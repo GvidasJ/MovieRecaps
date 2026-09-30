@@ -67,8 +67,16 @@ disables this). If the default files do not exist, `./input` is scanned for exac
 with the same orientation and duration are genuinely ambiguous: the tool stops and asks you to pass both
 flags.
 
-**Exit code**: `0` when no acceptance criterion (and no Stage 9 check) is `fail`, `1` otherwise, `2` on
-errors (missing/ambiguous inputs, a crashed stage — see `work/match_cuts.log`).
+**Exit code** (DESIGN §7 D5):
+
+| code | meaning | headline |
+|---|---|---|
+| `0` | every acceptance criterion is `pass` / `pass_with_exceptions` and no Stage 9 check failed | `PASS` |
+| `1` | an acceptance criterion or a Stage 9 check (incl. `9.8 deliverables`) failed | `FAIL` |
+| `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `work/match_cuts.log`) | — |
+| `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock) | `PASS (criterion 6 not verified: …)` |
+
+A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked".
 
 The final summary prints one line per acceptance criterion, the output paths and the warnings:
 
@@ -104,7 +112,8 @@ output/
                            low_confidence/k#####.png, verify_failures/k#####.png,
                            decisions.jsonl (this run's evidence, cached stages replayed with cached=true)
 work/
-  cache/<stage>/<key>.*    content-addressed caches (key = input file hashes + analysis parameters)
+  cache/<stage>/<key>.*    content-addressed caches (key = input file hashes + analysis parameters; the
+                           anchors / FrameMap also the layout geometry + overlay masks they were matched with)
   decisions.jsonl          every decision with its evidence (truncated at the start of each run; cached
                            stages replay their stored records; copied to <out>/debug/)
   match_cuts.log           full debug log (appended)
@@ -120,6 +129,11 @@ every measured frame under AE's floor rule (`raw_in_interval_both`: also under r
 it the phase is chosen from the AUDIO when the segment's audio correlates confidently (`audio.phase_source
 = "audio"`, `audio.lag_ms_video` = the lag the interval centre would have had), otherwise the centre;
 this removes the systematic quarter-frame audio offset of the centre (8.3 ms at 30p, 10.4 ms at 24p).
+The audio-chosen `raw_in` keeps a margin of `max(ae_min_margin_ms, min(5 % of the interval width, 5 % of
+a RAW frame))` from the interval edges (1 ms at 30p for a sub-frame interval, 1.7 ms for a wide one), so
+the frames stay exact while an in-point on the edge — an NLE cut at a RAW shot boundary — stays within
+~2 ms in audio. Static / ambiguous-identical shots, whose interval can span seconds, also get a wide
+audio search centred on the feasible interval and covering all of it (half-width up to 60 s).
 `ae_margin_ms` is the distance to the interval edge. The only wall-clock values are in `provenance.timings`, which the determinism check
 ignores; everything else is identical on a re-run.
 
@@ -207,7 +221,10 @@ issue found and the conform decision.
 
 **Fullscreen shots inside a boxed edit** — detected as layout periods; those segments carry their own
 `box` (the whole canvas) and are placed directly in the main comp above the Video Box (no rounded mask),
-in the AE project and in the preview. Split-screen / picture-in-picture regions are detected and reported
+in the AE project and in the preview. A dissolve between a boxed and a fullscreen shot is recreated as
+such (the fullscreen layer fades in / out above the Video Box); the detected period boundary usually falls
+inside the dissolve, and those frames — like a 1-2 frame sliver where the boundary is off by a frame or
+two — are logged as explained, not warned. Split-screen / picture-in-picture regions are detected and reported
 but not recreated (criterion 1 becomes `pass_with_exceptions`, listed under *Anything AE can't
 reproduce*).
 

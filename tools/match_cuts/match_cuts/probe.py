@@ -12,7 +12,11 @@ counts and timestamps are measured, never estimated:
 * audio stream parameters, file hash, and ``ae_issues`` — the reasons the file is not AE-safe,
 * input warnings that are NOT AE issues (``input_warnings(info)``): a truncated / partially downloaded
   or copied file whose decoded video is shorter than its header's duration by > max(1 s, 2 %)
-  (stored in the probe's side information, ``probe_extra(info)['truncation']``).
+  (stored in the probe's side information, ``probe_extra(info)['truncation']``). When the only
+  header duration is the CONTAINER's (FLV, tag-less Matroska) it may be the end of a longer audio
+  track: the packets at the end of the file decide (``stream_tails``) -- audio reaching the container
+  end + video packets ending where the decode ended = a complete file whose video is shorter than
+  its audio, no warning.
 
 Results are cached in ``WORK_DIR/cache/probe/`` keyed by the file content hash.
 """
@@ -46,6 +50,10 @@ AUDIO_PRIMING_MAX_S = 0.1          # a single audio edit skipping <= this is cod
 NOMINAL_FPS_TOL = 0.01             # relative tolerance for nominal-rate snapping (VFR phone files)
 TRUNC_MIN_S = 1.0                  # decoded video shorter than the header's duration by more than
 TRUNC_REL = 0.02                   # max(1 s, 2 %) => truncated / partial file warning (input_warnings)
+TAIL_LEAD_S = 2.0                  # stream_tails: packets read from this long before the decoded video end
+TAIL_FULL_SPAN_S = 600.0           # ... to EOF when that span is <= this, else two windows of
+TAIL_WINDOW_S = 10.0               # this length (around the decoded video end / before the container end)
+TAIL_TIMEOUT_S = 300.0             # ffprobe packet listing timeout (no decode; seconds even on long files)
 
 # Issue codes (``ae_issues`` entries are "<code>: <detail>"). Codes that cannot be derived from the
 # StreamInfo fields alone are computed during probe() and carried over by ae_issues().
@@ -487,23 +495,151 @@ def header_video_duration(vs: dict, fmt: dict, v_start: float) -> tuple[float, s
     return 0.0, ""
 
 
-def truncation_check(role: str, header_s: float, header_source: str, decoded_s: float) -> dict | None:
-    """{header_s, header_source, decoded_s, missing_s, warning} when the decoded video is shorter than
-    the header says by more than max(TRUNC_MIN_S, TRUNC_REL·header) — a truncated / partially downloaded
-    or copied file — else None."""
+def _trunc_threshold(header_s: float) -> float:
+    return max(TRUNC_MIN_S, TRUNC_REL * float(header_s))
+
+
+def truncation_check(role: str, header_s: float, header_source: str, decoded_s: float,
+                     tails: dict | None = None) -> dict | None:
+    """{header_s, header_source, decoded_s, missing_s, kind, warning} when the decoded video is shorter
+    than the header says by more than max(TRUNC_MIN_S, TRUNC_REL·header) — a truncated / partially
+    downloaded or copied file — else None.
+
+    ``tails`` (:func:`stream_tails`, only meaningful when ``header_source`` is 'container duration': the
+    container's duration is the end of its LONGEST stream) tells where the packets really end. When the
+    audio reaches the container end the file is complete and the container duration is the audio's:
+    video packets ending where the decode ended -> None (the video is simply shorter than its audio);
+    video packets running on past the decoded end -> kind 'undecodable' (damaged video tail); no video
+    packet found -> kind 'video_shorter', worded 'video ends X s before the audio' (never 'truncated').
+    Audio ending early as well (or ``tails`` None) -> kind 'truncated'."""
     if not (header_s > 0 and decoded_s >= 0):
         return None
     missing = header_s - decoded_s
-    if missing <= max(TRUNC_MIN_S, TRUNC_REL * header_s):
+    thr = _trunc_threshold(header_s)
+    if missing <= thr:
         return None
-    what = ("competitor frames taken from footage after that point will be reported as NOT-IN-RAW although "
-            "the real cause is the truncated RAW" if role == "raw" else
-            "the edit after that point is missing from the analysis")
-    warning = (f"truncated: {role} video decodes to {decoded_s:.3f} s but its {header_source} says "
-               f"{header_s:.3f} s ({missing:.3f} s missing) — truncated / partially downloaded or copied "
-               f"file? Re-download it; {what}")
-    return {"header_s": round(float(header_s), 6), "header_source": header_source,
-            "decoded_s": round(float(decoded_s), 6), "missing_s": round(float(missing), 6), "warning": warning}
+    kind = "truncated"
+    a_end = v_end = None
+    if tails and header_source == "container duration":
+        a_end, v_end = tails.get("audio_end_s"), tails.get("video_end_s")
+        if a_end is not None and float(a_end) >= header_s - 0.5 * thr:
+            if v_end is not None and abs(float(v_end) - decoded_s) <= thr:
+                return None
+            kind = "undecodable" if v_end is not None and float(v_end) > decoded_s else "video_shorter"
+    if kind == "truncated":
+        what = ("competitor frames taken from footage after that point will be reported as NOT-IN-RAW although "
+                "the real cause is the truncated RAW" if role == "raw" else
+                "the edit after that point is missing from the analysis")
+        warning = (f"truncated: {role} video decodes to {decoded_s:.3f} s but its {header_source} says "
+                   f"{header_s:.3f} s ({missing:.3f} s missing) — truncated / partially downloaded or copied "
+                   f"file? Re-download it; {what}")
+    elif kind == "undecodable":
+        what = ("competitor frames taken from footage after that point will be reported as NOT-IN-RAW although "
+                "the real cause is the damaged RAW" if role == "raw" else
+                "the edit after that point is missing from the analysis")
+        warning = (f"undecodable: {role} video decodes to {decoded_s:.3f} s but its packets run to "
+                   f"{float(v_end):.3f} s ({float(v_end) - decoded_s:.3f} s do not decode; the audio runs to "
+                   f"{float(a_end):.3f} s) — damaged video stream? Re-download or re-export it; {what}")
+    else:
+        what = ("competitor frames taken from footage after that point cannot be in this RAW and will be "
+                "reported as NOT-IN-RAW" if role == "raw" else
+                "competitor frames after that point have no video to analyse")
+        warning = (f"video ends early: {role} video decodes to {decoded_s:.3f} s and ends "
+                   f"{float(a_end) - decoded_s:.3f} s before its audio ({float(a_end):.3f} s; the file is "
+                   f"complete, not truncated); {what}")
+    out = {"header_s": round(float(header_s), 6), "header_source": header_source,
+           "decoded_s": round(float(decoded_s), 6), "missing_s": round(float(missing), 6), "kind": kind,
+           "warning": warning}
+    if a_end is not None:
+        out["audio_end_s"] = round(float(a_end), 6)
+    if v_end is not None:
+        out["video_end_s"] = round(float(v_end), 6)
+    return out
+
+
+def _needs_tail_check(header_s: float, header_source: str, decoded_s: float, has_audio: bool) -> bool:
+    """True when truncation_check would warn on a CONTAINER duration of a file with audio (the only case
+    where :func:`stream_tails` can change the verdict)."""
+    return (bool(has_audio) and header_source == "container duration" and header_s > 0
+            and header_s - decoded_s > _trunc_threshold(header_s))
+
+
+def _packet_ends(path: str | os.PathLike, intervals: str, timeout: float = TAIL_TIMEOUT_S) -> dict[int, float] | None:
+    """{stream index: absolute end (pts + duration, s) of its last packet} within ffprobe
+    ``-read_intervals intervals`` (packets are listed, not decoded); None when ffprobe fails."""
+    cmd = [ffprobe_bin(), "-v", "error", "-read_intervals", intervals, "-show_entries",
+           "packet=stream_index,pts_time,dts_time,duration_time", "-of", "compact=p=0", str(path)]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.info("%s: packet listing failed (%s)", path, e)
+        return None
+    if res.returncode != 0:
+        log.info("%s: packet listing failed (ffprobe %d): %s", path, res.returncode, (res.stderr or "")[-300:])
+        return None
+    ends: dict[int, float] = {}
+    for line in res.stdout.splitlines():
+        kv = dict(p.split("=", 1) for p in line.strip().split("|") if "=" in p)
+        try:
+            si = int(kv.get("stream_index", ""))
+        except ValueError:
+            continue
+        t = _float(kv.get("pts_time"), math.nan)
+        if not math.isfinite(t):
+            t = _float(kv.get("dts_time"), math.nan)
+        if not math.isfinite(t):
+            continue
+        e = t + max(0.0, _float(kv.get("duration_time"), 0.0))
+        if e > ends.get(si, -math.inf):
+            ends[si] = e
+    return ends
+
+
+def stream_tails(path: str | os.PathLike, pj: dict, v_start: float, decoded_s: float) -> dict | None:
+    """Where the main video and the first audio stream really END, from their packets (ffprobe, no
+    decode), in seconds relative to the video stream start (the decoded-PTS convention):
+    {video_end_s, audio_end_s, container_end_s, intervals}; a stream without packets in the listed range
+    has None. Packets are listed from TAIL_LEAD_S before the decoded video end to EOF, or -- when that
+    span exceeds TAIL_FULL_SPAN_S -- in two TAIL_WINDOW_S windows (around the decoded video end and
+    before the container end). None when there is no audio stream or ffprobe fails."""
+    fmt = pj.get("format", {}) or {}
+    vs = _video_ordinal(pj)[1]
+    auds = [st for st in pj.get("streams", []) if st.get("codec_type") == "audio"]
+    if vs is None or not auds:
+        return None
+    try:
+        vi, ai = int(vs.get("index")), int(auds[0].get("index"))
+    except (TypeError, ValueError):
+        return None
+    c_end = _float(fmt.get("duration")) + _float(fmt.get("start_time"))
+    a = max(0.0, float(v_start) + float(decoded_s) - TAIL_LEAD_S)
+    if c_end - a <= TAIL_FULL_SPAN_S:
+        intervals = f"{a:.3f}%"
+    else:
+        intervals = f"{a:.3f}%+{TAIL_WINDOW_S + TAIL_LEAD_S:.3f},{max(0.0, c_end - TAIL_WINDOW_S):.3f}%"
+    ends = _packet_ends(path, intervals)
+    if ends is None:
+        return None
+
+    def rel(i: int) -> float | None:
+        return round(ends[i] - float(v_start), 6) if i in ends else None
+    return {"video_end_s": rel(vi), "audio_end_s": rel(ai), "container_end_s": round(c_end - float(v_start), 6),
+            "intervals": intervals}
+
+
+def _tails_for(info: StreamInfo, pj: dict | None, header_s: float, header_source: str,
+               decoded_s: float) -> dict | None:
+    """stream_tails for a (cached) probe result when they can change the truncation verdict."""
+    if not _needs_tail_check(header_s, header_source, decoded_s, info.has_audio):
+        return None
+    if not info.path or not Path(info.path).is_file():
+        return None
+    try:
+        pj = pj if pj is not None else ffprobe_json(info.path)
+        return stream_tails(info.path, pj, info.v_start_time, decoded_s)
+    except (OSError, RuntimeError, ValueError) as e:
+        log.info("%s: stream tails not measured (%s)", info.path, e)
+        return None
 
 
 def _decoded_video_seconds(rel_pts: np.ndarray, fps: Fraction) -> float:
@@ -524,26 +660,34 @@ def truncation_info(info: StreamInfo) -> dict | None:
     ``info.role``), or None. Probe cache entries written before the check existed are re-evaluated
     from the container duration and the decoded PTS."""
     ex = probe_extra(info)
+    pj: dict | None = None
+    side = _sidecar(info, ".ffprobe.json") if info.pts_file else None
+    if side is not None and side.exists():
+        try:
+            pj = json.loads(side.read_text())
+        except (OSError, ValueError):
+            pj = None
     if "truncation" in ex:
         t = ex["truncation"]
-        return (truncation_check(info.role, float(t["header_s"]), str(t["header_source"]), float(t["decoded_s"]))
-                if t else None)
+        if not t:
+            return None
+        header_s, src, dec = float(t["header_s"]), str(t["header_source"]), float(t["decoded_s"])
+        tails = ex.get("stream_tails")
+        if tails is None and "stream_tails" not in ex:   # entry written before the tail check existed
+            tails = _tails_for(info, pj, header_s, src, dec)
+        return truncation_check(info.role, header_s, src, dec, tails)
     if not info.pts_file or not Path(info.pts_file).exists():
         return None                      # decode=False: the frame count comes from the header itself
     header_s, src = 0.0, ""
-    side = _sidecar(info, ".ffprobe.json")
-    if side.exists():
-        try:
-            pj = json.loads(side.read_text())
-            vs = _video_ordinal(pj)[1]
-            if vs is not None:
-                header_s, src = header_video_duration(vs, pj.get("format", {}) or {}, info.v_start_time)
-        except (OSError, ValueError):
-            header_s = 0.0
+    if pj is not None:
+        vs = _video_ordinal(pj)[1]
+        if vs is not None:
+            header_s, src = header_video_duration(vs, pj.get("format", {}) or {}, info.v_start_time)
     if not src:                          # container duration spans from the earliest stream start
         starts = [info.v_start_time] + ([info.a_start_time] if info.has_audio else [])
         header_s, src = info.container_duration + min(starts) - info.v_start_time, "container duration"
-    return truncation_check(info.role, header_s, src, _decoded_video_seconds(load_pts(info), info.fps))
+    dec = _decoded_video_seconds(load_pts(info), info.fps)
+    return truncation_check(info.role, header_s, src, dec, _tails_for(info, pj, header_s, src, dec))
 
 
 def input_warnings(info: StreamInfo) -> list[str]:
@@ -762,13 +906,23 @@ def probe(path: str | os.PathLike, role: str, work_dir: str | os.PathLike, decod
     # truncated / partial file: decoded video much shorter than the header says. An INPUT WARNING
     # (input_warnings()), not an AE issue: no conform brings the missing footage back.
     trunc = None
+    tails = None
+    notes: list[str] = []
     header_s, header_src = header_video_duration(vs, fmt, info.v_start_time)
     if decode and rel is not None:
-        trunc = truncation_check(role, header_s, header_src, _decoded_video_seconds(rel, fps))
+        dec_s = _decoded_video_seconds(rel, fps)
+        if _needs_tail_check(header_s, header_src, dec_s, info.has_audio):
+            # the container duration may be the end of a longer AUDIO track (FLV, tag-less Matroska)
+            tails = stream_tails(abspath, pj, info.v_start_time, dec_s)
+        trunc = truncation_check(role, header_s, header_src, dec_s, tails)
         if trunc:
             log.warning("%s: %s", abspath, trunc["warning"])
+        elif tails is not None:
+            notes.append(f"video ends {header_s - dec_s:.3f} s before the audio (audio runs to the container end "
+                         f"{tails.get('audio_end_s')} s, video packets end at {tails.get('video_end_s')} s = the "
+                         f"decoded end {dec_s:.3f} s): complete file, not truncated")
+            log.info("%s: %s", abspath, notes[-1])
 
-    notes: list[str] = []
     if info.container in ("mp4", "mov", "m4v", "3gp"):
         try:
             tracks = read_edit_lists(abspath)
@@ -790,7 +944,7 @@ def probe(path: str | os.PathLike, role: str, work_dir: str | os.PathLike, decod
     # persist
     extra = {"nominal_fps_reason": why, "field_order": field_order, "edit_lists": edits, "notes": notes,
              "video_stream_ordinal": vindex, "header_video_duration": round(float(header_s), 6),
-             "header_duration_source": header_src,
+             "header_duration_source": header_src, "stream_tails": tails,
              "truncation": ({k: v for k, v in trunc.items() if k != "warning"} if trunc else None),
              "warnings": [trunc["warning"]] if trunc else []}
     if decode and rel is not None and ptsint is not None:

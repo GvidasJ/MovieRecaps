@@ -212,6 +212,58 @@ def test_coverage_fullscreen_period_needs_its_own_box():
     assert r["status"] == "pass_with_exceptions" and len(r["exceptions"]) == 2
 
 
+def test_coverage_fullscreen_period_boundary_inside_a_dissolve_or_off_by_a_sliver():
+    """review R2-5 / real-world D1-c1-transition: a dissolve between a boxed shot and a full-screen shot makes the
+    detected full-screen period start (or end) inside the dissolve; segment.py keeps the boxed segment boxless
+    (majority rule) and AE renders the dissolve correctly (the full-screen neighbour in MAIN over the Video Box).
+    Those transition frames -- and a merged 1-2 frame sliver at the period boundary -- are listed exceptions,
+    not c1 failures; a boxless segment's own non-transition frames in a full-screen period still fail."""
+    full = {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0, "corner_radius": 0.0}
+    O, D, n = 34, 6, 80
+
+    def pair(period_start: int, a_out_trans: bool = True, b_box: bool = True):
+        A = seg(1, "raw", 0, O + D, 100, transition_out=xfade(D) if a_out_trans else None)
+        B = seg(2, "raw", O, n, 900, transition_in=xfade(D))
+        if b_box:
+            B.box, B.region = dict(full), 1
+        lb = {"periods": [{"comp_in": 0, "comp_out": period_start, "mode": "boxed"},
+                          {"comp_in": period_start, "comp_out": n, "mode": "fullscreen"}]}
+        return verify.check_coverage([A, B], n, lb)
+
+    for start in (O + 1, O + 2, O + 4):                   # the period starts inside the dissolve
+        r = pair(start)
+        assert r["status"] == "pass_with_exceptions" and not r["failures"], r
+        assert any("transition overlap with S02" in e for e in r["exceptions"]), r["exceptions"]
+        assert r["fullscreen_explained"][0]["why"] == "transition"
+    r = pair(O + 2, a_out_trans=False)                    # the transition declared on B only is enough
+    assert r["status"] == "pass_with_exceptions", r
+    r = pair(O - 1)                                       # detected one frame before the dissolve: a sliver
+    assert r["status"] == "pass_with_exceptions" and {e["why"] for e in r["fullscreen_explained"]} == \
+        {"transition", "sliver"}, r
+    r = pair(O - 4)                                       # 4 non-transition frames full-screen: A needed the box
+    assert r["status"] == "fail" and "frames 30-33 show the video full-screen" in r["failures"][0], r
+    r = pair(O + 2, b_box=False)                          # the neighbour does not carry the box: not explained
+    assert r["status"] == "fail" and any("S01: frames 36-39" in f for f in r["failures"]), r
+    # the reverse: full-screen shot A dissolving into boxed B; the period ends inside the dissolve
+    A = seg(1, "raw", 0, O + D, 100, transition_out=xfade(D), box=dict(full), region=1)
+    B = seg(2, "raw", O, n, 900, transition_in=xfade(D))
+    lb = {"periods": [{"comp_in": 0, "comp_out": O + 3, "mode": "fullscreen"}, {"comp_in": O + 3, "comp_out": n, "mode": "boxed"}]}
+    r = verify.check_coverage([A, B], n, lb)
+    assert r["status"] == "pass_with_exceptions" and not r["failures"], r
+    lb["periods"][0]["comp_out"] = lb["periods"][1]["comp_in"] = O + D + 2      # ends 2 frames after the dissolve
+    assert verify.check_coverage([A, B], n, lb)["status"] == "pass_with_exceptions"
+    lb["periods"][0]["comp_out"] = lb["periods"][1]["comp_in"] = O + D + 3
+    assert verify.check_coverage([A, B], n, lb)["status"] == "fail"
+    # a merged sliver of a hard cut: boxed A runs 2 frames into the full-screen period
+    A = seg(1, "raw", 0, 32, 100)
+    B = seg(2, "raw", 32, n, 900, box=dict(full), region=1)
+    lb = {"periods": [{"comp_in": 0, "comp_out": 30, "mode": "boxed"}, {"comp_in": 30, "comp_out": n, "mode": "fullscreen"}]}
+    r = verify.check_coverage([A, B], n, lb)
+    assert r["status"] == "pass_with_exceptions" and "merged sliver" in r["exceptions"][0], r
+    A.comp_out, B.comp_in = 33, 33
+    assert verify.check_coverage([A, B], n, lb)["status"] == "fail"
+
+
 def test_frame_box_fn_follows_periods_and_segment_boxes():
     dom = {"x": 5, "y": 5, "w": 50, "h": 20, "corner_radius": 2}
     full = {"x": 0.0, "y": 0.0, "w": 64.0, "h": 36.0, "corner_radius": 0.0}
@@ -384,6 +436,77 @@ def test_cuts_with_real_scoring(phase):
     late = [seg(1, "raw", 0, 11, 5), seg(2, "raw", 11, 20, 31)]    # cut placed one frame late
     r = verify.check_cuts(late, F30, F30, (48, 32), 40, scorer, Config())
     assert r["status"] == "fail"
+
+
+def _soft_textures(n: int, w: int = 64, h: int = 48, seed: int = 3) -> np.ndarray:
+    """Textures of moderate contrast (mean 128, std ~35) so a +-10 % contrast change never clips."""
+    import cv2
+    rng = np.random.default_rng(seed)
+    out = np.empty((n, h, w), np.uint8)
+    for i in range(n):
+        img = cv2.GaussianBlur(rng.uniform(0, 255, (h, w)).astype(np.float32), (0, 0), 1.5)
+        img = (img - img.mean()) / max(float(img.std()), 1e-6) * 35.0 + 128.0
+        out[i] = np.clip(np.round(img), 0, 255).astype(np.uint8)
+    return out
+
+
+@pytest.mark.parametrize("gain,blur", [(0.9, 0.0), (0.94, 0.0), (0.96, 0.0), (1.1, 0.0), (1.0, 0.8), (0.9, 1.2)])
+def test_cuts_crossfade_window_under_contrast_change_and_softness(phase, gain, blur):
+    """review R2-1: the repost's contrast change (gain 0.9-1.1, + lift) or a slight softness made the gain-free
+    constrained blend fit measure alpha_B ~ (1-g)/2 on the pure frames around a dissolve and tilt the ramp, so
+    the re-fitted window of a CORRECT crossfade came out (32, 9) / (32, 10) instead of (34, 6) and c2 failed.
+    The gain-independent estimator (beta_B / (beta_A + beta_B)) refits exactly (O, D)."""
+    import cv2
+    O, D, n = 34, 6, 60
+    raw = _soft_textures(200)
+    ja, jb = 10, 120                                   # A shows RAW 10 + k, B shows RAW 120 + (k - O)
+    comp = np.empty((n,) + raw.shape[1:], np.uint8)
+    for k in range(n):
+        al = min(1.0, max(0.0, (k - O) / D))
+        a = raw[ja + k].astype(np.float32) if k < O + D else 0.0
+        b = raw[jb + k - O].astype(np.float32) if k >= O else 0.0
+        y = gain * ((1.0 - al) * a + al * b) + 12.0 * (1.0 if gain < 1.0 else -1.0)
+        if blur:
+            y = cv2.GaussianBlur(np.float32(y), (0, 0), blur)
+        comp[k] = np.clip(np.round(y), 0, 255).astype(np.uint8)
+    scorer = verify.ProxyScorer(_proxy(comp, "competitor"), _proxy(raw, "raw"), None, lambda k: None, 64, Config())
+    xf = xfade(D)
+    a = seg(1, "raw", 0, O + D, ja, transition_out=dict(xf))
+    b = seg(2, "raw", O, n, jb, transition_in=dict(xf))
+    r = verify.check_cuts([a, b], F30, F30, (64, 48), 200, scorer, Config())
+    c = r["cuts"][0]
+    assert c["window_fit"] == {"O": O, "D": D}, c
+    assert r["status"] == "pass", r["failures"]
+    # a crossfade declared one frame short under the same grading is still caught
+    xf5 = xfade(D - 1)
+    a5 = seg(1, "raw", 0, O + D - 1, ja, transition_out=dict(xf5))
+    b5 = seg(2, "raw", O, n, jb, transition_in=dict(xf5))
+    assert verify.check_cuts([a5, b5], F30, F30, (64, 48), 200, scorer, Config())["status"] == "fail"
+
+
+def test_proxy_scorer_blend_alpha_is_gain_independent():
+    """review R2-1: ProxyScorer.blend measures alpha_B without a gain assumption (pure frames stay ~0 / ~1)."""
+    raw = _soft_textures(4)
+    for g in (0.85, 1.0, 1.15):
+        comp = np.stack([np.clip(np.round(g * ((1 - al) * raw[0].astype(np.float32) + al * raw[1]) + 5), 0, 255)
+                         .astype(np.uint8) for al in (0.0, 0.3, 1.0)])
+        sc = verify.ProxyScorer(_proxy(comp, "competitor"), _proxy(raw, "raw"), None, lambda k: None, 64, Config())
+        ident = Sim(1.0, 0.0, 0.0, 0.0)
+        got = [sc.blend(k, (0, ident, False), (1, ident, False))[0] for k in range(3)]
+        assert got == pytest.approx([0.0, 0.3, 1.0], abs=0.02), (g, got)
+    # the estimator: beta_B / (beta_A + beta_B); undefined for an unrelated frame or collinear sources
+    from match_cuts import scoring
+    assert scoring.blend_alpha_cov(1.0, 1.0, 0.0, 0.7 * 0.9, 0.3 * 0.9)[0] == pytest.approx(0.7)
+    assert math.isnan(scoring.blend_alpha_cov(1.0, 1.0, 0.0, 0.01, 0.02)[0])       # beta_A + beta_B <= 0.05
+    assert math.isnan(scoring.blend_alpha_cov(1.0, 1.0, 1.0, 0.5, 0.5)[0])         # A == B
+
+
+def test_fit_crossfade_window_drops_frames_within_the_purity_tolerance():
+    """review R2-1 (second guard): residual alpha on the pure frames around the ramp does not tilt the fit."""
+    rows = [(31, 0.04), (32, 0.045), (33, 0.05), (34, 0.05), (35, 1 / 6), (36, 2 / 6), (37, 3 / 6), (38, 4 / 6),
+            (39, 5 / 6), (40, 0.95), (41, 0.955), (42, 0.96)]
+    assert verify.fit_crossfade_window(rows) != (34, 6)
+    assert verify.fit_crossfade_window(rows, pure=max(0.5 / 6, 0.05)) == (34, 6)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -702,18 +825,87 @@ def test_mock_checks_pass_and_fail(tmp_path):
     assert mutated(lambda b: b["default"].update(mock_errors=["unknown member layer.guidelayer"]))["status"] == "fail"
     assert mutated(lambda b: b["default"].update(status="script_error", error="TypeError"))["status"] == "fail"
     assert mutated(lambda b: b["default"]["comps"][1]["layers"].pop(0))["status"] == "fail"
-    # the JSX self-check switching a stretch layer to frame-exact remap is allowed (and reported)
+    # the JSX self-check switching a stretch layer to frame-exact remap is allowed (and reported); the JSX
+    # also renames the layer '<name>  [frames]' (review AE2-1)
     def switch(b):
         L = b["default"]["comps"][1]["layers"][0]
-        L.update(timeRemapEnabled=True, startTime=0.0, stretch=100.0)
+        L.update(timeRemapEnabled=True, startTime=0.0, stretch=100.0, name="S01  RAW  [frames]")
     r = mutated(switch)
-    assert r["status"] == "pass" and r["switched_to_frames"] == ["S01  RAW"]
+    assert r["status"] == "pass" and r["switched_to_frames"] == ["S01  RAW"], r["failures"]
+    bad = json.loads(json.dumps(recs))
+    switch(bad)
+    bad["default"]["comps"][1]["layers"][0]["name"] = "S01  RAW  [other]"
+    assert verify.check_mock(plan, bad, fps, 90, tmp_path, "raw.mp4", layer_checker=None)["status"] == "fail"
+    # ... and the switched layer is still key-checked, as the frames-mode layer the JSX made of it
+    seen = {}
+
+    def checker(P, L, F):
+        seen[P["id"]] = (P["timeMode"], P.get("stretch"), P.get("audio"))
+        return []
+    ok = json.loads(json.dumps(recs))
+    switch(ok)
+    assert verify.check_mock(plan, ok, fps, 90, tmp_path, "raw.mp4", layer_checker=checker)["status"] == "pass"
+    assert seen["seg1"] == ("frames", 100.0, False)
     na = verify.check_mock(plan, {"default": {"status": "not_available", "reason": "node missing"}}, fps, 90, tmp_path, "raw.mp4")
     assert na["status"] == "not_available"
     # per-layer key / render-switch problems reported by the layer checker fail c6
     r = verify.check_mock(plan, recs, fps, 90, tmp_path, "raw.mp4",
                           layer_checker=lambda P, L, F: ["ADBE Opacity: 0 keys (plan 8)"] if P["id"] == "seg1" else [])
     assert r["status"] == "fail" and "ADBE Opacity" in r["failures"][0]
+
+
+def test_mock_check_accepts_the_jsx_runtime_switch_to_frames(tmp_path):
+    """review AE2-1: with --ae-time-mode stretch, a segment that ends on the RAW's last frame gets the plan warning
+    'AE will clamp it (the JSX self-check then falls back to frame-exact remapping)'; the JSX does exactly that
+    and renames the layer '<name>  [frames]'. c6 (check_mock on the real mock record) failed on the rename and
+    skipped the switched layer's key / render-switch checks; it now passes and still checks that layer."""
+    from match_cuts import export_ae as ea
+    from match_cuts.model import Cutlist
+    if ea._find_node() is None:
+        pytest.skip("Node.js not installed (AE mock not available)")
+    RF = Fraction(30000, 1001)
+
+    def raw_time(j0: int, phase: float) -> float:
+        return float((j0 + Fraction(phase)) / RF)
+    sim1 = {"scale": 0.52, "rotation_deg": 0.0, "tx": -10.0, "ty": 480.0}
+    segs = [Segment(id=1, type="raw", comp_in=0, comp_out=45, raw_in_seconds=raw_time(100, 0.5), speed=1.0,
+                    transform=dict(sim1)),
+            Segment(id=2, type="raw", comp_in=45, comp_out=90, raw_in_seconds=raw_time(5355, 0.5), speed=1.0,
+                    transform=dict(sim1))]
+    comp = {"file": "media/competitor_ref.mp4", "file_rel": "media/competitor_ref.mp4", "width": 1080,
+            "height": 1920, "fps": "30/1", "frames": 90, "has_audio": True}
+    raw = {"file": "media/raw.mp4", "file_rel": "media/raw.mp4", "width": 1920, "height": 1080,
+           "fps": "30000/1001", "frames": 5400, "conformed": False, "has_audio": True}
+    layout = {"mode": "match", "layout_kind": "boxed", "canvas_bg": "#000000",
+              "box": {"x": 60.4, "y": 459.6, "w": 959.3, "h": 1000.5, "corner_radius": 36.0},
+              "background": "solid", "background_detail": {"type": "solid", "color": "#000000"}, "zones": [],
+              "captions": []}
+    cl = Cutlist(1, comp, raw, layout, segs)
+    cfg = Config(ae_time_mode="stretch")
+    meta = ea.footage_meta_from_cutlist(cl)
+    plan = ea.ae_plan(cl, cfg, meta)
+    assert any("AE will clamp it" in w for w in plan["warnings"]), plan["warnings"]
+    jsx = tmp_path / "build_ae_project.jsx"
+    ea.write_jsx(cl, plan, jsx, cfg)
+    for rel in ("media/raw.mp4", "media/competitor_ref.mp4"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_bytes(b"")
+    recs = {sc: ea.run_jsx_in_mock(jsx, meta, sc) for sc in ("default", "media_missing", "new_project_null",
+                                                              "no_marker_property")}
+    rec = recs["default"]
+    names = [L.get("name") for c in rec["comps"] for L in c["layers"]]
+    assert any(str(n).endswith("  [frames]") for n in names), names          # the runtime switch happened
+    r = verify.check_mock(plan, recs, Fraction(30), 90, tmp_path, "raw.mp4")
+    assert r["status"] == "pass", r["failures"]
+    assert len(r["switched_to_frames"]) == 1 and r["switched_to_frames"][0].startswith("S02")
+    # the switched layer's render switches are still checked (record_layer_problems on the frames-mode copy)
+    bad = json.loads(json.dumps(recs))
+    for c in bad["default"]["comps"]:
+        for L in c["layers"]:
+            if str(L.get("name")).endswith("  [frames]"):
+                L["quality"] = "DRAFT"
+    r = verify.check_mock(plan, bad, Fraction(30), 90, tmp_path, "raw.mp4")
+    assert r["status"] == "fail" and "render switches" in json.dumps(r["failures"]), r["failures"]
 
 
 def test_mock_checks_generic_record_format(tmp_path):
@@ -1317,6 +1509,47 @@ def test_compare_with_previous_run():
     assert verify.compare_with_previous_run(None, cur)["compared"] is False
 
 
+def test_previous_run_comparison_ignores_locations_and_gates_on_ffmpeg(monkeypatch, tmp_path):
+    """review R2-6: a rerun into the same --out after moving / renaming the (content-identical) inputs, or after
+    an ffmpeg upgrade, failed s9_7 ('requires a re-run to reproduce it', exit 1). Location-only media fields are
+    canonicalised away; a different ffmpeg version skips the comparison (it may change decoded pixels)."""
+    from match_cuts import pipeline
+    cur = _cutlist(timings={"S2": 1.0}).to_dict()
+    cur["provenance"].update(input_hashes={"competitor": "a", "raw": "b"}, analysis_params_hash="p",
+                             stage_versions={"x": 1}, ffmpeg_version="6.1.1")
+    cur["settings"] = {"layout_mode": "match"}
+    for role, name in (("competitor", "competitor_ref.mp4"), ("raw", "raw.mp4")):
+        cur[role] = {"file": f"media/{name}", "file_rel": f"media/{name}", "file_abs": f"/old/out/media/{name}",
+                     "source_path": f"/old/inputs/{name}", "hash": role, "width": 64}
+    moved = json.loads(json.dumps(cur))
+    for role in ("competitor", "raw"):
+        moved[role].update(source_path=f"/new/place/{role}_renamed.mp4", file_abs=f"/new/out/media/{role}_x.mp4",
+                           file=f"media/{role}_x.mp4", file_rel=f"media/{role}_x.mp4")
+    moved["provenance"]["timings"] = {"S2": 9.0}
+    assert verify.compare_with_previous_run(moved, cur) == {"compared": True, "identical": True, "differences": []}
+    moved["raw"]["hash"] = "other"                          # a real content difference still counts
+    r = verify.compare_with_previous_run(moved, cur)
+    assert r["compared"] and not r["identical"] and r["differences"] == ["/raw/hash: 'other' != 'raw'"]
+    new_ff = json.loads(json.dumps(cur))
+    new_ff["provenance"]["ffmpeg_version"] = "7.1"
+    r = verify.compare_with_previous_run(new_ff, cur)
+    assert r["compared"] is False and r["changed"] == ["ffmpeg_version"]
+    # end to end through check_determinism: the moved-inputs rerun passes s9_7
+    cfg = Config()
+    cfg.out_dir = str(tmp_path)
+    cl = _cutlist(timings={"S2": 1.0})
+    cl.provenance.update(cur["provenance"])
+    cl.settings = dict(cur["settings"])
+    cl.competitor, cl.raw = dict(cur["competitor"]), dict(cur["raw"])
+    monkeypatch.setattr(pipeline, "rerun_assembly", lambda c: cl)
+    prev = cl.to_dict()
+    for role in ("competitor", "raw"):
+        prev[role].update(source_path="/somewhere/else.mp4", file_abs="/elsewhere/media/x.mp4")
+    ctx = types.SimpleNamespace(cfg=cfg, cutlist=cl, previous_cutlist=prev)
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "pass" and "identical to the previous run" in r["summary"], r
+
+
 def test_unsnapped_speed_judged_on_measured_frames_not_soft_ranges():
     """Integration fix (segment agent note / time-math F2): a genuine 1.03x segment on slow footage has soft
     ranges of ±1 frame that also admit 1.05; segment.py rightly leaves it unsnapped because 1.05 does not
@@ -1343,3 +1576,47 @@ def test_unsnapped_speed_judged_on_measured_frames_not_soft_ranges():
     s1 = seg(1, "raw", 0, n, 100, speed=1.0004, unsnapped=True)
     r1 = verify.check_speed_framing([s1], fm1, F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
     assert r1["status"] == "fail" and any("unsnapped although" in f for f in r1["failures"]), r1
+
+
+def _measured_fm(meas: np.ndarray, soft: int = 2) -> FrameMap:
+    n = len(meas)
+    fm = frame_map(list(meas))
+    fm.soft_lo = np.asarray(meas, np.int32) - soft
+    fm.soft_hi = np.asarray(meas, np.int32) + soft
+    for c in ("status", "raw", "raw_lo", "raw_hi", "flip"):
+        fm.d["pre_segment_" + c] = np.asarray(getattr(fm, c)).copy()
+    return fm
+
+
+def test_unsnapped_check_drops_isolated_measured_outliers_and_never_uses_soft_ranges():
+    """review R2-4: one isolated argmax error in refine's measured frames (segment.py tolerates it as a drop) made
+    the measured frames jointly infeasible; c4 then fell back to the soft ranges (+-2 frames on slow footage),
+    which admit 1.0 / 1.05 for a genuine 1.03x segment, and failed 'left unsnapped although [1.0, 1.05] are
+    feasible'. The outlier is now dropped (max-consistent subset at the segment's speed); when the measured
+    frames stay infeasible the snap is 'undecidable' (listed), never judged on the soft ranges."""
+    n, v, x0 = 90, 1.03, 1000.4
+    meas = np.floor(x0 + v * np.arange(n)).astype(np.int64)
+    bad = meas.copy()
+    bad[45] += 1                                   # ONE isolated argmax error
+    fm = _measured_fm(bad)
+    s = Segment(id=1, type="raw", comp_in=0, comp_out=n, speed=v, unsnapped=True, raw_in_seconds=x0 / 30.0,
+                transform=dict(IDENT))
+    cfg = Config()
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
+    assert not any("unsnapped although" in f for f in r["failures"]), r["failures"]
+    row = r["segments"][0]
+    assert row["snap_check"] == "unsnapped" and row["snap_outliers_dropped"] == [[45, 45]], row
+    assert 1.029 < row["snap_range_measured"][0] <= 1.03 <= row["snap_range_measured"][1] < 1.031
+    # measured frames that no single line explains (not a few isolated outliers): undecidable, not a failure
+    noisy = meas.copy()
+    noisy[::7] += 2
+    r = verify.check_speed_framing([s], _measured_fm(noisy), F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
+    assert r["segments"][0]["snap_check"] == "undecidable", r["segments"][0]
+    assert not r["failures"] and any("snap not decidable" in e for e in r["exceptions"]), r
+    # a segment wrongly left unsnapped (1.0 reproduces every measured frame but the outlier) still fails
+    ones = np.arange(500, 500 + n).astype(np.int64)
+    ones[30] += 1
+    s1 = Segment(id=1, type="raw", comp_in=0, comp_out=n, speed=1.0004, unsnapped=True, raw_in_seconds=500.2 / 30.0,
+                 transform=dict(IDENT))
+    r = verify.check_speed_framing([s1], _measured_fm(ones), F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
+    assert r["status"] == "fail" and any("unsnapped although [1.0" in f for f in r["failures"]), r

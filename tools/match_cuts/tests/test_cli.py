@@ -872,7 +872,8 @@ def _solved(seg: Segment, fm: FrameMap, cf: Fraction, rf: Fraction) -> Segment:
 
 def test_audio_informed_phase_sign_and_clamping():
     """D3 (REQ-1 / F7): raw_in := raw_in + v * lag (lag_ms > 0 = rebuilt audio late = raw_in too small),
-    clamped into floor∩round with max(1 ms, 5 %) margin, never changing a matched frame."""
+    clamped into floor∩round with a max(1 ms, min(5 % of the width, 5 % of a RAW frame)) margin, never
+    changing a matched frame."""
     from match_cuts import phase_solve
     cf = rf = F30
     fm = _phase_fm(30, 200)
@@ -910,7 +911,8 @@ def test_audio_informed_phase_sign_and_clamping():
         s11.raw_in_interval_both[1] - s11.raw_in_interval_both[0]
     s, (old, frames), _, _ = run(+1.0, speed=1.1, fmap=fm11)
     lo_b, hi_b = (s11.raw_in_interval_both or s11.raw_in_interval)
-    m = max(0.001, 0.05 * width)
+    m = max(0.001, min(0.05 * width, 0.05 / 30))
+    assert m == pipeline.audio_phase_margin_s(width, rf, cfg.ae_min_margin_ms)
     assert s.raw_in_seconds == pytest.approx(min(max(old + 1.1 * 0.001, lo_b + m), hi_b - m), abs=2e-9)
     assert [phase_solve.ae_frame(s.raw_in_seconds, 1.1, k, 0, cf, rf) for k in range(30)] == frames
     # weak correlation / an audio exception / a replaced track: the video phase stays
@@ -1159,8 +1161,12 @@ def test_layout_period_warnings():
     bad = [Segment(1, "raw", 0, 10), Segment(2, "raw", 10, 40)]
     w = pipeline.layout_period_warnings(bad, lay, "match")
     assert len(w) == 1 and "frames 0-9 are fullscreen" in w[0] and "S01" in w[0] and "S02" not in w[0]
-    straddle = [Segment(1, "raw", 0, 12, box=full, region=1), Segment(2, "raw", 12, 40)]
-    assert "straddle" in pipeline.layout_period_warnings(straddle, lay, "match")[0]
+    straddle = [Segment(1, "raw", 0, 13, box=full, region=1), Segment(2, "raw", 13, 40)]
+    w = pipeline.layout_period_warnings(straddle, lay, "match")
+    assert len(w) == 1 and "straddle" in w[0] and "S01 (frames 10-12)" in w[0]
+    # a merged 1-2 frame sliver past the boundary (detected boundary off by a frame or two) is no warning
+    sliver = [Segment(1, "raw", 0, 12, box=full, region=1), Segment(2, "raw", 12, 40)]
+    assert pipeline.layout_period_warnings(sliver, lay, "match") == []
     assert pipeline.layout_period_warnings(bad, lay, "source") == []
     # stage-level: split/PiP warned (analysis), fullscreen only logged
     ctx = pipeline.Context(cfg=Config())
@@ -1174,6 +1180,152 @@ def test_layout_period_warnings():
                                      "(After Effects cannot reproduce it from this cutlist)"]
     assert not any("fullscreen" in w for w in ctx.warnings)
     assert any(a[1] == "fullscreen_periods" and k["periods"] == [[0, 10]] for a, k in recs)
+
+
+def test_layout_period_warnings_transition_and_sliver_at_fullscreen_boundary():
+    """Review R2-5 / D1-c1-transition: a dissolve between a boxed shot and a fullscreen shot puts the
+    detected period boundary inside the declared crossfade overlap; those frames show both framings and
+    are no warning (neither the boxless outgoing A 'cropped' nor the fullscreen B 'straddling'). Frames
+    of a boxless segment in the fullscreen period OUTSIDE the declared overlap still warn, and so does an
+    overlap that is not a declared transition or whose neighbour has the same framing."""
+    from match_cuts.model import LayoutPeriod
+    full = {"x": 0, "y": 0, "w": W, "h": H, "corner_radius": 0}
+    boxed = Box(4, 4, W - 8, H - 8, 2)
+    xf = {"type": "crossfade", "duration_frames": 6}
+
+    def lay(fs_in: int, fs_out: int = 80, n: int = 80) -> Layout:
+        ps = [LayoutPeriod(0, fs_in, "boxed", boxed), LayoutPeriod(fs_in, fs_out, "fullscreen", Box(0, 0, W, H))]
+        if fs_out < n:
+            ps.append(LayoutPeriod(fs_out, n, "boxed", boxed))
+        return Layout(W, H, box=boxed, periods=ps)
+
+    # boxed -> fullscreen, crossfade O=34 D=6 (declared on B only), period starts mid-dissolve (36)
+    A = Segment(1, "raw", 0, 40, raw_in_seconds=1.0)
+    B = Segment(2, "raw", 34, 80, raw_in_seconds=20.0, box=dict(full), region=1, transition_in=dict(xf))
+    recs = []
+    dlog = types.SimpleNamespace(record=lambda *a, **k: recs.append((a, k)))
+    assert pipeline.layout_period_warnings([A, B], lay(36), "match", dlog) == []
+    ev = {k["segment"]: k for a, k in recs if a[1] == "period_boundary_explained"}
+    assert ev[1]["transition_frames"] == [[36, 39]] and ev[1]["unexplained"] == []
+    assert ev[2]["transition_frames"] == [[34, 35]]
+    # the exp_fs_xfade shape: A [0,36) transition_out, B [30,60) transition_in, period from 31
+    A2 = Segment(1, "raw", 0, 36, transition_out=dict(xf))
+    B2 = Segment(2, "raw", 30, 60, box=dict(full), region=1, transition_in=dict(xf))
+    assert pipeline.layout_period_warnings([A2, B2], lay(31, 60, 60), "match") == []
+    # fullscreen -> boxed dissolve: B boxless incoming, A fullscreen outgoing; period ends mid-dissolve
+    A3 = Segment(1, "raw", 0, 36, box=dict(full), region=1, transition_out=dict(xf))
+    B3 = Segment(2, "raw", 30, 60)
+    L3 = Layout(W, H, box=boxed, periods=[LayoutPeriod(0, 33, "fullscreen", Box(0, 0, W, H)),
+                                          LayoutPeriod(33, 60, "boxed", boxed)])
+    assert pipeline.layout_period_warnings([A3, B3], L3, "match") == []
+    # the boxless A overlaps B for 10 frames but only a 6-frame crossfade is declared: nothing explained
+    A4 = Segment(1, "raw", 0, 44)
+    B4 = Segment(2, "raw", 34, 80, box=dict(full), region=1, transition_in=dict(xf))
+    w = pipeline.layout_period_warnings([A4, B4], lay(36), "match")
+    assert len(w) == 1 and "S01 (frames 36-43)" in w[0] and "cropped" in w[0]     # (B: a 2-frame sliver)
+    # period detected late in the dissolve: the fullscreen B's 4 frames before it are the declared overlap
+    assert pipeline.layout_period_warnings([A, B], lay(38), "match") == []
+    w = pipeline.layout_period_warnings([A, dataclasses.replace(B, transition_in=None)], lay(38), "match")
+    assert len(w) == 1 and "S02 (frames 34-37) straddle" in w[0]
+    # a boxless segment after the dissolve, inside the fullscreen period: warned even though A/B are explained
+    B6 = Segment(2, "raw", 34, 60, box=dict(full), region=1, transition_in=dict(xf))
+    w = pipeline.layout_period_warnings([A, B6, Segment(3, "raw", 60, 80)], lay(36), "match")
+    assert len(w) == 1 and "S03 (frames 60-79)" in w[0] and "S01" not in w[0]
+    # an overlap that no transition declares (or of another length) explains nothing
+    B5 = Segment(2, "raw", 34, 80, box=dict(full), region=1, transition_in={"type": "crossfade", "duration_frames": 5})
+    w = pipeline.layout_period_warnings([A, B5], lay(36), "match")
+    assert len(w) == 1 and "S01 (frames 36-39)" in w[0]
+    # a boxless segment wholly inside the fullscreen period (no neighbour of the other framing): warned
+    w = pipeline.layout_period_warnings([Segment(1, "raw", 0, 36), Segment(2, "raw", 36, 80)], lay(36), "match")
+    assert len(w) == 1 and "S02 (frames 36-79)" in w[0]
+    # a boxless 1-2 frame sliver merged across the boundary into the boxed neighbour: no warning; 3 frames: warned
+    assert pipeline.layout_period_warnings([Segment(1, "raw", 0, 38), Segment(2, "raw", 38, 80, box=dict(full),
+                                                                                region=1)], lay(36), "match") == []
+    w = pipeline.layout_period_warnings([Segment(1, "raw", 0, 39), Segment(2, "raw", 39, 80, box=dict(full),
+                                                                           region=1)], lay(36), "match")
+    assert len(w) == 1 and "S01 (frames 36-38)" in w[0]
+
+
+def test_layout_period_rule_matches_verify_c1():
+    """The pipeline warning and verify's c1 use ONE rule for boxless RAW frames in a fullscreen period
+    (declared transition overlap with a boxed neighbour, merged 1-2 frame sliver): the unexplained frames
+    agree on a grid of dissolve / sliver / plain layouts."""
+    from match_cuts import verify
+    fn = getattr(verify, "boxless_fullscreen_frames", None)
+    if fn is None:
+        pytest.skip("verify.boxless_fullscreen_frames not available")
+    full = {"x": 0, "y": 0, "w": W, "h": H, "corner_radius": 0}
+    cases = 0
+    for a_out in (36, 38, 39, 40, 44):
+        for b_in in (30, 34, 36):
+            for d_decl in (None, 4, 6, 10):
+                for fs_in in (31, 34, 36, 38, 40):
+                    if b_in >= a_out + 1 or b_in < 1:
+                        continue
+                    xf = None if d_decl is None else {"type": "crossfade", "duration_frames": d_decl}
+                    A = Segment(1, "raw", 0, a_out, transition_out=xf)
+                    B = Segment(2, "raw", b_in, 80, box=dict(full), region=1, transition_in=xf)
+                    mine, _ = pipeline.period_mismatch_frames(A, fs_in, 80, [A, B])
+                    theirs = fn(A, [A, B], fs_in, 80)["unexplained"]
+                    assert sorted(mine) == sorted(theirs), (a_out, b_in, d_decl, fs_in, mine, theirs)
+                    cases += 1
+    assert cases > 50
+
+
+def test_pass1_visual_cache_keys_depend_on_the_layout(monkeypatch, clips, tmp_path, capsys):
+    """Review R2-3: the FIRST S5.2 + S5.3 pass keys its anchors and FrameMap on the layout geometry and
+    the starting overlay masks (like the D2 second pass), so a WORK_DIR whose layout changed (new layout
+    algorithm, other box or overlays) never reuses a FrameMap matched against another box; the stage
+    versions of frame_map / sparse_search / probe / layout were bumped for caches written before."""
+    from match_cuts import common, layout as layout_mod
+    assert common.STAGE_VERSION["frame_map"] >= 3 and common.STAGE_VERSION["sparse_search"] >= 2
+    assert common.STAGE_VERSION["probe"] >= 2 and common.STAGE_VERSION["layout"] >= 2
+    boxed = Box(4, 4, W - 8, H - 8, 2)
+    l1 = Layout(W, H, box=boxed)
+    l2 = Layout(W, H, box=Box(6, 4, W - 12, H - 8, 2))
+    ov1 = layout_mod.OverlayMasks((H, W))
+    ov2 = layout_mod.OverlayMasks((H, W))
+    m = np.zeros((H, W), bool)
+    m[2:5, 3:9] = True
+    ov2.set(7, m)
+    p = pipeline.visual_pass_key_parts
+    assert p(l1, ov1) == p(Layout.from_dict(l1.to_dict()), ov1.copy())         # deterministic, content-based
+    assert p(l1, ov1) != p(l2, ov1) and p(l1, ov1) != p(l1, ov2)
+    ctx = types.SimpleNamespace(comp_info=types.SimpleNamespace(file_hash="c" * 40),
+                                raw_info=types.SimpleNamespace(file_hash="r" * 40), cfg=Config(), keys={})
+    k1 = pipeline._analysis_key(ctx, "frame_map", *p(l1, ov1))
+    assert k1 != pipeline._analysis_key(ctx, "frame_map", *p(l2, ov1))
+    assert k1 != pipeline._analysis_key(ctx, "frame_map")                     # the pre-R2-3 pass-1 key
+    # stage level: the stub world's first pass is keyed on its layout; another layout -> another key
+    calls: dict = {}
+    install_stub_world(monkeypatch, calls)
+    out = tmp_path / "o"
+    base = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out),
+            "--work", str(tmp_path / "w"), "--skip-compare"]
+    fm_dir = tmp_path / "w" / "cache" / "frame_map"
+
+    def run() -> tuple[set, bool]:
+        calls.clear()
+        cli.main(base)
+        capsys.readouterr()
+        decs = [json.loads(x) for x in (out / "debug" / "decisions.jsonl").read_text().splitlines() if x.strip()]
+        hit = any(d.get("stage") == "refine" and d.get("decision") == "cache_hit" for d in decs)
+        return {p_.name for p_ in fm_dir.glob("*.npz")}, hit
+    files_a, hit = run()
+    assert not hit and calls["refine"] == 1
+    assert run() == (files_a, True) and "refine" not in calls                  # same layout: a cache hit
+    lay_mod = sys.modules["match_cuts.layout"]
+    orig = lay_mod.analyze_layout
+
+    def moved_box(*a, **k):
+        lay, ov = orig(*a, **k)
+        d = lay.to_dict()
+        d["box"] = dict(d["box"], x=2, w=int(d["box"]["w"]) - 4)
+        return Layout.from_dict(d), ov
+    monkeypatch.setattr(lay_mod, "analyze_layout", moved_box)
+    files_b, hit = run()
+    assert not hit and calls["refine"] == 1 and files_b > files_a              # re-matched against the new box
+    assert calls["refine_boxes"][-1]["x"] == 2
 
 
 def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_path, capsys):
@@ -1285,3 +1437,44 @@ def test_audio_phase_static_only_edit_is_not_mistaken_for_replaced_audio(monkeyp
     assert s.audio["phase_source"] == "audio" and abs(s.audio["lag_ms"]) < 3.0
     assert audio_result["status"] == "ok" and s.audio["exception"] is None
     assert abs(s.raw_in_seconds - float(Fraction(j2) / fps)) < 0.0005
+
+
+@pytest.mark.parametrize("run_len", [180, 900])
+def test_audio_phase_static_shot_inpoint_on_the_interval_edge(run_len):
+    """Review R2-2: RAW holds a static run of ``run_len`` identical frames (29.97p); the competitor uses
+    60 frames of it FROM ITS FIRST FRAME (NLE in-point on the RAW shot boundary = the lower edge of the
+    feasible raw_in interval, which spans seconds). The D3 margin is a fraction of a RAW frame, not 5 % of
+    the ambiguity span (which left raw_in 201 ms late and failed c5), and the wide search is centred on
+    the feasible interval and covers all of it (the 900-frame run's interval is 28 s wide, beyond the old
+    +-5 s cap): raw_in lands within 2 ms of the truth and a c5-style +-2 s xcorr leaves < 3 ms."""
+    from match_cuts import audio_align, phase_solve
+    cf, rf, sr = Fraction(30), Fraction(30000, 1001), 16000
+    S, N = 300, 60
+    fm = FrameMap(N)
+    fm.status = np.full(N, Status.MATCH, np.int8)
+    fm.raw = (S + np.arange(N)).astype(np.int32)                   # refine's 'best' frame: any of the run
+    fm.raw_lo = fm.soft_lo = np.full(N, S, np.int32)
+    fm.raw_hi = fm.soft_hi = np.full(N, S + run_len - 1, np.int32)
+    seg = _solved(Segment(1, "raw", 0, N, speed=1.0), fm, cf, rf)
+    lo, hi = seg.raw_in_interval_both or seg.raw_in_interval
+    true_in = float(Fraction(S) / rf)
+    assert lo == pytest.approx(true_in, abs=1e-6) and hi - lo > 3.0 and seg.raw_in_seconds - true_in > 1.0
+    rng = np.random.default_rng(0)
+    raw_y = rng.standard_normal(int((S + run_len) / float(rf) * sr) + 5 * sr).astype(np.float32)   # unique audio
+    a0 = int(round(true_in * sr))
+    comp_y = raw_y[a0:a0 + int(N / 30 * sr)].copy()
+    res = {"status": "ok", "segments": {1: {"lag_ms": None, "corr": 0.05, "exception": "audio_replaced"}}}
+    recs = []
+    dlog = types.SimpleNamespace(record=lambda st, dec, **k: recs.append((st, dec, k)))
+    moved, warns = pipeline.audio_informed_phase([seg], res, fm, comp_y, raw_y, sr, cf, rf, Config(), dlog)
+    assert moved == [1] and not warns and seg.audio["phase_source"] == "audio"
+    margin = pipeline.audio_phase_margin_s(hi - lo, rf, Config().ae_min_margin_ms)
+    assert margin == pytest.approx(0.05 / float(rf)) and margin < 0.002         # 5 % of a frame, not of 4-28 s
+    assert 0.0 <= seg.raw_in_seconds - true_in <= 0.002
+    rebuilt = audio_align.resample_at(raw_y, (seg.raw_in_seconds + np.arange(comp_y.size) / sr) * sr)
+    lag, peak = audio_align.xcorr_lag(comp_y, rebuilt, sr, 2.0)                   # verify c5's +-2 s search
+    assert abs(lag) * 1000.0 < 3.0 and peak > 0.9
+    wide = [k for st, dec, k in recs if dec == "audio_phase"][0]["wide_search"]
+    assert wide["max_lag_s"] >= 0.5 * (hi - lo)                                   # the whole interval searched
+    for k in range(N):                                                            # every frame stays on the run
+        assert S <= phase_solve.ae_frame(seg.raw_in_seconds, 1.0, k, 0, cf, rf) <= S + run_len - 1

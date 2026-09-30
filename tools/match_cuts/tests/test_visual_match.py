@@ -624,3 +624,95 @@ def test_index_and_search_bit_identical_inline_fork_spawn(scene, tmp_path, monke
     assert set(best) == {0, 12, 33, 52, 66}
     assert all(best[k]["raw"] == scene["truth"][k]["raw"] for k in best)
 
+
+
+# ----------------------------------------------------------------------------------------------
+# Regression real-world-new-paths:D7-spawn-memory: every spawn worker loads its OWN FLANN tree
+# (~800 B per descriptor): the pool is capped by the available RAM when the state holds a RawIndex,
+# and states without a RawIndex (S5.3 refine) drop the workers' trees. The fork path is unchanged.
+# ----------------------------------------------------------------------------------------------
+
+def _index_probe(state, x):
+    """Module-level parallel_map item function: (x, pid, FLANN trees cached in this process, votes)."""
+    idx = state.get("index")
+    v = idx.votes(np.ascontiguousarray(idx.desc[(x * 7) % 200:(x * 7) % 200 + 40])) if idx is not None else None
+    return (x, os.getpid(), len(vm._INDEX_CACHE), None if v is None else v.tolist())
+
+
+def _ram_for_workers(idx, n_workers: float) -> int:
+    """An available-RAM figure for which _spawn_mem_cap allows int(n_workers) workers for ``idx``."""
+    n = len(idx.desc)
+    per = vm.SPAWN_TREE_BYTES_PER_DESC * n + vm.SPAWN_WORKER_BASE_BYTES
+    avail = vm.SPAWN_MEM_MARGIN_BYTES + n * 640 + int(n_workers * per)
+    assert avail // 10 < vm.SPAWN_MEM_MARGIN_BYTES
+    return avail
+
+
+def test_spawn_pool_capped_by_available_ram(scene, built, monkeypatch, clean_pool_env, caplog):
+    idx = built["index"]
+    idx.ensure_built()
+    items = list(range(24))
+    inline = vm.parallel_map(_index_probe, items, 1, {"index": idx}, seed=1)
+    monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_available_ram", lambda: _ram_for_workers(idx, 2.5))
+    before = dict(vm.POOL_STATS)
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        res = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
+    assert vm._POOL["n"] == 2                                     # 4 requested, 2 fit
+    assert len({r[1] for r in res}) <= 2 and os.getpid() not in {r[1] for r in res}
+    assert [(r[0], r[3]) for r in res] == [(r[0], r[3]) for r in inline]   # results do not depend on the pool
+    assert vm.POOL_STATS["spawn_mem_capped"] == before["spawn_mem_capped"] + 1
+    assert vm.POOL_STATS["spawn"] == before["spawn"] + 1
+    assert "spawn workers: 2 instead of 4" in caplog.text and "FLANN tree" in caplog.text
+    # decided once per index: the trees the workers now hold do not shrink the pool further, no new log
+    caplog.clear()
+    monkeypatch.setattr(vm, "_available_ram", lambda: 1)
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        res2 = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
+    assert vm._POOL["n"] == 2 and [r[3] for r in res2] == [r[3] for r in inline] and "instead of" not in caplog.text
+    # a state without a RawIndex is not capped
+    vm.parallel_map(_probe, list(range(40)), 4, {"mul": 7}, seed=1)
+    assert vm._POOL["n"] == 4
+    # only one worker fits: single-process (the parent already holds the tree), no spawn pool used
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_available_ram", lambda: _ram_for_workers(idx, 1.5))
+    before = dict(vm.POOL_STATS)
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        res3 = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
+    assert {r[1] for r in res3} == {os.getpid()} and [r[3] for r in res3] == [r[3] for r in inline]
+    assert vm.POOL_STATS["inline"] == before["inline"] + 1 and vm.POOL_STATS["spawn"] == before["spawn"]
+    assert "running single-process" in caplog.text
+    # unknown available RAM: no cap
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_available_ram", lambda: None)
+    assert vm._spawn_mem_cap(4, {"index": idx}) == 4
+    # the fork path never consults the memory cap (the tree is shared copy-on-write)
+    monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
+
+    def boom(*a, **k):
+        raise AssertionError("_spawn_mem_cap called on the fork path")
+    monkeypatch.setattr(vm, "_spawn_mem_cap", boom)
+    before = dict(vm.POOL_STATS)
+    res4 = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
+    assert vm.POOL_STATS["fork"] == before["fork"] + 1 and [r[3] for r in res4] == [r[3] for r in inline]
+
+
+def test_available_ram_probe_returns_bytes():
+    avail = vm._available_ram()
+    assert avail is None or avail > 16 << 20
+
+
+def test_spawn_workers_drop_index_trees_for_states_without_index(scene, built, monkeypatch, clean_pool_env):
+    idx = built["index"]
+    monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+    monkeypatch.setattr(vm, "_MEM_CAPS", {}, raising=False)
+    monkeypatch.setattr(vm, "_available_ram", lambda: None, raising=False)       # no memory cap here
+    items = list(range(24))
+    r1 = vm.parallel_map(_index_probe, items, 3, {"index": idx}, seed=1)
+    assert all(r[2] >= 1 for r in r1)                           # S5.2: each worker holds the tree
+    r2 = vm.parallel_map(_index_probe, items, 3, {"mul": 1}, seed=1)
+    assert {r[1] for r in r1} & {r[1] for r in r2}              # the same (persistent) workers
+    assert all(r[2] == 0 for r in r2)                           # S5.3 state: the trees were dropped
+    r3 = vm.parallel_map(_index_probe, items, 3, {"index": idx}, seed=1)
+    assert all(r[2] >= 1 for r in r3) and [r[3] for r in r3] == [r[3] for r in r1]   # reloaded, same votes

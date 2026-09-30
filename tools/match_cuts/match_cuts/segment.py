@@ -39,8 +39,9 @@ Algorithm overview
   4. Speed-only cuts (no RAW discontinuity): cut moved to the intersection of both lines,
      cut_ambiguity=[a, b] = all positions both models explain.
   5. Transitions: fit_blend over A in {Â-1..Â+1} x B in {B̂-1..B̂+1} (vectorised covariance form, equal to
-     scoring.fit_blend) around every cut / short gap; blend frames by the relative test; alpha_B(k) =
-     (k-O)/D least squares -> (O, D); B.comp_in = O, A.comp_out = O + D (DESIGN §3); the chosen A/B frames
+     scoring.fit_blend) around every cut / short gap; blend frames by the relative test; alpha_B(k) from the
+     gain-independent fit (scoring.blend_alpha_cov) = (k-O)/D least squares -> (O, D); B.comp_in = O,
+     A.comp_out = O + D (DESIGN §3); the chosen A/B frames
      become phase constraints. Dips (fades to/from a UNIFORM run), flashes (UNIFORM runs of 1-2 frames);
      NONE -> NOT-IN-RAW placeholders.
   6. Criterion-2 check on every hard cut (A's last frame scores higher under A's model than under B's
@@ -803,7 +804,12 @@ class _Scorer:
     def blend_fit(self, k: int, a_items: Sequence[tuple[int, Sim, bool]],
                   b_items: Sequence[tuple[int, Sim, bool]]) -> dict | None:
         """All A x B two-source fits y ≈ alpha*A + (1-alpha)*B + c (scoring.fit_blend, vectorised via the
-        covariance matrix) + single-source ZNCC and gains. alpha = weight of A (outgoing)."""
+        covariance matrix) + single-source ZNCC and gains. alpha = weight of A (outgoing).
+
+        The best pair (highest zfit) also gets the gain-independent weight 'alpha_a_free' (scoring.
+        blend_alpha_cov: y ≈ beta_A*A + beta_B*B + c, beta_A / (beta_A + beta_B); NaN when undefined) and
+        'gain_free' (beta_A + beta_B): a contrast change of the repost biases the constrained alpha, not
+        this one (review R2-1). The crossfade fit uses alpha_a_free; zfit stays the constrained fit's."""
         items = list(a_items) + list(b_items)
         st = self._stack(k, items)
         if st is None:
@@ -832,7 +838,11 @@ class _Scorer:
                     best = (z, al, ia, ib)
         out = {"single": single, "gains": gains, "na": na}
         if best is not None:
-            out.update({"zfit": float(best[0]), "alpha_a": float(best[1]), "ia": best[2], "ib": best[3]})
+            from .scoring import blend_alpha_cov
+            A, B = 1 + best[2], 1 + na + best[3]
+            af, g = blend_alpha_cov(float(C[A, A]), float(C[B, B]), float(C[A, B]), float(C[A, 0]), float(C[B, 0]))
+            out.update({"zfit": float(best[0]), "alpha_a": float(best[1]), "ia": best[2], "ib": best[3],
+                        "alpha_a_free": af, "gain_free": g})
         return out
 
 
@@ -1983,8 +1993,13 @@ class _Builder:
             if r is None or "zfit" not in r:
                 return None
             best_single = float(np.nanmax(r["single"]))
-            alpha_b = 1.0 - r["alpha_a"]
-            is_blend = (0.02 < alpha_b < 0.98) and (1.0 - r["zfit"]) <= rel * (1.0 - best_single)
+            # alpha from the gain-independent fit (a graded / softer repost biases the constrained one and
+            # tilts the ramp by a frame or two, review R2-1); the relative blend test keeps the constrained
+            # fit's zfit
+            af = r.get("alpha_a_free", float("nan"))
+            free_ok = af is not None and math.isfinite(af)
+            alpha_b = 1.0 - (af if free_ok else r["alpha_a"])
+            is_blend = free_ok and (0.02 < alpha_b < 0.98) and (1.0 - r["zfit"]) <= rel * (1.0 - best_single)
             return {"k": k, "alpha_b": alpha_b, "zfit": r["zfit"], "single": best_single, "blend": is_blend,
                     "a_j": a_items[r["ia"]][0], "b_j": b_items[r["ib"]][0]}
 

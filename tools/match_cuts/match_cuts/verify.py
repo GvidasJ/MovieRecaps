@@ -206,8 +206,12 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
     if multi:
         exceptions.append("segments of an unsupported video region (split-screen / PiP): "
                           + ", ".join(f"{_seg_name(s)} (region {s.region})" for s in multi))
-    # full-screen periods (DESIGN §7 D1) are reproduced: every RAW segment in them carries its own box
+    # full-screen periods (DESIGN §7 D1) are reproduced: every RAW segment in them carries its own box. A
+    # boxless segment's frames there are explained only by its declared transition overlap with a neighbour
+    # carrying the box (the detected period starts mid-dissolve) or as a merged 1-2 frame sliver at the period
+    # boundary (the detected boundary is off by a frame or two); its other frames fail (review R2-5 / D1-c1)
     fullscreen: list[list[int]] = []
+    fs_explained: list[dict] = []
     for p in all_periods:
         if str(p.get("mode")) != "fullscreen":
             continue
@@ -215,9 +219,23 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
         fullscreen.append([a, b - 1])
         boxed = [s for s in segs if s.type == "raw" and s.comp_in < b and s.comp_out > a and not s.box]
         for s in boxed:
-            lo, hi = max(a, s.comp_in), min(b, s.comp_out) - 1
-            failures.append(f"{_seg_name(s)}: frames {lo}-{hi} show the video full-screen in the competitor but the "
-                            "segment has no box (rebuilt inside the dominant video box)")
+            part = boxless_fullscreen_frames(s, segs, a, b)
+            for why, text in (("transition", "lie in its declared transition overlap with {nb}, which carries the "
+                                              "full-screen box (the detected period starts inside the dissolve)"),
+                              ("sliver", "are a merged sliver at the full-screen period boundary (the detected "
+                                         "boundary is off by a frame or two)")):
+                fr = part[why]
+                if not fr:
+                    continue
+                nb = ", ".join(_seg_name(x) for x in segs if x.id in part["neighbours"]) or "a neighbour"
+                rng = ", ".join(f"{x}-{y}" for x, y in _ranges(fr))
+                exceptions.append(f"{_seg_name(s)}: frames {rng} of the full-screen period {a}-{b - 1} "
+                                  + text.format(nb=nb))
+                fs_explained.append({"segment": s.id, "frames": _ranges(fr), "why": why, "period": [a, b - 1]})
+            if part["unexplained"]:
+                rng = ", ".join(f"{x}-{y}" for x, y in _ranges(part["unexplained"]))
+                failures.append(f"{_seg_name(s)}: frames {rng} show the video full-screen in the competitor but the "
+                                "segment has no box (rebuilt inside the dominant video box)")
     status = _status_from(len(failures), len(exceptions))
     n_ph = sum(1 for s in segs if s.type == "not_in_raw")
     summary = (f"{len(segs)} segments ({n_ph} NOT-IN-RAW), {covered}/{n} frames covered, "
@@ -226,7 +244,58 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
         summary += f", {len(fullscreen)} full-screen period(s)"
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions,
             "frames": n, "covered": covered, "gaps": gaps, "overlaps": overlaps, "transitions": explained,
-            "extra_region_frames": region_frames, "fullscreen_frames": fullscreen}
+            "extra_region_frames": region_frames, "fullscreen_frames": fullscreen,
+            "fullscreen_explained": fs_explained}
+
+
+FULLSCREEN_SLIVER_MAX = 2      # merge_tiny joins at most 2-frame slivers across a layout period boundary
+
+
+def boxless_fullscreen_frames(seg: Segment, segments: Sequence[Segment], a: int, b: int) -> dict:
+    """Classify the frames of a boxless RAW segment ``seg`` that lie in the full-screen period [a, b):
+
+    * 'transition': inside a declared transition overlap (crossfade: the overlap length equals the declared
+      duration on either side) with a neighbour that carries a box -- the full-screen shot dissolving in or
+      out while the period detection switched mid-dissolve (segment.py keeps such a straddling segment boxed);
+    * 'sliver': the remaining frames form one run of <= FULLSCREEN_SLIVER_MAX frames at the period boundary
+      while most of the segment lies outside the period (segment.merge_tiny's merged sliver);
+    * 'unexplained': everything else (the segment should have carried the full-screen box).
+
+    Returns {'transition', 'sliver', 'unexplained': sorted frame lists, 'neighbours': [segment ids]}. The same
+    rule serves pipeline.layout_period_warnings / report._warnings (DESIGN §7 D1)."""
+    lo, hi = max(int(a), int(seg.comp_in)), min(int(b), int(seg.comp_out))
+    frames = set(range(lo, hi))
+    trans: set[int] = set()
+    nbs: list[int] = []
+    for o in segments:
+        if o is seg or not getattr(o, "box", None) or o.type != "raw":
+            continue
+        ov0, ov1 = max(int(seg.comp_in), int(o.comp_in)), min(int(seg.comp_out), int(o.comp_out))
+        if ov1 <= ov0:
+            continue
+        first, second = (o, seg) if int(o.comp_in) < int(seg.comp_in) else (seg, o)
+        if int(second.comp_in) != ov0 or int(first.comp_out) != ov1:
+            continue
+        ts = (_transition_dict(first.transition_out), _transition_dict(second.transition_in))
+        if not any(t and int(t.get("duration_frames", -1) or -1) == ov1 - ov0 for t in ts):
+            continue
+        got = frames & set(range(ov0, ov1))
+        if got:
+            trans |= got
+            nbs.append(int(o.id))
+    rest = sorted(frames - trans)
+    sliver: list[int] = []
+    if rest:
+        runs = _ranges(rest)
+        n_in = hi - lo
+        n_out = (int(seg.comp_out) - int(seg.comp_in)) - n_in
+        if len(runs) == 1 and len(rest) <= FULLSCREEN_SLIVER_MAX and n_out > n_in:
+            r0, r1 = runs[0]
+            at_start = r0 == a and int(seg.comp_in) < a          # the segment runs into the period ...
+            at_end = r1 == b - 1 and int(seg.comp_out) > b       # ... or out of it
+            if at_start or at_end:
+                sliver, rest = rest, []
+    return {"transition": sorted(trans), "sliver": sliver, "unexplained": rest, "neighbours": sorted(set(nbs))}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -365,7 +434,10 @@ class ProxyScorer:
         return out
 
     def blend(self, k: int, a: Cand | None, b: Cand | None) -> tuple[float, float]:
-        """(alpha_B, zncc_of_fit) of comp[k] ~ (1-alpha_B)*A + alpha_B*B (scoring.fit_blend)."""
+        """(alpha_B, zncc_of_fit) of comp[k] ~ g * ((1-alpha_B)*A + alpha_B*B) + c. alpha_B comes from the
+        gain-independent fit (scoring.fit_blend_free: beta_B / (beta_A + beta_B)) so a contrast change or
+        a softness mismatch of the repost does not bias it (review R2-1); NaN when comp[k] is no blend of
+        A and B (beta_A + beta_B <= scoring.BLEND_MIN_GAIN)."""
         from . import scoring
         region = self._region(k)
         if region is None:
@@ -374,7 +446,9 @@ class ProxyScorer:
         if wa is None or wb is None:
             return float("nan"), float("nan")
         valid = region.mask & wa[1] & wb[1]
-        alpha_a, _res, z = scoring.fit_blend(region, wa[0], wb[0], valid)
+        if int(valid.sum()) < self.min_pixels:
+            return float("nan"), float("nan")
+        alpha_a, _gain, z = scoring.fit_blend_free(region, wa[0], wb[0], valid)
         return 1.0 - alpha_a, z
 
     def uniform(self, k: int) -> tuple[float, float]:
@@ -440,12 +514,15 @@ def _side(scorer: Any, k: int, own: Cand | None, other: Cand | None) -> dict:
     return res
 
 
-def fit_crossfade_window(rows: Sequence[tuple[int, float]]) -> tuple[int, int] | None:
+def fit_crossfade_window(rows: Sequence[tuple[int, float]], pure: float | None = None) -> tuple[int, int] | None:
     """(O, D) of a linear crossfade alpha_B(k) = (k - O) / D fitted to measured (k, alpha_B) pairs the way
     segment.py finds crossfades: least squares over the ramp frames (0.02 < alpha < 0.98), O = round(zero
     crossing), D = round(1 / slope); one ramp frame: D = 2 around alpha 0.5, else D from its alpha. None
-    when nothing ramps."""
-    ramp = [(int(k), float(a)) for k, a in rows if a is not None and math.isfinite(a) and 0.02 < a < 0.98]
+    when nothing ramps. ``pure`` (the purity tolerance of the pure-A / pure-B checks) also drops frames
+    within ``pure`` of 0 or 1 before the fit: those are the pure frames around the dissolve, whose small
+    residual alpha (grading, softness) would otherwise tilt the fitted ramp (review R2-1)."""
+    edge = max(0.02, float(pure)) if pure is not None and math.isfinite(float(pure)) else 0.02
+    ramp = [(int(k), float(a)) for k, a in rows if a is not None and math.isfinite(a) and edge < a < 1.0 - edge]
     if not ramp:
         return None
     if len(ramp) >= 2:
@@ -533,8 +610,10 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
             else:
                 sides.append({"side": "alpha", "result": "ok" if max_err <= alpha_tol else "fail",
                               "reason": f"max |alpha_fit - alpha| = {max_err:.3f} (tol {alpha_tol})"})
-            # the window itself: re-fit (O, D) from the measured ramp (time-math F4)
-            fit = fit_crossfade_window(sorted(fit_rows.items()))
+            # the window itself: re-fit (O, D) from the measured ramp (time-math F4); frames within the
+            # purity tolerance of 0 / 1 are the pure frames around the ramp, judged below (review R2-1)
+            pure = max(0.5 / d, 0.05) if d > 0 else 0.05
+            fit = fit_crossfade_window(sorted(fit_rows.items()), pure=pure)
             c["window_fit"] = None if fit is None else {"O": fit[0], "D": fit[1]}
             if d > 0 and fit is None:
                 sides.append({"side": "window", "result": "unscorable", "reason": "no ramp frames to fit (O, D)"})
@@ -542,7 +621,6 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
                 ok = fit == (o, d)
                 sides.append({"side": "window", "result": "ok" if ok else "fail",
                               "reason": f"measured ramp gives O={fit[0]} D={fit[1]}, declared O={o} D={d}"})
-            pure = max(0.5 / d, 0.05) if d > 0 else 0.05
             for kk, want_b in ((o - 1, False), (o, False), (o + d, True)):
                 if kk not in fit_rows:
                     continue
@@ -1219,6 +1297,23 @@ def _bad_alerts(rec: dict) -> list[str]:
     return [str(a) for a in (_get(rec, "alerts", default=[]) or []) if "Error" in str(a) or "failed" in str(a)]
 
 
+FRAMES_SUFFIX = "  [frames]"   # export_ae's JSX renames a layer its read-back self-check switched to frames mode
+
+
+def _record_name_ok(P: dict, L: dict, mode: str, remapped: bool) -> bool:
+    """The recorded layer name is the plan's, or -- for a stretch layer the JSX self-check switched to
+    frame-exact remapping at runtime -- the plan's name + '  [frames]' (export_ae.record_name_matches)."""
+    if L.get("name") == P.get("name"):
+        return True
+    try:
+        from .export_ae import record_name_matches
+        if record_name_matches(P, L):
+            return True
+    except Exception:  # noqa: BLE001 - fall back to the local rule below
+        pass
+    return mode == "stretch" and remapped and L.get("name") == f"{P.get('name')}{FRAMES_SUFFIX}"
+
+
 def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int, script_dir: str | Path,
                raw_name: str, layer_checker: Callable[[dict, dict, dict], list[str]] | None | str = "auto") -> dict:
     """Criterion 6 on the mock-run records (DESIGN §5 verify c6).
@@ -1304,16 +1399,20 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
     for P in all_layers:
         if not isinstance(P, dict):
             continue
+        mode = str(_get(P, "timeMode", "time_mode", default="stretch"))
         L = rec_by_tag.get(str(P.get("id"))) if P.get("id") is not None and rec_by_tag else None
         if L is None:
             L = rec_by_name.get(str(P.get("name")))
+        if L is None and mode == "stretch":            # renamed by the JSX self-check (untagged records)
+            L = rec_by_name.get(f"{P.get('name')}{FRAMES_SUFFIX}")
         if L is None:
             if str(P.get("kind")) == "reference" and not ((plan.get("footage") or {}).get("ref")):
                 continue
             layer_problems.append(f"{P.get('id') or P.get('name')}: not found in the mock record")
             continue
         probs = []
-        if P.get("name") is not None and L.get("name") != P.get("name"):
+        remapped = bool(_get(L, "timeRemapEnabled", default=False))
+        if P.get("name") is not None and not _record_name_ok(P, L, mode, remapped):
             probs.append(f"name {L.get('name')!r} != {P.get('name')!r}")
         k_in, k_out = _get(P, "compIn", "comp_in"), _get(P, "compOut", "comp_out")
         want_in = _get(P, "inPoint", default=None if k_in is None else int(k_in) * den / num)
@@ -1321,8 +1420,6 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
         for key, want in (("inPoint", want_in), ("outPoint", want_out)):
             if want is not None and not _close(_get(L, key), float(want)):
                 probs.append(f"{key} {_get(L, key)} != {want}")
-        mode = str(_get(P, "timeMode", "time_mode", default="stretch"))
-        remapped = bool(_get(L, "timeRemapEnabled", default=False))
         t_in = float(want_in) if want_in is not None else 0.0
         if mode in ("remap", "frames") or (remapped and mode == "stretch"):
             if mode == "stretch":
@@ -1347,9 +1444,14 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
                     probs.append(f"startTime {_get(L, 'startTime')} != {want_start}")
         elif _get(P, "startTime") is not None and not _close(_get(L, "startTime"), float(_get(P, "startTime"))):
             probs.append(f"startTime {_get(L, 'startTime')} != {_get(P, 'startTime')}")
-        if extra_problems is not None and "timeMode" in P and not (mode == "stretch" and remapped):
+        if extra_problems is not None and "timeMode" in P:
+            PP = P
+            if mode == "stretch" and remapped:
+                # switched to frame-exact remapping at runtime: check its keys / mask / opacity / switches as the
+                # frames-mode layer the JSX made of it (its audio moved to a runtime audio twin) (review AE2-1)
+                PP = {**P, "timeMode": "frames", "startTime": t_in, "stretch": 100.0, "audio": False}
             try:
-                probs.extend(extra_problems(P, L, F))
+                probs.extend(extra_problems(PP, L, F))
             except Exception as e:  # noqa: BLE001 - a helper that cannot read this record is reported, not fatal
                 probs.append(f"key/render-switch check unavailable: {type(e).__name__}: {e}")
         if probs:
@@ -1438,6 +1540,37 @@ def _measured_constraints(seg: Segment, fm: FrameMap) -> tuple[np.ndarray, np.nd
     return ks.astype(np.int64), lo, hi
 
 
+SNAP_OUTLIER_MAX_FRAC = 0.05   # c4 snap judgement: at most this fraction (min 2 frames) of measured outliers dropped
+
+
+def measured_speed_range(seg: Segment, fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
+                         feasible_range: Callable | None = None) -> tuple[tuple[float, float] | None, list[int]]:
+    """Speed range that reproduces refine's MEASURED frames of a segment (``_measured_constraints``), and the
+    frames dropped to get it. When the measured frames are jointly infeasible, isolated argmax errors are
+    removed first -- the largest subset consistent with one line at the segment's own speed
+    (pipeline.max_consistent_subset), provided it drops at most max(2, 5 %) of the frames (segment.py tolerates
+    such frames as drops). (None, dropped) when still undecidable; never falls back to the soft ranges."""
+    if feasible_range is None:
+        feasible_range = _phase().feasible_speed_range
+    mk, mlo, mhi = _measured_constraints(seg, fm)
+    if len(mk) < 2:
+        return None, []
+    mvr = feasible_range(mk, mlo, mhi, seg.comp_in, comp_fps, raw_fps)
+    if mvr is not None:
+        return (float(mvr[0]), float(mvr[1])), []
+    v = float(seg.speed or 0.0)
+    if not (v > 0 and math.isfinite(v)):
+        return None, []
+    from .pipeline import max_consistent_subset
+    u = v * float(raw_fps) / float(comp_fps)
+    keep = np.asarray(max_consistent_subset(mk, mlo, mhi, int(seg.comp_in), u), bool)
+    dropped = [int(k) for k in mk[~keep]]
+    if int(keep.sum()) < 2 or not dropped or len(dropped) > max(2, int(SNAP_OUTLIER_MAX_FRAC * len(mk))):
+        return None, dropped
+    mvr = feasible_range(mk[keep], mlo[keep], mhi[keep], seg.comp_in, comp_fps, raw_fps)
+    return (None if mvr is None else (float(mvr[0]), float(mvr[1]))), dropped
+
+
 def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
                         raw_wh: tuple[float, float], box: Box | dict | None, comp_wh: tuple[float, float],
                         cfg: Any, feasible_range: Callable | None = None,
@@ -1499,18 +1632,27 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
                 if s.unsnapped:
                     # 'a snap value was feasible' is judged on refine's MEASURED frames (pre-segmentation
                     # visually-identical ranges), not on the wider soft ranges: on slow footage the soft
-                    # ranges admit 1.05 for a genuine 1.03x segment that segment.py rightly left unsnapped
-                    mk, mlo, mhi = _measured_constraints(s, fm)
-                    mvr = feasible_range(mk, mlo, mhi, s.comp_in, comp_fps, raw_fps) if len(mk) >= 2 else None
-                    slo, shi = (float(mvr[0]), float(mvr[1])) if mvr is not None else (lo_v, hi_v)
-                    row["snap_range_measured"] = None if mvr is None else [round(slo, 6), round(shi, 6)]
-                    feas = sorted({v for v in snaps + used_speeds if slo <= v <= shi})
-                    if feas:
-                        failures.append(f"{name}: speed left unsnapped although {feas[:4]} are feasible")
-                        row["snap_check"] = "fail"
+                    # ranges admit 1.05 for a genuine 1.03x segment that segment.py rightly left unsnapped.
+                    # Isolated argmax errors (which segment.py tolerates as drops) are removed first; the soft
+                    # range is never used for this judgement (review R2-4)
+                    mvr, dropped = measured_speed_range(s, fm, comp_fps, raw_fps, feasible_range)
+                    row["snap_range_measured"] = None if mvr is None else [round(float(mvr[0]), 6),
+                                                                           round(float(mvr[1]), 6)]
+                    if dropped:
+                        row["snap_outliers_dropped"] = _ranges(dropped)
+                    if mvr is None:
+                        exceptions.append(f"{name}: snap not decidable from the measured frames (unsnapped speed "
+                                          f"{s.speed:.5f}; refine's measured frames admit no single linear time map)")
+                        row["snap_check"] = "undecidable"
                     else:
-                        exceptions.append(f"{name}: unsnapped speed {s.speed:.5f} (no common value feasible)")
-                        row["snap_check"] = "unsnapped"
+                        slo, shi = float(mvr[0]), float(mvr[1])
+                        feas = sorted({v for v in snaps + used_speeds if slo <= v <= shi})
+                        if feas:
+                            failures.append(f"{name}: speed left unsnapped although {feas[:4]} are feasible")
+                            row["snap_check"] = "fail"
+                        else:
+                            exceptions.append(f"{name}: unsnapped speed {s.speed:.5f} (no common value feasible)")
+                            row["snap_check"] = "unsnapped"
         # -- framing / flip / rotation --
         k0, k1 = max(0, s.comp_in), min(fm.n, s.comp_out)
         ks = [k for k in range(k0, k1) if int(fm.status[k]) == Status.MATCH and np.isfinite(fm.s[k])]
@@ -2308,20 +2450,45 @@ def check_determinism(ctx: Any) -> dict:
             "previous_run": prev, "warnings": warnings}
 
 
+# a previous run is comparable only when all of these provenance entries are equal; ffmpeg decodes the pixels
+# every stage measures, so a different ffmpeg version may legitimately change results (review R2-6)
+PREVIOUS_RUN_GATE_KEYS = ("version", "input_hashes", "analysis_params_hash", "stage_versions", "code_hash",
+                          "ffmpeg_version")
+# location-only fields of the competitor / raw media blocks: where the inputs and the output folder live, not
+# what was analysed (the content is pinned by 'hash' / 'source_hash' and provenance.input_hashes)
+MEDIA_LOCATION_FIELDS = ("source_path", "file_abs", "file_rel", "file")
+
+
+def previous_run_canonical(d: dict) -> dict:
+    """``canonical_cutlist`` minus the location-only fields (MEDIA_LOCATION_FIELDS of cutlist.competitor /
+    cutlist.raw): moving / renaming the same inputs or the output folder is no reproducibility failure."""
+    c = canonical_cutlist(json.loads(json.dumps(d, default=json_default)))
+    for role in ("competitor", "raw"):
+        blk = c.get(role)
+        if isinstance(blk, dict):
+            for f in MEDIA_LOCATION_FIELDS:
+                blk.pop(f, None)
+    return c
+
+
 def compare_with_previous_run(previous: dict | None, current: dict) -> dict:
     """Compare with the previous run's cutlist.json when it was made from the same inputs, analysis
-    parameters, settings and tool / stage versions (else the comparison is skipped)."""
+    parameters, settings, tool / stage versions and ffmpeg version (else the comparison is skipped), ignoring
+    provenance.timings and the location-only media fields (``previous_run_canonical``)."""
     if not previous:
         return {"compared": False, "reason": "no previous cutlist.json"}
-    keys = ("version", "input_hashes", "analysis_params_hash", "stage_versions", "code_hash")
     pp, cp = previous.get("provenance") or {}, current.get("provenance") or {}
-    same = all(json.dumps(pp.get(k), sort_keys=True, default=json_default) == json.dumps(cp.get(k), sort_keys=True, default=json_default)
-               for k in keys)
-    same = same and json.dumps(previous.get("settings"), sort_keys=True) == json.dumps(
-        json.loads(json.dumps(current.get("settings"), default=json_default)), sort_keys=True)
-    if not same:
-        return {"compared": False, "reason": "inputs, parameters, settings or tool version changed"}
-    cmp = compare_cutlists(previous, current)
+
+    def js(v: Any) -> str:
+        return json.dumps(json.loads(json.dumps(v, default=json_default)), sort_keys=True)
+
+    changed = [k for k in PREVIOUS_RUN_GATE_KEYS if js(pp.get(k)) != js(cp.get(k))]
+    if js(previous.get("settings")) != js(current.get("settings")):
+        changed.append("settings")
+    if changed:
+        return {"compared": False, "reason": "inputs, parameters, settings, tool or ffmpeg version changed",
+                "changed": changed}
+    cmp = compare_cutlists(previous_run_canonical(previous), previous_run_canonical(current))
     return {"compared": True, "identical": cmp["identical"], "differences": cmp["differences"][:20]}
 
 

@@ -10,6 +10,7 @@ and compression noise before ZNCC. Optionally the gradient-magnitude ZNCC is ave
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -178,3 +179,48 @@ def fit_blend(comp: CompRegion, a_img: np.ndarray, b_img: np.ndarray, valid: np.
     fit = alpha * a + (1 - alpha) * b + coef[1]
     res = float(np.sqrt(np.mean((y - fit) ** 2)))
     return alpha, res, zncc(y, fit)
+
+
+BLEND_MIN_GAIN = 0.05      # beta_A + beta_B at or below this: comp is not a blend of A and B (alpha undefined)
+BLEND_MIN_DET = 1e-4       # relative determinant of the [A, B] covariance below this: A ~ B, alpha undefined
+
+
+def blend_alpha_cov(c_aa: float, c_bb: float, c_ab: float, c_ay: float, c_by: float,
+                    min_gain: float = BLEND_MIN_GAIN) -> tuple[float, float]:
+    """Gain-independent blend weight from (co)variances: the unconstrained least-squares fit
+    y ≈ beta_A*A + beta_B*B + c, alpha_A = beta_A / (beta_A + beta_B). Returns (alpha_A, beta_A + beta_B);
+    alpha_A is NaN when A and B are (nearly) collinear or beta_A + beta_B <= ``min_gain``.
+
+    Unlike ``fit_blend`` (y - B = alpha (A - B) + c, i.e. gain fixed at 1) the ratio does not depend on a
+    contrast change of the competitor (y = g * blend + c): a gain g != 1 makes the constrained fit measure
+    alpha_B ≈ (1 - g) / 2 on a pure frame and scales the ramp slope by g (review R2-1)."""
+    det = c_aa * c_bb - c_ab * c_ab
+    if not (c_aa > 0 and c_bb > 0) or det <= BLEND_MIN_DET * c_aa * c_bb:
+        return float("nan"), float("nan")
+    beta_a = (c_bb * c_ay - c_ab * c_by) / det
+    beta_b = (c_aa * c_by - c_ab * c_ay) / det
+    gain = beta_a + beta_b
+    if not math.isfinite(gain) or gain <= min_gain:
+        return float("nan"), float(gain)
+    return float(beta_a / gain), float(gain)
+
+
+def fit_blend_free(comp: CompRegion, a_img: np.ndarray, b_img: np.ndarray, valid: np.ndarray,
+                   min_gain: float = BLEND_MIN_GAIN) -> tuple[float, float, float]:
+    """Gain-independent two-source fit comp ≈ beta_A*A + beta_B*B + c over valid pixels (A, B already
+    warped and blurred into the ROI). Returns (alpha_A = beta_A / (beta_A + beta_B), beta_A + beta_B,
+    zncc_of_fit); alpha_A is NaN when undefined (see ``blend_alpha_cov``)."""
+    m = valid & comp.mask
+    if m.sum() < 64:
+        return float("nan"), float("nan"), float("nan")
+    y = comp.img[m].astype(np.float64)
+    a = a_img[m].astype(np.float64)
+    b = b_img[m].astype(np.float64)
+    y0, a0, b0 = y - y.mean(), a - a.mean(), b - b.mean()
+    n = float(y.size)
+    alpha, gain = blend_alpha_cov(float(a0 @ a0) / n, float(b0 @ b0) / n, float(a0 @ b0) / n,
+                                  float(a0 @ y0) / n, float(b0 @ y0) / n, min_gain)
+    if not math.isfinite(alpha):
+        return alpha, gain, float("nan")
+    fit = gain * (alpha * a0 + (1.0 - alpha) * b0)
+    return alpha, gain, zncc(y0, fit)

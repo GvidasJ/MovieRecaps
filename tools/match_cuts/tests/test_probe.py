@@ -291,3 +291,87 @@ def test_input_warnings_for_probe_cache_entries_without_the_finding(partial, tmp
     Path(again.pts_file).with_name(Path(again.pts_file).name.replace(".pts.npy", ".ffprobe.json")).unlink()
     w = input_warnings(again)
     assert len(w) == 1 and "container duration" in w[0]
+
+
+# ----------------------------------------------------------------------------------------------
+# Regression real-world-new-paths:probe-flv-trunc: a container duration that is the end of a longer
+# AUDIO track (FLV, Matroska without DURATION tags) is not a truncated file
+# ----------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def audio_tail(tmp_path_factory) -> dict[str, Path]:
+    d = tmp_path_factory.mktemp("probe_audio_tail")
+    c = {"flv": d / "tail.flv", "mkv_tagged": d / "tagged.mkv", "mkv": d / "notag.mkv", "flv_part": d / "part.flv"}
+    src = ["-f", "lavfi", "-i", "testsrc2=s=160x90:r=30,trim=end_frame=90", "-f", "lavfi",
+           "-i", "anoisesrc=seed=3:r=48000,atrim=end_sample=240000"]          # 3 s video, 5 s audio
+    ff(*src, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(c["flv"]))
+    ff(*src, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "libopus",
+       "-write_crc32", "0", str(c["mkv_tagged"]))
+    data = c["mkv_tagged"].read_bytes()
+    assert data.count(b"DURATION") == 2
+    c["mkv"].write_bytes(data.replace(b"DURATION", b"DURATIOX"))    # a muxer that writes no DURATION tags
+    fl = c["flv"].read_bytes()
+    c["flv_part"].write_bytes(fl[:len(fl) // 3])                    # an interrupted download of the FLV
+    return c
+
+
+def test_container_duration_of_a_longer_audio_is_not_a_truncation(audio_tail, tmp_path):
+    for key in ("flv", "mkv"):
+        info = probe(audio_tail[key], "raw", tmp_path)
+        ex = probe_extra(info)
+        assert info.nb_frames == 90 and info.has_audio and info.container_duration > 4.9, key
+        assert ex["header_duration_source"] == "container duration", key       # the path under test
+        assert input_warnings(info) == [] and truncation_info(info) is None, key
+        tails = ex["stream_tails"]
+        assert tails["video_end_s"] == pytest.approx(3.0, abs=0.05), key
+        assert tails["audio_end_s"] == pytest.approx(5.0, abs=0.1), key
+        assert any("before the audio" in n and "not truncated" in n for n in ex["notes"]), key
+        # a cache hit keeps the verdict without re-listing packets
+        assert input_warnings(probe(audio_tail[key], "competitor", tmp_path)) == [], key
+    # the tagged Matroska takes the DURATION-tag path and never needs the packet listing
+    tagged = probe(audio_tail["mkv_tagged"], "raw", tmp_path)
+    assert input_warnings(tagged) == [] and probe_extra(tagged)["stream_tails"] is None
+    # a REALLY truncated FLV (both streams end early; onMetaData still announces 5 s) is still reported
+    part = probe(audio_tail["flv_part"], "raw", tmp_path)
+    w = input_warnings(part)
+    assert len(w) == 1 and w[0].startswith("truncated:") and "container duration" in w[0]
+    t = truncation_info(part)
+    assert t["kind"] == "truncated" and t["audio_end_s"] < 3.0 and t["missing_s"] > 2.0
+
+
+def test_old_probe_cache_entries_with_a_false_truncation_are_re_measured(audio_tail, tmp_path):
+    import json
+    for key, expect_warning in (("flv", False), ("flv_part", True)):
+        info = probe(audio_tail[key], "raw", tmp_path)
+        side = Path(info.pts_file).with_name(Path(info.pts_file).name.replace(".pts.npy", ".extra.json"))
+        ex = json.loads(side.read_text())
+        ex.pop("stream_tails")
+        dec = float(load_pts(info)[-1]) + 1 / 30
+        hdr = float(ex["header_video_duration"])
+        # what the probe of the previous round stored: a truncation finding without the packet check
+        ex["truncation"] = {"header_s": hdr, "header_source": "container duration", "decoded_s": dec,
+                            "missing_s": hdr - dec}
+        side.write_text(json.dumps(ex))
+        again = probe(audio_tail[key], "raw", tmp_path)               # cache hit
+        assert bool(input_warnings(again)) is expect_warning, key
+
+
+def test_truncation_check_wording_by_stream_tails():
+    from match_cuts.probe import truncation_check
+    base = ("raw", 5.0, "container duration", 3.0)
+    t = truncation_check(*base)
+    assert t["kind"] == "truncated" and t["warning"].startswith("truncated:")
+    # audio reaches the container end, video packets end where the decode ended: complete file
+    assert truncation_check(*base, {"audio_end_s": 4.99, "video_end_s": 3.02}) is None
+    # ... video packets run on past the decoded end: a damaged video stream, not a truncated download
+    u = truncation_check(*base, {"audio_end_s": 5.0, "video_end_s": 4.9})
+    assert u["kind"] == "undecodable" and "truncated" not in u["warning"] and "do not decode" in u["warning"]
+    # ... no video packet found near the end: worded as a shorter video, never as a truncated download
+    v = truncation_check(*base, {"audio_end_s": 5.0, "video_end_s": None})
+    assert v["kind"] == "video_shorter" and "before its audio" in v["warning"] and "truncated /" not in v["warning"]
+    # audio ends early too: truncated
+    assert truncation_check(*base, {"audio_end_s": 3.1, "video_end_s": 3.0})["kind"] == "truncated"
+    # tails only matter for a container duration (a stream header duration is the video's own)
+    assert truncation_check("raw", 5.0, "stream header duration", 3.0,
+                            {"audio_end_s": 5.0, "video_end_s": 3.0})["kind"] == "truncated"

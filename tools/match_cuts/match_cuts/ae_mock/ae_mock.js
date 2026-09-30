@@ -8,7 +8,8 @@
  *     members absent in CC 2019 (allow-list) read as undefined, like AE;
  *   - read-only members throw on write; enum-typed members only accept values of the right enum;
  *   - integer / range checks (addComp / addSolid sizes in [4, 30000], 0 < duration <= 10800,
- *     1 <= fps <= 999, layer times within +-10800 s, opacity 0..100, colours 0..1, finite numbers only);
+ *     1 <= fps <= 999, layer times within +-10800 s, opacity 0..100, colours 0..1, finite numbers only,
+ *     Item.comment at most 15,999 bytes);
  *   - non-remapped footage / pre-comp layers are clamped to the source extent;
  *   - frameRate reads back as float32 (Math.fround), like AE;
  *   - property() accepts matchNames only (display names are localized in AE);
@@ -33,6 +34,7 @@ const fs = require('fs');
 const vm = require('vm');
 
 const T_LIMIT = 10800;
+const ITEM_COMMENT_MAX_BYTES = 15999;   // Item.comment (AE Scripting Guide)
 
 const ENUMS = {
   BlendingMode: ['NORMAL', 'DISSOLVE', 'DANCING_DISSOLVE', 'DARKEN', 'MULTIPLY', 'COLOR_BURN',
@@ -631,7 +633,16 @@ function createMock(opts) {
     get name() { return this._name; }
     set name(v) { this._name = str(v, this._cls + '.name'); }
     get comment() { return this._comment; }
-    set comment(v) { this._comment = str(v, this._cls + '.comment'); }
+    set comment(v) {
+      // AE Scripting Guide: Item.comment is 'a string ... up to 15,999 bytes in length after any encoding
+      // conversion'; a longer value is rejected (the item keeps its previous comment)
+      const s = str(v, this._cls + '.comment');
+      const nb = Buffer.byteLength(s, 'utf8');
+      if (nb > ITEM_COMMENT_MAX_BYTES) {
+        throw err(this._cls + '.comment: ' + nb + ' bytes (After Effects stores at most ' + ITEM_COMMENT_MAX_BYTES + ')');
+      }
+      this._comment = s;
+    }
     get parentFolder() { return wrap(this._parent || this._proj._root); }
     set parentFolder(v) {
       const f = unwrap(v);

@@ -372,6 +372,37 @@ def test_crossfade_6_frames_gives_O_and_D(tmp_path):
     assert any(r["decision"] == "crossfade" for r in records(tmp_path / "d.jsonl"))
 
 
+@pytest.mark.parametrize("gain,D", [(0.9, 6), (0.94, 6), (1.1, 6), (1.1, 8), (1.15, 5)])
+def test_crossfade_window_is_exact_under_a_contrast_change(gain, D):
+    """review R2-1: the repost is graded (contrast x gain about mid-grey, + lift). The constrained blend fit
+    (gain fixed at 1) scales the measured ramp by the gain, so a contrast boost gave D - 1; the crossfade fit
+    now takes alpha from the gain-independent estimator (beta_B / (beta_A + beta_B)) and finds (O, D)."""
+    bank = texture_bank(400, seed=1)
+    O = 45
+    ma = ff_select(O + D, 1.0, 10)
+    mb = ff_select(60, 1.0, 250)
+    n = O + 60
+    comp = np.empty((n, H // 2, W // 2), np.uint8)
+    for k in range(n):
+        if k < O:
+            y = bank[ma[k]].astype(np.float32)
+        elif k < O + D:
+            p = np.float32(1.0 - (k - O) / D)
+            y = bank[ma[k]].astype(np.float32) * p + bank[mb[k - O]].astype(np.float32) * (1 - p)
+        else:
+            y = bank[mb[k - O]].astype(np.float32)
+        comp[k] = np.clip(np.round(gain * (y - 128.0) + 128.0 + 6.0), 0, 255).astype(np.uint8)
+    rawcol = np.r_[ma[:O + 3], [-1], mb[4:60]]
+    specs = [Spec(m=rawcol[:O + 3], n=O + 3, sim=(1, 0, 0, 0)), Spec(kind="none", n=1),
+             Spec(m=rawcol[O + 4:], n=n - O - 4, sim=(1, 0, 0, 0), track=1)]
+    fm, _ = build_fm(specs)
+    segs = run(fm, *pix_proxies(comp, bank))
+    assert [s.type for s in segs] == ["raw", "raw"]
+    A, B = segs
+    assert B.transition_in is not None and B.transition_in["type"] == "crossfade", B.transition_in
+    assert (A.comp_out, B.comp_in, B.transition_in["duration_frames"]) == (O + D, O, D), B.transition_in["notes"]
+
+
 def test_hard_cut_criterion2_and_flash_with_pixels(tmp_path):
     bank = texture_bank(300, seed=2)
     ma = ff_select(40, 1.0, 20)

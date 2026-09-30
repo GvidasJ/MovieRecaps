@@ -1095,7 +1095,8 @@ def test_mock_summary_counts_hidden_warnings(tmp_path):
     lines = rec["alerts"][-1].split("\n")
     assert "Warnings (20):" in lines
     assert sum(1 for x in lines if x.startswith("- plan warning")) == 12
-    assert lines[-1].startswith("- ... and 8 more (plan warnings: report.md; runtime warnings: the comment of the comp")
+    # only plan warnings overflowed: the pointer names report.md alone (ae-new-jsx:AE2-3)
+    assert lines[-1] == "- ... and 8 more (plan warnings: report.md)"
 
 
 @needs_node
@@ -1113,6 +1114,132 @@ def test_mock_runtime_frames_switch_is_tagged_and_persisted(tmp_path):
     main = ea.record_main_comp(rec)
     assert main["comment"].split("\n")[0] == "mc:main" and main["comment"].split("\n")[1:] == rec["warnings"]
     assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+
+
+# ---------------------------------------------------------------------------------------------
+# ae-new-jsx:AE2-3: the runtime-warning store in the MAIN comment respects AE's Item.comment limit
+# (15,999 bytes); the alert points to the comment only for warnings actually stored there
+# ---------------------------------------------------------------------------------------------
+
+_STORE_ANCHOR = "    if (WARN.length > 0) {"          # where the JSX writes the MAIN comment
+
+
+def _with_runtime_warnings(jsx: Path, n: int, dst: Path, extra: str = "", replace: tuple[str, str] | None = None) -> Path:
+    """The generated JSX with ``n`` runtime self-check warnings (the real ~145-byte wording) raised right
+    before the MAIN comment is written -- what a long recap under AE time quantisation produces."""
+    text = jsx.read_text()
+    assert text.count(_STORE_ANCHOR) == 1
+    inj = ("    for (var qq = 0; qq < " + str(n) + "; qq++) { warn(\"S\" + (qq < 10 ? \"00\" : (qq < 100 ? \"0\" : \"\")) + qq + "
+           "\" RAW 12.345-67.890 s" + extra + ": AE stored stretch/startTime differently from the plan (1 frame(s) off); "
+           "switched this layer to frame-exact time remapping\"); }\n")
+    text = text.replace(_STORE_ANCHOR, inj + _STORE_ANCHOR)
+    if replace:
+        assert replace[0] in text
+        text = text.replace(replace[0], replace[1])
+    dst.write_text(text)
+    return dst
+
+
+@needs_node
+def test_mock_item_comment_limit(tmp_path):
+    """The strict mock enforces AE's documented Item.comment limit (15,999 bytes after encoding)."""
+    snippet = """#target aftereffects
+(function () {
+    app.newProject();
+    var comp = app.project.items.addComp("Recreated Edit", 1080, 1920, 1, 10, 30);
+    var s = "", i;
+    for (i = 0; i < 15999; i++) { s += "x"; }
+    comp.comment = s;
+    try { comp.comment = s + "x"; } catch (e) { $.writeln("rejected: " + e.message); }
+    var t = "";
+    for (i = 0; i < 5334; i++) { t += "\\u4e2d"; }
+    try { comp.comment = t; } catch (e2) { $.writeln("rejected utf8: " + e2.message); }
+})();
+"""
+    p = tmp_path / "limit.jsx"
+    p.write_text(snippet)
+    rec = ea.run_jsx_in_mock(p, {})
+    assert rec["status"] == "ok", rec.get("error")
+    assert len(rec["comps"][0]["comment"]) == 15999                   # the last accepted value stays
+    assert any(x.startswith("rejected: ") for x in rec["logs"])
+    assert any(x.startswith("rejected utf8: ") and "16002 bytes" in x for x in rec["logs"])  # 3 bytes per char
+    assert len(rec["mock_errors"]) == 2 and all("Item.comment" in e or "CompItem.comment" in e for e in rec["mock_errors"])
+
+
+@needs_node
+def test_mock_many_runtime_warnings_fit_the_main_comment(tmp_path):
+    """> 110 runtime warnings of ~145 bytes used to make a ~30 KB comment (200-entry cap): AE rejects it,
+    the catch swallowed that and the alert still pointed to the comment. Now the comment stays under the
+    budget, ends with the count of the warnings not stored and the alert says so."""
+    cl, cfg, plan, jsx = build(tmp_path)
+    n = 160
+    j2 = _with_runtime_warnings(jsx, n, tmp_path / "many_warnings.jsx")
+    rec = ea.run_jsx_in_mock(j2, meta_for(cl))
+    assert rec["status"] == "ok" and rec["mock_errors"] == [] and rec["saved"], rec.get("error")
+    assert len(rec["warnings"]) == n and 140 <= len(rec["warnings"][0]) <= 160
+    main = ea.record_main_comp(rec)
+    body = main["comment"]
+    assert len(body.encode("utf-8")) <= 15000
+    lines = body.split("\n")
+    stored = len(lines) - 2
+    assert lines[0] == "mc:main" and 90 <= stored < n
+    assert lines[1:1 + stored] == rec["warnings"][:stored]
+    assert lines[-1] == f"... and {n - stored} more runtime warnings not stored"
+    alert = rec["alerts"][-1].split("\n")
+    assert f"Warnings ({n}):" in alert
+    assert alert[-1] == (f"- ... and {n - 12} more (runtime warnings: the comment of the comp \"Recreated Edit\" "
+                         f"({n - stored} of them not stored))")
+    # multi-byte warnings (a localised AE error message) are budgeted in bytes, not characters
+    j3 = _with_runtime_warnings(jsx, n, tmp_path / "utf8_warnings.jsx", extra=" \\u00e9\\u4e2d\\u6587\\u00fc")
+    r3 = ea.run_jsx_in_mock(j3, meta_for(cl))
+    assert r3["status"] == "ok" and r3["mock_errors"] == [], r3.get("mock_errors")
+    c3 = ea.record_main_comp(r3)["comment"]
+    assert len(c3.encode("utf-8")) <= 15000 and c3.split("\n")[-1].endswith("more runtime warnings not stored")
+    # few runtime warnings: all stored, no count line, no 'not stored' in the alert
+    j4 = _with_runtime_warnings(jsx, 20, tmp_path / "some_warnings.jsx")
+    r4 = ea.run_jsx_in_mock(j4, meta_for(cl))
+    c4 = ea.record_main_comp(r4)["comment"].split("\n")
+    assert c4[1:] == r4["warnings"] and len(c4) == 21
+    assert r4["alerts"][-1].split("\n")[-1] == "- ... and 8 more (runtime warnings: the comment of the comp \"Recreated Edit\")"
+
+
+@needs_node
+def test_mock_main_comment_fallback_when_ae_rejects_it(tmp_path):
+    """An AE that rejects the comment (e.g. a lower limit than documented): the JSX retries with a small
+    budget, then keeps the bare 'mc:main' tag; the alert never points to warnings that are not there."""
+    cl, cfg, plan, jsx = build(tmp_path)
+    n = 300
+    # first budget too large for AE -> rejected, the small one is stored
+    j1 = _with_runtime_warnings(jsx, n, tmp_path / "retry.jsx",
+                                replace=("var COMMENT_BUDGETS = [15000, 2000];", "var COMMENT_BUDGETS = [40000, 2000];"))
+    r1 = ea.run_jsx_in_mock(j1, meta_for(cl))
+    assert r1["status"] == "ok" and r1["saved"] and len(r1["mock_errors"]) == 1
+    c1 = ea.record_main_comp(r1)["comment"].split("\n")
+    stored = len(c1) - 2
+    assert c1[0] == "mc:main" and 1 <= stored <= 14 and c1[1:1 + stored] == r1["warnings"][:stored]
+    a1 = r1["alerts"][-1].split("\n")[-1]
+    if stored > 12:
+        assert f"({n - stored} of them not stored)" in a1
+    else:
+        assert a1 == f"- ... and {n - 12} more (runtime warnings could not be stored)"
+    # every attempt rejected -> the bare tag stays, the alert says the runtime warnings could not be stored
+    j2 = _with_runtime_warnings(jsx, n, tmp_path / "rejected.jsx",
+                                replace=("var COMMENT_BUDGETS = [15000, 2000];", "var COMMENT_BUDGETS = [40000, 30000];"))
+    r2 = ea.run_jsx_in_mock(j2, meta_for(cl))
+    assert r2["status"] == "ok" and r2["saved"] and len(r2["mock_errors"]) == 2
+    main = ea.record_main_comp(r2)
+    assert main is not None and main["comment"] == "mc:main"
+    assert r2["alerts"][-1].split("\n")[-1] == f"- ... and {n - 12} more (runtime warnings could not be stored)"
+    assert "comment of the comp" not in r2["alerts"][-1]
+    # plan AND runtime warnings hidden: both pointers, each where the warnings really are
+    plan2 = dict(plan)
+    plan2["warnings"] = [f"plan warning {i}" for i in range(15)]
+    jsx5 = tmp_path / "with_plan_warnings.jsx"
+    ea.write_jsx(cl, plan2, jsx5, cfg)
+    j5 = _with_runtime_warnings(jsx5, 30, tmp_path / "both.jsx")
+    r5 = ea.run_jsx_in_mock(j5, meta_for(cl))
+    assert r5["alerts"][-1].split("\n")[-1] == ("- ... and 21 more (plan warnings: report.md; runtime warnings: the "
+                                                "comment of the comp \"Recreated Edit\")")
 
 
 # ---------------------------------------------------------------------------------------------

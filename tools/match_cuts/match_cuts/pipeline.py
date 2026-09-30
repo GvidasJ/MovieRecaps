@@ -8,7 +8,8 @@ Caching (DESIGN §1): the stage modules that take a ``cache`` cache themselves (
 layout, RawIndex, conform via ``.conform.json``). The pipeline caches the stages whose functions
 do not take one -- AudioHints (``audio_align``), anchors (``sparse_search``) and the refined FrameMap
 plus the pass-2 overlay masks (``frame_map``) -- under ``WORK_DIR/cache/<stage>/<key>`` with
-``key = stage_key(stage, competitor hash, RAW hash, cfg.analysis_params())``. Freshly computed
+``key = stage_key(stage, competitor hash, RAW hash, cfg.analysis_params())`` (anchors and FrameMap also
+key on the layout geometry + starting overlay masks, ``visual_pass_key_parts``). Freshly computed
 values are always written first and re-read from the cache file, so a first run and a cached
 re-run see bit-identical inputs (criterion 9.7).
 
@@ -30,6 +31,7 @@ import contextlib
 import copy
 import dataclasses
 import glob
+import hashlib
 import json
 import math
 import os
@@ -49,7 +51,7 @@ import numpy as np
 
 from . import __version__
 from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, fmt_seconds,
-                     fps_str, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
+                     fps_str, json_default, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
                      setup_logging, stage_key, timecode)
 from .config import Config
 from .geometry import Sim
@@ -602,15 +604,25 @@ def _append_note(notes: str, extra: str) -> str:
 # ---------------------------------------------------------------------------------------------
 
 AUDIO_PHASE_NARROW_S = 0.1       # analyze_segments_audio searches the per-segment lag within +-100 ms
-AUDIO_PHASE_WIDE_MAX_S = 5.0     # cap of the wider search for static / ambiguous segments
+AUDIO_PHASE_WIDE_MAX_S = 60.0    # cap of the half-width of the wider search for static / ambiguous segments
+AUDIO_PHASE_WIDE_PAD_S = 0.02    # the wide search reaches this far past the feasible range on both sides
+AUDIO_PHASE_MARGIN_FRAC = 0.05   # D3 edge margin: 5 % of the interval width, at most 5 % of a RAW frame
 AUDIO_PHASE_WIDE_GAIN = 0.02     # a wide-search peak must beat a strong narrow peak by this much
 AUDIO_PHASE_MIN_RANGE_S = 0.25   # shortest audio range the wide search correlates
 _AE_EPS = 1e-9
 
 
-def audio_phase_margin_s(width_s: float) -> float:
-    """Edge margin of the audio-informed raw_in inside its feasible interval: max(1 ms, 5 % of the width)."""
-    return max(0.001, 0.05 * max(0.0, float(width_s)))
+def audio_phase_margin_s(width_s: float, raw_fps: Fraction | float | None = None, min_margin_ms: float = 1.0) -> float:
+    """Edge margin (s) of the audio-informed raw_in inside its feasible interval (DESIGN §7 D3):
+    ``max(ae_min_margin_ms, min(5 % of the width, 5 % of a RAW frame))``. The margin only has to keep
+    the AE floor/round rule off the interval edges; capping it at a fraction of a RAW FRAME (not of the
+    ambiguity span) keeps a static / ambiguous-identical shot whose feasible interval spans seconds on
+    the audio's in-point (an NLE in-point on the RAW shot boundary sits exactly on the interval edge).
+    Without ``raw_fps`` the frame cap is not applied (5 % of the width)."""
+    w = AUDIO_PHASE_MARGIN_FRAC * max(0.0, float(width_s))
+    if raw_fps is not None and float(raw_fps) > 0:
+        w = min(w, AUDIO_PHASE_MARGIN_FRAC / float(raw_fps))
+    return max(max(0.0, float(min_margin_ms)) / 1000.0, w)
 
 
 def audio_phase_interval(seg: Segment) -> tuple[list[float] | None, str]:
@@ -703,11 +715,14 @@ def _segment_audio_range(seg: Segment, comp_fps: Fraction, sr: int, n_comp: int)
 
 
 def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int, comp_fps: Fraction,
-                   max_lag_s: float, resample: Callable | None = None) -> tuple[float, float] | None:
+                   max_lag_s: float, resample: Callable | None = None,
+                   centre_lag_s: float = 0.0) -> tuple[float, float] | None:
     """Lag (s, positive = the RAW-rebuilt audio is LATE, xcorr_lag's convention) and peak NCC of a
-    stretch segment's rebuilt audio against the competitor within +-max_lag_s: the rebuilt track is
-    rendered over the segment's audio range widened by max_lag_s on both sides and the competitor range
-    slides across it, so large lags keep the full overlap. The integer-sample peak is then refined on a
+    stretch segment's rebuilt audio against the competitor within centre_lag_s +- max_lag_s (lags are
+    relative to the segment's current raw_in; ``centre_lag_s`` centres the search on the feasible
+    interval rather than on raw_in): the rebuilt track is rendered over the segment's audio range
+    shifted by centre_lag_s and widened by max_lag_s on both sides, and the competitor range slides
+    across it, so large lags keep the full overlap. The integer-sample peak is then refined on a
     lag-compensated render with ``audio_align.xcorr_lag`` (band-limited sub-sample peak; its NCC is the
     returned peak, so wide-band audio at a half-sample offset is not under-scored). None when the
     segment has too little audio."""
@@ -730,7 +745,8 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
         t = np.arange(n0, n1, dtype=np.float64) / sr + shift_s
         return resample(raw, (float(seg.raw_in_seconds) + v * (t - t_in)) * sr, cutoff=cutoff)
 
-    ncc = _sliding_ncc(comp[a:b], render(a - L, b + L))
+    c0 = float(centre_lag_s)
+    ncc = _sliding_ncc(comp[a:b], render(a - L, b + L, c0))
     if ncc.size == 0:
         return None
     i = int(np.argmax(ncc))
@@ -740,7 +756,7 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
         den = ym - 2.0 * y0 + yp
         if den < 0:
             off = float(np.clip(0.5 * (ym - yp) / den, -0.5, 0.5))
-    lag = (i + off - L) / sr
+    lag = c0 + (i + off - L) / sr
     # rebuilt(t) ~ comp(t - lag)  =>  rebuilt(t + lag) ~ comp(t): measure what is left on that render
     delta, peak = audio_align.xcorr_lag(comp[a:b], render(a, b, lag), sr, 2.0 / sr + 1e-4)
     if peak >= float(ncc[i]):
@@ -780,10 +796,12 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     after the frame boundary an NLE in-point sits on (8.3 ms at 30p, 10.4 ms at 24p). For every 'raw'
     stretch segment whose first-pass audio correlation is >= cfg.verify_audio_strong_corr with no audio
     exception, ``raw_in := raw_in + v * lag`` (lag_ms > 0 = the rebuilt audio is late, i.e. raw_in too
-    small), clamped into raw_in_interval_both (else raw_in_interval) with a margin of max(1 ms, 5 % of
-    that interval's width) from each edge and into the range that keeps every correctly shown matched
-    frame (refine's measurement) on its RAW frame. Segments whose interval is wider than +-100 ms in
-    competitor time (static / ambiguous-identical shots) also get a wider search over that interval.
+    small), clamped into raw_in_interval_both (else raw_in_interval) with a margin of
+    max(ae_min_margin_ms, min(5 % of that interval's width, 5 % of a RAW frame)) from each edge
+    (``audio_phase_margin_s``) and into the range that keeps every correctly shown matched frame
+    (refine's measurement) on its RAW frame. Segments whose interval is wider than +-100 ms in
+    competitor time (static / ambiguous-identical shots) also get a wider search, centred on that
+    feasible range and covering all of it (half-width capped at AUDIO_PHASE_WIDE_MAX_S).
     Sets seg.audio['phase_source'] ('audio'|'video') and seg.audio['lag_ms_video'] (the first-pass lag);
     the caller re-runs analyze_segments_audio so lag_ms becomes the residual. Returns (ids moved,
     warnings)."""
@@ -829,8 +847,8 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             skip("no feasible raw_in interval")
             continue
         width = interval[1] - interval[0]
-        # D3 margin; never below the AE-rule-sensitivity threshold (1 ms by default, i.e. the same value)
-        margin = max(audio_phase_margin_s(width), float(getattr(cfg, "ae_min_margin_ms", 1.0)) / 1000.0)
+        # D3 margin; never below the AE-rule-sensitivity threshold (1 ms by default)
+        margin = audio_phase_margin_s(width, raw_fps, float(getattr(cfg, "ae_min_margin_ms", 1.0)))
         exc = au.get("exception")
         if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
             skip(f"audio exception {exc}")
@@ -838,11 +856,18 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
         cand = None
         if exc is None and au.get("lag_ms") is not None and au.get("corr") is not None and float(au["corr"]) >= strong:
             cand = (float(au["lag_ms"]) / 1000.0, float(au["corr"]), "xcorr")
+        old = float(s.raw_in_seconds)
+        p_lo, p_hi, n_keep = preserved_frames_interval(s, fm, old, comp_fps, raw_fps, kind == "both")
+        lo_e, hi_e = max(interval[0], p_lo), min(interval[1], p_hi)
         half_comp_s = 0.5 * width / v
         if half_comp_s > AUDIO_PHASE_NARROW_S and comp.size and raw.size:
-            max_lag = min(half_comp_s + 0.02, AUDIO_PHASE_WIDE_MAX_S)
-            wide = wide_audio_lag(s, comp, raw, sr, comp_fps, max_lag, resample=resample)
-            ev["wide_search"] = {"max_lag_s": round(max_lag, 6),
+            # centred on the reachable range (not on raw_in) and covering all of it: an in-point anywhere in
+            # a wide ambiguous interval is found even when raw_in sits off-centre
+            c_lo, c_hi = (lo_e, hi_e) if hi_e > lo_e else (interval[0], interval[1])
+            centre_lag = (0.5 * (c_lo + c_hi) - old) / v
+            max_lag = min(0.5 * (c_hi - c_lo) / v + AUDIO_PHASE_WIDE_PAD_S, AUDIO_PHASE_WIDE_MAX_S)
+            wide = wide_audio_lag(s, comp, raw, sr, comp_fps, max_lag, resample=resample, centre_lag_s=centre_lag)
+            ev["wide_search"] = {"max_lag_s": round(max_lag, 6), "centre_lag_ms": round(centre_lag * 1000.0, 3),
                                  "lag_ms": None if wide is None else round(wide[0] * 1000.0, 3),
                                  "corr": None if wide is None else round(wide[1], 4)}
             if wide is not None and wide[1] >= strong and (cand is None or wide[1] > cand[1] + AUDIO_PHASE_WIDE_GAIN):
@@ -851,10 +876,7 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             skip(f"audio not confidently aligned (corr {au.get('corr')} < {strong} or exception {exc})")
             continue
         lag_s, corr, how = cand
-        old = float(s.raw_in_seconds)
         target = old + v * lag_s
-        p_lo, p_hi, n_keep = preserved_frames_interval(s, fm, old, comp_fps, raw_fps, kind == "both")
-        lo_e, hi_e = max(interval[0], p_lo), min(interval[1], p_hi)
         if hi_e - lo_e <= 2 * margin:
             skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.3f} ms is not wider than 2 x margin {margin * 1000:.3f} ms")
             continue
@@ -1126,34 +1148,114 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
                 dlog.record("phase_solve", "audio_phase_residual", segment=s.id,
                             lag_ms_video=(s.audio or {}).get("lag_ms_video"), lag_ms=(s.audio or {}).get("lag_ms"),
                             corr=(s.audio or {}).get("corr"), raw_in_seconds=s.raw_in_seconds)
-    seg_warn.extend(layout_period_warnings(segments, ctx.layout, cfg.layout_mode))
+    seg_warn.extend(layout_period_warnings(segments, ctx.layout, cfg.layout_mode, dlog))
     seg_warn.extend(segment_warnings(segments, ctx.comp_fps, audio_result))
     cutlist = build_cutlist(ctx, segments, audio_result, seg_warn)
     return fm, segments, audio_result, cutlist
 
 
-def layout_period_warnings(segments: list[Segment], layout: Layout | None, layout_mode: str) -> list[str]:
+LAYOUT_SLIVER_FRAMES = 2    # segment.merge_tiny joins a 1-2 frame sliver across a period boundary (D1)
+
+
+def _transition_len(t: Any) -> int:
+    if t is None:
+        return 0
+    d = t if isinstance(t, dict) else dict(vars(t))
+    return int(d.get("duration_frames") or 0)
+
+
+def transition_overlap_frames(seg: Segment, segments: list[Segment]) -> set[int]:
+    """Frames of ``seg`` inside a DECLARED transition overlap with a neighbour of the other framing (one
+    of the pair carries a per-segment box, the other none): the overlap [B.comp_in, A.comp_out) of a
+    pair A -> B whose A.transition_out or B.transition_in lasts exactly that many frames (the overlap
+    rule of verify's c1). During such a dissolve the competitor shows both framings, so a layout-period
+    boundary detected inside it is not a framing error of either segment (export_ae keys the upper
+    layer; review R2-5 / D1-c1-transition)."""
+    out: set[int] = set()
+    if seg.type != "raw":
+        return out
+    for nb in segments:
+        if nb is seg or nb.type != "raw" or bool(nb.box) == bool(seg.box):
+            continue
+        for x, y in ((seg, nb), (nb, seg)):          # x outgoing, y incoming
+            lo, hi = int(y.comp_in), int(x.comp_out)
+            if not (int(x.comp_in) <= lo < hi <= int(y.comp_out)):
+                continue
+            if hi - lo in (_transition_len(x.transition_out), _transition_len(y.transition_in)):
+                out.update(range(max(lo, int(seg.comp_in)), min(hi, int(seg.comp_out))))
+    return out
+
+
+def period_mismatch_frames(seg: Segment, a: int, b: int, segments: list[Segment]) -> tuple[list[int], dict]:
+    """Frames of RAW segment ``seg`` whose framing contradicts the fullscreen period [a, b): a boxless
+    segment's frames inside it, a boxed (whole-canvas) segment's frames outside it. Not counted (the
+    rule of verify.boxless_fullscreen_frames, mirrored for boxed segments): frames inside a declared
+    transition overlap with a neighbour of the other framing (``transition_overlap_frames``), and a
+    merged sliver -- the remaining frames form ONE run of at most LAYOUT_SLIVER_FRAMES frames at the
+    period boundary of a segment that continues across it and lies mostly on the correct side (the
+    detected boundary is off by a frame or two). Returns (unexplained frames, exempt evidence)."""
+    k0, k1 = int(seg.comp_in), int(seg.comp_out)
+    if seg.box:
+        wrong = [k for k in range(k0, k1) if not (a <= k < b)]
+    else:
+        wrong = list(range(max(a, k0), min(b, k1)))
+    if not wrong:
+        return [], {}
+    tr = transition_overlap_frames(seg, segments)
+    rest = [k for k in wrong if k not in tr]
+    sliver: list[int] = []
+    runs = _ranges(rest)
+    if len(runs) == 1 and len(rest) <= LAYOUT_SLIVER_FRAMES and (k1 - k0) - len(wrong) > len(wrong):
+        r0, r1 = runs[0]
+        if seg.box:      # outside the period, touching it, the segment continuing inside
+            at_edge = (r1 == a - 1 and k1 > a) or (r0 == b and k0 < b)
+        else:            # inside the period, touching its edge, the segment continuing outside
+            at_edge = (r0 == a and k0 < a) or (r1 == b - 1 and k1 > b)
+        if at_edge:
+            sliver, rest = rest, []
+    ev = {}
+    if len(rest) + len(sliver) < len(wrong):
+        ev["transition_frames"] = [[x, y] for x, y in _ranges([k for k in wrong if k in tr])]
+    if sliver:
+        ev["sliver_frames"] = [[x, y] for x, y in _ranges(sliver)]
+    return rest, ev
+
+
+def layout_period_warnings(segments: list[Segment], layout: Layout | None, layout_mode: str,
+                           dlog: DecisionLog | None = None) -> list[str]:
     """Fullscreen periods are reproduced per segment (DESIGN §7 D1: segment.py gives the segments inside
     one ``box`` = the whole canvas; export_ae / render_preview place them in MAIN without the Video Box
     mask). Warn only where that cannot happen: a RAW segment overlapping a fullscreen period without its
-    own box (it would be clipped to the Video Box) or straddling the period boundary."""
+    own box (it would be clipped to the Video Box) or a boxed one straddling the period boundary --
+    except frames inside a declared transition overlap with a neighbour of the other framing and merged
+    1-2 frame slivers at the boundary (``period_mismatch_frames``; the same rule as verify's c1), which
+    are logged as explained."""
     out: list[str] = []
     if layout is None or layout_mode != "match":
         return out
+    raw = sorted((s for s in segments if s.type == "raw"), key=lambda s: (s.comp_in, s.id))
     for p in layout.periods:
         if p.mode != "fullscreen":
             continue
         a, b = int(p.comp_in), int(p.comp_out)
-        inside = [s for s in segments if s.type == "raw" and s.comp_in < b and s.comp_out > a]
-        boxless = [s for s in inside if not s.box]
-        straddle = [s for s in inside if s.box and (s.comp_in < a or s.comp_out > b)]
+        boxless: list[str] = []
+        straddle: list[str] = []
+        for s in raw:
+            if not (s.comp_in < b and s.comp_out > a) or (s.box and a <= s.comp_in and s.comp_out <= b):
+                continue
+            bad, ev = period_mismatch_frames(s, a, b, raw)
+            if ev and dlog is not None:
+                dlog.record("layout", "period_boundary_explained", segment=s.id, period=[a, b - 1],
+                            has_box=bool(s.box), unexplained=[[x, y] for x, y in _ranges(bad)], **ev)
+            if not bad:
+                continue
+            (straddle if s.box else boxless).append(f"S{s.id:02d} (frames {_ranges_str(bad)})")
         if boxless:
-            out.append(f"frames {a}-{b - 1} are fullscreen in the competitor but "
-                       f"{', '.join(f'S{s.id:02d}' for s in boxless)} carry no per-segment box: exported inside "
-                       "the Video Box (the fullscreen shot is cropped)")
+            out.append(f"frames {a}-{b - 1} are fullscreen in the competitor but {', '.join(boxless)} carry no "
+                       "per-segment box: exported inside the Video Box (the fullscreen shot is cropped)")
         if straddle:
-            out.append(f"{', '.join(f'S{s.id:02d}' for s in straddle)} straddle the fullscreen period "
-                       f"{a}-{b - 1}: part of the segment is shown with the wrong layout")
+            out.append(f"{', '.join(straddle)} straddle the fullscreen period {a}-{b - 1}: part of the segment is "
+                       "shown with the wrong layout")
     return out
 
 
@@ -1277,13 +1379,44 @@ def cached_anchors(ctx: Context, compute: Callable[[], list], *extra: Any) -> li
 
 def layout_key(layout: Layout | None) -> str:
     """Hash of the layout geometry that drives matching (box, background, zones, periods, regions) --
-    file paths and notes excluded, so it does not depend on WORK_DIR."""
+    file paths and notes excluded, so it does not depend on WORK_DIR. Canonicalised through a JSON +
+    ``Layout.from_dict`` round trip, so a freshly computed layout (ints, tuples, numpy scalars) and the
+    same layout re-read from its cache file give the same key."""
     if layout is None:
         return "none"
-    d = layout.to_dict()
+    d = Layout.from_dict(json.loads(json.dumps(layout.to_dict(), default=json_default))).to_dict()
     for k in ("static_mask_file", "overlay_mask_file", "notes"):
         d.pop(k, None)
     return params_hash(d)
+
+
+def overlays_key(overlays: Any) -> str:
+    """Content hash of the overlay masks S5.2 / S5.3 start from: mask shape, default dilation, and every
+    frame's full mask (packed bits) -- no file path, so it does not depend on WORK_DIR."""
+    if overlays is None:
+        return "none"
+    frames = getattr(overlays, "frames", None)
+    get = getattr(overlays, "get", None)
+    if not callable(frames) or not callable(get):
+        return params_hash("overlays", type(overlays).__name__)
+    h = hashlib.blake2b(digest_size=10)
+    h.update(json.dumps([getattr(overlays, "shape", None), getattr(overlays, "dilate_px", None)],
+                        default=str).encode())
+    for k in sorted(int(k) for k in frames()):
+        m = get(k)
+        if m is None:
+            continue
+        h.update(b"|%d|" % k)
+        h.update(np.packbits(np.asarray(m, bool)).tobytes())
+    return h.hexdigest()
+
+
+def visual_pass_key_parts(layout: Layout | None, overlays: Any) -> tuple:
+    """Extra cache-key parts of an S5.2 + S5.3 pass (frame_map and sparse_search keys): the layout
+    geometry and the starting overlay masks. BOTH passes (the first one and the D2 refined-box re-run)
+    key on them, so a layout that changes -- a new layout algorithm, a refined box, other overlays --
+    never reuses a FrameMap or anchors matched against another box (review R2-3)."""
+    return ("layout", layout_key(layout), "overlays", overlays_key(overlays))
 
 
 def frame_map_cache_paths(ctx: Context, *extra: Any) -> tuple[Path, Path]:
@@ -1699,11 +1832,12 @@ def stage_visual_refine(ctx: Context) -> None:
     run once more with the refined layout (its own cache keys)."""
     base_raw = ctx.raw_proxy                       # index frames + audio-hint windows (stage_proxies)
     overlays_pass1 = copy.deepcopy(ctx.overlays)   # layout's overlays, before refine adds residual masks
-    visual_refine_pass(ctx, base_raw, ctx.overlays, "")
+    visual_refine_pass(ctx, base_raw, ctx.overlays, "", *visual_pass_key_parts(ctx.layout, overlays_pass1))
     if refine_layout_from_raw(ctx):
         log.info("layout refined against RAW: re-running S5.2 + S5.3 with the corrected box")
-        visual_refine_pass(ctx, base_raw, initial_overlays(ctx.layout, overlays_pass1), " (refined box)",
-                           "layout", layout_key(ctx.layout))
+        overlays_pass2 = initial_overlays(ctx.layout, overlays_pass1)
+        visual_refine_pass(ctx, base_raw, overlays_pass2, " (refined box)",
+                           *visual_pass_key_parts(ctx.layout, overlays_pass2))
     # later stages do not use the worker pool; free spawn workers (and their kd-trees) now
     try:
         from . import visual_match

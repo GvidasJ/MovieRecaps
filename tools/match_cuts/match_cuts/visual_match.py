@@ -57,8 +57,18 @@ _WSTATE: dict[str, Any] = {}
 START_METHOD_ENV = "MATCH_CUTS_START_METHOD"
 # how parallel_map calls ran in THIS process (diagnostics + tests): inline / fork / spawn pools, and
 # spawn requests that fell back to inline (unpicklable state or an unguarded __main__)
-POOL_STATS: dict[str, int] = {"inline": 0, "fork": 0, "spawn": 0, "spawn_fallback": 0}
+POOL_STATS: dict[str, int] = {"inline": 0, "fork": 0, "spawn": 0, "spawn_fallback": 0, "spawn_mem_capped": 0}
 _WARNED: set[str] = set()
+
+# Spawn workers cannot share the parent's FLANN kd-tree (fork shares it copy-on-write): every worker that
+# unpickles a RawIndex loads its own tree -- private memory, measured ~740-780 B per descriptor (4
+# randomised kd-trees), ~1.5 GB at cfg.index_max_descriptors = 2M. The spawn pool size is therefore capped
+# by the available RAM when the state holds a RawIndex (_spawn_mem_cap); the descriptors themselves are
+# memmapped (page cache, shared by all workers) and counted once.
+SPAWN_TREE_BYTES_PER_DESC = 800
+SPAWN_WORKER_BASE_BYTES = 300 << 20        # interpreter + numpy / OpenCV + per-task working set
+SPAWN_MEM_MARGIN_BYTES = 768 << 20         # kept free for the parent / OS (at least; or 10 % of available)
+_MEM_CAPS: dict[tuple, int] = {}           # (index identity, requested workers) -> cap (decided once)
 
 
 def _warn_once(key: str, msg: str, *args: Any) -> None:
@@ -135,7 +145,9 @@ def _spawn_init() -> None:
 
 
 def _spawn_invoke(task: tuple[str, str, Any]) -> Any:
-    """Spawn worker entry: (token, state file, item). The state is (re)loaded when the token changes."""
+    """Spawn worker entry: (token, state file, item). The state is (re)loaded when the token changes; a
+    state without a RawIndex (refine's S5.3 calls) drops this worker's cached FLANN trees, so they are not
+    held (~800 B per descriptor each) through the rest of the run."""
     global _WSTATE
     token, path, item = task
     if _SPAWN_TOKEN[0] != token:
@@ -143,12 +155,118 @@ def _spawn_invoke(task: tuple[str, str, Any]) -> Any:
         _SPAWN_TOKEN[0] = None
         with open(path, "rb") as f:
             fn, state, seed = pickle.load(f)
+        if _INDEX_CACHE and _state_index(state) is None:
+            _INDEX_CACHE.clear()
+            _release_memory()
         st = dict(state)
         st["__fn__"] = fn
         st["__seed__"] = int(seed)
         _WSTATE = st
         _SPAWN_TOKEN[0] = token
     return _invoke(item)
+
+
+def _release_memory() -> None:
+    """Best effort: collect garbage and hand freed heap pages back to the OS (glibc malloc_trim)."""
+    import gc
+    gc.collect()
+    if _platform().startswith("linux"):
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):  # pragma: no cover - non-glibc
+            pass
+
+
+def _state_index(state: dict) -> "RawIndex | None":
+    """The RawIndex a parallel_map state carries (top level or one container level down), else None."""
+    for v in state.values():
+        if isinstance(v, RawIndex):
+            return v
+        if isinstance(v, dict):
+            v = list(v.values())
+        if isinstance(v, (list, tuple)):
+            for x in v:
+                if isinstance(x, RawIndex):
+                    return x
+    return None
+
+
+def _available_ram() -> int | None:
+    """Bytes of RAM available to new processes without swapping, or None when unknown: Linux
+    /proc/meminfo MemAvailable, Windows GlobalMemoryStatusEx.ullAvailPhys, macOS vm_stat free + inactive
+    + speculative + purgeable pages, else POSIX SC_AVPHYS_PAGES."""
+    plat = _platform()
+    try:
+        if plat.startswith("linux"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        elif plat.startswith("win"):
+            import ctypes
+
+            class _MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            ms = _MS()
+            ms.dwLength = ctypes.sizeof(_MS)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):  # type: ignore[attr-defined]
+                return int(ms.ullAvailPhys)
+            return None
+        elif plat == "darwin":
+            import re
+            import subprocess
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+            m = re.search(r"page size of (\d+) bytes", out)
+            page = int(m.group(1)) if m else 4096
+            pages = 0
+            for key in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+                m = re.search(re.escape(key) + r":\s+(\d+)", out)
+                pages += int(m.group(1)) if m else 0
+            if pages > 0:
+                return pages * page
+        if hasattr(os, "sysconf"):
+            n = os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+            return int(n) if n > 0 else None
+    except Exception:  # noqa: BLE001 - a failed probe only means "unknown" (no cap)
+        return None
+    return None
+
+
+def _spawn_mem_cap(workers: int, state: dict) -> int:
+    """Spawn pool size for ``state``: ``workers`` unless the state holds a :class:`RawIndex`, then at most
+    (available RAM - margin - the memmapped descriptors) // (SPAWN_TREE_BYTES_PER_DESC x descriptors +
+    SPAWN_WORKER_BASE_BYTES), >= 1. The available RAM already excludes the parent (which holds its own
+    tree). Decided once per (index, workers) in this process -- later calls with the same index would
+    otherwise count the trees the pool's workers already hold -- and logged once."""
+    idx = _state_index(state)
+    if idx is None or workers <= 1:
+        return workers
+    n_desc = int(len(idx.desc))
+    ident = (str(idx.key) or f"id{id(idx)}", n_desc, int(workers))
+    if ident in _MEM_CAPS:
+        return _MEM_CAPS[ident]
+    cap = int(workers)
+    avail = _available_ram()
+    if avail is not None and n_desc > 0:
+        per_worker = SPAWN_TREE_BYTES_PER_DESC * n_desc + SPAWN_WORKER_BASE_BYTES
+        shared = n_desc * 128 * (1 + 4)                  # uint8 + float32 descriptor memmaps (page cache)
+        margin = max(SPAWN_MEM_MARGIN_BYTES, avail // 10)
+        cap = int(max(1, min(int(workers), (avail - margin - shared) // per_worker)))
+        if cap < workers:
+            POOL_STATS["spawn_mem_capped"] += 1
+            log.warning("spawn workers: %d instead of %d for the RAW index search - each spawn worker loads its "
+                        "own FLANN tree (%.2f GB for %d descriptors + %.2f GB base) and %.1f GB RAM is available%s",
+                        cap, workers, SPAWN_TREE_BYTES_PER_DESC * n_desc / 1e9, n_desc, SPAWN_WORKER_BASE_BYTES / 1e9,
+                        avail / 1e9, " (running single-process)" if cap <= 1 else "")
+        else:
+            log.debug("spawn workers: %d (RAW index %d descriptors, %.1f GB available)", workers, n_desc, avail / 1e9)
+    _MEM_CAPS[ident] = cap
+    return cap
 
 
 def _spawn_pool(n: int):
@@ -227,7 +345,10 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
       ``model.Proxy`` pickles as its memmapped file (re-opened in the worker), :class:`RawIndex` as its
       cached npz + trained FLANN tree + memmapped descriptors (:meth:`RawIndex.prepare_spawn`),
       :class:`AllowedMasks` with its extra masks packed. Unpicklable state falls back to a
-      single-process loop with a warning.
+      single-process loop with a warning. Each spawn worker holds its OWN FLANN tree (~800 B per
+      descriptor), so with a RawIndex in ``state`` the pool is capped by the available RAM
+      (:func:`_spawn_mem_cap`, logged; single-process when only one worker fits) and a later state
+      without a RawIndex drops the workers' trees.
     """
     global _WSTATE
     items = list(items)
@@ -269,6 +390,10 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
 
 def _spawn_map(fn: Callable, items: list, workers: int, state: dict, seed: int,
                chunksize: int | None) -> list[Any]:
+    workers = _spawn_mem_cap(workers, state)
+    if workers <= 1:                              # the parent already holds the tree: no worker copy
+        POOL_STATS["inline"] += 1
+        return [_invoke(it) for it in items]
     payload = _spawn_payload(fn, state, seed)
     if payload is None:
         POOL_STATS["spawn_fallback"] += 1

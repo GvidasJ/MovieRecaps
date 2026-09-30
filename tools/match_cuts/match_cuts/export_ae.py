@@ -1967,9 +1967,10 @@ __HEADER__
     }
 
     // Alert summary: runtime warnings first (they exist only here and in the MAIN comp comment), then the
-    // plan warnings (also in report.md); anything not shown is counted with a pointer to where it is.
+    // plan warnings (also in report.md); anything not shown is counted with a pointer to where it really
+    // is: report.md for plan warnings; the MAIN comment only for runtime warnings actually stored there.
     function summary(saved) {
-        var S = PLAN.summary, lines = [], i, n, shown = 0;
+        var S = PLAN.summary, lines = [], i, n, shownW = 0, shownP = 0, where, hidW, hidStored;
         lines.push("match_cuts: built \"" + PLAN.main.name + "\"" + (saved ? " and saved recreated_edit.aep" : " (NOT saved)"));
         lines.push(S.raw + " RAW segments, " + S.placeholders + " NOT-IN-RAW placeholders, " + S.cuts + " cuts");
         lines.push("duration " + S.duration + " s = " + PLAN.main.frames + " frames at " + C.num + "/" + C.den + " fps");
@@ -1980,22 +1981,71 @@ __HEADER__
         n = PLAN.warnings.length + WARN.length;
         if (n > 0) {
             lines.push("Warnings (" + n + "):");
-            for (i = 0; i < WARN.length && i < 12; i++) { lines.push("- " + WARN[i]); shown++; }
-            for (i = 0; i < PLAN.warnings.length && i < 12; i++) { lines.push("- " + PLAN.warnings[i]); shown++; }
-            if (n > shown) {
-                lines.push("- ... and " + (n - shown) + " more (plan warnings: report.md; runtime warnings: the " +
-                           "comment of the comp \"" + PLAN.main.name + "\")");
+            for (i = 0; i < WARN.length && i < 12; i++) { lines.push("- " + WARN[i]); shownW++; }
+            for (i = 0; i < PLAN.warnings.length && i < 12; i++) { lines.push("- " + PLAN.warnings[i]); shownP++; }
+            if (n > shownW + shownP) {
+                where = [];
+                if (PLAN.warnings.length > shownP) { where.push("plan warnings: report.md"); }
+                hidW = WARN.length - shownW;
+                if (hidW > 0) {
+                    hidStored = STORED.n > shownW ? STORED.n - shownW : 0;
+                    if (hidStored > 0) {
+                        where.push("runtime warnings: the comment of the comp \"" + PLAN.main.name + "\"" +
+                                   (hidW > hidStored ? " (" + (hidW - hidStored) + " of them not stored)" : ""));
+                    } else {
+                        where.push("runtime warnings could not be stored");
+                    }
+                }
+                lines.push("- ... and " + (n - shownW - shownP) + " more (" + where.join("; ") + ")");
             }
         }
         return lines.join("\n");
     }
 
     // MAIN keeps its 'mc:main' tag on the first comment line; the runtime warnings follow (saved with the
-    // project, so they survive the alert).
-    function mainComment() {
-        var c = "mc:main", i;
-        for (i = 0; i < WARN.length && i < 200; i++) { c += "\n" + WARN[i]; }
-        return c;
+    // project, so they survive the alert). AE stores at most 15,999 bytes (after encoding conversion) in
+    // Item.comment: the text is built under a byte budget (UTF-8 upper bound per character), warnings that
+    // do not fit are counted on its last line, and STORED.n says how many are really in the comment.
+    var COMMENT_BUDGETS = [15000, 2000];
+    var STORED = { n: 0 };
+    function u8len(s) {
+        var n = 0, i, c;
+        for (i = 0; i < s.length; i++) {
+            c = s.charCodeAt(i);
+            n += (c < 128) ? 1 : ((c < 2048) ? 2 : 3);
+        }
+        return n;
+    }
+    function mainComment(budget) {
+        var c = "mc:main", used = 7, i, w, len;
+        for (i = 0; i < WARN.length; i++) {
+            w = "\n" + WARN[i];
+            len = u8len(w);
+            // room for the closing '... and N more' line (<= 64 bytes) unless this is the last warning
+            if (used + len + (i < WARN.length - 1 ? 64 : 0) > budget) { break; }
+            c += w;
+            used += len;
+        }
+        if (i < WARN.length) { c += "\n... and " + (WARN.length - i) + " more runtime warnings not stored"; }
+        return { text: c, n: i };
+    }
+    // Writes the runtime warnings into the MAIN comment: the full budget, then a small one, then the bare
+    // tag (an AE that rejects the value must not lose the 'mc:main' tag).
+    function storeWarnings(main) {
+        var k, mc;
+        for (k = 0; k < COMMENT_BUDGETS.length; k++) {
+            mc = mainComment(COMMENT_BUDGETS[k]);
+            try {
+                main.comment = mc.text;
+                STORED.n = mc.n;
+                return true;
+            } catch (eC) {
+                note("the MAIN comp comment rejected " + mc.n + " runtime warning(s) (" + eC.message + ")");
+            }
+        }
+        STORED.n = 0;
+        try { main.comment = "mc:main"; } catch (eC2) { }
+        return false;
     }
 
     var here = new File($.fileName).parent;
@@ -2022,9 +2072,7 @@ __HEADER__
         app.endUndoGroup();
     }
     if (!ok) { return; }
-    if (WARN.length > 0) {
-        try { res.main.comment = mainComment(); } catch (eC) { }
-    }
+    if (WARN.length > 0) { storeWarnings(res.main); }
     // Saved = save() did not throw, the project is now THIS file, and the file on disk is new (a
     // recreated_edit.aep left by an earlier run must not pass for a successful save).
     var out = new File(here.fsName + "/recreated_edit.aep"), before = -1, saved = false, pf = null;

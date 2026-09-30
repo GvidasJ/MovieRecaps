@@ -45,6 +45,11 @@ cli.main -> pipeline.run(cfg)
 
 Caching: each stage's result lives in `WORK_DIR/cache/<stage>/<key>` with
 `key = common.stage_key(stage, input file hashes, cfg.analysis_params(), stage-specific params)`.
+The pipeline-level anchors (`sparse_search`) and FrameMap (`frame_map`) keys of BOTH S5.2 + S5.3 passes
+also carry `pipeline.visual_pass_key_parts(layout, overlays)` (the canonical layout geometry hash + a
+content hash of the starting overlay masks), so a FrameMap matched against one box is never reused for
+another (a new layout algorithm, the D2 refined box, other overlays). Bump `STAGE_VERSION[stage]`
+whenever a stage's algorithm or output semantics change.
 Export-only settings (layout mode, comp size, fps mode, AE time mode) are excluded from analysis keys.
 Determinism (criterion 9.7): no wall-clock values in cutlist.json (timings go to
 `provenance.timings`, excluded from the determinism comparison), `common.seed_everything(cfg.seed)`
@@ -431,10 +436,14 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # (z = [0,0,0] for ThreeD_SPATIAL). Only matchNames ('ADBE Transform Group'/'ADBE Position',
     # 'ADBE Time Remapping', 'ADBE Mask Parade'/'ADBE Mask Atom'/'ADBE Mask Shape', 'ADBE Effect
     # Parade', 'ADBE Gaussian Blur 2' params by index, 'ADBE Audio Group'/'ADBE Audio Levels').
-    # Crossfade: ONLY the upper (outgoing) layer A is keyed: Opacity 100 at t(O-1), 100·(1-α_B) at O..O+D-1,
-    # (0 at O+D = A.outPoint), LINEAR; B stays 100 %. Audio across a crossfade: Audio Levels keys on both
-    # layers at the overlap frames, 20·log10(max(g, 1e-3)) dB with g = 1-α_B (A) / α_B (B); the preview
-    # applies the same linear gains. Dips: only the solid (above both) is keyed.
+    # Crossfade: ONLY the UPPER layer of the pair is keyed (LINEAR), the other stays 100 %. Same level
+    # (chronological stacking inside one comp): the outgoing A is upper and falls: Opacity 100 at t(O-1),
+    # 100·(1-α_B) at O..O+D-1, (0 at O+D = A.outPoint). An incoming MAIN-level B (D1, box != None) sits
+    # above the whole Video Box holding A, so B is keyed rising: 100·α_B at O..O+D-1, 100 at O+D (a
+    # MAIN-level outgoing A over a boxed B is the same-level rule: A falls). Audio across a crossfade:
+    # Audio Levels keys on both layers at the overlap frames, 20·log10(max(g, 1e-3)) dB with
+    # g = 1-α_B (A) / α_B (B); the preview applies the same linear gains. Dips: only the solid (above both)
+    # is keyed.
     # Rounded box: mask on the pre-comp layer (Bezier, tangent 0.5522847498·r, feather 0) — no track
     # matte (setTrackMatte is AE 23+). Markers: comp.markerProperty.setValueAtTime (try/catch), merged
     # per frame. Reference layer: guideLayer, audioEnabled=false, blendingMode DIFFERENCE, enabled=false,
@@ -634,19 +643,31 @@ verification honesty) were fixed under these shared rules:
 * **D1 Per-period layout.** `segment.py` sets `Segment.box`/`Segment.region` from `layout.periods`:
   inside a `fullscreen` period `box` = the whole canvas (`corner_radius` 0) and `region` = 1; the dominant
   boxed layout keeps `box = None`, `region = 0`; split/PiP stay unsupported (`region` ≥ 2, flagged, c1
-  `pass_with_exceptions`). Segments never straddle a period boundary. `export_ae` and `render_preview` put
+  `pass_with_exceptions`). Segments never straddle a period boundary (beyond a declared transition
+  overlap or a merged 1-2 frame sliver, below). `export_ae` and `render_preview` put
   `box != None` segments directly in MAIN (above the Video Box and background, below the reference layer)
   with the canonical Sim at origin (0, 0) × r and a (rounded-)rect mask at the box (none for the full
-  canvas); `verify` scores each frame in its own box ROI.
+  canvas); `verify` scores each frame in its own box ROI. A crossfade whose incoming B is such a
+  MAIN-level layer keys B rising (100·α_B, then 100 at O+D) and leaves the boxed outgoing A at 100 %
+  (§5 export_ae: the UPPER layer of the pair is keyed). A layout-period boundary detected inside a
+  declared crossfade/dip overlap between a boxed and a fullscreen segment, or a merged 1-2 frame sliver
+  at the boundary, is not a framing error: c1 lists those frames as explained exceptions
+  (`verify.boxless_fullscreen_frames`) and the pipeline does not warn (`pipeline.period_mismatch_frames`,
+  the same rule mirrored for boxed segments; logged as `period_boundary_explained`).
 * **D2 Box refinement against RAW.** `layout.refine_box_from_raw(...)` re-fits the box from pixels where
   the warped matched RAW agrees with the competitor (static pixels included), so single-camera shots with a
   static background are not shrunk to the moving subject; when it changes the box the pipeline re-runs
   S5.2 + S5.3 once.
 * **D3 Audio-informed phase.** After the per-segment audio analysis, `raw_in := raw_in + v·lag` for
   confidently correlated stretch segments, clamped into the floor∩round interval (else the floor interval)
-  with a margin of max(1 ms, 5 % of its width); the residual lag is re-measured. This removes the
-  systematic quarter-frame audio offset of the interval centre (8.3 ms at 30p, 10.4 ms at 24p) while
-  keeping every frame exact under both sampling rules (`Segment.audio.phase_source`, `lag_ms_video`).
+  with a margin of `max(ae_min_margin_ms, min(5 % of its width, 5 % of a RAW frame))` from each edge
+  (`pipeline.audio_phase_margin_s`; a fraction of a FRAME, not of the ambiguity span, so an in-point on
+  the edge of a seconds-wide static interval stays within ~2 ms in audio); the residual lag is
+  re-measured. This removes the systematic quarter-frame audio offset of the interval centre (8.3 ms at
+  30p, 10.4 ms at 24p) while keeping every frame exact under both sampling rules
+  (`Segment.audio.phase_source`, `lag_ms_video`). Segments whose interval is wider than ±100 ms (static /
+  ambiguous-identical) also get a wide search centred on the feasible interval and covering all of it
+  (half-width capped at 60 s).
 * **D4 Verification references.** Criterion 3 compares the AE result with refine's PRE-segmentation
   measurement (`fm.d['pre_segment_*']`); frames segmentation re-assigned to its model are a listed
   `reassigned` class counted against `frame_exact_min`; a plan that disagrees with the cutlist always fails.
