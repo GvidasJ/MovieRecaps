@@ -464,10 +464,12 @@ def test_layout_truth(e2e, cutlist):
 
 
 def test_second_run_identical_cutlist(e2e, cutlist):
-    """Criterion 9.7: a second CLI run (same inputs, same work dir -> caches) writes a byte-identical
-    cutlist.json. Wall-clock provenance.timings is the only field allowed to differ (DESIGN §1)."""
+    """Criterion 9.7: a second CLI run with the SAME arguments (same inputs, same --out, same --work ->
+    caches) writes an identical cutlist.json. Wall-clock provenance.timings is the only field allowed to
+    differ (DESIGN §1). (A different --out legitimately changes the absolute media paths the JSX falls
+    back to, so the rerun must use the same output directory.)"""
     first = _need(e2e, "cutlist.json").read_bytes()
-    out2 = e2e["root"] / "output_run2"
+    out2 = e2e["out"]
     proc = _run_cli(e2e["python"], e2e["synthetic"], out2, e2e["work"])
     p2 = out2 / "cutlist.json"
     assert p2.exists(), f"second run wrote no cutlist.json (exit {proc.returncode}){_tail(proc)}"
