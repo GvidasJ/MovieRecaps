@@ -1704,6 +1704,12 @@ def stage_visual_refine(ctx: Context) -> None:
         log.info("layout refined against RAW: re-running S5.2 + S5.3 with the corrected box")
         visual_refine_pass(ctx, base_raw, initial_overlays(ctx.layout, overlays_pass1), " (refined box)",
                            "layout", layout_key(ctx.layout))
+    # later stages do not use the worker pool; free spawn workers (and their kd-trees) now
+    try:
+        from . import visual_match
+        getattr(visual_match, "shutdown_workers", lambda: None)()
+    except Exception:  # noqa: BLE001 - freeing memory early is best effort
+        pass
 
 
 def initial_overlays(layout: Layout, fallback: Any) -> Any:

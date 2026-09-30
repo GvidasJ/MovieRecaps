@@ -51,8 +51,10 @@ Determinism (criterion 9.7): no wall-clock values in cutlist.json (timings go to
 before every RANSAC batch and immediately before creating/training every `FlannBasedMatcher`, and at the
 start of every worker; deterministic iteration order; multiprocessing results gathered in input order.
 `DecisionLog` truncates `work/decisions.jsonl` at run start; every decision is logged with evidence.
-Process pools: fork pools (visual_match.parallel_map) only read memmapped proxies; before forking the
-parent runs `gc.collect(); gc.freeze()` and sets OpenCV to 1 thread — a forked child must never run a
+Process pools (visual_match.parallel_map): `fork` on Linux, a persistent `spawn` pool on Windows/macOS
+(override: `MATCH_CUTS_START_METHOD=fork|spawn`); workers only read memmapped proxies (Proxy pickles as file
+references; the RawIndex as its cached files) and results are bit-identical across start methods. Before
+forking the parent runs `gc.collect(); gc.freeze()` and sets OpenCV to 1 thread — a forked child must never run a
 destructor of an inherited object (verified deadlock: a stray frame-threaded PyAV decoder freed by the
 child's GC hangs in avcodec_free_context). Pools that decode video use the 'spawn' context.
 
