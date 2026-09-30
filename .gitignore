@@ -10,3 +10,6 @@ work/
 output/
 node_modules/
 *.egg-info/
+# example outputs: keep the small proof files, not the media / renders
+examples/**/media/
+examples/**/*.mp4

@@ -1,0 +1,160 @@
+TITLE: Recreated Edit
+FCM: NON-DROP FRAME
+
+001  AX       B     C        00:02:36:20 00:02:39:05 00:00:00:00 00:00:02:15
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:36:20
+* SEGMENT: S01 raw speed 1.000000 conf 1.00
+* NOTE: record TC = competitor frame at 30 fps NDF (competitor 30/1 fps); source TC = RAW frame at 30 fps NDF (RAW 30000/1001 fps); M2 = speed x RAW fps x 30 / competitor fps
+* NOTE: 22 segments, 1571 frames; BL = NOT-IN-RAW placeholder / dip / flash (add your own media); J/L audio offsets are listed in cutlist.csv
+* NOTE: YELLOW locators = audio the competitor added (music / SFX / voice-over), not recreated: labelled placeholders for your own
+* LOC: 00:00:00:00 RED     Start S01 RAW 00:02:36:20
+* LOC: 00:00:00:00 YELLOW  MUSIC placeholder 00:00:00:00-00:00:52:11 (competitor-added music, not recreated - add your own, -6.4 dB re RAW audio)
+
+002  AX       B     C        00:00:02:00 00:00:05:00 00:00:02:15 00:00:05:15
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:02:00
+* SEGMENT: S02 raw speed 1.000000 conf 1.00
+* LOC: 00:00:02:15 RED     Cut S02 RAW 00:00:02:00
+
+003  AX       B     C        00:00:05:10 00:00:07:25 00:00:05:15 00:00:08:00
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:05:10
+* SEGMENT: S03 raw speed 1.000000 conf 1.00
+* LOC: 00:00:05:15 RED     Cut S03 RAW 00:00:05:10
+
+004  AX       B     C        00:00:16:20 00:00:19:15 00:00:08:00 00:00:10:25
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:16:20
+* SEGMENT: S04 raw speed 1.000000 conf 1.00
+* LOC: 00:00:08:00 RED     Cut S04 RAW 00:00:16:20
+
+005  AX       B     C        00:00:31:20 00:00:34:00 00:00:10:25 00:00:13:05
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:31:20
+* SEGMENT: S05 raw speed 1.000000 FLIP-H conf 1.00
+* LOC: 00:00:10:25 RED     Cut S05 RAW 00:00:31:20
+
+006  AX       B     C        00:02:21:20 00:02:22:20 00:00:13:05 00:00:14:05
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:21:20
+* SEGMENT: S06 raw speed 1.000000 conf 0.99
+* LOC: 00:00:13:05 RED     Cut S06 RAW 00:02:21:20
+
+007  AX       B     C        00:00:46:20 00:00:49:10 00:00:14:05 00:00:16:25
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:46:20
+* SEGMENT: S07 raw speed 1.000000 conf 1.00
+* LOC: 00:00:14:05 RED     Cut S07 RAW 00:00:46:20
+
+008  AX       B     C        00:00:49:20 00:00:51:20 00:00:16:25 00:00:18:25
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:49:20
+* SEGMENT: S08 raw speed 1.000000 conf 1.00
+* LOC: 00:00:16:25 RED     Cut S08 RAW 00:00:49:20
+
+009  AX       B     C        00:01:01:20 00:01:05:00 00:00:18:25 00:00:22:05
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:01:01:20
+* SEGMENT: S09 raw speed 1.000000 conf 1.00
+* LOC: 00:00:18:25 RED     Cut S09 RAW 00:01:01:20
+
+010  AX       B     C        00:01:16:20 00:01:19:03 00:00:22:05 00:00:24:11
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       032.967        00:01:16:20
+* SEGMENT: S10 raw speed 1.100000 conf 1.00
+* LOC: 00:00:22:05 RED     Cut S10 RAW 00:01:16:20
+
+011  AX       B     C        00:01:32:00 00:01:34:15 00:00:24:11 00:00:26:26
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:01:32:00
+* SEGMENT: S11 raw speed 1.000000 conf 0.99
+* LOC: 00:00:24:11 RED     Cut S11 RAW 00:01:32:00
+
+012  AX       B     C        00:01:34:15 00:01:34:15 00:00:26:26 00:00:26:26
+012  AX       B     D 006    00:01:47:00 00:01:49:20 00:00:26:26 00:00:29:16
+* FROM CLIP NAME: raw.mp4
+* TO CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:01:47:00
+* SEGMENT: S12 raw speed 1.000000 conf 1.00
+* LOC: 00:00:26:26 RED     Cut S12 RAW 00:01:47:00
+
+013  AX       B     C        00:00:17:10 00:00:19:00 00:00:29:16 00:00:31:06
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:17:10
+* SEGMENT: S13 raw speed 1.000000 conf 1.00
+* LOC: 00:00:29:16 RED     Cut S13 RAW 00:00:17:10
+
+014  BL       B     C        00:00:00:00 00:00:01:00 00:00:31:06 00:00:32:06
+* FROM CLIP NAME: BLACK
+* SEGMENT: S14 not_in_raw - MISSING - not in RAW (00:00:31:06-00:00:32:06)
+* LOC: 00:00:31:06 RED     Cut S14 MISSING - not in RAW (00:00:31:06-00:00:32:06)
+
+015  AX       B     C        00:02:01:20 00:02:04:20 00:00:32:06 00:00:35:06
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:01:20
+* SEGMENT: S15 raw speed 1.000000 conf 1.00
+* LOC: 00:00:32:06 RED     Cut S15 RAW 00:02:01:20
+
+016  AX       B     C        00:02:16:20 00:02:19:00 00:00:35:06 00:00:37:16
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:16:20
+* SEGMENT: S16 raw speed 1.000000 conf 1.00
+* LOC: 00:00:35:06 RED     Cut S16 RAW 00:02:16:20
+
+017  AX       B     C        00:02:19:00 00:02:21:00 00:00:37:16 00:00:39:16
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:19:00
+* SEGMENT: S17 raw speed 1.000000 conf 0.99
+* LOC: 00:00:37:16 RED     Cut S17 RAW 00:02:19:00
+
+018  AX       B     C        00:02:46:20 00:02:49:15 00:00:39:16 00:00:42:11
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:46:20
+* SEGMENT: S18 raw speed 1.000000 conf 1.00
+* LOC: 00:00:39:16 RED     Cut S18 RAW 00:02:46:20
+
+019  AX       B     C        00:01:10:00 00:01:12:10 00:00:42:11 00:00:44:21
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:01:10:00
+* SEGMENT: S19 raw speed 1.000000 conf 1.00
+* LOC: 00:00:42:11 RED     Cut S19 RAW 00:01:10:00
+
+020  AX       B     C        00:02:31:20 00:02:34:10 00:00:44:21 00:00:47:11
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:02:31:20
+* SEGMENT: S20 raw speed 1.000000 conf 1.00
+* LOC: 00:00:44:21 RED     Cut S20 RAW 00:02:31:20
+
+021  AX       B     C        00:00:10:00 00:00:13:00 00:00:47:11 00:00:50:11
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:00:10:00
+* SEGMENT: S21 raw speed 1.000000 conf 1.00
+* LOC: 00:00:47:11 RED     Cut S21 RAW 00:00:10:00
+
+022  AX       B     C        00:01:40:00 00:01:42:00 00:00:50:11 00:00:52:11
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4
+M2   AX       029.970        00:01:40:00
+* SEGMENT: S22 raw speed 1.000000 conf 1.00
+* LOC: 00:00:50:11 RED     Cut S22 RAW 00:01:40:00

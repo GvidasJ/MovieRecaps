@@ -1,0 +1,2327 @@
+{
+  "criteria": {
+    "c1_coverage": {
+      "status": "pass",
+      "summary": "22 segments (1 NOT-IN-RAW), 1571/1571 frames covered, 0 gaps, 1 overlaps (1 transitions), 1 full-screen period(s)",
+      "details": {
+        "status": "pass",
+        "summary": "22 segments (1 NOT-IN-RAW), 1571/1571 frames covered, 0 gaps, 1 overlaps (1 transitions), 1 full-screen period(s)",
+        "failures": [],
+        "exceptions": [],
+        "frames": 1571,
+        "covered": 1571,
+        "gaps": [],
+        "overlaps": [
+          [
+            806,
+            811
+          ]
+        ],
+        "transitions": [
+          {
+            "frames": [
+              806,
+              811
+            ],
+            "from": 11,
+            "to": 12,
+            "type": "crossfade"
+          }
+        ],
+        "extra_region_frames": [],
+        "fullscreen_frames": [
+          [
+            395,
+            424
+          ]
+        ]
+      }
+    },
+    "c2_cuts": {
+      "status": "pass",
+      "summary": "21 cuts: 21 verified both sides, 0 exceptions, 0 failed",
+      "details": {
+        "status": "pass",
+        "summary": "21 cuts: 21 verified both sides, 0 exceptions, 0 failed",
+        "failures": [],
+        "exceptions": [],
+        "cuts": [
+          {
+            "from": 1,
+            "to": 2,
+            "frame": 75,
+            "kind": "hard",
+            "tc": "00:00:02:15",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 74,
+                "own": 4774,
+                "other": 59,
+                "s_own": 0.999401,
+                "s_other": -0.387512,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 75,
+                "own": 60,
+                "other": 4775,
+                "s_own": 0.999126,
+                "s_other": -0.368221,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 2,
+            "to": 3,
+            "frame": 165,
+            "kind": "hard",
+            "tc": "00:00:05:15",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 164,
+                "own": 149,
+                "other": 159,
+                "s_own": 0.999167,
+                "s_other": 0.869428,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 165,
+                "own": 160,
+                "other": 150,
+                "s_own": 0.999148,
+                "s_other": 0.889309,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 3,
+            "to": 4,
+            "frame": 240,
+            "kind": "hard",
+            "tc": "00:00:08:00",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 239,
+                "own": 234,
+                "other": 499,
+                "s_own": 0.999234,
+                "s_other": 0.201276,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 240,
+                "own": 500,
+                "other": 235,
+                "s_own": 0.999123,
+                "s_other": 0.192111,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 4,
+            "to": 5,
+            "frame": 325,
+            "kind": "hard",
+            "tc": "00:00:10:25",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 324,
+                "own": 584,
+                "other": 949,
+                "s_own": 0.998979,
+                "s_other": 0.184939,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 325,
+                "own": 950,
+                "other": 585,
+                "s_own": 0.999304,
+                "s_other": 0.220957,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 5,
+            "to": 6,
+            "frame": 395,
+            "kind": "hard",
+            "tc": "00:00:13:05",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 394,
+                "own": 1019,
+                "other": 4249,
+                "s_own": 0.999337,
+                "s_other": -0.040601,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 395,
+                "own": 4250,
+                "other": 1020,
+                "s_own": 0.994428,
+                "s_other": -0.001992,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 6,
+            "to": 7,
+            "frame": 425,
+            "kind": "hard",
+            "tc": "00:00:14:05",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 424,
+                "own": 4279,
+                "other": 1399,
+                "s_own": 0.994181,
+                "s_other": -0.056061,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 425,
+                "own": 1400,
+                "other": 4280,
+                "s_own": 0.998602,
+                "s_other": -0.029628,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 7,
+            "to": 8,
+            "frame": 505,
+            "kind": "hard",
+            "tc": "00:00:16:25",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 504,
+                "own": 1479,
+                "other": 1489,
+                "s_own": 0.998746,
+                "s_other": 0.811198,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 505,
+                "own": 1490,
+                "other": 1480,
+                "s_own": 0.99881,
+                "s_other": 0.825784,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 8,
+            "to": 9,
+            "frame": 565,
+            "kind": "hard",
+            "tc": "00:00:18:25",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 564,
+                "own": 1549,
+                "other": 1849,
+                "s_own": 0.998829,
+                "s_other": 0.216156,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 565,
+                "own": 1850,
+                "other": 1550,
+                "s_own": 0.998907,
+                "s_other": 0.226172,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 9,
+            "to": 10,
+            "frame": 665,
+            "kind": "hard",
+            "tc": "00:00:22:05",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 664,
+                "own": 1949,
+                "other": 2299,
+                "s_own": 0.99885,
+                "s_other": 0.052495,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 665,
+                "own": 2300,
+                "other": 1950,
+                "s_own": 0.999345,
+                "s_other": 0.059164,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 10,
+            "to": 11,
+            "frame": 731,
+            "kind": "hard",
+            "tc": "00:00:24:11",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 730,
+                "own": 2371,
+                "other": 2759,
+                "s_own": 0.999329,
+                "s_other": 0.263563,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 731,
+                "own": 2760,
+                "other": 2373,
+                "s_own": 0.997819,
+                "s_other": 0.268973,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 11,
+            "to": 12,
+            "frame": 806,
+            "kind": "crossfade",
+            "tc": "00:00:26:26",
+            "alpha": [
+              {
+                "k": 806,
+                "alpha_declared": 0.0,
+                "alpha_fit": -0.0079,
+                "zncc_fit": 0.9981
+              },
+              {
+                "k": 807,
+                "alpha_declared": 0.1667,
+                "alpha_fit": 0.1622,
+                "zncc_fit": 0.9982
+              },
+              {
+                "k": 808,
+                "alpha_declared": 0.3333,
+                "alpha_fit": 0.3311,
+                "zncc_fit": 0.9985
+              },
+              {
+                "k": 809,
+                "alpha_declared": 0.5,
+                "alpha_fit": 0.4994,
+                "zncc_fit": 0.9988
+              },
+              {
+                "k": 810,
+                "alpha_declared": 0.6667,
+                "alpha_fit": 0.6673,
+                "zncc_fit": 0.999
+              },
+              {
+                "k": 811,
+                "alpha_declared": 0.8333,
+                "alpha_fit": 0.8382,
+                "zncc_fit": 0.999
+              }
+            ],
+            "alpha_max_err": 0.0079,
+            "window_fit": {
+              "O": 806,
+              "D": 6
+            },
+            "status": "pass",
+            "sides": [
+              {
+                "side": "alpha",
+                "result": "ok",
+                "reason": "max |alpha_fit - alpha| = 0.008 (tol 0.15)"
+              },
+              {
+                "side": "window",
+                "result": "ok",
+                "reason": "measured ramp gives O=806 D=6, declared O=806 D=6"
+              },
+              {
+                "side": "A_before",
+                "k": 805,
+                "own": 2834,
+                "other": 3209,
+                "s_own": 0.997983,
+                "s_other": 0.296878,
+                "result": "ok"
+              },
+              {
+                "side": "B_after",
+                "k": 812,
+                "own": 3216,
+                "other": 2841,
+                "s_own": 0.999176,
+                "s_other": 0.264006,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 12,
+            "to": 13,
+            "frame": 886,
+            "kind": "hard",
+            "tc": "00:00:29:16",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 885,
+                "own": 3289,
+                "other": 519,
+                "s_own": 0.999108,
+                "s_other": 0.095549,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 886,
+                "own": 520,
+                "other": 3290,
+                "s_own": 0.998943,
+                "s_other": 0.089264,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 13,
+            "to": 14,
+            "frame": 936,
+            "kind": "raw_to_placeholder",
+            "tc": "00:00:31:06",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "raw_frame",
+                "k": 935,
+                "s_own": 0.998875,
+                "result": "ok"
+              },
+              {
+                "side": "placeholder_frame",
+                "k": 936,
+                "s_ext": 6.8e-05,
+                "result": "ok",
+                "reason": "placeholder vs extended S13 model must be < none_thresh 0.6"
+              }
+            ]
+          },
+          {
+            "from": 14,
+            "to": 15,
+            "frame": 966,
+            "kind": "placeholder_to_raw",
+            "tc": "00:00:32:06",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "raw_frame",
+                "k": 966,
+                "s_own": 0.998352,
+                "result": "ok"
+              },
+              {
+                "side": "placeholder_frame",
+                "k": 965,
+                "s_ext": -0.149459,
+                "result": "ok",
+                "reason": "placeholder vs extended S15 model must be < none_thresh 0.6"
+              }
+            ]
+          },
+          {
+            "from": 15,
+            "to": 16,
+            "frame": 1056,
+            "kind": "hard",
+            "tc": "00:00:35:06",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1055,
+                "own": 3739,
+                "other": 4099,
+                "s_own": 0.998577,
+                "s_other": 0.398998,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1056,
+                "own": 4100,
+                "other": 3740,
+                "s_own": 0.998468,
+                "s_other": 0.393967,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 16,
+            "to": 17,
+            "frame": 1126,
+            "kind": "hard",
+            "tc": "00:00:37:16",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1125,
+                "own": 4169,
+                "other": 4169,
+                "s_own": 0.998506,
+                "s_other": 0.080922,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1126,
+                "own": 4170,
+                "other": 4170,
+                "s_own": 0.99795,
+                "s_other": 0.116176,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 17,
+            "to": 18,
+            "frame": 1186,
+            "kind": "hard",
+            "tc": "00:00:39:16",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1185,
+                "own": 4229,
+                "other": 4999,
+                "s_own": 0.998047,
+                "s_other": 0.029064,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1186,
+                "own": 5000,
+                "other": 4230,
+                "s_own": 0.998415,
+                "s_other": 0.041361,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 18,
+            "to": 19,
+            "frame": 1271,
+            "kind": "hard",
+            "tc": "00:00:42:11",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1270,
+                "own": 5084,
+                "other": 2099,
+                "s_own": 0.998517,
+                "s_other": 0.074906,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1271,
+                "own": 2100,
+                "other": 5085,
+                "s_own": 0.999086,
+                "s_other": 0.049704,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 19,
+            "to": 20,
+            "frame": 1341,
+            "kind": "hard",
+            "tc": "00:00:44:21",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1340,
+                "own": 2169,
+                "other": 4549,
+                "s_own": 0.999129,
+                "s_other": -0.027065,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1341,
+                "own": 4550,
+                "other": 2170,
+                "s_own": 0.999163,
+                "s_other": -0.007117,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 20,
+            "to": 21,
+            "frame": 1421,
+            "kind": "hard",
+            "tc": "00:00:47:11",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1420,
+                "own": 4629,
+                "other": 299,
+                "s_own": 0.999239,
+                "s_other": 0.148523,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1421,
+                "own": 300,
+                "other": 4630,
+                "s_own": 0.999254,
+                "s_other": 0.153815,
+                "result": "ok"
+              }
+            ]
+          },
+          {
+            "from": 21,
+            "to": 22,
+            "frame": 1511,
+            "kind": "hard",
+            "tc": "00:00:50:11",
+            "status": "pass",
+            "sides": [
+              {
+                "side": "A_last",
+                "k": 1510,
+                "own": 389,
+                "other": 2999,
+                "s_own": 0.999324,
+                "s_other": 0.46794,
+                "result": "ok"
+              },
+              {
+                "side": "B_first",
+                "k": 1511,
+                "own": 3000,
+                "other": 390,
+                "s_own": 0.998213,
+                "s_other": 0.459673,
+                "result": "ok"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "c3_source_frames": {
+      "status": "pass",
+      "summary": "AE sim: plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked); visual: 1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+      "details": {
+        "s9_2": {
+          "status": "pass",
+          "summary": "plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked) | mock record: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+          "failures": [],
+          "exceptions": [],
+          "plan": {
+            "status": "pass",
+            "summary": "plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+            "failures": [],
+            "exceptions": [],
+            "reference": "pre-segmentation measurement (refine)",
+            "matched": 1535,
+            "exact": 1535,
+            "fraction_ok": 1.0,
+            "ambiguous_identical": [],
+            "timing_tie": [],
+            "grid": [],
+            "n_grid": 0,
+            "reassigned": [],
+            "n_reassigned": 0,
+            "mismatches": [],
+            "n_mismatches": 0,
+            "excluded_near_cuts": 0,
+            "plan_mismatches": [],
+            "n_plan_mismatches": 0,
+            "transition_frames_checked": 6,
+            "solid_frames_checked": 30
+          },
+          "mock": {
+            "status": "pass",
+            "summary": "mock record: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+            "failures": [],
+            "exceptions": [],
+            "reference": "pre-segmentation measurement (refine)",
+            "matched": 1535,
+            "exact": 1535,
+            "fraction_ok": 1.0,
+            "ambiguous_identical": [],
+            "timing_tie": [],
+            "grid": [],
+            "n_grid": 0,
+            "reassigned": [],
+            "n_reassigned": 0,
+            "mismatches": [],
+            "n_mismatches": 0,
+            "excluded_near_cuts": 0,
+            "plan_mismatches": [],
+            "n_plan_mismatches": 0,
+            "transition_frames_checked": 6,
+            "solid_frames_checked": 30
+          }
+        },
+        "s9_3": {
+          "status": "pass",
+          "summary": "1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+          "failures": [],
+          "exceptions": [],
+          "threshold": 0.9,
+          "distribution": {
+            "min": 0.99027,
+            "p1": 0.99043,
+            "p5": 0.99543,
+            "median": 0.99958,
+            "mean": 0.99877,
+            "hist": {
+              "-1.00-0.50": 0,
+              "0.50-0.80": 0,
+              "0.80-0.90": 0,
+              "0.90-0.95": 0,
+              "0.95-0.98": 0,
+              "0.98-0.99": 0,
+              "0.99-1.01": 1535
+            }
+          },
+          "failed_frames": [],
+          "blend_frames_min": 0.99143,
+          "blend_threshold": 0.9,
+          "blend_failed_frames": [],
+          "uniform_frames_checked": 0,
+          "uniform_failed": [],
+          "placeholder_frames_checked": 30,
+          "placeholder_failed": [],
+          "source": "preview_recreation.mp4",
+          "scores_file": "/tmp/pytest-of-root/pytest-265/e2e_full0/work/verify_zncc.npy",
+          "preview_file": {
+            "status": "pass",
+            "summary": "delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+            "frames": 1571,
+            "width": 1080,
+            "height": 1920,
+            "compared": 0,
+            "mismatches": []
+          }
+        }
+      }
+    },
+    "c4_speed_framing": {
+      "status": "pass",
+      "summary": "21 raw segments: 0 problems, 0 exceptions",
+      "details": {
+        "status": "pass",
+        "summary": "21 raw segments: 0 problems, 0 exceptions",
+        "failures": [],
+        "exceptions": [],
+        "segments": [
+          {
+            "id": 1,
+            "speed": 1.0,
+            "speed_range": [
+              0.987473,
+              1.014527
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 75,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 3.6e-05,
+              "max_pos_err_px": 0.039,
+              "flip": "ok",
+              "flip_median_diff": 1.19816,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 2,
+            "speed": 1.0,
+            "speed_range": [
+              0.989753,
+              1.012247
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 90,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 0.000204,
+              "max_pos_err_px": 0.053,
+              "flip": "ok",
+              "flip_median_diff": 1.49098,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 3,
+            "speed": 1.0,
+            "speed_range": [
+              0.987473,
+              1.014527
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 75,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 0.000186,
+              "max_pos_err_px": 0.064,
+              "flip": "ok",
+              "flip_median_diff": 1.49744,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 4,
+            "speed": 1.0,
+            "speed_range": [
+              0.989083,
+              1.012917
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 85,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 4e-05,
+              "max_pos_err_px": 0.06,
+              "flip": "ok",
+              "flip_median_diff": 0.76932,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 5,
+            "speed": 1.0,
+            "speed_range": [
+              0.986493,
+              1.015507
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 70,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 2.2e-05,
+              "max_pos_err_px": 0.023,
+              "flip": "ok",
+              "flip_median_diff": 1.24398,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 6,
+            "speed": 1.0,
+            "speed_range": [
+              0.966483,
+              1.035517
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 30,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 3,
+              "n_measured": 3,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 0.000131,
+              "max_pos_err_px": 0.147,
+              "flip": "ok",
+              "flip_median_diff": 0.59595,
+              "flip_samples": 3
+            }
+          },
+          {
+            "id": 7,
+            "speed": 1.0,
+            "speed_range": [
+              0.988329,
+              1.013671
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 80,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 1.9e-05,
+              "max_pos_err_px": 0.045,
+              "flip": "ok",
+              "flip_median_diff": 0.79833,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 8,
+            "speed": 1.0,
+            "speed_range": [
+              0.984034,
+              1.017966
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 60,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 2.1e-05,
+              "max_pos_err_px": 0.02,
+              "flip": "ok",
+              "flip_median_diff": 0.83048,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 9,
+            "speed": 1.0,
+            "speed_range": [
+              0.990889,
+              1.011111
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 100,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 5.3e-05,
+              "max_pos_err_px": 0.034,
+              "flip": "ok",
+              "flip_median_diff": 1.32639,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 10,
+            "speed": 1.1,
+            "speed_range": [
+              1.099137,
+              1.102797
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 66,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 7.6e-05,
+              "max_pos_err_px": 0.071,
+              "flip": "ok",
+              "flip_median_diff": 0.74957,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 11,
+            "speed": 1.0,
+            "speed_range": [
+              0.988329,
+              1.013671
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 75,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 3.1e-05,
+              "max_pos_err_px": 0.025,
+              "flip": "ok",
+              "flip_median_diff": 0.7243,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 12,
+            "speed": 1.0,
+            "speed_range": [
+              0.988,
+              1.014
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 74,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 1.5e-05,
+              "max_pos_err_px": 0.016,
+              "flip": "ok",
+              "flip_median_diff": 0.82792,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 13,
+            "speed": 1.0,
+            "speed_range": [
+              0.980571,
+              1.021429
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 50,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 3,
+              "n_measured": 3,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 3.9e-05,
+              "max_pos_err_px": 0.028,
+              "flip": "ok",
+              "flip_median_diff": 0.73296,
+              "flip_samples": 3
+            }
+          },
+          {
+            "id": 15,
+            "speed": 1.0,
+            "speed_range": [
+              0.989753,
+              1.012247
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 90,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 6.9e-05,
+              "max_pos_err_px": 0.046,
+              "flip": "ok",
+              "flip_median_diff": 0.79062,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 16,
+            "speed": 1.0,
+            "speed_range": [
+              0.986493,
+              1.015507
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 70,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 7.7e-05,
+              "max_pos_err_px": 0.048,
+              "flip": "ok",
+              "flip_median_diff": 0.63705,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 17,
+            "speed": 1.0,
+            "speed_range": [
+              0.984034,
+              1.017966
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 60,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 5.6e-05,
+              "max_pos_err_px": 0.043,
+              "flip": "ok",
+              "flip_median_diff": 0.64271,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 18,
+            "speed": 1.0,
+            "speed_range": [
+              0.989083,
+              1.012917
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 85,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 2.9e-05,
+              "max_pos_err_px": 0.052,
+              "flip": "ok",
+              "flip_median_diff": 1.00906,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 19,
+            "speed": 1.0,
+            "speed_range": [
+              0.986493,
+              1.015507
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 70,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 3.6e-05,
+              "max_pos_err_px": 0.038,
+              "flip": "ok",
+              "flip_median_diff": 1.33158,
+              "flip_samples": 4
+            }
+          },
+          {
+            "id": 20,
+            "speed": 1.0,
+            "speed_range": [
+              0.988329,
+              1.013671
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 80,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 2.9e-05,
+              "max_pos_err_px": 0.095,
+              "flip": "ok",
+              "flip_median_diff": 0.50555,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 21,
+            "speed": 1.0,
+            "speed_range": [
+              0.989753,
+              1.012247
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 90,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 5,
+              "n_measured": 5,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 0.000172,
+              "max_pos_err_px": 0.057,
+              "flip": "ok",
+              "flip_median_diff": 1.49432,
+              "flip_samples": 5
+            }
+          },
+          {
+            "id": 22,
+            "speed": 1.0,
+            "speed_range": [
+              0.984034,
+              1.017966
+            ],
+            "speed_range_source": "independent LP",
+            "speed_check": "ok",
+            "frames_checked": 60,
+            "max_scale_err": 0.0,
+            "max_pos_err_px": 0.0,
+            "max_rot_err_deg": 0.0,
+            "flip_mismatch": 0,
+            "framing_bad": 0,
+            "independent": {
+              "n_samples": 4,
+              "n_measured": 4,
+              "n_bad": 0,
+              "bad": [],
+              "unconverged": [],
+              "max_scale_err": 1.2e-05,
+              "max_pos_err_px": 0.023,
+              "flip": "ok",
+              "flip_median_diff": 0.58125,
+              "flip_samples": 4
+            }
+          }
+        ]
+      }
+    },
+    "c5_audio": {
+      "status": "pass_with_exceptions",
+      "summary": "21 segments measured, max |lag| 0.99 ms, 1 explained exceptions, 0 failures",
+      "details": {
+        "status": "pass_with_exceptions",
+        "summary": "21 segments measured, max |lag| 0.99 ms, 1 explained exceptions, 0 failures",
+        "failures": [],
+        "exceptions": [
+          "S14: not_in_raw"
+        ],
+        "segments": [
+          {
+            "id": 1,
+            "type": "raw",
+            "audio_range": [
+              0,
+              75
+            ],
+            "duration_s": 2.5,
+            "lag_ms": -0.987,
+            "corr": 0.8985,
+            "result": "ok"
+          },
+          {
+            "id": 2,
+            "type": "raw",
+            "audio_range": [
+              75,
+              165
+            ],
+            "duration_s": 3.0,
+            "lag_ms": -0.988,
+            "corr": 0.9024,
+            "result": "ok"
+          },
+          {
+            "id": 3,
+            "type": "raw",
+            "audio_range": [
+              165,
+              240
+            ],
+            "duration_s": 2.5,
+            "lag_ms": -0.988,
+            "corr": 0.9001,
+            "result": "ok"
+          },
+          {
+            "id": 4,
+            "type": "raw",
+            "audio_range": [
+              240,
+              325
+            ],
+            "duration_s": 2.8333,
+            "lag_ms": -0.989,
+            "corr": 0.9034,
+            "result": "ok"
+          },
+          {
+            "id": 5,
+            "type": "raw",
+            "audio_range": [
+              325,
+              395
+            ],
+            "duration_s": 2.3333,
+            "lag_ms": -0.987,
+            "corr": 0.8862,
+            "result": "ok"
+          },
+          {
+            "id": 6,
+            "type": "raw",
+            "audio_range": [
+              395,
+              425
+            ],
+            "duration_s": 1.0,
+            "lag_ms": -0.988,
+            "corr": 0.8993,
+            "result": "ok"
+          },
+          {
+            "id": 7,
+            "type": "raw",
+            "audio_range": [
+              425,
+              505
+            ],
+            "duration_s": 2.6667,
+            "lag_ms": -0.987,
+            "corr": 0.8993,
+            "result": "ok"
+          },
+          {
+            "id": 8,
+            "type": "raw",
+            "audio_range": [
+              505,
+              565
+            ],
+            "duration_s": 2.0,
+            "lag_ms": -0.987,
+            "corr": 0.8982,
+            "result": "ok"
+          },
+          {
+            "id": 9,
+            "type": "raw",
+            "audio_range": [
+              565,
+              665
+            ],
+            "duration_s": 3.3333,
+            "lag_ms": -0.988,
+            "corr": 0.9043,
+            "result": "ok"
+          },
+          {
+            "id": 10,
+            "type": "raw",
+            "audio_range": [
+              665,
+              731
+            ],
+            "duration_s": 2.2,
+            "lag_ms": -0.651,
+            "corr": 0.8987,
+            "result": "ok"
+          },
+          {
+            "id": 11,
+            "type": "raw",
+            "audio_range": [
+              731,
+              812
+            ],
+            "duration_s": 2.7,
+            "lag_ms": -0.967,
+            "corr": 0.8936,
+            "result": "ok"
+          },
+          {
+            "id": 12,
+            "type": "raw",
+            "audio_range": [
+              806,
+              886
+            ],
+            "duration_s": 2.6667,
+            "lag_ms": -0.987,
+            "corr": 0.8995,
+            "result": "ok"
+          },
+          {
+            "id": 13,
+            "type": "raw",
+            "audio_range": [
+              886,
+              936
+            ],
+            "duration_s": 1.6667,
+            "lag_ms": -0.987,
+            "corr": 0.8992,
+            "result": "ok"
+          },
+          {
+            "id": 14,
+            "type": "not_in_raw",
+            "result": "exception",
+            "code": "not_in_raw"
+          },
+          {
+            "id": 15,
+            "type": "raw",
+            "audio_range": [
+              966,
+              1056
+            ],
+            "duration_s": 3.0,
+            "lag_ms": -0.987,
+            "corr": 0.8999,
+            "result": "ok"
+          },
+          {
+            "id": 16,
+            "type": "raw",
+            "audio_range": [
+              1056,
+              1126
+            ],
+            "duration_s": 2.3333,
+            "lag_ms": -0.001,
+            "corr": 0.9056,
+            "result": "ok"
+          },
+          {
+            "id": 17,
+            "type": "raw",
+            "audio_range": [
+              1126,
+              1186
+            ],
+            "duration_s": 2.0,
+            "lag_ms": -0.987,
+            "corr": 0.9024,
+            "result": "ok"
+          },
+          {
+            "id": 18,
+            "type": "raw",
+            "audio_range": [
+              1186,
+              1271
+            ],
+            "duration_s": 2.8333,
+            "lag_ms": -0.987,
+            "corr": 0.9036,
+            "result": "ok"
+          },
+          {
+            "id": 19,
+            "type": "raw",
+            "audio_range": [
+              1271,
+              1341
+            ],
+            "duration_s": 2.3333,
+            "lag_ms": -0.987,
+            "corr": 0.9046,
+            "result": "ok"
+          },
+          {
+            "id": 20,
+            "type": "raw",
+            "audio_range": [
+              1341,
+              1421
+            ],
+            "duration_s": 2.6667,
+            "lag_ms": -0.988,
+            "corr": 0.9036,
+            "result": "ok"
+          },
+          {
+            "id": 21,
+            "type": "raw",
+            "audio_range": [
+              1421,
+              1511
+            ],
+            "duration_s": 3.0,
+            "lag_ms": -0.988,
+            "corr": 0.9038,
+            "result": "ok"
+          },
+          {
+            "id": 22,
+            "type": "raw",
+            "audio_range": [
+              1511,
+              1571
+            ],
+            "duration_s": 2.0,
+            "lag_ms": -0.987,
+            "corr": 0.9032,
+            "result": "ok"
+          }
+        ],
+        "tolerance_ms": 10.0,
+        "audio_source": "original rate 48000 Hz"
+      }
+    },
+    "c6_after_effects": {
+      "status": "pass",
+      "summary": "mock run: 19/19 checks ok (mock only: After Effects not installed)",
+      "details": {
+        "mock": {
+          "status": "pass",
+          "summary": "mock run: 19/19 checks ok",
+          "failures": [],
+          "checks": [
+            {
+              "check": "jsx ran without exception",
+              "ok": true,
+              "detail": null
+            },
+            {
+              "check": "no strict-mock violations",
+              "ok": true,
+              "detail": []
+            },
+            {
+              "check": "no error alerts",
+              "ok": true,
+              "detail": []
+            },
+            {
+              "check": "one balanced undo group",
+              "ok": true,
+              "detail": {
+                "begin": 1,
+                "end": 1
+              }
+            },
+            {
+              "check": "MAIN comp created",
+              "ok": true,
+              "detail": [
+                "Recreated Edit",
+                "Video Box"
+              ]
+            },
+            {
+              "check": "MAIN frameRate == main_fps",
+              "ok": true,
+              "detail": {
+                "recorded": 30,
+                "want": "30/1"
+              }
+            },
+            {
+              "check": "MAIN duration == frames * frameDuration",
+              "ok": true,
+              "detail": {
+                "recorded": 52.36666666666667,
+                "want": 52.36666666666667,
+                "frames": 1571
+              }
+            },
+            {
+              "check": "work area == whole comp",
+              "ok": true,
+              "detail": {
+                "workAreaStart": 0,
+                "workAreaDuration": 52.36666666666667
+              }
+            },
+            {
+              "check": "MAIN width",
+              "ok": true,
+              "detail": {
+                "recorded": 1080,
+                "want": 1080
+              }
+            },
+            {
+              "check": "MAIN height",
+              "ok": true,
+              "detail": {
+                "recorded": 1920,
+                "want": 1920
+              }
+            },
+            {
+              "check": "saved <script dir>/recreated_edit.aep",
+              "ok": true,
+              "detail": {
+                "recorded": [
+                  "/home/user/MovieRecaps/examples/synthetic_full/recreated_edit.aep"
+                ],
+                "want": "/home/user/MovieRecaps/examples/synthetic_full/recreated_edit.aep"
+              }
+            },
+            {
+              "check": "one RAW video layer per segment",
+              "ok": true,
+              "detail": {
+                "recorded": 21,
+                "plan": 21
+              }
+            },
+            {
+              "check": "every plan layer present with the plan's name/startTime/stretch/in/out",
+              "ok": true,
+              "detail": []
+            },
+            {
+              "check": "media_missing: no exception",
+              "ok": true,
+              "detail": null
+            },
+            {
+              "check": "media_missing: File.openDialog called",
+              "ok": true,
+              "detail": 1
+            },
+            {
+              "check": "media_missing: aborted without saving",
+              "ok": true,
+              "detail": []
+            },
+            {
+              "check": "media_missing: clean abort message",
+              "ok": true,
+              "detail": [
+                "Cancelled: the RAW video raw.mp4 was not found (next to this script in media/raw.mp4, at /home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4, or via the file dialog). Nothing was built."
+              ]
+            },
+            {
+              "check": "new_project_null: clean abort",
+              "ok": true,
+              "detail": [
+                "Cancelled: After Effects did not create a new project. Nothing was built."
+              ]
+            },
+            {
+              "check": "no_marker_property: still builds and saves",
+              "ok": true,
+              "detail": [
+                "match_cuts: built \"Recreated Edit\" and saved recreated_edit.aep\n21 RAW segments, 1 NOT-IN-RAW placeholders, 21 cuts\nduration 52.367 s = 1571 frames at 30/1 fps\n1 audio placeholder(s), 6 overlay guide(s): the competitor's own music / text - add yours there\nWarnings (2):\n- comp markers could not be added (Cannot read properties of undefined (reading 'setValueAtTime')); the cut list is in cutlist.csv\n- S10: AE-rule-sensitive (phase margin 0.733 ms); if AE shows a neighbouring frame, re-export with --ae-time-mode frames"
+              ]
+            }
+          ],
+          "switched_to_frames": [],
+          "scenarios": [
+            "default",
+            "media_missing",
+            "new_project_null",
+            "no_marker_property"
+          ]
+        },
+        "s9_6": {
+          "status": "not_available",
+          "summary": "aerender not available on this machine (criterion 6 is mock-only)",
+          "failures": []
+        },
+        "mock_only": true
+      }
+    }
+  },
+  "checks": {
+    "s9_1_coverage": {
+      "status": "pass",
+      "summary": "22 segments (1 NOT-IN-RAW), 1571/1571 frames covered, 0 gaps, 1 overlaps (1 transitions), 1 full-screen period(s)",
+      "failures": [],
+      "exceptions": [],
+      "frames": 1571,
+      "covered": 1571,
+      "gaps": [],
+      "overlaps": [
+        [
+          806,
+          811
+        ]
+      ],
+      "transitions": [
+        {
+          "frames": [
+            806,
+            811
+          ],
+          "from": 11,
+          "to": 12,
+          "type": "crossfade"
+        }
+      ],
+      "extra_region_frames": [],
+      "fullscreen_frames": [
+        [
+          395,
+          424
+        ]
+      ]
+    },
+    "s9_2_ae_sim": {
+      "status": "pass",
+      "summary": "plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked) | mock record: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+      "failures": [],
+      "exceptions": [],
+      "plan": {
+        "status": "pass",
+        "summary": "plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+        "failures": [],
+        "exceptions": [],
+        "reference": "pre-segmentation measurement (refine)",
+        "matched": 1535,
+        "exact": 1535,
+        "fraction_ok": 1.0,
+        "ambiguous_identical": [],
+        "timing_tie": [],
+        "grid": [],
+        "n_grid": 0,
+        "reassigned": [],
+        "n_reassigned": 0,
+        "mismatches": [],
+        "n_mismatches": 0,
+        "excluded_near_cuts": 0,
+        "plan_mismatches": [],
+        "n_plan_mismatches": 0,
+        "transition_frames_checked": 6,
+        "solid_frames_checked": 30
+      },
+      "mock": {
+        "status": "pass",
+        "summary": "mock record: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked)",
+        "failures": [],
+        "exceptions": [],
+        "reference": "pre-segmentation measurement (refine)",
+        "matched": 1535,
+        "exact": 1535,
+        "fraction_ok": 1.0,
+        "ambiguous_identical": [],
+        "timing_tie": [],
+        "grid": [],
+        "n_grid": 0,
+        "reassigned": [],
+        "n_reassigned": 0,
+        "mismatches": [],
+        "n_mismatches": 0,
+        "excluded_near_cuts": 0,
+        "plan_mismatches": [],
+        "n_plan_mismatches": 0,
+        "transition_frames_checked": 6,
+        "solid_frames_checked": 30
+      }
+    },
+    "s9_3_visual": {
+      "status": "pass",
+      "summary": "1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+      "failures": [],
+      "exceptions": [],
+      "threshold": 0.9,
+      "distribution": {
+        "min": 0.99027,
+        "p1": 0.99043,
+        "p5": 0.99543,
+        "median": 0.99958,
+        "mean": 0.99877,
+        "hist": {
+          "-1.00-0.50": 0,
+          "0.50-0.80": 0,
+          "0.80-0.90": 0,
+          "0.90-0.95": 0,
+          "0.95-0.98": 0,
+          "0.98-0.99": 0,
+          "0.99-1.01": 1535
+        }
+      },
+      "failed_frames": [],
+      "blend_frames_min": 0.99143,
+      "blend_threshold": 0.9,
+      "blend_failed_frames": [],
+      "uniform_frames_checked": 0,
+      "uniform_failed": [],
+      "placeholder_frames_checked": 30,
+      "placeholder_failed": [],
+      "source": "preview_recreation.mp4",
+      "scores_file": "/tmp/pytest-of-root/pytest-265/e2e_full0/work/verify_zncc.npy",
+      "preview_file": {
+        "status": "pass",
+        "summary": "delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+        "frames": 1571,
+        "width": 1080,
+        "height": 1920,
+        "compared": 0,
+        "mismatches": []
+      }
+    },
+    "s9_4_cut_images": {
+      "status": "pass",
+      "summary": "21/21 cut images in examples/synthetic_full/debug/cuts",
+      "failures": [],
+      "images": [
+        "examples/synthetic_full/debug/cuts/cut_01.png",
+        "examples/synthetic_full/debug/cuts/cut_02.png",
+        "examples/synthetic_full/debug/cuts/cut_03.png",
+        "examples/synthetic_full/debug/cuts/cut_04.png",
+        "examples/synthetic_full/debug/cuts/cut_05.png",
+        "examples/synthetic_full/debug/cuts/cut_06.png",
+        "examples/synthetic_full/debug/cuts/cut_07.png",
+        "examples/synthetic_full/debug/cuts/cut_08.png",
+        "examples/synthetic_full/debug/cuts/cut_09.png",
+        "examples/synthetic_full/debug/cuts/cut_10.png",
+        "examples/synthetic_full/debug/cuts/cut_11.png",
+        "examples/synthetic_full/debug/cuts/cut_12.png",
+        "examples/synthetic_full/debug/cuts/cut_13.png",
+        "examples/synthetic_full/debug/cuts/cut_14.png",
+        "examples/synthetic_full/debug/cuts/cut_15.png",
+        "examples/synthetic_full/debug/cuts/cut_16.png",
+        "examples/synthetic_full/debug/cuts/cut_17.png",
+        "examples/synthetic_full/debug/cuts/cut_18.png",
+        "examples/synthetic_full/debug/cuts/cut_19.png",
+        "examples/synthetic_full/debug/cuts/cut_20.png",
+        "examples/synthetic_full/debug/cuts/cut_21.png"
+      ]
+    },
+    "s9_5_audio": {
+      "status": "pass_with_exceptions",
+      "summary": "21 segments measured, max |lag| 0.99 ms, 1 explained exceptions, 0 failures",
+      "failures": [],
+      "exceptions": [
+        "S14: not_in_raw"
+      ],
+      "segments": [
+        {
+          "id": 1,
+          "type": "raw",
+          "audio_range": [
+            0,
+            75
+          ],
+          "duration_s": 2.5,
+          "lag_ms": -0.987,
+          "corr": 0.8985,
+          "result": "ok"
+        },
+        {
+          "id": 2,
+          "type": "raw",
+          "audio_range": [
+            75,
+            165
+          ],
+          "duration_s": 3.0,
+          "lag_ms": -0.988,
+          "corr": 0.9024,
+          "result": "ok"
+        },
+        {
+          "id": 3,
+          "type": "raw",
+          "audio_range": [
+            165,
+            240
+          ],
+          "duration_s": 2.5,
+          "lag_ms": -0.988,
+          "corr": 0.9001,
+          "result": "ok"
+        },
+        {
+          "id": 4,
+          "type": "raw",
+          "audio_range": [
+            240,
+            325
+          ],
+          "duration_s": 2.8333,
+          "lag_ms": -0.989,
+          "corr": 0.9034,
+          "result": "ok"
+        },
+        {
+          "id": 5,
+          "type": "raw",
+          "audio_range": [
+            325,
+            395
+          ],
+          "duration_s": 2.3333,
+          "lag_ms": -0.987,
+          "corr": 0.8862,
+          "result": "ok"
+        },
+        {
+          "id": 6,
+          "type": "raw",
+          "audio_range": [
+            395,
+            425
+          ],
+          "duration_s": 1.0,
+          "lag_ms": -0.988,
+          "corr": 0.8993,
+          "result": "ok"
+        },
+        {
+          "id": 7,
+          "type": "raw",
+          "audio_range": [
+            425,
+            505
+          ],
+          "duration_s": 2.6667,
+          "lag_ms": -0.987,
+          "corr": 0.8993,
+          "result": "ok"
+        },
+        {
+          "id": 8,
+          "type": "raw",
+          "audio_range": [
+            505,
+            565
+          ],
+          "duration_s": 2.0,
+          "lag_ms": -0.987,
+          "corr": 0.8982,
+          "result": "ok"
+        },
+        {
+          "id": 9,
+          "type": "raw",
+          "audio_range": [
+            565,
+            665
+          ],
+          "duration_s": 3.3333,
+          "lag_ms": -0.988,
+          "corr": 0.9043,
+          "result": "ok"
+        },
+        {
+          "id": 10,
+          "type": "raw",
+          "audio_range": [
+            665,
+            731
+          ],
+          "duration_s": 2.2,
+          "lag_ms": -0.651,
+          "corr": 0.8987,
+          "result": "ok"
+        },
+        {
+          "id": 11,
+          "type": "raw",
+          "audio_range": [
+            731,
+            812
+          ],
+          "duration_s": 2.7,
+          "lag_ms": -0.967,
+          "corr": 0.8936,
+          "result": "ok"
+        },
+        {
+          "id": 12,
+          "type": "raw",
+          "audio_range": [
+            806,
+            886
+          ],
+          "duration_s": 2.6667,
+          "lag_ms": -0.987,
+          "corr": 0.8995,
+          "result": "ok"
+        },
+        {
+          "id": 13,
+          "type": "raw",
+          "audio_range": [
+            886,
+            936
+          ],
+          "duration_s": 1.6667,
+          "lag_ms": -0.987,
+          "corr": 0.8992,
+          "result": "ok"
+        },
+        {
+          "id": 14,
+          "type": "not_in_raw",
+          "result": "exception",
+          "code": "not_in_raw"
+        },
+        {
+          "id": 15,
+          "type": "raw",
+          "audio_range": [
+            966,
+            1056
+          ],
+          "duration_s": 3.0,
+          "lag_ms": -0.987,
+          "corr": 0.8999,
+          "result": "ok"
+        },
+        {
+          "id": 16,
+          "type": "raw",
+          "audio_range": [
+            1056,
+            1126
+          ],
+          "duration_s": 2.3333,
+          "lag_ms": -0.001,
+          "corr": 0.9056,
+          "result": "ok"
+        },
+        {
+          "id": 17,
+          "type": "raw",
+          "audio_range": [
+            1126,
+            1186
+          ],
+          "duration_s": 2.0,
+          "lag_ms": -0.987,
+          "corr": 0.9024,
+          "result": "ok"
+        },
+        {
+          "id": 18,
+          "type": "raw",
+          "audio_range": [
+            1186,
+            1271
+          ],
+          "duration_s": 2.8333,
+          "lag_ms": -0.987,
+          "corr": 0.9036,
+          "result": "ok"
+        },
+        {
+          "id": 19,
+          "type": "raw",
+          "audio_range": [
+            1271,
+            1341
+          ],
+          "duration_s": 2.3333,
+          "lag_ms": -0.987,
+          "corr": 0.9046,
+          "result": "ok"
+        },
+        {
+          "id": 20,
+          "type": "raw",
+          "audio_range": [
+            1341,
+            1421
+          ],
+          "duration_s": 2.6667,
+          "lag_ms": -0.988,
+          "corr": 0.9036,
+          "result": "ok"
+        },
+        {
+          "id": 21,
+          "type": "raw",
+          "audio_range": [
+            1421,
+            1511
+          ],
+          "duration_s": 3.0,
+          "lag_ms": -0.988,
+          "corr": 0.9038,
+          "result": "ok"
+        },
+        {
+          "id": 22,
+          "type": "raw",
+          "audio_range": [
+            1511,
+            1571
+          ],
+          "duration_s": 2.0,
+          "lag_ms": -0.987,
+          "corr": 0.9032,
+          "result": "ok"
+        }
+      ],
+      "tolerance_ms": 10.0,
+      "audio_source": "original rate 48000 Hz"
+    },
+    "s9_6_ae_render": {
+      "status": "not_available",
+      "summary": "aerender not available on this machine (criterion 6 is mock-only)",
+      "failures": []
+    },
+    "s9_7_determinism": {
+      "status": "pass",
+      "summary": "cutlist re-assembled from caches is byte-identical",
+      "failures": [],
+      "differences": [],
+      "previous_run": {
+        "compared": false,
+        "reason": "no previous cutlist.json"
+      },
+      "warnings": []
+    },
+    "s9_8_deliverables": {
+      "status": "pass",
+      "summary": "9/9 deliverables present, 1 skipped (recreated_edit.aep (After Effects not installed)), exports validated, 0 stage errors",
+      "failures": [],
+      "warnings": [],
+      "skipped": [
+        "recreated_edit.aep (After Effects not installed)"
+      ],
+      "items": [
+        {
+          "key": "jsx",
+          "deliverable": "build_ae_project.jsx",
+          "path": "examples/synthetic_full/build_ae_project.jsx",
+          "exists": true
+        },
+        {
+          "key": "media_raw",
+          "deliverable": "RAW media imported by the JSX",
+          "path": "examples/synthetic_full/media/raw.mp4",
+          "exists": true
+        },
+        {
+          "key": "media_competitor",
+          "deliverable": "competitor reference media",
+          "path": "examples/synthetic_full/media/competitor_ref.mp4",
+          "exists": true
+        },
+        {
+          "key": "cutlist",
+          "deliverable": "cutlist.json",
+          "path": "examples/synthetic_full/cutlist.json",
+          "exists": true
+        },
+        {
+          "key": "csv",
+          "deliverable": "cutlist.csv",
+          "path": "examples/synthetic_full/cutlist.csv",
+          "exists": true
+        },
+        {
+          "key": "xml",
+          "deliverable": "recreated_edit.xml",
+          "path": "examples/synthetic_full/recreated_edit.xml",
+          "exists": true
+        },
+        {
+          "key": "edl",
+          "deliverable": "recreated_edit.edl",
+          "path": "examples/synthetic_full/recreated_edit.edl",
+          "exists": true
+        },
+        {
+          "key": "preview",
+          "deliverable": "preview_recreation.mp4",
+          "path": "examples/synthetic_full/preview_recreation.mp4",
+          "exists": true
+        },
+        {
+          "key": "compare",
+          "deliverable": "compare.mp4",
+          "path": "examples/synthetic_full/compare.mp4",
+          "exists": true
+        }
+      ]
+    }
+  },
+  "failures": [],
+  "main_fps": "30/1",
+  "frames": 1571,
+  "main_frames": 1571
+}

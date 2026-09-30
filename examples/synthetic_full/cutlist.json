@@ -1,0 +1,3615 @@
+{
+  "version": 1,
+  "competitor": {
+    "file": "media/competitor_ref.mp4",
+    "file_rel": "media/competitor_ref.mp4",
+    "file_abs": "/home/user/MovieRecaps/examples/synthetic_full/media/competitor_ref.mp4",
+    "source_path": "/home/user/MovieRecaps/work/synthetic/full/competitor.mp4",
+    "width": 1080,
+    "height": 1920,
+    "fps": "30/1",
+    "frames": 1571,
+    "duration_s": 52.366666667,
+    "conformed": false,
+    "conform_reason": "AE-safe: used unchanged",
+    "container": "mp4",
+    "codec": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "has_audio": true,
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "audio_channels": 2,
+    "hash": "15ad0cd6aa862e978b2eb1481bc8a9816f69d0f0",
+    "source_hash": "15ad0cd6aa862e978b2eb1481bc8a9816f69d0f0",
+    "source_issues": []
+  },
+  "raw": {
+    "file": "media/raw.mp4",
+    "file_rel": "media/raw.mp4",
+    "file_abs": "/home/user/MovieRecaps/examples/synthetic_full/media/raw.mp4",
+    "source_path": "/home/user/MovieRecaps/work/synthetic/full/raw.mp4",
+    "width": 1920,
+    "height": 1080,
+    "fps": "30000/1001",
+    "frames": 5400,
+    "duration_s": 180.18,
+    "conformed": false,
+    "conform_reason": "AE-safe: used unchanged",
+    "container": "mp4",
+    "codec": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "has_audio": true,
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "audio_channels": 1,
+    "hash": "96526b82e615a8db153ea14b80e7c47e5a7e5e8d",
+    "source_hash": "96526b82e615a8db153ea14b80e7c47e5a7e5e8d",
+    "source_issues": []
+  },
+  "layout": {
+    "mode": "match",
+    "layout_kind": "boxed",
+    "canvas_bg": "#000000",
+    "box": {
+      "x": 60.0,
+      "y": 460.0,
+      "w": 960.0,
+      "h": 1000.0,
+      "corner_radius": 40.0
+    },
+    "background": "solid",
+    "background_detail": {
+      "color": "#000000",
+      "gray": 0.0,
+      "type": "solid"
+    },
+    "zones": [
+      {
+        "type": "logo",
+        "x": 64.0,
+        "y": 74.0,
+        "w": 92.0,
+        "h": 92.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "compact blob (canvas); colours #e1252e 73%, #fefdfc 11%, #dc2730 9%"
+      },
+      {
+        "type": "channel_name",
+        "x": 182.0,
+        "y": 98.0,
+        "w": 318.0,
+        "h": 44.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "text next to the logo; colours #fefefe 95%"
+      },
+      {
+        "type": "title",
+        "x": 298.0,
+        "y": 206.0,
+        "w": 480.0,
+        "h": 178.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "multicolour; text block above the box; colours #ffffff 41%, #fdd01c 24%, #fbd023 16%, #fe2e30 12%"
+      },
+      {
+        "type": "captions",
+        "x": 284.0,
+        "y": 1160.0,
+        "w": 514.0,
+        "h": 70.0,
+        "comp_in": 15,
+        "comp_out": 1557,
+        "static": false,
+        "text": "",
+        "notes": "96 caption events; white text with dark outline, median glyph height 54 px"
+      },
+      {
+        "type": "watermark",
+        "x": 360.0,
+        "y": 1492.0,
+        "w": 360.0,
+        "h": 34.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "below the box; colours #8b8b8b 91%, #7a7a7a 8%"
+      }
+    ],
+    "periods": [
+      {
+        "comp_in": 0,
+        "comp_out": 395,
+        "mode": "boxed",
+        "box": {
+          "x": 60.0,
+          "y": 460.0,
+          "w": 960.0,
+          "h": 1000.0,
+          "corner_radius": 40.0
+        }
+      },
+      {
+        "comp_in": 395,
+        "comp_out": 425,
+        "mode": "fullscreen",
+        "box": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 1080.0,
+          "h": 1920.0,
+          "corner_radius": 0.0
+        }
+      },
+      {
+        "comp_in": 425,
+        "comp_out": 1571,
+        "mode": "boxed",
+        "box": {
+          "x": 60.0,
+          "y": 460.0,
+          "w": 960.0,
+          "h": 1000.0,
+          "corner_radius": 40.0
+        }
+      }
+    ],
+    "regions": [],
+    "captions": [
+      {
+        "comp_in": 15,
+        "comp_out": 28,
+        "h": 54.0,
+        "type": "captions",
+        "w": 186.0,
+        "x": 444.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 28,
+        "comp_out": 42,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 42,
+        "comp_out": 58,
+        "h": 52.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 58,
+        "comp_out": 71,
+        "h": 54.0,
+        "type": "captions",
+        "w": 366.0,
+        "x": 360.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 71,
+        "comp_out": 85,
+        "h": 54.0,
+        "type": "captions",
+        "w": 514.0,
+        "x": 284.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 103,
+        "comp_out": 111,
+        "h": 54.0,
+        "type": "captions",
+        "w": 400.0,
+        "x": 340.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 111,
+        "comp_out": 121,
+        "h": 58.0,
+        "type": "captions",
+        "w": 346.0,
+        "x": 370.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 121,
+        "comp_out": 131,
+        "h": 54.0,
+        "type": "captions",
+        "w": 180.0,
+        "x": 452.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 137,
+        "comp_out": 152,
+        "h": 14.0,
+        "type": "text",
+        "w": 14.0,
+        "x": 844.0,
+        "y": 1312.0
+      },
+      {
+        "comp_in": 150,
+        "comp_out": 158,
+        "h": 52.0,
+        "type": "captions",
+        "w": 70.0,
+        "x": 508.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 154,
+        "comp_out": 240,
+        "h": 14.0,
+        "type": "text",
+        "w": 14.0,
+        "x": 844.0,
+        "y": 1312.0
+      },
+      {
+        "comp_in": 158,
+        "comp_out": 170,
+        "h": 54.0,
+        "type": "captions",
+        "w": 330.0,
+        "x": 374.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 170,
+        "comp_out": 185,
+        "h": 54.0,
+        "type": "captions",
+        "w": 286.0,
+        "x": 394.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 185,
+        "comp_out": 194,
+        "h": 54.0,
+        "type": "captions",
+        "w": 130.0,
+        "x": 476.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 194,
+        "comp_out": 209,
+        "h": 54.0,
+        "type": "captions",
+        "w": 192.0,
+        "x": 444.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 218,
+        "comp_out": 233,
+        "h": 54.0,
+        "type": "captions",
+        "w": 250.0,
+        "x": 418.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 233,
+        "comp_out": 243,
+        "h": 52.0,
+        "type": "captions",
+        "w": 208.0,
+        "x": 436.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 243,
+        "comp_out": 254,
+        "h": 52.0,
+        "type": "captions",
+        "w": 218.0,
+        "x": 428.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 254,
+        "comp_out": 264,
+        "h": 52.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 281,
+        "comp_out": 297,
+        "h": 60.0,
+        "type": "captions",
+        "w": 262.0,
+        "x": 408.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 297,
+        "comp_out": 309,
+        "h": 60.0,
+        "type": "captions",
+        "w": 180.0,
+        "x": 450.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 309,
+        "comp_out": 321,
+        "h": 52.0,
+        "type": "captions",
+        "w": 176.0,
+        "x": 450.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 335,
+        "comp_out": 347,
+        "h": 54.0,
+        "type": "captions",
+        "w": 166.0,
+        "x": 454.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 347,
+        "comp_out": 359,
+        "h": 52.0,
+        "type": "captions",
+        "w": 198.0,
+        "x": 442.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 359,
+        "comp_out": 375,
+        "h": 54.0,
+        "type": "captions",
+        "w": 166.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 375,
+        "comp_out": 390,
+        "h": 52.0,
+        "type": "captions",
+        "w": 326.0,
+        "x": 378.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 395,
+        "comp_out": 425,
+        "h": 96.0,
+        "type": "text",
+        "w": 520.0,
+        "x": 88.0,
+        "y": 460.0
+      },
+      {
+        "comp_in": 408,
+        "comp_out": 421,
+        "h": 52.0,
+        "type": "captions",
+        "w": 242.0,
+        "x": 420.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 421,
+        "comp_out": 432,
+        "h": 56.0,
+        "type": "captions",
+        "w": 380.0,
+        "x": 350.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 432,
+        "comp_out": 448,
+        "h": 52.0,
+        "type": "captions",
+        "w": 212.0,
+        "x": 436.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 448,
+        "comp_out": 460,
+        "h": 52.0,
+        "type": "captions",
+        "w": 202.0,
+        "x": 440.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 460,
+        "comp_out": 469,
+        "h": 56.0,
+        "type": "captions",
+        "w": 438.0,
+        "x": 320.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 487,
+        "comp_out": 502,
+        "h": 54.0,
+        "type": "captions",
+        "w": 236.0,
+        "x": 424.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 502,
+        "comp_out": 515,
+        "h": 52.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 514,
+        "comp_out": 565,
+        "h": 18.0,
+        "type": "text",
+        "w": 20.0,
+        "x": 482.0,
+        "y": 878.0
+      },
+      {
+        "comp_in": 515,
+        "comp_out": 524,
+        "h": 52.0,
+        "type": "captions",
+        "w": 162.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 532,
+        "comp_out": 540,
+        "h": 54.0,
+        "type": "captions",
+        "w": 368.0,
+        "x": 356.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 540,
+        "comp_out": 549,
+        "h": 52.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 549,
+        "comp_out": 561,
+        "h": 54.0,
+        "type": "captions",
+        "w": 200.0,
+        "x": 442.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 561,
+        "comp_out": 577,
+        "h": 52.0,
+        "type": "captions",
+        "w": 202.0,
+        "x": 442.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 591,
+        "comp_out": 607,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 607,
+        "comp_out": 622,
+        "h": 54.0,
+        "type": "captions",
+        "w": 300.0,
+        "x": 390.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 622,
+        "comp_out": 635,
+        "h": 68.0,
+        "type": "captions",
+        "w": 448.0,
+        "x": 318.0,
+        "y": 1162.0
+      },
+      {
+        "comp_in": 635,
+        "comp_out": 646,
+        "h": 54.0,
+        "type": "captions",
+        "w": 186.0,
+        "x": 444.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 646,
+        "comp_out": 658,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 669,
+        "comp_out": 680,
+        "h": 52.0,
+        "type": "captions",
+        "w": 210.0,
+        "x": 434.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 680,
+        "comp_out": 690,
+        "h": 54.0,
+        "type": "captions",
+        "w": 340.0,
+        "x": 372.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 690,
+        "comp_out": 706,
+        "h": 54.0,
+        "type": "captions",
+        "w": 160.0,
+        "x": 462.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 706,
+        "comp_out": 714,
+        "h": 60.0,
+        "type": "captions",
+        "w": 232.0,
+        "x": 424.0,
+        "y": 1160.0
+      },
+      {
+        "comp_in": 723,
+        "comp_out": 739,
+        "h": 56.0,
+        "type": "captions",
+        "w": 198.0,
+        "x": 438.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 739,
+        "comp_out": 753,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 778,
+        "comp_out": 789,
+        "h": 54.0,
+        "type": "captions",
+        "w": 366.0,
+        "x": 360.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 801,
+        "comp_out": 809,
+        "h": 54.0,
+        "type": "captions",
+        "w": 400.0,
+        "x": 340.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 809,
+        "comp_out": 822,
+        "h": 54.0,
+        "type": "captions",
+        "w": 346.0,
+        "x": 370.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 822,
+        "comp_out": 837,
+        "h": 54.0,
+        "type": "captions",
+        "w": 180.0,
+        "x": 452.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 853,
+        "comp_out": 865,
+        "h": 52.0,
+        "type": "captions",
+        "w": 70.0,
+        "x": 508.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 865,
+        "comp_out": 875,
+        "h": 54.0,
+        "type": "captions",
+        "w": 330.0,
+        "x": 374.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 875,
+        "comp_out": 891,
+        "h": 54.0,
+        "type": "captions",
+        "w": 286.0,
+        "x": 394.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 910,
+        "comp_out": 922,
+        "h": 54.0,
+        "type": "captions",
+        "w": 130.0,
+        "x": 476.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 922,
+        "comp_out": 938,
+        "h": 56.0,
+        "type": "captions",
+        "w": 192.0,
+        "x": 444.0,
+        "y": 1164.0
+      },
+      {
+        "comp_in": 938,
+        "comp_out": 953,
+        "h": 54.0,
+        "type": "captions",
+        "w": 250.0,
+        "x": 418.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 970,
+        "comp_out": 978,
+        "h": 52.0,
+        "type": "captions",
+        "w": 208.0,
+        "x": 436.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 978,
+        "comp_out": 992,
+        "h": 52.0,
+        "type": "captions",
+        "w": 218.0,
+        "x": 428.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 992,
+        "comp_out": 1004,
+        "h": 52.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1004,
+        "comp_out": 1012,
+        "h": 54.0,
+        "type": "captions",
+        "w": 262.0,
+        "x": 408.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1023,
+        "comp_out": 1037,
+        "h": 54.0,
+        "type": "captions",
+        "w": 180.0,
+        "x": 450.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1037,
+        "comp_out": 1049,
+        "h": 52.0,
+        "type": "captions",
+        "w": 176.0,
+        "x": 450.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1049,
+        "comp_out": 1062,
+        "h": 54.0,
+        "type": "captions",
+        "w": 166.0,
+        "x": 454.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1062,
+        "comp_out": 1077,
+        "h": 52.0,
+        "type": "captions",
+        "w": 198.0,
+        "x": 442.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1093,
+        "comp_out": 1106,
+        "h": 54.0,
+        "type": "captions",
+        "w": 166.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1106,
+        "comp_out": 1119,
+        "h": 52.0,
+        "type": "captions",
+        "w": 326.0,
+        "x": 378.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1119,
+        "comp_out": 1127,
+        "h": 52.0,
+        "type": "captions",
+        "w": 242.0,
+        "x": 420.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1127,
+        "comp_out": 1135,
+        "h": 54.0,
+        "type": "captions",
+        "w": 380.0,
+        "x": 350.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1151,
+        "comp_out": 1164,
+        "h": 52.0,
+        "type": "captions",
+        "w": 212.0,
+        "x": 436.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1164,
+        "comp_out": 1174,
+        "h": 52.0,
+        "type": "captions",
+        "w": 202.0,
+        "x": 440.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1174,
+        "comp_out": 1184,
+        "h": 54.0,
+        "type": "captions",
+        "w": 438.0,
+        "x": 320.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1184,
+        "comp_out": 1193,
+        "h": 56.0,
+        "type": "captions",
+        "w": 236.0,
+        "x": 424.0,
+        "y": 1164.0
+      },
+      {
+        "comp_in": 1205,
+        "comp_out": 1216,
+        "h": 56.0,
+        "type": "captions",
+        "w": 156.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1216,
+        "comp_out": 1227,
+        "h": 52.0,
+        "type": "captions",
+        "w": 162.0,
+        "x": 460.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1227,
+        "comp_out": 1240,
+        "h": 54.0,
+        "type": "captions",
+        "w": 368.0,
+        "x": 356.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1240,
+        "comp_out": 1256,
+        "h": 52.0,
+        "type": "captions",
+        "w": 158.0,
+        "x": 458.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1256,
+        "comp_out": 1267,
+        "h": 58.0,
+        "type": "captions",
+        "w": 200.0,
+        "x": 442.0,
+        "y": 1164.0
+      },
+      {
+        "comp_in": 1271,
+        "comp_out": 1286,
+        "h": 16.0,
+        "type": "text",
+        "w": 24.0,
+        "x": 236.0,
+        "y": 1312.0
+      },
+      {
+        "comp_in": 1282,
+        "comp_out": 1295,
+        "h": 52.0,
+        "type": "captions",
+        "w": 202.0,
+        "x": 442.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1295,
+        "comp_out": 1307,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1307,
+        "comp_out": 1320,
+        "h": 54.0,
+        "type": "captions",
+        "w": 300.0,
+        "x": 390.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1320,
+        "comp_out": 1332,
+        "h": 54.0,
+        "type": "captions",
+        "w": 448.0,
+        "x": 318.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1348,
+        "comp_out": 1357,
+        "h": 54.0,
+        "type": "captions",
+        "w": 186.0,
+        "x": 444.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1357,
+        "comp_out": 1370,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1370,
+        "comp_out": 1381,
+        "h": 52.0,
+        "type": "captions",
+        "w": 210.0,
+        "x": 434.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1381,
+        "comp_out": 1392,
+        "h": 54.0,
+        "type": "captions",
+        "w": 340.0,
+        "x": 372.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1392,
+        "comp_out": 1402,
+        "h": 54.0,
+        "type": "captions",
+        "w": 160.0,
+        "x": 462.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1410,
+        "comp_out": 1425,
+        "h": 54.0,
+        "type": "captions",
+        "w": 232.0,
+        "x": 424.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1425,
+        "comp_out": 1433,
+        "h": 64.0,
+        "type": "captions",
+        "w": 186.0,
+        "x": 444.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1433,
+        "comp_out": 1444,
+        "h": 54.0,
+        "type": "captions",
+        "w": 68.0,
+        "x": 506.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1480,
+        "comp_out": 1488,
+        "h": 64.0,
+        "type": "captions",
+        "w": 366.0,
+        "x": 360.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1482,
+        "comp_out": 1511,
+        "h": 14.0,
+        "type": "text",
+        "w": 14.0,
+        "x": 844.0,
+        "y": 1076.0
+      },
+      {
+        "comp_in": 1488,
+        "comp_out": 1502,
+        "h": 64.0,
+        "type": "captions",
+        "w": 514.0,
+        "x": 284.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1502,
+        "comp_out": 1510,
+        "h": 54.0,
+        "type": "captions",
+        "w": 400.0,
+        "x": 340.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1521,
+        "comp_out": 1536,
+        "h": 56.0,
+        "type": "captions",
+        "w": 346.0,
+        "x": 370.0,
+        "y": 1164.0
+      },
+      {
+        "comp_in": 1536,
+        "comp_out": 1544,
+        "h": 54.0,
+        "type": "captions",
+        "w": 180.0,
+        "x": 452.0,
+        "y": 1166.0
+      },
+      {
+        "comp_in": 1544,
+        "comp_out": 1557,
+        "h": 52.0,
+        "type": "captions",
+        "w": 70.0,
+        "x": 508.0,
+        "y": 1166.0
+      }
+    ],
+    "notes": [
+      "frames 395-424 show the video fullscreen (not boxed): their segments cover the whole canvas in the recreation (per-segment box)"
+    ]
+  },
+  "segments": [
+    {
+      "id": 1,
+      "type": "raw",
+      "comp_in": 0,
+      "comp_out": 75,
+      "raw_in_frame": 4700,
+      "raw_in_seconds": 156.826800001,
+      "raw_out_frame": 4774,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.987472945918919,
+        1.014527054081081
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259543674015602,
+        "rotation_deg": 0.0,
+        "tx": -348.93663836141366,
+        "ty": 460.0041325592324
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.987,
+        "corr": 0.8989,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.095
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9984,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        156.8258,
+        156.8567
+      ],
+      "raw_in_interval_both": [
+        156.8258,
+        156.840016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 2,
+      "type": "raw",
+      "comp_in": 75,
+      "comp_out": 165,
+      "raw_in_frame": 60,
+      "raw_in_seconds": 2.005966668,
+      "raw_out_frame": 149,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.989752786494382,
+        1.012247213505618
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259375025106927,
+        "rotation_deg": 0.0,
+        "tx": -348.9282312645097,
+        "ty": 460.0179209487709
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.989,
+        "corr": 0.9025,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.847
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9979,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        2.004966667,
+        2.035366667
+      ],
+      "raw_in_interval_both": [
+        2.004966667,
+        2.018683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 3,
+      "type": "raw",
+      "comp_in": 165,
+      "comp_out": 240,
+      "raw_in_frame": 160,
+      "raw_in_seconds": 5.342133334,
+      "raw_out_frame": 234,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.987472945918919,
+        1.014527054081081
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259200653468105,
+        "rotation_deg": 0.0,
+        "tx": -348.90392268734206,
+        "ty": 460.0202022836622
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.99,
+        "corr": 0.9001,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.098
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.998,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        5.341133333,
+        5.372033333
+      ],
+      "raw_in_interval_both": [
+        5.341133333,
+        5.35535
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 4,
+      "type": "raw",
+      "comp_in": 240,
+      "comp_out": 325,
+      "raw_in_frame": 500,
+      "raw_in_seconds": 16.687133334,
+      "raw_out_frame": 584,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9890833095,
+        1.0129166904999998
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259986563442654,
+        "rotation_deg": 0.0,
+        "tx": -349.0691180254323,
+        "ty": 460.01294524206594
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.991,
+        "corr": 0.9036,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.933
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9976,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        16.686133333,
+        16.7167
+      ],
+      "raw_in_interval_both": [
+        16.686133333,
+        16.700016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 5,
+      "type": "raw",
+      "comp_in": 325,
+      "comp_out": 395,
+      "raw_in_frame": 950,
+      "raw_in_seconds": 31.701633334,
+      "raw_out_frame": 1019,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9864927246086957,
+        1.0155072753913041
+      ],
+      "flip_h": true,
+      "transform": {
+        "scale": 0.9260131761345903,
+        "rotation_deg": 0.0,
+        "tx": -349.05864475107353,
+        "ty": 459.9977138762231
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.985,
+        "corr": 0.8862,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.177
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9983,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        31.700633333,
+        31.7317
+      ],
+      "raw_in_interval_both": [
+        31.700633333,
+        31.715016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 6,
+      "type": "raw",
+      "comp_in": 395,
+      "comp_out": 425,
+      "raw_in_frame": 4250,
+      "raw_in_seconds": 141.8103,
+      "raw_out_frame": 4279,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.966482689586207,
+        1.035517310413793
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.7776846664616772,
+        "rotation_deg": 0.0,
+        "tx": -1166.5937543641069,
+        "ty": 0.17274984775087887
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.989,
+        "corr": 0.8992,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.847
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 1,
+      "box": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1080.0,
+        "h": 1920.0,
+        "corner_radius": 0.0
+      },
+      "confidence": 0.987,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        141.8093,
+        141.8417
+      ],
+      "raw_in_interval_both": [
+        141.8093,
+        141.825016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": "fullscreen layout period (frames 395-424): shown on the whole canvas"
+    },
+    {
+      "id": 7,
+      "type": "raw",
+      "comp_in": 425,
+      "comp_out": 505,
+      "raw_in_frame": 1400,
+      "raw_in_seconds": 46.716966667,
+      "raw_out_frame": 1479,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9883290885822785,
+        1.0136709114177214
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259582426509247,
+        "rotation_deg": 0.0,
+        "tx": -348.9749877110486,
+        "ty": 460.0292084666642
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.985,
+        "corr": 0.8994,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.009
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9969,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        46.715966667,
+        46.7467
+      ],
+      "raw_in_interval_both": [
+        46.715966667,
+        46.730016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 8,
+      "type": "raw",
+      "comp_in": 505,
+      "comp_out": 565,
+      "raw_in_frame": 1490,
+      "raw_in_seconds": 49.719300001,
+      "raw_out_frame": 1549,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9840338643728813,
+        1.0179661356271188
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259433521438922,
+        "rotation_deg": 0.0,
+        "tx": -348.97794915614566,
+        "ty": 460.04451441209295
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.986,
+        "corr": 0.8982,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.344
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.997,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        49.7183,
+        49.7497
+      ],
+      "raw_in_interval_both": [
+        49.7183,
+        49.733016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 9,
+      "type": "raw",
+      "comp_in": 565,
+      "comp_out": 665,
+      "raw_in_frame": 1850,
+      "raw_in_seconds": 61.732633334,
+      "raw_out_frame": 1949,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9908888686666667,
+        1.0111111313333332
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259739564288211,
+        "rotation_deg": 0.0,
+        "tx": -348.99415064546827,
+        "ty": 459.998871831096
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 565,
+          "scale": 0.9259739564288211,
+          "rotation_deg": 0.0,
+          "tx": -348.99415064546827,
+          "ty": 459.998871831096
+        },
+        {
+          "comp_frame": 664,
+          "scale": 1.0370649357086228,
+          "rotation_deg": 0.0,
+          "tx": -455.63431498598163,
+          "ty": 399.942907043642
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.99,
+        "corr": 0.9045,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.681
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9973,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        61.731633333,
+        61.7617
+      ],
+      "raw_in_interval_both": [
+        61.731633333,
+        61.745016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": "animated framing: 2 keys, scale 0.9260->1.0371, easing linear"
+    },
+    {
+      "id": 10,
+      "type": "raw",
+      "comp_in": 665,
+      "comp_out": 731,
+      "raw_in_frame": 2300,
+      "raw_in_seconds": 76.759466667,
+      "raw_out_frame": 2371,
+      "speed": 1.1,
+      "speed_measured": 1.100462686567164,
+      "speed_range": [
+        1.0991372156470587,
+        1.1027966441016948
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259851597126169,
+        "rotation_deg": 0.0,
+        "tx": -349.05360549503837,
+        "ty": 460.01599771838943
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": false,
+        "lag_ms": -0.651,
+        "corr": 0.8986,
+        "exception": null,
+        "phase_source": "video",
+        "lag_ms_video": -0.651
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 0.733333,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9983,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        76.758733333,
+        76.7602
+      ],
+      "raw_in_interval_both": null,
+      "color": null,
+      "label": "",
+      "notes": "AE-rule-sensitive"
+    },
+    {
+      "id": 11,
+      "type": "raw",
+      "comp_in": 731,
+      "comp_out": 812,
+      "raw_in_frame": 2760,
+      "raw_in_seconds": 92.095633334,
+      "raw_out_frame": 2840,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9883290885822785,
+        1.0136709114177214
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259745353378718,
+        "rotation_deg": 0.0,
+        "tx": -348.99680743295926,
+        "ty": 460.0165788112383
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": {
+        "type": "crossfade",
+        "duration_frames": 6,
+        "alpha": [
+          0.0,
+          0.166667,
+          0.333333,
+          0.5,
+          0.666667,
+          0.833333
+        ],
+        "color": null,
+        "notes": "O=806 D=6; measured alpha_B [0.1624, 0.3315, 0.4989, 0.6669, 0.838] at frames [807, 808, 809, 810, 811] (max dev from linear 0.005)"
+      },
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.968,
+        "corr": 0.8942,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.993
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9949,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        92.094633333,
+        92.125366667
+      ],
+      "raw_in_interval_both": [
+        92.094633333,
+        92.108683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 12,
+      "type": "raw",
+      "comp_in": 806,
+      "comp_out": 886,
+      "raw_in_frame": 3210,
+      "raw_in_seconds": 107.110633334,
+      "raw_out_frame": 3289,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9879999740000001,
+        1.014000026
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259900786058466,
+        "rotation_deg": 0.0,
+        "tx": -349.0299918229846,
+        "ty": 460.01697630475314
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": {
+        "type": "crossfade",
+        "duration_frames": 6,
+        "alpha": [
+          0.0,
+          0.166667,
+          0.333333,
+          0.5,
+          0.666667,
+          0.833333
+        ],
+        "color": null,
+        "notes": "O=806 D=6; measured alpha_B [0.1624, 0.3315, 0.4989, 0.6669, 0.838] at frames [807, 808, 809, 810, 811] (max dev from linear 0.005)"
+      },
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.987,
+        "corr": 0.9008,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.045
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9979,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        107.109633333,
+        107.140433333
+      ],
+      "raw_in_interval_both": [
+        107.109633333,
+        107.12375
+      ],
+      "color": null,
+      "label": "",
+      "notes": "crossfade in: O=806, D=6 frames (B's frame at 806 inferred, invisible)"
+    },
+    {
+      "id": 13,
+      "type": "raw",
+      "comp_in": 886,
+      "comp_out": 936,
+      "raw_in_frame": 520,
+      "raw_in_seconds": 17.3533,
+      "raw_out_frame": 569,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9805713877142856,
+        1.0214286122857144
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.0352759919799048,
+        "rotation_deg": 0.0,
+        "tx": -333.9359990761027,
+        "ty": 431.00769911340626
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.985,
+        "corr": 0.8992,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.51
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9973,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        17.3523,
+        17.384033333
+      ],
+      "raw_in_interval_both": [
+        17.3523,
+        17.36735
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 14,
+      "type": "not_in_raw",
+      "comp_in": 936,
+      "comp_out": 966,
+      "raw_in_frame": null,
+      "raw_in_seconds": null,
+      "raw_out_frame": null,
+      "speed": 1.0,
+      "speed_measured": null,
+      "speed_range": null,
+      "flip_h": false,
+      "transform": null,
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": null,
+        "corr": null,
+        "exception": "not_in_raw",
+        "phase_source": null,
+        "lag_ms_video": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": null,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9835,
+      "ambiguous_frames": [],
+      "raw_in_interval": null,
+      "raw_in_interval_both": null,
+      "color": null,
+      "label": "MISSING - not in RAW (00:00:31:06-00:00:32:06)",
+      "notes": "no RAW match (NOT-IN-RAW placeholder)"
+    },
+    {
+      "id": 15,
+      "type": "raw",
+      "comp_in": 966,
+      "comp_out": 1056,
+      "raw_in_frame": 3650,
+      "raw_in_seconds": 121.792300001,
+      "raw_out_frame": 3739,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.989752786494382,
+        1.012247213505618
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259575944146434,
+        "rotation_deg": 0.0,
+        "tx": -348.9818619544502,
+        "ty": 460.0202442556888
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.986,
+        "corr": 0.9,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.844
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9962,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        121.7913,
+        121.8217
+      ],
+      "raw_in_interval_both": [
+        121.7913,
+        121.805016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 16,
+      "type": "raw",
+      "comp_in": 1056,
+      "comp_out": 1126,
+      "raw_in_frame": 4100,
+      "raw_in_seconds": 136.807647,
+      "raw_out_frame": 4169,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9864927246086957,
+        1.0155072753913041
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259297294958804,
+        "rotation_deg": 0.0,
+        "tx": -348.95731840817916,
+        "ty": 460.05158497862135
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.9057,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -5.178
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.013667,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9963,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        136.805633333,
+        136.8367
+      ],
+      "raw_in_interval_both": [
+        136.805633333,
+        136.820016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 17,
+      "type": "raw",
+      "comp_in": 1126,
+      "comp_out": 1186,
+      "raw_in_frame": 4170,
+      "raw_in_seconds": 139.141966667,
+      "raw_out_frame": 4229,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9840338643728813,
+        1.0179661356271188
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.1572869558245558,
+        "rotation_deg": 0.0,
+        "tx": -571.1311734899714,
+        "ty": 335.00365828469364
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.987,
+        "corr": 0.9025,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.345
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.995,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        139.140966667,
+        139.172366667
+      ],
+      "raw_in_interval_both": [
+        139.140966667,
+        139.155683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 18,
+      "type": "raw",
+      "comp_in": 1186,
+      "comp_out": 1271,
+      "raw_in_frame": 5000,
+      "raw_in_seconds": 166.837133334,
+      "raw_out_frame": 5084,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9890833095,
+        1.0129166904999998
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9260169791054884,
+        "rotation_deg": 0.0,
+        "tx": -349.0846598395874,
+        "ty": 460.00840121084707
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.987,
+        "corr": 0.9037,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.929
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9963,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        166.836133333,
+        166.8667
+      ],
+      "raw_in_interval_both": [
+        166.836133333,
+        166.850016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 19,
+      "type": "raw",
+      "comp_in": 1271,
+      "comp_out": 1341,
+      "raw_in_frame": 2100,
+      "raw_in_seconds": 70.0733,
+      "raw_out_frame": 2169,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9864927246086957,
+        1.0155072753913041
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9814726381610077,
+        "rotation_deg": 0.0,
+        "tx": -462.1756053514465,
+        "ty": 399.9829149558743
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.987,
+        "corr": 0.9046,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.179
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9978,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        70.0723,
+        70.103366667
+      ],
+      "raw_in_interval_both": [
+        70.0723,
+        70.086683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 20,
+      "type": "raw",
+      "comp_in": 1341,
+      "comp_out": 1421,
+      "raw_in_frame": 4550,
+      "raw_in_seconds": 151.821966667,
+      "raw_out_frame": 4629,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9883290885822785,
+        1.0136709114177214
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259621614731399,
+        "rotation_deg": 0.0,
+        "tx": -348.9905969233122,
+        "ty": 460.04593264024436
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.989,
+        "corr": 0.9036,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.014
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9981,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        151.820966667,
+        151.8517
+      ],
+      "raw_in_interval_both": [
+        151.820966667,
+        151.835016667
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 21,
+      "type": "raw",
+      "comp_in": 1421,
+      "comp_out": 1511,
+      "raw_in_frame": 300,
+      "raw_in_seconds": 10.013966668,
+      "raw_out_frame": 389,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.989752786494382,
+        1.012247213505618
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9259148321758011,
+        "rotation_deg": 0.0,
+        "tx": -348.89384518867314,
+        "ty": 460.00430840361935
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.989,
+        "corr": 0.9038,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -6.847
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.000001,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9981,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        10.012966667,
+        10.043366667
+      ],
+      "raw_in_interval_both": [
+        10.012966667,
+        10.026683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    },
+    {
+      "id": 22,
+      "type": "raw",
+      "comp_in": 1511,
+      "comp_out": 1571,
+      "raw_in_frame": 3000,
+      "raw_in_seconds": 100.102966667,
+      "raw_out_frame": 3059,
+      "speed": 1.0,
+      "speed_measured": 1.001,
+      "speed_range": [
+        0.9840338643728813,
+        1.0179661356271188
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.925946188893241,
+        "rotation_deg": 0.0,
+        "tx": -348.96679026100594,
+        "ty": 460.01343646218504
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.986,
+        "corr": 0.9032,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -7.345
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9954,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        100.101966667,
+        100.133366667
+      ],
+      "raw_in_interval_both": [
+        100.101966667,
+        100.116683333
+      ],
+      "color": null,
+      "label": "",
+      "notes": ""
+    }
+  ],
+  "overlays_detected": [
+    {
+      "type": "channel_name",
+      "comp_in": 0,
+      "comp_out": 1571,
+      "x": 182.0,
+      "y": 98.0,
+      "w": 318.0,
+      "h": 44.0,
+      "static": true,
+      "text": "",
+      "notes": "text next to the logo; colours #fefefe 95%"
+    },
+    {
+      "type": "logo",
+      "comp_in": 0,
+      "comp_out": 1571,
+      "x": 64.0,
+      "y": 74.0,
+      "w": 92.0,
+      "h": 92.0,
+      "static": true,
+      "text": "",
+      "notes": "compact blob (canvas); colours #e1252e 73%, #fefdfc 11%, #dc2730 9%"
+    },
+    {
+      "type": "title",
+      "comp_in": 0,
+      "comp_out": 1571,
+      "x": 298.0,
+      "y": 206.0,
+      "w": 480.0,
+      "h": 178.0,
+      "static": true,
+      "text": "",
+      "notes": "multicolour; text block above the box; colours #ffffff 41%, #fdd01c 24%, #fbd023 16%, #fe2e30 12%"
+    },
+    {
+      "type": "watermark",
+      "comp_in": 0,
+      "comp_out": 1571,
+      "x": 360.0,
+      "y": 1492.0,
+      "w": 360.0,
+      "h": 34.0,
+      "static": true,
+      "text": "",
+      "notes": "below the box; colours #8b8b8b 91%, #7a7a7a 8%"
+    },
+    {
+      "type": "captions",
+      "comp_in": 15,
+      "comp_out": 1557,
+      "x": 284.0,
+      "y": 1160.0,
+      "w": 514.0,
+      "h": 70.0,
+      "static": false,
+      "text": "",
+      "notes": "96 caption events; white text with dark outline, median glyph height 54 px"
+    },
+    {
+      "type": "captions",
+      "comp_in": 15,
+      "comp_out": 28,
+      "x": 444.0,
+      "y": 1166.0,
+      "w": 186.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 28,
+      "comp_out": 42,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 42,
+      "comp_out": 58,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 58,
+      "comp_out": 71,
+      "x": 360.0,
+      "y": 1166.0,
+      "w": 366.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 71,
+      "comp_out": 85,
+      "x": 284.0,
+      "y": 1166.0,
+      "w": 514.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 103,
+      "comp_out": 111,
+      "x": 340.0,
+      "y": 1166.0,
+      "w": 400.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 111,
+      "comp_out": 121,
+      "x": 370.0,
+      "y": 1166.0,
+      "w": 346.0,
+      "h": 58.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 121,
+      "comp_out": 131,
+      "x": 452.0,
+      "y": 1166.0,
+      "w": 180.0,
+      "h": 54.0
+    },
+    {
+      "type": "text",
+      "comp_in": 137,
+      "comp_out": 152,
+      "x": 844.0,
+      "y": 1312.0,
+      "w": 14.0,
+      "h": 14.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 150,
+      "comp_out": 158,
+      "x": 508.0,
+      "y": 1166.0,
+      "w": 70.0,
+      "h": 52.0
+    },
+    {
+      "type": "text",
+      "comp_in": 154,
+      "comp_out": 240,
+      "x": 844.0,
+      "y": 1312.0,
+      "w": 14.0,
+      "h": 14.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 158,
+      "comp_out": 170,
+      "x": 374.0,
+      "y": 1166.0,
+      "w": 330.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 170,
+      "comp_out": 185,
+      "x": 394.0,
+      "y": 1166.0,
+      "w": 286.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 185,
+      "comp_out": 194,
+      "x": 476.0,
+      "y": 1166.0,
+      "w": 130.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 194,
+      "comp_out": 209,
+      "x": 444.0,
+      "y": 1166.0,
+      "w": 192.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 218,
+      "comp_out": 233,
+      "x": 418.0,
+      "y": 1166.0,
+      "w": 250.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 233,
+      "comp_out": 243,
+      "x": 436.0,
+      "y": 1166.0,
+      "w": 208.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 243,
+      "comp_out": 254,
+      "x": 428.0,
+      "y": 1166.0,
+      "w": 218.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 254,
+      "comp_out": 264,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 281,
+      "comp_out": 297,
+      "x": 408.0,
+      "y": 1166.0,
+      "w": 262.0,
+      "h": 60.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 297,
+      "comp_out": 309,
+      "x": 450.0,
+      "y": 1166.0,
+      "w": 180.0,
+      "h": 60.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 309,
+      "comp_out": 321,
+      "x": 450.0,
+      "y": 1166.0,
+      "w": 176.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 335,
+      "comp_out": 347,
+      "x": 454.0,
+      "y": 1166.0,
+      "w": 166.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 347,
+      "comp_out": 359,
+      "x": 442.0,
+      "y": 1166.0,
+      "w": 198.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 359,
+      "comp_out": 375,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 166.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 375,
+      "comp_out": 390,
+      "x": 378.0,
+      "y": 1166.0,
+      "w": 326.0,
+      "h": 52.0
+    },
+    {
+      "type": "text",
+      "comp_in": 395,
+      "comp_out": 425,
+      "x": 88.0,
+      "y": 460.0,
+      "w": 520.0,
+      "h": 96.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 408,
+      "comp_out": 421,
+      "x": 420.0,
+      "y": 1166.0,
+      "w": 242.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 421,
+      "comp_out": 432,
+      "x": 350.0,
+      "y": 1166.0,
+      "w": 380.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 432,
+      "comp_out": 448,
+      "x": 436.0,
+      "y": 1166.0,
+      "w": 212.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 448,
+      "comp_out": 460,
+      "x": 440.0,
+      "y": 1166.0,
+      "w": 202.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 460,
+      "comp_out": 469,
+      "x": 320.0,
+      "y": 1166.0,
+      "w": 438.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 487,
+      "comp_out": 502,
+      "x": 424.0,
+      "y": 1166.0,
+      "w": 236.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 502,
+      "comp_out": 515,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 52.0
+    },
+    {
+      "type": "text",
+      "comp_in": 514,
+      "comp_out": 565,
+      "x": 482.0,
+      "y": 878.0,
+      "w": 20.0,
+      "h": 18.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 515,
+      "comp_out": 524,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 162.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 532,
+      "comp_out": 540,
+      "x": 356.0,
+      "y": 1166.0,
+      "w": 368.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 540,
+      "comp_out": 549,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 549,
+      "comp_out": 561,
+      "x": 442.0,
+      "y": 1166.0,
+      "w": 200.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 561,
+      "comp_out": 577,
+      "x": 442.0,
+      "y": 1166.0,
+      "w": 202.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 591,
+      "comp_out": 607,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 607,
+      "comp_out": 622,
+      "x": 390.0,
+      "y": 1166.0,
+      "w": 300.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 622,
+      "comp_out": 635,
+      "x": 318.0,
+      "y": 1162.0,
+      "w": 448.0,
+      "h": 68.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 635,
+      "comp_out": 646,
+      "x": 444.0,
+      "y": 1166.0,
+      "w": 186.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 646,
+      "comp_out": 658,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 669,
+      "comp_out": 680,
+      "x": 434.0,
+      "y": 1166.0,
+      "w": 210.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 680,
+      "comp_out": 690,
+      "x": 372.0,
+      "y": 1166.0,
+      "w": 340.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 690,
+      "comp_out": 706,
+      "x": 462.0,
+      "y": 1166.0,
+      "w": 160.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 706,
+      "comp_out": 714,
+      "x": 424.0,
+      "y": 1160.0,
+      "w": 232.0,
+      "h": 60.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 723,
+      "comp_out": 739,
+      "x": 438.0,
+      "y": 1166.0,
+      "w": 198.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 739,
+      "comp_out": 753,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 778,
+      "comp_out": 789,
+      "x": 360.0,
+      "y": 1166.0,
+      "w": 366.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 801,
+      "comp_out": 809,
+      "x": 340.0,
+      "y": 1166.0,
+      "w": 400.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 809,
+      "comp_out": 822,
+      "x": 370.0,
+      "y": 1166.0,
+      "w": 346.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 822,
+      "comp_out": 837,
+      "x": 452.0,
+      "y": 1166.0,
+      "w": 180.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 853,
+      "comp_out": 865,
+      "x": 508.0,
+      "y": 1166.0,
+      "w": 70.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 865,
+      "comp_out": 875,
+      "x": 374.0,
+      "y": 1166.0,
+      "w": 330.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 875,
+      "comp_out": 891,
+      "x": 394.0,
+      "y": 1166.0,
+      "w": 286.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 910,
+      "comp_out": 922,
+      "x": 476.0,
+      "y": 1166.0,
+      "w": 130.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 922,
+      "comp_out": 938,
+      "x": 444.0,
+      "y": 1164.0,
+      "w": 192.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 938,
+      "comp_out": 953,
+      "x": 418.0,
+      "y": 1166.0,
+      "w": 250.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 970,
+      "comp_out": 978,
+      "x": 436.0,
+      "y": 1166.0,
+      "w": 208.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 978,
+      "comp_out": 992,
+      "x": 428.0,
+      "y": 1166.0,
+      "w": 218.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 992,
+      "comp_out": 1004,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1004,
+      "comp_out": 1012,
+      "x": 408.0,
+      "y": 1166.0,
+      "w": 262.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1023,
+      "comp_out": 1037,
+      "x": 450.0,
+      "y": 1166.0,
+      "w": 180.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1037,
+      "comp_out": 1049,
+      "x": 450.0,
+      "y": 1166.0,
+      "w": 176.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1049,
+      "comp_out": 1062,
+      "x": 454.0,
+      "y": 1166.0,
+      "w": 166.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1062,
+      "comp_out": 1077,
+      "x": 442.0,
+      "y": 1166.0,
+      "w": 198.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1093,
+      "comp_out": 1106,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 166.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1106,
+      "comp_out": 1119,
+      "x": 378.0,
+      "y": 1166.0,
+      "w": 326.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1119,
+      "comp_out": 1127,
+      "x": 420.0,
+      "y": 1166.0,
+      "w": 242.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1127,
+      "comp_out": 1135,
+      "x": 350.0,
+      "y": 1166.0,
+      "w": 380.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1151,
+      "comp_out": 1164,
+      "x": 436.0,
+      "y": 1166.0,
+      "w": 212.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1164,
+      "comp_out": 1174,
+      "x": 440.0,
+      "y": 1166.0,
+      "w": 202.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1174,
+      "comp_out": 1184,
+      "x": 320.0,
+      "y": 1166.0,
+      "w": 438.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1184,
+      "comp_out": 1193,
+      "x": 424.0,
+      "y": 1164.0,
+      "w": 236.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1205,
+      "comp_out": 1216,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 156.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1216,
+      "comp_out": 1227,
+      "x": 460.0,
+      "y": 1166.0,
+      "w": 162.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1227,
+      "comp_out": 1240,
+      "x": 356.0,
+      "y": 1166.0,
+      "w": 368.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1240,
+      "comp_out": 1256,
+      "x": 458.0,
+      "y": 1166.0,
+      "w": 158.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1256,
+      "comp_out": 1267,
+      "x": 442.0,
+      "y": 1164.0,
+      "w": 200.0,
+      "h": 58.0
+    },
+    {
+      "type": "text",
+      "comp_in": 1271,
+      "comp_out": 1286,
+      "x": 236.0,
+      "y": 1312.0,
+      "w": 24.0,
+      "h": 16.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1282,
+      "comp_out": 1295,
+      "x": 442.0,
+      "y": 1166.0,
+      "w": 202.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1295,
+      "comp_out": 1307,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1307,
+      "comp_out": 1320,
+      "x": 390.0,
+      "y": 1166.0,
+      "w": 300.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1320,
+      "comp_out": 1332,
+      "x": 318.0,
+      "y": 1166.0,
+      "w": 448.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1348,
+      "comp_out": 1357,
+      "x": 444.0,
+      "y": 1166.0,
+      "w": 186.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1357,
+      "comp_out": 1370,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1370,
+      "comp_out": 1381,
+      "x": 434.0,
+      "y": 1166.0,
+      "w": 210.0,
+      "h": 52.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1381,
+      "comp_out": 1392,
+      "x": 372.0,
+      "y": 1166.0,
+      "w": 340.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1392,
+      "comp_out": 1402,
+      "x": 462.0,
+      "y": 1166.0,
+      "w": 160.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1410,
+      "comp_out": 1425,
+      "x": 424.0,
+      "y": 1166.0,
+      "w": 232.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1425,
+      "comp_out": 1433,
+      "x": 444.0,
+      "y": 1166.0,
+      "w": 186.0,
+      "h": 64.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1433,
+      "comp_out": 1444,
+      "x": 506.0,
+      "y": 1166.0,
+      "w": 68.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1480,
+      "comp_out": 1488,
+      "x": 360.0,
+      "y": 1166.0,
+      "w": 366.0,
+      "h": 64.0
+    },
+    {
+      "type": "text",
+      "comp_in": 1482,
+      "comp_out": 1511,
+      "x": 844.0,
+      "y": 1076.0,
+      "w": 14.0,
+      "h": 14.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1488,
+      "comp_out": 1502,
+      "x": 284.0,
+      "y": 1166.0,
+      "w": 514.0,
+      "h": 64.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1502,
+      "comp_out": 1510,
+      "x": 340.0,
+      "y": 1166.0,
+      "w": 400.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1521,
+      "comp_out": 1536,
+      "x": 370.0,
+      "y": 1164.0,
+      "w": 346.0,
+      "h": 56.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1536,
+      "comp_out": 1544,
+      "x": 452.0,
+      "y": 1166.0,
+      "w": 180.0,
+      "h": 54.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 1544,
+      "comp_out": 1557,
+      "x": 508.0,
+      "y": 1166.0,
+      "w": 70.0,
+      "h": 52.0
+    }
+  ],
+  "added_audio": [
+    {
+      "type": "music",
+      "comp_in": 0,
+      "comp_out": 1571,
+      "level_db": -6.4,
+      "level_dbfs": -23.6
+    }
+  ],
+  "audio": {
+    "status": "ok",
+    "notes": [
+      "added music comp frames 0-1570 (-6.4 dB re original, -23.6 dBFS)"
+    ],
+    "cuts": [],
+    "analysis_sr": 16000,
+    "competitor_has_audio": true,
+    "raw_has_audio": true,
+    "hint_windows": 206,
+    "hint_windows_confident": 176
+  },
+  "settings": {
+    "layout_mode": "match",
+    "comp_size": "competitor",
+    "main_size": [
+      1080,
+      1920
+    ],
+    "fps_mode": "competitor",
+    "main_fps": "30/1",
+    "fps_source_max_error_s": 0.0,
+    "ae_time_mode": "auto",
+    "ae_min_margin_ms": 1.0,
+    "criteria_exact": true
+  },
+  "warnings": [
+    "S10: AE-rule-sensitive segment (margin 0.7333 ms < 1.0 ms; no raw_in satisfies both floor and round sampling); if After Effects shows an off-by-one frame, re-export with --ae-time-mode frames",
+    "NOT-IN-RAW: comp frames 936-965 (00:00:31:06-00:00:32:06) - placeholder 'MISSING - not in RAW (00:00:31:06-00:00:32:06)'"
+  ],
+  "provenance": {
+    "tool": "match_cuts",
+    "version": "0.1.0",
+    "input_hashes": {
+      "competitor": "15ad0cd6aa862e978b2eb1481bc8a9816f69d0f0",
+      "raw": "96526b82e615a8db153ea14b80e7c47e5a7e5e8d"
+    },
+    "analysed_hashes": {
+      "competitor": "15ad0cd6aa862e978b2eb1481bc8a9816f69d0f0",
+      "raw": "96526b82e615a8db153ea14b80e7c47e5a7e5e8d"
+    },
+    "analysis_params_hash": "d7a3cf74b18a9cd6be3d",
+    "analysis_params": {
+      "seed": 12345,
+      "raw_proxy_width": 640,
+      "comp_proxy_scale": 0.5,
+      "comp_proxy_max_width": 640,
+      "proxy_budget_bytes": 3221225472,
+      "min_proxy_width": 256,
+      "long_raw_s": 2700.0,
+      "long_raw_window_s": 20.0,
+      "audio_sr": 16000,
+      "static_std_thresh": 2.0,
+      "dynamic_frac_thresh": 0.5,
+      "overlay_dilate_px": 3,
+      "overlay_resid_thresh": 40.0,
+      "overlay_min_frames": 3,
+      "audio_window": 1.0,
+      "audio_hop": 0.25,
+      "audio_feat_rate": 100,
+      "audio_n_mels": 40,
+      "audio_min_conf": 1.3,
+      "audio_speed_min": 0.9,
+      "audio_speed_max": 1.3,
+      "audio_speed_step": 0.01,
+      "audio_refine_ms": 50.0,
+      "audio_fmin": 80.0,
+      "audio_fmax": 7600.0,
+      "audio_replaced_corr": 0.3,
+      "audio_jl_max_s": 1.0,
+      "audio_added_thresh_db": -20.0,
+      "sift_nfeatures": 500,
+      "raw_index_fps_short": 10.0,
+      "raw_index_fps_long": 3.0,
+      "index_max_descriptors": 2000000,
+      "comp_search_stride": 3,
+      "index_knn": 24,
+      "index_ratio": 0.8,
+      "index_far_s": 2.0,
+      "vote_top_candidates": 8,
+      "vote_min_frac": 0.2,
+      "anchors_per_frame": 3,
+      "lowe_ratio": 0.75,
+      "ransac_reproj_px": 3.0,
+      "min_inliers": 12,
+      "min_inlier_ratio": 0.3,
+      "anchor_zncc_slack": 0.05,
+      "audio_restrict_s": 2.0,
+      "refine_radius": 3,
+      "track_search_radius": 8,
+      "score_blur": 1.0,
+      "grad_weight": 0.0,
+      "match_thresh": 0.9,
+      "none_thresh": 0.6,
+      "identical_thresh": 0.9995,
+      "identical_mad": 0.75,
+      "low_margin_eps": 0.001,
+      "soft_delta_min": 0.001,
+      "soft_delta_max": 0.01,
+      "rel_drop_min": 0.01,
+      "uniform_std": 4.0,
+      "low_conf_thresh": 0.5,
+      "ecc_iterations": 60,
+      "ecc_eps": 1e-05,
+      "speed_snap_values": [
+        1.0,
+        1.05,
+        1.1,
+        1.15,
+        1.2,
+        1.25,
+        1.5,
+        2.0,
+        0.9523809523809523,
+        0.9090909090909091,
+        0.8695652173913044,
+        0.8333333333333334,
+        0.8,
+        0.6666666666666666,
+        0.5
+      ],
+      "speed_snap_tol": 0.003,
+      "min_segment_frames": 1,
+      "lambda_cut": 1.0,
+      "lambda_unsnapped": 3.0,
+      "lambda_nondominant": 1.5,
+      "lambda_one": 0.25,
+      "lambda_drop": 0.4,
+      "lambda_tie": 0.05,
+      "dp_max_consecutive_fail": 6,
+      "transition_stop_after": 3,
+      "segment_score_max_pixels": 60000,
+      "scenedetect": true,
+      "scenedetect_min_len": 2,
+      "link_scale_tol": 0.005,
+      "link_pos_tol": 2.0,
+      "punch_scale_step": 0.01,
+      "punch_pos_step": 4.0,
+      "transition_search": 20,
+      "blend_rel": 0.5,
+      "framing_scale_spread": 0.003,
+      "framing_pos_spread": 1.5,
+      "framing_sample_step": 3,
+      "rdp_pos_tol": 0.5,
+      "rdp_scale_tol": 0.001,
+      "rotation_min_deg": 0.2,
+      "scenedetect_adaptive": 2.0,
+      "scenedetect_content": 15.0
+    },
+    "stage_versions": {
+      "audio": 1,
+      "audio_align": 1,
+      "conform": 1,
+      "frame_map": 2,
+      "layout": 1,
+      "probe": 1,
+      "proxy": 1,
+      "raw_index": 1,
+      "scenedetect": 1,
+      "segments": 2,
+      "sparse_search": 1
+    },
+    "code_hash": "01488c39f6390cd8ca93",
+    "seed": 12345,
+    "ffmpeg_version": "6.1.1",
+    "timings": {
+      "S0 env": 0.222,
+      "S2 probe+conform": 1.027,
+      "S3 audio": 0.035,
+      "S5.1 audio align": 0.009,
+      "S3 proxies": 0.002,
+      "S4 layout": 0.019,
+      "S5.4-S6 segments+cutlist": 7.0,
+      "S7 AE project": 0.778,
+      "S8.preview": 82.944,
+      "S8.compare": 44.134,
+      "S8 exports": 127.231,
+      "S9 verify": 48.701,
+      "total": 188.008
+    }
+  }
+}
