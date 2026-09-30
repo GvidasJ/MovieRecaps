@@ -2535,7 +2535,10 @@ def _analyze(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | os.Pat
 # box is re-measured against RAW itself: confidently matched RAW frames are warped into competitor space
 # with their fitted Sims, and every pixel votes
 #   IN   the competitor agrees with the (gain/offset-fitted) warped RAW, and RAW differs there from what the
-#        canvas next to the box would show (so the agreement is evidence, not a coincidence);
+#        canvas next to the box would show (so the agreement is evidence, not a coincidence) — or, gain-
+#        invariant, the competitor shows RAW's local STRUCTURE (windowed ZNCC >= REFINE_ZNCC_MIN where RAW is
+#        textured): a caption gradient / darkened lower third / inner shadow / vignette changes the local gain
+#        and offset, not the structure, and a flat canvas or a title never correlates with RAW;
 #   OUT  RAW is present but the competitor disagrees (canvas, title, ... or an unmasked overlay) — except on
 #        pixels INSIDE the current box that the temporal analysis proved dynamic: there the disagreement is a
 #        competitor effect on the video (caption gradient, darkened lower third, inner shadow / feathered edge,
@@ -2549,8 +2552,9 @@ def _analyze(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | os.Pat
 # Per box side, lines (columns / rows over the middle half of the box) are classified in / out / no-RAW /
 # don't-care and scanned outward from the current edge (growing through in and don't-care lines to the
 # outermost in line, stopping at the first out / no-RAW line) — or inward (shrinking) over lines with RAW
-# disagreement, and only over lines that are mostly static or show the canvas model. The sub-pixel edge is
-# the integral estimator over a per-pixel COVERAGE map
+# disagreement, and only over lines that are mostly static or show the canvas model and do not show RAW's
+# local structure (a side never moves inward over video the temporal analysis saw or RAW explains). The
+# sub-pixel edge is the integral estimator over a per-pixel COVERAGE map
 #   c(x) = sum_k (C_k - B_k)(R_k - B_k) / sum_k (R_k - B_k)^2
 # (C competitor, R fitted warped RAW, B background = the nearest background pixel outside the box: the proxy
 # is the area average of c R + (1 - c) B), or the RAW frame's own edge when the box ends where RAW ends — an
@@ -2558,8 +2562,9 @@ def _analyze(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | os.Pat
 # nothing can observe (RAW that equals the canvas) keeps the temporal edge. The corner radius is the joint
 # corner fit of :func:`_fit_radius` on the same coverage map (kept when no corner is observable).
 # The measured box replaces the temporal one only when it explains the votes better away from both outlines
-# (partially covered boundary lines decide nothing), removes no dynamic video (the ring between the boxes)
-# and does not cover rounded corners the competitor shows at the temporal box.
+# (partially covered boundary lines decide nothing), removes no video (dynamic or structure-agreeing pixels
+# with RAW present in the ring between the boxes) and does not cover rounded corners the competitor shows at
+# the temporal box.
 
 REFINE_FRAMES = 16                # confidently matched frames used (spread over the edit)
 REFINE_BLUR = 1.0                 # Gaussian sigma (proxy px) before the per-pixel comparison
@@ -2574,6 +2579,10 @@ REFINE_RING_DYN_FRAC = 0.05       # max fraction of dynamic, not canvas-like pix
 REFINE_BAND_PX = 2                # votes this close (proxy px) to either outline do not decide old vs new box
 REFINE_FRAME_EDGE_TOL = 1.5       # proxy px: the RAW frame edge 'coincides' with a measured edge
 REFINE_GROW_MIN_LINES = 3         # a side grows only to an IN line at least this far outside (blurred boundary)
+REFINE_ZNCC_WIN = 9               # proxy px window of the gain-invariant local structure comparison ...
+REFINE_ZNCC_MIN = 0.8             # ... the competitor shows RAW's local structure when the windowed ZNCC >= this
+REFINE_ZNCC_STD = 3.0             # ... over a window where warped RAW has at least this local std (8-bit levels)
+REFINE_ZNCC_GAIN_MIN = 0.1        # ... and the competitor at least this fraction of it (a flat canvas never agrees)
 
 _L_DC, _L_IN, _L_OUT, _L_NORAW, _L_MIX = 0, 1, 2, 3, 4
 _SIDES = ("left", "top", "right", "bottom")
@@ -2737,17 +2746,57 @@ def _line_classes(nI: np.ndarray, nO: np.ndarray, nV: np.ndarray, side: str, ban
     return cls
 
 
+def _structure_agreement(C: np.ndarray, R: np.ndarray, V: np.ndarray, win: int, zmin: float, smin: float,
+                         gmin: float) -> tuple[np.ndarray, np.ndarray]:
+    """Gain-invariant local comparison of the competitor ``C`` with the fitted warped RAW ``R`` (both
+    blurred): (agree, textured) bool [h, w]. Windowed statistics over the RAW-present pixels (``V``) of the
+    ``win`` x ``win`` window around each pixel (at least half of it). ``textured``: RAW present and varying
+    there (local std >= ``smin``); ``agree``: textured, the competitor varies too (>= ``gmin`` x RAW's local
+    std) and the zero-mean normalised cross-correlation is >= ``zmin``. A competitor effect on the video
+    (caption gradient, darkened lower third, inner shadow, feathered edge, vignette) changes the local gain /
+    offset, not the structure: it still agrees; a flat canvas, a title or any content other than RAW does
+    not. (A window straddling an edge where RAW's own content ends too — letterbox bars cropped off — also
+    correlates on the outer pixels: the caller counts agreement as evidence only where RAW differs from the
+    canvas.)"""
+    import cv2
+    k = (int(win), int(win))
+    Vf = np.asarray(V, np.float32)
+
+    def box(a: np.ndarray) -> np.ndarray:
+        return cv2.boxFilter(a, cv2.CV_32F, k, normalize=True, borderType=cv2.BORDER_CONSTANT)
+    wv = box(Vf)
+    inv = 1.0 / np.maximum(wv, 1e-3)
+    Cv, Rv = C * Vf, R * Vf
+    mC, mR = box(Cv) * inv, box(Rv) * inv
+    vC = np.maximum(box(Cv * C) * inv - mC * mC, 0.0)
+    vR = np.maximum(box(Rv * R) * inv - mR * mR, 0.0)
+    cCR = box(Cv * R) * inv - mC * mR
+    textured = np.asarray(V, bool) & (wv >= 0.5) & (vR >= float(smin) ** 2)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = cCR / np.sqrt(np.maximum(vC * vR, 1e-6))
+    agree = textured & (vC >= (float(gmin) ** 2) * vR) & (z >= float(zmin))
+    return agree, textured
+
+
 def _line_shrinkable(static: np.ndarray, nBG: np.ndarray, nV: np.ndarray, side: str, band: tuple[int, int],
-                     frac: float) -> np.ndarray:
+                     frac: float, nSA: np.ndarray | None = None, nTX: np.ndarray | None = None) -> np.ndarray:
     """Per canonical line over the band rows: may a box side move inward over it? Only when the line is
     mostly static (the temporal analysis did not see video there) or mostly shows the canvas model where RAW
-    would not (``nBG`` votes over the RAW-present pixel-frames ``nV``). A line of dynamic video that merely
-    disagrees with the globally gain-fitted RAW (caption gradient, inner shadow, vignette) is not."""
+    would not (``nBG`` votes over the RAW-present pixel-frames ``nV``) — and never when the competitor shows
+    RAW's local structure on most of the line's textured pixel-frames (``nSA`` of ``nTX``, see
+    :func:`_structure_agreement`): video under a competitor effect, static or not. A line of dynamic video
+    that merely disagrees with the globally gain-fitted RAW (caption gradient, inner shadow, vignette) is
+    not shrinkable."""
     b0, b1 = int(band[0]), int(band[1])
     st = _canon(np.asarray(static, np.float32), side)[b0:b1].mean(axis=0)
     bg = _canon(nBG, side)[b0:b1].sum(axis=0).astype(np.float64)
     vv = _canon(nV, side)[b0:b1].sum(axis=0).astype(np.float64)
-    return (st >= frac) | ((vv > 0) & (bg >= frac * vv))
+    ok = (st >= frac) | ((vv > 0) & (bg >= frac * vv))
+    if nSA is not None and nTX is not None:
+        sa = _canon(nSA, side)[b0:b1].sum(axis=0).astype(np.float64)
+        tx = _canon(nTX, side)[b0:b1].sum(axis=0).astype(np.float64)
+        ok &= ~((tx > 0) & (tx >= 0.2 * vv) & (sa >= frac * tx))
+    return ok
 
 
 def _scan_side(cls: np.ndarray, e0: int, f_out: float | None, shrinkable: np.ndarray | None = None,
@@ -2930,9 +2979,11 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
 
     Returns {'ok': bool, 'reason', 'box' (full-res Box), 'edges' (proxy), 'radius' (proxy), 'radius_kept',
     'raw_match' (bool [h, w]), 'frames', 'evidence', 'maps' (nI, nO, nV), 'canvas_votes' (int [h, w]: OUT
-    votes where the competitor shows the canvas model and RAW would not), 'protected' (bool [h, w]: dynamic
-    pixels inside the current box that do not mostly show the canvas — video a refined box must keep),
-    'frame_data'}."""
+    votes where the competitor shows the canvas model and RAW would not), 'structure_votes' ((nSA, nTX) int
+    [h, w]: pixel-frames where the competitor shows RAW's local structure, of those where RAW is locally
+    textured; see :func:`_structure_agreement`), 'protected' (bool [h, w]: pixels inside the current box,
+    RAW present, not mostly showing the canvas, and dynamic or mostly structure-agreeing — video a refined
+    box must keep), 'frame_data'}."""
     dlog = dlog or null_dlog()
     w, h = int(comp.size[0]), int(comp.size[1])
     rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
@@ -2967,11 +3018,17 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
     tau_k = float(_p(cfg, "REFINE_TAU_K", REFINE_TAU_K))
     disc_min = float(_p(cfg, "REFINE_DISC_MIN", REFINE_DISC_MIN))
     sol_tol = float(_p(cfg, "SOLID_TOL", SOLID_TOL))
+    z_win = max(3, int(_p(cfg, "REFINE_ZNCC_WIN", REFINE_ZNCC_WIN)) | 1)
+    z_min = float(_p(cfg, "REFINE_ZNCC_MIN", REFINE_ZNCC_MIN))
+    z_std = float(_p(cfg, "REFINE_ZNCC_STD", REFINE_ZNCC_STD))
+    z_gain = float(_p(cfg, "REFINE_ZNCC_GAIN_MIN", REFINE_ZNCC_GAIN_MIN))
     near_cur = _dilate(cov_cur > 0, 2)
     nI = np.zeros((h, w), np.int16)
     nO = np.zeros((h, w), np.int16)
     nV = np.zeros((h, w), np.int16)
     nBG = np.zeros((h, w), np.int16)
+    nSA = np.zeros((h, w), np.int16)          # the competitor shows RAW's local structure (gain-invariant)
+    nTX = np.zeros((h, w), np.int16)          # ... of the pixel-frames where RAW is locally textured
     taus = []
     no_bg = 0
     for f in frames:
@@ -2982,6 +3039,7 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
         f["tau"] = tau
         taus.append(round(tau, 2))
         agree = res <= tau
+        sagree, textured = _structure_agreement(Cb, Rb, V, z_win, z_min, z_std, z_gain)
         # background samples: outside the current box, no overlay, RAW absent or disagreeing, background pixels
         # only (never a zone; see _background_sources) — eroded, so the thin band of blurred box-edge pixels
         # (box content mixed with the canvas) never serves as background; with a background model, only the
@@ -2991,20 +3049,29 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
             cand &= np.abs(Cb - bg_model) <= max(sol_tol, tau)
         B = _nearest_fill(Cb, cand)
         use = V & ~Ok
-        out = use & ~agree
+        sagree &= use
+        # the competitor shows RAW's local structure under a different local gain / offset (caption gradient,
+        # darkened lower third, inner shadow, feathered edge, vignette: the gain / offset fit is global): RAW
+        # content, whatever the level test says
+        out = use & ~agree & ~sagree
         if B is None:
-            # (no background visible at all: an agreement proves nothing about the box extent)
+            # (no background visible at all: a level agreement proves nothing about the box extent)
             no_bg += 1
             disc = np.zeros((h, w), bool)
             canvas = disc
         else:
             disc = np.abs(Rb - B) > max(disc_min, tau)
             canvas = disc & (np.abs(Cb - B) <= tau)     # the competitor shows the canvas where RAW would not
-        nI += (use & agree & disc).astype(np.int16)
-        # a disagreement on video the temporal analysis saw inside the box is a competitor effect (caption
-        # gradient, inner shadow, vignette: the gain / offset fit is global) unless it shows the canvas
+        # (structure agreement is evidence only where RAW itself differs from the canvas: next to a RAW
+        # content edge that coincides with the box edge — letterbox bars cropped off on a canvas of their
+        # level — a window straddling the edge correlates on the outside pixels too)
+        nI += (use & (agree | sagree) & disc).astype(np.int16)
+        # a disagreement on video the temporal analysis saw inside the box is a competitor effect or an
+        # unmasked overlay, not the box edge: don't-care unless it shows the canvas
         nO += (out & (~dyn_in | canvas)).astype(np.int16)
         nBG += (out & canvas).astype(np.int16)
+        nSA += sagree.astype(np.int16)
+        nTX += (textured & use).astype(np.int16)
         nV += V.astype(np.int16)           # RAW present (a caption hiding a line makes it don't-care, not RAW-less)
         del f["Cb"], f["Rb"]
     nfr = len(frames)
@@ -3030,7 +3097,7 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
             if band[1] - band[0] < 4:
                 continue
             cls = _line_classes(nI, nO, nV, side, band, nfr)
-            shr = _line_shrinkable(static_t, nBG, nV, side, band, shrink_frac)
+            shr = _line_shrinkable(static_t, nBG, nV, side, band, shrink_frac, nSA, nTX)
             e0 = int(round(_to_canon(ints[side], side, w, h)))
             f_out = min(foot[side]) if foot else None
             e_c, action, stop, stop_kind = _scan_side(cls, e0, f_out, shr, grow_min)
@@ -3142,17 +3209,23 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
     new_box = Box(sx0, sy0, sx1 - sx0, sy1 - sy0, r_s)
     ev_tot = nI.astype(np.int32) + nO
     raw_match = (ev_tot > 0) & (nI.astype(np.int32) * 2 > ev_tot)
-    protected = dyn_in & ~(nBG.astype(np.int32) * 2 > nV)
+    # video a refined box must keep: inside the current box, RAW present, not mostly showing the canvas, and
+    # either dynamic (the temporal analysis saw it move) or mostly showing RAW's local structure
+    struct_mostly = (nTX > 0) & (nSA.astype(np.int32) * 2 >= nTX)
+    protected = (cov_cur > 0) & (nV.astype(np.int32) * 2 > nfr) & ~(nBG.astype(np.int32) * 2 > nV) & \
+        (~static_t | struct_mostly)
     evidence = {"frames": [f["k"] for f in frames], "raw_frames": [f["j"] for f in frames],
                 "gain_offset": [[f["gain"], f["offset"]] for f in frames], "tau": taus, "selection": sel_ev,
                 "sides": side_ev, "radius": rev, "radius_kept": bool(r_kept),
                 "measured_full": [round(fx0, 3), round(fy0, 3), round(fx1, 3), round(fy1, 3)],
                 "radius_measured_full": round(r_full, 3), "static": static_how, "background_samples": bg_rule,
                 "frames_without_background": no_bg, "dynamic_in_box_px": int(dyn_in.sum()),
-                "canvas_votes_in_box": int(nBG[cov_cur > 0].sum(dtype=np.int64))}
+                "canvas_votes_in_box": int(nBG[cov_cur > 0].sum(dtype=np.int64)),
+                "structure_votes": int(nSA.sum(dtype=np.int64)), "protected_px": int(protected.sum())}
     return {"ok": True, "box": new_box, "edges": edges, "radius": float(radius), "radius_kept": bool(r_kept),
             "raw_match": raw_match, "frames": [f["k"] for f in frames], "evidence": evidence,
-            "maps": (nI, nO, nV), "canvas_votes": nBG, "protected": protected, "frame_data": frames}
+            "maps": (nI, nO, nV), "canvas_votes": nBG, "structure_votes": (nSA, nTX), "protected": protected,
+            "frame_data": frames}
 
 
 def _outline_band(boxes: Sequence[Box], comp: Proxy, px: int) -> np.ndarray:
@@ -3179,8 +3252,8 @@ def _evidence_error(box: Box, comp: Proxy, nI: np.ndarray, nO: np.ndarray, exclu
 
 def _refine_veto(old: Box, new: Box, comp: Proxy, m: dict, band: np.ndarray, cfg: Any) -> dict | None:
     """Reasons a measured box must not replace the temporal one although it explains the votes better:
-    (1) the ring it drops holds dynamic video that does not show the canvas (a competitor effect on the
-    video, not the box edge); (2) it covers rounded corners the competitor shows at the temporal box (RAW
+    (1) the ring it drops holds video (``m['protected']``: RAW present, dynamic or showing RAW's local
+    structure, not the canvas — a competitor effect on the video, not the box edge); (2) it covers rounded corners the competitor shows at the temporal box (RAW
     present, canvas shown). None when neither applies."""
     W, H = int(comp.full_size[0]), int(comp.full_size[1])
     cov_old = box_coverage(Layout(W, H, box=old), comp)
