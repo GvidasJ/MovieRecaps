@@ -114,7 +114,7 @@
                   <name>Center</name>
                   <value>
                     <horiz>-0.0000189</horiz>
-                    <vert>0.0000102</vert>
+                    <vert>0.0000101</vert>
                   </value>
                 </parameter>
                 <parameter>
@@ -514,7 +514,7 @@
                   <name>Center</name>
                   <value>
                     <horiz>-0.0000796</horiz>
-                    <vert>0.0000233</vert>
+                    <vert>0.0000234</vert>
                   </value>
                 </parameter>
                 <parameter>
@@ -809,7 +809,7 @@
                   <name>Scale</name>
                   <valuemin>0</valuemin>
                   <valuemax>1000</valuemax>
-                  <value>92.594335</value>
+                  <value>92.594333</value>
                 </parameter>
                 <parameter>
                   <parameterid>rotation</parameterid>
@@ -1585,7 +1585,7 @@
                   <parameterid>center</parameterid>
                   <name>Center</name>
                   <value>
-                    <horiz>-0.00006</horiz>
+                    <horiz>-0.0000599</horiz>
                     <vert>0.0000279</vert>
                   </value>
                 </parameter>

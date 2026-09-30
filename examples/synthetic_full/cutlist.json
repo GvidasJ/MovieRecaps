@@ -1107,10 +1107,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259543674015602,
+        "scale": 0.9259543674015394,
         "rotation_deg": 0.0,
-        "tx": -348.93663836141366,
-        "ty": 460.0041325592324
+        "tx": -348.9366383619125,
+        "ty": 460.00411056756167
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1169,8 +1169,8 @@
       "transform": {
         "scale": 0.9259375025106927,
         "rotation_deg": 0.0,
-        "tx": -348.9282312645097,
-        "ty": 460.0179209487709
+        "tx": -348.92823126451765,
+        "ty": 460.0179209487656
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1349,8 +1349,8 @@
       "transform": {
         "scale": 0.9260131761345903,
         "rotation_deg": 0.0,
-        "tx": -349.05864475107353,
-        "ty": 459.9977138762231
+        "tx": -349.05864475102896,
+        "ty": 459.99772637376054
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1475,8 +1475,8 @@
       "transform": {
         "scale": 0.9259582426509247,
         "rotation_deg": 0.0,
-        "tx": -348.9749877110486,
-        "ty": 460.0292084666642
+        "tx": -348.9749876785603,
+        "ty": 460.0292084666705
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1533,10 +1533,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259433521438922,
+        "scale": 0.9259433329829525,
         "rotation_deg": 0.0,
-        "tx": -348.97794915614566,
-        "ty": 460.04451441209295
+        "tx": -348.97793083221904,
+        "ty": 460.0445237767417
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1593,18 +1593,18 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259739564288211,
+        "scale": 0.9259739564288222,
         "rotation_deg": 0.0,
-        "tx": -348.99415064546827,
-        "ty": 459.998871831096
+        "tx": -348.99415066650727,
+        "ty": 459.99887158772407
       },
       "transform_keys": [
         {
           "comp_frame": 565,
-          "scale": 0.9259739564288211,
+          "scale": 0.9259739564288222,
           "rotation_deg": 0.0,
-          "tx": -348.99415064546827,
-          "ty": 459.998871831096
+          "tx": -348.99415066650727,
+          "ty": 459.99887158772407
         },
         {
           "comp_frame": 664,
@@ -1746,7 +1746,7 @@
           0.833333
         ],
         "color": null,
-        "notes": "O=806 D=6; measured alpha_B [0.1624, 0.3315, 0.4989, 0.6669, 0.838] at frames [807, 808, 809, 810, 811] (max dev from linear 0.005)"
+        "notes": "O=806 D=6; measured alpha_B [0.1643, 0.3288, 0.4929, 0.6594, 0.83] at frames [807, 808, 809, 810, 811] (max dev from linear 0.007)"
       },
       "audio": {
         "in_offset_frames": 0,
@@ -1798,10 +1798,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259900786058466,
+        "scale": 0.9259900786058469,
         "rotation_deg": 0.0,
-        "tx": -349.0299918229846,
-        "ty": 460.01697630475314
+        "tx": -349.0299830779535,
+        "ty": 460.01698392861056
       },
       "transform_keys": [],
       "easing": "linear",
@@ -1818,7 +1818,7 @@
           0.833333
         ],
         "color": null,
-        "notes": "O=806 D=6; measured alpha_B [0.1624, 0.3315, 0.4989, 0.6669, 0.838] at frames [807, 808, 809, 810, 811] (max dev from linear 0.005)"
+        "notes": "O=806 D=6; measured alpha_B [0.1643, 0.3288, 0.4929, 0.6594, 0.83] at frames [807, 808, 809, 810, 811] (max dev from linear 0.007)"
       },
       "transition_out": null,
       "audio": {
@@ -1977,10 +1977,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259575944146434,
+        "scale": 0.9259575944146261,
         "rotation_deg": 0.0,
-        "tx": -348.9818619544502,
-        "ty": 460.0202442556888
+        "tx": -348.9818617957965,
+        "ty": 460.02024425570517
       },
       "transform_keys": [],
       "easing": "linear",
@@ -2037,10 +2037,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9259297294958804,
+        "scale": 0.9259297294959714,
         "rotation_deg": 0.0,
-        "tx": -348.95731840817916,
-        "ty": 460.05158497862135
+        "tx": -348.95728056636835,
+        "ty": 460.051564244788
       },
       "transform_keys": [],
       "easing": "linear",
@@ -2097,10 +2097,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 1.1572869558245558,
+        "scale": 1.1572869558245507,
         "rotation_deg": 0.0,
-        "tx": -571.1311734899714,
-        "ty": 335.00365828469364
+        "tx": -571.1311733976947,
+        "ty": 335.00365832081025
       },
       "transform_keys": [],
       "easing": "linear",
@@ -2217,10 +2217,10 @@
       ],
       "flip_h": false,
       "transform": {
-        "scale": 0.9814726381610077,
+        "scale": 0.9814726381609467,
         "rotation_deg": 0.0,
-        "tx": -462.1756053514465,
-        "ty": 399.9829149558743
+        "tx": -462.17560540403133,
+        "ty": 399.9829207807438
       },
       "transform_keys": [],
       "easing": "linear",
@@ -2279,8 +2279,8 @@
       "transform": {
         "scale": 0.9259621614731399,
         "rotation_deg": 0.0,
-        "tx": -348.9905969233122,
-        "ty": 460.04593264024436
+        "tx": -348.99059685488123,
+        "ty": 460.04592965334456
       },
       "transform_keys": [],
       "easing": "linear",
@@ -2339,8 +2339,8 @@
       "transform": {
         "scale": 0.9259148321758011,
         "rotation_deg": 0.0,
-        "tx": -348.89384518867314,
-        "ty": 460.00430840361935
+        "tx": -348.89384561950624,
+        "ty": 460.0043084035558
       },
       "transform_keys": [],
       "easing": "linear",
@@ -3584,32 +3584,32 @@
       "audio": 1,
       "audio_align": 1,
       "conform": 1,
-      "frame_map": 2,
-      "layout": 1,
-      "probe": 1,
+      "frame_map": 3,
+      "layout": 2,
+      "probe": 2,
       "proxy": 1,
       "raw_index": 1,
       "scenedetect": 1,
       "segments": 2,
-      "sparse_search": 1
+      "sparse_search": 2
     },
-    "code_hash": "01488c39f6390cd8ca93",
+    "code_hash": "603420c943cb1ed9104a",
     "seed": 12345,
     "ffmpeg_version": "6.1.1",
     "timings": {
-      "S0 env": 0.222,
-      "S2 probe+conform": 1.027,
-      "S3 audio": 0.035,
-      "S5.1 audio align": 0.009,
-      "S3 proxies": 0.002,
-      "S4 layout": 0.019,
-      "S5.4-S6 segments+cutlist": 7.0,
-      "S7 AE project": 0.778,
-      "S8.preview": 82.944,
-      "S8.compare": 44.134,
-      "S8 exports": 127.231,
-      "S9 verify": 48.701,
-      "total": 188.008
+      "S0 env": 0.128,
+      "S2 probe+conform": 0.871,
+      "S3 audio": 0.053,
+      "S5.1 audio align": 0.007,
+      "S3 proxies": 0.001,
+      "S4 layout": 0.015,
+      "S5.4-S6 segments+cutlist": 4.124,
+      "S7 AE project": 0.506,
+      "S8.preview": 55.173,
+      "S8.compare": 30.369,
+      "S8 exports": 85.647,
+      "S9 verify": 31.376,
+      "total": 125.218
     }
   }
 }

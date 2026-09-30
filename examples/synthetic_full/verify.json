@@ -34,7 +34,8 @@
             395,
             424
           ]
-        ]
+        ],
+        "fullscreen_explained": []
       }
     },
     "c2_cuts": {
@@ -336,41 +337,41 @@
               {
                 "k": 806,
                 "alpha_declared": 0.0,
-                "alpha_fit": -0.0079,
+                "alpha_fit": -0.0021,
                 "zncc_fit": 0.9981
               },
               {
                 "k": 807,
                 "alpha_declared": 0.1667,
-                "alpha_fit": 0.1622,
+                "alpha_fit": 0.1641,
                 "zncc_fit": 0.9982
               },
               {
                 "k": 808,
                 "alpha_declared": 0.3333,
-                "alpha_fit": 0.3311,
+                "alpha_fit": 0.3284,
                 "zncc_fit": 0.9985
               },
               {
                 "k": 809,
                 "alpha_declared": 0.5,
-                "alpha_fit": 0.4994,
+                "alpha_fit": 0.4933,
                 "zncc_fit": 0.9988
               },
               {
                 "k": 810,
                 "alpha_declared": 0.6667,
-                "alpha_fit": 0.6673,
+                "alpha_fit": 0.6597,
                 "zncc_fit": 0.999
               },
               {
                 "k": 811,
                 "alpha_declared": 0.8333,
-                "alpha_fit": 0.8382,
+                "alpha_fit": 0.8301,
                 "zncc_fit": 0.999
               }
             ],
-            "alpha_max_err": 0.0079,
+            "alpha_max_err": 0.007,
             "window_fit": {
               "O": 806,
               "D": 6
@@ -380,7 +381,7 @@
               {
                 "side": "alpha",
                 "result": "ok",
-                "reason": "max |alpha_fit - alpha| = 0.008 (tol 0.15)"
+                "reason": "max |alpha_fit - alpha| = 0.007 (tol 0.15)"
               },
               {
                 "side": "window",
@@ -682,7 +683,7 @@
     },
     "c3_source_frames": {
       "status": "pass",
-      "summary": "AE sim: plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked); visual: 1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+      "summary": "AE sim: plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked); visual: 1535 matched frames, min ZNCC 0.99028, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99142), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
       "details": {
         "s9_2": {
           "status": "pass",
@@ -738,12 +739,12 @@
         },
         "s9_3": {
           "status": "pass",
-          "summary": "1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+          "summary": "1535 matched frames, min ZNCC 0.99028, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99142), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
           "failures": [],
           "exceptions": [],
           "threshold": 0.9,
           "distribution": {
-            "min": 0.99027,
+            "min": 0.99028,
             "p1": 0.99043,
             "p5": 0.99543,
             "median": 0.99958,
@@ -759,7 +760,7 @@
             }
           },
           "failed_frames": [],
-          "blend_frames_min": 0.99143,
+          "blend_frames_min": 0.99142,
           "blend_threshold": 0.9,
           "blend_failed_frames": [],
           "uniform_frames_checked": 0,
@@ -767,7 +768,7 @@
           "placeholder_frames_checked": 30,
           "placeholder_failed": [],
           "source": "preview_recreation.mp4",
-          "scores_file": "/tmp/pytest-of-root/pytest-265/e2e_full0/work/verify_zncc.npy",
+          "scores_file": "/tmp/pytest-of-root/pytest-358/e2e_full0/work/verify_zncc.npy",
           "preview_file": {
             "status": "pass",
             "summary": "delivered preview: 1571 frames at 30/1 fps, 1080x1920",
@@ -1844,7 +1845,8 @@
           395,
           424
         ]
-      ]
+      ],
+      "fullscreen_explained": []
     },
     "s9_2_ae_sim": {
       "status": "pass",
@@ -1900,12 +1902,12 @@
     },
     "s9_3_visual": {
       "status": "pass",
-      "summary": "1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
+      "summary": "1535 matched frames, min ZNCC 0.99028, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99142), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920",
       "failures": [],
       "exceptions": [],
       "threshold": 0.9,
       "distribution": {
-        "min": 0.99027,
+        "min": 0.99028,
         "p1": 0.99043,
         "p5": 0.99543,
         "median": 0.99958,
@@ -1921,7 +1923,7 @@
         }
       },
       "failed_frames": [],
-      "blend_frames_min": 0.99143,
+      "blend_frames_min": 0.99142,
       "blend_threshold": 0.9,
       "blend_failed_frames": [],
       "uniform_frames_checked": 0,
@@ -1929,7 +1931,7 @@
       "placeholder_frames_checked": 30,
       "placeholder_failed": [],
       "source": "preview_recreation.mp4",
-      "scores_file": "/tmp/pytest-of-root/pytest-265/e2e_full0/work/verify_zncc.npy",
+      "scores_file": "/tmp/pytest-of-root/pytest-358/e2e_full0/work/verify_zncc.npy",
       "preview_file": {
         "status": "pass",
         "summary": "delivered preview: 1571 frames at 30/1 fps, 1080x1920",

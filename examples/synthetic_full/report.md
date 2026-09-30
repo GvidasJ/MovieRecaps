@@ -8,7 +8,7 @@
 |---|---|---|
 | 1. Full coverage | PASS | 22 segments (1 NOT-IN-RAW), 1571/1571 frames covered, 0 gaps, 1 overlaps (1 transitions), 1 full-screen period(s) |
 | 2. Frame-exact cuts | PASS | 21 cuts: 21 verified both sides, 0 exceptions, 0 failed |
-| 3. Frame-exact source frames | PASS | AE sim: plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked); visual: 1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920 |
+| 3. Frame-exact source frames | PASS | AE sim: plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked); visual: 1535 matched frames, min ZNCC 0.99028, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99142), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920 |
 | 4. Speed / framing / flip / rotation | PASS | 21 raw segments: 0 problems, 0 exceptions |
 | 5. Audio | PASS (with exceptions) | 21 segments measured, max \|lag\| 0.99 ms, 1 explained exceptions, 0 failures |
 | 6. After Effects | PASS | mock run: 19/19 checks ok (mock only: After Effects not installed) |
@@ -165,14 +165,14 @@ All warnings:
 |---|---|---|
 | s9_1_coverage | PASS | 22 segments (1 NOT-IN-RAW), 1571/1571 frames covered, 0 gaps, 1 overlaps (1 transitions), 1 full-screen period(s) |
 | s9_2_ae_sim | PASS | plan: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked) \| mock record: 1535/1535 exact, 0 ambiguous-identical, 0 timing-tie, 0 re-assigned, 0 mismatched (100.0000% ok); plan vs cutlist: 0 differing frame(s) (6 transition, 30 placeholder/dip frames checked) |
-| s9_3_visual | PASS | 1535 matched frames, min ZNCC 0.99027, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99143), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920 |
+| s9_3_visual | PASS | 1535 matched frames, min ZNCC 0.99028, median 0.99958, 0 below 0.9; 6 blend frames (min 0.99142), 0 uniform, 30 placeholder frames checked [preview_recreation.mp4]; delivered preview: 1571 frames at 30/1 fps, 1080x1920 |
 | s9_4_cut_images | PASS | 21/21 cut images in examples/synthetic_full/debug/cuts |
 | s9_5_audio | PASS (with exceptions) | 21 segments measured, max \|lag\| 0.99 ms, 1 explained exceptions, 0 failures |
 | s9_6_ae_render | N/A | aerender not available on this machine (criterion 6 is mock-only) |
 | s9_7_determinism | PASS | cutlist re-assembled from caches is byte-identical |
 | s9_8_deliverables | PASS | 9/9 deliverables present, 1 skipped (recreated_edit.aep (After Effects not installed)), exports validated, 0 stage errors |
 
-Visual ZNCC over matched frames (preview_recreation.mp4): min 0.99027, p1 0.99043, p5 0.99543, median 0.99958, mean 0.99877; threshold 0.9.
+Visual ZNCC over matched frames (preview_recreation.mp4): min 0.99028, p1 0.99043, p5 0.99543, median 0.99958, mean 0.99877; threshold 0.9.
 
 | ZNCC bin | frames |
 |---|---|
@@ -284,8 +284,8 @@ After Effects mock run:
 | media | media | AE-imported media |
 | debug | debug | debug plots, cut images, failure thumbnails |
 | decisions | debug/decisions.jsonl | decision log (evidence) |
-| log | ../../../../../tmp/pytest-of-root/pytest-265/e2e_full0/work/match_cuts.log | run log |
-| frame_map | ../../../../../tmp/pytest-of-root/pytest-265/e2e_full0/work/frame_map.npz | per-frame mapping m(k) |
+| log | ../../../../../tmp/pytest-of-root/pytest-358/e2e_full0/work/match_cuts.log | run log |
+| frame_map | ../../../../../tmp/pytest-of-root/pytest-358/e2e_full0/work/frame_map.npz | per-frame mapping m(k) |
 
 ## 10. Environment and timings
 
@@ -295,16 +295,16 @@ After Effects mock run:
 
 | stage | seconds |
 |---|---|
-| S0 env | 0.22 |
-| S2 probe+conform | 1.03 |
-| S3 audio | 0.04 |
+| S0 env | 0.13 |
+| S2 probe+conform | 0.87 |
+| S3 audio | 0.05 |
 | S5.1 audio align | 0.01 |
 | S3 proxies | 0.00 |
-| S4 layout | 0.02 |
-| S5.4-S6 segments+cutlist | 7.00 |
-| S7 AE project | 0.78 |
-| S8.preview | 82.94 |
-| S8.compare | 44.13 |
-| S8 exports | 127.23 |
-| S9 verify | 48.70 |
-| total | 188.01 |
+| S4 layout | 0.01 |
+| S5.4-S6 segments+cutlist | 4.12 |
+| S7 AE project | 0.51 |
+| S8.preview | 55.17 |
+| S8.compare | 30.37 |
+| S8 exports | 85.65 |
+| S9 verify | 31.38 |
+| total | 125.22 |
