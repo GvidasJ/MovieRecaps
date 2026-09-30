@@ -621,3 +621,37 @@ matched frame (exact); cuts ±0 frames (speed-only cuts: truth inside cut_ambigu
 ±1 % / ±4 px; push-in keys reproduce the truth within tolerance at every frame; crossfade (O, D=6);
 NOT-IN-RAW placeholder range exact; c1–c5 ∈ {pass, pass_with_exceptions}, c6 == pass (mock), s9_7 pass;
 a second CLI run gives a byte-identical cutlist.json.
+
+## 7. Decisions from the final adversarial review (v3)
+
+37 confirmed findings (requirements, time math, After Effects realism, real-world robustness,
+verification honesty) were fixed under these shared rules:
+
+* **D1 Per-period layout.** `segment.py` sets `Segment.box`/`Segment.region` from `layout.periods`:
+  inside a `fullscreen` period `box` = the whole canvas (`corner_radius` 0) and `region` = 1; the dominant
+  boxed layout keeps `box = None`, `region = 0`; split/PiP stay unsupported (`region` ≥ 2, flagged, c1
+  `pass_with_exceptions`). Segments never straddle a period boundary. `export_ae` and `render_preview` put
+  `box != None` segments directly in MAIN (above the Video Box and background, below the reference layer)
+  with the canonical Sim at origin (0, 0) × r and a (rounded-)rect mask at the box (none for the full
+  canvas); `verify` scores each frame in its own box ROI.
+* **D2 Box refinement against RAW.** `layout.refine_box_from_raw(...)` re-fits the box from pixels where
+  the warped matched RAW agrees with the competitor (static pixels included), so single-camera shots with a
+  static background are not shrunk to the moving subject; when it changes the box the pipeline re-runs
+  S5.2 + S5.3 once.
+* **D3 Audio-informed phase.** After the per-segment audio analysis, `raw_in := raw_in + v·lag` for
+  confidently correlated stretch segments, clamped into the floor∩round interval (else the floor interval)
+  with a margin of max(1 ms, 5 % of its width); the residual lag is re-measured. This removes the
+  systematic quarter-frame audio offset of the interval centre (8.3 ms at 30p, 10.4 ms at 24p) while
+  keeping every frame exact under both sampling rules (`Segment.audio.phase_source`, `lag_ms_video`).
+* **D4 Verification references.** Criterion 3 compares the AE result with refine's PRE-segmentation
+  measurement (`fm.d['pre_segment_*']`); frames segmentation re-assigned to its model are a listed
+  `reassigned` class counted against `frame_exact_min`; a plan that disagrees with the cutlist always fails.
+* **D5 Exit codes.** 0 = pass; 1 = failure; 2 = run error; 3 = nothing failed but a criterion is
+  `not_available` (headline `PASS (criterion 6 not verified: …)`). New check `s9_8_deliverables`.
+* **D6 Decision log.** `DecisionLog.capture/replay`: each stage's records are stored with its cache entry
+  and replayed (`cached=true`) on a cache hit; `decisions.jsonl` is also copied to `<out>/debug/`.
+* **D7 Parallelism.** `fork` pools only on Linux; `spawn` elsewhere (Windows/macOS, or
+  `MATCH_CUTS_START_METHOD=spawn`) with picklable state (`Proxy` pickles as paths, `RawIndex` as its cache
+  file); results bit-identical across start methods and worker counts.
+* **D8 Synthetic.** Competitor audio starts at the frame boundary of each segment's first RAW frame (NLE
+  convention); one ~1 s fullscreen segment exercises D1.
