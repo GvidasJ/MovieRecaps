@@ -1136,7 +1136,8 @@ def test_mock_media_must_exist_where_the_jsx_looks(tmp_path):
     res = ea.mock_verify(jsx2, plan2, meta_for(cl2), scenarios=("default",))
     assert res["status"] == "fail" and res["records"]["default"]["calls"]["openDialog"] == 1
     # the default run records where each clip was imported from: <script dir>/<rel>
-    cl3, _, plan3, jsx3 = build(tmp_path / "ok", make_cutlist()) if (tmp_path / "ok").mkdir() is None else (None,) * 4
+    (tmp_path / "ok").mkdir()
+    cl3, _, plan3, jsx3 = build(tmp_path / "ok", make_cutlist())
     rec3 = ea.run_jsx_in_mock(jsx3, meta_for(cl3))
     raw = next(f for f in rec3["footage"] if f["comment"] == "mc:raw")
     assert raw["fsName"] == str(tmp_path / "ok" / "media" / "raw.mp4")
@@ -1230,7 +1231,7 @@ def test_plan_placeholders_fill_and_source_modes():
 
 @needs_node
 def test_mock_placeholders_build_cleanly(tmp_path):
-    for i, mode in enumerate(("match", "fill", "source")):
+    for mode in ("match", "fill", "source"):
         d = tmp_path / mode
         d.mkdir()
         cl, cfg, plan, jsx = build(d, placeholder_cutlist(), layout_mode=mode)

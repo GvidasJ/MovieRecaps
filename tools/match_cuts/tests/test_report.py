@@ -234,3 +234,131 @@ def test_edit_breakdown_numbers(tmp_path):
 def test_md_table_escapes_pipes():
     t = report.md_table(["a", "b"], [["x|y", None]])
     assert t.splitlines()[2] == "| x\\|y |  |"
+
+
+# ---------------------------------------------------------------------------------------------
+# review fixes: headline (D5), per-event caption counts (REQ-7), re-assigned / not-reproduced frames
+# (verification-honesty F1/F2, time-math F1), full-screen / split periods (REQ-3), MAIN-grid note (REQ-2)
+# ---------------------------------------------------------------------------------------------
+
+def _ver(statuses: dict, checks: dict | None = None) -> dict:
+    crit = {k: {"status": v, "summary": f"{k} summary"} for k, v in statuses.items()}
+    return {"criteria": crit, "checks": {k: {"status": v} for k, v in (checks or {}).items()}}
+
+
+ALL = {k: "pass" for k in ("c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio",
+                           "c6_after_effects")}
+
+
+def test_headline_d5():
+    assert report.headline(None) == "not verified"
+    assert report.headline(_ver(ALL, {"s9_7_determinism": "pass", "s9_8_deliverables": "pass"})) == "PASS"
+    assert report.headline(_ver({**ALL, "c3_source_frames": "pass_with_exceptions"})) == "PASS"
+    assert report.headline(_ver({**ALL, "c2_cuts": "fail"})) == "FAIL"
+    assert report.headline(_ver(ALL, {"s9_8_deliverables": "fail"})) == "FAIL"          # a failed check fails
+    assert report.headline(_ver(ALL, {"s9_7_determinism": "fail"})) == "FAIL"
+    assert report.headline(_ver({k: v for k, v in ALL.items() if k != "c5_audio"})) == "FAIL"   # incomplete
+    assert report.headline(_ver({**ALL, "c4_speed_framing": "weird"})) == "FAIL"
+    h = report.headline(_ver({**ALL, "c6_after_effects": "not_available"}, {"s9_6_ae_render": "not_available"}))
+    assert h == "PASS (criterion 6 not verified: c6_after_effects summary)"
+    h = report.headline(_ver({**ALL, "c5_audio": "not_available", "c6_after_effects": "not_available"}))
+    assert h.startswith("PASS (criteria 5, 6 not verified: ")
+
+
+def test_report_overall_uses_the_d5_headline(tmp_path):
+    ctx = make_ctx(tmp_path)
+    ctx.verify["checks"]["s9_8_deliverables"] = {"status": "fail", "summary": "7/8 deliverables present",
+                                                 "failures": ["recreated_edit.xml missing"]}
+    md = report.render_report(ctx)
+    assert "**Overall: FAIL**" in md and "| 9.8 Deliverables | FAIL | 7/8 deliverables present |" in md
+    ctx.verify["checks"]["s9_8_deliverables"]["status"] = "pass"
+    ctx.verify["criteria"]["c6_after_effects"] = {"status": "not_available", "summary": "mock not available: node missing"}
+    md = report.render_report(ctx)
+    assert "**Overall: PASS (criterion 6 not verified: mock not available: node missing)**" in md
+
+
+def test_caption_counts_are_per_event(tmp_path):
+    """REQ-7: the aggregate caption zone and other text events were counted as captions (33 / 34 / 35 for
+    the same 33 events)."""
+    ctx = make_ctx(tmp_path)
+    cl = ctx.cutlist
+    cl.layout["zones"].append({"type": "captions", "x": 100.0, "y": 1200.0, "w": 880.0, "h": 90.0, "comp_in": 12,
+                               "comp_out": 70, "notes": "2 caption events"})
+    cl.layout["captions"].append({"type": "text", "comp_in": 80, "comp_out": 120, "x": 300, "y": 500, "w": 200, "h": 40})
+    cl.overlays_detected = [{"type": "logo", "comp_in": 0, "comp_out": 300, "x": 40.0, "y": 60.0, "w": 160.0, "h": 160.0,
+                             "static": True},
+                            {"type": "captions", "comp_in": 12, "comp_out": 70, "x": 100.0, "y": 1200.0, "w": 880.0,
+                             "h": 90.0, "static": False, "notes": "zone"},
+                            {"type": "captions", "comp_in": 12, "comp_out": 40, "x": 100, "y": 1200, "w": 880, "h": 90},
+                            {"type": "captions", "comp_in": 40, "comp_out": 70, "x": 100, "y": 1205, "w": 800, "h": 90},
+                            {"type": "text", "comp_in": 80, "comp_out": 120, "x": 300, "y": 500, "w": 200, "h": 40}]
+    assert [c["comp_in"] for c in report.caption_events(cl)] == [12, 40]
+    md = report.render_report(ctx)
+    assert "- Captions: 2 caption events" in md and "- Captions: 2 events" in md
+    assert "3 caption" not in md and "Captions: 3" not in md
+    assert "Other overlaid text / stickers: 1 text event" in md and "Other overlaid text / stickers: text ×1" in md
+    assert "- Static overlays: logo" in md
+
+
+def test_reassigned_frames_are_listed_separately(tmp_path):
+    """verification-honesty F2 / time-math F1: frames segmentation re-assigned to its model were labelled
+    'Low-margin frames (... < 0.001)'. They get their own line (measured -> model, score gap); the
+    low-margin line keeps refine's own flags only."""
+    ctx = make_ctx(tmp_path)
+    fm = ctx.fm
+    for k in ("status", "raw", "raw_lo", "raw_hi", "low_margin"):
+        fm.d["pre_segment_" + k] = np.asarray(fm.d[k]).copy()
+    fm.d["pre_segment_raw"][60] = 61                      # refine measured 61, the segment model shows 60
+    fm.cand_j0[60] = 55
+    fm.cand[60, 5], fm.cand[60, 6] = 0.95, 0.99
+    fm.low_margin[60] = True                              # write_back flags it low_margin
+    fm.d["pre_segment_low_margin"][200] = True            # refine's own low-margin frame
+    fm.low_margin[200] = True
+    rows = report.reassigned_frames(fm)
+    assert rows == [{"k": 60, "measured": 61, "model": 60, "gap": pytest.approx(0.04)}]
+    md = report.render_report(ctx)
+    low = next(ln for ln in md.splitlines() if ln.startswith("- Low-margin frames"))
+    assert ": 1 — 200" in low
+    re_ln = next(ln for ln in md.splitlines() if ln.startswith("- Re-assigned by segmentation"))
+    assert "measured 61 → model 60 (score gap 0.0400)" in re_ln
+
+
+def test_frames_not_reproduced_exactly_are_listed(tmp_path):
+    """verification-honesty F1: s9_2 mismatches never reached the report's warnings."""
+    ctx = make_ctx(tmp_path)
+    ctx.verify["checks"]["s9_2_ae_sim"] = {"status": "fail", "plan": {
+        "plan_mismatches": [{"K": 194, "k": 194}, {"K": 195, "k": 195}], "n_plan_mismatches": 2,
+        "reassigned": [{"k": 205}], "n_reassigned": 1, "mismatches": [{"k": 300}], "n_mismatches": 1}, "mock": {}}
+    md = report.render_report(ctx)
+    ln = next(ln for ln in md.splitlines() if ln.startswith("- Frames not reproduced exactly (s9_2)"))
+    assert "AE plan: 2 differ from the cutlist (MAIN frames) (194-195)" in ln
+    assert "1 re-assigned by segmentation (205)" in ln and "1 AE frame ≠ measured m(k) (300)" in ln
+
+
+def test_fullscreen_and_split_periods_in_the_report(tmp_path):
+    """REQ-3: full-screen periods are listed as reproduced; split / PiP periods under 'Anything AE can't
+    reproduce' (they printed 'nothing detected')."""
+    ctx = make_ctx(tmp_path)
+    ctx.cutlist.layout["periods"] = [{"comp_in": 0, "comp_out": 40, "mode": "fullscreen"},
+                                     {"comp_in": 40, "comp_out": 270, "mode": "boxed"},
+                                     {"comp_in": 270, "comp_out": 300, "mode": "split"}]
+    ctx.cutlist.segments[0].box = {"x": 0, "y": 0, "w": 1080, "h": 1920, "corner_radius": 0}
+    md = report.render_report(ctx)
+    assert "- Full-screen periods (reproduced: full-canvas layers directly in MAIN): 0–39" in md
+    cant = next(ln for ln in md.splitlines() if ln.startswith("- Anything AE can't reproduce"))
+    assert "frames 270–299: split layout" in cant and "nothing detected" not in cant
+    assert "0–40 fullscreen (reproduced" in md and "270–300 split (NOT reproduced" in md
+    ctx.cutlist.segments[0].box = None                   # a full-screen shot rebuilt inside the box is listed
+    md = report.render_report(ctx)
+    assert "S01: shown full-screen by the competitor but rebuilt inside the video box" in md
+
+
+def test_main_grid_note_names_criterion_3(tmp_path):
+    """REQ-2 / time-math F3: the note said only criteria 2 and 6 are inexact on a different MAIN grid."""
+    ctx = make_ctx(tmp_path)
+    ctx.cutlist.settings.update(criteria_exact=False, fps_mode="source", main_fps="30000/1001",
+                                fps_source_max_error_s=0.0166)
+    md = report.render_report(ctx)
+    note = next(ln for ln in md.splitlines() if ln.startswith("_MAIN runs at"))
+    assert "criterion 3 accepts" in note and "Criteria 2, 3 and 6 are frame-exact only with `--fps competitor`" in note
+    assert "max error 16.600 ms" in note

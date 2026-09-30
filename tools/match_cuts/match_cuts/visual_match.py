@@ -605,24 +605,28 @@ class RawIndex:
     def prepare_spawn(self) -> None:
         """Called by :func:`parallel_map` before pickling for spawn workers. Trains FLANN here (once) and,
         for a cached index, writes next to its npz the uint8 and float32 descriptors (``.desc.npy`` /
-        ``.desc32.npy``, kept: content-addressed by the index key) and this process's trained tree
-        (``.flann``), so every worker memmaps the descriptors (one copy in the page cache instead of one
-        per worker) and loads the identical tree instead of re-training it."""
+        ``.desc32.npy``, kept: content-addressed by the index key, re-checked against a strided sample)
+        and this process's trained tree (``.flann``), so every worker memmaps the descriptors (one copy in
+        the page cache instead of one per worker) and loads the identical tree instead of re-training it
+        (without a usable ``.flann`` the worker re-trains with the index seed: the same tree, slower)."""
+        import cv2
         self.ensure_built()
         if self._spawn_files is not None or not self.npz_path or not Path(self.npz_path).is_file():
             return
         base = Path(self.npz_path)
         stem = base.name[:-len(".npz")] if base.name.endswith(".npz") else base.name
-        files = {"desc": base.with_name(stem + ".desc.npy"), "desc32": base.with_name(stem + ".desc32.npy"),
+        paths = {"desc": base.with_name(stem + ".desc.npy"), "desc32": base.with_name(stem + ".desc32.npy"),
                  "flann": base.with_name(stem + ".flann")}
+        step = max(1, len(self.desc) // 1024)
         try:
             for name, arr in (("desc", self.desc), ("desc32", self._data32)):
-                p = files[name]
+                p = paths[name]
                 ok = False
                 if p.is_file():
                     try:
                         mm = np.load(p, mmap_mode="r")
-                        ok = mm.shape == arr.shape and mm.dtype == arr.dtype
+                        ok = (mm.shape == arr.shape and mm.dtype == arr.dtype
+                              and np.array_equal(mm[::step], arr[::step]) and np.array_equal(mm[-1:], arr[-1:]))
                         del mm
                     except (OSError, ValueError):
                         ok = False
@@ -630,14 +634,25 @@ class RawIndex:
                     tmp = p.with_name(p.name + f".{os.getpid()}.tmp.npy")
                     np.save(tmp, np.ascontiguousarray(arr))
                     os.replace(tmp, p)
-            # the tree is re-saved once per process: workers must load exactly the tree trained here
-            tmp = files["flann"].with_name(files["flann"].name + f".{os.getpid()}.tmp")
-            self._flann.save(str(tmp))
-            os.replace(tmp, files["flann"])
         except OSError as e:
             log.warning("RAW index: spawn side files not written (%s) - workers receive the descriptors", e)
             return
-        self._spawn_files = {k: str(v) for k, v in files.items()}
+        files = {"desc": str(paths["desc"]), "desc32": str(paths["desc32"])}
+        # the tree is re-saved once per process: workers must load exactly the tree trained here
+        tmp = paths["flann"].with_name(paths["flann"].name + f".{os.getpid()}.tmp")
+        try:
+            self._flann.save(str(tmp))
+            if tmp.is_file() and tmp.stat().st_size > 0:
+                os.replace(tmp, paths["flann"])
+                files["flann"] = str(paths["flann"])
+        except (OSError, cv2.error) as e:           # e.g. a non-ASCII path on Windows (OpenCV file API)
+            log.info("RAW index: FLANN tree not saved (%s) - spawn workers re-train it (same seed)", e)
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        self._spawn_files = files
 
     def __reduce__(self):
         st: dict[str, Any] = {k: getattr(self, k) for k in self._SCALARS}
@@ -781,7 +796,7 @@ def _restore_index(st: dict) -> RawIndex:
     persistent pool loads each tree once per worker, not once per call."""
     import cv2
     files = st.get("files")
-    ident = (str(st["key"]), files["flann"] if files else "")
+    ident = (str(st["key"]), (files.get("flann") or files["desc32"]) if files else "")
     idx = _INDEX_CACHE.get(ident) if st["key"] else None
     if idx is None:
         idx = RawIndex.__new__(RawIndex)
@@ -794,9 +809,13 @@ def _restore_index(st: dict) -> RawIndex:
                 idx.offsets = np.asarray(z["offsets"], np.int64)
             idx.desc = np.load(files["desc"], mmap_mode="r")
             idx._data32 = np.load(files["desc32"], mmap_mode="r")
-            fl = cv2.flann_Index()
-            if len(idx._data32) and fl.load(idx._data32, files["flann"]):
-                idx._flann = fl
+            if files.get("flann") and len(idx._data32):
+                try:
+                    fl = cv2.flann_Index()
+                    if fl.load(idx._data32, files["flann"]):
+                        idx._flann = fl
+                except cv2.error:                      # unreadable tree file: re-train (same seed, same tree)
+                    idx._flann = None
         else:
             idx.frames, idx.desc, idx.owner = st["frames"], st["desc"], st["owner"]
             idx.pts, idx.offsets = st["pts"], st["offsets"]

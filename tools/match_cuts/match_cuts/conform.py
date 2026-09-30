@@ -24,10 +24,11 @@ in, odd sizes cropped by one px) and the NOMINAL frame rate, is CFR and starts a
   * ``-fps_mode passthrough`` on ffmpeg >= 5.1, ``-vsync 0`` on older builds.
 Transcodes are verified: exact frame count, AE-safety of the result, and >= 50 frames sampled by PTS
 whose SSIM against their source frame is > 0.98 and higher than against the source's neighbours.
-VFR conforms get a second, rule-independent check: the conformed frames are matched by CONTENT to the
-source frames (every frame when short, evenly spread windows when long) and a source frame that is
-never shown although its stored display interval is at least one output slot long fails the
-conform (only genuinely short intervals — real jitter — may be dropped by the fps rule).
+VFR conforms get a second check (content_coverage): the conformed frames are matched by CONTENT to the
+source frames (every frame when short, evenly spread windows when long) and every source frame that
+must be shown — stated independently of the ffmpeg rule: its stored display interval is >= 1 slot, or
+it lies within timestamp precision of a slot boundary (must_show_frames) — or that the rule shows, has
+to appear; only frames sharing a slot with their successor (real jitter) may be dropped.
 Results are cached in ``output/media/.conform.json`` ({src_hash, params, out_hash}).
 """
 from __future__ import annotations
@@ -437,25 +438,53 @@ def _cover_windows(n: int) -> list[tuple[int, int]]:
     return [(int(s), int(s) + COVER_WINDOW) for s in starts]
 
 
+def must_show_frames(pts: np.ndarray, tb: Fraction, fps: Fraction, shift: Fraction | None = None,
+                     n_out: int | None = None) -> dict[str, set]:
+    """Source frames a correct VFR->CFR conform MUST show, from two physical requirements stated
+    independently of the conform's ffmpeg rule (``source_index_for_output``):
+
+      * 'long':     the stored display interval Δ = (pts_{j+1} - pts_j)·tb·fps >= 1 output slot (the last
+                    frame: the median duration) — it contains a slot boundary however the rule rounds;
+      * 'boundary': the frame lies within the timestamp precision u (= vfr_pts_shift: one tick, at most a
+                    quarter slot) of a slot boundary m/fps and its successor lies more than u after that
+                    boundary — its true time may be exactly m/fps, where 'the frame displayed at t_m' is
+                    this frame (an ms-rounded 29.97 frame stored 0.4 ms late is such a frame: the
+                    unshifted rule dropped ~1/3 of them).
+    ``shift`` = u (default vfr_pts_shift); with ``n_out`` only frames whose slot is < n_out are required.
+    Both sets are exact (Python ints / Fractions)."""
+    tb, fps = Fraction(tb), Fraction(fps)
+    u = (vfr_pts_shift(tb, fps) if shift is None else Fraction(shift)) * fps       # in slots
+    rel = [int(p) - int(pts[0]) for p in pts]
+    n = len(rel)
+    lim = n_out
+    inter = interval_slots(np.asarray(rel, dtype=np.int64), tb, fps)
+    long_, boundary = set(), set()
+    for j in range(n):
+        x = rel[j] * tb * fps                        # position in slots (exact)
+        if inter[j] >= 1 and (lim is None or math.ceil(max(x - u, 0)) < lim):
+            long_.add(j)
+        m = round(x)                                 # nearest boundary
+        if (abs(x - m) <= u and (lim is None or m < lim)
+                and (j == n - 1 or rel[j + 1] * tb * fps > m + u)):
+            boundary.add(j)
+    return {"long": long_, "boundary": boundary}
+
+
 def content_coverage(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
-    """Rule-independent check of a VFR conform: which SOURCE frames does the conform actually show?
+    """Content check of a VFR conform over (nearly) every frame: which SOURCE frames does it really show?
 
     Every conformed frame k (all of them up to COVER_FULL_MAX, else evenly spread windows) is matched by
     content (gray, <= COVER_MAX_SIDE px, RMSE) against the source frames around the rule's prediction;
     a source frame is 'shown' when some conformed frame is as close to it as to its best match (within
-    codec noise: rmse <= 1.5·best + 1 level, so visually identical neighbours count as shown). A source
-    frame that is never shown is classified by its STORED display interval Δ (output slots):
-      * Δ >= 1                         -> unexplained: the interval contains a slot boundary whatever the
-                                          rule's rounding, so it must be shown (the ms-timestamp drop bug);
-      * 1 - 2·tb·fps <= Δ < 1          -> quantisation-ambiguous (one tick of rounding at either end
-                                          could make it a full slot): real jitter drops such a frame with
-                                          probability ~(1 - Δ), so at most E + 3·sqrt(E) + 2 of them may
-                                          be missing, E = sum(1 - Δ) over the zone (an ms-timestamp
-                                          29.97 file has E ~ 1 % of its frames; the drop bug lost ~1/3);
-      * Δ < 1 - 2·tb·fps               -> real jitter: two source frames within one slot (allowed).
-    Independently of the classes, a missing frame that the rule itself shows is a rule violation (the
-    SSIM samples check the same thing on 64 frames; this covers every checked frame).
-    Returns {checked, windows, missing, unexplained, ambiguous, jitter, informative, problems, ...}."""
+    codec noise: rmse <= 1.5·best + 1 level, so visually identical neighbours count as shown). Every
+    checked source frame that must be shown and is not fails the conform:
+      * 'unexplained': frames must_show_frames() requires (interval >= 1 slot, or within timestamp
+        precision of a slot boundary) — requirements stated independently of the ffmpeg rule, so a wrong
+        rule (e.g. one ignoring ms-rounded timestamps) cannot hide its own damage;
+      * 'rule_violations': other frames the 'frame displayed at t_k' rule shows (the SSIM samples check
+        the same on 64 frames; this covers every checked frame).
+    Frames the rule drops (two source frames inside one slot: real jitter) are reported as
+    'jitter_drops'. Returns {checked, windows, missing, unexplained, rule_violations, informative, ...}."""
     import cv2
     from .media import VideoReader
 
@@ -469,10 +498,11 @@ def content_coverage(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
         rec.update({"checked": 0, "note": "too short for a content check"})
         return rec
     idx_all = source_index_for_output(np.arange(n), "fps", pts, tb, fps, shift)
-    rec["rule_shown"] = int(len(np.unique(idx_all)))
-    rec["rule_dropped"] = int(n_src - rec["rule_shown"])
+    rule_set = set(int(x) for x in np.unique(idx_all).tolist())
+    rec["rule_shown"] = len(rule_set)
+    rec["rule_dropped"] = int(n_src - len(rule_set))
+    req = must_show_frames(pts, tb, fps, vfr_pts_shift(tb, fps), n_out=n)
     inter = interval_slots(pts, tb, fps)
-    thr_amb = 1 - 2 * Fraction(tb) * fps
     wins = _cover_windows(n)
     geo = output_geometry(src)
     f = min(1.0, COVER_MAX_SIDE / max(plan["width"], plan["height"]))
@@ -502,38 +532,29 @@ def content_coverage(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
             e_hi = n_src - 1 if k1 >= n else int(idx_all[k1 - 1]) - 1
             if e_hi >= e_lo:
                 evaluable[e_lo:e_hi + 1] = True
-    missing = [j for j in np.flatnonzero(evaluable & ~covered).tolist()]
-    rule_set = set(int(x) for x in np.unique(idx_all).tolist())
-    rule_violations = [j for j in missing if j in rule_set]
-    unexplained = [j for j in missing if inter[j] >= 1]
-    zone = [j for j in np.flatnonzero(evaluable).tolist() if thr_amb <= inter[j] < 1]
-    ambiguous = [j for j in missing if thr_amb <= inter[j] < 1]
-    jitter = [j for j in missing if inter[j] < thr_amb]
+    missing = np.flatnonzero(evaluable & ~covered).tolist()
+    required = req["long"] | req["boundary"]
+    unexplained = [j for j in missing if j in required]
+    rule_violations = [j for j in missing if j in rule_set and j not in required]
+    jitter = [j for j in missing if j not in rule_set and j not in required]
     n_eval = int(evaluable.sum())
-    # drops expected in the quantisation zone if the frames' phases were uniform: sum(1 - Δ) (CFR content
-    # whose timestamps are merely rounded sits AT the slot boundaries and loses none of them)
-    e_amb = float(sum(1 - inter[j] for j in zone))
-    allowed_amb = int(math.floor(e_amb + 3.0 * math.sqrt(e_amb) + 2.0))
+    needed = sum(k1 - k0 for k0, k1 in wins)
     rec.update({"checked": n_eval, "output_frames_matched": int(seen_out), "windows": len(wins),
                 "full": n <= COVER_FULL_MAX, "compare_size": list(size),
                 "informative": int((informative & evaluable).sum()), "missing": len(missing),
+                "required": int(sum(1 for j in required if evaluable[j])),
                 "unexplained": unexplained[:50], "n_unexplained": len(unexplained),
                 "rule_violations": rule_violations[:50], "n_rule_violations": len(rule_violations),
-                "ambiguous": ambiguous[:50], "n_ambiguous": len(ambiguous), "ambiguous_zone": len(zone),
-                "ambiguous_expected": round(e_amb, 3), "ambiguous_allowed": allowed_amb,
                 "jitter_drops": len(jitter)})
-    if seen_out < sum(k1 - k0 for k0, k1 in wins):
-        rec["problems"].append(f"content check decoded only {seen_out} of the {sum(k1 - k0 for k0, k1 in wins)} "
-                               "conformed frames it needed")
+    if seen_out < needed:
+        rec["problems"].append(f"content check decoded only {seen_out} of the {needed} conformed frames it needed")
     if unexplained:
+        j0 = unexplained[0]
+        why = "display interval >= 1 slot" if j0 in req["long"] else "within timestamp precision of a slot boundary"
         rec["problems"].append(
-            f"{len(unexplained)} source frames are never shown although their display interval is >= 1 "
-            f"output slot (e.g. {unexplained[:8]}; interval {float(inter[unexplained[0]]):.3f} slots) — the "
-            "conform dropped real frames")
-    if len(ambiguous) > allowed_amb:
-        rec["problems"].append(
-            f"{len(ambiguous)} source frames with a ~1-slot display interval are never shown (jitter explains "
-            f"~{e_amb:.1f}, <= {allowed_amb} allowed; e.g. {ambiguous[:8]}) — the conform dropped real frames")
+            f"{len(unexplained)} source frames that must be shown are missing from the conform (e.g. "
+            f"{unexplained[:8]}; frame {j0}: {why}, interval {float(inter[j0]):.3f} slots) — the conform dropped "
+            "real frames")
     if rule_violations:
         rec["problems"].append(
             f"{len(rule_violations)} source frames the 'frame displayed at t_k' rule shows are missing from the "
@@ -770,8 +791,9 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
     codec_desc = {"prores_lt": "ProRes 422 LT (prores_aw) + PCM 48 kHz", "prores": "ProRes 422 (prores_aw) + PCM 48 kHz",
                   "prores_ks": "ProRes 422 LT (prores_ks) + PCM 48 kHz", "h264": "H.264 CRF 12 + AAC 48 kHz",
                   "h264_ref": "H.264 + AAC 48 kHz"}[plan["codec"]]
-    reason = ("not AE-safe: " + "; ".join(why_not_copy) + f" -> transcoded to {codec_desc}, "
-              f"{'VFR->CFR fps round=up (PTS shifted back by ' + str(plan.get('pts_shift')) + ' s for timestamp quantisation)' if plan['mode'] == 'fps' else 'CFR re-stamped by frame index'} at "
+    timing_desc = (f"VFR->CFR fps round=up (PTS shifted back by {plan.get('pts_shift')} s for timestamp "
+                   "quantisation)" if plan["mode"] == "fps" else "CFR re-stamped by frame index")
+    reason = ("not AE-safe: " + "; ".join(why_not_copy) + f" -> transcoded to {codec_desc}, {timing_desc} at "
               f"{plan['fps']} fps, {plan['width']}x{plan['height']}, start 0")
     res = ConformResult(str(dst.resolve()), True, reason, ver, str(src),
                         os.path.relpath(dst.resolve(), out_root).replace(os.sep, "/"), str(dst.resolve()))

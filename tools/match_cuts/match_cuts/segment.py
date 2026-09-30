@@ -13,20 +13,29 @@ Algorithm overview
   2. Cuts = DP over candidate cut positions of each MATCH sub-run (never greedy prefixes). Candidates:
      boundaries of greedy free-speed runs (+-1), phase breaks at the dominant speed / 1.0 inside runs
      within 15 % of that speed and at the nearest snap speed, RAW increment anomalies, track changes, audio
-     lag steps. cost(segment) = 0 if the dominant (or an audio-confirmed) speed is feasible on the soft
-     ranges, lambda_one for 1.0 when it is not dominant, lambda_nondominant for any other snap value (incl.
-     freeze 0 and reverse -1), lambda_unsnapped when only an unsnapped speed is, inf when infeasible --
-     after tolerating isolated interior single-frame violations whose model frame scores within 5*delta_k
-     of their best and that no competing hypothesis explains (same track, or a near miss of <= 2 frames),
-     + lambda_drop each, + lambda_tie when only a timing tie makes it feasible; + lambda_cut per cut. A
-     1-frame-skip jump cut therefore stays a cut between two 1.0 segments instead of becoming a fake
-     1.02-1.05x segment.
+     lag steps; where soft ranges are wider than refine's measured (argmax) range, also the phase breaks and
+     free runs of the MEASURED frames. cost(segment) = 0 if the dominant (or an audio-confirmed) speed is
+     feasible on the soft ranges, lambda_one for 1.0 when it is not dominant, lambda_nondominant for any
+     other snap value (incl. freeze 0 and reverse -1), lambda_unsnapped for the unsnapped robust slope of
+     the measured frames (tried when nothing snapped is feasible or every snapped explanation costs more),
+     inf when infeasible -- after tolerating isolated interior single-frame violations whose model frame
+     scores within 5*delta_k of their best and that no competing hypothesis explains (same track, or a near
+     miss of <= 2 frames), + lambda_drop each, + lambda_tie when only a timing tie makes it feasible
+     + the DATA TERM: every frame the line shows inside its soft range but outside refine's measured range
+     costs lambda_data * clip(deficit / delta_k, 0.25, 1) at the best phase (soft ranges are tolerances,
+     not free choices: a 2-frame jump cut on slow footage is a cut, a 1.03x shot is not snapped to 1.0);
+     + lambda_cut per cut; equal costs -> fewer segments. A 1-frame-skip jump cut therefore stays a cut
+     between two 1.0 segments instead of becoming a fake 1.02-1.05x segment.
   3. Clean-up: 1-2 frame segments explained by a neighbour's model are merged (matching errors), genuine
      ones are kept (verified flash cuts); adjacent compatible segments are merged when one model is
-     cheaper, or when one line at the same speed explains both with runs of <= 2 low-margin near misses;
-     short NONE runs inside one continuous model are absorbed when the model frame (or a blend of two
-     neighbouring RAW frames) matches them; phase_solve.snap_speed re-snaps non-dominant speeds with the
-     other segments' speeds as preferred values.
+     cheaper; chains of >= 2 one-frame skips that one line (any speed) reproduces at least as well are one
+     retimed segment; adjacent segments at the same speed are merged when one line explains both with runs
+     of <= 2 low-margin near misses (a sub-frame phase cut bought only by the data term needs
+     lambda_phase_cut more evidence); short NONE runs inside one continuous model are absorbed when the
+     model frame (or a blend of two neighbouring RAW frames) matches them; phase_solve.snap_speed re-snaps
+     non-dominant speeds with the other segments' speeds as preferred values, only inside the measured
+     frames' exact range or within speed_snap_tol of their robust slope (prompt 5.4). Runs never cross a
+     layout period boundary (D1: fullscreen / split / PiP periods; Segment.box / region set per period).
   4. Speed-only cuts (no RAW discontinuity): cut moved to the intersection of both lines,
      cut_ambiguity=[a, b] = all positions both models explain.
   5. Transitions: fit_blend over A in {Â-1..Â+1} x B in {B̂-1..B̂+1} (vectorised covariance form, equal to
@@ -35,10 +44,16 @@ Algorithm overview
      become phase constraints. Dips (fades to/from a UNIFORM run), flashes (UNIFORM runs of 1-2 frames);
      NONE -> NOT-IN-RAW placeholders.
   6. Criterion-2 check on every hard cut (A's last frame scores higher under A's model than under B's
-     and vice versa); the cut is moved otherwise.
+     and vice versa); the cut is moved otherwise (never at a layout period boundary, never while both
+     models show the same frame on both sides). Afterwards neighbours whose models agree at the boundary
+     (same speed, RAW frame and framing on both sides: no discontinuity of m(k)) are merged -- no phantom
+     cuts.
   7. Retiming (frame blending), freeze / reverse / ramps (remap keys), framing (constant or RDP keys,
-     rotation only above rotation_min_deg, full-affine check when the similarity fits poorly), phase solve,
-     FrameMap write-back (m(k) := model frame where consistent, BLEND, tie, low_margin, soft ranges).
+     rotation only above rotation_min_deg, full-affine check when the similarity fits poorly), phase solve
+     (the phase that reproduces the most measured frames inside the soft intersection, not its centre;
+     raw_in_interval / ae_margin_ms refer to that sub-interval; speed_range = the speeds reproducing what
+     the segment claims), FrameMap write-back (m(k) := model frame where consistent, BLEND, tie,
+     low_margin, soft ranges), Segment.box / region from the layout period.
   8. PySceneDetect cross-check (every scene change must coincide with a cut / transition, disagreements
      explained), debug/mapping.png and debug/scores.png.
 """
@@ -62,6 +77,8 @@ __all__ = ["build_segments", "segment_constraints", "scenedetect_changes", "plot
 
 _TIE = ps.TIE_SLACK
 _TAU = ps.TAU
+_AUTO = object()     # sentinel: "compute it here"
+_PRUNED = object()   # fit(): feasible, but no explanation can cost <= bound
 
 
 def _cfg(cfg: Any, name: str, default: Any) -> Any:
@@ -213,11 +230,24 @@ class _Model:
     vrange: tuple[float, float] | None
     v_ols: float
     drops: list[int]
-    sol: dict
+    _sol: dict | None           # phase solution (``sol``; computed lazily when ``lazy`` is set)
     track: int
     flip: bool
     n_frames: int
     data: float = 0.0           # DP data term: frames shown off refine's measured argmax range (weighted)
+    lazy: Any = None            # () -> sol: the DP evaluates thousands of ranges, only the chosen ones need it
+
+    @property
+    def sol(self) -> dict:
+        if self._sol is None and self.lazy is not None:
+            self._sol = self.lazy()
+            self.lazy = None
+        return self._sol if self._sol is not None else {}
+
+    @sol.setter
+    def sol(self, value: dict) -> None:
+        self._sol = value
+        self.lazy = None
 
     @property
     def raw_in(self) -> float:
@@ -249,8 +279,9 @@ class _Solver:
         # measured argmax range costs l_data * clip(deficit / delta_k, w_min, 1) (l_data without a candidate
         # vector) -- soft ranges are tolerances, not free choices, so a constant-speed line that contradicts a
         # run of measured frames loses to a cut / another speed
-        self.l_data = float(_cfg(cfg, "lambda_data", 0.5))
+        self.l_data = float(_cfg(cfg, "lambda_data", 0.25))
         self.w_min = float(_cfg(cfg, "data_weight_min", 0.25))
+        self.l_phase = float(_cfg(cfg, "lambda_phase_cut", 1.0))
         self.snaps = [float(s) for s in _cfg(cfg, "speed_snap_values", (1.0,))]
         self._cache: dict[tuple, Any] = {}
         self._relax_cache: dict[tuple, bool] = {}
@@ -353,8 +384,7 @@ class _Solver:
         if i.size == 0:
             return 0.0
         st = (j - base).astype(np.float64) - u * d[i]
-        c, _a, _b = ps.best_subinterval(st, st + 1.0, w, xl, xh)
-        return float(c)
+        return ps.min_penalty(st, w, xl, xh)
 
     def try_u(self, u: float, ks: np.ndarray, d: np.ndarray, lo_r: np.ndarray, hi_r: np.ndarray, base: int,
               droppable: np.ndarray, track: int | None = None, max_run: int = 1, with_interval: bool = False
@@ -428,8 +458,11 @@ class _Solver:
     # -- full cost evaluation -----------------------------------------------------------------------
     def fit(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray, comp_in: int, droppable: np.ndarray,
             span: tuple[int, int], track: int, flip: bool, fixed_v: float | None = None,
-            max_run: int = 1) -> _Model | None:
-        """Cheapest explanation of the constraint frames ks by one linear time map (or None)."""
+            max_run: int = 1, pen: Any = _AUTO, bound: float = math.inf) -> Any:
+        """Cheapest explanation of the constraint frames ks by one linear time map (or None when no line
+        explains them). ``pen``: the data-term penalty pairs when the caller already has them (default:
+        computed here). ``bound``: the DP only needs explanations costing <= bound; when the frames are
+        feasible but nothing can, ``_PRUNED`` is returned (the data term is never computed for them)."""
         n = int(ks.size)
         if n == 0:
             v = self.dominant if fixed_v is None else fixed_v
@@ -441,7 +474,7 @@ class _Solver:
         d = (ks - comp_in).astype(np.float64)
         lo_r = (lo - base).astype(np.float64)
         hi_r = (hi - base).astype(np.float64)
-        pen = self.penalties(ks, lo, hi)
+        pen = self.penalties(ks, lo, hi) if pen is _AUTO else pen
         plo, phi = self.F.pristine(ks, lo, hi)
         vo_cache: list[float] = []
 
@@ -450,61 +483,94 @@ class _Solver:
                 vo_cache.append(ps.estimate_speed(ks, plo, phi, self.cf, self.rf) if n >= 2 else float("nan"))
             return vo_cache[0]
 
-        def evaluate(v: float, bc: float, dmask: np.ndarray, mr: int):
+        def evaluate(v: float, bc: float, dmask: np.ndarray, mr: int, bound: float = math.inf):
+            """(total, data, drops) of speed v, or None when infeasible; the data term is skipped (returned as
+            inf) when the candidate cannot reach ``bound`` even with a zero data term."""
             r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, dmask, track, mr, with_interval=True)
             if r is None:
                 return None
             drops, t, _x, xl, xh = r
+            base_total = bc + self.l_drop * len(drops) + (self.l_tie if t < _TIE else 0.0)
+            if base_total > bound + 1e-9:
+                return math.inf, math.inf, drops
             keep = None
             if drops:
                 keep = ~np.isin(ks, np.asarray(drops, dtype=np.int64))
             data = self.data_cost(pen, v * self.ratio, d, base, xl, xh, keep)
-            total = bc + self.l_drop * len(drops) + (self.l_tie if t < _TIE else 0.0) + data
-            return total, data, drops
+            return round(base_total + data, 9), data, drops
 
-        best = None      # (key, v, kind, drops, unsnapped, data); key = (total, data, rank, |v - v_ols|, v)
         if fixed_v is not None:
             cands = [(float(fixed_v), 0.0, "fixed", 0)]
         else:
             cands = self.speed_cands(*span)
+        feas: list[tuple] = []      # (total, data, rank, v, kind, drops)
+        bt = math.inf
+        feasible = False
         for v, bc, kind, rank in cands:
-            if best is not None and bc > best[0][0] + 1e-12:
+            lim = min(bt, bound)
+            if bc > lim + 1e-9 and feasible:
                 break
-            ev = evaluate(v, bc, droppable, max_run)
+            ev = evaluate(v, bc, droppable, max_run, lim)
             if ev is None:
                 continue
-            total, data, drops = ev
-            if best is not None and (total, data, rank) > best[0][:3]:
+            feasible = True
+            if not math.isfinite(ev[0]):
                 continue
-            vo = v_ols_() if kind == "snap" else float("nan")
-            key = (total, data, rank, abs(v - vo) if math.isfinite(vo) else 0.0, v)
-            if best is None or key < best[0]:
-                best = (key, v, kind, drops, False, data)
+            feas.append((ev[0], ev[1], rank, v, kind, ev[2]))
+            bt = min(bt, ev[0])
+        best = None      # (key, v, kind, drops, unsnapped, data); key = (total, data, rank, |v - v_ols|, v)
+        if feas:
+            k0 = min(f[:3] for f in feas)
+            ties = [f for f in feas if f[:3] == k0]
+            if len(ties) > 1:       # equal cost and rank (snap values): the one closest to the measured slope
+                vo = v_ols_()
+                ties.sort(key=lambda f: (abs(f[3] - vo) if math.isfinite(vo) else 0.0, f[3]))
+            f = ties[0]
+            best = ((f[0], f[1], f[2], 0.0, f[3]), f[3], f[4], f[5], False, f[1])
         # unsnapped speed (prompt 5.4: snap only if the residuals don't get worse): the robust slope of the
         # measured frames, clipped into the speeds that reproduce them (else into the soft range). Tried when
         # nothing snapped is feasible or when every snapped explanation costs more than lambda_unsnapped
         # (i.e. it contradicts the measured frames).
-        if fixed_v is None and n >= 2 and (best is None or best[0][0] > self.l_uns + 1e-12):
-            un = self._unsnapped(ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate)
+        if fixed_v is None and n >= 2 and (best is None or best[0][0] > self.l_uns + 1e-9) and \
+                not (feasible and self.l_uns > bound + 1e-9) and \
+                not (best is not None and self._within_snap_tol(best[1], ks, plo, phi)):
+            un = self._unsnapped(ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate, bound)
             if un is not None:
+                feasible = True
                 v, (total, data, drops) = un
                 key = (total, data, 9, 0.0, v)
-                if best is None or key < best[0]:
+                if math.isfinite(total) and (best is None or key < best[0]):
                     best = (key, v, "unsnapped", drops, True, data)
         if best is None:
-            return None
+            return _PRUNED if feasible else None
         key, v, kind, drops, uns, data = best
         use = np.ones(n, bool)
         if drops:
             use &= ~np.isin(ks, np.asarray(drops, dtype=np.int64))
-        sol = ps.solve_raw_in(ks[use], lo[use], hi[use], comp_in, v, self.cf, self.rf,
-                              penalties=self._pen_subset(pen, use))
-        vo = vo_cache[0] if vo_cache else float("nan")     # final segments recompute it (to_segment)
-        return _Model(comp_in, float(v), kind, float(key[0]), bool(uns), None, float(vo), list(drops), sol,
-                      track, flip, n, float(data))
+        cf, rf, psub = self.cf, self.rf, self._pen_subset(pen, use)
 
-    def _unsnapped(self, ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate):
-        """(v, evaluate(v)) of the unsnapped explanation, or None."""
+        def solve() -> dict:
+            return ps.solve_raw_in(ks[use], lo[use], hi[use], comp_in, v, cf, rf, penalties=psub)
+
+        vo = vo_cache[0] if vo_cache else float("nan")     # final segments recompute it (to_segment)
+        return _Model(comp_in, float(v), kind, float(key[0]), bool(uns), None, float(vo), list(drops), None,
+                      track, flip, n, float(data), lazy=solve)
+
+    def _within_snap_tol(self, v: float, ks: np.ndarray, plo: np.ndarray, phi: np.ndarray) -> bool:
+        """The measured frames' least-squares slope is within speed_snap_tol of v: the snap passes the prompt's
+        test and an unsnapped line at (almost) the same slope cannot explain the frames better (O(n) gate for
+        the O(n^2) unsnapped search -- dense argmax noise raises the data term of EVERY line)."""
+        x = ks.astype(np.float64)
+        x = x - x.mean()
+        sxx = float((x * x).sum())
+        if sxx <= 0 or v == 0:
+            return False
+        y = (plo + phi + 1).astype(np.float64) / 2.0
+        vl = float((x * (y - y.mean())).sum()) / sxx / self.ratio
+        return abs(vl - v) <= float(_cfg(self.cfg, "speed_snap_tol", 0.003)) * abs(v)
+
+    def _unsnapped(self, ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate, bound=math.inf):
+        """(v, evaluate(v)) of the unsnapped explanation (total inf: feasible but above bound), or None."""
         vr = ps.feasible_speed_range(ks, lo, hi, comp_in, self.cf, self.rf)
         if vr is None and droppable.any():
             keep = ~droppable
@@ -529,7 +595,7 @@ class _Solver:
             if any(abs(v - s) <= 1e-12 for s in seen):
                 continue
             seen.append(v)
-            ev = evaluate(v, self.l_uns, droppable, 1)
+            ev = evaluate(v, self.l_uns, droppable, 1, bound)
             if ev is not None and (best is None or ev[:2] < best[1][:2]):
                 best = (v, ev)
                 if ev[1] <= 1e-12:
@@ -821,6 +887,7 @@ class _Builder:
             self.center = (cw / 2.0, ch / 2.0)
             self.box_r = math.hypot(cw, ch) / 2.0
         self.ts = int(_cfg(cfg, "transition_search", 20))
+        self._gpen: Any = None          # data-term pairs over the whole timeline (per DP pass)
         self._init_periods(layout, cw, ch)
 
     # ---------------------------------------------------------------------------------------------
@@ -1193,7 +1260,8 @@ class _Builder:
         vals, cnt = np.unique(self.F.track[ks], return_counts=True)
         return int(vals[np.argmax(cnt)])
 
-    def eval_range(self, q: int, p: int) -> _Model | None:
+    def eval_range(self, q: int, p: int, bound: float = math.inf) -> Any:
+        """Cheapest model of [q, p) (None: infeasible; _PRUNED: feasible but costlier than bound)."""
         key = ("r", q, p, self.S.dominant)
         if key in self.S._cache:
             return self.S._cache[key]
@@ -1203,9 +1271,27 @@ class _Builder:
         if dm.size:
             dm[0] = False
             dm[-1] = False
-        m = self.S.fit(ks, lo, hi, q, dm, (q, p), tr, bool(self.F.flip[q]))
-        self.S._cache[key] = m
+        m = self.S.fit(ks, lo, hi, q, dm, (q, p), tr, bool(self.F.flip[q]), pen=self._range_penalties(q, p),
+                       bound=bound)
+        if m is not _PRUNED:
+            self.S._cache[key] = m
         return m
+
+    def _range_penalties(self, q: int, p: int):
+        """Data-term pairs of the DP range [q, p) (soft ranges F.lo/F.hi, unchanged during a DP pass), sliced
+        from one precomputation over the whole timeline."""
+        if self._gpen is None:
+            F = self.F
+            allk = np.arange(self.n, dtype=np.int64)
+            gp = self.S.penalties(allk, F.lo.astype(np.int64), F.hi.astype(np.int64))
+            self._gpen = gp if gp is not None else False
+        if self._gpen is False:
+            return None
+        i, j, w = self._gpen
+        a, b = np.searchsorted(i, q, side="left"), np.searchsorted(i, p, side="left")
+        if b <= a:
+            return None
+        return i[a:b] - q, j[a:b], w[a:b]
 
     def _relaxed_break(self, q: int, p: int) -> bool:
         key = (q, p)
@@ -1233,7 +1319,9 @@ class _Builder:
             for qi in range(pi - 1, -1, -1):
                 q = P[qi]
                 prev, _pq, _pm, pn = best.get(q, (math.inf, None, None, 0))
-                m = self.eval_range(q, p)
+                lamq = lam if q > r0 else 0.0
+                bound = (bc - prev - lamq + 2e-9) if math.isfinite(prev) else -math.inf
+                m = self.eval_range(q, p, bound)
                 if m is None:
                     # Sound break: infeasible even with every relaxed-droppable frame removed. Practical
                     # break: only the first frame of [q, p) can turn droppable when q moves left, so a
@@ -1243,9 +1331,9 @@ class _Builder:
                         break
                     continue
                 fails = 0
-                if prev == math.inf:
+                if m is _PRUNED or prev == math.inf:
                     continue
-                c = prev + m.cost + (lam if q > r0 else 0.0)
+                c = prev + m.cost + lamq
                 if c < bc - 1e-9 or (c <= bc + 1e-9 and pn + 1 < bn):
                     bc, bn, arg = c, pn + 1, (q, m)
             best[p] = (bc, arg[0] if arg else None, arg[1] if arg else None, bn)
@@ -1502,7 +1590,11 @@ class _Builder:
             for i, t in enumerate(segs):
                 if t.kind != "raw" or t.length > 2:
                     continue
-                for side in (-1, 1):
+                sides = (-1, 1)
+                if len(self.pinfos) > 1:     # layout periods: a neighbour with the same framing first (D1)
+                    sides = tuple(sorted(sides, key=lambda sd: not (
+                        0 <= i + sd < len(segs) and segs[i + sd].kind == "raw" and self._framing_close(t, segs[i + sd]))))
+                for side in sides:
                     ni = i + side
                     if not (0 <= ni < len(segs)):
                         continue
@@ -1511,7 +1603,11 @@ class _Builder:
                         continue
                     if (side < 0 and nb.b != t.a) or (side > 0 and nb.a != t.b):
                         continue
-                    if not self._same_period(min(nb.a, t.a), max(nb.b, t.b)):
+                    if not self._same_period(min(nb.a, t.a), max(nb.b, t.b)) and \
+                            not self._framing_close(t, nb):
+                        # a 1-2 frame sliver across a layout period boundary is merged only into a neighbour with
+                        # the same framing (the detected boundary is off by a frame or two); otherwise the
+                        # period split stands (D1)
                         continue
                     res = [self._explains(nb, k) for k in range(t.a, t.b)]
                     if all(r[0] for r in res):
@@ -1538,6 +1634,17 @@ class _Builder:
                     "speed": t.model.v, "raw": [int(self.F.raw[k]) for k in range(t.a, t.b)],
                     "score": [float(self.F.score[k]) for k in range(t.a, t.b)]})
         return segs
+
+    def _framing_close(self, t: _Seg, nb: _Seg) -> bool:
+        """The measured framing of tiny segment t matches its neighbour nb at their common boundary."""
+        it = [k for k in range(t.a, t.b) if self.F.sim(k) is not None]
+        side = range(nb.b - 1, nb.a - 1, -1) if nb.b <= t.a else range(nb.a, nb.b)
+        ib = [k for k in side if self.F.sim(k) is not None][:1]
+        if not it or not ib or t.flip != nb.flip:
+            return False
+        ds, dp = self._change(np.array(it[:1]), np.array(ib))
+        return bool(ds[0] <= float(_cfg(self.cfg, "punch_scale_step", 0.01))
+                    and dp[0] <= float(_cfg(self.cfg, "punch_pos_step", 4.0)))
 
     def _compatible(self, A: _Seg, B: _Seg) -> bool:
         if A.kind != "raw" or B.kind != "raw" or A.flip != B.flip:
@@ -1594,17 +1701,70 @@ class _Builder:
             if m is not None:
                 m.kind, m.unsnapped = A.model.kind, A.model.unsnapped
                 m.cost += self.S.class_cost(A.model.kind)
-            if m is not None and m.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut - 1e-9:
+            # a sub-frame phase cut (same speed, lines < 0.5 frame apart: no RAW frame skipped or repeated)
+            # justified only by the data term needs stronger evidence than lambda_cut: random +-1 argmax noise
+            # inside wide soft ranges must not buy a cut by fitting a few same-direction errors at a segment end
+            # (lambda_phase_cut extra)
+            extra = 0.0
+            if m is not None and abs(A.model.pos(B.a) - B.model.pos(B.a)) < 0.5:
+                extra = min(self.S.l_phase, max(0.0, m.data - A.model.data - B.model.data))
+            if m is not None and m.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut + extra - 1e-9:
                 trial.model = m
                 for k in m.drops:   # later refits use the isolated-only rule: fold the runs into the ranges
                     self._widen(k, int(self.pred(trial, k)), "continuous_merge")
                 self.refit(trial, keep_v=True)
                 self.log("merge_continuous", comp_range=[A.a, B.b], evidence={
                     "cut_removed": B.a, "speed": m.v, "drops": m.drops,
-                    "costs": [self.seg_cost(A), self.seg_cost(B), m.cost]})
+                    "costs": [self.seg_cost(A), self.seg_cost(B), m.cost], "data": [A.model.data, B.model.data, m.data]})
                 segs[i:i + 2] = [trial]
                 continue
             i += 1
+        return segs
+
+    def _skip_link(self, A: _Seg, B: _Seg) -> bool:
+        """A hard cut between two pieces at the same speed whose lines differ by one RAW frame (0.5..1.5: a
+        1-frame skip / repeat -- not a sub-frame phase jitter), same flip, framing and layout period."""
+        return bool(A.kind == "raw" and B.kind == "raw" and A.b == B.a and B.trans_in is None and A.trans_out is None
+                    and B.cut_ambiguity is None and A.model is not None and B.model is not None
+                    and abs(A.model.v - B.model.v) <= 1e-12 and self._compatible(A, B)
+                    and 0.5 <= abs(A.model.pos(B.a) - B.model.pos(B.a)) < 1.5)
+
+    def merge_retime_chains(self, segs: list[_Seg]) -> list[_Seg]:
+        """time-math F2: >= 2 one-frame skips / repeats in a row that ONE line (any speed) reproduces at least as
+        well as the pieces do are a constant retime (1.02-1.05x: its floor pattern steps by 2 every 1/(u-1)
+        frames), not a run of equally many 1-frame jump cuts that happen to fall exactly where that line
+        steps. A single 1-frame skip stays a cut (DESIGN: never a fake 1.02-1.05x speed)."""
+        i = 0
+        while i < len(segs):
+            j = i
+            while j + 1 < len(segs) and self._skip_link(segs[j], segs[j + 1]):
+                j += 1
+            if j - i < 2:
+                i = j + 1
+                continue
+            merged = False
+            for L in range(j - i + 1, 2, -1):           # longest sub-chain first, leftmost first
+                for a in range(i, j - L + 2):
+                    chain = segs[a:a + L]
+                    trial = _Seg("raw", chain[0].a, chain[-1].b, model=chain[0].model, flip=chain[0].flip,
+                                 track=chain[0].track, extra={k: v for c in chain for k, v in c.extra.items()},
+                                 notes=[n for c in chain for n in c.notes])
+                    if not self.refit(trial, keep_v=False):
+                        continue
+                    d_union = trial.model.data + self.S.l_drop * len(trial.model.drops)
+                    d_parts = sum(c.model.data + self.S.l_drop * len(c.model.drops) for c in chain)
+                    if abs(trial.model.v - chain[0].model.v) <= 1e-12 or d_union > d_parts + 1e-9:
+                        continue
+                    self.log("merge_retime_chain", comp_range=[trial.a, trial.b], evidence={
+                        "pieces": [[c.a, c.b] for c in chain], "piece_speed": chain[0].model.v,
+                        "speed": trial.model.v, "kind": trial.model.kind, "data": [d_parts, d_union]})
+                    segs[a:a + L] = [trial]
+                    merged = True
+                    break
+                if merged:
+                    break
+            if not merged:
+                i = j + 1
         return segs
 
     def absorb_none(self, segs: list[_Seg]) -> list[_Seg]:
@@ -2423,6 +2583,7 @@ class _Builder:
             work = self._segment_pass()
         work = self.merge_tiny(work)
         work = self.merge_adjacent(work)
+        work = self.merge_retime_chains(work)
         work = self.merge_continuous(work)
         work = self.absorb_none(work)
         self.final_speeds(work)
@@ -2465,6 +2626,7 @@ class _Builder:
         return segs
 
     def _segment_pass(self) -> list[_Seg]:
+        self._gpen = None
         work: list[_Seg] = []
         for a, b, st in self.status_runs():
             if st == Status.MATCH:

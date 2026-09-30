@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from fractions import Fraction
 from pathlib import Path
@@ -11,8 +12,9 @@ import pytest
 
 from match_cuts.common import DecisionLog, file_hash
 from match_cuts.config import Config
-from match_cuts.conform import (ConformResult, conform, output_geometry, source_index_for_output, ssim,
-                                verify_transcode, plan_transcode)
+from match_cuts.conform import (ConformResult, conform, ffmpeg_command, must_show_frames, output_geometry,
+                                plan_transcode, source_index_for_output, ssim, sync_args, verify_transcode,
+                                vfr_pts_shift)
 from match_cuts.media import VideoReader, extract_audio
 from match_cuts.probe import load_pts_int, probe
 
@@ -235,8 +237,6 @@ def test_verification_detects_one_frame_offset(clips, tmp_path):
 # Regressions: quantised VFR timestamps (F1), VFR tail (F2), ffmpeg < 5.1 (F7)
 # ----------------------------------------------------------------------------------------------
 
-from match_cuts.conform import ffmpeg_command, sync_args, vfr_pts_shift  # noqa: E402
-
 
 def _id_clip(out: Path, n: int, rate: str, post: str, *enc: str) -> None:
     """Moving texture + 8-bit frame-id band; ``post`` = filters after the vstack (select / setpts)."""
@@ -275,6 +275,8 @@ def test_vfr_ms_timebase_conform_keeps_every_frame(vfr_clips, tmp_path):
     assert info.vfr and info.fps == Fraction(30000, 1001) and info.nb_frames == 239
     pts_i, tb, _ = load_pts_int(info)
     assert tb == Fraction(1, 1000)
+    plan = plan_transcode(info, "raw", cfg)
+    assert "settb=1/1000,setpts=max(PTS-STARTPTS-1\\,0)" in plan["vf"] and plan["pts_shift"] == "1/1000"
     res = conform(info, "raw", cfg, None)
     ver = res.verification
     assert res.conformed and ver["ok"] and ver["method"] == "fps", ver.get("problems")
@@ -296,19 +298,37 @@ def test_vfr_verification_is_independent_of_the_rule(vfr_clips, tmp_path):
     import subprocess as sp
     cfg = make_cfg(tmp_path)
     info = probe(vfr_clips["ms"], "raw", cfg.work_dir)
-    plan = plan_transcode(info, "raw", cfg)
-    assert "setpts=max(PTS-STARTPTS-1\\,0)" in plan["vf"] and plan["pts_shift"] == "1/1000"
-    old = dict(plan, pts_shift="0", vf=plan["vf"].replace("settb=1/1000,setpts=max(PTS-STARTPTS-1\\,0)",
-                                                            "setpts=PTS-STARTPTS"))
-    out = tmp_path / "old_rule.mov"
-    sp.run(ffmpeg_command(str(info.path), str(out), old), check=True)
+    out = tmp_path / "old_rule.mp4"
+    sp.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(info.path), "-vf",
+            "setpts=PTS-STARTPTS,fps=fps=30000/1001:round=up,tpad=stop=-1:stop_mode=clone,trim=end_frame=240,"
+            "format=yuv420p", "-fps_mode", "passthrough", "-c:v", "libx264", "-crf", "12", str(out)], check=True)
+    # the plan the old conform claimed to follow: unshifted 'max{i : pts_i <= k/fps}'
+    old = dict(plan_transcode(info, "raw", cfg), pts_shift="0", expected_frames=240, codec="h264_ref")
     out_info = probe(out, "raw", cfg.work_dir)
     ver = verify_transcode(info, out_info, old)
-    assert ver["n_failed"] == 0                                          # the rule check alone is blind
-    assert not ver["ok"] and ver["coverage"]["n_ambiguous"] > 50
-    assert any("never shown" in p for p in ver["problems"])
+    assert ver["n_failed"] == 0 and ver["samples"] >= 50                # the rule check alone is blind
+    assert not ver["ok"] and ver["coverage"]["n_unexplained"] > 50
+    assert any("must be shown are missing" in p for p in ver["problems"])
     _, oids, _ = decode_ids(out)
     assert len(set(oids)) < 180                                          # really ~1/3 of the frames lost
+
+
+def test_must_show_frames_rule_independent_requirements():
+    """F1: the requirements the content check enforces, stated without the conform's ffmpeg rule."""
+    fps = Fraction(30000, 1001)
+    ms = [round(Fraction(i * 1001, 30)) for i in range(120) if i != 50]          # 1 ms PTS, frame 50 dropped
+    req = must_show_frames(np.array(ms), Fraction(1, 1000), fps, n_out=120)
+    assert req["long"] | req["boundary"] == set(range(119))                    # every frame must be shown
+    late = [j for j in range(119) if Fraction(ms[j], 1000) * fps > round(Fraction(ms[j], 1000) * fps)]
+    assert late and set(late) <= req["boundary"] and not set(late) <= req["long"]    # the frames once dropped
+    # real jitter (+-0.2 frame at 1/90000): frames 0.2 slot late sharing a slot with an early successor may
+    # be dropped; the unshifted/shifted rule drops exactly frames outside the requirement
+    jit = [round(Fraction(90000, 30) * (i + Fraction(1, 5) * (1 if i % 2 else -1))) for i in range(60)]
+    jit[0] = 0
+    req2 = must_show_frames(np.array(jit), Fraction(1, 90000), Fraction(30), n_out=60)
+    idx = source_index_for_output(np.arange(60), "fps", np.array(jit), Fraction(1, 90000), Fraction(30))
+    dropped = set(range(60)) - set(idx.tolist())
+    assert dropped and not (dropped & (req2["long"] | req2["boundary"]))
 
 
 @pytest.mark.parametrize("key", ["t600", "t90k"])
@@ -342,6 +362,7 @@ def test_ffmpeg_sync_flag_by_version(clips, tmp_path):
     assert sync_args(()) == ("-fps_mode", "passthrough")                # unknown (git build) -> current
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the fake ffmpeg 4.4 is a POSIX shell wrapper")
 def test_conform_runs_on_ffmpeg_older_than_5_1(clips, tmp_path, monkeypatch):
     """F7: with an ffmpeg 4.4 (no -fps_mode) every transcode used to fail with 'Unrecognized option'."""
     import shutil as sh
@@ -349,7 +370,7 @@ def test_conform_runs_on_ffmpeg_older_than_5_1(clips, tmp_path, monkeypatch):
     fake = tmp_path / "ffmpeg44"
     fake.write_text("#!/bin/sh\n"
                     "for a in \"$@\"; do\n"
-                    "  if [ \"$a\" = \"-version\" ]; then echo 'ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright'; exit 0; fi\n"
+                    "  if [ \"$a\" = \"-version\" ]; then echo 'ffmpeg version 4.4.2-0ubuntu0.22.04.1'; exit 0; fi\n"
                     "  if [ \"$a\" = \"-fps_mode\" ]; then echo \"Unrecognized option 'fps_mode'.\" >&2; exit 1; fi\n"
                     "done\n"
                     f"exec {real} \"$@\"\n")

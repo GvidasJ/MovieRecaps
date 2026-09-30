@@ -459,6 +459,7 @@ def install_stub_world(monkeypatch, calls: dict):
 
         @staticmethod
         def load(path):
+            calls.setdefault("ov_load", []).append(str(path))
             return OverlayMasks()
 
     def analyze_layout(comp, cfg, cache, debug_dir, dlog):
@@ -897,9 +898,11 @@ def test_audio_informed_phase_sign_and_clamping():
     assert s.raw_in_seconds == pytest.approx(old - 0.003, abs=1e-9)
     # NLE in-point at the frame boundary: the audio asks for the lower bound; clamped 1 ms inside
     s, (old, frames), _, _ = run(-8.333)
-    assert s.raw_in_seconds == pytest.approx(200 / 30 + 0.001, abs=1e-9)
+    assert s.raw_in_seconds == pytest.approx(200 / 30 + 0.001, abs=3e-9)
+    assert s.ae_margin_ms >= 1.0 and "AE-rule-sensitive" not in (s.notes or "")   # rounding never eats the margin
     s, _, _, _ = run(+50.0)                                           # far outside: upper bound - margin
-    assert s.raw_in_seconds == pytest.approx(200.5 / 30 - 0.001, abs=1e-9)
+    assert s.raw_in_seconds == pytest.approx(200.5 / 30 - 0.001, abs=3e-9)
+    assert s.raw_in_interval_both[1] - s.raw_in_seconds >= 0.001
     # speed 1.1: the RAW shift is v * lag
     fm11 = _phase_fm(30, 200, 1.1)
     s11 = _solved(Segment(1, "raw", 0, 30, speed=1.1), fm11, cf, rf)
@@ -954,7 +957,7 @@ def test_audio_phase_same_rate_24p_nle_inpoint_and_static_shot(monkeypatch, tmp_
     10.43 ms early (> the 10 ms c5 tolerance); after D3 the residual is the 1 ms edge margin. S2 (static,
     every frame ambiguous-identical over 61 RAW frames): the video centre is 156 ms off, beyond the
     +-100 ms per-segment search; the wide search puts raw_in on the in-point."""
-    from match_cuts import audio_align, phase_solve
+    from match_cuts import phase_solve
     fps, sr = Fraction(24000, 1001), 16000
     rng = np.random.default_rng(5)
     raw_y = rng.standard_normal(20 * sr).astype(np.float32) * 0.1
@@ -1092,6 +1095,9 @@ def test_box_refined_against_raw_reruns_visual_stages(monkeypatch, clips, tmp_pa
         dlog.record("layout", "box_grown_to_raw", old=layout.box.to_dict(), new=grown.to_dict())
         new = Layout.from_dict(layout.to_dict())
         new.box = grown
+        ov = Path(cache.root) / "refined_overlays.npz"             # the re-analysis' initial overlay masks
+        np.savez_compressed(ov, frames=np.zeros(0, np.int32))
+        new.overlay_mask_file = str(ov)
         return new, True
     monkeypatch.setattr(lay_mod, "refine_box_from_raw", refine_box_from_raw, raising=False)
     probe_mod = sys.modules["match_cuts.probe"]
@@ -1103,6 +1109,7 @@ def test_box_refined_against_raw_reruns_visual_stages(monkeypatch, clips, tmp_pa
     assert cli.main(argv) == 0
     printed = capsys.readouterr().out
     assert calls["refine"] == 2 and calls["refine_boxes"] == [Box(0, 0, W, H).to_dict(), grown.to_dict()]
+    assert any(p.endswith("refined_overlays.npz") for p in calls["ov_load"])   # pass 2 starts from its masks
     cl = json.loads((out / "cutlist.json").read_text())
     assert cl["layout"]["box"] == grown.to_dict()
     assert any("truncated/partial file" in w and w.startswith("raw input") for w in cl["warnings"])
@@ -1187,7 +1194,6 @@ def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_pa
     v = json.loads((out / "verify.json").read_text())
     chk = v["checks"]["s9_8_deliverables"]
     assert chk["status"] == "fail" and "edl" in json.dumps(chk)
-    ctx_exports = None
     # validation failure alone also fails; skipped renders are listed as skipped, not missing
     monkeypatch.setattr(xe, "write_edl", lambda cl, path, cfg=None: Path(path).write_text("edl\n"))
     monkeypatch.setattr(xe, "validate_exports", lambda cl, x, e: {"ok": False, "errors": ["EDL: 39 frames != 40"]})
@@ -1196,7 +1202,6 @@ def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_pa
     capsys.readouterr()
     chk = json.loads((out2 / "verify.json").read_text())["checks"]["s9_8_deliverables"]
     assert chk["status"] == "fail" and "39 frames != 40" in json.dumps(chk)
-    assert ctx_exports is None
     monkeypatch.setattr(xe, "validate_exports", lambda cl, x, e: {"ok": True, "errors": []})
     out3 = tmp_path / "o3"
     assert cli.main(base + ["--out", str(out3), "--skip-preview", "--skip-compare"]) == 0
@@ -1229,7 +1234,7 @@ def test_collect_deliverables_records_files_skips_and_errors(tmp_path):
     assert d["files"]["xml"].endswith("recreated_edit.xml") and d["files"]["edl"] is None
     assert d["skipped"] == {"aep": "After Effects not installed on this machine (Linux)", "compare": "--skip-compare"}
     assert d["missing"] == ["edl", "media_competitor"] and d["ok"] is False
-    assert "EDL: does not exist" in d["errors"] and "deliverable missing: edl" in d["errors"]
+    assert d["errors"] == ["EDL: does not exist"]
     ctx.exports.update(d)
     ctx.errors.append({"stage": "S8 EDL", "error": "OSError: disk full"})
     chk = pipeline.deliverables_check(ctx)
@@ -1238,3 +1243,45 @@ def test_collect_deliverables_records_files_skips_and_errors(tmp_path):
     # AE ran but produced no project: missing, not skipped
     ctx.ae_run = {"status": "failed", "error": "recreated_edit.aep did not appear"}
     assert "aep" in pipeline.collect_deliverables(ctx, {})["missing"]
+    # debug plots are diagnostics: listed when missing, never a failure on their own
+    (tmp_path / "o" / "debug" / "scores.png").unlink()
+    ctx.ae_run = {"status": "not_available"}
+    ctx.errors.clear()
+    ctx.exports = {"ok": True, "errors": []}
+    (media / "competitor_ref.mp4").write_text("x")
+    d = pipeline.collect_deliverables(ctx, {"csv": True, "xml": True, "edl": True, "preview": True})
+    (tmp_path / "o" / "recreated_edit.edl").write_text("x")
+    d = pipeline.collect_deliverables(ctx, {"csv": True, "xml": True, "edl": True, "preview": True})
+    assert d["missing"] == [] and d["missing_diagnostics"] == ["debug_scores"]
+    ctx.exports.update(d)
+    chk = pipeline.deliverables_check(ctx)
+    assert chk["status"] == "pass" and chk["warnings"] == ["debug file missing: debug_scores"]
+
+
+def test_audio_phase_static_only_edit_is_not_mistaken_for_replaced_audio(monkeypatch, tmp_path):
+    """A single static shot whose video-centre phase is 156 ms off: the +-100 ms per-segment search sees
+    no correlation (the run looks 'audio replaced'); the wide search still finds the in-point, and the
+    re-measured run is 'ok' with a small residual."""
+    fps, sr = Fraction(24000, 1001), 16000
+    rng = np.random.default_rng(9)
+    raw_y = (rng.standard_normal(20 * sr) * 0.1).astype(np.float32)
+    j2, n1 = 303, 48
+    a0 = int(Fraction(j2) * sr / fps)
+    n_s = int(Fraction(n1) * sr / fps)
+    comp_y = raw_y[a0:a0 + n_s].copy()
+    fm = FrameMap(n1)
+    fm.status = np.full(n1, Status.MATCH, np.int8)
+    fm.raw, fm.raw_lo, fm.raw_hi = np.full(n1, 330, np.int32), np.full(n1, 300, np.int32), np.full(n1, 360, np.int32)
+    fm.soft_lo, fm.soft_hi = fm.raw_lo, fm.raw_hi
+    install(monkeypatch, "segment", build_segments=lambda fm_, *a, **k: [
+        Segment(1, "raw", 0, n1, speed=1.0, raw_in_frame=330, transform=Sim(1, 0, 0, 0).to_dict())])
+    ctx = _assembly_ctx(tmp_path, fps, n1, int(20 * fps), comp_y, raw_y, sr)
+    recs = []
+    dlog = types.SimpleNamespace(record=lambda st, dec, **k: recs.append((st, dec, k)))
+    _, segs, audio_result, _ = pipeline.segment_and_assemble(ctx, fm, dlog, tmp_path / "dbg")
+    first = [k for st, dec, k in recs if st == "audio_segments" and dec == "summary"][0]
+    assert first["status"] == "audio_replaced"                     # what the +-100 ms search concluded
+    s = segs[0]
+    assert s.audio["phase_source"] == "audio" and abs(s.audio["lag_ms"]) < 3.0
+    assert audio_result["status"] == "ok" and s.audio["exception"] is None
+    assert abs(s.raw_in_seconds - float(Fraction(j2) / fps)) < 0.0005

@@ -694,10 +694,13 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
     """Lag (s, positive = the RAW-rebuilt audio is LATE, xcorr_lag's convention) and peak NCC of a
     stretch segment's rebuilt audio against the competitor within +-max_lag_s: the rebuilt track is
     rendered over the segment's audio range widened by max_lag_s on both sides and the competitor range
-    slides across it, so large lags keep the full overlap. Sub-sample peak by parabola. None when the
+    slides across it, so large lags keep the full overlap. The integer-sample peak is then refined on a
+    lag-compensated render with ``audio_align.xcorr_lag`` (band-limited sub-sample peak; its NCC is the
+    returned peak, so wide-band audio at a half-sample offset is not under-scored). None when the
     segment has too little audio."""
+    from . import audio_align
     if resample is None:
-        from .audio_align import resample_at as resample
+        resample = audio_align.resample_at
     comp = np.asarray(comp_y, np.float32).reshape(-1)
     raw = np.asarray(raw_y, np.float32).reshape(-1)
     if comp.size == 0 or raw.size == 0 or seg.raw_in_seconds is None:
@@ -708,10 +711,13 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
     L = int(round(max(0.0, float(max_lag_s)) * sr))
     v = float(seg.speed)
     t_in = float(Fraction(int(seg.comp_in)) / Fraction(comp_fps))
-    t = np.arange(a - L, b + L, dtype=np.float64) / sr
-    pos = (float(seg.raw_in_seconds) + v * (t - t_in)) * sr
-    rb = resample(raw, pos, cutoff=min(1.0, 1.0 / max(abs(v), 1e-6)))
-    ncc = _sliding_ncc(comp[a:b], rb)
+    cutoff = min(1.0, 1.0 / max(abs(v), 1e-6))
+
+    def render(n0: int, n1: int, shift_s: float = 0.0) -> np.ndarray:
+        t = np.arange(n0, n1, dtype=np.float64) / sr + shift_s
+        return resample(raw, (float(seg.raw_in_seconds) + v * (t - t_in)) * sr, cutoff=cutoff)
+
+    ncc = _sliding_ncc(comp[a:b], render(a - L, b + L))
     if ncc.size == 0:
         return None
     i = int(np.argmax(ncc))
@@ -721,7 +727,12 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
         den = ym - 2.0 * y0 + yp
         if den < 0:
             off = float(np.clip(0.5 * (ym - yp) / den, -0.5, 0.5))
-    return (i + off - L) / sr, float(np.clip(ncc[i], -1.0, 1.0))
+    lag = (i + off - L) / sr
+    # rebuilt(t) ~ comp(t - lag)  =>  rebuilt(t + lag) ~ comp(t): measure what is left on that render
+    delta, peak = audio_align.xcorr_lag(comp[a:b], render(a, b, lag), sr, 2.0 / sr + 1e-4)
+    if peak >= float(ncc[i]):
+        return lag + float(delta), float(np.clip(peak, -1.0, 1.0))
+    return lag, float(np.clip(ncc[i], -1.0, 1.0))
 
 
 def _refresh_phase_after_move(seg: Segment, fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction, phase) -> None:
@@ -787,7 +798,10 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
         def skip(reason: str) -> None:
             dlog.record("phase_solve", "audio_phase_skipped", reason=reason, **ev)
 
-        if status in ("no_audio", "audio_replaced"):
+        if status == "no_audio":
+            # ('audio_replaced' runs still try the wide search below: a run whose every segment is a static
+            # shot misplaced by > 100 ms looks replaced to the +-100 ms search; the strong-corr gate
+            # keeps genuinely replaced audio out)
             skip(f"run audio status {status}")
             continue
         v = float(s.speed) if s.speed is not None else float("nan")
@@ -802,7 +816,8 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             skip("no feasible raw_in interval")
             continue
         width = interval[1] - interval[0]
-        margin = audio_phase_margin_s(width)
+        # D3 margin; never below the AE-rule-sensitivity threshold (1 ms by default, i.e. the same value)
+        margin = max(audio_phase_margin_s(width), float(getattr(cfg, "ae_min_margin_ms", 1.0)) / 1000.0)
         exc = au.get("exception")
         if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
             skip(f"audio exception {exc}")
@@ -831,13 +846,18 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.3f} ms is not wider than 2 x margin {margin * 1000:.3f} ms")
             continue
         new = fmt_seconds(min(max(target, lo_e + margin), hi_e - margin))
-        if not (lo_e < new < hi_e):         # 9-decimal rounding pushed it out: keep the video phase
+        for _ in range(3):                  # the 9-decimal rounding must not eat into the margin
+            if new - lo_e < margin:
+                new = fmt_seconds(new + 1e-9)
+            elif hi_e - new < margin:
+                new = fmt_seconds(new - 1e-9)
+        if not (lo_e + margin <= new <= hi_e - margin):
             skip("rounded raw_in outside the feasible range")
             continue
         clamped = abs(new - target) > 5e-10
         au["phase_source"] = "audio"
         rec = dict(ev, raw_in_audio_target=round(target, 9), raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
-                   lag_ms=round(lag_s * 1000.0, 3), corr=round(corr, 4), source=how, interval=kind,
+                   lag_ms_used=round(lag_s * 1000.0, 3), corr_used=round(corr, 4), source=how, interval=kind,
                    interval_s=[round(interval[0], 9), round(interval[1], 9)], margin_ms=round(margin * 1000.0, 6),
                    preserved_range_s=[None if not math.isfinite(p_lo) else round(p_lo, 9),
                                       None if not math.isfinite(p_hi) else round(p_hi, 9)],
@@ -1142,15 +1162,28 @@ def store_decisions(ctx: Context, stage: str, key: str, records: list[dict]) -> 
     save_decisions(decisions_path(ctx, stage, key), records)
 
 
-def replay_decisions(ctx: Context, stage: str, key: str) -> int:
-    """Replay a cached stage's stored records into this run's log (cached=true, cache_key). Returns the
-    number replayed; a missing store (a cache entry written before D6) is logged, never fatal."""
+def replay_decisions(ctx: Context, stage: str, key: str, fresh: list[dict] | None = None) -> int:
+    """Replay a cached stage's stored records into this run's log (cached=true, cache_key). Records the
+    stage emitted again in this run (``fresh``, e.g. a measurement done before a nested cache hit) are not
+    repeated. Returns the number replayed; a missing store (a cache entry written before D6) is logged,
+    never fatal."""
     p = decisions_path(ctx, stage, key)
     if not p.exists():
         ctx.dlog.record("pipeline", "decisions_not_cached", step=stage, cache_key=key,
                         note="cache entry predates the decision store; only the cache hit is logged")
         return 0
-    return ctx.dlog.replay(load_decisions(p), cached=True, cache_key=key)
+    seen: dict[str, int] = {}
+    for r in fresh or []:
+        s = json.dumps(r, sort_keys=True)
+        seen[s] = seen.get(s, 0) + 1
+    todo = []
+    for r in load_decisions(p):
+        s = json.dumps(r, sort_keys=True)
+        if seen.get(s):
+            seen[s] -= 1
+            continue
+        todo.append(r)
+    return ctx.dlog.replay(todo, cached=True, cache_key=key)
 
 
 def _is_cache_hit(rec: dict, stages: tuple[str, ...] | None) -> bool:
@@ -1168,7 +1201,7 @@ def self_cached_stage(ctx: Context, stage: str, key: str, fn: Callable[[], Any],
     with ctx.dlog.capture(stage) as cap:
         result = fn()
     if any(_is_cache_hit(r, hit_stages) for r in cap):
-        replay_decisions(ctx, stage, key)
+        replay_decisions(ctx, stage, key, fresh=list(cap))
     else:
         store_decisions(ctx, stage, key, list(cap))
     return result
@@ -1655,7 +1688,20 @@ def stage_visual_refine(ctx: Context) -> None:
     visual_refine_pass(ctx, base_raw, ctx.overlays, "")
     if refine_layout_from_raw(ctx):
         log.info("layout refined against RAW: re-running S5.2 + S5.3 with the corrected box")
-        visual_refine_pass(ctx, base_raw, copy.deepcopy(overlays_pass1), " (refined box)", "layout", layout_key(ctx.layout))
+        visual_refine_pass(ctx, base_raw, initial_overlays(ctx.layout, overlays_pass1), " (refined box)",
+                           "layout", layout_key(ctx.layout))
+
+
+def initial_overlays(layout: Layout, fallback: Any) -> Any:
+    """The overlay masks S5.2 starts from for ``layout``: the re-analysed layout's own
+    ``overlay_mask_file`` (layout.refine_box_from_raw writes new ones), else a copy of ``fallback``."""
+    p = getattr(layout, "overlay_mask_file", "") or ""
+    if p and Path(p).exists():
+        try:
+            return load_overlays(Path(p))
+        except Exception as e:  # noqa: BLE001 - fall back to the first pass's initial masks
+            log.warning("could not load the refined layout's overlay masks %s: %s", p, e)
+    return copy.deepcopy(fallback)
 
 
 def stage_segments(ctx: Context) -> None:
@@ -1751,6 +1797,7 @@ DELIVERABLES = (   # (name, path under OUTPUT_DIR): the prompt's Deliverables tr
     ("csv", "cutlist.csv"), ("xml", "recreated_edit.xml"), ("edl", "recreated_edit.edl"),
     ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("debug_mapping", "debug/mapping.png"),
     ("debug_scores", "debug/scores.png"), ("debug_layout", "debug/layout.png"))
+DIAGNOSTIC_DELIVERABLES = ("debug_mapping", "debug_scores", "debug_layout")   # missing -> listed, never a failure
 
 
 def stage_exports(ctx: Context) -> None:
@@ -1799,8 +1846,9 @@ def stage_exports(ctx: Context) -> None:
 def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) -> dict:
     """The prompt's deliverables after S7/S8 (REQ-6, DESIGN §7 D5): ``files`` {name: path | None (not
     produced by THIS run)}, ``skipped`` {name: reason} (explicitly skipped: --skip-preview/--skip-compare,
-    the .aep when After Effects is not installed), ``missing`` [names], ``errors`` (XML/EDL validation
-    errors + the missing deliverables), ``validation_ok``. report.md / verify.json are written after
+    the .aep when After Effects is not installed), ``missing`` [names; debug plots go to
+    ``missing_diagnostics``], ``ok`` / ``validation_ok`` (the XML/EDL re-parse validation passed) and
+    ``errors`` (its errors). report.md / verify.json are written after
     verification (a failure there is a run error, exit 2) and added to ``files`` by the pipeline later."""
     cfg, out = ctx.cfg, ctx.cfg.out
     produced = dict(produced or {})
@@ -1833,12 +1881,12 @@ def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) 
     for name, conf in (("media_raw", ctx.raw_conform), ("media_competitor", ctx.comp_conform)):
         mp = getattr(conf, "path", None) if conf is not None else None
         files[name] = str(mp) if mp and Path(mp).exists() else None
-    missing = [k for k, v in files.items() if v is None and k not in skipped]
+    missing = [k for k, v in files.items() if v is None and k not in skipped and k not in DIAGNOSTIC_DELIVERABLES]
+    missing_diag = [k for k in DIAGNOSTIC_DELIVERABLES if files.get(k) is None]
     val_ok = ctx.exports.get("ok") is True if isinstance(ctx.exports, dict) else False
     errors = list((ctx.exports or {}).get("errors") or []) if not val_ok else []
-    errors += [f"deliverable missing: {k}" for k in missing]
-    return {"files": files, "skipped": skipped, "missing": missing, "ok": val_ok, "validation_ok": val_ok,
-            "errors": errors}
+    return {"files": files, "skipped": skipped, "missing": missing, "missing_diagnostics": missing_diag,
+            "ok": val_ok, "validation_ok": val_ok, "errors": errors}
 
 
 def deliverables_check(ctx: Context) -> dict:
@@ -1847,19 +1895,21 @@ def deliverables_check(ctx: Context) -> dict:
     ex = ctx.exports if isinstance(ctx.exports, dict) else {}
     files = ex.get("files") or {}
     skipped = ex.get("skipped") or {}
-    missing = [k for k, p in files.items() if k not in skipped and (not p or not Path(p).exists())]
+    missing = [k for k, p in files.items() if k not in skipped and k not in DIAGNOSTIC_DELIVERABLES
+               and (not p or not Path(p).exists())]
+    warns = [f"debug file missing: {k}" for k in DIAGNOSTIC_DELIVERABLES if k in files and not files.get(k)]
     fails = [f"deliverable missing: {k}" for k in missing]
     if not files:
         fails.append("no deliverables recorded (S7/S8 did not run)")
     if ex.get("ok") is not True:
-        errs = [e for e in (ex.get("errors") or []) if not str(e).startswith("deliverable missing")]
+        errs = list(ex.get("errors") or [])
         fails.append(f"XML/EDL validation did not pass: {'; '.join(map(str, errs[:5])) or 'not run'}")
     fails += [f"stage error: {e.get('stage')}: {e.get('error')}" for e in ctx.errors]
     n_ok = sum(1 for k, p in files.items() if p and k not in missing)
     summary = (f"{n_ok} deliverables present" + (f", skipped: {', '.join(sorted(skipped))}" if skipped else "")
                if not fails else f"{len(fails)} problem(s): {fails[0]}")
     return {"status": "fail" if fails else "pass", "summary": summary, "missing": missing,
-            "skipped": dict(skipped), "failures": fails, "source": "pipeline"}
+            "skipped": dict(skipped), "failures": fails, "warnings": warns, "source": "pipeline"}
 
 
 def stage_verify(ctx: Context) -> None:

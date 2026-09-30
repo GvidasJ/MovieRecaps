@@ -219,6 +219,70 @@ def test_snap_preferences():
     assert ps.dominant_speed([]) is None
 
 
+def test_snap_speed_tolerance_against_measured_frames():
+    """time-math F2 / prompt 5.4 'snap only if within 0.3 % and the residuals don't get worse': a soft range
+    that merely CONTAINS 1.0 / 1.05 never licenses a snap when the measured frames' exact range excludes them
+    and the robust slope is further than speed_snap_tol away."""
+    cfg = Config()
+    assert cfg.speed_snap_tol == pytest.approx(0.003)
+    # 1.03x on slow footage: soft range [0.989, 1.06] contains 1.0 and 1.05; the measured frames do not
+    v, uns = ps.snap_speed(1.0303, (0.989, 1.06), cfg, preferred={1.0: 1e9}, exact_range=(1.0296, 1.0304))
+    assert uns and v == pytest.approx(1.0303)
+    # within 0.3 % of the measured slope: snapped although just outside the exact range
+    assert ps.snap_speed(1.0985, (1.05, 1.15), cfg, exact_range=(1.0980, 1.0990)) == (pytest.approx(1.1), False)
+    # inside the exact range (the residuals do not get worse): snapped even when v_ols is imprecise
+    assert ps.snap_speed(1.12, (1.05, 1.15), cfg, exact_range=(1.08, 1.13)) == (pytest.approx(1.1), False)
+    # no exact range: the old behaviour (every snap inside the range qualifies)
+    assert ps.snap_speed(1.04, (0.98, 1.12), cfg) == (1.0, False)
+    # unsnapped result is clipped into the exact range
+    v, uns = ps.snap_speed(1.045, (1.0, 1.3), cfg, exact_range=(1.036, 1.038), preferred=[])
+    assert uns and v == pytest.approx(1.038)
+
+
+def test_solve_raw_in_prefers_measured_frames_inside_asymmetric_soft_ranges():
+    """time-math F2 (c): soft range [m - 1, m] on every frame (slow footage, the previous frame scores within
+    delta). Centring the soft intersection shows m - 1 on EVERY frame; with the measured (argmax) range as the
+    preference the phase reproduces every measured frame, and the interval / margin refer to that phase."""
+    m = ff_select(40, F(1, 30000), 1001, 1.0, C30, 500)
+    ks = np.arange(40)
+    old = ps.solve_raw_in(ks, m - 1, m, 0, 1.0, C30, R2997)
+    assert np.all(ps.ae_frame(old["raw_in"], 1.0, ks, 0, C30, R2997) == m - 1)
+    sol = ps.solve_raw_in(ks, m - 1, m, 0, 1.0, C30, R2997, prefer=(m, m))
+    assert sol["ok"] and sol["data_cost"] == 0.0
+    assert np.array_equal(ps.ae_frame(sol["raw_in"], 1.0, ks, 0, C30, R2997), m)
+    a, b = sol["interval_floor"]
+    sa, sb = sol["interval_soft"]
+    assert sa - 1e-12 <= a <= sol["raw_in"] <= b <= sb + 1e-12
+    for x in np.linspace(a, b, 7)[1:-1]:          # every raw_in in the reported interval shows the measured frames
+        assert np.array_equal(ps.ae_frame(float(x), 1.0, ks, 0, C30, R2997), m)
+    assert sol["margin_ms"] == pytest.approx(min(sol["raw_in"] - a, b - sol["raw_in"]) * 1000, abs=1e-6)
+    # without a preference nothing changes (interval_soft == interval_floor)
+    assert old["interval_soft"] == old["interval_floor"] and old["data_cost"] == 0.0
+    # a measurement no 1.0x line reproduces (a +2 step at frame 20): a minimum-penalty phase, its cost reported
+    mm = m.copy()
+    mm[:20] -= 1
+    sol2 = ps.solve_raw_in(ks, m - 1, m, 0, 1.0, C30, R2997, prefer=(mm, mm))
+    pred = ps.ae_frame(sol2["raw_in"], 1.0, ks, 0, C30, R2997)
+    assert int((pred != mm).sum()) == 20 and sol2["data_cost"] == pytest.approx(20.0)
+
+
+def test_best_subinterval_sweep():
+    # two unit penalties overlapping on [0.5, 1): minimum 0 on the widest free piece
+    c, a, b = ps.best_subinterval([0.0, 0.5], [1.0, 1.5], [1.0, 1.0], -1.0, 2.0)
+    assert c == 0.0 and (a, b) == (-1.0, 0.0)
+    # every x penalised: the least penalised piece
+    c, a, b = ps.best_subinterval([-2.0, 0.5], [0.5, 3.0], [2.0, 1.0], -1.0, 2.0)
+    assert c == 1.0 and (a, b) == (0.5, 2.0)
+    # a floating-point sliver between abutting penalties is no minimum
+    s1 = 0.1 - 0.3 * 7
+    c, a, b = ps.best_subinterval([s1, (0.1 + 1.0) - 0.3 * 7], [s1 + 1.0, (0.1 + 2.0) - 0.3 * 7], [1.0, 1.0],
+                                  s1, s1 + 2.0)
+    assert c == 1.0
+    assert ps.min_penalty(np.array([0.0, 0.5]), np.array([1.0, 1.0]), 0.0, 1.0) == 1.0
+    # degenerate interval: the cost at its centre
+    assert ps.best_subinterval([0.0], [1.0], [3.0], 0.5, 0.5) == (3.0, 0.5, 0.5)
+
+
 def test_estimate_speed_robust():
     ks = np.arange(60)
     m = ff_select(60, F(1, 30000), 1001, 1.0, C30, 400)

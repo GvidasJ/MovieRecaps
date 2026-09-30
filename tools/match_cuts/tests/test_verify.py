@@ -132,6 +132,7 @@ def test_crashed_result_fails_every_criterion():
     assert set(r["criteria"]) == set(verify.CRITERIA)
     assert all(c["status"] == "fail" for c in r["criteria"].values())
     assert set(r["checks"]) == set(verify.CHECKS)
+    assert "s9_8_deliverables" in verify.CHECKS
 
 
 # ---------------------------------------------------------------------------------------------
@@ -192,6 +193,34 @@ def test_coverage_extra_region_is_an_exception():
     assert r["extra_region_frames"] == [[5, 8]]
 
 
+def test_coverage_fullscreen_period_needs_its_own_box():
+    """requirements REQ-3 (DESIGN §7 D1): a full-screen period is reproduced (segments carry the whole canvas
+    as their box); a RAW segment inside it rebuilt in the dominant box fails c1; split/PiP stay exceptions."""
+    lb = {"box": {"x": 5, "y": 5, "w": 50, "h": 20, "corner_radius": 2},
+          "periods": [{"comp_in": 0, "comp_out": 10, "mode": "boxed"}, {"comp_in": 10, "comp_out": 20, "mode": "fullscreen"},
+                      {"comp_in": 20, "comp_out": 30, "mode": "boxed"}]}
+    full = {"x": 0, "y": 0, "w": 64, "h": 36, "corner_radius": 0}
+    segs = [seg(1, "raw", 0, 10, 100), seg(2, "raw", 10, 20, 300), seg(3, "raw", 20, 30, 500)]
+    r = verify.check_coverage(segs, 30, lb)
+    assert r["status"] == "fail" and "full-screen" in r["failures"][0] and r["fullscreen_frames"] == [[10, 19]]
+    segs[1].box, segs[1].region = dict(full), 1
+    r = verify.check_coverage(segs, 30, lb)
+    assert r["status"] == "pass", r
+    lb["periods"].append({"comp_in": 25, "comp_out": 30, "mode": "split"})
+    segs[2].region = 2
+    r = verify.check_coverage(segs, 30, lb)
+    assert r["status"] == "pass_with_exceptions" and len(r["exceptions"]) == 2
+
+
+def test_frame_box_fn_follows_periods_and_segment_boxes():
+    dom = {"x": 5, "y": 5, "w": 50, "h": 20, "corner_radius": 2}
+    full = {"x": 0.0, "y": 0.0, "w": 64.0, "h": 36.0, "corner_radius": 0.0}
+    lb = {"periods": [{"comp_in": 10, "comp_out": 20, "mode": "fullscreen"}]}
+    s = seg(3, "raw", 25, 30, 10, box={"x": 1, "y": 1, "w": 10, "h": 10})
+    f = verify.frame_box_fn([s], lb, dom, full, 40)
+    assert f(0) == dom and f(10) == full and f(19) == full and f(20) == dom and f(26) == s.box
+
+
 # ---------------------------------------------------------------------------------------------
 # c2 cuts -- decision logic with a stub scorer
 # ---------------------------------------------------------------------------------------------
@@ -225,12 +254,23 @@ def test_cuts_flip_decides(phase):
     assert r["status"] == "pass", r
 
 
-def test_cuts_indistinguishable_models_are_exceptions(phase):
+def test_cuts_spurious_cut_without_discontinuity_fails(phase):
+    """verification-honesty F3: a hard cut where both models show the same RAW frame and framing on both
+    sides is no discontinuity in m(k) -- a phantom cut -- and fails (it used to be an exception)."""
     a, b = seg(1, "raw", 0, 10, 100), seg(2, "raw", 10, 20, 110)        # continuous: no visible discontinuity
     truth = {k: 100 + k for k in range(20)}
     r = verify.check_cuts([a, b], F30, F30, (64, 36), 1000, StubScorer(truth), Config())
+    assert r["status"] == "fail"
+    assert {s["result"] for s in r["cuts"][0]["sides"]} == {"fail"}
+    assert "spurious cut" in r["failures"][0]
+    # a speed-only cut (cut_ambiguity) legitimately has both models agree at the boundary
+    b2 = seg(2, "raw", 10, 20, 110, cut_ambiguity=[9, 11])
+    r = verify.check_cuts([a, b2], F30, F30, (64, 36), 1000, StubScorer(truth), Config())
     assert r["status"] == "pass_with_exceptions"
     assert {s["result"] for s in r["cuts"][0]["sides"]} == {"indistinguishable"}
+    # so does a layout change (boxed -> full-screen period, DESIGN §7 D1)
+    b3 = seg(2, "raw", 10, 20, 110, box={"x": 0, "y": 0, "w": 64, "h": 36, "corner_radius": 0}, region=1)
+    assert verify.check_cuts([a, b3], F30, F30, (64, 36), 1000, StubScorer(truth), Config())["status"] == "pass_with_exceptions"
 
 
 def test_cuts_speed_only_ambiguity_exempts(phase):
@@ -263,6 +303,44 @@ def test_cuts_crossfade_alpha_ramp(phase):
     bad = {10 + i: 0.5 for i in range(6)}
     r = verify.check_cuts([a, b], F30, F30, (64, 36), 1000, StubScorer(truth, alpha=bad), Config())
     assert r["status"] == "fail"
+
+
+class TrueAlphaScorer(StubScorer):
+    """Reports the TRUE competitor alpha_B = clip((k - O) / D) of a crossfade (O, D) (review exp_xfade)."""
+
+    def __init__(self, O: int, D: int):
+        super().__init__({})
+        self.O, self.D = O, D
+
+    def blend(self, k, a, b):
+        return min(1.0, max(0.0, (k - self.O) / self.D)), 0.99
+
+    def score(self, k, cands):
+        al = min(1.0, max(0.0, (k - self.O) / self.D))
+        return np.array([float("nan") if c is None else 1.0 - 0.5 * (al if c[0] < 1000 else 1 - al) for c in cands])
+
+
+@pytest.mark.parametrize("truth,declared,ok", [
+    ((100, 6), (100, 6), True), ((100, 15), (100, 15), True), ((100, 2), (100, 2), True),
+    ((100, 6), (100, 5), False), ((100, 6), (100, 7), False), ((100, 8), (101, 8), False),
+    ((100, 15), (101, 15), False), ((100, 15), (102, 15), False), ((100, 15), (100, 17), False)])
+def test_cuts_crossfade_window_off_by_one_fails(phase, truth, declared, ok):
+    """time-math F4: a crossfade declared one or two frames early / late / short / long passed the per-frame
+    alpha tolerance (0.15); the re-fitted window (O, D) must now equal the declared one."""
+    (Ot, Dt), (Od, Dd) = truth, declared
+    xf = {"type": "crossfade", "duration_frames": Dd, "alpha": [i / Dd for i in range(Dd)]}
+    a = seg(1, "raw", 0, Od + Dd, 300, transition_out=dict(xf))
+    b = seg(2, "raw", Od, 200, 1500, transition_in=dict(xf))
+    r = verify.check_cuts([a, b], F30, F30, (64, 36), 5000, TrueAlphaScorer(Ot, Dt), Config())
+    assert (r["status"] == "pass") is ok, r["cuts"][0]
+    if not ok:
+        assert r["cuts"][0]["window_fit"] == {"O": Ot, "D": Dt}
+
+
+def test_fit_crossfade_window():
+    assert verify.fit_crossfade_window([(k, (k - 50) / 10) for k in range(47, 63)]) == (50, 10)
+    assert verify.fit_crossfade_window([(49, 0.0), (50, 0.5), (51, 1.0)]) == (49, 2)
+    assert verify.fit_crossfade_window([(10, 0.0), (11, 1.0)]) is None
 
 
 def test_cuts_dip_neighbours(phase):
@@ -348,6 +426,122 @@ def test_ae_sim_exact_ambiguous_tie_and_mismatch():
     assert r["status"] == "fail"
 
 
+def _with_pre_segment(fm: FrameMap) -> FrameMap:
+    """Store the current columns as refine's pre-segmentation measurement (what segment.py keeps)."""
+    for k in ("status", "raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi", "low_margin", "flip", "track", "tie"):
+        fm.d["pre_segment_" + k] = np.asarray(fm.d[k]).copy()
+    return fm
+
+
+def test_ae_sim_compares_with_the_pre_segment_measurement():
+    """time-math F1 / verification-honesty F1+F2 (DESIGN §7 D4): segment.py overwrites m(k) with its own
+    model frame; c3 must compare the AE frame with refine's MEASUREMENT (fm.d['pre_segment_raw']). Frames
+    the model re-assigned form a listed 'reassigned' class counted against frame_exact_min (they were
+    counted as exact)."""
+    truth = list(range(100, 300))
+    fm = _with_pre_segment(frame_map(truth))
+    # segmentation re-assigned k = 50 (measured 151, model 150) and absorbed an unmatched frame k = 60
+    fm.d["pre_segment_raw"][50] = 151
+    fm.d["pre_segment_raw_lo"][50] = fm.d["pre_segment_raw_hi"][50] = 151
+    fm.d["pre_segment_status"][60] = Status.NONE
+    fm.low_margin[50] = fm.low_margin[60] = True
+    r = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config())
+    assert r["reference"].startswith("pre-segmentation")
+    assert r["status"] == "pass_with_exceptions" and r["exact"] == 198
+    assert [x["k"] for x in r["reassigned"]] == [50, 60] and r["reassigned"][0]["m"] == 151
+    assert r["fraction_ok"] == pytest.approx(198 / 200)
+    assert any("re-assigned" in e for e in r["exceptions"])
+    # counted against frame_exact_min: 3 re-assigned frames of 200 -> < 99 % -> fail
+    fm.d["pre_segment_raw"][70] = 171
+    fm.d["pre_segment_raw_lo"][70] = fm.d["pre_segment_raw_hi"][70] = 171
+    assert verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config())["status"] == "fail"
+    # refine's own ambiguous range still exempts
+    fm2 = _with_pre_segment(frame_map(truth))
+    fm2.d["pre_segment_raw"][5] = 106
+    fm2.d["pre_segment_raw_lo"][5], fm2.d["pre_segment_raw_hi"][5] = 105, 106
+    r = verify.check_ae_sim(_sim_frames(truth), fm2, F30, F30, 200, [], Config())
+    assert [x["k"] for x in r["ambiguous_identical"]] == [5] and not r["reassigned"]
+
+
+def _two_seg_cutlist(n: int = 400, cut: int = 200) -> list[Segment]:
+    return [seg(1, "raw", 0, cut, 1000), seg(2, "raw", cut, n, 3000)]
+
+
+def test_ae_sim_plan_that_disagrees_with_the_cutlist_always_fails(phase):
+    """verification-honesty F1: an AE plan whose cut is 3 frames late (0.75 % of the frames) passed as
+    'pass_with_exceptions'; a plan that does not reproduce the cutlist now fails whatever the fraction."""
+    segs = _two_seg_cutlist()
+    truth = [verify.seg_raw_frame(segs[0] if k < 200 else segs[1], k, F30, F30, 10000) for k in range(400)]
+    fm = frame_map(truth)
+    ok = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 400, [200], Config(), segments=segs, raw_fps=F30,
+                             n_raw=10000)
+    assert ok["status"] == "pass" and ok["n_plan_mismatches"] == 0
+    late = list(truth)
+    for k in (200, 201, 202):                    # A's layer runs 3 frames into B (extrapolated A frames)
+        late[k] = verify.seg_raw_frame(segs[0], k, F30, F30, 10000)
+    r = verify.check_ae_sim(_sim_frames(late), fm, F30, F30, 400, [200], Config(), segments=segs, raw_fps=F30,
+                            n_raw=10000)
+    assert r["fraction_ok"] > 0.99 and r["status"] == "fail"
+    assert [x["K"] for x in r["plan_mismatches"]] == [200, 201, 202]
+    # without the cutlist (old call) the same simulation only lists the frames
+    r = verify.check_ae_sim(_sim_frames(late), fm, F30, F30, 400, [200], Config())
+    assert r["status"] == "pass_with_exceptions" and r["n_mismatches"] == 3
+
+
+def _weighted(ents: dict[int, list[tuple]]) -> dict[int, list[dict]]:
+    return {K: [{"layer": f"seg{s}", "seg": s, "raw_frame": j, "opacity": w, "weight": w} for s, j, w in e]
+            for K, e in ents.items()}
+
+
+def test_ae_sim_checks_transitions_and_placeholders_against_the_cutlist(phase):
+    """verification-honesty F4: crossfade (BLEND) frames and NOT-IN-RAW / dip frames were skipped by s9_2;
+    the plan's two layers, their RAW frames and opacities, and the absence of RAW on placeholder / dip
+    frames are now checked against the cutlist."""
+    xf = {"type": "crossfade", "duration_frames": 6, "alpha": [i / 6 for i in range(6)]}
+    a = seg(1, "raw", 0, 36, 100, transition_out=dict(xf))
+    b = seg(2, "raw", 30, 60, 500, transition_in=dict(xf))
+    c = seg(3, "not_in_raw", 60, 70)
+    d = seg(4, "raw", 70, 90, 900)
+    segs = [a, b, c, d]
+    fm = frame_map([0] * 90)
+    ents: dict[int, list[tuple]] = {}
+    for k in range(90):
+        if k < 30:
+            ents[k] = [(1, verify.seg_raw_frame(a, k, F30, F30, 5000), 1.0)]
+        elif k < 36:
+            al = (k - 30) / 6
+            ents[k] = [(1, verify.seg_raw_frame(a, k, F30, F30, 5000), 1 - al),
+                       (2, verify.seg_raw_frame(b, k, F30, F30, 5000), al)]
+        elif k < 60:
+            ents[k] = [(2, verify.seg_raw_frame(b, k, F30, F30, 5000), 1.0)]
+        elif k < 70:
+            ents[k] = []
+        else:
+            ents[k] = [(4, verify.seg_raw_frame(d, k, F30, F30, 5000), 1.0)]
+        fm.raw[k] = ents[k][0][1] if len(ents[k]) == 1 else -1
+    fm.status[30:36] = Status.BLEND
+    fm.status[60:70] = Status.NONE
+    fm.raw_lo, fm.raw_hi = fm.raw, fm.raw
+    kw = dict(segments=segs, raw_fps=F30, n_raw=5000)
+    r = verify.check_ae_sim(_weighted(ents), fm, F30, F30, 90, [30, 60, 70], Config(), **kw)
+    assert r["status"] == "pass", r["failures"]
+    assert r["transition_frames_checked"] == 6 and r["solid_frames_checked"] == 10
+    hard = dict(ents)                              # crossfade dropped: hard cut at 30
+    for k in range(30, 36):
+        hard[k] = [(2, verify.seg_raw_frame(b, k, F30, F30, 5000), 1.0)]
+    r = verify.check_ae_sim(_weighted(hard), fm, F30, F30, 90, [30, 60, 70], Config(), **kw)
+    assert r["status"] == "fail" and {x["K"] for x in r["plan_mismatches"]} == {30, 31, 32, 33, 34, 35}
+    rev = dict(ents)                               # ramp reversed
+    for k in range(30, 36):
+        al = 1 - (k - 30) / 6
+        rev[k] = [(1, verify.seg_raw_frame(a, k, F30, F30, 5000), 1 - al), (2, verify.seg_raw_frame(b, k, F30, F30, 5000), al)]
+    assert verify.check_ae_sim(_weighted(rev), fm, F30, F30, 90, [30, 60, 70], Config(), **kw)["status"] == "fail"
+    leak = dict(ents)                              # RAW shows through the NOT-IN-RAW placeholder
+    leak[65] = [(2, 530, 1.0)]
+    r = verify.check_ae_sim(_weighted(leak), fm, F30, F30, 90, [30, 60, 70], Config(), **kw)
+    assert r["status"] == "fail" and r["plan_mismatches"][0]["what"] == "not_in_raw"
+
+
 def test_ae_sim_skips_blend_and_placeholder_frames():
     truth = list(range(50))
     fm = frame_map(truth)
@@ -358,14 +552,67 @@ def test_ae_sim_skips_blend_and_placeholder_frames():
     assert r["status"] == "pass" and r["matched"] == 39
 
 
-def test_ae_sim_on_a_different_main_grid():
+def _grid_cutlist(raw_fps: Fraction, phase_frac: float, n: int = 90, speed: float = 1.0) -> Cutlist:
+    """One RAW segment [0, n) in a 30 fps competitor, RAW at raw_fps; raw_in puts frame 240 at phase_frac."""
+    s = Segment(id=1, type="raw", comp_in=0, comp_out=n, speed=speed, transform=dict(IDENT),
+                raw_in_seconds=float((240 + Fraction(phase_frac)) / raw_fps), raw_in_frame=240)
+    comp = {"file": "media/c.mp4", "file_rel": "media/c.mp4", "width": 64, "height": 36, "fps": "30/1",
+            "frames": n, "has_audio": False}
+    raw = {"file": "media/raw.mp4", "file_rel": "media/raw.mp4", "width": 64, "height": 36,
+           "fps": f"{raw_fps.numerator}/{raw_fps.denominator}", "frames": 100000, "has_audio": False}
+    return Cutlist(1, comp, raw, {"mode": "match", "box": None}, [s])
+
+
+def _exact_frame_map(cl: Cutlist) -> FrameMap:
+    """m(k) = the AE floor rule on the COMPETITOR grid (what the competitor showed), exact rationals."""
+    s = cl.segments[0]
+    rf, n = cl.raw_fps, int(cl.competitor["frames"])
+    raw_in = Fraction(s.raw_in_seconds)
+    return frame_map([math.floor(rf * (raw_in + Fraction(s.speed) * Fraction(k, 30))) for k in range(n)])
+
+
+@pytest.mark.parametrize("raw_fps", [Fraction(24000, 1001), Fraction(25), Fraction(30000, 1001), Fraction(60)])
+@pytest.mark.parametrize("phase_frac", [0.05, 0.3, 0.55, 0.8])
+@pytest.mark.parametrize("mode", [{"fps_mode": "source"}, {"layout_mode": "source"}])
+def test_ae_sim_on_a_different_main_grid(raw_fps, phase_frac, mode):
+    """requirements REQ-2 / time-math F3: with --fps source or --layout source (MAIN at the RAW rate) a
+    CORRECT export -- the real ae_plan + simulate_ae -- must not fail criterion 3: at MAIN frame K AE shows
+    the RAW frame of time K/main_fps, which lies between m(k) and m(k+1). It is listed ('grid'), not a
+    mismatch. (Comparing with m(floor(K comp_fps / main_fps)) failed 25-66 % of the frames.)"""
+    from match_cuts import export_ae
+    cl = _grid_cutlist(raw_fps, phase_frac)
+    fm = _exact_frame_map(cl)
+    cfg = Config(**mode)
+    plan = export_ae.ae_plan(cl, cfg, export_ae.footage_meta_from_cutlist(cl))
+    mf = Fraction(plan["main"]["fps"]["num"], plan["main"]["fps"]["den"])
+    assert mf == raw_fps
+    sim = export_ae.simulate_ae(plan)
+    r = verify.check_ae_sim(sim, fm, F30, mf, plan["main"]["frames"], [], cfg, segments=cl.segments,
+                            raw_fps=cl.raw_fps, n_raw=100000)
+    assert r["status"] in ("pass", "pass_with_exceptions"), r["summary"]
+    assert r["n_mismatches"] == 0 and r["n_plan_mismatches"] == 0 and r["fraction_ok"] == 1.0
+    # the same plan one RAW frame late still fails (the plan no longer reproduces the cutlist)
+    for L in plan["layers"]:
+        if L["kind"] == "raw":
+            L["expect"] = [e + 1 for e in L["expect"]]
+            L["timeMode"] = "frames"
+    r = verify.check_ae_sim(export_ae.simulate_ae(plan), fm, F30, mf, plan["main"]["frames"], [], cfg,
+                            segments=cl.segments, raw_fps=cl.raw_fps, n_raw=100000)
+    assert r["status"] == "fail" and r["n_plan_mismatches"] > 0
+
+
+def test_ae_sim_grid_bracket_without_segments_and_near_cuts():
     comp_fps, main_fps = Fraction(30), Fraction(24000, 1001)
     truth = list(range(1000, 1060))
     fm = frame_map(truth)
     n_main = math.floor(60 * main_fps / comp_fps + Fraction(1, 2))
-    sim = [truth[verify.main_to_comp(K, comp_fps, main_fps)] for K in range(n_main)]
+    sim = [truth[verify.main_to_comp(K, comp_fps, main_fps)] + (K % 2) for K in range(n_main)]   # m(k) or m(k)+1
     r = verify.check_ae_sim(_sim_frames(sim), fm, comp_fps, main_fps, n_main, [24], Config())
-    assert r["status"] == "pass" and r["excluded_near_cuts"] == 2
+    assert r["status"] == "pass_with_exceptions" and r["excluded_near_cuts"] == 2 and r["n_mismatches"] == 0
+    assert r["n_grid"] > 0
+    sim[40] += 3                                                   # outside [m(k), m(k+1)]: a real mismatch
+    r = verify.check_ae_sim(_sim_frames(sim), fm, comp_fps, main_fps, n_main, [24], Config())
+    assert r["n_mismatches"] == 1
     assert verify.main_to_comp(10, comp_fps, main_fps) == math.floor(10 * 30 / (24000 / 1001))
 
 
@@ -531,6 +778,92 @@ def test_framing_follows_animated_keys(phase):
     assert r["status"] == "pass", r
 
 
+def test_framing_is_measured_independently(phase):
+    """verification-honesty F5: the FrameMap Sims are refine's track model and the segment transform is their
+    median, so a wrong track passed c4 with 0.0 errors. With a measure() (ECC from a perturbed start) a
+    framing that the pixels contradict fails, and so does a flip the mirrored hypothesis beats."""
+    cfg = Config()
+    s = seg(1, "raw", 0, 40, 100)
+    fm = frame_map(list(range(100, 140)))                         # FrameMap Sims == the segment model (self-consistent)
+    box = Box(0, 0, 64, 36)
+    wrong = Sim(1.025, 0.0, 6.0, 0.0)                              # what the pixels say
+
+    def measure(sim_true, own=0.95, other=0.3):
+        calls = []
+
+        def f(sg, k, model):
+            calls.append(k)
+            return {"sim": sim_true, "z": 0.99, "z_model": 0.80 if sim_true is not model else 0.99,
+                    "flip_own": own, "flip_other": other}
+        f.calls = calls
+        return f
+    m = measure(wrong)
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), box, (64, 36), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=m)
+    assert r["status"] == "fail" and "independently measured framing" in r["failures"][0]
+    assert r["segments"][0]["max_scale_err"] == 0.0                # the self-referential comparison saw nothing
+    assert 0 in m.calls and 39 in m.calls and len(m.calls) >= 8
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), box, (64, 36), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=measure(Sim(1.0005, 0.0, 0.3, 0.0)))
+    assert r["status"] == "pass", r
+    # ECC that did not reach the model's score is not evidence against the model
+    def unconverged(sg, k, model):
+        return {"sim": wrong, "z": 0.7, "z_model": 0.99, "flip_own": 0.95, "flip_other": 0.2}
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), box, (64, 36), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=unconverged)
+    assert r["status"] == "pass_with_exceptions" and "could not be measured" in r["exceptions"][0]
+    # flip: the mirrored hypothesis wins -> fail; a tie (symmetric content) -> listed
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), box, (64, 36), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=measure(None, 0.3, 0.9))
+    assert r["status"] == "fail" and "mirrored hypothesis" in r["failures"][0]
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), box, (64, 36), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=measure(None, 0.9, 0.895))
+    assert r["status"] == "pass_with_exceptions" and any("flip not decidable" in e for e in r["exceptions"])
+
+
+def _warp_frames(raw: np.ndarray, sim: Sim, flip: bool, out_wh: tuple[int, int]) -> np.ndarray:
+    from match_cuts import scoring
+    out = []
+    for img in raw:
+        w, _v = scoring.warp_to_roi(img, sim, flip, raw.shape[2], (1.0, 1.0), (1.0, 1.0), (0, 0, out_wh[0], out_wh[1]))
+        out.append(np.clip(np.rint(w), 0, 255).astype(np.uint8))
+    return np.stack(out)
+
+
+def test_framing_measure_with_real_ecc(phase):
+    """framing_measure (refine.refine_transform from a perturbed start) on real pixels: the true framing
+    passes, a 2.5 % / 6 px wrong segment transform fails, a wrong flip fails."""
+    import cv2
+    rng = np.random.default_rng(11)
+    raw = np.empty((30, 72, 96), np.uint8)
+    for i in range(30):
+        img = cv2.GaussianBlur(rng.uniform(0, 255, (72, 96)).astype(np.float32), (0, 0), 2.0) * 3.0 - 250
+        raw[i] = np.clip(img, 0, 255).astype(np.uint8)
+    true = Sim(0.9, 0.0, 6.0, 4.0)
+    comp_frames = _warp_frames(raw[5:25], true, False, (96, 72))
+    comp, rawp = _proxy(comp_frames, "competitor"), _proxy(raw, "raw")
+    cfg = Config()
+    box = {"x": 8, "y": 8, "w": 80, "h": 56, "corner_radius": 0}
+    fm = frame_map(list(range(5, 25)))
+    scorer = verify.ProxyScorer(comp, rawp, box, lambda k: None, 96, cfg)
+    meas = verify.framing_measure(comp, rawp, scorer, lambda k: None, lambda k: box, (96, 72), F30, F30, 30, cfg)
+
+    def run(sim, flip=False):
+        s = seg(1, "raw", 0, 20, 5, transform=sim.to_dict(), flip_h=flip)
+        fm.flip[:] = flip                      # the FrameMap agrees with the model (refine's track model)
+        fm.s[:], fm.theta[:], fm.tx[:], fm.ty[:] = sim.s, sim.theta_deg, sim.tx, sim.ty
+        return verify.check_speed_framing([s], fm, F30, F30, (96, 72), box, (96, 72), cfg,
+                                          feasible_range=lambda *a: (0.999, 1.001), measure=meas, sample_step=5)
+    r = run(true)
+    assert r["status"] == "pass", r
+    ind = r["segments"][0]["independent"]
+    assert ind["n_measured"] >= 4 and ind["max_scale_err"] < 0.01 and ind["max_pos_err_px"] < 2.0 and ind["flip"] == "ok"
+    r = run(verify.perturb_sim(true, (48, 36), 0.025, 6.0, 0.0))
+    assert r["status"] == "fail" and "independently measured framing" in r["failures"][0]
+    r = run(true, flip=True)
+    assert r["status"] == "fail" and any("mirrored hypothesis" in f for f in r["failures"])
+
+
 # ---------------------------------------------------------------------------------------------
 # c5 audio exception codes
 # ---------------------------------------------------------------------------------------------
@@ -577,8 +910,13 @@ def test_audio_derived_codes_and_no_audio():
     cfg = Config()
     s = seg(1, "raw", 0, 60, 100)
     music = [{"type": "music", "comp_in": 0, "comp_out": 300}]
+    # verification-honesty F6: music_dominated is never invented by the check from added-audio overlap
+    r = verify.check_audio([s], y, y, sr, F30, {"status": "ok"}, music, cfg, xcorr=_xc(0.05, 0.1))
+    assert r["status"] == "fail" and "did not report music dominance" in r["failures"][0]
+    s.audio = {**s.audio, "exception": "music_dominated"}         # ... only accepted from audio_align
     r = verify.check_audio([s], y, y, sr, F30, {"status": "ok"}, music, cfg, xcorr=_xc(0.05, 0.1))
     assert r["status"] == "pass_with_exceptions" and r["segments"][0]["code"] == "music_dominated"
+    s.audio = {**s.audio, "exception": None}
     r = verify.check_audio([s], y, y, sr, F30, {"status": "audio_replaced"}, [], cfg, xcorr=_xc(0.05, 0.1))
     assert r["segments"][0]["code"] == "audio_replaced"
     s.audio = {**s.audio, "pitch_preserved": True}
@@ -588,6 +926,28 @@ def test_audio_derived_codes_and_no_audio():
     assert r["status"] == "pass_with_exceptions" and r["segments"][0]["code"] == "no_audio"
     r = verify.check_audio([s], y, np.zeros_like(y), sr, F30, {"status": "ok"}, [], cfg, xcorr=_xc(0, 1))
     assert r["segments"][0]["code"] == "no_audio"             # silent RAW range
+
+
+def test_audio_gross_misalignment_and_contradicted_analysis_fail():
+    """verification-honesty F6: recreated audio 500 ms off (or from another moment) gave a weak +-100 ms peak
+    and verify labelled it 'music_dominated' because a music bed overlapped. Now a wide search finds the
+    real lag (fail), and a weak peak on a segment the analysis found aligned fails."""
+    from match_cuts import audio_align
+    sr = 8000
+    rng = np.random.default_rng(3)
+    src_y = rng.standard_normal(sr * 12).astype(np.float32)
+    music = [{"type": "music", "comp_in": 0, "comp_out": 360}]
+    comp_y = src_y.copy()
+    s = seg(1, "raw", 30, 150, 100)
+    s.audio = {**s.audio, "lag_ms": 0.4, "corr": 0.93, "exception": None}      # audio_align found it aligned
+    late = np.concatenate([np.zeros(sr // 2, np.float32), src_y[:-sr // 2]])  # rebuilt 500 ms late
+    r = verify.check_audio([s], comp_y, late, sr, F30, {"status": "ok"}, music, Config(), xcorr=audio_align.xcorr_lag)
+    assert r["status"] == "fail" and "misaligned by +500" in r["failures"][0], r["failures"]
+    other = rng.standard_normal(sr * 12).astype(np.float32)                   # a different RAW moment entirely
+    r = verify.check_audio([s], comp_y, other, sr, F30, {"status": "ok"}, music, Config(), xcorr=audio_align.xcorr_lag)
+    assert r["status"] == "fail" and "no longer correlates" in r["failures"][0], r["failures"]
+    r = verify.check_audio([s], comp_y, comp_y, sr, F30, {"status": "ok"}, music, Config(), xcorr=audio_align.xcorr_lag)
+    assert r["status"] == "pass" and r["segments"][0]["result"] == "ok"
 
 
 def test_audio_uses_jl_offsets():
@@ -626,6 +986,82 @@ def test_visual_check_and_failure_thumbnails(tmp_path):
     assert r["status"] == "fail" and any("missing" in f for f in r["failures"])
 
 
+def test_visual_checks_blend_uniform_and_placeholder_frames(tmp_path):
+    """verification-honesty F4: crossfade frames of the recreation were never gated (a frozen crossfade
+    passed), dip frames and NOT-IN-RAW placeholder frames were not looked at (a white placeholder passed)."""
+    raw = _textures(40, seed=4)
+    n = 30
+    comp_frames = np.zeros((n, 32, 48), np.uint8)
+    for k in range(10):
+        comp_frames[k] = raw[k]
+    for k in range(10, 16):                               # crossfade raw[k] -> raw[20 + k]
+        al = (k - 10) / 6
+        comp_frames[k] = np.clip((1 - al) * raw[k].astype(np.float32) + al * raw[20 + k], 0, 255).astype(np.uint8)
+    comp_frames[16:20] = 0                                # dip to black
+    ph = verify.placeholder_gray()
+    comp_frames[20:25] = 200                              # competitor shows stock footage (NOT IN RAW)
+    for k in range(25, 30):
+        comp_frames[k] = raw[k]
+    comp = _proxy(comp_frames, "competitor")
+    fm = frame_map(list(range(n)))
+    fm.status[10:16] = Status.BLEND
+    fm.status[16:20] = Status.UNIFORM
+    fm.status[20:25] = Status.NONE
+    segs = [seg(1, "raw", 0, 16, 0), seg(2, "dip", 16, 20), seg(3, "not_in_raw", 20, 25), seg(4, "raw", 25, 30, 25)]
+
+    def rec_frames(freeze_blend=False, white_placeholder=False, grey_dip=False):
+        out = []
+        for k in range(n):
+            img = comp_frames[k].copy()
+            if 10 <= k < 16 and freeze_blend:
+                img = comp_frames[9].copy()
+            if 16 <= k < 20 and grey_dip:
+                img[:] = 128
+            if 20 <= k < 25:
+                img[:] = 255 if white_placeholder else int(round(ph))
+                img[14:18, 10:38] = 255                    # the drawn label
+            out.append((k, img))
+        return out
+    r = verify.check_visual(comp, rec_frames(), fm, lambda k: None, None, Config(), tmp_path, segments=segs)
+    assert r["status"] == "pass", r["failures"]
+    assert r["uniform_frames_checked"] == 4 and r["placeholder_frames_checked"] == 5
+    r = verify.check_visual(comp, rec_frames(freeze_blend=True), fm, lambda k: None, None, Config(), tmp_path, segments=segs)
+    assert r["status"] == "fail" and r["blend_failed_frames"]
+    r = verify.check_visual(comp, rec_frames(white_placeholder=True), fm, lambda k: None, None, Config(), tmp_path,
+                            segments=segs)
+    assert r["status"] == "fail" and len(r["placeholder_failed"]) == 5
+    r = verify.check_visual(comp, rec_frames(grey_dip=True), fm, lambda k: None, None, Config(), tmp_path, segments=segs)
+    assert r["status"] == "fail" and len(r["uniform_failed"]) == 4
+
+
+def test_visual_scores_fullscreen_frames_on_the_whole_canvas():
+    """requirements REQ-3: s9_3 scored only the dominant box ROI, so a full-screen shot rebuilt inside the
+    box passed. With box_fn the frame's own box (the whole canvas) is scored."""
+    raw = _textures(12, seed=6)
+    comp = _proxy(raw[:10], "competitor")
+    fm = frame_map(list(range(10)))
+    dom = {"x": 12, "y": 8, "w": 24, "h": 16, "corner_radius": 0}
+    boxed = []
+    for k in range(10):
+        img = np.zeros_like(raw[k])
+        img[8:24, 12:36] = raw[k][8:24, 12:36]          # the recreation keeps the box, black around it
+        boxed.append((k, img))
+    full = {"x": 0, "y": 0, "w": 48, "h": 32, "corner_radius": 0}
+    assert verify.check_visual(comp, boxed, fm, lambda k: None, dom, Config())["status"] == "pass"
+    r = verify.check_visual(comp, boxed, fm, lambda k: None, dom, Config(), box_fn=lambda k: full if k >= 5 else dom)
+    assert r["status"] == "fail" and r["failed_frames"] == [5, 6, 7, 8, 9]
+
+
+def test_proxy_scorer_uses_the_frame_box():
+    raw = _textures(6, seed=7)
+    full = {"x": 0, "y": 0, "w": 48, "h": 32, "corner_radius": 0}
+    dom = {"x": 12, "y": 8, "w": 24, "h": 16}
+    sc = verify.ProxyScorer(_proxy(raw, "competitor"), _proxy(raw, "raw"), dom, lambda k: None, 48, Config(),
+                            box_fn=lambda k: full if k == 3 else dom)
+    assert sc.roi_at(2) == (12, 8, 24, 16) and sc.roi_at(3) == (0, 0, 48, 32)
+    assert sc.score(3, [(3, Sim(1.0, 0.0, 0.0, 0.0), False)])[0] > 0.999
+
+
 def test_proxy_roi_clips_and_scales():
     assert verify.proxy_roi(None, (100, 50), (0.5, 0.5)) == (0, 0, 100, 50)
     assert verify.proxy_roi({"x": 10.5, "y": 20, "w": 100, "h": 60, "corner_radius": 4}, (100, 50), (0.5, 0.5)) == (5, 10, 51, 30)   # covers 5.25..55.25
@@ -660,6 +1096,91 @@ def test_ae_render_not_available_without_aerender(tmp_path):
     assert r["status"] == "not_available"
 
 
+def _write_video(path: Path, frames: np.ndarray, fps=F30) -> None:
+    from match_cuts.media import FFmpegWriter
+    h, w = frames.shape[1:3]
+    with FFmpegWriter(path, w, h, fps, codec_args=["-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p"]) as wr:
+        for f in frames:
+            wr.write(np.repeat(f[:, :, None], 3, axis=2) if f.ndim == 2 else f)
+
+
+def _fake_aerender(path: Path, frames_dir: Path, n: int, rc: int = 0) -> Path:
+    """A fake aerender: copies the first ``n`` PNGs of frames_dir to the -output pattern, exits with ``rc``."""
+    path.write_text("#!" + sys.executable + "\n"
+                    "import sys, shutil, pathlib\n"
+                    "out = pathlib.Path(sys.argv[sys.argv.index('-output') + 1])\n"
+                    f"src = sorted(pathlib.Path({str(frames_dir)!r}).glob('*.png'))[:{n}]\n"
+                    "if 'PNG' in sys.argv[sys.argv.index('-OMtemplate') + 1]:\n"
+                    "    for i, p in enumerate(src):\n"
+                    "        shutil.copy(p, out.parent / ('ae_%05d.png' % i))\n"
+                    f"sys.exit({rc})\n")
+    path.chmod(0o755)
+    return path
+
+
+def test_ae_render_rejects_failed_stale_and_truncated_renders(tmp_path):
+    """verification-honesty F9: s9_6 compared stale frames of an earlier run when aerender failed, ignored
+    the return code and passed a render that stopped after 10 frames."""
+    import cv2
+    frames = _textures(20, 64, 48, seed=9)
+    preview = tmp_path / "preview.mp4"
+    _write_video(preview, frames)
+    pngs = tmp_path / "pngs"
+    pngs.mkdir()
+    for i, f in enumerate(frames):
+        cv2.imwrite(str(pngs / f"f{i:03d}.png"), f)
+    aep = tmp_path / "recreated_edit.aep"
+    aep.write_bytes(b"aep")
+    out = tmp_path / "aerender"
+    good = _fake_aerender(tmp_path / "aerender_ok", pngs, 20)
+    r = verify.check_ae_render({"aerender": str(good)}, str(aep), str(preview), 20, F30, (64, 48), out, Config())
+    assert r["status"] == "pass", r
+    # a later run whose aerender fails: the 20 PNGs of the previous run must not be compared
+    bad = _fake_aerender(tmp_path / "aerender_fail", pngs, 0, rc=1)
+    r = verify.check_ae_render({"aerender": str(bad)}, str(aep), str(preview), 20, F30, (64, 48), out, Config())
+    assert r["status"] == "fail" and r["summary"] == "aerender produced no frames"
+    assert all(t.get("returncode") == 1 for t in r["tried"])
+    # a render that stops after 10 frames (exit code 0)
+    short = _fake_aerender(tmp_path / "aerender_short", pngs, 10)
+    r = verify.check_ae_render({"aerender": str(short)}, str(aep), str(preview), 20, F30, (64, 48), out, Config())
+    assert r["status"] == "fail" and any("10 frames, MAIN has 20" in f for f in r["failures"])
+    # a non-zero exit with frames left behind is a failed attempt too
+    crash = _fake_aerender(tmp_path / "aerender_crash", pngs, 20, rc=3)
+    r = verify.check_ae_render({"aerender": str(crash)}, str(aep), str(preview), 20, F30, (64, 48), out, Config())
+    assert r["status"] == "fail"
+
+
+def test_compare_render_to_preview_counts_frames():
+    raw = _textures(12, seed=5).astype(np.float32)
+    prev = [(k, raw[k]) for k in range(12)]
+    assert verify.compare_render_to_preview(iter(prev[:10]), prev, Config())["status"] == "pass"
+    r = verify.compare_render_to_preview(iter(prev[:10]), prev, Config(), n_expected=12)
+    assert r["status"] == "fail" and "10 frames, MAIN has 12" in r["failures"][0]
+
+
+def test_preview_file_probe_and_sample_comparison(tmp_path):
+    """verification-honesty F12: the delivered preview_recreation.mp4 was never decoded in fill / source /
+    --fps source / other --comp-size runs. It is now probed (frame count, fps grid, size) and, outside the
+    match mode, sampled frames are compared with render_frame."""
+    frames = _textures(30, 64, 48, seed=12)
+    p = tmp_path / "preview_recreation.mp4"
+    _write_video(p, frames)
+    render = lambda ks: {k: np.repeat(frames[k][:, :, None], 3, axis=2) for k in ks}   # noqa: E731
+    r = verify.check_preview_file(p, 30, F30, (64, 48), render, [0, 7, 15, 29])
+    assert r["status"] == "pass" and r["compared"] == 4, r
+    r = verify.check_preview_file(p, 32, F30, (64, 48))
+    assert r["status"] == "fail" and "30 frames, expected 32" in r["failures"][0]
+    r = verify.check_preview_file(p, 30, Fraction(30000, 1001), (64, 48))
+    assert r["status"] == "fail"
+    r = verify.check_preview_file(p, 30, F30, (128, 96))
+    assert r["status"] == "fail" and "MAIN is 128x96" in r["failures"][0]
+    wrong = lambda ks: {k: np.repeat(frames[(k + 3) % 30][:, :, None], 3, axis=2) for k in ks}   # noqa: E731
+    r = verify.check_preview_file(p, 30, F30, (64, 48), wrong, [0, 7, 15, 29])
+    assert r["status"] == "fail" and "differs from the renderer" in r["failures"][0]
+    assert verify.check_preview_file(None, 30, F30, None, skipped="--skip-preview")["status"] == "not_available"
+    assert verify.check_preview_file(tmp_path / "nope.mp4", 30, F30, None)["status"] == "fail"
+
+
 # ---------------------------------------------------------------------------------------------
 # s9_7 determinism
 # ---------------------------------------------------------------------------------------------
@@ -692,6 +1213,84 @@ def test_check_determinism_uses_fresh_rerun(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "rerun_assembly", lambda c: _cutlist(speed=1.1))
     r = verify.check_determinism(ctx)
     assert r["status"] == "fail" and r["differences"]
+
+
+def test_check_determinism_fails_when_the_previous_identical_run_differs(monkeypatch, tmp_path):
+    """verification-honesty F11: a previous run with identical inputs / parameters / versions that produced a
+    different cutlist.json only raised a warning; it is Stage 9.7's failure."""
+    from match_cuts import pipeline
+    cfg = Config()
+    cfg.out_dir = str(tmp_path)
+    cur = _cutlist()
+    cur.provenance.update(input_hashes={"competitor": "a", "raw": "b"}, analysis_params_hash="p", stage_versions={"x": 1})
+    cur.settings = {"layout_mode": "match"}
+    ctx = types.SimpleNamespace(cfg=cfg, cutlist=cur)
+    monkeypatch.setattr(pipeline, "rerun_assembly", lambda c: cur)
+    prev = cur.to_dict()
+    ctx.previous_cutlist = json.loads(json.dumps(prev))
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "pass" and "identical to the previous run" in r["summary"]
+    ctx.previous_cutlist["segments"][0]["notes"] = "different"
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "fail" and "previous run" in r["failures"][0]
+    ctx.previous_cutlist["provenance"]["stage_versions"] = {"x": 2}          # the tool changed: not compared
+    assert verify.check_determinism(ctx)["status"] == "pass"
+
+
+def _deliverables_ctx(tmp_path: Path, **over):
+    cfg = Config()
+    cfg.out_dir, cfg.work_dir = str(tmp_path / "out"), str(tmp_path / "work")
+    out = Path(cfg.out_dir)
+    files = ["build_ae_project.jsx", "cutlist.json", "cutlist.csv", "recreated_edit.xml", "recreated_edit.edl",
+             "preview_recreation.mp4", "compare.mp4", "media/raw.mp4", "media/competitor_ref.mp4",
+             "debug/mapping.png", "debug/scores.png", "debug/layout.png", "debug/cuts/cut_01.png"]
+    for f in files:
+        (out / f).parent.mkdir(parents=True, exist_ok=True)
+        (out / f).write_bytes(b"x")
+    cl = _cutlist()
+    cl.raw.update(file="media/raw.mp4", file_rel="media/raw.mp4")
+    cl.competitor.update(file="media/competitor_ref.mp4", file_rel="media/competitor_ref.mp4")
+    ctx = types.SimpleNamespace(cfg=cfg, cutlist=cl, env={"ae_app": None}, ae_run={"status": "not_available"},
+                                exports={"ok": True}, errors=[], paths={"jsx": str(out / "build_ae_project.jsx")})
+    for k, v in over.items():
+        setattr(ctx, k, v)
+    return ctx, out
+
+
+def test_deliverables_check(tmp_path):
+    """requirements REQ-6 (DESIGN §7 D5): a missing / unvalidated deliverable or a recorded export error used
+    to leave 'Overall: PASS' and exit 0; s9_8_deliverables fails on each of them."""
+    ctx, out = _deliverables_ctx(tmp_path)
+    r = verify.check_deliverables(ctx, n_cuts=1)
+    assert r["status"] == "pass", r["failures"]
+    assert r["skipped"] == ["recreated_edit.aep (After Effects not installed)"]
+    (out / "recreated_edit.xml").unlink()
+    r = verify.check_deliverables(ctx, n_cuts=1)
+    assert r["status"] == "fail" and any("recreated_edit.xml missing" in f for f in r["failures"])
+    ctx, out = _deliverables_ctx(tmp_path / "b", exports={"ok": False, "errors": ["duration 299 != 300"]})
+    assert "validation did not pass" in verify.check_deliverables(ctx)["failures"][0]
+    ctx, out = _deliverables_ctx(tmp_path / "c", errors=[{"stage": "S8 compare.mp4", "error": "OSError: disk full"}])
+    assert "S8 compare.mp4" in verify.check_deliverables(ctx)["failures"][0]
+    ctx, out = _deliverables_ctx(tmp_path / "d", env={"ae_app": "/Applications/Adobe After Effects 2025"})
+    assert "recreated_edit.aep" in verify.check_deliverables(ctx)["failures"][0]
+    ctx, out = _deliverables_ctx(tmp_path / "e")
+    (out / "preview_recreation.mp4").unlink()
+    (out / "compare.mp4").unlink()
+    (out / "media" / "raw.mp4").unlink()
+    r = verify.check_deliverables(ctx)
+    assert r["status"] == "fail" and len(r["failures"]) == 3
+    ctx.cfg.skip_preview = ctx.cfg.skip_compare = True
+    (out / "media" / "raw.mp4").write_bytes(b"x")
+    r = verify.check_deliverables(ctx, n_cuts=2)
+    assert r["status"] == "fail" and r["failures"] == ["debug/cuts has 1 cut images, the edit has 2 cuts"]
+    assert len(r["skipped"]) == 3
+    (out / "debug" / "scores.png").unlink()
+    r = verify.check_deliverables(ctx, n_cuts=1)
+    assert r["status"] == "pass" and r["warnings"] == ["debug/scores.png missing"]
+    # the pipeline says this run did not produce the EDL: the stale file from an earlier run does not count
+    ctx.exports = {"ok": True, "validation_ok": True, "missing": ["edl"], "skipped": {}}
+    r = verify.check_deliverables(ctx, n_cuts=1)
+    assert r["status"] == "fail" and "'edl' was not produced by this run" in r["failures"][0]
 
 
 def test_segment_labeler_names_covering_segments():

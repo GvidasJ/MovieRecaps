@@ -248,8 +248,10 @@ def headline(result: dict) -> str:
     """Overall verdict (DESIGN §7 D5): 'PASS', 'PASS (criterion 6 not verified: <reason>)' or 'FAIL' --
     derived from the exit code, so the headline and the exit status never disagree."""
     code = result.get("exit_code", 1)
-    from . import pipeline
+    if result.get("headline"):
+        return str(result["headline"])
     try:
+        from . import pipeline
         return pipeline.headline_for(result.get("criteria") or {}, result.get("checks") or {}, code)
     except Exception:  # noqa: BLE001 - verify not importable: fall back to the exit code alone
         return {0: "PASS", 2: "ERROR", 3: "PASS (some criterion not verified)"}.get(int(code), "FAIL")

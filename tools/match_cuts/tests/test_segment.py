@@ -640,6 +640,178 @@ def test_rotation_threshold_and_recentring():
     assert np.allclose(t0.apply([pre])[0], [cx, cy], atol=1e-6)
 
 
+# ---------------------------------------------------------------------------------------------------
+# review v3 regressions: data term (time-math F2), phantom cuts (verification-honesty F3), layout periods (D1)
+# ---------------------------------------------------------------------------------------------------
+
+def _ae(segs):
+    """RAW frame After Effects shows per comp frame (stretch segments, floor rule)."""
+    out = []
+    for s in segs:
+        ks = np.arange(s.comp_in, s.comp_out)
+        out.append(ps.ae_frame(s.raw_in_seconds, s.speed, ks, s.comp_in, C30, R2997))
+    return np.concatenate(out)
+
+
+def _slow_footage(fm, truth, width=1, rel=0.4):
+    """Slow footage: every neighbour within `width` frames scores within delta_k of the best, so refine's soft
+    range is argmax +- width (delta_k = soft_delta_min here: every best score is 0.99)."""
+    n = fm.n
+    fm.soft_lo, fm.soft_hi = truth - width, truth + width
+    j0 = truth - 7
+    cand = np.full((n, 15), 0.95, np.float32)
+    cand[:, 7] = 0.99
+    for dj in range(1, width + 1):
+        cand[:, 7 - dj] = cand[:, 7 + dj] = 0.99 - rel * 0.001 * dj
+    fm.cand_j0, fm.cand = j0, cand
+    fm.margin = np.full(n, rel * 0.001)
+
+
+@pytest.mark.parametrize("with_cand", [False, True])
+def test_two_frame_skip_jump_cut_with_wide_soft_ranges_is_a_cut(with_cand):
+    """time-math F2: with soft ranges of +-1 one 1.0x line fits a 2-frame-skip jump cut inside every soft range
+    while contradicting every measured frame. The data term makes it a cut, and AE shows refine's argmax."""
+    m1 = ff_select(45, 1.0, 1000)
+    m2 = ff_select(45, 1.0, int(m1[-1]) + 3)          # 2 RAW frames skipped
+    fm, _ = build_fm([Spec(m=m1, n=45), Spec(m=m2, n=45)])
+    truth = np.asarray(fm.raw).copy()
+    if with_cand:
+        _slow_footage(fm, truth)
+    else:
+        fm.soft_lo, fm.soft_hi = truth - 1, truth + 1
+    segs = run(fm, *proxies(fm.n))
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 45), (45, 90)]
+    assert all(s.speed == 1.0 and not s.unsnapped for s in segs)
+    assert np.array_equal(_ae(segs), truth)
+    assert np.array_equal(np.asarray(fm.raw), truth)          # nothing re-assigned
+
+
+@pytest.mark.parametrize("w", [0, 1])
+def test_103x_segment_is_not_snapped_to_one(w):
+    """time-math F2: a 1.03x segment is reported unsnapped at its measured speed (no snap value is within
+    speed_snap_tol of the robust slope of the measured frames), not as 1.0 with frames off the argmax (soft
+    +-1) or as 1.0 pieces joined by fake 1-frame jump cuts (exact ranges)."""
+    fm, _ = build_fm([Spec(n=90, j0=1000, v=1.03)])
+    truth = np.asarray(fm.raw).copy()
+    if w:
+        _slow_footage(fm, truth, w)
+    segs = run(fm, *proxies(fm.n))
+    assert len(segs) == 1
+    s = segs[0]
+    tol = Config().speed_snap_tol
+    assert s.speed != 1.0
+    if s.unsnapped:
+        assert abs(s.speed / 1.03 - 1.0) < 0.005
+    else:
+        assert abs(s.speed - s.speed_measured) <= tol * s.speed
+    assert abs(s.speed_measured / 1.03 - 1.0) < 0.005             # robust slope of the ARGMAX frames
+    assert s.speed_range[0] <= s.speed <= s.speed_range[1]
+    assert not (s.speed_range[0] <= 1.0 <= s.speed_range[1]) and not (s.speed_range[0] <= 1.05 <= s.speed_range[1])
+    assert np.array_equal(_ae(segs), truth)
+
+
+def test_105x_segment_with_wide_soft_ranges_keeps_its_snap():
+    """time-math F2: 1.05x over 40 frames with soft +-1: 1.0 fits the soft ranges but contradicts 19 measured
+    frames; the segment must be 1.05 (the dominant speed no longer wins a cost tie by rank)."""
+    fm, _ = build_fm([Spec(n=40, j0=1000, v=1.05)])
+    truth = np.asarray(fm.raw).copy()
+    _slow_footage(fm, truth)
+    segs = run(fm, *proxies(fm.n))
+    assert len(segs) == 1 and segs[0].speed == pytest.approx(1.05) and not segs[0].unsnapped
+    assert np.array_equal(_ae(segs), truth)
+
+
+def test_phantom_cut_after_criterion2_move_is_merged(tmp_path):
+    """verification-honesty F3: refine's argmax at frame 30 is one frame late (pixels say otherwise) and the
+    frames after it are ambiguous pairs. The DP cuts at 30; criterion 2 moves the cut, after which both models
+    show the same RAW frame and framing on both sides. That is no discontinuity of m(k): no cut may remain."""
+    bank = texture_bank(300, seed=11)
+    truth = ff_select(60, 1.0, 20)
+    comp = bank[truth]
+    fm, _ = build_fm([Spec(m=truth, n=60)])
+    raw = truth.copy()
+    raw[30] = truth[30] + 1
+    lo, hi = raw.copy(), raw.copy()
+    lo[31:], hi[31:] = truth[31:], truth[31:] + 1
+    fm.raw, fm.raw_lo, fm.raw_hi, fm.soft_lo, fm.soft_hi = raw, lo, hi, lo, hi
+    j0 = np.full(60, -1)
+    cand = np.full((60, 15), np.nan, np.float32)
+    j0[30] = raw[30] - 7
+    cand[30, :] = 0.95
+    cand[30, 7], cand[30, 6] = 0.99, 0.96
+    fm.cand_j0, fm.cand = j0, cand
+    marg = np.full(60, 0.04)
+    marg[30] = 0.03
+    fm.margin = marg
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *pix_proxies(comp, bank), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out, s.speed) for s in segs] == [(0, 60, 1.0)]
+    assert np.array_equal(_ae(segs), truth)
+    rec = records(tmp_path / "d.jsonl")
+    assert any(r["decision"] == "phantom_cut_merged" for r in rec)
+
+
+def test_layout_periods_set_box_region_and_split_segments(tmp_path):
+    """D1 / requirements REQ-3: a fullscreen period inside a boxed edit gives segments with box = the whole
+    canvas and region 1, split exactly at the period boundaries even inside one continuous shot; a split-screen
+    period is region 2 and flagged; the dominant layout keeps box None / region 0."""
+    from match_cuts.model import Box, Layout, LayoutPeriod
+    box = Box(60.0, 400.0, 960.0, 1000.0, 30.0)
+    full = Box(0.0, 0.0, 1080.0, 1920.0, 0.0)
+    m = ff_select(100, 1.0, 1000)                    # ONE continuous shot, constant framing, frames 0-99
+    m2 = ff_select(20, 1.0, 3000)
+    fm, _ = build_fm([Spec(m=m, n=100, sim=(0.5, 0.0, 60.0, 690.0)), Spec(kind="none", n=10),
+                      Spec(m=m2, n=20, track=1, sim=(0.5, 0.0, 60.0, 690.0))])
+    lay = Layout(1080, 1920, mode="boxed", box=box, periods=[
+        LayoutPeriod(0, 40, "boxed", box), LayoutPeriod(40, 70, "fullscreen", full), LayoutPeriod(70, 85, "boxed", box),
+        LayoutPeriod(85, 95, "split", box), LayoutPeriod(95, 115, "boxed", box), LayoutPeriod(115, 130, "fullscreen", full)])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), layout=lay, dlog=dl)
+    dl.close()
+    fullbox = {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0, "corner_radius": 0.0}
+    got = [(s.type, s.comp_in, s.comp_out, s.box, s.region) for s in segs]
+    assert got == [("raw", 0, 40, None, 0), ("raw", 40, 70, fullbox, 1), ("raw", 70, 85, None, 0),
+                   ("raw", 85, 95, None, 2), ("raw", 95, 100, None, 0), ("not_in_raw", 100, 110, None, 0),
+                   ("raw", 110, 115, None, 0), ("raw", 115, 130, fullbox, 1)]
+    rs = raws(segs)
+    assert [s.raw_in_frame for s in rs] == [int(m[0]), int(m[40]), int(m[70]), int(m[85]), int(m[95]),
+                                            int(m2[0]), int(m2[5])]
+    assert all(s.speed == 1.0 for s in rs)
+    assert "fullscreen layout period" in segs[1].notes and "'split' layout period" in segs[3].notes
+    for s in rs:
+        check_model(s, fm)
+    # a fullscreen DOMINANT layout: every segment keeps box None / region 0
+    lay2 = Layout(1080, 1920, mode="fullscreen", box=full, periods=[LayoutPeriod(0, 130, "fullscreen", full)])
+    fm2, _ = build_fm([Spec(m=m, n=100), Spec(kind="none", n=10), Spec(m=m2, n=20, track=1)])
+    segs2 = run(fm2, *proxies(fm2.n), layout=lay2)
+    assert [(s.comp_in, s.comp_out, s.box, s.region) for s in segs2] == [(0, 100, None, 0), (100, 110, None, 0),
+                                                                          (110, 130, None, 0)]
+
+
+@pytest.mark.parametrize("start", [39, 41])
+def test_layout_period_boundary_off_by_one_follows_the_cut(start):
+    """D1 robustness: the detected fullscreen period starts one frame early / late relative to the hard cut
+    into the fullscreen shot. The 1-frame sliver is merged into the neighbour with the same framing (across
+    the period boundary), so the cut stays at 40 and each shot gets its own box."""
+    from match_cuts.model import Box, Layout, LayoutPeriod
+    box = Box(60.0, 400.0, 960.0, 1000.0, 30.0)
+    full = Box(0.0, 0.0, 1080.0, 1920.0, 0.0)
+    boxed_sim, full_sim = (0.5, 0.0, 60.0, 690.0), (1.8, 0.0, -1188.0, 0.0)
+    fm, _ = build_fm([Spec(m=ff_select(40, 1.0, 1000), n=40, sim=boxed_sim),
+                      Spec(m=ff_select(30, 1.0, 3000), n=30, sim=full_sim, track=1),
+                      Spec(m=ff_select(30, 1.0, 5000), n=30, sim=boxed_sim, track=2)])
+    lay = Layout(1080, 1920, mode="boxed", box=box, periods=[
+        LayoutPeriod(0, start, "boxed", box), LayoutPeriod(start, 70, "fullscreen", full),
+        LayoutPeriod(70, 100, "boxed", box)])
+    segs = run(fm, *proxies(fm.n), layout=lay)
+    fullbox = {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0, "corner_radius": 0.0}
+    assert [(s.comp_in, s.comp_out, s.box, s.region) for s in segs] == [(0, 40, None, 0), (40, 70, fullbox, 1),
+                                                                        (70, 100, None, 0)]
+    for s in segs:
+        check_model(s, fm)
+
+
 def test_full_affine_reported_when_similarity_is_poor():
     import cv2
     bank = texture_bank(120, seed=8)

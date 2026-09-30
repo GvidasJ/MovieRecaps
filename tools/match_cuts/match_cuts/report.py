@@ -25,6 +25,8 @@ from .model import Segment, Status
 
 STATUS_LABEL = {"pass": "PASS", "fail": "FAIL", "pass_with_exceptions": "PASS (with exceptions)",
                 "not_available": "N/A"}
+CRITERIA_KEYS = ("c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio", "c6_after_effects")
+KNOWN_STATUSES = ("pass", "pass_with_exceptions", "fail", "not_available")
 CRITERIA_TITLES = {
     "c1_coverage": "1. Full coverage",
     "c2_cuts": "2. Frame-exact cuts",
@@ -169,6 +171,34 @@ def segment_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[str
 
 
 # ---------------------------------------------------------------------------------------------
+# Headline (DESIGN §7 D5)
+# ---------------------------------------------------------------------------------------------
+
+def headline(ver: dict | None) -> str:
+    """'PASS', 'PASS (criterion 6 not verified: <reason>)' or 'FAIL' ('not verified' without results).
+
+    FAIL when a criterion c1..c6 is missing or failed, any Stage 9 check failed (s9_7 determinism,
+    s9_8 deliverables, ...) or a status is unknown; PASS (... not verified ...) when nothing failed but a
+    criterion is not_available (exit code 3); else PASS (pass_with_exceptions counts as a pass)."""
+    ver = ver or {}
+    crit = ver.get("criteria") or {}
+    checks = ver.get("checks") or {}
+    if not crit and not checks:
+        return "not verified"
+    statuses = [(crit.get(k) or {}).get("status") for k in CRITERIA_KEYS]
+    statuses += [(v or {}).get("status") for v in checks.values()]
+    if any(s not in KNOWN_STATUSES or s == "fail" for s in statuses):
+        return "FAIL"
+    na = [k for k in CRITERIA_KEYS if (crit.get(k) or {}).get("status") == "not_available"]
+    if not na:
+        return "PASS"
+    nums = [k[1:].split("_", 1)[0] for k in na]
+    reasons = "; ".join(str((crit.get(k) or {}).get("summary") or "not available") for k in na)
+    label = f"criterion {nums[0]}" if len(nums) == 1 else "criteria " + ", ".join(nums)
+    return f"PASS ({label} not verified: {reasons})"
+
+
+# ---------------------------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------------------------
 
@@ -182,14 +212,18 @@ def _criteria(ctx: Any) -> list[str]:
         rows.append([title, _status(c.get("status")), c.get("summary", "not run")])
     det = checks.get("s9_7_determinism", {})
     rows.append(["9.7 Determinism", _status(det.get("status")), det.get("summary", "not run")])
-    overall = "not verified"
-    if crit:
-        overall = "FAIL" if any(c.get("status") == "fail" for c in crit.values()) or det.get("status") == "fail" else "PASS"
-    out = [f"**Overall: {overall}**", "", md_table(["Criterion", "Status", "Evidence"], rows)]
+    dlv = checks.get("s9_8_deliverables", {})
+    if dlv or crit:
+        rows.append(["9.8 Deliverables", _status(dlv.get("status")), dlv.get("summary", "not run")])
+    out = [f"**Overall: {headline(ver)}**", "", md_table(["Criterion", "Status", "Evidence"], rows)]
     settings = (ctx.cutlist.settings if getattr(ctx, "cutlist", None) else {}) or {}
     if settings and not settings.get("criteria_exact", True):
+        err_ms = float(settings.get("fps_source_max_error_s") or 0.0) * 1000.0
         out += ["", f"_MAIN runs at {settings.get('main_fps')} (fps mode `{settings.get('fps_mode')}` / layout "
-                    f"`{settings.get('layout_mode')}`): criteria 2 and 6 are exact only with `--fps competitor`._"]
+                    f"`{settings.get('layout_mode')}`), not on the competitor's grid: cuts are rounded to the nearest "
+                    f"MAIN frame (max error {err_ms:.3f} ms) and criterion 3 accepts, on each MAIN frame, any RAW frame "
+                    "between the two competitor frames that bracket its time (listed as 'between competitor frames'). "
+                    "Criteria 2, 3 and 6 are frame-exact only with `--fps competitor`._"]
     mock_only = (crit.get("c6_after_effects", {}).get("details") or {}).get("mock_only")
     if mock_only:
         out += ["", "_Criterion 6 was verified with the strict ExtendScript/After Effects mock (After Effects is not "
@@ -276,13 +310,26 @@ def _layout(ctx: Any) -> list[str]:
                                f"{float(z.get('w', 0)):.0f}", f"{float(z.get('h', 0)):.0f}",
                                "all" if z.get("comp_in") is None else f"{z.get('comp_in')}–{z.get('comp_out')}",
                                (z.get("text") or "") + (" " + z.get("notes") if z.get("notes") else "")] for z in zones])]
-    caps = lb.get("captions") or []
+    caps = caption_events(cl) if cl is not None else [c for c in (lb.get("captions") or [])
+                                                        if str(c.get("type", "captions")) == "captions"]
     if caps:
-        out += ["", f"- Captions: {len(caps)} caption events, frames {caps[0].get('comp_in')}–{caps[-1].get('comp_out')}"
+        last = max(int(c.get("comp_out", 0)) for c in caps)
+        out += ["", f"- Captions: {len(caps)} caption events, frames {caps[0].get('comp_in')}–{last}"
                     f" (masked out of matching; placeholder guides in AE)"]
+    others = [c for c in (lb.get("captions") or []) if str(c.get("type", "captions")) != "captions"]
+    if others:
+        kinds = Counter(str(c.get("type")) for c in others)
+        out.append("- Other overlaid text / stickers: " + ", ".join(f"{v} {k} event{'s' if v != 1 else ''}"
+                                                                   for k, v in sorted(kinds.items())))
     periods = lb.get("periods") or []
     if periods:
-        out.append("- Layout periods: " + ", ".join(f"{p.get('comp_in')}–{p.get('comp_out')} {p.get('mode')}" for p in periods))
+        def _pdesc(p: dict) -> str:
+            mode = str(p.get("mode"))
+            what = {"fullscreen": " (reproduced: full-canvas layers in MAIN)",
+                    "split": " (NOT reproduced: only the dominant region is rebuilt)",
+                    "pip": " (NOT reproduced: only the dominant region is rebuilt)"}.get(mode, "")
+            return f"{p.get('comp_in')}–{p.get('comp_out')} {mode}{what}"
+        out.append("- Layout periods: " + ", ".join(_pdesc(p) for p in periods))
     if lb.get("regions"):
         out.append(f"- Extra video regions (not recreated in v1): {lb['regions']}")
     for n in lb.get("notes") or []:
@@ -402,14 +449,18 @@ def _breakdown(ctx: Any) -> list[str]:
     out.append(f"- Horizontal flips: {len(b['flips'])}" + (" (" + ", ".join(f"S{i:02d}" for i in b["flips"]) + ")" if b["flips"] else ""))
     out.append(f"- Rotation: {len(b['rotations'])} segments" + (" (" + ", ".join(f"S{i:02d}" for i in b["rotations"]) + ")" if b["rotations"] else ""))
     out.append("- Transitions: " + (", ".join(f"{k} ×{v}" for k, v in sorted(b["transitions"].items())) or "hard cuts only"))
-    caps = [o for o in cl.overlays_detected if o.get("type") == "captions"]
+    caps = caption_events(cl)
     if caps:
         durs = [(int(c["comp_out"]) - int(c["comp_in"])) / float(cl.comp_fps) for c in caps if "comp_in" in c and "comp_out" in c]
         out.append(f"- Captions: {len(caps)} events" + (f", typical duration {statistics.median(durs):.2f}s" if durs else "")
                    + f" ({_caption_style(caps)})")
-    statics = [o for o in cl.overlays_detected if o.get("type") != "captions"]
+    statics = [o for o in cl.overlays_detected if _is_zone_entry(o, cl) and o.get("type") != "captions"]
     if statics:
         out.append("- Static overlays: " + ", ".join(f"{o.get('type')}" for o in statics))
+    texts = [o for o in cl.overlays_detected if not _is_zone_entry(o, cl) and o.get("type") != "captions"]
+    if texts:
+        kinds = Counter(str(o.get("type")) for o in texts)
+        out.append("- Other overlaid text / stickers: " + ", ".join(f"{k} ×{v}" for k, v in sorted(kinds.items())))
     if cl.added_audio:
         out.append("- Added audio (not recreated): " + ", ".join(
             f"{a.get('type')} {timecode(int(a.get('comp_in', 0)), cl.comp_fps)}–{timecode(int(a.get('comp_out', 0)), cl.comp_fps)}"
@@ -420,6 +471,32 @@ def _breakdown(ctx: Any) -> list[str]:
     if pp:
         out.append("- Pitch preserved on speed-changed segments (AE's stretch changes pitch): " + ", ".join(f"S{i:02d}" for i in pp))
     return out
+
+
+def _is_zone_entry(o: dict, cl: Any) -> bool:
+    """An overlays_detected entry derived from a layout ZONE (the static / aggregate regions: logo, title,
+    the caption band spanning every caption), not a per-event detection."""
+    if str(o.get("kind", "")) == "zone" or str(o.get("type", "")).endswith("_zone") or "static" in o:
+        return True
+    for z in (cl.layout or {}).get("zones") or []:
+        if str(z.get("type")) != str(o.get("type")):
+            continue
+        if str(o.get("type")) != "captions":
+            return True                   # logo / title / watermark ...: zone types, never per-event
+        if all(abs(float(z.get(q, 0.0)) - float(o.get(q, -1e9))) < 1e-6 for q in ("x", "y", "w", "h")):
+            return True                   # the aggregate caption band
+    return False
+
+
+def caption_events(cl: Any) -> list[dict]:
+    """Per-event captions (requirements REQ-7): the layout's caption events of type 'captions' (other text
+    and sticker events and the aggregate caption ZONE excluded), else the per-event 'captions' entries of
+    overlays_detected. Sorted by comp_in."""
+    lb = cl.layout or {}
+    caps = [c for c in (lb.get("captions") or []) if str(c.get("type", "captions")) == "captions"]
+    if not caps:
+        caps = [o for o in (cl.overlays_detected or []) if o.get("type") == "captions" and not _is_zone_entry(o, cl)]
+    return sorted(caps, key=lambda c: (int(c.get("comp_in", 0)), float(c.get("y", 0.0)), float(c.get("x", 0.0))))
 
 
 def _caption_style(caps: list[dict]) -> str:
@@ -446,10 +523,21 @@ def _warnings(ctx: Any) -> list[str]:
         out.append(f"- Ambiguous-identical frames (neighbouring RAW frames identical): {len(amb)} — {_ranges_str(amb, comp_fps)}")
         ties = sorted(set(np.nonzero(fm.tie)[0].tolist()) | {k for s in cl.segments for k in s.tie_frames})
         out.append(f"- Timing-tie frames (AE floor/round may differ by one frame): {len(ties)} — {_ranges_str(ties, comp_fps)}")
-        lm = np.nonzero(fm.low_margin & matched)[0]
+        re_rows = reassigned_frames(fm)
+        re_set = {r["k"] for r in re_rows}
+        pre_low = np.asarray(fm.d["pre_segment_low_margin"], bool) if "pre_segment_low_margin" in fm.d \
+            else np.asarray(fm.low_margin, bool)
+        lm = [int(k) for k in np.nonzero(pre_low & matched)[0] if int(k) not in re_set]
         if len(lm):
             out.append(f"- Low-margin frames (best RAW frame beats its neighbours by < {getattr(cfg, 'low_margin_eps', 0.001)}): "
                        f"{len(lm)} — {_ranges_str(lm, comp_fps)}")
+        if re_rows:
+            ex = "; ".join(f"k {r['k']}: " + (f"measured {r['measured']} → model {r['model']}" if r["measured"] is not None
+                                              else f"unmatched → model {r['model']}")
+                           + (f" (score gap {r['gap']:.4f})" if r.get("gap") is not None else "") for r in re_rows[:8])
+            out.append(f"- Re-assigned by segmentation (the segment model's RAW frame replaced refine's measured best "
+                       f"frame; counted against criterion 3): {len(re_rows)} — {_ranges_str(re_set, comp_fps)}"
+                       + (f" — {ex}" + (" …" if len(re_rows) > 8 else "") if ex else ""))
     else:
         amb = [k for s in cl.segments for k in s.ambiguous_frames]
         out.append(f"- Ambiguous-identical frames: {len(amb)} — {_ranges_str(amb, comp_fps)}")
@@ -461,10 +549,27 @@ def _warnings(ctx: Any) -> list[str]:
         or (s.raw_in_seconds is not None and s.raw_in_interval_both is None))]
     out.append("- AE-rule-sensitive segments (tiny phase margin; use `--ae-time-mode frames` if AE is off by a frame): "
                + (", ".join(f"S{s.id:02d} ({s.ae_margin_ms if s.ae_margin_ms is not None else '?'} ms)" for s in sens) or "none"))
-    cant = []
+    nre = not_reproduced(getattr(ctx, "verify", None))
+    if nre:
+        out.append("- Frames not reproduced exactly (s9_2): " + "; ".join(nre))
     lb = cl.layout or {}
-    if lb.get("regions"):
+    periods = [p for p in (lb.get("periods") or []) if isinstance(p, dict)]
+    full = [p for p in periods if str(p.get("mode")) == "fullscreen"]
+    if full:
+        out.append("- Full-screen periods (reproduced: full-canvas layers directly in MAIN): " + ", ".join(
+            f"{p.get('comp_in')}–{int(p.get('comp_out')) - 1} ({timecode(int(p.get('comp_in')), comp_fps)}–"
+            f"{timecode(int(p.get('comp_out')), comp_fps)})" for p in full))
+    cant = []
+    split = [p for p in periods if str(p.get("mode")) in ("split", "pip")]
+    for p in split:
+        cant.append(f"frames {p.get('comp_in')}–{int(p.get('comp_out')) - 1}: {p.get('mode')} layout (multiple video regions) "
+                    "— only the dominant region is rebuilt")
+    if lb.get("regions") and not split:
         cant.append(f"{len(lb['regions'])} extra video region(s) (split-screen / PiP) — only the dominant region is rebuilt")
+    boxed_full = [s for s in cl.segments if s.type == "raw" and not s.box and any(
+        s.comp_in < int(p.get("comp_out")) and s.comp_out > int(p.get("comp_in")) for p in full)]
+    for s in boxed_full:
+        cant.append(f"S{s.id:02d}: shown full-screen by the competitor but rebuilt inside the video box")
     for s in cl.segments:
         if s.retime and s.retime != "none":
             cant.append(f"S{s.id:02d}: {s.retime} retiming (AE Frame Blending approximates it)")
@@ -484,6 +589,55 @@ def _warnings(ctx: Any) -> list[str]:
     errs = getattr(ctx, "errors", None) or []
     if errs:
         out += ["", "Stage errors:", ""] + [f"- {e.get('stage')}: {e.get('error')}" for e in errs]
+    return out
+
+
+def reassigned_frames(fm: Any) -> list[dict]:
+    """Matched frames whose RAW frame segmentation changed (verification-honesty F2): refine measured
+    ``measured`` (None: refine found no match, the frame was absorbed), the segment model shows ``model``;
+    ``gap`` = score(measured) - score(model) from refine's candidate vector when both were evaluated."""
+    d = getattr(fm, "d", None) or {}
+    if "pre_segment_raw" not in d:
+        return []
+    pre_raw, raw = np.asarray(d["pre_segment_raw"]), np.asarray(fm.raw)
+    pre_st = np.asarray(d.get("pre_segment_status", fm.status))
+    st = np.asarray(fm.status)
+    out = []
+    j0s, cand = d.get("cand_j0"), d.get("cand")
+    for k in np.nonzero(st == Status.MATCH)[0]:
+        k = int(k)
+        if int(pre_st[k]) == Status.MATCH and int(pre_raw[k]) == int(raw[k]):
+            continue
+        row = {"k": k, "measured": int(pre_raw[k]) if int(pre_st[k]) == Status.MATCH else None, "model": int(raw[k]),
+               "gap": None}
+        if row["measured"] is not None and j0s is not None and cand is not None:
+            j0 = int(j0s[k])
+            a, b = row["measured"] - j0, row["model"] - j0
+            if j0 >= 0 and 0 <= a < cand.shape[1] and 0 <= b < cand.shape[1] and np.isfinite(cand[k, a]) \
+                    and np.isfinite(cand[k, b]):
+                row["gap"] = float(cand[k, a] - cand[k, b])
+        out.append(row)
+    return out
+
+
+def not_reproduced(ver: dict | None) -> list[str]:
+    """'Frames not reproduced exactly' lines from s9_2 (plan and mock record): frames differing from the
+    cutlist, re-assigned frames and frames whose AE frame differs from the measured m(k)."""
+    s92 = ((ver or {}).get("checks") or {}).get("s9_2_ae_sim") or {}
+    out = []
+    for src_name in ("plan", "mock"):
+        r = s92.get(src_name) or {}
+        parts = []
+        for key, n_key, label in (("plan_mismatches", "n_plan_mismatches", "differ from the cutlist (MAIN frames)"),
+                                  ("reassigned", "n_reassigned", "re-assigned by segmentation"),
+                                  ("mismatches", "n_mismatches", "AE frame ≠ measured m(k)")):
+            lst = r.get(key) or []
+            n = int(r.get(n_key) or len(lst))
+            if n:
+                fr = [int(x.get("k", x.get("K"))) for x in lst if x.get("k", x.get("K")) is not None]
+                parts.append(f"{n} {label} ({_ranges_str(fr, None, 8)})")
+        if parts:
+            out.append(f"{'AE plan' if src_name == 'plan' else 'mock record'}: " + ", ".join(parts))
     return out
 
 

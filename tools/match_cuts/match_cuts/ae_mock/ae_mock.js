@@ -103,7 +103,7 @@ function createMock(opts) {
   const savedPaths = new Map();          // virtual saved files: path -> mtime (ms)
   const virtualFiles = new Map();        // files that exist only in the scenario: path -> mtime (ms)
   if (scenario === 'save_fails_existing' || scenario === 'save_silent_fail') {
-    // a recreated_edit.aep left by an earlier run (an hour old)
+    // a recreated_edit.aep left by an earlier run (old mtime)
     virtualFiles.set(path.join(jsxDir, 'recreated_edit.aep'), 1700000000000);
   }
   const T2P = new WeakMap();

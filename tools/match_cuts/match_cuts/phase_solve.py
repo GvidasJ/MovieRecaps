@@ -32,7 +32,7 @@ import numpy as np
 
 __all__ = [
     "TAU", "TIE_SLACK", "feasible_speed_range", "is_feasible", "solve_raw_in", "ae_frame", "snap_speed",
-    "estimate_speed", "dominant_speed", "chebyshev_x", "best_subinterval", "prefer_penalties",
+    "estimate_speed", "dominant_speed", "chebyshev_x", "best_subinterval", "min_penalty", "prefer_penalties",
 ]
 
 TAU = 1e-6          # constraint tolerance (RAW frames)
@@ -191,48 +191,62 @@ def best_subinterval(starts: Any, ends: Any, costs: Any, xlo: float, xhi: float,
     c = np.asarray(costs, dtype=np.float64).ravel()
     if not (s.shape == e.shape == c.shape):
         raise ValueError("best_subinterval: starts/ends/costs shapes differ")
+    r = _penalty_sweep(s, e, c, xlo, xhi, min_width, True)
+    return r
 
-    def at(x: float) -> float:
-        return float(c[(s <= x) & (x < e)].sum()) if c.size else 0.0
 
+def _penalty_sweep(s: np.ndarray, e: np.ndarray, c: np.ndarray, xlo: float, xhi: float, min_width: float,
+                   interval: bool) -> tuple[float, float, float]:
+    """best_subinterval's sweep (``interval=False``: only the minimum, a, b = xlo, xhi)."""
     if not xhi > xlo:
-        return at((xlo + xhi) / 2.0), xlo, xhi
+        x = (xlo + xhi) / 2.0
+        return (float(c[(s <= x) & (x < e)].sum()) if c.size else 0.0), xlo, xhi
     if c.size == 0:
         return 0.0, xlo, xhi
-    inner = np.concatenate([s, e])
-    inner = inner[(inner > xlo) & (inner < xhi)]
-    bps = np.unique(np.concatenate([[xlo, xhi], inner]))
-    mids = (bps[:-1] + bps[1:]) / 2.0
-    os_ = np.argsort(s, kind="stable")
-    oe = np.argsort(e, kind="stable")
-    cs = np.concatenate([[0.0], np.cumsum(c[os_])])
-    ce = np.concatenate([[0.0], np.cumsum(c[oe])])
-    val = cs[np.searchsorted(s[os_], mids, side="right")] - ce[np.searchsorted(e[oe], mids, side="right")]
-    sliver = (bps[1:] - bps[:-1]) < float(min_width)
+    c0 = float(c[(s <= xlo) & (xlo < e)].sum())          # value on [xlo, first event)
+    pos = np.concatenate([s, e])
+    dw = np.concatenate([c, -c])
+    inside = (pos > xlo) & (pos < xhi)
+    pos, dw = pos[inside], dw[inside]
+    order = np.argsort(pos, kind="stable")
+    pos = pos[order]
+    val = np.empty(pos.size + 1)
+    val[0] = c0
+    np.cumsum(dw[order], out=val[1:])
+    val[1:] += c0
+    bps = np.empty(pos.size + 2)
+    bps[0], bps[-1] = xlo, xhi
+    bps[1:-1] = pos
+    sliver = (bps[1:] - bps[:-1]) < float(min_width)       # incl. zero-width pieces (duplicate breakpoints)
     if sliver.all():
         sliver[:] = False
     vmin = float(val[~sliver].min())
+    out = float(round(vmin, 9)) + 0.0
+    if not interval:
+        return out, xlo, xhi
     good = val <= vmin + 1e-9 * max(1.0, abs(vmin))
-    good &= ~sliver | np.r_[False, good[:-1]] | np.r_[good[1:], False]      # an isolated sliver is no minimum
-    left, right = np.r_[False, good[:-1]], np.r_[good[1:], False]
-    good |= sliver & left & right                                            # ... nor a break between two
-    best = None
-    i, n = 0, good.size
+    left = np.zeros_like(good)
+    right = np.zeros_like(good)
+    left[1:], right[:-1] = good[:-1], good[1:]
+    good &= ~sliver | left | right                          # an isolated sliver is no minimum ...
+    left[1:], right[:-1] = good[:-1], good[1:]
+    good |= sliver & left & right                           # ... nor a break between two good pieces
+    gi = np.flatnonzero(good)
+    brk = np.flatnonzero(np.diff(gi) > 1)
+    starts_i = np.concatenate([gi[:1], gi[brk + 1]])
+    ends_i = np.concatenate([gi[brk], gi[-1:]])
+    a_s, b_s = bps[starts_i], bps[ends_i + 1]
     centre = (xlo + xhi) / 2.0
-    while i < n:
-        if not good[i]:
-            i += 1
-            continue
-        j = i
-        while j + 1 < n and good[j + 1]:
-            j += 1
-        a, b = float(bps[i]), float(bps[j + 1])
-        key = (-(b - a), abs((a + b) / 2.0 - centre), a)
-        if best is None or key < best[0]:
-            best = (key, a, b)
-        i = j + 1
-    _k, a, b = best
-    return at((a + b) / 2.0), a, b
+    i = int(np.lexsort((a_s, np.abs((a_s + b_s) / 2.0 - centre), -(b_s - a_s)))[0])
+    return out, float(a_s[i]), float(b_s[i])
+
+
+def min_penalty(starts: np.ndarray, costs: np.ndarray, xlo: float, xhi: float,
+                min_width: float = 2 * TAU) -> float:
+    """Minimum of ``best_subinterval`` for unit intervals [starts, starts + 1) (the DP data term)."""
+    s = np.asarray(starts, dtype=np.float64)
+    return _penalty_sweep(s, s + 1.0, np.asarray(costs, dtype=np.float64), float(xlo), float(xhi),
+                          min_width, False)[0]
 
 
 def prefer_penalties(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], plo: Sequence[int],

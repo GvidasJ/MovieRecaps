@@ -469,14 +469,16 @@ def _parse_hms(value: Any) -> float:
 
 def header_video_duration(vs: dict, fmt: dict, v_start: float) -> tuple[float, str]:
     """(seconds, source) of the video duration the file's HEADER announces, relative to the video
-    stream start: the stream duration (MP4/MOV track), else the stream's DURATION tag (Matroska/WebM),
-    else the container's start + duration minus the video start (0.0, '' when unknown)."""
+    stream start: the stream duration (MP4/MOV track), else the stream's DURATION tag (Matroska/WebM;
+    ffmpeg writes the track's END timestamp there, so a positive video start is subtracted — the
+    lenient reading when a muxer wrote a true duration), else the container's start + duration minus
+    the video start (0.0, '' when unknown)."""
     d = _float(vs.get("duration"))
     if d > 0:
         return d, "stream header duration"
     for k, v in (vs.get("tags") or {}).items():
         if str(k).upper() == "DURATION":
-            d = _parse_hms(v)
+            d = _parse_hms(v) - max(0.0, float(v_start))
             if d > 0:
                 return d, "stream DURATION tag"
     fd = _float(fmt.get("duration"))
@@ -528,8 +530,20 @@ def truncation_info(info: StreamInfo) -> dict | None:
                 if t else None)
     if not info.pts_file or not Path(info.pts_file).exists():
         return None                      # decode=False: the frame count comes from the header itself
-    return truncation_check(info.role, info.container_duration, "container duration",
-                            _decoded_video_seconds(load_pts(info), info.fps))
+    header_s, src = 0.0, ""
+    side = _sidecar(info, ".ffprobe.json")
+    if side.exists():
+        try:
+            pj = json.loads(side.read_text())
+            vs = _video_ordinal(pj)[1]
+            if vs is not None:
+                header_s, src = header_video_duration(vs, pj.get("format", {}) or {}, info.v_start_time)
+        except (OSError, ValueError):
+            header_s = 0.0
+    if not src:                          # container duration spans from the earliest stream start
+        starts = [info.v_start_time] + ([info.a_start_time] if info.has_audio else [])
+        header_s, src = info.container_duration + min(starts) - info.v_start_time, "container duration"
+    return truncation_check(info.role, header_s, src, _decoded_video_seconds(load_pts(info), info.fps))
 
 
 def input_warnings(info: StreamInfo) -> list[str]:

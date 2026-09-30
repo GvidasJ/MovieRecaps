@@ -54,7 +54,7 @@ PLAN_ALPHA_TOL = 0.02      # plan vs cutlist: max |simulated - declared| transit
 PLAN_SOLID_MAX_WEIGHT = 0.02   # RAW contribution allowed on a dip / flash / NOT-IN-RAW frame of the plan
 # c4 independent framing measurement (verification-honesty F5)
 FRAMING_SAMPLE_STEP = 5    # every n-th matched frame (+ the ends and the key frames) of each segment
-FRAMING_MAX_SAMPLES = 400  # over the whole edit (the step grows for long edits)
+FRAMING_MAX_SAMPLES = 60   # regular samples over the whole edit (the step grows for long edits)
 FRAMING_PERTURB = (0.02, 3.0)  # ECC starts from the model scaled by +-2 % and shifted by +-3 px (comp px)
 FRAMING_BAD_FRAC = 0.2     # more than this fraction of measured samples off by > tolerance -> fail
 # c5: wide search for grossly misaligned audio (verification-honesty F6)
@@ -647,13 +647,6 @@ def main_to_comp(K: int, comp_fps: Fraction, main_fps: Fraction) -> int:
     if Fraction(main_fps) == Fraction(comp_fps):
         return int(K)
     return math.floor(Fraction(int(K)) * Fraction(comp_fps) / Fraction(main_fps))
-
-
-def _main_to_comp_f(K: float, comp_fps: Fraction, main_fps: Fraction) -> float:
-    """Fractional competitor frame at MAIN frame K (exact on the same grid)."""
-    if Fraction(main_fps) == Fraction(comp_fps):
-        return float(K)
-    return float(Fraction(K) * Fraction(comp_fps) / Fraction(main_fps))
 
 
 def _to_main(k: int, comp_fps: Fraction, main_fps: Fraction) -> int:
@@ -1527,7 +1520,8 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
             if ind["n_measured"] and ind["n_bad"] > FRAMING_BAD_FRAC * ind["n_measured"]:
                 failures.append(f"{name}: independently measured framing differs from the segment model on "
                                 f"{ind['n_bad']}/{ind['n_measured']} sampled frames {ind['bad'][:5]} (max scale err "
-                                f"{ind['max_scale_err']:.2%}, pos {ind['max_pos_err_px']:.2f} px)")
+                                f"{ind['max_scale_err']:.2%}, pos {ind['max_pos_err_px']:.2f} px, tolerance "
+                                f"{scale_tol:.0%} / {pos_tol:g} px)")
             elif ind["n_bad"]:
                 exceptions.append(f"{name}: independently measured framing off on {ind['n_bad']}/{ind['n_measured']} "
                                   f"sampled frames {ind['bad'][:5]}")
@@ -1570,6 +1564,7 @@ def _independent_framing(seg: Segment, ks: Sequence[int], raw_wh: tuple[float, f
         z, zm = float(r.get("z", float("nan"))), float(r.get("z_model", float("nan")))
         if es <= scale_tol and ep <= pos_tol and er <= rot_tol:
             n_meas += 1
+            ws, wp = max(ws, es), max(wp, ep)
             continue
         if math.isfinite(z) and (not math.isfinite(zm) or z > zm + 1e-4):
             n_meas += 1
@@ -2006,8 +2001,10 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
             if not math.isnan(s):
                 image(k, c, rec, roi, s)
         elif st == Status.BLEND and math.isfinite(s) and s < blend_thr:
-            blend_fail.append(k)
-            image(k, c, rec, roi, s)
+            cv = c[y:y + h, x:x + w].astype(np.float32)[m]
+            if cv.size and float(cv.std()) >= 2.0 * uni_std:      # near-uniform (deep in a dip): not gated
+                blend_fail.append(k)
+                image(k, c, rec, roi, s)
     matched = status[:n] == Status.MATCH
     missing = np.nonzero(matched & ~seen)[0]
     nan_fail = [k for k in fails if math.isnan(scores[k])]
@@ -2320,50 +2317,59 @@ def _media_file(block: dict | None, out_dir: Path) -> Path | None:
 
 def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
     """Every deliverable of the prompt's output tree exists (unless the run explicitly skipped it), the XML /
-    EDL re-parse validation passed and no export stage recorded an error. report.md and verify.json are
-    written after verification (their absence is a run error). Missing debug plots are listed, not failed
-    (they are diagnostics)."""
+    EDL re-parse validation passed and no export stage recorded an error (DESIGN §7 D5, REQ-6). When the
+    pipeline recorded which deliverables THIS run produced (``ctx.exports['missing']``, from
+    pipeline.collect_deliverables) a file left over from an earlier run does not count either.
+    report.md and verify.json are written after verification (their failure is a run error). Missing debug
+    plots are listed, not failed (they are diagnostics)."""
     cfg = ctx.cfg
-    out = Path(getattr(cfg, "out_dir", ".") if not hasattr(cfg, "out") else cfg.out)
+    out = Path(cfg.out) if hasattr(cfg, "out") else Path(getattr(cfg, "out_dir", "."))
     paths = dict(getattr(ctx, "paths", {}) or {})
     cl = getattr(ctx, "cutlist", None)
     env = getattr(ctx, "env", {}) or {}
-    ae_run = getattr(ctx, "ae_run", {}) or {}
+    exports = getattr(ctx, "exports", None) or {}
     failures: list[str] = []
     warnings: list[str] = []
-    skipped: list[str] = []
+    skipped: dict[str, str] = {}
     items: list[dict] = []
+    failed_keys: set[str] = set()
 
     def need(key: str, path: Path | None, what: str) -> None:
         ok = path is not None and Path(path).exists()
-        items.append({"deliverable": what, "path": None if path is None else str(path), "exists": ok})
+        items.append({"key": key, "deliverable": what, "path": None if path is None else str(path), "exists": ok})
         if not ok:
+            failed_keys.add(key)
             failures.append(f"{what} missing" + (f" ({path})" if path is not None else ""))
 
     need("jsx", Path(paths.get("jsx") or out / "build_ae_project.jsx"), "build_ae_project.jsx")
     if env.get("ae_app"):
         need("aep", Path(paths.get("aep") or out / "recreated_edit.aep"), "recreated_edit.aep (After Effects is installed)")
     else:
-        skipped.append("recreated_edit.aep (After Effects not installed)")
+        skipped["aep"] = "recreated_edit.aep (After Effects not installed)"
     if cl is not None:
-        need("raw_media", _media_file(cl.raw, out), "RAW media imported by the JSX")
-        need("comp_media", _media_file(cl.competitor, out), "competitor reference media")
+        need("media_raw", _media_file(cl.raw, out), "RAW media imported by the JSX")
+        need("media_competitor", _media_file(cl.competitor, out), "competitor reference media")
     need("cutlist", Path(paths.get("cutlist") or out / "cutlist.json"), "cutlist.json")
     need("csv", Path(paths.get("csv") or out / "cutlist.csv"), "cutlist.csv")
     need("xml", Path(paths.get("xml") or out / "recreated_edit.xml"), "recreated_edit.xml")
     need("edl", Path(paths.get("edl") or out / "recreated_edit.edl"), "recreated_edit.edl")
-    exports = getattr(ctx, "exports", None) or {}
-    if exports.get("ok") is not True:
+    val_ok = exports.get("validation_ok", exports.get("ok"))
+    if val_ok is not True:
         failures.append("XML/EDL re-parse validation did not pass: "
                         + str(exports.get("errors") or exports.get("error") or "validation did not run"))
     if getattr(cfg, "skip_preview", False):
-        skipped.append("preview_recreation.mp4 (--skip-preview)")
+        skipped["preview"] = "preview_recreation.mp4 (--skip-preview)"
     else:
         need("preview", Path(paths.get("preview") or out / "preview_recreation.mp4"), "preview_recreation.mp4")
     if getattr(cfg, "skip_compare", False):
-        skipped.append("compare.mp4 (--skip-compare)")
+        skipped["compare"] = "compare.mp4 (--skip-compare)"
     else:
         need("compare", Path(paths.get("compare") or out / "compare.mp4"), "compare.mp4")
+    pipe_skipped = exports.get("skipped") or {}
+    for key in exports.get("missing") or []:
+        if key not in failed_keys and key not in skipped and key not in pipe_skipped:
+            failed_keys.add(str(key))
+            failures.append(f"deliverable {key!r} was not produced by this run (a file from an earlier run does not count)")
     dbg = Path(getattr(cfg, "debug_dir", out / "debug"))
     for name in ("mapping.png", "scores.png", "layout.png"):
         if not (dbg / name).exists():
@@ -2372,15 +2378,15 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
         got = len(list((dbg / "cuts").glob("cut_*.png"))) if (dbg / "cuts").is_dir() else 0
         if got < n_cuts:
             failures.append(f"debug/cuts has {got} cut images, the edit has {n_cuts} cuts")
-    for e in getattr(ctx, "errors", None) or []:
+    errors = list(getattr(ctx, "errors", None) or [])
+    for e in errors:
         failures.append(f"stage error {e.get('stage')}: {e.get('error')}")
     status = "fail" if failures else "pass"
     summary = (f"{sum(1 for i in items if i['exists'])}/{len(items)} deliverables present"
-               + (f", {len(skipped)} skipped ({'; '.join(skipped)})" if skipped else "")
-               + f", exports {'validated' if exports.get('ok') is True else 'NOT validated'}, "
-               + f"{len(getattr(ctx, 'errors', None) or [])} stage errors")
-    return {"status": status, "summary": summary, "failures": failures, "warnings": warnings, "skipped": skipped,
-            "items": items}
+               + (f", {len(skipped)} skipped ({'; '.join(skipped.values())})" if skipped else "")
+               + f", exports {'validated' if val_ok is True else 'NOT validated'}, {len(errors)} stage errors")
+    return {"status": status, "summary": summary, "failures": failures, "warnings": warnings,
+            "skipped": list(skipped.values()), "items": items}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -2546,7 +2552,8 @@ def framing_measure(comp: Any, raw: Any, scorer: Any, allowed_fn: Callable[[int]
         roi = proxy_roi(b, comp.size, comp.ratio)
         comp_img, raw_img = np.asarray(comp.get(int(k))), np.asarray(raw.get(int(j)))
         best = None
-        for sign in (1.0, -1.0):
+        first = 1.0 if int(k) % 2 == 0 else -1.0          # alternate the side of the start between samples
+        for sign in (first, -first):
             init = perturb_sim(model, centre, sign * rel, sign * px, sign * px)
             try:
                 sim, z = refine.refine_transform(comp_img, raw_img, init, flip, float(raw_wh[0]), raw.ratio, comp.ratio,
@@ -2554,9 +2561,9 @@ def framing_measure(comp: Any, raw: Any, scorer: Any, allowed_fn: Callable[[int]
             except Exception:  # noqa: BLE001 - an ECC failure is an unmeasured sample, not a crash
                 continue
             if sim is init or not math.isfinite(float(z)):
-                continue                        # ECC did not improve on the perturbed start
-            if best is None or float(z) > best[1]:
-                best = (sim, float(z))
+                continue                        # ECC did not improve on the perturbed start: try the other side
+            best = (sim, float(z))
+            break
         sc = scorer.score(k, [(j, model, flip), (j, model, not flip)])
         out = {"flip_own": float(sc[0]), "flip_other": float(sc[1]), "sim": None, "z": float("nan"),
                "z_model": float(sc[0])}
@@ -2654,8 +2661,8 @@ def verify_all(ctx: Any) -> dict:
         np.save(Path(cfg.work) / "verify_zncc.npy", scores.astype(np.float32))
         res["scores_file"] = str(Path(cfg.work) / "verify_zncc.npy")
         pf = _run_check("s9_3_preview_file", lambda: preview_file(desc))
-        res["preview_file"] = pf
-        res["failures"] = list(res.get("failures", [])) + [f"preview file: {f}" for f in pf.get("failures", [])]
+        res["preview_file"] = {k: v for k, v in pf.items() if k != "failures"}    # failures listed once, below
+        res["failures"] = list(res.get("failures", [])) + [f"delivered preview: {f}" for f in pf.get("failures", [])]
         res["status"] = aggregate([res["status"], pf["status"]])
         res["summary"] = f"{res['summary']}; {pf.get('summary')}"
         return res

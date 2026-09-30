@@ -573,6 +573,15 @@ def test_raw_index_pickles_as_cache_files(scene, built, tmp_path):
         assert np.array_equal(getattr(back, k), getattr(idx, k)), k
     assert np.array_equal(back.votes(q), ref)
     assert pickle.loads(blob) is back                       # per-process cache: loaded once per worker
+    # no / unreadable tree file (e.g. OpenCV cannot write a non-ASCII path): re-trained, same seed, same votes
+    bad = tmp_path / "bad.flann"
+    bad.write_bytes(b"not a flann index" * 64)
+    for files in ({k: v for k, v in idx._spawn_files.items() if k != "flann"},
+                  {**idx._spawn_files, "flann": str(bad)}):
+        st = {k: getattr(idx, k) for k in vm.RawIndex._SCALARS}
+        st.update(key="", files=files)                      # no per-process cache
+        r = vm._restore_index(st)
+        assert r._flann is not None and np.array_equal(r.votes(q), ref)
     # uncached index: pickled by value, FLANN re-trained with the index seed -> identical votes
     raw_idx = vm.RawIndex(idx.frames, idx.desc, idx.owner, idx.pts, idx.offsets, idx.fps, idx.step, built["cfg"])
     b2 = pickle.dumps(raw_idx)

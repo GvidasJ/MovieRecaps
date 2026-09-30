@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 
 from match_cuts.model import StreamInfo
-from match_cuts.probe import (ae_issues, display_geometry, load_pts, load_pts_int, nearest_common_rate, nominal_fps,
-                              probe, read_edit_lists, reader_sar, timing_stats)
+from match_cuts.probe import (ae_issues, display_geometry, input_warnings, load_pts, load_pts_int, nearest_common_rate,
+                              nominal_fps, probe, probe_extra, read_edit_lists, reader_sar, timing_stats,
+                              truncation_info)
 
 ID_GEQ = ("geq=lum='if(lt(Y,16),if(mod(floor(N/pow(2,floor(X/16))),2),235,16),"
           "if(mod(floor(N/pow(2,floor(X/16))),2),16,235))'")
@@ -200,3 +201,93 @@ def test_probe_without_decode_pass(clips, tmp_path):
     assert info.pts_file == "" and info.nb_frames == 90 and not info.vfr
     assert info.fps == Fraction(30000, 1001) and info.ae_issues == []
     np.testing.assert_allclose(load_pts(info), np.arange(90) * 1001 / 30000)
+
+
+# ----------------------------------------------------------------------------------------------
+# Regression F8: truncated / partially downloaded inputs are reported (input_warnings, not ae_issues)
+# ----------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def partial(tmp_path_factory) -> dict[str, Path]:
+    d = tmp_path_factory.mktemp("probe_partial")
+    c = {k: d / v for k, v in {"mkv": "full.mkv", "mkv_part": "part.mkv", "mp4": "full.mp4",
+                                "mp4_part": "part.mp4", "moov_end": "moov_end.mp4", "moov_part": "moov_part.mp4",
+                                "long_audio": "long_audio.mp4", "long_audio_mkv": "long_audio.mkv",
+                                "late_video_mkv": "late_video.mkv"}.items()}
+    src = ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30,trim=end_frame=300", "-f", "lavfi",
+           "-i", "anoisesrc=seed=3:r=48000,atrim=end_sample=480000"]
+    ff(*src, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "libopus",
+       str(c["mkv"]))
+    ff(*src, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       "-movflags", "+faststart", str(c["mp4"]))
+    ff(*src, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       str(c["moov_end"]))
+    for full, part in (("mkv", "mkv_part"), ("mp4", "mp4_part"), ("moov_end", "moov_part")):
+        data = c[full].read_bytes()
+        c[part].write_bytes(data[:len(data) // 3])           # an interrupted download / copy
+    # legitimately longer audio (5 s) than video (3 s): NOT a truncation
+    for key, acodec in (("long_audio", "aac"), ("long_audio_mkv", "libopus")):
+        ff("-f", "lavfi", "-i", "testsrc2=s=160x90:r=30,trim=end_frame=90", "-f", "lavfi",
+           "-i", "anoisesrc=seed=3:r=48000,atrim=end_sample=240000", "-c:v", "libx264", "-preset", "veryfast",
+           "-pix_fmt", "yuv420p", "-c:a", acodec, str(c[key]))
+    # video starting 4 s after the audio: Matroska's DURATION tag holds the track END timestamp (7 s)
+    ff("-itsoffset", "4", "-i", str(c["long_audio_mkv"]), "-i", str(c["long_audio_mkv"]), "-map", "0:v", "-map", "1:a",
+       "-c", "copy", str(c["late_video_mkv"]))
+    return c
+
+
+def test_truncated_mkv_is_reported(partial, tmp_path):
+    full = probe(partial["mkv"], "raw", tmp_path)
+    assert input_warnings(full) == [] and truncation_info(full) is None
+    info = probe(partial["mkv_part"], "raw", tmp_path)
+    assert 0 < info.nb_frames < 150 and info.container_duration > 9.9
+    w = input_warnings(info)
+    assert len(w) == 1 and w[0].startswith("truncated:") and "NOT-IN-RAW" in w[0]
+    t = truncation_info(info)
+    assert t["header_s"] == pytest.approx(10.0, abs=0.05) and t["missing_s"] > 5
+    assert t["decoded_s"] == pytest.approx(info.nb_frames / 30, abs=0.05)
+    assert not any("truncat" in i for i in info.ae_issues)           # ae_issues stay AE issues
+    assert probe_extra(info)["truncation"]["missing_s"] == t["missing_s"]
+    # the role of a cached probe decides the wording
+    comp = probe(partial["mkv_part"], "competitor", tmp_path)
+    assert "competitor video" in input_warnings(comp)[0] and "NOT-IN-RAW" not in input_warnings(comp)[0]
+
+
+def test_truncated_faststart_mp4_is_reported(partial, tmp_path):
+    assert input_warnings(probe(partial["mp4"], "raw", tmp_path)) == []
+    info = probe(partial["mp4_part"], "raw", tmp_path)
+    assert 0 < info.nb_frames < 200
+    assert input_warnings(info) and truncation_info(info)["header_source"] == "stream header duration"
+    # the missing samples are an incomplete index, not an edit list (the conform still happens)
+    assert not info.edit_list and not any(i.startswith("edit_list") for i in info.ae_issues)
+    assert any(i.startswith("incomplete:") for i in info.ae_issues)
+
+
+def test_mp4_without_moov_names_the_cause(partial, tmp_path):
+    with pytest.raises(RuntimeError, match="moov atom.*incomplete"):
+        probe(partial["moov_part"], "raw", tmp_path)
+
+
+def test_longer_audio_is_not_a_truncation(partial, tmp_path):
+    for key in ("long_audio", "long_audio_mkv", "late_video_mkv"):
+        info = probe(partial[key], "raw", tmp_path)
+        assert info.nb_frames == 90 and info.container_duration > 4.5
+        assert input_warnings(info) == [] and truncation_info(info) is None
+    assert probe(partial["late_video_mkv"], "raw", tmp_path).v_start_time > 3.9
+
+
+def test_input_warnings_for_probe_cache_entries_without_the_finding(partial, tmp_path):
+    import json
+    info = probe(partial["mkv_part"], "raw", tmp_path)
+    side = Path(info.pts_file).with_name(Path(info.pts_file).name.replace(".pts.npy", ".extra.json"))
+    ex = json.loads(side.read_text())
+    for k in ("truncation", "warnings"):
+        ex.pop(k)
+    side.write_text(json.dumps(ex))                                  # an entry written by an older probe
+    again = probe(partial["mkv_part"], "raw", tmp_path)               # cache hit
+    w = input_warnings(again)
+    assert len(w) == 1 and "DURATION tag" in w[0]                   # re-read from the stored ffprobe JSON
+    Path(again.pts_file).with_name(Path(again.pts_file).name.replace(".pts.npy", ".ffprobe.json")).unlink()
+    w = input_warnings(again)
+    assert len(w) == 1 and "container duration" in w[0]

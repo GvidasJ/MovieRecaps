@@ -116,7 +116,7 @@ def render_stack(n: int = N_FRAMES, box: tuple = TRUTH_BOX, captions=CAPTIONS, f
     (tw, _), _ = cv2.getTextSize("synthrecaps dot tv", FONT, 1.0, 2)
     cv2.putText(canvas, "synthrecaps dot tv", ((W - tw) // 2, 1530), FONT, 1.0, (140, 140, 140), 2, cv2.LINE_AA)
     tex = texture(W, H, seed)
-    frames, cap_masks = [], []
+    frames, cap_masks, raw = [], [], []
     words = {k: wd for wd, a, b in captions for k in range(a, b)}
     for k in range(n):
         ox, oy = (5 * k) % 380, (3 * k) % 380
@@ -124,6 +124,8 @@ def render_stack(n: int = N_FRAMES, box: tuple = TRUTH_BOX, captions=CAPTIONS, f
         if counter:
             # a RAW-like burned-in number that changes every frame (all digits: none is static over the clip)
             put_outlined(content, f"{(k * 13721 + 24680) % 100000:05d}", (x + 300, y + 200), 2.5, (255, 255, 255), 2, 6)
+        # the "RAW" frame shown in the box (identity geometry: RAW = W x H), as a half-size proxy
+        raw.append(cv2.resize(cv2.cvtColor(content, cv2.COLOR_BGR2GRAY), (W // 2, H // 2), interpolation=cv2.INTER_AREA))
         fs = fullscreen is not None and fullscreen[0] <= k < fullscreen[1]
         if fs:
             img = content.copy()
@@ -141,7 +143,8 @@ def render_stack(n: int = N_FRAMES, box: tuple = TRUTH_BOX, captions=CAPTIONS, f
         frames.append(cv2.resize(gray, (W // 2, H // 2), interpolation=cv2.INTER_AREA))
         cap_masks.append(cv2.resize(cm, (W // 2, H // 2), interpolation=cv2.INTER_AREA) > 128)
     counter_org = (x + 300, y + 200)
-    return {"frames": np.stack(frames), "cap_masks": np.stack(cap_masks), "box": box, "counter_org": counter_org}
+    return {"frames": np.stack(frames), "cap_masks": np.stack(cap_masks), "box": box, "counter_org": counter_org,
+            "raw": np.stack(raw)}
 
 
 def boxes_equal(b: Box, truth: tuple, tol: float = 1.0, rtol: float = 3.0) -> list[str]:
@@ -606,3 +609,288 @@ def test_real_mp4_proxy(tmp_path):
     # the cached result is reused
     lay2, ov2 = analyze(proxy, tmp_path, cache=True)
     assert lay2.to_dict() == lay.to_dict() and ov2.frames() == ov.frames()
+
+
+# ----------------------------------------------------------------------------------------------
+# DESIGN §7 D2 (review real-world:F3): static content inside the video box — a locked-off single-camera
+# shot (talking head / podcast) or RAW letterbox bars — and the box re-measured against RAW
+# ----------------------------------------------------------------------------------------------
+
+RAW_W, RAW_H = 1920, 1080
+
+
+def identity_frame_map(n: int, sim=None, status: np.ndarray | None = None):
+    from match_cuts.geometry import Sim
+    from match_cuts.model import FrameMap, Status
+    fm = FrameMap(n)
+    fm.status = np.full(n, Status.MATCH, np.int8) if status is None else status
+    fm.raw = np.arange(n)
+    fm.score = np.full(n, 0.99)
+    fm.conf = np.full(n, 0.99)
+    for k in range(n):
+        fm.set_sim(k, sim if sim is not None else Sim.identity())
+    return fm
+
+
+def raw_proxy(frames: np.ndarray, full_size: tuple[int, int]) -> Proxy:
+    n, h, w = frames.shape
+    return Proxy("raw", "", frames, full_size, (w / full_size[0], h / full_size[1]), Fraction(30), np.arange(n) / 30.0, n)
+
+
+def draw_canvas(level: int = 0) -> np.ndarray:
+    canvas = np.full((FULL_H, FULL_W, 3), level, np.uint8)
+    cv2.circle(canvas, (110, 120), 46, (46, 38, 226), -1, cv2.LINE_AA)
+    cv2.putText(canvas, "MY TITLE HERE", (200, 300), FONT, 2.0, (255, 255, 255), 4, cv2.LINE_AA)
+    cv2.putText(canvas, "watermark dot tv", (380, 1560), FONT, 1.0, (140, 140, 140), 2, cv2.LINE_AA)
+    return canvas
+
+
+def raw_backed_scene(kind: str, n: int = 24, box: tuple = TRUTH_BOX, canvas_level: int = 0, bar_level: int = 0,
+                     seed: int = 0, noise: float = 1.0):
+    """A single-camera edit rebuilt from a 1920x1080 RAW cover-scaled into the rounded box (RAW height = box
+    height, wider than the box): 'talking_head' = static textured background + a moving 'head' ellipse;
+    'letterbox' = a moving picture between static letterbox bars (12 % of the RAW height, level
+    ``bar_level``). Canvas (``canvas_level``) with logo, title, watermark; captions on frames 6-15; Gaussian
+    noise. Returns (competitor proxy, RAW proxy, FrameMap with the true Sim, Sim)."""
+    from match_cuts.geometry import Sim, warp_raw_to_comp
+    x, y, bw, bh, _r = box
+    s = bh / RAW_H
+    sim = Sim(s, 0.0, x + bw / 2 - s * RAW_W / 2, float(y))
+    still = texture(RAW_W, RAW_H, seed + 1)[:RAW_H, :RAW_W]
+    mov = texture(RAW_W, RAW_H, seed + 2)
+    hole = hole_mask(FULL_W, FULL_H, box)
+    canvas = draw_canvas(canvas_level)
+    rng = np.random.default_rng(seed + 7)
+    bar = int(round(0.12 * RAW_H))
+    comp, raws = [], []
+    for k in range(n):
+        ox, oy = (5 * k) % 380, (3 * k) % 380
+        moving = mov[oy:oy + RAW_H, ox:ox + RAW_W]
+        if kind == "talking_head":
+            f = still.copy()
+            m = np.zeros((RAW_H, RAW_W), np.uint8)
+            cv2.ellipse(m, (RAW_W // 2 + int(40 * np.sin(k / 5)), RAW_H // 2 + 60), (190, 300), 0, 0, 360, 255, -1)
+            f[m > 0] = moving[m > 0]
+        else:
+            f = moving.copy()
+            f[:bar] = bar_level
+            f[RAW_H - bar:] = bar_level
+        wr, _v = warp_raw_to_comp(f, sim, False, RAW_W, (FULL_W, FULL_H))
+        img = canvas.copy()
+        img[hole] = cv2.cvtColor(wr, cv2.COLOR_GRAY2BGR)[hole]
+        if 6 <= k < 16:
+            put_outlined(img, "WORD", caption_org("WORD", box), 2.4, (255, 255, 255), 2, 6)
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) + rng.normal(0, noise, (FULL_H, FULL_W))
+        comp.append(cv2.resize(np.clip(np.round(g), 0, 255).astype(np.uint8), (FULL_W // 2, FULL_H // 2),
+                               interpolation=cv2.INTER_AREA))
+        raws.append(cv2.resize(f, (640, 360), interpolation=cv2.INTER_AREA))
+    return (make_proxy(np.stack(comp), (FULL_W, FULL_H)), raw_proxy(np.stack(raws), (RAW_W, RAW_H)),
+            identity_frame_map(n, sim), sim)
+
+
+def review_talking_head(n: int = 60, box: tuple = TRUTH_BOX, noise: float = 1.0, seed: int = 0) -> np.ndarray:
+    """The review's scene (real-world:F3): black canvas + title; inside the rounded box a static textured
+    background with a moving textured ellipse (the 'head') and a caption; Gaussian noise."""
+    rng = np.random.default_rng(seed)
+    hole = hole_mask(FULL_W, FULL_H, box)
+    x, y, bw, bh, _r = box
+    canvas = np.zeros((FULL_H, FULL_W, 3), np.uint8)
+    cv2.putText(canvas, "MY TITLE HERE", (200, 300), FONT, 2.0, (255, 255, 255), 4, cv2.LINE_AA)
+    tex, tex2 = texture(FULL_W, FULL_H, seed), texture(FULL_W, FULL_H, seed + 1)
+    frames = []
+    for k in range(n):
+        content = cv2.cvtColor(tex2[:FULL_H, :FULL_W], cv2.COLOR_GRAY2BGR).copy()
+        ox, oy = (3 * k) % 300, (2 * k) % 300
+        mov = cv2.cvtColor(tex[oy:oy + FULL_H, ox:ox + FULL_W], cv2.COLOR_GRAY2BGR)
+        m = np.zeros((FULL_H, FULL_W), np.uint8)
+        cv2.ellipse(m, (FULL_W // 2 + int(20 * np.sin(k / 7)), y + bh // 2 + 60), (170, 260), 0, 0, 360, 255, -1)
+        content[m > 0] = mov[m > 0]
+        img = canvas.copy()
+        img[hole] = content[hole]
+        if 20 <= k < 40:
+            put_outlined(img, "WORD", caption_org("WORD", box), 2.4, (255, 255, 255), 2, 6)
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) + rng.normal(0, noise, (FULL_H, FULL_W))
+        frames.append(cv2.resize(np.clip(g, 0, 255).astype(np.uint8), (FULL_W // 2, FULL_H // 2),
+                                 interpolation=cv2.INTER_AREA))
+    return np.stack(frames)
+
+
+def refine(lay, ov, cp, rp, fm, tmp: Path, cache: bool = False):
+    dlog = DecisionLog(tmp / "refine_decisions.jsonl")
+    try:
+        return L.refine_box_from_raw(lay, ov, cp, rp, fm, Config(work_dir=str(tmp / "work")),
+                                     Cache(tmp / "work") if cache else None, dlog, tmp / "debug")
+    finally:
+        dlog.close()
+
+
+def decisions(path: Path, name: str) -> list[dict]:
+    return [d for d in (json.loads(line) for line in path.read_text().splitlines()) if d["decision"] == name]
+
+
+@pytest.mark.parametrize("noise", [1.0, 3.0])
+def test_initial_detection_static_background_talking_head(tmp_path, noise):
+    """review real-world:F3 repro: temporal activity alone gave the moving head's bbox + an 'image'
+    background; a static TEXTURED picture enclosing the moving subject in a clean rounded rectangle on a
+    uniform canvas is part of the video box."""
+    lay, _ov = analyze(make_proxy(review_talking_head(noise=noise), (FULL_W, FULL_H)), tmp_path)
+    assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
+    assert lay.background["type"] == "solid" and lay.background["gray"] < 3, lay.background   # (clipped noise)
+    assert "title" in [z.type for z in lay.zones]
+    # the static picture inside the box is video, not an overlay zone
+    assert not [z for z in lay.zones if z.static and z.y >= TRUTH_BOX[1] and z.y + z.h <= TRUTH_BOX[1] + TRUTH_BOX[3]]
+
+
+def test_refine_box_from_raw_talking_head(tmp_path):
+    """A box that covers only the moving subject (what the temporal analysis gave before) is re-measured
+    against RAW: grown to the RAW-matching region (static background included) — exact to ±1 px, radius
+    ±3 px — and the layout is re-derived (background solid, title / logo / watermark zones, no in-box zone,
+    notes, new initial overlay masks); cached re-runs are identical."""
+    import dataclasses
+    cp, rp, fm, _sim = raw_backed_scene("talking_head")
+    lay0, ov0 = analyze(cp, tmp_path / "a")
+    assert not boxes_equal(lay0.box, TRUTH_BOX)                       # (the initial detection handles it too)
+    shrunk = Box(356.51, 754.0, 368.49, 530.0, 0.0)                    # the review's (pre-fix) detection
+    wrong = dataclasses.replace(lay0, box=shrunk, background={"type": "image", "color": "#6e6e6e"},
+                                periods=[dataclasses.replace(p, box=shrunk) for p in lay0.periods])
+    lay, changed = refine(wrong, ov0, cp, rp, fm, tmp_path / "b", cache=True)
+    assert changed is True and lay is not wrong
+    assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
+    assert lay.background["type"] == "solid" and lay.canvas_bg == "#000000", lay.background
+    types = [z.type for z in lay.zones]
+    assert {"logo", "title", "watermark", "captions"} <= set(types), types
+    assert not [z for z in lay.zones if z.static and z.y >= TRUTH_BOX[1] and z.y + z.h <= TRUTH_BOX[1] + TRUTH_BOX[3]]
+    assert [(p.comp_in, p.comp_out, p.mode) for p in lay.periods] == [(0, 24, "boxed")]
+    assert lay.periods[0].box.to_dict() == lay.box.to_dict()
+    assert any("RAW" in nt and "grown" in nt for nt in lay.notes), lay.notes
+    ov = L.OverlayMasks.load(lay.overlay_mask_file)                    # the caller reloads the initial masks
+    assert set(ov.frames()) == set(range(6, 16))
+    assert np.load(lay.static_mask_file).shape == (960, 540)
+    assert (tmp_path / "b" / "debug" / "layout_refine.png").exists()
+    dec = decisions(tmp_path / "b" / "refine_decisions.jsonl", "box_refined")
+    assert dec and dec[0]["evidence"]["votes_contradicted_new"] < dec[0]["evidence"]["votes_contradicted_old"]
+    # deterministic, and the re-analysis is cached
+    lay2, changed2 = refine(wrong, ov0, cp, rp, fm, tmp_path / "b", cache=True)
+    assert changed2 and lay2.to_dict() == lay.to_dict()
+    assert decisions(tmp_path / "b" / "refine_decisions.jsonl", "cache_hit")
+
+
+@pytest.mark.parametrize("canvas_level,bar_level,radius_observable", [(0, 0, False), (0, 14, True), (40, 0, True)])
+def test_refine_box_from_raw_letterboxed_raw(tmp_path, canvas_level, bar_level, radius_observable):
+    """RAW with its own letterbox bars inside the box: the bars are static, so temporal activity gives only
+    the picture between them (h 760 instead of 1000). Measured against RAW the box reaches the RAW frame
+    edge; the corner radius is measured wherever the bars differ from the canvas (black bars on a black
+    canvas: the corners cannot be seen at all — the radius is kept and that is noted)."""
+    cp, rp, fm, _sim = raw_backed_scene("letterbox", canvas_level=canvas_level, bar_level=bar_level)
+    lay0, ov0 = analyze(cp, tmp_path / "a")
+    assert abs(lay0.box.h - 760) < 6 and abs(lay0.box.y - 580) < 3, lay0.box      # the bug: bars left out
+    lay, changed = refine(lay0, ov0, cp, rp, fm, tmp_path / "b")
+    assert changed
+    if radius_observable:
+        assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
+    else:
+        assert not boxes_equal(lay.box, TRUTH_BOX, rtol=1e9), lay.box
+        assert lay.box.corner_radius == lay0.box.corner_radius
+        assert any("corner radius not observable" in nt for nt in lay.notes), lay.notes
+    assert lay.background["type"] == "solid"
+    # the bars are video: no zone inside the box
+    assert not [z for z in lay.zones if z.static and z.y >= TRUTH_BOX[1] - 2
+                and z.y + z.h <= TRUTH_BOX[1] + TRUTH_BOX[3] + 2]
+
+
+def test_refine_box_from_raw_keeps_correct_box(main_scene, tmp_path):
+    """A correct box is only verified: same Layout object back, changed False; frames of the fullscreen
+    period (and the flash frame) are never used for the RAW comparison."""
+    from match_cuts.model import Status
+    sc, lay, ov, proxy = main_scene["scene"], main_scene["layout"], main_scene["overlays"], main_scene["proxy"]
+    status = np.full(N_FRAMES, Status.MATCH, np.int8)
+    status[FLASH] = Status.UNIFORM
+    fm = identity_frame_map(N_FRAMES, status=status)
+    rp = raw_proxy(sc["raw"], (FULL_W, FULL_H))
+    m = L.measure_box_from_raw(lay, ov, proxy, rp, fm, Config())
+    assert m["ok"] and not boxes_equal(m["box"], TRUTH_BOX, tol=0.5, rtol=2.0), m["box"]
+    assert not [k for k in m["frames"] if FULLSCREEN[0] <= k < FULLSCREEN[1] or k == FLASH], m["frames"]
+    before = json.dumps(lay.to_dict(), sort_keys=True)
+    lay2, changed = refine(lay, ov, proxy, rp, fm, tmp_path)
+    assert changed is False and lay2 is lay and json.dumps(lay.to_dict(), sort_keys=True) == before
+    dec = decisions(tmp_path / "refine_decisions.jsonl", "box_refine")
+    assert dec and dec[0]["changed"] is False and "agrees" in dec[0]["reason"]
+
+
+def test_refine_box_from_raw_needs_matches(main_scene, tmp_path):
+    from match_cuts.model import Status
+    lay, ov, proxy, sc = main_scene["layout"], main_scene["overlays"], main_scene["proxy"], main_scene["scene"]
+    fm = identity_frame_map(N_FRAMES, status=np.full(N_FRAMES, Status.NONE, np.int8))
+    lay2, changed = refine(lay, ov, proxy, raw_proxy(sc["raw"], (FULL_W, FULL_H)), fm, tmp_path)
+    assert lay2 is lay and changed is False
+    assert decisions(tmp_path / "refine_decisions.jsonl", "box_refine")[0]["reason"]
+    fs_only = Layout(FULL_W, FULL_H, mode="fullscreen", box=Box(0, 0, FULL_W, FULL_H, 0))
+    assert L.refine_box_from_raw(fs_only, None, proxy, None, fm, Config(), None, None, None) == (fs_only, False)
+
+
+# ----------------------------------------------------------------------------------------------
+# fullscreen periods (DESIGN §7 D1 / D8): exact boundaries, statistics without the fullscreen frames
+# ----------------------------------------------------------------------------------------------
+
+def d8_scene(n: int, fullscreen: list[tuple[int, int]], dark: list[tuple[int, int]] = (), dim: float = 0.12,
+             seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Boxed edit whose fullscreen shots cover the whole canvas with the title / logo / channel name /
+    watermark still drawn on top (D8); ``dark`` shots are dimmed to ``dim`` (a night scene: most of the
+    canvas changes by less than 20 levels). Returns (competitor proxy frames, RAW content proxy frames)."""
+    hole = hole_mask(FULL_W, FULL_H, TRUTH_BOX)
+    g = np.zeros((FULL_H, FULL_W, 3), np.uint8)
+    cv2.circle(g, (110, 120), 46, (46, 38, 226), -1, cv2.LINE_AA)
+    cv2.putText(g, "SynthRecaps", (180, 138), FONT, 1.4, (255, 255, 255), 3, cv2.LINE_AA)
+    put_outlined(g, "WAIT FOR THE", (240, 250), 1.8, (255, 255, 255), 2, 3)
+    put_outlined(g, "LAST SECOND", (260, 330), 1.8, (31, 210, 255), 2, 3)
+    cv2.putText(g, "synthrecaps dot tv", (380, 1530), FONT, 1.0, (140, 140, 140), 2, cv2.LINE_AA)
+    glyph = g.max(axis=2) > 0
+    tex = texture(FULL_W, FULL_H, seed)
+    frames, raw = [], []
+    for k in range(n):
+        ox, oy = (5 * k) % 380, (3 * k) % 380
+        content = cv2.cvtColor(tex[oy:oy + FULL_H, ox:ox + FULL_W], cv2.COLOR_GRAY2BGR)
+        if any(a <= k < b for a, b in dark):
+            content = (content.astype(np.float32) * dim).astype(np.uint8)
+        if any(a <= k < b for a, b in fullscreen):
+            img = content.copy()
+            img[glyph] = g[glyph]
+        else:
+            img = g.copy()
+            img[hole] = content[hole]
+        half = (FULL_W // 2, FULL_H // 2)
+        frames.append(cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), half, interpolation=cv2.INTER_AREA))
+        raw.append(cv2.resize(cv2.cvtColor(content, cv2.COLOR_BGR2GRAY), half, interpolation=cv2.INTER_AREA))
+    return np.stack(frames), np.stack(raw)
+
+
+@pytest.mark.parametrize("fullscreen,dark", [([(0, 6), (30, 40)], []), ([(20, 30)], [(20, 30)]), ([(52, 60)], [])],
+                         ids=["start_and_middle", "dark_shot", "at_the_end"])
+def test_fullscreen_period_boundaries_exact(tmp_path, fullscreen, dark):
+    n = 60
+    frames, raw = d8_scene(n, fullscreen, dark)
+    proxy = make_proxy(frames, (FULL_W, FULL_H))
+    lay, _ov = analyze(proxy, tmp_path)
+    want, k = [], 0
+    for a, b in fullscreen:
+        if a > k:
+            want.append((k, a, "boxed"))
+        want.append((a, b, "fullscreen"))
+        k = b
+    if k < n:
+        want.append((k, n, "boxed"))
+    assert [(p.comp_in, p.comp_out, p.mode) for p in lay.periods] == want, lay.periods
+    for p in lay.periods:                        # D1 consumers read each period's box
+        want_box = Box(0, 0, FULL_W, FULL_H, 0) if p.mode == "fullscreen" else lay.box
+        assert p.box.to_dict() == want_box.to_dict()
+    assert not boxes_equal(lay.box, TRUTH_BOX), lay.box
+    # the static statistics ignore the fullscreen frames: canvas static, box interior dynamic, zones found
+    st = np.load(lay.static_mask_file)
+    assert st[20, 20] and st[900, 20] and st[240:720, 40:500].mean() < 0.01
+    assert lay.background["type"] == "solid" and lay.canvas_bg == "#000000"
+    assert {"logo", "channel_name", "title", "watermark"} <= {z.type for z in lay.zones}, lay.zones
+    # ... and so does the RAW box measurement
+    fm = identity_frame_map(n)
+    m = L.measure_box_from_raw(lay, None, proxy, raw_proxy(raw, (FULL_W, FULL_H)), fm, Config())
+    assert m["ok"] and not [kk for kk in m["frames"] if any(a <= kk < b for a, b in fullscreen)], m["frames"]
+    assert not boxes_equal(m["box"], TRUTH_BOX), m["box"]
