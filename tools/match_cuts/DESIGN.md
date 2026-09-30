@@ -51,6 +51,10 @@ Determinism (criterion 9.7): no wall-clock values in cutlist.json (timings go to
 before every RANSAC batch and immediately before creating/training every `FlannBasedMatcher`, and at the
 start of every worker; deterministic iteration order; multiprocessing results gathered in input order.
 `DecisionLog` truncates `work/decisions.jsonl` at run start; every decision is logged with evidence.
+Process pools: fork pools (visual_match.parallel_map) only read memmapped proxies; before forking the
+parent runs `gc.collect(); gc.freeze()` and sets OpenCV to 1 thread — a forked child must never run a
+destructor of an inherited object (verified deadlock: a stray frame-threaded PyAV decoder freed by the
+child's GC hangs in avcodec_free_context). Pools that decode video use the 'spawn' context.
 
 ## 2. Conventions
 
@@ -149,7 +153,9 @@ visual verification always uses a match-geometry render at competitor size and f
   region (RAW-vs-RAW, warped & masked: mean |diff| ≤ `identical_mad` or ZNCC ≥ `identical_thresh`) —
   the only criterion-3 exemption; `low_margin` flag = score gap ≤ `low_margin_eps` (never an
   exemption); `soft_lo..soft_hi` = soft range for the LP `{j : S_k(j) ≥ max S_k − δ_k}` with
-  `δ_k = max(soft_delta_min, 3·MAD of the track's margins)`; `cand_j0` + `cand[k, 0:CAND_W]` = the
+  `δ_k = scoring.noise_delta(track's best scores) = clip(3·1.4826·MAD(best scores), soft_delta_min,
+  soft_delta_max)` — the score NOISE, never the spread of margins (margins measure discriminability; a
+  margin-based δ let a frame 0.18 below its own best count as 'explained' and hid a jump cut); `cand_j0` + `cand[k, 0:CAND_W]` = the
   candidate score vector S_k around m (NaN where not evaluated); `widened`, `tie`, `mean`/`std`.
 * `AudioHints` — per competitor audio window: `comp_t`, `raw_t`, `speed`, `conf`, `psr`, `peak`.
 * `Segment` — prompt Stage 6 fields + extras (see model.py). `type ∈ {raw, not_in_raw, dip, flash}`;

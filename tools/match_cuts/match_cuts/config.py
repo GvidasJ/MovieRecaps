@@ -103,7 +103,8 @@ class Config:
     identical_thresh: float = 0.9995       # RAW-vs-RAW ZNCC above which neighbours are 'identical'
     identical_mad: float = 0.75            # ... or mean |diff| (8-bit, proxy, visible region) below this
     low_margin_eps: float = 0.001          # score gap flagged low_margin (never an ambiguity exemption)
-    soft_delta_min: float = 0.001          # soft LP range delta_k = max(this, 3*MAD of track margins)
+    soft_delta_min: float = 0.001          # soft LP range delta_k = clip(3 * robust std of the track's best scores,
+    soft_delta_max: float = 0.01           #   soft_delta_min, soft_delta_max)  (scoring.noise_delta)
     rel_drop_min: float = 0.01             # re-search if score < rolling track median - max(this, 4*MAD)
     uniform_std: float = 4.0               # region luma std below which a frame is UNIFORM
     low_conf_thresh: float = 0.5           # frames below get debug/low_confidence/k#####.png (max 200)

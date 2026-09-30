@@ -114,16 +114,16 @@ class _Frames:
         self.cand = np.asarray(fm.cand).astype(np.float64)
         self.cand_j0 = np.asarray(fm.cand_j0).astype(np.int64)
         self.touched: dict[int, str] = {}           # k -> why its constraint was changed
-        # delta_k per track (DESIGN §3): max(soft_delta_min, 3 * MAD of the track's margins)
+        # delta_k per track (DESIGN §3): score noise = scoring.noise_delta of the track's best scores
+        from .scoring import noise_delta
         dmin = float(_cfg(cfg, "soft_delta_min", 0.001))
+        dmax = float(_cfg(cfg, "soft_delta_max", 0.01))
         self.delta = np.full(n, dmin)
-        m_ok = (st == Status.MATCH) & np.isfinite(self.margin)
+        s_ok = (st == Status.MATCH) & np.isfinite(self.score)
         for tr in sorted(set(self.track[st == Status.MATCH].tolist())):
-            sel = m_ok & (self.track == tr)
+            sel = s_ok & (self.track == tr)
             if sel.sum() >= 3:
-                mg = self.margin[sel]
-                mad = float(np.median(np.abs(mg - np.median(mg))))
-                self.delta[(self.track == tr)] = max(dmin, 3.0 * mad)
+                self.delta[(self.track == tr)] = noise_delta(self.score[sel], dmin, dmax)
         # intrinsic (relaxed) droppability: the frame's best is within 5 delta of something else
         with np.errstate(invalid="ignore"):
             rel = np.isfinite(self.margin) & (self.margin <= 5.0 * self.delta)

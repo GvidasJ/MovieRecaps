@@ -41,6 +41,7 @@ from typing import Any, Callable, Iterable, Sequence
 import numpy as np
 
 from . import scoring
+from .scoring import noise_delta
 from .common import Cache, DecisionLog, log, null_dlog, params_hash, stage_key
 from .geometry import Sim, from_cv_matrix, h3, interpolate_keys, rdp, to_cv_matrix, translate3
 from .model import CAND_W, AudioHints, FrameMap, Layout, Proxy, Status
@@ -273,7 +274,7 @@ class _Track:
 
 def _w_eval(state: dict, task: tuple) -> tuple:
     """Score frame k under one track model: window jhat±R, widened on the edge up to Rmax."""
-    k, keys, flip, jhat, R, Rmax = task
+    k, keys, flip, jhats, R, Rmax = task
     comp, raw, cfg = state["comp"], state["raw"], state["cfg"]
     n = raw.n
     sim = _sim_at(keys, k, state["raw_wh"])
@@ -286,9 +287,15 @@ def _w_eval(state: dict, task: tuple) -> tuple:
             for j, v in zip(js, sc.scores(js, sim, flip)):
                 S[j] = float(v)
 
-    jhat = int(min(max(jhat, 0), n - 1))
+    if isinstance(jhats, (int, np.integer)):
+        jhats = (int(jhats),)
+    jhats = [int(min(max(int(j), 0), n - 1)) for j in jhats]
+    # the primary hint (track prediction) and the local-continuity hints: score a window around each,
+    # then continue from the best of them
+    for jh in jhats:
+        ev(jh - R, jh + R)
+    jhat = max(jhats, key=lambda jh: max(S.get(j, -np.inf) for j in range(max(0, jh - R), min(n - 1, jh + R) + 1)))
     lo, hi = max(0, jhat - R), min(n - 1, jhat + R)
-    ev(lo, hi)
     widened = False
 
     def best() -> int:
@@ -639,9 +646,17 @@ class _Refiner:
             return
         R, Rmax = int(self.cfg.refine_radius), int(max(self.cfg.track_search_radius, self.cfg.refine_radius))
         tasks, keys = [], []
+        thr = self.cfg.match_thresh
         for k, t in sorted(pairs, key=lambda p: (p[0], p[1].id)):
-            jhat = int(round(t.predict(k, self.u1)))
-            tasks.append((int(k), t.keys, t.flip, jhat, R, Rmax))
+            jhats = [int(round(t.predict(k, self.u1)))]
+            # local continuity hints: a same-shot jump cut breaks the track's time line, the neighbours
+            # already assigned to this track predict the next frame far better than the global support
+            for nb, sgn in ((k - 1, 1), (k + 1, -1)):
+                if 0 <= nb < self.N and int(self.win_tid[nb]) == t.id and self.win_s[nb] >= thr:
+                    jh = int(round(float(self.win_j[nb]) + sgn * self.u1))
+                    if jh not in jhats:
+                        jhats.append(jh)
+            tasks.append((int(k), t.keys, t.flip, tuple(jhats), R, Rmax))
             keys.append((int(k), t.id))
         self.stats["eval_tasks"] += len(tasks)
         for (k, tid), (lo, arr, jb, sb, edge, wid) in zip(keys, self._map(_w_eval, tasks)):
@@ -724,7 +739,14 @@ class _Refiner:
         A.span = [min(A.span[0], B.span[0]), max(A.span[1], B.span[1])]
         del self.tracks[B.id]
         for k in range(B.span[0], B.span[1] + 1):
-            self.hyp[k].pop(B.id, None)
+            hb = self.hyp[k].pop(B.id, None)
+            if hb is None or not (hb.jb >= 0 and np.isfinite(hb.sb)):
+                continue
+            # keep B's result where it is better: the tracks explain the same frames with the same
+            # framing (duplicates / one chain), so B's hypothesis is valid for A until A is re-evaluated
+            ha = self.hyp[k].get(A.id)
+            if ha is None or not np.isfinite(ha.sb) or hb.sb > ha.sb:
+                self.hyp[k][A.id] = hb
         self._assign(range(B.span[0], B.span[1] + 1))
         if not evaluate:
             return
@@ -1064,10 +1086,10 @@ class _Refiner:
             if np.any(np.isfinite(others)):
                 prov.setdefault(int(self.win_tid[k]), []).append(h.sb - float(np.nanmax(others)))
         cap: dict[int, float] = {}
-        for tid, mg in prov.items():
-            mg = np.array(mg)
-            mad = float(np.median(np.abs(mg - np.median(mg))))
-            cap[tid] = min(_SOFT_CAP_MAX, 2.0 * max(float(cfg.soft_delta_min), 3.0 * mad))
+        for tid in prov:
+            best = np.array([self.win_s[k] for k in match if int(self.win_tid[k]) == tid], np.float64)
+            cap[tid] = min(_SOFT_CAP_MAX, 2.0 * noise_delta(best, float(cfg.soft_delta_min),
+                                                             float(getattr(cfg, "soft_delta_max", 0.01))))
         tasks = []
         for k in match:
             t = self.tracks[int(self.win_tid[k])]
@@ -1143,10 +1165,8 @@ class _Refiner:
         # per-track delta, soft ranges, low_margin, confidence
         delta: dict[int, float] = {}
         for tid in sorted(self.tracks):
-            m = fm.margin[(fm.track == tid) & (fm.status == Status.MATCH)]
-            m = m[np.isfinite(m)]
-            mad = float(np.median(np.abs(m - np.median(m)))) if len(m) else 0.0
-            delta[tid] = max(float(cfg.soft_delta_min), 3.0 * mad)
+            sc = np.asarray(fm.score, np.float64)[(fm.track == tid) & (fm.status == Status.MATCH)]
+            delta[tid] = noise_delta(sc, float(cfg.soft_delta_min), float(getattr(cfg, "soft_delta_max", 0.01)))
         soft_lo = np.full(self.N, -1, np.int32)
         soft_hi = np.full(self.N, -1, np.int32)
         low = np.zeros(self.N, bool)

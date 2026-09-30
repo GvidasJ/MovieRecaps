@@ -133,6 +133,21 @@ def score_candidates(comp: CompRegion, raw_frames: Sequence[np.ndarray], sim: Si
     return s
 
 
+def noise_delta(best_scores, dmin: float = 0.001, dmax: float = 0.01) -> float:
+    """Score-noise tolerance delta for one track (DESIGN §3): 3 x the robust std (1.4826·MAD) of the
+    track's BEST scores, clamped to [dmin, dmax].
+
+    It is deliberately NOT derived from the margins: margins measure how discriminative the content is
+    (0.1 on textured footage), not how noisy a correct frame's score is; using them let a frame that is
+    0.18 below its own best be treated as 'explained'."""
+    s = np.asarray(best_scores, np.float64)
+    s = s[np.isfinite(s)]
+    if s.size < 3:
+        return float(dmin)
+    mad = float(np.median(np.abs(s - np.median(s)))) * 1.4826
+    return float(min(dmax, max(dmin, 3.0 * mad)))
+
+
 def region_stats(comp_img: np.ndarray, roi: tuple[int, int, int, int], allowed: np.ndarray | None) -> tuple[float, float]:
     """(mean, std) of luma in the allowed part of the ROI -- used for UNIFORM (dip/flash) detection."""
     x, y, w, h = roi

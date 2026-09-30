@@ -81,8 +81,15 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
         if workers <= 1 or len(items) < max(2, min_items) or not _fork_available():
             return [_invoke(it) for it in items]
         import cv2
+        import gc
         prev_threads = cv2.getNumThreads()
         cv2.setNumThreads(1)
+        # Collect cyclic garbage in the PARENT and freeze everything that exists now, so a forked child
+        # never runs a destructor of an inherited object. Verified deadlock otherwise: a stray PyAV
+        # decoder (frame-threaded) reached by the child's GC calls avcodec_free_context, which waits on
+        # decoder threads that do not exist in the child (futex hang in pthread_cond_destroy).
+        gc.collect()
+        gc.freeze()
         try:
             ctx = mp.get_context("fork")
             n = min(int(workers), len(items))
@@ -90,6 +97,7 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
             with ctx.Pool(n) as pool:
                 return pool.map(_invoke, items, chunksize=cs)
         finally:
+            gc.unfreeze()
             cv2.setNumThreads(prev_threads)
     finally:
         _WSTATE = prev_state
