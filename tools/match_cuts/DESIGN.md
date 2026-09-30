@@ -92,9 +92,12 @@ start of every worker; deterministic iteration order; multiprocessing results ga
   includes the reflection (e.g. an ECC result initialised from `to_cv_matrix(sim, True)`).
   Descriptors of the flipped comp frame are used only for voting in the index.
 * ECC convention (verified): `M = translate3(-x0,-y0) @ h3(to_cv_matrix(sim0, flip, W, rr, cr))`,
-  `init = inv(M)[:2]`, `cc, Wm = cv2.findTransformECC(blur(comp_roi), blur(raw_proxy), init,
-  cv2.MOTION_AFFINE, crit, mask, 5)`, `sim = from_cv_matrix((translate3(x0,y0) @ inv(h3(Wm)))[:2], flip, W, rr, cr)`.
-  ECC raises `cv2.error` ("Iterations do not converge") — always catch and fall back.
+  `init = inv(M)[:2]`, `cc, Wm = cv2.findTransformECCWithMask(blur(comp_roi), blur(raw_proxy), comp_mask_u8,
+  np.full(raw.shape, 255, np.uint8), init, cv2.MOTION_AFFINE, crit, 5)` (the 6th argument of plain
+  findTransformECC masks the INPUT image, not the template), `sim = from_cv_matrix((translate3(x0,y0) @
+  inv(h3(Wm)))[:2], flip, W, rr, cr)`. ECC raises `cv2.error` ("Iterations do not converge") — always catch
+  and fall back. SIFT: `cv2.SIFT_create(n, enable_precise_upscale=True)` (the default upscale shifts every
+  keypoint by 0.25 px, so SIFT of cv2.flip(img, 1) would be offset by 0.5 px).
 * Rotation is included only if |θ| > 0.2° (cfg.rotation_min_deg); otherwise θ = 0.
 * `geometry.interpolate_keys(keys, k, raw_w, raw_h)` interpolates exactly like AE (linear Scale,
   Rotation, Position); preview, AE simulation and verification all use it.
@@ -575,8 +578,11 @@ CORNER quads and `(in-1)` (perspective's `in` is 1-based); linear z(n) → exact
 timing chain with a step `if(lt(in,K+1),z1,z2)`. No zoompan, no scale=eval=frame+crop.
 Layout: one RGBA `frame.png` rendered once with geq (alpha 0 inside the rounded box tested at pixel centres
 (X+0.5, Y+0.5), plus logo, channel name, multicoloured title, watermark), composed with
-`color=black:s=1080x1920:r=30[c];[c][box]overlay=60:460:shortest=1[v];[v][1:v]overlay=0:0:shortest=1` and
-`-loop 1 -framerate 30 -i frame.png` (no alphamerge with looped inputs). Video graph = video only:
+`[box]pad=1080:1920:60:460:black[v];[v][1:v]overlay=0:0:shortest=1` and `-loop 1 -framerate 30 -i frame.png`
+(the `color[c];[c][box]overlay=…:shortest=1` variant drops the last frame; no alphamerge with looped inputs).
+`perspective` (sense=source, CORNER quad) maps output pixel INDICES, so a zoom z about the box centre also
+shifts the content by −(z−1)/2 px — synth includes that in the truth. lavfi `gradients` needs explicit
+colours (its random default ignores `seed`). Video graph = video only:
 `concat=n=K:v=1:a=0`; crossfade via `xfade=transition=fade:duration=D/30:offset=O/30` with A trimmed to
 exactly O+D frames. Captions (word-by-word, over the box) after the concat with
 `enable='between(t,(k_in-0.5)/30,(k_out-0.5)/30)'`. Audio in a separate graph: per segment

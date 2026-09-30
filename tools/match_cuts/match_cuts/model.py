@@ -242,6 +242,7 @@ FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
     "cand_j0": (np.int32, -1),      # RAW index of cand[:, 0]
     "widened": (np.bool_, False),   # the search window had to be extended (argmax was on the edge)
     "tie": (np.bool_, False),       # timing-tie frame (phase LP slack < 1e-4 frame) - set by segment.py
+    "confounded": (np.bool_, False),  # pure pan: time and translation trade off (refine step 2)
 }
 
 CAND_W = 15   # per-frame candidate score vector length stored in FrameMap.cand (RAW cand_j0 .. cand_j0+14)

@@ -84,6 +84,8 @@ class Config:
     index_ratio: float = 0.8               # cluster-aware ratio: vs first NN > index_far_s away
     index_far_s: float = 2.0
     vote_top_candidates: int = 8
+    vote_min_frac: float = 0.2             # verify only candidates with >= this fraction of the best vote
+    anchors_per_frame: int = 3             # max anchors kept per searched frame
     lowe_ratio: float = 0.75               # pairwise verification against ONE RAW frame only
     ransac_reproj_px: float = 3.0          # comp-proxy px (RANSAC is RAW -> comp)
     min_inliers: int = 12

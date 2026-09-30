@@ -93,12 +93,14 @@ def zncc(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None = None) -> float:
 
 def zncc_rows(vec: np.ndarray, mat: np.ndarray) -> np.ndarray:
     """ZNCC of one vector against each row of mat (same length). Returns float64 [n]."""
-    v = vec.astype(np.float64)
+    v = np.asarray(vec, np.float64)
     v = v - v.mean()
-    m = mat.astype(np.float64)
-    m = m - m.mean(axis=1, keepdims=True)
-    num = m @ v
-    den = np.sqrt((m * m).sum(axis=1) * (v * v).sum())
+    m = np.asarray(mat, np.float64)
+    n = m.shape[1]
+    s1 = m.sum(axis=1)
+    s2 = np.einsum("ij,ij->i", m, m)
+    num = m @ v                       # v is zero-mean, so the row means drop out of the numerator
+    den = np.sqrt(np.maximum(s2 - s1 * s1 / n, 0.0) * float(v @ v))
     with np.errstate(invalid="ignore", divide="ignore"):
         out = np.where(den > 1e-9, num / den, np.nan)
     return out
