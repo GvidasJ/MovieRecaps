@@ -161,7 +161,9 @@ SHOTS: tuple[ShotSpec, ...] = (
     ShotSpec("testsrc+life", "testsrc=s={W}x{H}:r={R}", skip=45, layer=(404, 0.35, 8)),
     ShotSpec("life_b", "life=s={LW}x{LH}:r={R}:rule=B36/S23:seed=21:ratio=0.4:life_color=#40ff80:"
                        "death_color=#200010,scale={W}:{H}:flags=neighbor", skip=40),
-    ShotSpec("gradients+life", "gradients=s={W}x{H}:r={R}:speed=0.02:seed=3:n=4", layer=(606, 0.4, 8)),
+    # gradients: explicit colours + line (its default 'random' colours ignore `seed` -> not reproducible)
+    ShotSpec("gradients+life", "gradients=s={W}x{H}:r={R}:speed=0.02:seed=3:n=4:c0=0x2050c0:c1=0xe0a020:"
+                               "c2=0x20a060:c3=0xc03070:x0={GX0}:y0={GY0}:x1={GX1}:y1={GY1}", layer=(606, 0.4, 8)),
     ShotSpec("testsrc2_mosaic+life", "testsrc2=s={W4}x{H4}:r={R},split=4[a][b][c][d];[b]hue=h=90[b2];"
                                      "[c]hue=h=180,hflip[c2];[d]hue=h=270,vflip[d2];[a][b2]hstack[t];"
                                      "[c2][d2]hstack[u];[t][u]vstack,scale={W}:{H}:flags=bicubic", skip=90,
@@ -927,7 +929,8 @@ def shot_graph(p: Profile, s: ShotSpec) -> str:
     vals = {"W": W, "H": H, "R": R, "W2": W // 2, "H2": H // 2, "W4": W // 4, "H4": H // 4,
             "W6": W // 6, "H6": H // 6, "W8": W // 8, "H8": H // 8, "LW": 160, "LH": 90,
             "OW": even(W / 4), "OH": even(H / 3), "OX": even(W * 0.375), "OY": even(H * 0.28),
-            "AX": even(W * 0.26), "AY": even(H * 0.23)}
+            "AX": even(W * 0.26), "AY": even(H * 0.23),
+            "GX0": W // 10, "GY0": H // 10, "GX1": W - W // 10, "GY1": H - H // 10}
     g = s.graph.format(**vals) + f",scale={W}:{H}:flags=neighbor,format=yuv420p"
     if s.layer is None:
         return g
@@ -1112,7 +1115,8 @@ def decode_id_chain(id_mp4: Path, c: Chain) -> np.ndarray:
 
 def not_in_raw_graph(bw: int, bh: int, n: int, unit: float) -> str:
     fs = max(12, int(round(96 * unit)))
-    return (f"gradients=s={bw}x{bh}:r=30:speed=0.03:seed=9:c0=0x3010a0:c1=0xff7a00:c2=0x00c8a0:n=3,"
+    return (f"gradients=s={bw}x{bh}:r=30:speed=0.03:seed=9:c0=0x3010a0:c1=0xff7a00:c2=0x00c8a0:n=3:"
+            f"x0={bw // 8}:y0={bh // 8}:x1={bw - bw // 8}:y1={bh - bh // 8},"
             f"trim=end_frame={n},drawtext=fontfile={FONT}:text='SUBSCRIBE':x=(w-tw)/2+{int(40 * unit)}*sin(2*PI*t):"
             f"y=(h-th)/2:fontsize={fs}:fontcolor=white:borderw={max(2, int(6 * unit))}:bordercolor=black")
 
@@ -1312,8 +1316,20 @@ def _zncc_rows(v: np.ndarray, m: np.ndarray) -> np.ndarray:
 _PERTURB = ((0.0, 0.0, 0.0), (0.005, 0.0, 0.0), (-0.005, 0.0, 0.0), (0.0, 2.0, 2.0), (0.0, -2.0, -2.0),
             (0.0, 2.0, -2.0), (0.0, -2.0, 2.0), (0.005, 2.0, -2.0), (-0.005, -2.0, 2.0))
 
-# shared (fork copy-on-write) state of the self-check workers
+# state of the self-check workers (spawned processes; big arrays arrive as memory-mapped .npy files)
 _SC: dict[str, Any] = {}
+
+
+def _sc_init(small: dict, comp_npy: str, raw_npy: str, raw_idx_npy: str) -> None:
+    """Initializer of a spawned self-check worker: single-threaded OpenCV (3 workers already use 3
+    cores), memory-mapped competitor ROIs and RAW proxies."""
+    import cv2
+    cv2.setNumThreads(1)
+    _SC.clear()
+    _SC.update(small)
+    _SC["comp"] = np.load(comp_npy, mmap_mode="r")
+    raw = np.load(raw_npy, mmap_mode="r")
+    _SC["raws"] = {int(j): raw[i] for i, j in enumerate(np.load(raw_idx_npy))}
 
 
 def _perturbed(sim: dict, box_c: tuple[float, float], ds: float, dx: float, dy: float) -> dict:
@@ -1334,7 +1350,6 @@ def _self_check_frames(items: list[tuple]) -> list[tuple]:
     """Worker: worst margin (truth frame score - best of j±1, j±2) over the perturbations, per frame.
     The five candidates are warped as one 4-channel + one 1-channel image (identical per-channel result)."""
     import cv2
-    cv2.setNumThreads(1)
     st = _SC
     x, y, w, h = st["roi"]
     blur = st["blur"]
@@ -1371,7 +1386,7 @@ def _self_check_frames(items: list[tuple]) -> list[tuple]:
 
 
 def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dict], segs: list[dict],
-               captions: list[dict], workers: int = MAX_PARALLEL) -> dict:
+               captions: list[dict], scratch: Path, workers: int = MAX_PARALLEL) -> dict:
     """(a) every matchable competitor frame: the truth RAW frame beats j±1, j±2 by >= SELF_MARGIN_MIN masked
     ZNCC at the DESIGN proxy sizes under ±0.5 % scale / ±2 px perturbations (mask = rounded box minus the
     dilated caption bboxes); (b) >= SELF_INLIERS_MIN SIFT + RANSAC inliers (RAW -> comp, pairwise Lowe
@@ -1395,7 +1410,9 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
         s = seg_by_id[fr["seg"]]
         items.append((fr["k"], fr["raw_a"], _sim_at(s, fr["k"]), s["flip"]))
         need.update(range(fr["raw_a"] - 2, fr["raw_a"] + 3))
-    comp = decode_gray(comp_mp4, (cw, ch), roi=roi)
+    comp_d = decode_gray(comp_mp4, (cw, ch), roi=roi)
+    comp = np.stack([comp_d[k] for k in range(len(comp_d))])
+    del comp_d
     raws = decode_gray(raw_mp4, (rw, rh), keep=lambda i: i in need)
     dil = 3
     cap_boxes: dict[int, list] = {}
@@ -1406,14 +1423,23 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
         for k in range(c["k_in"], c["k_out"]):
             cap_boxes.setdefault(k, []).append(b)
     box_c = (bx + bw / 2, by + bh / 2)
+    small = dict(mask_base=_box_mask(p, cw, ch)[y0:y1, x0:x1], cap_boxes=cap_boxes, roi=roi, raw_w=p.raw_w,
+                 raw_ratio=raw_ratio, comp_ratio=comp_ratio, blur=float(cfg["score_blur"]), box_c=box_c)
     _SC.clear()
-    _SC.update(comp=comp, raws=raws, mask_base=_box_mask(p, cw, ch)[y0:y1, x0:x1], cap_boxes=cap_boxes, roi=roi,
-               raw_w=p.raw_w, raw_ratio=raw_ratio, comp_ratio=comp_ratio, blur=float(cfg["score_blur"]),
-               box_c=box_c)
+    _SC.update(small, comp=comp, raws=raws)
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    npys = [scratch / "selfcheck_comp.npy", scratch / "selfcheck_raw.npy", scratch / "selfcheck_raw_idx.npy"]
     try:
         if workers > 1:
+            idx = np.array(sorted(raws), np.int64)
+            np.save(npys[0], comp)
+            np.save(npys[1], np.stack([raws[int(j)] for j in idx]))
+            np.save(npys[2], idx)
             batches = [items[i::workers] for i in range(workers)]
-            with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("fork")) as ex:
+            # spawn (not fork): a forked child must not inherit OpenCV's / PyAV's live thread pools
+            with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"), initializer=_sc_init,
+                                     initargs=(small, *map(str, npys))) as ex:
                 res = [r for part in ex.map(_self_check_frames, batches) for r in part]
         else:
             res = _self_check_frames(items)
@@ -1457,6 +1483,8 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
                 centre_err[key] = err
     finally:
         _SC.clear()
+        for f in npys:
+            f.unlink(missing_ok=True)
     margins = np.array([r[2] for r in res])
     worst = min(res, key=lambda r: r[2])
     per_seg: dict[int, dict] = {}
@@ -1847,7 +1875,7 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
 
     # ---- self-checks at proxy sizes ---------------------------------------------------------------------
     t0 = time.perf_counter()
-    sc = self_check(p, raw_mp4, comp_mp4, frames, segs, cap_truth)
+    sc = self_check(p, raw_mp4, comp_mp4, frames, segs, cap_truth, build)
     asc = audio_self_check(raw_mp4, comp_mp4, segs)
     sc["audio"] = asc
     timings["self_check_s"] = time.perf_counter() - t0

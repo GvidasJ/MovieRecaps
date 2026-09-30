@@ -15,7 +15,7 @@ match-cuts = "match_cuts.cli:main"
 packages = ["match_cuts"]
 
 [tool.setuptools.package-data]
-match_cuts = ["ae_mock/*.js"]
+match_cuts = ["ae_mock/*.js", "ae_mock/ACORN_LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

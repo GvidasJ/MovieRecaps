@@ -313,9 +313,9 @@ class FrameMap:
 class AudioHints:
     """One row per competitor audio window. raw_t is the RAW time matching comp_t (window centre)."""
     comp_t: np.ndarray                     # float64 seconds (window centre)
-    raw_t: np.ndarray                      # float64 seconds, NaN if no confident match
+    raw_t: np.ndarray                      # float64 seconds, NaN when no candidate beats the null level
     speed: np.ndarray                      # float64, time-scale v of best match (1.0 default)
-    conf: np.ndarray                       # float32 peak-to-second-peak ratio (>= 1)
+    conf: np.ndarray                       # float32 peak / max(second peak outside ±0.3 s, null level); < 1 = no evidence, 0 = no candidate
     psr: np.ndarray                        # float32 peak-to-sidelobe ratio
     peak: np.ndarray                       # float32 normalised correlation peak
     window: float = 1.0

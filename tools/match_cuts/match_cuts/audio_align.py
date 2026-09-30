@@ -10,35 +10,46 @@ Plain numpy/scipy DSP (no librosa):
 ``coarse_align``  (prompt 5.1)
     Every ~1 s competitor window (hop 0.25 s) is cross-correlated against the WHOLE RAW with an
     FFT-based, exactly normalised NCC (overlap-save blocks; the sliding RAW energy comes from
-    cumulative sums) on a cheap *coarse* feature (onset envelope + octave-band energies -- both survive
-    the pitch shift of a tape-style speed change). The top peaks (non-max suppression ±0.3 s) are
-    verified on the *full* log-mel feature under two hypotheses: tape (the competitor's mel filters
-    are warped by ``v`` so its band ``b`` sees the RAW band ``b`` content shifted up by ``v``) and
-    pitch-preserving (unwarped). The winner is refined on the 16 kHz waveform within ±50 ms
-    (normalised xcorr, parabolic sub-sample peak); for tape/1.0 windows the two window halves give a
-    drift that refines the speed. Windows that are weak at speed 1.00 are re-searched with
-    time-scaled windows (v = 0.90 .. 1.30, step 0.01): a decimated coarse scan shortlists speeds,
-    then the full search runs at the shortlisted speeds; found speeds are propagated to neighbouring
-    windows. ``conf`` = peak / second peak, where the second peak is the best verified candidate
-    outside ±0.3 s or -- if larger -- the expected maximum of the full-feature NCC over the whole
-    RAW estimated from random lags (mu + 4.5 sigma), so windows with no genuine match never look
-    confident. ``psr`` = peak-to-sidelobe ratio of the coarse NCC curve.
+    cumulative sums) on a cheap *coarse* feature: onset envelope + octave-band log energies (per-file
+    z-scored); for a time-scaled window the octave bands are tape-warped and the onset envelope is
+    pitch-invariant. The top coarse peaks (non-max suppression ±0.3 s) are verified on the *full*
+    feature -- delta log-mel (measured to separate true matches from the null far better than plain
+    log-mel) -- under two hypotheses: tape (competitor mel filters warped by v, i.e. pitch follows
+    speed) and pitch-preserving (unwarped). ``conf`` = peak / second peak, the second peak being the
+    best verified candidate outside ±0.3 s or -- if larger -- the null level (max and mean + 4.5 std of
+    the full NCC at 64 random lags, never below 0.38), so windows without a genuine match stay
+    below 1.3; ``psr`` = peak-to-sidelobe ratio of the coarse curve (outside ±0.3 s).
+    Windows weak at speed 1.00 are re-searched with time-scaled windows (v = 0.90 .. 1.30, step
+    0.01): a decimated (25 Hz) coarse scan over all speeds shortlists speeds (and must beat 1.00 by
+    0.05), the full search runs at those; found speeds are propagated to neighbouring windows (also
+    replacing weaker confident results) and tried on the windows between scanned ones. When no probe
+    window matches at any speed and nothing matched at 1.00, the scan stops early (audio replaced).
+    Confident windows are refined on the 16 kHz waveform: speed 1 -> whole-window NCC within
+    ±audio_refine_ms (sub-sample peak) + a quarter-window drift check; other speeds -> robust line
+    through the lags of the four window quarters (tape-style resampling of the window) at candidate
+    speeds around the feature estimate, giving offset and speed to ~1e-4, then a whole-window NCC.
 
 ``xcorr_lag``
-    Normalised cross-correlation lag of two equally long signals (b delayed by lag vs a).
+    Normalised cross-correlation lag of two equally long signals (b delayed by lag vs a), with a
+    band-limited sub-sample refinement (~0.02 sample).
 
 ``analyze_segments_audio``  (prompt 5.6)
-    Per segment: the RAW-rebuilt audio (tape-style resampling for v != 1, windowed-sinc) is compared
-    with the competitor: J/L offsets at hard cuts (audio switch point from a two-model local NCC
-    segmentation), lag/corr over the segment's audio range, pitch preservation for speed != 1
-    (whitened log-frequency spectrum of the competitor vs the RAW source at shift log(v) vs 0),
-    added audio (music bed / SFX / voice-over) from the residual energy after subtracting the
-    lag-compensated, gain-fitted rebuilt track, and the run status ok / no_audio / audio_replaced.
+    Per segment: the RAW-rebuilt audio (tape-style resampling for v != 1 like AE's stretch,
+    Kaiser-windowed sinc) is compared with the competitor: J/L offsets at hard cuts (audio switch
+    point from a two-model local-NCC segmentation), lag/corr over the segment's audio range, pitch
+    preservation for speed != 1 (whitened log-frequency spectrum at shift log2(v) vs 0, confirmed by a
+    time-aligned tape-vs-unwarped delta-log-mel test that also gates on the audio being related to
+    the RAW at all), added audio (music bed / SFX / voice-over) from the residual energy after
+    subtracting the lag-compensated, gain-fitted rebuilt track, and the run status ok / no_audio /
+    audio_replaced.
+
+Both stages pin OpenBLAS to one thread while they run (``single_thread_blas``): they issue thousands
+of small matrix products, which a multi-threaded BLAS on a busy machine makes ~100x slower.
 """
 from __future__ import annotations
 
 import math
-from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Sequence
@@ -61,7 +72,7 @@ _VERIFY_R = 3                 # +- frames searched around each coarse peak on th
 _EXCL_S = 0.3                 # the second peak lies outside +- this (s)
 _NULL_LAGS = 64               # random lags used to estimate the full-feature null distribution
 _NULL_Z = 4.5                 # null floor = mean + 4.5 std of the full NCC at random lags
-_NULL_FLOOR_MIN = 0.12
+_NULL_FLOOR_MIN = 0.38        # never below the typical whole-RAW null maximum of the delta-log-mel NCC
 _WAVE_MIN_PEAK = 0.3          # waveform NCC needed to trust the sample-precise refinement
 _SILENT_RMS = 10 ** (-70 / 20)
 _KAISER_BETA = 8.0
@@ -71,6 +82,67 @@ _TAPE, _TEMPO = "tape", "tempo"
 _ADDED_FRAME_S = 0.02         # residual-energy frame for added-audio detection
 _MAX_LAG_SEG_S = 0.1          # per-segment lag search (same as verify s9_5)
 _MIN_SEG_S = 0.5              # shorter audio ranges -> 'too_short' when they do not line up
+
+
+_BLAS_CTL: list = []
+
+
+def _blas_ctl():
+    """(set_num_threads, get_num_threads) of numpy's bundled OpenBLAS via ctypes, or None."""
+    if not _BLAS_CTL:
+        found = None
+        try:
+            import ctypes
+            import glob
+            import os
+            d = os.path.join(os.path.dirname(np.__file__), os.pardir, "numpy.libs")
+            for path in sorted(glob.glob(os.path.join(d, "*openblas*.so*"))):
+                lib = ctypes.CDLL(path)
+                for sn, gn in (("scipy_openblas_set_num_threads64_", "scipy_openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads64_", "openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads", "openblas_get_num_threads")):
+                    if hasattr(lib, sn) and hasattr(lib, gn):
+                        found = (getattr(lib, sn), getattr(lib, gn))
+                        break
+                if found:
+                    break
+        except Exception:          # pragma: no cover - platform specific
+            found = None
+        _BLAS_CTL.append(found)
+    return _BLAS_CTL[0]
+
+
+@contextmanager
+def single_thread_blas():
+    """Pin OpenBLAS to one thread for the duration (restored afterwards; no-op if not controllable).
+
+    This stage runs thousands of small matrix products; with a multi-threaded OpenBLAS on a busy
+    machine each one costs ~100x more (measured: 8 ms vs 0.08 ms for 132x513 @ 513x40)."""
+    ctl = _blas_ctl()
+    if ctl is None:
+        yield
+        return
+    setter, getter = ctl
+    try:
+        old = int(getter())
+    except Exception:              # pragma: no cover
+        yield
+        return
+    setter(1)
+    try:
+        yield
+    finally:
+        setter(max(1, old))
+
+
+def _mono(y: Any) -> np.ndarray:
+    """float32 mono view of an audio array: None -> empty; (N, C) -> channel mean; (N,) unchanged."""
+    if y is None:
+        return np.zeros(0, np.float32)
+    a = np.asarray(y)
+    if a.ndim == 2:
+        a = a.mean(axis=1) if a.shape[1] > 1 else a[:, 0]
+    return np.ascontiguousarray(a.reshape(-1), dtype=np.float32)
 
 
 def _cfg(cfg: Any, name: str, default: Any) -> Any:
@@ -147,15 +219,18 @@ def _power_chunks(y: np.ndarray, sr: int, rate: int, n_fft: int, chunk: int = 40
     if T == 0:
         return
     half = n_fft // 2
-    ypad = np.zeros(len(y) + n_fft + 2, np.float32)
-    ypad[half:half + len(y)] = y
     win = _hann(n_fft)
     norm = (2.0 / float(win.sum())) ** 2
     ar = np.arange(n_fft)
     for i0 in range(0, T, chunk):
         i1 = min(T, i0 + chunk)
-        starts = np.round(np.arange(i0, i1) * (sr / rate)).astype(np.int64)
-        fr = ypad[starts[:, None] + ar[None, :]] * win[None, :]
+        starts = np.round(np.arange(i0, i1) * (sr / rate)).astype(np.int64) - half   # first sample of each frame
+        a, b = int(starts[0]), int(starts[-1]) + n_fft
+        seg = np.zeros(b - a, np.float32)                  # this chunk's samples, zero outside the signal
+        lo, hi = max(0, a), min(len(y), b)
+        if hi > lo:
+            seg[lo - a:hi - a] = y[lo:hi]
+        fr = seg[(starts - a)[:, None] + ar[None, :]] * win[None, :]
         X = sfft.rfft(fr, axis=1)
         yield i0, ((X.real.astype(np.float32) ** 2 + X.imag.astype(np.float32) ** 2) * np.float32(norm))
 
@@ -211,8 +286,7 @@ def features(y: np.ndarray, sr: int, cfg: Any) -> dict:
     Returns ``{'logmel': float32 [T, n_mels] (dB, own numpy HTK mel filterbank), 'onset': float32 [T]
     (spectral flux of the log-mel), 'broad': float32 [T, 6] (octave-band log energies, 125 Hz..4 kHz
     centres), 'rate': int, 'n_fft': int, 'fmin', 'fmax', 'sr'}``. Empty input -> T = 0."""
-    y = np.asarray(y, np.float32).reshape(-1)
-    return _spectral(y, int(sr), cfg, keep_power=False)
+    return _spectral(_mono(y), int(sr), cfg, keep_power=False)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -222,12 +296,12 @@ def features(y: np.ndarray, sr: int, cfg: Any) -> dict:
 _SINC_TABLES: dict[tuple[float, int], tuple[np.ndarray, np.ndarray]] = {}
 
 
-def _sinc_table(cutoff: float) -> tuple[np.ndarray, np.ndarray]:
+def _sinc_table(cutoff: float, half: int = _SINC_HALF) -> tuple[np.ndarray, np.ndarray]:
     fc = float(min(1.0, max(0.05, cutoff)))
-    key = (round(fc, 6), _SINC_HALF)
+    key = (round(fc, 6), int(half))
     tab = _SINC_TABLES.get(key)
     if tab is None:
-        H = int(math.ceil(_SINC_HALF / fc))
+        H = int(math.ceil(half / fc))
         taps = np.arange(-H + 1, H + 1)
         ph = np.arange(_SINC_PHASES + 1) / _SINC_PHASES          # fractional position 0..1
         x = ph[:, None] - taps[None, :]                          # distance position - sample
@@ -239,30 +313,35 @@ def _sinc_table(cutoff: float) -> tuple[np.ndarray, np.ndarray]:
     return tab
 
 
-def resample_at(y: np.ndarray, pos: np.ndarray, cutoff: float = 1.0, chunk: int = 1 << 15) -> np.ndarray:
-    """Band-limited interpolation of ``y`` at fractional sample positions ``pos`` (Kaiser-windowed sinc,
-    1024 tabulated phases; ``cutoff`` = fraction of Nyquist, use min(1, 1/step) when the positions
-    advance by ``step`` > 1 per output sample so nothing aliases). Samples outside ``y`` are zero."""
+def resample_at(y: np.ndarray, pos: np.ndarray, cutoff: float = 1.0, chunk: int = 1 << 15,
+                half: int = _SINC_HALF) -> np.ndarray:
+    """Band-limited interpolation of ``y`` at fractional sample positions ``pos`` (Kaiser-windowed sinc
+    of ``2*half`` taps, 1024 tabulated phases; ``cutoff`` = fraction of Nyquist, use min(1, 1/step) when
+    the positions advance by ``step`` > 1 per output sample so nothing aliases). Samples outside ``y``
+    are zero."""
     y = np.asarray(y, np.float32).reshape(-1)
     pos = np.asarray(pos, np.float64).reshape(-1)
     out = np.zeros(pos.size, np.float32)
     if y.size == 0 or pos.size == 0:
         return out
-    tab, taps = _sinc_table(cutoff)
+    tab, taps = _sinc_table(cutoff, half)
     H = int(-taps[0]) + 1
-    ypad = np.zeros(y.size + 2 * H + 2, np.float32)
-    ypad[H:H + y.size] = y
     for c0 in range(0, pos.size, chunk):
         p = pos[c0:c0 + chunk]
         ok = (p > -H) & (p < y.size + H - 1)
         if not np.any(ok):
             continue
-        pp = np.where(ok, p, 0.0)
+        # only the samples this chunk touches, zero-padded by the kernel half-width
+        lo = max(0, int(math.floor(p[ok].min())) - H)
+        hi = min(y.size, int(math.floor(p[ok].max())) + H + 2)
+        seg = np.zeros(hi - lo + 2 * H + 2, np.float32)
+        seg[H:H + hi - lo] = y[lo:hi]
+        pp = np.where(ok, p, float(lo))
         base = np.floor(pp).astype(np.int64)
         ph = np.round((pp - base) * _SINC_PHASES).astype(np.int64)
-        idx = base[:, None] + taps[None, :] + H
-        np.clip(idx, 0, ypad.size - 1, out=idx)
-        v = np.einsum("ij,ij->i", tab[ph], ypad[idx])
+        idx = (base - lo)[:, None] + taps[None, :] + H
+        np.clip(idx, 0, seg.size - 1, out=idx)
+        v = np.einsum("ij,ij->i", tab[ph], seg[idx])
         out[c0:c0 + chunk] = np.where(ok, v, 0.0)
     return out
 
@@ -282,7 +361,6 @@ def _parabolic(ym: float, y0: float, yp: float) -> float:
 def _ncc_slide(chunk: np.ndarray, region: np.ndarray) -> np.ndarray:
     """NCC of ``chunk`` at every offset inside ``region`` (len(region) >= len(chunk)); exact
     normalisation by the sliding region energy (cumulative sums); mean-removed chunk."""
-    from scipy.signal import fftconvolve
     c = np.asarray(chunk, np.float64)
     r = np.asarray(region, np.float64)
     m = c.size
@@ -290,25 +368,31 @@ def _ncc_slide(chunk: np.ndarray, region: np.ndarray) -> np.ndarray:
         return np.zeros(0)
     c = c - c.mean()
     nc = float(np.sqrt(np.sum(c * c)))
-    num = fftconvolve(r, c[::-1], mode="valid")
+    n_lags = r.size - m + 1
+    if n_lags * m <= 400_000:
+        num = np.correlate(r, c, mode="valid")              # few lags: direct is cheaper
+    else:
+        from scipy.signal import fftconvolve
+        num = fftconvolve(r, c[::-1], mode="valid")
     cs1 = np.concatenate([[0.0], np.cumsum(r)])
     cs2 = np.concatenate([[0.0], np.cumsum(r * r)])
     s1 = cs1[m:] - cs1[:-m]
     e = np.maximum((cs2[m:] - cs2[:-m]) - s1 * s1 / m, 0.0)
     den = nc * np.sqrt(e)
-    tiny = 1e-9 * max(nc, 1e-12) * math.sqrt(m) * 1e-3
-    return np.where(den > tiny, num / np.maximum(den, 1e-300), 0.0)
+    return np.where(den > 1e-12 * max(nc, 1e-12), num / np.maximum(den, 1e-300), 0.0)
 
 
 def xcorr_lag(a: np.ndarray, b: np.ndarray, sr: int, max_lag_s: float) -> tuple[float, float]:
     """Normalised cross-correlation lag between two (equally long) signals.
 
     Returns ``(lag_s, peak)``: ``b`` is delayed by ``lag_s`` seconds relative to ``a`` (``b(t) ≈ a(t -
-    lag)``; positive = b late), searched within ``±max_lag_s`` (and at most half the length), with a
-    parabolic sub-sample peak. ``peak`` is the normalised correlation in [-1, 1] at the best lag
-    (energies of the overlapping parts). Silent / empty input -> ``(0.0, 0.0)``."""
-    a = np.asarray(a, np.float64).reshape(-1)
-    b = np.asarray(b, np.float64).reshape(-1)
+    lag)``; positive = b late), searched within ``±max_lag_s`` (and at most half the length); the
+    integer peak is refined by windowed-sinc interpolation of the correlation (0.05-sample grid +
+    parabola, ~0.02 sample accuracy). ``peak`` is the normalised correlation in [-1, 1] at the best
+    lag (energies of the overlapping parts). Multi-channel input is averaged to mono. Silent / empty
+    input -> ``(0.0, 0.0)``."""
+    a = _mono(a).astype(np.float64)
+    b = _mono(b).astype(np.float64)
     n = min(a.size, b.size)
     if n < 2:
         return 0.0, 0.0
@@ -333,7 +417,20 @@ def xcorr_lag(a: np.ndarray, b: np.ndarray, sr: int, max_lag_s: float) -> tuple[
     i = int(np.argmax(ncc))
     off = 0.0
     if 0 < i < ncc.size - 1:
-        off = _parabolic(ncc[i - 1], ncc[i], ncc[i + 1])
+        # band-limited refinement: the correlation is band-limited, so windowed-sinc interpolation of
+        # its integer-lag samples gives it at fractional lags (0.05-sample grid over +-1 sample, then a
+        # parabola on that fine grid)
+        tau = lags[i] + np.linspace(-1.0, 1.0, 41)
+        H = 24
+        loc = r[(lags[i] + np.arange(-H, H + 1)) % N]              # integer-lag correlation around the peak
+        rf = resample_at(loc, tau - lags[i] + H, cutoff=1.0)        # band-limited (windowed-sinc) interpolation
+        dfr = np.interp(tau, lags[i - 1:i + 2].astype(np.float64), den[i - 1:i + 2])
+        nf = rf / dfr
+        j = int(np.argmax(nf))
+        off = float(tau[j] - lags[i])
+        if 0 < j < nf.size - 1:
+            off += 0.05 * _parabolic(nf[j - 1], nf[j], nf[j + 1])
+        return float((lags[i] + off) / sr), float(np.clip(max(ncc[i], nf[j]), -1.0, 1.0))
     return float((lags[i] + off) / sr), float(np.clip(ncc[i], -1.0, 1.0))
 
 
@@ -377,31 +474,29 @@ class _Correlator:
         return e
 
     def ncc_multi(self, windows: Sequence[np.ndarray]) -> list[np.ndarray]:
-        """NCC curves of several windows (lengths may differ, each <= m_max)."""
+        """NCC curves of several windows (lengths may differ, each <= m_max). Processed one window at a
+        time: per window one small rfft, a [F, 1, C] @ [F, C, K] product and K inverse FFTs (batching
+        several windows was measured slower)."""
         import scipy.fft as sfft
-        out: list[np.ndarray] = [np.zeros(0) for _ in windows]
-        live = [i for i, w in enumerate(windows) if 2 <= w.shape[0] <= self.m_max and w.shape[0] <= self.T]
-        if not live:
-            return out
-        mb = max(windows[i].shape[0] for i in live)
-        W = np.zeros((len(live), mb, self.C))
-        norms = np.zeros(len(live))
-        for r, i in enumerate(live):
-            w = np.asarray(windows[i], np.float64).reshape(windows[i].shape[0], -1)
+        out: list[np.ndarray] = []
+        for w in windows:
+            m = int(w.shape[0])
+            if m < 2 or m > self.m_max or m > self.T:
+                out.append(np.zeros(0))
+                continue
+            w = np.asarray(w, np.float64).reshape(m, -1)
             w = w - w.mean(0, keepdims=True)
-            W[r, :w.shape[0]] = w
-            norms[r] = math.sqrt(float(np.sum(w * w)))
-        FW = np.conj(sfft.rfft(W, n=self.nfft, axis=1)).astype(np.complex64)     # [B, F, C]
-        acc = np.matmul(FW.transpose(1, 0, 2), self.spec)                          # [F, B, K]
-        num = sfft.irfft(acc.transpose(1, 2, 0), n=self.nfft, axis=2)[:, :, :self.step]
-        num = num.reshape(len(live), -1)
-        for r, i in enumerate(live):
-            m = windows[i].shape[0]
+            nw = math.sqrt(float(np.sum(w * w)))
             e = self.energy(m)
-            den = norms[r] * np.sqrt(e)
-            nm = num[r, :e.size]
-            good = (e > 1e-6 * m) & (norms[r] > 1e-9)
-            out[i] = np.where(good, nm / np.where(good, den, 1.0), 0.0)
+            if nw <= 1e-9:
+                out.append(np.zeros(e.size))
+                continue
+            FW = np.conj(sfft.rfft(w, n=self.nfft, axis=0)).astype(np.complex64)          # [F, C]
+            acc = np.matmul(FW[:, None, :], self.spec)[:, 0, :]                            # [F, K]
+            num = sfft.irfft(acc, n=self.nfft, axis=0)[:self.step]                          # [step, K]
+            num = num.T.reshape(-1)[:e.size]
+            good = e > 1e-6 * m
+            out.append(np.where(good, num / (nw * np.sqrt(np.where(good, e, 1.0))), 0.0))
         return out
 
 
@@ -488,7 +583,7 @@ class _Aligner:
         self.Tc = self.c["logmel"].shape[0]
         self.Tr = self.r["logmel"].shape[0]
         self.r_full = _delta(self.r["logmel"])          # full verification feature: delta log-mel
-        self._warp_cache: OrderedDict[float, tuple[np.ndarray, np.ndarray]] = OrderedDict()
+        self._fb_cache: dict[float, tuple[np.ndarray, np.ndarray]] = {}
         self.st = st
         # coarse matrices (per-file z-scored channels; onset weighted)
         self.c_stats = self._stats(self.c)
@@ -528,50 +623,56 @@ class _Aligner:
         m[:, 0] *= _ONSET_WEIGHT
         return m
 
-    def _warped(self, v: float) -> tuple[np.ndarray, np.ndarray]:
-        """Competitor (log-mel, octave-band) features with every filter warped by v (tape hypothesis),
-        for the whole competitor; small LRU cache (the same speed is used by many windows)."""
+    def _fbs(self, v: float) -> tuple[np.ndarray, np.ndarray]:
+        """(mel, octave) filterbanks warped by v (tape hypothesis), cached per speed."""
         key = round(float(v), 6)
-        hit = self._warp_cache.get(key)
-        if hit is not None:
-            self._warp_cache.move_to_end(key)
-            return hit
-        P = self.c["power"]
-        fb = mel_filterbank(self.sr, self.n_fft, self.st["n_mels"], self.st["fmin"], self.st["fmax"], warp=key)
-        bb = broad_filterbank(self.sr, self.n_fft, warp=key)
-        val = (_log_db(P @ fb.T), _log_db(P @ bb.T))
-        self._warp_cache[key] = val
-        if len(self._warp_cache) > 8:
-            self._warp_cache.popitem(last=False)
-        return val
+        hit = self._fb_cache.get(key)
+        if hit is None:
+            hit = (mel_filterbank(self.sr, self.n_fft, self.st["n_mels"], self.st["fmin"], self.st["fmax"], warp=key),
+                   broad_filterbank(self.sr, self.n_fft, warp=key))
+            self._fb_cache[key] = hit
+        return hit
 
     def _positions(self, i0: int, v: float, extra: int = 0) -> np.ndarray:
         """Absolute (fractional) competitor frame positions of the RAW-grid frames -extra .. m-1 of a
         window starting at comp frame i0 matched at speed v (m = round(n v))."""
         m = int(round(self.n * v))
-        return i0 + np.arange(-extra, m) / v
+        return np.clip(i0 + np.arange(-extra, m) / v, 0.0, self.Tc - 1.0)
 
-    def _interp_rows(self, F: np.ndarray, q: np.ndarray) -> np.ndarray:
-        """Rows of the [Tc, k] competitor feature F linearly interpolated at absolute positions q."""
-        q = np.clip(q, 0.0, F.shape[0] - 1.0)
-        j0 = np.floor(q).astype(np.int64)
+    @staticmethod
+    def _interp_rows(F: np.ndarray, q: np.ndarray, a: int = 0) -> np.ndarray:
+        """Rows of F (row 0 = absolute frame a) linearly interpolated at absolute positions q."""
+        rel = np.clip(q - a, 0.0, F.shape[0] - 1.0)
+        j0 = np.floor(rel).astype(np.int64)
         j1 = np.minimum(j0 + 1, F.shape[0] - 1)
-        fr = (q - j0).astype(np.float32)[:, None]
+        fr = (rel - j0).astype(np.float32)[:, None]
         return F[j0] * (1.0 - fr) + F[j1] * fr
+
+    def _rows(self, q: np.ndarray) -> tuple[int, int]:
+        return int(math.floor(q.min())), min(self.Tc, int(math.floor(q.max())) + 2)
 
     def comp_coarse(self, i0: int, v: float) -> np.ndarray:
         """Competitor coarse window starting at comp frame i0, time-scaled onto RAW frames at speed v
         (octave bands tape-warped by v; the onset envelope is pitch-invariant)."""
         q = self._positions(i0, v)
-        br = self.c["broad"] if abs(v - 1.0) < 1e-12 else self._warped(v)[1]
-        on = self._interp_rows(self.c["onset"][:, None], q)[:, 0]
-        return self._coarse_from(on, self._interp_rows(br, q), self.c_stats)
+        a, b = self._rows(q)
+        if abs(v - 1.0) < 1e-12:
+            br = self.c["broad"][a:b]
+        else:
+            br = _log_db(self.c["power"][a:b] @ self._fbs(v)[1].T)
+        on = self._interp_rows(self.c["onset"][a:b, None], q, a)[:, 0]
+        return self._coarse_from(on, self._interp_rows(br, q, a), self.c_stats)
 
     def comp_full(self, i0: int, v: float, hyp: str) -> np.ndarray:
         """Competitor delta-log-mel window at speed v on the RAW frame grid (tape: mel filters warped by
         v; tempo: unwarped). Deltas are taken AFTER time-scaling, like the RAW's."""
-        L = self._warped(v)[0] if (hyp == _TAPE and abs(v - 1.0) > 1e-12) else self.c["logmel"]
-        return np.diff(self._interp_rows(L, self._positions(i0, v, extra=1)), axis=0).astype(np.float32)
+        q = self._positions(i0, v, extra=1)
+        a, b = self._rows(q)
+        if hyp == _TAPE and abs(v - 1.0) > 1e-12:
+            L = _log_db(self.c["power"][a:b] @ self._fbs(v)[0].T)
+        else:
+            L = self.c["logmel"][a:b]
+        return np.diff(self._interp_rows(L, q, a), axis=0).astype(np.float32)
 
     def full_ncc(self, wf: np.ndarray, lags: np.ndarray) -> np.ndarray:
         """Full-feature NCC (delta log-mel, per-band mean removed) of wf [m, B] at RAW start frames
@@ -702,7 +803,7 @@ class _Aligner:
         if abs(v - 1.0) < 1e-12 and abs(a - round(a)) < 1e-9:
             s = self.comp_y[int(round(a)):int(round(a)) + m].astype(np.float32)
             return np.pad(s, (0, m - s.size)) if s.size < m else s
-        return resample_at(self.comp_y, a + np.arange(m) / v, cutoff=min(1.0, v))
+        return resample_at(self.comp_y, a + np.arange(m) / v, cutoff=min(1.0, v), half=8)
 
     def _align(self, chunk: np.ndarray, s0: float, search_s: float) -> tuple[float, float] | None:
         """Sub-sample offset (samples, relative to the expected RAW position s0) of ``chunk`` in the RAW
@@ -720,11 +821,12 @@ class _Aligner:
             return None
         return lo + j + _parabolic(s[j - 1], s[j], s[j + 1]) - s0, float(s[j])
 
-    def _line_fit(self, c0: float, v: float, r0: float, search_s: float) -> tuple[float, float] | None:
+    def _line_fit(self, c0: float, v: float, r0: float, search_s: float) -> tuple[float, float, float] | None:
         """Lag line lag(t) = a + b t of the window (tape-resampled at speed v) against the RAW around
         start r0: waveform lags of the 4 window quarters (±search_s, NCC >= _WAVE_MIN_PEAK) and a
-        robust line through them (>= 3 within 0.6 ms). Returns (a seconds, b) or None. Captures speed
-        errors up to ~0.3 % (beyond that the resampled quarters are pitch-mismatched and decorrelate)."""
+        robust line through them (>= 3 within 0.6 ms). Returns (a seconds, b, quality) with quality =
+        inliers + mean inlier NCC - rms residual / 0.6 ms, or None. Captures speed errors up to ~0.3 %; beyond that voiced
+        speech still correlates at pitch-period-shifted lags, which the quality score exposes."""
         sr = self.sr
         m = int(math.floor(self.W * v * sr))
         if m < 4 * 400:
@@ -732,22 +834,34 @@ class _Aligner:
         chunk = self._chunk(c0, v, m)
         h = m // 4
         pts: list[tuple[float, float]] = []
+        pks: list[float] = []
         for q in range(4):
             al = self._align(chunk[q * h:(q + 1) * h], r0 * sr + q * h, search_s)
             if al is not None:
                 pts.append(((q * h + h / 2.0) / sr, al[0] / sr))
-        return _robust_line(pts, tol=0.0006, max_slope=0.03, min_inliers=3)
+                pks.append(al[1])
+        fit = _robust_line(pts, tol=0.0006, max_slope=0.03, min_inliers=3)
+        if fit is None:
+            return None
+        a, b, inl = fit
+        x = np.array([p[0] for p in pts])[inl]
+        y = np.array([p[1] for p in pts])[inl]
+        rms = float(np.sqrt(np.mean((y - (a + b * x)) ** 2)))
+        # quality: inliers, mean inlier NCC, minus the residual in units of the tolerance
+        return a, b, float(inl.sum() + np.mean(np.asarray(pks)[inl]) - rms / 0.0006)
 
-    def refine(self, wi: int, res: _Res) -> _Res:
+    def refine(self, wi: int, res: _Res, hints: Sequence[float] = ()) -> _Res:
         """Sample-precise RAW time (and speed) on the 16 kHz waveform.
 
-        1. quarter-lag line fit (tape-style resampling of the window) at the found speed and, if it
-           does not converge, at speeds ±0.003·k (k <= 4: covers the ±0.01 grid uncertainty): gives
-           the start offset a and the speed v (1 + b) to ~1e-4;
-        2. polish with a second line fit and a whole-window NCC (±3 ms, parabolic sub-sample peak).
-        Without a line fit, a whole-window NCC within ±audio_refine_ms at the found speed; when the
-        waveform does not follow at all (pitch-preserving stretch, heavy added audio) the
-        feature-level estimate is kept. Sets res.raw_t / res.speed / res.wave_peak."""
+        Speed 1: whole-window NCC within ±audio_refine_ms (parabolic sub-sample peak) and a quarter
+        line fit that only checks for a drift. Other speeds: quarter-lag line fits (tape-style
+        resampling) at ``hints`` (refined speeds of neighbouring windows), the found speed and speeds
+        ±0.003·k (k <= 6, covers the feature-level uncertainty); the best fit by (inliers + mean
+        quarter NCC - residual/tolerance) wins (early exit at >= 4.5: four quarters on one line
+        within ~0.1 ms), giving start offset a and speed v (1 + b); then a polishing fit and a
+        whole-window NCC (±3 ms) that must reach 0.5 or the fit is discarded. When the waveform does
+        not follow (pitch-preserving stretch, heavy added audio) the feature-level estimate is kept.
+        Sets res.raw_t / res.speed / res.wave_peak."""
         sr = self.sr
         c0 = self.starts_s[wi]
         v0 = res.v
@@ -755,30 +869,49 @@ class _Aligner:
         v = v0
         wave_peak = float("nan")
         search = max(self.refine_s, 0.03)
-        fit = None
-        for k in (0, -1, 1, -2, 2, -3, 3, -4, 4):
-            vk = round(v0 + 0.003 * k, 6)
-            if vk <= 0.5 * self.vmin or (k and abs(vk - 1.0) < 1e-9 and abs(v0 - 1.0) > 0.02):
+        if abs(v0 - 1.0) < 1e-12:
+            # speed 1: plain slices -- whole-window NCC, then a quarter fit only to detect a drift
+            m = int(math.floor(self.W * sr))
+            al = self._align(self._chunk(c0, 1.0, m), r0 * sr, self.refine_s)
+            if al is not None:
+                r0 += al[0] / sr
+                f = self._line_fit(c0, 1.0, r0, 0.003)
+                if f is None or abs(f[1]) <= 0.003:
+                    res.raw_t = float(r0 + self.W / 2.0)
+                    res.speed = 1.0
+                    res.wave_peak = al[1]
+                    return res
+                r0 += f[0]
+                v0 = v = 1.0 + f[1]
+        best = None
+        cands = [float(h) for h in hints if abs(float(h) - v0) <= 0.02]
+        cands += [round(v0 + 0.003 * k, 6) for k in (0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6)]
+        for vk in cands:
+            if vk <= 0.5 * self.vmin:
                 continue
             f = self._line_fit(c0, vk, r0, search)
-            if f is not None:
-                fit = (vk, f)
-                break
-        if fit is not None:
-            vk, (a, b) = fit
-            r0 += a
-            v = vk * (1.0 + b)
-            f2 = self._line_fit(c0, v, r0, 0.003)
+            if f is not None and (best is None or f[2] > best[1][2]):
+                best = (vk, f)
+                if f[2] >= 4.5:          # 4 quarters on one line within ~0.1 ms at a good NCC
+                    break
+        if best is not None:
+            vk, (a, b, _q) = best
+            r1, v1 = r0 + a, vk * (1.0 + b)
+            f2 = self._line_fit(c0, v1, r1, 0.003)
             if f2 is not None and abs(f2[1]) < 0.003:
-                r0 += f2[0]
-                v = v * (1.0 + f2[1])
-        m = int(math.floor(self.W * v * sr))
-        al = self._align(self._chunk(c0, v, m), r0 * sr, 0.003 if fit is not None else self.refine_s) if m > 64 else None
-        if al is not None:
-            r0 += al[0] / sr
-            wave_peak = al[1]
+                r1 += f2[0]
+                v1 = v1 * (1.0 + f2[1])
+            m = int(math.floor(self.W * v1 * sr))
+            al = self._align(self._chunk(c0, v1, m), r1 * sr, 0.003) if m > 64 else None
+            if al is not None and al[1] >= 0.5:
+                r0, v, wave_peak = r1 + al[0] / sr, v1, al[1]
+        if not np.isfinite(wave_peak):
+            m = int(math.floor(self.W * v0 * sr))
+            al = self._align(self._chunk(c0, v0, m), r0 * sr, self.refine_s) if m > 64 else None
+            if al is not None:
+                r0, v, wave_peak = r0 + al[0] / sr, v0, al[1]
         speed = v
-        if abs(v0 - 1.0) < 1e-12 and abs(speed - 1.0) <= 0.003:
+        if abs(speed - 1.0) < 5e-4 or (abs(res.v - 1.0) < 1e-12 and abs(speed - 1.0) <= 0.003):
             speed = 1.0
         res.raw_t = float(r0 + v * self.W / 2.0)
         res.speed = float(speed)
@@ -787,9 +920,9 @@ class _Aligner:
 
 
 def _robust_line(pts: list[tuple[float, float]], tol: float, max_slope: float,
-                 min_inliers: int = 3) -> tuple[float, float] | None:
+                 min_inliers: int = 3) -> tuple[float, float, np.ndarray] | None:
     """Least-squares line y = a + b x through the largest consistent subset (>= min_inliers points
-    within tol) of a handful of points (all pairs tried); None if no such subset."""
+    within tol) of a handful of points (all pairs tried). Returns (a, b, inlier mask) or None."""
     if len(pts) < min_inliers:
         return None
     x = np.array([p[0] for p in pts])
@@ -803,23 +936,24 @@ def _robust_line(pts: list[tuple[float, float]], tol: float, max_slope: float,
             if abs(b) > max_slope:
                 continue
             a = y[i] - b * x[i]
-            inl = np.abs(y - (a + b * x)) <= tol
-            key = (int(inl.sum()), -float(np.abs(y - (a + b * x))[inl].sum()))
+            r = np.abs(y - (a + b * x))
+            inl = r <= tol
+            key = (int(inl.sum()), -float(r[inl].sum()))
             if best is None or key > best[0]:
                 best = (key, inl)
     if best is None or best[0][0] < min_inliers:
         return None
     inl = best[1]
     b, a = np.polyfit(x[inl], y[inl], 1)
-    if abs(b) > max_slope:
+    if abs(b) > max_slope or np.max(np.abs(y[inl] - (a + b * x[inl]))) > tol:
         return None
-    return float(a), float(b)
+    return float(a), float(b), inl
 
 
 def _null_floor(mu: float, sd: float, mx: float) -> float:
-    """Expected maximum of the full-feature NCC over the whole RAW for a window WITHOUT a genuine
-    match, from its mean/std at random lags (measured on speech and tonal material: mu + 4.5 sigma
-    keeps ~95 % of correct windows at conf >= 1.3 and ~2 % of wrong ones)."""
+    """Null level of the full-feature NCC for a window: the maximum over the random lags or mean +
+    4.5 std, whichever is larger (measured on speech and tonal material: ~95 % of correct windows
+    reach conf >= 1.3, ~2 % of windows without a genuine match do)."""
     return max(mx, mu + _NULL_Z * sd)
 
 
@@ -856,10 +990,15 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
     time-scaled window matched better (then the measured speed). ``conf`` = peak / second peak (>= 1
     means the best candidate beats both the runner-up outside ±0.3 s and the null-level maximum);
     confident windows are ``conf >= cfg.audio_min_conf``. Empty/silent audio -> ``AudioHints.empty()``."""
+    with single_thread_blas():
+        return _coarse_align(comp_y, raw_y, sr, cfg, dlog)
+
+
+def _coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog: DecisionLog | None) -> AudioHints:
+    """Implementation of ``coarse_align`` (runs with single-threaded BLAS)."""
     import time
     dlog = dlog or null_dlog()
-    comp_y = np.asarray(comp_y if comp_y is not None else np.zeros(0), np.float32).reshape(-1)
-    raw_y = np.asarray(raw_y if raw_y is not None else np.zeros(0), np.float32).reshape(-1)
+    comp_y, raw_y = _mono(comp_y), _mono(raw_y)
     t0 = time.perf_counter()
     if comp_y.size == 0 or raw_y.size == 0 or _rms(comp_y) < _SILENT_RMS or _rms(raw_y) < _SILENT_RMS:
         dlog.record("audio_align", "no_audio", comp_samples=int(comp_y.size), raw_samples=int(raw_y.size))
@@ -872,7 +1011,7 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
     mc = A.min_conf
     res: list[_Res | None] = [None] * N
     live = [i for i in range(N) if A.energy_ok[i]]
-    # ---- pass 1: speed 1.00, batched coarse curves --------------------------------------------
+    # ---- pass 1: speed 1.00 on every audible window -----------------------------------------------
     for b0 in range(0, len(live), 32):
         idx = live[b0:b0 + 32]
         curves = A.corr.ncc_multi([A.comp_coarse(A.i0[i], 1.0) for i in idx])
@@ -882,10 +1021,11 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
     # ---- pass 1b: slight speed changes on windows that matched at 1.00 --------------------------
     for i in live:
         r = res[i]
-        if r is None or not r.ok(mc):
-            continue
+        if r is None or not r.ok(mc) or r.peak >= 0.9:
+            continue           # an excellent 1.00 match leaves no room for a speed change
         vb, sb, _ = A.local_sweep(i, r, 0.05)
-        if abs(vb - 1.0) > 1e-9 and sb > r.peak + 0.01:
+        # time-scaled (interpolated) features are slightly smoother, so leaving 1.00 needs a clear gain
+        if abs(vb - 1.0) > 1e-9 and sb > r.peak + 0.03:
             r2 = A.evaluate(i, vb)
             if _better(r2, r, mc):
                 res[i] = r2
@@ -983,6 +1123,7 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
     psr = np.zeros(N, np.float32)
     peak = np.zeros(N, np.float32)
     evid = []
+    last_refined: float | None = None
     for i in range(N):
         r = res[i]
         if r is None:
@@ -993,7 +1134,9 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
         peak[i] = r.peak
         if r.conf > 1.0:
             if r.ok(mc):
-                A.refine(i, r)
+                A.refine(i, r, hints=[s for s in (last_refined,) if s is not None])
+                if np.isfinite(r.wave_peak) and abs(r.speed - 1.0) > 1e-9:
+                    last_refined = r.speed
             else:
                 r.raw_t = float(r.lag / A.rate + r.v * A.W / 2.0)
                 r.speed = r.v
@@ -1003,7 +1146,8 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
             speed[i] = r.v
         evid.append({"i": i, "comp_t": round(float(comp_t[i]), 3), "raw_t": None if not np.isfinite(raw_t[i]) else round(float(raw_t[i]), 6),
                      "speed": round(float(speed[i]), 5), "hyp": r.hyp, "peak": round(r.peak, 4),
-                     "second": round(r.second, 4), "null_floor": round(r.floor, 4), "conf": round(float(r.conf), 3),
+                     "second": round(r.second, 4), "null_floor": round(r.floor, 4), "coarse": round(r.coarse, 4),
+                     "conf": round(float(r.conf), 3),
                      "psr": round(r.psr, 2), "wave_peak": None if not np.isfinite(r.wave_peak) else round(r.wave_peak, 4)})
     hints = AudioHints(comp_t=comp_t, raw_t=raw_t, speed=speed, conf=conf.astype(np.float32),
                        psr=psr.astype(np.float32), peak=peak.astype(np.float32), window=float(A.W), hop=float(A.hop))
@@ -1018,10 +1162,16 @@ def coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog:
     return hints
 
 
-def _rms(y: np.ndarray) -> float:
+def _rms(y: np.ndarray, chunk: int = 1 << 20) -> float:
+    """RMS without a full-size float64 temporary (RAWs can be hours long)."""
+    y = np.asarray(y).reshape(-1)
     if y.size == 0:
         return 0.0
-    return float(np.sqrt(np.mean(np.square(y, dtype=np.float64))))
+    acc = 0.0
+    for i in range(0, y.size, chunk):
+        c = y[i:i + chunk].astype(np.float64)
+        acc += float(np.dot(c, c))
+    return math.sqrt(acc / y.size)
 
 
 # =============================================================================================
@@ -1165,6 +1315,58 @@ def pitch_shift_test(comp_part: np.ndarray, raw_part: np.ndarray, v: float, sr: 
     return out
 
 
+def feature_pitch_test(comp_part: np.ndarray, raw_part: np.ndarray, v: float, sr: int, cfg: Any) -> dict:
+    """Time-aligned evidence for a speed-v segment: delta-log-mel NCC between the competitor audio
+    (time-scaled onto the RAW frame grid) and the RAW audio it plays, with the competitor's mel filters
+    warped by v (tape: pitch follows speed) or not (pitch preserved). Also tells whether the segment's
+    audio is related to the RAW at all. Returns {'ncc_tape', 'ncc_tempo', 'related', 'pitch_preserved'}."""
+    out: dict[str, Any] = {"ncc_tape": None, "ncc_tempo": None, "related": False, "pitch_preserved": None}
+    if v <= 0 or comp_part.size < sr // 4 or raw_part.size < sr // 4:
+        return out
+    fc = _spectral(np.asarray(comp_part, np.float32), sr, cfg, keep_power=True)
+    fr = _spectral(np.asarray(raw_part, np.float32), sr, cfg)
+    Tr, Tc = fr["logmel"].shape[0], fc["logmel"].shape[0]
+    if Tr < 8 or Tc < 8:
+        return out
+    q = np.clip(np.arange(Tr) / v, 0.0, Tc - 1.0)
+    j0 = np.floor(q).astype(np.int64)
+    j1 = np.minimum(j0 + 1, Tc - 1)
+    w = (q - j0)[:, None]
+    st = _feature_setup(sr, cfg)
+    R = _delta(fr["logmel"]).astype(np.float64)
+    R -= R.mean(0)
+    res = {}
+    for hyp, L in ((_TAPE, _log_db(fc["power"] @ mel_filterbank(sr, fc["n_fft"], st["n_mels"], st["fmin"], st["fmax"], warp=v).T)),
+                   (_TEMPO, fc["logmel"])):
+        Ci = L[j0] * (1.0 - w) + L[j1] * w
+        C = _delta(Ci).astype(np.float64)
+        C -= C.mean(0)
+        den = math.sqrt(float(np.sum(C * C)) * float(np.sum(R * R)))
+        res[hyp] = float(np.sum(C * R) / den) if den > 0 else 0.0
+    out["ncc_tape"], out["ncc_tempo"] = round(res[_TAPE], 4), round(res[_TEMPO], 4)
+    best = max(res.values())
+    out["related"] = bool(best >= 0.4)
+    if out["related"] and abs(math.log2(v)) * 48 >= 2.0:
+        if res[_TAPE] - res[_TEMPO] > 0.05:
+            out["pitch_preserved"] = False
+        elif res[_TEMPO] - res[_TAPE] > 0.05:
+            out["pitch_preserved"] = True
+    return out
+
+
+def _pitch_decision(spectral: dict, feat: dict) -> bool | None:
+    """Combine the spectral-shift and time-aligned feature tests: only for audio related to the RAW;
+    agreement (or one undecided) decides, disagreement -> None."""
+    if not feat.get("related"):
+        return None
+    a, b = spectral.get("pitch_preserved"), feat.get("pitch_preserved")
+    if a is None:
+        return b
+    if b is None or a == b:
+        return a
+    return None
+
+
 def _classify_added(res: np.ndarray, sr: int, frame: int) -> str:
     """music | voice_over | sfx from the residual signal of one added-audio run."""
     dur = res.size / sr
@@ -1203,18 +1405,26 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
       p - cut (negative = J-cut: B's audio leads; positive = L-cut: A's audio trails).
     * lag_ms / corr: ``xcorr_lag(competitor, rebuilt)`` over the segment's audio range (crossfade
       overlaps excluded): positive lag = rebuilt late.
-    * pitch_preserved: speed != 1 only (``pitch_shift_test``), else None.
+    * pitch_preserved: stretch segments with speed != 1 only, else None: ``pitch_shift_test``
+      (spectral shift) combined with ``feature_pitch_test`` (time-aligned tape vs unwarped features,
+      which also requires the audio to be related to the RAW); disagreement or unrelated -> None.
     * added_audio: residual (competitor - gain * lag-compensated rebuilt) energy frames above
       ``cfg.audio_added_thresh_db`` (default -20 dB) relative to the rebuilt track, median-smoothed,
       merged across unobservable ranges (NOT-IN-RAW, dips, crossfades); level_db = residual level
       relative to the original (rebuilt) audio in the run, level_dbfs = absolute.
     * exception (closed list): not_in_raw, no_audio, audio_replaced, pitch_preserved,
       music_dominated, too_short -- set when the segment's audio does not line up and why."""
+    with single_thread_blas():
+        return _analyze_segments_audio(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog)
+
+
+def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
+                           comp_fps: Any, cfg: Any, dlog: DecisionLog | None) -> dict:
+    """Implementation of ``analyze_segments_audio`` (runs with single-threaded BLAS)."""
     dlog = dlog or null_dlog()
     fps = parse_fps(comp_fps)
     sr = int(sr)
-    comp = np.asarray(comp_y if comp_y is not None else np.zeros(0), np.float32).reshape(-1)
-    raw = np.asarray(raw_y if raw_y is not None else np.zeros(0), np.float32).reshape(-1)
+    comp, raw = _mono(comp_y), _mono(raw_y)
     segs = sorted(segments, key=lambda s: (s.comp_in, s.id))
     min_corr = float(_cfg(cfg, "audio_replaced_corr", 0.3))
     tol_ms = float(_cfg(cfg, "audio_lag_tol_ms", 10.0))
@@ -1330,6 +1540,7 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
 
     # ---- per-segment lag / corr over the final audio range + pitch -----------------------------
     ranges: dict[int, tuple[int, int]] = {}
+    silent: dict[int, str] = {}
     for s in segs:
         if s.id not in models:
             continue
@@ -1341,6 +1552,12 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
         if b - a < int(0.1 * sr):
             continue
         rb = models[s.id].render(raw, sr, a, b)
+        if _rms(comp[a:b]) < _SILENT_RMS:
+            silent[s.id] = "competitor"
+            continue
+        if _rms(rb) < _SILENT_RMS:
+            silent[s.id] = "rebuilt"          # e.g. a freeze: AE plays no audio, the competitor does
+            continue
         lag, pk = xcorr_lag(comp[a:b], rb, sr, _MAX_LAG_SEG_S)
         out[s.id]["lag_ms"] = round(lag * 1000.0, 3)
         out[s.id]["corr"] = round(pk, 4)
@@ -1349,9 +1566,12 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
             r0 = m.raw_seconds(np.array([a / sr]))[0]
             r1 = m.raw_seconds(np.array([b / sr]))[0]
             ra, rb_ = int(round(r0 * sr)), int(round(r1 * sr))
-            pt = pitch_shift_test(comp[a:b], raw[max(0, ra):max(0, rb_)], m.v, sr)
-            out[s.id]["pitch_preserved"] = pt["pitch_preserved"]
-            dlog.record("audio_segments", "pitch", seg=s.id, speed=m.v, **pt)
+            cpart, rpart = comp[a:b], raw[max(0, ra):max(0, rb_)]
+            pt = pitch_shift_test(cpart, rpart, m.v, sr)
+            fm = feature_pitch_test(cpart, rpart, m.v, sr, cfg)
+            out[s.id]["pitch_preserved"] = _pitch_decision(pt, fm)
+            dlog.record("audio_segments", "pitch", seg=s.id, speed=m.v, spectral=pt, features=fm,
+                        pitch_preserved=out[s.id]["pitch_preserved"])
         lag0[s.id] = lag if pk >= min_corr else lag0.get(s.id, 0.0)
 
     # ---- run status -----------------------------------------------------------------------------
@@ -1369,8 +1589,8 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
             continue
         a, b = ranges[s.id]
         b = min(b, n_total)
-        if b <= a:
-            continue
+        if b <= a or out[s.id]["pitch_preserved"]:
+            continue       # a pitch-preserving stretch is RAW audio the tape rebuild cannot explain
         g = 0.0
         rb = models[s.id].render(raw, sr, a, b, lag0.get(s.id, 0.0))
         if status != "audio_replaced":
@@ -1383,8 +1603,9 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
         rebuilt[:] = 0.0
     added = _added_audio(comp[:n_total], rebuilt, observable, sr, fps, n_frames, thr_db, dlog)
     for ad in added:
+        rel = f"{ad['level_db']:+.1f} dB re original, " if ad["level_db"] is not None else ""
         notes.append(f"added {ad['type']} comp frames {ad['comp_in']}-{ad['comp_out'] - 1} "
-                     f"({ad['level_db']:+.1f} dB re original, {ad['level_dbfs']:.1f} dBFS)")
+                     f"({rel}{ad['level_dbfs']:.1f} dBFS)")
 
     # ---- exceptions ------------------------------------------------------------------------------
     for s in segs:
@@ -1399,7 +1620,11 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
         corr, lag = o["corr"], o["lag_ms"]
         good = corr is not None and corr >= min_corr and lag is not None and abs(lag) <= tol_ms
         exc = None
-        if status == "audio_replaced":
+        if s.id in silent:
+            s0, s1 = s.comp_in, s.comp_out
+            over = any(ad["comp_in"] < s1 and ad["comp_out"] > s0 for ad in added)
+            exc = "no_audio" if silent[s.id] == "competitor" else ("music_dominated" if over else "audio_replaced")
+        elif status == "audio_replaced":
             exc = "audio_replaced"
         elif o["pitch_preserved"]:
             exc = "pitch_preserved"

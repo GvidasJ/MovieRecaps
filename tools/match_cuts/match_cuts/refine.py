@@ -419,9 +419,12 @@ def _w_resid(state: dict, task: tuple) -> np.ndarray:
     base = cv2.erode(base, ker, borderType=cv2.BORDER_CONSTANT, borderValue=0) > 0
     if base.sum() < 64:
         return out
-    A = np.c_[wr[base], np.ones(int(base.sum()), np.float32)]
-    coef, *_ = np.linalg.lstsq(A.astype(np.float64), c[base].astype(np.float64), rcond=None)
-    res = np.abs(c - (coef[0] * wr + coef[1]))
+    xv = wr[base].astype(np.float64)
+    yv = c[base].astype(np.float64)
+    xm, ym = xv.mean(), yv.mean()
+    vx = float(((xv - xm) ** 2).sum())
+    gain = float(((xv - xm) * (yv - ym)).sum()) / vx if vx > 1e-9 else 0.0
+    res = np.abs(c - (gain * wr + (ym - gain * xm)))       # least-squares gain/offset fit
     res[~base] = 0
     return np.clip(res, 0, 255).astype(np.uint8)
 
@@ -459,8 +462,8 @@ def _masks_from_residuals_local(residuals: dict[int, np.ndarray], base_allowed: 
         return {}
     y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1       # work inside the allowed bbox
     hi = np.stack([np.asarray(residuals[k])[y0:y1, x0:x1] >= cfg.overlay_resid_thresh for k in ks])
+    flat = hi.reshape(len(ks), -1)
     kk = np.array(ks)
-    csum = np.concatenate([np.zeros((1,) + hi.shape[1:], np.int32), np.cumsum(hi, axis=0, dtype=np.int32)])
     lo_i = np.searchsorted(kk, kk - 3, side="left")
     hi_i = np.searchsorted(kk, kk + 3, side="right")
     d = int(cfg.overlay_dilate_px)
@@ -469,12 +472,16 @@ def _masks_from_residuals_local(residuals: dict[int, np.ndarray], base_allowed: 
     area = max(1, int(base_allowed.sum()))
     out: dict[int, np.ndarray] = {}
     for i, k in enumerate(ks):
-        if not hi[i].any():
+        idx = np.flatnonzero(flat[i])
+        if idx.size == 0:
             continue
-        cnt = csum[hi_i[i]] - csum[lo_i[i]]
-        m = hi[i] & (cnt >= min(int(cfg.overlay_min_frames), int(hi_i[i] - lo_i[i])))
-        if not m.any():
+        cnt = flat[lo_i[i]:hi_i[i], idx].sum(axis=0)          # temporal support of the flagged pixels
+        keep = idx[cnt >= min(int(cfg.overlay_min_frames), int(hi_i[i] - lo_i[i]))]
+        if keep.size == 0:
             continue
+        m = np.zeros(flat.shape[1], bool)
+        m[keep] = True
+        m = m.reshape(hi.shape[1:])
         m8 = m.astype(np.uint8)
         if ker is not None:
             m8 = cv2.dilate(m8, ker)
@@ -1321,8 +1328,6 @@ def build_frame_map(comp: Proxy, raw: Proxy, layout: Layout | None, overlays: An
             dlog.record("refine", "cache_hit", key=key)
             log.info("frame map: cache hit %s", key)
             return fm
-    if index is not None:
-        index.ensure_built()
     ref = _Refiner(comp, raw, layout, overlays, anchors, hints, index, cfg, dlog, allowed, rfn)
     fm = ref.run(debug_dir)
     if cache is not None and key is not None:

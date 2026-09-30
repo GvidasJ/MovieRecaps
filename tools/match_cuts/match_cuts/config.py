@@ -68,6 +68,11 @@ class Config:
     audio_speed_max: float = 1.30
     audio_speed_step: float = 0.01
     audio_refine_ms: float = 50.0
+    audio_fmin: float = 80.0               # log-mel lower edge (Hz)
+    audio_fmax: float = 7600.0             # log-mel upper edge (Hz); also capped at 0.49*sr/audio_speed_max
+    audio_replaced_corr: float = 0.30      # per-segment xcorr peak below which the audio does not follow RAW
+    audio_jl_max_s: float = 1.0            # max J/L audio offset searched at a hard cut (s)
+    audio_added_thresh_db: float = -20.0   # residual level (re the rebuilt original) that counts as added audio
 
     # ---- visual search (Stage 5.2) ------------------------------------------------------
     sift_nfeatures: int = 500
@@ -110,6 +115,15 @@ class Config:
     min_segment_frames: int = 1
     lambda_cut: float = 1.0                # DP cost per cut
     lambda_unsnapped: float = 3.0          # DP cost of a segment whose speed cannot be snapped (> lambda_cut)
+    lambda_nondominant: float = 1.5        # DP cost of a snapped speed other than the dominant one / 1.0 (> lambda_cut)
+    lambda_one: float = 0.25               # DP cost of speed 1.0 when it is not the edit's dominant speed
+    lambda_drop: float = 0.4               # DP cost per tolerated isolated low-margin frame
+    lambda_tie: float = 0.05               # DP cost when a segment is feasible only at a timing tie
+    dp_max_consecutive_fail: int = 6       # DP inner-loop break after this many infeasible ranges in a row
+    transition_stop_after: int = 3         # crossfade scan stops after this many consecutive non-blend frames per side
+    segment_score_max_pixels: int = 60000  # pixel cap (regular subsample) for blend fits / cross-transform ZNCC
+    scenedetect: bool = True               # run the PySceneDetect cross-check (decodes the competitor once, cached)
+    scenedetect_min_len: int = 2           # min scene length (frames); the default 15 hides close cuts
     link_scale_tol: float = 0.005          # anchors join a track only within 0.5 % scale ...
     link_pos_tol: float = 2.0              # ... and 2 px (comp full res) after the track trend
     punch_scale_step: float = 0.01         # transform step between frames that is a cut (punch-in)
