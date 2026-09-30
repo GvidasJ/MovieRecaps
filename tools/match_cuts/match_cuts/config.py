@@ -1,0 +1,132 @@
+"""Run configuration + every tunable threshold in one place (DESIGN.md §4).
+
+Thresholds are tuned on the synthetic test (tests/test_synthetic.py); change them here, never inline.
+"""
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class Config:
+    # ---- I/O -----------------------------------------------------------------------------
+    competitor: str = "./input/competitor.mp4"
+    raw: str = "./input/raw.mp4"
+    out_dir: str = "./output"
+    work_dir: str = "./work"
+    layout_mode: str = "match"             # match | fill | source
+    comp_size: str = "competitor"          # 'competitor' or 'WxH'
+    fps_mode: str = "competitor"           # competitor | source
+    force_conform: bool = False            # conform RAW even if AE-safe (testing)
+    conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT <= 10 min)
+    large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
+    workers: int = 0                       # 0 = os.cpu_count()
+    verbose: bool = False
+    seed: int = 12345
+    skip_preview: bool = False             # tests may skip long renders
+    skip_compare: bool = False
+
+    # ---- proxies (Stage 3) --------------------------------------------------------------
+    raw_proxy_width: int = 640             # upper bound; lowered for long RAWs to fit the byte budget
+    comp_proxy_scale: float = 0.5          # competitor proxy = this fraction of full res
+    comp_proxy_max_width: int = 640
+    proxy_budget_bytes: int = 3 * 1024 ** 3
+    min_proxy_width: int = 256
+    audio_sr: int = 16000
+
+    # ---- layout (Stage 4) ---------------------------------------------------------------
+    static_std_thresh: float = 2.0         # temporal std (8-bit) below which a pixel is static
+    dynamic_frac_thresh: float = 0.5       # row/col fraction of dynamic px to belong to the box
+    overlay_dilate_px: int = 3             # at comp proxy res
+    overlay_resid_thresh: float = 40.0     # |comp - warped raw| (8-bit) for residual-overlay detection
+    overlay_min_frames: int = 3
+
+    # ---- audio (Stage 5.1) --------------------------------------------------------------
+    audio_window: float = 1.0
+    audio_hop: float = 0.25
+    audio_feat_rate: int = 100             # Hz
+    audio_n_mels: int = 40
+    audio_min_conf: float = 1.3            # peak / second-peak ratio for a confident window
+    audio_speed_min: float = 0.90
+    audio_speed_max: float = 1.30
+    audio_speed_step: float = 0.01
+    audio_refine_ms: float = 50.0
+
+    # ---- visual search (Stage 5.2) ------------------------------------------------------
+    sift_nfeatures: int = 500
+    raw_index_fps_short: float = 10.0      # RAW index sampling rate for RAW <= 10 min
+    raw_index_fps_long: float = 3.0        # for longer RAWs
+    comp_search_stride: int = 3            # sparse competitor frames searched globally
+    vote_knn: int = 5
+    vote_top_candidates: int = 8
+    lowe_ratio: float = 0.75
+    ransac_reproj_px: float = 3.0          # at proxy res
+    min_inliers: int = 25
+    min_inlier_ratio: float = 0.30
+    audio_restrict_s: float = 2.0          # search +- this around a confident audio hint
+
+    # ---- refinement (Stage 5.3) ---------------------------------------------------------
+    refine_radius: int = 3                 # evaluate m-3 .. m+3
+    track_search_radius: int = 8           # when propagating a track to a new frame
+    score_blur: float = 1.0
+    grad_weight: float = 0.0               # >0 adds gradient-magnitude ZNCC (graded material)
+    match_thresh: float = 0.90             # masked ZNCC needed to accept a match (tuned on synthetic)
+    none_thresh: float = 0.60              # below this for every hypothesis -> NONE candidate
+    identical_thresh: float = 0.9995       # RAW-vs-RAW ZNCC above which neighbours are 'identical'
+    ambiguous_eps: float = 0.002           # score gap below which two RAW frames are indistinguishable
+    uniform_std: float = 4.0               # region luma std below which a frame is UNIFORM
+    ecc_iterations: int = 60
+    ecc_eps: float = 1e-5
+
+    # ---- segmentation (Stage 5.4 / 6) ---------------------------------------------------
+    speed_snap_values: tuple = (1.0, 1.05, 1.10, 1.15, 1.20, 1.25, 1.50, 2.00,
+                                1 / 1.05, 1 / 1.10, 1 / 1.15, 1 / 1.20, 1 / 1.25, 1 / 1.50, 0.5)
+    speed_snap_tol: float = 0.003
+    min_segment_frames: int = 1
+    transition_search: int = 20            # frames either side of a cut examined for blends
+    blend_min_gain: float = 0.02           # blend ZNCC must beat both single sources by this
+    framing_scale_spread: float = 0.003    # < -> constant framing
+    framing_pos_spread: float = 1.5        # px at comp full res
+    framing_sample_step: int = 3
+    rdp_pos_tol: float = 0.5               # px (comp full res)
+    rdp_scale_tol: float = 0.001           # relative
+    rotation_min_deg: float = 0.2
+    scenedetect_adaptive: float = 2.0
+    scenedetect_content: float = 15.0
+
+    # ---- verification (Stage 9) ---------------------------------------------------------
+    verify_zncc: float = 0.90
+    audio_lag_tol_ms: float = 10.0
+    frame_exact_min: float = 0.99
+
+    def resolved_workers(self) -> int:
+        import os
+        return self.workers or max(1, (os.cpu_count() or 2))
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    def analysis_params(self) -> dict:
+        """Parameters that influence analysis results (cache keys). Excludes paths/verbosity."""
+        d = self.to_dict()
+        for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare"):
+            d.pop(k, None)
+        return d
+
+    @property
+    def out(self) -> Path:
+        return Path(self.out_dir)
+
+    @property
+    def work(self) -> Path:
+        return Path(self.work_dir)
+
+    @property
+    def debug_dir(self) -> Path:
+        return Path(self.out_dir) / "debug"
+
+    @property
+    def media_dir(self) -> Path:
+        return Path(self.out_dir) / "media"

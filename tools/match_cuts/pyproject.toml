@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "match_cuts"
+version = "0.1.0"
+description = "Rebuild a short-form competitor edit frame-exactly from its RAW source and export an After Effects project"
+requires-python = ">=3.10"
+
+[project.scripts]
+match-cuts = "match_cuts.cli:main"
+
+[tool.setuptools]
+packages = ["match_cuts"]
+
+[tool.setuptools.package-data]
+match_cuts = ["ae_mock/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: end-to-end tests that generate and process synthetic video (minutes)"]

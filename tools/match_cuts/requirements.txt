@@ -1,0 +1,13 @@
+numpy>=1.26
+scipy>=1.11
+opencv-contrib-python-headless>=4.9   # or opencv-contrib-python; never both, and never alongside opencv-python
+scikit-image>=0.22
+av>=12
+soundfile>=0.12
+matplotlib>=3.8
+tqdm>=4.66
+opentimelineio>=0.17
+otio-fcp-adapter
+otio-cmx3600-adapter
+pytest>=8
+# scenedetect must be installed WITHOUT its opencv extra:  pip install --no-deps scenedetect click platformdirs
