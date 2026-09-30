@@ -193,7 +193,10 @@ _FULL_CHAINS = (
     ChainSpec("jump_cut", shot=0, off=160, n=75, note="same-shot jump cut (skips ~10 RAW frames)"),
     ChainSpec("normal", shot=1, off=50, n=85),
     ChainSpec("flip", shot=2, off=50, n=70, flip=True),
-    ChainSpec("fullscreen", shot=10, off=350, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
+    # fullscreen: a pure Game-of-Life shot -- its cells stay SIFT-matchable at the 2.7x proxy scale ratio of the
+    # full-canvas cover scale (measured over all 30 frames: >= 54 inliers, margin >= 0.08; the rotating testsrc2
+    # shot gave 29 inliers)
+    ChainSpec("fullscreen", shot=9, off=200, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
     ChainSpec("normal", shot=3, off=50, n=80),
     ChainSpec("jump_cut", shot=3, off=140, n=60, note="same-shot jump cut (skips ~10 RAW frames)"),
     ChainSpec("pushin", shot=4, off=50, n=100, push_end=1.12),
@@ -217,7 +220,7 @@ _MINI_CHAINS = (
     ChainSpec("jump_cut", shot=0, off=62, n=30, note="same-shot jump cut (skips ~6 RAW frames)"),
     ChainSpec("normal", shot=1, off=10, n=36),
     ChainSpec("flip", shot=2, off=10, n=30, flip=True),
-    ChainSpec("fullscreen", shot=10, off=110, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
+    ChainSpec("fullscreen", shot=9, off=85, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
     ChainSpec("normal", shot=3, off=10, n=32),
     ChainSpec("jump_cut", shot=3, off=48, n=28, note="same-shot jump cut (skips ~6 RAW frames)"),
     ChainSpec("pushin", shot=4, off=10, n=45, push_end=1.12),

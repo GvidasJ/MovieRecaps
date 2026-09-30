@@ -125,7 +125,8 @@ def render_stack(n: int = N_FRAMES, box: tuple = TRUTH_BOX, captions=CAPTIONS, f
             # a RAW-like burned-in number that changes every frame (all digits: none is static over the clip)
             put_outlined(content, f"{(k * 13721 + 24680) % 100000:05d}", (x + 300, y + 200), 2.5, (255, 255, 255), 2, 6)
         # the "RAW" frame shown in the box (identity geometry: RAW = W x H), as a half-size proxy
-        raw.append(cv2.resize(cv2.cvtColor(content, cv2.COLOR_BGR2GRAY), (W // 2, H // 2), interpolation=cv2.INTER_AREA))
+        raw.append(cv2.resize(cv2.cvtColor(content, cv2.COLOR_BGR2GRAY), (W // 2, H // 2),
+                              interpolation=cv2.INTER_AREA))
         fs = fullscreen is not None and fullscreen[0] <= k < fullscreen[1]
         if fs:
             img = content.copy()
@@ -634,7 +635,8 @@ def identity_frame_map(n: int, sim=None, status: np.ndarray | None = None):
 
 def raw_proxy(frames: np.ndarray, full_size: tuple[int, int]) -> Proxy:
     n, h, w = frames.shape
-    return Proxy("raw", "", frames, full_size, (w / full_size[0], h / full_size[1]), Fraction(30), np.arange(n) / 30.0, n)
+    return Proxy("raw", "", frames, full_size, (w / full_size[0], h / full_size[1]), Fraction(30),
+                 np.arange(n) / 30.0, n)
 
 
 def draw_canvas(level: int = 0) -> np.ndarray:
@@ -688,7 +690,7 @@ def raw_backed_scene(kind: str, n: int = 24, box: tuple = TRUTH_BOX, canvas_leve
             identity_frame_map(n, sim), sim)
 
 
-def review_talking_head(n: int = 60, box: tuple = TRUTH_BOX, noise: float = 1.0, seed: int = 0) -> np.ndarray:
+def review_talking_head(n: int = 40, box: tuple = TRUTH_BOX, noise: float = 1.0, seed: int = 0) -> np.ndarray:
     """The review's scene (real-world:F3): black canvas + title; inside the rounded box a static textured
     background with a moving textured ellipse (the 'head') and a caption; Gaussian noise."""
     rng = np.random.default_rng(seed)
@@ -707,7 +709,7 @@ def review_talking_head(n: int = 60, box: tuple = TRUTH_BOX, noise: float = 1.0,
         content[m > 0] = mov[m > 0]
         img = canvas.copy()
         img[hole] = content[hole]
-        if 20 <= k < 40:
+        if 12 <= k < 28:
             put_outlined(img, "WORD", caption_org("WORD", box), 2.4, (255, 255, 255), 2, 6)
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) + rng.normal(0, noise, (FULL_H, FULL_W))
         frames.append(cv2.resize(np.clip(g, 0, 255).astype(np.uint8), (FULL_W // 2, FULL_H // 2),
@@ -739,6 +741,26 @@ def test_initial_detection_static_background_talking_head(tmp_path, noise):
     assert "title" in [z.type for z in lay.zones]
     # the static picture inside the box is video, not an overlay zone
     assert not [z for z in lay.zones if z.static and z.y >= TRUTH_BOX[1] and z.y + z.h <= TRUTH_BOX[1] + TRUTH_BOX[3]]
+
+
+def test_initial_detection_ignores_drop_shadow(tmp_path):
+    """The static-picture rule must not take a smooth drop shadow around the box (static, non-canvas, a
+    clean rounded rectangle too — but without fine detail) for video."""
+    hole = hole_mask(FULL_W, FULL_H, TRUTH_BOX)
+    dist = cv2.distanceTransform((~hole).astype(np.uint8), cv2.DIST_L2, 5)
+    base = np.clip(90.0 - np.clip(1 - dist / 40.0, 0, 1) * 70.0, 0, 255).astype(np.float32)
+    tex = texture(FULL_W, FULL_H, 3)
+    frames = []
+    for k in range(24):
+        ox, oy = (5 * k) % 380, (3 * k) % 380
+        img = base.copy()
+        img[hole] = tex[oy:oy + FULL_H, ox:ox + FULL_W][hole]
+        frames.append(cv2.resize(np.clip(img, 0, 255).astype(np.uint8), (FULL_W // 2, FULL_H // 2),
+                                 interpolation=cv2.INTER_AREA))
+    lay, _ov = analyze(make_proxy(np.stack(frames), (FULL_W, FULL_H)), tmp_path)
+    assert not boxes_equal(lay.box, TRUTH_BOX, tol=2.0, rtol=4.0), lay.box
+    assert not decisions(tmp_path / "decisions.jsonl", "box_static_region")
+    assert "box_shadow" in lay.background
 
 
 def test_refine_box_from_raw_talking_head(tmp_path):

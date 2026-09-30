@@ -12,7 +12,11 @@ Algorithm (``analyze_layout``):
    of the reference region (outside that region) that deviates from the canvas -> frames that do not
    show the dominant layout (fullscreen video, full-canvas flashes) are found and excluded from the
    temporal statistics. The static mask is ``temporal std < cfg.static_std_thresh`` over the remaining
-   frames (all frames when the layout never changes), saved as ``.npy`` (True = static).
+   frames (all frames when the layout never changes), saved as ``.npy`` (True = static). Fullscreen
+   periods (``Layout.periods``, exact frame boundaries, box = the whole canvas; consumed per segment by
+   D1): > NONDOM_FRAC of the canvas region changed by > DEV_LEVEL, or — a dark shot over a black canvas —
+   > NONDOM_FRAC_LO changed by > DEV_LEVEL_LO with a mean change the statistics exclude; uniform
+   full-canvas frames (flash / dip) stay in the dominant layout.
 2. **Video box.** Dynamic pixels (std >= thresh) -> largest connected component -> bbox trimmed with
    row / column dynamic fractions (``cfg.dynamic_frac_thresh``). Each edge is located to sub-pixel
    precision on the temporal MEAN image: the mean is linear in the pixel coverage (area-averaged
@@ -25,7 +29,10 @@ Algorithm (``analyze_layout``):
    ``M = S (1 - C_r) + (P0 + P1 x + P2 y) C_r`` (per-corner linear levels, shared r; 1 px grid, then
    0.1 / 0.02 px refinement). When the whole frame moves (box over a blurred copy of the video) the box
    is the region clearly more active (temporal std) — or sharper (high-frequency energy) — than its
-   surroundings. Edges are snapped to integers when within 0.25 full-res px (measured values logged).
+   surroundings. A locked-off shot (talking head, podcast) has a static background: when a static
+   TEXTURED picture encloses the moving subject and forms a clean rounded rectangle on a uniform canvas
+   (:func:`_static_video_region`), that rectangle is the box (edges from the mean image only).
+   Edges are snapped to integers when within 0.25 full-res px (measured values logged).
    Border stroke / shadow hugging the box are measured from the static ring profile outside the box.
    Further dynamic components: large ones -> ``Layout.extra_regions`` (split screen / PiP, with
    per-frame activity -> ``periods``), small ones -> dynamic zones (progress bar / sticker).
@@ -58,6 +65,11 @@ Algorithm (``analyze_layout``):
 
 Cached (``Cache``, stage ``layout``) by the proxy content id + ``cfg.analysis_params()``.
 Every decision is logged with its evidence in the DecisionLog.
+
+After the first FrameMap, :func:`refine_box_from_raw` (DESIGN §7 D2) re-measures the box against the
+matched RAW frames — static content inside the box (a locked-off background, letterbox bars) matches RAW
+and belongs to the video region — and, when it changes materially, re-runs the analysis above with that
+box (``debug/layout_refine.png``); see the section comment there.
 """
 from __future__ import annotations
 
@@ -908,7 +920,8 @@ def _contrast_region(M: np.ndarray) -> tuple[tuple[int, int, int, int], float, n
 
 STATIC_VIDEO_CONTRAST = 12.0     # |mean - canvas| of a pixel that is not the canvas
 STATIC_VIDEO_FILL = 0.96          # the grown region must fill its bounding box (a rounded rectangle)
-STATIC_VIDEO_TEXTURE = 0.35       # fraction of its static part with |grad mean| > 2 (a picture, not a flat panel)
+STATIC_VIDEO_TEXTURE = 0.5        # fraction of its static part with fine detail (a picture, not a flat panel /
+                                  # a smooth drop shadow): |mean - GaussianBlur(mean, 1.5)| > 1.5
 
 
 def _static_video_region(st: _Stats, dyn: np.ndarray, tb: tuple[int, int, int, int], thr: float,
@@ -918,7 +931,8 @@ def _static_video_region(st: _Stats, dyn: np.ndarray, tb: tuple[int, int, int, i
     On a uniform canvas (the frame border ring is >= 80 % one level), the non-canvas region that holds the
     dynamic component is the video box when it is a clean rounded rectangle (fills >= STATIC_VIDEO_FILL of
     its bounding box, holes filled) larger than the dynamic bbox, and its static part is TEXTURED like a
-    picture (a flat title panel or bar attached to the video is not taken). Returns (bbox, region mask,
+    picture (fine detail: a flat title panel or bar attached to the video, or a smooth drop shadow around
+    it, is not taken). Returns (bbox, region mask,
     canvas level, evidence) or None. Cheap first guess only: :func:`refine_box_from_raw` verifies the box
     against RAW (and also catches flat static strips such as coloured letterbox bars)."""
     import cv2
@@ -961,13 +975,13 @@ def _static_video_region(st: _Stats, dyn: np.ndarray, tb: tuple[int, int, int, i
         return None
     rect = np.zeros((h, w), bool)
     rect[y0:y1, x0:x1] = True
-    part = region & ~_dilate(rect, 2) & (st.std < thr)
+    part = region & ~_dilate(rect, 4) & (st.std < thr)
     part &= _erode_mask(region, 3)                       # not the (blurred) rim of the region
     if int(part.sum()) < 50:
         return None
     m32 = st.mean.astype(np.float32)
-    grad = np.hypot(cv2.Sobel(m32, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(m32, cv2.CV_32F, 0, 1, ksize=3)) / 8.0
-    tex = float((grad[part] > 2.0).mean())
+    detail = np.abs(m32 - cv2.GaussianBlur(m32, (0, 0), 1.5))
+    tex = float((detail[part] > 1.5).mean())
     ev["texture_fraction"] = round(tex, 4)
     if tex < float(_p(cfg, "STATIC_VIDEO_TEXTURE", STATIC_VIDEO_TEXTURE)):
         return None
@@ -2297,10 +2311,11 @@ def _forced_box_result(st: _Stats, fb: _ForcedBox, cfg: Any, dlog: DecisionLog) 
     thr = float(_cfg(cfg, "static_std_thresh", 2.0))
     dyn = _morph(_morph(st.std >= thr, "open", 3), "close", 5)
     x0, y0, x1, y1 = fb.edges
-    bi = (max(0, int(math.floor(x0))), max(0, int(math.floor(y0))), min(w, int(math.ceil(x1))), min(h, int(math.ceil(y1))))
+    bi = (max(0, int(math.floor(x0))), max(0, int(math.floor(y0))), min(w, int(math.ceil(x1))),
+          min(h, int(math.ceil(y1))))
     near = np.zeros((h, w), bool)
     near[max(0, bi[1] - 2):bi[3] + 2, max(0, bi[0] - 2):bi[2] + 2] = True
-    n, lab, stats, _ = _cc(dyn & ~near)
+    n, _lab, stats, _ = _cc(dyn & ~near)
     order = 1 + np.argsort(-stats[1:, 4], kind="stable") if n > 1 else np.zeros(0, int)
     others = [(int(stats[i, 0]), int(stats[i, 1]), int(stats[i, 0] + stats[i, 2]), int(stats[i, 1] + stats[i, 3]),
                int(stats[i, 4])) for i in order if stats[i, 4] >= 12]
@@ -2823,7 +2838,6 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
 
     Returns {'ok': bool, 'reason', 'box' (full-res Box), 'edges' (proxy), 'radius' (proxy), 'radius_kept',
     'raw_match' (bool [h, w]), 'frames', 'evidence', 'maps' (nI, nO, nV), 'frame_data'}."""
-    import cv2
     dlog = dlog or null_dlog()
     w, h = int(comp.size[0]), int(comp.size[1])
     rx, ry = float(comp.ratio[0]), float(comp.ratio[1])

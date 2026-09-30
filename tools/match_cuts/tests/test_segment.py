@@ -721,6 +721,30 @@ def test_105x_segment_with_wide_soft_ranges_keeps_its_snap():
     assert np.array_equal(_ae(segs), truth)
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_random_argmax_noise_in_wide_soft_ranges_makes_no_cut(seed):
+    """Guard for the data term (time-math F2): isolated random +-1 argmax errors (30 % of the frames, each
+    beating the true frame by 0.8 delta) inside wide soft ranges must not buy fake 1-frame cuts; the one 1.0
+    line of the truth is kept and the erroneous frames are re-assigned to it."""
+    rng = np.random.default_rng(seed)
+    n = 150
+    fm, _ = build_fm([Spec(m=ff_select(n, 1.0, 1000), n=n)])
+    truth = np.asarray(fm.raw).copy()
+    noise = np.where(rng.random(n) < 0.3, rng.choice([-1, 1], n), 0)
+    noise[0] = noise[-1] = 0
+    am = truth + noise
+    fm.raw = fm.raw_lo = fm.raw_hi = am
+    fm.soft_lo, fm.soft_hi = np.minimum(am - 1, truth), np.maximum(am + 1, truth)
+    fm.cand_j0 = am - 7
+    cand = np.full((n, 15), 0.95, np.float32)
+    cand[:, 7] = 0.99
+    cand[:, 6] = cand[:, 8] = 0.99 - 0.8 * 0.001
+    fm.cand, fm.margin = cand, np.full(n, 0.8 * 0.001)
+    segs = run(fm, *proxies(n))
+    assert [(s.comp_in, s.comp_out, s.speed) for s in segs] == [(0, n, 1.0)]
+    assert np.array_equal(_ae(segs), truth)
+
+
 def test_phantom_cut_after_criterion2_move_is_merged(tmp_path):
     """verification-honesty F3: refine's argmax at frame 30 is one frame late (pixels say otherwise) and the
     frames after it are ambiguous pairs. The DP cuts at 30; criterion 2 moves the cut, after which both models

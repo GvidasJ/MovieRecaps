@@ -279,7 +279,7 @@ class _Solver:
         # measured argmax range costs l_data * clip(deficit / delta_k, w_min, 1) (l_data without a candidate
         # vector) -- soft ranges are tolerances, not free choices, so a constant-speed line that contradicts a
         # run of measured frames loses to a cut / another speed
-        self.l_data = float(_cfg(cfg, "lambda_data", 0.25))
+        self.l_data = float(_cfg(cfg, "lambda_data", 0.5))
         self.w_min = float(_cfg(cfg, "data_weight_min", 0.25))
         self.l_phase = float(_cfg(cfg, "lambda_phase_cut", 1.0))
         self.snaps = [float(s) for s in _cfg(cfg, "speed_snap_values", (1.0,))]
@@ -483,10 +483,21 @@ class _Solver:
                 vo_cache.append(ps.estimate_speed(ks, plo, phi, self.cf, self.rf) if n >= 2 else float("nan"))
             return vo_cache[0]
 
+        # O(1) necessary condition from the first and last frames when both are hard constraints (never
+        # droppable): u within their pairwise bounds (the exact LP projection of that pair)
+        u_lo, u_hi = -math.inf, math.inf
+        if n >= 2 and not droppable[0] and not droppable[-1] and d[-1] > d[0]:
+            D = float(d[-1] - d[0])
+            u_lo = (lo_r[-1] - hi_r[0] - 1.0 - 4 * _TAU) / D
+            u_hi = (hi_r[-1] + 1.0 - lo_r[0] + 4 * _TAU) / D
+
         def evaluate(v: float, bc: float, dmask: np.ndarray, mr: int, bound: float = math.inf):
             """(total, data, drops) of speed v, or None when infeasible; the data term is skipped (returned as
             inf) when the candidate cannot reach ``bound`` even with a zero data term."""
-            r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, dmask, track, mr, with_interval=True)
+            u = v * self.ratio
+            if dmask is droppable and not (u_lo <= u <= u_hi):
+                return None
+            r = self.try_u(u, ks, d, lo_r, hi_r, base, dmask, track, mr, with_interval=True)
             if r is None:
                 return None
             drops, t, _x, xl, xh = r
@@ -1125,6 +1136,24 @@ class _Builder:
                 start, lr, ur = k, float(lo[k]), float(hi[k] + 1)
         return out
 
+    def _measured_steps(self, r0: int, r1: int, u: float, w: int = 5) -> set[int]:
+        """Candidate cuts where the MEASURED (argmax-range) frames step away from a line of speed u: the
+        residual l_k = centre(raw_lo, raw_hi)_k - u k changes level between the medians of the w frames
+        before and from k (jump cuts, 1-frame skips / repeats, the regular steps of a 1.02-1.05x retime).
+        Isolated argmax errors inside wide soft ranges do not move a median, so noisy slow footage adds few
+        candidates (the DP is O(candidates^2))."""
+        F = self.F
+        n = r1 - r0
+        if n < 2 * w:
+            return set()
+        ks = np.arange(r0, r1)
+        lv = (F.raw_lo[r0:r1] + F.raw_hi[r0:r1]).astype(np.float64) / 2.0 - u * ks
+        win = np.lib.stride_tricks.sliding_window_view(lv, w)
+        med = np.median(win, axis=1)                   # med[i] = median of lv[i:i+w]
+        left, right = med[:-w], med[w:]                # windows [i, i+w) and [i+w, i+2w) -> step at i+w
+        idx = np.nonzero(np.abs(right - left) >= 0.5)[0] + w
+        return {int(r0 + i) for i in idx}
+
     def _free_runs(self, r0: int, r1: int, forward: bool = True, lo_a: np.ndarray | None = None,
                    hi_a: np.ndarray | None = None) -> list[tuple[int, int, float, float]]:
         """Greedy maximal runs explained by ONE line at ANY speed (exact pairwise u bounds, incremental).
@@ -1218,12 +1247,8 @@ class _Builder:
         # see a 1-2 frame jump cut there; the MEASURED frames' phase breaks (and free runs) do (data term)
         wide = (F.lo[r0:r1] < F.raw_lo[r0:r1]) | (F.hi[r0:r1] > F.raw_hi[r0:r1])
         if wide.any():
-            plo, phi = F.raw_lo, F.raw_hi
             for v in sorted({self.S.dominant, 1.0}):
-                for b in self._phase_breaks(r0, r1, v * ratio, plo, phi):
-                    cands.update((b - 1, b, b + 1))
-            for a, b, _u0, _u1 in self._free_runs(r0, r1, True, plo, phi) + self._free_runs(r0, r1, False, plo, phi):
-                cands.update((a - 1, a, a + 1, b - 1, b, b + 1))
+                cands.update(self._measured_steps(r0, r1, v * ratio))
         for k in range(r0 + 1, r1):
             if F.track[k] != F.track[k - 1]:
                 cands.add(k)
@@ -1321,6 +1346,11 @@ class _Builder:
                 prev, _pq, _pm, pn = best.get(q, (math.inf, None, None, 0))
                 lamq = lam if q > r0 else 0.0
                 bound = (bc - prev - lamq + 2e-9) if math.isfinite(prev) else -math.inf
+                if bound < 0.0 and ("r", q, p, self.S.dominant) not in self.S._cache:
+                    # nothing in [q, p) can improve p: skip the fit (counted as feasible, so the streak of
+                    # infeasible ranges -- an optimisation only -- restarts)
+                    fails = 0
+                    continue
                 m = self.eval_range(q, p, bound)
                 if m is None:
                     # Sound break: infeasible even with every relaxed-droppable frame removed. Practical
@@ -1701,13 +1731,15 @@ class _Builder:
             if m is not None:
                 m.kind, m.unsnapped = A.model.kind, A.model.unsnapped
                 m.cost += self.S.class_cost(A.model.kind)
-            # a sub-frame phase cut (same speed, lines < 0.5 frame apart: no RAW frame skipped or repeated)
-            # justified only by the data term needs stronger evidence than lambda_cut: random +-1 argmax noise
-            # inside wide soft ranges must not buy a cut by fitting a few same-direction errors at a segment end
-            # (lambda_phase_cut extra)
+            # a cut that ONE line at the same speed also fits (inside the soft ranges) is justified by the data
+            # term alone. Random +-1 argmax noise inside wide soft ranges can mimic a 1-frame skip around a
+            # boundary: such a cut changes few frames, or changes more than it fixes. It needs lambda_phase_cut
+            # more evidence; a genuine skip / retime step moves every frame on one side to the measured frame.
             extra = 0.0
-            if m is not None and abs(A.model.pos(B.a) - B.model.pos(B.a)) < 0.5:
-                extra = min(self.S.l_phase, max(0.0, m.data - A.model.data - B.model.data))
+            if m is not None:
+                changed, fixed = self._cut_evidence(A, B, m)
+                if changed < int(_cfg(self.cfg, "phase_cut_min_frames", 6)) or fixed < 0.75 * changed:
+                    extra = min(self.S.l_phase, max(0.0, m.data - A.model.data - B.model.data))
             if m is not None and m.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut + extra - 1e-9:
                 trial.model = m
                 for k in m.drops:   # later refits use the isolated-only rule: fold the runs into the ranges
@@ -1720,6 +1752,22 @@ class _Builder:
                 continue
             i += 1
         return segs
+
+    def _cut_evidence(self, A: _Seg, B: _Seg, m: _Model) -> tuple[int, int]:
+        """(changed, fixed): the comp frames whose RAW frame differs between the segment models of A and B and
+        the single model m of their union, and how many more of them the two models show inside refine's
+        measured range than m does (what the cut A|B changes in the output, and whether it agrees with the
+        measurement)."""
+        F = self.F
+        U = _Seg("raw", A.a, B.b, model=m, flip=A.flip, track=A.track)
+        ks = np.arange(A.a, B.b)
+        split = np.concatenate([np.asarray(self.pred(A, ks[ks < B.a])), np.asarray(self.pred(B, ks[ks >= B.a]))])
+        union = np.asarray(self.pred(U, ks))
+        ch = split != union
+        rlo, rhi = F.raw_lo[ks], F.raw_hi[ks]
+        ok_s = (rlo <= split) & (split <= rhi)
+        ok_u = (rlo <= union) & (union <= rhi)
+        return int(ch.sum()), int(ok_s[ch].sum()) - int(ok_u[ch].sum())
 
     def _skip_link(self, A: _Seg, B: _Seg) -> bool:
         """A hard cut between two pieces at the same speed whose lines differ by one RAW frame (0.5..1.5: a
@@ -1754,6 +1802,13 @@ class _Builder:
                     d_union = trial.model.data + self.S.l_drop * len(trial.model.drops)
                     d_parts = sum(c.model.data + self.S.l_drop * len(c.model.drops) for c in chain)
                     if abs(trial.model.v - chain[0].model.v) <= 1e-12 or d_union > d_parts + 1e-9:
+                        continue
+                    # a retime accounts for its steps: all in one direction, and the union line drifts away from
+                    # the pieces' speed by as many RAW frames as there are steps
+                    steps = [B.model.pos(B.a) - A.model.pos(B.a) for A, B in zip(chain[:-1], chain[1:])]
+                    drift = (trial.model.v - chain[0].model.v) * self.S.ratio * (trial.b - trial.a)
+                    if not (all(x > 0 for x in steps) or all(x < 0 for x in steps)) or \
+                            abs(drift - sum(round(x) for x in steps)) > 1.0:
                         continue
                     self.log("merge_retime_chain", comp_range=[trial.a, trial.b], evidence={
                         "pieces": [[c.a, c.b] for c in chain], "piece_speed": chain[0].model.v,
