@@ -44,6 +44,10 @@ def parse_fps(value: Any) -> Fraction:
     """
     if isinstance(value, Fraction):
         return value
+    if isinstance(value, np.integer):
+        return Fraction(int(value))
+    if isinstance(value, np.floating):
+        value = float(value)
     if isinstance(value, (tuple, list)) and len(value) == 2:
         return Fraction(int(value[0]), int(value[1]))
     if isinstance(value, int):
@@ -67,7 +71,9 @@ def parse_fps(value: Any) -> Fraction:
 
 
 def snap_rate(fr: Fraction, tol: float = 1e-4) -> Fraction:
-    """Snap a measured (e.g. avg_frame_rate) rational to a common rate if within tol (relative)."""
+    """Snap a measured (e.g. avg_frame_rate) rational to a common rate if within tol (relative).
+
+    For nominal-rate detection of VFR phone/TikTok files use tol=0.01 (DESIGN §5 conform)."""
     for r in _COMMON_RATES:
         if abs(float(fr) - float(r)) <= float(r) * tol:
             return r
@@ -105,7 +111,8 @@ def fmt_seconds(t: float) -> float:
 
 
 def is_drop_frame(fps: Fraction) -> bool:
-    return Fraction(fps).denominator == 1001
+    """SMPTE drop-frame applies only to 30000/1001 and 60000/1001 (not 24000/1001)."""
+    return Fraction(fps) in (Fraction(30000, 1001), Fraction(60000, 1001))
 
 
 def timecode(frame: int, fps: Fraction, drop_frame: bool | None = None) -> str:
@@ -187,6 +194,25 @@ def params_hash(*parts: Any) -> str:
     """Stable short hash of JSON-serialisable parameters (dataclasses and Fractions allowed)."""
     blob = json.dumps(parts, sort_keys=True, default=json_default, separators=(",", ":"))
     return hashlib.blake2b(blob.encode(), digest_size=10).hexdigest()
+
+
+# Bump a stage's version whenever its algorithm changes so stale cache entries are never reused.
+STAGE_VERSION: dict[str, int] = {
+    "probe": 1, "conform": 1, "proxy": 1, "audio": 1, "layout": 1, "audio_align": 1, "raw_index": 1,
+    "sparse_search": 1, "frame_map": 1, "segments": 1,
+}
+
+
+def stage_key(stage: str, *parts: Any) -> str:
+    """Cache key = params_hash(STAGE_VERSION[stage], stage, *parts). Parts must include input hashes."""
+    return params_hash(STAGE_VERSION.get(stage, 0), stage, *parts)
+
+
+def seed_everything(seed: int) -> None:
+    """Seed OpenCV's RNG (RANSAC, FLANN randomised trees). Call before creating/training every
+    FlannBasedMatcher (it trains lazily on the first knnMatch) and at the start of every worker."""
+    import cv2
+    cv2.setRNGSeed(int(seed))
 
 
 class Cache:
@@ -274,11 +300,11 @@ class DecisionLog:
     Also mirrored to the python logger at DEBUG level.
     """
 
-    def __init__(self, path: str | os.PathLike | None):
+    def __init__(self, path: str | os.PathLike | None, truncate: bool = True):
         self.path = Path(path) if path else None
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(self.path, "a") if self.path else None
+        self._fh = open(self.path, "w" if truncate else "a") if self.path else None
 
     def record(self, stage: str, decision: str, **fields: Any) -> None:
         entry = {"stage": stage, "decision": decision, **fields}

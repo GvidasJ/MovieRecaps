@@ -200,6 +200,8 @@ def extract_audio(path: str | Path, sr: int = 16000, mono: bool = True,
     zeros are prepended so sample 0 corresponds to video t = 0; negative -> leading samples dropped.
     Returns an empty array if the file has no audio.
     """
+    if _audio_channels(path, stream_index) is None:
+        return np.zeros((0,) if mono else (0, 1), np.float32)
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-i", str(path), "-map", f"0:a:{stream_index}?", "-vn",
            "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(sr)]
     if mono:
@@ -210,7 +212,7 @@ def extract_audio(path: str | Path, sr: int = 16000, mono: bool = True,
         raise RuntimeError(f"audio extraction failed for {path}: {res.stderr.decode(errors='replace')[-2000:]}")
     y = np.frombuffer(res.stdout, dtype=np.float32)
     if not mono:
-        ch = _audio_channels(path, stream_index)
+        ch = _audio_channels(path, stream_index) or 1
         y = y.reshape(-1, max(1, ch))
     n_off = int(round(offset_s * sr))
     if n_off > 0:
@@ -221,14 +223,21 @@ def extract_audio(path: str | Path, sr: int = 16000, mono: bool = True,
     return np.ascontiguousarray(y)
 
 
-def _audio_channels(path: str | Path, stream_index: int = 0) -> int:
+def _audio_channels(path: str | Path, stream_index: int = 0) -> int | None:
+    """Channel count of audio stream a:stream_index, or None when the file has no such stream."""
     import json
     from .common import ffprobe_bin
 
     res = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", f"a:{stream_index}",
                           "-show_entries", "stream=channels", "-of", "json", str(path)], capture_output=True, text=True)
     try:
-        return int(json.loads(res.stdout)["streams"][0]["channels"])
+        streams = json.loads(res.stdout).get("streams", [])
+    except Exception:
+        return None
+    if not streams:
+        return None
+    try:
+        return int(streams[0]["channels"])
     except Exception:
         return 1
 

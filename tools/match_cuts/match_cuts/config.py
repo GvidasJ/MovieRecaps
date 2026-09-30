@@ -20,7 +20,9 @@ class Config:
     comp_size: str = "competitor"          # 'competitor' or 'WxH'
     fps_mode: str = "competitor"           # competitor | source
     force_conform: bool = False            # conform RAW even if AE-safe (testing)
-    conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT <= 10 min)
+    conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
+    ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
+    ae_min_margin_ms: float = 1.0          # phase margin below which a segment is "AE-rule-sensitive"
     large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
     workers: int = 0                       # 0 = os.cpu_count()
     verbose: bool = False
@@ -34,6 +36,8 @@ class Config:
     comp_proxy_max_width: int = 640
     proxy_budget_bytes: int = 3 * 1024 ** 3
     min_proxy_width: int = 256
+    long_raw_s: float = 2700.0             # beyond this AND over budget: sparse RAW proxy (index frames + windows)
+    long_raw_window_s: float = 20.0
     audio_sr: int = 16000
 
     # ---- layout (Stage 4) ---------------------------------------------------------------
@@ -58,13 +62,17 @@ class Config:
     sift_nfeatures: int = 500
     raw_index_fps_short: float = 10.0      # RAW index sampling rate for RAW <= 10 min
     raw_index_fps_long: float = 3.0        # for longer RAWs
+    index_max_descriptors: int = 2_000_000 # cap (uint8 storage); nfeatures per sample lowered to fit
     comp_search_stride: int = 3            # sparse competitor frames searched globally
-    vote_knn: int = 5
+    index_knn: int = 24                    # k-NN per query descriptor in the multi-frame index
+    index_ratio: float = 0.8               # cluster-aware ratio: vs first NN > index_far_s away
+    index_far_s: float = 2.0
     vote_top_candidates: int = 8
-    lowe_ratio: float = 0.75
-    ransac_reproj_px: float = 3.0          # at proxy res
-    min_inliers: int = 25
+    lowe_ratio: float = 0.75               # pairwise verification against ONE RAW frame only
+    ransac_reproj_px: float = 3.0          # comp-proxy px (RANSAC is RAW -> comp)
+    min_inliers: int = 12
     min_inlier_ratio: float = 0.30
+    anchor_zncc_slack: float = 0.05        # anchor accepted only if masked ZNCC >= match_thresh - slack
     audio_restrict_s: float = 2.0          # search +- this around a confident audio hint
 
     # ---- refinement (Stage 5.3) ---------------------------------------------------------
@@ -75,8 +83,12 @@ class Config:
     match_thresh: float = 0.90             # masked ZNCC needed to accept a match (tuned on synthetic)
     none_thresh: float = 0.60              # below this for every hypothesis -> NONE candidate
     identical_thresh: float = 0.9995       # RAW-vs-RAW ZNCC above which neighbours are 'identical'
-    ambiguous_eps: float = 0.002           # score gap below which two RAW frames are indistinguishable
+    identical_mad: float = 0.75            # ... or mean |diff| (8-bit, proxy, visible region) below this
+    low_margin_eps: float = 0.001          # score gap flagged low_margin (never an ambiguity exemption)
+    soft_delta_min: float = 0.001          # soft LP range delta_k = max(this, 3*MAD of track margins)
+    rel_drop_min: float = 0.01             # re-search if score < rolling track median - max(this, 4*MAD)
     uniform_std: float = 4.0               # region luma std below which a frame is UNIFORM
+    low_conf_thresh: float = 0.5           # frames below get debug/low_confidence/k#####.png (max 200)
     ecc_iterations: int = 60
     ecc_eps: float = 1e-5
 
@@ -85,8 +97,14 @@ class Config:
                                 1 / 1.05, 1 / 1.10, 1 / 1.15, 1 / 1.20, 1 / 1.25, 1 / 1.50, 0.5)
     speed_snap_tol: float = 0.003
     min_segment_frames: int = 1
+    lambda_cut: float = 1.0                # DP cost per cut
+    lambda_unsnapped: float = 3.0          # DP cost of a segment whose speed cannot be snapped (> lambda_cut)
+    link_scale_tol: float = 0.005          # anchors join a track only within 0.5 % scale ...
+    link_pos_tol: float = 2.0              # ... and 2 px (comp full res) after the track trend
+    punch_scale_step: float = 0.01         # transform step between frames that is a cut (punch-in)
+    punch_pos_step: float = 4.0
     transition_search: int = 20            # frames either side of a cut examined for blends
-    blend_min_gain: float = 0.02           # blend ZNCC must beat both single sources by this
+    blend_rel: float = 0.5                 # blend frame: (1 - zncc_fit) <= blend_rel * (1 - best single zncc)
     framing_scale_spread: float = 0.003    # < -> constant framing
     framing_pos_spread: float = 1.5        # px at comp full res
     framing_sample_step: int = 3
@@ -109,9 +127,13 @@ class Config:
         return dataclasses.asdict(self)
 
     def analysis_params(self) -> dict:
-        """Parameters that influence analysis results (cache keys). Excludes paths/verbosity."""
+        """Parameters that influence ANALYSIS results (cache keys). Excludes paths, verbosity and the
+        export-only settings (layout_mode, comp_size, fps_mode, ae_*), and conform settings (those go
+        only into the conform key), so changing --layout never recomputes the analysis."""
         d = self.to_dict()
-        for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare"):
+        for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare",
+                  "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
+                  "ae_time_mode", "ae_min_margin_ms", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min"):
             d.pop(k, None)
         return d
 

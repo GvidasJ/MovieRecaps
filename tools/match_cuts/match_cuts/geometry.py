@@ -72,9 +72,15 @@ class Sim:
 
     @staticmethod
     def from_matrix(m: np.ndarray) -> "Sim":
-        """Closest similarity (least squares on the 2x2 part) to an affine 2x3/3x3 matrix."""
+        """Closest similarity (least squares on the 2x2 part) to an affine 2x3/3x3 matrix.
+
+        Raises ValueError for reflections (det <= 0): a mirrored mapping must be expressed as
+        flip_h=True + a proper Sim (DESIGN §2.2), never silently projected (which would give s≈0).
+        """
         m = h3(m)
         a, b, c, d = m[0, 0], m[0, 1], m[1, 0], m[1, 1]
+        if a * d - b * c <= 0:
+            raise ValueError("matrix is a reflection (det <= 0); use flip_h=True with the flipped RAW")
         sc = (a + d) / 2.0   # s cos
         ss = (c - b) / 2.0   # s sin
         s = math.hypot(sc, ss)
@@ -302,13 +308,15 @@ def rdp(points: np.ndarray, tol: np.ndarray | float) -> list[int]:
     return [int(i) for i in np.nonzero(keep)[0]]
 
 
-def interpolate_keys(keys: Iterable[dict], k: float) -> Sim:
-    """Linear interpolation of transform keys [{comp_frame, scale, rotation_deg, tx, ty}] at frame k.
+def interpolate_keys(keys: Iterable[dict], k: float, raw_w: float | None = None,
+                     raw_h: float | None = None) -> Sim:
+    """Interpolate transform keys [{comp_frame, scale, rotation_deg, tx, ty}] at frame k exactly as AE does.
 
-    Keys are always LINEAR (AE keys are written with linear interpolation, DESIGN.md §5.5): measured
-    easing is reproduced by the RDP key density, never by AE easy-ease, so preview == AE.
-    Because AE Position = s R c + t is linear in (s, t) for fixed rotation, linear Scale+Position
-    keys in AE are exactly linear (s, tx, ty) here.
+    Keys are always LINEAR in time and space (the JSX sets linear temporal interpolation and linear
+    spatial tangents, DESIGN §5 export_ae); measured easing is reproduced by key density, never by AE
+    easy-ease, so preview == AE. AE interpolates Scale, Rotation and Position = s R c + t linearly;
+    when rotation is constant between two keys that equals linear (s, tx, ty). When rotation changes,
+    the AE-space interpolation is used, which needs the RAW size (raw_w, raw_h) for the anchor c.
     """
     ks = sorted(keys, key=lambda d: d["comp_frame"])
     if not ks:
@@ -320,6 +328,16 @@ def interpolate_keys(keys: Iterable[dict], k: float) -> Sim:
     for a, b in zip(ks[:-1], ks[1:]):
         if a["comp_frame"] <= k <= b["comp_frame"]:
             u = (k - a["comp_frame"]) / (b["comp_frame"] - a["comp_frame"])
+            ra, rb = a.get("rotation_deg", 0.0), b.get("rotation_deg", 0.0)
+            if abs(ra - rb) > 1e-9:
+                if raw_w is None or raw_h is None:
+                    raise ValueError("interpolate_keys: rotation varies between keys; pass raw_w/raw_h")
+                ea = sim_to_ae(Sim.from_dict(a), False, raw_w, raw_h)
+                eb = sim_to_ae(Sim.from_dict(b), False, raw_w, raw_h)
+                lerp = lambda p, q: tuple(pi + u * (qi - pi) for pi, qi in zip(p, q))  # noqa: E731
+                ae = AETransform(ea.anchor, lerp(ea.scale, eb.scale), ea.rotation + u * (eb.rotation - ea.rotation),
+                                 lerp(ea.position, eb.position))
+                return Sim.from_matrix(ae_to_matrix(ae))
             return Sim(a["scale"] + u * (b["scale"] - a["scale"]),
                        a.get("rotation_deg", 0.0) + u * (b.get("rotation_deg", 0.0) - a.get("rotation_deg", 0.0)),
                        a["tx"] + u * (b["tx"] - a["tx"]), a["ty"] + u * (b["ty"] - a["ty"]))

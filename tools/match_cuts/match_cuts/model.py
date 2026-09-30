@@ -85,17 +85,39 @@ class Proxy:
     """
     role: str
     path: str                              # the media file (AE-imported copy)
-    frames: Any                            # np.ndarray / np.memmap [N, h, w] uint8
+    frames: Any                            # np.ndarray / np.memmap [rows, h, w] uint8
     full_size: tuple[int, int]             # (W, H) full-res display size
     ratio: tuple[float, float]
     fps: Fraction
-    pts: np.ndarray
-    n: int
+    pts: np.ndarray                        # [n] seconds for every frame of the file (not only stored rows)
+    n: int                                 # frame count of the FILE
     npy_path: str = ""
+    index_map: Any = None                  # None = dense (row j = frame j); else int32 [n]: row or -1 (long RAW)
 
     @property
     def size(self) -> tuple[int, int]:
         return (int(self.frames.shape[2]), int(self.frames.shape[1]))
+
+    @property
+    def dense(self) -> bool:
+        return self.index_map is None
+
+    def has(self, j: int) -> bool:
+        if j < 0 or j >= self.n:
+            return False
+        return self.index_map is None or int(self.index_map[j]) >= 0
+
+    def get(self, j: int) -> np.ndarray:
+        """Proxy image of frame j (KeyError if a sparse proxy does not hold it). ALWAYS use this
+        (or has()) instead of indexing .frames directly, so long-RAW sparse proxies work."""
+        if self.index_map is None:
+            if j < 0 or j >= self.n:
+                raise KeyError(j)
+            return self.frames[j]
+        row = int(self.index_map[j]) if 0 <= j < self.n else -1
+        if row < 0:
+            raise KeyError(j)
+        return self.frames[row]
 
 
 # ---------------------------------------------------------------------------------------
@@ -214,21 +236,43 @@ FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
     "conf": (np.float32, 0.0),      # [0, 1] confidence
     "mean": (np.float32, np.nan),   # mean luma of the video region (for UNIFORM / dips)
     "std": (np.float32, np.nan),    # std of luma in the video region
+    "low_margin": (np.bool_, False),  # best vs neighbours within noise (NOT an ambiguity exemption)
+    "soft_lo": (np.int32, -1),      # soft range for the phase LP: {j : S_k(j) >= max S_k - delta_k}
+    "soft_hi": (np.int32, -1),      #   (inclusive; always contains [raw_lo, raw_hi])
+    "cand_j0": (np.int32, -1),      # RAW index of cand[:, 0]
+    "widened": (np.bool_, False),   # the search window had to be extended (argmax was on the edge)
+    "tie": (np.bool_, False),       # timing-tie frame (phase LP slack < 1e-4 frame) - set by segment.py
 }
+
+CAND_W = 15   # per-frame candidate score vector length stored in FrameMap.cand (RAW cand_j0 .. cand_j0+14)
 
 
 class FrameMap:
     """Column store for m(k): one entry per competitor frame. Save/load as .npz."""
 
     def __init__(self, n: int, data: dict[str, np.ndarray] | None = None):
-        self.n = int(n)
+        object.__setattr__(self, "n", int(n))
         if data is None:
             data = {k: np.full(self.n, v, dtype=t) for k, (t, v) in FRAME_MAP_FIELDS.items()}
         else:
             for k, (t, v) in FRAME_MAP_FIELDS.items():
                 if k not in data:
                     data[k] = np.full(self.n, v, dtype=t)
-        self.d = data
+        if "cand" not in data:
+            data["cand"] = np.full((self.n, CAND_W), np.nan, dtype=np.float32)
+        object.__setattr__(self, "d", data)
+
+    def __setattr__(self, name: str, value) -> None:
+        # fm.status = array  ->  writes into the column store (so save()/load() keep it)
+        if name in FRAME_MAP_FIELDS or name == "cand":
+            d = self.__dict__["d"]
+            t = d[name].dtype
+            v = np.asarray(value, dtype=t)
+            if v.shape != d[name].shape:
+                raise ValueError(f"FrameMap.{name}: shape {v.shape} != {d[name].shape}")
+            d[name] = v.copy()
+        else:
+            object.__setattr__(self, name, value)
 
     def __getattr__(self, name: str) -> np.ndarray:
         d = self.__dict__.get("d")
@@ -242,6 +286,10 @@ class FrameMap:
 
     def set_sim(self, k: int, sim) -> None:
         self.d["s"][k], self.d["theta"][k], self.d["tx"][k], self.d["ty"][k] = sim.s, sim.theta_deg, sim.tx, sim.ty
+
+    def cand_scores(self, k: int) -> tuple[int, np.ndarray]:
+        """(j0, scores[CAND_W]) candidate score vector of frame k (NaN where not evaluated)."""
+        return int(self.d["cand_j0"][k]), self.d["cand"][k]
 
     def save(self, path: str | Path) -> None:
         np.savez_compressed(path, n=np.array(self.n), **self.d)
@@ -308,7 +356,7 @@ class Transition:
 @dataclass
 class Segment:
     id: int
-    type: str                              # 'raw' | 'not_in_raw' | 'dip' | 'flash' | 'freeze'
+    type: str                              # 'raw' | 'not_in_raw' | 'dip' | 'flash'  (freeze/reverse/ramp = raw + remap)
     comp_in: int
     comp_out: int                          # half-open
     raw_in_frame: int | None = None        # RAW frame shown at comp_in
@@ -324,7 +372,19 @@ class Segment:
     time_remap_keys: list[dict] = field(default_factory=list)  # [{comp_frame(float ok), raw_seconds}] for freeze/reverse/ramp
     transition_in: dict | None = None      # Transition as dict
     transition_out: dict | None = None
-    audio: dict = field(default_factory=lambda: {"in_offset_frames": 0, "out_offset_frames": 0})
+    audio: dict = field(default_factory=lambda: {
+        "in_offset_frames": 0, "out_offset_frames": 0,   # audio range = [comp_in+in, comp_out+out)
+        "pitch_preserved": None, "lag_ms": None, "corr": None, "exception": None})
+    time_mode: str = "stretch"             # stretch | remap  (remap <=> time_remap_keys non-empty)
+    retime: str = "none"                   # none | frame_blend | optical_flow
+    uncertain: bool = False
+    unsnapped: bool = False                # speed could not be snapped to a common/dominant value
+    cut_ambiguity: list[int] | None = None # [a, b]: cut can be anywhere in [a, b] (speed-only change)
+    tie_frames: list[int] = field(default_factory=list)       # timing-tie frames (phase slack < 1e-4)
+    low_margin_frames: list[int] = field(default_factory=list)
+    ae_margin_ms: float | None = None      # half-width of the feasible raw_in interval (ms)
+    region: int = 0                        # video region index (multi-region layouts)
+    box: dict | None = None                # Box in force during the segment (None = layout.box)
     confidence: float = 0.0
     ambiguous_frames: list[int] = field(default_factory=list)  # competitor frames with ambiguous-identical RAW
     raw_in_interval: list[float] | None = None                 # feasible raw_in interval (floor rule)
@@ -391,3 +451,22 @@ class Cutlist:
     def save(self, path: str | Path) -> None:
         from .common import dump_json
         dump_json(self.to_dict(), path)
+
+
+def cutlist_layout(layout: "Layout", layout_mode: str) -> dict:
+    """The cutlist.json 'layout' block (DESIGN §3). mode = the requested LAYOUT_MODE; layout_kind = what
+    was detected in the competitor. background = type string (prompt schema), details alongside."""
+    bg = layout.background or {"type": "solid", "color": layout.canvas_bg}
+    return {
+        "mode": layout_mode,
+        "layout_kind": layout.mode,
+        "canvas_bg": layout.canvas_bg,
+        "box": layout.box.to_dict() if layout.box else None,
+        "background": bg.get("type", "solid"),
+        "background_detail": bg,
+        "zones": [dataclasses.asdict(z) for z in layout.zones],
+        "periods": [dataclasses.asdict(p) for p in layout.periods],
+        "regions": [b.to_dict() for b in layout.extra_regions],
+        "captions": layout.captions,
+        "notes": layout.notes,
+    }
