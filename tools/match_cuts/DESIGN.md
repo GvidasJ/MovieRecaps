@@ -411,8 +411,10 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # Files and Access Network' (Scripting & Expressions in 16.1+, General before). Media: relative to
     # the script, then absolute path, then File.openDialog; missing -> clean abort.
     # Import via ImportOptions + canImportAs(FOOTAGE); fieldSeparationType OFF, removePulldown OFF
-    # (try/catch); conformFrameRate only if |frameRate - num/den| > 1e-3·num/den (AE reports float32);
-    # size / frame-count checks -> warnings.
+    # (try/catch); conformFrameRate whenever |frameRate - num/den| > 2e-7·num/den (AE reports float32,
+    # noise < 6e-8); warn when > 1e-5 relative or >= 0.25 frame of drift; frame count must match exactly
+    # (else an offset warning). Save detection: no throw && app.project.file is the .aep && out.exists &&
+    # its mtime changed; the summary and the preference alert use that flag.
     # Per layer STRICT ORDER: stretch -> startTime -> inPoint -> outPoint -> (timeRemapEnabled + keys) ->
     # transform / opacity / audio keys (keys live in LAYER time; nothing that moves the layer in time may
     # follow a key write). Stretch mode: `L.stretch = s; var vEff = 100 / L.stretch; L.startTime = tIn -

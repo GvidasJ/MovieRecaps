@@ -1315,3 +1315,31 @@ def test_compare_with_previous_run():
     other_settings["settings"] = {"layout_mode": "fill"}
     assert verify.compare_with_previous_run(other_settings, cur)["compared"] is False
     assert verify.compare_with_previous_run(None, cur)["compared"] is False
+
+
+def test_unsnapped_speed_judged_on_measured_frames_not_soft_ranges():
+    """Integration fix (segment agent note / time-math F2): a genuine 1.03x segment on slow footage has soft
+    ranges of ±1 frame that also admit 1.05; segment.py rightly leaves it unsnapped because 1.05 does not
+    reproduce refine's MEASURED frames. c4 must judge 'a snap value was feasible' on the measured frames."""
+    import math
+    n = 60
+    truth = [100 + math.floor(1.03 * k + 0.25) for k in range(n)]
+    fm = frame_map(truth)
+    fm.soft_lo = np.asarray(truth, np.int32) - 1
+    fm.soft_hi = np.asarray(truth, np.int32) + 1
+    fm.d["pre_segment_raw"] = np.asarray(truth, np.int32)
+    fm.d["pre_segment_raw_lo"] = np.asarray(truth, np.int32)
+    fm.d["pre_segment_raw_hi"] = np.asarray(truth, np.int32)
+    fm.d["pre_segment_status"] = np.full(n, Status.MATCH, np.int8)
+    fm.d["pre_segment_flip"] = np.zeros(n, bool)
+    s = seg(1, "raw", 0, n, 100, speed=1.03, unsnapped=True)
+    cfg = Config()
+    r = verify.check_speed_framing([s], fm, F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
+    assert not any("unsnapped although" in f for f in r["failures"]), r["failures"]
+    assert r["status"] in ("pass", "pass_with_exceptions"), r
+    # ...while a segment left unsnapped although 1.0 reproduces every measured frame still fails
+    truth1 = list(range(100, 100 + n))
+    fm1 = frame_map(truth1)
+    s1 = seg(1, "raw", 0, n, 100, speed=1.0004, unsnapped=True)
+    r1 = verify.check_speed_framing([s1], fm1, F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
+    assert r1["status"] == "fail" and any("unsnapped although" in f for f in r1["failures"]), r1

@@ -1418,6 +1418,26 @@ def perturb_sim(sim: Sim, centre: tuple[float, float], rel_scale: float, dx: flo
     return Sim(sim.s * f, sim.theta_deg, f * sim.tx + (1 - f) * cx + dx, f * sim.ty + (1 - f) * cy + dy)
 
 
+def _measured_constraints(seg: Segment, fm: FrameMap) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(ks, lo, hi) of a segment's MATCH frames using refine's measurement (fm.d['pre_segment_*'] when
+    segmentation stored it, else the current visually-identical ranges) -- never the soft ranges."""
+    k0, k1 = max(0, int(seg.comp_in)), min(fm.n, int(seg.comp_out))
+    if k1 <= k0:
+        e = np.zeros(0, np.int64)
+        return e, e.copy(), e.copy()
+    d = fm.d
+    st = d.get("pre_segment_status", fm.status)[k0:k1]
+    fl = d.get("pre_segment_flip", fm.flip)[k0:k1]
+    raw = d.get("pre_segment_raw", fm.raw)[k0:k1].astype(np.int64)
+    lo = d.get("pre_segment_raw_lo", fm.raw_lo)[k0:k1].astype(np.int64)
+    hi = d.get("pre_segment_raw_hi", fm.raw_hi)[k0:k1].astype(np.int64)
+    sel = (st == Status.MATCH) & (fl.astype(bool) == bool(seg.flip_h)) & (raw >= 0)
+    ks = np.arange(k0, k1)[sel]
+    lo = np.minimum(np.where(lo[sel] >= 0, lo[sel], raw[sel]), raw[sel])
+    hi = np.maximum(np.where(hi[sel] >= 0, hi[sel], raw[sel]), raw[sel])
+    return ks.astype(np.int64), lo, hi
+
+
 def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
                         raw_wh: tuple[float, float], box: Box | dict | None, comp_wh: tuple[float, float],
                         cfg: Any, feasible_range: Callable | None = None,
@@ -1477,7 +1497,14 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
                 if not ok:
                     failures.append(f"{name}: speed {s.speed:.5f} outside the feasible range [{lo_v:.5f}, {hi_v:.5f}] ± 0.5 %")
                 if s.unsnapped:
-                    feas = sorted({v for v in snaps + used_speeds if lo_v <= v <= hi_v})
+                    # 'a snap value was feasible' is judged on refine's MEASURED frames (pre-segmentation
+                    # visually-identical ranges), not on the wider soft ranges: on slow footage the soft
+                    # ranges admit 1.05 for a genuine 1.03x segment that segment.py rightly left unsnapped
+                    mk, mlo, mhi = _measured_constraints(s, fm)
+                    mvr = feasible_range(mk, mlo, mhi, s.comp_in, comp_fps, raw_fps) if len(mk) >= 2 else None
+                    slo, shi = (float(mvr[0]), float(mvr[1])) if mvr is not None else (lo_v, hi_v)
+                    row["snap_range_measured"] = None if mvr is None else [round(slo, 6), round(shi, 6)]
+                    feas = sorted({v for v in snaps + used_speeds if slo <= v <= shi})
                     if feas:
                         failures.append(f"{name}: speed left unsnapped although {feas[:4]} are feasible")
                         row["snap_check"] = "fail"

@@ -51,7 +51,7 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 | `--out Z` | `./output` | deliverables folder |
 | `--layout` | `match` | `match`: recreate the competitor's canvas, video box (position, size, rounded corners), background and per-shot crop/zoom. `fill`: full-screen 9:16 keeping the per-shot framing. `source`: cuts only, RAW size and RAW fps, no reframing |
 | `--comp-size` | `competitor` | AE comp size; `competitor` = same pixels as the competitor, or e.g. `1080x1920`. In `match` mode it must keep the competitor's aspect (rejected otherwise) |
-| `--fps` | `competitor` | `competitor`: the competitor's exact frame rate (exact cut timing). `source`: RAW frame rate; cuts are rounded to the nearest MAIN frame and the max error is reported (`cutlist.settings.fps_source_max_error_s`). Criteria 2 and 6 are exact only with `competitor` |
+| `--fps` | `competitor` | `competitor`: the competitor's exact frame rate (exact cut timing). `source`: RAW frame rate; cuts are rounded to the nearest MAIN frame and the max error is reported (`cutlist.settings.fps_source_max_error_s`). On a different MAIN grid criterion 3 accepts, per MAIN frame, any RAW frame between the competitor frames bracketing that time; cut timing is exact only with `competitor` |
 | `--work DIR` | `./work` | caches and intermediate files |
 | `--workers N` | `0` | worker processes (0 = all CPUs) |
 | `--force-conform` | off | transcode RAW to an AE-safe copy even if it is already AE-safe |
@@ -92,18 +92,21 @@ output/
   recreated_edit.aep       only when After Effects is installed on this machine (Stage 7.6)
   media/                   RAW (or its AE-safe conformed copy raw_ae.mov / raw_ae.mp4) + competitor_ref.mp4
   cutlist.json             the single source of truth (prompt Stage 6 schema + extras)
-  cutlist.csv              one row per segment
+  cutlist.csv              one row per segment (timecodes as in the report: drop-frame for 29.97/59.94)
   recreated_edit.xml       FCP7 XML (Premiere Pro / DaVinci Resolve)
   recreated_edit.edl       CMX3600 EDL (cuts + M2 speed lines)
   preview_recreation.mp4   frame-exact render of the recreation from RAW (MAIN size / fps / layout)
-  compare.mp4              competitor | recreation | amplified difference, frame number + timecode + segment
+  compare.mp4              competitor | recreation | amplified difference; frame number, timecode and segment
+                           in a label strip above each panel (never over the picture)
   report.md                inputs, layout, segment table, edit-style breakdown, warnings, criteria, timings
   verify.json              every Stage 9 check and acceptance criterion with its evidence
-  debug/                   mapping.png, scores.png, layout.png, cuts/cut_XX.png,
-                           low_confidence/k#####.png, verify_failures/k#####.png
+  debug/                   mapping.png, scores.png, layout.png, layout_refine.png, cuts/cut_XX.png,
+                           low_confidence/k#####.png, verify_failures/k#####.png,
+                           decisions.jsonl (this run's evidence, cached stages replayed with cached=true)
 work/
   cache/<stage>/<key>.*    content-addressed caches (key = input file hashes + analysis parameters)
-  decisions.jsonl          every decision with its evidence (truncated at the start of each run)
+  decisions.jsonl          every decision with its evidence (truncated at the start of each run; cached
+                           stages replay their stored records; copied to <out>/debug/)
   match_cuts.log           full debug log (appended)
   frame_map.npz            m(k): the RAW frame, scores, ranges and transform of every competitor frame
   layout.json, ae_plan.json, ae_mock_runs.json, verify_zncc.npy, verify_rerun/
@@ -112,9 +115,12 @@ work/
 `cutlist.json` notes: frame indices are integers, intervals half-open `[comp_in, comp_out)`, frame
 rates exact rationals (`"30000/1001"`), seconds have 9 decimals. `transform` maps RAW pixels (after the
 horizontal flip when `flip_h`) to competitor pixels, CORNER convention. `raw_in_seconds` is the
-phase-solved RAW time at `comp_in` (the centre of the feasible interval `raw_in_interval`, preferring the
-part that also satisfies round-to-nearest sampling, `raw_in_interval_both`); `ae_margin_ms` is its
-half-width. The only wall-clock values are in `provenance.timings`, which the determinism check
+phase-solved RAW time at `comp_in`: any value inside the feasible interval `raw_in_interval` reproduces
+every measured frame under AE's floor rule (`raw_in_interval_both`: also under round-to-nearest). Inside
+it the phase is chosen from the AUDIO when the segment's audio correlates confidently (`audio.phase_source
+= "audio"`, `audio.lag_ms_video` = the lag the interval centre would have had), otherwise the centre;
+this removes the systematic quarter-frame audio offset of the centre (8.3 ms at 30p, 10.4 ms at 24p).
+`ae_margin_ms` is the distance to the interval edge. The only wall-clock values are in `provenance.timings`, which the determinism check
 ignores; everything else is identical on a re-run.
 
 ## Pipeline
@@ -124,7 +130,7 @@ ignores; everything else is identical on a re-run.
 | S0 | `pipeline.check_env` | OS, ffmpeg/ffprobe versions, Python packages, Node, After Effects / aerender search |
 | S2 | `probe`, `conform` | ffprobe + a full decode pass per file; AE-unsafe files (VP9/AV1/HEVC, WebM, Opus, VFR, start offsets, edit lists, rotation, SAR ≠ 1) are conformed to `media/` and verified; analysis then uses **only** the files AE imports |
 | S3 | `proxies` | memory-mapped grayscale proxies, 16 kHz mono analysis audio (original-rate audio for the final audio check) |
-| S4 | `layout` | static mask, video box + corner radius, background, zones, caption/overlay masks |
+| S4 | `layout` | static mask, video box + corner radius, background, zones, caption/overlay masks, layout periods (fullscreen / split / PiP); after S5.3 the box is re-fitted against the warped RAW (`refine_box_from_raw`) and S5.2–5.3 re-run once if it changed |
 | S5.1 | `audio_align` | FFT cross-correlation of 1 s windows (log-mel + onset), speed-scaled windows, sample-precise refine |
 | S5.2 | `visual_match` | SIFT index of RAW, voting, RANSAC (also against the flipped RAW), ZNCC-verified anchors |
 | S5.3 | `refine` | frame-exact m(k) with masked ZNCC, track transforms, ambiguous-identical ranges, rescue search |
@@ -147,14 +153,19 @@ automatically when an algorithm changes).
 |---|---|
 | **c1 coverage** | 9.1: segments + labelled NOT-IN-RAW placeholders tile `[0, N)` exactly; overlaps only where a measured transition of exactly that length explains them; raw segments must carry a RAW mapping |
 | **c2 frame-exact cuts** | an independent per-cut check: the last frame of A scores higher against A's model (AE sampling rule + A's transform) than against B's model extended back, and the first frame of B the reverse; crossfades: the fitted alpha ramp; NOT-IN-RAW neighbours: the placeholder frame must *not* match the extended neighbour; 9.4 writes `debug/cuts/cut_XX.png` (k-1..k+2, competitor over recreation) |
-| **c3 frame-exact source frames** | 9.2: which RAW frame AE shows on every comp frame, simulated from the exact AE plan **and** from the values the JSX actually set in the mock run, must equal m(k) on ≥ 99 % of matched frames (exceptions listed: ambiguous-identical, timing-tie); 9.3: masked ZNCC of competitor vs a match-geometry recreation on every frame ≥ `verify_zncc`, failures in `debug/verify_failures/` |
-| **c4 speed / framing** | speed inside the feasible range of the segment's frame constraints (± 0.5 %) and snapped whenever a snap value was feasible; per-frame measured transforms vs the segment model within ± 1 % scale / ± 4 px; flip and rotation consistent |
-| **c5 audio** | 9.5: per-segment lag of the rebuilt RAW audio vs the competitor's within ± 10 ms, else an explanation from the closed list `too_short, not_in_raw, audio_replaced, pitch_preserved, music_dominated, no_audio` (a confident correlation at a wrong lag always fails) |
+| **c3 frame-exact source frames** | 9.2: which RAW frame AE shows on every comp frame, simulated from the exact AE plan **and** from the values the JSX actually set in the mock run, must equal refine's MEASURED m(k) (before segmentation) on ≥ 99 % of matched frames; listed exception classes: ambiguous-identical, timing-tie, and frames segmentation re-assigned to its model; a plan that disagrees with the cut list always fails. Crossfade frames (both layers + opacity), dips and NOT-IN-RAW placeholders are checked too. 9.3: masked ZNCC of competitor vs a match-geometry recreation on every frame (each frame in its own box ROI; fullscreen periods on the whole canvas minus active zones) ≥ `verify_zncc`, failures in `debug/verify_failures/`; the delivered `preview_recreation.mp4` is always probed (frame count, fps) |
+| **c4 speed / framing** | speed inside the feasible range of the segment's frame constraints (± 0.5 %) and snapped whenever a snap value reproduces refine's measured frames; framing MEASURED independently (ECC from a perturbed start on sampled frames) vs the segment model within ± 1 % scale / ± 4 px; flip must beat the mirrored hypothesis; rotation consistent |
+| **c5 audio** | 9.5: per-segment lag of the rebuilt RAW audio vs the competitor's within ± 10 ms, else an explanation from the closed list `too_short, not_in_raw, audio_replaced, pitch_preserved, music_dominated, no_audio` (a confident correlation at a wrong lag always fails; `music_dominated` is only accepted when the per-segment audio analysis found it, and a wide ±2 s search catches grossly misaligned audio) |
 | **c6 After Effects** | the `.jsx` in the strict mock (no error alert; MAIN frame rate, duration, work area; saved `recreated_edit.aep` next to the script; one layer per segment with the planned name/startTime/stretch/in/out; the *media missing* scenario aborts cleanly after the relink dialog) + 9.6 `aerender` frame-by-frame comparison with the preview when AE is installed. On Linux `pass` means *mock-verified* |
-| 9.7 determinism | segmentation → phase solve → audio → cut list re-run from the cached FrameMap/AudioHints in a fresh context; canonical JSON (without `provenance.timings`) must be byte-identical. When the previous run's `cutlist.json` came from the same inputs, parameters and tool/stage versions it is compared too (a difference is reported as a warning) |
+| 9.7 determinism | segmentation → phase solve → audio → cut list re-run from the cached FrameMap/AudioHints in a fresh context; canonical JSON (without `provenance.timings`) must be byte-identical. When the previous run's `cutlist.json` came from the same inputs, parameters and tool/stage versions it is compared too (a difference fails) |
+| 9.8 deliverables | every file of the deliverables tree exists (unless explicitly skipped, e.g. `--skip-preview`, or the `.aep` without AE), XML/EDL re-parse validation passed, no stage error |
 
 Statuses: `pass`, `pass_with_exceptions` (every exception listed and explained), `fail`,
-`not_available` (e.g. no Node for the mock, no AE for aerender — never a failure by itself).
+`not_available` (e.g. no Node for the mock, no AE for aerender).
+
+Exit codes: `0` everything passed; `1` a criterion or check failed; `2` the run itself failed (bad
+inputs, a crashed stage); `3` nothing failed but a criterion could not be verified (headline
+`PASS (criterion 6 not verified: …)`, e.g. Node.js missing so the JSX was never executed).
 
 ## Running the result in After Effects
 
@@ -186,13 +197,30 @@ them where they are or relink when asked.
 **VFR, start offsets, WebM/VP9/AV1/HEVC/Opus** — these are conformed automatically to
 `media/raw_ae.mov` (ProRes 422 LT, same resolution and frame rate, CFR, start 0, PCM audio; H.264
 CRF 12 in `raw_ae.mp4` for RAWs longer than 10 minutes) and verified (frame count + ≥ 50 PTS-sampled
-frames matched by SSIM). A VFR competitor is timed on its nominal rate using the frame displayed at
-each output time. The report's *Inputs* section lists every issue found and the conform decision.
+frames matched by SSIM, plus — for VFR — a content check that every source frame the timing requires is
+really shown, independent of the ffmpeg rule). A VFR competitor is timed on its nominal rate using the
+frame displayed at each output time; millisecond-rounded timestamps (MKV/WebM, OBS recordings) are treated
+as quantised so no frame is lost. ffmpeg older than 5.1 works (`-vsync 0` instead of `-fps_mode`). A
+truncated or partially downloaded input is detected (decoded length vs the header) and warned about —
+otherwise its missing tail would look like NOT-IN-RAW footage. The report's *Inputs* section lists every
+issue found and the conform decision.
+
+**Fullscreen shots inside a boxed edit** — detected as layout periods; those segments carry their own
+`box` (the whole canvas) and are placed directly in the main comp above the Video Box (no rounded mask),
+in the AE project and in the preview. Split-screen / picture-in-picture regions are detected and reported
+but not recreated (criterion 1 becomes `pass_with_exceptions`, listed under *Anything AE can't
+reproduce*).
+
+**Slow on Windows / macOS** — worker processes are `spawn`ed there (forking is only safe on Linux);
+results are identical, start-up costs a few seconds per pool. `MATCH_CUTS_START_METHOD=spawn|fork`
+overrides the choice.
 
 **AE shows a different frame rate than expected** — AE sometimes misreads the rate of a file; the JSX
 compares the imported `frameRate` with the exact rate from the cut list and sets
-`mainSource.conformFrameRate` when they differ by more than 0.1 % (listed in the final alert). It never
-conforms to the comp rate: a 29.97 fps source inside a 30 fps edit plays at speed 1.000.
+`mainSource.conformFrameRate` on any real difference (beyond AE's float32 rounding; a warning with the
+drift in frames when it is more than cosmetic), and checks the frame count exactly. It never conforms to
+the comp rate: a 29.97 fps source inside a 30 fps edit plays at speed 1.000. Runtime warnings are listed in
+the final alert and stored in the comment of the `Recreated Edit` comp.
 
 **Off-by-one frames in AE on some segments** — the report lists *AE-rule-sensitive* segments (phase
 margin below `ae_min_margin_ms`, or no start time that satisfies both floor and round sampling). The JSX
@@ -201,7 +229,7 @@ frame-exact time remapping; to force it for every layer, re-export with `--ae-ti
 
 **A criterion failed** — start with `report.md` (*Warnings*, *Verification details*), then
 `verify.json`, `debug/mapping.png` (every segment should be a straight line, every cut a jump),
-`debug/scores.png`, `debug/cuts/`, `debug/verify_failures/` and the evidence in `work/decisions.jsonl`.
+`debug/scores.png`, `debug/cuts/`, `debug/verify_failures/` and the evidence in `debug/decisions.jsonl`.
 
 | failing | usual causes and fixes |
 |---|---|

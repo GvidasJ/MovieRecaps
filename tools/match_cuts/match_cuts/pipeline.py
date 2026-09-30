@@ -370,6 +370,19 @@ def remap_raw_seconds(keys: list[dict], k: float) -> float | None:
     return float(ks[-1]["raw_seconds"])
 
 
+def code_hash() -> str:
+    """Hash of the package's own source files (match_cuts/*.py + ae_mock/*.js): the s9_7 comparison with a
+    previous run only applies when the code is identical too (edits without a STAGE_VERSION bump would
+    otherwise be reported as non-determinism)."""
+    import hashlib
+    root = Path(__file__).resolve().parent
+    h = hashlib.blake2b(digest_size=10)
+    for p in sorted(list(root.glob("*.py")) + list((root / "ae_mock").glob("*.js"))):
+        h.update(p.name.encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
+
 def segment_constraints(seg: Segment, fm: FrameMap) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(ks, lo, hi) phase constraints of a segment: MATCH frames in [comp_in, comp_out) with their soft
     ranges (fallback: ambiguous-identical range, then the argmax)."""
@@ -1043,6 +1056,7 @@ def build_cutlist(ctx: Context, segments: list[Segment], audio_result: dict, seg
         "analysis_params_hash": params_hash(cfg.analysis_params()),
         "analysis_params": cfg.analysis_params(),
         "stage_versions": dict(sorted(STAGE_VERSION.items())),
+        "code_hash": code_hash(),
         "seed": cfg.seed,
         "ffmpeg_version": ctx.env.get("ffmpeg_version"),
         "timings": dict(ctx.timings),
