@@ -37,6 +37,12 @@ class VideoReader:
     display: apply rotation side-data (multiples of 90°) and SAR -> square pixels so frames are
              in display orientation. Rotation is applied *before* resizing; ``size`` refers to the
              display-oriented frame.
+    sar:     SAR of the ROTATED frame (SAR is applied after rotation) -- pass probe.reader_sar(info),
+             not StreamInfo.sar, for 90/270° files. Conformed files always have rotation 0 and SAR 1.
+
+    Fork hazard (measured): once a process has called PyAV ``frame.to_ndarray()``, a child created
+    with multiprocessing 'fork' that decodes/converts video hangs. Worker pools that decode video
+    must use mp.get_context('spawn'); pools that only read memmapped proxies are fork-safe.
     """
 
     def __init__(self, path: str | Path, fps: Fraction | str | None = None, stream_index: int = 0,
@@ -260,7 +266,7 @@ class FFmpegWriter:
 
     def write(self, img: np.ndarray) -> None:
         assert img.shape[1] == self.size[0] and img.shape[0] == self.size[1], (img.shape, self.size)
-        self.proc.stdin.write(np.ascontiguousarray(img).tobytes())
+        self.proc.stdin.write(memoryview(np.ascontiguousarray(img)))
 
     def close(self) -> None:
         self.proc.stdin.close()

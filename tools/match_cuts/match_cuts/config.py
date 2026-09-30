@@ -23,6 +23,17 @@ class Config:
     conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
     ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
     ae_min_margin_ms: float = 1.0          # phase margin below which a segment is "AE-rule-sensitive"
+    conform_h264_preset: str = "veryfast"  # libx264 preset for raw_ae.mp4 (RAW > 10 min or conform_codec=h264)
+    conform_h264_crf: int = 12
+    competitor_h264_preset: str = "medium" # competitor_ref.mp4 when the competitor must be transcoded
+    competitor_h264_crf: int = 12
+    # ---- exports (Stage 8) ----
+    preview_crf: int = 14                  # <= 16 (prompt)
+    preview_preset: str = "fast"
+    preview_audio_budget_bytes: int = 1 << 30   # above this the RAW audio is decoded per played window
+    compare_height: int = 960
+    compare_crf: int = 18
+    compare_preset: str = "veryfast"
     large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
     workers: int = 0                       # 0 = os.cpu_count()
     verbose: bool = False
@@ -118,6 +129,10 @@ class Config:
     verify_zncc: float = 0.90
     audio_lag_tol_ms: float = 10.0
     frame_exact_min: float = 0.99
+    verify_alpha_tol: float = 0.15         # crossfade: max |fitted alpha_B - declared alpha_B| per overlap frame
+    verify_audio_min_corr: float = 0.30    # xcorr peak below which a segment's audio lag is not trusted
+    verify_audio_strong_corr: float = 0.80 # peak above which a lag outside audio_lag_tol_ms always fails c5
+    verify_full_rate_max_s: float = 900.0  # RAWs up to this long: final audio check at the original rate
 
     def resolved_workers(self) -> int:
         import os
@@ -133,7 +148,11 @@ class Config:
         d = self.to_dict()
         for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
-                  "ae_time_mode", "ae_min_margin_ms", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min"):
+                  "ae_time_mode", "ae_min_margin_ms", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
+                  "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
+                  "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
+                  "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
+                  "verify_full_rate_max_s"):
             d.pop(k, None)
         return d
 

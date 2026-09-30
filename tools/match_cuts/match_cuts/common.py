@@ -73,11 +73,14 @@ def parse_fps(value: Any) -> Fraction:
 def snap_rate(fr: Fraction, tol: float = 1e-4) -> Fraction:
     """Snap a measured (e.g. avg_frame_rate) rational to a common rate if within tol (relative).
 
-    For nominal-rate detection of VFR phone/TikTok files use tol=0.01 (DESIGN §5 conform)."""
+    For nominal-rate detection of VFR phone/TikTok files use tol=0.01 (DESIGN §5 conform).
+    Returns the NEAREST common rate within tolerance (not the first one listed)."""
+    best, best_d = fr, None
     for r in _COMMON_RATES:
-        if abs(float(fr) - float(r)) <= float(r) * tol:
-            return r
-    return fr
+        d = abs(float(fr) - float(r)) / float(r)
+        if d <= tol and (best_d is None or d < best_d):
+            best, best_d = r, d
+    return best
 
 
 def fps_str(fr: Fraction) -> str:
