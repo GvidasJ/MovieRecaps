@@ -3,6 +3,7 @@ AE-simulation comparison, mock-record evaluation, speed/framing, audio exception
 aggregation and the determinism comparison. The analysis modules are replaced by small stubs."""
 from __future__ import annotations
 
+import copy
 import json
 import math
 import sys
@@ -244,6 +245,19 @@ def test_coverage_fullscreen_period_boundary_inside_a_dissolve_or_off_by_a_slive
     assert r["status"] == "fail" and "frames 30-33 show the video full-screen" in r["failures"][0], r
     r = pair(O + 2, b_box=False)                          # the neighbour does not carry the box: not explained
     assert r["status"] == "fail" and any("S01: frames 36-39" in f for f in r["failures"]), r
+    # a dip: boxed A fades to black (the whole canvas: the full-screen period starts inside the fade-out), the
+    # dip segment carries the canvas box, full-screen B fades in from black
+    dip = {"type": "dip_black", "duration_frames": D, "alpha": [i / D for i in range(D)], "color": "#000000"}
+    A = seg(1, "raw", 0, O + D, 100, transition_out=dict(dip))
+    U = seg(2, "dip", O, 50, transition_in=dict(dip), box=dict(full), region=1)
+    B = seg(3, "raw", 50, n, 900, box=dict(full), region=1)
+    lb = {"periods": [{"comp_in": 0, "comp_out": O + 2, "mode": "boxed"},
+                      {"comp_in": O + 2, "comp_out": n, "mode": "fullscreen"}]}
+    r = verify.check_coverage([A, U, B], n, lb)
+    assert r["status"] == "pass_with_exceptions" and not r["failures"], r
+    assert r["fullscreen_explained"] == [{"segment": 1, "frames": [[36, 39]], "why": "transition", "period": [36, 79]}]
+    U.box = None                                          # the dip does not carry the full-screen box
+    assert verify.check_coverage([A, U, B], n, lb)["status"] == "fail"
     # the reverse: full-screen shot A dissolving into boxed B; the period ends inside the dissolve
     A = seg(1, "raw", 0, O + D, 100, transition_out=xfade(D), box=dict(full), region=1)
     B = seg(2, "raw", O, n, 900, transition_in=xfade(D))
@@ -844,8 +858,13 @@ def test_mock_checks_pass_and_fail(tmp_path):
         return []
     ok = json.loads(json.dumps(recs))
     switch(ok)
-    assert verify.check_mock(plan, ok, fps, 90, tmp_path, "raw.mp4", layer_checker=checker)["status"] == "pass"
+    plan_x = json.loads(json.dumps(plan))
+    plan_x["layers"][0]["expect"] = list(range(40))        # export_ae's per-frame list (frames-mode key count)
+    assert verify.check_mock(plan_x, ok, fps, 90, tmp_path, "raw.mp4", layer_checker=checker)["status"] == "pass"
     assert seen["seg1"] == ("frames", 100.0, False)
+    seen.clear()                                            # a generic plan without it: keys / switches only
+    assert verify.check_mock(plan, ok, fps, 90, tmp_path, "raw.mp4", layer_checker=checker)["status"] == "pass"
+    assert seen["seg1"] == ("still", 100.0, False)
     na = verify.check_mock(plan, {"default": {"status": "not_available", "reason": "node missing"}}, fps, 90, tmp_path, "raw.mp4")
     assert na["status"] == "not_available"
     # per-layer key / render-switch problems reported by the layer checker fail c6
@@ -906,6 +925,18 @@ def test_mock_check_accepts_the_jsx_runtime_switch_to_frames(tmp_path):
                 L["quality"] = "DRAFT"
     r = verify.check_mock(plan, bad, Fraction(30), 90, tmp_path, "raw.mp4")
     assert r["status"] == "fail" and "render switches" in json.dumps(r["failures"]), r["failures"]
+    # its sound moved to the runtime audio-only twin ('mc:seg2_audio'): a missing or muted twin fails c6
+    twin = [L for c in rec["comps"] for L in c["layers"] if L.get("comment") == "mc:seg2_audio"]
+    assert len(twin) == 1 and twin[0]["enabled"] is False and twin[0]["audioEnabled"] is True, twin
+    for mutate, needle in ((lambda L: L.update(comment="x", name="x"), "without its audio twin"),
+                           (lambda L: L.update(audioEnabled=False), "audio twin: enabled")):
+        bad = json.loads(json.dumps(recs))
+        for c in bad["default"]["comps"]:
+            for L in c["layers"]:
+                if L.get("comment") == "mc:seg2_audio":
+                    mutate(L)
+        r = verify.check_mock(plan, bad, Fraction(30), 90, tmp_path, "raw.mp4")
+        assert r["status"] == "fail" and needle in json.dumps(r["failures"]), r["failures"]
 
 
 def test_mock_checks_generic_record_format(tmp_path):
@@ -1534,6 +1565,8 @@ def test_previous_run_comparison_ignores_locations_and_gates_on_ffmpeg(monkeypat
     new_ff["provenance"]["ffmpeg_version"] = "7.1"
     r = verify.compare_with_previous_run(new_ff, cur)
     assert r["compared"] is False and r["changed"] == ["ffmpeg_version"]
+    new_ff["raw"]["hash"] = "other"                         # not compared at all: no failure either
+    assert verify.compare_with_previous_run(new_ff, cur)["compared"] is False
     # end to end through check_determinism: the moved-inputs rerun passes s9_7
     cfg = Config()
     cfg.out_dir = str(tmp_path)
@@ -1548,6 +1581,12 @@ def test_previous_run_comparison_ignores_locations_and_gates_on_ffmpeg(monkeypat
     ctx = types.SimpleNamespace(cfg=cfg, cutlist=cl, previous_cutlist=prev)
     r = verify.check_determinism(ctx)
     assert r["status"] == "pass" and "identical to the previous run" in r["summary"], r
+    prev = copy.deepcopy(prev)                              # (to_dict shares the provenance dict)
+    prev["provenance"]["ffmpeg_version"] = "7.1"            # after an ffmpeg upgrade: skipped, and said so
+    prev["segments"] = []
+    ctx.previous_cutlist = prev
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "pass" and "previous run not compared (ffmpeg_version changed)" in r["summary"], r
 
 
 def test_unsnapped_speed_judged_on_measured_frames_not_soft_ranges():

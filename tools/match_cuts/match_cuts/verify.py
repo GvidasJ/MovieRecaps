@@ -207,9 +207,10 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
         exceptions.append("segments of an unsupported video region (split-screen / PiP): "
                           + ", ".join(f"{_seg_name(s)} (region {s.region})" for s in multi))
     # full-screen periods (DESIGN §7 D1) are reproduced: every RAW segment in them carries its own box. A
-    # boxless segment's frames there are explained only by its declared transition overlap with a neighbour
-    # carrying the box (the detected period starts mid-dissolve) or as a merged 1-2 frame sliver at the period
-    # boundary (the detected boundary is off by a frame or two); its other frames fail (review R2-5 / D1-c1)
+    # boxless segment's frames there are explained only by its declared transition overlap (crossfade / dip) with
+    # a neighbour carrying the box (the detected period boundary falls mid-transition) or as a merged 1-2 frame
+    # sliver at the period boundary (the detected boundary is off by a frame or two); its other frames fail
+    # (review R2-5 / D1-c1)
     fullscreen: list[list[int]] = []
     fs_explained: list[dict] = []
     for p in all_periods:
@@ -221,7 +222,7 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
         for s in boxed:
             part = boxless_fullscreen_frames(s, segs, a, b)
             for why, text in (("transition", "lie in its declared transition overlap with {nb}, which carries the "
-                                              "full-screen box (the detected period starts inside the dissolve)"),
+                                              "full-screen box (the detected period boundary falls inside the transition)"),
                               ("sliver", "are a merged sliver at the full-screen period boundary (the detected "
                                          "boundary is off by a frame or two)")):
                 fr = part[why]
@@ -254,9 +255,11 @@ FULLSCREEN_SLIVER_MAX = 2      # merge_tiny joins at most 2-frame slivers across
 def boxless_fullscreen_frames(seg: Segment, segments: Sequence[Segment], a: int, b: int) -> dict:
     """Classify the frames of a boxless RAW segment ``seg`` that lie in the full-screen period [a, b):
 
-    * 'transition': inside a declared transition overlap (crossfade: the overlap length equals the declared
-      duration on either side) with a neighbour that carries a box -- the full-screen shot dissolving in or
-      out while the period detection switched mid-dissolve (segment.py keeps such a straddling segment boxed);
+    * 'transition': inside a declared transition overlap (crossfade or dip: the overlap length equals the
+      declared duration on either side) with a neighbour that carries a box -- a RAW segment (the full-screen
+      shot dissolving in or out while the period detection switched mid-dissolve; segment.py keeps such a
+      straddling segment boxed by the majority rule) or a dip segment (the whole canvas fading to / from the
+      dip colour);
     * 'sliver': the remaining frames form one run of <= FULLSCREEN_SLIVER_MAX frames at the period boundary
       while most of the segment lies outside the period (segment.merge_tiny's merged sliver);
     * 'unexplained': everything else (the segment should have carried the full-screen box).
@@ -268,7 +271,7 @@ def boxless_fullscreen_frames(seg: Segment, segments: Sequence[Segment], a: int,
     trans: set[int] = set()
     nbs: list[int] = []
     for o in segments:
-        if o is seg or not getattr(o, "box", None) or o.type != "raw":
+        if o is seg or not getattr(o, "box", None) or o.type not in ("raw", "dip"):
             continue
         ov0, ov1 = max(int(seg.comp_in), int(o.comp_in)), min(int(seg.comp_out), int(o.comp_out))
         if ov1 <= ov0:
@@ -1298,6 +1301,7 @@ def _bad_alerts(rec: dict) -> list[str]:
 
 
 FRAMES_SUFFIX = "  [frames]"   # export_ae's JSX renames a layer its read-back self-check switched to frames mode
+AUDIO_TWIN_SUFFIX = "  audio"   # ... and moves its audio to a disabled audio-only twin '<name>  audio' (mc:<id>_audio)
 
 
 def _record_name_ok(P: dict, L: dict, mode: str, remapped: bool) -> bool:
@@ -1312,6 +1316,32 @@ def _record_name_ok(P: dict, L: dict, mode: str, remapped: bool) -> bool:
     except Exception:  # noqa: BLE001 - fall back to the local rule below
         pass
     return mode == "stretch" and remapped and L.get("name") == f"{P.get('name')}{FRAMES_SUFFIX}"
+
+
+def _audio_twin_problems(P: dict, L: dict, rec_by_tag: dict, rec_by_name: dict,
+                         checker: Callable[[dict, dict, dict], list[str]] | None, F: dict) -> list[str]:
+    """A stretch layer the JSX self-check switched to frame-exact remapping keeps its sound on a runtime
+    audio-only twin (export_ae addAudioTwin: stretch-placed, video disabled, audio enabled, the plan's audio
+    level keys). Problems of that twin; none when the plan layer carries no audio or the footage has none."""
+    if not P.get("audio") or not L.get("hasAudio"):
+        return []
+    T = rec_by_tag.get(f"{P.get('id')}_audio") if P.get("id") is not None else None
+    if T is None:
+        T = rec_by_name.get(f"{P.get('name')}{AUDIO_TWIN_SUFFIX}")
+    if T is None:
+        return ["switched to frame-exact remapping without its audio twin layer (the segment's audio is lost)"]
+    probs = []
+    if T.get("enabled") is not False or not T.get("audioEnabled"):
+        probs.append(f"audio twin: enabled {T.get('enabled')} / audioEnabled {T.get('audioEnabled')} "
+                     "(want video off, audio on)")
+    if checker is not None:
+        PA = {**P, "id": f"{P.get('id')}_audio", "kind": "raw_audio", "xf": None, "opacity": [], "mask": None,
+              "maskPath": None, "enabled": False, "guide": False, "audio": True, "timeMode": "stretch"}
+        try:
+            probs.extend(f"audio twin: {m}" for m in checker(PA, T, F))
+        except Exception as e:  # noqa: BLE001 - reported, not fatal
+            probs.append(f"audio twin: key check unavailable: {type(e).__name__}: {e}")
+    return probs
 
 
 def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int, script_dir: str | Path,
@@ -1449,11 +1479,15 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
             if mode == "stretch" and remapped:
                 # switched to frame-exact remapping at runtime: check its keys / mask / opacity / switches as the
                 # frames-mode layer the JSX made of it (its audio moved to a runtime audio twin) (review AE2-1)
-                PP = {**P, "timeMode": "frames", "startTime": t_in, "stretch": 100.0, "audio": False}
+                # (a plan without the per-frame 'expect' list: the remap keys are left to simulate_ae(record))
+                PP = {**P, "timeMode": "frames" if "expect" in P else "still", "startTime": t_in, "stretch": 100.0,
+                      "audio": False}
             try:
                 probs.extend(extra_problems(PP, L, F))
             except Exception as e:  # noqa: BLE001 - a helper that cannot read this record is reported, not fatal
                 probs.append(f"key/render-switch check unavailable: {type(e).__name__}: {e}")
+        if mode == "stretch" and remapped:
+            probs.extend(_audio_twin_problems(P, L, rec_by_tag, rec_by_name, extra_problems, F))
         if probs:
             layer_problems.append(f"{P.get('id') or P.get('name')}: " + "; ".join(probs))
     chk("every plan layer present with the plan's name/startTime/stretch/in/out", not layer_problems, layer_problems[:20])
@@ -2446,6 +2480,8 @@ def check_determinism(ctx: Any) -> dict:
     summary = "cutlist re-assembled from caches is byte-identical" if not failures else "cutlist NOT reproducible"
     if prev.get("compared"):
         summary += "; " + ("identical to the previous run" if prev.get("identical") else "DIFFERS from the previous run")
+    elif prev.get("changed"):
+        summary += "; previous run not compared (" + ", ".join(prev["changed"]) + " changed)"
     return {"status": status, "summary": summary, "failures": failures, "differences": cmp["differences"],
             "previous_run": prev, "warnings": warnings}
 

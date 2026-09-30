@@ -9,7 +9,8 @@ layout, RawIndex, conform via ``.conform.json``). The pipeline caches the stages
 do not take one -- AudioHints (``audio_align``), anchors (``sparse_search``) and the refined FrameMap
 plus the pass-2 overlay masks (``frame_map``) -- under ``WORK_DIR/cache/<stage>/<key>`` with
 ``key = stage_key(stage, competitor hash, RAW hash, cfg.analysis_params())`` (anchors and FrameMap also
-key on the layout geometry + starting overlay masks, ``visual_pass_key_parts``). Freshly computed
+key on the layout geometry, its static-pixel mask and the starting overlay masks, on BOTH passes:
+``visual_pass_key_parts``). Freshly computed
 values are always written first and re-read from the cache file, so a first run and a cached
 re-run see bit-identical inputs (criterion 9.7).
 
@@ -50,7 +51,7 @@ from typing import Any, Callable, Iterator
 import numpy as np
 
 from . import __version__
-from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, fmt_seconds,
+from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, file_hash, fmt_seconds,
                      fps_str, json_default, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
                      setup_logging, stage_key, timecode)
 from .config import Config
@@ -1175,7 +1176,9 @@ def transition_overlap_frames(seg: Segment, segments: list[Segment]) -> set[int]
     if seg.type != "raw":
         return out
     for nb in segments:
-        if nb is seg or nb.type != "raw" or bool(nb.box) == bool(seg.box):
+        # a RAW neighbour of the other framing, or a dip segment carrying the canvas box (the same neighbour
+        # set as verify.boxless_fullscreen_frames, so the warning and c1 never disagree)
+        if nb is seg or nb.type not in ("raw", "dip") or bool(nb.box) == bool(seg.box):
             continue
         for x, y in ((seg, nb), (nb, seg)):          # x outgoing, y incoming
             lo, hi = int(y.comp_in), int(x.comp_out)
@@ -1186,17 +1189,20 @@ def transition_overlap_frames(seg: Segment, segments: list[Segment]) -> set[int]
     return out
 
 
-def period_mismatch_frames(seg: Segment, a: int, b: int, segments: list[Segment]) -> tuple[list[int], dict]:
+def period_mismatch_frames(seg: Segment, a: int, b: int, segments: list[Segment],
+                           fullscreen: list[tuple[int, int]] | None = None) -> tuple[list[int], dict]:
     """Frames of RAW segment ``seg`` whose framing contradicts the fullscreen period [a, b): a boxless
-    segment's frames inside it, a boxed (whole-canvas) segment's frames outside it. Not counted (the
-    rule of verify.boxless_fullscreen_frames, mirrored for boxed segments): frames inside a declared
+    segment's frames inside it, a boxed (whole-canvas) segment's frames outside it (and outside every
+    other fullscreen period in ``fullscreen``, half-open ranges). Not counted (the rule of
+    verify.boxless_fullscreen_frames, mirrored for boxed segments): frames inside a declared
     transition overlap with a neighbour of the other framing (``transition_overlap_frames``), and a
     merged sliver -- the remaining frames form ONE run of at most LAYOUT_SLIVER_FRAMES frames at the
     period boundary of a segment that continues across it and lies mostly on the correct side (the
     detected boundary is off by a frame or two). Returns (unexplained frames, exempt evidence)."""
     k0, k1 = int(seg.comp_in), int(seg.comp_out)
     if seg.box:
-        wrong = [k for k in range(k0, k1) if not (a <= k < b)]
+        spans = [(int(a), int(b))] + [(int(x), int(y)) for x, y in (fullscreen or [])]
+        wrong = [k for k in range(k0, k1) if not any(x <= k < y for x, y in spans)]
     else:
         wrong = list(range(max(a, k0), min(b, k1)))
     if not wrong:
@@ -1234,16 +1240,20 @@ def layout_period_warnings(segments: list[Segment], layout: Layout | None, layou
     if layout is None or layout_mode != "match":
         return out
     raw = sorted((s for s in segments if s.type == "raw"), key=lambda s: (s.comp_in, s.id))
-    for p in layout.periods:
-        if p.mode != "fullscreen":
-            continue
-        a, b = int(p.comp_in), int(p.comp_out)
+    neighbours = sorted(segments, key=lambda s: (s.comp_in, s.id))   # raw + dip neighbours of transitions
+    full = [(int(p.comp_in), int(p.comp_out)) for p in layout.periods if p.mode == "fullscreen"]
+    boxed_seen: set[int] = set()      # a boxed segment spanning adjacent fullscreen periods is judged once
+    for a, b in full:
         boxless: list[str] = []
         straddle: list[str] = []
         for s in raw:
             if not (s.comp_in < b and s.comp_out > a) or (s.box and a <= s.comp_in and s.comp_out <= b):
                 continue
-            bad, ev = period_mismatch_frames(s, a, b, raw)
+            if s.box:
+                if int(s.id) in boxed_seen:
+                    continue
+                boxed_seen.add(int(s.id))
+            bad, ev = period_mismatch_frames(s, a, b, neighbours, full)
             if ev and dlog is not None:
                 dlog.record("layout", "period_boundary_explained", segment=s.id, period=[a, b - 1],
                             has_box=bool(s.box), unexplained=[[x, y] for x, y in _ranges(bad)], **ev)
@@ -1378,8 +1388,10 @@ def cached_anchors(ctx: Context, compute: Callable[[], list], *extra: Any) -> li
 
 
 def layout_key(layout: Layout | None) -> str:
-    """Hash of the layout geometry that drives matching (box, background, zones, periods, regions) --
-    file paths and notes excluded, so it does not depend on WORK_DIR. Canonicalised through a JSON +
+    """Hash of the layout that drives matching: its geometry (box, background, zones, periods, regions)
+    and the CONTENT of its static-pixel mask (visual_match excludes those pixels from the box ROI) --
+    file paths and notes excluded, so it does not depend on WORK_DIR. The overlay masks are keyed
+    separately (``overlays_key``: the masks a pass starts from). Canonicalised through a JSON +
     ``Layout.from_dict`` round trip, so a freshly computed layout (ints, tuples, numpy scalars) and the
     same layout re-read from its cache file give the same key."""
     if layout is None:
@@ -1387,7 +1399,8 @@ def layout_key(layout: Layout | None) -> str:
     d = Layout.from_dict(json.loads(json.dumps(layout.to_dict(), default=json_default))).to_dict()
     for k in ("static_mask_file", "overlay_mask_file", "notes"):
         d.pop(k, None)
-    return params_hash(d)
+    sm = getattr(layout, "static_mask_file", "") or ""
+    return params_hash(d, "static_mask", file_hash(sm) if sm and Path(sm).is_file() else "")
 
 
 def overlays_key(overlays: Any) -> str:
@@ -1700,7 +1713,10 @@ def stage_proxies(ctx: Context) -> None:
 
 def stage_layout(ctx: Context) -> None:
     from . import layout as layout_mod
-    key = stage_key("layout", ctx.comp_info.file_hash, ctx.cfg.analysis_params())
+    # the decision store of the self-cached layout stage: keyed like analyze_layout's own cache entry
+    # (incl. LAYOUT_ALGO_VERSION), so a replay never mixes records of another layout algorithm
+    key = stage_key("layout", ctx.comp_info.file_hash, ctx.cfg.analysis_params(),
+                    "algo", getattr(layout_mod, "LAYOUT_ALGO_VERSION", 0))
     ctx.keys["layout"] = key
     ctx.layout, ctx.overlays = self_cached_stage(
         ctx, "layout", key,
@@ -1800,7 +1816,8 @@ def refine_layout_from_raw(ctx: Context) -> bool:
                         if not callable(fn) else "no layout / FrameMap")
         return False
     old = ctx.layout
-    key = stage_key("layout_refine", ctx.keys.get("frame_map"), layout_key(old))
+    key = stage_key("layout_refine", ctx.keys.get("frame_map"), layout_key(old),
+                    "algo", getattr(layout_mod, "LAYOUT_ALGO_VERSION", 0))
     ctx.keys["layout_refine"] = key
     try:
         res = self_cached_stage(ctx, "layout_refine", key, lambda: fn(

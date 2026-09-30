@@ -566,10 +566,27 @@ def _warnings(ctx: Any) -> list[str]:
                     "— only the dominant region is rebuilt")
     if lb.get("regions") and not split:
         cant.append(f"{len(lb['regions'])} extra video region(s) (split-screen / PiP) — only the dominant region is rebuilt")
-    boxed_full = [s for s in cl.segments if s.type == "raw" and not s.box and any(
-        s.comp_in < int(p.get("comp_out")) and s.comp_out > int(p.get("comp_in")) for p in full)]
-    for s in boxed_full:
-        cant.append(f"S{s.id:02d}: shown full-screen by the competitor but rebuilt inside the video box")
+    # a boxless segment touching a fullscreen period is only a problem for frames that neither a declared
+    # dissolve/dip with a fullscreen neighbour nor a 1-2 frame boundary sliver explains (verify's c1 rule)
+    try:
+        from .verify import boxless_fullscreen_frames
+    except Exception:  # noqa: BLE001 - report must render even if verify is unavailable
+        boxless_fullscreen_frames = None
+    for s in cl.segments:
+        if s.type != "raw" or s.box:
+            continue
+        bad: list[int] = []
+        for p in full:
+            a, b = int(p.get("comp_in")), int(p.get("comp_out"))
+            if not (s.comp_in < b and s.comp_out > a):
+                continue
+            if boxless_fullscreen_frames is None:
+                bad += list(range(max(a, s.comp_in), min(b, s.comp_out)))
+            else:
+                bad += list(boxless_fullscreen_frames(s, cl.segments, a, b).get("unexplained") or [])
+        if bad:
+            cant.append(f"S{s.id:02d}: frames {_ranges_str(sorted(set(bad)), comp_fps)} shown full-screen by the "
+                        "competitor but rebuilt inside the video box")
     for s in cl.segments:
         if s.retime and s.retime != "none":
             cant.append(f"S{s.id:02d}: {s.retime} retiming (AE Frame Blending approximates it)")

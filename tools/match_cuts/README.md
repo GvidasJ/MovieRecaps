@@ -73,10 +73,11 @@ flags.
 |---|---|---|
 | `0` | every acceptance criterion is `pass` / `pass_with_exceptions` and no Stage 9 check failed | `PASS` |
 | `1` | an acceptance criterion or a Stage 9 check (incl. `9.8 deliverables`) failed | `FAIL` |
-| `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `work/match_cuts.log`) | — |
+| `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `work/match_cuts.log`) | none (`match_cuts: ERROR: …` on stderr) |
 | `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock) | `PASS (criterion 6 not verified: …)` |
 
-A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked".
+A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked"
+(`3` is the normal result on a machine without Node.js / After Effects). Ctrl-C exits with `130`.
 
 The final summary prints one line per acceptance criterion, the output paths and the warnings:
 
@@ -177,9 +178,9 @@ automatically when an algorithm changes).
 Statuses: `pass`, `pass_with_exceptions` (every exception listed and explained), `fail`,
 `not_available` (e.g. no Node for the mock, no AE for aerender).
 
-Exit codes: `0` everything passed; `1` a criterion or check failed; `2` the run itself failed (bad
-inputs, a crashed stage); `3` nothing failed but a criterion could not be verified (headline
-`PASS (criterion 6 not verified: …)`, e.g. Node.js missing so the JSX was never executed).
+Exit codes (the table under *Usage*): `0` everything passed; `1` a criterion or check failed; `2` the
+run itself failed (bad inputs, a crashed stage); `3` nothing failed but a criterion could not be verified
+(headline `PASS (criterion 6 not verified: …)`, e.g. Node.js missing so the JSX was never executed).
 
 ## Running the result in After Effects
 

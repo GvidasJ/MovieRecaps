@@ -46,10 +46,12 @@ cli.main -> pipeline.run(cfg)
 Caching: each stage's result lives in `WORK_DIR/cache/<stage>/<key>` with
 `key = common.stage_key(stage, input file hashes, cfg.analysis_params(), stage-specific params)`.
 The pipeline-level anchors (`sparse_search`) and FrameMap (`frame_map`) keys of BOTH S5.2 + S5.3 passes
-also carry `pipeline.visual_pass_key_parts(layout, overlays)` (the canonical layout geometry hash + a
-content hash of the starting overlay masks), so a FrameMap matched against one box is never reused for
-another (a new layout algorithm, the D2 refined box, other overlays). Bump `STAGE_VERSION[stage]`
-whenever a stage's algorithm or output semantics change.
+also carry `pipeline.visual_pass_key_parts(layout, overlays)` (`layout_key`: the canonical layout
+geometry + the static-pixel mask's content; `overlays_key`: a content hash of the starting overlay
+masks), so a FrameMap matched against one box is never reused for another (a new layout algorithm, the
+D2 refined box, other overlays). The layout stage's decision store is keyed with `LAYOUT_ALGO_VERSION`
+like `analyze_layout`'s own entry. Bump `STAGE_VERSION[stage]` whenever a stage's algorithm or output
+semantics change.
 Export-only settings (layout mode, comp size, fps mode, AE time mode) are excluded from analysis keys.
 Determinism (criterion 9.7): no wall-clock values in cutlist.json (timings go to
 `provenance.timings`, excluded from the determinism comparison), `common.seed_everything(cfg.seed)`
@@ -439,8 +441,9 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # Crossfade: ONLY the UPPER layer of the pair is keyed (LINEAR), the other stays 100 %. Same level
     # (chronological stacking inside one comp): the outgoing A is upper and falls: Opacity 100 at t(O-1),
     # 100·(1-α_B) at O..O+D-1, (0 at O+D = A.outPoint). An incoming MAIN-level B (D1, box != None) sits
-    # above the whole Video Box holding A, so B is keyed rising: 100·α_B at O..O+D-1, 100 at O+D (a
-    # MAIN-level outgoing A over a boxed B is the same-level rule: A falls). Audio across a crossfade:
+    # above the whole Video Box holding a boxed A, so B is keyed rising: 100·α_B at O..O+D-1, 100 at O+D,
+    # and A stays 100 %. (A MAIN-level outgoing A over a boxed B is upper anyway: A falls, as in the
+    # same-level case.) Audio across a crossfade:
     # Audio Levels keys on both layers at the overlap frames, 20·log10(max(g, 1e-3)) dB with
     # g = 1-α_B (A) / α_B (B); the preview applies the same linear gains. Dips: only the solid (above both)
     # is keyed.
@@ -680,3 +683,31 @@ verification honesty) were fixed under these shared rules:
   file); results bit-identical across start methods and worker counts.
 * **D8 Synthetic.** Competitor audio starts at the frame boundary of each segment's first RAW frame (NLE
   convention); one ~1 s fullscreen segment exercises D1.
+
+### 7.1 Second review round (review of the v3 diff)
+
+* **Crossfade alpha is gain-independent**: `scoring.fit_blend_free` regresses the competitor on
+  `[A, B, 1]` and takes `α_A = β_A/(β_A+β_B)` (undefined when A and B are collinear), so a repost's
+  contrast change neither breaks a correct dissolve nor confirms an off-by-one one; segment.py keeps the
+  constrained fit's ZNCC for its relative blend test, and c2's window refit drops frames within the purity
+  tolerance.
+* **c4 snap judgement** uses only refine's measured frames: isolated outliers are dropped with
+  `pipeline.max_consistent_subset` (≤ max(2, 5 %) of the frames); if still infeasible the snap is
+  `undecidable` (an exception) — never the soft ranges.
+* **c1 across fullscreen boundaries**: frames of a boxless segment inside a declared crossfade/dip overlap
+  with a neighbour carrying the fullscreen box, and a merged 1–2 frame sliver at a period boundary, are
+  explained exceptions (`verify.boxless_fullscreen_frames`, the single rule also used by
+  `pipeline.layout_period_warnings` and the report).
+* **s9_7 previous-run gate** includes `provenance.ffmpeg_version` and `code_hash`; location-only fields
+  (source/abs/rel paths) are ignored.
+* **c6** accepts the JSX's runtime `  [frames]` fallback rename, checks switched layers as frames-mode
+  layers and requires their audio-only twin.
+* **D3 margin** = max(ae_min_margin_ms, min(5 % of the interval width, 5 % of a RAW frame)); the wide
+  audio search is centred on the feasible interval (up to ±60 s), so static / ambiguous-identical shots land
+  on their audio in-point.
+* **Cache keys**: pass-1 and pass-2 visual/refine keys include the layout geometry, static mask and starting
+  overlays; STAGE_VERSION and LAYOUT_ALGO_VERSION were bumped.
+* **Box refinement** never moves an edge inward over pixels the temporal analysis proved dynamic, and grows
+  only on positive agreement evidence beyond the edge (no growth over letterbox bars the competitor cropped).
+* **Spawn pools** are capped by available RAM when the state holds a RawIndex; the AE MAIN-comment warning
+  store stays under AE's 15,999-byte `Item.comment` limit.

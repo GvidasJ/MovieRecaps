@@ -350,7 +350,24 @@ def test_fullscreen_and_split_periods_in_the_report(tmp_path):
     assert "0–40 fullscreen (reproduced" in md and "270–300 split (NOT reproduced" in md
     ctx.cutlist.segments[0].box = None                   # a full-screen shot rebuilt inside the box is listed
     md = report.render_report(ctx)
-    assert "S01: shown full-screen by the competitor but rebuilt inside the video box" in md
+    assert "S01: frames 0-39" in md and "shown full-screen by the competitor but rebuilt inside the video box" in md
+
+
+def test_fullscreen_boundary_sliver_is_not_reported_as_unreproducible(tmp_path):
+    """Integration (second review round R2-5): the report uses verify's c1 rule -- a boxless segment whose only
+    frames in a full-screen period are a 1-2 frame sliver at the detected boundary (merged by segmentation)
+    is explained, not 'rebuilt inside the video box'."""
+    ctx = make_ctx(tmp_path)
+    s0 = ctx.cutlist.segments[0]
+    a = int(s0.comp_out) - 2                             # the period's detected start lies 2 frames early
+    ctx.cutlist.layout["periods"] = [{"comp_in": 0, "comp_out": a, "mode": "boxed"},
+                                     {"comp_in": a, "comp_out": a + 30, "mode": "fullscreen"}]
+    s0.box = None
+    nxt = next(s for s in ctx.cutlist.segments if s.comp_in == s0.comp_out)
+    nxt.box = {"x": 0, "y": 0, "w": 1080, "h": 1920, "corner_radius": 0}
+    md = report.render_report(ctx)
+    cant = next(ln for ln in md.splitlines() if ln.startswith("- Anything AE can't reproduce"))
+    assert f"S{s0.id:02d}" not in cant, cant
 
 
 def test_main_grid_note_names_criterion_3(tmp_path):

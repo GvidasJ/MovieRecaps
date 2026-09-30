@@ -1168,6 +1168,17 @@ def test_layout_period_warnings():
     sliver = [Segment(1, "raw", 0, 12, box=full, region=1), Segment(2, "raw", 12, 40)]
     assert pipeline.layout_period_warnings(sliver, lay, "match") == []
     assert pipeline.layout_period_warnings(bad, lay, "source") == []
+    # a fullscreen segment across two ADJACENT fullscreen periods is inside fullscreen throughout: no
+    # straddle; one reaching past both is reported once, with the frames outside every fullscreen period
+    lay2 = Layout(W, H, box=Box(4, 4, W - 8, H - 8, 2), periods=[
+        LayoutPeriod(0, 10, "fullscreen", Box(0, 0, W, H)), LayoutPeriod(10, 20, "fullscreen", Box(0, 0, W, H)),
+        LayoutPeriod(20, 40, "boxed", Box(4, 4, W - 8, H - 8, 2))])
+    assert pipeline.layout_period_warnings([Segment(1, "raw", 0, 20, box=full, region=1), Segment(2, "raw", 20, 40)],
+                                           lay2, "match") == []
+    w = pipeline.layout_period_warnings([Segment(1, "raw", 0, 25, box=full, region=1), Segment(2, "raw", 25, 40)],
+                                        lay2, "match")
+    assert w == ["S01 (frames 20-24) straddle the fullscreen period 0-9: part of the segment is shown with the "
+                 "wrong layout"]
     # stage-level: split/PiP warned (analysis), fullscreen only logged
     ctx = pipeline.Context(cfg=Config())
     ctx.layout = Layout(W, H, box=Box(4, 4, W - 8, H - 8, 2), periods=[
@@ -1291,6 +1302,14 @@ def test_pass1_visual_cache_keys_depend_on_the_layout(monkeypatch, clips, tmp_pa
     p = pipeline.visual_pass_key_parts
     assert p(l1, ov1) == p(Layout.from_dict(l1.to_dict()), ov1.copy())         # deterministic, content-based
     assert p(l1, ov1) != p(l2, ov1) and p(l1, ov1) != p(l1, ov2)
+    # the static-pixel mask (excluded from the box ROI by visual_match) is keyed by CONTENT, not by path
+    sm = np.zeros((H, W), bool)
+    for name, val in (("a", False), ("b", False), ("c", True)):
+        sm[0, 0] = val
+        np.save(tmp_path / f"static_{name}.npy", sm)
+    la, lb, lc = (Layout.from_dict(dict(l1.to_dict(), static_mask_file=str(tmp_path / f"static_{n}.npy")))
+                  for n in "abc")
+    assert p(la, ov1) == p(lb, ov1) != p(lc, ov1)
     ctx = types.SimpleNamespace(comp_info=types.SimpleNamespace(file_hash="c" * 40),
                                 raw_info=types.SimpleNamespace(file_hash="r" * 40), cfg=Config(), keys={})
     k1 = pipeline._analysis_key(ctx, "frame_map", *p(l1, ov1))
@@ -1478,3 +1497,64 @@ def test_audio_phase_static_shot_inpoint_on_the_interval_edge(run_len):
     assert wide["max_lag_s"] >= 0.5 * (hi - lo)                                   # the whole interval searched
     for k in range(N):                                                            # every frame stays on the run
         assert S <= phase_solve.ae_frame(seg.raw_in_seconds, 1.0, k, 0, cf, rf) <= S + run_len - 1
+
+
+_TOOL_DIR = Path(pipeline.__file__).resolve().parent.parent
+
+
+def _doc_section(text: str, heading: str) -> str:
+    """The body of the markdown section ``heading`` (up to the next heading of the same or a higher level)."""
+    lines = text.splitlines()
+    level = len(heading) - len(heading.lstrip("#"))
+    start = lines.index(heading) + 1
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("#")
+                and len(lines[i]) - len(lines[i].lstrip("#")) <= level and not lines[i].startswith("#" * (level + 1))),
+               len(lines))
+    return "\n".join(lines[start:end])
+
+
+def test_readme_usage_exit_codes_match_d5():
+    """Review R2-7: the README usage section documents the D5 exit codes (incl. 3 = nothing failed but a
+    criterion is not_available), consistently with pipeline.exit_code_for -- not the pre-D5 '0 when
+    nothing failed, 1 otherwise' sentence a wrapper script would misread."""
+    readme = (_TOOL_DIR / "README.md").read_text(encoding="utf-8")
+    usage = _doc_section(readme, "## Usage")
+    assert "`0` when no acceptance criterion" not in readme
+    rows = {}
+    for line in usage.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) >= 3 and cells[0].strip("`").isdigit():
+            rows[int(cells[0].strip("`"))] = (cells[1], cells[2])
+    assert sorted(rows) == [pipeline.EXIT_PASS, pipeline.EXIT_FAIL, pipeline.EXIT_ERROR, pipeline.EXIT_NOT_VERIFIED]
+    assert "not_available" in rows[pipeline.EXIT_NOT_VERIFIED][0]
+    assert rows[pipeline.EXIT_NOT_VERIFIED][1].startswith("`PASS (criterion 6 not verified")
+    assert rows[pipeline.EXIT_PASS][1] == "`PASS`" and rows[pipeline.EXIT_FAIL][1] == "`FAIL`"
+    # the table agrees with the implementation
+    from match_cuts.verify import CRITERIA
+    ok = {c: {"status": "pass"} for c in CRITERIA}
+    assert pipeline.exit_code_for(ok, {}) == pipeline.EXIT_PASS
+    na = dict(ok, **{CRITERIA[-1]: {"status": "not_available", "summary": "no Node.js"}})
+    assert pipeline.exit_code_for(na, {}) == pipeline.EXIT_NOT_VERIFIED
+    assert pipeline.headline_for(na, {}).startswith("PASS (criterion 6 not verified")
+    assert pipeline.exit_code_for(na, {"s9_8_deliverables": {"status": "fail"}}) == pipeline.EXIT_FAIL
+
+
+def test_design_contract_crossfade_keying_and_d3_margin():
+    """Review AE2-4 / R2-2: DESIGN.md (the contract every module follows) states the crossfade keying
+    export_ae implements -- the UPPER layer of the pair is keyed, an incoming MAIN-level (D1) layer
+    RISING -- and the D3 margin rule pipeline.audio_phase_margin_s implements."""
+    design = (_TOOL_DIR / "DESIGN.md").read_text(encoding="utf-8")
+    flat = " ".join(line.strip().lstrip("#").strip() for line in design.splitlines())
+    assert "ONLY the upper (outgoing) layer A is keyed" not in flat and "B stays 100 %" not in flat
+    assert "ONLY the UPPER layer of the pair is keyed" in flat
+    assert "B is keyed rising: 100·α_B at O..O+D-1, 100 at O+D" in flat
+    d1 = flat[flat.index("**D1 Per-period layout.**"):flat.index("**D2 Box refinement")]
+    assert "keys B rising" in d1 and "UPPER layer of the pair is keyed" in d1
+    d3 = flat[flat.index("**D3 Audio-informed phase.**"):flat.index("**D4 Verification")]
+    assert "max(ae_min_margin_ms, min(5 % of its width, 5 % of a RAW frame))" in d3
+    assert "max(1 ms, 5 % of its width)" not in d3
+    assert pipeline.AUDIO_PHASE_MARGIN_FRAC == 0.05
+    rf = Fraction(30000, 1001)
+    assert pipeline.audio_phase_margin_s(4.0, rf, 1.0) == pytest.approx(0.05 / float(rf))     # wide: 5 % of a frame
+    assert pipeline.audio_phase_margin_s(0.004, rf, 1.0) == pytest.approx(0.001)              # the 1 ms floor
+    assert pipeline.audio_phase_margin_s(0.03, rf, 1.0) == pytest.approx(0.0015)              # 5 % of the width
