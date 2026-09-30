@@ -7,8 +7,11 @@ shorter one. Explicit arguments that look reversed are swapped with a warning; i
 exist, ``./input`` (or --input-dir) is scanned for exactly two videos. Genuinely ambiguous inputs
 (same orientation, same duration) stop with a question instead of guessing.
 
-Prints one line per acceptance criterion c1..c6 (+ determinism), the output paths and the warnings;
-exit code 0 only if nothing is 'fail' (1 otherwise, 2 on errors).
+Prints the overall headline ('PASS', 'PASS (criterion 6 not verified: <reason>)' or 'FAIL'), one line
+per acceptance criterion c1..c6 (+ determinism and deliverables), the output paths and the warnings.
+Exit code (DESIGN §7 D5): 0 = every criterion passed (or passed with explained exceptions) and no check
+failed; 1 = something failed; 2 = run error; 3 = nothing failed but a criterion could not be verified
+(not_available, e.g. criterion 6 without Node.js / After Effects).
 """
 from __future__ import annotations
 
@@ -77,8 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Rebuild a competitor's short-form edit frame-exactly from its RAW source and export an "
                     "After Effects project (build_ae_project.jsx), cutlist.json/csv, FCP7 XML, EDL, a preview "
                     "render, compare.mp4 and a verification report.",
-        epilog="Exit code: 0 = every acceptance criterion passed (or passed with explained exceptions), "
-               "1 = a criterion failed, 2 = error. See tools/match_cuts/README.md.")
+        epilog="Exit code: 0 = every acceptance criterion passed (or passed with explained exceptions) and "
+               "every deliverable was produced, 1 = something failed, 2 = run error, 3 = nothing failed but a "
+               "criterion could not be verified here (e.g. criterion 6 without Node.js / After Effects). "
+               "See tools/match_cuts/README.md.")
     p.add_argument("--competitor", default=None, metavar="X",
                    help=f"the finished edit (default {DEFAULTS['competitor']}; auto-detected in --input-dir)")
     p.add_argument("--raw", default=None, metavar="Y",
@@ -239,21 +244,33 @@ def resolve_inputs(competitor: str | None, raw: str | None, input_dir: str | Pat
 # Summary
 # ---------------------------------------------------------------------------------------------
 
+def headline(result: dict) -> str:
+    """Overall verdict (DESIGN §7 D5): 'PASS', 'PASS (criterion 6 not verified: <reason>)' or 'FAIL' --
+    derived from the exit code, so the headline and the exit status never disagree."""
+    code = result.get("exit_code", 1)
+    from . import pipeline
+    try:
+        return pipeline.headline_for(result.get("criteria") or {}, result.get("checks") or {}, code)
+    except Exception:  # noqa: BLE001 - verify not importable: fall back to the exit code alone
+        return {0: "PASS", 2: "ERROR", 3: "PASS (some criterion not verified)"}.get(int(code), "FAIL")
+
+
 def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 20) -> str:
-    """The final chat summary: pass/fail per criterion, output paths, warnings."""
+    """The final chat summary: overall headline, pass/fail per criterion, output paths, warnings."""
     crit = result.get("criteria") or {}
     checks = result.get("checks") or {}
     lines = []
-    overall = "PASS" if result.get("exit_code", 1) == 0 else "FAIL"
-    lines.append(f"match_cuts result: {overall}")
+    lines.append(f"match_cuts result: {headline(result)}")
     for key, label in CRITERIA_LABELS:
         c = crit.get(key) or {}
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
         lines.append(f"  {label:<30} {st:<6} {c.get('summary', '')}")
-    det = checks.get("s9_7_determinism") or {}
-    if det:
-        lines.append(f"  {'9.7 determinism':<30} {STATUS_TEXT.get(det.get('status'), det.get('status')):<6} {det.get('summary', '')}")
-    lines.append("  (PASS* = passed with listed, explained exceptions)")
+    for key, label in (("s9_7_determinism", "9.7 determinism"), ("s9_8_deliverables", "9.8 deliverables")):
+        chk = checks.get(key) or {}
+        if chk:
+            st = STATUS_TEXT.get(chk.get("status"), str(chk.get("status") or "not run").upper())
+            lines.append(f"  {label:<30} {st:<6} {chk.get('summary', '')}")
+    lines.append("  (PASS* = passed with listed, explained exceptions; N/A = could not be verified on this machine)")
     paths = result.get("paths") or {}
     if paths:
         lines.append(f"Outputs ({out_dir}):")

@@ -6,9 +6,19 @@
                      division) and so does every simulation here, so the values are bit-identical.
 ``write_jsx``        ES3 ExtendScript (ASCII only, NaN-free) that builds ``Recreated Edit`` and saves
                      ``recreated_edit.aep`` next to itself.
-``simulate_ae``      which RAW frame AE shows on every MAIN frame -- from a plan or from a mock-run record.
+``simulate_ae``      which RAW frame AE shows on every MAIN frame -- from a plan or from a mock-run record
+                     (MAIN composited top-down, entering the Video Box pre-comp through its layer).
 ``run_jsx_in_mock``  runs the JSX through the ES3 gate and the strict Node AE mock (``ae_mock/``).
 ``fill_transform``   §2.4 fill-mode framing (shared with the preview renderer).
+``mock_verify``      criterion-6 checks of a JSX against its plan in every mock scenario.
+
+Per-period layout (DESIGN §7 D1): a segment whose ``box`` differs from the layout box (a fullscreen
+period: the whole canvas) is placed directly in MAIN above the Video Box layer (canonical Sim at origin
+(0, 0) x r; a layer-space (rounded-)rect mask unless the box is the whole canvas); split / PiP regions are
+flagged. Labelled placeholders (prompt: "do not copy ... leave labelled placeholders"): guide solids for
+the static zones, the caption band and every in-box text / sticker / emoji overlay (match mode; fill mode
+mapped through fill_transform), and per ``cutlist.added_audio`` range a comp marker plus a disabled guide
+bar ``PLACEHOLDER - MUSIC ...`` spanning it (every mode).
 
 AE timing model used everywhere (mirrors the mock and, as far as documented, After Effects):
   * stretch mode: layer time ``lt = (t - startTime) * 100 / stretch``; RAW frame
@@ -55,14 +65,26 @@ REFERENCE_NAME = "REFERENCE - competitor (turn on: black = match)"
 PLACEHOLDER_RGB = [0.85, 0.1, 0.55]
 TIME_MODES = ("auto", "stretch", "remap", "frames")
 LAYOUT_MODES = ("match", "fill", "source")
-MOCK_SCENARIOS = ("default", "media_missing", "new_project_null", "no_marker_property", "quantize_time")
+# Mock scenarios (ae_mock.js): the first four are the pipeline's c6 set; the others exercise the JSX guards
+# (frame-rate misread -> conform, frame-count offset, failed save over an old .aep, relink by abs path).
+MOCK_SCENARIOS = ("default", "media_missing", "new_project_null", "no_marker_property", "quantize_time",
+                  "fps_misread_down", "fps_misread_up", "fps_display_rounded", "frame_count_off",
+                  "save_fails_existing", "save_silent_fail", "rel_missing_abs_present")
+MOCK_VERIFY_SCENARIOS = ("default", "media_missing", "new_project_null", "no_marker_property",
+                         "fps_misread_down", "fps_misread_up", "fps_display_rounded", "frame_count_off",
+                         "save_fails_existing", "save_silent_fail", "rel_missing_abs_present")
 DEFAULT_BLURRINESS = 50.0
 GUIDE_OPACITY = 35.0
 _GUIDE_RGB = {
     "header": [0.2, 0.6, 1.0], "logo": [0.2, 0.9, 0.9], "title": [1.0, 0.8, 0.1],
     "captions": [0.1, 1.0, 0.3], "watermark": [0.8, 0.5, 1.0], "sticker": [1.0, 0.5, 0.2],
-    "progress": [1.0, 0.3, 0.3], "other": [0.7, 0.7, 0.7],
+    "progress": [1.0, 0.3, 0.3], "text": [0.6, 1.0, 0.6], "emoji": [1.0, 0.6, 0.8], "other": [0.7, 0.7, 0.7],
 }
+OVERLAY_GUIDE_TYPES = ("text", "sticker", "emoji")   # dynamic competitor overlays that get their own guide
+MAX_OVERLAY_GUIDES = 60
+_AUDIO_RGB = {"music": [0.3, 0.4, 1.0], "voice_over": [1.0, 0.45, 0.1], "sfx": [0.9, 0.9, 0.2],
+              "other": [0.6, 0.6, 0.6]}
+BOX_TOL_PX = 0.5               # competitor px: a segment box this close to the layout box IS the layout box
 
 MOCK_DIR = Path(__file__).resolve().parent / "ae_mock"
 
@@ -206,6 +228,60 @@ def box_geometry(box: Box | dict, r: float) -> dict:
                      "r": max(0.0, float(b.corner_radius) * r)}}
 
 
+def same_box(a: Box, b: Box, tol: float = BOX_TOL_PX) -> bool:
+    """Two CORNER boxes within ``tol`` px on every edge and radius."""
+    return (abs(a.x - b.x) <= tol and abs(a.y - b.y) <= tol and abs(a.w - b.w) <= tol and abs(a.h - b.h) <= tol
+            and abs(float(a.corner_radius) - float(b.corner_radius)) <= tol)
+
+
+def is_full_canvas(b: Box, w: float, h: float, tol: float = BOX_TOL_PX) -> bool:
+    """The box covers the whole competitor canvas (a fullscreen layout period, D1): no mask needed."""
+    return (b.x <= tol and b.y <= tol and b.x + b.w >= w - tol and b.y + b.h >= h - tol
+            and float(b.corner_radius) <= tol)
+
+
+def rounded_rect_shape(x: float, y: float, w: float, h: float, rad: float) -> dict:
+    """Closed mask path of a (rounded) rectangle, built exactly like the JSX addRoundedMask: Bezier
+    corners with tangent 0.5522847498 * radius (8 vertices), or 4 vertices when the radius is 0."""
+    rad = max(0.0, min(float(rad), w / 2.0, h / 2.0))
+    k = 0.5522847498 * rad
+    x1, y1 = x + w, y + h
+    if rad <= 0:
+        v = [[x, y], [x1, y], [x1, y1], [x, y1]]
+        z = [[0.0, 0.0]] * 4
+        return {"vertices": v, "inTangents": [list(p) for p in z], "outTangents": [list(p) for p in z]}
+    v = [[x + rad, y], [x1 - rad, y], [x1, y + rad], [x1, y1 - rad], [x1 - rad, y1], [x + rad, y1], [x, y1 - rad],
+         [x, y + rad]]
+    it = [[-k, 0.0], [0.0, 0.0], [0.0, -k], [0.0, 0.0], [k, 0.0], [0.0, 0.0], [0.0, k], [0.0, 0.0]]
+    ot = [[0.0, 0.0], [k, 0.0], [0.0, 0.0], [0.0, k], [0.0, 0.0], [-k, 0.0], [0.0, 0.0], [0.0, -k]]
+    return {"vertices": v, "inTangents": it, "outTangents": ot}
+
+
+def shape_to_layer(shape: dict, anchor: Iterable[float], scale: Iterable[float], rotation: float,
+                   position: Iterable[float]) -> dict:
+    """A comp-space mask path -> the layer space of a layer with this AE transform (masks live in layer
+    space): p_layer = Anchor + M^-1 (p_comp - Position), tangents M^-1 t, M = R(rotation) diag(scale/100)."""
+    ax, ay = (float(v) for v in anchor)
+    sx, sy = (float(v) / 100.0 for v in list(scale)[:2])
+    px, py = (float(v) for v in list(position)[:2])
+    if abs(sx) < 1e-12 or abs(sy) < 1e-12:
+        raise ValueError("shape_to_layer: zero layer scale")
+    th = math.radians(float(rotation))
+    c, s = math.cos(th), math.sin(th)
+
+    def inv(dx: float, dy: float) -> list[float]:
+        # M^-1 = diag(1/sx, 1/sy) R(-th)
+        return [(c * dx + s * dy) / sx, (-s * dx + c * dy) / sy]
+
+    verts = []
+    for vx, vy in shape["vertices"]:
+        d = inv(float(vx) - px, float(vy) - py)
+        verts.append([ax + d[0], ay + d[1]])
+    return {"vertices": verts,
+            "inTangents": [inv(float(t[0]), float(t[1])) for t in shape["inTangents"]],
+            "outTangents": [inv(float(t[0]), float(t[1])) for t in shape["outTangents"]]}
+
+
 def fill_transform(sim: Sim, flip: bool, box: Box | dict | None, raw_wh: tuple[float, float],
                    target_wh: tuple[float, float]) -> Sim:
     """§2.4 fill mode: the canonical Sim (competitor px) -> a Sim into the full-screen target frame.
@@ -345,6 +421,63 @@ class _PlanBuilder:
         self.seg_h = self.box_geo["bh"] if self.box_geo else self.H
         self.fill_box = self.box_model or Box(0.0, 0.0, float(self.Wc), float(self.Hc))
 
+    # -- per-segment placement (D1) --------------------------------------------------------------
+    def place(self, seg: Segment) -> dict:
+        """Where a segment's layers go (DESIGN §7 D1).
+
+        ``seg.box`` None (or equal to the layout box) -> the dominant layout: inside the Video Box pre-comp
+        in match mode (or MAIN without a box). A different box (a fullscreen period: the whole canvas)
+        -> directly in MAIN above the Video Box, canonical Sim at origin (0, 0) x r, clipped by a
+        (rounded-)rect mask at the box unless the box is the whole canvas. fill: the segment's own box is
+        the box fill_transform frames; source: identity."""
+        own = None
+        if seg.box:
+            try:
+                own = Box.from_dict(seg.box)
+                for v, what in ((own.x, "x"), (own.y, "y"), (own.w, "w"), (own.h, "h"), (own.corner_radius, "r")):
+                    _num(v, f"segment {seg.id} box.{what}")
+                if own.w <= 0 or own.h <= 0:
+                    raise ValueError(f"segment {seg.id} box has no area")
+            except (KeyError, TypeError, ValueError) as e:
+                self.warn(f"S{int(seg.id):02d}: invalid per-segment box ignored ({e})")
+                own = None
+        if self.layout_mode == "source":
+            return {"comp": "main", "own": None, "full": True, "fill_box": None}
+        if self.layout_mode == "fill":
+            return {"comp": "main", "own": None, "full": True, "fill_box": own or self.fill_box}
+        if own is not None and self.box_model is not None and same_box(own, self.box_model):
+            own = None
+        if own is None:
+            return {"comp": self.seg_comp, "own": None, "full": self.box_geo is None, "fill_box": None}
+        return {"comp": "main", "own": own, "full": is_full_canvas(own, self.Wc, self.Hc), "fill_box": None}
+
+    def main_rect(self, b: Box) -> tuple[float, float, float, float, float]:
+        """A competitor-px box in MAIN px (match mode): (x, y, w, h, radius)."""
+        return b.x * self.r, b.y * self.r, b.w * self.r, b.h * self.r, max(0.0, float(b.corner_radius) * self.r)
+
+    def mask_path(self, xf: dict, place: dict, k_in: int, k_out: int) -> dict | None:
+        """Layer-space mask path clipping a MAIN-level segment layer to its own box (D1): one static shape,
+        or -- when the transform is keyed -- one LINEAR key per MAIN frame (exact at every frame)."""
+        own = place.get("own")
+        if own is None or place.get("full"):
+            return None
+        x, y, w, h, rad = self.main_rect(own)
+        shape = rounded_rect_shape(x, y, w, h, rad)
+        keys = xf.get("keys") or []
+        if not keys:
+            s = shape_to_layer(shape, xf["anchor"], xf["scale"], xf["rotation"], xf["position"])
+            return {"keys": [dict(k=int(k_in), **s)]}
+        kt = [float(d["k"]) for d in keys]
+        hold = [False] * len(keys)
+        out = []
+        for K in range(int(k_in), int(k_out)):
+            sc = [_interp(kt, [float(d["scale"][i]) for d in keys], hold, float(K), 1e-12) for i in range(2)]
+            po = [_interp(kt, [float(d["position"][i]) for d in keys], hold, float(K), 1e-12) for i in range(2)]
+            rot = (_interp(kt, [float(d["rotation"]) for d in keys], hold, float(K), 1e-12) if xf.get("rotKeys")
+                   else float(xf["rotation"]))
+            out.append(dict(k=K, **shape_to_layer(shape, xf["anchor"], sc, rot, po)))
+        return {"keys": out}
+
     # -- time grid ----------------------------------------------------------------------------
     def to_main(self, k: int) -> int:
         """K = floor(k * main_fps / comp_fps + 1/2) (exact); identity when the grids agree (§2.5)."""
@@ -404,7 +537,7 @@ class _PlanBuilder:
              "rawIn": None, "startTime": 0.0, "startStretch": None, "inPoint": 0.0, "outPoint": 0.0,
              "expect": [], "remap": [], "flip": False, "xf": None, "opacity": [], "opacityValue": 100.0,
              "audioKeys": [], "enabled": True, "audio": False, "guide": False, "blend": "normal",
-             "mask": None, "blur": None, "color": None, "w": None, "h": None,
+             "mask": None, "maskPath": None, "blur": None, "color": None, "w": None, "h": None,
              "aeRuleSensitive": False, "note": ""}
         L.update(kw)
         L["inPoint"] = self.T(L["compIn"])
@@ -427,7 +560,8 @@ class _PlanBuilder:
                            xf=_static_xf((w / 2.0, h / 2.0), (cx, cy)), **kw)
 
     # -- transforms ----------------------------------------------------------------------------
-    def seg_xf(self, seg: Segment) -> dict:
+    def seg_xf(self, seg: Segment, place: dict | None = None) -> dict:
+        place = place if place is not None else self.place(seg)
         flip = bool(seg.flip_h)
         if self.layout_mode == "source":
             c = (self.raw_w / 2.0, self.raw_h / 2.0)
@@ -438,11 +572,13 @@ class _PlanBuilder:
             raise ValueError(f"ae_plan: segment {seg.id} has neither transform nor transform_keys")
         if base is None:
             base = _check_sim(keys[0], f"segment {seg.id} transform_keys[0]")
-        ox, oy = (self.box_geo["bx0"], self.box_geo["by0"]) if self.box_geo else (0, 0)
+        in_box = self.box_geo is not None and place["comp"] == "box"
+        ox, oy = (self.box_geo["bx0"], self.box_geo["by0"]) if in_box else (0, 0)
+        fbox = place.get("fill_box") or self.fill_box
 
         def conv(sim: Sim) -> AETransform:
             if self.layout_mode == "fill":
-                return sim_to_ae(fill_transform(sim, flip, self.fill_box, (self.raw_w, self.raw_h), (self.W, self.H)),
+                return sim_to_ae(fill_transform(sim, flip, fbox, (self.raw_w, self.raw_h), (self.W, self.H)),
                                  flip, self.raw_w, self.raw_h, r=1.0)
             return sim_to_ae(sim, flip, self.raw_w, self.raw_h, r=self.r)
 
@@ -461,7 +597,9 @@ class _PlanBuilder:
         return xf
 
     # -- RAW segment layers --------------------------------------------------------------------
-    def raw_layers(self, seg: Segment, k_in: int, k_out: int) -> list[dict]:
+    def raw_layers(self, seg: Segment, k_in: int, k_out: int, place: dict | None = None) -> list[dict]:
+        place = place if place is not None else self.place(seg)
+        comp = place["comp"]
         sid = int(seg.id)
         v = _num(seg.speed, f"segment {sid} speed")
         raw_in = _num(seg.raw_in_seconds, f"segment {sid} raw_in_seconds")
@@ -516,10 +654,11 @@ class _PlanBuilder:
                     self.warn(f"S{sid:02d}: outPoint lies past the RAW end; AE will clamp it (the JSX self-check "
                               "then falls back to frame-exact remapping)")
 
-        L = self._layer(id=f"seg{sid}", kind="raw", source="raw", seg=sid, compIn=k_in, compOut=k_out,
+        L = self._layer(id=f"seg{sid}", kind="raw", comp=comp, source="raw", seg=sid, compIn=k_in, compOut=k_out,
                         timeMode=mode, speed=v, stretch=stretch, rawIn=raw_in_m, startStretch=start_st,
-                        expect=expect, remap=rk, flip=bool(seg.flip_h), xf=self.seg_xf(seg),
+                        expect=expect, remap=rk, flip=bool(seg.flip_h), xf=self.seg_xf(seg, place),
                         audio=self.has_audio)
+        L["maskPath"] = self.mask_path(L["xf"], place, k_in, k_out)
         L["startTime"] = start_st if mode == "stretch" else self.T(k_in)
         # does the AE model of the chosen mode reproduce the expectation (floor rule, §2.1)?
         model = _layer_raw_frames(L, mode, F, self.R)
@@ -607,7 +746,7 @@ class _PlanBuilder:
                 # the audio twin uses the same (raw_in, v) map; placeStretch pins its rawIn at its own compIn
                 a_raw_in = raw_in_m + v * ((a_in - k_in) / mf)
                 a_start = (self.T(a_in) - a_raw_in / (100.0 / stretch)) if a_mode == "stretch" else None
-                A = self._layer(id=f"seg{sid}_audio", kind="raw_audio", source="raw", seg=sid, compIn=a_in,
+                A = self._layer(id=f"seg{sid}_audio", kind="raw_audio", comp=comp, source="raw", seg=sid, compIn=a_in,
                                 compOut=a_out, timeMode=a_mode, speed=v, stretch=stretch if a_mode == "stretch" else None,
                                 rawIn=a_raw_in, startStretch=a_start,
                                 startTime=a_start if a_mode == "stretch" else self.T(a_in),
@@ -666,9 +805,16 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
            startTime, startStretch, inPoint, outPoint, expect[], remap[{k, v}], flip,
            xf{anchor, scale, rotation, position, keys[{k, scale, rotation, position}], rotKeys},
            opacity[{k, v}], opacityValue, audioKeys[{k, v dB}], enabled, audio, guide, blend,
-           mask, blur, color, w, h, aeRuleSensitive, note}
-          kinds: raw | raw_audio | placeholder | dip | flash | box | bg_blur | bg_solid | guide | reference
-      markers [{k, text}] (merged per MAIN frame), fpsSource, summary, warnings, decisions.
+           mask, maskPath{keys[{k, vertices, inTangents, outTangents}]} | None, blur, color, w, h,
+           aeRuleSensitive, note}
+          kinds: raw | raw_audio | placeholder | dip | flash | box | bg_blur | bg_solid | guide |
+                 audio_placeholder | reference
+          MAIN stacking (D1): reference, guides (zones, in-box text/sticker/emoji overlays), audio
+          placeholders (disabled guide bars for cutlist.added_audio), segment layers placed in MAIN
+          (a per-segment box != the layout box, e.g. fullscreen periods; all segments when there is no
+          Video Box), the Video Box pre-comp layer, the blurred background, the background solid.
+      markers [{k, text}] (merged per MAIN frame), periods [{comp_in, comp_out, mode, reproduced}],
+      fpsSource, summary, warnings, decisions.
     """
     dlog = dlog or null_dlog()
     b = _PlanBuilder(cutlist, cfg, footage_meta, dlog)
@@ -693,7 +839,22 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
         if t not in markers[K]:
             markers[K].append(t)
 
-    n_raw = n_placeholder = 0
+    places: dict[int, dict] = {}
+
+    def seg_solid_kw(place: dict) -> dict:
+        """Solid geometry of a dip / flash / NOT-IN-RAW segment: the segment comp's size, or -- placed in
+        MAIN at its own box (D1) -- the box rect (rounded corners as a layer-space mask)."""
+        own = place.get("own")
+        if place["comp"] != "main" or own is None:
+            return {"comp": place["comp"]}
+        x, y, w, h, rad = b.main_rect(own)
+        sw, sh = max(4, min(30000, round(w))), max(4, min(30000, round(h)))
+        mp = None
+        if not place.get("full") and rad > 0:
+            mp = {"keys": [dict(k=0, **rounded_rect_shape(0.0, 0.0, float(sw), float(sh), rad))]}
+        return {"comp": "main", "w": sw, "h": sh, "center": (x + w / 2.0, y + h / 2.0), "maskPath": mp}
+
+    n_raw = n_placeholder = n_main_seg = 0
     for i, seg in enumerate(segs):
         sid = int(seg.id)
         c_in, c_out = _int(seg.comp_in, f"segment {sid} comp_in"), _int(seg.comp_out, f"segment {sid} comp_out")
@@ -707,17 +868,24 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             b.warn(f"S{sid:02d}: {c_out - c_in} competitor frame(s) vanish on the {fps_str(b.main_fps)} MAIN grid")
             continue
         kmap[sid] = (k_in, k_out)
-        if getattr(seg, "region", 0):
-            b.warn(f"S{sid:02d}: belongs to video region {seg.region}; v1 exports it inside the dominant Video Box")
-        if seg.box and b.box_model and Box.from_dict(seg.box) != b.box_model:
-            b.warn(f"S{sid:02d}: uses a different layout box; exported inside the dominant Video Box")
+        place = b.place(seg)
+        places[sid] = place
+        region = int(getattr(seg, "region", 0) or 0)
+        if region >= 2:
+            b.warn(f"S{sid:02d}: belongs to video region {region} of a split-screen / picture-in-picture layout; "
+                   "only this region is recreated" + (" (placed at its own box in MAIN)" if place["comp"] == "main"
+                                                      and place.get("own") is not None else ""))
+        if place.get("own") is not None:
+            n_main_seg += 1
+            b.decide("segment_placement", segment=sid, comp="main", region=region, box=seg.box,
+                     full_canvas=bool(place["full"]), reason="per-segment box differs from the layout box (D1)")
         tc_in, tc_out = timecode(k_in, b.main_fps), timecode(k_out, b.main_fps)
         cut_label = "Start" if i == 0 else f"Cut {i:02d}"
         if seg.type == "raw":
             if getattr(seg, "retime", "none") not in (None, "none"):
                 b.warn(f"S{sid:02d}: the competitor used {seg.retime} retiming; the layer shows whole RAW frames "
                        "(switch on Frame Blending > Frame Mix in AE to approximate it)")
-            layers = b.raw_layers(seg, k_in, k_out)
+            layers = b.raw_layers(seg, k_in, k_out, place)
             chrono.append(layers[0])
             seg_layer[sid] = layers[0]
             carrier[sid] = layers[1] if len(layers) > 1 else layers[0]
@@ -739,7 +907,7 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             else:
                 col = seg.color or "#ffffff"
             L = b._solid(f"{seg.type}{sid}", seg.type, f"{seg.type.upper()} {col} ({tc_in}-{tc_out})",
-                         _rgb(col), k_in, k_out, seg=sid)
+                         _rgb(col), k_in, k_out, seg=sid, **seg_solid_kw(place))
             upper.append(L)
             seg_layer[sid] = L
             add_marker(k_in, f"{cut_label} | {seg.type} {col}")
@@ -750,7 +918,7 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             name = f"MISSING - not in RAW ({tc_in}-{tc_out})"
             if label and "MISSING" not in label.upper():
                 name += f" {label}"
-            L = b._solid(f"nir{sid}", "placeholder", name, PLACEHOLDER_RGB, k_in, k_out, seg=sid)
+            L = b._solid(f"nir{sid}", "placeholder", name, PLACEHOLDER_RGB, k_in, k_out, seg=sid, **seg_solid_kw(place))
             chrono.append(L)
             seg_layer[sid] = L
             n_placeholder += 1
@@ -760,6 +928,11 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
     keyed: dict[str, dict[float, float]] = {}
     akeyed: dict[str, dict[float, float]] = {}
     ordered = [s for s in segs if int(s.id) in kmap]
+
+    def level(L: dict) -> int:
+        """Stacking level: MAIN-level segment layers (D1) sit above the Video Box pre-comp layer."""
+        return 1 if (b.box_geo is not None and L["comp"] == "main") else 0
+
     for X, Y in zip(ordered[:-1], ordered[1:]):
         tr = Y.transition_in or X.transition_out
         if not tr:
@@ -790,7 +963,17 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
         else:
             if is_dip:
                 b.warn(f"S{int(X.id):02d}->S{int(Y.id):02d}: {ttype} without a dip segment; exported as a crossfade")
-            U, rising = LX, False
+            # the UPPER layer of the pair is keyed: chronological stacking puts X above Y inside one comp,
+            # but a MAIN-level (D1) layer sits above the whole Video Box -> key the incoming Y rising then
+            if level(LY) > level(LX):
+                U, rising = LY, True
+            else:
+                U, rising = LX, False
+        if is_dip:
+            other = LX if U is LY else LY
+            if level(other) > level(U):
+                b.warn(f"S{int(X.id):02d}->S{int(Y.id):02d}: the dip solid lies inside the Video Box but its "
+                       "neighbour is a full-canvas layer above it; that neighbour is not dipped in AE")
         ks: dict[float, float] = keyed.setdefault(U["id"], {})
         if rising:
             for i2, a in enumerate(alpha):
@@ -820,6 +1003,70 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
         if L["id"] in akeyed:
             L["audioKeys"] = [{"k": _knum(k), "v": float(v)} for k, v in sorted(akeyed[L["id"]].items())]
 
+    # ---- layout periods (D1): fullscreen reproduced per segment, split / PiP flagged ---------------
+    lay = cutlist.layout or {}
+    period_info: list[dict] = []
+    for p in lay.get("periods") or []:
+        try:
+            pa, pb, pm = int(p["comp_in"]), int(p["comp_out"]), str(p.get("mode", "boxed"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        # a segment belongs to the period holding its midpoint (a crossfade overlaps the neighbour period)
+        inside = [s for s in ordered if pa <= (int(s.comp_in) + int(s.comp_out)) / 2.0 < pb]
+        info = {"comp_in": pa, "comp_out": pb, "mode": pm, "reproduced": pm == "boxed"}
+        if pm == "fullscreen":
+            missing = [int(s.id) for s in inside if s.type == "raw" and places.get(int(s.id), {}).get("own") is None
+                       and b.layout_mode == "match" and b.box_geo is not None]
+            info["reproduced"] = not missing
+            if missing:
+                b.warn(f"frames {pa}-{pb - 1} are fullscreen in the competitor but "
+                       f"{', '.join(f'S{x:02d}' for x in missing[:8])} carry no per-segment box; exported inside the "
+                       "Video Box (cropped to the box)")
+            else:
+                b.decide("fullscreen_period", comp_in=pa, comp_out=pb,
+                         segments=[int(s.id) for s in inside], placed_in="main" if b.layout_mode == "match" else b.layout_mode)
+        elif pm in ("split", "pip"):
+            b.warn(f"frames {pa}-{pb - 1}: {'split-screen' if pm == 'split' else 'picture-in-picture'} layout in the "
+                   "competitor; only the matched video region is recreated, the other region(s) are not in the project")
+        period_info.append(info)
+    if lay.get("regions"):
+        b.warn(f"{len(lay['regions'])} extra video region(s) (split-screen / picture-in-picture) are not recreated; "
+               "only the dominant Video Box is built")
+
+    # ---- guide geometry: match = competitor px x r; fill = mapped through fill_transform; source: none
+    fill_map = None
+    if b.layout_mode == "fill":
+        fb = b.fill_box
+        cb = max(fb.w / b.raw_w, fb.h / b.raw_h)
+        # nominal framing: RAW cover-scaled into the box, centred -> fill_transform of it; competitor px ->
+        # target px is then F o S0^-1 (box centre -> frame centre, zoom cover_frame / cover_box)
+        s0 = Sim(cb, 0.0, fb.x + fb.w / 2.0 - cb * b.raw_w / 2.0, fb.y + fb.h / 2.0 - cb * b.raw_h / 2.0)
+        f0 = fill_transform(s0, False, fb, (b.raw_w, b.raw_h), (b.W, b.H))
+        s0inv = s0.inverse()
+
+        def fill_map(pts: list[list[float]]):
+            return f0.apply(s0inv.apply(pts))
+
+    def guide_rect(x: float, y: float, w: float, h: float) -> tuple[float, float, float, float] | None:
+        if b.layout_mode == "match":
+            return x * b.r, y * b.r, w * b.r, h * b.r
+        if fill_map is None:
+            return None
+        q = fill_map([[x, y], [x + w, y + h]])
+        gx0, gy0 = float(min(q[:, 0])), float(min(q[:, 1]))
+        gw, gh = min(float(abs(q[1, 0] - q[0, 0])), float(b.W)), min(float(abs(q[1, 1] - q[0, 1])), float(b.H))
+        # clamp into the frame (a zone outside the competitor's box maps off-frame)
+        gx = min(max(gx0, 0.0), b.W - gw)
+        gy = min(max(gy0, 0.0), b.H - gh)
+        return gx, gy, gw, gh
+
+    def guide_range(c_in: Any, c_out: Any) -> tuple[int, int]:
+        if c_in is not None and c_out is not None:
+            g_in, g_out = b.to_main(int(c_in)), b.to_main(int(c_out))
+        else:
+            g_in, g_out = 0, b.N
+        return max(0, g_in), min(b.N, g_out)
+
     # ---- MAIN layers ------------------------------------------------------------------------
     main_layers: list[dict] = []
     if b.ref_foot is not None:
@@ -829,11 +1076,8 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             id="ref", kind="reference", comp="main", source="ref", name=REFERENCE_NAME, compIn=0, compOut=k_ref,
             enabled=False, audio=False, guide=True, blend="difference",
             xf=_static_xf((b.Wc / 2.0, b.Hc / 2.0), (b.W / 2.0, b.H / 2.0), (100.0 * sr, 100.0 * sr))))
-    lay = cutlist.layout or {}
-    if lay.get("regions"):
-        b.warn(f"{len(lay['regions'])} extra video region(s) (split-screen / picture-in-picture) are not recreated; "
-               "only the dominant Video Box is built")
-    if b.layout_mode == "match":
+    n_overlay_guides = 0
+    if b.layout_mode in ("match", "fill"):
         zones = list(lay.get("zones") or [])
         if not any(str(z.get("type")) == "captions" for z in zones) and lay.get("captions"):
             caps = lay["captions"]
@@ -845,24 +1089,92 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
                           "comp_out": None})
         for zi, z in enumerate(zones):
             try:
-                zx, zy = _num(z["x"], "zone.x") * b.r, _num(z["y"], "zone.y") * b.r
-                zw, zh = _num(z["w"], "zone.w") * b.r, _num(z["h"], "zone.h") * b.r
+                gr = guide_rect(_num(z["x"], "zone.x"), _num(z["y"], "zone.y"), _num(z["w"], "zone.w"),
+                                _num(z["h"], "zone.h"))
             except (KeyError, ValueError) as e:
                 b.warn(f"guide zone {zi} skipped ({e})")
                 continue
+            if gr is None:
+                continue
+            zx, zy, zw, zh = gr
             ztype = ascii_text(z.get("type", "other"), 40)
-            if z.get("comp_in") is not None and z.get("comp_out") is not None:
-                g_in, g_out = b.to_main(int(z["comp_in"])), b.to_main(int(z["comp_out"]))
-            else:
-                g_in, g_out = 0, b.N
-            g_in, g_out = max(0, g_in), min(b.N, g_out)
+            g_in, g_out = guide_range(z.get("comp_in"), z.get("comp_out"))
             if g_out <= g_in:
                 continue
             main_layers.append(b._solid(
                 f"guide{zi}", "guide", f"GUIDE - {ztype} zone ({round(zx)},{round(zy)} {round(zw)}x{round(zh)})",
                 _GUIDE_RGB.get(ztype, _GUIDE_RGB["other"]), g_in, g_out, comp="main", w=round(zw), h=round(zh),
                 center=(zx + zw / 2.0, zy + zh / 2.0), guide=True, opacityValue=GUIDE_OPACITY))
+        # dynamic competitor overlays (in-box text / stickers / emoji): one labelled guide per event
+        seen: set = set()
+        ov = [o for o in (cutlist.overlays_detected or []) if isinstance(o, dict)
+              and str(o.get("type")) in OVERLAY_GUIDE_TYPES]
+        ov.sort(key=lambda o: (int(o.get("comp_in") or 0), int(o.get("comp_out") or 0), str(o.get("type")),
+                               float(o.get("y") or 0.0), float(o.get("x") or 0.0)))
+        n_skipped = 0
+        for o in ov:
+            try:
+                ox, oy, ow, oh = (_num(o[k], f"overlay.{k}") for k in ("x", "y", "w", "h"))
+                c_in = _int(o.get("comp_in", 0), "overlay.comp_in")
+                c_out = _int(o.get("comp_out", b.Nc), "overlay.comp_out")
+            except (KeyError, ValueError) as e:
+                b.warn(f"overlay guide skipped ({e})")
+                continue
+            key = (str(o["type"]), round(ox), round(oy), round(ow), round(oh), c_in, c_out)
+            if key in seen or ow <= 0 or oh <= 0:
+                continue
+            seen.add(key)
+            gr = guide_rect(ox, oy, ow, oh)
+            g_in, g_out = guide_range(c_in, c_out)
+            if gr is None or g_out <= g_in:
+                continue
+            if n_overlay_guides >= MAX_OVERLAY_GUIDES:
+                n_skipped += 1
+                continue
+            gx, gy, gw, gh = gr
+            otype = ascii_text(o["type"], 20)
+            main_layers.append(b._solid(
+                f"ovl{n_overlay_guides}", "guide",
+                f"GUIDE - {otype} overlay ({round(gx)},{round(gy)} {round(gw)}x{round(gh)}) "
+                f"{timecode(g_in, b.main_fps)}-{timecode(g_out, b.main_fps)}: add your own",
+                _GUIDE_RGB.get(otype, _GUIDE_RGB["other"]), g_in, g_out, comp="main", w=round(gw), h=round(gh),
+                center=(gx + gw / 2.0, gy + gh / 2.0), guide=True, opacityValue=GUIDE_OPACITY))
+            n_overlay_guides += 1
+        if n_skipped:
+            b.warn(f"{n_skipped} more in-box text/sticker overlay(s) have no guide layer (limit "
+                   f"{MAX_OVERLAY_GUIDES}); their timings are in cutlist.json overlays_detected")
+    # competitor's added music / SFX / voice-over: a marker + a labelled (disabled) guide bar per range
+    n_audio_ph = 0
+    strip_h = max(4, min(b.H, round(b.H / 40.0)))
+    for ai, a in enumerate(sorted((x for x in (cutlist.added_audio or []) if isinstance(x, dict)),
+                                  key=lambda x: (int(x.get("comp_in") or 0), int(x.get("comp_out") or 0),
+                                                 str(x.get("type"))))):
+        try:
+            c_in, c_out = _int(a.get("comp_in"), "added_audio.comp_in"), _int(a.get("comp_out"), "added_audio.comp_out")
+        except ValueError as e:
+            b.warn(f"added audio placeholder skipped ({e})")
+            continue
+        g_in, g_out = guide_range(c_in, c_out)
+        if g_out <= g_in:
+            continue
+        atype = ascii_text(a.get("type") or "other", 20)
+        label = atype.replace("_", " ").upper()
+        tc = f"{timecode(g_in, b.main_fps)}-{timecode(g_out, b.main_fps)}"
+        lvl = a.get("level_db")
+        lvl_txt = f", {float(lvl):+.1f} dB vs the RAW audio" if isinstance(lvl, (int, float)) and math.isfinite(lvl) else ""
+        main_layers.append(b._solid(
+            f"audio_ph{ai}", "audio_placeholder",
+            f"PLACEHOLDER - {label} {tc} (competitor's own audio, not copied{lvl_txt}): add your own",
+            _AUDIO_RGB.get(atype, _AUDIO_RGB["other"]), g_in, g_out, comp="main", w=b.W, h=strip_h,
+            center=(b.W / 2.0, b.H - strip_h / 2.0), guide=True, enabled=False, audio=False))
+        add_marker(g_in, f"{label} placeholder {tc}{lvl_txt}: add your own {label.lower()}")
+        n_audio_ph += 1
+        b.decide("audio_placeholder", type=str(a.get("type")), comp_in=c_in, comp_out=c_out, main_in=g_in,
+                 main_out=g_out)
     seg_stack = upper + chrono + audio_dups
+    box_stack = [L for L in seg_stack if L["comp"] == "box"]
+    main_seg_stack = [L for L in seg_stack if L["comp"] == "main"]
+    main_layers.extend(main_seg_stack)          # D1 / no box: segment layers directly in MAIN, above the box
     bg = lay.get("background_detail") or {"type": lay.get("background", "solid"), "color": lay.get("canvas_bg", "#000000")}
     bg_rgb = _rgb(bg.get("color") or lay.get("canvas_bg") or "#000000")
     if b.box_geo:
@@ -883,12 +1195,10 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
                 blur={"amount": amount}))
         elif str(bg.get("type", "solid")) not in ("solid", "blur"):
             b.warn(f"background type {bg.get('type')!r} is recreated as a solid; add your own image/gradient")
-    else:
-        main_layers.extend(seg_stack)
     if b.layout_mode == "match":
         bg_name = f"BACKGROUND - solid {bg.get('color') or lay.get('canvas_bg') or '#000000'}"
         main_layers.append(b._solid("bg_solid", "bg_solid", bg_name, bg_rgb, 0, b.N, comp="main"))
-    layers = (seg_stack if b.box_geo else []) + main_layers
+    layers = box_stack + main_layers
 
     if not any(L["kind"] == "raw" for L in layers):
         b.warn("no RAW segment could be exported")
@@ -921,7 +1231,9 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
                       "maxErrorS": max_err, "perSegment": fps_err, "perSegmentOut": fps_err_out},
         "summary": {"segments": n_raw + n_placeholder + len(upper), "raw": n_raw, "placeholders": n_placeholder,
                     "cuts": max(0, len(kmap) - 1), "duration": f"{b.T(b.N):.3f}", "frames": int(b.N),
-                    "framesModeLayers": frames_layers},
+                    "framesModeLayers": frames_layers, "mainLevelSegments": n_main_seg,
+                    "audioPlaceholders": n_audio_ph, "overlayGuides": n_overlay_guides},
+        "periods": period_info,
         "warnings": b.warnings,
         "decisions": b.decisions,
     }
@@ -1004,10 +1316,18 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None) -> dict[int, 
     if time_mode_override not in (None, "stretch", "remap", "frames"):
         raise ValueError(f"simulate_ae: unknown time mode override {time_mode_override!r}")
     F, R, N = plan["main"]["fps"], plan["rawFps"], int(plan["main"]["frames"])
-    stack = [L for L in plan["layers"] if L["comp"] == plan["segComp"]
-             and L["enabled"] and not L["guide"] and L["kind"] not in ("raw_audio", "bg_blur")]
+
+    def stack(comp: str) -> list[dict]:
+        return [L for L in plan["layers"] if L["comp"] == comp and L["enabled"] and not L["guide"]
+                and L["kind"] not in ("raw_audio", "bg_blur")]
+
+    main_stack = stack("main")
+    box_stack = stack("box") if plan.get("box") is not None else []
+    if plan.get("segComp") == "box" and plan.get("box") is not None and not any(L["kind"] == "box" for L in main_stack):
+        main_stack = box_stack + main_stack         # a plan without the pre-comp layer: the box comp alone
+        box_stack = []
     frames: dict[str, dict[int, int]] = {}
-    for L in stack:
+    for L in main_stack + box_stack:
         if L["kind"] != "raw":
             continue
         mode = L["timeMode"]
@@ -1020,20 +1340,45 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None) -> dict[int, 
             mode = "stretch"
         js = _layer_raw_frames(L, mode, F, R)
         frames[L["id"]] = {K: j for K, j in zip(range(int(L["compIn"]), int(L["compOut"])), js)}
-    out: dict[int, list[dict]] = {}
-    for K in range(N):
+
+    def walk(st: list[dict], K: int, w_in: float, entries: list[dict], depth: int) -> float:
+        """Composite one comp top-down; returns its transparency (what shows through it)."""
         remaining = 1.0
-        entries: list[dict] = []
-        for L in stack:
+        for L in st:
             if not (int(L["compIn"]) <= K < int(L["compOut"])):
                 continue
             op = _plan_opacity(L, K)
+            if L["kind"] == "box":
+                trans = walk(box_stack, K, w_in * remaining * op, entries, depth + 1) if depth < 4 else 1.0
+                remaining *= 1.0 - op * (1.0 - trans)
+                continue
             if L["kind"] == "raw":
                 entries.append({"layer": L["id"], "seg": L["seg"], "raw_frame": int(frames[L["id"]][K]),
-                                "opacity": op, "weight": remaining * op})
+                                "opacity": op, "weight": w_in * remaining * op})
             remaining *= (1.0 - op)
+        return remaining
+
+    out: dict[int, list[dict]] = {}
+    for K in range(N):
+        entries: list[dict] = []
+        walk(main_stack, K, 1.0, entries, 0)
         out[K] = entries
     return out
+
+
+def comp_tag(c: dict) -> str:
+    """The 'mc:...' tag of a recorded comp: the FIRST line of its comment (the JSX appends the runtime
+    warnings to the MAIN comp's comment below the tag)."""
+    return str(c.get("comment") or "").split("\n", 1)[0].strip()
+
+
+def record_main_comp(rec: dict) -> dict | None:
+    """MAIN comp of a mock record: tagged 'mc:main' (first comment line), else named MAIN_COMP_NAME."""
+    comps = rec.get("comps", []) or []
+    main = next((c for c in comps if comp_tag(c) == "mc:main"), None)
+    if main is None:
+        main = next((c for c in comps if c.get("name") == MAIN_COMP_NAME), None)
+    return main
 
 
 def _fraction_from_rate(x: float) -> Fraction:
@@ -1061,9 +1406,7 @@ def _simulate_record(rec: dict) -> dict[int, list[dict]]:
     """simulate_ae on a mock-run record (the values the JSX actually set)."""
     comps = {c["id"]: c for c in rec.get("comps", [])}
     footage = {f["id"]: f for f in rec.get("footage", [])}
-    main = next((c for c in rec.get("comps", []) if c.get("comment") == "mc:main"), None)
-    if main is None:
-        main = next((c for c in rec.get("comps", []) if c.get("name") == MAIN_COMP_NAME), None)
+    main = record_main_comp(rec)
     if main is None:
         raise ValueError("simulate_ae: the mock record has no MAIN comp (comment 'mc:main')")
     Fr = _fraction_from_rate(float(main["frameRate"]))
@@ -1199,6 +1542,9 @@ def write_jsx(cutlist: Cutlist, plan: dict, out_path: str | os.PathLike, cfg: An
     (json.dumps(ensure_ascii=True, allow_nan=False, sort_keys=True)). Raises ValueError if the plan holds
     NaN/Infinity or the generated text fails the static ES3 checks."""
     _validate_plan_numbers(plan)
+    # plans written by an older version lack the newer optional fields the JSX reads (null / 0 defaults)
+    plan = dict(plan, layers=[dict({"maskPath": None}, **L) for L in plan["layers"]],
+                summary=dict({"audioPlaceholders": 0, "overlayGuides": 0}, **plan["summary"]))
     try:
         data = json.dumps(plan, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
     except ValueError as e:
@@ -1248,6 +1594,9 @@ __HEADER__
         WARN.push(String(msg));
         try { $.writeln("match_cuts warning: " + msg); } catch (eW) { }
     }
+    function note(msg) {
+        try { $.writeln("match_cuts: " + msg); } catch (eN) { }
+    }
     function xprop(L, mn) { return L.property("ADBE Transform Group").property(mn); }
 
     function findMedia(here, X, required) {
@@ -1267,17 +1616,33 @@ __HEADER__
         return f;
     }
 
+    // Frame rate: AE shows RAW frame floor(t * rate) with ITS rate, so any real difference from the probed
+    // rate drifts over the clip -> conform to the exact num/den (AE reports float32: < 6e-8 relative
+    // noise; anything above 2e-7 is a real difference). Then the frame count must match EXACTLY: a
+    // difference means AE added/dropped frames (edit list, codec delay) and every RAW frame is offset.
     function importFootage(f, X, folder, tag) {
-        var io = new ImportOptions(f), it, want, n;
+        var io = new ImportOptions(f), it, want, got, drift, n;
         if (!io.canImportAs(ImportAsType.FOOTAGE)) { throw new Error("cannot import " + f.fsName + " as footage"); }
         io.importAs = ImportAsType.FOOTAGE;
         it = app.project.importFile(io);
         it.parentFolder = folder;
         it.comment = tag;
+        note("imported " + f.fsName);
         want = X.fps.num / X.fps.den;
-        if (Math.abs(it.frameRate - want) > 1e-3 * want) {
-            warn(it.name + ": AE read " + it.frameRate + " fps; conformed to " + X.fps.num + "/" + X.fps.den);
+        got = it.frameRate;
+        if (Math.abs(got - want) > 2e-7 * want) {
+            drift = Math.abs(got - want) / want * X.frames;
             it.mainSource.conformFrameRate = want;
+            if (Math.abs(got - want) > 1e-5 * want || drift >= 0.25) {
+                warn(it.name + ": AE read " + got + " fps (" + drift.toFixed(2) + " frame(s) of drift over the clip); " +
+                     "conformed to " + X.fps.num + "/" + X.fps.den);
+            } else {
+                note(it.name + ": AE reported " + got + " fps; conformed to " + X.fps.num + "/" + X.fps.den);
+            }
+            if (Math.abs(it.frameRate - want) > 1e-5 * want) {
+                warn(it.name + ": conforming to " + X.fps.num + "/" + X.fps.den + " did not take effect (AE uses " +
+                     it.frameRate + " fps); RAW frames will drift");
+            }
         }
         try { it.mainSource.fieldSeparationType = FieldSeparationType.OFF; } catch (e1) { }
         try { it.mainSource.removePulldown = PulldownPhase.OFF; } catch (e2) { }
@@ -1285,8 +1650,9 @@ __HEADER__
             warn(it.name + ": size " + it.width + "x" + it.height + " (expected " + X.w + "x" + X.h + ")");
         }
         n = Math.round(it.duration * want);
-        if (Math.abs(n - X.frames) > 1) {
-            warn(it.name + ": " + n + " frames in AE (expected " + X.frames + ")");
+        if (n !== X.frames) {
+            warn(it.name + ": " + n + " frames in AE (expected " + X.frames + "); AE may be offset by " +
+                 (n - X.frames) + " frame(s) (edit list / codec delay) - check with the REFERENCE layer");
         }
         return it;
     }
@@ -1453,6 +1819,32 @@ __HEADER__
         mask.property("ADBE Mask Feather").setValue([0, 0]);
     }
 
+    // A mask path computed by the plan in LAYER space (a segment clipped to its own box in MAIN, D1):
+    // one shape, or one LINEAR key per MAIN frame when the layer's framing is animated.
+    function makeShape(d) {
+        var sh = new Shape();
+        sh.vertices = d.vertices;
+        sh.inTangents = d.inTangents;
+        sh.outTangents = d.outTangents;
+        sh.closed = true;
+        return sh;
+    }
+    function addPathMask(L, M) {
+        var mask = L.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"), P, t = [], v = [], i;
+        mask.maskMode = MaskMode.ADD;
+        P = mask.property("ADBE Mask Shape");
+        if (M.keys.length === 1) {
+            P.setValue(makeShape(M.keys[0]));
+        } else {
+            for (i = 0; i < M.keys.length; i++) {
+                t.push(T(M.keys[i].k, C));
+                v.push(makeShape(M.keys[i]));
+            }
+            setKeys(P, t, v, false);
+        }
+        mask.property("ADBE Mask Feather").setValue([0, 0]);
+    }
+
     function addBlur(L, b) {
         var fx, g;
         try {
@@ -1507,6 +1899,7 @@ __HEADER__
                 if (L.hasAudio && audioOn) { addAudioTwin(comp, srcs.raw, s); }
                 audioOn = false;
                 placeRemap(L, s, true);
+                L.name = s.name + "  [frames]";
             }
         } else if (s.timeMode === "remap") {
             placeRemap(L, s, false);
@@ -1524,6 +1917,7 @@ __HEADER__
         applyOpacity(L, s);
         if (audioOn) { applyAudioKeys(L, s); }
         if (s.mask !== null) { addRoundedMask(L, s.mask); }
+        if (s.maskPath !== null) { addPathMask(L, s.maskPath); }
         if (s.blur !== null) { addBlur(L, s.blur); }
         return L;
     }
@@ -1572,19 +1966,36 @@ __HEADER__
         res.main = main;
     }
 
+    // Alert summary: runtime warnings first (they exist only here and in the MAIN comp comment), then the
+    // plan warnings (also in report.md); anything not shown is counted with a pointer to where it is.
     function summary(saved) {
-        var S = PLAN.summary, lines = [], i, n;
+        var S = PLAN.summary, lines = [], i, n, shown = 0;
         lines.push("match_cuts: built \"" + PLAN.main.name + "\"" + (saved ? " and saved recreated_edit.aep" : " (NOT saved)"));
         lines.push(S.raw + " RAW segments, " + S.placeholders + " NOT-IN-RAW placeholders, " + S.cuts + " cuts");
         lines.push("duration " + S.duration + " s = " + PLAN.main.frames + " frames at " + C.num + "/" + C.den + " fps");
+        if (S.audioPlaceholders > 0 || S.overlayGuides > 0) {
+            lines.push(S.audioPlaceholders + " audio placeholder(s), " + S.overlayGuides +
+                       " overlay guide(s): the competitor's own music / text - add yours there");
+        }
         n = PLAN.warnings.length + WARN.length;
         if (n > 0) {
             lines.push("Warnings (" + n + "):");
-            for (i = 0; i < PLAN.warnings.length && i < 12; i++) { lines.push("- " + PLAN.warnings[i]); }
-            for (i = 0; i < WARN.length && i < 12; i++) { lines.push("- " + WARN[i]); }
-            if (n > 24) { lines.push("- ... see report.md"); }
+            for (i = 0; i < WARN.length && i < 12; i++) { lines.push("- " + WARN[i]); shown++; }
+            for (i = 0; i < PLAN.warnings.length && i < 12; i++) { lines.push("- " + PLAN.warnings[i]); shown++; }
+            if (n > shown) {
+                lines.push("- ... and " + (n - shown) + " more (plan warnings: report.md; runtime warnings: the " +
+                           "comment of the comp \"" + PLAN.main.name + "\")");
+            }
         }
         return lines.join("\n");
+    }
+
+    // MAIN keeps its 'mc:main' tag on the first comment line; the runtime warnings follow (saved with the
+    // project, so they survive the alert).
+    function mainComment() {
+        var c = "mc:main", i;
+        for (i = 0; i < WARN.length && i < 200; i++) { c += "\n" + WARN[i]; }
+        return c;
     }
 
     var here = new File($.fileName).parent;
@@ -1611,14 +2022,33 @@ __HEADER__
         app.endUndoGroup();
     }
     if (!ok) { return; }
-    var out = new File(here.fsName + "/recreated_edit.aep");
-    try { app.project.save(out); } catch (eS) { warn("saving the project did not work (" + eS.message + ")"); }
-    if (!out.exists) {
+    if (WARN.length > 0) {
+        try { res.main.comment = mainComment(); } catch (eC) { }
+    }
+    // Saved = save() did not throw, the project is now THIS file, and the file on disk is new (a
+    // recreated_edit.aep left by an earlier run must not pass for a successful save).
+    var out = new File(here.fsName + "/recreated_edit.aep"), before = -1, saved = false, pf = null;
+    try { if (out.exists && out.modified !== null) { before = out.modified.getTime(); } } catch (eM) { before = -1; }
+    try {
+        app.project.save(out);
+        pf = app.project.file;
+        saved = (pf !== null && pf.name === out.name && out.exists);
+        if (saved && before >= 0) {
+            try {
+                saved = (out.modified.getTime() !== before) || ((new Date()).getTime() - before < 3000);
+            } catch (eM2) { }
+        }
+    } catch (eS) {
+        warn("saving the project did not work (" + eS.message + ")");
+        saved = false;
+    }
+    if (!saved) {
         alert("Could not save recreated_edit.aep next to this script. Enable Preferences > Scripting & " +
               "Expressions > Allow Scripts to Write Files and Access Network (Preferences > General before " +
-              "AE 16.1), then run the script again. The project is open but unsaved.");
+              "AE 16.1), check that the folder is writable and the file is not open elsewhere, then run the " +
+              "script again. The project is open but unsaved.");
     }
-    alert(summary(out.exists));
+    alert(summary(saved));
 })();
 """
 
@@ -1640,11 +2070,19 @@ def run_jsx_in_mock(jsx_path: str | os.PathLike, footage_meta: dict, scenario: s
                     timeout: float = 300.0) -> dict:
     """Run a JSX through the ES3 gate and the strict Node AE mock (match_cuts/ae_mock).
 
-    footage_meta = {basename: {width, height, fps_num, fps_den, frames, has_audio}}.
-    Scenarios: default | media_missing (openDialog returns null -> clean abort) | new_project_null |
-    no_marker_property | quantize_time (AE stores startTime to 10 ms and stretch to 1e-3 % -> exercises the
-    JSX self-check fallback). Returns the recorded project (see ae_mock.js ``finish``) with ``status`` in
-    {ok, script_error, gate_failed, mock_crash, node_error, not_available}."""
+    footage_meta = {basename: {width, height, fps_num, fps_den, frames, has_audio}}. The mock resolves
+    File.exists / File.modified on the REAL file system (the media must exist where the JSX looks for
+    them); only the saved .aep is virtual.
+    Scenarios: default | media_missing (media reported missing, openDialog returns null -> clean abort) |
+    new_project_null | no_marker_property | quantize_time (AE stores startTime to 10 ms and stretch to
+    1e-3 % -> exercises the JSX self-check fallback) | fps_misread_down / fps_misread_up (AE reads every
+    clip at rate * 1000/1001 or * 1001/1000 -> the JSX must conform) | fps_display_rounded (AE reports
+    the 2-decimal display rate, 29.97 for 30000/1001 -> conformed quietly, no warning) | frame_count_off (AE sees one frame
+    more -> exact frame-count warning) | save_fails_existing / save_silent_fail (an old recreated_edit.aep
+    exists; save() throws / writes nothing -> 'NOT saved') | rel_missing_abs_present (media next to the
+    script missing -> the absolute path). Returns the recorded project (see ae_mock.js ``finish``; footage
+    items carry the imported ``fsName``) with ``status`` in {ok, script_error, gate_failed, mock_crash,
+    node_error, not_available}."""
     if scenario not in MOCK_SCENARIOS:
         raise ValueError(f"run_jsx_in_mock: unknown scenario {scenario!r} (expected {MOCK_SCENARIOS})")
     node = _find_node()
@@ -1734,6 +2172,36 @@ def record_layer_problems(PL: dict, RL: dict, F: dict, tol: float = 1e-6) -> lis
         elif got and (abs(float(got[0]["time"]) - _t(PL["compIn"], F)) > tol
                       or any(g.get("outInterp") != "HOLD" for g in got)):
             out.append("ADBE Time Remapping: frame-exact keys misplaced or not HOLD")
+    mp = PL.get("maskPath")
+    if mp:
+        masks = RL.get("masks") or []
+        if len(masks) != 1:
+            out.append(f"mask path: {len(masks)} masks (plan 1)")
+        else:
+            m = masks[0]
+            want_keys = mp["keys"]
+            got = ([{"time": None, "value": m.get("shape")}] if len(want_keys) == 1
+                   else (m.get("shapeKeys") or []))
+            if len(got) != len(want_keys) or any(g.get("value") is None for g in got):
+                out.append(f"mask path: {len(got)} shape(s) (plan {len(want_keys)})")
+            else:
+                for g, w in zip(got, want_keys):
+                    if g["time"] is not None and abs(float(g["time"]) - _t(w["k"], F)) > tol:
+                        out.append(f"mask path: key at {g['time']} s, plan {_t(w['k'], F)} s")
+                        break
+                    gv = g["value"]
+                    bad = False
+                    for nm in ("vertices", "inTangents", "outTangents"):
+                        a, b = gv.get(nm) or [], w[nm]
+                        if len(a) != len(b) or any(abs(float(x) - float(y)) > 1e-6
+                                                   for pa, pb in zip(a, b) for x, y in zip(pa, pb)):
+                            out.append(f"mask path: {nm} differ from the plan")
+                            bad = True
+                            break
+                    if bad:
+                        break
+            if m.get("mode") != "ADD" or any(abs(float(x)) > 0 for x in (m.get("feather") or [0])):
+                out.append(f"mask path: mode {m.get('mode')} / feather {m.get('feather')} (want ADD / 0)")
     if PL["source"] in ("raw", "box") and PL["kind"] != "raw_audio":
         if RL.get("quality") != "BEST" or RL.get("frameBlendingType") != "NO_FRAME_BLEND" or RL.get("motionBlur"):
             out.append(f"render switches quality={RL.get('quality')} frameBlending={RL.get('frameBlendingType')} "
@@ -1745,23 +2213,60 @@ def record_layer_problems(PL: dict, RL: dict, F: dict, tol: float = 1e-6) -> lis
     return out
 
 
+def _norm(p: Any) -> str:
+    return os.path.normcase(os.path.normpath(str(p)))
+
+
+def _raw_footage_rec(rec: dict, tag: str = "mc:raw") -> dict | None:
+    return next((f for f in rec.get("footage", []) if f.get("comment") == tag), None)
+
+
+def record_name_matches(PL: dict, RL: dict) -> bool:
+    """A recorded layer name equals the plan's, or -- for a stretch layer the JSX read-back self-check
+    switched to frame-exact remapping at runtime -- the plan's name + '  [frames]'."""
+    if RL.get("name") == PL.get("name"):
+        return True
+    return (PL.get("timeMode") == "stretch" and bool(RL.get("timeRemapEnabled"))
+            and RL.get("name") == f"{PL.get('name')}  [frames]")
+
+
 def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
-                scenarios: Iterable[str] = ("default", "media_missing", "new_project_null", "no_marker_property"),
-                tol: float = 1e-9) -> dict:
+                scenarios: Iterable[str] = MOCK_VERIFY_SCENARIOS, tol: float = 1e-9) -> dict:
     """Criterion-6 mock checks (DESIGN §5 verify c6) for a written JSX against its plan.
 
     default: status ok, no alert containing 'Error'/'failed', no strict-mock violations, MAIN frameRate ==
     main fps and duration == frames * frameDuration (within tol), work area == whole comp, saved to
-    <script dir>/recreated_edit.aep, balanced undo group, every plan layer present with name / startTime /
-    stretch / inPoint / outPoint equal to the plan, and simulate_ae(record) == simulate_ae(plan).
-    media_missing: openDialog called, clean abort, nothing saved. new_project_null: clean abort.
-    no_marker_property: still builds and saves. Returns {status: pass|fail|not_available, details,
+    <script dir>/recreated_edit.aep, balanced undo group, the RAW (and reference) footage imported from
+    <script dir>/<rel> (the mock checks existence on the real file system), every plan layer present with
+    name / startTime / stretch / inPoint / outPoint equal to the plan, and simulate_ae(record) ==
+    simulate_ae(plan). media_missing: openDialog called, clean abort, nothing saved. new_project_null:
+    clean abort. no_marker_property: still builds and saves. fps_display_rounded: conformed without a
+    warning. fps_misread_down / fps_misread_up: every
+    footage item conformed to its exact rate (warned), simulate_ae(record) == simulate_ae(plan).
+    frame_count_off: an 'offset by 1 frame' warning. save_fails_existing / save_silent_fail (an old
+    recreated_edit.aep exists): the 'Allow Scripts to Write Files' alert and '(NOT saved)'.
+    rel_missing_abs_present: imported from the absolute path without a dialog when that path lies outside
+    the script folder and exists, else a clean abort. Returns {status: pass|fail|not_available, details,
     failures, records}."""
     failures: list[str] = []
     details: dict[str, Any] = {"mock_only": True}
     records: dict[str, dict] = {}
     jsx = Path(jsx_path).resolve()
     want_save = str(jsx.parent / "recreated_edit.aep")
+    sim_plan: dict | None = None
+
+    def plan_sim() -> dict:
+        nonlocal sim_plan
+        if sim_plan is None:
+            sim_plan = raw_frames_by_layer(simulate_ae(plan))
+        return sim_plan
+
+    def media_path(role: str) -> str | None:
+        X = (plan.get("footage") or {}).get(role)
+        if not X or not X.get("rel"):
+            return None
+        return _norm(jsx.parent / X["rel"])
+
     for sc in scenarios:
         rec = run_jsx_in_mock(jsx, footage_meta, sc)
         records[sc] = rec
@@ -1773,6 +2278,7 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
             continue
         alerts = rec.get("alerts", [])
         bad_alerts = [a for a in alerts if "Error" in a or "failed" in a]
+        warns = rec.get("warnings", []) or []
         if sc == "default":
             if bad_alerts:
                 failures.append(f"default: alert {bad_alerts[0][:200]!r}")
@@ -1780,10 +2286,22 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                 failures.append(f"default: strict mock violations {rec['mock_errors'][:3]}")
             if rec.get("saved") != [want_save]:
                 failures.append(f"default: saved {rec.get('saved')} (expected [{want_save}])")
+            if not alerts or "and saved recreated_edit.aep" not in alerts[-1]:
+                failures.append(f"default: the summary alert does not report a saved project ({alerts[-1:]})")
             u = rec.get("calls", {})
             if u.get("beginUndoGroup") != 1 or u.get("endUndoGroup") != 1:
                 failures.append(f"default: undo groups {u.get('beginUndoGroup')}/{u.get('endUndoGroup')}")
-            main = next((c for c in rec.get("comps", []) if c.get("comment") == "mc:main"), None)
+            if u.get("openDialog", 0):
+                failures.append("default: File.openDialog was called (media not found next to the script)")
+            for role, tag in (("raw", "mc:raw"), ("ref", "mc:ref")):
+                want = media_path(role)
+                f = _raw_footage_rec(rec, tag)
+                if want is None or (f is None and role == "ref"):
+                    continue
+                got = _norm(f.get("fsName") or f.get("file")) if f else None
+                if got != want:
+                    failures.append(f"default: {role} footage imported from {got} (expected <script dir>/rel = {want})")
+            main = record_main_comp(rec)
             if main is None:
                 failures.append("default: no MAIN comp")
                 continue
@@ -1803,6 +2321,7 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                 for L in c["layers"]:
                     by_tag[str(L.get("comment", ""))] = L
             n_checked = 0
+            switched = []
             for PL in plan["layers"]:
                 RL = by_tag.get("mc:" + PL["id"])
                 if RL is None:
@@ -1812,18 +2331,24 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                         failures.append(f"default: layer {PL['id']} missing")
                     continue
                 n_checked += 1
-                if RL["name"] != PL["name"]:
+                runtime_frames = PL["timeMode"] == "stretch" and bool(RL.get("timeRemapEnabled"))
+                if runtime_frames:
+                    switched.append(PL["id"])
+                if not record_name_matches(PL, RL):
                     failures.append(f"default: {PL['id']} name {RL['name']!r} != {PL['name']!r}")
                 exp_start = PL["startTime"]
                 exp_stretch = PL["stretch"] if PL["timeMode"] == "stretch" else 100.0
+                if runtime_frames:
+                    exp_start, exp_stretch = PL["inPoint"], 100.0
                 for key, exp in (("startTime", exp_start), ("inPoint", PL["inPoint"]), ("outPoint", PL["outPoint"])):
                     if abs(float(RL[key]) - float(exp)) > tol:
                         failures.append(f"default: {PL['id']} {key} {RL[key]} != {exp}")
                 if PL["timeMode"] in ("stretch", "remap", "frames") and abs(float(RL["stretch"]) - float(exp_stretch)) > tol:
                     failures.append(f"default: {PL['id']} stretch {RL['stretch']} != {exp_stretch}")
-                if bool(RL.get("timeRemapEnabled")) != (PL["timeMode"] in ("remap", "frames")):
+                if not runtime_frames and bool(RL.get("timeRemapEnabled")) != (PL["timeMode"] in ("remap", "frames")):
                     failures.append(f"default: {PL['id']} timeRemapEnabled {RL.get('timeRemapEnabled')} (plan {PL['timeMode']})")
-                failures.extend(f"default: {PL['id']} {m}" for m in record_layer_problems(PL, RL, F))
+                if not runtime_frames:
+                    failures.extend(f"default: {PL['id']} {m}" for m in record_layer_problems(PL, RL, F))
             for c in rec.get("comps", []):
                 if c.get("frameBlending") or c.get("motionBlur"):
                     failures.append(f"default: comp {c.get('name')} has frame blending / motion blur on")
@@ -1831,10 +2356,10 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                 if f.get("comment") == "mc:raw" and f.get("fieldSeparationType") != "OFF":
                     failures.append("default: RAW footage field separation is not OFF")
             details["layers_checked"] = n_checked
-            sim_p = raw_frames_by_layer(simulate_ae(plan))
+            details["switched_to_frames"] = switched
             sim_r = raw_frames_by_layer(simulate_ae(rec))
-            diff = [lid for lid in sorted(set(sim_p) | set(sim_r)) if sim_p.get(lid) != sim_r.get(lid)]
-            details["sim_layers"] = len(sim_p)
+            diff = [lid for lid in sorted(set(plan_sim()) | set(sim_r)) if plan_sim().get(lid) != sim_r.get(lid)]
+            details["sim_layers"] = len(plan_sim())
             if diff:
                 failures.append(f"default: simulate_ae(record) != simulate_ae(plan) for {diff[:5]}")
         elif sc == "media_missing":
@@ -1850,4 +2375,72 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
         elif sc == "no_marker_property":
             if rec.get("saved") != [want_save] or bad_alerts:
                 failures.append(f"no_marker_property: did not build/save cleanly (alerts {alerts[:2]})")
+        elif sc in ("fps_misread_down", "fps_misread_up"):
+            if rec.get("mock_errors") or bad_alerts or rec.get("saved") != [want_save]:
+                failures.append(f"{sc}: did not build/save cleanly ({(rec.get('mock_errors') or alerts)[:2]})")
+            for role, tag in (("raw", "mc:raw"), ("ref", "mc:ref")):
+                X = (plan.get("footage") or {}).get(role)
+                f = _raw_footage_rec(rec, tag)
+                if not X or f is None:
+                    continue
+                want = X["fps"]["num"] / X["fps"]["den"]
+                if abs(float(f.get("conformFrameRate") or 0.0) - want) > 1e-9 * want:
+                    failures.append(f"{sc}: {role} footage read at {f.get('fps_num')}/{f.get('fps_den')} was not "
+                                    f"conformed to {X['fps']['num']}/{X['fps']['den']} "
+                                    f"(conformFrameRate {f.get('conformFrameRate')})")
+            if not any("conformed to" in w for w in warns):
+                failures.append(f"{sc}: no 'conformed' warning")
+            if rec.get("comps"):
+                sim_r = raw_frames_by_layer(simulate_ae(rec))
+                if sim_r != plan_sim():
+                    failures.append(f"{sc}: simulate_ae(record) != simulate_ae(plan) after the conform")
+        elif sc == "fps_display_rounded":
+            if rec.get("mock_errors") or bad_alerts or rec.get("saved") != [want_save]:
+                failures.append(f"{sc}: did not build/save cleanly ({(rec.get('mock_errors') or alerts)[:2]})")
+            if warns:
+                failures.append(f"{sc}: spurious warnings for a display-rounded frame rate: {warns[:2]}")
+            for role, tag in (("raw", "mc:raw"), ("ref", "mc:ref")):
+                X = (plan.get("footage") or {}).get(role)
+                f = _raw_footage_rec(rec, tag)
+                if not X or f is None:
+                    continue
+                want = X["fps"]["num"] / X["fps"]["den"]
+                read = float(f["fps_num"]) / float(f["fps_den"])
+                conf = float(f.get("conformFrameRate") or 0.0)
+                if abs(read - want) > 2e-7 * want and abs(conf - want) > 1e-9 * want:
+                    failures.append(f"{sc}: {role} footage read at {read} not conformed to {want}")
+            if rec.get("comps") and raw_frames_by_layer(simulate_ae(rec)) != plan_sim():
+                failures.append(f"{sc}: simulate_ae(record) != simulate_ae(plan)")
+        elif sc == "frame_count_off":
+            if rec.get("mock_errors") or bad_alerts:
+                failures.append(f"frame_count_off: did not build cleanly ({(rec.get('mock_errors') or alerts)[:2]})")
+            if not any("may be offset by 1 frame" in w for w in warns):
+                failures.append("frame_count_off: no 'offset by 1 frame' warning for a one-frame count difference")
+        elif sc in ("save_fails_existing", "save_silent_fail"):
+            if rec.get("saved"):
+                failures.append(f"{sc}: the mock recorded a save")
+            if not any("Allow Scripts to Write Files" in a for a in alerts):
+                failures.append(f"{sc}: no 'Allow Scripts to Write Files' alert although save() failed over an "
+                                "existing recreated_edit.aep")
+            if not alerts or "(NOT saved)" not in alerts[-1]:
+                failures.append(f"{sc}: the summary does not say '(NOT saved)' ({alerts[-1:]})")
+        elif sc == "rel_missing_abs_present":
+            X = (plan.get("footage") or {}).get("raw") or {}
+            ab = X.get("abs") or ""
+            outside = bool(ab) and os.path.isabs(ab) and os.path.isfile(ab) and not _norm(ab).startswith(
+                _norm(jsx.parent) + os.sep)
+            if outside:
+                f = _raw_footage_rec(rec, "mc:raw")
+                got = _norm(f.get("fsName") or f.get("file")) if f else None
+                if got != _norm(ab):
+                    failures.append(f"rel_missing_abs_present: RAW imported from {got} (expected the absolute path {ab})")
+                if rec.get("calls", {}).get("openDialog", 0):
+                    failures.append("rel_missing_abs_present: File.openDialog called although the absolute path exists")
+                if rec.get("saved") != [want_save] or bad_alerts:
+                    failures.append(f"rel_missing_abs_present: did not build/save cleanly (alerts {alerts[:2]})")
+            else:
+                if rec.get("calls", {}).get("openDialog", 0) < 1 or rec.get("saved") \
+                        or not any(a.startswith("Cancelled") for a in alerts):
+                    failures.append(f"rel_missing_abs_present: no dialog + clean abort (alerts {alerts[:2]})")
+            details["rel_missing_abs_present"] = "abs" if outside else "abort"
     return {"status": "fail" if failures else "pass", "details": details, "failures": failures, "records": records}

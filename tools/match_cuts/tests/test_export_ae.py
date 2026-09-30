@@ -128,12 +128,25 @@ def meta_for(cl: Cutlist) -> dict:
     return ea.footage_meta_from_cutlist(cl)
 
 
-def build(tmp_path: Path, cl: Cutlist | None = None, **cfg_kw):
+def place_media(folder: Path, cl: Cutlist) -> None:
+    """Placeholder media files where the JSX looks for them (<script dir>/<file_rel>): the mock checks
+    File.exists on the real file system."""
+    for block in (cl.raw, cl.competitor):
+        rel = block.get("file_rel")
+        if rel:
+            p = folder / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"")
+
+
+def build(tmp_path: Path, cl: Cutlist | None = None, media: bool = True, **cfg_kw):
     cl = cl or make_cutlist()
     cfg = Config(**cfg_kw)
     plan = ea.ae_plan(cl, cfg, meta_for(cl))
     jsx = tmp_path / "build_ae_project.jsx"
     ea.write_jsx(cl, plan, jsx, cfg)
+    if media:
+        place_media(tmp_path, cl)
     return cl, cfg, plan, jsx
 
 
@@ -359,7 +372,6 @@ def test_plan_source_and_fill_layouts():
     assert not any(x["kind"] in ("guide", "bg_solid") for x in src["layers"])
     fill = ea.ae_plan(cl, Config(layout_mode="fill"), meta_for(cl))
     assert (fill["main"]["w"], fill["main"]["h"]) == (1080, 1920) and fill["box"] is None
-    assert not any(x["kind"] == "guide" for x in fill["layers"])
     L1 = layer(fill, "seg1")
     want = ea.fill_transform(Sim.from_dict(SIM1), False, Box.from_dict(cl.layout["box"]), (RAW_W, RAW_H), (1080, 1920))
     ae = sim_to_ae(want, False, RAW_W, RAW_H)
@@ -500,9 +512,12 @@ def test_mock_all_scenarios_and_record_equals_plan(tmp_path):
     assert npn["calls"]["newProject"] == 1 and npn["saved"] == [] and npn["alerts"][0].startswith("Cancelled")
     nm = res["records"]["no_marker_property"]
     assert nm["saved"] and "comp markers could not be added" in nm["alerts"][-1]
-    assert next(c for c in nm["comps"] if c["comment"] == "mc:main")["markers"] == []
+    nm_main = ea.record_main_comp(nm)
+    assert nm_main["markers"] == []
     assert len(nm["warnings"]) == 1 and nm["warnings"][0].startswith("comp markers could not be added")
-    assert rec["warnings"] == []
+    # AE-4: the runtime warnings are saved with the project, below the 'mc:main' tag
+    assert nm_main["comment"].split("\n") == ["mc:main", nm["warnings"][0]]
+    assert rec["warnings"] == [] and main["comment"] == "mc:main"
 
 
 @needs_node
@@ -727,6 +742,8 @@ STRICT_SNIPPET = """#target aftereffects
 def test_mock_strictness(tmp_path):
     p = tmp_path / "strict.jsx"
     p.write_text(STRICT_SNIPPET)
+    (tmp_path / "media").mkdir()
+    (tmp_path / "media" / "raw.mp4").write_bytes(b"")
     meta = {"raw.mp4": {"width": 1920, "height": 1080, "fps_num": 30000, "fps_den": 1001, "frames": 5400,
                         "has_audio": True}}
     rec = ea.run_jsx_in_mock(p, meta)
@@ -828,3 +845,430 @@ def test_mock_dip_flash_lcut_and_blur_background(tmp_path):
     assert by["mc:bg_blur"]["sourceType"] == "comp" and not by["mc:bg_blur"]["audioEnabled"]
     assert len(by["mc:dip2"]["props"]["ADBE Opacity"]["keys"]) == len(layer(plan, "dip2")["opacity"]) == 11
     assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+
+
+# ---------------------------------------------------------------------------------------------
+# AE-1 / D1: per-period layout (fullscreen segments directly in MAIN, split / PiP flagged)
+# ---------------------------------------------------------------------------------------------
+
+FULL = {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0, "corner_radius": 0.0}
+PIP = {"x": 100.0, "y": 1500.0, "w": 400.0, "h": 300.0, "corner_radius": 20.0}
+_CS = max(1080 / RAW_W, 1920 / RAW_H)
+SIM_FULL = {"scale": _CS, "rotation_deg": 0.0, "tx": 540 - _CS * RAW_W / 2, "ty": 960 - _CS * RAW_H / 2}
+
+
+def fullscreen_cutlist(s3_box=FULL) -> Cutlist:
+    """boxed S1 -(6-frame crossfade)-> fullscreen S2, fullscreen S3, boxed S4, a PiP-region S5 with an
+    animated framing, a fullscreen NOT-IN-RAW S6."""
+    segs = [Segment(id=1, type="raw", comp_in=0, comp_out=45, raw_in_seconds=raw_time(900, 0.5), speed=1.0,
+                    transform=dict(SIM1), transition_out=dict(XFADE)),
+            Segment(id=2, type="raw", comp_in=39, comp_out=90, raw_in_seconds=raw_time(2000, 0.5), speed=1.0,
+                    transform=dict(SIM_FULL), transition_in=dict(XFADE), box=dict(FULL), region=1),
+            Segment(id=3, type="raw", comp_in=90, comp_out=120, raw_in_seconds=raw_time(2600, 0.5), speed=1.0,
+                    flip_h=True, transform=dict(SIM_FULL), box=dict(s3_box) if s3_box else None,
+                    region=1 if s3_box else 0),
+            Segment(id=4, type="raw", comp_in=120, comp_out=150, raw_in_seconds=raw_time(3100, 0.5), speed=1.0,
+                    transform=dict(SIM1)),
+            Segment(id=5, type="raw", comp_in=150, comp_out=180, raw_in_seconds=raw_time(3500, 0.5), speed=1.0,
+                    transform={"scale": 0.25, "rotation_deg": 0.0, "tx": 60.0, "ty": 1480.0},
+                    transform_keys=[{"comp_frame": 150, "scale": 0.25, "rotation_deg": 0.0, "tx": 60.0, "ty": 1480.0},
+                                    {"comp_frame": 179, "scale": 0.3, "rotation_deg": 2.0, "tx": 20.0, "ty": 1450.0}],
+                    box=dict(PIP), region=2),
+            Segment(id=6, type="not_in_raw", comp_in=180, comp_out=200, label="insert", box=dict(FULL), region=1)]
+    cl = make_cutlist(segs, comp_frames=200)
+    cl.layout["periods"] = [{"comp_in": 0, "comp_out": 39, "mode": "boxed", "box": cl.layout["box"]},
+                            {"comp_in": 39, "comp_out": 120, "mode": "fullscreen", "box": dict(FULL)},
+                            {"comp_in": 120, "comp_out": 150, "mode": "boxed", "box": cl.layout["box"]},
+                            {"comp_in": 150, "comp_out": 180, "mode": "pip", "box": dict(PIP)},
+                            {"comp_in": 180, "comp_out": 200, "mode": "fullscreen", "box": dict(FULL)}]
+    return cl
+
+
+def test_plan_fullscreen_segments_placed_in_main():
+    cl = fullscreen_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    L1, L2, L3, L4, L5 = (layer(plan, f"seg{i}") for i in (1, 2, 3, 4, 5))
+    # boxed segments stay in the Video Box pre-comp; fullscreen (and the PiP region) go to MAIN
+    assert (L1["comp"], L4["comp"]) == ("box", "box")
+    assert (L2["comp"], L3["comp"], L5["comp"]) == ("main", "main", "main")
+    # canonical Sim at origin (0, 0), r = 1: no Video Box offset, no mask for the whole canvas
+    for L, seg in ((L2, cl.segments[1]), (L3, cl.segments[2])):
+        ae = sim_to_ae(Sim.from_dict(seg.transform), seg.flip_h, RAW_W, RAW_H, r=1.0)
+        assert L["xf"]["position"] == pytest.approx(list(ae.position), abs=1e-9)
+        assert L["xf"]["scale"] == pytest.approx(list(ae.scale), abs=1e-9)
+        assert L["maskPath"] is None and L["mask"] is None
+    # MAIN stacking: reference > guides > MAIN-level segments (chronological) > Video Box > background
+    main_ids = [L["id"] for L in plan["layers"] if L["comp"] == "main"]
+    assert main_ids[0] == "ref" and main_ids[-1] == "bg_solid"
+    assert max(main_ids.index(g) for g in main_ids if g.startswith("guide")) < main_ids.index("seg2") \
+        < main_ids.index("seg3") < main_ids.index("seg5") < main_ids.index("nir6") < main_ids.index("box")
+    # the fullscreen NOT-IN-RAW placeholder covers the whole canvas
+    P6 = layer(plan, "nir6")
+    assert (P6["comp"], P6["w"], P6["h"], P6["xf"]["position"], P6["maskPath"]) == ("main", 1080, 1920, [540.0, 960.0], None)
+    # no "exported inside the dominant Video Box" warning for reproduced fullscreen segments; PiP flagged
+    assert not any("different layout box" in w or "fullscreen" in w for w in plan["warnings"]), plan["warnings"]
+    assert any(w.startswith("S05:") and "picture-in-picture" in w for w in plan["warnings"])
+    assert any("picture-in-picture layout in the competitor" in w for w in plan["warnings"])
+    assert [(p["mode"], p["reproduced"]) for p in plan["periods"]] == [
+        ("boxed", True), ("fullscreen", True), ("boxed", True), ("pip", False), ("fullscreen", True)]
+    assert plan["summary"]["mainLevelSegments"] == 4
+    assert any(d["decision"] == "fullscreen_period" for d in plan["decisions"])
+
+
+def test_plan_crossfade_into_a_main_level_layer_keys_the_incoming_layer():
+    cl = fullscreen_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    L1, L2 = layer(plan, "seg1"), layer(plan, "seg2")
+    # S2 (MAIN, above the whole Video Box) is the upper layer: it rises 0 -> 100 %; S1 stays at 100 %
+    assert L1["opacity"] == []
+    want = [(39 + i, 100.0 * i / 6) for i in range(6)] + [(45, 100.0)]
+    assert [(k["k"], k["v"]) for k in L2["opacity"]] == [(k, pytest.approx(v)) for k, v in want]
+    sim = ea.simulate_ae(plan)
+    for i in range(6):
+        w = {e["layer"]: e["weight"] for e in sim[39 + i]}
+        assert w["seg1"] == pytest.approx(1 - i / 6) and w["seg2"] == pytest.approx(i / 6)
+    assert [e["layer"] for e in sim[45]] == ["seg2"] and sim[45][0]["weight"] == 1.0
+    assert all(sim[K] == [] for K in range(180, 200))                       # fullscreen NOT-IN-RAW
+    exp = expected_frames(cl)
+    assert ea.raw_frames_by_layer(sim) == exp
+
+
+def test_plan_masked_main_level_segment_mask_path_is_the_box():
+    """A segment with its own non-canvas box is clipped by a layer-space mask whose comp-space image is
+    exactly the (rounded) box at every MAIN frame, also with an animated framing (one key per frame)."""
+    from match_cuts.geometry import ae_to_matrix
+    cl = fullscreen_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    L5 = layer(plan, "seg5")
+    mp = L5["maskPath"]
+    assert [k["k"] for k in mp["keys"]] == list(range(150, 180))
+    want = ea.rounded_rect_shape(PIP["x"], PIP["y"], PIP["w"], PIP["h"], PIP["corner_radius"])
+    xk = L5["xf"]["keys"]
+    for key in mp["keys"]:
+        K = key["k"]
+        u = (K - xk[0]["k"]) / (xk[1]["k"] - xk[0]["k"])
+        lerp = lambda a, b: a + u * (b - a)       # noqa: E731
+        xf = {"anchor": L5["xf"]["anchor"], "scale": [lerp(xk[0]["scale"][i], xk[1]["scale"][i]) for i in range(2)],
+              "rotation": lerp(xk[0]["rotation"], xk[1]["rotation"]),
+              "position": [lerp(xk[0]["position"][i], xk[1]["position"][i]) for i in range(2)]}
+        m = ae_to_matrix(xf)
+        for vl, vc in zip(key["vertices"], want["vertices"]):
+            assert (m[:2, :2] @ vl + m[:2, 2]).tolist() == pytest.approx(vc, abs=1e-6)
+        for nm in ("inTangents", "outTangents"):
+            for tl, tc in zip(key[nm], want[nm]):
+                assert (m[:2, :2] @ tl).tolist() == pytest.approx(tc, abs=1e-6)
+    # a static framing: one shape; comp-size scaling applies r to the box
+    cl2 = fullscreen_cutlist()
+    cl2.segments[4].transform_keys = []
+    plan2 = ea.ae_plan(cl2, Config(comp_size="720x1280"), meta_for(cl2))
+    r = 2 / 3
+    L5b = layer(plan2, "seg5")
+    assert len(L5b["maskPath"]["keys"]) == 1
+    m = ae_to_matrix(L5b["xf"])
+    want2 = ea.rounded_rect_shape(PIP["x"] * r, PIP["y"] * r, PIP["w"] * r, PIP["h"] * r, PIP["corner_radius"] * r)
+    for vl, vc in zip(L5b["maskPath"]["keys"][0]["vertices"], want2["vertices"]):
+        assert (m[:2, :2] @ vl + m[:2, 2]).tolist() == pytest.approx(vc, abs=1e-6)
+    L2b = layer(plan2, "seg2")
+    ae = sim_to_ae(Sim.from_dict(SIM_FULL), False, RAW_W, RAW_H, r=r)
+    assert L2b["xf"]["position"] == pytest.approx(list(ae.position)) and L2b["comp"] == "main"
+    assert (layer(plan2, "nir6")["w"], layer(plan2, "nir6")["h"]) == (720, 1280)
+
+
+def test_plan_fullscreen_period_without_segment_box_is_warned():
+    cl = fullscreen_cutlist(s3_box=None)
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    assert layer(plan, "seg3")["comp"] == "box"
+    assert any("fullscreen in the competitor" in w and "S03" in w for w in plan["warnings"])
+    assert plan["periods"][1] == {"comp_in": 39, "comp_out": 120, "mode": "fullscreen", "reproduced": False}
+    # a segment box equal to the layout box is the dominant layout (inside the Video Box)
+    cl2 = make_cutlist()
+    cl2.segments[0].box = dict(cl2.layout["box"])
+    assert layer(ea.ae_plan(cl2, Config(), meta_for(cl2)), "seg1")["comp"] == "box"
+
+
+def test_plan_fill_mode_uses_the_segment_box():
+    cl = fullscreen_cutlist()
+    plan = ea.ae_plan(cl, Config(layout_mode="fill"), meta_for(cl))
+    L2 = layer(plan, "seg2")
+    want = ea.fill_transform(Sim.from_dict(SIM_FULL), False, Box.from_dict(FULL), (RAW_W, RAW_H), (1080, 1920))
+    ae = sim_to_ae(want, False, RAW_W, RAW_H)
+    assert L2["xf"]["position"] == pytest.approx(list(ae.position)) and L2["xf"]["scale"] == pytest.approx(list(ae.scale))
+    assert all(L["comp"] == "main" and L["maskPath"] is None for L in plan["layers"])
+
+
+@needs_node
+def test_mock_fullscreen_segments_run_and_match_plan(tmp_path):
+    cl, cfg, plan, jsx = build(tmp_path, fullscreen_cutlist())
+    res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("default",))
+    assert res["status"] == "pass", res["failures"]
+    rec = res["records"]["default"]
+    main = ea.record_main_comp(rec)
+    tags = [L["comment"] for L in main["layers"]]
+    assert tags.index("mc:seg2") < tags.index("mc:seg3") < tags.index("mc:box")      # above the Video Box
+    boxc = next(c for c in rec["comps"] if c["comment"] == "mc:box")
+    assert {L["comment"] for L in boxc["layers"]} == {"mc:seg1", "mc:seg4"}
+    by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+    assert by["mc:seg2"]["masks"] == [] and len(by["mc:seg5"]["masks"][0]["shapeKeys"]) == 30
+    assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+    sp, sr = ea.simulate_ae(plan), ea.simulate_ae(rec)
+    for K in range(39, 46):
+        assert [(e["layer"], e["weight"]) for e in sp[K]] == [(e["layer"], pytest.approx(e["weight"])) for e in sr[K]]
+
+
+# ---------------------------------------------------------------------------------------------
+# AE-2: frame-rate conform on any real difference, exact frame count
+# ---------------------------------------------------------------------------------------------
+
+@needs_node
+@pytest.mark.parametrize("scenario", ["fps_misread_down", "fps_misread_up"])
+def test_mock_fps_misread_is_conformed(tmp_path, scenario):
+    """AE reading every clip at rate * 1000/1001 (or 1001/1000) -- the classic NTSC misread, which the old
+    1e-3 threshold let through for 30/1 and 24000/1001 -- must be conformed and logged, frame exact."""
+    cl, cfg, plan, jsx = build(tmp_path)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl), scenario)
+    assert rec["status"] == "ok" and rec["mock_errors"] == [] and rec["saved"]
+    for tag, fps in (("mc:raw", 30000 / 1001), ("mc:ref", 30.0)):
+        f = next(x for x in rec["footage"] if x["comment"] == tag)
+        assert f["fps_num"] / f["fps_den"] != pytest.approx(fps, rel=1e-6)        # AE misread it ...
+        assert f["conformFrameRate"] == pytest.approx(fps, rel=1e-12)             # ... and the JSX conformed
+    assert sum("conformed to" in w for w in rec["warnings"]) == 2
+    assert any("frame(s) of drift" in w for w in rec["warnings"])
+    assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+    res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=(scenario,))
+    assert res["status"] == "pass", res["failures"]
+
+
+@needs_node
+def test_mock_one_frame_count_difference_is_warned(tmp_path):
+    cl, cfg, plan, jsx = build(tmp_path)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl), "frame_count_off")
+    assert rec["status"] == "ok" and rec["mock_errors"] == []
+    offs = [w for w in rec["warnings"] if "may be offset by 1 frame" in w]
+    assert len(offs) == 2 and any("5401 frames in AE (expected 5400)" in w for w in offs)
+    assert ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("frame_count_off",))["status"] == "pass"
+
+
+# ---------------------------------------------------------------------------------------------
+# AE-3: a failed save over an existing recreated_edit.aep is detected
+# ---------------------------------------------------------------------------------------------
+
+@needs_node
+@pytest.mark.parametrize("scenario", ["save_fails_existing", "save_silent_fail"])
+def test_mock_failed_save_over_existing_aep_is_reported(tmp_path, scenario):
+    cl, cfg, plan, jsx = build(tmp_path)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl), scenario)
+    assert rec["status"] == "ok" and rec["saved"] == [] and rec["calls"]["save"] == 1
+    assert any("Allow Scripts to Write Files" in a for a in rec["alerts"])
+    assert "(NOT saved)" in rec["alerts"][-1] and "and saved" not in rec["alerts"][-1]
+    assert ea.mock_verify(jsx, plan, meta_for(cl), scenarios=(scenario,))["status"] == "pass"
+
+
+@needs_node
+def test_mock_save_with_a_real_old_aep_on_disk(tmp_path):
+    import os
+    cl, cfg, plan, jsx = build(tmp_path)
+    old = tmp_path / "recreated_edit.aep"
+    old.write_bytes(b"old project")
+    os.utime(old, (1_600_000_000, 1_600_000_000))
+    ok = ea.run_jsx_in_mock(jsx, meta_for(cl), "default")                  # overwritten: new mtime -> saved
+    assert ok["saved"] == [str(old)] and "and saved recreated_edit.aep" in ok["alerts"][-1]
+    assert not any("Allow Scripts" in a for a in ok["alerts"])
+    bad = ea.run_jsx_in_mock(jsx, meta_for(cl), "save_silent_fail")        # nothing written: old file stays
+    assert bad["saved"] == [] and "(NOT saved)" in bad["alerts"][-1]
+    assert old.read_bytes() == b"old project"
+
+
+# ---------------------------------------------------------------------------------------------
+# AE-4: warning overflow line, runtime warnings persisted, runtime [frames] tag
+# ---------------------------------------------------------------------------------------------
+
+@needs_node
+def test_mock_summary_counts_hidden_warnings(tmp_path):
+    cl = make_cutlist()
+    cfg = Config()
+    plan = ea.ae_plan(cl, cfg, meta_for(cl))
+    plan["warnings"] = [f"plan warning {i}" for i in range(20)]
+    jsx = tmp_path / "build_ae_project.jsx"
+    ea.write_jsx(cl, plan, jsx, cfg)
+    place_media(tmp_path, cl)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
+    lines = rec["alerts"][-1].split("\n")
+    assert "Warnings (20):" in lines
+    assert sum(1 for x in lines if x.startswith("- plan warning")) == 12
+    assert lines[-1].startswith("- ... and 8 more (plan warnings: report.md; runtime warnings: the comment of the comp")
+
+
+@needs_node
+def test_mock_runtime_frames_switch_is_tagged_and_persisted(tmp_path):
+    cl, cfg, plan, jsx = build(tmp_path)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl), "quantize_time")
+    assert rec["status"] == "ok" and rec["mock_errors"] == []
+    by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+    switched = [PL for PL in plan["layers"] if PL["kind"] == "raw" and by["mc:" + PL["id"]]["timeRemapEnabled"]
+                and PL["timeMode"] == "stretch"]
+    assert switched
+    for PL in switched:
+        RL = by["mc:" + PL["id"]]
+        assert RL["name"] == PL["name"] + "  [frames]" and ea.record_name_matches(PL, RL)
+    main = ea.record_main_comp(rec)
+    assert main["comment"].split("\n")[0] == "mc:main" and main["comment"].split("\n")[1:] == rec["warnings"]
+    assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+
+
+# ---------------------------------------------------------------------------------------------
+# AE-5: the mock checks paths on the real file system
+# ---------------------------------------------------------------------------------------------
+
+@needs_node
+def test_mock_media_must_exist_where_the_jsx_looks(tmp_path):
+    cl, cfg, plan, jsx = build(tmp_path, media=False)                      # no media/ next to the script
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
+    assert rec["calls"]["openDialog"] == 1 and rec["saved"] == [] and rec["alerts"][0].startswith("Cancelled")
+    # a wrong relative path in the plan is caught although media/raw.mp4 exists
+    d2 = tmp_path / "wrong_rel"
+    d2.mkdir()
+    cl2 = make_cutlist()
+    plan2 = ea.ae_plan(cl2, Config(), meta_for(cl2))
+    plan2["footage"]["raw"]["rel"] = "no/such/dir/raw.mp4"
+    jsx2 = d2 / "build_ae_project.jsx"
+    ea.write_jsx(cl2, plan2, jsx2, Config())
+    place_media(d2, cl2)
+    res = ea.mock_verify(jsx2, plan2, meta_for(cl2), scenarios=("default",))
+    assert res["status"] == "fail" and res["records"]["default"]["calls"]["openDialog"] == 1
+    # the default run records where each clip was imported from: <script dir>/<rel>
+    cl3, _, plan3, jsx3 = build(tmp_path / "ok", make_cutlist()) if (tmp_path / "ok").mkdir() is None else (None,) * 4
+    rec3 = ea.run_jsx_in_mock(jsx3, meta_for(cl3))
+    raw = next(f for f in rec3["footage"] if f["comment"] == "mc:raw")
+    assert raw["fsName"] == str(tmp_path / "ok" / "media" / "raw.mp4")
+
+
+@needs_node
+def test_mock_rel_missing_abs_present(tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "raw.mp4").write_bytes(b"")
+    cl = make_cutlist()
+    cl.raw["file_abs"] = str(elsewhere / "raw.mp4")
+    out = tmp_path / "out"
+    out.mkdir()
+    _, _, plan, jsx = build(out, cl)
+    res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("rel_missing_abs_present",))
+    assert res["status"] == "pass", res["failures"]
+    assert res["details"]["rel_missing_abs_present"] == "abs"
+    rec = res["records"]["rel_missing_abs_present"]
+    raw = next(f for f in rec["footage"] if f["comment"] == "mc:raw")
+    assert raw["fsName"] == str(elsewhere / "raw.mp4") and rec["calls"]["openDialog"] == 0 and rec["saved"]
+    # the reference has no reachable absolute path: skipped with a warning, not fatal
+    assert any("reference video" in w for w in rec["warnings"])
+
+
+# ---------------------------------------------------------------------------------------------
+# REQ-4: labelled placeholders for the competitor's music / SFX / VO and in-box overlays
+# ---------------------------------------------------------------------------------------------
+
+def placeholder_cutlist() -> Cutlist:
+    cl = make_cutlist()
+    cl.added_audio = [{"type": "voice_over", "comp_in": 50, "comp_out": 120, "level_db": None},
+                      {"type": "music", "comp_in": 0, "comp_out": 300, "level_db": -6.5, "level_dbfs": -23.6}]
+    cl.overlays_detected = [
+        {"type": "logo", "comp_in": 0, "comp_out": 300, "x": 30, "y": 30, "w": 50, "h": 50, "static": True},
+        {"type": "captions", "comp_in": 12, "comp_out": 40, "x": 200, "y": 900, "w": 600, "h": 90},
+        {"type": "text", "comp_in": 50, "comp_out": 66, "x": 520.0, "y": 940.0, "w": 56.0, "h": 44.0},
+        {"type": "text", "comp_in": 50, "comp_out": 66, "x": 520.0, "y": 940.0, "w": 56.0, "h": 44.0},
+        {"type": "sticker", "comp_in": 100, "comp_out": 130, "x": 500.0, "y": 1000.0, "w": 100.0, "h": 100.0}]
+    return cl
+
+
+def test_plan_audio_placeholders_and_overlay_guides_match_mode():
+    cl = placeholder_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    aph = [L for L in plan["layers"] if L["kind"] == "audio_placeholder"]
+    assert [(L["compIn"], L["compOut"]) for L in aph] == [(0, 300), (50, 120)]
+    assert all(L["comp"] == "main" and L["guide"] and not L["enabled"] and not L["audio"] for L in aph)
+    assert aph[0]["name"].startswith("PLACEHOLDER - MUSIC 00:00:00:00-00:00:10:00") and "-6.5 dB" in aph[0]["name"]
+    assert aph[1]["name"].startswith("PLACEHOLDER - VOICE OVER ") and aph[1]["name"].isascii()
+    mk = {m["k"]: m["text"] for m in plan["markers"]}
+    assert mk[0].startswith("Start | S01 RAW ") and "MUSIC placeholder 00:00:00:00-00:00:10:00" in mk[0]
+    assert "VOICE OVER placeholder" in mk[50]
+    ovl = [L for L in plan["layers"] if L["id"].startswith("ovl")]
+    assert len(ovl) == 2                                                   # duplicate event merged
+    t, st = ovl
+    assert t["name"].startswith("GUIDE - text overlay (520,940 56x44) 00:00:01:20-00:00:02:06")
+    assert (t["compIn"], t["compOut"], t["w"], t["h"], t["xf"]["position"]) == (50, 66, 56, 44, [548.0, 962.0])
+    assert st["name"].startswith("GUIDE - sticker overlay") and (st["compIn"], st["compOut"]) == (100, 130)
+    assert all(L["guide"] and L["enabled"] and L["comp"] == "main" for L in ovl)
+    assert plan["summary"]["audioPlaceholders"] == 2 and plan["summary"]["overlayGuides"] == 2
+    main_ids = [L["id"] for L in plan["layers"] if L["comp"] == "main"]
+    assert main_ids.index("ref") < main_ids.index("ovl0") < main_ids.index("audio_ph0") < main_ids.index("box")
+    # the added layers never change what AE shows
+    assert ea.raw_frames_by_layer(ea.simulate_ae(plan)) == expected_frames(cl)
+
+
+def test_plan_placeholders_fill_and_source_modes():
+    cl = placeholder_cutlist()
+    fill = ea.ae_plan(cl, Config(layout_mode="fill"), meta_for(cl))
+    # fill: guides mapped through fill_transform (box centre -> frame centre, zoom cover_frame / cover_box)
+    bx = cl.layout["box"]
+    q = max(1080 / RAW_W, 1920 / RAW_H) / max(bx["w"] / RAW_W, bx["h"] / RAW_H)
+    bcx, bcy = bx["x"] + bx["w"] / 2, bx["y"] + bx["h"] / 2
+    t = next(L for L in fill["layers"] if L["id"] == "ovl0")
+    cx, cy = 540 + q * (548 - bcx), 960 + q * (962 - bcy)
+    assert t["xf"]["position"] == pytest.approx([cx, cy], abs=0.51) and t["w"] == round(56 * q)
+    zones = {L["name"].split(" ")[2]: L for L in fill["layers"] if L["id"].startswith("guide")}
+    assert set(zones) == {"title", "watermark", "captions"}
+    for L in zones.values():                                               # clamped inside the frame
+        x, y = L["xf"]["position"]
+        assert L["w"] / 2 - 0.51 <= x <= 1080 - L["w"] / 2 + 0.51 and L["h"] / 2 - 0.51 <= y <= 1920 - L["h"] / 2 + 0.51
+    assert len([L for L in fill["layers"] if L["kind"] == "audio_placeholder"]) == 2
+    # source: no spatial guides, but the audio placeholders on the RAW grid
+    src = ea.ae_plan(cl, Config(layout_mode="source"), meta_for(cl))
+    assert not any(L["kind"] == "guide" for L in src["layers"])
+    aph = [L for L in src["layers"] if L["kind"] == "audio_placeholder"]
+    to_main = lambda k: math.floor(Fraction(k) * RF / CF + Fraction(1, 2))   # noqa: E731
+    assert [(L["compIn"], L["compOut"]) for L in aph] == [(0, to_main(300)), (to_main(50), to_main(120))]
+
+
+@needs_node
+def test_mock_placeholders_build_cleanly(tmp_path):
+    for i, mode in enumerate(("match", "fill", "source")):
+        d = tmp_path / mode
+        d.mkdir()
+        cl, cfg, plan, jsx = build(d, placeholder_cutlist(), layout_mode=mode)
+        res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("default",))
+        assert res["status"] == "pass", (mode, res["failures"])
+        rec = res["records"]["default"]
+        by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+        assert by["mc:audio_ph0"]["guideLayer"] and not by["mc:audio_ph0"]["enabled"]
+        main = ea.record_main_comp(rec)
+        assert any("MUSIC placeholder" in m["comment"] for m in main["markers"])
+        assert "2 audio placeholder(s)" in rec["alerts"][-1]
+
+
+@needs_node
+def test_mock_display_rounded_rate_is_conformed_quietly(tmp_path):
+    """AE reporting 29.97 for a 30000/1001 clip (9.6e-7 relative) is conformed to the exact rate without a
+    user warning (float32 noise alone, < 6e-8, never triggers a conform)."""
+    cl, cfg, plan, jsx = build(tmp_path)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl), "fps_display_rounded")
+    assert rec["status"] == "ok" and rec["warnings"] == [] and rec["saved"]
+    raw = next(f for f in rec["footage"] if f["comment"] == "mc:raw")
+    ref = next(f for f in rec["footage"] if f["comment"] == "mc:ref")
+    assert (raw["fps_num"], raw["fps_den"]) == (2997, 100) and raw["conformFrameRate"] == 30000 / 1001
+    assert ref["conformFrameRate"] == 0                                    # 30/1 is read exactly
+    assert any(re.search(r"raw\.mp4: AE reported 29\.9699\d* fps; conformed to 30000/1001", x) for x in rec["logs"])
+    assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == expected_frames(cl)
+
+
+@needs_node
+def test_write_jsx_accepts_a_plan_without_the_new_fields(tmp_path):
+    cl = make_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    for L in plan["layers"]:
+        del L["maskPath"]
+    del plan["summary"]["audioPlaceholders"], plan["summary"]["overlayGuides"]
+    jsx = tmp_path / "build_ae_project.jsx"
+    ea.write_jsx(cl, plan, jsx, Config())
+    place_media(tmp_path, cl)
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
+    assert rec["status"] == "ok" and rec["mock_errors"] == [] and rec["saved"], rec.get("error")
+    assert "maskPath" not in plan["layers"][0]                            # the caller's plan is not mutated

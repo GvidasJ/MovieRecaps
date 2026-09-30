@@ -173,6 +173,51 @@ def test_determinism_workers_and_debug_pngs(run, tmp_path):
             assert outs[0].raw[k] == t["raw"], k
 
 
+def _mm_proxy(p: Proxy, path: Path, a: int, b: int) -> Proxy:
+    """Frames a..b of ``p`` saved to ``path`` and re-opened as a read-only memmap (as the pipeline does)."""
+    np.save(path, np.ascontiguousarray(p.frames[a:b]))
+    return Proxy(p.role, "", np.load(path, mmap_mode="r"), p.full_size, p.ratio, p.fps, p.pts[a:b], b - a,
+                 npy_path=str(path))
+
+
+def test_frame_map_bit_identical_inline_fork_spawn(run, tmp_path, monkeypatch):
+    """Review finding real-world:F6 / DESIGN D7: refinement (tracks, ECC, overlay pass 2, rescue searches
+    through the cached RAW index) runs in spawn pools where fork is unavailable, with FrameMaps and pass-2
+    masks bit-identical to the inline and fork runs."""
+    from match_cuts.layout import OverlayMasks
+    sc = run["sc"]
+    a0, a1 = 34, 76                                  # jump cut + flash + flipped + NOT-IN-RAW
+    comp = _mm_proxy(sc["comp"], tmp_path / "comp.npy", a0, a1)
+    raw = _mm_proxy(sc["raw"], tmp_path / "raw.npy", 0, sc["raw"].n)
+    anchors = [vm.Anchor.from_dict({**a.to_dict(), "k": a.k - a0}) for a in run["anchors"] if a0 <= a.k < a1]
+    outs = {}
+    try:
+        for mode, workers in (("inline", 1), ("fork", 3), ("spawn", 3)):
+            monkeypatch.setenv(vm.START_METHOD_ENV, "spawn" if mode == "spawn" else "fork")
+            cfg = S.make_config(tmp_path / mode, workers=workers)
+            ov = OverlayMasks(comp.frames.shape[1:])
+            allowed = vm.AllowedMasks(sc["layout"], ov, comp, cfg, use_layout_module=False)
+            before = dict(vm.POOL_STATS)
+            fm = refine.build_frame_map(comp, raw, sc["layout"], ov, anchors, None, run["index"], cfg, None, None,
+                                        None, allowed_fn=allowed, residual_fn=refine._masks_from_residuals_local)
+            if mode != "inline":
+                assert vm.POOL_STATS[mode] >= before[mode] + 3, (mode, vm.POOL_STATS)
+                assert vm.POOL_STATS["spawn_fallback"] == before["spawn_fallback"]
+            outs[mode] = (fm, {k: ov.get(k) for k in ov.frames()})
+    finally:
+        vm.shutdown_workers()
+    fm0, m0 = outs["inline"]
+    for mode in ("fork", "spawn"):
+        fm1, m1 = outs[mode]
+        for name, col in fm0.d.items():
+            assert np.array_equal(col, fm1.d[name], equal_nan=True), (mode, name)
+        assert sorted(m1) == sorted(m0) and all(np.array_equal(m0[k], m1[k]) for k in m0), mode
+    assert m0                                        # overlay pass 2 found the caption
+    for k, t in enumerate(sc["truth"][a0:a1]):
+        if t["kind"] == "raw":
+            assert fm0.raw[k] == t["raw"], k
+
+
 def test_refine_transform_recovers_truth_and_falls_back(run):
     sc, cfg = run["sc"], run["cfg"]
     comp, raw = sc["comp"], sc["raw"]

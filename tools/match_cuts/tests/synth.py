@@ -12,8 +12,12 @@ so the transform / timing conventions of match_cuts are cross-checked instead of
 * ``competitor.mp4`` 9:16 edit: every segment is ONE timing chain ``-ss (j-0.5)/fps -i SRC ->
                      setpts=(PTS-STARTPTS)/v[+phase],fps=30,trim=end_frame=N`` followed (real chain only) by
                      whitelisted 1:1 geometry filters (hflip, scale, crop exact=1, perspective), rendered to
-                     lossless box-size intermediates, then concat / xfade, rounded-box layout (frame.png),
-                     word-by-word captions; audio in a separate graph, muxed with ``-c:v copy``.
+                     lossless box-size intermediates (the one FULLSCREEN chain: canvas-size, the RAW cover-
+                     scaled to the whole canvas), then xfade / pad onto the canvas / concat, rounded-box
+                     layout (frame.png; during the fullscreen chain only its glyph layer, so the title / logo
+                     stay on top of the video), word-by-word captions; audio in a separate graph (each
+                     chain's audio starts at the NLE in-point = the LOWER bound of its floor-rule raw_in
+                     interval, i.e. at the first RAW frame's boundary), muxed with ``-c:v copy``.
 * ``truth.json``     MEASURED: every timing chain is applied to id.mp4 and decoded; geometry truth is computed
                      by this module's own numpy code (independent of match_cuts.geometry) and VERIFIED by
                      pushing a calibration texture through each segment's exact geometry filter string.
@@ -48,7 +52,7 @@ import numpy as np
 
 log = logging.getLogger("match_cuts.synth")
 
-SYNTH_VERSION = 1
+SYNTH_VERSION = 2                     # 2: NLE audio in-points (D8), fullscreen chain
 RAW_FPS = Fraction(30000, 1001)
 COMP_FPS = Fraction(30)
 RAW_TB = Fraction(1, 30000)           # -video_track_timescale 30000 on raw.mp4 and id.mp4
@@ -98,7 +102,8 @@ class Framing:
 @dataclass(frozen=True)
 class ChainSpec:
     """One timing chain = one competitor segment (the punch-in chain yields two truth segments)."""
-    kind: str                         # normal|hook|jump_cut|flip|pushin|speed|crossfade|reuse|not_in_raw|punchin
+    kind: str                         # normal|hook|jump_cut|flip|pushin|speed|crossfade|reuse|not_in_raw|punchin|
+    #                                   fullscreen (RAW cover-scaled to the WHOLE canvas; title/logo on top)
     shot: int = -1                    # RAW shot index (-1: NOT-IN-RAW insert)
     off: int = 0                      # RAW start frame inside the shot
     n: int = 30                       # competitor frames produced by the chain (incl. a crossfade overlap)
@@ -188,6 +193,7 @@ _FULL_CHAINS = (
     ChainSpec("jump_cut", shot=0, off=160, n=75, note="same-shot jump cut (skips ~10 RAW frames)"),
     ChainSpec("normal", shot=1, off=50, n=85),
     ChainSpec("flip", shot=2, off=50, n=70, flip=True),
+    ChainSpec("fullscreen", shot=10, off=350, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
     ChainSpec("normal", shot=3, off=50, n=80),
     ChainSpec("jump_cut", shot=3, off=140, n=60, note="same-shot jump cut (skips ~10 RAW frames)"),
     ChainSpec("pushin", shot=4, off=50, n=100, push_end=1.12),
@@ -211,6 +217,7 @@ _MINI_CHAINS = (
     ChainSpec("jump_cut", shot=0, off=62, n=30, note="same-shot jump cut (skips ~6 RAW frames)"),
     ChainSpec("normal", shot=1, off=10, n=36),
     ChainSpec("flip", shot=2, off=10, n=30, flip=True),
+    ChainSpec("fullscreen", shot=10, off=110, n=30, note="fullscreen: RAW covers the whole canvas, title/logo on top"),
     ChainSpec("normal", shot=3, off=10, n=32),
     ChainSpec("jump_cut", shot=3, off=48, n=28, note="same-shot jump cut (skips ~6 RAW frames)"),
     ChainSpec("pushin", shot=4, off=10, n=45, push_end=1.12),
@@ -633,8 +640,21 @@ def scaled_size(w: int, h: int, s_target: float, min_w: int, min_h: int, aniso_m
     return best[1], best[2]
 
 
-def geometry_for(profile: Profile, spec: ChainSpec) -> Geometry:
+def is_fullscreen(spec: ChainSpec) -> bool:
+    return spec.kind == "fullscreen"
+
+
+def chain_box(profile: Profile, spec: ChainSpec) -> tuple[int, int, int, int]:
+    """(x, y, w, h) competitor px the chain's picture covers: the rounded video box, or the whole canvas for
+    the fullscreen chain."""
+    if is_fullscreen(spec):
+        return 0, 0, profile.comp_w, profile.comp_h
     bx, by, bw, bh, _ = profile.box
+    return bx, by, bw, bh
+
+
+def geometry_for(profile: Profile, spec: ChainSpec) -> Geometry:
+    bx, by, bw, bh = chain_box(profile, spec)
     W, H = profile.raw_w, profile.raw_h
     cover = max(bh / H, bw / W)
     z = spec.framing.zoom
@@ -764,6 +784,24 @@ def _drawtext(text: str, x: str, y: str, fs: int, color: str, font: str = FONT, 
     return s
 
 
+def _static_text_filters(lp: LayoutPlan) -> list[str]:
+    """drawtext chain of the static zones (logo letter, channel name, multicolour title, watermark)."""
+    lx, ly, lr = lp.logo
+    parts = [_drawtext("S", f"{lx}-tw/2", f"{ly}-th/2", int(lr * 1.3), "white")]
+    x, y, fs, text = lp.channel
+    parts.append(_drawtext(text, str(x), str(y), fs, "white"))
+    for (ty, tfs, col, text) in lp.title:
+        parts.append(_drawtext(text, "(w-tw)/2", str(ty), tfs, col, border=max(2, tfs // 16)))
+    wy, wfs, wtext = lp.watermark
+    parts.append(_drawtext(wtext, "(w-tw)/2", str(wy), wfs, "#8c8c8c"))
+    return parts
+
+
+def _logo_expr(lp: LayoutPlan) -> str:
+    lx, ly, lr = lp.logo
+    return f"lte(hypot(X+0.5-{lx},Y+0.5-{ly}),{lr})"
+
+
 def render_frame_png(path: Path, lp: LayoutPlan) -> None:
     """RGBA canvas: black, alpha 0 inside the rounded box (pixel centres), logo disc + letter, channel name,
     two-colour title with a red accent line, watermark under the box. Rendered once with geq + drawtext."""
@@ -771,20 +809,56 @@ def render_frame_png(path: Path, lp: LayoutPlan) -> None:
     cxb, cyb = bx + bw / 2, by + bh / 2
     inbox = (f"between(X,{bx},{bx + bw - 1})*between(Y,{by},{by + bh - 1})*"
              f"lte(hypot(max(abs(X+0.5-{cxb})-{bw / 2 - r},0),max(abs(Y+0.5-{cyb})-{bh / 2 - r},0)),{r})")
-    lx, ly, lr = lp.logo
-    logo = f"lte(hypot(X+0.5-{lx},Y+0.5-{ly}),{lr})"
+    logo = _logo_expr(lp)
     geq = (f"geq=r='if({logo},226,0)':g='if({logo},38,0)':b='if({logo},46,0)':a='if({inbox},0,255)'")
-    parts = [f"color=c=black:s={lp.comp_w}x{lp.comp_h}:r=30,format=rgba,{geq}"]
-    fs_logo = int(lr * 1.3)
-    parts.append(_drawtext("S", f"{lx}-tw/2", f"{ly}-th/2", fs_logo, "white"))
-    x, y, fs, text = lp.channel
-    parts.append(_drawtext(text, str(x), str(y), fs, "white"))
-    for (ty, tfs, col, text) in lp.title:
-        parts.append(_drawtext(text, "(w-tw)/2", str(ty), tfs, col, border=max(2, tfs // 16)))
-    wy, wfs, wtext = lp.watermark
-    parts.append(_drawtext(wtext, "(w-tw)/2", str(wy), wfs, "#8c8c8c"))
+    parts = [f"color=c=black:s={lp.comp_w}x{lp.comp_h}:r=30,format=rgba,{geq}", *_static_text_filters(lp)]
     run_ffmpeg(["-y", "-f", "lavfi", "-i", ",".join(parts), "-frames:v", "1", "-pix_fmt", "rgba", str(path)],
                label="frame.png")
+
+
+def render_glyph_png(path: Path, lp: LayoutPlan) -> None:
+    """RGBA glyph layer of the static zones ONLY (transparent elsewhere), overlaid during the fullscreen chain
+    so the title / logo / channel name / watermark stay on top of the full-canvas video.
+
+    The same logo disc + drawtext chain as frame.png is rendered on a transparent canvas; drawtext blends
+    every plane incl. alpha, i.e. it produces PREMULTIPLIED colour (measured). ffmpeg's overlay treats
+    premultiplied input wrongly in YUV (it adds the black level), so the layer is un-premultiplied here and
+    overlaid with the default straight alpha: over black it reproduces frame.png (check_glyph_png)."""
+    import cv2
+    logo = _logo_expr(lp)
+    geq = f"geq=r='if({logo},226,0)':g='if({logo},38,0)':b='if({logo},46,0)':a='if({logo},255,0)'"
+    parts = [f"color=c=black@0.0:s={lp.comp_w}x{lp.comp_h}:r=30,format=rgba,{geq}", *_static_text_filters(lp)]
+    raw = run_ffmpeg(["-f", "lavfi", "-i", ",".join(parts), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba",
+                      "-"], capture=True, label="glyph layer")
+    img = np.frombuffer(raw, np.uint8).reshape(lp.comp_h, lp.comp_w, 4).astype(np.float64)
+    a = img[:, :, 3:4]
+    rgb = np.where(a > 0, np.clip(np.round(img[:, :, :3] * 255.0 / np.maximum(a, 1.0)), 0, 255), 0.0)
+    out = np.dstack([rgb, a]).astype(np.uint8)
+    if not cv2.imwrite(str(path), cv2.cvtColor(out, cv2.COLOR_RGBA2BGRA)):
+        raise RuntimeError(f"cannot write {path}")
+
+
+def check_glyph_png(frame_png: Path, glyph_png: Path, lp: LayoutPlan, tol: int = 2) -> dict:
+    """The (straight-alpha) glyph layer composited over black must reproduce frame.png outside the box (the
+    static zones look the same in boxed and fullscreen frames) and be fully transparent inside the box."""
+    import cv2
+    fr = cv2.imread(str(frame_png), cv2.IMREAD_UNCHANGED)
+    gl = cv2.imread(str(glyph_png), cv2.IMREAD_UNCHANGED)
+    if fr is None or gl is None or fr.shape != gl.shape or gl.shape[2] != 4:
+        raise RuntimeError("frame.png / glyph layer must be RGBA of the same size")
+    outside = fr[:, :, 3] == 255
+    a = gl[:, :, 3:4].astype(np.float64) / 255.0
+    comp = np.round(gl[:, :, :3].astype(np.float64) * a).astype(np.int16)
+    diff = np.abs(comp - fr[:, :, :3].astype(np.int16)).max(axis=2)
+    worst = int(diff[outside].max())
+    if worst > tol:
+        ys, xs = np.nonzero(outside & (diff > tol))
+        raise RuntimeError(f"glyph layer over black differs from frame.png by {worst} levels "
+                           f"({len(ys)} px, e.g. at x={xs[:5].tolist()}, y={ys[:5].tolist()})")
+    if int(gl[:, :, 3][~outside].max(initial=0)) != 0:
+        raise RuntimeError("glyph layer is not transparent inside the video box")
+    return {"max_diff": worst, "opaque_px": int((gl[:, :, 3] == 255).sum()),
+            "covered_px": int((gl[:, :, 3] > 0).sum())}
 
 
 def measure_zones(frame_png: Path, lp: LayoutPlan) -> list[dict]:
@@ -1086,8 +1160,9 @@ def resolve_chains(p: Profile) -> list[Chain]:
             c.j = spec.shot * p.shot_len + spec.off
             if spec.off + src_frames_needed(spec.n, spec.speed) > p.shot_len:
                 raise ValueError(f"chain {i} runs past the end of shot {spec.shot}")
-            if "mandelbrot" in SHOTS[spec.shot].tags and (spec.flip or spec.push_end or spec.punch_at):
-                raise ValueError("mandelbrot shots are not used for flip / push-in / punch-in")
+            if "mandelbrot" in SHOTS[spec.shot].tags and (spec.flip or spec.push_end or spec.punch_at or
+                                                          is_fullscreen(spec)):
+                raise ValueError("mandelbrot shots are not used for flip / push-in / punch-in / fullscreen")
             c.phase = choose_phase(spec.speed, spec.n)
             c.ss = ss_seconds(c.j)
             c.timing = timing_filters(spec.speed, spec.n, c.phase)
@@ -1098,6 +1173,12 @@ def resolve_chains(p: Profile) -> list[Chain]:
     for a, b in zip(chains[:-1], chains[1:]):
         if a.spec.xfade and not (a.in_raw and b.in_raw):
             raise ValueError("crossfades only between two RAW chains")
+        if a.spec.xfade and (is_fullscreen(a.spec) or is_fullscreen(b.spec)):
+            raise ValueError("crossfades only between boxed chains")
+    for c in chains:
+        if is_fullscreen(c.spec) and (not c.in_raw or c.spec.flip or c.spec.push_end is not None or
+                                      c.spec.punch_at is not None or c.spec.framing != Framing()):
+            raise ValueError("the fullscreen chain is a plain RAW chain (cover-scaled, centred)")
     return chains
 
 
@@ -1132,23 +1213,91 @@ def render_chain(raw_mp4: Path, c: Chain, dst: Path, p: Profile) -> None:
                     f"format=yuv420p[v]", "-map", "[v]", *FFV1, str(dst)], label="not-in-raw insert")
 
 
-def composite_graph(chains: list[Chain], inputs: list[str], tail: str) -> str:
-    """concat of the chain streams with the crossfade(s) (box-size stream); `tail` is appended to the concat."""
+def composite_graph(chains: list[Chain], inputs: list[str], tail: str, canvas: Profile | None = None) -> str:
+    """concat of the chain streams with the crossfade(s); `tail` is appended to the concat.
+
+    canvas=None: box-size streams (every chain boxed; `tail` pads onto the canvas). With a profile: every
+    boxed chain (a crossfade pair after its xfade on the box-size streams) is padded onto the black canvas
+    at the box origin and fullscreen chains (already canvas-size) are concatenated as they are."""
+    pad = ""
+    if canvas is not None:
+        bx, by = canvas.box[0], canvas.box[1]
+        pad = f"pad={canvas.comp_w}:{canvas.comp_h}:{bx}:{by}:black"
     parts, labels, i = [], [], 0
     while i < len(chains):
         c = chains[i]
         if c.spec.xfade:
             b = chains[i + 1]
+            if is_fullscreen(c.spec) or is_fullscreen(b.spec):
+                raise ValueError("crossfades only between boxed chains")
             d = c.spec.xfade
             off = c.spec.n - d
-            parts.append(f"{inputs[i]}{inputs[i + 1]}{tail_xfade(d, off)}[x{i}]")
+            parts.append(f"{inputs[i]}{inputs[i + 1]}{tail_xfade(d, off)}" + (f",{pad}" if pad else "") + f"[x{i}]")
             labels.append(f"[x{i}]")
             i += 2
+        elif pad and not is_fullscreen(c.spec):
+            parts.append(f"{inputs[i]}{pad}[p{i}]")
+            labels.append(f"[p{i}]")
+            i += 1
         else:
+            if canvas is None and is_fullscreen(c.spec):
+                raise ValueError("a fullscreen chain needs the canvas-size composite (canvas=profile)")
             labels.append(inputs[i])
             i += 1
     parts.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0{tail}")
     return ";".join(parts)
+
+
+def fullscreen_ranges(chains: list[Chain]) -> list[tuple[int, int]]:
+    """Competitor frame ranges [a, b) of the fullscreen chains."""
+    return [(c.comp_in, c.comp_in + c.spec.n) for c in chains if is_fullscreen(c.spec)]
+
+
+def _t_between(a: int, b: int) -> str:
+    """Timeline expression selecting competitor frames [a, b) (half-frame guards, never on a PTS)."""
+    return f"between(t,{(a - 0.5) / 30:.6f},{(b - 0.5) / 30:.6f})"
+
+
+def competitor_video_filter(p: Profile, chains: list[Chain], caps: list[dict], lp: LayoutPlan) -> str:
+    """The competitor video filtergraph. Inputs: 0..K-1 = the chain intermediates (box-size; canvas-size for
+    fullscreen chains), K = frame.png (-loop 1), K+1 = the glyph layer (-loop 1; only when there is a
+    fullscreen chain). Boxed frames get frame.png (black canvas, rounded hole, static zones); fullscreen
+    frames get only the glyph layer; captions are drawn on every frame. Output label [vout]."""
+    k = len(chains)
+    fs = fullscreen_ranges(chains)
+    if fs:
+        en = "+".join(_t_between(a, b) for a, b in fs)
+        over = (f"[v0][{k}:v]overlay=0:0:shortest=1:enable='not({en})'[v1];"
+                f"[v1][{k + 1}:v]overlay=0:0:shortest=1:enable='{en}'[v2];[v2]")
+    else:
+        over = f"[v0][{k}:v]overlay=0:0:shortest=1[v1];[v1]"
+    # canvas via pad (the `color` source + overlay=shortest=1 recipe drops the final frame -- measured)
+    tail = "[v0];" + over + ",".join([*caption_filters(caps, lp), "format=yuv420p"]) + "[vout]"
+    return composite_graph(chains, [f"[{i}:v]" for i in range(k)], tail, canvas=p)
+
+
+def measure_fullscreen_frames(comp_mp4: Path, p: Profile, lp: LayoutPlan, zones: list[dict],
+                              scale: int = 4) -> tuple[list[int], np.ndarray]:
+    """Frames whose canvas OUTSIDE the video box (minus the static zones and the caption band) shows picture
+    rather than the black background. Returns (fullscreen frame indices, per-frame non-black fraction)."""
+    w, h = even(p.comp_w / scale), even(p.comp_h / scale)
+    rx, ry = w / p.comp_w, h / p.comp_h
+    m = np.ones((h, w), bool)
+
+    def cut(x0, y0, x1, y1, pad=2):
+        m[max(0, int(math.floor(y0 * ry)) - pad):int(math.ceil(y1 * ry)) + pad,
+          max(0, int(math.floor(x0 * rx)) - pad):int(math.ceil(x1 * rx)) + pad] = False
+    bx, by, bw, bh, _ = p.box
+    cut(bx, by, bx + bw, by + bh)
+    for z in zones:
+        cut(z["x"], z["y"], z["x"] + z["w"], z["y"] + z["h"])
+    cut(0, lp.caption_y - lp.caption_fs, p.comp_w, lp.caption_y + 2 * lp.caption_fs)
+    frac = []
+    for fr in iter_raw_frames(["-i", str(comp_mp4), "-vf", f"scale={w}:{h}:flags=area,format=gray", "-f", "rawvideo",
+                               "-pix_fmt", "gray", "-"], w, h, "fullscreen measurement"):
+        frac.append(float((fr[m] > 40).mean()))
+    a = np.array(frac)
+    return [int(k) for k in np.nonzero(a > 0.3)[0]], a
 
 
 _XFADE_REAL = "fade"
@@ -1202,18 +1351,33 @@ def floor_interval(frames: np.ndarray, speed: str, src_fps: Fraction = RAW_FPS) 
     return lo / src_fps, hi / src_fps
 
 
+def audio_in_point(frames: np.ndarray, speed: str, src_fps: Fraction = RAW_FPS) -> Fraction:
+    """NLE audio in-point (seconds) of a chain: the clip's in-point sits on the frame BOUNDARY of its first RAW
+    frame, i.e. the LOWER bound of the floor-rule raw_in interval (the earliest in-point that shows exactly
+    the chain's frames; == j/fps up to the RAW-vs-comp rate drift over the chain). DESIGN §7 D8: the old
+    interval centre put the audio ~1/4 RAW frame late and hid the tool's quarter-frame phase bias."""
+    return floor_interval(frames, speed, src_fps)[0]
+
+
+def audio_start_sample(frames: np.ndarray, speed: str, src_fps: Fraction = RAW_FPS) -> int:
+    """First RAW audio sample of the chain: the first sample at or after the NLE in-point (so the truth
+    raw_in stays inside the floor interval, < 1 sample above its lower bound)."""
+    return int(math.ceil(audio_in_point(frames, speed, src_fps) * AUDIO_SR))
+
+
 def build_competitor_audio(p: Profile, chains: list[Chain], raw_audio: Path, dst: Path, n_comp: int) -> dict:
-    """Separate audio graph: per chain sample-exact atrim (tape-style asetrate for v != 1), acrossfade for
-    the crossfade, NOT-IN-RAW tone, concat; music under it (-12 dB, amix normalize=0). Returns per-chain
-    audio start (seconds) and sample counts."""
+    """Separate audio graph: per chain sample-exact atrim (tape-style asetrate for v != 1) starting at the NLE
+    in-point (:func:`audio_start_sample`), acrossfade for the crossfade, NOT-IN-RAW tone, concat; music under
+    it (-12 dB, amix normalize=0). Returns per-chain audio start (seconds) and sample counts."""
     parts, labels, info, inputs = [], [], {}, []
     for c in chains:
         n = c.spec.n
         out_samples = n * SAMPLES_PER_COMP_FRAME
         if c.in_raw:
             a, b = floor_interval(c.frames, c.spec.speed)
-            start = (a + b) / 2
-            s0 = int(round(start * AUDIO_SR))
+            s0 = audio_start_sample(c.frames, c.spec.speed)
+            if not a <= Fraction(s0, AUDIO_SR) < min(b, a + Fraction(1, AUDIO_SR)):
+                raise RuntimeError(f"chain {c.index}: audio start {s0} outside [{a}, {b})")
             v = Fraction(c.spec.speed)
             src_len = int(math.ceil(out_samples * v)) + 4 * AUDIO_SR // 100
             # one input per chain (a single input feeding many atrim consumers overflows ffmpeg's queues)
@@ -1227,7 +1391,7 @@ def build_competitor_audio(p: Profile, chains: list[Chain], raw_audio: Path, dst
                 chain += f",asetrate={int(rate)},aresample={AUDIO_SR}"
             chain += f",atrim=end_sample={out_samples},asetpts=PTS-STARTPTS"
             info[c.index] = {"raw_in_seconds": s0 / AUDIO_SR, "start_sample": s0,
-                             "interval_floor": [float(a), float(b)]}
+                             "interval_floor": [float(a), float(b)], "in_point": "floor_interval_lower_bound"}
         else:
             chain = (f"aevalsrc=exprs='0.25*sin(2*PI*2960*t)*(0.55+0.45*sin(2*PI*6*t))':s={AUDIO_SR},"
                      f"atrim=end_sample={out_samples}")
@@ -1603,7 +1767,13 @@ def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
                    "shot": spec.shot, "shot_name": SHOTS[spec.shot].name if c.in_raw else None,
                    "speed": float(Fraction(spec.speed)), "speed_str": spec.speed, "flip": bool(spec.flip),
                    "transition_in": None, "transition_out": None, "transform": None, "transform_keys": [],
-                   "animated": False}
+                   "animated": False,
+                   # DESIGN §7 D1: box in force during the segment (None = the dominant rounded box, region 0;
+                   # the whole canvas with radius 0 inside a fullscreen layout period, region 1)
+                   "layout_mode": "fullscreen" if is_fullscreen(spec) else "boxed",
+                   "box": ({"x": 0, "y": 0, "w": p.comp_w, "h": p.comp_h, "corner_radius": 0}
+                           if is_fullscreen(spec) else None),
+                   "region": 1 if is_fullscreen(spec) else 0}
             if c.in_raw:
                 g = c.geom
                 fr = c.frames[a:b]
@@ -1612,7 +1782,8 @@ def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
                            chain_raw_start=c.j, ss=c.ss, timing_filter=c.timing, geometry_filter=g.filters(),
                            setpts_phase_ticks=c.phase,
                            geometry={"flip": g.flip, "scale_w": g.sw, "scale_h": g.sh, "crop_x": g.cx,
-                                     "crop_y": g.cy, "box_w": g.bw, "box_h": g.bh, "zoom_first": g.zoom(a),
+                                     "crop_y": g.cy, "box_x": g.bx, "box_y": g.by, "box_w": g.bw, "box_h": g.bh,
+                                     "zoom_first": g.zoom(a),
                                      "zoom_last": g.zoom(b - 1), "push_a": g.push_a, "punch_at": g.punch_at})
                 seg["transform"] = g.truth_sim(a)
                 if g.push_a is not None:
@@ -1632,7 +1803,8 @@ def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
                     Fraction(spec.speed) * Fraction(a) / COMP_FPS)
                 seg["audio"] = {"in_offset_frames": 0, "out_offset_frames": 0,
                                 "pitch_preserved": False if Fraction(spec.speed) != 1 else None,
-                                "exception": None, "raw_in_seconds": seg["raw_in_seconds_chain_audio"]}
+                                "exception": None, "raw_in_seconds": seg["raw_in_seconds_chain_audio"],
+                                "in_point": ai.get("in_point")}
             else:
                 seg.update(raw_in_frame=None, raw_out_frame=None, raw_frames=[], label="NOT-IN-RAW insert",
                            generator="gradients+drawtext", audio={"in_offset_frames": 0, "out_offset_frames": 0,
@@ -1672,6 +1844,25 @@ def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
     if any(f is None for f in frames):
         raise RuntimeError("truth does not tile the competitor timeline")
     return segs, frames, transitions
+
+
+def layout_periods(p: Profile, segs: list[dict]) -> list[dict]:
+    """Truth layout periods (half-open, tiling the timeline): runs of segments with the same layout mode
+    ('boxed' = the rounded box, 'fullscreen' = the whole canvas); a crossfade overlap belongs to its boxed
+    neighbours."""
+    bx, by, bw, bh, br = p.box
+    boxed = {"x": bx, "y": by, "w": bw, "h": bh, "corner_radius": br}
+    out: list[dict] = []
+    for s in sorted(segs, key=lambda d: (d["comp_in"], d["comp_out"])):
+        mode = s["layout_mode"]
+        if out and out[-1]["mode"] == mode and s["comp_in"] <= out[-1]["comp_out"]:
+            out[-1]["comp_out"] = max(out[-1]["comp_out"], s["comp_out"])
+        else:
+            if out and s["comp_in"] != out[-1]["comp_out"]:
+                raise RuntimeError(f"layout periods do not tile the timeline at {s['comp_in']}")
+            out.append({"comp_in": s["comp_in"], "comp_out": s["comp_out"], "mode": mode,
+                        "box": dict(s["box"]) if s["box"] else dict(boxed), "region": s["region"]})
+    return out
 
 
 # =====================================================================================================
@@ -1832,19 +2023,30 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
         if c["y"] < band[0] or c["y"] + c["h"] > band[1]:
             raise RuntimeError(f"caption {c} outside the planned caption band {band}")
     bx, by, bw, bh, br = p.box
+    fs_ranges = fullscreen_ranges(chains)
+    glyph = {}
     ins = []
     for d in seg_paths:
         ins += ["-i", str(d)]
-    k = len(seg_paths)
     ins += ["-loop", "1", "-framerate", "30", "-i", str(frame_png)]
-    # canvas via pad (the `color` source + overlay=shortest=1 recipe drops the final frame -- measured)
-    tail = (f",pad={p.comp_w}:{p.comp_h}:{bx}:{by}:black[v0];"
-            f"[v0][{k}:v]overlay=0:0:shortest=1[v1];[v1]" + ",".join(caption_filters(caps, lp)) +
-            ",format=yuv420p[vout]")
-    fc = composite_graph(chains, [f"[{i}:v]" for i in range(k)], tail)
+    if fs_ranges:
+        glyph_png = build / "glyph_layer.png"
+        render_glyph_png(glyph_png, lp)
+        glyph = check_glyph_png(frame_png, glyph_png, lp)
+        ins += ["-loop", "1", "-framerate", "30", "-i", str(glyph_png)]
+    fc = competitor_video_filter(p, chains, caps, lp)
     comp_video = build / "competitor_video.mp4"
     run_ffmpeg(["-y", *ins, "-filter_complex", fc, "-map", "[vout]", "-an", *X264_COMP, *BITEXACT,
                 str(comp_video)], label="competitor video")
+    # the fullscreen frames must be exactly the planned ones (picture outside the box; black elsewhere)
+    fs_got, fs_frac = measure_fullscreen_frames(comp_video, p, lp, zones)
+    fs_want = [k for a, b in fs_ranges for k in range(a, b)]
+    if fs_got != fs_want:
+        raise RuntimeError(f"fullscreen frames {fs_got[:10]}... != planned {fs_want[:10]}... "
+                           f"(non-black fraction outside the box: {np.round(fs_frac[:20], 3).tolist()} ...)")
+    fs_measure = {"frames": len(fs_got),
+                  "min_fraction_inside": float(fs_frac[fs_want].min()) if fs_want else None,
+                  "max_fraction_outside": float(np.delete(fs_frac, fs_want).max()), "glyph_layer": glyph}
     timings["competitor_video_s"] = time.perf_counter() - t0
 
     # ---- audio ------------------------------------------------------------------------------------------
@@ -1919,7 +2121,12 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
         "layout": {"canvas": {"w": p.comp_w, "h": p.comp_h}, "canvas_bg": "#000000", "background": "solid",
                    "box": {"x": bx, "y": by, "w": bw, "h": bh, "radius": br, "corner_radius": br},
                    "zones": zones, "captions": cap_truth,
-                   "caption_band": [int(band[0]), int(band[1])]},
+                   "caption_band": [int(band[0]), int(band[1])],
+                   # D1: layout changes over time -- the fullscreen chain shows the RAW over the whole
+                   # canvas with only the glyph layer (logo, channel, title, watermark) and captions on top
+                   "periods": layout_periods(p, segs),
+                   "fullscreen": [{"comp_in": a, "comp_out": b} for a, b in fs_ranges],
+                   "fullscreen_measurement": fs_measure},
         "audio": {"sr": AUDIO_SR, "pitch_preserved": False, "status": "ok",
                   "segments": {str(s["id"]): s["audio"] for s in segs},
                   "added_audio": [{"type": "music", "comp_in": 0, "comp_out": n_music, "level_db": -12.0}],
@@ -1930,7 +2137,10 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
         "self_check": sc,
         "conventions": {"transform": "canonical Sim: flipped-RAW full-res px -> competitor px (CORNER)",
                         "transform_keys": "absolute comp_frame, linear", "crossfade": "alpha_b(k)=(k-O)/D",
-                        "intervals": "half-open [comp_in, comp_out)", "raw_in_interval_floor": "seconds, AE floor rule"},
+                        "intervals": "half-open [comp_in, comp_out)", "raw_in_interval_floor": "seconds, AE floor rule",
+                        "audio_raw_in": "NLE in-point: first sample at/after the LOWER bound of the chain's floor-"
+                                        "rule raw_in interval (the first RAW frame's boundary), DESIGN §7 D8",
+                        "segment_box": "null = layout.box (region 0); fullscreen = whole canvas, radius 0 (region 1)"},
     }
     files = {}
     for name in ("raw.mp4", "competitor.mp4", "id.mp4", "frame.png"):
@@ -1959,7 +2169,11 @@ def _summary(p: Profile, truth: dict) -> dict:
                           f"raw {s['raw_in_frame'] if s['raw_in_frame'] is not None else '-':>5} "
                           f"v={s['speed_str']:>4} flip={int(s['flip'])} "
                           f"s={s['transform']['scale'] if s['transform'] else 0:.5f}"
-                          + (" animated" if s["animated"] else "") for s in segs],
+                          + (f" audio_in={s['audio']['raw_in_seconds']:.6f}" if s["type"] == "raw" else "")
+                          + (" animated" if s["animated"] else "")
+                          + (" FULLSCREEN box=canvas" if s.get("layout_mode") == "fullscreen" else "")
+                          for s in segs],
+        "layout_periods": [f"[{d['comp_in']},{d['comp_out']}) {d['mode']}" for d in truth["layout"]["periods"]],
         "self_check_min_margin": sc["min_margin"], "self_check_median_margin": sc["median_margin"],
         "self_check_min_inliers": sc["min_inliers"],
         "calibration_max_dpos": max(v["max_dpos"] for v in truth["calibration"].values()),

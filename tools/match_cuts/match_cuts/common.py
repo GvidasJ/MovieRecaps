@@ -8,6 +8,7 @@ Conventions (see DESIGN.md §2):
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -18,7 +19,7 @@ import subprocess
 import time
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 
 import numpy as np
 
@@ -296,11 +297,25 @@ def load_json(path: str | os.PathLike) -> Any:
 # Decision log
 # --------------------------------------------------------------------------------------
 
+class DecisionCapture(list):
+    """The records (JSON-normalised dicts, exactly as written to the log) emitted while a
+    ``DecisionLog.capture(tag)`` block was active."""
+
+    def __init__(self, tag: str | None = None):
+        super().__init__()
+        self.tag = tag
+
+
 class DecisionLog:
     """Append-only JSONL log of every decision with its evidence (scores, margins, alternatives).
 
     Usage: ``dlog.record("segment", "cut", comp_frame=412, evidence={...}, rejected=[...])``.
     Also mirrored to the python logger at DEBUG level.
+
+    Cached stages (DESIGN §7 D6): ``with dlog.capture("layout") as recs: ...`` collects every record
+    emitted inside the block (nested captures each get them) so the pipeline can store them next to the
+    stage's cache entry; on a cache hit ``dlog.replay(recs, cached=True, cache_key=key)`` writes them
+    again (with the extra fields), so a cached re-run keeps the full evidence.
     """
 
     def __init__(self, path: str | os.PathLike | None, truncate: bool = True):
@@ -308,19 +323,77 @@ class DecisionLog:
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self.path, "w" if truncate else "a") if self.path else None
+        self._captures: list[DecisionCapture] = []
 
-    def record(self, stage: str, decision: str, **fields: Any) -> None:
-        entry = {"stage": stage, "decision": decision, **fields}
+    def _emit(self, entry: dict) -> None:
         line = json.dumps(entry, default=json_default, sort_keys=True)
         if self._fh:
             self._fh.write(line + "\n")
             self._fh.flush()
-        log.debug("%s: %s %s", stage, decision, line)
+        caps = getattr(self, "_captures", None)
+        if caps:
+            rec = json.loads(line)
+            for cap in caps:
+                cap.append(dict(rec))
+        log.debug("%s: %s %s", entry.get("stage"), entry.get("decision"), line)
+
+    def record(self, stage: str, decision: str, **fields: Any) -> None:
+        self._emit({"stage": stage, "decision": decision, **fields})
+
+    @contextlib.contextmanager
+    def capture(self, tag: str | None = None) -> Iterator[DecisionCapture]:
+        """Collect the records emitted (or replayed) inside the block into a ``DecisionCapture``."""
+        if not hasattr(self, "_captures"):
+            self._captures = []
+        cap = DecisionCapture(tag)
+        self._captures.append(cap)
+        try:
+            yield cap
+        finally:
+            for i in range(len(self._captures) - 1, -1, -1):
+                if self._captures[i] is cap:
+                    del self._captures[i]
+                    break
+
+    def replay(self, records: Iterable[dict], **extra: Any) -> int:
+        """Write previously captured records again, each updated with ``extra`` (e.g. ``cached=True,
+        cache_key=...``). Records without a stage/decision are skipped. Returns the number written."""
+        n = 0
+        for r in records:
+            if not isinstance(r, dict) or "stage" not in r or "decision" not in r:
+                continue
+            self._emit({**r, **extra})
+            n += 1
+        return n
 
     def close(self) -> None:
         if self._fh:
             self._fh.close()
             self._fh = None
+
+
+def load_decisions(path: str | os.PathLike) -> list[dict]:
+    """Records of a decisions .jsonl file (blank / unparsable lines are skipped)."""
+    out: list[dict] = []
+    p = Path(path)
+    if not p.exists():
+        return out
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def save_decisions(path: str | os.PathLike, records: Iterable[dict]) -> None:
+    """Write records as JSONL (atomically)."""
+    atomic_write_text(path, "".join(json.dumps(r, default=json_default, sort_keys=True) + "\n" for r in records))
 
 
 _NULL_DLOG = DecisionLog(None)

@@ -12,19 +12,32 @@ Every transcode keeps the resolution (display orientation, square pixels — rot
 in, odd sizes cropped by one px) and the NOMINAL frame rate, is CFR and starts at 0:
   * CFR sources are re-stamped by frame index (``settb=1/fps,setpts=N``): immune to ms-rounded
     timestamps (WebM/MKV), frame k of the output IS decoded frame k of the source;
-  * VFR sources use ``fps=fps=N/D:round=up`` = "the frame displayed at t_k" (verified), padded with
-    the last frame / trimmed to exactly #{k : k/fps < last_pts + median_frame_duration} frames;
-  * audio is re-based so that sample 0 is video frame 0 (start offsets / edit lists removed).
+  * VFR sources use ``fps=fps=N/D:round=up`` = "the frame displayed at t_k" (verified). Stored PTS are
+    QUANTISED (1 ms in MKV/WebM, 1/600 s in phone MOVs, ...): a frame rounded late by < 1 tick would
+    land one slot late and collide with its successor (dropping ~1/3 of the frames of an ms-timebase
+    29.97 file), so every PTS is shifted back by ``pts_shift = min(1 tick, 1/(4·fps))`` before the
+    ``fps`` filter (``settb=T,setpts=max(PTS-STARTPTS-D,0)``). The last frame is cloned for a short
+    while BEFORE the ``fps`` filter (``tpad``; a container that gives the last frame a 1-tick duration
+    would otherwise end the stream before the final slot), then trimmed to exactly
+    #{k : k/fps < last_pts - pts_shift + median_frame_duration} frames;
+  * audio is re-based so that sample 0 is video frame 0 (start offsets / edit lists removed);
+  * ``-fps_mode passthrough`` on ffmpeg >= 5.1, ``-vsync 0`` on older builds.
 Transcodes are verified: exact frame count, AE-safety of the result, and >= 50 frames sampled by PTS
 whose SSIM against their source frame is > 0.98 and higher than against the source's neighbours.
+VFR conforms get a second, rule-independent check: the conformed frames are matched by CONTENT to the
+source frames (every frame when short, evenly spread windows when long) and a source frame that is
+never shown although its stored display interval is at least one output slot long fails the
+conform (only genuinely short intervals — real jitter — may be dropped by the fps rule).
 Results are cached in ``output/media/.conform.json`` ({src_hash, params, out_hash}).
 """
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -47,6 +60,12 @@ SAMPLE_TARGET = 64
 COMPARE_MAX_SIDE = 480
 PRORES_MAX_S = 600.0                 # 'auto': ProRes LT up to 10 min, H.264 beyond
 AUDIO_RATE = 48000
+FPS_MODE_MIN_VERSION = (5, 1)        # '-fps_mode' appeared in ffmpeg 5.1; older builds need '-vsync 0'
+# rule-independent VFR content check (verify_transcode, mode 'fps')
+COVER_MAX_SIDE = 96                  # frames compared at <= 96 px (content identity, not quality)
+COVER_FULL_MAX = 6000                # conforms up to this many frames are checked completely ...
+COVER_WINDOW = 240                   # ... longer ones in evenly spread windows of this many output slots
+COVER_OVERLAP = 8                    # adjacent full-coverage windows overlap (no unchecked seam frames)
 
 
 @dataclass
@@ -96,30 +115,77 @@ def output_geometry(info: StreamInfo) -> dict:
             "scale_x": bool(scale_x), "scale_y": bool(scale_y)}
 
 
-def _vfr_expected_frames(pts: np.ndarray, tb: Fraction, fps: Fraction) -> int:
-    """#{k : k/fps < last_pts + median_frame_duration} with PTS relative to the first frame (exact)."""
-    rel = pts - pts[0]
+def vfr_pts_shift(tb: Fraction, fps: Fraction) -> Fraction:
+    """Seconds every VFR source PTS is moved back before the ``fps`` filter: min(1 tick, 1/(4·fps)).
+
+    Stored PTS are quantised to the stream time base (1 ms in MKV/WebM, 1/600 s in phone MOVs,
+    1/15360 s for ffmpeg MP4s at 29.97, ...); a frame rounded LATE by less than a tick would otherwise
+    land one output slot late and collide with its successor (``round=up``). One full tick also covers
+    truncating/ceiling muxers and a rounded first PTS; the 1/4-frame cap keeps a coarse time base from
+    moving any frame by more than a quarter of a slot. Exact time bases (1/90000 at 30 fps) move by
+    one tick = 11 µs, i.e. only frames that lie within 11 µs after a slot boundary change slot."""
+    tb, fps = Fraction(tb), Fraction(fps)
+    if tb <= 0 or fps <= 0:
+        return Fraction(0)
+    return min(tb, 1 / (4 * fps))
+
+
+def _frac_gcd(a: Fraction, b: Fraction) -> Fraction:
+    """Largest T such that a/T and b/T are integers (a, b > 0)."""
+    return Fraction(math.gcd(a.numerator * b.denominator, b.numerator * a.denominator),
+                    a.denominator * b.denominator)
+
+
+def _median_delta(rel: np.ndarray) -> Fraction:
+    """Median of the integer PTS deltas (x.5 exact), in time-base ticks."""
+    return Fraction(int(np.median(np.diff(rel)) * 2), 2)
+
+
+def _vfr_expected_frames(pts: np.ndarray, tb: Fraction, fps: Fraction, shift: Fraction | None = None) -> int:
+    """#{k : k/fps < last_pts - shift + median_frame_duration} with PTS relative to the first frame
+    (exact). ``shift`` defaults to vfr_pts_shift(tb, fps) (the conform's PTS shift)."""
+    rel = np.asarray(pts, dtype=np.int64) - int(pts[0])
     if len(rel) < 2:
         return 1
-    med = Fraction(int(np.median(np.diff(rel)) * 2), 2)          # median of integer deltas (x.5 exact)
-    end = (Fraction(int(rel[-1])) + med) * tb * fps               # in output frames
-    n = math.ceil(end)
-    return int(n)
+    shift = vfr_pts_shift(tb, fps) if shift is None else Fraction(shift)
+    med = _median_delta(rel)
+    end = ((Fraction(int(rel[-1])) + med) * tb - shift) * fps     # in output frames
+    return int(max(1, math.ceil(end)))
 
 
-def source_index_for_output(k: np.ndarray, mode: str, pts: np.ndarray, tb: Fraction, fps: Fraction) -> np.ndarray:
+def source_index_for_output(k: np.ndarray, mode: str, pts: np.ndarray, tb: Fraction, fps: Fraction,
+                            shift: Fraction | None = None) -> np.ndarray:
     """Decoded-order index of the source frame shown at conformed frame k.
 
-    restamp: k itself. fps (VFR): max{i : pts_i - pts_0 <= k/fps}, evaluated EXACTLY with Python ints
-    ((pts_i - pts_0)·tb_num·fps_num <= k·tb_den·fps_den) so exact-tie frames are never misplaced."""
+    restamp: k itself. fps (VFR): max{i : (pts_i - pts_0)·tb - shift <= k/fps} with
+    shift = vfr_pts_shift(tb, fps) unless given (the conform's quantisation shift), evaluated EXACTLY
+    with Python ints so exact-tie frames are never misplaced."""
     import bisect
     ks = [int(x) for x in np.asarray(k).ravel()]
     if mode == "restamp":
         return np.minimum(np.asarray(ks, dtype=np.int64), len(pts) - 1)
+    tb, fps = Fraction(tb), Fraction(fps)
+    shift = vfr_pts_shift(tb, fps) if shift is None else Fraction(shift)
+    # (rel·a/b - c/d) <= k·f/e  <=>  rel·a·d·e - c·b·e <= k·f·b·d   (tb = a/b, shift = c/d, fps = e/f)
+    a, b = tb.numerator, tb.denominator
+    c, d = shift.numerator, shift.denominator
+    e, f = fps.numerator, fps.denominator
     p0 = int(pts[0])
-    lhs = [(int(p) - p0) * tb.numerator * fps.numerator for p in pts]     # increasing
-    scale = tb.denominator * fps.denominator
+    lhs = [(int(p) - p0) * a * d * e - c * b * e for p in pts]     # increasing
+    scale = f * b * d
     return np.asarray([max(0, bisect.bisect_right(lhs, x * scale) - 1) for x in ks], dtype=np.int64)
+
+
+def interval_slots(pts: np.ndarray, tb: Fraction, fps: Fraction) -> list[Fraction]:
+    """Stored display interval of every source frame in output slots (exact): (pts_{i+1} - pts_i)·tb·fps;
+    the last frame gets the median frame duration (as in the expected frame count)."""
+    rel = np.asarray(pts, dtype=np.int64) - int(pts[0])
+    if len(rel) < 2:
+        return [Fraction(1)]
+    q = Fraction(tb) * Fraction(fps)
+    out = [Fraction(int(x)) * q for x in np.diff(rel)]
+    out.append(_median_delta(rel) * q)
+    return out
 
 
 def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
@@ -132,11 +198,24 @@ def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
     if codec not in ("prores_lt", "prores", "prores_ks", "h264", "h264_ref"):
         raise ValueError(f"unknown conform_codec {codec!r} (auto|prores_lt|prores|prores_ks|h264)")
     pts, tb, _origin = load_pts_int(info)
+    extra: dict[str, Any] = {}
     if info.vfr:
         mode = "fps"
-        expected = _vfr_expected_frames(pts, tb, fps)
-        timing = [f"setpts=PTS-STARTPTS", f"fps=fps={fps.numerator}/{fps.denominator}:round=up",
-                  "tpad=stop=-1:stop_mode=clone", f"trim=end_frame={expected}"]
+        shift = vfr_pts_shift(tb, fps)
+        tb_f = _frac_gcd(Fraction(tb), shift) if shift > 0 else Fraction(tb)   # PTS and shift exact in tb_f
+        shift_ticks = int(shift / tb_f)
+        expected = _vfr_expected_frames(pts, tb, fps, shift)
+        rel = np.asarray(pts, dtype=np.int64) - int(pts[0])
+        med_s = float(_median_delta(rel) * tb) if len(rel) > 1 else float(1 / fps)
+        # clone the last frame BEFORE the fps filter so the final slot(s) always see it (a container can
+        # give the last frame a 1-tick duration: the stream would end before the last slot). tpad spaces
+        # the clones by 1/link-frame-rate; >= 0.5 s keeps >= 1 clone for any link rate >= 2 fps.
+        pad_s = max(0.5, 4.0 * med_s)
+        timing = [f"settb={tb_f.numerator}/{tb_f.denominator}",
+                  f"setpts=max(PTS-STARTPTS-{shift_ticks}\\,0)",
+                  f"tpad=stop_mode=clone:stop_duration={pad_s:.6f}",
+                  f"fps=fps={fps.numerator}/{fps.denominator}:round=up", f"trim=end_frame={expected}"]
+        extra = {"pts_shift": fps_str(shift), "filter_tb": fps_str(tb_f)}
     else:
         mode = "restamp"
         expected = int(info.nb_frames)
@@ -188,17 +267,56 @@ def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
     return {"version": STAGE_VERSION.get("conform", 1), "mode": mode, "codec": codec, "name": name,
             "fps": fps_str(fps), "expected_frames": int(expected), "width": geo["w"], "height": geo["h"],
             "vf": ",".join(vf), "af": ",".join(af) if af else None, "vargs": vargs, "aargs": aargs,
-            "vindex": video_stream_ordinal(info)}
+            "vindex": video_stream_ordinal(info), **extra}
 
 
-def ffmpeg_command(src: str, out: str, plan: dict) -> list[str]:
+def _parse_version(text: str) -> tuple[int, ...]:
+    """(major, minor[, patch]) from ``ffmpeg -version`` output; () for git builds ('N-112345-g...')."""
+    m = re.search(r"version\s+n?(\d+(?:\.\d+)*)", text or "")
+    return tuple(int(x) for x in m.group(1).split(".")[:3]) if m else ()
+
+
+@functools.lru_cache(maxsize=8)
+def _detect_sync_args(binary: str) -> tuple[str, ...]:
+    """Passthrough frame-sync flag the given ffmpeg accepts (cached per binary)."""
+    try:
+        out = subprocess.run([binary, "-hide_banner", "-version"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    ver = _parse_version(out)
+    if not ver:                  # git / distro build without a release number: ask the option parser
+        try:
+            helptext = subprocess.run([binary, "-hide_banner", "-h", "long"], capture_output=True, text=True,
+                                      timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            helptext = ""
+        if helptext and "-fps_mode" not in helptext:
+            ver = (0,)
+    return sync_args(ver)
+
+
+def sync_args(ffmpeg_version: tuple[int, ...] | None = None) -> tuple[str, ...]:
+    """``-fps_mode passthrough`` (ffmpeg >= 5.1) or ``-vsync 0`` (older builds, e.g. Ubuntu 22.04's
+    4.4 — prompt: "-vsync 0 on old builds"). ``ffmpeg_version`` None = detect the configured binary;
+    () = unknown (treated as a current build)."""
+    if ffmpeg_version is None:
+        return _detect_sync_args(ffmpeg_bin())
+    v = tuple(int(x) for x in ffmpeg_version)
+    if v and v < FPS_MODE_MIN_VERSION:
+        return ("-vsync", "0")
+    return ("-fps_mode", "passthrough")
+
+
+def ffmpeg_command(src: str, out: str, plan: dict, ffmpeg_version: tuple[int, ...] | None = None) -> list[str]:
+    """The conform's ffmpeg command line. ``ffmpeg_version`` None = detect (see sync_args)."""
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-i", src, "-map", f"0:v:{plan['vindex']}"]
     if plan["af"]:
         cmd += ["-map", "0:a:0"]
     cmd += ["-filter:v", plan["vf"]]
     if plan["af"]:
         cmd += ["-filter:a", plan["af"]]
-    cmd += ["-fps_mode", "passthrough", *plan["vargs"], *plan["aargs"], "-map_metadata", "-1", "-map_chapters", "-1"]
+    cmd += [*sync_args(ffmpeg_version), *plan["vargs"], *plan["aargs"], "-map_metadata", "-1",
+            "-map_chapters", "-1"]
     if plan["codec"] == "h264_ref":
         cmd += ["-movflags", "+faststart"]       # small reference file; a multi-GB RAW would be rewritten
     return cmd + [out]
@@ -296,14 +414,145 @@ def decode_source_frames(info: StreamInfo, indices: list[int], geo: dict, size: 
     return out
 
 
+def _plan_shift(plan: dict, tb: Fraction, fps: Fraction) -> Fraction:
+    """The PTS shift a VFR plan applied (plans without the key: the current default)."""
+    s = plan.get("pts_shift")
+    return Fraction(str(s)) if s not in (None, "") else vfr_pts_shift(tb, fps)
+
+
+def _cover_windows(n: int) -> list[tuple[int, int]]:
+    """Output-slot windows [k0, k1) of the content check: the whole conform (overlapping chunks) when
+    n <= COVER_FULL_MAX, else evenly spread windows of COVER_WINDOW slots incl. the first and last."""
+    if n <= COVER_FULL_MAX:
+        chunk = 600
+        wins, k0 = [], 0
+        while True:
+            k1 = min(n, k0 + chunk)
+            wins.append((k0, k1))
+            if k1 >= n:
+                return wins
+            k0 = k1 - COVER_OVERLAP
+    m = max(2, COVER_FULL_MAX // COVER_WINDOW)
+    starts = np.unique(np.round(np.linspace(0, n - COVER_WINDOW, m)).astype(np.int64))
+    return [(int(s), int(s) + COVER_WINDOW) for s in starts]
+
+
+def content_coverage(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
+    """Rule-independent check of a VFR conform: which SOURCE frames does the conform actually show?
+
+    Every conformed frame k (all of them up to COVER_FULL_MAX, else evenly spread windows) is matched by
+    content (gray, <= COVER_MAX_SIDE px, RMSE) against the source frames around the rule's prediction;
+    a source frame is 'shown' when some conformed frame is as close to it as to its best match (within
+    codec noise: rmse <= 1.5·best + 1 level, so visually identical neighbours count as shown). A source
+    frame that is never shown is classified by its STORED display interval Δ (output slots):
+      * Δ >= 1                         -> unexplained: the interval contains a slot boundary whatever the
+                                          rule's rounding, so it must be shown (the ms-timestamp drop bug);
+      * 1 - 2·tb·fps <= Δ < 1          -> quantisation-ambiguous (one tick of rounding at either end
+                                          could make it a full slot): real jitter drops such a frame with
+                                          probability ~(1 - Δ), so at most E + 3·sqrt(E) + 2 of them may
+                                          be missing, E = sum(1 - Δ) over the zone (an ms-timestamp
+                                          29.97 file has E ~ 1 % of its frames; the drop bug lost ~1/3);
+      * Δ < 1 - 2·tb·fps               -> real jitter: two source frames within one slot (allowed).
+    Independently of the classes, a missing frame that the rule itself shows is a rule violation (the
+    SSIM samples check the same thing on 64 frames; this covers every checked frame).
+    Returns {checked, windows, missing, unexplained, ambiguous, jitter, informative, problems, ...}."""
+    import cv2
+    from .media import VideoReader
+
+    pts, tb, _ = load_pts_int(src)
+    fps = Fraction(plan["fps"])
+    shift = _plan_shift(plan, tb, fps)
+    n = int(min(out.nb_frames, plan["expected_frames"]))
+    n_src = len(pts)
+    rec: dict[str, Any] = {"frames_source": int(n_src), "frames_output": n, "problems": []}
+    if n < 1 or n_src < 2:
+        rec.update({"checked": 0, "note": "too short for a content check"})
+        return rec
+    idx_all = source_index_for_output(np.arange(n), "fps", pts, tb, fps, shift)
+    rec["rule_shown"] = int(len(np.unique(idx_all)))
+    rec["rule_dropped"] = int(n_src - rec["rule_shown"])
+    inter = interval_slots(pts, tb, fps)
+    thr_amb = 1 - 2 * Fraction(tb) * fps
+    wins = _cover_windows(n)
+    geo = output_geometry(src)
+    f = min(1.0, COVER_MAX_SIDE / max(plan["width"], plan["height"]))
+    size = (max(8, int(round(plan["width"] * f))), max(8, int(round(plan["height"] * f))))
+    covered = np.zeros(n_src, dtype=bool)
+    evaluable = np.zeros(n_src, dtype=bool)
+    informative = np.zeros(n_src, dtype=bool)
+    seen_out = 0
+    with VideoReader(out.path, fps=out.fps) as rd:
+        for k0, k1 in wins:
+            lo = 0 if k0 == 0 else max(0, int(idx_all[k0]) - 3)
+            hi = n_src - 1 if k1 >= n else min(n_src - 1, int(idx_all[k1 - 1]) + 3)
+            srcf = decode_source_frames(src, list(range(lo, hi + 1)), geo, size)
+            S = np.stack([srcf[j] for j in range(lo, hi + 1)]).astype(np.float32)
+            for j in range(lo, hi + 1):          # does the source frame differ from its neighbours at all?
+                nb = [float(np.sqrt(np.mean((S[j - lo] - S[x - lo]) ** 2))) for x in (j - 1, j + 1) if lo <= x <= hi]
+                if nb and min(nb) > 2.0:
+                    informative[j] = True
+            for k, img in rd.frames(k0, k1, "gray"):
+                c = cv2.resize(img, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+                i = int(idx_all[k])
+                cand = np.arange(max(lo, i - 3), min(hi, i + 3) + 1)
+                rmse = np.array([float(np.sqrt(np.mean((S[j - lo] - c) ** 2))) for j in cand])
+                covered[cand[rmse <= 1.5 * float(rmse.min()) + 1.0]] = True
+                seen_out += 1
+            e_lo = 0 if k0 == 0 else int(idx_all[k0]) + 1
+            e_hi = n_src - 1 if k1 >= n else int(idx_all[k1 - 1]) - 1
+            if e_hi >= e_lo:
+                evaluable[e_lo:e_hi + 1] = True
+    missing = [j for j in np.flatnonzero(evaluable & ~covered).tolist()]
+    rule_set = set(int(x) for x in np.unique(idx_all).tolist())
+    rule_violations = [j for j in missing if j in rule_set]
+    unexplained = [j for j in missing if inter[j] >= 1]
+    zone = [j for j in np.flatnonzero(evaluable).tolist() if thr_amb <= inter[j] < 1]
+    ambiguous = [j for j in missing if thr_amb <= inter[j] < 1]
+    jitter = [j for j in missing if inter[j] < thr_amb]
+    n_eval = int(evaluable.sum())
+    # drops expected in the quantisation zone if the frames' phases were uniform: sum(1 - Δ) (CFR content
+    # whose timestamps are merely rounded sits AT the slot boundaries and loses none of them)
+    e_amb = float(sum(1 - inter[j] for j in zone))
+    allowed_amb = int(math.floor(e_amb + 3.0 * math.sqrt(e_amb) + 2.0))
+    rec.update({"checked": n_eval, "output_frames_matched": int(seen_out), "windows": len(wins),
+                "full": n <= COVER_FULL_MAX, "compare_size": list(size),
+                "informative": int((informative & evaluable).sum()), "missing": len(missing),
+                "unexplained": unexplained[:50], "n_unexplained": len(unexplained),
+                "rule_violations": rule_violations[:50], "n_rule_violations": len(rule_violations),
+                "ambiguous": ambiguous[:50], "n_ambiguous": len(ambiguous), "ambiguous_zone": len(zone),
+                "ambiguous_expected": round(e_amb, 3), "ambiguous_allowed": allowed_amb,
+                "jitter_drops": len(jitter)})
+    if seen_out < sum(k1 - k0 for k0, k1 in wins):
+        rec["problems"].append(f"content check decoded only {seen_out} of the {sum(k1 - k0 for k0, k1 in wins)} "
+                               "conformed frames it needed")
+    if unexplained:
+        rec["problems"].append(
+            f"{len(unexplained)} source frames are never shown although their display interval is >= 1 "
+            f"output slot (e.g. {unexplained[:8]}; interval {float(inter[unexplained[0]]):.3f} slots) — the "
+            "conform dropped real frames")
+    if len(ambiguous) > allowed_amb:
+        rec["problems"].append(
+            f"{len(ambiguous)} source frames with a ~1-slot display interval are never shown (jitter explains "
+            f"~{e_amb:.1f}, <= {allowed_amb} allowed; e.g. {ambiguous[:8]}) — the conform dropped real frames")
+    if rule_violations:
+        rec["problems"].append(
+            f"{len(rule_violations)} source frames the 'frame displayed at t_k' rule shows are missing from the "
+            f"conform (e.g. {rule_violations[:8]})")
+    if n_eval and not rec["informative"]:
+        rec["note"] = "no checked source frame differs from its neighbours: content check uninformative (static)"
+    return rec
+
+
 def verify_transcode(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
-    """Frame count + AE safety + >= 50 PTS-sampled SSIM checks (DESIGN §5 conform verification)."""
+    """Frame count + AE safety + >= 50 PTS-sampled SSIM checks (DESIGN §5 conform verification), plus
+    the rule-independent content check for VFR conforms (content_coverage)."""
     import cv2
     from .media import VideoReader
 
     t0 = time.perf_counter()
     res: dict[str, Any] = {"method": plan["mode"], "frames_expected": plan["expected_frames"],
-                           "frames_actual": int(out.nb_frames), "fps_expected": plan["fps"],
+                           "frames_actual": int(out.nb_frames), "frames_source": int(src.nb_frames),
+                           "fps_expected": plan["fps"],
                            "fps_actual": fps_str(out.fps), "size": [out.display_width, out.display_height],
                            "ae_issues_after": list(out.ae_issues)}
     problems: list[str] = []
@@ -324,7 +573,8 @@ def verify_transcode(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
     if n > 0:
         m = min(n, SAMPLE_TARGET)
         ks = np.unique(np.round(np.linspace(0, n - 1, m)).astype(np.int64))
-        src_idx = source_index_for_output(ks, plan["mode"], pts, tb, fps)
+        src_idx = source_index_for_output(ks, plan["mode"], pts, tb, fps,
+                                          _plan_shift(plan, tb, fps) if plan["mode"] == "fps" else None)
         need = sorted({int(j) for i in src_idx for j in (i - 1, i, i + 1) if 0 <= j < len(pts)})
         size = _compare_size(plan["width"], plan["height"])
         geo = output_geometry(src)
@@ -368,6 +618,10 @@ def verify_transcode(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
                             f"(e.g. k={fails[0]['k']} src={fails[0]['src']} ssim={fails[0]['ssim']} nb={fails[0]['neighbours']})")
         if n_inf == 0 and n > 2:
             res["note"] = "no sampled frame differs from its neighbours: offset check uninformative (static video)"
+    if plan["mode"] == "fps" and n > 0:
+        cov = content_coverage(src, out, plan)
+        problems += cov.pop("problems")
+        res["coverage"] = cov
     res["problems"] = problems
     res["ok"] = not problems
     res["seconds"] = round(time.perf_counter() - t0, 3)
@@ -517,7 +771,7 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
                   "prores_ks": "ProRes 422 LT (prores_ks) + PCM 48 kHz", "h264": "H.264 CRF 12 + AAC 48 kHz",
                   "h264_ref": "H.264 + AAC 48 kHz"}[plan["codec"]]
     reason = ("not AE-safe: " + "; ".join(why_not_copy) + f" -> transcoded to {codec_desc}, "
-              f"{'VFR->CFR fps round=up' if plan['mode'] == 'fps' else 'CFR re-stamped by frame index'} at "
+              f"{'VFR->CFR fps round=up (PTS shifted back by ' + str(plan.get('pts_shift')) + ' s for timestamp quantisation)' if plan['mode'] == 'fps' else 'CFR re-stamped by frame index'} at "
               f"{plan['fps']} fps, {plan['width']}x{plan['height']}, start 0")
     res = ConformResult(str(dst.resolve()), True, reason, ver, str(src),
                         os.path.relpath(dst.resolve(), out_root).replace(os.sep, "/"), str(dst.resolve()))

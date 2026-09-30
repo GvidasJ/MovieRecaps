@@ -12,7 +12,8 @@ render_preview.py).
                     CRF <= 16, yuv420p, +faststart), audio from :func:`build_audio` muxed as AAC.
 ``build_audio``     sample-accurate RAW audio rebuild on the MAIN timeline.
 ``render_compare``  compare.mp4: competitor | recreation (match geometry) | |diff| x 4, 960 px high, frame
-                    number / timecode / segment id burned in, competitor audio.
+                    number / timecode / segment id in a label strip above each panel (never over the
+                    picture, where the competitor's logo / name / title sit), competitor audio.
 
 Rendering model (identical to the AE project, DESIGN §2.1-2.5, §3, §5 export_ae)
 ---------------------------------------------------------------------------------
@@ -31,6 +32,17 @@ Rendering model (identical to the AE project, DESIGN §2.1-2.5, §3, §5 export_
 * match: the segment stack is rendered over the Video Box pre-comp rectangle (bx0, by0, bw, bh) and
   composited with the anti-aliased rounded-box coverage over the background (solid colour, or a blurred
   cover-scaled copy of the pre-comp as in the AE plan); fill / source: over black.
+* match, per-period layout (DESIGN §7 D1; placement = ``export_ae._PlanBuilder.place``): a segment whose
+  ``Segment.box`` differs from the layout box (by > export_ae.BOX_TOL_PX = 0.5 px; a fullscreen period:
+  the whole canvas, radius 0) is a MAIN-level layer -- composited directly on the MAIN canvas ABOVE the
+  Video Box composite and the background (below the disabled reference / guide layers), with the
+  canonical Sim x r at origin (0, 0), clipped by the anti-aliased (rounded-)rect of its own box x r (no
+  clip for the whole canvas); dips / flashes / NOT-IN-RAW solids there are export_ae's round(w) x
+  round(h) solids centred on the box. MAIN-level layers keep the segment-stack order among themselves
+  (dips / flashes, then chronological, first on top); without a Video Box the clipped layers keep their
+  place in the single MAIN stack. A crossfade from a Video-Box layer into a MAIN-level one keys the
+  incoming (upper) layer rising, so the pair still renders (1 - alpha_B) A + alpha_B B; dips keep keying
+  the dip solid. fill: a segment's own box is the box its fill framing is computed from.
 * NOT-IN-RAW: a solid of export_ae's placeholder colour with the placeholder label drawn on it.
 """
 from __future__ import annotations
@@ -53,8 +65,8 @@ from .geometry import CORNER_TO_CV, CV_TO_CORNER, Sim, interpolate_keys, to_cv_m
 from .model import Box, Cutlist, Segment
 
 __all__ = ["RenderContext", "Layer", "make_context", "render_frame", "render_preview", "build_audio",
-           "render_compare", "iter_render", "layer_raw_frame", "frame_sources", "fill_transform_local",
-           "rounded_box_coverage", "sample_positions", "load_raw_audio"]
+           "render_compare", "compare_geometry", "iter_render", "layer_raw_frame", "frame_sources",
+           "fill_transform_local", "rounded_box_coverage", "sample_positions", "load_raw_audio"]
 
 AE_EPS = 1e-9
 PLACEHOLDER_RGB = (0.85, 0.1, 0.55)        # export_ae.PLACEHOLDER_RGB (AE solid colour, 0..1)
@@ -64,6 +76,7 @@ LAYOUT_MODES = ("match", "fill", "source")
 COMPARE_HEIGHT = 960
 COMPARE_MAX_WIDTH = 3840
 DIFF_GAIN = 4.0
+STRIP_BGR = (24, 24, 24)                   # compare.mp4 label strip (text never covers the picture)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -162,6 +175,31 @@ def fill_transform_local(sim: Sim, flip: bool, box: Box | dict | None, raw_wh: t
                float(Ht / 2.0 - s_new * (sn * px + c * py)))
 
 
+BOX_TOL_PX = 0.5                           # export_ae.BOX_TOL_PX (competitor px)
+
+
+def _same_box_local(a: Box, b: Box, tol: float = BOX_TOL_PX) -> bool:
+    """export_ae.same_box: two CORNER boxes within tol px on every edge and radius."""
+    return (abs(a.x - b.x) <= tol and abs(a.y - b.y) <= tol and abs(a.w - b.w) <= tol and abs(a.h - b.h) <= tol
+            and abs(float(a.corner_radius) - float(b.corner_radius)) <= tol)
+
+
+def _is_full_canvas_local(b: Box, w: float, h: float, tol: float = BOX_TOL_PX) -> bool:
+    """export_ae.is_full_canvas: the box covers the whole competitor canvas (no mask needed)."""
+    return (b.x <= tol and b.y <= tol and b.x + b.w >= w - tol and b.y + b.h >= h - tol
+            and float(b.corner_radius) <= tol)
+
+
+def _export_ae_attr(name: str, fallback: Any) -> Any:
+    """export_ae's own implementation of a placement helper (so the preview follows the AE plan), else the
+    local copy."""
+    try:
+        from . import export_ae
+    except ImportError:  # pragma: no cover - export_ae is a sibling module
+        return fallback
+    return getattr(export_ae, name, fallback)
+
+
 def _fill_transform() -> Callable[..., Sim]:
     try:
         from .export_ae import fill_transform
@@ -223,6 +261,9 @@ class Layer:
     keys: list[dict] = field(default_factory=list)                     # interpolate_keys dicts (MAIN)
     color: tuple[float, float, float] = (0.0, 0.0, 0.0)                # BGR 0..255 (solids)
     label: str = ""                             # NOT-IN-RAW placeholder label (drawn)
+    main: bool = False                          # D1: MAIN-level layer (Segment.box set) above the Video Box
+    clip: tuple[float, float, float, float, float] | None = None       # MAIN-level clip (x, y, w, h, radius)
+    #                                             MAIN px, CORNER; None = no mask (the whole canvas)
 
     def active(self, K: int) -> bool:
         return self.k_in <= K < self.k_out
@@ -249,7 +290,7 @@ class RenderContext:
     bg_type: str                                # 'solid' | 'blur' | 'none'
     bg_color: tuple[float, float, float]        # BGR 0..255
     blur_sigma: float                           # pre-comp px (blur background)
-    layers: list[Layer]                         # top first
+    layers: list[Layer]                         # top first (MAIN-level layers, then the Video Box stack)
     raw_path: str | None = None
     placeholder_color: tuple[float, float, float] = (140.0, 26.0, 217.0)
     interp: int = 1                             # cv2.INTER_LINEAR
@@ -276,9 +317,13 @@ def _to_main_f(k: float, main_fps: Fraction, comp_fps: Fraction) -> float:
 
 
 def _transition_keys(segs: list[Segment], kmap: dict[int, tuple[int, int]], main_fps: Fraction,
-                     comp_fps: Fraction) -> tuple[dict[int, dict[float, float]], dict[int, dict[float, float]]]:
+                     comp_fps: Fraction, main_ids: set[int] | frozenset[int] = frozenset()
+                     ) -> tuple[dict[int, dict[float, float]], dict[int, dict[float, float]]]:
     """Opacity keys (0..1) and crossfade Audio Levels keys (dB) per segment id, exactly as export_ae.ae_plan
-    writes them: only the UPPER layer of a pair is keyed (the outgoing one, or the dip solid)."""
+    writes them: only the UPPER layer of a pair is keyed (the outgoing one, or the dip solid). main_ids =
+    the MAIN-level segments (D1, above the Video Box): a crossfade from a Video-Box layer into a MAIN-level
+    one keys the incoming (upper) layer rising; dips keep keying the dip solid (export_ae warns when its
+    neighbour is a MAIN-level layer above it)."""
     opacity: dict[int, dict[float, float]] = {}
     audio_db: dict[int, dict[float, float]] = {}
     ordered = [s for s in segs if int(s.id) in kmap]
@@ -303,6 +348,8 @@ def _transition_keys(segs: list[Segment], kmap: dict[int, tuple[int, int]], main
             uid, rising = int(Y.id), True
         elif is_dip and X.type == "dip":
             uid, rising = int(X.id), False
+        elif int(Y.id) in main_ids and int(X.id) not in main_ids:
+            uid, rising = int(Y.id), True                  # the incoming layer is above the outgoing one
         else:
             uid, rising = int(X.id), False
         ks = opacity.setdefault(uid, {})
@@ -408,16 +455,65 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
     fill_tf = _fill_transform()
     fill_box = box or Box(0.0, 0.0, float(Wc), float(Hc))
 
-    def to_main_sim(sim: Sim, flip: bool) -> Sim:
+    same_box = _export_ae_attr("same_box", _same_box_local)
+    is_full_canvas = _export_ae_attr("is_full_canvas", _is_full_canvas_local)
+
+    def place(seg: Segment) -> dict:
+        """Per-segment placement, exactly export_ae._PlanBuilder.place (DESIGN §7 D1): the segment's own box
+        (Segment.box; None, or equal to the layout box -> the dominant layout) -> match: a clipped layer
+        directly in MAIN, above the Video Box when there is one ('main'), unclipped when the box is the
+        whole canvas ('full'); fill: that box frames the segment (fill_transform); source: ignored."""
+        own = None
+        if seg.box:
+            try:
+                own = seg.box if isinstance(seg.box, Box) else Box.from_dict(seg.box)
+                if not all(math.isfinite(float(v)) for v in (own.x, own.y, own.w, own.h, own.corner_radius)):
+                    raise ValueError("non-finite value")
+                if own.w <= 0 or own.h <= 0:
+                    raise ValueError("no area")
+            except (KeyError, TypeError, ValueError) as e:
+                warnings.append(f"S{int(seg.id):02d}: invalid per-segment box ignored ({e})")
+                own = None
+        if mode == "source":
+            return {"own": None, "full": True, "fill_box": None, "main": False}
+        if mode == "fill":
+            return {"own": None, "full": True, "fill_box": own or fill_box, "main": False}
+        if own is not None and box is not None and same_box(own, box):
+            own = None
+        if own is None:
+            return {"own": None, "full": box is None, "fill_box": None, "main": False}
+        return {"own": own, "full": bool(is_full_canvas(own, Wc, Hc)), "fill_box": None, "main": box is not None}
+
+    def clip_of(pl: dict, solid: bool) -> tuple[float, float, float, float, float] | None:
+        """MAIN px clip (x, y, w, h, radius) of a segment at its own box; None = no mask. RAW layers: the
+        (rounded-)rect mask at box x r, none for the whole canvas. Solids: export_ae's round(w) x round(h)
+        solid centred on the box, rounded corners only when not the whole canvas."""
+        own = pl["own"]
+        if own is None:
+            return None
+        x, y, w, h, rad = own.x * r, own.y * r, own.w * r, own.h * r, max(0.0, float(own.corner_radius) * r)
+        if solid:
+            sw, sh = max(4, min(30000, round(w))), max(4, min(30000, round(h)))
+            x, y, w, h = x + w / 2.0 - sw / 2.0, y + h / 2.0 - sh / 2.0, float(sw), float(sh)
+            rad = rad if not pl["full"] else 0.0
+            if rad <= 0.0 and x <= 1e-6 and y <= 1e-6 and x + w >= W - 1e-6 and y + h >= H - 1e-6:
+                return None
+            return float(x), float(y), float(w), float(h), float(rad)
+        if pl["full"]:
+            return None
+        return float(x), float(y), float(w), float(h), float(rad)
+
+    def to_main_sim(sim: Sim, flip: bool, fbox: Box | None = None) -> Sim:
         if mode == "match":
             return Sim(sim.s * r, sim.theta_deg, sim.tx * r, sim.ty * r)
         if mode == "fill":
-            return fill_tf(sim, flip, fill_box, (raw_w, raw_h), (W, H))
+            return fill_tf(sim, flip, fbox or fill_box, (raw_w, raw_h), (W, H))
         s = min(W / raw_w, H / raw_h)
         return Sim(s, 0.0, (W - s * raw_w) / 2.0, (H - s * raw_h) / 2.0)
 
     segs = sorted(cutlist.segments, key=lambda s: (int(s.comp_in), int(s.comp_out), int(s.id)))
     kmap: dict[int, tuple[int, int]] = {}
+    places: dict[int, dict] = {}
     upper: list[Layer] = []
     chrono: list[Layer] = []
     for seg in segs:
@@ -427,6 +523,8 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
             warnings.append(f"S{sid:02d}: vanishes on the {fps_str(main_fps)} MAIN grid")
             continue
         kmap[sid] = (k_in, k_out)
+        pl = place(seg)
+        places[sid] = pl
         if seg.type == "raw":
             v = float(seg.speed)
             raw_in = _seg_raw_in(seg, raw_fps)
@@ -450,15 +548,15 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
             elif keys:
                 mkeys = []
                 for kd in keys:
-                    s2 = to_main_sim(Sim.from_dict(kd), flip)
+                    s2 = to_main_sim(Sim.from_dict(kd), flip, pl["fill_box"])
                     mkeys.append({"comp_frame": _to_main_f(float(kd["comp_frame"]), main_fps, comp_fps),
                                   **s2.to_dict()})
                 sim = None
             elif seg.transform:
-                sim, mkeys = to_main_sim(Sim.from_dict(seg.transform), flip), []
+                sim, mkeys = to_main_sim(Sim.from_dict(seg.transform), flip, pl["fill_box"]), []
             else:
                 warnings.append(f"S{sid:02d}: no transform; identity used")
-                sim, mkeys = to_main_sim(Sim(), flip), []
+                sim, mkeys = to_main_sim(Sim(), flip, pl["fill_box"]), []
             chrono.append(Layer(0, "raw", sid, "raw", k_in, k_out, raw_in=raw_in_m, speed=v, remap=remap,
                                 flip=flip, sim=sim, keys=mkeys))
         elif seg.type in ("dip", "flash"):
@@ -472,8 +570,18 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
         else:
             label = seg.label or f"MISSING - not in RAW ({timecode(k_in, main_fps)}-{timecode(k_out, main_fps)})"
             chrono.append(Layer(0, "solid", sid, "not_in_raw", k_in, k_out, color=placeholder, label=label))
-    opacity, _ = _transition_keys(segs, kmap, main_fps, comp_fps)
-    layers = upper + chrono
+    main_ids: set[int] = set()
+    for L in upper + chrono:
+        pl = places[L.seg_id]
+        L.main = bool(pl["main"])
+        L.clip = clip_of(pl, L.kind == "solid")
+        if L.main:
+            main_ids.add(L.seg_id)
+    opacity, _ = _transition_keys(segs, kmap, main_fps, comp_fps, main_ids)
+    # final stack (top first): MAIN-level layers above the Video Box composite, each group in the
+    # segment-stack order (dips / flashes, then chronological, first on top); without a Video Box the
+    # clipped own-box layers keep their place in the one MAIN stack (export_ae)
+    layers = [L for L in upper + chrono if L.main] + [L for L in upper + chrono if not L.main]
     for i, L in enumerate(layers):
         L.idx = i
         if L.seg_id in opacity:
@@ -516,9 +624,19 @@ def layer_raw_frame(L: Layer, K: int, ctx: RenderContext) -> int:
     return int(min(max(j, 0), ctx.n_raw - 1))
 
 
+def _clip_hides_roi(L: Layer, ctx: RenderContext) -> bool:
+    """A MAIN-level layer's clip rectangle contains the whole Video Box ROI (it hides the stack below)."""
+    if L.clip is None:
+        return True
+    x, y, w, h, _ = L.clip
+    x0, y0, rw, rh = ctx.roi
+    return x <= x0 + 1e-6 and y <= y0 + 1e-6 and x + w >= x0 + rw - 1e-6 and y + h >= y0 + rh - 1e-6
+
+
 def frame_sources(K: int, ctx: RenderContext) -> list[tuple[Layer, int, float]]:
     """[(layer, RAW frame, weight)] of the visible RAW layers at MAIN frame K, top first; weight = the
-    layer's contribution after the stack above it (solids included), like export_ae.simulate_ae."""
+    layer's contribution after the stack above it (solids included), like export_ae.simulate_ae. A
+    layer clipped to its own box (D1) that does not contain the Video Box does not reduce the weights below."""
     out: list[tuple[Layer, int, float]] = []
     remaining = 1.0
     for L in ctx.layers:
@@ -527,6 +645,8 @@ def frame_sources(K: int, ctx: RenderContext) -> list[tuple[Layer, int, float]]:
         op = L.op(K)
         if L.kind == "raw" and op > 0:
             out.append((L, layer_raw_frame(L, K, ctx), remaining * op))
+        if L.clip is not None and not _clip_hides_roi(L, ctx):
+            continue
         remaining *= 1.0 - op
     return out
 
@@ -537,24 +657,29 @@ def _layer_sim(L: Layer, K: int, ctx: RenderContext) -> Sim:
     return L.sim if L.sim is not None else Sim()
 
 
-def _roi_matrix(sim: Sim, flip: bool, ctx: RenderContext) -> np.ndarray:
+def _layer_roi(L: Layer, ctx: RenderContext) -> tuple[int, int, int, int]:
+    """Area a layer is rendered over: the Video Box ROI, or the whole MAIN frame for a MAIN-level layer."""
+    return (0, 0, ctx.size[0], ctx.size[1]) if L.main else ctx.roi
+
+
+def _roi_matrix(sim: Sim, flip: bool, ctx: RenderContext, roi: tuple[int, int, int, int] | None = None) -> np.ndarray:
     m = to_cv_matrix(sim, flip, ctx.raw_size[0])
-    x0, y0 = ctx.roi[0], ctx.roi[1]
+    x0, y0 = (roi or ctx.roi)[0], (roi or ctx.roi)[1]
     return (translate3(-x0, -y0) @ h3(m))[:2, :]
 
 
-def _coverage(M: np.ndarray, ctx: RenderContext) -> np.ndarray | float:
+def _coverage(M: np.ndarray, ctx: RenderContext, roi: tuple[int, int, int, int] | None = None) -> np.ndarray | float:
     """Bilinear alpha of the warped RAW frame over the ROI: 1.0 (scalar) when the RAW frame covers the
     whole ROI (checked on the ROI corners mapped back into RAW), else warped ones (cached per matrix)."""
     import cv2
-    rw, rh = ctx.roi[2], ctx.roi[3]
+    rw, rh = (roi or ctx.roi)[2], (roi or ctx.roi)[3]
     W, H = ctx.raw_size
     inv = np.linalg.inv(h3(M))
     corners = np.array([[0, 0, 1], [rw - 1, 0, 1], [0, rh - 1, 1], [rw - 1, rh - 1, 1]], np.float64)
     src = corners @ inv.T
     if np.all(src[:, 0] >= 0) and np.all(src[:, 0] <= W - 1) and np.all(src[:, 1] >= 0) and np.all(src[:, 1] <= H - 1):
         return 1.0
-    key = ("cov", tuple(np.round(M, 9).ravel()))
+    key = ("cov", rw, rh, tuple(np.round(M, 9).ravel()))
     cache = ctx.cache.setdefault("coverage", {})
     if key in cache:
         return cache[key]
@@ -570,18 +695,20 @@ def _coverage(M: np.ndarray, ctx: RenderContext) -> np.ndarray | float:
 
 
 def _placeholder_image(L: Layer, ctx: RenderContext) -> np.ndarray:
-    """The placeholder solid over the ROI with its label drawn (cached per layer)."""
+    """The placeholder solid over the layer's area (Video Box ROI, or MAIN for a MAIN-level layer) with its
+    label drawn inside the visible box (cached per layer)."""
     import cv2
     key = ("ph", L.idx)
     img = ctx.cache.get(key)
     if img is not None:
         return img
-    rw, rh = ctx.roi[2], ctx.roi[3]
+    rw, rh = _layer_roi(L, ctx)[2], _layer_roi(L, ctx)[3]
     img = np.empty((rh, rw, 3), np.uint8)
     img[:] = np.array([round(c) for c in L.color], np.uint8)
     # draw inside the visible (box) area
-    if ctx.mask is not None:
-        ys, xs = np.nonzero(ctx.mask >= 0.999)
+    vis = _main_clip(L, ctx) if (L.main or L.clip is not None) else ctx.mask
+    if vis is not None:
+        ys, xs = np.nonzero(vis >= 0.999)
         vx0, vx1 = (int(xs.min()), int(xs.max())) if xs.size else (0, rw - 1)
         vy0, vy1 = (int(ys.min()), int(ys.max())) if ys.size else (0, rh - 1)
     else:
@@ -626,7 +753,7 @@ def _stack(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> tup
     rw, rh = ctx.roi[2], ctx.roi[3]
     C = np.zeros((rh, rw, 3), np.float32)
     A: np.ndarray | float = 0.0
-    for L in reversed([L for L in ctx.layers if L.active(K)]):        # bottom -> top
+    for L in reversed([L for L in ctx.layers if L.active(K) and not L.main]):     # bottom -> top
         op = L.op(K)
         if op <= 0.0:
             continue
@@ -648,6 +775,10 @@ def _stack(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> tup
             Cl, Al = np.array(L.color, np.float32), 1.0
         if Cl.ndim == 1:
             Cl = np.array(np.broadcast_to(Cl, (rh, rw, 3)), np.float32)
+        clip = _main_clip(L, ctx)                              # own-box layer without a Video Box (ROI = MAIN)
+        if clip is not None:
+            Cl = Cl * clip[..., None]
+            Al = Al * clip
         if isinstance(Al, float) and Al * op >= 1.0:           # opaque layer: replaces everything below
             C, A = Cl, 1.0
             continue
@@ -720,12 +851,12 @@ def _opaque_top(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -
     """uint8 ROI image of the top layer when it hides everything below (opacity 1, full coverage), else None."""
     import cv2
     for L in ctx.layers:                                   # top first
-        if not L.active(K):
+        if not L.active(K) or L.main:
             continue
         op = L.op(K)
         if op <= 0.0:
             continue
-        if op < 1.0:
+        if op < 1.0 or L.clip is not None:
             return None
         rw, rh = ctx.roi[2], ctx.roi[3]
         if L.kind == "raw":
@@ -751,14 +882,122 @@ def _opaque_top(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -
     return None
 
 
+def _main_clip(L: Layer, ctx: RenderContext) -> np.ndarray | None:
+    """Anti-aliased coverage [H, W] of a MAIN-level layer's clip box (cached), None = no mask."""
+    if L.clip is None:
+        return None
+    key = ("clip", L.clip)
+    m = ctx.cache.get(key)
+    if m is None:
+        W, H = ctx.size
+        x, y, w, h, rad = L.clip
+        m = np.zeros((H, W), np.float32)
+        # super-sampled only over the box's pixel bounds (clipped to the frame): 0 elsewhere
+        bx0, by0 = max(0, math.floor(x)), max(0, math.floor(y))
+        bx1, by1 = min(W, math.ceil(x + w)), min(H, math.ceil(y + h))
+        if bx1 > bx0 and by1 > by0:
+            m[by0:by1, bx0:bx1] = rounded_box_coverage(bx1 - bx0, by1 - by0, x - bx0, y - by0, w, h, rad)
+        ctx.cache[key] = m
+    return m
+
+
+def _main_layer(L: Layer, K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]
+                ) -> tuple[np.ndarray, np.ndarray | float]:
+    """Premultiplied (C [H, W, 3] float32, A [H, W] or scalar) of one MAIN-level layer over the MAIN frame:
+    warped RAW (bilinear coverage) / solid / labelled placeholder, times its clip coverage."""
+    import cv2
+    W, H = ctx.size
+    full = (0, 0, W, H)
+    if L.kind == "raw":
+        j = layer_raw_frame(L, K, ctx)
+        if j not in raw_frames:
+            raise KeyError(j)
+        img = raw_frames[j]
+        if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
+            raise ValueError(f"RAW frame {j} is {img.shape[1]}x{img.shape[0]}, expected "
+                             f"{ctx.raw_size[0]}x{ctx.raw_size[1]}")
+        M = _roi_matrix(_layer_sim(L, K, ctx), L.flip, ctx, full)
+        Cl = cv2.warpAffine(img, M, (W, H), flags=ctx.interp, borderMode=cv2.BORDER_CONSTANT,
+                            borderValue=(0, 0, 0)).astype(np.float32)
+        Al: np.ndarray | float = _coverage(M, ctx, full)
+    elif L.label:
+        Cl, Al = _placeholder_image(L, ctx).astype(np.float32), 1.0
+    else:
+        Cl, Al = np.array(np.broadcast_to(np.array(L.color, np.float32), (H, W, 3))), 1.0
+    clip = _main_clip(L, ctx)
+    if clip is not None:
+        Cl = Cl * clip[..., None]
+        Al = Al * clip
+    return Cl, Al
+
+
+def _main_opaque_top(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray], L: Layer) -> np.ndarray | None:
+    """uint8 MAIN frame when the top MAIN-level layer hides everything (opacity 1, no clip, full
+    coverage), else None."""
+    import cv2
+    if L.op(K) < 1.0 or L.clip is not None:
+        return None
+    W, H = ctx.size
+    full = (0, 0, W, H)
+    if L.kind == "raw":
+        j = layer_raw_frame(L, K, ctx)
+        if j not in raw_frames:
+            raise KeyError(j)
+        img = raw_frames[j]
+        if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
+            return None
+        M = _roi_matrix(_layer_sim(L, K, ctx), L.flip, ctx, full)
+        if not isinstance(_coverage(M, ctx, full), float):
+            return None
+        return cv2.warpAffine(img, M, (W, H), flags=ctx.interp, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    if L.label:
+        return _placeholder_image(L, ctx).copy()
+    im = np.empty((H, W, 3), np.uint8)
+    im[:] = np.array([int(round(c)) for c in L.color], np.uint8)
+    return im
+
+
+def _composite_main(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray], base: np.ndarray,
+                    mains: list[Layer]) -> np.ndarray:
+    """MAIN-level layers (top first) composited bottom-up over the uint8 Video Box composite `base`:
+    C = op Cl + (1 - op Al) C (premultiplied)."""
+    import cv2
+    C = base.astype(np.float32)
+    for L in reversed(mains):                                       # bottom -> top
+        op = L.op(K)
+        Cl, Al = _main_layer(L, K, ctx, raw_frames)
+        if isinstance(Al, float):
+            if Al * op >= 1.0:
+                C = Cl
+            else:
+                C = cv2.addWeighted(C, 1.0 - Al * op, Cl, op, 0.0, dtype=cv2.CV_32F)
+            continue
+        a = Al * np.float32(op)
+        C = C * (1.0 - a)[..., None] + Cl * np.float32(op)
+    return cv2.convertScaleAbs(C)
+
+
 def render_frame(k: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> np.ndarray:
     """MAIN frame k (BGR uint8 [H, W, 3]). raw_frames = {RAW frame index: full-res BGR frame}; a missing
     frame raises KeyError(j) (callers fetch it and retry).
 
     out = C * m + (1 - A * m) * background over the ROI (m = box coverage, 1 without a box). Fast path
     (the usual frame): the top layer is opaque and covers the ROI -> uint8 warp straight into a copy of the
-    cached background, blending only the mask-edge pixels (identical result)."""
+    cached background, blending only the mask-edge pixels (identical result). MAIN-level layers (D1,
+    Segment.box set) are then composited over the whole frame, each clipped by its own box; an opaque,
+    unclipped, fully covering top MAIN-level layer (a fullscreen shot) is warped straight into the frame."""
     K = int(k)
+    mains = [L for L in ctx.layers if L.main and L.active(K) and L.op(K) > 0.0]
+    if mains:
+        top = _main_opaque_top(K, ctx, raw_frames, mains[0])
+        if top is not None:
+            return top
+        return _composite_main(K, ctx, raw_frames, _render_box_level(K, ctx, raw_frames), mains)
+    return _render_box_level(K, ctx, raw_frames)
+
+
+def _render_box_level(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> np.ndarray:
+    """The Video Box composite (segment stack in the box, masked, over the background) as a MAIN frame."""
     cx0, cy0, cx1, cy1, sl = _roi_clip(ctx)
     if ctx.bg_type != "blur":
         top = _opaque_top(K, ctx, raw_frames)
@@ -1256,15 +1495,44 @@ def _even(x: float) -> int:
     return max(2, int(round(x / 2.0)) * 2)
 
 
-def _put_lines(img: np.ndarray, lines: Sequence[str], scale: float) -> None:
+def compare_geometry(width: int, height: int, cfg: Any) -> dict:
+    """compare.mp4 panel geometry for a competitor of width x height: panel size (pw, ph) -- ph =
+    cfg.compare_height (960), lowered so 3 panels stay <= 3840 px wide -- the height of the label strip
+    above every panel (two text lines: frame number / timecode / segment id, so the labels never cover the
+    competitor's logo, name or title at the top of the picture), text scale and line pitch. The video is
+    3 pw x (strip + ph), both even."""
+    ph = _even(float(getattr(cfg, "compare_height", COMPARE_HEIGHT) or COMPARE_HEIGHT))
+    pw = _even(width * ph / height)
+    if 3 * pw > COMPARE_MAX_WIDTH:                  # landscape competitors: keep the video <= 4K wide
+        ph = _even(ph * COMPARE_MAX_WIDTH / (3 * pw))
+        pw = _even(width * ph / height)
+    scale = max(0.4, ph / 960.0 * 0.9)              # readable at small test heights too
+    line = int(34 * scale) + 4
+    strip = _even(2 * line + int(14 * scale) + 4)
+    return {"pw": int(pw), "ph": int(ph), "strip": int(strip), "scale": float(scale), "line": int(line)}
+
+
+def _label_strip(width: int, lines: Sequence[str], geo: dict) -> np.ndarray:
+    """A dedicated label strip (uint8 [strip, width, 3]) with `lines` in white, each shrunk to fit."""
     import cv2
     font = cv2.FONT_HERSHEY_SIMPLEX
+    img = np.empty((geo["strip"], width, 3), np.uint8)
+    img[:] = np.array(STRIP_BGR, np.uint8)
+    scale, line = geo["scale"], geo["line"]
     th = max(1, int(round(2 * scale)))
-    y = int(8 + 30 * scale)
+    x0 = int(10 * scale) + 4
+    avail = max(8, width - 2 * x0)
+    y = int(6 * scale) + 2 + cv2.getTextSize("Ag", font, scale, th)[0][1]
     for t in lines:
-        cv2.putText(img, t, (int(10 * scale) + 4, y), font, scale, (0, 0, 0), th + 3, cv2.LINE_AA)
-        cv2.putText(img, t, (int(10 * scale) + 4, y), font, scale, (255, 255, 255), th, cv2.LINE_AA)
-        y += int(34 * scale) + 4
+        t = _ascii(t)
+        sc, tt = scale, th
+        tw = cv2.getTextSize(t, font, sc, tt)[0][0]
+        if tw > avail:
+            sc = scale * avail / tw
+            tt = max(1, int(round(2 * sc)))
+        cv2.putText(img, t, (x0, y), font, sc, (255, 255, 255), tt, cv2.LINE_AA)
+        y += line
+    return img
 
 
 def _segment_label(cutlist: Cutlist, k: int) -> str:
@@ -1337,7 +1605,8 @@ def render_compare(comp_path: str | os.PathLike, preview_frames_source: Any, cut
                    out_path: str | os.PathLike, cfg: Any) -> None:
     """compare.mp4: competitor | recreation | amplified |difference| (x4), each panel scaled to 960 px high
     (cfg.compare_height; lowered so the video stays <= 3840 px wide for landscape competitors), frame
-    number, timecode and segment id burned in, the competitor's audio.
+    number, timecode and segment id burned into a dedicated label strip above each panel (never over the
+    picture, see :func:`compare_geometry`), the competitor's audio.
 
     preview_frames_source: the match-geometry recreation -- a video path (preview_recreation.mp4 when it is
     a match render at competitor size/fps), a RenderContext (rendered on the fly from the RAW), a callable
@@ -1347,12 +1616,8 @@ def render_compare(comp_path: str | os.PathLike, preview_frames_source: Any, cut
     comp_fps = cutlist.comp_fps
     N = int(cutlist.competitor["frames"])
     Wc, Hc = int(cutlist.competitor["width"]), int(cutlist.competitor["height"])
-    ph = _even(float(getattr(cfg, "compare_height", COMPARE_HEIGHT)))
-    pw = _even(Wc * ph / Hc)
-    if 3 * pw > COMPARE_MAX_WIDTH:                  # landscape competitors: keep the video <= 4K wide
-        ph = _even(ph * COMPARE_MAX_WIDTH / (3 * pw))
-        pw = _even(Wc * ph / Hc)
-    scale = max(0.4, ph / 960.0 * 0.9)          # readable at small test heights too
+    geo = compare_geometry(Wc, Hc, cfg)
+    ph, pw, sh = geo["ph"], geo["pw"], geo["strip"]
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     raw_path = _raw_path_from_cutlist(cutlist, cfg)
@@ -1363,7 +1628,7 @@ def render_compare(comp_path: str | os.PathLike, preview_frames_source: Any, cut
         video = tmpdir / "video.mp4"
         last_comp = None
         with VideoReader(str(comp_path), fps=comp_fps) as cr, \
-                FFmpegWriter(video, 3 * pw, ph, comp_fps, crf=int(getattr(cfg, "compare_crf", 18)),
+                FFmpegWriter(video, 3 * pw, sh + ph, comp_fps, crf=int(getattr(cfg, "compare_crf", 18)),
                              preset=str(getattr(cfg, "compare_preset", "veryfast"))) as wr:
             it = cr.frames(0, N)
             nxt = next(it, None)
@@ -1378,14 +1643,15 @@ def render_compare(comp_path: str | os.PathLike, preview_frames_source: Any, cut
                 d = cv2.convertScaleAbs(cv2.absdiff(c, r), alpha=DIFF_GAIN)
                 tc = timecode(k, comp_fps)
                 lab = _segment_label(cutlist, k)
-                _put_lines(c, ["COMPETITOR", f"frame {k}", tc], scale)
-                _put_lines(r, ["RECREATION", f"frame {k}", lab], scale)
-                _put_lines(d, [f"|DIFF| x{DIFF_GAIN:g}", f"frame {k}", lab], scale)
-                wr.write(np.hstack([c, r, d]))
+                panels = []
+                for title, img in (("COMPETITOR", c), ("RECREATION", r), (f"|DIFF| x{DIFF_GAIN:g}", d)):
+                    strip = _label_strip(pw, [f"{title}  frame {k}", f"{tc}  {lab}"], geo)
+                    panels.append(np.vstack([strip, img]))
+                wr.write(np.hstack(panels))
         _mux(video, Path(comp_path), out, audio_map="1:a:0?")
     finally:
         rec.close()
         for p in sorted(tmpdir.glob("*")):
             p.unlink(missing_ok=True)
         tmpdir.rmdir()
-    log.info("compare: %s (%dx%d, %d frames)", out, 3 * pw, ph, N)
+    log.info("compare: %s (%dx%d, %d frames)", out, 3 * pw, sh + ph, N)

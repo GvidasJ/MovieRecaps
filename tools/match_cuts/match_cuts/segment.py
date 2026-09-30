@@ -113,6 +113,12 @@ class _Frames:
         self.low_margin = np.asarray(fm.low_margin).astype(bool).copy()
         self.cand = np.asarray(fm.cand).astype(np.float64)
         self.cand_j0 = np.asarray(fm.cand_j0).astype(np.int64)
+        if self.cand.ndim != 2 or self.cand.shape[0] != n:
+            self.cand = np.full((n, 1), np.nan)
+        fin = np.isfinite(self.cand)
+        # best candidate score per frame (NaN without a candidate vector): vectorised deficits for the DP data term
+        self.rowmax = np.where(fin.any(axis=1), np.where(fin, self.cand, -np.inf).max(axis=1), np.nan) \
+            if self.cand.shape[1] else np.full(n, np.nan)
         self.touched: dict[int, str] = {}           # k -> why its constraint was changed
         # delta_k per track (DESIGN §3): score noise = scoring.noise_delta of the track's best scores
         from .scoring import noise_delta
@@ -153,6 +159,29 @@ class _Frames:
             return float("nan")
         return float(np.nanmax(row) - s)
 
+    def deficits(self, ks: np.ndarray, js: np.ndarray) -> np.ndarray:
+        """Vectorised ``deficit``: max S_k - S_k(j) per (k, j) pair (NaN where j was not evaluated)."""
+        ks = np.asarray(ks, dtype=np.int64)
+        js = np.asarray(js, dtype=np.int64)
+        out = np.full(ks.size, np.nan)
+        if ks.size == 0:
+            return out
+        j0 = self.cand_j0[ks]
+        i = js - j0
+        ok = (j0 >= 0) & (i >= 0) & (i < self.cand.shape[1])
+        if ok.any():
+            out[ok] = self.rowmax[ks[ok]] - self.cand[ks[ok], i[ok]]
+        return out
+
+    def pristine(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Preferred (measured) RAW range per constraint frame: refine's argmax range [raw_lo, raw_hi]
+        intersected with the constraint [lo, hi]; the constraint itself where they do not intersect (e.g.
+        the A/B frames chosen on crossfade blend frames, or a criterion-2 move)."""
+        rlo, rhi = self.raw_lo[ks], self.raw_hi[ks]
+        plo, phi = np.maximum(lo, rlo), np.minimum(hi, rhi)
+        bad = plo > phi
+        return np.where(bad, lo, plo).astype(np.int64), np.where(bad, hi, phi).astype(np.int64)
+
     def _cand_any_close(self, k: int) -> bool:
         row = self.cand[k]
         if int(self.cand_j0[k]) < 0 or not np.isfinite(row).any():
@@ -188,6 +217,7 @@ class _Model:
     track: int
     flip: bool
     n_frames: int
+    data: float = 0.0           # DP data term: frames shown off refine's measured argmax range (weighted)
 
     @property
     def raw_in(self) -> float:
@@ -215,6 +245,12 @@ class _Solver:
         self.l_one = float(_cfg(cfg, "lambda_one", 0.25))
         self.l_drop = float(_cfg(cfg, "lambda_drop", 0.4))
         self.l_tie = float(_cfg(cfg, "lambda_tie", 0.05))
+        # data term (time-math F2): a frame whose model frame lies inside its soft range but outside refine's
+        # measured argmax range costs l_data * clip(deficit / delta_k, w_min, 1) (l_data without a candidate
+        # vector) -- soft ranges are tolerances, not free choices, so a constant-speed line that contradicts a
+        # run of measured frames loses to a cut / another speed
+        self.l_data = float(_cfg(cfg, "lambda_data", 0.5))
+        self.w_min = float(_cfg(cfg, "data_weight_min", 0.25))
         self.snaps = [float(s) for s in _cfg(cfg, "speed_snap_values", (1.0,))]
         self._cache: dict[tuple, Any] = {}
         self._relax_cache: dict[tuple, bool] = {}
@@ -272,10 +308,59 @@ class _Solver:
         return out
 
     # -- 1-D feasibility at a fixed speed, with isolated-violation tolerance ------------------------
+    def penalties(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """(i, j, w) data-term pairs of a constraint set (phase_solve.prefer_penalties with deficit weights),
+        or None when every frame's soft range equals its measured range (the data term is then 0)."""
+        F = self.F
+        if ks.size == 0 or self.l_data <= 0:
+            return None
+        plo, phi = F.pristine(ks, lo, hi)
+        if not np.any((lo < plo) | (hi > phi)):
+            return None
+
+        def weight(i: np.ndarray, j: np.ndarray) -> np.ndarray:
+            k = ks[i]
+            dfc = F.deficits(k, j)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                w = np.clip(dfc / np.maximum(F.delta[k], 1e-12), self.w_min, 1.0)
+            return self.l_data * np.where(np.isfinite(w), w, 1.0)
+
+        pen = ps.prefer_penalties(ks, lo, hi, plo, phi, weight)
+        return pen if pen[0].size else None
+
+    @staticmethod
+    def _pen_subset(pen, keep: np.ndarray):
+        """Penalty pairs restricted to the kept constraint frames (indices re-numbered)."""
+        if pen is None:
+            return None
+        i, j, w = pen
+        sel = keep[i]
+        if not sel.any():
+            return None
+        new_idx = np.cumsum(keep) - 1
+        return new_idx[i[sel]], j[sel], w[sel]
+
+    def data_cost(self, pen, u: float, d: np.ndarray, base: int, xl: float, xh: float,
+                  keep: np.ndarray | None = None) -> float:
+        """Minimal data term over the feasible phase interval [xl, xh] (local units) at speed u."""
+        if pen is None:
+            return 0.0
+        i, j, w = pen
+        if keep is not None:
+            sel = keep[i]
+            i, j, w = i[sel], j[sel], w[sel]
+        if i.size == 0:
+            return 0.0
+        st = (j - base).astype(np.float64) - u * d[i]
+        c, _a, _b = ps.best_subinterval(st, st + 1.0, w, xl, xh)
+        return float(c)
+
     def try_u(self, u: float, ks: np.ndarray, d: np.ndarray, lo_r: np.ndarray, hi_r: np.ndarray, base: int,
-              droppable: np.ndarray, track: int | None = None, max_run: int = 1
-              ) -> tuple[list[int], float, float] | None:
-        """Returns (dropped comp frames, slack t*, x*) or None. Local units (see phase_solve).
+              droppable: np.ndarray, track: int | None = None, max_run: int = 1, with_interval: bool = False
+              ) -> tuple | None:
+        """Returns (dropped comp frames, slack t*, x*) -- plus the feasible phase interval (xl, xh) of the
+        kept frames when with_interval -- or None. Local units (see phase_solve).
 
         A violating frame may be dropped only if it is isolated (no adjacent violation), interior (the
         caller's mask), its score for the model frame is within 5 delta_k of its best, and no competing
@@ -286,6 +371,8 @@ class _Solver:
         lmax, umin = float(L.max()), float(U.min())
         if lmax - _TAU <= umin + _TAU:
             t = min((umin - lmax) / 2.0, 0.5)
+            if with_interval:
+                return [], t, (lmax + umin) / 2.0, lmax, umin
             return [], t, (lmax + umin) / 2.0
         if not droppable.any():
             return None
@@ -334,6 +421,8 @@ class _Solver:
                 # no score for the model frame: only a near miss of a low-margin frame is tolerated
                 # (a far-away flash cut on the same track must stay a cut)
                 return None
+        if with_interval:
+            return [int(ks[i]) for i in viol], t, x, lmax2, umin2
         return [int(ks[i]) for i in viol], t, x
 
     # -- full cost evaluation -----------------------------------------------------------------------
@@ -352,14 +441,28 @@ class _Solver:
         d = (ks - comp_in).astype(np.float64)
         lo_r = (lo - base).astype(np.float64)
         hi_r = (hi - base).astype(np.float64)
+        pen = self.penalties(ks, lo, hi)
+        plo, phi = self.F.pristine(ks, lo, hi)
         vo_cache: list[float] = []
 
-        def v_ols_() -> float:      # robust slope, only computed when a decision needs it
+        def v_ols_() -> float:      # robust slope of the MEASURED frames, only computed when a decision needs it
             if not vo_cache:
-                vo_cache.append(ps.estimate_speed(ks, lo, hi, self.cf, self.rf) if n >= 2 else float("nan"))
+                vo_cache.append(ps.estimate_speed(ks, plo, phi, self.cf, self.rf) if n >= 2 else float("nan"))
             return vo_cache[0]
 
-        best = None
+        def evaluate(v: float, bc: float, dmask: np.ndarray, mr: int):
+            r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, dmask, track, mr, with_interval=True)
+            if r is None:
+                return None
+            drops, t, _x, xl, xh = r
+            keep = None
+            if drops:
+                keep = ~np.isin(ks, np.asarray(drops, dtype=np.int64))
+            data = self.data_cost(pen, v * self.ratio, d, base, xl, xh, keep)
+            total = bc + self.l_drop * len(drops) + (self.l_tie if t < _TIE else 0.0) + data
+            return total, data, drops
+
+        best = None      # (key, v, kind, drops, unsnapped, data); key = (total, data, rank, |v - v_ols|, v)
         if fixed_v is not None:
             cands = [(float(fixed_v), 0.0, "fixed", 0)]
         else:
@@ -367,46 +470,71 @@ class _Solver:
         for v, bc, kind, rank in cands:
             if best is not None and bc > best[0][0] + 1e-12:
                 break
-            r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, droppable, track, max_run)
-            if r is None:
+            ev = evaluate(v, bc, droppable, max_run)
+            if ev is None:
                 continue
-            drops, t, _x = r
-            total = bc + self.l_drop * len(drops) + (self.l_tie if t < _TIE else 0.0)
-            if best is not None and (total, rank) > best[0][:2]:
+            total, data, drops = ev
+            if best is not None and (total, data, rank) > best[0][:3]:
                 continue
             vo = v_ols_() if kind == "snap" else float("nan")
-            key = (total, rank, abs(v - vo) if math.isfinite(vo) else 0.0, v)
+            key = (total, data, rank, abs(v - vo) if math.isfinite(vo) else 0.0, v)
             if best is None or key < best[0]:
-                best = (key, v, kind, drops, False)
-        if best is None and fixed_v is None:
-            vr = ps.feasible_speed_range(ks, lo, hi, comp_in, self.cf, self.rf)
-            dmask = droppable
-            if vr is None and droppable.any():
-                keep = ~droppable
-                if keep.sum() >= 1:
-                    vr = ps.feasible_speed_range(ks[keep], lo[keep], hi[keep], comp_in, self.cf, self.rf)
-            if vr is not None:
-                v_ols = v_ols_()
-                vo = v_ols if math.isfinite(v_ols) else (vr[0] + vr[1]) / 2.0
-                v = float(min(max(vo, vr[0]), vr[1]))
-                r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, dmask, track)
-                if r is None:   # clipped v sits on the edge of a relaxed range: try the centre
-                    v = (vr[0] + vr[1]) / 2.0
-                    r = self.try_u(v * self.ratio, ks, d, lo_r, hi_r, base, dmask, track)
-                if r is not None:
-                    drops, t, _x = r
-                    total = self.l_uns + self.l_drop * len(drops) + (self.l_tie if t < _TIE else 0.0)
-                    best = ((total, 9, 0.0, v), v, "unsnapped", drops, True)
+                best = (key, v, kind, drops, False, data)
+        # unsnapped speed (prompt 5.4: snap only if the residuals don't get worse): the robust slope of the
+        # measured frames, clipped into the speeds that reproduce them (else into the soft range). Tried when
+        # nothing snapped is feasible or when every snapped explanation costs more than lambda_unsnapped
+        # (i.e. it contradicts the measured frames).
+        if fixed_v is None and n >= 2 and (best is None or best[0][0] > self.l_uns + 1e-12):
+            un = self._unsnapped(ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate)
+            if un is not None:
+                v, (total, data, drops) = un
+                key = (total, data, 9, 0.0, v)
+                if best is None or key < best[0]:
+                    best = (key, v, "unsnapped", drops, True, data)
         if best is None:
             return None
-        key, v, kind, drops, uns = best
+        key, v, kind, drops, uns, data = best
         use = np.ones(n, bool)
         if drops:
             use &= ~np.isin(ks, np.asarray(drops, dtype=np.int64))
-        sol = ps.solve_raw_in(ks[use], lo[use], hi[use], comp_in, v, self.cf, self.rf)
+        sol = ps.solve_raw_in(ks[use], lo[use], hi[use], comp_in, v, self.cf, self.rf,
+                              penalties=self._pen_subset(pen, use))
         vo = vo_cache[0] if vo_cache else float("nan")     # final segments recompute it (to_segment)
         return _Model(comp_in, float(v), kind, float(key[0]), bool(uns), None, float(vo), list(drops), sol,
-                      track, flip, n)
+                      track, flip, n, float(data))
+
+    def _unsnapped(self, ks, lo, hi, plo, phi, comp_in, droppable, v_ols_, evaluate):
+        """(v, evaluate(v)) of the unsnapped explanation, or None."""
+        vr = ps.feasible_speed_range(ks, lo, hi, comp_in, self.cf, self.rf)
+        if vr is None and droppable.any():
+            keep = ~droppable
+            if keep.sum() >= 1:
+                vr = ps.feasible_speed_range(ks[keep], lo[keep], hi[keep], comp_in, self.cf, self.rf)
+        if vr is None:
+            return None
+        v_ols = v_ols_()
+        vo = v_ols if math.isfinite(v_ols) else (vr[0] + vr[1]) / 2.0
+        tries = []
+        ex = ps.feasible_speed_range(ks, plo, phi, comp_in, self.cf, self.rf) \
+            if bool(np.any((plo > lo) | (phi < hi))) else vr
+        if ex is not None and ex[0] <= vr[1] and ex[1] >= vr[0]:
+            e0, e1 = max(ex[0], vr[0]), min(ex[1], vr[1])
+            tries.append(float(min(max(vo, e0), e1)))
+            tries.append((e0 + e1) / 2.0)
+        tries.append(float(min(max(vo, vr[0]), vr[1])))
+        tries.append((vr[0] + vr[1]) / 2.0)   # clipped v on the edge of a relaxed range: the centre
+        best = None
+        seen: list[float] = []
+        for v in tries:
+            if any(abs(v - s) <= 1e-12 for s in seen):
+                continue
+            seen.append(v)
+            ev = evaluate(v, self.l_uns, droppable, 1)
+            if ev is not None and (best is None or ev[:2] < best[1][:2]):
+                best = (v, ev)
+                if ev[1] <= 1e-12:
+                    break
+        return best
 
     def vrange(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray, comp_in: int) -> tuple[float, float] | None:
         if ks.size == 0:
@@ -693,6 +821,83 @@ class _Builder:
             self.center = (cw / 2.0, ch / 2.0)
             self.box_r = math.hypot(cw, ch) / 2.0
         self.ts = int(_cfg(cfg, "transition_search", 20))
+        self._init_periods(layout, cw, ch)
+
+    # ---------------------------------------------------------------------------------------------
+    # layout periods (D1: fullscreen vs boxed shots, split / PiP)
+    # ---------------------------------------------------------------------------------------------
+    def _init_periods(self, layout: Any, cw: Any, ch: Any) -> None:
+        """Per-frame layout class from layout.periods: (box dict | None, region, mode, period). The dominant
+        layout -> (None, 0); a 'fullscreen' period inside another dominant layout -> the whole canvas, region
+        1; 'split' / 'pip' (unsupported: extra regions are not recreated) -> region 2 / 3, box None.
+        ``self.plabel`` increments at every change, so segments never straddle a period boundary."""
+        n = self.n
+        self.pinfos: list[tuple] = [(None, 0, None, None)]      # class 0 = dominant layout
+        self.pcls = np.zeros(n, np.int64)
+        self.plabel = np.zeros(n, np.int64)
+        periods = list(getattr(layout, "periods", None) or []) if layout is not None else []
+        if not periods or n == 0:
+            return
+        W = float(getattr(layout, "comp_w", 0) or (cw or 0))
+        H = float(getattr(layout, "comp_h", 0) or (ch or 0))
+        dom = str(getattr(layout, "mode", "boxed") or "boxed")
+        for p in sorted(periods, key=lambda p: (int(p.comp_in), int(p.comp_out))):
+            a, b = max(0, int(p.comp_in)), min(n, int(p.comp_out))
+            mode = str(p.mode)
+            if b <= a or mode == dom:
+                continue
+            if mode == "fullscreen":
+                info = ({"x": 0.0, "y": 0.0, "w": W, "h": H, "corner_radius": 0.0}, 1, mode, (a, b))
+            elif mode == "pip":
+                info = (None, 3, mode, (a, b))
+            else:                       # split (or any other unsupported multi-region layout)
+                info = (None, 2, mode, (a, b))
+            self.pinfos.append(info)
+            self.pcls[a:b] = len(self.pinfos) - 1
+        if len(self.pinfos) == 1:
+            return
+        self.plabel = np.concatenate([[0], np.cumsum(self.pcls[1:] != self.pcls[:-1])]).astype(np.int64)
+        self.log("layout_periods", evidence={"dominant": dom, "periods": [
+            {"comp_in": i[3][0], "comp_out": i[3][1], "mode": i[2], "region": i[1], "box": i[0]}
+            for i in self.pinfos[1:]]})
+
+    def _period_break(self, k: int) -> bool:
+        return 0 < k < self.n and self.plabel[k] != self.plabel[k - 1]
+
+    def _same_period(self, a: int, b: int) -> bool:
+        """[a, b) lies inside one layout period."""
+        a, b = max(0, int(a)), min(self.n, int(b))
+        return b <= a or self.plabel[a] == self.plabel[b - 1]
+
+    def _period_info(self, a: int, b: int) -> tuple:
+        """(box, region, mode, period) of the layout class covering most of [a, b)."""
+        a, b = max(0, int(a)), min(self.n, int(b))
+        if len(self.pinfos) == 1 or b <= a:
+            return self.pinfos[0]
+        cls, cnt = np.unique(self.pcls[a:b], return_counts=True)
+        return self.pinfos[int(cls[np.argmax(cnt)])]
+
+    def assign_regions(self, segs: list[Segment]) -> None:
+        """Segment.box / Segment.region from the layout period (D1)."""
+        if len(self.pinfos) == 1:
+            return
+        for s in segs:
+            box, region, mode, per = self._period_info(s.comp_in, s.comp_out)
+            s.box = dict(box) if box is not None else None
+            s.region = int(region)
+            if not self._same_period(s.comp_in, s.comp_out):
+                self.log("segment_straddles_period", comp_range=[s.comp_in, s.comp_out], evidence={
+                    "reason": "transition overlap across a layout period boundary", "assigned_mode": mode})
+            if mode is None:
+                continue
+            if mode == "fullscreen":
+                note = f"fullscreen layout period (frames {per[0]}-{per[1] - 1}): shown on the whole canvas"
+            else:
+                note = (f"'{mode}' layout period (frames {per[0]}-{per[1] - 1}): extra video region(s) are not "
+                        "recreated (only the dominant box is rebuilt)")
+            s.notes = (s.notes + "; " if s.notes else "") + note
+            self.log("segment_layout_period", comp_range=[s.comp_in, s.comp_out], evidence={
+                "mode": mode, "region": s.region, "box": s.box, "period": list(per)})
 
     # ---------------------------------------------------------------------------------------------
     def log(self, decision: str, **kw: Any) -> None:
@@ -707,11 +912,12 @@ class _Builder:
     # runs and hard boundaries
     # ---------------------------------------------------------------------------------------------
     def status_runs(self) -> list[tuple[int, int, int]]:
+        """Runs of equal status, split at layout period boundaries (D1)."""
         st = self.F.status
         out = []
         a = 0
         for k in range(1, self.n + 1):
-            if k == self.n or st[k] != st[a]:
+            if k == self.n or st[k] != st[a] or self._period_break(k):
                 out.append((a, k, int(st[a])))
                 a = k
         return out
@@ -826,36 +1032,40 @@ class _Builder:
     # ---------------------------------------------------------------------------------------------
     # DP
     # ---------------------------------------------------------------------------------------------
-    def _phase_breaks(self, r0: int, r1: int, u: float) -> set[int]:
+    def _phase_breaks(self, r0: int, r1: int, u: float, lo: np.ndarray | None = None,
+                      hi: np.ndarray | None = None) -> set[int]:
         F = self.F
+        lo = F.lo if lo is None else lo
+        hi = F.hi if hi is None else hi
         out: set[int] = set()
         # forward
         start, lr, ur = r0, -math.inf, math.inf
         for k in range(r0, r1):
             dd = k - start
-            lr = max(lr, F.lo[k] - u * dd)
-            ur = min(ur, F.hi[k] + 1 - u * dd)
+            lr = max(lr, lo[k] - u * dd)
+            ur = min(ur, hi[k] + 1 - u * dd)
             if lr > ur + 2 * _TAU:
                 out.add(k)
-                start, lr, ur = k, float(F.lo[k]), float(F.hi[k] + 1)
+                start, lr, ur = k, float(lo[k]), float(hi[k] + 1)
         # backward
         start, lr, ur = r1 - 1, -math.inf, math.inf
         for k in range(r1 - 1, r0 - 1, -1):
             dd = k - start
-            lr = max(lr, F.lo[k] - u * dd)
-            ur = min(ur, F.hi[k] + 1 - u * dd)
+            lr = max(lr, lo[k] - u * dd)
+            ur = min(ur, hi[k] + 1 - u * dd)
             if lr > ur + 2 * _TAU:
                 out.add(k + 1)
-                start, lr, ur = k, float(F.lo[k]), float(F.hi[k] + 1)
+                start, lr, ur = k, float(lo[k]), float(hi[k] + 1)
         return out
 
-    def _free_runs(self, r0: int, r1: int, forward: bool = True) -> list[tuple[int, int, float, float]]:
+    def _free_runs(self, r0: int, r1: int, forward: bool = True, lo_a: np.ndarray | None = None,
+                   hi_a: np.ndarray | None = None) -> list[tuple[int, int, float, float]]:
         """Greedy maximal runs explained by ONE line at ANY speed (exact pairwise u bounds, incremental).
         Returns [(a, b, umin, umax)] tiling [r0, r1) (u in RAW frames per comp frame). Used only to place
-        candidate cuts: its boundaries are real model breaks at some speed."""
+        candidate cuts: its boundaries are real model breaks at some speed. Soft ranges by default."""
         F = self.F
-        lo = F.lo.astype(np.float64)
-        hi = F.hi.astype(np.float64)
+        lo = (F.lo if lo_a is None else lo_a).astype(np.float64)
+        hi = (F.hi if hi_a is None else hi_a).astype(np.float64)
         t2 = 2 * _TAU
         runs = []
         if forward:
@@ -937,6 +1147,16 @@ class _Builder:
                 k = r0 + int(i) + 1
                 if near(run_at(fwd, k), u, tol) or near(run_at(fwd, k - 1), u, tol):
                     cands.add(k)
+        # soft ranges wider than the measured argmax range (slow footage): the soft phase breaks above do not
+        # see a 1-2 frame jump cut there; the MEASURED frames' phase breaks (and free runs) do (data term)
+        wide = (F.lo[r0:r1] < F.raw_lo[r0:r1]) | (F.hi[r0:r1] > F.raw_hi[r0:r1])
+        if wide.any():
+            plo, phi = F.raw_lo, F.raw_hi
+            for v in sorted({self.S.dominant, 1.0}):
+                for b in self._phase_breaks(r0, r1, v * ratio, plo, phi):
+                    cands.update((b - 1, b, b + 1))
+            for a, b, _u0, _u1 in self._free_runs(r0, r1, True, plo, phi) + self._free_runs(r0, r1, False, plo, phi):
+                cands.update((a - 1, a, a + 1, b - 1, b, b + 1))
         for k in range(r0 + 1, r1):
             if F.track[k] != F.track[k - 1]:
                 cands.add(k)
@@ -1003,14 +1223,16 @@ class _Builder:
         P = self.candidates(r0, r1)
         lam = self.S.l_cut
         max_fail = int(_cfg(self.cfg, "dp_max_consecutive_fail", 6))
-        best: dict[int, tuple[float, int | None, _Model | None]] = {r0: (0.0, None, None)}
+        # best[p] = (cost, q, model, number of segments); equal costs (1e-9) -> fewer segments (a constant
+        # non-snap speed whose regular 1-frame steps could also be read as equally many 1-frame jump cuts)
+        best: dict[int, tuple[float, int | None, _Model | None, int]] = {r0: (0.0, None, None, 0)}
         for pi in range(1, len(P)):
             p = P[pi]
-            bc, arg = math.inf, None
+            bc, bn, arg = math.inf, 0, None
             fails = 0
             for qi in range(pi - 1, -1, -1):
                 q = P[qi]
-                prev = best.get(q, (math.inf, None, None))[0]
+                prev, _pq, _pm, pn = best.get(q, (math.inf, None, None, 0))
                 m = self.eval_range(q, p)
                 if m is None:
                     # Sound break: infeasible even with every relaxed-droppable frame removed. Practical
@@ -1024,9 +1246,9 @@ class _Builder:
                 if prev == math.inf:
                     continue
                 c = prev + m.cost + (lam if q > r0 else 0.0)
-                if c < bc - 1e-12:
-                    bc, arg = c, (q, m)
-            best[p] = (bc, arg[0] if arg else None, arg[1] if arg else None)
+                if c < bc - 1e-9 or (c <= bc + 1e-9 and pn + 1 < bn):
+                    bc, bn, arg = c, pn + 1, (q, m)
+            best[p] = (bc, arg[0] if arg else None, arg[1] if arg else None, bn)
         if best[r1][0] == math.inf:
             # cannot happen when the dominant-speed forward breaks are candidates; be safe anyway
             log.warning("segment: DP found no segmentation of [%d, %d); using the free-speed runs", r0, r1)
@@ -1039,14 +1261,14 @@ class _Builder:
         out = []
         p = r1
         while p != r0:
-            _c, q, m = best[p]
+            _c, q, m, _n = best[p]
             out.append(self._raw_seg(q, p, m))
             p = q
         out.reverse()
         self.log("dp_run", comp_range=[r0, r1], evidence={
             "candidates": len(P), "cost": best[r1][0],
             "segments": [{"comp_in": s.a, "comp_out": s.b, "speed": s.model.v, "kind": s.model.kind,
-                          "drops": s.model.drops} for s in out]})
+                          "drops": s.model.drops, "data": round(float(s.model.data), 6)} for s in out]})
         return out
 
     def _fixed_model(self, a: int, b: int, v: float) -> _Model:
@@ -1090,7 +1312,7 @@ class _Builder:
             if m is not None:
                 m.kind, m.unsnapped = seg.model.kind, seg.model.unsnapped
                 m.cost += self.S.class_cost(seg.model.kind)
-                m.v_ols = ps.estimate_speed(ks, lo, hi, self.cf, self.rf) if ks.size >= 2 else float("nan")
+                m.v_ols = self.measured_speed(ks, lo, hi)
         if m is None:
             m = self.S.fit(ks, lo, hi, seg.a, dm, (seg.a, seg.b), tr, seg.flip)
         if m is None:
@@ -1106,6 +1328,41 @@ class _Builder:
 
     def seg_cost(self, seg: _Seg) -> float:
         return seg.model.cost if seg.model is not None else 0.0
+
+    def measured_speed(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> float:
+        """v_ols: robust slope of refine's MEASURED (argmax) frames, not of the soft-range midpoints."""
+        if ks.size < 2:
+            return float("nan")
+        plo, phi = self.F.pristine(ks, lo, hi)
+        return ps.estimate_speed(ks, plo, phi, self.cf, self.rf)
+
+    def claimed_range(self, S: _Seg, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> tuple[float, float] | None:
+        """Segment.speed_range: the speeds at which one line reproduces what the segment CLAIMS -- refine's
+        measured range where the model shows it, the model frame where the segment re-assigns a frame --
+        (the soft-range feasible range when that is empty, e.g. timing ties)."""
+        if ks.size == 0:
+            return None
+        plo, phi = self.F.pristine(ks, lo, hi)
+        if S.model is not None and math.isfinite(S.model.sol.get("raw_in", float("nan"))):
+            j = np.asarray(self.pred(S, ks), dtype=np.int64)
+            inside = (plo <= j) & (j <= phi)
+            clo, chi = np.where(inside, plo, j), np.where(inside, phi, j)
+            vr = ps.feasible_speed_range(ks, clo, chi, S.a, self.cf, self.rf)
+            if vr is not None:
+                return vr
+        return self.S.vrange(ks, lo, hi, S.a)
+
+    def exact_range(self, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray, comp_in: int,
+                    drops: Iterable[int] = ()) -> tuple[float, float] | None:
+        """Speeds at which one line reproduces every measured (argmax-range) frame -- dropped frames
+        excluded -- i.e. the residuals do not get worse (prompt 5.4); None when none does."""
+        if ks.size == 0:
+            return None
+        keep = ~np.isin(ks, np.asarray(list(drops), dtype=np.int64)) if drops else np.ones(ks.size, bool)
+        if keep.sum() == 0:
+            return None
+        plo, phi = self.F.pristine(ks[keep], lo[keep], hi[keep])
+        return ps.feasible_speed_range(ks[keep], plo, phi, comp_in, self.cf, self.rf)
 
     # ---------------------------------------------------------------------------------------------
     # framing
@@ -1254,6 +1511,8 @@ class _Builder:
                         continue
                     if (side < 0 and nb.b != t.a) or (side > 0 and nb.a != t.b):
                         continue
+                    if not self._same_period(min(nb.a, t.a), max(nb.b, t.b)):
+                        continue
                     res = [self._explains(nb, k) for k in range(t.a, t.b)]
                     if all(r[0] for r in res):
                         trial = _Seg("raw", min(nb.a, t.a), max(nb.b, t.b), model=nb.model, flip=nb.flip,
@@ -1283,6 +1542,8 @@ class _Builder:
     def _compatible(self, A: _Seg, B: _Seg) -> bool:
         if A.kind != "raw" or B.kind != "raw" or A.flip != B.flip:
             return False
+        if not self._same_period(min(A.a, B.a), max(A.b, B.b)):
+            return False            # D1: never merge across a layout period boundary
         ka, kb = A.b - 1, B.a
         ia = [k for k in range(A.b - 1, A.a - 1, -1) if self.F.sim(k) is not None][:1]
         ib = [k for k in range(B.a, B.b) if self.F.sim(k) is not None][:1]
@@ -1733,14 +1994,84 @@ class _Builder:
                     return sa, sb
         return None
 
+    def _same_view(self, A: _Seg, B: _Seg, k: int) -> bool:
+        """Both segment models show the same RAW frame with the same flip and framing at comp frame k."""
+        if A.flip != B.flip or A.model is None or B.model is None:
+            return False
+        if int(self.pred(A, k)) != int(self.pred(B, k)) or int(self.pred(A, k)) < 0:
+            return False
+        sa, sb = self.sim_at(A, k), self.sim_at(B, k)
+        return bool(abs(sa.s / sb.s - 1.0) <= 1e-3 and math.hypot(sa.tx - sb.tx, sa.ty - sb.ty) <= 1.0
+                    and abs(sa.theta_deg - sb.theta_deg) <= 0.05)
+
+    def _phantom(self, A: _Seg, B: _Seg) -> bool:
+        """A hard cut with no discontinuity in m(k): same speed, and both models show the same RAW frame and
+        framing on both sides of the boundary (only speed-only cuts, which carry cut_ambiguity, may agree)."""
+        return bool(A.kind == "raw" and B.kind == "raw" and A.b == B.a and B.trans_in is None
+                    and B.cut_ambiguity is None and A.model is not None and B.model is not None
+                    and abs(A.model.v - B.model.v) <= 1e-12 and self._compatible(A, B)
+                    and self._same_view(A, B, B.a - 1) and self._same_view(A, B, B.a))
+
+    def merge_phantom_cuts(self, segs: list[_Seg]) -> list[_Seg]:
+        """verification-honesty F3: after criterion-2 moves, merge neighbours whose models agree at the
+        boundary (a cut must be a discontinuity of m(k)); the union keeps A's incoming and B's outgoing
+        transition. Refit at the common speed with the isolated-frame rule, then with runs of 2."""
+        i = 0
+        while i + 1 < len(segs):
+            A, B = segs[i], segs[i + 1]
+            if not self._phantom(A, B):
+                i += 1
+                continue
+            trial = _Seg("raw", A.a, B.b, model=A.model, flip=A.flip, track=A.track, extra={**A.extra, **B.extra},
+                         trans_in=A.trans_in, trans_out=B.trans_out, notes=A.notes + B.notes,
+                         cut_ambiguity=A.cut_ambiguity, uncertain=A.uncertain or B.uncertain,
+                         blend_frames=sorted(set(A.blend_frames) | set(B.blend_frames)))
+            ok = self.refit(trial, keep_v=True)
+            if not ok:
+                ks, lo, hi = self.constraints(trial)
+                dm = self.F.relaxed[ks].copy()
+                if dm.size:
+                    dm[0] = dm[-1] = False
+                m = self.S.fit(ks, lo, hi, trial.a, dm, (trial.a, trial.b), A.track, A.flip, fixed_v=A.model.v,
+                               max_run=2)
+                if m is not None:
+                    m.kind, m.unsnapped = A.model.kind, A.model.unsnapped
+                    m.cost += self.S.class_cost(A.model.kind)
+                    trial.model = m
+                    for k in m.drops:
+                        self._widen(k, int(self.pred(trial, k)), "phantom_cut_merge")
+                    ok = self.refit(trial, keep_v=True)
+            if ok and trial.model.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut + 1e-9:
+                self.log("phantom_cut_merged", comp_frame=int(B.a), evidence={
+                    "segments": [[A.a, A.b], [B.a, B.b]], "speed": trial.model.v,
+                    "pred": [int(self.pred(trial, B.a - 1)), int(self.pred(trial, B.a))],
+                    "costs": [self.seg_cost(A), self.seg_cost(B), trial.model.cost]})
+                segs[i:i + 2] = [trial]
+                continue
+            self.log("phantom_cut_kept", comp_frame=int(B.a), evidence={
+                "segments": [[A.a, A.b], [B.a, B.b]], "union_feasible": bool(ok)})
+            B.notes.append(f"cut at {B.a} shows no RAW / framing discontinuity but one model cannot explain "
+                           "both sides")
+            i += 1
+        return segs
+
     def check_cuts(self, segs: list[_Seg]) -> None:
         for i in range(len(segs) - 1):
             A, B = segs[i], segs[i + 1]
             if not (A.kind == "raw" and B.kind == "raw" and A.b == B.a) or B.trans_in is not None \
                     or B.cut_ambiguity is not None:
                 continue
+            if self._period_break(B.a):
+                self.log("criterion2_layout_boundary", comp_frame=int(B.a), evidence={
+                    "reason": "cut at a layout period boundary (not moved)"})
+                continue
             for it in range(3):
                 c = B.a
+                if self._same_view(A, B, c - 1) and self._same_view(A, B, c):
+                    # both models show the same frame on both sides: moving the cut cannot help (it would only
+                    # oscillate); merge_phantom_cuts removes it
+                    self.log("criterion2_indistinguishable", comp_frame=int(c), evidence={"cut": c, "iteration": it})
+                    break
                 s1 = self._side_scores(A, B, c - 1)
                 s2 = self._side_scores(A, B, c)
                 ev = {"cut": c, "last_A": s1, "first_B": s2, "iteration": it}
@@ -1792,21 +2123,26 @@ class _Builder:
             if ks.size < 2:
                 continue
             vr = self.S.vrange(ks, lo, hi, S.a)
-            S.model.v_ols = ps.estimate_speed(ks, lo, hi, self.cf, self.rf)
+            ex = self.exact_range(ks, lo, hi, S.a, S.model.drops)
+            S.model.v_ols = self.measured_speed(ks, lo, hi)
             others = dict(weights)
             others[S.model.v] = others.get(S.model.v, 0.0) - S.length
             pref = {v: w for v, w in others.items() if w > 0}
             dom = self.S.dominant
             pref[dom] = pref.get(dom, 0.0) + 1e9           # the edit's dominant speed stays dominant
-            v2, uns = ps.snap_speed(S.model.v_ols, vr, self.cfg, preferred=pref)
+            # snap test (prompt 5.4): inside the measured frames' exact range, or within speed_snap_tol of the
+            # robust slope of the measured frames; a soft range alone never licenses a snap
+            v2, uns = ps.snap_speed(S.model.v_ols, vr, self.cfg, preferred=pref,
+                                    exact_range=ex if ex is not None else (S.model.v_ols, S.model.v_ols))
             if uns or abs(v2 - S.model.v) <= 1e-12:
                 continue
             old = S.model
             S.model = _Model(old.comp_in, v2, "snap", old.cost, False, vr, old.v_ols, [], old.sol, old.track,
-                             old.flip, old.n_frames)
-            if self.refit(S, keep_v=True):
+                             old.flip, old.n_frames, old.data)
+            if self.refit(S, keep_v=True) and S.model.data <= old.data + 1e-9:
                 self.log("speed_resnapped", comp_range=[S.a, S.b], evidence={
-                    "from": old.v, "to": v2, "range": vr, "v_ols": old.v_ols, "was_unsnapped": old.unsnapped})
+                    "from": old.v, "to": v2, "range": vr, "exact_range": ex, "v_ols": old.v_ols,
+                    "was_unsnapped": old.unsnapped})
             else:
                 S.model = old
 
@@ -1899,10 +2235,20 @@ class _Builder:
         for k in m.drops:   # tolerated isolated frames: their soft range now includes the model frame
             self._widen(k, int(self.pred(S, k)), "drop")
         ks, lo, hi = self.constraints(S)
-        sol = ps.solve_raw_in(ks, lo, hi, S.a, m.v, cf, self.rf) if ks.size else m.sol
+        if ks.size:
+            # the phase follows the measured frames (data term); tolerated drops keep their widened soft range
+            # but carry no preference
+            pen = self.S.penalties(ks, lo, hi)
+            if pen is not None and m.drops:
+                sel = ~np.isin(ks[pen[0]], np.asarray(m.drops, dtype=np.int64))
+                pen = (pen[0][sel], pen[1][sel], pen[2][sel]) if sel.any() else None
+            sol = ps.solve_raw_in(ks, lo, hi, S.a, m.v, cf, self.rf, penalties=pen)
+        else:
+            sol = m.sol
         m.sol = sol
-        vr = self.S.vrange(ks, lo, hi, S.a)
-        m.v_ols = ps.estimate_speed(ks, lo, hi, cf, self.rf) if ks.size >= 2 else float("nan")
+        m.data = float(sol.get("data_cost", 0.0)) if ks.size else m.data
+        vr = self.claimed_range(S, ks, lo, hi)
+        m.v_ols = self.measured_speed(ks, lo, hi)
         notes = list(S.notes)
         uncertain = S.uncertain
         if ks.size and not sol.get("ok", False):
@@ -2084,6 +2430,7 @@ class _Builder:
         work = self.transitions(work)
         work = self.uniform_runs(work)
         self.check_cuts(work)
+        work = self.merge_phantom_cuts(work)
         self.retime(work)
         work = self.ramps(work)
         for S in work:
@@ -2097,6 +2444,7 @@ class _Builder:
         segs = [segs[i] for i in order]
         for i, s in enumerate(segs, start=1):
             s.id = i
+        self.assign_regions(segs)
         self.write_back(work, segs)
         self._coverage_check(segs)
         pre_raw = np.asarray(self.fm.d[_PRE + "raw"]) if (_PRE + "raw") in self.fm.d else None

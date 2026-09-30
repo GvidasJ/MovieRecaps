@@ -12,8 +12,17 @@ plus the pass-2 overlay masks (``frame_map``) -- under ``WORK_DIR/cache/<stage>/
 values are always written first and re-read from the cache file, so a first run and a cached
 re-run see bit-identical inputs (criterion 9.7).
 
-S5.4 -> S6 (segmentation, phase solve, audio per segment, cutlist assembly) is never cached: it is
-what ``verify`` s9_7 re-runs from the cached FrameMap/AudioHints in a fresh context.
+S5.4 -> S6 (segmentation, phase solve, audio per segment, audio-informed phase, cutlist assembly) is
+never cached: it is what ``verify`` s9_7 re-runs from the cached FrameMap/AudioHints in a fresh context.
+
+Decision log (DESIGN §7 D6): every cached stage's records are captured when it computes and stored in
+``WORK_DIR/cache/decisions/<stage>-<key>.jsonl``; a cache hit replays them (``cached: true``), so a
+re-run's ``decisions.jsonl`` holds the same evidence. The log of each run is copied to
+``OUTPUT_DIR/debug/decisions.jsonl`` (the one the report links).
+
+Also here: the D2 box refinement against RAW (re-running S5.2 + S5.3 once when the box changes), the
+long-RAW proxy windows re-derived from the cached FrameMap on both cache branches, the D3 audio-informed
+phase, the deliverables record (``ctx.exports``) and the D5 exit codes / headline.
 """
 from __future__ import annotations
 
@@ -40,7 +49,8 @@ import numpy as np
 
 from . import __version__
 from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, fmt_seconds,
-                     fps_str, log, null_dlog, params_hash, seed_everything, setup_logging, stage_key, timecode)
+                     fps_str, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
+                     setup_logging, stage_key, timecode)
 from .config import Config
 from .geometry import Sim
 from .model import (AudioHints, Cutlist, FrameMap, Layout, Segment, Status, StreamInfo, cutlist_layout)
@@ -50,7 +60,9 @@ MOCK_SCENARIOS = ("default", "media_missing", "new_project_null", "no_marker_pro
 MAIN_COMP_NAME = "Recreated Edit"
 PHASE_TAU = 1e-6            # frame tolerance of the phase LP (DESIGN §2.1)
 DEFAULT_SEG_AUDIO = {"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None,
-                     "lag_ms": None, "corr": None, "exception": None}
+                     "lag_ms": None, "corr": None, "exception": None,
+                     "phase_source": None,      # 'audio' | 'video': what placed raw_in inside its interval (D3)
+                     "lag_ms_video": None}      # lag at the video-only raw_in (lag_ms = residual after D3)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -572,6 +584,281 @@ def _append_note(notes: str, extra: str) -> str:
     return f"{notes}; {extra}"
 
 
+# ---------------------------------------------------------------------------------------------
+# Audio-informed phase (S6, DESIGN §7 D3)
+# ---------------------------------------------------------------------------------------------
+
+AUDIO_PHASE_NARROW_S = 0.1       # analyze_segments_audio searches the per-segment lag within +-100 ms
+AUDIO_PHASE_WIDE_MAX_S = 5.0     # cap of the wider search for static / ambiguous segments
+AUDIO_PHASE_WIDE_GAIN = 0.02     # a wide-search peak must beat a strong narrow peak by this much
+AUDIO_PHASE_MIN_RANGE_S = 0.25   # shortest audio range the wide search correlates
+_AE_EPS = 1e-9
+
+
+def audio_phase_margin_s(width_s: float) -> float:
+    """Edge margin of the audio-informed raw_in inside its feasible interval: max(1 ms, 5 % of the width)."""
+    return max(0.001, 0.05 * max(0.0, float(width_s)))
+
+
+def audio_phase_interval(seg: Segment) -> tuple[list[float] | None, str]:
+    """The interval the audio-informed raw_in must stay in: floor∩round when it exists, else floor."""
+    if seg.raw_in_interval_both:
+        return [float(seg.raw_in_interval_both[0]), float(seg.raw_in_interval_both[1])], "both"
+    if seg.raw_in_interval:
+        return [float(seg.raw_in_interval[0]), float(seg.raw_in_interval[1])], "floor"
+    return None, ""
+
+
+def _pre_segment_columns(fm: FrameMap) -> dict[str, np.ndarray]:
+    """refine's own measurement (segment.py keeps it as 'pre_segment_*'; DESIGN §7 D4), else the
+    current columns."""
+    d = fm.__dict__["d"]
+    return {k: np.asarray(d.get("pre_segment_" + k, d[k])) for k in ("status", "raw", "raw_lo", "raw_hi", "flip")}
+
+
+def preserved_frames_interval(seg: Segment, fm: FrameMap, raw_in_s: float, comp_fps: Fraction, raw_fps: Fraction,
+                              both: bool) -> tuple[float, float, int]:
+    """raw_in range (seconds) that keeps every frame of the segment the current raw_in shows correctly
+    (AE floor rule; with ``both`` also round-to-nearest) on a RAW frame inside refine's measured range
+    [raw_lo, raw_hi]. Returns (lo_s, hi_s, frames used). Moving raw_in inside it never changes a frame
+    that criterion 3 counts as exact."""
+    k0, k1 = max(0, int(seg.comp_in)), min(fm.n, int(seg.comp_out))
+    if k1 <= k0:
+        return -math.inf, math.inf, 0
+    cols = _pre_segment_columns(fm)
+    ks = np.arange(k0, k1)
+    rf = float(Fraction(raw_fps))
+    u = float(seg.speed) * float(Fraction(raw_fps) / Fraction(comp_fps))
+    d = (ks - int(seg.comp_in)).astype(np.float64)
+    x = rf * float(raw_in_s)
+    lo, hi = cols["raw_lo"][ks].astype(np.int64), cols["raw_hi"][ks].astype(np.int64)
+    rw = cols["raw"][ks].astype(np.int64)
+    lo = np.where(lo >= 0, np.minimum(lo, rw), rw)
+    hi = np.where(hi >= 0, np.maximum(hi, rw), rw)
+    meas = (cols["status"][ks] == Status.MATCH) & (cols["flip"][ks] == bool(seg.flip_h)) & (rw >= 0)
+    j_f = np.floor(x + u * d + _AE_EPS)
+    sel_f = meas & (j_f >= lo) & (j_f <= hi)
+    lows = [lo[sel_f] - u * d[sel_f]]
+    highs = [hi[sel_f] + 1.0 - u * d[sel_f] - 2 * _AE_EPS]
+    n = int(sel_f.sum())
+    if both:
+        j_r = np.floor(x + u * d + 0.5)
+        sel_r = meas & (j_r >= lo) & (j_r <= hi)
+        lows.append(lo[sel_r] - 0.5 - u * d[sel_r])
+        highs.append(hi[sel_r] + 0.5 - u * d[sel_r] - 2 * _AE_EPS)
+    lo_all, hi_all = np.concatenate(lows), np.concatenate(highs)
+    a = float(lo_all.max()) / rf if lo_all.size else -math.inf
+    b = float(hi_all.min()) / rf if hi_all.size else math.inf
+    return a, b, n
+
+
+def _sliding_ncc(c: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """Normalised correlation of ``c`` (length n) with every length-n window of ``r`` (both mean-removed
+    per window): array of length len(r) - n + 1; entry o compares c[i] with r[o + i]."""
+    import scipy.fft as sfft
+    c = np.asarray(c, np.float64)
+    r = np.asarray(r, np.float64)
+    n, m = c.size, r.size
+    if n < 2 or m < n:
+        return np.zeros(0)
+    c0 = c - c.mean()
+    ec = float(np.dot(c0, c0))
+    if ec <= 1e-18:
+        return np.zeros(m - n + 1)
+    N = sfft.next_fast_len(m + n, real=True)
+    num = sfft.irfft(sfft.rfft(r, N) * np.conj(sfft.rfft(c0, N)), N)[: m - n + 1]
+    cs = np.concatenate([[0.0], np.cumsum(r)])
+    cs2 = np.concatenate([[0.0], np.cumsum(r * r)])
+    s1, s2 = cs[n:] - cs[:-n], cs2[n:] - cs2[:-n]
+    den = np.sqrt(np.maximum(s2 - s1 * s1 / n, 0.0) * ec)
+    return np.where(den > 1e-12, num / np.maximum(den, 1e-300), 0.0)
+
+
+def _segment_audio_range(seg: Segment, comp_fps: Fraction, sr: int, n_comp: int) -> tuple[int, int]:
+    """Comp audio samples [a, b) of a segment's own audio (J/L offsets applied, crossfade overlaps
+    excluded) -- the range analyze_segments_audio measures."""
+    def tr(t: dict | None) -> int:
+        return int(t.get("duration_frames") or 0) if t and str(t.get("type", "")) == "crossfade" else 0
+    au = seg.audio or {}
+    din, dout = tr(seg.transition_in), tr(seg.transition_out)
+    k_a = seg.comp_in + (din if din else int(au.get("in_offset_frames") or 0))
+    k_b = seg.comp_out - (dout if dout else -int(au.get("out_offset_frames") or 0))
+    fr = Fraction(comp_fps)
+    a = max(0, int(round(Fraction(int(k_a)) * sr / fr)))
+    b = min(int(n_comp), int(round(Fraction(int(k_b)) * sr / fr)))
+    return a, b
+
+
+def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int, comp_fps: Fraction,
+                   max_lag_s: float, resample: Callable | None = None) -> tuple[float, float] | None:
+    """Lag (s, positive = the RAW-rebuilt audio is LATE, xcorr_lag's convention) and peak NCC of a
+    stretch segment's rebuilt audio against the competitor within +-max_lag_s: the rebuilt track is
+    rendered over the segment's audio range widened by max_lag_s on both sides and the competitor range
+    slides across it, so large lags keep the full overlap. Sub-sample peak by parabola. None when the
+    segment has too little audio."""
+    if resample is None:
+        from .audio_align import resample_at as resample
+    comp = np.asarray(comp_y, np.float32).reshape(-1)
+    raw = np.asarray(raw_y, np.float32).reshape(-1)
+    if comp.size == 0 or raw.size == 0 or seg.raw_in_seconds is None:
+        return None
+    a, b = _segment_audio_range(seg, comp_fps, sr, comp.size)
+    if b - a < int(AUDIO_PHASE_MIN_RANGE_S * sr):
+        return None
+    L = int(round(max(0.0, float(max_lag_s)) * sr))
+    v = float(seg.speed)
+    t_in = float(Fraction(int(seg.comp_in)) / Fraction(comp_fps))
+    t = np.arange(a - L, b + L, dtype=np.float64) / sr
+    pos = (float(seg.raw_in_seconds) + v * (t - t_in)) * sr
+    rb = resample(raw, pos, cutoff=min(1.0, 1.0 / max(abs(v), 1e-6)))
+    ncc = _sliding_ncc(comp[a:b], rb)
+    if ncc.size == 0:
+        return None
+    i = int(np.argmax(ncc))
+    off = 0.0
+    if 0 < i < ncc.size - 1:
+        ym, y0, yp = float(ncc[i - 1]), float(ncc[i]), float(ncc[i + 1])
+        den = ym - 2.0 * y0 + yp
+        if den < 0:
+            off = float(np.clip(0.5 * (ym - yp) / den, -0.5, 0.5))
+    return (i + off - L) / sr, float(np.clip(ncc[i], -1.0, 1.0))
+
+
+def _refresh_phase_after_move(seg: Segment, fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction, phase) -> None:
+    """Derived phase fields after raw_in moved inside its interval: raw_in/out frames (AE rule), the
+    margin to the floor interval, timing-tie frames at the new raw_in."""
+    v = float(seg.speed)
+    seg.raw_in_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, comp_fps, raw_fps))
+    seg.raw_out_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_out - 1, seg.comp_in, comp_fps, raw_fps))
+    if seg.raw_in_interval:
+        a, b = (float(x) for x in seg.raw_in_interval)
+        seg.ae_margin_ms = round(max(0.0, min(float(seg.raw_in_seconds) - a, b - float(seg.raw_in_seconds))) * 1000.0, 6)
+    ks, lo, hi = segment_constraints(seg, fm)
+    if len(ks):
+        tie_slack = float(getattr(phase, "TIE_SLACK", 1e-4))
+        u = v * float(Fraction(raw_fps) / Fraction(comp_fps))
+        pos = float(Fraction(raw_fps)) * float(seg.raw_in_seconds) + u * (ks - int(seg.comp_in)).astype(np.float64)
+        slack = np.minimum(pos - lo, hi + 1.0 - pos)
+        new_ties = {int(k) for k in ks[(slack >= -PHASE_TAU) & (slack < tie_slack)]}
+        if new_ties:
+            seg.tie_frames = sorted(set(int(k) for k in seg.tie_frames) | new_ties)
+            for k in new_ties:
+                if 0 <= k < fm.n:
+                    fm.tie[k] = True
+
+
+def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameMap, comp_y: np.ndarray | None,
+                         raw_y: np.ndarray | None, sr: int, comp_fps: Fraction, raw_fps: Fraction, cfg: Config,
+                         dlog: DecisionLog, phase=None, resample: Callable | None = None) -> tuple[list[int], list[str]]:
+    """DESIGN §7 D3: pick raw_in inside its feasible interval from the sample-precise audio lag.
+
+    The video phase solve leaves raw_in at the centre of the floor∩round interval, a quarter RAW frame
+    after the frame boundary an NLE in-point sits on (8.3 ms at 30p, 10.4 ms at 24p). For every 'raw'
+    stretch segment whose first-pass audio correlation is >= cfg.verify_audio_strong_corr with no audio
+    exception, ``raw_in := raw_in + v * lag`` (lag_ms > 0 = the rebuilt audio is late, i.e. raw_in too
+    small), clamped into raw_in_interval_both (else raw_in_interval) with a margin of max(1 ms, 5 % of
+    that interval's width) from each edge and into the range that keeps every correctly shown matched
+    frame (refine's measurement) on its RAW frame. Segments whose interval is wider than +-100 ms in
+    competitor time (static / ambiguous-identical shots) also get a wider search over that interval.
+    Sets seg.audio['phase_source'] ('audio'|'video') and seg.audio['lag_ms_video'] (the first-pass lag);
+    the caller re-runs analyze_segments_audio so lag_ms becomes the residual. Returns (ids moved,
+    warnings)."""
+    if phase is None:
+        from . import phase_solve as phase
+    per = (audio_result or {}).get("segments") or {}
+    status = (audio_result or {}).get("status")
+    strong = float(getattr(cfg, "verify_audio_strong_corr", 0.8))
+    comp = np.zeros(0, np.float32) if comp_y is None else np.asarray(comp_y, np.float32).reshape(-1)
+    raw = np.zeros(0, np.float32) if raw_y is None else np.asarray(raw_y, np.float32).reshape(-1)
+    moved: list[int] = []
+    warnings: list[str] = []
+    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+        if s.type != "raw":
+            continue
+        au = {**DEFAULT_SEG_AUDIO, **(s.audio or {})}
+        upd = per.get(s.id, per.get(str(s.id))) or {}
+        au.update({k: v for k, v in upd.items() if k in ("lag_ms", "corr", "exception")})
+        au["lag_ms_video"] = au.get("lag_ms")
+        au["phase_source"] = "video"
+        s.audio = au
+        ev: dict[str, Any] = {"segment": s.id, "lag_ms_video": au.get("lag_ms"), "corr": au.get("corr"),
+                              "exception": au.get("exception"), "raw_in_video": s.raw_in_seconds}
+
+        def skip(reason: str) -> None:
+            dlog.record("phase_solve", "audio_phase_skipped", reason=reason, **ev)
+
+        if status in ("no_audio", "audio_replaced"):
+            skip(f"run audio status {status}")
+            continue
+        v = float(s.speed) if s.speed is not None else float("nan")
+        if segment_time_mode(s) == "remap" or s.time_mode == "remap" or not math.isfinite(v) or v <= 0:
+            skip("not a stretch segment")
+            continue
+        if s.raw_in_seconds is None:
+            skip("no raw_in")
+            continue
+        interval, kind = audio_phase_interval(s)
+        if interval is None or interval[1] <= interval[0]:
+            skip("no feasible raw_in interval")
+            continue
+        width = interval[1] - interval[0]
+        margin = audio_phase_margin_s(width)
+        exc = au.get("exception")
+        if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
+            skip(f"audio exception {exc}")
+            continue
+        cand = None
+        if exc is None and au.get("lag_ms") is not None and au.get("corr") is not None and float(au["corr"]) >= strong:
+            cand = (float(au["lag_ms"]) / 1000.0, float(au["corr"]), "xcorr")
+        half_comp_s = 0.5 * width / v
+        if half_comp_s > AUDIO_PHASE_NARROW_S and comp.size and raw.size:
+            max_lag = min(half_comp_s + 0.02, AUDIO_PHASE_WIDE_MAX_S)
+            wide = wide_audio_lag(s, comp, raw, sr, comp_fps, max_lag, resample=resample)
+            ev["wide_search"] = {"max_lag_s": round(max_lag, 6),
+                                 "lag_ms": None if wide is None else round(wide[0] * 1000.0, 3),
+                                 "corr": None if wide is None else round(wide[1], 4)}
+            if wide is not None and wide[1] >= strong and (cand is None or wide[1] > cand[1] + AUDIO_PHASE_WIDE_GAIN):
+                cand = (wide[0], wide[1], "xcorr_wide")
+        if cand is None:
+            skip(f"audio not confidently aligned (corr {au.get('corr')} < {strong} or exception {exc})")
+            continue
+        lag_s, corr, how = cand
+        old = float(s.raw_in_seconds)
+        target = old + v * lag_s
+        p_lo, p_hi, n_keep = preserved_frames_interval(s, fm, old, comp_fps, raw_fps, kind == "both")
+        lo_e, hi_e = max(interval[0], p_lo), min(interval[1], p_hi)
+        if hi_e - lo_e <= 2 * margin:
+            skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.3f} ms is not wider than 2 x margin {margin * 1000:.3f} ms")
+            continue
+        new = fmt_seconds(min(max(target, lo_e + margin), hi_e - margin))
+        if not (lo_e < new < hi_e):         # 9-decimal rounding pushed it out: keep the video phase
+            skip("rounded raw_in outside the feasible range")
+            continue
+        clamped = abs(new - target) > 5e-10
+        au["phase_source"] = "audio"
+        rec = dict(ev, raw_in_audio_target=round(target, 9), raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
+                   lag_ms=round(lag_s * 1000.0, 3), corr=round(corr, 4), source=how, interval=kind,
+                   interval_s=[round(interval[0], 9), round(interval[1], 9)], margin_ms=round(margin * 1000.0, 6),
+                   preserved_range_s=[None if not math.isfinite(p_lo) else round(p_lo, 9),
+                                      None if not math.isfinite(p_hi) else round(p_hi, 9)],
+                   preserved_frames=n_keep, clamped=clamped, speed=v)
+        if abs(new - old) <= 5e-10:
+            dlog.record("phase_solve", "audio_phase", moved=False, **rec)
+            continue
+        s.raw_in_seconds = new
+        _refresh_phase_after_move(s, fm, comp_fps, raw_fps, phase)
+        rec.update(raw_in_frame=s.raw_in_frame, raw_out_frame=s.raw_out_frame, ae_margin_ms=s.ae_margin_ms)
+        dlog.record("phase_solve", "audio_phase", moved=True, **rec)
+        moved.append(int(s.id))
+        if how == "xcorr_wide":
+            s.notes = _append_note(s.notes, f"raw_in placed by a wide audio search (lag {lag_s * 1000:+.1f} ms "
+                                            f"inside a {width * 1000:.0f} ms feasible interval)")
+        if clamped and abs(target - new) * 1000.0 > float(getattr(cfg, "audio_lag_tol_ms", 10.0)):
+            warnings.append(f"S{s.id:02d}: the audio implies raw_in {target:.6f}s, {abs(target - new) * 1000:.1f} ms "
+                            f"outside the video-feasible interval (kept at {new:.6f}s)")
+    return moved, warnings
+
+
 def _ranges(frames: list[int]) -> list[tuple[int, int]]:
     """Sorted ints -> inclusive runs [(a, b), ...]."""
     fr = sorted(set(int(f) for f in frames))
@@ -792,9 +1079,48 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
     audio_result = audio_align.analyze_segments_audio(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog)
     audio_result = audio_result or {}
     apply_segment_audio(segments, audio_result)
+    # D3: audio-informed phase inside the video-feasible interval, then re-measure (lag_ms = residual)
+    moved, warns = audio_informed_phase(segments, audio_result, fm, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps,
+                                        ctx.raw_fps, cfg, dlog)
+    seg_warn.extend(warns)
+    if moved:
+        audio_result = audio_align.analyze_segments_audio(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps,
+                                                          cfg, dlog) or {}
+        apply_segment_audio(segments, audio_result)
+        for s in segments:
+            if s.id in moved:
+                dlog.record("phase_solve", "audio_phase_residual", segment=s.id,
+                            lag_ms_video=(s.audio or {}).get("lag_ms_video"), lag_ms=(s.audio or {}).get("lag_ms"),
+                            corr=(s.audio or {}).get("corr"), raw_in_seconds=s.raw_in_seconds)
+    seg_warn.extend(layout_period_warnings(segments, ctx.layout, cfg.layout_mode))
     seg_warn.extend(segment_warnings(segments, ctx.comp_fps, audio_result))
     cutlist = build_cutlist(ctx, segments, audio_result, seg_warn)
     return fm, segments, audio_result, cutlist
+
+
+def layout_period_warnings(segments: list[Segment], layout: Layout | None, layout_mode: str) -> list[str]:
+    """Fullscreen periods are reproduced per segment (DESIGN §7 D1: segment.py gives the segments inside
+    one ``box`` = the whole canvas; export_ae / render_preview place them in MAIN without the Video Box
+    mask). Warn only where that cannot happen: a RAW segment overlapping a fullscreen period without its
+    own box (it would be clipped to the Video Box) or straddling the period boundary."""
+    out: list[str] = []
+    if layout is None or layout_mode != "match":
+        return out
+    for p in layout.periods:
+        if p.mode != "fullscreen":
+            continue
+        a, b = int(p.comp_in), int(p.comp_out)
+        inside = [s for s in segments if s.type == "raw" and s.comp_in < b and s.comp_out > a]
+        boxless = [s for s in inside if not s.box]
+        straddle = [s for s in inside if s.box and (s.comp_in < a or s.comp_out > b)]
+        if boxless:
+            out.append(f"frames {a}-{b - 1} are fullscreen in the competitor but "
+                       f"{', '.join(f'S{s.id:02d}' for s in boxless)} carry no per-segment box: exported inside "
+                       "the Video Box (the fullscreen shot is cropped)")
+        if straddle:
+            out.append(f"{', '.join(f'S{s.id:02d}' for s in straddle)} straddle the fullscreen period "
+                       f"{a}-{b - 1}: part of the segment is shown with the wrong layout")
+    return out
 
 
 # ---------------------------------------------------------------------------------------------
@@ -805,17 +1131,64 @@ def _analysis_key(ctx: Context, stage: str, *extra: Any) -> str:
     return stage_key(stage, ctx.comp_info.file_hash, ctx.raw_info.file_hash, ctx.cfg.analysis_params(), *extra)
 
 
+# -- decision capture / replay across cache hits (DESIGN §7 D6) --------------------------------------
+
+def decisions_path(ctx: Context, stage: str, key: str) -> Path:
+    """work/cache/decisions/<stage>-<key>.jsonl: the records a cached stage emitted when it computed."""
+    return ctx.cache.path("decisions", f"{stage}-{key}", ".jsonl")
+
+
+def store_decisions(ctx: Context, stage: str, key: str, records: list[dict]) -> None:
+    save_decisions(decisions_path(ctx, stage, key), records)
+
+
+def replay_decisions(ctx: Context, stage: str, key: str) -> int:
+    """Replay a cached stage's stored records into this run's log (cached=true, cache_key). Returns the
+    number replayed; a missing store (a cache entry written before D6) is logged, never fatal."""
+    p = decisions_path(ctx, stage, key)
+    if not p.exists():
+        ctx.dlog.record("pipeline", "decisions_not_cached", step=stage, cache_key=key,
+                        note="cache entry predates the decision store; only the cache hit is logged")
+        return 0
+    return ctx.dlog.replay(load_decisions(p), cached=True, cache_key=key)
+
+
+def _is_cache_hit(rec: dict, stages: tuple[str, ...] | None) -> bool:
+    dec = str(rec.get("decision", ""))
+    if not (dec == "cache_hit" or dec.endswith("_cache_hit")):
+        return False
+    return stages is None or str(rec.get("stage")) in stages
+
+
+def self_cached_stage(ctx: Context, stage: str, key: str, fn: Callable[[], Any],
+                      hit_stages: tuple[str, ...] | None = None) -> Any:
+    """Run a stage whose module caches itself (layout, conform, box refinement): its records are
+    captured; when the module reports a cache hit (a 'cache_hit' record of ``hit_stages``) the records
+    stored when it last computed are replayed, else the captured records become the store."""
+    with ctx.dlog.capture(stage) as cap:
+        result = fn()
+    if any(_is_cache_hit(r, hit_stages) for r in cap):
+        replay_decisions(ctx, stage, key)
+    else:
+        store_decisions(ctx, stage, key, list(cap))
+    return result
+
+
 def cached_hints(ctx: Context, compute: Callable[[], AudioHints]) -> AudioHints:
     key = _analysis_key(ctx, "audio_align", int(ctx.audio_sr))
     ctx.keys["audio_align"] = key
     p = ctx.cache.path("audio_align", key, ".npz")
     if not p.exists():
-        hints = compute()
-        tmp = p.with_name(p.stem + ".tmp.npz")
-        hints.save(tmp)
+        with ctx.dlog.capture("audio_align") as cap:
+            hints = compute()
+            tmp = p.with_name(p.stem + ".tmp.npz")
+            hints.save(tmp)
+        store_decisions(ctx, "audio_align", key, list(cap))
         os.replace(tmp, p)
     else:
         log.info("audio hints: cache hit %s", p.name)
+        ctx.dlog.record("audio_align", "cache_hit", key=key)
+        replay_decisions(ctx, "audio_align", key)
     return AudioHints.load(p)
 
 
@@ -837,18 +1210,68 @@ def _anchor_from_dict(d: dict, anchor_cls: Any) -> Any:
     return anchor_cls(**d)
 
 
-def cached_anchors(ctx: Context, compute: Callable[[], list]) -> list:
+def cached_anchors(ctx: Context, compute: Callable[[], list], *extra: Any) -> list:
+    """Anchors of the sparse search, cached as JSON (``extra`` = additional key parts, e.g. the refined
+    layout of the D2 second pass)."""
     from . import visual_match
-    key = _analysis_key(ctx, "sparse_search")
+    key = _analysis_key(ctx, "sparse_search", *extra)
     ctx.keys["sparse_search"] = key
-    rows = ctx.cache.json("sparse_search", key, lambda: [_anchor_to_dict(a) for a in compute()])
+    p = ctx.cache.path("sparse_search", key, ".json")
+    if p.exists():
+        ctx.dlog.record("visual_match", "cache_hit", key=key)
+        replay_decisions(ctx, "sparse_search", key)
+        rows = ctx.cache.json("sparse_search", key, lambda: [])
+    else:
+        with ctx.dlog.capture("sparse_search") as cap:
+            rows = ctx.cache.json("sparse_search", key, lambda: [_anchor_to_dict(a) for a in compute()])
+        store_decisions(ctx, "sparse_search", key, list(cap))
     return [_anchor_from_dict(r, visual_match.Anchor) for r in rows]
 
 
-def frame_map_cache_paths(ctx: Context) -> tuple[Path, Path]:
-    key = _analysis_key(ctx, "frame_map")
+def layout_key(layout: Layout | None) -> str:
+    """Hash of the layout geometry that drives matching (box, background, zones, periods, regions) --
+    file paths and notes excluded, so it does not depend on WORK_DIR."""
+    if layout is None:
+        return "none"
+    d = layout.to_dict()
+    for k in ("static_mask_file", "overlay_mask_file", "notes"):
+        d.pop(k, None)
+    return params_hash(d)
+
+
+def frame_map_cache_paths(ctx: Context, *extra: Any) -> tuple[Path, Path]:
+    key = _analysis_key(ctx, "frame_map", *extra)
     ctx.keys["frame_map"] = key
     return ctx.cache.path("frame_map", key, ".npz"), ctx.cache.path("frame_map", key, ".overlays.npz")
+
+
+def frame_map_windows(fm: FrameMap, raw_fps: Fraction, comp_fps: Fraction, n_raw: int, cfg: Config
+                      ) -> list[tuple[int, int]]:
+    """Dense RAW windows (half-open frame ranges) around every RAW frame the FrameMap references (best
+    frame, ambiguous and soft ranges, refine's pre-segmentation measurement), padded by what
+    segmentation and verification read beyond them (transition search, track radius, refine radius at up
+    to 2x speed; >= 2 s). Derived from the CACHED FrameMap only, so a first run and a cached re-run
+    expose exactly the same frames of a sparse long-RAW proxy (real-world F5)."""
+    d = fm.__dict__["d"]
+    cols = [d[k] for k in ("raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi") if k in d]
+    cols += [d[k] for k in ("pre_segment_raw", "pre_segment_raw_lo", "pre_segment_raw_hi") if k in d]
+    js = np.unique(np.concatenate([np.asarray(c, np.int64).ravel() for c in cols])) if cols else np.zeros(0, np.int64)
+    js = js[(js >= 0) & (js < int(n_raw))]
+    if js.size == 0:
+        return []
+    rf, cf = float(Fraction(raw_fps)), float(Fraction(comp_fps))
+    reach = int(getattr(cfg, "transition_search", 20)) + int(getattr(cfg, "track_search_radius", 8)) \
+        + int(getattr(cfg, "refine_radius", 3)) + 2
+    pad = int(math.ceil(max(2.0 * rf, 2.0 * reach * rf / cf)))
+    starts = np.maximum(0, js - pad)
+    ends = np.minimum(int(n_raw), js + pad + 1)
+    wins: list[tuple[int, int]] = []
+    for a, b in zip(starts.tolist(), ends.tolist()):
+        if wins and a <= wins[-1][1]:
+            wins[-1] = (wins[-1][0], max(wins[-1][1], b))
+        else:
+            wins.append((a, b))
+    return wins
 
 
 def load_overlays(path: Path) -> Any:
@@ -980,6 +1403,33 @@ def stage_env(ctx: Context) -> None:
                     ae_app=env.get("ae_app"), aerender=env.get("aerender"))
 
 
+def _conform_key(ctx: Context, info: StreamInfo) -> str:
+    cfg = ctx.cfg
+    return stage_key("conform", info.role, info.file_hash, str(Path(cfg.media_dir).resolve()), cfg.force_conform,
+                     cfg.conform_codec, cfg.conform_h264_preset, cfg.conform_h264_crf, cfg.competitor_h264_preset,
+                     cfg.competitor_h264_crf, cfg.large_file_bytes)
+
+
+def surface_input_warnings(ctx: Context, probe_mod: Any) -> None:
+    """probe.input_warnings(info) (e.g. a truncated / partially downloaded file whose decoded duration is
+    far below the container's) for both inputs -> warnings that also go into cutlist.warnings and the
+    report (real-world F8). Skipped when the probe module does not provide it."""
+    fn = getattr(probe_mod, "input_warnings", None)
+    if not callable(fn):
+        return
+    for info in (ctx.comp_input, ctx.raw_input):
+        if info is None:
+            continue
+        try:
+            found = list(fn(info) or [])
+        except Exception as e:  # noqa: BLE001 - a diagnostics helper must not stop the run
+            log.warning("probe.input_warnings(%s) failed: %s", info.path, e)
+            continue
+        for w in found:
+            ctx.warn(f"{info.role} input {Path(info.path).name}: {w}", analysis=True)
+            ctx.dlog.record("probe", "input_warning", role=info.role, path=info.path, warning=str(w))
+
+
 def stage_probe_conform(ctx: Context) -> None:
     from . import conform, probe
     cfg = ctx.cfg
@@ -989,14 +1439,18 @@ def stage_probe_conform(ctx: Context) -> None:
     for info in (ctx.comp_input, ctx.raw_input):
         ctx.dlog.record("probe", "input", role=info.role, path=info.path, fps=fps_str(info.fps),
                         frames=info.nb_frames, vfr=info.vfr, ae_issues=info.ae_issues, rotation=info.rotation)
+    surface_input_warnings(ctx, probe)
     if ctx.comp_input.vfr:
         ctx.warn(f"competitor is VFR (PTS jitter {ctx.comp_input.pts_jitter:.2f} frames): the timeline is built on "
                  f"its nominal {fps_str(ctx.comp_input.fps)} fps (frame displayed at each t_k)", analysis=True)
     if ctx.raw_input.vfr:
         ctx.warn(f"RAW is VFR (PTS jitter {ctx.raw_input.pts_jitter:.2f} frames): conformed to CFR "
                  f"{fps_str(ctx.raw_input.fps)}", analysis=True)
-    ctx.raw_conform = conform.conform(ctx.raw_input, "raw", cfg, ctx.dlog)
-    ctx.comp_conform = conform.conform(ctx.comp_input, "competitor", cfg, ctx.dlog)
+    ctx.raw_conform = self_cached_stage(ctx, "conform_raw", _conform_key(ctx, ctx.raw_input),
+                                        lambda: conform.conform(ctx.raw_input, "raw", cfg, ctx.dlog), ("conform",))
+    ctx.comp_conform = self_cached_stage(ctx, "conform_competitor", _conform_key(ctx, ctx.comp_input),
+                                         lambda: conform.conform(ctx.comp_input, "competitor", cfg, ctx.dlog),
+                                         ("conform",))
     for role, res in (("raw", ctx.raw_conform), ("competitor", ctx.comp_conform)):
         ctx.dlog.record("conform", "result", role=role, path=str(res.path), conformed=bool(res.conformed),
                         reason=res.reason, verification=getattr(res, "verification", {}))
@@ -1066,44 +1520,142 @@ def stage_proxies(ctx: Context) -> None:
 
 def stage_layout(ctx: Context) -> None:
     from . import layout as layout_mod
-    ctx.layout, ctx.overlays = layout_mod.analyze_layout(ctx.comp_proxy, ctx.cfg, ctx.cache, ctx.cfg.debug_dir, ctx.dlog)
-    lay = ctx.layout
-    if lay.extra_regions or any(p.mode in ("split", "pip") for p in lay.periods):
-        ctx.warn(f"{len(lay.extra_regions)} extra video region(s) (split-screen / picture-in-picture) detected: "
-                 "only the dominant region is recreated (see report)", analysis=True)
-    for n in lay.notes:
+    key = stage_key("layout", ctx.comp_info.file_hash, ctx.cfg.analysis_params())
+    ctx.keys["layout"] = key
+    ctx.layout, ctx.overlays = self_cached_stage(
+        ctx, "layout", key,
+        lambda: layout_mod.analyze_layout(ctx.comp_proxy, ctx.cfg, ctx.cache, ctx.cfg.debug_dir, ctx.dlog), ("layout",))
+    for n in ctx.layout.notes:
         ctx.dlog.record("layout", "note", note=n)
 
 
-def stage_visual_refine(ctx: Context) -> None:
-    """S5.2 + S5.3 (skipped entirely on a FrameMap cache hit)."""
+def layout_warnings(ctx: Context) -> None:
+    """Warnings about the (final, possibly RAW-refined) layout. Fullscreen periods are reproduced per
+    segment (DESIGN §7 D1) and only logged; split-screen / PiP periods and extra regions are not
+    reproduced (one region is recreated) and are warned."""
+    lay = ctx.layout
+    if lay is None:
+        return
+    if lay.extra_regions:
+        ctx.warn(f"{len(lay.extra_regions)} extra video region(s) (split-screen / picture-in-picture) detected: "
+                 "only the dominant region is recreated (see report)", analysis=True)
+    for p in lay.periods:
+        if p.mode in ("split", "pip"):
+            ctx.warn(f"frames {p.comp_in}-{p.comp_out - 1}: {'split-screen' if p.mode == 'split' else 'picture-in-picture'}"
+                     " layout: only the dominant region is recreated (After Effects cannot reproduce it from this "
+                     "cutlist)", analysis=True)
+    full = [[int(p.comp_in), int(p.comp_out)] for p in lay.periods if p.mode == "fullscreen"]
+    if full:
+        ctx.dlog.record("layout", "fullscreen_periods", periods=full,
+                        handling="reproduced per segment: Segment.box = the whole canvas, placed in MAIN "
+                                 "without the Video Box mask (DESIGN §7 D1)")
+
+
+def _extend_raw(ctx: Context, base: Any, windows: list[tuple[int, int]]) -> Any:
+    """A sparse (long-RAW) proxy extended by ``windows``; dense proxies are returned unchanged."""
+    if base is None or getattr(base, "dense", True) or not windows:
+        return base
+    from . import proxies
+    return proxies.extend_proxy(base, windows, ctx.cfg, ctx.cache)
+
+
+def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str, *extra: Any) -> None:
+    """One S5.2 + S5.3 pass (skipped on a FrameMap cache hit, whose decisions are replayed). The RAW
+    proxy the later stages see is ``base_raw`` extended by windows derived from the CACHED FrameMap on
+    BOTH branches, so a cached re-run exposes the same RAW frames as the first run (real-world F5)."""
     cfg = ctx.cfg
-    fm_path, ov_path = frame_map_cache_paths(ctx)
+    fm_path, ov_path = frame_map_cache_paths(ctx, *extra)
+    key = ctx.keys["frame_map"]
     if fm_path.exists() and ov_path.exists():
         log.info("frame map: cache hit %s", fm_path.name)
-        ctx.dlog.record("refine", "cache_hit", key=ctx.keys["frame_map"])
+        ctx.dlog.record("refine", "cache_hit", key=key, frame_pass=label)
+        replay_decisions(ctx, "frame_map", key)
     else:
-        from . import proxies, refine, visual_match
-        with _stage(ctx, "S5.2 visual search"):
-            seed_everything(cfg.seed)
-            ctx.index = visual_match.RawIndex.build(ctx.raw_proxy, cfg, ctx.cache)
-            ctx.anchors = cached_anchors(ctx, lambda: visual_match.sparse_search(
-                ctx.comp_proxy, ctx.raw_proxy, ctx.layout, ctx.overlays, ctx.index, ctx.hints, cfg, ctx.dlog))
-            ctx.dlog.record("visual_match", "summary", anchors=len(ctx.anchors))
-            if not ctx.raw_proxy.dense and ctx.anchors:
-                wins = hint_windows(AudioHints.empty(), ctx.raw_fps, ctx.raw_info.nb_frames, cfg,
-                                    extra_times=[a.raw / float(ctx.raw_fps) for a in ctx.anchors])
-                ctx.raw_proxy = proxies.extend_proxy(ctx.raw_proxy, wins, cfg, ctx.cache)
-        with _stage(ctx, "S5.3 refine"):
-            seed_everything(cfg.seed)
-            fm = refine.build_frame_map(ctx.comp_proxy, ctx.raw_proxy, ctx.layout, ctx.overlays, ctx.anchors,
-                                        ctx.hints, ctx.index, cfg, ctx.cache, ctx.dlog, cfg.debug_dir)
-            if fm.n != ctx.n_comp:
-                raise RuntimeError(f"FrameMap has {fm.n} rows for {ctx.n_comp} competitor frames")
-            save_frame_map_cache(fm, ctx.overlays, fm_path, ov_path)
+        from . import refine, visual_match
+        overlays = overlays_in
+        with ctx.dlog.capture("frame_map") as cap:
+            with _stage(ctx, f"S5.2 visual search{label}"):
+                seed_everything(cfg.seed)
+                ctx.index = visual_match.RawIndex.build(base_raw, cfg, ctx.cache)
+                ctx.anchors = cached_anchors(ctx, lambda: visual_match.sparse_search(
+                    ctx.comp_proxy, base_raw, ctx.layout, overlays, ctx.index, ctx.hints, cfg, ctx.dlog), *extra)
+                ctx.dlog.record("visual_match", "summary", anchors=len(ctx.anchors))
+                raw_for_refine = base_raw
+                if not getattr(base_raw, "dense", True) and ctx.anchors:
+                    wins = hint_windows(AudioHints.empty(), ctx.raw_fps, ctx.raw_info.nb_frames, cfg,
+                                        extra_times=[a.raw / float(ctx.raw_fps) for a in ctx.anchors])
+                    raw_for_refine = _extend_raw(ctx, base_raw, wins)
+            with _stage(ctx, f"S5.3 refine{label}"):
+                seed_everything(cfg.seed)
+                fm = refine.build_frame_map(ctx.comp_proxy, raw_for_refine, ctx.layout, overlays, ctx.anchors,
+                                            ctx.hints, ctx.index, cfg, ctx.cache, ctx.dlog, cfg.debug_dir)
+                if fm.n != ctx.n_comp:
+                    raise RuntimeError(f"FrameMap has {fm.n} rows for {ctx.n_comp} competitor frames")
+        store_decisions(ctx, "frame_map", key, list(cap))
+        save_frame_map_cache(fm, overlays, fm_path, ov_path)
     # always continue from the cache files (first run == cached re-run, bit for bit)
     ctx.fm_pre = FrameMap.load(fm_path)
     ctx.overlays = load_overlays(ov_path)
+    if not getattr(base_raw, "dense", True):
+        wins = frame_map_windows(ctx.fm_pre, ctx.raw_fps, ctx.comp_fps, ctx.raw_info.nb_frames, cfg)
+        ctx.raw_proxy = _extend_raw(ctx, base_raw, wins)
+        ctx.dlog.record("proxies", "frame_map_windows", frame_pass=label, n=len(wins), windows=wins[:200],
+                        frames=int(sum(b - a for a, b in wins)))
+    else:
+        ctx.raw_proxy = base_raw
+
+
+def refine_layout_from_raw(ctx: Context) -> bool:
+    """DESIGN §7 D2: re-fit the box against the warped matched RAW (pixels that agree with RAW belong to
+    the video region even when static). Adopts the returned layout; True when it changed materially
+    (the caller then re-runs S5.2 + S5.3 once). Skipped when layout.refine_box_from_raw is missing; a
+    crash keeps the temporal-analysis box with a warning."""
+    try:
+        from . import layout as layout_mod
+    except ImportError:  # pragma: no cover - the stage modules ship together
+        return False
+    fn = getattr(layout_mod, "refine_box_from_raw", None)
+    if not callable(fn) or ctx.layout is None or ctx.fm_pre is None:
+        ctx.dlog.record("layout", "refine_box_skipped", reason="layout.refine_box_from_raw not available"
+                        if not callable(fn) else "no layout / FrameMap")
+        return False
+    old = ctx.layout
+    key = stage_key("layout_refine", ctx.keys.get("frame_map"), layout_key(old))
+    ctx.keys["layout_refine"] = key
+    try:
+        res = self_cached_stage(ctx, "layout_refine", key, lambda: fn(
+            old, ctx.overlays, ctx.comp_proxy, ctx.raw_proxy, ctx.fm_pre, ctx.cfg, ctx.cache, ctx.dlog,
+            ctx.cfg.debug_dir))
+    except Exception as e:  # noqa: BLE001 - the unrefined box is still a valid (if possibly small) layout
+        log.error("box refinement against RAW failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"box refinement against RAW failed ({type(e).__name__}: {e}); the box from the temporal "
+                 "analysis is kept", analysis=True)
+        ctx.dlog.record("layout", "refine_box_error", error=f"{type(e).__name__}: {e}")
+        return False
+    if isinstance(res, tuple) and len(res) == 2:
+        new, changed = res
+    else:
+        new, changed = res, False
+    if new is None:
+        return False
+    changed = bool(changed)
+    ctx.layout = new
+    ctx.dlog.record("pipeline", "box_refined_from_raw", changed=changed,
+                    old_box=old.box.to_dict() if old.box else None, new_box=new.box.to_dict() if new.box else None,
+                    old_background=old.background, new_background=new.background,
+                    action="re-run S5.2 + S5.3 with the refined layout" if changed else "keep the FrameMap")
+    return changed
+
+
+def stage_visual_refine(ctx: Context) -> None:
+    """S5.2 + S5.3, then the D2 box refinement against RAW; when the box changed materially S5.2 + S5.3
+    run once more with the refined layout (its own cache keys)."""
+    base_raw = ctx.raw_proxy                       # index frames + audio-hint windows (stage_proxies)
+    overlays_pass1 = copy.deepcopy(ctx.overlays)   # layout's overlays, before refine adds residual masks
+    visual_refine_pass(ctx, base_raw, ctx.overlays, "")
+    if refine_layout_from_raw(ctx):
+        log.info("layout refined against RAW: re-running S5.2 + S5.3 with the corrected box")
+        visual_refine_pass(ctx, base_raw, copy.deepcopy(overlays_pass1), " (refined box)", "layout", layout_key(ctx.layout))
 
 
 def stage_segments(ctx: Context) -> None:
@@ -1194,40 +1746,120 @@ def match_render_context(ctx: Context) -> Any:
                                        fps=ctx.comp_fps)
 
 
+DELIVERABLES = (   # (name, path under OUTPUT_DIR): the prompt's Deliverables tree, checked by s9_8
+    ("jsx", "build_ae_project.jsx"), ("aep", "recreated_edit.aep"), ("cutlist", "cutlist.json"),
+    ("csv", "cutlist.csv"), ("xml", "recreated_edit.xml"), ("edl", "recreated_edit.edl"),
+    ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("debug_mapping", "debug/mapping.png"),
+    ("debug_scores", "debug/scores.png"), ("debug_layout", "debug/layout.png"))
+
+
 def stage_exports(ctx: Context) -> None:
     from . import export_xml_edl, render_preview
     cfg, cl, out = ctx.cfg, ctx.cutlist, ctx.cfg.out
     csv, xml, edl = out / "cutlist.csv", out / "recreated_edit.xml", out / "recreated_edit.edl"
-    _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(cl, csv))
-    _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(cl, xml, cfg))
-    _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(cl, edl, cfg))
+    produced: dict[str, bool] = {}
+    produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(cl, csv))
+    produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(cl, xml, cfg))
+    produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(cl, edl, cfg))
     for key, p in (("csv", csv), ("xml", xml), ("edl", edl)):
-        if p.exists():
+        if produced[key] and p.exists():
             ctx.paths[key] = str(p)
-    if xml.exists() and edl.exists():
+    validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
+    if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
         ok, res = _soft(ctx, "S8 validate exports", lambda: export_xml_edl.validate_exports(cl, xml, edl))
-        ctx.exports = res if ok and isinstance(res, dict) else {"ok": False, "error": "validation raised"}
-        if ctx.exports.get("ok") is False:
-            ctx.warn(f"XML/EDL re-parse validation failed: {ctx.exports.get('errors') or ctx.exports.get('error')}")
+        validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
+        if validation.get("ok") is not True:
+            ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
+    ctx.exports = dict(validation)
     if not cfg.skip_preview:
         prev = out / "preview_recreation.mp4"
         with _stage(ctx, "S8.preview"):
             ok, res = _soft(ctx, "S8 preview_recreation.mp4",
                             lambda: render_preview.render_preview(cl, ctx.raw_info.path, prev, cfg))
             ctx.preview = res if ok and isinstance(res, dict) else {}
-        if prev.exists():
+        produced["preview"] = ok
+        if ok and prev.exists():
             ctx.paths["preview"] = str(prev)
     if not cfg.skip_compare:
         cmp_path = out / "compare.mp4"
+        produced["compare"] = False
         with _stage(ctx, "S8.compare"):
             if match_preview_usable(ctx):
                 ok, src = True, ctx.paths["preview"]
             else:
                 ok, src = _soft(ctx, "S8 match-geometry render context", lambda: match_render_context(ctx))
             if ok and src is not None:
-                _soft(ctx, "S8 compare.mp4", lambda: render_preview.render_compare(ctx.comp_info.path, src, cl, cmp_path, cfg))
-        if cmp_path.exists():
+                produced["compare"], _ = _soft(ctx, "S8 compare.mp4", lambda: render_preview.render_compare(
+                    ctx.comp_info.path, src, cl, cmp_path, cfg))
+        if produced["compare"] and cmp_path.exists():
             ctx.paths["compare"] = str(cmp_path)
+    ctx.exports.update(collect_deliverables(ctx, produced))
+
+
+def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) -> dict:
+    """The prompt's deliverables after S7/S8 (REQ-6, DESIGN §7 D5): ``files`` {name: path | None (not
+    produced by THIS run)}, ``skipped`` {name: reason} (explicitly skipped: --skip-preview/--skip-compare,
+    the .aep when After Effects is not installed), ``missing`` [names], ``errors`` (XML/EDL validation
+    errors + the missing deliverables), ``validation_ok``. report.md / verify.json are written after
+    verification (a failure there is a run error, exit 2) and added to ``files`` by the pipeline later."""
+    cfg, out = ctx.cfg, ctx.cfg.out
+    produced = dict(produced or {})
+    files: dict[str, str | None] = {}
+    skipped: dict[str, str] = {}
+    for name, rel in DELIVERABLES:
+        p = out / rel
+        ok = produced.get(name, True)
+        if name == "jsx":
+            ok = bool(ctx.paths.get("jsx"))
+        elif name == "cutlist":
+            ok = ctx.cutlist is not None
+        elif name == "aep":
+            st = (ctx.ae_run or {}).get("status")
+            if st != "ok":
+                if st in (None, "not_available"):
+                    skipped[name] = (ctx.ae_run or {}).get("reason") or "After Effects not installed on this machine"
+                files[name] = None
+                continue
+            p = Path(ctx.ae_run.get("aep") or p)
+        elif name == "preview" and cfg.skip_preview:
+            skipped[name] = "--skip-preview"
+            files[name] = None
+            continue
+        elif name == "compare" and cfg.skip_compare:
+            skipped[name] = "--skip-compare"
+            files[name] = None
+            continue
+        files[name] = str(p) if ok and p.exists() else None
+    for name, conf in (("media_raw", ctx.raw_conform), ("media_competitor", ctx.comp_conform)):
+        mp = getattr(conf, "path", None) if conf is not None else None
+        files[name] = str(mp) if mp and Path(mp).exists() else None
+    missing = [k for k, v in files.items() if v is None and k not in skipped]
+    val_ok = ctx.exports.get("ok") is True if isinstance(ctx.exports, dict) else False
+    errors = list((ctx.exports or {}).get("errors") or []) if not val_ok else []
+    errors += [f"deliverable missing: {k}" for k in missing]
+    return {"files": files, "skipped": skipped, "missing": missing, "ok": val_ok, "validation_ok": val_ok,
+            "errors": errors}
+
+
+def deliverables_check(ctx: Context) -> dict:
+    """Pipeline-side 's9_8_deliverables' (used when verify does not provide it): every deliverable exists
+    unless explicitly skipped, the XML/EDL re-parse validation passed, no S7/S8 stage error."""
+    ex = ctx.exports if isinstance(ctx.exports, dict) else {}
+    files = ex.get("files") or {}
+    skipped = ex.get("skipped") or {}
+    missing = [k for k, p in files.items() if k not in skipped and (not p or not Path(p).exists())]
+    fails = [f"deliverable missing: {k}" for k in missing]
+    if not files:
+        fails.append("no deliverables recorded (S7/S8 did not run)")
+    if ex.get("ok") is not True:
+        errs = [e for e in (ex.get("errors") or []) if not str(e).startswith("deliverable missing")]
+        fails.append(f"XML/EDL validation did not pass: {'; '.join(map(str, errs[:5])) or 'not run'}")
+    fails += [f"stage error: {e.get('stage')}: {e.get('error')}" for e in ctx.errors]
+    n_ok = sum(1 for k, p in files.items() if p and k not in missing)
+    summary = (f"{n_ok} deliverables present" + (f", skipped: {', '.join(sorted(skipped))}" if skipped else "")
+               if not fails else f"{len(fails)} problem(s): {fails[0]}")
+    return {"status": "fail" if fails else "pass", "summary": summary, "missing": missing,
+            "skipped": dict(skipped), "failures": fails, "source": "pipeline"}
 
 
 def stage_verify(ctx: Context) -> None:
@@ -1237,6 +1869,12 @@ def stage_verify(ctx: Context) -> None:
     except Exception as e:  # noqa: BLE001 - a crashed verification is a failed verification
         log.error("verification crashed: %s\n%s", e, traceback.format_exc())
         ctx.verify = verify.crashed_result(f"{type(e).__name__}: {e}")
+    checks = ctx.verify.setdefault("checks", {})
+    if "s9_8_deliverables" not in checks:           # D5: deliverables count like every other check
+        chk = deliverables_check(ctx)
+        checks["s9_8_deliverables"] = chk
+        if chk["status"] == "fail":
+            ctx.verify.setdefault("failures", []).extend(f"s9_8 deliverables: {f}" for f in chk["failures"])
     p = ctx.cfg.out / "verify.json"
     dump_json(ctx.verify, p)
     ctx.paths["verify"] = str(p)
@@ -1266,20 +1904,55 @@ def _collect_paths(ctx: Context) -> None:
         p = out / rel
         if p.exists():
             ctx.paths[key] = str(p)
-    ctx.paths["decisions"] = str(ctx.cfg.work / "decisions.jsonl")
+    # this run's decision log is copied next to its report (debug/decisions.jsonl) when the run ends, so
+    # every report links its own evidence even when WORK_DIR is shared by several clip pairs
+    ctx.paths["decisions"] = str(ctx.cfg.debug_dir / "decisions.jsonl")
     ctx.paths["log"] = str(ctx.cfg.work / "match_cuts.log")
     ctx.paths["frame_map"] = str(ctx.cfg.work / "frame_map.npz")
 
 
+EXIT_PASS, EXIT_FAIL, EXIT_ERROR, EXIT_NOT_VERIFIED = 0, 1, 2, 3
+OK_CRITERION_STATUSES = ("pass", "pass_with_exceptions")
+
+
 def exit_code_for(criteria: dict, checks: dict | None = None) -> int:
-    """0 only if nothing is 'fail': every criterion c1..c6 present and not failed, and no Stage 9 check
-    (e.g. s9_7 determinism) failed."""
+    """DESIGN §7 D5: 0 = every criterion c1..c6 pass / pass_with_exceptions and no Stage 9 check (s9_7
+    determinism, s9_8 deliverables, ...) failed; 1 = something failed (or a criterion is missing / has an
+    unknown status); 3 = nothing failed but some criterion is not_available (e.g. criterion 6 without
+    Node.js and After Effects). 2 (run error) is returned by the CLI when the run raises."""
     from .verify import CRITERIA
     if not criteria or any(c not in criteria for c in CRITERIA):
-        return 1
+        return EXIT_FAIL
+    st = [(criteria.get(c) or {}).get("status") for c in CRITERIA]
     if any((v or {}).get("status") == "fail" for v in criteria.values()):
-        return 1
-    return 1 if any((v or {}).get("status") == "fail" for v in (checks or {}).values()) else 0
+        return EXIT_FAIL
+    if any((v or {}).get("status") == "fail" for v in (checks or {}).values()):
+        return EXIT_FAIL
+    if any(s not in OK_CRITERION_STATUSES + ("not_available",) for s in st):
+        return EXIT_FAIL
+    return EXIT_NOT_VERIFIED if any(s == "not_available" for s in st) else EXIT_PASS
+
+
+def _criterion_number(key: str) -> str:
+    m = re.match(r"c(\d+)", str(key))
+    return m.group(1) if m else str(key)
+
+
+def headline_for(criteria: dict, checks: dict | None = None, code: int | None = None) -> str:
+    """The overall verdict line (DESIGN §7 D5): 'PASS', 'PASS (criterion 6 not verified: <reason>)' or
+    'FAIL' ('ERROR' for exit code 2)."""
+    code = exit_code_for(criteria, checks) if code is None else int(code)
+    if code == EXIT_PASS:
+        return "PASS"
+    if code == EXIT_ERROR:
+        return "ERROR"
+    if code == EXIT_NOT_VERIFIED:
+        from .verify import CRITERIA
+        na = [(k, criteria.get(k) or {}) for k in CRITERIA if (criteria.get(k) or {}).get("status") == "not_available"]
+        nums = ", ".join(_criterion_number(k) for k, _ in na)
+        reasons = "; ".join(str(c.get("summary") or "not available").strip()[:160] for _, c in na)
+        return f"PASS ({'criterion' if len(na) == 1 else 'criteria'} {nums} not verified: {reasons})"
+    return "FAIL"
 
 
 def run(cfg: Config) -> dict:
@@ -1307,6 +1980,7 @@ def run(cfg: Config) -> dict:
         with _stage(ctx, "S4 layout"):
             stage_layout(ctx)
         stage_visual_refine(ctx)
+        layout_warnings(ctx)
         with _stage(ctx, "S5.4-S6 segments+cutlist"):
             stage_segments(ctx)
         with _stage(ctx, "S7 AE project"):
@@ -1320,16 +1994,36 @@ def run(cfg: Config) -> dict:
         _collect_paths(ctx)
         with _stage(ctx, "S10 report"):
             stage_report(ctx)
+        if isinstance(ctx.exports, dict) and isinstance(ctx.exports.get("files"), dict):
+            for key in ("report", "verify"):
+                ctx.exports["files"][key] = ctx.paths.get(key)
     finally:
         for p, st in stats.items():
             if Path(p).exists() and _input_stat(p) != st:
                 log.error("INPUT FILE CHANGED DURING THE RUN: %s", p)
         ctx.dlog.close()
+        copy_decision_log(cfg)
     criteria = ctx.verify.get("criteria", {})
-    code = exit_code_for(criteria, ctx.verify.get("checks", {}))
-    return {"criteria": criteria, "checks": ctx.verify.get("checks", {}), "failures": ctx.verify.get("failures", []),
+    checks = ctx.verify.get("checks", {})
+    code = exit_code_for(criteria, checks)
+    return {"criteria": criteria, "checks": checks, "failures": ctx.verify.get("failures", []),
             "warnings": list(ctx.warnings), "paths": dict(ctx.paths), "timings": dict(ctx.timings),
-            "exit_code": code, "context": ctx}
+            "exit_code": code, "headline": headline_for(criteria, checks, code), "context": ctx}
+
+
+def copy_decision_log(cfg: Config) -> Path | None:
+    """<out>/debug/decisions.jsonl = this run's complete decision log (REQ-5)."""
+    src, dst = cfg.work / "decisions.jsonl", cfg.debug_dir / "decisions.jsonl"
+    try:
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_name(dst.name + ".tmp")
+            shutil.copyfile(src, tmp)
+            os.replace(tmp, dst)
+            return dst
+    except OSError as e:
+        log.warning("could not copy the decision log to %s: %s", dst, e)
+    return None
 
 
 # ---------------------------------------------------------------------------------------------

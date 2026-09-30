@@ -6,7 +6,9 @@
  *   node run_mock.js <script.jsx> <footage_meta.json> <scenario> <record_out.json>
  *
  * footage_meta.json = {basename: {width, height, fps_num, fps_den, frames, has_audio}}
- * scenario          = default | media_missing | new_project_null | no_marker_property | quantize_time
+ * scenario          = default | media_missing | new_project_null | no_marker_property | quantize_time |
+ *                     fps_misread_down | fps_misread_up | fps_display_rounded | frame_count_off | save_fails_existing |
+ *                     save_silent_fail | rel_missing_abs_present   (see ae_mock.js)
  *
  * ES3 gate (the script is ExtendScript = ECMAScript 3, run by AE CC 2019+):
  *   1. ASCII only (ExtendScript decodes BOM-less files with the platform code page);

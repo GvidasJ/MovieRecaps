@@ -119,6 +119,55 @@ class Proxy:
             raise KeyError(j)
         return self.frames[row]
 
+    # -- pickling (spawn worker pools, DESIGN §5 visual_match.parallel_map) -----------------------------
+    def __getstate__(self) -> dict:
+        """A proxy whose ``frames`` is a read-only memmap of a file (dense ``.npy`` = ``npy_path``, or the
+        sparse store's ``.u8`` rows) pickles as that file reference (path, offset, dtype, shape), never as
+        pixels: a spawned worker re-opens the same memmap (shared page cache) instead of receiving a copy.
+        ``pts`` / ``index_map`` are small and pickled by value. In-memory proxies pickle their pixels."""
+        d = dict(self.__dict__)
+        ref = _memmap_ref(d.get("frames"))
+        if ref is not None:
+            d["frames"] = None
+            d["_frames_ref"] = ref
+        return d
+
+    def __setstate__(self, d: dict) -> None:
+        d = dict(d)
+        ref = d.pop("_frames_ref", None)
+        if ref is not None:
+            d["frames"] = _open_memmap_ref(ref)
+        self.__dict__.update(d)
+
+
+def _memmap_ref(a: Any) -> dict | None:
+    """(file, offset, dtype, shape, order) of a read-only memmap that maps a whole file region (not a
+    view of one), else None (pickle by value)."""
+    import mmap
+    import os
+    if not isinstance(a, np.memmap) or not isinstance(getattr(a, "base", None), mmap.mmap):
+        return None
+    fn = getattr(a, "filename", None)
+    if not fn or getattr(a, "mode", None) != "r" or a.size == 0 or not os.path.isfile(fn):
+        return None
+    if a.flags.c_contiguous:
+        order = "C"
+    elif a.flags.f_contiguous:
+        order = "F"
+    else:  # pragma: no cover - memmaps of a file region are always contiguous
+        return None
+    return {"file": str(fn), "offset": int(a.offset), "dtype": a.dtype.str,
+            "shape": tuple(int(s) for s in a.shape), "order": order}
+
+
+def _open_memmap_ref(ref: dict) -> np.memmap:
+    import os
+    fn, off, dt, shape = ref["file"], int(ref["offset"]), np.dtype(ref["dtype"]), tuple(ref["shape"])
+    need = off + int(np.prod(shape, dtype=np.int64)) * dt.itemsize
+    if not os.path.isfile(fn) or os.path.getsize(fn) < need:
+        raise FileNotFoundError(f"Proxy: memmapped frames {fn} are missing or truncated (need {need} bytes)")
+    return np.memmap(fn, dtype=dt, mode="r", offset=off, shape=shape, order=ref.get("order", "C"))
+
 
 # ---------------------------------------------------------------------------------------
 # Layout

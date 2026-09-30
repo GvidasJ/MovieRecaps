@@ -166,13 +166,27 @@ ALL_PASS = {"c1_coverage": "pass", "c2_cuts": "pass", "c3_source_frames": "pass_
 
 
 def test_exit_codes():
+    """DESIGN §7 D5: 0 pass, 1 anything failed, 3 nothing failed but a criterion is not_available."""
     assert pipeline.exit_code_for({k: {"status": v} for k, v in ALL_PASS.items()}) == 0
     assert pipeline.exit_code_for({**{k: {"status": v} for k, v in ALL_PASS.items()}, "c2_cuts": {"status": "fail"}}) == 1
     assert pipeline.exit_code_for({k: {"status": v} for k, v in ALL_PASS.items()},
                                   {"s9_7_determinism": {"status": "fail"}}) == 1
     assert pipeline.exit_code_for({"c1_coverage": {"status": "pass"}}) == 1          # incomplete verification
-    assert pipeline.exit_code_for({**{k: {"status": v} for k, v in ALL_PASS.items()},
-                                   "c6_after_effects": {"status": "not_available"}}) == 0
+    na6 = {**{k: {"status": v} for k, v in ALL_PASS.items()},
+           "c6_after_effects": {"status": "not_available", "summary": "mock not available: Node.js missing"}}
+    assert pipeline.exit_code_for(na6) == 3                                          # was 0 (verification-honesty F10)
+    assert pipeline.exit_code_for(na6, {"s9_8_deliverables": {"status": "fail"}}) == 1   # a failure wins over N/A
+    assert pipeline.exit_code_for({k: {"status": v} for k, v in ALL_PASS.items()},
+                                  {"s9_8_deliverables": {"status": "fail"}}) == 1     # REQ-6: a missing deliverable
+    assert pipeline.exit_code_for({k: {"status": v} for k, v in ALL_PASS.items()},
+                                  {"s9_6_ae_render": {"status": "not_available"}}) == 0   # only criteria count for 3
+    assert pipeline.exit_code_for({**{k: {"status": v} for k, v in ALL_PASS.items()}, "c4_speed_framing": {}}) == 1
+    # headline
+    assert pipeline.headline_for({k: {"status": v} for k, v in ALL_PASS.items()}) == "PASS"
+    assert pipeline.headline_for(na6) == "PASS (criterion 6 not verified: mock not available: Node.js missing)"
+    na56 = {**na6, "c5_audio": {"status": "not_available", "summary": "no audio"}}
+    assert pipeline.headline_for(na56).startswith("PASS (criteria 5, 6 not verified: no audio; mock")
+    assert pipeline.headline_for({**na6, "c2_cuts": {"status": "fail"}}) == "FAIL"
 
 
 def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys):
@@ -195,6 +209,20 @@ def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys
     monkeypatch.setattr(pipeline, "run", lambda cfg: _fake_result({**ALL_PASS, "c3_source_frames": "fail"}))
     assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 1
     assert "match_cuts result: FAIL" in capsys.readouterr().out
+    # criterion 6 never checked (no Node, no AE): not a plain PASS and not exit 0 (verification-honesty F10)
+    monkeypatch.setattr(pipeline, "run", lambda cfg: _fake_result({**ALL_PASS, "c6_after_effects": "not_available"}))
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 3
+    out = capsys.readouterr().out
+    assert "match_cuts result: PASS (criterion 6 not verified: c6_after_effects summary)" in out
+    assert "match_cuts result: PASS\n" not in out
+    # a failed deliverables check fails the run and is printed (REQ-6)
+    res = _fake_result(ALL_PASS)
+    res["checks"]["s9_8_deliverables"] = {"status": "fail", "summary": "1 problem(s): deliverable missing: xml"}
+    res["exit_code"] = pipeline.exit_code_for(res["criteria"], res["checks"])
+    monkeypatch.setattr(pipeline, "run", lambda cfg: res)
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 1
+    out = capsys.readouterr().out
+    assert "match_cuts result: FAIL" in out and "9.8 deliverables" in out and "deliverable missing: xml" in out
 
     def boom(cfg):
         raise RuntimeError("kaputt")
@@ -435,6 +463,12 @@ def install_stub_world(monkeypatch, calls: dict):
 
     def analyze_layout(comp, cfg, cache, debug_dir, dlog):
         (Path(debug_dir) / "layout.png").write_bytes(b"png")
+        marker = cache.root / "layout_stub.done"            # behaves like layout's own cache
+        if marker.exists():
+            dlog.record("layout", "cache_hit", key="stub")
+        else:
+            dlog.record("layout", "box_full_res", box={"x": 0, "y": 0, "w": W, "h": H}, evidence={"std": 9.5})
+            marker.write_text("1")
         return Layout(W, H, mode="fullscreen", box=Box(0, 0, W, H)), OverlayMasks()
     install(monkeypatch, "layout", analyze_layout=analyze_layout, OverlayMasks=OverlayMasks,
             allowed_mask=lambda layout, overlays, k, comp, dilate_px=None: np.ones((H, W), bool))
@@ -468,7 +502,9 @@ def install_stub_world(monkeypatch, calls: dict):
 
     def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cache, dlog, debug_dir):
         calls["refine"] = calls.get("refine", 0) + 1
+        calls.setdefault("refine_boxes", []).append(layout.box.to_dict() if layout.box else None)
         assert all(isinstance(a.sim, Sim) for a in anchors)
+        dlog.record("refine", "track", frames=[0, COMP_N], anchors=len(anchors))
         fm = FrameMap(COMP_N)
         matched = truth >= 0
         fm.status = np.where(matched, Status.MATCH, Status.NONE).astype(np.int8)
@@ -485,6 +521,7 @@ def install_stub_world(monkeypatch, calls: dict):
 
     def build_segments(fm, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints=None):
         (Path(debug_dir) / "mapping.png").write_bytes(b"png")
+        (Path(debug_dir) / "scores.png").write_bytes(b"png")
         out = []
         for sid, typ, a, b, j0 in EDIT:
             s = Segment(sid, typ, a, b, speed=1.0, speed_measured=1.0, speed_range=[0.99, 1.01], confidence=0.95)
@@ -614,8 +651,11 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     assert code == 0, printed
     verify = json.loads((out / "verify.json").read_text())
     st = {k: v["status"] for k, v in verify["criteria"].items()}
-    assert st == {"c1_coverage": "pass", "c2_cuts": "pass", "c3_source_frames": "pass", "c4_speed_framing": "pass",
-                  "c5_audio": "pass_with_exceptions", "c6_after_effects": "pass"}, verify["failures"]
+    # the stub world has 64x36 frames: verify's own measurements may list explained exceptions there
+    assert set(st) == {"c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio",
+                       "c6_after_effects"}, verify["failures"]
+    assert all(v in ("pass", "pass_with_exceptions") for v in st.values()), (st, verify["failures"])
+    assert st["c1_coverage"] == st["c2_cuts"] == st["c6_after_effects"] == "pass", st
     assert verify["checks"]["s9_7_determinism"]["status"] == "pass"
     assert verify["checks"]["s9_6_ae_render"]["status"] == "not_available"
     assert verify["checks"]["s9_3_visual"]["source"] == "preview_recreation.mp4"
@@ -667,6 +707,17 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     again = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
     assert sum(1 for d in again if d["stage"] == "phase_solve" and d["decision"] == "raw_in") == 3
     assert any(d["stage"] == "refine" and d["decision"] == "cache_hit" for d in again)
+    # REQ-5 / D6: the cached stages' evidence is replayed (cached=true), not reduced to 'cache_hit'
+    replayed = [d for d in again if d.get("cached") is True]
+    assert any(d["stage"] == "layout" and d["decision"] == "box_full_res" and d["evidence"] == {"std": 9.5}
+               for d in replayed)
+    assert any(d["stage"] == "refine" and d["decision"] == "track" for d in replayed)
+    assert all(d.get("cache_key") for d in replayed)
+    assert not any(d.get("cached") for d in decisions)                  # the first run computed everything
+    assert (work / "cache" / "decisions").is_dir() and any((work / "cache" / "decisions").glob("frame_map-*.jsonl"))
+    # each report links its own evidence: <out>/debug/decisions.jsonl is this run's complete log
+    assert (out / "debug" / "decisions.jsonl").read_text() == (work / "decisions.jsonl").read_text()
+    assert json.loads((out / "verify.json").read_text())["checks"]["s9_8_deliverables"]["status"] == "pass"
 
 
 def test_end_to_end_non_match_layout_uses_in_memory_render(monkeypatch, clips, tmp_path, capsys):
@@ -766,3 +817,424 @@ def test_conform_reason_is_deterministic():
     assert pipeline.conform_reason(info, conf, StreamInfo(path="in.mp4", role="raw")) == "AE-safe: used unchanged"
     conf = types.SimpleNamespace(conformed=False, reason="large", file_rel="", file_abs="/big/raw.mp4")
     assert "absolute path" in pipeline.conform_reason(info, conf, StreamInfo(path="in.mp4", role="raw"))
+
+
+# ---------------------------------------------------------------------------------------------
+# review fixes (DESIGN §7): decision capture/replay, audio-informed phase, long-RAW windows, box
+# refinement against RAW, layout periods, input warnings, deliverables
+# ---------------------------------------------------------------------------------------------
+
+def test_decision_log_capture_and_replay(tmp_path):
+    """D6 / REQ-5: capture() collects the records emitted inside (nested captures too, JSON-normalised);
+    replay() writes them again with the extra fields."""
+    from match_cuts.common import DecisionLog, load_decisions, save_decisions
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    dl.record("pre", "outside")
+    with dl.capture("layout") as outer:
+        dl.record("layout", "box", box=Fraction(3, 2), arr=np.arange(2))
+        with dl.capture("inner") as inner:
+            dl.record("layout", "zone", n=np.int64(2))
+    dl.record("post", "outside")
+    assert outer.tag == "layout" and inner.tag == "inner"
+    assert [r["decision"] for r in outer] == ["box", "zone"] and [r["decision"] for r in inner] == ["zone"]
+    assert outer[0]["box"] == "3/2" and outer[0]["arr"] == [0, 1] and inner[0]["n"] == 2   # as written to the log
+    save_decisions(tmp_path / "store.jsonl", outer)
+    assert dl.replay(load_decisions(tmp_path / "store.jsonl") + [{"junk": 1}], cached=True, cache_key="K") == 2
+    dl.close()
+    recs = load_decisions(tmp_path / "d.jsonl")
+    assert [(r["stage"], r["decision"], r.get("cached")) for r in recs] == [
+        ("pre", "outside", None), ("layout", "box", None), ("layout", "zone", None), ("post", "outside", None),
+        ("layout", "box", True), ("layout", "zone", True)]
+    assert recs[-1]["cache_key"] == "K" and recs[-1]["n"] == 2
+    # the null log captures too (stages called without a log file)
+    with null_dlog().capture("x") as cap:
+        null_dlog().record("s", "d", v=1)
+    assert cap == [{"stage": "s", "decision": "d", "v": 1}]
+
+
+def _phase_fm(n: int, raw0: int, speed_u: float = 1.0, soft_pad: int = 0) -> FrameMap:
+    fm = FrameMap(n)
+    fm.status = np.full(n, Status.MATCH, np.int8)
+    truth = np.floor(raw0 + speed_u * np.arange(n) + 1e-9).astype(np.int32)
+    for col in ("raw", "raw_lo", "raw_hi"):
+        setattr(fm, col, truth)
+    fm.soft_lo = truth - soft_pad
+    fm.soft_hi = truth + soft_pad
+    return fm
+
+
+def _solved(seg: Segment, fm: FrameMap, cf: Fraction, rf: Fraction) -> Segment:
+    pipeline.solve_segment_phase(seg, fm, cf, rf, Config(), null_dlog())
+    seg.audio = dict(pipeline.DEFAULT_SEG_AUDIO)
+    return seg
+
+
+def test_audio_informed_phase_sign_and_clamping():
+    """D3 (REQ-1 / F7): raw_in := raw_in + v * lag (lag_ms > 0 = rebuilt audio late = raw_in too small),
+    clamped into floor∩round with max(1 ms, 5 %) margin, never changing a matched frame."""
+    from match_cuts import phase_solve
+    cf = rf = F30
+    fm = _phase_fm(30, 200)
+    cfg = Config()
+
+    def run(lag_ms, corr=0.9, exception=None, speed=1.0, fmap=fm):
+        s = _solved(Segment(1, "raw", 0, 30, speed=speed), fmap, cf, rf)
+        before = (s.raw_in_seconds, [phase_solve.ae_frame(s.raw_in_seconds, speed, k, 0, cf, rf) for k in range(30)])
+        res = {"segments": {1: {"lag_ms": lag_ms, "corr": corr, "exception": exception}}, "status": "ok"}
+        pipeline.apply_segment_audio([s], res)
+        moved, warns = pipeline.audio_informed_phase([s], res, fmap, None, None, 16000, cf, rf, cfg, null_dlog())
+        return s, before, moved, warns
+
+    s, (old, frames), moved, _ = run(+3.0)                           # rebuilt 3 ms late -> raw_in 3 ms later
+    assert old == pytest.approx(200.25 / 30, abs=1e-9)                # video-only: centre of floor ∩ round
+    assert s.raw_in_seconds == pytest.approx(old + 0.003, abs=1e-9) and moved == [1]
+    assert s.audio["phase_source"] == "audio" and s.audio["lag_ms_video"] == 3.0
+    assert [phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, 0, cf, rf) for k in range(30)] == frames
+    assert [phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, 0, cf, rf, rule="round") for k in range(30)] == frames
+    assert s.raw_in_frame == 200 and s.raw_out_frame == 229
+    assert s.ae_margin_ms == pytest.approx((old + 0.003 - 200 / 30) * 1000, abs=1e-5)
+    s, (old, frames), _, _ = run(-3.0)                                # rebuilt early -> earlier
+    assert s.raw_in_seconds == pytest.approx(old - 0.003, abs=1e-9)
+    # NLE in-point at the frame boundary: the audio asks for the lower bound; clamped 1 ms inside
+    s, (old, frames), _, _ = run(-8.333)
+    assert s.raw_in_seconds == pytest.approx(200 / 30 + 0.001, abs=1e-9)
+    s, _, _, _ = run(+50.0)                                           # far outside: upper bound - margin
+    assert s.raw_in_seconds == pytest.approx(200.5 / 30 - 0.001, abs=1e-9)
+    # speed 1.1: the RAW shift is v * lag
+    fm11 = _phase_fm(30, 200, 1.1)
+    s11 = _solved(Segment(1, "raw", 0, 30, speed=1.1), fm11, cf, rf)
+    width = s11.raw_in_interval[1] - s11.raw_in_interval[0] if s11.raw_in_interval_both is None else \
+        s11.raw_in_interval_both[1] - s11.raw_in_interval_both[0]
+    s, (old, frames), _, _ = run(+1.0, speed=1.1, fmap=fm11)
+    lo_b, hi_b = (s11.raw_in_interval_both or s11.raw_in_interval)
+    m = max(0.001, 0.05 * width)
+    assert s.raw_in_seconds == pytest.approx(min(max(old + 1.1 * 0.001, lo_b + m), hi_b - m), abs=2e-9)
+    assert [phase_solve.ae_frame(s.raw_in_seconds, 1.1, k, 0, cf, rf) for k in range(30)] == frames
+    # weak correlation / an audio exception / a replaced track: the video phase stays
+    for kw in ({"corr": 0.79}, {"exception": "music_dominated"}, {"exception": "pitch_preserved"}):
+        s, (old, _), moved, _ = run(+3.0, **kw)
+        assert s.raw_in_seconds == old and not moved and s.audio["phase_source"] == "video"
+        assert s.audio["lag_ms_video"] == 3.0
+
+
+def test_audio_informed_phase_keeps_measured_frames():
+    """Soft ranges wider than refine's measurement: the audio may only move raw_in where every frame the
+    video phase showed correctly (pre-segmentation measurement) stays on its RAW frame (criterion 3)."""
+    from match_cuts import phase_solve
+    cf = rf = F30
+    fm = _phase_fm(30, 200, soft_pad=1)            # soft [j-1, j+1], measured j (unique)
+    s = _solved(Segment(1, "raw", 0, 30, speed=1.0), fm, cf, rf)
+    old = s.raw_in_seconds
+    frames = [phase_solve.ae_frame(old, 1.0, k, 0, cf, rf) for k in range(30)]
+    assert frames == list(range(200, 230))
+    res = {"segments": {1: {"lag_ms": 30.0, "corr": 0.95, "exception": None}}, "status": "ok"}
+    pipeline.apply_segment_audio([s], res)
+    pipeline.audio_informed_phase([s], res, fm, None, None, 16000, cf, rf, Config(), null_dlog())
+    assert s.raw_in_seconds > old                                   # moved towards the audio ...
+    assert [phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, 0, cf, rf) for k in range(30)] == frames   # ... not past it
+    assert [phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, 0, cf, rf, rule="round") for k in range(30)] == frames
+
+
+def _assembly_ctx(tmp_path: Path, fps: Fraction, n_comp: int, n_raw: int, comp_y, raw_y, sr: int) -> "pipeline.Context":
+    cfg = Config()
+    cfg.out_dir, cfg.work_dir = str(tmp_path / "o"), str(tmp_path / "w")
+    ctx = pipeline.Context(cfg=cfg)
+    for role, n in (("competitor", n_comp), ("raw", n_raw)):
+        info = StreamInfo(path=str(tmp_path / f"{role}.mp4"), role=role, fps=fps, nb_frames=n, width=W, height=H,
+                          display_width=W, display_height=H, has_audio=True, file_hash=role, duration=n / float(fps))
+        setattr(ctx, "comp_info" if role == "competitor" else "raw_info", info)
+    ctx.comp_audio, ctx.raw_audio, ctx.audio_sr = comp_y, raw_y, sr
+    ctx.main_fps, ctx.main_size = fps, (W, H)
+    return ctx
+
+
+def test_audio_phase_same_rate_24p_nle_inpoint_and_static_shot(monkeypatch, tmp_path):
+    """REQ-1 / F7 through the real assembly (phase_solve + audio_align): 23.976p competitor and RAW, NLE
+    in-points on RAW frame boundaries. S1 (unique frames): the video-only centre leaves the audio
+    10.43 ms early (> the 10 ms c5 tolerance); after D3 the residual is the 1 ms edge margin. S2 (static,
+    every frame ambiguous-identical over 61 RAW frames): the video centre is 156 ms off, beyond the
+    +-100 ms per-segment search; the wide search puts raw_in on the in-point."""
+    from match_cuts import audio_align, phase_solve
+    fps, sr = Fraction(24000, 1001), 16000
+    rng = np.random.default_rng(5)
+    raw_y = rng.standard_normal(20 * sr).astype(np.float32) * 0.1
+    n_raw = int(20 * fps)
+
+    def samples(frames: int) -> int:                                 # exact for multiples of 3 frames
+        v = Fraction(frames) * sr / fps
+        assert v.denominator == 1
+        return int(v)
+    j1, j2, n1 = 33, 303, 48
+    comp_y = np.concatenate([raw_y[samples(j1):samples(j1) + samples(n1)],
+                             raw_y[samples(j2):samples(j2) + samples(n1)]])
+    comp_y = comp_y + rng.standard_normal(comp_y.size).astype(np.float32) * 0.02   # a little independent noise
+    fm = FrameMap(2 * n1)
+    fm.status = np.full(2 * n1, Status.MATCH, np.int8)
+    raw = np.concatenate([j1 + np.arange(n1), np.full(n1, 330)]).astype(np.int32)
+    lo = np.concatenate([j1 + np.arange(n1), np.full(n1, 300)]).astype(np.int32)
+    hi = np.concatenate([j1 + np.arange(n1), np.full(n1, 360)]).astype(np.int32)
+    fm.raw, fm.raw_lo, fm.raw_hi, fm.soft_lo, fm.soft_hi = raw, lo, hi, lo, hi
+    install(monkeypatch, "segment", build_segments=lambda fm_, *a, **k: [
+        Segment(1, "raw", 0, n1, speed=1.0, raw_in_frame=j1, transform=Sim(1, 0, 0, 0).to_dict()),
+        Segment(2, "raw", n1, 2 * n1, speed=1.0, raw_in_frame=330, transform=Sim(1, 0, 0, 0).to_dict(),
+                ambiguous_frames=list(range(n1, 2 * n1)))])
+    ctx = _assembly_ctx(tmp_path, fps, 2 * n1, n_raw, comp_y, raw_y, sr)
+    dlog = types.SimpleNamespace(record=lambda *a, **k: None)
+    fm_out, segs, audio_result, cutlist = pipeline.segment_and_assemble(ctx, fm, dlog, tmp_path / "dbg")
+    s1, s2 = sorted(segs, key=lambda s: s.id)
+    # S1: the video-only phase was a quarter frame late in RAW = audio 10.43 ms early
+    assert s1.audio["lag_ms_video"] == pytest.approx(-0.25 * 1001 / 24, abs=0.3)
+    assert abs(s1.audio["lag_ms_video"]) > 10.0
+    assert s1.audio["phase_source"] == "audio" and abs(s1.audio["lag_ms"]) < 3.0 and s1.audio["corr"] >= 0.8
+    both_w = s1.raw_in_interval_both[1] - s1.raw_in_interval_both[0]
+    assert abs(s1.raw_in_seconds - float(Fraction(j1) / fps)) <= pipeline.audio_phase_margin_s(both_w) + 1e-6
+    assert pipeline.audio_phase_margin_s(both_w) == pytest.approx(0.05 * both_w)     # 5 % of 20.85 ms > 1 ms
+    assert [phase_solve.ae_frame(s1.raw_in_seconds, 1.0, k, 0, fps, fps) for k in range(n1)] == list(range(j1, j1 + n1))
+    # S2: static shot; the audio places the in-point
+    assert s2.audio["phase_source"] == "audio" and abs(s2.audio["lag_ms"]) < 3.0 and s2.audio["exception"] is None
+    assert abs(s2.raw_in_seconds - float(Fraction(j2) / fps)) < 0.0005
+    assert "wide audio search" in s2.notes
+    assert s2.raw_in_interval_both[0] < s2.raw_in_seconds < s2.raw_in_interval_both[1]
+    for k in range(n1, 2 * n1):
+        assert 300 <= phase_solve.ae_frame(s2.raw_in_seconds, 1.0, k, n1, fps, fps) <= 360
+    assert cutlist.segments[0].audio["phase_source"] == "audio"
+
+
+def test_frame_map_windows_cover_every_referenced_raw_frame():
+    fm = FrameMap(6)
+    fm.raw = np.array([-1, 100, 101, 102, -1, 900], np.int32)
+    fm.raw_lo = np.array([-1, 99, 101, 102, -1, 900], np.int32)
+    fm.raw_hi = np.array([-1, 100, 101, 104, -1, 905], np.int32)
+    cfg = Config()
+    wins = pipeline.frame_map_windows(fm, F30, F30, 950, cfg)
+    pad = int(math.ceil(max(60.0, 2 * (cfg.transition_search + cfg.track_search_radius + cfg.refine_radius + 2))))
+    assert wins == [(99 - pad, 104 + pad + 1), (900 - pad, 950)]          # clipped to the RAW length
+    assert pipeline.frame_map_windows(fm, F30, F30, 2000, cfg)[1] == (900 - pad, 905 + pad + 1)
+    assert pipeline.frame_map_windows(FrameMap(3), F30, F30, 1000, cfg) == []
+
+
+def _install_sparse_raw(monkeypatch, calls: dict) -> None:
+    """Replace the stub proxies with a long-RAW style sparse RAW proxy (every 8th frame exposed) whose
+    extend_proxy exposes the requested windows (like proxies.py: exactly the frames requested so far)."""
+    raw_frames, comp_frames, _ = _world()
+
+    def mk(role, info, frames, index_map):
+        return Proxy(role, info.path, frames, (W, H), (1.0, 1.0), F30, np.arange(len(frames)) / 30.0, len(frames),
+                     index_map=index_map)
+
+    def build_proxy(info, role, cfg, cache, windows=None):
+        if role == "competitor":
+            return mk(role, info, comp_frames, None)
+        im = np.full(RAW_N, -1, np.int32)
+        im[::8] = np.arange(RAW_N)[::8]
+        for a, b in windows or []:
+            im[a:b] = np.arange(a, b)
+        return mk(role, info, raw_frames, im)
+
+    def extend_proxy(p, windows, cfg, cache):
+        calls.setdefault("extend", []).append([list(w) for w in windows])
+        im = np.asarray(p.index_map).copy()
+        for a, b in windows:
+            im[a:b] = np.arange(a, b)
+        return Proxy(p.role, p.path, p.frames, p.full_size, p.ratio, p.fps, p.pts, p.n, index_map=im)
+    mod = sys.modules["match_cuts.proxies"]
+    monkeypatch.setattr(mod, "build_proxy", build_proxy)
+    monkeypatch.setattr(mod, "extend_proxy", extend_proxy)
+    seg_mod = sys.modules["match_cuts.segment"]
+    orig = seg_mod.build_segments
+
+    def build_segments(fm, comp, raw, *a, **k):
+        calls.setdefault("seg_raw_frames", []).append(np.flatnonzero(np.asarray(raw.index_map) >= 0).tolist())
+        return orig(fm, comp, raw, *a, **k)
+    monkeypatch.setattr(seg_mod, "build_segments", build_segments)
+
+
+def test_long_raw_proxy_windows_survive_the_frame_map_cache(monkeypatch, clips, tmp_path, capsys):
+    """real-world F5: on a FrameMap cache hit the sparse RAW proxy is extended with windows re-derived
+    from the cached FrameMap, so segmentation/verification see the same RAW frames as the first run."""
+    calls: dict = {}
+    install_stub_world(monkeypatch, calls)
+    _install_sparse_raw(monkeypatch, calls)
+    out, work = tmp_path / "output", tmp_path / "work"
+    argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work",
+            str(work), "--skip-compare"]
+    cli.main(argv)
+    first = json.loads((out / "cutlist.json").read_text())
+    n_ext_first = len(calls["extend"])
+    cli.main(argv)
+    capsys.readouterr()
+    assert calls["refine"] == 1                                    # second run: FrameMap cache hit
+    assert len(calls["extend"]) > n_ext_first                      # ... and still extended (hit branch)
+    runs = calls["seg_raw_frames"]
+    # each run segments once and verify s9_7 re-assembles once: all four see the same RAW frames
+    assert len(runs) == 4 and all(r == runs[0] for r in runs)
+    assert set(range(5, 77)) <= set(runs[0]) and len(runs[0]) > len(range(0, RAW_N, 8))
+    second = json.loads((out / "cutlist.json").read_text())
+    first["provenance"].pop("timings")
+    second["provenance"].pop("timings")
+    assert first == second
+    decisions = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
+    assert any(d["decision"] == "frame_map_windows" and d["n"] >= 1 for d in decisions)
+
+
+def test_box_refined_against_raw_reruns_visual_stages(monkeypatch, clips, tmp_path, capsys):
+    """real-world F3 / D2: when layout.refine_box_from_raw changes the box, S5.2 + S5.3 run once more
+    with the refined layout (own cache keys); a cached re-run reproduces it without recomputing.
+    Also real-world F8: probe.input_warnings reach the warnings and cutlist.warnings."""
+    calls: dict = {}
+    install_stub_world(monkeypatch, calls)
+    lay_mod = sys.modules["match_cuts.layout"]
+    grown = Box(2.0, 3.0, W - 4.0, H - 6.0, 4.0)
+
+    def refine_box_from_raw(layout, overlays, comp, raw, fm, cfg, cache, dlog, debug_dir):
+        calls["refine_box"] = calls.get("refine_box", 0) + 1
+        assert fm.n == COMP_N and raw is not None and comp is not None
+        dlog.record("layout", "box_grown_to_raw", old=layout.box.to_dict(), new=grown.to_dict())
+        new = Layout.from_dict(layout.to_dict())
+        new.box = grown
+        return new, True
+    monkeypatch.setattr(lay_mod, "refine_box_from_raw", refine_box_from_raw, raising=False)
+    probe_mod = sys.modules["match_cuts.probe"]
+    monkeypatch.setattr(probe_mod, "input_warnings", lambda info: [
+        "decoded duration 3.0 s < container duration 10.0 s (truncated/partial file?)"] if info.role == "raw" else [],
+        raising=False)
+    out, work = tmp_path / "output", tmp_path / "work"
+    argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work", str(work)]
+    assert cli.main(argv) == 0
+    printed = capsys.readouterr().out
+    assert calls["refine"] == 2 and calls["refine_boxes"] == [Box(0, 0, W, H).to_dict(), grown.to_dict()]
+    cl = json.loads((out / "cutlist.json").read_text())
+    assert cl["layout"]["box"] == grown.to_dict()
+    assert any("truncated/partial file" in w and w.startswith("raw input") for w in cl["warnings"])
+    assert "truncated/partial file" in printed
+    decisions = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
+    ev = [d for d in decisions if d["decision"] == "box_refined_from_raw"]
+    assert ev and ev[0]["changed"] is True and ev[0]["new_box"] == grown.to_dict()
+    # cached re-run: no search / refine, same layout and cutlist
+    assert cli.main(argv) == 0
+    capsys.readouterr()
+    assert calls["refine"] == 2
+    cl2 = json.loads((out / "cutlist.json").read_text())
+    cl["provenance"].pop("timings")
+    cl2["provenance"].pop("timings")
+    assert cl == cl2
+    again = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
+    assert sum(1 for d in again if d["stage"] == "refine" and d["decision"] == "cache_hit") == 2
+    assert any(d["decision"] == "track" and d.get("cached") for d in again)
+
+
+def test_box_refinement_missing_or_failing_is_not_fatal(monkeypatch, clips, tmp_path, capsys):
+    calls: dict = {}
+    install_stub_world(monkeypatch, calls)
+
+    def boom(*a, **k):
+        raise ValueError("no agreeing pixels")
+    monkeypatch.setattr(sys.modules["match_cuts.layout"], "refine_box_from_raw", boom, raising=False)
+    out = tmp_path / "o"
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out),
+                     "--work", str(tmp_path / "w"), "--skip-compare"]) == 0
+    capsys.readouterr()
+    assert calls["refine"] == 1
+    cl = json.loads((out / "cutlist.json").read_text())
+    assert any("box refinement against RAW failed" in w for w in cl["warnings"])
+
+
+def test_layout_period_warnings():
+    """F4 / AE-1 / REQ-3 with D1: fullscreen periods are reproduced (a segment inside carries the whole
+    canvas as its box) -- warn only when a segment there has no box or straddles the boundary; split/PiP
+    periods are always warned (not reproducible)."""
+    from match_cuts.model import LayoutPeriod
+    full = {"x": 0, "y": 0, "w": W, "h": H, "corner_radius": 0}
+    lay = Layout(W, H, box=Box(4, 4, W - 8, H - 8, 2), periods=[
+        LayoutPeriod(0, 10, "fullscreen", Box(0, 0, W, H)), LayoutPeriod(10, 40, "boxed", Box(4, 4, W - 8, H - 8, 2))])
+    ok = [Segment(1, "raw", 0, 10, box=full, region=1), Segment(2, "raw", 10, 40)]
+    assert pipeline.layout_period_warnings(ok, lay, "match") == []
+    bad = [Segment(1, "raw", 0, 10), Segment(2, "raw", 10, 40)]
+    w = pipeline.layout_period_warnings(bad, lay, "match")
+    assert len(w) == 1 and "frames 0-9 are fullscreen" in w[0] and "S01" in w[0] and "S02" not in w[0]
+    straddle = [Segment(1, "raw", 0, 12, box=full, region=1), Segment(2, "raw", 12, 40)]
+    assert "straddle" in pipeline.layout_period_warnings(straddle, lay, "match")[0]
+    assert pipeline.layout_period_warnings(bad, lay, "source") == []
+    # stage-level: split/PiP warned (analysis), fullscreen only logged
+    ctx = pipeline.Context(cfg=Config())
+    ctx.layout = Layout(W, H, box=Box(4, 4, W - 8, H - 8, 2), periods=[
+        LayoutPeriod(0, 10, "fullscreen", Box(0, 0, W, H)), LayoutPeriod(10, 20, "split", None),
+        LayoutPeriod(20, 40, "boxed", Box(4, 4, W - 8, H - 8, 2))])
+    recs = []
+    ctx.dlog = types.SimpleNamespace(record=lambda *a, **k: recs.append((a, k)))
+    pipeline.layout_warnings(ctx)
+    assert ctx.analysis_warnings == ["frames 10-19: split-screen layout: only the dominant region is recreated "
+                                     "(After Effects cannot reproduce it from this cutlist)"]
+    assert not any("fullscreen" in w for w in ctx.warnings)
+    assert any(a[1] == "fullscreen_periods" and k["periods"] == [[0, 10]] for a, k in recs)
+
+
+def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_path, capsys):
+    """REQ-6 / D5: an export that raised (EDL) or failed validation is a failed run (exit 1, s9_8 fail),
+    not 'PASS' with a warning; explicitly skipped renders are not missing."""
+    calls: dict = {}
+    install_stub_world(monkeypatch, calls)
+    xe = sys.modules["match_cuts.export_xml_edl"]
+
+    def edl_boom(cl, path, cfg=None):
+        raise OSError("disk full")
+    monkeypatch.setattr(xe, "write_edl", edl_boom)
+    out = tmp_path / "o"
+    base = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--work", str(tmp_path / "w")]
+    assert cli.main(base + ["--out", str(out)]) == 1
+    printed = capsys.readouterr().out
+    assert "match_cuts result: FAIL" in printed and "9.8 deliverables" in printed
+    v = json.loads((out / "verify.json").read_text())
+    chk = v["checks"]["s9_8_deliverables"]
+    assert chk["status"] == "fail" and "edl" in json.dumps(chk)
+    ctx_exports = None
+    # validation failure alone also fails; skipped renders are listed as skipped, not missing
+    monkeypatch.setattr(xe, "write_edl", lambda cl, path, cfg=None: Path(path).write_text("edl\n"))
+    monkeypatch.setattr(xe, "validate_exports", lambda cl, x, e: {"ok": False, "errors": ["EDL: 39 frames != 40"]})
+    out2 = tmp_path / "o2"
+    assert cli.main(base + ["--out", str(out2), "--skip-preview", "--skip-compare"]) == 1
+    capsys.readouterr()
+    chk = json.loads((out2 / "verify.json").read_text())["checks"]["s9_8_deliverables"]
+    assert chk["status"] == "fail" and "39 frames != 40" in json.dumps(chk)
+    assert ctx_exports is None
+    monkeypatch.setattr(xe, "validate_exports", lambda cl, x, e: {"ok": True, "errors": []})
+    out3 = tmp_path / "o3"
+    assert cli.main(base + ["--out", str(out3), "--skip-preview", "--skip-compare"]) == 0
+    capsys.readouterr()
+    chk = json.loads((out3 / "verify.json").read_text())["checks"]["s9_8_deliverables"]
+    assert chk["status"] == "pass"
+
+
+def test_collect_deliverables_records_files_skips_and_errors(tmp_path):
+    cfg = Config()
+    cfg.out_dir, cfg.work_dir = str(tmp_path / "o"), str(tmp_path / "w")
+    cfg.skip_compare = True
+    ctx = pipeline.Context(cfg=cfg)
+    (tmp_path / "o" / "debug").mkdir(parents=True)
+    for rel in ("build_ae_project.jsx", "cutlist.json", "cutlist.csv", "recreated_edit.xml", "preview_recreation.mp4",
+                "debug/mapping.png", "debug/scores.png", "debug/layout.png"):
+        (tmp_path / "o" / rel).write_text("x")
+    ctx.paths["jsx"] = str(tmp_path / "o" / "build_ae_project.jsx")
+    ctx.cutlist = object()
+    ctx.ae_run = {"status": "not_available", "reason": "After Effects not installed on this machine (Linux)"}
+    ctx.exports = {"ok": False, "errors": ["EDL: does not exist"]}
+    media = tmp_path / "o" / "media"
+    media.mkdir()
+    (media / "raw.mp4").write_text("x")
+    ctx.raw_conform = types.SimpleNamespace(path=str(media / "raw.mp4"))
+    ctx.comp_conform = types.SimpleNamespace(path=str(media / "competitor_ref.mp4"))     # missing
+    d = pipeline.collect_deliverables(ctx, {"csv": True, "xml": True, "edl": False, "preview": True})
+    assert set(d["files"]) >= {"jsx", "aep", "cutlist", "csv", "xml", "edl", "preview", "compare", "debug_mapping",
+                               "debug_scores", "debug_layout", "media_raw", "media_competitor"}
+    assert d["files"]["xml"].endswith("recreated_edit.xml") and d["files"]["edl"] is None
+    assert d["skipped"] == {"aep": "After Effects not installed on this machine (Linux)", "compare": "--skip-compare"}
+    assert d["missing"] == ["edl", "media_competitor"] and d["ok"] is False
+    assert "EDL: does not exist" in d["errors"] and "deliverable missing: edl" in d["errors"]
+    ctx.exports.update(d)
+    ctx.errors.append({"stage": "S8 EDL", "error": "OSError: disk full"})
+    chk = pipeline.deliverables_check(ctx)
+    assert chk["status"] == "fail" and chk["missing"] == ["edl", "media_competitor"]
+    assert any("stage error: S8 EDL" in f for f in chk["failures"])
+    # AE ran but produced no project: missing, not skipped
+    ctx.ae_run = {"status": "failed", "error": "recreated_edit.aep did not appear"}
+    assert "aep" in pipeline.collect_deliverables(ctx, {})["missing"]

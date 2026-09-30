@@ -6,13 +6,18 @@ Runs the real CLI on the synthetic RAW + competitor made by tests/synth.py (prof
 * FrameMap m(k) (``<work>/frame_map.npz``) == truth on EVERY matchable frame
 * cuts +-0 frames (speed-only cuts: truth inside ``cut_ambiguity``), segment boundaries exact
 * AE-simulated RAW frames (from the cutlist's raw_in / speed / comp_in, AE floor rule) == truth, except
-  listed timing-tie frames
+  listed timing-tie frames; verify.json s9_2 (AE plan AND mock-run record vs m(k)): 0 mismatches
+* the fullscreen segment (DESIGN §7 D1/D8): exact range, ``box`` == the whole canvas (radius 0), region 1,
+  exact frames (m(k) and AE simulation), a fullscreen layout period covering it
+* audio: per RAW segment |lag_ms| <= 3 ms after the audio-informed phase (D3; the synthetic audio starts
+  at the NLE in-point = lower bound of the floor interval, D8)
 * speed +-0.5 % AND snapped to the truth value; flip; framing +-1 % scale / +-4 px (every frame, incl. the
   push-in keys); rotation 0
 * crossfade (O, D=6); NOT-IN-RAW placeholder range exact; coverage
 * ``<out>/verify.json``: c1-c5 in {pass, pass_with_exceptions}, c6 == pass (mock), s9_7 pass
 * audio truth (offsets 0, pitch not preserved on the 1.10x segment, NOT-IN-RAW exception, music added)
-* layout truth (box, background, static zones, captions) within lenient tolerances
+* layout truth (box, background, static zones, captions) within lenient tolerances; caption recall is
+  computed from per-event caption entries only (zone aggregates and entries > 3 s excluded, REQ-7)
 * a second CLI run (same work dir) gives a byte-identical cutlist.json
 
 Failures print precise, actionable tables (which frames / segments differ and how).
@@ -178,6 +183,43 @@ def _sim_at(seg: dict, k: int, key_field: str = "transform_keys") -> dict:
     return {f: a.get(f, 0.0) + u * (b.get(f, 0.0) - a.get(f, 0.0)) for f in ("scale", "rotation_deg", "tx", "ty")}
 
 
+CAPTION_EVENT_MAX_S = 3.0
+
+
+def caption_event_entries(cutlist: dict) -> list[dict]:
+    """Per-event caption entries of a cutlist (layout.captions + overlays_detected): type 'captions' only
+    (not 'text' / stickers), never a zone-derived entry (kind/source 'zone', a '*zone*' type, or the
+    aggregate caption zone spanning the whole edit) and never an entry longer than CAPTION_EVENT_MAX_S --
+    a word-by-word caption event is short, so any longer entry is an aggregate that would cover every
+    caption frame and make the recall check impossible to fail (REQ-7)."""
+    fps = float(_fps((cutlist.get("competitor") or {}).get("fps") or 30))
+    max_frames = CAPTION_EVENT_MAX_S * fps + 1e-9
+    out = []
+    for c in list((cutlist.get("layout") or {}).get("captions") or []) + list(cutlist.get("overlays_detected") or []):
+        typ = str(c.get("type", "")).lower()
+        if typ not in ("captions", "caption") or "zone" in typ:
+            continue
+        if str(c.get("kind", "")).lower() == "zone" or str(c.get("source", "")).lower() == "zone":
+            continue
+        a, b = c.get("comp_in"), c.get("comp_out")
+        if a is None or b is None or not (0 < int(b) - int(a) <= max_frames):
+            continue
+        out.append(c)
+    return out
+
+
+def caption_recall(truth_captions: list[dict], cutlist: dict, n: int) -> tuple[float, list[dict]]:
+    """Fraction of truth caption frames covered by per-event caption entries; (recall, entries used)."""
+    want = np.zeros(n, bool)
+    for c in truth_captions:
+        want[int(c["k_in"]):int(c["k_out"])] = True
+    got = np.zeros(n, bool)
+    used = caption_event_entries(cutlist)
+    for c in used:
+        got[max(0, int(c["comp_in"])):min(n, int(c["comp_out"]))] = True
+    return float((want & got).sum() / max(1, want.sum())), used
+
+
 def _apply(sim: dict, p: tuple[float, float]) -> np.ndarray:
     th = math.radians(sim.get("rotation_deg", 0.0))
     s = sim["scale"]
@@ -299,6 +341,98 @@ def test_ae_simulated_frames_equal_truth(e2e, cutlist):
     assert not rows, _table(f"AE-simulated RAW frame != truth on {len(rows)} of {n_frames} frames "
                             "(stretch rule floor(raw_fps*(raw_in+v*(t_k-t_in))+1e-9); tie frames excluded):",
                             ["seg", "kind", "k", "truth", "AE", "diff", "raw_in_s", "speed"], rows)
+
+
+def _ae_check_part(s92: dict, src: str) -> dict | None:
+    d = s92.get(src)
+    return d if isinstance(d, dict) else None
+
+
+def test_verify_ae_sim_has_no_mismatches(verify):
+    """verify.json s9_2 (criterion 3): the AE plan AND the mock-run record, simulated with AE's own
+    semantics, show m(k) on every matched frame -- n_mismatches == 0 for both (ambiguous-identical /
+    timing-tie / reassigned frames are listed classes, reported here but not mismatches)."""
+    checks = verify.get("checks") or {}
+    s92 = checks.get("s9_2_ae_sim") or checks.get("s9_2") or {}
+    rows = []
+    for src in ("plan", "mock"):
+        d = _ae_check_part(s92, src)
+        if d is None:
+            rows.append([src, "missing", "-", "-", json.dumps(s92, default=str)[:200]])
+            continue
+        n_mis = d.get("n_mismatches")
+        if n_mis is None:
+            n_mis = len(d.get("mismatches") or [])
+        classes = {c: (len(d[c]) if isinstance(d.get(c), list) else d.get(c))
+                   for c in ("ambiguous_identical", "timing_tie", "reassigned", "n_reassigned") if c in d}
+        if d.get("status") in (None, "not_available", "fail", "error") or n_mis != 0:
+            first = [(m.get("k"), m.get("ae"), m.get("m")) for m in (d.get("mismatches") or [])[:10]]
+            rows.append([src, d.get("status"), n_mis, json.dumps(classes), f"{d.get('summary')} first (k, ae, m): {first}"])
+    assert not rows, _table("s9_2 AE simulation vs m(k) must have 0 mismatches (plan and mock record):",
+                            ["source", "status", "n_mismatches", "classes", "detail"], rows)
+
+
+def test_fullscreen_segment(e2e, cutlist, frame_map):
+    """DESIGN §7 D1/D8: the ~1 s fullscreen segment is found with its exact range, carries box == the whole
+    canvas (corner radius 0) and region 1, sits in a fullscreen layout period, and shows the exact truth
+    frames both in m(k) and in the AE simulation."""
+    truth = e2e["truth"]
+    fs = [t for t in truth["segments"] if t.get("kind") == "fullscreen"]
+    assert len(fs) == 1, f"truth has {len(fs)} fullscreen segments (synthetic data older than SYNTH_VERSION 2?)"
+    t = fs[0]
+    W, H = truth["competitor"]["width"], truth["competitor"]["height"]
+    matched, _ = _match_segments(truth, cutlist)
+    s = matched.get(t["id"])
+    assert s is not None, (f"no cutlist segment starts at the fullscreen segment's comp_in {t['comp_in']}:\n" +
+                           _table("cutlist segments:", ["id", "comp_in", "comp_out", "type", "box"],
+                                  [[x.get("id"), x["comp_in"], x["comp_out"], x["type"], x.get("box")]
+                                   for x in _segments(cutlist)]))
+    rows = []
+    if int(s["comp_out"]) != t["comp_out"]:
+        rows.append(["range", f"[{t['comp_in']},{t['comp_out']})", f"[{s['comp_in']},{s['comp_out']})"])
+    box = s.get("box")
+    want = {"x": 0, "y": 0, "w": W, "h": H}
+    if not isinstance(box, dict) or any(abs(float(box.get(f, -1e9)) - v) > 0.5 for f, v in want.items()) or \
+            abs(float(box.get("corner_radius", 0.0) or 0.0)) > 0.5:
+        rows.append(["box", f"{want} r=0", box])
+    if int(s.get("region", -1) if s.get("region") is not None else -1) != 1:
+        rows.append(["region", 1, s.get("region")])
+    periods = [pp for pp in ((cutlist.get("layout") or {}).get("periods") or []) if pp.get("mode") == "fullscreen"]
+    got_p = sorted((int(pp["comp_in"]), int(pp["comp_out"])) for pp in periods)
+    want_p = [(d["comp_in"], d["comp_out"]) for d in truth["layout"].get("fullscreen", [])]
+    if got_p != want_p:
+        rows.append(["layout fullscreen periods", want_p, got_p])
+    status, raw = frame_map["status"], frame_map["raw"]
+    sim = _ae_frames(s, _fps(cutlist["competitor"]["fps"]), _fps(cutlist["raw"]["fps"]))
+    ties = set(int(x) for x in (s.get("tie_frames") or []))
+    for i, k in enumerate(range(t["comp_in"], t["comp_out"])):
+        j = t["raw_frames"][i]
+        if int(status[k]) != S_MATCH or int(raw[k]) != j:
+            rows.append([f"m({k})", j, f"{int(raw[k])} (status {int(status[k])})"])
+        if k in sim and sim[k] != j and k not in ties:
+            rows.append([f"AE frame at {k}", j, sim[k]])
+    assert not rows, _table(f"fullscreen segment {t['id']} [{t['comp_in']},{t['comp_out']}) differs from truth:",
+                            ["field", "truth", "cutlist"], rows)
+
+
+def test_audio_phase_lag(e2e, cutlist):
+    """DESIGN §7 D3/D8: the synthetic audio starts at the NLE in-point (lower bound of the floor interval);
+    after the audio-informed phase every RAW segment's residual audio lag is within +-3 ms."""
+    truth = e2e["truth"]
+    matched, _ = _match_segments(truth, cutlist)
+    rows = []
+    for t in truth["segments"]:
+        s = matched.get(t["id"])
+        if t["type"] != "raw" or s is None:
+            continue
+        a = s.get("audio") or {}
+        lag = a.get("lag_ms")
+        if lag is None or not math.isfinite(float(lag)) or abs(float(lag)) > 3.0:
+            rows.append([t["id"], t["kind"], lag, a.get("lag_ms_video"), a.get("phase_source"), a.get("corr"),
+                         a.get("exception"), s.get("raw_in_seconds"), t["audio"]["raw_in_seconds"]])
+    assert not rows, _table("audio lag after the audio-informed phase must be within +-3 ms per RAW segment:",
+                            ["seg", "kind", "lag_ms", "lag_ms_video", "phase_source", "corr", "exception",
+                             "raw_in_s", "truth audio raw_in_s"], rows)
 
 
 def test_speed_flip_framing(e2e, cutlist):
@@ -450,16 +584,12 @@ def test_layout_truth(e2e, cutlist):
             rows.append([f"zone {z['type']}", f"({z['x']},{z['y']},{z['w']},{z['h']})", f"covered {best:.0%}",
                          ">= 50 % covered by a detected zone"])
     n = e2e["truth"]["competitor"]["frames"]
-    want = np.zeros(n, bool)
-    for c in truth["captions"]:
-        want[c["k_in"]:c["k_out"]] = True
-    got = np.zeros(n, bool)
-    for c in (lay.get("captions") or []) + [o for o in cutlist.get("overlays_detected", [])
-                                            if "caption" in str(o.get("type", ""))]:
-        got[int(c["comp_in"]):int(c["comp_out"])] = True
-    recall = (want & got).sum() / max(1, want.sum())
+    recall, used = caption_recall(truth["captions"], cutlist, n)
     if recall < 0.8:
-        rows.append(["captions", f"{want.sum()} frames", f"recall {recall:.0%}", ">= 80 % of caption frames"])
+        n_frames = sum(c["k_out"] - c["k_in"] for c in truth["captions"])
+        rows.append(["captions", f"{len(truth['captions'])} events / {n_frames} frames",
+                     f"recall {recall:.0%} from {len(used)} per-event entries",
+                     ">= 80 % of caption frames (zones and entries > 3 s excluded)"])
     assert not rows, _table("layout differs from truth:", ["field", "truth", "cutlist", "tolerance"], rows)
 
 

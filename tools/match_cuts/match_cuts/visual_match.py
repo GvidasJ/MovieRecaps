@@ -15,16 +15,22 @@ A competitor frame is matched to RAW with keypoints, never with shot detection:
   SIFT features of a mirrored image are an exact permutation of the originals (precise-upscale SIFT,
   :func:`mirror_features`), so flip votes and flipped verification need no second SIFT pass.
 * :func:`sparse_search` runs :func:`search_frame` every ``cfg.comp_search_stride`` competitor frames
-  (audio-restricted first, global fallback) in a fork pool.
+  (audio-restricted first, global fallback) in a worker pool.
 
 Shared helpers used by ``refine`` live here too: :class:`AllowedMasks` (box & ~static & ~overlay
-masks), :func:`parallel_map` (deterministic fork pool), :func:`proxy_id` (cache identities).
+masks), :func:`parallel_map` (deterministic worker pool: fork on Linux, spawn on Windows / macOS or with
+``MATCH_CUTS_START_METHOD=spawn``; bit-identical results either way), :func:`proxy_id` (cache
+identities).
 """
 from __future__ import annotations
 
+import atexit
 import hashlib
 import math
 import multiprocessing as mp
+import os
+import pickle
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,14 +45,26 @@ from .geometry import Sim, from_cv_matrix
 from .model import AudioHints, Layout, Proxy
 
 __all__ = ["RawIndex", "Anchor", "search_frame", "sparse_search", "run_searches", "AllowedMasks", "parallel_map",
-           "proxy_id", "box_roi", "audio_window", "detect_sift", "mirror_features"]
+           "proxy_id", "box_roi", "audio_window", "detect_sift", "mirror_features", "start_method",
+           "shutdown_workers"]
 
 
 # ---------------------------------------------------------------------------------------------
-# Deterministic fork pool
+# Deterministic worker pools (fork on Linux, spawn elsewhere -- DESIGN D7)
 # ---------------------------------------------------------------------------------------------
 
 _WSTATE: dict[str, Any] = {}
+START_METHOD_ENV = "MATCH_CUTS_START_METHOD"
+# how parallel_map calls ran in THIS process (diagnostics + tests): inline / fork / spawn pools, and
+# spawn requests that fell back to inline (unpicklable state or an unguarded __main__)
+POOL_STATS: dict[str, int] = {"inline": 0, "fork": 0, "spawn": 0, "spawn_fallback": 0}
+_WARNED: set[str] = set()
+
+
+def _warn_once(key: str, msg: str, *args: Any) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        log.warning(msg, *args)
 
 
 def _invoke(item: Any) -> Any:
@@ -60,16 +78,156 @@ def _fork_available() -> bool:
     return "fork" in mp.get_all_start_methods()
 
 
+def _platform() -> str:
+    import sys
+    return sys.platform
+
+
+def start_method() -> str:
+    """'fork' or 'spawn': fork only on Linux (on macOS fork is unsafe with system frameworks, Windows
+    has none); ``MATCH_CUTS_START_METHOD=fork|spawn`` overrides (fork falls back to spawn where the
+    platform lacks it)."""
+    env = os.environ.get(START_METHOD_ENV, "").strip().lower()
+    if env == "spawn":
+        return "spawn"
+    if env == "fork":
+        if _fork_available():
+            return "fork"
+        _warn_once("env_fork", "%s=fork: the fork start method is unavailable on this platform - using spawn",
+                   START_METHOD_ENV)
+        return "spawn"
+    if env:
+        _warn_once("env_bad", "%s=%r ignored (expected 'fork' or 'spawn')", START_METHOD_ENV, env)
+    return "fork" if _platform().startswith("linux") and _fork_available() else "spawn"
+
+
+def _spawn_safe() -> bool:
+    """Spawned workers re-import the parent's ``__main__``: safe for ``python -m pkg`` entry points
+    (incl. pytest), console-script launchers, a guarded script (``if __name__ == "__main__":``) or no
+    main file (interactive / ``-c``)."""
+    import sys
+    m = sys.modules.get("__main__")
+    f = getattr(m, "__file__", None)
+    if not f:
+        return True
+    spec = getattr(m, "__spec__", None)
+    if spec is not None and str(getattr(spec, "name", "")).endswith("__main__"):
+        return True
+    try:
+        txt = Path(f).read_text(errors="ignore")
+    except OSError:
+        return False
+    return "__name__" in txt and "__main__" in txt
+
+
+# One persistent spawn pool per process (spawn start-up + imports cost ~0.3-1 s per pool, and refine
+# calls parallel_map dozens of times): state reaches the workers through a pickle file per call, loaded
+# once per worker and call (token), so memmapped proxies are re-opened, never copied.
+_POOL: dict[str, Any] = {"pool": None, "n": 0, "dir": None, "pid": None}
+_CALL_SEQ = [0]
+_SPAWN_TOKEN: list[str | None] = [None]
+
+
+def _spawn_init() -> None:
+    """Spawn worker initializer: one OpenCV thread per worker (as in the fork path; safe after spawn)."""
+    import cv2
+    cv2.setNumThreads(1)
+
+
+def _spawn_invoke(task: tuple[str, str, Any]) -> Any:
+    """Spawn worker entry: (token, state file, item). The state is (re)loaded when the token changes."""
+    global _WSTATE
+    token, path, item = task
+    if _SPAWN_TOKEN[0] != token:
+        _WSTATE = {}                             # release the previous call's state (memmaps) first
+        _SPAWN_TOKEN[0] = None
+        with open(path, "rb") as f:
+            fn, state, seed = pickle.load(f)
+        st = dict(state)
+        st["__fn__"] = fn
+        st["__seed__"] = int(seed)
+        _WSTATE = st
+        _SPAWN_TOKEN[0] = token
+    return _invoke(item)
+
+
+def _spawn_pool(n: int):
+    p = _POOL
+    if p["pool"] is not None and (p["n"] != n or p["pid"] != os.getpid()):
+        shutdown_workers()
+    if p["pool"] is None:
+        import tempfile
+        p["dir"] = tempfile.mkdtemp(prefix="match_cuts_pool_")
+        p["pool"] = mp.get_context("spawn").Pool(n, initializer=_spawn_init)
+        p["n"], p["pid"] = n, os.getpid()
+        log.debug("spawn pool: %d workers", n)
+    return p["pool"], p["dir"]
+
+
+def shutdown_workers() -> None:
+    """Terminate the persistent spawn pool of this process (also run at interpreter exit)."""
+    p = _POOL
+    pool, d, pid = p["pool"], p["dir"], p["pid"]
+    p.update(pool=None, n=0, dir=None, pid=None)
+    if pool is not None and pid == os.getpid():
+        try:
+            pool.terminate()
+            pool.join()
+        except Exception:  # pragma: no cover - best effort at shutdown
+            pass
+    if d and pid == os.getpid():
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(shutdown_workers)
+
+
+def _prepare_spawn_state(state: dict) -> None:
+    """Objects that can make their pickled form cheaper do it before pickling (RawIndex: trained FLANN
+    tree + descriptors written next to its cached npz so workers load / memmap them)."""
+    for v in state.values():
+        prep = getattr(v, "prepare_spawn", None)
+        if callable(prep) and not isinstance(v, type):
+            prep()
+
+
+def _spawn_payload(fn: Callable, state: dict, seed: int) -> bytes | None:
+    """Pickled (fn, state, seed) for spawn workers, or None (with a warning) when that is impossible:
+    ``fn`` and every callable in ``state`` must be module-level, and ``__main__`` must be import-safe."""
+    name = f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+    if not _spawn_safe():
+        _warn_once("unsafe_main", "parallel_map: __main__ is not guarded by `if __name__ == \"__main__\":` - "
+                   "spawn workers disabled, running single-process")
+        return None
+    try:
+        _prepare_spawn_state(state)
+        return pickle.dumps((fn, state, int(seed)), protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as e:  # PicklingError, AttributeError (local objects), TypeError (handles)
+        _warn_once("pickle:" + name, "parallel_map(%s): state is not picklable for spawn workers (%s: %s) - "
+                   "running single-process", name, type(e).__name__, e)
+        return None
+
+
 def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: int, state: dict,
                  seed: int, chunksize: int | None = None, min_items: int = 8) -> list[Any]:
     """Apply ``fn(state, item)`` to every item; results in INPUT order (deterministic).
 
-    Workers are forked (big read-only objects in ``state`` -- memmapped proxies, the FLANN index --
-    are inherited copy-on-write, never pickled; only items and results are pickled). OpenCV's thread
-    pool is set to 1 thread in the parent before forking and restored afterwards: calling
-    ``cv2.setNumThreads`` inside a forked child deadlocks with the pthreads backend (verified), and one
-    OpenCV thread per worker avoids oversubscription. ``common.seed_everything(seed)`` runs before
-    every item, so results do not depend on which worker processed which item.
+    Start method (:func:`start_method`): 'fork' on Linux, 'spawn' elsewhere, override
+    ``MATCH_CUTS_START_METHOD=fork|spawn``. ``common.seed_everything(seed)`` runs before every item and
+    every worker runs one OpenCV thread, so results are bit-identical for inline (workers <= 1), fork
+    and spawn runs and do not depend on which worker processed which item.
+
+    * fork: big read-only objects in ``state`` (memmapped proxies, the FLANN index) are inherited
+      copy-on-write, never pickled; only items and results are pickled. OpenCV's thread pool is set to
+      1 thread in the parent before forking and restored afterwards (``cv2.setNumThreads`` inside a
+      forked child deadlocks with the pthreads backend -- verified).
+    * spawn: ``fn`` and ``state`` are pickled once per call into a file the workers of a persistent
+      per-process pool load once per call. ``fn`` and callables in ``state`` must be module-level;
+      ``model.Proxy`` pickles as its memmapped file (re-opened in the worker), :class:`RawIndex` as its
+      cached npz + trained FLANN tree + memmapped descriptors (:meth:`RawIndex.prepare_spawn`),
+      :class:`AllowedMasks` with its extra masks packed. Unpicklable state falls back to a
+      single-process loop with a warning.
     """
     global _WSTATE
     items = list(items)
@@ -78,8 +236,14 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
     _WSTATE["__fn__"] = fn
     _WSTATE["__seed__"] = int(seed)
     try:
-        if workers <= 1 or len(items) < max(2, min_items) or not _fork_available():
+        if workers <= 1 or len(items) < max(2, min_items):
+            POOL_STATS["inline"] += 1
             return [_invoke(it) for it in items]
+        if start_method() == "spawn":
+            return _spawn_map(fn, items, int(workers), state, seed, chunksize)
+        POOL_STATS["fork"] += 1
+        if _POOL["pool"] is not None:
+            shutdown_workers()               # never fork while a spawn pool's handler threads run
         import cv2
         import gc
         prev_threads = cv2.getNumThreads()
@@ -101,6 +265,34 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
             cv2.setNumThreads(prev_threads)
     finally:
         _WSTATE = prev_state
+
+
+def _spawn_map(fn: Callable, items: list, workers: int, state: dict, seed: int,
+               chunksize: int | None) -> list[Any]:
+    payload = _spawn_payload(fn, state, seed)
+    if payload is None:
+        POOL_STATS["spawn_fallback"] += 1
+        POOL_STATS["inline"] += 1
+        return [_invoke(it) for it in items]
+    POOL_STATS["spawn"] += 1
+    pool, d = _spawn_pool(workers)
+    _CALL_SEQ[0] += 1
+    token = f"{os.getpid()}-{_CALL_SEQ[0]}-{time.monotonic_ns()}"
+    path = os.path.join(d, f"state-{_CALL_SEQ[0]}.pkl")
+    with open(path, "wb") as f:
+        f.write(payload)
+    n = min(workers, len(items))
+    cs = chunksize or max(1, min(16, len(items) // (n * 6) or 1))
+    try:
+        return pool.map(_spawn_invoke, [(token, path, it) for it in items], chunksize=cs)
+    except BaseException:
+        shutdown_workers()                        # never reuse a pool after a failure / interrupt
+        raise
+    finally:
+        try:
+            os.remove(path)
+        except OSError:  # pragma: no cover - removed with the pool directory at exit
+            pass
 
 
 # ---------------------------------------------------------------------------------------------
@@ -264,7 +456,7 @@ class AllowedMasks:
                 if self._kernel is not None:
                     ov = cv2.dilate(ov, self._kernel)
                 m &= ov == 0
-        ex = self.extra.get(int(k))
+        ex = self._extra_mask(int(k))
         if ex is not None:
             m &= ~ex
         return m
@@ -272,11 +464,36 @@ class AllowedMasks:
     def __call__(self, k: int) -> np.ndarray:
         return self._compute(int(k))
 
+    def _extra_mask(self, k: int) -> np.ndarray | None:
+        ex = self.extra.get(k)
+        if ex is None:
+            packed = self.__dict__.get("_extra_packed")
+            if packed and k in packed:
+                shape, bits = packed.pop(k)
+                ex = np.unpackbits(bits, count=int(shape[0]) * int(shape[1])).reshape(shape).astype(bool)
+                self.extra[k] = ex
+        return ex
+
     def add_extra(self, k: int, mask: np.ndarray) -> None:
         """Exclude more pixels at frame k (overlay pass 2)."""
         k = int(k)
         mask = np.asarray(mask, bool)
-        self.extra[k] = mask if k not in self.extra else (self.extra[k] | mask)
+        cur = self._extra_mask(k)
+        self.extra[k] = mask if cur is None else (cur | mask)
+
+    # -- pickling (spawn workers): extra masks travel bit-packed and are unpacked on first use --------
+    def __getstate__(self) -> dict:
+        d = dict(self.__dict__)
+        packed = dict(d.pop("_extra_packed", None) or {})
+        for k, m in self.extra.items():
+            m = np.asarray(m, bool)
+            packed[int(k)] = (tuple(int(s) for s in m.shape), np.packbits(m.ravel()))
+        d["extra"] = {}
+        d["_extra_packed"] = packed
+        return d
+
+    def __setstate__(self, d: dict) -> None:
+        self.__dict__.update(d)
 
 
 def mask_bbox(mask: np.ndarray | None, shape: tuple[int, int]) -> tuple[int, int, int, int]:
@@ -364,7 +581,7 @@ class RawIndex:
     """SIFT descriptors of sampled RAW proxy frames with cluster-aware voting (DESIGN §5)."""
 
     def __init__(self, frames: np.ndarray, desc: np.ndarray, owner: np.ndarray, pts: np.ndarray,
-                 offsets: np.ndarray, raw_fps, step: int, cfg, key: str = ""):
+                 offsets: np.ndarray, raw_fps, step: int, cfg, key: str = "", npz_path: str = ""):
         self.frames = np.asarray(frames, np.int32)          # sampled RAW frame indices (sorted)
         self.desc = np.asarray(desc, np.uint8)              # [N, 128] uint8 (lossless SIFT values)
         self.owner = np.asarray(owner, np.int32)            # [N] RAW frame of each descriptor
@@ -373,12 +590,62 @@ class RawIndex:
         self.fps = raw_fps
         self.step = int(step)
         self.key = key
+        self.npz_path = str(npz_path or "")                 # cache file (stage 'raw_index') when cached
         self.knn = int(getattr(cfg, "index_knn", 24))
         self.ratio = float(getattr(cfg, "index_ratio", 0.8))
         self.far = float(getattr(cfg, "index_far_s", 2.0)) * float(raw_fps)
         self.seed = int(getattr(cfg, "seed", 12345))
         self._flann = None
         self._data32: np.ndarray | None = None
+        self._spawn_files: dict[str, str] | None = None     # set by prepare_spawn (cached index only)
+
+    # -- pickling for spawn workers (DESIGN D7) ---------------------------------------------------
+    _SCALARS = ("fps", "step", "key", "npz_path", "knn", "ratio", "far", "seed")
+
+    def prepare_spawn(self) -> None:
+        """Called by :func:`parallel_map` before pickling for spawn workers. Trains FLANN here (once) and,
+        for a cached index, writes next to its npz the uint8 and float32 descriptors (``.desc.npy`` /
+        ``.desc32.npy``, kept: content-addressed by the index key) and this process's trained tree
+        (``.flann``), so every worker memmaps the descriptors (one copy in the page cache instead of one
+        per worker) and loads the identical tree instead of re-training it."""
+        self.ensure_built()
+        if self._spawn_files is not None or not self.npz_path or not Path(self.npz_path).is_file():
+            return
+        base = Path(self.npz_path)
+        stem = base.name[:-len(".npz")] if base.name.endswith(".npz") else base.name
+        files = {"desc": base.with_name(stem + ".desc.npy"), "desc32": base.with_name(stem + ".desc32.npy"),
+                 "flann": base.with_name(stem + ".flann")}
+        try:
+            for name, arr in (("desc", self.desc), ("desc32", self._data32)):
+                p = files[name]
+                ok = False
+                if p.is_file():
+                    try:
+                        mm = np.load(p, mmap_mode="r")
+                        ok = mm.shape == arr.shape and mm.dtype == arr.dtype
+                        del mm
+                    except (OSError, ValueError):
+                        ok = False
+                if not ok:
+                    tmp = p.with_name(p.name + f".{os.getpid()}.tmp.npy")
+                    np.save(tmp, np.ascontiguousarray(arr))
+                    os.replace(tmp, p)
+            # the tree is re-saved once per process: workers must load exactly the tree trained here
+            tmp = files["flann"].with_name(files["flann"].name + f".{os.getpid()}.tmp")
+            self._flann.save(str(tmp))
+            os.replace(tmp, files["flann"])
+        except OSError as e:
+            log.warning("RAW index: spawn side files not written (%s) - workers receive the descriptors", e)
+            return
+        self._spawn_files = {k: str(v) for k, v in files.items()}
+
+    def __reduce__(self):
+        st: dict[str, Any] = {k: getattr(self, k) for k in self._SCALARS}
+        if self._spawn_files is not None:
+            st["files"] = dict(self._spawn_files)
+        else:
+            st.update(frames=self.frames, desc=self.desc, owner=self.owner, pts=self.pts, offsets=self.offsets)
+        return (_restore_index, (st,))
 
     # -- construction ---------------------------------------------------------------------------
     @staticmethod
@@ -417,19 +684,22 @@ class RawIndex:
             }
 
         data = cache.npz("raw_index", key, compute) if cache is not None else compute()
+        npz_path = str(cache.path("raw_index", key, ".npz")) if cache is not None else ""
         idx = RawIndex(data["frames"], data["desc"], data["owner"], data["pts"], data["offsets"], raw.fps,
-                       int(data["step"]), cfg, key)
+                       int(data["step"]), cfg, key, npz_path=npz_path)
         log.info("RAW index: %d frames (step %d), %d descriptors (%.1f MB uint8)", len(idx.frames), idx.step,
                  len(idx.desc), idx.desc.nbytes / 1e6)
         return idx
 
     # -- FLANN ----------------------------------------------------------------------------------
     def ensure_built(self) -> None:
-        """Train the FLANN kd-tree (seeded, deterministic). Call before forking workers."""
+        """Train the FLANN kd-tree (seeded, deterministic: the same tree in every process). Call before
+        forking workers."""
         if self._flann is not None:
             return
         import cv2
-        self._data32 = np.ascontiguousarray(self.desc, dtype=np.float32)   # kept alive: FLANN references it
+        if self._data32 is None or len(self._data32) != len(self.desc):
+            self._data32 = np.ascontiguousarray(self.desc, dtype=np.float32)   # kept alive: FLANN references it
         seed_everything(self.seed)
         self._flann = cv2.flann_Index(self._data32, dict(algorithm=1, trees=4))
 
@@ -499,6 +769,49 @@ class RawIndex:
         peaks = np.flatnonzero((sm > 0) & (sm >= left) & (sm > right))
         order = sorted(peaks.tolist(), key=lambda i: (-sm[i], int(self.frames[i])))
         return [(int(self.frames[i]), float(sm[i])) for i in order[:max(1, int(top))]]
+
+
+_INDEX_CACHE: OrderedDict[tuple, RawIndex] = OrderedDict()
+
+
+def _restore_index(st: dict) -> RawIndex:
+    """Unpickle a :class:`RawIndex` in a spawn worker (see :meth:`RawIndex.prepare_spawn`). The FLANN tree
+    is loaded (or re-trained with the index seed) HERE, before the worker seeds the item, so no item
+    sees an RNG re-seed mid-way. Content-addressed indexes (non-empty key) are kept per process, so the
+    persistent pool loads each tree once per worker, not once per call."""
+    import cv2
+    files = st.get("files")
+    ident = (str(st["key"]), files["flann"] if files else "")
+    idx = _INDEX_CACHE.get(ident) if st["key"] else None
+    if idx is None:
+        idx = RawIndex.__new__(RawIndex)
+        idx._flann, idx._data32, idx._spawn_files = None, None, None
+        if files:
+            with np.load(st["npz_path"], allow_pickle=False) as z:
+                idx.frames = np.asarray(z["frames"], np.int32)
+                idx.owner = np.asarray(z["owner"], np.int32)
+                idx.pts = np.asarray(z["pts"], np.float32)
+                idx.offsets = np.asarray(z["offsets"], np.int64)
+            idx.desc = np.load(files["desc"], mmap_mode="r")
+            idx._data32 = np.load(files["desc32"], mmap_mode="r")
+            fl = cv2.flann_Index()
+            if len(idx._data32) and fl.load(idx._data32, files["flann"]):
+                idx._flann = fl
+        else:
+            idx.frames, idx.desc, idx.owner = st["frames"], st["desc"], st["owner"]
+            idx.pts, idx.offsets = st["pts"], st["offsets"]
+        for k in RawIndex._SCALARS:
+            setattr(idx, k, st[k])
+        if len(idx.desc):
+            idx.ensure_built()                  # no-op when the tree was loaded
+        if st["key"]:
+            _INDEX_CACHE[ident] = idx
+            while len(_INDEX_CACHE) > 2:
+                _INDEX_CACHE.popitem(last=False)
+    else:
+        for k in RawIndex._SCALARS:            # query parameters travel with every call
+            setattr(idx, k, st[k])
+    return idx
 
 
 # ---------------------------------------------------------------------------------------------
@@ -746,7 +1059,7 @@ def _search_worker(state: dict, task: tuple[int, tuple[int, int] | None, str]) -
 def run_searches(comp: Proxy, raw: Proxy, index: RawIndex, allowed: Callable[[int], np.ndarray],
                  roi: tuple[int, int, int, int], hints: AudioHints | None, frames: Iterable[int], cfg,
                  source: str = "global") -> list[tuple[int, list[Anchor], list]]:
-    """search_frame on many frames in a fork pool (audio window first, then global). Input order kept."""
+    """search_frame on many frames in a worker pool (audio window first, then global). Input order kept."""
     index.ensure_built()
     tasks = [(int(k), audio_window(hints, k, comp.fps, raw.fps, cfg, raw.n), source) for k in frames]
     state = {"comp": comp, "raw": raw, "index": index, "cfg": cfg, "allowed": allowed, "roi": roi}
@@ -760,7 +1073,7 @@ def sparse_search(comp: Proxy, raw: Proxy, layout: Layout | None, overlays: Any,
     """Anchors for every cfg.comp_search_stride-th competitor frame (or ``frames``) (DESIGN §5).
 
     Audio-restricted (+- cfg.audio_restrict_s around a confident hint) first, global fallback; frames
-    whose video region is uniform (std < cfg.uniform_std) are skipped. Runs in a fork pool (memmaps
+    whose video region is uniform (std < cfg.uniform_std) are skipped. Runs in a worker pool (memmaps
     shared, seeded per item, results in input order). Cached as JSON (stage 'sparse_search') when a
     ``cache`` is given. ``allowed_fn`` overrides the default :class:`AllowedMasks`. Returns anchors
     sorted by (k, -zncc).

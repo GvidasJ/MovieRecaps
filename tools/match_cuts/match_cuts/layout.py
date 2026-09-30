@@ -76,10 +76,10 @@ from .common import (Cache, DecisionLog, atomic_write_text, file_hash, json_defa
                      stage_key)
 from .model import Box, Layout, LayoutPeriod, Proxy, Zone
 
-__all__ = ["OverlayMasks", "analyze_layout", "box_coverage", "allowed_mask", "masks_from_residuals",
-           "rounded_box_coverage", "LAYOUT_ALGO_VERSION"]
+__all__ = ["OverlayMasks", "analyze_layout", "refine_box_from_raw", "measure_box_from_raw", "box_coverage",
+           "allowed_mask", "masks_from_residuals", "rounded_box_coverage", "LAYOUT_ALGO_VERSION"]
 
-LAYOUT_ALGO_VERSION = 1           # bump when the algorithm changes (part of the cache key)
+LAYOUT_ALGO_VERSION = 2           # bump when the algorithm changes (part of the cache key)
 
 # ------------------------------------------------------------------------------------------------
 # Internal thresholds (8-bit levels / proxy px). Each can be overridden with a Config attribute of
@@ -88,6 +88,8 @@ LAYOUT_ALGO_VERSION = 1           # bump when the algorithm changes (part of the
 SAMPLE_FRAMES = 80                # frames sampled for the canvas median / blur test
 DEV_LEVEL = 20.0                  # |frame - canvas| counted as a canvas change
 NONDOM_FRAC = 0.35                # fraction of the canvas region changed -> frame not in the dominant layout
+DEV_LEVEL_LO = 10.0               # ... a smaller change (dark fullscreen shots on a black canvas) ...
+NONDOM_FRAC_LO = 0.7              # ... over most of the canvas region (and a mean change above STATS_EXCLUDE_MAD)
 STATS_EXCLUDE_FRAC = 0.02         # ... above this (or a large mean deviation) -> excluded from the statistics
 STATS_EXCLUDE_MAD = 3.0
 EDGE_MIN_CONTRAST = 6.0           # |P - S| on the mean image below which the std image is used for edges
@@ -481,6 +483,14 @@ def _dilate(mask: np.ndarray, r: int) -> np.ndarray:
     return cv2.dilate(mask.astype(np.uint8), ker) > 0
 
 
+def _erode_mask(mask: np.ndarray, r: int) -> np.ndarray:
+    import cv2
+    if r <= 0:
+        return mask.astype(bool)
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    return cv2.erode(mask.astype(np.uint8), ker, borderType=cv2.BORDER_CONSTANT, borderValue=0) > 0
+
+
 def _runs(flags: np.ndarray) -> list[tuple[int, int, Any]]:
     """Maximal runs [a, b) of equal values in a 1-D array -> [(a, b, value)]."""
     v = np.asarray(flags)
@@ -564,6 +574,8 @@ class _Stats:
     mean: np.ndarray                 # float32 [h, w] temporal mean over used frames
     std: np.ndarray                  # float32 [h, w] temporal std over used frames
     notes: list[str] = field(default_factory=list)
+    dev_lo: np.ndarray | None = None # [n] fraction of ref pixels deviating by > DEV_LEVEL_LO
+    thr_mad: float = STATS_EXCLUDE_MAD   # mean-deviation level above which a frame left the dominant layout
 
 
 def _largest_component_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -575,7 +587,10 @@ def _largest_component_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | Non
     return x, y, x + w, y + h
 
 
-def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog) -> _Stats:
+def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog,
+                   region: tuple[int, int, int, int] | None = None) -> _Stats:
+    """``region``: known dominant video region (proxy x0, y0, x1, y1), e.g. a box verified against RAW;
+    default: the provisional region of pixels that differ from the canvas in most samples."""
     h, w = int(comp.size[1]), int(comp.size[0])
     n = int(comp.n)
     S = int(min(n, _p(cfg, "SAMPLE_FRAMES", SAMPLE_FRAMES)))
@@ -583,16 +598,20 @@ def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog) -> _Stats:
     samples = np.stack([np.asarray(comp.get(int(k))) for k in idx])
     med = np.median(samples, axis=0).astype(np.float32)
     dev_level = float(_p(cfg, "DEV_LEVEL", DEV_LEVEL))
+    dev_level_lo = float(_p(cfg, "DEV_LEVEL_LO", DEV_LEVEL_LO))
     q = np.zeros((h, w), np.float32)
     for i in range(0, len(idx), 16):
         q += (np.abs(samples[i:i + 16].astype(np.float32) - med) > dev_level).sum(axis=0)
     q /= max(1, len(idx))
     del samples
     # provisional dominant video region: pixels that differ from the canvas in most samples
-    dyn_q = _morph(_morph(q > 0.5, "open", 3), "close", 5)
-    bb = _largest_component_bbox(dyn_q)
-    if bb is None:
-        bb = (0, 0, w, h)
+    if region is not None:
+        bb = (max(0, int(region[0])), max(0, int(region[1])), min(w, int(region[2])), min(h, int(region[3])))
+    else:
+        dyn_q = _morph(_morph(q > 0.5, "open", 3), "close", 5)
+        bb = _largest_component_bbox(dyn_q)
+        if bb is None:
+            bb = (0, 0, w, h)
     margin = max(2, int(round(0.01 * max(h, w))))
     x0, y0, x1, y1 = bb
     ref = np.ones((h, w), bool)
@@ -605,6 +624,7 @@ def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog) -> _Stats:
     s1 = np.zeros((h, w), np.uint64)
     s2 = np.zeros((h, w), np.uint64)
     dev = np.zeros(n, np.float32)
+    dev_lo = np.zeros(n, np.float32)
     mad = np.zeros(n, np.float32)
     fstd = np.zeros(n, np.float32)
     ref_idx = np.flatnonzero(ref.ravel())[::4] if ref is not None else None
@@ -618,10 +638,12 @@ def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog) -> _Stats:
             v = c.reshape(len(ks), -1)[:, ref_idx].astype(np.int16)
             d = np.abs(v - med_ref)
             dev[ks] = (d > dev_level).mean(axis=1)
+            dev_lo[ks] = (d > dev_level_lo).mean(axis=1)
             mad[ks] = d.mean(axis=1)
             fstd[ks] = v.std(axis=1)
     used = np.ones(n, bool)
     notes: list[str] = []
+    thr_mad = float(_p(cfg, "STATS_EXCLUDE_MAD", STATS_EXCLUDE_MAD))
     if ref_idx is not None:
         mad_med = float(np.median(mad))
         mad_spread = 1.4826 * float(np.median(np.abs(mad - mad_med)))
@@ -643,8 +665,10 @@ def _compute_stats(comp: Proxy, cfg: Any, dlog: DecisionLog) -> _Stats:
     std = np.sqrt(np.maximum(s2.astype(np.float64) / nu - mean * mean, 0.0))
     dlog.record("layout", "statistics", frames=n, samples=int(len(idx)), used=int(used.sum()),
                 excluded=[int(k) for k in excl[:200]], provisional_region=list(bb),
+                region_source="given" if region is not None else "canvas deviation",
                 ref_pixels=int(ref.sum()) if ref is not None else 0)
-    return _Stats(med, q, idx, ref, bb, dev, mad, fstd, used, mean.astype(np.float32), std.astype(np.float32), notes)
+    return _Stats(med, q, idx, ref, bb, dev, mad, fstd, used, mean.astype(np.float32), std.astype(np.float32), notes,
+                  dev_lo, float(thr_mad))
 
 
 # ================================================================================================
@@ -1255,8 +1279,12 @@ def _multicolour(hexes: Sequence[str]) -> bool:
 
 
 def _detect_zones(st: _Stats, br: _BoxResult, cov: np.ndarray, bg: dict, bg_level: float, colour: dict | None,
-                  comp: Proxy, cfg: Any, dlog: DecisionLog, ring_px: int = 0) -> tuple[list[Zone], np.ndarray]:
-    """Static zones (logo / channel_name / title / header / watermark / other). Returns (zones, zone mask)."""
+                  comp: Proxy, cfg: Any, dlog: DecisionLog, ring_px: int = 0,
+                  raw_match: np.ndarray | None = None) -> tuple[list[Zone], np.ndarray]:
+    """Static zones (logo / channel_name / title / header / watermark / other). Returns (zones, zone mask).
+
+    ``raw_match``: pixels whose content is known to match RAW (box measured against RAW): static RAW
+    content inside the box (a locked-off background, letterbox bars) is video, not an overlay zone."""
     import cv2
     h, w = st.mean.shape
     rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
@@ -1277,7 +1305,12 @@ def _detect_zones(st: _Stats, br: _BoxResult, cov: np.ndarray, bg: dict, bg_leve
     inside = cov >= 0.99
     near_box = _dilate(cov > 0, 1 + int(ring_px))          # the box edge and its stroke / shadow ring
     cand = static & (np.abs(st.mean - model) > zc) & ~near_box
-    cand |= static & inside & (np.abs(st.mean - model) > zc)
+    in_cand = static & inside & (np.abs(st.mean - model) > zc)
+    if raw_match is not None and np.shape(raw_match) == (h, w):
+        in_cand &= ~_dilate(np.asarray(raw_match, bool), 4)
+        # the box rim (a few px the RAW comparison cannot reach) belongs to the video too
+        in_cand &= ~(inside & ~_erode_mask(inside, 4))
+    cand |= in_cand
     zmask = np.zeros((h, w), bool)
     if br.kind == "boxed":
         bx0, by0, bx1, by1 = br.edges
@@ -2024,6 +2057,10 @@ def _periods(st: _Stats, n: int, mode: str, box_full: Box | None, W: int, H: int
     if st.ref is None or mode != "boxed":
         return [LayoutPeriod(0, n, mode, box_full)]
     nd = st.dev > float(_p(cfg, "NONDOM_FRAC", NONDOM_FRAC))
+    if st.dev_lo is not None:
+        # a dark fullscreen shot over a black canvas changes most of the canvas region by less than DEV_LEVEL:
+        # a smaller change over (nearly) all of it, with a mean change the statistics would exclude, also counts
+        nd |= (st.dev_lo > float(_p(cfg, "NONDOM_FRAC_LO", NONDOM_FRAC_LO))) & (st.mad > st.thr_mad)
     uni = nd & (st.fstd < max(float(_cfg(cfg, "uniform_std", 4.0)), 4.0))
     lab = np.where(nd & ~uni, 1, 0)
     periods = []
@@ -2150,11 +2187,59 @@ def analyze_layout(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | 
                    dlog: DecisionLog | None) -> tuple[Layout, OverlayMasks]:
     """Stage 4 (see the module docstring). Returns (Layout in competitor full-res CORNER px, initial
     per-frame OverlayMasks at proxy res). Writes ``debug_dir/layout.png``; cached by proxy id + params."""
+    return _analyze(comp, cfg, cache, debug_dir, dlog, None)
+
+
+@dataclass
+class _ForcedBox:
+    """A video box measured against RAW (:func:`refine_box_from_raw`) that replaces the detection of step 2."""
+    box: Box                                    # full-res CORNER px (what the Layout stores)
+    edges: tuple[float, float, float, float]    # proxy CORNER coords (x0, y0, x1, y1)
+    radius: float                               # proxy px
+    raw_match: np.ndarray | None                # bool [h, w]: pixels whose (static) content matches RAW
+    evidence: dict
+    notes: list[str] = field(default_factory=list)
+
+    def signature(self) -> list:
+        import hashlib
+        mh = ""
+        if self.raw_match is not None:
+            mh = hashlib.blake2b(np.packbits(np.asarray(self.raw_match, bool)).tobytes(), digest_size=12).hexdigest()
+        return ["raw_refined", [round(float(v), 4) for v in (self.box.x, self.box.y, self.box.w, self.box.h,
+                                                              self.box.corner_radius)], mh, list(self.notes)]
+
+
+def _forced_box_result(st: _Stats, fb: _ForcedBox, cfg: Any, dlog: DecisionLog) -> _BoxResult:
+    """A :class:`_BoxResult` for a box given from outside: the dynamic mask and the dynamic components that
+    do not touch the box (extra regions / animated zones) are measured as in :func:`_detect_box`."""
+    h, w = st.mean.shape
+    thr = float(_cfg(cfg, "static_std_thresh", 2.0))
+    dyn = _morph(_morph(st.std >= thr, "open", 3), "close", 5)
+    x0, y0, x1, y1 = fb.edges
+    bi = (max(0, int(math.floor(x0))), max(0, int(math.floor(y0))), min(w, int(math.ceil(x1))), min(h, int(math.ceil(y1))))
+    near = np.zeros((h, w), bool)
+    near[max(0, bi[1] - 2):bi[3] + 2, max(0, bi[0] - 2):bi[2] + 2] = True
+    n, lab, stats, _ = _cc(dyn & ~near)
+    order = 1 + np.argsort(-stats[1:, 4], kind="stable") if n > 1 else np.zeros(0, int)
+    others = [(int(stats[i, 0]), int(stats[i, 1]), int(stats[i, 0] + stats[i, 2]), int(stats[i, 1] + stats[i, 3]),
+               int(stats[i, 4])) for i in order if stats[i, 4] >= 12]
+    ev = dict(fb.evidence)
+    dlog.record("layout", "box", kind="boxed", source="raw", edges_proxy=[round(float(v), 4) for v in fb.edges],
+                radius_proxy=round(float(fb.radius), 3), evidence=ev)
+    return _BoxResult("boxed", tuple(float(v) for v in fb.edges), float(fb.radius), "raw", bi, dyn, others, ev)
+
+
+def _analyze(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | os.PathLike | None,
+             dlog: DecisionLog | None, forced: _ForcedBox | None) -> tuple[Layout, OverlayMasks]:
+    """analyze_layout; with ``forced`` the video box is not detected but taken from a RAW-verified
+    measurement (everything that depends on the box is re-derived: statistics region, periods, background,
+    border, zones, text overlays, masks). Cached under a key that includes the forced box."""
     dlog = dlog or null_dlog()
     if comp.n <= 0:
         raise ValueError("analyze_layout: the competitor proxy has no frames")
     params = cfg.analysis_params() if hasattr(cfg, "analysis_params") else {}
-    key = stage_key("layout", _proxy_id(comp), params, LAYOUT_ALGO_VERSION)
+    key = stage_key("layout", _proxy_id(comp), params, LAYOUT_ALGO_VERSION,
+                    *([] if forced is None else forced.signature()))
     if cache is not None:
         pj = cache.path("layout", key, ".json")
         ps, po, pp = (cache.path("layout", key, s) for s in (".static.npy", ".overlays.npz", ".png"))
@@ -2188,15 +2273,24 @@ def analyze_layout(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | 
         t_last[0] = t
     W, H = int(comp.full_size[0]), int(comp.full_size[1])
     h, w = int(comp.size[1]), int(comp.size[0])
-    st = _compute_stats(comp, cfg, dlog)
+    region = None
+    if forced is not None:
+        fx0, fy0, fx1, fy1 = forced.edges
+        region = (int(math.floor(fx0)), int(math.floor(fy0)), int(math.ceil(fx1)), int(math.ceil(fy1)))
+    st = _compute_stats(comp, cfg, dlog, region=region)
     _tick("stats")
     notes = list(st.notes)
-    br = _detect_box(comp, st, cfg, dlog)
-    _tick("box")
-    if br.kind == "boxed":
-        box, box_ev = _box_full(br, comp)
+    if forced is not None:
+        br = _forced_box_result(st, forced, cfg, dlog)
+        box, box_ev = Box(**forced.box.to_dict()), {"source": "measured against RAW (refine_box_from_raw)"}
+        notes.extend(forced.notes)
     else:
-        box, box_ev = Box(0.0, 0.0, float(W), float(H), 0.0), {}
+        br = _detect_box(comp, st, cfg, dlog)
+        if br.kind == "boxed":
+            box, box_ev = _box_full(br, comp)
+        else:
+            box, box_ev = Box(0.0, 0.0, float(W), float(H), 0.0), {}
+    _tick("box")
     dlog.record("layout", "box_full_res", box=box.to_dict(), evidence=box_ev)
     lay_tmp = Layout(W, H, box=box)
     cov = box_coverage(lay_tmp, comp)
@@ -2222,7 +2316,8 @@ def analyze_layout(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | 
         notes.append("static image background: logo / title zones are not separated from the picture")
         dlog.record("layout", "zones", count=0, reason="static image background")
     else:
-        zones, zmask = _detect_zones(st, br, cov, bg, bg_level, colour, comp, cfg, dlog, ring_px=ring_px)
+        zones, zmask = _detect_zones(st, br, cov, bg, bg_level, colour, comp, cfg, dlog, ring_px=ring_px,
+                                     raw_match=forced.raw_match if forced is not None else None)
     _tick("zones")
     # extra regions (split / PiP) and dynamic zones outside the box
     rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
@@ -2332,3 +2427,511 @@ def analyze_layout(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | 
              mode, box.x, box.y, box.w, box.h, box.corner_radius, bg.get("type"), bg.get("color", ""), len(zones),
              len(capev))
     return layout, overlays
+
+
+# ================================================================================================
+# Box refinement against RAW (DESIGN §7 D2)
+# ================================================================================================
+#
+# Step 2 finds the video box from TEMPORAL activity. A locked-off single-camera shot (talking head,
+# podcast, stream) has a static background for the whole edit, and RAW letterbox bars / baked-in panels
+# are static too: the dynamic region then covers only the moving subject. Once the FrameMap exists, the
+# box is re-measured against RAW itself: confidently matched RAW frames are warped into competitor space
+# with their fitted Sims, and every pixel votes
+#   IN   the competitor agrees with the (gain/offset-fitted) warped RAW, and RAW differs there from what the
+#        canvas next to the box would show (so the agreement is evidence, not a coincidence);
+#   OUT  RAW is present but the competitor disagrees (canvas, title, ... or an unmasked overlay);
+#   neither when RAW is absent or indistinguishable from the canvas.
+# Per box side, lines (columns / rows over the middle half of the box) are classified in / out / no-RAW /
+# don't-care and scanned outward from the current edge (growing through in and don't-care lines, stopping at
+# the first out / no-RAW line) — or inward (shrinking) over lines with RAW disagreement only. The sub-pixel
+# edge is the integral estimator over a per-pixel COVERAGE map
+#   c(x) = sum_k (C_k - B_k)(R_k - B_k) / sum_k (R_k - B_k)^2
+# (C competitor, R fitted warped RAW, B background = the nearest pixel outside the box: the proxy is the
+# area average of c R + (1 - c) B), or the RAW frame's own edge when the box ends where RAW ends; the corner
+# radius is the joint corner fit of :func:`_fit_radius` on the same coverage map (kept when no corner is
+# observable, e.g. black letterbox bars on a black canvas).
+
+REFINE_FRAMES = 16                # confidently matched frames used (spread over the edit)
+REFINE_BLUR = 1.0                 # Gaussian sigma (proxy px) before the per-pixel comparison
+REFINE_TAU_MIN = 8.0              # |competitor - fitted warped RAW| counted as disagreement (8-bit) ...
+REFINE_TAU_K = 4.0                # ... or this many robust sigmas of the in-box residual
+REFINE_DISC_MIN = 12.0            # |warped RAW - background| for a pixel to discriminate inside / outside
+REFINE_EDGE_PX = 2.0              # full-res edge change that is material (D2)
+REFINE_RADIUS_PX = 3.0            # full-res radius change that is material (D2)
+
+_L_DC, _L_IN, _L_OUT, _L_NORAW, _L_MIX = 0, 1, 2, 3, 4
+_SIDES = ("left", "top", "right", "bottom")
+
+
+def _canon(a: np.ndarray, side: str) -> np.ndarray:
+    """View of a [h, w] map with the given box side as a LEFT edge: lines = columns, inside = larger index."""
+    if side == "left":
+        return a
+    if side == "right":
+        return a[:, ::-1]
+    if side == "top":
+        return a.T
+    return a[::-1, :].T
+
+
+def _to_canon(v: float, side: str, w: int, h: int) -> float:
+    return v if side in ("left", "top") else (w - v if side == "right" else h - v)
+
+
+_from_canon = _to_canon                   # the mapping is an involution
+
+
+def _nearest_fill(img: np.ndarray, src: np.ndarray) -> np.ndarray | None:
+    """Every pixel gets the value of ``img`` at its nearest ``src`` pixel (None when src is empty)."""
+    import cv2
+    if not src.any():
+        return None
+    _d, lab = cv2.distanceTransformWithLabels((~src).astype(np.uint8), cv2.DIST_L2, 3,
+                                              labelType=cv2.DIST_LABEL_PIXEL)
+    vals = np.zeros(int(lab.max()) + 1, np.float32)
+    vals[lab[src]] = img[src]
+    return vals[lab]
+
+
+def _refine_frames(layout: Layout, comp: Proxy, raw: Proxy, fm: Any, cfg: Any) -> tuple[list[int], dict]:
+    """Confidently matched frames of the dominant layout, spread over the edit (deterministic): the
+    MATCH frames with a finite Sim, a RAW frame the proxy holds and a score within 0.05 of the median
+    (>= 0.8), split into REFINE_FRAMES consecutive groups, best score of each group."""
+    from .model import Status
+    n = int(min(int(fm.n), int(comp.n)))
+    if n <= 0:
+        return [], {"reason": "empty frame map"}
+    ok = np.asarray(fm.status[:n]) == Status.MATCH
+    dom = np.ones(n, bool)
+    if layout.periods:
+        dom[:] = False
+        for p in layout.periods:
+            if p.mode == layout.mode:
+                dom[max(0, int(p.comp_in)):min(n, int(p.comp_out))] = True
+    s, th, tx, ty = (np.asarray(fm.d[c][:n], np.float64) for c in ("s", "theta", "tx", "ty"))
+    j = np.asarray(fm.raw[:n], np.int64)
+    sc = np.asarray(fm.score[:n], np.float64)
+    ok &= dom & np.isfinite(s) & np.isfinite(th) & np.isfinite(tx) & np.isfinite(ty) & (s > 0)
+    ok &= (j >= 0) & (j < int(raw.n)) & np.isfinite(sc)
+    if "low_margin" in fm.d:
+        lm = ok & ~np.asarray(fm.d["low_margin"][:n], bool)
+        if lm.sum() >= 3:
+            ok = lm
+    idx = np.array([k for k in np.flatnonzero(ok) if raw.has(int(j[k]))], np.int64)
+    if idx.size == 0:
+        return [], {"reason": "no confidently matched frame in the dominant layout"}
+    thr = max(0.8, float(np.median(sc[idx])) - 0.05)
+    idx = idx[sc[idx] >= thr]
+    groups = max(1, int(_p(cfg, "REFINE_FRAMES", REFINE_FRAMES)))
+    out = [int(g[int(np.argmax(sc[g]))]) for g in np.array_split(idx, min(groups, idx.size)) if g.size]
+    return sorted(out), {"candidates": int(idx.size), "score_threshold": round(thr, 4)}
+
+
+def _refine_frame(k: int, comp: Proxy, raw: Proxy, fm: Any, overlays: Any, base_fit: np.ndarray,
+                  static: np.ndarray | None) -> dict | None:
+    """Competitor frame k and its RAW frame warped with the fitted Sim (gain / offset fitted on the current
+    box's dynamic, overlay-free pixels); None when the fit region is too small or degenerate."""
+    from .geometry import warp_raw_to_comp
+    w, h = int(comp.size[0]), int(comp.size[1])
+    C = np.asarray(comp.get(int(k)), np.float32)
+    j = int(fm.raw[k])
+    Wr, V = warp_raw_to_comp(np.asarray(raw.get(j), np.float32), fm.sim(int(k)), bool(fm.flip[k]),
+                             float(raw.full_size[0]), (w, h), tuple(float(v) for v in raw.ratio),
+                             tuple(float(v) for v in comp.ratio))
+    Ok = None
+    if overlays is not None:
+        try:
+            Ok = overlays.get_dilated(int(k)) if hasattr(overlays, "get_dilated") else overlays.get(int(k))
+        except Exception:  # noqa: BLE001 - masks are optional evidence
+            Ok = None
+    Ok = np.zeros((h, w), bool) if Ok is None or np.shape(Ok) != (h, w) else np.asarray(Ok, bool)
+    fit = base_fit & V & ~Ok
+    if static is not None and int((fit & ~static).sum()) >= 400:
+        fit &= ~static
+    if int(fit.sum()) < 400:
+        return None
+    x = Wr[fit].astype(np.float64)
+    y = C[fit].astype(np.float64)
+    sel = np.ones(x.size, bool)
+    a, b = 1.0, 0.0
+    for _ in range(3):
+        A = np.stack([x[sel], np.ones(int(sel.sum()))], axis=1)
+        (a, b), *_ = np.linalg.lstsq(A, y[sel], rcond=None)
+        r = np.abs(y - (a * x + b))
+        s = 1.4826 * float(np.median(r[sel])) + 1e-6
+        sel = r <= max(3.0 * s, 6.0)
+        if sel.sum() < 200:
+            return None
+    if not (0.2 <= a <= 5.0):
+        return None
+    return {"k": int(k), "j": j, "C": C, "R": (a * Wr + b).astype(np.float32), "V": V, "Ok": Ok,
+            "gain": round(float(a), 4), "offset": round(float(b), 3)}
+
+
+def _footprints(fm: Any, ks: Sequence[int], raw: Proxy, comp: Proxy) -> dict[str, list[float]] | None:
+    """Canonical proxy coordinate of the RAW frame's own edge per side and frame (axis-aligned Sims only)."""
+    w, h = int(comp.size[0]), int(comp.size[1])
+    rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
+    Wr, Hr = float(raw.full_size[0]), float(raw.full_size[1])
+    out: dict[str, list[float]] = {s: [] for s in _SIDES}
+    for k in ks:
+        sim = fm.sim(int(k))
+        if abs(float(sim.theta_deg)) > 0.05:
+            return None
+        pts = sim.apply(np.array([[0.0, 0.0], [Wr, 0.0], [0.0, Hr], [Wr, Hr]]))
+        x0, x1 = float(pts[:, 0].min()) * rx, float(pts[:, 0].max()) * rx
+        y0, y1 = float(pts[:, 1].min()) * ry, float(pts[:, 1].max()) * ry
+        for side, v in (("left", x0), ("top", y0), ("right", x1), ("bottom", y1)):
+            out[side].append(_to_canon(v, side, w, h))
+    return out
+
+
+def _line_classes(nI: np.ndarray, nO: np.ndarray, nV: np.ndarray, side: str, band: tuple[int, int],
+                  nfr: int) -> np.ndarray:
+    """Per canonical line (see :func:`_canon`) over the band rows: in / out / no-RAW / don't-care / mixed."""
+    b0, b1 = int(band[0]), int(band[1])
+    ci, co, cv = (_canon(a, side)[b0:b1].sum(axis=0).astype(np.float64) for a in (nI, nO, nV))
+    L = max(1, (b1 - b0) * nfr)
+    ev = ci + co
+    cls = np.full(ci.size, _L_DC, np.int8)
+    has_raw = cv >= 0.3 * L
+    has = has_raw & (ev >= 0.15 * L)
+    cls[~has_raw] = _L_NORAW
+    cls[has] = _L_MIX
+    cls[has & (ci >= 0.6 * ev)] = _L_IN
+    cls[has & (co >= 0.6 * ev)] = _L_OUT
+    return cls
+
+
+def _scan_side(cls: np.ndarray, e0: int, f_out: float | None) -> tuple[int, str, int | None, int | None]:
+    """Integer canonical edge (first inside line) from the line classes, starting at the current edge e0.
+
+    Grow: outward over in / don't-care / mixed lines to the outermost in line before the first out or
+    no-RAW line. Else shrink: inward over the lines that are not in, if RAW disagrees on at least one of them
+    (no-RAW lines alone never shrink: the RAW frame edge often coincides with the box edge) — or to the
+    outermost RAW frame edge ``f_out`` when no frame's RAW reaches the current edge.
+    Returns (edge, action, stop line index, stop class)."""
+    n = cls.size
+    e0 = int(min(max(e0, 0), n))
+
+    def stop_from(e: int) -> tuple[int | None, int | None]:
+        x = e - 1
+        while x >= 0:
+            if cls[x] in (_L_OUT, _L_NORAW):
+                return x, int(cls[x])
+            x -= 1
+        return None, None
+    last_in = None
+    x = e0 - 1
+    while x >= 0:
+        c = cls[x]
+        if c == _L_IN:
+            last_in = x
+        elif c in (_L_OUT, _L_NORAW):
+            break
+        x -= 1
+    if last_in is not None:
+        return (last_in, "grow") + stop_from(last_in)
+    x, bad = e0, False
+    while x < n and cls[x] != _L_IN:
+        bad |= bool(cls[x] == _L_OUT)
+        x += 1
+    if bad and x < n:
+        return (x, "shrink") + stop_from(x)
+    if f_out is not None and f_out > e0 + 1.5 and x < n:
+        e = int(min(math.ceil(f_out), x))
+        return (e, "shrink_to_raw_frame") + stop_from(e)
+    return (e0, "keep") + stop_from(e0)
+
+
+def _coverage_subpixel(cov_c: np.ndarray, band: tuple[int, int], e_int: int) -> tuple[float | None, dict]:
+    """Sub-pixel canonical edge from the canonical coverage map: c(x) = per-column median over the band rows
+    (clipped to [0, 1]); the transition is the outermost column xo (searching outward from e_int + 2) whose
+    coverage drops below 0.5; integral estimator e = (xo + 4) - sum_{x=xo-3}^{xo+3} c(x) (unmeasured columns
+    beyond the transition count as 0 outside / 1 inside). None when the transition is not measurable."""
+    b0, b1 = int(band[0]), int(band[1])
+    n = cov_c.shape[1]
+    lo, hi = max(0, e_int - 10), min(n, e_int + 6)
+    need = max(5, int(0.2 * (b1 - b0)))
+    cm = np.full(n, np.nan)
+    for x in range(lo, hi):
+        col = cov_c[b0:b1, x]
+        col = col[np.isfinite(col)]
+        if col.size >= need:
+            cm[x] = float(np.median(np.clip(col, -0.25, 1.25)))
+    xo = None
+    for x in range(min(hi - 1, e_int + 2), lo - 1, -1):
+        if np.isfinite(cm[x]) and cm[x] < 0.5:
+            xo = x
+            break
+    prof = {int(x): round(float(cm[x]), 3) for x in range(lo, hi) if np.isfinite(cm[x])}
+    if xo is None or xo + 1 >= n or not np.isfinite(cm[xo + 1]):
+        return None, {"reason": "no measurable coverage transition", "profile": prof}
+    a, b = xo - 3, xo + 4
+    xs = np.arange(a, b)
+    vals = np.array([cm[x] if 0 <= x < n and np.isfinite(cm[x]) else (0.0 if x <= xo else 1.0) for x in xs])
+    e = float(b - np.clip(vals, 0.0, 1.0).sum())
+    ev = {"transition": int(xo), "profile": prof, "estimate": round(e, 4)}
+    if not (xo - 1.0 <= e <= xo + 2.0):
+        return None, {**ev, "reason": "estimate outside the transition"}
+    return e, ev
+
+
+def _draw_refine_png(path: Path, frames: list[dict], nI: np.ndarray, nO: np.ndarray, nV: np.ndarray,
+                     old: Box, new: Box, comp: Proxy, changed: bool) -> None:
+    """debug/layout_refine.png: median matched competitor frame, RAW agreement (green = matches RAW, red =
+    RAW present but different, blue = no RAW), current box (red) and measured box (green)."""
+    import cv2
+    base = np.median(np.stack([f["C"] for f in frames]), axis=0).astype(np.uint8)
+    h, w = base.shape
+    img = cv2.cvtColor(base, cv2.COLOR_GRAY2BGR).astype(np.float32) * 0.6
+    ev = nI + nO
+    tint = np.zeros((h, w, 3), np.float32)
+    tint[(ev > 0) & (nI >= nO)] = (0, 200, 0)
+    tint[(ev > 0) & (nO > nI)] = (0, 0, 220)
+    tint[nV == 0] = (160, 60, 0)
+    img = np.clip(img + 0.4 * tint, 0, 255).astype(np.uint8)
+    scale = max(1.0, 960.0 / h)
+    img = cv2.resize(img, (int(round(w * scale)), int(round(h * scale))), interpolation=cv2.INTER_NEAREST)
+    rx, ry = float(comp.ratio[0]) * scale, float(comp.ratio[1]) * scale
+    for b, col in ((old, (0, 0, 255)), (new, (0, 255, 0))):
+        cov = rounded_box_coverage((img.shape[1], img.shape[0]), b.x * rx, b.y * ry, (b.x + b.w) * rx,
+                                   (b.y + b.h) * ry, b.corner_radius * (rx + ry) / 2)
+        cnts, _ = cv2.findContours((cov >= 0.5).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(img, cnts, -1, col, 2, cv2.LINE_AA)
+    txt = (f"{'CHANGED' if changed else 'kept'}: x{new.x:g} y{new.y:g} w{new.w:g} h{new.h:g} r{new.corner_radius:g} "
+           f"(was x{old.x:g} y{old.y:g} w{old.w:g} h{old.h:g} r{old.corner_radius:g}), {len(frames)} frames")
+    cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.stem + ".tmp.png")
+    cv2.imwrite(str(tmp), img)
+    os.replace(tmp, path)
+
+
+def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy, fm: Any, cfg: Any,
+                         dlog: DecisionLog | None = None) -> dict:
+    """The RAW-agreement box measurement of :func:`refine_box_from_raw` without re-analysing anything.
+
+    Returns {'ok': bool, 'reason', 'box' (full-res Box), 'edges' (proxy), 'radius' (proxy), 'radius_kept',
+    'raw_match' (bool [h, w]), 'frames', 'evidence', 'maps' (nI, nO, nV), 'frame_data'}."""
+    import cv2
+    dlog = dlog or null_dlog()
+    w, h = int(comp.size[0]), int(comp.size[1])
+    rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
+    if layout is None or layout.box is None or layout.mode != "boxed":
+        return {"ok": False, "reason": "no boxed layout"}
+    ks, sel_ev = _refine_frames(layout, comp, raw, fm, cfg)
+    if len(ks) < 3:
+        return {"ok": False, "reason": sel_ev.get("reason", f"only {len(ks)} confidently matched frame(s)"),
+                "selection": sel_ev}
+    cov_cur = box_coverage(layout, comp)
+    base_fit = cov_cur >= 0.99
+    static = None
+    sm = getattr(layout, "static_mask_file", "")
+    if sm and Path(sm).is_file():
+        st_ = np.load(sm).astype(bool)
+        static = st_ if st_.shape == (h, w) else None
+    frames = [f for f in (_refine_frame(k, comp, raw, fm, overlays, base_fit, static) for k in ks) if f is not None]
+    if len(frames) < 3:
+        return {"ok": False, "reason": "RAW could not be fitted photometrically on enough frames", "selection": sel_ev}
+    sig = float(_p(cfg, "REFINE_BLUR", REFINE_BLUR))
+    tau_min = float(_p(cfg, "REFINE_TAU_MIN", REFINE_TAU_MIN))
+    tau_k = float(_p(cfg, "REFINE_TAU_K", REFINE_TAU_K))
+    disc_min = float(_p(cfg, "REFINE_DISC_MIN", REFINE_DISC_MIN))
+    near_cur = _dilate(cov_cur > 0, 2)
+    nI = np.zeros((h, w), np.int16)
+    nO = np.zeros((h, w), np.int16)
+    nV = np.zeros((h, w), np.int16)
+    taus = []
+    for f in frames:
+        C, R, V, Ok = f["C"], f["R"], f["V"], f["Ok"]
+        Vf = V.astype(np.float32)
+        Cb = cv2.GaussianBlur(C, (0, 0), sig) if sig > 0 else C
+        if sig > 0:            # normalised blur: RAW is valid right up to its own frame edge
+            Rb = cv2.GaussianBlur(R * Vf, (0, 0), sig) / np.maximum(cv2.GaussianBlur(Vf, (0, 0), sig), 1e-3)
+        else:
+            Rb = R
+        res = np.abs(Cb - Rb)
+        fitm = base_fit & V & ~Ok
+        tau = max(tau_min, tau_k * 1.4826 * float(np.median(res[fitm]))) if fitm.any() else tau_min
+        f["tau"] = tau
+        taus.append(round(tau, 2))
+        agree = res <= tau
+        # background samples: outside the current box, no overlay, RAW absent or disagreeing
+        B = _nearest_fill(Cb, ~near_cur & ~Ok & (~V | ~agree))
+        disc = np.ones((h, w), bool) if B is None else np.abs(Rb - B) > max(disc_min, tau)
+        use = V & ~Ok
+        nI += (use & agree & disc).astype(np.int16)
+        nO += (use & ~agree).astype(np.int16)
+        nV += use.astype(np.int16)
+    nfr = len(frames)
+    foot = _footprints(fm, [f["k"] for f in frames], raw, comp)
+    b = layout.box
+    cur = [b.x * rx, b.y * ry, (b.x + b.w) * rx, (b.y + b.h) * ry]           # proxy x0, y0, x1, y1
+    ints = {"left": int(round(cur[0])), "top": int(round(cur[1])), "right": int(round(cur[2])),
+            "bottom": int(round(cur[3]))}
+    side_ev: dict[str, dict] = {}
+    for _it in range(3):
+        prev = dict(ints)
+        for side in _SIDES:
+            if side in ("left", "right"):
+                a0, a1 = ints["top"], ints["bottom"]
+            else:
+                a0, a1 = ints["left"], ints["right"]
+            band = (max(0, a0 + (a1 - a0) // 4), max(0, a1 - (a1 - a0) // 4))
+            if band[1] - band[0] < 4:
+                continue
+            cls = _line_classes(nI, nO, nV, side, band, nfr)
+            e0 = int(round(_to_canon(ints[side], side, w, h)))
+            f_out = min(foot[side]) if foot else None
+            e_c, action, stop, stop_kind = _scan_side(cls, e0, f_out)
+            ints[side] = int(round(_from_canon(e_c, side, w, h)))
+            side_ev[side] = {"band": list(band), "from": e0, "edge_canonical": e_c, "action": action,
+                             "stop": stop, "stop_class": {None: None, _L_OUT: "out", _L_NORAW: "no_raw"}[stop_kind],
+                             "cls": cls}
+        if ints == prev:
+            break
+    if not (ints["right"] - ints["left"] > 8 and ints["bottom"] - ints["top"] > 8):
+        return {"ok": False, "reason": f"degenerate measured box {ints}", "selection": sel_ev}
+    # coverage map (unblurred): background = nearest pixel >= 2 px outside the measured integer box
+    outside = np.ones((h, w), bool)
+    outside[max(0, ints["top"] - 2):ints["bottom"] + 2, max(0, ints["left"] - 2):ints["right"] + 2] = False
+    num = np.zeros((h, w), np.float64)
+    den = np.zeros((h, w), np.float64)
+    for f in frames:
+        C, R, V, Ok = f["C"], f["R"], f["V"], f["Ok"]
+        B = _nearest_fill(C, outside & ~Ok)
+        if B is None:
+            continue
+        d = R - B
+        wgt = V & ~Ok & (np.abs(d) >= max(disc_min, f["tau"]))
+        num += np.where(wgt, (C - B) * d, 0.0)
+        den += np.where(wgt, d * d, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        covm = np.where(den > 0, num / np.maximum(den, 1e-9), np.nan)
+    edges_c: dict[str, float] = {}
+    for side in _SIDES:
+        e_int = int(round(_to_canon(ints[side], side, w, h)))
+        sev = side_ev.get(side, {"band": None, "stop_class": None})
+        band = sev.get("band")
+        val: float | None = None
+        how = "integer"
+        fs = foot[side] if foot else None
+        if e_int <= 0:
+            val, how = 0.0, "frame border"
+        elif sev.get("stop_class") == "no_raw" and fs is not None:
+            f_in = max(fs)                     # innermost RAW frame edge: the box cannot extend beyond it
+            cls = sev["cls"]
+            gap = cls[int(max(0, math.ceil(f_in))):e_int]
+            if f_in <= e_int + 1.5 and not (gap == _L_OUT).any():
+                val, how = float(min(f_in, e_int + 1.0)), "RAW frame edge"
+        if val is None and band is not None:
+            e_sub, cev = _coverage_subpixel(_canon(covm, side), tuple(band), e_int)
+            sev["coverage"] = cev
+            if e_sub is not None:
+                val, how = e_sub, "coverage"
+        if val is None:
+            val = float(e_int)
+        edges_c[side] = val
+        sev["method"] = how
+        sev["value_canonical"] = round(val, 4)
+        sev.pop("cls", None)
+    edges = (_from_canon(edges_c["left"], "left", w, h), _from_canon(edges_c["top"], "top", w, h),
+             _from_canon(edges_c["right"], "right", w, h), _from_canon(edges_c["bottom"], "bottom", w, h))
+    corners = [nm for nm, sx, sy in (("tl", "left", "top"), ("tr", "right", "top"), ("bl", "left", "bottom"),
+                                     ("br", "right", "bottom")) if edges_c[sx] > 0.5 and edges_c[sy] > 0.5]
+    Mc = np.clip(np.nan_to_num(covm, nan=0.0), -0.5, 1.5)
+    radius, rev = _fit_radius(Mc, np.isfinite(covm), edges, corners)
+    r_kept = "reason" in rev or not corners
+    if r_kept:
+        radius = float(b.corner_radius) * (rx + ry) / 2.0
+    # full-res, snapped like the detected box
+    fx0, fy0, fx1, fy1 = edges[0] / rx, edges[1] / ry, edges[2] / rx, edges[3] / ry
+    sx0, sy0, sx1, sy1 = (_snap(v, 0.25) for v in (fx0, fy0, fx1, fy1))
+    r_full = radius / ((rx + ry) / 2.0)
+    r_s = float(b.corner_radius) if r_kept else (_snap(r_full, 0.35) if r_full > 0.5 else 0.0)
+    new_box = Box(sx0, sy0, sx1 - sx0, sy1 - sy0, r_s)
+    ev_tot = nI.astype(np.int32) + nO
+    raw_match = (ev_tot > 0) & (nI.astype(np.int32) * 2 > ev_tot)
+    evidence = {"frames": [f["k"] for f in frames], "raw_frames": [f["j"] for f in frames],
+                "gain_offset": [[f["gain"], f["offset"]] for f in frames], "tau": taus, "selection": sel_ev,
+                "sides": side_ev, "radius": rev, "radius_kept": bool(r_kept),
+                "measured_full": [round(fx0, 3), round(fy0, 3), round(fx1, 3), round(fy1, 3)],
+                "radius_measured_full": round(r_full, 3)}
+    return {"ok": True, "box": new_box, "edges": edges, "radius": float(radius), "radius_kept": bool(r_kept),
+            "raw_match": raw_match, "frames": [f["k"] for f in frames], "evidence": evidence,
+            "maps": (nI, nO, nV), "frame_data": frames}
+
+
+def _evidence_error(box: Box, comp: Proxy, nI: np.ndarray, nO: np.ndarray) -> int:
+    """RAW-agreement votes a box contradicts: disagreements inside + agreements outside."""
+    lay = Layout(int(comp.full_size[0]), int(comp.full_size[1]), box=box)
+    inside = box_coverage(lay, comp) >= 0.5
+    return int(nO[inside].sum(dtype=np.int64) + nI[~inside].sum(dtype=np.int64))
+
+
+def refine_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy, fm: Any, cfg: Any,
+                        cache: Cache | None, dlog: DecisionLog | None,
+                        debug_dir: str | os.PathLike | None) -> tuple[Layout, bool]:
+    """DESIGN §7 D2: re-measure the video box against the matched RAW frames (see the section comment).
+
+    Returns ``(layout, changed)``. ``changed`` is True when an edge moved by more than REFINE_EDGE_PX or
+    the radius by more than REFINE_RADIUS_PX (full-res px) AND the measured box explains the RAW agreement
+    votes better than the current one; the returned Layout is then a complete re-analysis with that box
+    (statistics region, periods, background, border, zones, captions, static mask, and NEW initial overlay
+    masks at ``layout.overlay_mask_file`` — the caller reloads them before re-running S5.2/S5.3). Otherwise
+    the input layout is returned unchanged. Frames of fullscreen / split / PiP periods are never used.
+    Writes ``debug_dir/layout_refine.png``; every decision is logged."""
+    dlog = dlog or null_dlog()
+    if layout is None or layout.box is None or layout.mode != "boxed" or fm is None or raw is None:
+        dlog.record("layout", "box_refine", changed=False, reason="no boxed layout / frame map")
+        return layout, False
+    m = measure_box_from_raw(layout, overlays, comp, raw, fm, cfg, dlog)
+    old = layout.box
+    if not m.get("ok"):
+        dlog.record("layout", "box_refine", changed=False, reason=m.get("reason"), selection=m.get("selection"))
+        log.info("layout: box not re-measured against RAW (%s)", m.get("reason"))
+        return layout, False
+    new: Box = m["box"]
+    d_edge = max(abs(new.x - old.x), abs(new.y - old.y), abs((new.x + new.w) - (old.x + old.w)),
+                 abs((new.y + new.h) - (old.y + old.h)))
+    d_r = abs(new.corner_radius - old.corner_radius)
+    material = d_edge > float(_p(cfg, "REFINE_EDGE_PX", REFINE_EDGE_PX)) or \
+        d_r > float(_p(cfg, "REFINE_RADIUS_PX", REFINE_RADIUS_PX))
+    nI, nO, nV = m["maps"]
+    err_old, err_new = _evidence_error(old, comp, nI, nO), _evidence_error(new, comp, nI, nO)
+    changed = bool(material and err_new < err_old)
+    ev = {**m["evidence"], "old_box": old.to_dict(), "measured_box": new.to_dict(), "max_edge_change": round(d_edge, 3),
+          "radius_change": round(d_r, 3), "votes_contradicted_old": err_old, "votes_contradicted_new": err_new}
+    if debug_dir is not None:
+        try:
+            _draw_refine_png(Path(debug_dir) / "layout_refine.png", m["frame_data"], nI, nO, nV, old, new, comp,
+                             changed)
+        except Exception as e:  # noqa: BLE001 - a debug image must never break the analysis
+            log.warning("layout: debug/layout_refine.png failed: %s", e)
+    if not changed:
+        why = ("measured box agrees with the detected one" if not material else
+               "measured box does not explain the RAW agreement better than the detected one")
+        dlog.record("layout", "box_refine", changed=False, reason=why, evidence=ev)
+        log.info("layout: box verified against RAW (%s; max edge change %.2f px, radius change %.2f px)", why,
+                 d_edge, d_r)
+        return layout, False
+    grown = new.w * new.h > old.w * old.h
+    why = ("box grown to the RAW-matching region (static content inside the video box)" if grown else
+           "box shrunk to the RAW-matching region")
+    dlog.record("layout", "box_refined", changed=True, reason=why, evidence=ev)
+    log.info("layout: %s: x%.2f y%.2f w%.2f h%.2f r%.2f (was x%.2f y%.2f w%.2f h%.2f r%.2f)", why, new.x, new.y,
+             new.w, new.h, new.corner_radius, old.x, old.y, old.w, old.h, old.corner_radius)
+    notes = [f"video {why} (measured against the matched RAW frames): x{new.x:g} y{new.y:g} w{new.w:g} "
+             f"h{new.h:g} r{new.corner_radius:g}; temporal activity alone gave x{old.x:g} y{old.y:g} w{old.w:g} "
+             f"h{old.h:g} r{old.corner_radius:g}"]
+    if m["radius_kept"]:
+        notes.append("corner radius not observable against RAW (corners indistinguishable from the canvas): "
+                     "kept from the temporal analysis")
+    fb = _ForcedBox(new, tuple(float(v) for v in m["edges"]), float(m["radius"]), m["raw_match"],
+                    {"refined_from": old.to_dict(), "reason": why, "frames": m["frames"],
+                     "radius_kept": m["radius_kept"]}, notes)
+    lay2, _ov2 = _analyze(comp, cfg, cache, debug_dir, dlog, fb)
+    return lay2, True

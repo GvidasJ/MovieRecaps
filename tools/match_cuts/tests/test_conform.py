@@ -229,3 +229,136 @@ def test_verification_detects_one_frame_offset(clips, tmp_path):
     ver = verify_transcode(src, shifted, plan)
     assert not ver["ok"] and ver["n_failed"] > 40
     assert any("better-than-neighbours" in p for p in ver["problems"])
+
+
+# ----------------------------------------------------------------------------------------------
+# Regressions: quantised VFR timestamps (F1), VFR tail (F2), ffmpeg < 5.1 (F7)
+# ----------------------------------------------------------------------------------------------
+
+from match_cuts.conform import ffmpeg_command, sync_args, vfr_pts_shift  # noqa: E402
+
+
+def _id_clip(out: Path, n: int, rate: str, post: str, *enc: str) -> None:
+    """Moving texture + 8-bit frame-id band; ``post`` = filters after the vstack (select / setpts)."""
+    ff("-f", "lavfi", "-i", f"testsrc2=s=128x96:r={rate},trim=end_frame={n}", "-f", "lavfi",
+       "-i", f"color=c=black:s=128x32:r={rate},format=yuv420p,{ID_GEQ},trim=end_frame={n}",
+       "-filter_complex", f"[1:v][0:v]vstack,{post}[v]", "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast",
+       "-crf", "12", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough", *enc, str(out))
+
+
+@pytest.fixture(scope="module")
+def vfr_clips(tmp_path_factory) -> dict[str, Path]:
+    d = tmp_path_factory.mktemp("conform_vfr_clips")
+    c = {"ms": d / "obs.mkv", "t600": d / "tail600.mp4", "t90k": d / "tail90k.mp4"}
+    # OBS-like MKV: 29.97 fps CFR content, 1 ms time base (PTS rounded), one dropped frame -> flagged VFR
+    _id_clip(c["ms"], 240, "30000/1001", "select='not(eq(n\\,100))'")
+    # jittery phone-like VFR (dropped frame at n=20) whose last two frames fall inside the FINAL output slot
+    # (x = 88.1 and 88.5 slots): the stream ends (last PTS + a 1-tick or pts-delta duration) before slot 89
+    for key, tb in (("t600", 600), ("t90k", 90000)):
+        _id_clip(c[key], 90, "30", f"select='not(eq(n\\,20))',settb=1/{tb},setpts='(if(lt(N\\,20)\\,N\\,N+1)"
+                 f"+0.2*sin(N*1.3)*lt(N\\,87)+0.1*eq(N\\,87)-0.5*eq(N\\,88))/30/TB'",
+                 "-enc_time_base:v", f"1/{tb}", "-video_track_timescale", str(tb))
+    return c
+
+
+def _rule_ids(spts: list[int], sids: list[int], stb: Fraction, fps: Fraction, n: int) -> list[int]:
+    """Ids the 'frame displayed at t_k' rule shows, with the conform's quantisation shift (exact)."""
+    shift = vfr_pts_shift(stb, fps)
+    rel = [Fraction(p - spts[0]) * stb for p in spts]
+    return [sids[max(i for i, t in enumerate(rel) if t - shift <= Fraction(k) / fps)] for k in range(n)]
+
+
+def test_vfr_ms_timebase_conform_keeps_every_frame(vfr_clips, tmp_path):
+    """F1: ms-rounded PTS must not push frames into their successor's slot (~1/3 were dropped)."""
+    cfg = make_cfg(tmp_path)
+    info = probe(vfr_clips["ms"], "raw", cfg.work_dir)
+    assert info.vfr and info.fps == Fraction(30000, 1001) and info.nb_frames == 239
+    pts_i, tb, _ = load_pts_int(info)
+    assert tb == Fraction(1, 1000)
+    res = conform(info, "raw", cfg, None)
+    ver = res.verification
+    assert res.conformed and ver["ok"] and ver["method"] == "fps", ver.get("problems")
+    spts, sids, stb = decode_ids(vfr_clips["ms"])
+    _, oids, _ = decode_ids(Path(res.path))
+    assert len(oids) == ver["frames_expected"] == 240
+    # independent of the tool's rule: EVERY source frame is shown; only the dropped frame's gap duplicates
+    assert set(oids) == set(sids)
+    dups = [k for k in range(1, len(oids)) if oids[k] == oids[k - 1]]
+    assert len(dups) == 1 and oids[dups[0]] == 99                      # frame 100 is missing in the source
+    assert oids == _rule_ids(spts, sids, stb, info.fps, len(oids))
+    cov = ver["coverage"]
+    assert cov["full"] and cov["checked"] == 239 and cov["missing"] == 0 and cov["rule_dropped"] == 0
+
+
+def test_vfr_verification_is_independent_of_the_rule(vfr_clips, tmp_path):
+    """F1: a conform made with the UNSHIFTED rule passes the rule-based SSIM samples (they share its
+    blind spot) but must fail the content check (source frames with a ~1-slot interval never shown)."""
+    import subprocess as sp
+    cfg = make_cfg(tmp_path)
+    info = probe(vfr_clips["ms"], "raw", cfg.work_dir)
+    plan = plan_transcode(info, "raw", cfg)
+    assert "setpts=max(PTS-STARTPTS-1\\,0)" in plan["vf"] and plan["pts_shift"] == "1/1000"
+    old = dict(plan, pts_shift="0", vf=plan["vf"].replace("settb=1/1000,setpts=max(PTS-STARTPTS-1\\,0)",
+                                                            "setpts=PTS-STARTPTS"))
+    out = tmp_path / "old_rule.mov"
+    sp.run(ffmpeg_command(str(info.path), str(out), old), check=True)
+    out_info = probe(out, "raw", cfg.work_dir)
+    ver = verify_transcode(info, out_info, old)
+    assert ver["n_failed"] == 0                                          # the rule check alone is blind
+    assert not ver["ok"] and ver["coverage"]["n_ambiguous"] > 50
+    assert any("never shown" in p for p in ver["problems"])
+    _, oids, _ = decode_ids(out)
+    assert len(set(oids)) < 180                                          # really ~1/3 of the frames lost
+
+
+@pytest.mark.parametrize("key", ["t600", "t90k"])
+def test_vfr_last_frames_inside_the_final_slot(vfr_clips, tmp_path, key):
+    """F2: the last source frame(s) falling late inside the final output slot must still be shown there
+    (the conform used to end early and clone an older frame -> verification failed -> run aborted)."""
+    cfg = make_cfg(tmp_path)
+    info = probe(vfr_clips[key], "competitor", cfg.work_dir)
+    assert info.vfr and info.fps == 30 and info.nb_frames == 89
+    res = conform(info, "competitor", cfg, None)
+    ver = res.verification
+    assert ver["ok"] and ver["frames_expected"] == 90 and ver["coverage"]["n_unexplained"] == 0
+    spts, sids, stb = decode_ids(vfr_clips[key])
+    _, oids, _ = decode_ids(Path(res.path))
+    assert len(oids) == 90 and oids[-1] == sids[-1] == 89               # final slot shows the last frame
+    assert oids == _rule_ids(spts, sids, stb, info.fps, 90)
+    plan = plan_transcode(info, "competitor", cfg)
+    vf = plan["vf"].split(",")
+    assert vf.index(next(x for x in vf if x.startswith("tpad"))) < vf.index(next(x for x in vf if x.startswith("fps")))
+
+
+def test_ffmpeg_sync_flag_by_version(clips, tmp_path):
+    """F7: '-fps_mode' only exists since ffmpeg 5.1; older builds get '-vsync 0'."""
+    cfg = make_cfg(tmp_path)
+    plan = plan_transcode(probe(clips["webm"], "raw", cfg.work_dir), "raw", cfg)
+    old = ffmpeg_command("in.webm", "out.mov", plan, ffmpeg_version=(4, 4, 2))
+    assert "-fps_mode" not in old and old[old.index("-vsync") + 1] == "0"
+    new = ffmpeg_command("in.webm", "out.mov", plan, ffmpeg_version=(6, 1, 1))
+    assert "-vsync" not in new and new[new.index("-fps_mode") + 1] == "passthrough"
+    assert sync_args((5, 1)) == ("-fps_mode", "passthrough") and sync_args((5, 0, 3)) == ("-vsync", "0")
+    assert sync_args(()) == ("-fps_mode", "passthrough")                # unknown (git build) -> current
+
+
+def test_conform_runs_on_ffmpeg_older_than_5_1(clips, tmp_path, monkeypatch):
+    """F7: with an ffmpeg 4.4 (no -fps_mode) every transcode used to fail with 'Unrecognized option'."""
+    import shutil as sh
+    real = sh.which("ffmpeg")
+    fake = tmp_path / "ffmpeg44"
+    fake.write_text("#!/bin/sh\n"
+                    "for a in \"$@\"; do\n"
+                    "  if [ \"$a\" = \"-version\" ]; then echo 'ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright'; exit 0; fi\n"
+                    "  if [ \"$a\" = \"-fps_mode\" ]; then echo \"Unrecognized option 'fps_mode'.\" >&2; exit 1; fi\n"
+                    "done\n"
+                    f"exec {real} \"$@\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("FFMPEG", str(fake))
+    cfg = make_cfg(tmp_path)
+    info = probe(clips["webm"], "raw", cfg.work_dir)
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    res = conform(info, "raw", cfg, dlog)
+    dlog.close()
+    assert res.conformed and res.verification["ok"]
+    assert probe(res.path, "raw", cfg.work_dir).nb_frames == 60

@@ -523,21 +523,224 @@ def test_render_compare_sources(preview, raw_clip, tmp_path):
     cfg = SimpleNamespace(out_dir=str(tmp_path), compare_height=240, compare_preset="ultrafast")
     comp = preview["path"]                                   # competitor stand-in: the preview itself
     ph, pw = 240, 136                                        # 270 x 480 -> 135 x 240 -> even 136
+    geo = rp.compare_geometry(CW, CH, cfg)
+    sh = geo["strip"]                                        # label strip above the panels
+    assert (geo["ph"], geo["pw"]) == (ph, pw) and sh % 2 == 0 and 30 <= sh <= 60
     outs = {}
     for name, src in (("path", str(preview["path"])), ("ctx", rp.make_context(cl, Config(), target_size=(CW, CH), fps=CF)),
                       ("callable", lambda k: np.full((CH, CW, 3), 128, np.uint8))):
         out = tmp_path / f"compare_{name}.mp4"
         rp.render_compare(comp, src, cl, out, cfg)
         st = _probe_video(out)
-        assert int(st["video"]["width"]) == 3 * pw and int(st["video"]["height"]) == ph
+        assert int(st["video"]["width"]) == 3 * pw and int(st["video"]["height"]) == sh + ph
         assert int(st["video"]["nb_read_frames"]) == N
         assert "audio" in st                                  # the competitor's audio
         with VideoReader(out, fps=CF) as vr:
             outs[name] = {k: img for k, img in vr.frames(0, None) if k in (15, 93, 140)}
     for k, img in outs["path"].items():
-        diff = img[60:, 2 * pw:]                              # below the burned-in text
+        diff = img[sh:, 2 * pw:]                              # the whole difference picture
         assert diff.mean() < 3.0, (k, diff.mean())            # recreation == competitor -> black difference
-        assert (img[:40, :pw].astype(int).sum(axis=2) > 600).sum() > 30          # text burned in
+        assert (img[:sh, :pw].astype(int).sum(axis=2) > 600).sum() > 30          # text burned in (strip)
     for k, img in outs["ctx"].items():
-        assert img[60:, 2 * pw:].mean() < 12.0, k             # re-rendered in memory: compression noise only
-    assert outs["callable"][15][60:, 2 * pw:].mean() > 20.0   # a wrong recreation shows up
+        assert img[sh:, 2 * pw:].mean() < 12.0, k             # re-rendered in memory: compression noise only
+    assert outs["callable"][15][sh:, 2 * pw:].mean() > 20.0   # a wrong recreation shows up
+
+
+def test_compare_labels_sit_in_a_strip_not_over_the_picture(preview, tmp_path):
+    """REQ-9: frame number / timecode / segment id are drawn in a dedicated strip above each panel, so the
+    competitor's logo, channel name and title at the top of the picture stay readable: every panel's
+    picture area is exactly the scaled source frame (no text over it), and each strip carries the labels."""
+    cl = preview["cutlist"]
+    cfg = SimpleNamespace(out_dir=str(tmp_path), compare_height=240, compare_preset="ultrafast", compare_crf=10)
+    geo = rp.compare_geometry(CW, CH, cfg)
+    sh, ph, pw = geo["strip"], geo["ph"], geo["pw"]
+    out = tmp_path / "compare_strip.mp4"
+    rp.render_compare(preview["path"], lambda k: np.full((CH, CW, 3), 128, np.uint8), cl, out, cfg)
+    with VideoReader(out, fps=CF) as vr:
+        got = {k: img for k, img in vr.frames(0, None) if k in (15, 93, 140)}
+    assert got[15].shape == (sh + ph, 3 * pw, 3)
+    for k, img in got.items():
+        img = img.astype(int)
+        rec = img[sh:, pw:2 * pw]                             # recreation picture: uniform grey, no text
+        assert np.abs(rec - 128).max() <= 6, (k, np.abs(rec - 128).max())
+        comp = cv2.resize(preview["frames"][k], (pw, ph), interpolation=cv2.INTER_AREA).astype(int)
+        top = (slice(sh, sh + 60), slice(0, pw))                # where the logo / name / title sit
+        assert np.abs(img[top] - comp[:60]).mean() < 4.0, k   # competitor picture untouched by labels
+        assert np.abs(img[sh:, :pw] - comp).mean() < 4.0, k
+        for x0 in (0, pw, 2 * pw):                              # every strip: two lines of white text
+            strip = img[:sh, x0:x0 + pw]
+            assert (strip.sum(axis=2) > 600).sum() > 40, (k, x0)
+            assert np.median(strip.reshape(-1, 3), axis=0).max() < 40      # dark strip background
+
+
+# ---------------------------------------------------------------------------------------------
+# Review fix AE-1 / D1: per-period layout (fullscreen shots and own-box segments in MAIN)
+# ---------------------------------------------------------------------------------------------
+
+FULL = {"x": 0.0, "y": 0.0, "w": float(CW), "h": float(CH), "corner_radius": 0.0}
+OWN = {"x": 30.0, "y": 20.0, "w": 200.0, "h": 80.0, "corner_radius": 16.0}       # above the Video Box
+BG_BGR = np.array([48.0, 32.0, 16.0])
+
+
+def cover_sim(s: float = 1.4) -> dict:
+    """RAW centred on the canvas, scaled to cover all of it (fullscreen shot)."""
+    return {"scale": s, "rotation_deg": 0.0, "tx": CW / 2 - s * RAW_W / 2, "ty": CH / 2 - s * RAW_H / 2}
+
+
+def rbox_interior(b: dict, margin: float = 2.0) -> np.ndarray:
+    """Pixels whose whole square lies inside the rounded box b by `margin` px (own geometry)."""
+    ys, xs = np.mgrid[0:CH, 0:CW].astype(np.float64)
+    x0, y0, x1, y1, r = b["x"] + margin, b["y"] + margin, b["x"] + b["w"] - margin, b["y"] + b["h"] - margin, \
+        b["corner_radius"]
+    ok = np.ones((CH, CW), bool)
+    for ox in (0.0, 1.0):
+        for oy in (0.0, 1.0):
+            px, py = xs + ox, ys + oy
+            inside = (px >= x0) & (px <= x1) & (py >= y0) & (py <= y1)
+            rr = max(r - margin, 0.0)
+            cx = np.clip(px, x0 + rr, x1 - rr)
+            cy = np.clip(py, y0 + rr, y1 - rr)
+            ok &= inside & ((px - cx) ** 2 + (py - cy) ** 2 <= rr ** 2 + 1e-9)
+    return ok
+
+
+def d1_segments() -> list[Segment]:
+    own_sim = {"scale": 0.5, "rotation_deg": 0.0, "tx": 130.0 - 0.5 * RAW_W / 2, "ty": 60.0 - 0.5 * RAW_H / 2}
+    return [
+        Segment(id=1, type="raw", comp_in=0, comp_out=20, raw_in_seconds=raw_time(10), speed=1.0,
+                transform=centred(0.75)),
+        Segment(id=2, type="raw", comp_in=20, comp_out=40, raw_in_seconds=raw_time(40), speed=1.0,
+                transform=cover_sim(), box=dict(FULL), region=1),                 # fullscreen period
+        Segment(id=3, type="raw", comp_in=40, comp_out=60, raw_in_seconds=raw_time(70), speed=1.0,
+                transform=own_sim, box=dict(OWN), region=1),                      # own rounded box
+        Segment(id=4, type="raw", comp_in=60, comp_out=80, raw_in_seconds=raw_time(100), speed=1.0,
+                transform=centred(0.8), transition_out=dict(XF)),
+        Segment(id=5, type="raw", comp_in=74, comp_out=100, raw_in_seconds=raw_time(150), speed=1.0,
+                transform=cover_sim(1.5), transition_in=dict(XF), box=dict(FULL), region=1),
+        Segment(id=6, type="not_in_raw", comp_in=100, comp_out=110, box=dict(FULL), region=1,
+                label="MISSING - not in RAW (fullscreen)"),
+    ]
+
+
+def d1_expected(k: int, segs: list[Segment], raw: dict[int, np.ndarray]) -> np.ndarray:
+    """Independent reference of the whole MAIN frame for the D1 cutlist (own warps, own box tests)."""
+    S = {s.id: s for s in segs}
+    bg = np.broadcast_to(BG_BGR, (CH, CW, 3)).astype(np.float64)
+    in_box = rbox_interior(BOX)
+
+    def boxed(s: Segment) -> np.ndarray:                  # a Video-Box segment over the background
+        img = bg.copy()
+        img[in_box] = ref_warp(raw[exact_frame(s, k)], sim_at(s, k), s.flip_h)[in_box]
+        return img
+
+    def full(s: Segment) -> np.ndarray:
+        return ref_warp(raw[exact_frame(s, k)], sim_at(s, k), s.flip_h)
+
+    if k < 20:
+        return boxed(S[1])
+    if k < 40:
+        return full(S[2])
+    if k < 60:
+        img = bg.copy()
+        own = rbox_interior(OWN)
+        img[own] = ref_warp(raw[exact_frame(S[3], k)], sim_at(S[3], k), False)[own]
+        return img
+    if k < 74:
+        return boxed(S[4])
+    if k < 80:                                            # crossfade Video Box S4 -> fullscreen S5
+        a = (k - 74) / 6.0
+        return (1 - a) * boxed(S[4]) + a * full(S[5])
+    return full(S[5])
+
+
+def test_d1_make_context_places_own_box_segments_in_main():
+    segs = d1_segments()
+    ctx = rp.make_context(make_cutlist(segments=segs, n=110), Config())
+    L = {x.seg_id: x for x in ctx.layers}
+    assert [x.seg_id for x in ctx.layers[:4]] == [2, 3, 5, 6]                    # MAIN-level layers on top
+    assert all(L[i].main for i in (2, 3, 5, 6)) and not L[1].main and not L[4].main
+    assert L[2].clip is None and L[5].clip is None and L[6].clip is None          # whole canvas: no mask
+    assert L[3].clip == (30.0, 20.0, 200.0, 80.0, 16.0)
+    assert L[2].sim == rp.Sim.from_dict(cover_sim())                              # canonical Sim at origin (0, 0)
+    # the crossfade into the MAIN-level S5 keys the upper (incoming) layer rising; S4 stays at 100 %
+    assert not L[4].opacity
+    assert [L[5].op(K) for K in range(74, 81)] == pytest.approx([0, 1 / 6, 2 / 6, .5, 4 / 6, 5 / 6, 1], abs=1e-9)
+    ws = {lay.seg_id: w for lay, _j, w in rp.frame_sources(77, ctx)}
+    assert abs(ws[5] - 0.5) < 1e-9 and abs(ws[4] - 0.5) < 1e-9
+    # a segment box equal to the layout box (within 0.5 px) stays in the Video Box
+    segs2 = [Segment(id=1, type="raw", comp_in=0, comp_out=20, raw_in_seconds=raw_time(10), speed=1.0,
+                     transform=centred(0.75), box={**BOX, "x": BOX["x"] + 0.3})]
+    ctx2 = rp.make_context(make_cutlist(segments=segs2, n=20), Config())
+    assert not ctx2.layers[0].main and ctx2.layers[0].clip is None
+    # fill mode: the segment's own box frames it (export_ae.fill_transform with that box)
+    from match_cuts.export_ae import fill_transform
+    ctx3 = rp.make_context(make_cutlist(segments=segs, n=110), Config(layout_mode="fill", comp_size="216x384"))
+    L3 = {x.seg_id: x for x in ctx3.layers}
+    assert not any(x.main or x.clip for x in ctx3.layers)
+    assert L3[2].sim == fill_transform(rp.Sim.from_dict(cover_sim()), False, rp.Box.from_dict(FULL),
+                                       (RAW_W, RAW_H), (216, 384))
+
+
+def test_d1_fullscreen_and_own_box_segments_render_on_the_canvas(raw_frames):
+    """AE-1: a fullscreen shot fills the whole canvas (not cropped to the rounded Video Box), an own-box
+    segment is clipped to its own rounded box, a crossfade from a boxed shot into a fullscreen one is
+    (1 - a) boxed + a fullscreen, and a NOT-IN-RAW placeholder in a fullscreen period covers the canvas."""
+    segs = d1_segments()
+    ctx = rp.make_context(make_cutlist(segments=segs, n=110), Config())
+    everything = np.ones((CH, CW), bool)
+    outside = ~rbox_interior(BOX, margin=-2.0)
+    for k in (5, 20, 33, 39, 45, 59, 65, 74, 75, 77, 79, 80, 95):
+        got = rp.render_frame(k, ctx, raw_frames).astype(np.float64)
+        ref = d1_expected(k, segs, raw_frames)
+        m = everything
+        if 40 <= k < 60:                                  # exclude the own box's anti-aliased edge
+            m = rbox_interior(OWN) | ~rbox_interior(OWN, margin=-2.0)
+        elif k < 20 or 60 <= k < 80:
+            m = rbox_interior(BOX) | outside
+        p = psnr(got, ref, m)
+        assert p > 40.0, f"frame {k}: PSNR {p:.1f} dB"
+        if 20 <= k < 40 or k >= 80:                       # fullscreen: the canvas corners show the RAW
+            assert psnr(got, ref, outside) > 40.0 and np.abs(got[5, 5] - BG_BGR).sum() > 20, k
+    # the own box's rounded corner shows the background, its inside the RAW
+    got = rp.render_frame(50, ctx, raw_frames).astype(int)
+    assert np.all(np.abs(got[21, 31] - BG_BGR) <= 2) and np.all(np.abs(got[200, 135] - BG_BGR) <= 2)
+    # NOT-IN-RAW in a fullscreen period: placeholder colour over the whole canvas, label drawn
+    ph = np.array(rp._hex_bgr([0.85, 0.1, 0.55]))
+    img = rp.render_frame(105, ctx, raw_frames).astype(int)
+    for y, x in ((3, 3), (CH - 4, CW - 4), (60, 135)):
+        assert np.all(np.abs(img[y, x] - ph) <= 1), (y, x, img[y, x])
+    assert (img.sum(axis=2) > 600).sum() > 50
+
+
+def test_d1_boxless_layout_clips_own_box_segments_in_the_main_stack(raw_frames):
+    """Without a Video Box every layer is in MAIN; an own-box segment is still clipped to its box."""
+    own_sim = {"scale": 0.5, "rotation_deg": 0.0, "tx": 130.0 - 0.5 * RAW_W / 2, "ty": 60.0 - 0.5 * RAW_H / 2}
+    segs = [Segment(id=1, type="raw", comp_in=0, comp_out=20, raw_in_seconds=raw_time(70), speed=1.0,
+                    transform=own_sim, box=dict(OWN), region=1)]
+    ctx = rp.make_context(make_cutlist(segments=segs, n=20, box=None), Config())
+    (L,) = ctx.layers
+    assert not L.main and L.clip == (30.0, 20.0, 200.0, 80.0, 16.0) and ctx.mask is None
+    got = rp.render_frame(10, ctx, raw_frames).astype(np.float64)
+    img = np.broadcast_to(BG_BGR, (CH, CW, 3)).astype(np.float64).copy()
+    own = rbox_interior(OWN)
+    img[own] = ref_warp(raw_frames[exact_frame(segs[0], 10)], sim_at(segs[0], 10), False)[own]
+    assert psnr(got, img, own | ~rbox_interior(OWN, margin=-2.0)) > 40.0
+
+
+def test_d1_render_preview_end_to_end(raw_clip, tmp_path):
+    """The whole-render path (sequential decode per layer, ffmpeg) with MAIN-level layers."""
+    segs = d1_segments()
+    cl = make_cutlist(str(raw_clip), segments=segs, n=110)
+    res = rp.render_preview(cl, raw_clip, tmp_path / "d1.mp4", Config(out_dir=str(tmp_path)))
+    assert res["frames"] == 110
+    with VideoReader(tmp_path / "d1.mp4", fps=CF) as vr:
+        frames = dict(vr.frames(0, None))
+    with VideoReader(raw_clip, fps=RF) as vr:
+        raw = dict(vr.frames(0, RAW_N))
+    everything = np.ones((CH, CW), bool)
+    for k in (10, 30, 50, 77, 90):
+        m = everything if k in (30, 90) else (rbox_interior(BOX) | ~rbox_interior(BOX, margin=-2.0)) if k != 50 \
+            else (rbox_interior(OWN) | ~rbox_interior(OWN, margin=-2.0))
+        p = psnr(frames[k].astype(float), d1_expected(k, segs, raw), m)
+        assert p > 33.0, (k, p)
+    assert sorted(sid for sid, _, _ in res["raw_frames"][77]) == [4, 5]

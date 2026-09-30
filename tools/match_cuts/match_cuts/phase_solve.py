@@ -32,7 +32,7 @@ import numpy as np
 
 __all__ = [
     "TAU", "TIE_SLACK", "feasible_speed_range", "is_feasible", "solve_raw_in", "ae_frame", "snap_speed",
-    "estimate_speed", "dominant_speed", "chebyshev_x",
+    "estimate_speed", "dominant_speed", "chebyshev_x", "best_subinterval", "prefer_penalties",
 ]
 
 TAU = 1e-6          # constraint tolerance (RAW frames)
@@ -174,8 +174,106 @@ def is_feasible(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_in
     return lmax <= umin
 
 
+def best_subinterval(starts: Any, ends: Any, costs: Any, xlo: float, xhi: float,
+                     min_width: float = 2 * TAU) -> tuple[float, float, float]:
+    """Minimum of a sum of interval penalties over [xlo, xhi].
+
+    The penalty at x is the sum of ``costs[i]`` over the half-open intervals ``[starts[i], ends[i])``
+    that contain x (piecewise constant). Returns ``(cost, a, b)``: the minimum and the widest maximal
+    sub-interval [a, b] of [xlo, xhi] where it is attained (ties: nearest the centre of [xlo, xhi], then
+    leftmost). Pieces narrower than ``min_width`` (floating-point slivers between abutting intervals,
+    e.g. j - u d + 1 vs (j + 1) - u d) neither define the minimum nor break a run. An empty / degenerate
+    [xlo, xhi] returns the cost at its centre and (xlo, xhi) unchanged. Exact sweep over the breakpoints
+    (O(m log m)), deterministic."""
+    xlo, xhi = float(xlo), float(xhi)
+    s = np.asarray(starts, dtype=np.float64).ravel()
+    e = np.asarray(ends, dtype=np.float64).ravel()
+    c = np.asarray(costs, dtype=np.float64).ravel()
+    if not (s.shape == e.shape == c.shape):
+        raise ValueError("best_subinterval: starts/ends/costs shapes differ")
+
+    def at(x: float) -> float:
+        return float(c[(s <= x) & (x < e)].sum()) if c.size else 0.0
+
+    if not xhi > xlo:
+        return at((xlo + xhi) / 2.0), xlo, xhi
+    if c.size == 0:
+        return 0.0, xlo, xhi
+    inner = np.concatenate([s, e])
+    inner = inner[(inner > xlo) & (inner < xhi)]
+    bps = np.unique(np.concatenate([[xlo, xhi], inner]))
+    mids = (bps[:-1] + bps[1:]) / 2.0
+    os_ = np.argsort(s, kind="stable")
+    oe = np.argsort(e, kind="stable")
+    cs = np.concatenate([[0.0], np.cumsum(c[os_])])
+    ce = np.concatenate([[0.0], np.cumsum(c[oe])])
+    val = cs[np.searchsorted(s[os_], mids, side="right")] - ce[np.searchsorted(e[oe], mids, side="right")]
+    sliver = (bps[1:] - bps[:-1]) < float(min_width)
+    if sliver.all():
+        sliver[:] = False
+    vmin = float(val[~sliver].min())
+    good = val <= vmin + 1e-9 * max(1.0, abs(vmin))
+    good &= ~sliver | np.r_[False, good[:-1]] | np.r_[good[1:], False]      # an isolated sliver is no minimum
+    left, right = np.r_[False, good[:-1]], np.r_[good[1:], False]
+    good |= sliver & left & right                                            # ... nor a break between two
+    best = None
+    i, n = 0, good.size
+    centre = (xlo + xhi) / 2.0
+    while i < n:
+        if not good[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and good[j + 1]:
+            j += 1
+        a, b = float(bps[i]), float(bps[j + 1])
+        key = (-(b - a), abs((a + b) / 2.0 - centre), a)
+        if best is None or key < best[0]:
+            best = (key, a, b)
+        i = j + 1
+    _k, a, b = best
+    return at((a + b) / 2.0), a, b
+
+
+def prefer_penalties(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], plo: Sequence[int],
+                     phi: Sequence[int], weight: Any = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Penalty pairs for ``solve_raw_in(penalties=...)``: every RAW frame j of a frame's constraint range
+    [lo_k, hi_k] that lies outside its PREFERRED (measured) range [plo_k, phi_k] costs ``weight`` (default
+    1; a callable weight(i, j) -> array may return per-pair costs). Frames whose preferred range does not
+    intersect the constraint range are not penalised. Returns (i, j, w) aligned arrays (i indexes ks)."""
+    lo_a = np.asarray(lo, dtype=np.int64).ravel()
+    hi_a = np.asarray(hi, dtype=np.int64).ravel()
+    flo = np.maximum(lo_a, np.asarray(plo, dtype=np.int64).ravel())
+    fhi = np.minimum(hi_a, np.asarray(phi, dtype=np.int64).ravel())
+    has = (flo <= fhi) & ((lo_a < flo) | (hi_a > fhi))
+    ii, jj = [], []
+    if has.any():
+        width = int((hi_a - lo_a)[has].max())
+        for off in range(width + 1):
+            j = lo_a + off
+            sel = has & (j <= hi_a) & ((j < flo) | (j > fhi))
+            if sel.any():
+                ii.append(np.nonzero(sel)[0])
+                jj.append(j[sel])
+    if not ii:
+        z = np.zeros(0, np.int64)
+        return z, z.copy(), np.zeros(0, np.float64)
+    i = np.concatenate(ii)
+    j = np.concatenate(jj)
+    order = np.lexsort((j, i))
+    i, j = i[order], j[order]
+    if weight is None:
+        w = np.ones(i.size, np.float64)
+    elif callable(weight):
+        w = np.asarray(weight(i, j), dtype=np.float64).reshape(i.size)
+    else:
+        w = np.full(i.size, float(weight))
+    return i, j, w
+
+
 def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_in: int, v: float,
-                 comp_fps: Any, raw_fps: Any) -> dict:
+                 comp_fps: Any, raw_fps: Any, prefer: tuple[Sequence[int], Sequence[int]] | None = None,
+                 penalties: tuple[Any, Any, Any] | None = None) -> dict:
     """Phase-solve raw_in (seconds) for a segment with its speed v fixed (the snapped speed).
 
     Chebyshev LP with u fixed: max t s.t. lo_k + t <= x + u d_k <= hi_k + 1 - t, -tau <= t <= 0.5
@@ -184,15 +282,27 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
     non-empty (wider than 2 * TIE_SLACK) -- the centre of that overlap, so the result holds under
     either rule.
 
+    Soft ranges are tolerances, not evidence: when ``prefer`` = (plo, phi) (the MEASURED argmax range per
+    frame, e.g. refine's pristine raw_lo/raw_hi) or explicit ``penalties`` = (i, j, w) (frame index into
+    ks, RAW frame, cost; see ``prefer_penalties``) are given, x is first restricted to the sub-interval of
+    the floor-rule interval where the total penalty of frames showing a non-preferred RAW frame is minimal
+    (``best_subinterval``) -- so the phase agrees with the measured frames, instead of centring an
+    asymmetric soft intersection -- and the rules above are applied inside it. ``interval_floor`` /
+    ``margin_ms`` then refer to that sub-interval (the raw_in values that reproduce the claimed frames);
+    ``interval_soft`` is the whole soft-feasible interval and ``data_cost`` the minimal penalty.
+
     Returns
       raw_in          seconds (float) -- the value After Effects gets
       raw_in_frames   raw_fps * raw_in (float RAW frame position at comp_in)
       slack           t* (frames) of the floor-rule Chebyshev LP (negative = infeasible)
       interval_floor  [a, b] seconds: feasible raw_in interval under the floor rule
+      interval_soft   [a, b] seconds: the whole soft-range feasible interval (== interval_floor without
+                      prefer / penalties)
       interval_both   [a, b] seconds under floor AND round-to-nearest, or None
       margin_ms       distance of raw_in to the nearest edge of interval_floor (ms)
       tie_frames      comp frames whose own slack at raw_in is < TIE_SLACK (timing ties)
       frame_slack     per-frame slack at raw_in (frames), aligned with ks
+      data_cost       total penalty at raw_in (0 without prefer / penalties)
       ok              the constraints are feasible (t* >= -tau)
       used_both       raw_in was taken from interval_both
     """
@@ -201,17 +311,37 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
     u = float(v) * _ratio(comp_fps, rf)
     x, t, lmax, umin = chebyshev_x(d, lo_rel, hi_rel, u)
     ok = t >= -TAU
+    a_int, b_int = lmax, umin
+    data_cost = 0.0
+    if penalties is None and prefer is not None:
+        penalties = prefer_penalties(ks, lo, hi, prefer[0], prefer[1])
+    has_pen = penalties is not None and np.asarray(penalties[0]).size > 0
+    if has_pen:
+        pi = np.asarray(penalties[0], dtype=np.int64).ravel()
+        pj = np.asarray(penalties[1], dtype=np.float64).ravel() - base
+        pw = np.asarray(penalties[2], dtype=np.float64).ravel()
+        st = pj - u * d[pi]
+        if ok:
+            data_cost, a_int, b_int = best_subinterval(st, st + 1.0, pw, lmax, umin)
+            x = (a_int + b_int) / 2.0
+        else:
+            data_cost, _a, _b = best_subinterval(st, st + 1.0, pw, x, x)
     # round-to-nearest feasible set: lo - 0.5 <= x + u d < hi + 0.5
     lr = float((lo_rel - 0.5 - u * d).max())
     ur = float((hi_rel + 0.5 - u * d).min())
-    both_lo, both_hi = max(lmax, lr), min(umin, ur)
+    both_lo, both_hi = max(a_int, lr), min(b_int, ur)
     used_both = False
     if ok and both_hi - both_lo > 2 * TIE_SLACK:
         x = (both_lo + both_hi) / 2.0
         used_both = True
     pos = x + u * d
     fslack = np.minimum(pos - lo_rel, hi_rel + 1.0 - pos)
-    ties = np.asarray(ks, dtype=np.int64).ravel()[fslack < TIE_SLACK]
+    tie_mask = fslack < TIE_SLACK
+    if has_pen and ok and b_int - a_int < 2 * TIE_SLACK:
+        # the preferred sub-interval is a single point: frames at a frame boundary may show either frame
+        fr = pos - np.floor(pos)
+        tie_mask |= (fr < TIE_SLACK) | (fr > 1.0 - TIE_SLACK)
+    ties = np.asarray(ks, dtype=np.int64).ravel()[tie_mask]
     rff = float(rf)
     base_s = float(Fraction(base) / rf)
 
@@ -222,11 +352,13 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
         "raw_in": sec(x),
         "raw_in_frames": base + x,
         "slack": float(t),
-        "interval_floor": [sec(lmax), sec(umin)],
+        "interval_floor": [sec(a_int), sec(b_int)],
+        "interval_soft": [sec(lmax), sec(umin)],
         "interval_both": [sec(both_lo), sec(both_hi)] if (ok and both_hi - both_lo > 2 * TIE_SLACK) else None,
-        "margin_ms": float(min(x - lmax, umin - x) / rff * 1000.0),
+        "margin_ms": float(min(x - a_int, b_int - x) / rff * 1000.0),
         "tie_frames": [int(k) for k in ties],
         "frame_slack": fslack,
+        "data_cost": float(data_cost),
         "ok": bool(ok),
         "used_both": used_both,
         "u": u,
@@ -302,37 +434,55 @@ def _speed_values(preferred: Any) -> list[float]:
     return out
 
 
-def snap_speed(v_ols: float, vrange: tuple[float, float] | None, cfg: Any, preferred: Any = ()) -> tuple[float, bool]:
+def snap_speed(v_ols: float, vrange: tuple[float, float] | None, cfg: Any, preferred: Any = (),
+               exact_range: tuple[float, float] | None = None) -> tuple[float, bool]:
     """Choose the reported speed of a segment from its tolerant feasible range.
 
     Candidates = cfg.speed_snap_values ∪ preferred (speeds of already-solved segments) that lie inside
-    [vmin, vmax]. Preference: (1) the dominant speed of the edit (``dominant_speed(preferred)``),
-    (2) 1.0, (3) the candidate closest to v_ols. No candidate inside -> (clip(v_ols, vmin, vmax), True)
+    [vmin, vmax] AND pass the prompt's snap test ('snap only if within 0.3 % and the residuals don't get
+    worse'): the candidate lies inside ``exact_range`` -- the speeds that reproduce the MEASURED (argmax)
+    frames, i.e. the residuals do not get worse -- or within ``cfg.speed_snap_tol`` (relative) of v_ols,
+    the robust slope of the measured frames. ``exact_range=None`` means vrange itself is the measurement
+    (exact constraints), so every candidate inside it passes (the previous behaviour).
+    Preference: (1) the dominant speed of the edit (``dominant_speed(preferred)``), (2) 1.0, (3) the
+    candidate closest to v_ols. No candidate -> (clip(v_ols, exact_range or [vmin, vmax]), True)
     (unsnapped). The LP centre is never reported as the speed.
     """
     if vrange is None:
         v = float(v_ols) if math.isfinite(float(v_ols)) else 1.0
         return v, True
     vmin, vmax = float(vrange[0]), float(vrange[1])
+    tol = float(getattr(cfg, "speed_snap_tol", 0.003))
+    vo_ok = math.isfinite(float(v_ols))
 
-    def inside(c: float) -> bool:
+    def inside(c: float, r: tuple[float, float] = (vmin, vmax)) -> bool:
         eps = 1e-9 * max(1.0, abs(c))
-        return vmin - eps <= c <= vmax + eps
+        return float(r[0]) - eps <= c <= float(r[1]) + eps
+
+    def passes(c: float) -> bool:
+        if not inside(c):
+            return False
+        if exact_range is None or inside(c, exact_range):
+            return True
+        return vo_ok and abs(c - float(v_ols)) <= tol * abs(c)
 
     snaps = [float(s) for s in getattr(cfg, "speed_snap_values", (1.0,))]
     cands: list[float] = []
     for c in snaps + _speed_values(preferred):
-        if math.isfinite(c) and inside(c) and not any(abs(c - e) <= 1e-9 * max(1.0, abs(c)) for e in cands):
+        if math.isfinite(c) and passes(c) and not any(abs(c - e) <= 1e-9 * max(1.0, abs(c)) for e in cands):
             cands.append(c)
     dom = dominant_speed(preferred)
-    if dom is not None and inside(dom):
+    if dom is not None and passes(dom):
         return dom, False
-    if inside(1.0):
+    if passes(1.0):
         return 1.0, False
-    vo = float(v_ols) if math.isfinite(float(v_ols)) else (vmin + vmax) / 2.0
+    vo = float(v_ols) if vo_ok else (vmin + vmax) / 2.0
     if cands:
         return min(cands, key=lambda c: (abs(c - vo), c)), False
-    return float(min(max(vo, vmin), vmax)), True
+    r0, r1 = vmin, vmax
+    if exact_range is not None and float(exact_range[0]) <= vmax and float(exact_range[1]) >= vmin:
+        r0, r1 = max(vmin, float(exact_range[0])), min(vmax, float(exact_range[1]))
+    return float(min(max(vo, r0), r1)), True
 
 
 def estimate_speed(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int] | None, comp_fps: Any, raw_fps: Any,

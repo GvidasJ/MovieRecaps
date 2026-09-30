@@ -1,7 +1,10 @@
 """Stage 8 editorial exports (prompt Stage 8; DESIGN.md §5 export_xml_edl.py).
 
 ``write_csv``         cutlist.csv -- one human-readable row per segment (the report's segment-table columns,
-                      then machine-readable columns).
+                      then machine-readable columns). The human-readable timecodes are ``common.timecode``
+                      exactly like report.md and the AE layer names / markers (drop-frame ';' for 29.97 /
+                      59.94, else NDF), so a CSV timecode lands on the same frame in a DF-displaying AE
+                      timeline; the EDL alone stays NDF (its FCM header declares it).
 ``write_fcp7_xml``    recreated_edit.xml -- FCP7 XML (xmeml v5) for Premiere Pro / DaVinci Resolve.
 ``write_edl``         recreated_edit.edl -- CMX3600, NON-DROP FRAME, cuts + M2 speed lines + dissolves.
 ``validate_exports``  re-parses both files (OTIO ``cmx_3600`` / ``fcp_xml`` adapters AND own parsers, because
@@ -9,6 +12,11 @@
 
 Edit model shared by the XML and the EDL (:func:`edit_events`)
 ---------------------------------------------------------------
+Added audio (``cutlist.added_audio``: music / SFX / voice-over the competitor mixed in, never recreated)
+becomes labelled placeholders: EDL ``* LOC:`` locator comments (YELLOW) on the event where the range
+starts and FCP7 XML range markers on the sequence, both named ``'<TYPE> placeholder <tc in>-<tc out>'``
+(record TC, exclusive end) -- see :func:`added_audio_markers`.
+
 Segments are sorted by ``comp_in``; each one becomes an event whose RECORD range is its own range trimmed
 at the next segment's ``comp_in`` (``rec_out = min(comp_out, next.comp_in)``), so events tile
 ``[0, competitor frames)`` exactly. A crossfade (DESIGN §3: ``B.comp_in = O``, ``A.comp_out = O + D``)
@@ -48,7 +56,7 @@ from .geometry import Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
 
 __all__ = ["EditEvent", "edit_events", "write_csv", "write_fcp7_xml", "write_edl", "validate_exports",
-           "edl_m2", "parse_edl_text", "parse_fcp7_xml", "CSV_COLUMNS"]
+           "edl_m2", "parse_edl_text", "parse_fcp7_xml", "CSV_COLUMNS", "added_audio_markers"]
 
 _AE_EPS = 1e-9
 SPEED_TOL = 0.002                    # validate_exports: relative speed tolerance (0.2 %)
@@ -148,7 +156,54 @@ def _tc_to_frames(tc: str, nominal: int) -> int:
 
 
 def _tc(frame: int, fps: Fraction) -> str:
+    """NDF timecode (EDL / XML, whose headers declare NON-DROP FRAME)."""
     return timecode(int(frame), Fraction(fps), drop_frame=False)
+
+
+def _tc_display(frame: int, fps: Fraction) -> str:
+    """Human-readable timecode of cutlist.csv: common.timecode's default (DF for 30000/1001 and 60000/1001),
+    the same string report.md and the AE layer names / markers show for that frame."""
+    return timecode(int(frame), Fraction(fps))
+
+
+# ---------------------------------------------------------------------------------------------
+# Added audio (music / SFX / voice-over) placeholders
+# ---------------------------------------------------------------------------------------------
+
+def _added_audio_kind(t: Any) -> str:
+    s = re.sub(r"[^A-Za-z0-9]+", "-", str(t or "audio")).strip("-").upper()
+    return {"VO": "VOICE-OVER", "VOICEOVER": "VOICE-OVER"}.get(s, s or "AUDIO")
+
+
+def added_audio_markers(cutlist: Cutlist) -> list[dict]:
+    """Labelled placeholders for the audio the competitor ADDED (cutlist.added_audio: music bed, SFX,
+    voice-over -- detected, logged, never recreated): [{type, comp_in, comp_out, name, label}] sorted by
+    comp_in, clamped to [0, competitor frames); label = '<TYPE> placeholder <tc in>-<tc out>' in record TC
+    (NDF, as the EDL / XML declare; end exclusive like the report), e.g. 'MUSIC placeholder
+    00:00:00:00-00:00:18:06'. Entries without a valid range are skipped (logged)."""
+    comp_fps = cutlist.comp_fps
+    n_total = int(cutlist.competitor["frames"])
+    out: list[dict] = []
+    for a in cutlist.added_audio or []:
+        try:
+            k0 = max(0, int(a.get("comp_in", 0)))
+            k1 = min(n_total, int(a.get("comp_out", n_total)))
+        except (TypeError, ValueError, AttributeError):
+            log.warning("export_xml_edl: added_audio entry %r has no valid range; no placeholder marker", a)
+            continue
+        if k1 <= k0:
+            continue
+        kind = _added_audio_kind(a.get("type"))
+        name = f"{kind} placeholder"
+        label = f"{name} {_tc(k0, comp_fps)}-{_tc(k1, comp_fps)}"
+        extra = []
+        if isinstance(a.get("level_db"), (int, float)) and math.isfinite(float(a["level_db"])):
+            extra.append(f"{float(a['level_db']):+.1f} dB re RAW audio")
+        what = str(a.get("type") or "audio").replace("_", "-")
+        comment = f"{label} (competitor-added {what}, not recreated - add your own{', ' + extra[0] if extra else ''})"
+        out.append({"type": str(a.get("type") or "audio"), "comp_in": k0, "comp_out": k1, "name": name,
+                    "label": label, "comment": comment})
+    return sorted(out, key=lambda m: (m["comp_in"], m["comp_out"], m["name"]))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -299,7 +354,7 @@ def _framing_str(seg: Segment) -> str:
 
 def _csv_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[Any]:
     n = int(seg.comp_out) - int(seg.comp_in)
-    comp = f"{_tc(seg.comp_in, comp_fps)}-{_tc(seg.comp_out, comp_fps)} ({seg.comp_in}-{seg.comp_out})"
+    comp = f"{_tc_display(seg.comp_in, comp_fps)}-{_tc_display(seg.comp_out, comp_fps)} ({seg.comp_in}-{seg.comp_out})"
     dur = f"{n}f / {n / float(comp_fps):.3f}s"
     raw_in_f = raw_out_f = None
     if seg.type == "raw":
@@ -309,7 +364,8 @@ def _csv_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[Any]:
         except ValueError:
             pass
     if seg.type == "raw" and raw_in_f is not None:
-        raw = f"{_tc(max(0, raw_in_f), raw_fps)}-{_tc(max(0, raw_out_f if raw_out_f is not None else raw_in_f), raw_fps)}"
+        raw = (f"{_tc_display(max(0, raw_in_f), raw_fps)}-"
+               f"{_tc_display(max(0, raw_out_f if raw_out_f is not None else raw_in_f), raw_fps)}")
         if seg.raw_in_seconds is not None:
             raw += f" (raw_in {float(seg.raw_in_seconds):.6f}s)"
     elif seg.type == "not_in_raw":
@@ -361,7 +417,8 @@ def _csv_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[Any]:
 
 
 def write_csv(cutlist: Cutlist, path: str | os.PathLike) -> None:
-    """cutlist.csv: one row per segment, sorted by comp_in (UTF-8, RFC 4180 quoting)."""
+    """cutlist.csv: one row per segment, sorted by comp_in (UTF-8, RFC 4180 quoting). Timecodes as in
+    report.md (common.timecode: drop-frame for 29.97 / 59.94)."""
     comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -412,6 +469,15 @@ def write_edl(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> Non
              f"{fps_str(raw_fps)} fps); M2 = speed x RAW fps x {_nominal(comp_fps)} / competitor fps",
              f"* NOTE: {len(cutlist.segments)} segments, {int(cutlist.competitor['frames'])} frames; BL = NOT-IN-RAW "
              "placeholder / dip / flash (add your own media); J/L audio offsets are listed in cutlist.csv"]
+    if cutlist.added_audio:
+        notes.append("* NOTE: YELLOW locators = audio the competitor added (music / SFX / voice-over), not "
+                     "recreated: labelled placeholders for your own")
+    # added-audio placeholders: a YELLOW locator on the event where each range starts
+    aa_by_event: dict[int, list[dict]] = {}
+    for mk in added_audio_markers(cutlist):
+        num_at = next((i for i, ev in enumerate(events, start=1) if ev.rec_in <= mk["comp_in"] < ev.rec_out),
+                      len(events))
+        aa_by_event.setdefault(num_at, []).append(mk)
     prev: EditEvent | None = None
     prev_src_out = 0
     for num, ev in enumerate(events, start=1):
@@ -453,6 +519,8 @@ def write_edl(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> Non
         if ev.seg is not None:
             j = f"RAW {_tc(ev.src_in, raw_fps)}" if ev.kind == "clip" else ev.label
             lines.append(f"* LOC: {rec_in} RED     {'Start' if ev.rec_in == 0 else 'Cut'} {ev.seg_name} {j}")
+        for mk in aa_by_event.get(num, []):
+            lines.append(f"* LOC: {_tc(mk['comp_in'], comp_fps)} YELLOW  {mk['comment']}")
         lines.append("")
         prev = ev
         prev_src_out = s_out if ev.kind == "clip" else ev.n_rec
@@ -583,16 +651,32 @@ def _fill_transform(sim: Sim, flip: bool, box: Box, raw_wh: tuple[float, float],
     return fill_transform(sim, flip, box, raw_wh, target_wh)
 
 
+def _own_box(seg: Segment) -> Box | None:
+    """The segment's own layout box (Segment.box, DESIGN §7 D1) when valid, else None."""
+    if not seg.box:
+        return None
+    try:
+        b = seg.box if isinstance(seg.box, Box) else Box.from_dict(seg.box)
+    except (KeyError, TypeError, ValueError):
+        return None
+    vals = (b.x, b.y, b.w, b.h, b.corner_radius)
+    if not all(math.isfinite(float(v)) for v in vals) or b.w <= 0 or b.h <= 0:
+        return None
+    return b
+
+
 def _seg_sims(seg: Segment, mode: str, W: int, H: int, fill_box: Box | None, raw_wh: tuple[int, int]
               ) -> list[tuple[float, Sim]]:
-    """[(comp_frame, Sim into the sequence frame)] -- one entry for constant framing."""
+    """[(comp_frame, Sim into the sequence frame)] -- one entry for constant framing. fill: framed from the
+    segment's own box when it has one (a fullscreen period, D1; as export_ae), else the layout box."""
     if mode == "source":
         return [(float(seg.comp_in), Sim(1.0, 0.0, 0.0, 0.0))]
     keys = sorted(seg.transform_keys or [], key=lambda d: float(d["comp_frame"]))
     items = [(float(k["comp_frame"]), Sim.from_dict(k)) for k in keys] if keys else \
         ([(float(seg.comp_in), Sim.from_dict(seg.transform))] if seg.transform else [])
     if mode == "fill" and fill_box is not None:
-        items = [(k, _fill_transform(s, bool(seg.flip_h), fill_box, raw_wh, (W, H))) for k, s in items]
+        fb = _own_box(seg) or fill_box
+        items = [(k, _fill_transform(s, bool(seg.flip_h), fb, raw_wh, (W, H))) for k, s in items]
     return items
 
 
@@ -696,7 +780,8 @@ def _file_el(parent: ET.Element, fid: str, defined: set[str], name: str, abs_pat
 
 def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> None:
     """FCP7 XML (xmeml v5): one video track (clipitems / slug generators / cross dissolves), one audio track
-    (RAW audio clipitems at the same record ranges when the RAW has audio), sequence markers at cuts.
+    (RAW audio clipitems at the same record ranges when the RAW has audio), sequence markers at cuts plus
+    one labelled range marker per added-audio placeholder (:func:`added_audio_markers`).
 
     Sequence size: competitor (match), the fill target (fill: cfg.comp_size or 1080x1920) or RAW (source);
     rate: always the competitor fps (exact cut timing). Basic Motion = the canonical Sim through
@@ -775,7 +860,7 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             _file_el(ci, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(ev.speed - 1.0) > 1e-9:
                 _time_remap(ci, ev.speed)
-            seg_box = Box.from_dict(seg.box) if seg.box else layout_box
+            seg_box = _own_box(seg) or layout_box            # crop: the segment's own box (D1) or the layout box
             _basic_motion(ci, seg, mode, W, H, fill_box, seg_box, (raw_w, raw_h), comp_fps, raw_fps)
             if seg.flip_h and mode != "source":
                 f = _sub(ci, "filter")
@@ -846,6 +931,13 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
         _sub(mk, "comment", txt)
         _sub(mk, "in", ev.rec_in)
         _sub(mk, "out", -1)
+    # added audio (music / SFX / voice-over): labelled range markers = placeholders for your own
+    for aa in added_audio_markers(cutlist):
+        mk = _sub(seq, "marker")
+        _sub(mk, "name", aa["label"])
+        _sub(mk, "comment", aa["comment"])
+        _sub(mk, "in", aa["comp_in"])
+        _sub(mk, "out", aa["comp_out"])
     ET.indent(root, space="  ")
     body = ET.tostring(root, encoding="unicode")
     atomic_write_text(path, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + body + "\n")
@@ -930,7 +1022,8 @@ def parse_fcp7_xml(path: str | os.PathLike) -> dict:
     out["audio_items"] = []
     for t in seq.findall("media/audio/track"):
         out["audio_items"].extend(items_of(t)[0])
-    out["markers"] = [{"name": _text(m, "name", ""), "in": int(_text(m, "in", 0))} for m in seq.findall("marker")]
+    out["markers"] = [{"name": _text(m, "name", ""), "in": int(_text(m, "in", 0)), "out": int(_text(m, "out", -1)),
+                       "comment": _text(m, "comment", "")} for m in seq.findall("marker")]
     return out
 
 
@@ -987,6 +1080,11 @@ def _validate_edl(cutlist: Cutlist, edl_path: Path, events: list[EditEvent], err
             errors.append(f"EDL {ev.seg_name}: placeholder/dip exported with reel {it['reel']} (expected BL)")
         if it["dissolve"] != ev.dissolve_in:
             errors.append(f"EDL {ev.seg_name}: dissolve {it['dissolve']} != {ev.dissolve_in}")
+    locs = [c for e in own for c in e["comments"] if c.startswith("LOC:")]
+    for mk in added_audio_markers(cutlist):
+        want = f"LOC: {_tc(mk['comp_in'], comp_fps)} YELLOW  {mk['label']}"
+        if not any(c.startswith(want) for c in locs):
+            errors.append(f"EDL: no locator for the {mk['label']!r} added-audio placeholder")
     res["own"] = {"events": len(own), "total_frames": items[-1]["end"] if items else 0}
     # OTIO cmx_3600 adapter (rate = competitor fps; one rate for source and record)
     try:
@@ -1067,6 +1165,11 @@ def _validate_xml(cutlist: Cutlist, xml_path: Path, events: list[EditEvent], err
                 errors.append(f"XML {ev.seg_name}: horizontal flip {it['flip']} != {want_flip}")
         elif not it["generator"]:
             errors.append(f"XML {ev.seg_name}: placeholder/dip is not a generator item")
+    got_mk = {(m["name"], m["in"], m["out"]) for m in own["markers"]}
+    for mk in added_audio_markers(cutlist):
+        if (mk["label"], mk["comp_in"], mk["comp_out"]) not in got_mk:
+            errors.append(f"XML: no range marker for the {mk['label']!r} added-audio placeholder "
+                          f"[{mk['comp_in']}, {mk['comp_out']})")
     want_tr = [(ev.rec_in, ev.rec_in + ev.dissolve_in) for ev in events if ev.dissolve_in]
     got_tr = [(t["start"], t["end"]) for t in own["transitions"]]
     if got_tr != want_tr:

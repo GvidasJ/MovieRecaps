@@ -269,7 +269,8 @@ class _Track:
 
 
 # ---------------------------------------------------------------------------------------------
-# Worker functions (run in fork pools; state = dict of shared read-only objects)
+# Worker functions (run in fork or spawn pools, visual_match.parallel_map: module-level, picklable;
+# state = dict of shared read-only objects)
 # ---------------------------------------------------------------------------------------------
 
 def _w_eval(state: dict, task: tuple) -> tuple:

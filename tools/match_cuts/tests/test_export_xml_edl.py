@@ -333,3 +333,131 @@ def test_fill_and_source_mode_xml_geometry(tmp_path):
     res = ex.validate_exports(cl2, tmp_path / "s.xml", tmp_path / "f.xml")      # not an EDL -> errors only there
     assert any(e.startswith("EDL") for e in res["errors"])
     assert not any(e.startswith("XML") for e in res["errors"])
+
+
+# ---------------------------------------------------------------------------------------------
+# Review fixes: CSV timecodes like the report (REQ-8), added-audio placeholders (REQ-4)
+# ---------------------------------------------------------------------------------------------
+
+def test_csv_timecodes_are_drop_frame_like_the_report_while_the_edl_stays_ndf(tmp_path):
+    """REQ-8: for 29.97 media cutlist.csv shows the same (drop-frame) timecode as report.md and the AE layer
+    names (common.timecode); only the EDL, whose FCM header says NON-DROP FRAME, keeps NDF."""
+    from match_cuts.common import timecode
+    cf = rf = Fraction(30000, 1001)
+    j = 17982                                                        # 00:10:00;00 DF == 00:09:59:12 NDF
+    seg = Segment(id=1, type="raw", comp_in=17982, comp_out=18027, raw_in_seconds=rt(j, .5, rf), raw_in_frame=j,
+                  raw_out_frame=j + 44, speed=1.0, transform=dict(SIM))
+    cl = make_cutlist([Segment(id=0, type="raw", comp_in=0, comp_out=17982, raw_in_seconds=rt(0, .5, rf),
+                               speed=1.0, transform=dict(SIM)), seg],
+                      comp_fps="30000/1001", raw_fps="30000/1001", n=18027)
+    cl.raw["frames"] = 60000
+    ex.write_csv(cl, tmp_path / "c.csv")
+    with open(tmp_path / "c.csv", newline="", encoding="utf-8") as f:
+        rows = [dict(zip(ex.CSV_COLUMNS, r)) for r in list(csv.reader(f))[1:]]
+    row = rows[1]
+    assert timecode(j, rf) == "00:10:00;00"
+    assert row["RAW in-out (tc)"].startswith(f"00:10:00;00-{timecode(j + 44, rf)} (raw_in ")
+    assert row["comp in-out (tc / frames)"] == f"00:10:00;00-{timecode(18027, cf)} (17982-18027)"
+    # the EDL keeps NDF source and record timecodes (FCM: NON-DROP FRAME)
+    ex.write_edl(cl, tmp_path / "c.edl")
+    text = (tmp_path / "c.edl").read_text()
+    assert "FCM: NON-DROP FRAME" in text and not re.search(r"\d\d;\d\d", text)
+    ev = ex.parse_edl_text(text)[1]
+    assert ev["src_in"] == "00:09:59:12" and ev["rec_in"] == "00:09:59:12"
+
+
+def _with_added_audio(cl: Cutlist) -> Cutlist:
+    cl.added_audio = [{"type": "music", "comp_in": 0, "comp_out": 300, "level_db": -6.5, "level_dbfs": -23.6},
+                      {"type": "voice_over", "comp_in": 100, "comp_out": 175, "level_db": None},
+                      {"type": "sfx", "comp_in": 212, "comp_out": 220}]
+    return cl
+
+
+def test_added_audio_becomes_labelled_edl_and_xml_placeholders(tmp_path):
+    """REQ-4: the music / SFX / voice-over the competitor added get labelled placeholders in the EDL
+    (YELLOW locator comments) and the FCP7 XML (sequence range markers), and validation checks them."""
+    cl = _with_added_audio(make_cutlist())
+    mk = ex.added_audio_markers(cl)
+    assert [(m["label"], m["comp_in"], m["comp_out"]) for m in mk] == [
+        ("MUSIC placeholder 00:00:00:00-00:00:10:00", 0, 300),
+        ("VOICE-OVER placeholder 00:00:03:10-00:00:05:25", 100, 175),
+        ("SFX placeholder 00:00:07:02-00:00:07:10", 212, 220)]
+    cfg = Config(out_dir=str(tmp_path))
+    xml, edl = tmp_path / "a.xml", tmp_path / "a.edl"
+    ex.write_fcp7_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    # EDL: a YELLOW locator on the event where each range starts (S01, S03, S06)
+    text = edl.read_text()
+    assert text.isascii()
+    events = ex.parse_edl_text(text)
+    locs = {e["num"]: [c for c in e["comments"] if c.startswith("LOC:") and "YELLOW" in c] for e in events}
+    assert locs[1] == ["LOC: 00:00:00:00 YELLOW  MUSIC placeholder 00:00:00:00-00:00:10:00 (competitor-added music, "
+                       "not recreated - add your own, -6.5 dB re RAW audio)"]
+    assert locs[3][0].startswith("LOC: 00:00:03:10 YELLOW  VOICE-OVER placeholder 00:00:03:10-00:00:05:25")
+    assert locs[6][0].startswith("LOC: 00:00:07:02 YELLOW  SFX placeholder 00:00:07:02-00:00:07:10")
+    assert sum(len(v) for v in locs.values()) == 3
+    tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30)
+    v = [t for t in tl.tracks if t.kind == otio.schema.TrackKind.Video][0]
+    yellow = [m.name for c in v if isinstance(c, otio.schema.Clip) for m in c.markers if m.color == "YELLOW"]
+    assert len(yellow) == 3 and yellow[0].startswith("MUSIC placeholder")
+    # XML: sequence range markers [comp_in, comp_out)
+    x = ex.parse_fcp7_xml(xml)
+    got = [(m["name"], m["in"], m["out"]) for m in x["markers"] if "placeholder" in m["name"]]
+    assert got == [(m["label"], m["comp_in"], m["comp_out"]) for m in mk]
+    tlx = otio.adapters.read_from_file(str(xml), adapter_name="fcp_xml")
+    rng = {m.name: (m.marked_range.start_time.value, m.marked_range.duration.value) for m in tlx.tracks.markers}
+    assert rng["VOICE-OVER placeholder 00:00:03:10-00:00:05:25"] == (100, 75)
+    res = ex.validate_exports(cl, xml, edl)
+    assert res["ok"], res["errors"]
+    # validation catches a missing placeholder
+    bad = tmp_path / "bad.edl"
+    bad.write_text("\n".join(ln for ln in text.splitlines() if "SFX placeholder" not in ln) + "\n")
+    res = ex.validate_exports(cl, xml, bad)
+    assert not res["ok"] and any("SFX placeholder" in e for e in res["errors"])
+    badx = tmp_path / "bad.xml"
+    badx.write_text(xml.read_text().replace("<out>175</out>", "<out>174</out>"))
+    res = ex.validate_exports(cl, badx, edl)
+    assert not res["ok"] and any("VOICE-OVER placeholder" in e for e in res["errors"])
+
+
+def test_fullscreen_segment_is_cropped_to_and_framed_from_its_own_box(tmp_path):
+    """D1: a segment of a fullscreen period (Segment.box = the whole canvas) is cropped to the canvas, not
+    to the Video Box, in match mode, and framed from its own box in fill mode (like export_ae)."""
+    from match_cuts.export_ae import fill_transform
+    import xml.etree.ElementTree as ET
+    full = {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0, "corner_radius": 0.0}
+    cover = {"scale": 1.8, "rotation_deg": 0.0, "tx": 540 - 1.8 * 960, "ty": 0.0}
+    segs = make_segments()[:2]
+    segs[1] = Segment(id=2, type="raw", comp_in=45, comp_out=90, raw_in_seconds=rt(2000), speed=1.0,
+                      transform=dict(cover), box=dict(full), region=1)
+    cl = make_cutlist(segs, n=90)
+
+    def crops(path) -> list[dict]:
+        root = ET.parse(path).getroot()
+        out = []
+        for ci in root.findall("sequence/media/video/track/clipitem"):
+            crop = [e for e in ci.findall("filter/effect") if e.findtext("effectid") == "crop"]
+            out.append({p.findtext("parameterid"): float(p.findtext("value")) for p in crop[0].findall("parameter")}
+                       if crop else {})
+        return out
+
+    ex.write_fcp7_xml(cl, tmp_path / "m.xml", Config())
+    c = crops(tmp_path / "m.xml")
+    assert c[0]["top"] == pytest.approx(0.0, abs=1e-3) and c[0]["left"] > 1.0      # S01: the Video Box
+    # S02: the RAW (1728 px wide, 1944 high) cropped to the canvas only: 18.75 % left/right, ~1.2 % top/bottom
+    assert c[1]["left"] == pytest.approx(100 * (0 - cover["tx"]) / 1.8 / 1920, abs=1e-3)
+    assert c[1]["top"] == pytest.approx(0.0, abs=1e-3)
+    assert c[1]["bottom"] == pytest.approx(100 * (1080 - 1920 / 1.8) / 1080, abs=1e-3)
+    cl.layout["mode"] = "fill"
+    ex.write_fcp7_xml(cl, tmp_path / "f.xml", Config(layout_mode="fill", comp_size="720x1280"))
+    root = ET.parse(tmp_path / "f.xml").getroot()
+    scales = []
+    for ci in root.findall("sequence/media/video/track/clipitem"):
+        basic = [e for e in ci.findall("filter/effect") if e.findtext("effectid") == "basic"][0]
+        scales.append(float([p for p in basic.findall("parameter") if p.findtext("parameterid") == "scale"][0]
+                            .findtext("value")))
+    want1 = fill_transform(Sim.from_dict(SIM), False, Box.from_dict(BOX), (1920, 1080), (720, 1280))
+    want2 = fill_transform(Sim.from_dict(cover), False, Box.from_dict(full), (1920, 1080), (720, 1280))
+    assert scales == [pytest.approx(100 * want1.s, abs=1e-4), pytest.approx(100 * want2.s, abs=1e-4)]
+    res = ex.validate_exports(cl, tmp_path / "f.xml", tmp_path / "f.xml")
+    assert not any(e.startswith("XML") for e in res["errors"])

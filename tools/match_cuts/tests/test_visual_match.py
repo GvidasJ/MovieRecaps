@@ -10,7 +10,10 @@ a caption-like overlay.
 """
 from __future__ import annotations
 
+import logging
 import math
+import os
+import pickle
 from fractions import Fraction
 
 import cv2
@@ -397,3 +400,218 @@ def test_mirror_features_equal_sift_of_the_flipped_image(scene):
             rel.append(dist / max(np.linalg.norm(d), 1.0))
     assert len(rel) >= 0.95 * len(pts)
     assert np.median(rel) < 0.02 and np.mean(np.array(rel) < 0.05) > 0.9
+
+
+# ----------------------------------------------------------------------------------------------
+# worker pools: fork on Linux, spawn on Windows / macOS (review finding real-world:F6, DESIGN D7)
+# ----------------------------------------------------------------------------------------------
+
+_PARENT_MARK = {"parent": False}     # set in the parent: forked workers inherit it, spawned ones do not
+
+
+def _probe(state, x):
+    """Module-level (hence picklable) parallel_map item function reporting where it ran."""
+    return (x, state["mul"] * x, os.getpid(), _PARENT_MARK["parent"], cv2.getNumThreads())
+
+
+def _run_probe(workers=3):
+    return vm.parallel_map(_probe, list(range(40)), workers, {"mul": 7}, seed=1)
+
+
+@pytest.fixture
+def clean_pool_env(monkeypatch):
+    monkeypatch.delenv(vm.START_METHOD_ENV, raising=False)
+    monkeypatch.setitem(_PARENT_MARK, "parent", True)
+    yield
+    vm.shutdown_workers()
+
+
+def test_start_method_platform_defaults_and_env(monkeypatch):
+    monkeypatch.delenv(vm.START_METHOD_ENV, raising=False)
+    monkeypatch.setattr(vm, "_platform", lambda: "linux")
+    assert vm.start_method() == "fork"
+    for plat in ("win32", "darwin"):
+        monkeypatch.setattr(vm, "_platform", lambda plat=plat: plat)
+        assert vm.start_method() == "spawn", plat
+    monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
+    assert vm.start_method() == "fork"                    # darwin has fork: explicit override honoured
+    monkeypatch.setattr(vm, "_fork_available", lambda: False)
+    assert vm.start_method() == "spawn"                   # Windows: no fork -> spawn
+    monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+    monkeypatch.setattr(vm, "_platform", lambda: "linux")
+    assert vm.start_method() == "spawn"
+
+
+def test_parallel_map_uses_spawn_workers_on_windows(monkeypatch, clean_pool_env):
+    """Regression (real-world:F6): without fork (Windows) parallel_map used to run everything in the
+    parent process. It must run a spawn pool with the same results as the inline loop."""
+    monkeypatch.setattr(vm, "_platform", lambda: "win32")
+    monkeypatch.setattr(vm, "_fork_available", lambda: False)
+    before = dict(vm.POOL_STATS)
+    res = _run_probe(3)
+    inline = vm.parallel_map(_probe, list(range(40)), 1, {"mul": 7}, seed=1)
+    assert [r[:2] for r in res] == [r[:2] for r in inline] == [(x, 7 * x) for x in range(40)]
+    pids = {r[2] for r in res}
+    assert pids and os.getpid() not in pids              # really ran in worker processes
+    assert not any(r[3] for r in res)                     # spawned (fresh module), not forked
+    assert all(r[4] == 1 for r in res)                    # one OpenCV thread per worker
+    assert vm.POOL_STATS["spawn"] == before["spawn"] + 1
+    assert vm.POOL_STATS["spawn_fallback"] == before["spawn_fallback"]
+    # the pool persists across calls (spawn start-up paid once) and still gives the same results
+    res2 = _run_probe(3)
+    assert [r[:2] for r in res2] == [r[:2] for r in res] and os.getpid() not in {r[2] for r in res2}
+    assert vm._POOL["pool"] is not None
+
+
+def test_parallel_map_macos_uses_spawn_and_env_overrides(monkeypatch, clean_pool_env):
+    monkeypatch.setattr(vm, "_platform", lambda: "darwin")
+    res = _run_probe(3)
+    assert not any(r[3] for r in res) and os.getpid() not in {r[2] for r in res}
+    monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
+    res_f = _run_probe(3)
+    assert all(r[3] for r in res_f) and os.getpid() not in {r[2] for r in res_f}   # forked
+    assert vm._POOL["pool"] is None                       # the spawn pool is shut down before forking
+    monkeypatch.setattr(vm, "_platform", lambda: "linux")
+    monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+    res_s = _run_probe(3)
+    assert not any(r[3] for r in res_s)
+    assert [r[:2] for r in res] == [r[:2] for r in res_f] == [r[:2] for r in res_s]
+
+
+def test_parallel_map_spawn_unpicklable_state_falls_back(monkeypatch, clean_pool_env, caplog):
+    monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+
+    def local_fn(state, x):                                # a closure cannot be pickled
+        return (x, state["mul"] * x, os.getpid())
+    before = dict(vm.POOL_STATS)
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        res = vm.parallel_map(local_fn, list(range(20)), 3, {"mul": 3}, seed=1)
+    assert [r[:2] for r in res] == [(x, 3 * x) for x in range(20)]
+    assert {r[2] for r in res} == {os.getpid()}
+    assert vm.POOL_STATS["spawn_fallback"] == before["spawn_fallback"] + 1
+    assert "not picklable" in caplog.text
+
+
+def _mm_proxy(p: Proxy, path, a: int = 0, b: int | None = None) -> Proxy:
+    """The proxy with its frames saved to ``path`` (.npy) and re-opened as a read-only memmap (pipeline)."""
+    b = p.n if b is None else b
+    np.save(path, np.ascontiguousarray(p.frames[a:b]))
+    return Proxy(p.role, "", np.load(path, mmap_mode="r"), p.full_size, p.ratio, p.fps, p.pts[a:b], b - a,
+                 npy_path=str(path))
+
+
+def test_proxy_pickles_memmaps_as_file_references(scene, tmp_path):
+    raw = scene["raw"]
+    # dense .npy proxy: pickled as (path, offset, dtype, shape), re-opened as a memmap
+    dense = _mm_proxy(raw, tmp_path / "raw.npy", 0, 60)
+    blob = pickle.dumps(dense, protocol=pickle.HIGHEST_PROTOCOL)
+    assert len(blob) < 16_000 < dense.frames.nbytes
+    back = pickle.loads(blob)
+    assert isinstance(back.frames, np.memmap) and str(back.frames.filename) == str(dense.frames.filename)
+    assert back.frames.shape == dense.frames.shape and np.array_equal(back.frames, dense.frames)
+    assert (back.role, back.n, back.full_size, back.ratio, back.fps, back.npy_path) == \
+        (dense.role, dense.n, dense.full_size, dense.ratio, dense.fps, dense.npy_path)
+    assert np.array_equal(back.pts, dense.pts)
+    # sparse store (.u8 rows + index_map)
+    rows = [3, 9, 27, 40]
+    u8 = tmp_path / "store.u8"
+    u8.write_bytes(np.ascontiguousarray(np.stack([raw.get(j) for j in rows])).tobytes())
+    h, w = raw.frames.shape[1:]
+    im = np.full(raw.n, -1, np.int32)
+    im[rows] = np.arange(len(rows), dtype=np.int32)
+    sparse = Proxy("raw", "", np.memmap(u8, dtype=np.uint8, mode="r", shape=(len(rows), h, w)), raw.full_size,
+                   raw.ratio, raw.fps, raw.pts, raw.n, npy_path=str(u8), index_map=im)
+    sb = pickle.dumps(sparse, protocol=pickle.HIGHEST_PROTOCOL)
+    assert len(sb) < 16_000
+    s2 = pickle.loads(sb)
+    assert isinstance(s2.frames, np.memmap) and not s2.dense
+    assert all(np.array_equal(s2.get(j), raw.get(j)) for j in rows) and not s2.has(4)
+    # a view of a memmap, a writable memmap and an in-memory proxy pickle their pixels
+    view = Proxy("raw", "", dense.frames[10:20], raw.full_size, raw.ratio, raw.fps, raw.pts[10:20], 10)
+    v2 = pickle.loads(pickle.dumps(view))
+    assert np.array_equal(v2.frames, raw.frames[10:20])
+    rw = Proxy("raw", "", np.load(tmp_path / "raw.npy", mmap_mode="r+"), raw.full_size, raw.ratio, raw.fps,
+               raw.pts[:60], 60)
+    assert len(pickle.dumps(rw)) > rw.frames.nbytes
+    mem = pickle.loads(pickle.dumps(scene["comp"]))
+    assert np.array_equal(mem.frames, scene["comp"].frames)
+
+
+def test_allowed_masks_pickle_packs_extra_masks(scene, tmp_path):
+    cfg = Config()
+    comp = _mm_proxy(scene["comp"], tmp_path / "comp.npy")          # pickled as a file reference
+    am = vm.AllowedMasks(scene["layout"], None, comp, cfg, use_layout_module=False)
+    for k in scene["caption_frames"]:
+        am.add_extra(k, scene["caption_mask"])
+    blob = pickle.dumps(am, protocol=pickle.HIGHEST_PROTOCOL)
+    assert len(blob) < 0.5 * len(scene["caption_frames"]) * scene["caption_mask"].size   # bit-packed
+    am2 = pickle.loads(blob)
+    for k in (0, 5, 10, 33, 60, 61, 100):
+        assert np.array_equal(am2(k), am(k)), k
+    am2.add_extra(12, np.roll(scene["caption_mask"], 7, axis=0))
+    am.add_extra(12, np.roll(scene["caption_mask"], 7, axis=0))
+    assert np.array_equal(am2(12), am(12))
+    am3 = pickle.loads(pickle.dumps(am2))                 # re-pickling keeps unpacked + packed masks
+    for k in (11, 12, 40):
+        assert np.array_equal(am3(k), am(k)), k
+
+
+def test_raw_index_pickles_as_cache_files(scene, built, tmp_path):
+    idx = built["index"]
+    q = np.ascontiguousarray(idx.desc[::53][:300])
+    ref = idx.votes(q)
+    # cached index: side files next to the npz; the pickle holds only paths and scalars
+    assert idx.npz_path and os.path.isfile(idx.npz_path)
+    idx.prepare_spawn()
+    blob = pickle.dumps(idx, protocol=pickle.HIGHEST_PROTOCOL)
+    assert len(blob) < 4096
+    vm._INDEX_CACHE.clear()
+    back = pickle.loads(blob)
+    assert back._flann is not None                         # tree loaded at unpickling, before any item runs
+    assert isinstance(back.desc, np.memmap) and np.array_equal(back.desc, idx.desc)
+    for k in ("frames", "owner", "pts", "offsets"):
+        assert np.array_equal(getattr(back, k), getattr(idx, k)), k
+    assert np.array_equal(back.votes(q), ref)
+    assert pickle.loads(blob) is back                       # per-process cache: loaded once per worker
+    # uncached index: pickled by value, FLANN re-trained with the index seed -> identical votes
+    raw_idx = vm.RawIndex(idx.frames, idx.desc, idx.owner, idx.pts, idx.offsets, idx.fps, idx.step, built["cfg"])
+    b2 = pickle.dumps(raw_idx)
+    assert len(b2) > idx.desc.nbytes
+    r2 = pickle.loads(b2)
+    assert r2._flann is not None and np.array_equal(r2.votes(q), ref)
+
+
+def test_index_and_search_bit_identical_inline_fork_spawn(scene, tmp_path, monkeypatch):
+    """RawIndex.build and sparse_search give identical results inline, in a fork pool and in a spawn
+    pool (memmapped proxies re-opened in the workers, the cached index loaded from its side files)."""
+    raw = _mm_proxy(scene["raw"], tmp_path / "raw.npy", 0, 2 * SHOT_LEN)       # shots 0 and 1
+    comp = _mm_proxy(scene["comp"], tmp_path / "comp.npy")
+    frames = [0, 12, 33, 52, 66, 73, 78]
+    out = {}
+    try:
+        for mode, workers in (("inline", 1), ("fork", 3), ("spawn", 3)):
+            monkeypatch.setenv(vm.START_METHOD_ENV, "spawn" if mode == "spawn" else "fork")
+            cfg = make_config(tmp_path / mode, workers=workers)
+            before = dict(vm.POOL_STATS)
+            idx = vm.RawIndex.build(raw, cfg, Cache(tmp_path / mode / "work"))
+            am = vm.AllowedMasks(scene["layout"], None, comp, cfg, use_layout_module=False)
+            anchors = vm.sparse_search(comp, raw, scene["layout"], None, idx, None, cfg, None, frames=frames,
+                                       allowed_fn=am)
+            if mode != "inline":
+                assert vm.POOL_STATS[mode] >= before[mode] + 2, (mode, vm.POOL_STATS)
+                assert vm.POOL_STATS["spawn_fallback"] == before["spawn_fallback"]
+            out[mode] = (idx, [a.to_dict() for a in anchors])
+    finally:
+        vm.shutdown_workers()
+    i0, a0 = out["inline"]
+    for mode in ("fork", "spawn"):
+        i1, a1 = out[mode]
+        for k in ("frames", "desc", "owner", "pts", "offsets"):
+            assert np.array_equal(getattr(i0, k), getattr(i1, k)), (mode, k)
+        assert a1 == a0, mode
+    best = {}
+    for a in a0:
+        best.setdefault(a["k"], a)
+    assert set(best) == {0, 12, 33, 52, 66}
+    assert all(best[k]["raw"] == scene["truth"][k]["raw"] for k in best)
+

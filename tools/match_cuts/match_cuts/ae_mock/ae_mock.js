@@ -16,7 +16,16 @@
  *   - keys are stored in LAYER time: changing startTime / stretch after keys were written moves them;
  *   - 1-based collections; layers.add / addSolid insert at index 1; new layers start at the comp's
  *     current time (not 0) and with hostile render switches, so the JSX must set everything explicitly;
- *   - every array handed to the script is created in the script's (poisoned, ES3-like) realm.
+ *   - every array handed to the script is created in the script's (poisoned, ES3-like) realm;
+ *   - File.exists / File.modified use the REAL file system (so a wrong relative path or a broken join
+ *     is caught); only the saved .aep is virtual (the mock never writes a project file).
+ * Scenarios (run_mock.js): default | media_missing (the media files are reported missing, openDialog
+ * returns null) | new_project_null | no_marker_property | quantize_time (startTime to 10 ms, stretch to
+ * 1e-3 %) | fps_misread_down / fps_misread_up (AE reads the footage at rate * 1000/1001 or * 1001/1000)
+ * | fps_display_rounded (AE reports the 2-decimal display rate, e.g. 29.97 for 30000/1001: < 1e-6 off)
+ * | frame_count_off (AE sees one frame more than the probe in every clip) | save_fails_existing (a recreated_edit.aep
+ * from an earlier run exists and save() throws) | save_silent_fail (the .aep exists and save() returns
+ * without writing) | rel_missing_abs_present (media next to the script are missing, absolute paths exist).
  * Every value the script sets is recorded; finish() returns the record (plain JSON).
  */
 const path = require('path');
@@ -82,6 +91,8 @@ function createMock(opts) {
   const scenario = opts.scenario || 'default';
   const CArray = vm.runInContext('Array', ctx);
   const CError = vm.runInContext('Error', ctx);
+  const CDate = vm.runInContext('Date', ctx);
+  const jsxDir = path.dirname(jsxPath);
 
   const rec = {
     record_type: 'ae_mock', scenario: scenario, jsx_path: jsxPath, status: 'running',
@@ -89,7 +100,12 @@ function createMock(opts) {
     calls: { newProject: 0, openDialog: 0, beginUndoGroup: 0, endUndoGroup: 0, importFile: 0, save: 0,
       openInViewer: 0, alert: 0 },
   };
-  const savedPaths = new Set();
+  const savedPaths = new Map();          // virtual saved files: path -> mtime (ms)
+  const virtualFiles = new Map();        // files that exist only in the scenario: path -> mtime (ms)
+  if (scenario === 'save_fails_existing' || scenario === 'save_silent_fail') {
+    // a recreated_edit.aep left by an earlier run (an hour old)
+    virtualFiles.set(path.join(jsxDir, 'recreated_edit.aep'), 1700000000000);
+  }
   const T2P = new WeakMap();
   const P2T = new WeakMap();
   const absent = new Set(ABSENT_IN_CC2019);
@@ -218,12 +234,22 @@ function createMock(opts) {
   const ev = (t) => wrap(t, 'EnumValue');
 
   // ---- files ---------------------------------------------------------------------------------
+  function isMedia(p) { return Object.prototype.hasOwnProperty.call(meta, path.basename(p)); }
+  function underDir(p, dir) { const r = path.relative(dir, p); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); }
   function existsPath(p) {
-    if (savedPaths.has(p)) return true;
+    if (savedPaths.has(p) || virtualFiles.has(p)) return true;
     if (p === jsxPath) return true;
-    const base = path.basename(p);
-    if (Object.prototype.hasOwnProperty.call(meta, base)) return scenario !== 'media_missing';
-    try { return fs.existsSync(p); } catch (e) { return false; }
+    if (isMedia(p)) {
+      if (scenario === 'media_missing') return false;
+      if (scenario === 'rel_missing_abs_present' && underDir(p, jsxDir)) return false;
+    }
+    try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch (e) { return false; }
+  }
+  function mtimePath(p) {
+    if (savedPaths.has(p)) return savedPaths.get(p);
+    if (virtualFiles.has(p)) return virtualFiles.get(p);
+    if (!existsPath(p)) return null;
+    try { return fs.statSync(p).mtimeMs; } catch (e) { return null; }
   }
   class FsEntry {
     constructor(p, cls) { this._cls = cls; this._p = path.resolve(str(p, cls + '(path)')); }
@@ -234,6 +260,7 @@ function createMock(opts) {
     get name() { return path.basename(this._p); }
     get displayName() { return path.basename(this._p); }
     get exists() { return existsPath(this._p); }
+    get modified() { const m = mtimePath(this._p); return m === null ? null : new CDate(Math.floor(m)); }
     get parent() { return wrap(new FolderObj(path.dirname(this._p))); }
     toString() { return this._p; }
   }
@@ -666,9 +693,9 @@ function createMock(opts) {
         this._src = new SolidSource(this, spec.color);
       } else {
         this._file = spec.file;
-        this._fpsNum = spec.fps_num;
+        this._fpsNum = spec.fps_num;             // the rate AE READ (misread in the fps_misread_* scenarios)
         this._fpsDen = spec.fps_den;
-        this._frames = spec.frames;
+        this._frames = spec.frames;               // the frames AE SEES (one more in frame_count_off)
         this._src = new FileSource(this);
       }
     }
@@ -959,11 +986,16 @@ function createMock(opts) {
       if (this._groups.transform) this._groups.transform._serialize(props);
       if (this._groups.audio) this._groups.audio._serialize(props);
       if (this._remap || this._remapProp._touched) props['ADBE Time Remapping'] = this._remapProp._serialize();
-      const masks = this._groups.masks ? this._groups.masks._items.map((m) => ({
-        mode: m._mode._name, modeSet: m._modeSet, inverted: m._inverted,
-        shape: m._children['ADBE Mask Shape'] ? m._children['ADBE Mask Shape']._value : null,
-        feather: m._children['ADBE Mask Feather'] ? m._children['ADBE Mask Feather']._value : null,
-      })) : [];
+      const masks = this._groups.masks ? this._groups.masks._items.map((m) => {
+        const sp = m._children['ADBE Mask Shape'];
+        return {
+          mode: m._mode._name, modeSet: m._modeSet, inverted: m._inverted,
+          shape: sp ? sp._value : null,
+          shapeKeys: sp ? sp._keys.map((k) => ({ time: sp._ct(k.lt), layerTime: k.lt, value: k.value,
+            inInterp: k.inInterp, outInterp: k.outInterp })) : [],
+          feather: m._children['ADBE Mask Feather'] ? m._children['ADBE Mask Feather']._value : null,
+        };
+      }) : [];
       const effects = this._groups.effects ? this._groups.effects._items.map((g) => {
         const params = {};
         for (const k of Object.keys(g._children)) params[k] = g._children[k]._value;
@@ -1053,17 +1085,27 @@ function createMock(opts) {
       const m = meta[base];
       if (!m) throw err('Project.importFile(): no footage metadata for ' + base);
       rec.calls.importFile++;
+      let fn = m.fps_num, fd = m.fps_den, frames = m.frames;
+      if (scenario === 'fps_misread_down') { fn = m.fps_num * 1000; fd = m.fps_den * 1001; }
+      if (scenario === 'fps_misread_up') { fn = m.fps_num * 1001; fd = m.fps_den * 1000; }
+      if (scenario === 'fps_display_rounded') { fn = Math.round(m.fps_num / m.fps_den * 100); fd = 100; }
+      if (scenario === 'frame_count_off') frames = m.frames + 1;
       return wrap(new FootageItem(this, base, {
-        file: o._file, width: m.width, height: m.height, fps_num: m.fps_num, fps_den: m.fps_den,
-        frames: m.frames, has_audio: !!m.has_audio,
+        file: o._file, width: m.width, height: m.height, fps_num: fn, fps_den: fd,
+        frames: frames, has_audio: !!m.has_audio,
       }));
     }
     save(file) {
       const f = unwrap(file);
       if (!(f instanceof FileObj)) throw err('Project.save(): expected a File');
       rec.calls.save++;
+      if (scenario === 'save_fails_existing') {
+        throw new CError('After Effects error: Unable to save "' + path.basename(f._p) + '" (permission denied)');
+      }
+      if (scenario === 'save_silent_fail') return false;       // AE showed an error dialog, nothing written
       rec.saved.push(f._p);
-      savedPaths.add(f._p);
+      const old = mtimePath(f._p);
+      savedPaths.set(f._p, Math.max(Date.now(), old === null ? 0 : old + 1000));
       this._file = f;
       return true;
     }
@@ -1073,7 +1115,8 @@ function createMock(opts) {
         parentFolder: it._parent ? it._parent._id : null }));
       const footage = this._items.filter((it) => it instanceof FootageItem).map((f) => ({
         id: f._id, name: f._name, comment: f._comment, solid: f._solid, width: f._w, height: f._h,
-        file: f._solid ? null : f._file._p, fps_num: f._solid ? null : f._fpsNum, fps_den: f._solid ? null : f._fpsDen,
+        file: f._solid ? null : f._file._p, fsName: f._solid ? null : f._file._p,
+        fps_num: f._solid ? null : f._fpsNum, fps_den: f._solid ? null : f._fpsDen,
         frames: f._solid ? null : f._frames, duration: f._durationValue(), hasAudio: f._hasAudio,
         conformFrameRate: f._solid ? 0 : f._src._conform,
         fieldSeparationType: f._solid ? null : f._src._fields._name,
