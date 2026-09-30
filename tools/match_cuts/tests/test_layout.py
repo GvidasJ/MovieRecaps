@@ -717,6 +717,63 @@ def review_talking_head(n: int = 40, box: tuple = TRUTH_BOX, noise: float = 1.0,
     return np.stack(frames)
 
 
+def effect_scene(box: tuple = TRUTH_BOX, n: int = 24, kind: str = "moving", zoom: float = 1.0, bars: int = 0,
+                 bar_level: int = 0, canvas_level: int = 0, effect: tuple | None = None, seed: int = 0,
+                 noise: float = 1.0):
+    """Review real-world-new-paths:D2-shrink / D2-letterbox-growth scenes: a 1920x1080 RAW cover-scaled
+    (x ``zoom``) into the rounded box and centred on it; ``kind`` 'moving' = translating texture,
+    'talking_head' = static texture with a moving textured ellipse; ``bars`` letterbox rows (RAW px, top and
+    bottom) of level ``bar_level``; ``effect`` = what the competitor does to the video inside the box:
+    ('gradient', height, min_gain) the dark gradient behind captions at the bottom of the box, ('band',
+    fraction, gain) a darkened lower band with a hard edge, ('feather', width, strength) an inner shadow /
+    feathered edge. Canvas (``canvas_level``) with logo, title, watermark; captions on frames 6-15; Gaussian
+    noise. Returns (competitor proxy, RAW proxy, FrameMap with the true Sim, Sim)."""
+    from match_cuts.geometry import Sim, warp_raw_to_comp
+    x, y, bw, bh, _r = box
+    s = zoom * max(bh / RAW_H, bw / RAW_W)
+    sim = Sim(s, 0.0, x + bw / 2 - s * RAW_W / 2, y + bh / 2 - s * RAW_H / 2)
+    still = texture(RAW_W, RAW_H, seed + 1)[:RAW_H, :RAW_W]
+    mov = texture(RAW_W, RAW_H, seed + 2)
+    hole = hole_mask(FULL_W, FULL_H, box)
+    canvas = cv2.cvtColor(draw_canvas(canvas_level), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    rng = np.random.default_rng(seed + 7)
+    yy, xx = np.mgrid[0:FULL_H, 0:FULL_W].astype(np.float32)
+    gain = np.ones((FULL_H, FULL_W), np.float32)
+    if effect is not None and effect[0] == "gradient":
+        gain = np.clip((y + bh - yy) / effect[1], 0, 1) * (1 - effect[2]) + effect[2]
+    elif effect is not None and effect[0] == "band":
+        gain[yy >= y + bh * (1 - effect[1])] = effect[2]
+    elif effect is not None and effect[0] == "feather":
+        d = np.minimum.reduce([xx + 0.5 - x, x + bw - xx - 0.5, yy + 0.5 - y, y + bh - yy - 0.5])
+        gain = 1 - effect[2] * np.clip(1 - d / effect[1], 0, 1)
+    comp, raws = [], []
+    for k in range(n):
+        ox, oy = (5 * k) % 380, (3 * k) % 380
+        moving = mov[oy:oy + RAW_H, ox:ox + RAW_W]
+        if kind == "talking_head":
+            f = still.copy()
+            m = np.zeros((RAW_H, RAW_W), np.uint8)
+            cv2.ellipse(m, (RAW_W // 2 + int(40 * np.sin(k / 5)), RAW_H // 2 - 60), (190, 300), 0, 0, 360, 255, -1)
+            f[m > 0] = moving[m > 0]
+        else:
+            f = moving.copy()
+        if bars:
+            f[:bars] = bar_level
+            f[RAW_H - bars:] = bar_level
+        wr, _v = warp_raw_to_comp(f, sim, False, RAW_W, (FULL_W, FULL_H))
+        img = canvas.copy()
+        img[hole] = (wr.astype(np.float32) * gain)[hole]
+        img = cv2.cvtColor(np.clip(np.round(img), 0, 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        if 6 <= k < 16:
+            put_outlined(img, "WORD", caption_org("WORD", box), 2.4, (255, 255, 255), 2, 6)
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) + rng.normal(0, noise, (FULL_H, FULL_W))
+        comp.append(cv2.resize(np.clip(np.round(g), 0, 255).astype(np.uint8), (FULL_W // 2, FULL_H // 2),
+                               interpolation=cv2.INTER_AREA))
+        raws.append(cv2.resize(f, (640, 360), interpolation=cv2.INTER_AREA))
+    return (make_proxy(np.stack(comp), (FULL_W, FULL_H)), raw_proxy(np.stack(raws), (RAW_W, RAW_H)),
+            identity_frame_map(n, sim), sim)
+
+
 def refine(lay, ov, cp, rp, fm, tmp: Path, cache: bool = False):
     dlog = DecisionLog(tmp / "refine_decisions.jsonl")
     try:
@@ -797,27 +854,116 @@ def test_refine_box_from_raw_talking_head(tmp_path):
     assert decisions(tmp_path / "b" / "refine_decisions.jsonl", "cache_hit")
 
 
-@pytest.mark.parametrize("canvas_level,bar_level,radius_observable", [(0, 0, False), (0, 14, True), (40, 0, True)])
-def test_refine_box_from_raw_letterboxed_raw(tmp_path, canvas_level, bar_level, radius_observable):
+@pytest.mark.parametrize("canvas_level,bar_level", [(0, 14), (40, 0)])
+def test_refine_box_from_raw_letterboxed_raw(tmp_path, canvas_level, bar_level):
     """RAW with its own letterbox bars inside the box: the bars are static, so temporal activity gives only
-    the picture between them (h 760 instead of 1000). Measured against RAW the box reaches the RAW frame
-    edge; the corner radius is measured wherever the bars differ from the canvas (black bars on a black
-    canvas: the corners cannot be seen at all — the radius is kept and that is noted)."""
+    the picture between them (h 760 instead of 1000). Where the bars differ from the canvas, they are IN
+    evidence beyond the temporal edge: measured against RAW the box reaches the RAW frame edge and the corner
+    radius is measured. (Bars that equal the canvas: see the next test.)"""
     cp, rp, fm, _sim = raw_backed_scene("letterbox", canvas_level=canvas_level, bar_level=bar_level)
     lay0, ov0 = analyze(cp, tmp_path / "a")
     assert abs(lay0.box.h - 760) < 6 and abs(lay0.box.y - 580) < 3, lay0.box      # the bug: bars left out
     lay, changed = refine(lay0, ov0, cp, rp, fm, tmp_path / "b")
     assert changed
-    if radius_observable:
-        assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
-    else:
-        assert not boxes_equal(lay.box, TRUTH_BOX, rtol=1e9), lay.box
-        assert lay.box.corner_radius == lay0.box.corner_radius
-        assert any("corner radius not observable" in nt for nt in lay.notes), lay.notes
+    assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
     assert lay.background["type"] == "solid"
     # the bars are video: no zone inside the box
     assert not [z for z in lay.zones if z.static and z.y >= TRUTH_BOX[1] - 2
                 and z.y + z.h <= TRUTH_BOX[1] + TRUTH_BOX[3] + 2]
+    sides = decisions(tmp_path / "b" / "refine_decisions.jsonl", "box_refined")[0]["evidence"]["sides"]
+    assert sides["top"]["method"] == sides["bottom"]["method"] == "RAW frame edge", sides
+
+
+def test_refine_box_from_raw_letterbox_unobservable_keeps_temporal(tmp_path):
+    """review real-world-new-paths:D2-letterbox-growth: black RAW letterbox bars on a black canvas cannot be
+    seen. Whether the competitor's box includes them (this scene) or crops them off
+    (test_refine_keeps_box_letterbox_cropped_off) is not observable, and both render the same in match mode
+    (and fill mode must not show the bars): without IN evidence beyond the temporal edge the box does NOT
+    grow to the RAW frame edge — the temporal box (the picture, square corners) is kept."""
+    cp, rp, fm, _sim = raw_backed_scene("letterbox", canvas_level=0, bar_level=0)
+    lay0, ov0 = analyze(cp, tmp_path / "a")
+    assert abs(lay0.box.h - 760) < 6 and abs(lay0.box.y - 580) < 3, lay0.box
+    lay, changed = refine(lay0, ov0, cp, rp, fm, tmp_path / "b")
+    assert changed is False and lay is lay0
+    dec = decisions(tmp_path / "b" / "refine_decisions.jsonl", "box_refine")[0]
+    measured = Box.from_dict(dec["evidence"]["measured_box"])
+    assert not boxes_equal(measured, (lay0.box.x, lay0.box.y, lay0.box.w, lay0.box.h, lay0.box.corner_radius)), \
+        measured
+    assert dec["evidence"]["sides"]["top"]["stop_class"] == "no_raw"          # the scan crossed the bars
+
+
+def _effect_refine(tmp_path, truth: tuple, **kw):
+    """effect_scene -> temporal analysis (must find the truth box) -> refine_box_from_raw. Returns (temporal
+    layout, refined layout, changed, the box_refine decision)."""
+    cp, rp, fm, _sim = effect_scene(box=truth, **kw)
+    lay0, ov0 = analyze(cp, tmp_path / "a")
+    assert not boxes_equal(lay0.box, truth), (lay0.box, boxes_equal(lay0.box, truth))
+    lay, changed = refine(lay0, ov0, cp, rp, fm, tmp_path / "b")
+    dec = (decisions(tmp_path / "b" / "refine_decisions.jsonl", "box_refine")
+           + decisions(tmp_path / "b" / "refine_decisions.jsonl", "box_refined"))
+    return lay0, lay, changed, dec[0]
+
+
+@pytest.mark.parametrize("kind,effect", [
+    ("moving", ("gradient", 150.0, 0.6)),        # caption gradient (review: h 1000 -> 873, r 0, 'pip')
+    ("moving", ("feather", 60.0, 0.3)),          # soft inner edge / inner shadow (review: all four sides in)
+    ("talking_head", ("gradient", 250.0, 0.4)),  # the same gradient over a locked-off (static) background
+    ("talking_head", ("band", 1 / 3, 0.5)),      # darkened lower third, hard edge, static background
+], ids=["gradient", "feather", "static_gradient", "static_lower_third"])
+def test_refine_keeps_box_under_competitor_effects(tmp_path, kind, effect):
+    """review real-world-new-paths:D2-shrink: a competitor effect that darkens part of the video inside a
+    CORRECT box (the gain / offset fit against RAW is global) must not shrink the box: OUT votes on video
+    the temporal analysis saw move are don't-care unless they show the canvas, a side moves inward only over
+    static / canvas-like lines that do not show RAW's local structure, and the gain-invariant structure
+    comparison counts the darkened video as RAW. Box, radius and layout stay; no PiP / extra region."""
+    lay0, lay, changed, dec = _effect_refine(tmp_path, TRUTH_BOX, kind=kind, effect=effect)
+    assert changed is False and lay is lay0, dec
+    measured = Box.from_dict(dec["evidence"]["measured_box"])
+    assert not boxes_equal(measured, TRUTH_BOX), (measured, dec["reason"])
+    assert [(p.comp_in, p.comp_out, p.mode) for p in lay.periods] == [(0, 24, "boxed")]
+    assert not lay.extra_regions and not [nt for nt in lay.notes if "pip" in nt.lower()]
+    assert dec["evidence"]["structure_votes"] > 0
+
+
+def test_refine_grows_talking_head_box_through_caption_gradient(tmp_path):
+    """The D2 growth case (a box that covers only the moving subject) with a caption gradient over the
+    static background at the bottom of the box: the darkened static rows still show RAW's structure, so the
+    box grows over them to the true edge instead of stopping where the gradient starts."""
+    import dataclasses
+    cp, rp, fm, _sim = effect_scene(kind="talking_head", effect=("gradient", 250.0, 0.4))
+    lay0, ov0 = analyze(cp, tmp_path / "a")
+    shrunk = Box(356.5, 754.0, 368.5, 530.0, 0.0)
+    wrong = dataclasses.replace(lay0, box=shrunk, background={"type": "image", "color": "#6e6e6e"},
+                                periods=[dataclasses.replace(p, box=shrunk) for p in lay0.periods])
+    lay, changed = refine(wrong, ov0, cp, rp, fm, tmp_path / "b")
+    assert changed is True
+    assert not boxes_equal(lay.box, TRUTH_BOX), (lay.box, boxes_equal(lay.box, TRUTH_BOX))
+    assert [(p.comp_in, p.comp_out, p.mode) for p in lay.periods] == [(0, 24, "boxed")]
+
+
+_BARS_239 = int(round((RAW_H - RAW_W / 2.39) / 2))                      # 2.39:1 movie in a 16:9 RAW
+
+
+@pytest.mark.parametrize("truth,kw", [
+    # the prompt's target: square rounded box showing exactly the 2.39:1 picture, bars outside it
+    ((60, 480, 960, 960, 40), {"bars": _BARS_239,
+                               "zoom": (960 / (RAW_H - 2 * _BARS_239)) / max(960 / RAW_H, 960 / RAW_W)}),
+    # a wide box, 150 px bars (RAW) cropped off above and below the picture
+    ((60, 765, 960, 390, 40), {"bars": 150}),
+], ids=["movie_239_square", "wide_box"])
+def test_refine_keeps_box_letterbox_cropped_off(tmp_path, truth, kw):
+    """review real-world-new-paths:D2-letterbox-growth: a letterboxed RAW whose bars the competitor cropped
+    off (box = the picture, rounded, on a black canvas; title / watermark on the canvas). The bars equal the
+    canvas: nothing beyond the box is observable, so the box must not grow to the RAW frame edge (was: y 480
+    -> 315, h 960 -> 1230 with r40 kept inside the bars); the canvas next to the box is never sampled from
+    the watermark / title (that made the black bars look 'discriminating'); partially covered boundary rows
+    do not outvote the rounded corners. Box and radius unchanged."""
+    lay0, lay, changed, dec = _effect_refine(tmp_path, truth, **kw)
+    assert changed is False and lay is lay0, dec
+    assert lay.box.corner_radius == lay0.box.corner_radius
+    measured = Box.from_dict(dec["evidence"]["measured_box"])
+    assert not boxes_equal(measured, truth), (measured, dec["reason"])
+    assert "zone" in dec["evidence"]["background_samples"]
 
 
 def test_refine_box_from_raw_keeps_correct_box(main_scene, tmp_path):
@@ -848,6 +994,128 @@ def test_refine_box_from_raw_needs_matches(main_scene, tmp_path):
     assert decisions(tmp_path / "refine_decisions.jsonl", "box_refine")[0]["reason"]
     fs_only = Layout(FULL_W, FULL_H, mode="fullscreen", box=Box(0, 0, FULL_W, FULL_H, 0))
     assert L.refine_box_from_raw(fs_only, None, proxy, None, fm, Config(), None, None, None) == (fs_only, False)
+
+
+@pytest.mark.parametrize("pad", [12, 40])
+def test_refine_box_from_raw_shrinks_oversized_box(main_scene, tmp_path, pad):
+    """The shrink guards (D2-shrink) keep a genuine shrink working: a box too large over the static canvas
+    (lines that are static, show the canvas where RAW would not and do not show RAW's structure) is
+    re-measured to the true box."""
+    import dataclasses
+    from match_cuts.model import Status
+    sc, lay, ov, proxy = main_scene["scene"], main_scene["layout"], main_scene["overlays"], main_scene["proxy"]
+    status = np.full(N_FRAMES, Status.MATCH, np.int8)
+    status[FLASH] = Status.UNIFORM
+    fm = identity_frame_map(N_FRAMES, status=status)
+    x, y, w, h, r = TRUTH_BOX
+    big = Box(x - pad, y - pad, w + 2 * pad, h + 2 * pad, float(r))
+    wrong = dataclasses.replace(lay, box=big, periods=[dataclasses.replace(p, box=big) if p.mode == "boxed" else p
+                                                       for p in lay.periods])
+    lay2, changed = refine(wrong, ov, proxy, raw_proxy(sc["raw"], (FULL_W, FULL_H)), fm, tmp_path)
+    assert changed is True
+    assert not boxes_equal(lay2.box, TRUTH_BOX), (lay2.box, boxes_equal(lay2.box, TRUTH_BOX))
+    dec = decisions(tmp_path / "refine_decisions.jsonl", "box_refined")[0]
+    assert "shrunk" in dec["reason"] and "veto" not in dec["evidence"]
+
+
+def test_scan_side_shrink_guard_and_grow_margin():
+    """_scan_side (canonical lines, inside = larger index): a side shrinks over OUT lines only while they are
+    shrinkable; it grows only to an IN line at least ``min_grow`` lines outside the edge."""
+    DC, IN, OUT = L._L_DC, L._L_IN, L._L_OUT
+    cls = np.array([DC] * 10 + [OUT] * 4 + [IN] * 6, np.int8)
+    assert L._scan_side(cls, 10, None)[:2] == (14, "shrink")
+    assert L._scan_side(cls, 10, None, np.ones(20, bool))[:2] == (14, "shrink")
+    no = np.ones(20, bool)
+    no[10:14] = False                                        # dynamic video / RAW structure: never shrink over it
+    assert L._scan_side(cls, 10, None, no)[:2] == (10, "keep")
+    part = np.ones(20, bool)
+    part[12] = False
+    assert L._scan_side(cls, 10, None, part)[:2] == (12, "shrink")
+    near = np.array([DC] * 8 + [IN] + [DC] + [IN] * 10, np.int8)   # IN 2 lines outside: a blurred boundary line
+    assert L._scan_side(near, 10, None, None, 3)[:2] == (10, "keep")
+    assert L._scan_side(near, 10, None, None, 1)[:2] == (8, "grow")
+    far = np.array([DC] * 6 + [IN] * 2 + [DC] * 2 + [IN] * 10, np.int8)
+    assert L._scan_side(far, 10, None, None, 3)[:2] == (6, "grow")
+
+
+def test_structure_agreement_is_gain_invariant():
+    """The competitor's local structure vs warped RAW: a darkened / offset copy agrees (a caption gradient,
+    an inner shadow), a flat canvas, other content and a canvas row next to the box edge do not; untextured
+    RAW gets no verdict."""
+    def prox(seed: int) -> np.ndarray:                     # proxy-scale texture (INTER_AREA 1/2, blurred as compared)
+        t = texture(800, 600, seed)[:600, :800]
+        return cv2.GaussianBlur(cv2.resize(t, (400, 300), interpolation=cv2.INTER_AREA).astype(np.float32),
+                                (0, 0), 1.0)
+    args = (L.REFINE_ZNCC_WIN, L.REFINE_ZNCC_MIN, L.REFINE_ZNCC_STD, L.REFINE_ZNCC_GAIN_MIN, 8.0)
+    R = prox(5)
+    V = np.ones(R.shape, bool)
+    ramp = np.linspace(1.0, 0.35, R.shape[0], dtype=np.float32)[:, None]
+    noise = np.random.default_rng(0).normal(0, 1.0, R.shape).astype(np.float32)
+    agree, tx = L._structure_agreement(R * ramp + 12.0 + noise, R, V, *args)
+    assert tx.mean() > 0.9 and agree[tx].mean() > 0.99
+    agree, _ = L._structure_agreement(noise, R, V, *args)
+    assert not agree.any()
+    for seed in (9, 11, 13):
+        agree, _ = L._structure_agreement(prox(seed), R, V, *args)
+        assert agree[tx].mean() < 0.005, seed
+    boxed = R.copy()
+    boxed[:100] = 0.0                                         # canvas above a box edge at row 100
+    agree, _ = L._structure_agreement(boxed, R, V, *args)
+    # (a canvas pixel right next to the edge may match the local fit by chance: isolated, never a line)
+    assert not agree[:97].any() and agree[97:100].mean() < 0.02 and agree[106:].mean() > 0.99
+    V2 = V.copy()
+    V2[250:] = False                                          # RAW ends at row 250: windows use RAW pixels only
+    agree, _ = L._structure_agreement(R * ramp + 12.0, R, V2, *args)
+    assert agree[240:250].mean() > 0.99 and not agree[250:].any()
+    agree, tx = L._structure_agreement(np.full_like(R, 50.0), np.full_like(R, 80.0), V, *args)
+    assert not tx.any() and not agree.any()
+
+
+def test_refine_veto_ring_and_corners():
+    """_refine_veto: a measured box that drops protected video (the ring between the boxes) or covers the
+    rounded corners the competitor shows at the temporal box (canvas where RAW is present) is rejected."""
+    cp = make_proxy(np.zeros((1, FULL_H // 2, FULL_W // 2), np.uint8), (FULL_W, FULL_H))
+    h, w = FULL_H // 2, FULL_W // 2
+    old = Box(*TRUTH_BOX)
+    lay_old = Layout(FULL_W, FULL_H, box=old)
+    zero = np.zeros((h, w), np.int16)
+    band = np.zeros((h, w), bool)
+    smaller = Box(60, 460, 960, 800, 40)
+    prot = L.box_coverage(lay_old, cp) > 0
+    v = L._refine_veto(old, smaller, cp, {"protected": prot, "maps": (zero, zero, zero)}, band, Config())
+    assert v is not None and "drops video" in v["reason"] and v["dynamic_px"] > 1000
+    assert L._refine_veto(old, smaller, cp, {"protected": np.zeros((h, w), bool), "maps": (zero, zero, zero)},
+                          band, Config()) is None
+    # rounded corners of the temporal box shown by the competitor (OUT votes where RAW is present)
+    rect = L.box_coverage(Layout(FULL_W, FULL_H, box=Box(60, 460, 960, 1000, 0)), cp) >= 1.0
+    ears = rect & (L.box_coverage(lay_old, cp) <= 0)
+    nO = np.where(ears, 16, 0).astype(np.int16)
+    nV = np.where(rect, 16, 0).astype(np.int16)
+    grown = Box(60, 400, 960, 1120, 40)
+    v = L._refine_veto(old, grown, cp, {"protected": None, "maps": (zero, nO, nV)}, band, Config())
+    assert v is not None and "rounded corners" in v["reason"]
+    nI = np.where(ears, 16, 0).astype(np.int16)                # the corners show RAW: the growth is plausible
+    assert L._refine_veto(old, grown, cp, {"protected": None, "maps": (nI, zero, nV)}, band, Config()) is None
+
+
+def test_background_sources_never_sample_zones():
+    """The canvas next to the box (B) is never sampled from a zone (title / watermark / logo): for a solid
+    background only static non-zone pixels with the model level, for a moving (blur) background only
+    non-static ones."""
+    from match_cuts.model import Zone
+    cp = make_proxy(np.zeros((1, FULL_H // 2, FULL_W // 2), np.uint8), (FULL_W, FULL_H))
+    h, w = FULL_H // 2, FULL_W // 2
+    static = np.ones((h, w), bool)
+    static[:, :40] = False
+    zones = [Zone("watermark", 380, 1538, 256, 22, 0, 0, True, "", ""), Zone("title", 202, 258, 436, 42, 0, 0, True, "", "")]
+    lay = Layout(FULL_W, FULL_H, box=Box(*TRUTH_BOX), zones=zones, background={"type": "solid", "gray": 3.0})
+    src, model, rule = L._background_sources(lay, cp, static)
+    assert not src[769:780, 190:318].any() and not src[129:150, 101:319].any()       # the zones (proxy px)
+    assert src[50, 300] and not src[50, 20] and "zone" in rule
+    assert model is not None and float(model[0, 0]) == 3.0
+    blur = Layout(FULL_W, FULL_H, box=Box(*TRUTH_BOX), zones=zones, background={"type": "blur", "sigma": 30.0})
+    src, model, _rule = L._background_sources(blur, cp, static)
+    assert model is None and src[50, 20] and not src[50, 300]
 
 
 # ----------------------------------------------------------------------------------------------

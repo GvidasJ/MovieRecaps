@@ -2579,8 +2579,8 @@ REFINE_RING_DYN_FRAC = 0.05       # max fraction of dynamic, not canvas-like pix
 REFINE_BAND_PX = 2                # votes this close (proxy px) to either outline do not decide old vs new box
 REFINE_FRAME_EDGE_TOL = 1.5       # proxy px: the RAW frame edge 'coincides' with a measured edge
 REFINE_GROW_MIN_LINES = 3         # a side grows only to an IN line at least this far outside (blurred boundary)
-REFINE_ZNCC_WIN = 9               # proxy px window of the gain-invariant local structure comparison ...
-REFINE_ZNCC_MIN = 0.8             # ... the competitor shows RAW's local structure when the windowed ZNCC >= this
+REFINE_ZNCC_WIN = 11              # proxy px window of the gain-invariant local structure comparison ...
+REFINE_ZNCC_MIN = 0.85            # ... the competitor shows RAW's local structure when the windowed ZNCC >= this
 REFINE_ZNCC_STD = 3.0             # ... over a window where warped RAW has at least this local std (8-bit levels)
 REFINE_ZNCC_GAIN_MIN = 0.1        # ... and the competitor at least this fraction of it (a flat canvas never agrees)
 
@@ -2747,17 +2747,18 @@ def _line_classes(nI: np.ndarray, nO: np.ndarray, nV: np.ndarray, side: str, ban
 
 
 def _structure_agreement(C: np.ndarray, R: np.ndarray, V: np.ndarray, win: int, zmin: float, smin: float,
-                         gmin: float) -> tuple[np.ndarray, np.ndarray]:
+                         gmin: float, tau: float) -> tuple[np.ndarray, np.ndarray]:
     """Gain-invariant local comparison of the competitor ``C`` with the fitted warped RAW ``R`` (both
     blurred): (agree, textured) bool [h, w]. Windowed statistics over the RAW-present pixels (``V``) of the
     ``win`` x ``win`` window around each pixel (at least half of it). ``textured``: RAW present and varying
     there (local std >= ``smin``); ``agree``: textured, the competitor varies too (>= ``gmin`` x RAW's local
-    std) and the zero-mean normalised cross-correlation is >= ``zmin``. A competitor effect on the video
-    (caption gradient, darkened lower third, inner shadow, feathered edge, vignette) changes the local gain /
-    offset, not the structure: it still agrees; a flat canvas, a title or any content other than RAW does
-    not. (A window straddling an edge where RAW's own content ends too — letterbox bars cropped off — also
-    correlates on the outer pixels: the caller counts agreement as evidence only where RAW differs from the
-    canvas.)"""
+    std), the zero-mean normalised cross-correlation is >= ``zmin`` AND the pixel itself is explained by the
+    window's local gain / offset fit (|C - (a R + b)| <= ``tau``: a canvas pixel next to the box edge, in a
+    window that is mostly video, is not). A competitor effect on the video (caption gradient, darkened lower
+    third, inner shadow, feathered edge, vignette) changes the local gain / offset, not the structure: it
+    still agrees; a flat canvas, a title or any content other than RAW does not. (Where RAW's own content
+    ends at the box edge too — letterbox bars cropped off, bars at the canvas level — the outer pixels agree
+    as well: the caller counts agreement as evidence only where RAW differs from the canvas.)"""
     import cv2
     k = (int(win), int(win))
     Vf = np.asarray(V, np.float32)
@@ -2774,7 +2775,9 @@ def _structure_agreement(C: np.ndarray, R: np.ndarray, V: np.ndarray, win: int, 
     textured = np.asarray(V, bool) & (wv >= 0.5) & (vR >= float(smin) ** 2)
     with np.errstate(invalid="ignore", divide="ignore"):
         z = cCR / np.sqrt(np.maximum(vC * vR, 1e-6))
-    agree = textured & (vC >= (float(gmin) ** 2) * vR) & (z >= float(zmin))
+        a = cCR / np.maximum(vR, 1e-6)
+    resid = np.abs(C - (a * (R - mR) + mC))
+    agree = textured & (vC >= (float(gmin) ** 2) * vR) & (z >= float(zmin)) & (resid <= float(tau))
     return agree, textured
 
 
@@ -2959,9 +2962,10 @@ def _background_sources(layout: Layout, comp: Proxy, static: np.ndarray | None) 
             u, v = xx / w, yy / h
             c = [float(t) for t in coef]
             model = (c[0] + c[1] * u + c[2] * v + c[3] * u * u + c[4] * v * v + c[5] * u * v).astype(np.float32)
-        else:
+        elif kind == "solid":
             model = np.full((h, w), _bg_gray(bg), np.float32)
-        rule = f"{kind}: static, non-zone pixels matching the background model"
+        rule = (f"{kind}: static, non-zone pixels matching the background model" if model is not None else
+                f"{kind}: static, non-zone pixels (no background model)")
     elif kind == "image":
         if static is not None:
             src &= static
@@ -3039,7 +3043,7 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
         f["tau"] = tau
         taus.append(round(tau, 2))
         agree = res <= tau
-        sagree, textured = _structure_agreement(Cb, Rb, V, z_win, z_min, z_std, z_gain)
+        sagree, textured = _structure_agreement(Cb, Rb, V, z_win, z_min, z_std, z_gain, tau)
         # background samples: outside the current box, no overlay, RAW absent or disagreeing, background pixels
         # only (never a zone; see _background_sources) — eroded, so the thin band of blurred box-edge pixels
         # (box content mixed with the canvas) never serves as background; with a background model, only the
@@ -3137,13 +3141,16 @@ def measure_box_from_raw(layout: Layout, overlays: Any, comp: Proxy, raw: Proxy,
         if not (gap == _L_OUT).any():
             return float(min(f_in, e_int + 1.0))
         return None
-    # 1. frame border; sides whose outward scan ran into RAW-less lines (possibly across RAW content that equals
-    #    the canvas, e.g. black letterbox bars on a black canvas, after IN lines): the RAW frame edge
+    # 1. frame border; sides that GREW (IN lines beyond the temporal edge) until their outward scan ran into
+    #    RAW-less lines (possibly across RAW content that equals the canvas, e.g. black letterbox bars on a
+    #    black canvas): the RAW frame edge. (A side that did not grow is measured on the coverage map first:
+    #    the competitor may crop a pixel or two of RAW, and the RAW frame edge right outside the box edge is
+    #    no evidence that the box reaches it.)
     for side in _SIDES:
         e_int = int(round(_to_canon(ints[side], side, w, h)))
         if e_int <= 0:
             edges_c[side], how_c[side] = 0.0, "frame border"
-        elif side_ev.get(side, {}).get("stop_class") == "no_raw":
+        elif side_ev.get(side, {}).get("stop_class") == "no_raw" and grew(side):
             v = raw_frame_edge(side)
             if v is not None:
                 edges_c[side], how_c[side] = v, "RAW frame edge"
