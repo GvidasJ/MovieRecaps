@@ -1,0 +1,3308 @@
+{
+  "version": 1,
+  "competitor": {
+    "file": "media/competitor_ref.mp4",
+    "file_rel": "media/competitor_ref.mp4",
+    "file_abs": "/home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/competitor_ref.mp4",
+    "source_path": "/home/user/MovieRecaps/work/synthetic/film24/competitor.mp4",
+    "width": 540,
+    "height": 960,
+    "fps": "30/1",
+    "frames": 532,
+    "duration_s": 17.733333333,
+    "conformed": false,
+    "conform_reason": "AE-safe: used unchanged",
+    "container": "mp4",
+    "codec": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "has_audio": true,
+    "audio_codec": "aac",
+    "audio_sample_rate": 44100,
+    "audio_channels": 2,
+    "hash": "b025ad0e98031d80d1b7148f256108bc0e45462f",
+    "source_hash": "b025ad0e98031d80d1b7148f256108bc0e45462f",
+    "source_issues": []
+  },
+  "raw": {
+    "file": "media/raw.mp4",
+    "file_rel": "media/raw.mp4",
+    "file_abs": "/home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4",
+    "source_path": "/home/user/MovieRecaps/work/synthetic/film24/raw.mp4",
+    "width": 960,
+    "height": 540,
+    "fps": "24000/1001",
+    "frames": 1608,
+    "duration_s": 67.067,
+    "conformed": false,
+    "conform_reason": "AE-safe: used unchanged",
+    "container": "mp4",
+    "codec": "h264",
+    "profile": "High",
+    "pix_fmt": "yuv420p",
+    "has_audio": true,
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "audio_channels": 1,
+    "hash": "214822df581596bcd46f85c23fb4e354d77de50a",
+    "source_hash": "214822df581596bcd46f85c23fb4e354d77de50a",
+    "source_issues": []
+  },
+  "layout": {
+    "mode": "match",
+    "layout_kind": "boxed",
+    "canvas_bg": "#000000",
+    "box": {
+      "x": 30.0,
+      "y": 230.0,
+      "w": 480.0,
+      "h": 500.0,
+      "corner_radius": 20.0
+    },
+    "background": "solid",
+    "background_detail": {
+      "type": "solid",
+      "color": "#000000",
+      "gray": 0.0
+    },
+    "zones": [
+      {
+        "type": "logo",
+        "x": 32.0,
+        "y": 36.0,
+        "w": 46.0,
+        "h": 48.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "compact blob (canvas); colours #e2242f 56%, #dd262f 23%, #fefafa 9%"
+      },
+      {
+        "type": "channel_name",
+        "x": 90.0,
+        "y": 48.0,
+        "w": 160.0,
+        "h": 24.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "text next to the logo; colours #fafafa 85%, #d5d5d5 14%"
+      },
+      {
+        "type": "title",
+        "x": 148.0,
+        "y": 102.0,
+        "w": 242.0,
+        "h": 90.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "multicolour; text block above the box; colours #fefefe 40%, #f8d024 20%, #fdd01b 20%, #fc2d30 9%"
+      },
+      {
+        "type": "captions",
+        "x": 142.0,
+        "y": 576.0,
+        "w": 256.0,
+        "h": 46.0,
+        "comp_in": 9,
+        "comp_out": 525,
+        "static": false,
+        "text": "",
+        "notes": "33 caption events; white text with dark outline, median glyph height 26 px"
+      },
+      {
+        "type": "watermark",
+        "x": 180.0,
+        "y": 746.0,
+        "w": 180.0,
+        "h": 18.0,
+        "comp_in": null,
+        "comp_out": null,
+        "static": true,
+        "text": "",
+        "notes": "below the box; colours #787878 53%, #8a8a8a 46%"
+      }
+    ],
+    "periods": [
+      {
+        "comp_in": 0,
+        "comp_out": 532,
+        "mode": "boxed",
+        "box": {
+          "x": 30.0,
+          "y": 230.0,
+          "w": 480.0,
+          "h": 500.0,
+          "corner_radius": 20.0
+        }
+      }
+    ],
+    "regions": [],
+    "captions": [
+      {
+        "type": "captions",
+        "comp_in": 9,
+        "comp_out": 18,
+        "x": 222.0,
+        "y": 582.0,
+        "w": 92.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 18,
+        "comp_out": 33,
+        "x": 254.0,
+        "y": 582.0,
+        "w": 32.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 33,
+        "comp_out": 45,
+        "x": 230.0,
+        "y": 582.0,
+        "w": 78.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 60,
+        "comp_out": 74,
+        "x": 180.0,
+        "y": 582.0,
+        "w": 182.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 74,
+        "comp_out": 82,
+        "x": 142.0,
+        "y": 582.0,
+        "w": 256.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 82,
+        "comp_out": 94,
+        "x": 170.0,
+        "y": 582.0,
+        "w": 200.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 94,
+        "comp_out": 103,
+        "x": 186.0,
+        "y": 582.0,
+        "w": 172.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 116,
+        "comp_out": 128,
+        "x": 226.0,
+        "y": 582.0,
+        "w": 90.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 128,
+        "comp_out": 136,
+        "x": 254.0,
+        "y": 582.0,
+        "w": 34.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 136,
+        "comp_out": 148,
+        "x": 186.0,
+        "y": 582.0,
+        "w": 166.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 148,
+        "comp_out": 157,
+        "x": 198.0,
+        "y": 582.0,
+        "w": 142.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 157,
+        "comp_out": 171,
+        "x": 238.0,
+        "y": 582.0,
+        "w": 64.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 191,
+        "comp_out": 204,
+        "x": 222.0,
+        "y": 582.0,
+        "w": 96.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 204,
+        "comp_out": 219,
+        "x": 210.0,
+        "y": 582.0,
+        "w": 124.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 219,
+        "comp_out": 230,
+        "x": 218.0,
+        "y": 582.0,
+        "w": 104.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 230,
+        "comp_out": 239,
+        "x": 214.0,
+        "y": 582.0,
+        "w": 108.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 239,
+        "comp_out": 251,
+        "x": 230.0,
+        "y": 582.0,
+        "w": 78.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 264,
+        "comp_out": 280,
+        "x": 204.0,
+        "y": 582.0,
+        "w": 130.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 280,
+        "comp_out": 290,
+        "x": 226.0,
+        "y": 582.0,
+        "w": 88.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 290,
+        "comp_out": 305,
+        "x": 226.0,
+        "y": 582.0,
+        "w": 86.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 305,
+        "comp_out": 314,
+        "x": 228.0,
+        "y": 582.0,
+        "w": 82.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 326,
+        "comp_out": 336,
+        "x": 220.0,
+        "y": 582.0,
+        "w": 100.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 336,
+        "comp_out": 350,
+        "x": 230.0,
+        "y": 582.0,
+        "w": 82.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 350,
+        "comp_out": 362,
+        "x": 188.0,
+        "y": 582.0,
+        "w": 164.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 362,
+        "comp_out": 374,
+        "x": 210.0,
+        "y": 582.0,
+        "w": 120.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 374,
+        "comp_out": 390,
+        "x": 176.0,
+        "y": 582.0,
+        "w": 190.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 408,
+        "comp_out": 420,
+        "x": 218.0,
+        "y": 582.0,
+        "w": 106.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 420,
+        "comp_out": 436,
+        "x": 220.0,
+        "y": 582.0,
+        "w": 100.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 436,
+        "comp_out": 452,
+        "x": 160.0,
+        "y": 582.0,
+        "w": 218.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 452,
+        "comp_out": 461,
+        "x": 212.0,
+        "y": 582.0,
+        "w": 118.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 461,
+        "comp_out": 470,
+        "x": 230.0,
+        "y": 576.0,
+        "w": 104.0,
+        "h": 46.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 497,
+        "comp_out": 509,
+        "x": 178.0,
+        "y": 582.0,
+        "w": 184.0,
+        "h": 26.0
+      },
+      {
+        "type": "captions",
+        "comp_in": 509,
+        "comp_out": 525,
+        "x": 226.0,
+        "y": 582.0,
+        "w": 82.0,
+        "h": 26.0
+      }
+    ],
+    "notes": []
+  },
+  "segments": [
+    {
+      "id": 1,
+      "type": "raw",
+      "comp_in": 0,
+      "comp_out": 36,
+      "raw_in_frame": 20,
+      "raw_in_seconds": 0.866105167,
+      "raw_out_frame": 48,
+      "speed": 1.0,
+      "speed_measured": 0.9998727477477478,
+      "speed_range": [
+        0.9923706033620691,
+        1.0090726613709675
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9335058162435175,
+        "rotation_deg": 0.0,
+        "tx": -178.07786993654133,
+        "ty": 227.9514840600331
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 6,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.9079,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 2.126,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.5615,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9956,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        0.860291667,
+        0.867666667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 2,
+      "type": "raw",
+      "comp_in": 36,
+      "comp_out": 72,
+      "raw_in_frame": 818,
+      "raw_in_seconds": 34.132770167,
+      "raw_out_frame": 846,
+      "speed": 1.0,
+      "speed_measured": 0.9998727477477478,
+      "speed_range": [
+        0.9923706033620691,
+        1.0090726613709675
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9332729472829531,
+        "rotation_deg": 0.0,
+        "tx": -177.97476408443333,
+        "ty": 228.01318057475734
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 6,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.8645,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 2.291,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.3965,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9969,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        34.126791667,
+        34.134166667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 3,
+      "type": "raw",
+      "comp_in": 72,
+      "comp_out": 112,
+      "raw_in_frame": 200,
+      "raw_in_seconds": 8.3661035,
+      "raw_out_frame": 231,
+      "speed": 1.0,
+      "speed_measured": 0.9991219512195121,
+      "speed_range": [
+        0.9936396322794119,
+        1.0079514584027778
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.493354608172581,
+        "rotation_deg": 0.0,
+        "tx": -349.61036591948874,
+        "ty": 76.4585249346278
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 72,
+          "scale": 1.493354608172581,
+          "rotation_deg": 0.0,
+          "tx": -349.61036591948874,
+          "ty": 76.4585249346278
+        },
+        {
+          "comp_frame": 111,
+          "scale": 1.4936376544012846,
+          "rotation_deg": 0.0,
+          "tx": -544.76872283435,
+          "ty": 76.4513916692112
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.9045,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 2.916,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 0.688167,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9985,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        8.359583333,
+        8.366791667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "animated framing: 2 keys, scale 1.4933->1.4937, easing linear",
+      "evidence": []
+    },
+    {
+      "id": 4,
+      "type": "raw",
+      "comp_in": 112,
+      "comp_out": 116,
+      "raw_in_frame": 100,
+      "raw_in_seconds": 4.19944,
+      "raw_out_frame": 103,
+      "speed": 1.0,
+      "speed_measured": 1.25125,
+      "speed_range": [
+        0.8341658325,
+        1.6683341675
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9334629277642601,
+        "rotation_deg": 0.0,
+        "tx": -178.07499130338925,
+        "ty": 227.98514850444545
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.9443,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -4.81,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 3.481667,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9955,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        4.195958333,
+        4.212541667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 5,
+      "type": "raw",
+      "comp_in": 116,
+      "comp_out": 146,
+      "raw_in_frame": 350,
+      "raw_in_seconds": 14.599437833,
+      "raw_out_frame": 373,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9905728123958334,
+        1.0106250962499999
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.492954437945992,
+        "rotation_deg": 0.0,
+        "tx": -556.8923201386867,
+        "ty": 76.63531611015509
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 116,
+          "scale": 1.492954437945992,
+          "rotation_deg": 0.0,
+          "tx": -556.8923201386867,
+          "ty": 76.63531611015509
+        },
+        {
+          "comp_frame": 135,
+          "scale": 1.4941703231593102,
+          "rotation_deg": 0.0,
+          "tx": -477.39972071823337,
+          "ty": 76.30663968265952
+        },
+        {
+          "comp_frame": 145,
+          "scale": 1.494316557311467,
+          "rotation_deg": 0.0,
+          "tx": -339.78966620317806,
+          "ty": 76.16678595292808
+        }
+      ],
+      "easing": "ease_in",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.001,
+        "corr": 0.8764,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -3.083,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 0.687833,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9981,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        14.59875,
+        14.606291667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "animated framing: 3 keys, scale 1.4930->1.4944, easing ease_in; PySceneDetect change at 124: inside a continuous mapping (same RAW line; measured framing continuous, model on the measurement): motion, lighting or overlay change -- not a cut; PySceneDetect change at 128: caption change (layout caption event 116-128)",
+      "evidence": []
+    },
+    {
+      "id": 6,
+      "type": "raw",
+      "comp_in": 146,
+      "comp_out": 186,
+      "raw_in_frame": 494,
+      "raw_in_seconds": 20.6327685,
+      "raw_out_frame": 525,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9936396322794119,
+        1.0079514584027778
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9335860751713128,
+        "rotation_deg": 0.0,
+        "tx": -178.10042623703833,
+        "ty": 227.9389800039086
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.9156,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -1.044,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.560167,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9986,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        20.630208333,
+        20.637416667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 7,
+      "type": "raw",
+      "comp_in": 186,
+      "comp_out": 189,
+      "raw_in_frame": 758,
+      "raw_in_seconds": 31.63371875,
+      "raw_out_frame": 760,
+      "speed": 1.0,
+      "speed_measured": 1.25125,
+      "speed_range": [
+        0.62562374875,
+        1.87687625125
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9329961321518406,
+        "rotation_deg": 0.0,
+        "tx": -177.85232066507547,
+        "ty": 228.04347936378613
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -32.56,
+        "corr": 0.9506,
+        "exception": "too_short",
+        "phase_source": "video",
+        "lag_ms_video": -32.56,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.052083,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9993,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        31.631666667,
+        31.656625
+      ],
+      "raw_in_interval_both": [
+        31.631666667,
+        31.635770833
+      ],
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 8,
+      "type": "raw",
+      "comp_in": 189,
+      "comp_out": 204,
+      "raw_in_frame": 648,
+      "raw_in_seconds": 27.032769091,
+      "raw_out_frame": 659,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9731941663888888,
+        1.0237502275
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9334669264056493,
+        "rotation_deg": 0.0,
+        "tx": -178.1155966524579,
+        "ty": 227.97055405678051
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.9282,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 0.665,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.605909,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9994,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        27.028833333,
+        27.035375
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 189,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [204,227), [227,247) (one phase solve)",
+      "evidence": []
+    },
+    {
+      "id": 9,
+      "type": "raw",
+      "comp_in": 204,
+      "comp_out": 227,
+      "raw_in_frame": 660,
+      "raw_in_seconds": 27.532769091,
+      "raw_out_frame": 677,
+      "speed": 1.0,
+      "speed_measured": 0.9977853260869565,
+      "speed_range": [
+        0.9878288156578946,
+        1.0129167858333332
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.1663352255934984,
+        "rotation_deg": 0.0,
+        "tx": -329.9503955321723,
+        "ty": 184.92338638766256
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.005,
+        "corr": 0.8455,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 0.67,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 3.105909,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9994,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        27.528833333,
+        27.535375
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 189,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [189,204), [227,247) (one phase solve)",
+      "evidence": []
+    },
+    {
+      "id": 10,
+      "type": "raw",
+      "comp_in": 227,
+      "comp_out": 247,
+      "raw_in_frame": 678,
+      "raw_in_seconds": 28.299435758,
+      "raw_out_frame": 693,
+      "speed": 1.0,
+      "speed_measured": 0.9934736842105263,
+      "speed_range": [
+        0.9831248212499999,
+        1.01664078140625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.0269972428579641,
+        "rotation_deg": 0.0,
+        "tx": -202.9266849905095,
+        "ty": 190.61216085195946
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.005,
+        "corr": 0.9256,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 0.66,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 3.935758,
+      "region": 0,
+      "box": null,
+      "confidence": 0.999,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        28.2955,
+        28.302041667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 189,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [189,204), [204,227) (one phase solve)",
+      "evidence": []
+    },
+    {
+      "id": 11,
+      "type": "raw",
+      "comp_in": 247,
+      "comp_out": 252,
+      "raw_in_frame": 1478,
+      "raw_in_seconds": 61.665854167,
+      "raw_out_frame": 1481,
+      "speed": 1.0,
+      "speed_measured": 0.875875,
+      "speed_range": [
+        0.625624374375,
+        1.251250625625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9333471348293735,
+        "rotation_deg": 0.0,
+        "tx": -178.00871478467542,
+        "ty": 227.97948442929953
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 59.02,
+        "corr": 0.909,
+        "exception": "too_short",
+        "phase_source": "video",
+        "lag_ms_video": 59.02,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 4.1875,
+      "region": 0,
+      "box": null,
+      "confidence": 0.997,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        61.661666667,
+        61.670041667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 12,
+      "type": "raw",
+      "comp_in": 252,
+      "comp_out": 282,
+      "raw_in_frame": 924,
+      "raw_in_seconds": 38.5661075,
+      "raw_out_frame": 947,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9905728123958334,
+        1.0106250962499999
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.0269053746034913,
+        "rotation_deg": 0.0,
+        "tx": -208.9692532656789,
+        "ty": 202.69830706237667
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 252,
+          "scale": 1.0269053746034913,
+          "rotation_deg": 0.0,
+          "tx": -208.9692532656789,
+          "ty": 202.69830706237667
+        },
+        {
+          "comp_frame": 281,
+          "scale": 1.0269849197319072,
+          "rotation_deg": 0.0,
+          "tx": -237.05804481718474,
+          "ty": 202.6687162078802
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.871,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -2.455,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.649167,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9981,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        38.565125,
+        38.572
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 252,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [282,302) (one phase solve); animated framing: 2 keys, scale 1.0269->1.0270, easing linear",
+      "evidence": []
+    },
+    {
+      "id": 13,
+      "type": "raw",
+      "comp_in": 282,
+      "comp_out": 302,
+      "raw_in_frame": 948,
+      "raw_in_seconds": 39.5661075,
+      "raw_out_frame": 963,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9831248212499999,
+        1.01664078140625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.0268016989232533,
+        "rotation_deg": 0.0,
+        "tx": -208.94978864000205,
+        "ty": 202.74779061489107
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.001,
+        "corr": 0.9262,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -2.455,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 0.9825,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9975,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        39.565125,
+        39.572
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 252,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [252,282) (one phase solve)",
+      "evidence": []
+    },
+    {
+      "id": 14,
+      "type": "raw",
+      "comp_in": 302,
+      "comp_out": 316,
+      "raw_in_frame": 1088,
+      "raw_in_seconds": 45.399439755,
+      "raw_out_frame": 1098,
+      "speed": 1.0,
+      "speed_measured": 0.9927499999999999,
+      "speed_range": [
+        0.9731941663888888,
+        1.0237502275
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9335287197879117,
+        "rotation_deg": 0.0,
+        "tx": -178.12130634744557,
+        "ty": 227.99282415433427
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.001,
+        "corr": 0.9311,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -0.749,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 3.689755,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9993,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        45.396583333,
+        45.403791667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 302,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [316,342) (one phase solve)",
+      "evidence": []
+    },
+    {
+      "id": 15,
+      "type": "raw",
+      "comp_in": 316,
+      "comp_out": 342,
+      "raw_in_frame": 1099,
+      "raw_in_seconds": 45.866106421,
+      "raw_out_frame": 1119,
+      "speed": 1.0,
+      "speed_measured": 0.9988611111111111,
+      "speed_range": [
+        0.9878288156578946,
+        1.0129167858333332
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.5875405407387542,
+        "rotation_deg": 0.0,
+        "tx": -417.1379794499298,
+        "ty": 50.91346789845289
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 316,
+          "scale": 1.5875405407387542,
+          "rotation_deg": 0.0,
+          "tx": -417.1379794499298,
+          "ty": 50.91346789845289
+        },
+        {
+          "comp_frame": 326,
+          "scale": 1.5879218691221666,
+          "rotation_deg": 0.0,
+          "tx": -477.4038562974857,
+          "ty": 50.85490216783688
+        },
+        {
+          "comp_frame": 341,
+          "scale": 1.5875894493471958,
+          "rotation_deg": 0.0,
+          "tx": -567.1277599991843,
+          "ty": 50.78359666884023
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.001,
+        "corr": 0.8865,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": -0.747,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.856421,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9992,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        45.86325,
+        45.870458333
+      ],
+      "raw_in_interval_both": null,
+      "time_line": 302,
+      "color": null,
+      "label": "",
+      "notes": "time line shared with segment(s) [302,316) (one phase solve); animated framing: 3 keys, scale 1.5873->1.5883, easing linear",
+      "evidence": []
+    },
+    {
+      "id": 16,
+      "type": "raw",
+      "comp_in": 342,
+      "comp_out": 372,
+      "raw_in_frame": 1368,
+      "raw_in_seconds": 57.057216675,
+      "raw_out_frame": 1373,
+      "speed": 0.25,
+      "speed_measured": 0.25359037819799773,
+      "speed_range": [
+        0.23833321416666667,
+        0.258879396637931
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9335641685535624,
+        "rotation_deg": 0.0,
+        "tx": -178.20798925520086,
+        "ty": 227.95240142110734
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [
+        {
+          "comp_frame": 342,
+          "raw_seconds": 57.057216675
+        },
+        {
+          "comp_frame": 372,
+          "raw_seconds": 57.307216675
+        }
+      ],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.8855,
+        "exception": null,
+        "phase_source": "video",
+        "lag_ms_video": 0.0,
+        "line": {
+          "id": 342,
+          "raw_in_seconds": 57.056439305,
+          "speed": 1.0,
+          "source": "own in-point at speed 1",
+          "lag_ms": -0.0,
+          "corr": 0.8855
+        }
+      },
+      "time_mode": "remap",
+      "retime": "frame_blend",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 6.177083333333347,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9885,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        57.057208333333335,
+        57.098708333333335
+      ],
+      "raw_in_interval_both": [
+        57.057208333333335,
+        57.07785416666667
+      ],
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "frame-blend retiming verified: 24/30 frames are blends of adjacent RAW frames on one path at speed 0.25 (measured 0.25004); every frame matches the Frame Mix of the path (AE Frame Blending > Frame Mix)",
+      "evidence": []
+    },
+    {
+      "id": 17,
+      "type": "uncertain",
+      "comp_in": 372,
+      "comp_out": 396,
+      "raw_in_frame": 1372,
+      "raw_in_seconds": null,
+      "raw_out_frame": 1382,
+      "speed": 1.0,
+      "speed_measured": null,
+      "speed_range": null,
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9335641685535624,
+        "rotation_deg": 0.0,
+        "tx": -178.20798925520086,
+        "ty": 227.95240142110734
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": null,
+        "corr": null,
+        "exception": "uncertain",
+        "phase_source": null,
+        "lag_ms_video": null,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": true,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": null,
+      "region": 0,
+      "box": null,
+      "confidence": 0.0,
+      "ambiguous_frames": [],
+      "raw_in_interval": null,
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "UNCERTAIN - best RAW 1370-1384, ZNCC 0.66-0.70 (00:00:12:12-00:00:13:06)",
+      "notes": "unresolved: best hypotheses score in [none_thresh, match_thresh) on 24/24 frames (no match, no NOT-IN-RAW claim)",
+      "evidence": [
+        {
+          "comp_frame": 372,
+          "raw": 1372,
+          "score": 0.6678,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 373,
+          "raw": 1372,
+          "score": 0.66777,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 374,
+          "raw": 1370,
+          "score": 0.65646,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 375,
+          "raw": 1372,
+          "score": 0.66323,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 376,
+          "raw": 1371,
+          "score": 0.66126,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 377,
+          "raw": 1383,
+          "score": 0.66149,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 378,
+          "raw": 1382,
+          "score": 0.6714,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 379,
+          "raw": 1384,
+          "score": 0.66649,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 380,
+          "raw": 1384,
+          "score": 0.6736,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 381,
+          "raw": 1384,
+          "score": 0.6687,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 382,
+          "raw": 1384,
+          "score": 0.66872,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 383,
+          "raw": 1382,
+          "score": 0.6811,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 384,
+          "raw": 1383,
+          "score": 0.69458,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 385,
+          "raw": 1383,
+          "score": 0.69321,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 386,
+          "raw": 1383,
+          "score": 0.69192,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 387,
+          "raw": 1383,
+          "score": 0.69193,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 388,
+          "raw": 1383,
+          "score": 0.70146,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 389,
+          "raw": 1382,
+          "score": 0.70126,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 390,
+          "raw": 1383,
+          "score": 0.69726,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 391,
+          "raw": 1381,
+          "score": 0.69458,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 392,
+          "raw": 1381,
+          "score": 0.69459,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 393,
+          "raw": 1382,
+          "score": 0.69102,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 394,
+          "raw": 1382,
+          "score": 0.69864,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 395,
+          "raw": 1382,
+          "score": 0.70178,
+          "sim": {
+            "scale": 0.9335641685535624,
+            "rotation_deg": 0.0,
+            "tx": -178.20798925520086,
+            "ty": 227.95240142110734
+          },
+          "flip": false
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "raw",
+      "comp_in": 396,
+      "comp_out": 415,
+      "raw_in_frame": 1438,
+      "raw_in_seconds": 59.999440833,
+      "raw_out_frame": 1452,
+      "speed": 1.0,
+      "speed_measured": 0.996609649122807,
+      "speed_range": [
+        0.9831248212499999,
+        1.01664078140625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9334724721781994,
+        "rotation_deg": 0.0,
+        "tx": -178.05132014227837,
+        "ty": 227.9665758411333
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.8683,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 1.67,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.2675,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9969,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        59.993833333,
+        60.001708333
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    },
+    {
+      "id": 19,
+      "type": "raw",
+      "comp_in": 415,
+      "comp_out": 426,
+      "raw_in_frame": 1453,
+      "raw_in_seconds": 60.612635417,
+      "raw_out_frame": 1453,
+      "speed": 0.0,
+      "speed_measured": 0.0,
+      "speed_range": [
+        -0.12512525025000001,
+        0.12512525025000001
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9332902882855916,
+        "rotation_deg": 0.0,
+        "tx": -177.9359312637829,
+        "ty": 228.00051270520652
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [
+        {
+          "comp_frame": 415,
+          "raw_seconds": 60.61263541666666
+        },
+        {
+          "comp_frame": 426,
+          "raw_seconds": 60.61263541666666
+        }
+      ],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.009,
+        "corr": 0.9178,
+        "exception": null,
+        "phase_source": "video",
+        "lag_ms_video": 1.661,
+        "line": {
+          "id": 396,
+          "raw_in_seconds": 60.632774166,
+          "speed": 1.0,
+          "source": "S18 continued",
+          "lag_ms": -0.009,
+          "corr": 0.9178
+        }
+      },
+      "time_mode": "remap",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": [
+        415,
+        416
+      ],
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 10.427083333333334,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9927,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        60.60220833333333,
+        60.64391666666666
+      ],
+      "raw_in_interval_both": [
+        60.60220833333333,
+        60.623062499999996
+      ],
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "speed-only cut (no RAW jump): cut may lie anywhere in [415, 416]; freeze frame on RAW 1453",
+      "evidence": []
+    },
+    {
+      "id": 20,
+      "type": "raw",
+      "comp_in": 426,
+      "comp_out": 446,
+      "raw_in_frame": 1238,
+      "raw_in_seconds": 51.666102167,
+      "raw_out_frame": 1253,
+      "speed": 1.0,
+      "speed_measured": 1.0010000000000001,
+      "speed_range": [
+        0.9831248212499999,
+        1.01664078140625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.399963807285338,
+        "rotation_deg": 0.0,
+        "tx": -342.26880734581505,
+        "ty": 101.75938456110822
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 426,
+          "scale": 1.399963807285338,
+          "rotation_deg": 0.0,
+          "tx": -342.26880734581505,
+          "ty": 101.75938456110822
+        },
+        {
+          "comp_frame": 445,
+          "scale": 1.399804598323694,
+          "rotation_deg": 0.0,
+          "tx": -462.1545373780717,
+          "ty": 101.81215588010565
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": -0.0,
+        "corr": 0.9083,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 1.623,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 2.3145,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9889,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        51.660541667,
+        51.668416667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "animated framing: 2 keys, scale 1.3997->1.4000, easing linear",
+      "evidence": []
+    },
+    {
+      "id": 21,
+      "type": "raw",
+      "comp_in": 446,
+      "comp_out": 466,
+      "raw_in_frame": 1259,
+      "raw_in_seconds": 52.532773167,
+      "raw_out_frame": 1274,
+      "speed": 1.0,
+      "speed_measured": 0.9934736842105263,
+      "speed_range": [
+        0.9831248212499999,
+        1.01664078140625
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 1.4005076642209113,
+        "rotation_deg": 0.0,
+        "tx": -458.5983259928745,
+        "ty": 101.60509960667275
+      },
+      "transform_keys": [
+        {
+          "comp_frame": 446,
+          "scale": 1.4005076642209113,
+          "rotation_deg": 0.0,
+          "tx": -458.5983259928745,
+          "ty": 101.60509960667275
+        },
+        {
+          "comp_frame": 465,
+          "scale": 1.4002377509938069,
+          "rotation_deg": 0.0,
+          "tx": -351.9421711630579,
+          "ty": 101.77988777565213
+        }
+      ],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.8898,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 0.794,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 3.1435,
+      "region": 0,
+      "box": null,
+      "confidence": 0.976,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        52.528041667,
+        52.535916667
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "animated framing: 2 keys, scale 1.4000->1.4006, easing linear",
+      "evidence": []
+    },
+    {
+      "id": 22,
+      "type": "uncertain",
+      "comp_in": 466,
+      "comp_out": 496,
+      "raw_in_frame": 1525,
+      "raw_in_seconds": null,
+      "raw_out_frame": 1565,
+      "speed": 1.0,
+      "speed_measured": null,
+      "speed_range": null,
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9332041450197104,
+        "rotation_deg": 0.0,
+        "tx": -379.4364425530706,
+        "ty": 228.04123580603834
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": null,
+        "corr": null,
+        "exception": "uncertain",
+        "phase_source": null,
+        "lag_ms_video": null,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": true,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": null,
+      "region": 0,
+      "box": null,
+      "confidence": 0.0,
+      "ambiguous_frames": [],
+      "raw_in_interval": null,
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "UNCERTAIN - best RAW 1513-1589, ZNCC 0.80-0.83 (00:00:15:16-00:00:16:16)",
+      "notes": "unresolved: best hypotheses score in [none_thresh, match_thresh) on 30/30 frames (no match, no NOT-IN-RAW claim)",
+      "evidence": [
+        {
+          "comp_frame": 466,
+          "raw": 1525,
+          "score": 0.82385,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 467,
+          "raw": 1526,
+          "score": 0.82533,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 468,
+          "raw": 1527,
+          "score": 0.82328,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 469,
+          "raw": 1527,
+          "score": 0.82329,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 470,
+          "raw": 1578,
+          "score": 0.82502,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 471,
+          "raw": 1529,
+          "score": 0.82439,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 472,
+          "raw": 1530,
+          "score": 0.82474,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 473,
+          "raw": 1531,
+          "score": 0.82374,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 474,
+          "raw": 1531,
+          "score": 0.82374,
+          "sim": {
+            "scale": 0.9333971071832357,
+            "rotation_deg": 0.0,
+            "tx": -251.03145819479505,
+            "ty": 227.9651387791804
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 475,
+          "raw": 1582,
+          "score": 0.8237,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 476,
+          "raw": 1585,
+          "score": 0.82322,
+          "sim": {
+            "scale": 0.9330334055460355,
+            "rotation_deg": 0.0,
+            "tx": 40.54413642439124,
+            "ty": 228.0336383727943
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 477,
+          "raw": 1584,
+          "score": 0.82409,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 478,
+          "raw": 1585,
+          "score": 0.82305,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 479,
+          "raw": 1585,
+          "score": 0.82307,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 480,
+          "raw": 1513,
+          "score": 0.82382,
+          "sim": {
+            "scale": 0.9332041450197104,
+            "rotation_deg": 0.0,
+            "tx": -379.4364425530706,
+            "ty": 228.04123580603834
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 481,
+          "raw": 1514,
+          "score": 0.8229,
+          "sim": {
+            "scale": 0.9332041450197104,
+            "rotation_deg": 0.0,
+            "tx": -379.4364425530706,
+            "ty": 228.04123580603834
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 482,
+          "raw": 1515,
+          "score": 0.80635,
+          "sim": {
+            "scale": 0.9332041450197104,
+            "rotation_deg": 0.0,
+            "tx": -379.4364425530706,
+            "ty": 228.04123580603834
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 483,
+          "raw": 1516,
+          "score": 0.80222,
+          "sim": {
+            "scale": 0.9332048073404295,
+            "rotation_deg": 0.0,
+            "tx": -379.4369000087721,
+            "ty": 227.96059308630382
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 484,
+          "raw": 1589,
+          "score": 0.80219,
+          "sim": {
+            "scale": 0.9334859001428939,
+            "rotation_deg": 0.0,
+            "tx": 29.159069907764888,
+            "ty": 228.00524992618566
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 485,
+          "raw": 1517,
+          "score": 0.80128,
+          "sim": {
+            "scale": 0.9332041450197104,
+            "rotation_deg": 0.0,
+            "tx": -379.4364425530706,
+            "ty": 228.04123580603834
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 486,
+          "raw": 1518,
+          "score": 0.8015,
+          "sim": {
+            "scale": 0.9332063775612724,
+            "rotation_deg": 0.0,
+            "tx": -379.43798453845136,
+            "ty": 228.04063300947658
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 487,
+          "raw": 1519,
+          "score": 0.8044,
+          "sim": {
+            "scale": 0.93320690096822,
+            "rotation_deg": 0.0,
+            "tx": -379.3558401097248,
+            "ty": 228.02318690415896
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 488,
+          "raw": 1560,
+          "score": 0.80454,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 489,
+          "raw": 1560,
+          "score": 0.80458,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 490,
+          "raw": 1561,
+          "score": 0.80519,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 491,
+          "raw": 1522,
+          "score": 0.80519,
+          "sim": {
+            "scale": 0.9332089945960105,
+            "rotation_deg": 0.0,
+            "tx": -379.49303139362655,
+            "ty": 228.05355258926792
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 492,
+          "raw": 1523,
+          "score": 0.80641,
+          "sim": {
+            "scale": 0.933207710002279,
+            "rotation_deg": 0.0,
+            "tx": -379.49214736614886,
+            "ty": 228.0531498863687
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 493,
+          "raw": 1564,
+          "score": 0.80451,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 494,
+          "raw": 1564,
+          "score": 0.80451,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        },
+        {
+          "comp_frame": 495,
+          "raw": 1565,
+          "score": 0.80478,
+          "sim": {
+            "scale": 0.9332029732891927,
+            "rotation_deg": 0.0,
+            "tx": -155.37984228835222,
+            "ty": 228.0227517069239
+          },
+          "flip": false
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "raw",
+      "comp_in": 496,
+      "comp_out": 532,
+      "raw_in_frame": 1008,
+      "raw_in_seconds": 42.0661055,
+      "raw_out_frame": 1036,
+      "speed": 1.0,
+      "speed_measured": 0.9987454954954954,
+      "speed_range": [
+        0.9923706033620691,
+        1.0090726613709675
+      ],
+      "flip_h": false,
+      "transform": {
+        "scale": 0.9334087967573743,
+        "rotation_deg": 0.0,
+        "tx": -178.02236457805031,
+        "ty": 227.97165393915148
+      },
+      "transform_keys": [],
+      "easing": "linear",
+      "time_remap_keys": [],
+      "transition_in": null,
+      "transition_out": null,
+      "audio": {
+        "in_offset_frames": 0,
+        "out_offset_frames": 0,
+        "pitch_preserved": null,
+        "lag_ms": 0.0,
+        "corr": 0.9083,
+        "exception": null,
+        "phase_source": "audio",
+        "lag_ms_video": 2.668,
+        "line": null
+      },
+      "time_mode": "stretch",
+      "retime": "none",
+      "uncertain": false,
+      "unsnapped": false,
+      "cut_ambiguity": null,
+      "tie_frames": [],
+      "low_margin_frames": [],
+      "ae_margin_ms": 1.0195,
+      "region": 0,
+      "box": null,
+      "confidence": 0.9978,
+      "ambiguous_frames": [],
+      "raw_in_interval": [
+        42.05975,
+        42.067125
+      ],
+      "raw_in_interval_both": null,
+      "time_line": null,
+      "color": null,
+      "label": "",
+      "notes": "",
+      "evidence": []
+    }
+  ],
+  "overlays_detected": [
+    {
+      "type": "channel_name",
+      "comp_in": 0,
+      "comp_out": 532,
+      "x": 90.0,
+      "y": 48.0,
+      "w": 160.0,
+      "h": 24.0,
+      "static": true,
+      "text": "",
+      "notes": "text next to the logo; colours #fafafa 85%, #d5d5d5 14%"
+    },
+    {
+      "type": "logo",
+      "comp_in": 0,
+      "comp_out": 532,
+      "x": 32.0,
+      "y": 36.0,
+      "w": 46.0,
+      "h": 48.0,
+      "static": true,
+      "text": "",
+      "notes": "compact blob (canvas); colours #e2242f 56%, #dd262f 23%, #fefafa 9%"
+    },
+    {
+      "type": "title",
+      "comp_in": 0,
+      "comp_out": 532,
+      "x": 148.0,
+      "y": 102.0,
+      "w": 242.0,
+      "h": 90.0,
+      "static": true,
+      "text": "",
+      "notes": "multicolour; text block above the box; colours #fefefe 40%, #f8d024 20%, #fdd01b 20%, #fc2d30 9%"
+    },
+    {
+      "type": "watermark",
+      "comp_in": 0,
+      "comp_out": 532,
+      "x": 180.0,
+      "y": 746.0,
+      "w": 180.0,
+      "h": 18.0,
+      "static": true,
+      "text": "",
+      "notes": "below the box; colours #787878 53%, #8a8a8a 46%"
+    },
+    {
+      "type": "captions",
+      "comp_in": 9,
+      "comp_out": 525,
+      "x": 142.0,
+      "y": 576.0,
+      "w": 256.0,
+      "h": 46.0,
+      "static": false,
+      "text": "",
+      "notes": "33 caption events; white text with dark outline, median glyph height 26 px"
+    },
+    {
+      "type": "captions",
+      "comp_in": 9,
+      "comp_out": 18,
+      "x": 222.0,
+      "y": 582.0,
+      "w": 92.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 18,
+      "comp_out": 33,
+      "x": 254.0,
+      "y": 582.0,
+      "w": 32.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 33,
+      "comp_out": 45,
+      "x": 230.0,
+      "y": 582.0,
+      "w": 78.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 60,
+      "comp_out": 74,
+      "x": 180.0,
+      "y": 582.0,
+      "w": 182.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 74,
+      "comp_out": 82,
+      "x": 142.0,
+      "y": 582.0,
+      "w": 256.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 82,
+      "comp_out": 94,
+      "x": 170.0,
+      "y": 582.0,
+      "w": 200.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 94,
+      "comp_out": 103,
+      "x": 186.0,
+      "y": 582.0,
+      "w": 172.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 116,
+      "comp_out": 128,
+      "x": 226.0,
+      "y": 582.0,
+      "w": 90.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 128,
+      "comp_out": 136,
+      "x": 254.0,
+      "y": 582.0,
+      "w": 34.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 136,
+      "comp_out": 148,
+      "x": 186.0,
+      "y": 582.0,
+      "w": 166.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 148,
+      "comp_out": 157,
+      "x": 198.0,
+      "y": 582.0,
+      "w": 142.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 157,
+      "comp_out": 171,
+      "x": 238.0,
+      "y": 582.0,
+      "w": 64.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 191,
+      "comp_out": 204,
+      "x": 222.0,
+      "y": 582.0,
+      "w": 96.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 204,
+      "comp_out": 219,
+      "x": 210.0,
+      "y": 582.0,
+      "w": 124.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 219,
+      "comp_out": 230,
+      "x": 218.0,
+      "y": 582.0,
+      "w": 104.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 230,
+      "comp_out": 239,
+      "x": 214.0,
+      "y": 582.0,
+      "w": 108.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 239,
+      "comp_out": 251,
+      "x": 230.0,
+      "y": 582.0,
+      "w": 78.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 264,
+      "comp_out": 280,
+      "x": 204.0,
+      "y": 582.0,
+      "w": 130.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 280,
+      "comp_out": 290,
+      "x": 226.0,
+      "y": 582.0,
+      "w": 88.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 290,
+      "comp_out": 305,
+      "x": 226.0,
+      "y": 582.0,
+      "w": 86.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 305,
+      "comp_out": 314,
+      "x": 228.0,
+      "y": 582.0,
+      "w": 82.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 326,
+      "comp_out": 336,
+      "x": 220.0,
+      "y": 582.0,
+      "w": 100.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 336,
+      "comp_out": 350,
+      "x": 230.0,
+      "y": 582.0,
+      "w": 82.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 350,
+      "comp_out": 362,
+      "x": 188.0,
+      "y": 582.0,
+      "w": 164.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 362,
+      "comp_out": 374,
+      "x": 210.0,
+      "y": 582.0,
+      "w": 120.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 374,
+      "comp_out": 390,
+      "x": 176.0,
+      "y": 582.0,
+      "w": 190.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 408,
+      "comp_out": 420,
+      "x": 218.0,
+      "y": 582.0,
+      "w": 106.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 420,
+      "comp_out": 436,
+      "x": 220.0,
+      "y": 582.0,
+      "w": 100.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 436,
+      "comp_out": 452,
+      "x": 160.0,
+      "y": 582.0,
+      "w": 218.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 452,
+      "comp_out": 461,
+      "x": 212.0,
+      "y": 582.0,
+      "w": 118.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 461,
+      "comp_out": 470,
+      "x": 230.0,
+      "y": 576.0,
+      "w": 104.0,
+      "h": 46.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 497,
+      "comp_out": 509,
+      "x": 178.0,
+      "y": 582.0,
+      "w": 184.0,
+      "h": 26.0
+    },
+    {
+      "type": "captions",
+      "comp_in": 509,
+      "comp_out": 525,
+      "x": 226.0,
+      "y": 582.0,
+      "w": 82.0,
+      "h": 26.0
+    }
+  ],
+  "added_audio": [
+    {
+      "type": "music",
+      "comp_in": 0,
+      "comp_out": 532,
+      "level_db": -6.1,
+      "level_dbfs": -23.4
+    }
+  ],
+  "audio": {
+    "status": "ok",
+    "notes": [
+      "L-cut at comp frame 36 (S01|S02): audio trails by 6 frames",
+      "continuous audio line (own in-point at speed 1) under comp frames 342-371 (S16): one audio layer on that line instead of silence",
+      "continuous audio line (S18 continued) under comp frames 415-425 (S19): one audio layer on that line instead of silence",
+      "added music comp frames 0-531 (-6.1 dB re original, -23.4 dBFS)"
+    ],
+    "cuts": [
+      {
+        "cut": 36,
+        "a": 1,
+        "b": 2,
+        "switch_ms": 248.999,
+        "baseline_ms": 47.859,
+        "switch_frame": 42,
+        "offset_frames": 6,
+        "measured_offset": 6,
+        "mean_margin": 0.6023,
+        "decisive": 0.8351,
+        "sides": [
+          5,
+          5
+        ],
+        "gain": 12.046,
+        "a_model": true,
+        "b_model": true
+      }
+    ],
+    "av_offset": {
+      "status": "measured",
+      "lag_ms": -85.438,
+      "lag_ms_interval": [
+        -86.626,
+        -84.25
+      ],
+      "centre_ms": -85.438,
+      "n_segments": 16,
+      "coverage": 1.0,
+      "coverage_zero": 0.0,
+      "spread_ms": 0.313,
+      "loo_distance_ms": 0.0,
+      "audio_s": 14.125,
+      "reason": "accepted",
+      "text": "competitor audio is 85.4 ms later than its picture, relative to RAW's own A/V sync",
+      "prior": {
+        "accepted": true,
+        "n_windows": 3,
+        "median_ms": -83.309,
+        "mad_ms": 0.788,
+        "interval_ms": [
+          -86.626,
+          -84.25
+        ],
+        "reason": "accepted",
+        "source": "probe",
+        "n_segments": 14,
+        "windows_reason": "3 usable window(s)",
+        "lag_ms": -85.438
+      },
+      "segments": [
+        1,
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        10,
+        12,
+        13,
+        14,
+        15,
+        18,
+        20,
+        21,
+        23
+      ],
+      "switch_baseline_ms": 47.859,
+      "switch_baseline": {
+        "n": 3,
+        "spread_ms": 2.859,
+        "threshold_ms": 16.667,
+        "range_ms": [
+          47.859,
+          47.859
+        ],
+        "tier": "strong"
+      },
+      "sync_mode": "raw"
+    },
+    "analysis_sr": 16000,
+    "competitor_has_audio": true,
+    "raw_has_audio": true,
+    "hint_windows": 67,
+    "hint_windows_confident": 44
+  },
+  "settings": {
+    "layout_mode": "match",
+    "comp_size": "competitor",
+    "main_size": [
+      540,
+      960
+    ],
+    "fps_mode": "competitor",
+    "main_fps": "30/1",
+    "fps_source_max_error_s": 0.0,
+    "ae_time_mode": "auto",
+    "ae_slack_tol_frames": 0.01,
+    "criteria_exact": true,
+    "audio_sync": "raw"
+  },
+  "warnings": [
+    "S16: competitor used frame-blend retiming at speed 0.25 - verified path, exported with AE Frame Mix",
+    "UNCERTAIN: comp frames 372-395 (00:00:12:12-00:00:13:06) - 'UNCERTAIN - best RAW 1370-1384, ZNCC 0.66-0.70 (00:00:12:12-00:00:13:06)' (neither matched nor NOT-IN-RAW: rebuild by hand from the guide layer)",
+    "UNCERTAIN: comp frames 466-495 (00:00:15:16-00:00:16:16) - 'UNCERTAIN - best RAW 1513-1589, ZNCC 0.80-0.83 (00:00:15:16-00:00:16:16)' (neither matched nor NOT-IN-RAW: rebuild by hand from the guide layer)"
+  ],
+  "provenance": {
+    "tool": "match_cuts",
+    "version": "0.1.0",
+    "input_hashes": {
+      "competitor": "b025ad0e98031d80d1b7148f256108bc0e45462f",
+      "raw": "214822df581596bcd46f85c23fb4e354d77de50a"
+    },
+    "analysed_hashes": {
+      "competitor": "b025ad0e98031d80d1b7148f256108bc0e45462f",
+      "raw": "214822df581596bcd46f85c23fb4e354d77de50a"
+    },
+    "analysis_params_hash": "66396deaf03e4cd822bb",
+    "analysis_params": {
+      "seed": 12345,
+      "raw_proxy_width": 640,
+      "comp_proxy_scale": 0.5,
+      "comp_proxy_max_width": 640,
+      "proxy_budget_bytes": 3221225472,
+      "min_proxy_width": 256,
+      "long_raw_s": 2700.0,
+      "long_raw_window_s": 20.0,
+      "audio_sr": 16000,
+      "static_std_thresh": 2.0,
+      "dynamic_frac_thresh": 0.5,
+      "overlay_dilate_px": 3,
+      "overlay_resid_thresh": 40.0,
+      "overlay_min_frames": 3,
+      "audio_window": 1.0,
+      "audio_hop": 0.25,
+      "audio_feat_rate": 100,
+      "audio_n_mels": 40,
+      "audio_min_conf": 1.3,
+      "audio_speed_min": 0.9,
+      "audio_speed_max": 1.3,
+      "audio_speed_step": 0.01,
+      "audio_refine_ms": 50.0,
+      "audio_fmin": 80.0,
+      "audio_fmax": 7600.0,
+      "audio_replaced_corr": 0.3,
+      "audio_jl_max_s": 1.0,
+      "audio_added_thresh_db": -20.0,
+      "audio_residual_search_s": 0.1,
+      "av_offset_max_s": 1.0,
+      "av_offset_prior_wave_peak": 0.8,
+      "av_offset_prior_min_windows": 8,
+      "av_offset_prior_max_mad_ms": 10.0,
+      "av_offset_seg_min_s": 0.5,
+      "av_offset_seg_short_s": 0.25,
+      "av_offset_seg_short_corr": 0.9,
+      "av_offset_eps_ms": 0.5,
+      "av_offset_min_segments": 3,
+      "av_offset_min_audio_s": 2.0,
+      "av_offset_min_coverage": 0.7,
+      "av_offset_max_spread_ms": 2.0,
+      "av_offset_min_ms": 2.0,
+      "av_offset_zero_frac": 0.9,
+      "audio_jl_strong_frames": 10,
+      "audio_jl_strong_corr": 0.8,
+      "audio_jl_strong_margin": 0.5,
+      "audio_jl_baseline_min_cuts": 3,
+      "audio_jl_min_frames": 0.5,
+      "audio_jl_min_decisive": 0.3,
+      "audio_peak_unique_margin": 0.1,
+      "audio_jl_large_frames": 4,
+      "sift_nfeatures": 500,
+      "raw_index_fps_short": 10.0,
+      "raw_index_fps_long": 3.0,
+      "index_max_descriptors": 2000000,
+      "comp_search_stride": 3,
+      "index_knn": 24,
+      "index_ratio": 0.8,
+      "index_far_s": 2.0,
+      "vote_top_candidates": 8,
+      "vote_min_frac": 0.2,
+      "anchors_per_frame": 3,
+      "lowe_ratio": 0.75,
+      "ransac_reproj_px": 3.0,
+      "min_inliers": 12,
+      "min_inlier_ratio": 0.3,
+      "near_miss_inliers": 6,
+      "anchor_zncc_slack": 0.05,
+      "audio_restrict_s": 2.0,
+      "refine_radius": 3,
+      "track_search_radius": 8,
+      "score_blur": 1.0,
+      "grad_weight": 0.0,
+      "match_thresh": 0.9,
+      "none_thresh": 0.6,
+      "detail_margin": 0.02,
+      "line_gap_s": 1.0,
+      "line_search_reach": 30,
+      "line_search_min_ratio": 0.6,
+      "line_search_nfeatures": 1000,
+      "line_search_verify": 3,
+      "identical_thresh": 0.9995,
+      "identical_mad": 0.75,
+      "identical_tiles": 4,
+      "identical_contrast_ref": 128.0,
+      "identical_contrast_min": 0.25,
+      "low_margin_eps": 0.001,
+      "soft_delta_min": 0.001,
+      "soft_delta_max": 0.01,
+      "rel_drop_min": 0.01,
+      "uniform_std": 4.0,
+      "low_conf_thresh": 0.5,
+      "ecc_iterations": 60,
+      "ecc_eps": 1e-05,
+      "ecc_pyramid_levels": 3,
+      "ecc_pyramid_min_side": 40,
+      "anchor_time_delta": 0.003,
+      "line_time_tol": 2.0,
+      "line_min_inlier_frac": 0.7,
+      "path_median": 5,
+      "temporal_refine_max_slope": 0.95,
+      "speed_snap_values": [
+        1.0,
+        1.05,
+        1.1,
+        1.15,
+        1.2,
+        1.25,
+        1.5,
+        2.0,
+        0.9523809523809523,
+        0.9090909090909091,
+        0.8695652173913044,
+        0.8333333333333334,
+        0.8,
+        0.6666666666666666,
+        0.5
+      ],
+      "speed_snap_tol": 0.003,
+      "retime_snap_values": [
+        0.25,
+        0.2,
+        0.3333333333333333
+      ],
+      "freeze_static_mad": 0.25,
+      "freeze_static_ratio": 10.0,
+      "min_segment_frames": 1,
+      "lambda_cut": 1.0,
+      "lambda_unsnapped": 3.0,
+      "lambda_nondominant": 1.5,
+      "lambda_one": 0.25,
+      "lambda_drop": 0.4,
+      "lambda_tie": 0.05,
+      "dp_max_consecutive_fail": 6,
+      "transition_stop_after": 3,
+      "segment_score_max_pixels": 60000,
+      "scenedetect": true,
+      "scenedetect_min_len": 2,
+      "link_scale_tol": 0.005,
+      "link_pos_tol": 2.0,
+      "punch_scale_step": 0.01,
+      "punch_pos_step": 4.0,
+      "step_confirm_frames": 2,
+      "lambda_repeat_cut": 1.0,
+      "union_track_window": 6,
+      "transition_search": 20,
+      "blend_rel": 0.5,
+      "framing_scale_spread": 0.003,
+      "framing_pos_spread": 1.5,
+      "framing_sample_step": 3,
+      "rdp_pos_tol": 0.5,
+      "rdp_scale_tol": 0.001,
+      "rotation_min_deg": 0.2,
+      "scenedetect_adaptive": 2.0,
+      "scenedetect_content": 15.0,
+      "temporal_max_side": 200,
+      "temporal_shot_cc": 0.8,
+      "temporal_gap_ratio": 2.5,
+      "temporal_growth_ratio": 1.5,
+      "temporal_ecc_iterations": 40,
+      "temporal_ecc_eps": 1e-05
+    },
+    "stage_versions": {
+      "audio": 1,
+      "audio_align": 2,
+      "conform": 1,
+      "frame_map": 5,
+      "layout": 2,
+      "probe": 2,
+      "proxy": 1,
+      "raw_index": 1,
+      "scenedetect": 1,
+      "segments": 4,
+      "sparse_search": 4
+    },
+    "code_hash": "ef12391d6bddadf86be4",
+    "seed": 12345,
+    "ffmpeg_version": "6.1.1",
+    "timings": {
+      "S0 env": 0.135,
+      "S2 probe+conform": 2.682,
+      "S3 audio": 0.651,
+      "S5.1 audio align": 2.296,
+      "S3 proxies": 5.006,
+      "S4 layout": 3.488,
+      "S5.2 visual search": 41.74,
+      "S5.3 refine": 65.533,
+      "S5.4-S6 segments+cutlist": 6.824,
+      "S7 AE project": 0.645,
+      "S8.preview": 7.242,
+      "S8.compare": 9.046,
+      "S8 exports": 16.377,
+      "S9 verify": 53.249,
+      "total": 199.216
+    }
+  }
+}

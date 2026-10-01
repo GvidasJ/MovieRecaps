@@ -1,0 +1,269 @@
+TITLE: Recreated Edit
+FCM: NON-DROP FRAME
+
+001  AX       V     C        00:00:00:20 00:00:02:01 00:00:00:00 00:00:01:06
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:00:20
+* SEGMENT: S01 raw speed 1.000000 conf 1.00
+* NOTE: record TC = competitor frame at 30 fps NDF (competitor 30/1 fps); source TC = RAW frame at 24 fps NDF (RAW 24000/1001 fps); M2 = speed x RAW fps x 30 / competitor fps
+* NOTE: 23 segments, 532 frames; BL = NOT-IN-RAW placeholder / dip / flash (add your own media); J/L audio offsets are listed in cutlist.csv
+* NOTE: YELLOW locators = audio the competitor added (music / SFX / voice-over), not recreated: labelled placeholders for your own
+* NOTE: AUDIO: RAW lip-sync; audio lines (continuous audio under video-only retimes / placeholders) as separate audio events; source = nearest RAW frame, remainder noted per event; video events V, audio events A (after the video events)
+* LOC: 00:00:00:00 RED     Start S01 RAW 00:00:00:20
+* LOC: 00:00:00:00 YELLOW  MUSIC placeholder 00:00:00:00-00:00:17:22 (competitor-added music, not recreated - add your own, -6.1 dB re RAW audio)
+
+002  AX       V     C        00:00:34:02 00:00:35:07 00:00:01:06 00:00:02:12
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:34:02
+* SEGMENT: S02 raw speed 1.000000 conf 1.00
+* LOC: 00:00:01:06 RED     Cut S02 RAW 00:00:34:02
+
+003  AX       V     C        00:00:08:08 00:00:09:16 00:00:02:12 00:00:03:22
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:08:08
+* SEGMENT: S03 raw speed 1.000000 conf 1.00
+* LOC: 00:00:02:12 RED     Cut S03 RAW 00:00:08:08
+
+004  AX       V     C        00:00:04:04 00:00:04:07 00:00:03:22 00:00:03:26
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:04:04
+* SEGMENT: S04 raw speed 1.000000 conf 1.00
+* LOC: 00:00:03:22 RED     Cut S04 RAW 00:00:04:04
+
+005  AX       V     C        00:00:14:14 00:00:15:14 00:00:03:26 00:00:04:26
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:14:14
+* SEGMENT: S05 raw speed 1.000000 conf 1.00
+* LOC: 00:00:03:26 RED     Cut S05 RAW 00:00:14:14
+
+006  AX       V     C        00:00:20:14 00:00:21:22 00:00:04:26 00:00:06:06
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:20:14
+* SEGMENT: S06 raw speed 1.000000 conf 1.00
+* LOC: 00:00:04:26 RED     Cut S06 RAW 00:00:20:14
+
+007  AX       V     C        00:00:31:14 00:00:31:16 00:00:06:06 00:00:06:09
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:31:14
+* SEGMENT: S07 raw speed 1.000000 conf 1.00
+* LOC: 00:00:06:06 RED     Cut S07 RAW 00:00:31:14
+
+008  AX       V     C        00:00:27:00 00:00:27:12 00:00:06:09 00:00:06:24
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:27:00
+* SEGMENT: S08 raw speed 1.000000 conf 1.00
+* LOC: 00:00:06:09 RED     Cut S08 RAW 00:00:27:00
+
+009  AX       V     C        00:00:27:12 00:00:28:06 00:00:06:24 00:00:07:17
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:27:12
+* SEGMENT: S09 raw speed 1.000000 conf 1.00
+* LOC: 00:00:06:24 RED     Cut S09 RAW 00:00:27:12
+
+010  AX       V     C        00:00:28:06 00:00:28:22 00:00:07:17 00:00:08:07
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:28:06
+* SEGMENT: S10 raw speed 1.000000 conf 1.00
+* LOC: 00:00:07:17 RED     Cut S10 RAW 00:00:28:06
+
+011  AX       V     C        00:01:01:14 00:01:01:18 00:00:08:07 00:00:08:12
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:01:01:14
+* SEGMENT: S11 raw speed 1.000000 conf 1.00
+* LOC: 00:00:08:07 RED     Cut S11 RAW 00:01:01:14
+
+012  AX       V     C        00:00:38:12 00:00:39:12 00:00:08:12 00:00:09:12
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:38:12
+* SEGMENT: S12 raw speed 1.000000 conf 1.00
+* LOC: 00:00:08:12 RED     Cut S12 RAW 00:00:38:12
+
+013  AX       V     C        00:00:39:12 00:00:40:04 00:00:09:12 00:00:10:02
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:39:12
+* SEGMENT: S13 raw speed 1.000000 conf 1.00
+* LOC: 00:00:09:12 RED     Cut S13 RAW 00:00:39:12
+
+014  AX       V     C        00:00:45:08 00:00:45:19 00:00:10:02 00:00:10:16
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:45:08
+* SEGMENT: S14 raw speed 1.000000 conf 1.00
+* LOC: 00:00:10:02 RED     Cut S14 RAW 00:00:45:08
+
+015  AX       V     C        00:00:45:19 00:00:46:16 00:00:10:16 00:00:11:12
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:45:19
+* SEGMENT: S15 raw speed 1.000000 conf 1.00
+* LOC: 00:00:10:16 RED     Cut S15 RAW 00:00:45:19
+
+016  AX       V     C        00:00:57:00 00:00:57:06 00:00:11:12 00:00:12:12
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       005.994        00:00:57:00
+* SEGMENT: S16 raw speed 0.250000 time-remap (average speed) conf 0.99
+* LOC: 00:00:11:12 RED     Cut S16 RAW 00:00:57:00
+
+017  BL       V     C        00:00:00:00 00:00:00:24 00:00:12:12 00:00:13:06
+* FROM CLIP NAME: BLACK
+* SEGMENT: S17 uncertain - UNCERTAIN - best RAW 1370-1384, ZNCC 0.66-0.70 (00:00:12:12-00:00:13:06)
+* LOC: 00:00:12:12 RED     Cut S17 UNCERTAIN - best RAW 1370-1384, ZNCC 0.66-0.70 (00:00:12:12-00:00:13:06)
+
+018  AX       V     C        00:00:59:22 00:01:00:13 00:00:13:06 00:00:13:25
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:59:22
+* SEGMENT: S18 raw speed 1.000000 conf 1.00
+* LOC: 00:00:13:06 RED     Cut S18 RAW 00:00:59:22
+
+019  AX       V     C        00:01:00:13 00:01:00:13 00:00:13:25 00:00:14:06
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       000.000        00:01:00:13
+* SEGMENT: S19 raw speed 0.000000 time-remap (average speed) conf 0.99
+* LOC: 00:00:13:25 RED     Cut S19 RAW 00:01:00:13
+
+020  AX       V     C        00:00:51:14 00:00:52:06 00:00:14:06 00:00:14:26
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:51:14
+* SEGMENT: S20 raw speed 1.000000 conf 0.99
+* LOC: 00:00:14:06 RED     Cut S20 RAW 00:00:51:14
+
+021  AX       V     C        00:00:52:11 00:00:53:03 00:00:14:26 00:00:15:16
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:52:11
+* SEGMENT: S21 raw speed 1.000000 conf 0.98
+* LOC: 00:00:14:26 RED     Cut S21 RAW 00:00:52:11
+
+022  BL       V     C        00:00:00:00 00:00:01:00 00:00:15:16 00:00:16:16
+* FROM CLIP NAME: BLACK
+* SEGMENT: S22 uncertain - UNCERTAIN - best RAW 1513-1589, ZNCC 0.80-0.83 (00:00:15:16-00:00:16:16)
+* LOC: 00:00:15:16 RED     Cut S22 UNCERTAIN - best RAW 1513-1589, ZNCC 0.80-0.83 (00:00:15:16-00:00:16:16)
+
+023  AX       V     C        00:00:42:00 00:00:43:05 00:00:16:16 00:00:17:22
+* FROM CLIP NAME: raw.mp4
+* SOURCE FILE: /home/user/MovieRecaps/.claude/worktrees/wf_b0a2be3c-657-2/examples/synthetic_film24/media/raw.mp4
+M2   AX       023.976        00:00:42:00
+* SEGMENT: S23 raw speed 1.000000 conf 1.00
+* LOC: 00:00:16:16 RED     Cut S23 RAW 00:00:42:00
+
+024  AX       A     C        00:00:00:21 00:00:02:02 00:00:00:00 00:00:01:06
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:00:21
+* AUDIO: S01 picture, nearest RAW frame, remainder -9.770 ms
+
+025  AX       A     C        00:00:34:02 00:00:35:07 00:00:01:06 00:00:02:12
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:34:02
+* AUDIO: S02 picture, nearest RAW frame, remainder +15.354 ms
+
+026  AX       A     C        00:00:08:09 00:00:09:17 00:00:02:12 00:00:03:22
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:08:09
+* AUDIO: S03 picture, nearest RAW frame, remainder -17.271 ms
+
+027  AX       A     C        00:00:04:05 00:00:04:08 00:00:03:22 00:00:03:26
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:04:05
+* AUDIO: S04 picture, nearest RAW frame, remainder -13.102 ms
+
+028  AX       A     C        00:00:14:14 00:00:15:14 00:00:03:26 00:00:04:26
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:14:14
+* AUDIO: S05 picture, nearest RAW frame, remainder +1.521 ms
+
+029  AX       A     C        00:00:20:15 00:00:21:23 00:00:04:26 00:00:06:06
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:20:15
+* AUDIO: S06 picture, nearest RAW frame, remainder -12.856 ms
+
+030  AX       A     C        00:00:31:14 00:00:31:16 00:00:06:06 00:00:06:09
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:31:14
+* AUDIO: S07 picture, nearest RAW frame, remainder +18.802 ms
+
+031  AX       A     C        00:00:27:00 00:00:27:12 00:00:06:09 00:00:06:24
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:27:00
+* AUDIO: S08 picture, nearest RAW frame, remainder +5.769 ms
+
+032  AX       A     C        00:00:27:12 00:00:28:06 00:00:06:24 00:00:07:17
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:27:12
+* AUDIO: S09 picture, nearest RAW frame, remainder +5.269 ms
+
+033  AX       A     C        00:00:28:07 00:00:28:23 00:00:07:17 00:00:08:07
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:28:07
+* AUDIO: S10 picture, nearest RAW frame, remainder -20.523 ms
+
+034  AX       A     C        00:01:01:15 00:01:01:19 00:00:08:07 00:00:08:12
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:01:01:15
+* AUDIO: S11 picture, nearest RAW frame, remainder -20.771 ms
+
+035  AX       A     C        00:00:38:13 00:00:39:13 00:00:08:12 00:00:09:12
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:38:13
+* AUDIO: S12 picture, nearest RAW frame, remainder -14.101 ms
+
+036  AX       A     C        00:00:39:13 00:00:40:05 00:00:09:12 00:00:10:02
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:39:13
+* AUDIO: S13 picture, nearest RAW frame, remainder -15.101 ms
+
+037  AX       A     C        00:00:45:08 00:00:45:19 00:00:10:02 00:00:10:16
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:45:08
+* AUDIO: S14 picture, nearest RAW frame, remainder +20.773 ms
+
+038  AX       A     C        00:00:45:20 00:00:46:17 00:00:10:16 00:00:11:12
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:45:20
+* AUDIO: S15 picture, nearest RAW frame, remainder -13.060 ms
+
+039  AX       A     C        00:00:57:00 00:00:58:00 00:00:11:12 00:00:12:12
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:57:00
+* AUDIO: S16 audio line, nearest RAW frame, remainder -0.561 ms
+
+040  AX       A     C        00:00:59:23 00:01:00:14 00:00:13:06 00:00:13:25
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:59:23
+* AUDIO: S18 picture, nearest RAW frame, remainder -18.851 ms
+
+041  AX       A     C        00:01:00:14 00:01:00:23 00:00:13:25 00:00:14:06
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:01:00:14
+* AUDIO: S19 audio line, nearest RAW frame, remainder -11.143 ms
+
+042  AX       A     C        00:00:51:15 00:00:52:07 00:00:14:06 00:00:14:26
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:51:15
+* AUDIO: S20 picture, nearest RAW frame, remainder -10.523 ms
+
+043  AX       A     C        00:00:52:12 00:00:53:04 00:00:14:26 00:00:15:16
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:52:12
+* AUDIO: S21 picture, nearest RAW frame, remainder -19.727 ms
+
+044  AX       A     C        00:00:42:01 00:00:43:06 00:00:16:16 00:00:17:22
+* FROM CLIP NAME: raw.mp4
+M2   AX       023.976        00:00:42:01
+* AUDIO: S23 picture, nearest RAW frame, remainder -17.603 ms
