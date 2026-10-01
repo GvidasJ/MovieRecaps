@@ -470,18 +470,25 @@ def test_fullscreen_segment(e2e, cutlist, frame_map):
                             ["field", "truth", "cutlist"], rows)
 
 
-@film_xfail("FX-02: per-segment lags carry the 86 ms A/V offset; short segments unmeasured")
+@film_xfail("FX-03/FX-04: pan_accel is chopped into slivers too short to measure (segmentation, not audio)")
 def test_audio_phase_lag(e2e, cutlist):
-    """DESIGN §7 D3/D8: the synthetic audio starts at the NLE in-point (lower bound of the floor interval);
-    after the audio-informed phase every RAW segment's residual audio lag is within +-3 ms. film24: the lag is
-    measured against the truth A/V offset (-86 ms: competitor audio late), i.e. |lag - offset| <= 3 ms."""
+    """DESIGN §7 D3/D8/D9: the synthetic audio starts at the NLE in-point (lower bound of the floor interval);
+    after the audio-informed phase every measurable RAW segment's residual audio lag is within +-3 ms. lag_ms is
+    the residual after the run's published A/V offset (film24: -86 ms, competitor audio late), so the residual
+    is judged against 0; without a published offset the raw lag is judged against the truth offset. Segments the
+    truth makes unmeasurable (retimed, or shorter than verify_audio_min_s) are not judged here."""
     truth = e2e["truth"]
-    want = float(((truth["audio"].get("av_offset") or {}).get("lag_ms")) or 0.0)
+    published = (cutlist.get("audio") or {}).get("av_offset") or {}
+    want = 0.0 if published.get("status") == "measured" else \
+        float(((truth["audio"].get("av_offset") or {}).get("lag_ms")) or 0.0)
+    min_frames = math.ceil(0.5 * float(_fps(cutlist["competitor"]["fps"])))
     matched, _ = _match_segments(truth, cutlist)
     rows = []
     for t in truth["segments"]:
         s = matched.get(t["id"])
         if t["type"] != "raw" or s is None:
+            continue
+        if float(t.get("speed", 1) or 0) != 1.0 or int(t["comp_out"]) - int(t["comp_in"]) < min_frames:
             continue
         a = s.get("audio") or {}
         lag = a.get("lag_ms")
@@ -621,8 +628,15 @@ def test_audio_truth(e2e, cutlist):
         rows.append(["-", "-", "added_audio music", "0..N (-12 dB)",
                      f"{json.dumps(cutlist.get('added_audio'))[:200]} covers {100 * covered.mean():.0f} %"])
     av = (cutlist.get("audio") or {}).get("av_offset") or {}
-    if av.get("lag_ms") != 0.0 or av.get("status") != "zero":       # DESIGN §7 D9: no A/V offset -> exactly 0
-        rows.append(["-", "-", "audio.av_offset", "status zero, lag_ms 0.0", f"{av.get('status')} {av.get('lag_ms')}"])
+    want_av = float(((truth["audio"].get("av_offset") or {}).get("lag_ms")) or 0.0)
+    if want_av == 0.0:
+        if av.get("lag_ms") != 0.0 or av.get("status") != "zero":   # DESIGN §7 D9: no A/V offset -> exactly 0
+            rows.append(["-", "-", "audio.av_offset", "status zero, lag_ms 0.0", f"{av.get('status')} {av.get('lag_ms')}"])
+    else:
+        lo, hi = (av.get("lag_ms_interval") or [None, None])[:2]
+        if av.get("status") != "measured" or lo is None or not (lo <= want_av <= hi):
+            rows.append(["-", "-", "audio.av_offset", f"measured, interval containing {want_av}",
+                         f"{av.get('status')} {av.get('lag_ms_interval')}"])
     assert not rows, _table("audio analysis differs from truth:", ["seg", "kind", "field", "truth", "cutlist"], rows)
 
 
@@ -877,17 +891,30 @@ def _published_av_offset_ms(cutlist: dict) -> float | None:
     return None
 
 
-@film_xfail("FX-02: no global A/V offset is estimated or published")
 def test_film24_av_offset_published(e2e, cutlist):
-    """FX-02: the cutlist publishes ONE global A/V offset equal to the truth split delay (content 38 ms + post-edit
-    48 ms = competitor audio 86 ms late: lag -86 ms) within 0.5 ms."""
+    """FX-02: the cutlist publishes ONE global A/V offset (measured, xcorr convention) whose interval contains the
+    truth split delay (content 38 ms + post-edit 48 ms = competitor audio 86 ms late: lag -86 ms)."""
     _need_film()
     want = _av_lag_truth(e2e["truth"])
+    av = (cutlist.get("audio") or {}).get("av_offset") or {}
+    lo, hi = (av.get("lag_ms_interval") or [None, None])[:2]
+    assert av.get("status") == "measured" and _published_av_offset_ms(cutlist) is not None, av
+    assert lo is not None and lo <= want <= hi, f"published A/V offset interval {[lo, hi]} ms, truth {want} ms"
+
+
+@film_xfail("FX-03/FX-04: only 11 strong segments survive the pan confound, so the offset interval is 4.3 ms wide")
+def test_film24_av_offset_precise(e2e, cutlist):
+    """FX-02 with intact segmentation: the published offset is precise -- interval <= 2 ms wide and centre within
+    0.5 ms of the truth (the real run's 34 strong segments gave a 0.4 ms interval)."""
+    _need_film()
+    want = _av_lag_truth(e2e["truth"])
+    av = (cutlist.get("audio") or {}).get("av_offset") or {}
+    lo, hi = (av.get("lag_ms_interval") or [None, None])[:2]
     got = _published_av_offset_ms(cutlist)
+    assert lo is not None and hi - lo <= 2.0, f"published A/V offset interval {[lo, hi]} ms is wider than 2 ms"
     assert got is not None and abs(got - want) <= 0.5, f"published A/V offset {got} ms, truth {want} ms"
 
 
-@film_xfail("FX-02: per-segment lags are not judged against a global A/V offset")
 def test_film24_c5_with_measured_offset(e2e, verify):
     """c5 passes on the film24 audio once the measured A/V offset is applied (no 'confidently misaligned' segment,
     no D3 clamp warning 'the audio implies raw_in ... outside the video-feasible interval')."""
@@ -904,7 +931,8 @@ def _warnings(e2e: dict) -> list[str]:
     return [ln.strip() for ln in (text + "\n" + e2e["proc"].stdout).splitlines() if "audio implies raw_in" in ln]
 
 
-@film_xfail("FX-02/FX-09: J/L detection has no switch baseline (48 ms post-edit delay -> fake L-cuts)")
+@film_xfail("FX-03/FX-04/FX-09: no strong cut survives the pan confound, so there is no switch baseline; "
+            "fake J/L next to slivers and placeholders; the genuine 6-frame L-cut reads +5")
 def test_film24_jl_cuts_equal_truth(e2e, cutlist):
     """FX-09: the detected J/L cuts equal the truth exactly: the one genuine 6-frame L-cut (A.out = B.in = +6)
     and nothing else -- the uniform 48 ms post-edit switch delay is a baseline, not 1-2 frame L-cuts."""
@@ -995,10 +1023,10 @@ def test_film24_no_cut_inside_repeat_pair(e2e, cutlist):
     assert not bad, f"{len(bad)} cuts inside repeat pairs: {bad[:20]}"
 
 
-@film_xfail("FX-01: verification compares the recreation with refine's own measurement")
 def test_film24_verify_flags_every_wrong_frame(e2e, cutlist, verify):
     """FX-01: every RAW-segment frame whose AE frame differs from the truth is reported by verification (s9_3
-    failed frames or s9_2 mismatches) -- a wrong RAW frame hidden behind a compensating shift must not pass."""
+    failed frames, s9_2 mismatches, s9_2b temporal-signature disagreements (both frames of the pair) or s9_2c
+    +-1 refit neighbour wins) -- a wrong RAW frame hidden behind a compensating shift must not pass."""
     _need_film()
     truth = e2e["truth"]
     cf, rf = _fps(cutlist["competitor"]["fps"]), _fps(cutlist["raw"]["fps"])
@@ -1009,6 +1037,10 @@ def test_film24_verify_flags_every_wrong_frame(e2e, cutlist, verify):
         for m in ((s92.get(src) or {}).get("mismatches") or []):
             if m.get("k") is not None:
                 flagged.add(int(m["k"]))
+    for d in ((checks.get("s9_2b_temporal") or {}).get("disagreements") or []):
+        flagged.update((int(d["k"]), int(d["k"]) + 1))
+    for d in ((checks.get("s9_2c_refit") or {}).get("neighbour_wins") or []):
+        flagged.add(int(d["k"]))
     wrong = []
     for fr in truth["frames"]:
         if fr["raw_a"] is None or fr["class"] not in ("exact", "static"):
