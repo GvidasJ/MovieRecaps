@@ -2520,7 +2520,6 @@ def build_film_truth(p: Profile, chains: list[Chain], audio_info: dict) \
             segs.append(seg)
     n_comp = max(s["comp_out"] for s in segs)
     frames: list[dict] = [None] * n_comp  # type: ignore[list-item]
-    by_id = {s["id"]: s for s in segs}
     for s in segs:
         c = chains[s["chain"]]
         for i, k in enumerate(range(s["comp_in"], s["comp_out"])):
@@ -2565,7 +2564,6 @@ def build_film_truth(p: Profile, chains: list[Chain], audio_info: dict) \
                 raise RuntimeError("L-cut bookkeeping error")
             jl.append({"cut": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "offset_frames": ext,
                        "type": "L" if ext > 0 else "J"})
-    del by_id
     return segs, frames, cuts, jl
 
 

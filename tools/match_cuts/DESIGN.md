@@ -689,6 +689,9 @@ competitor 540×960 @ 30, 532 frames; generation ~2 min, one CLI run ~4 min on 4
 * **Encoding**: every film24 x264 encode uses one thread — with 4 frame threads x264 produced a different
   bitstream for identical input in 1 of 3 runs on this content (identical decoded frames); one thread is
   byte-stable (verified by generating twice).
+* **A/V-offset variants** (`film24_av0`, `film24_avm50`, `film24_av150`; FX-02): the identical edit with only the
+  audio plan changed (total lag 0, +50 ms = audio early, −150 ms); test_synthetic.py accepts them, with the film24
+  xfails non-strict (not calibrated).
 
 **truth.json additions**: one segment per EDITOR CLIP (chains split at framing steps and at the start of a freeze;
 `time_line` ties the clips of one chain), `raw_in_seconds` = the picture in-point (n/30 exact, `raw_in_exact`,
