@@ -21,6 +21,18 @@ The tolerance makes exact timing ties (ffmpeg ``setpts=PTS/1.1`` resolving an ex
 editing apps rounding in floating point) feasible instead of splitting segments; frames whose
 Chebyshev slack is below ``TIE_SLACK`` (1e-4 frame) are reported as *timing-tie* frames: they may differ
 by one frame from the AE rule and are listed like ambiguous-identical frames.
+
+AE floor-rule safety (DESIGN §2.1, FX-10). Frame d of a layer changes its RAW frame where x + u d crosses an
+integer, i.e. at the BREAKPOINTS x = n - u d (every integer n). They are 1-periodic in x and cut the feasible
+interval into CELLS; every x inside one cell shows exactly the same RAW frame on every frame of the layer.
+The SLACK of a placement is the distance of x to the nearest breakpoint of ANY frame of the layer (binding or
+not) = min over frames of the distance of x + u d to the nearest integer. raw_in is therefore placed at the
+midpoint of the cell that maximises that minimum (``place_in_cells``) instead of the interval centre (which
+can coincide with a breakpoint of a non-binding frame). For rational rates the breakpoints live on a lattice:
+24000/1001 in 30 (u = 800/1001) has cells of 4/1001 frame around every 'cadence slip' (a 5-frame window with
+3 RAW advances); exact frames across a slip PIN raw_in to that cell (+-2/1001 frame = +-0.083 ms) -- maximal
+information, not weak evidence. ``exact_min_slack`` evaluates the slack with Fractions of the values
+actually written (9-decimal raw_in, AE's startTime / stretch).
 """
 from __future__ import annotations
 
@@ -286,16 +298,198 @@ def prefer_penalties(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], pl
     return i, j, w
 
 
+# ---------------------------------------------------------------------------------------------
+# AE floor-rule safety: breakpoint cells, max-min-slack placement, exact slack (FX-10)
+# ---------------------------------------------------------------------------------------------
+
+__all__ += ["SLACK_MERGE", "breakpoints_in", "place_in_cells", "cell_around", "place_raw_in", "layer_cell",
+            "exact_min_slack", "exact_line_slack", "float_min_slack"]
+
+SLACK_MERGE = 2 * TAU    # breakpoints closer than this (RAW frames) are one boundary (float noise between
+                         # abutting constraints, as best_subinterval's min_width)
+_CELL_WINDOW = 2.0       # half-width (frames) searched around the preferred point in a wide interval: the
+                         # breakpoints are 1-periodic, so this window holds a full copy of every cell
+
+
+def _residues(u: float, d: np.ndarray, round_rule: bool = False) -> np.ndarray:
+    """Sorted residues in [0, 1) of the breakpoints n - u*d (all integers n) of frames d -- with
+    ``round_rule`` also the round-to-nearest ones n + 1/2 - u*d -- near-duplicates (< SLACK_MERGE apart, also
+    across the wrap 1 == 0) merged."""
+    r = np.mod(-float(u) * np.asarray(d, dtype=np.float64).ravel(), 1.0)
+    if round_rule:
+        r = np.concatenate([r, np.mod(r + 0.5, 1.0)])
+    r = np.sort(r)
+    if r.size == 0:
+        return r
+    r = r[np.concatenate([[True], np.diff(r) > SLACK_MERGE])]
+    if r.size > 1 and r[0] + 1.0 - r[-1] <= SLACK_MERGE:
+        r = r[:-1]
+    return r
+
+
+def breakpoints_in(a: float, b: float, u: float, d: Any, round_rule: bool = False) -> np.ndarray:
+    """Sorted floor-rule (with ``round_rule`` also round-to-nearest) breakpoints (local frame units) of frames
+    ``d`` strictly inside (a, b); points within SLACK_MERGE of a or b are the edge itself."""
+    a, b = float(a), float(b)
+    r = _residues(u, np.asarray(d), round_rule)
+    if r.size == 0 or not b > a:
+        return np.zeros(0)
+    periods = np.arange(math.floor(a), math.floor(b) + 1, dtype=np.float64)
+    bp = (periods[:, None] + r[None, :]).ravel()
+    return np.sort(bp[(bp > a + SLACK_MERGE) & (bp < b - SLACK_MERGE)])
+
+
+def place_in_cells(a: float, b: float, u: float, d: Any, target: float | None = None, margin: Any = None,
+                   round_rule: bool = False) -> dict:
+    """Max-min-slack placement of x inside the allowed interval [a, b] (local frame units).
+
+    The floor-rule breakpoints of frames ``d`` (every frame of the layer, binding or not) cut [a, b] into
+    cells; a and b count as cell edges (they are breakpoints of the binding frames, or the round-rule /
+    preferred / preserved-frames limits the caller keeps). ``round_rule`` (the allowed interval is the
+    floor∩round set): the round-to-nearest breakpoints cut cells too, so the placement holds under either
+    rule (it is never ON a round-rule boundary). Without ``target``: x = the midpoint of the widest
+    cell (ties: nearest the centre of [a, b], then leftmost). With ``target`` (D3, the audio in-point): the
+    cell containing the target, or the nearest one (ties: wider, then leftmost), and x = the target clamped
+    to ``margin(cell width)`` from its edges (``margin`` None: the midpoint; never more than the half-width).
+
+    Returns {x, lo, hi (the chosen cell), half (its half-width = the slack x keeps from the cell edges at
+    the midpoint), best_half (the widest cell's half-width: the most slack any x in [a, b] can have),
+    pinned (no breakpoint inside [a, b]: the constraints pin x to ONE cell), n_breaks (inside the searched
+    window)}."""
+    a, b = float(a), float(b)
+    if not b > a:
+        x = (a + b) / 2.0
+        return {"x": x, "lo": a, "hi": b, "half": 0.0, "best_half": 0.0, "pinned": True, "n_breaks": 0}
+    c = (a + b) / 2.0 if target is None else min(max(float(target), a), b)
+    wa, wb = a, b
+    if b - a > 2.0 * _CELL_WINDOW + 1.0:
+        wa, wb = max(a, c - _CELL_WINDOW), min(b, c + _CELL_WINDOW)
+        if wb - wa < 2.0 * _CELL_WINDOW:            # the preferred point near an edge: keep the window 4 wide
+            wa, wb = (a, a + 2.0 * _CELL_WINDOW) if wa == a else (b - 2.0 * _CELL_WINDOW, b)
+    bp = breakpoints_in(wa, wb, u, d, round_rule)
+    edges = np.concatenate([[wa], bp, [wb]])
+    lo, hi = edges[:-1], edges[1:]
+    if wa > a and lo.size > 1:                      # a piece cut by the window is a partial copy of a cell
+        lo, hi = lo[1:], hi[1:]
+    if wb < b and lo.size > 1:
+        lo, hi = lo[:-1], hi[:-1]
+    half = (hi - lo) / 2.0
+    best = float(half.max())
+    hq = np.round(half * 1e9)                       # equal cells differ by float noise only
+    if target is None:
+        mid = (lo + hi) / 2.0
+        i = int(np.lexsort((lo, np.abs(mid - c), -hq))[0])
+    else:
+        t = float(target)
+        dist = np.maximum(0.0, np.maximum(lo - t, t - hi))
+        i = int(np.lexsort((lo, -hq, dist))[0])
+    cl, ch, h = float(lo[i]), float(hi[i]), float(half[i])
+    if target is None:
+        x = (cl + ch) / 2.0
+    else:
+        m = h if margin is None else min(h, max(0.0, float(margin(ch - cl))))
+        x = min(max(float(target), cl + m), ch - m)
+    return {"x": x, "lo": cl, "hi": ch, "half": h, "best_half": best,
+            "pinned": bool(bp.size == 0 and wa == a and wb == b), "n_breaks": int(bp.size)}
+
+
+def cell_around(x: float, u: float, d: Any) -> tuple[float, float]:
+    """The floor-rule breakpoint cell [lo, hi] (local frame units) of frames ``d`` that contains x (on a
+    breakpoint: the cell starting there)."""
+    bp = breakpoints_in(float(x) - 1.5, float(x) + 1.5, u, d)
+    left, right = bp[bp <= float(x)], bp[bp > float(x)]
+    return (float(left[-1]) if left.size else float(x) - 1.5), (float(right[0]) if right.size else float(x) + 1.5)
+
+
+def place_raw_in(interval_s: Sequence[float], comp_in: int, comp_out: int, v: float, comp_fps: Any, raw_fps: Any,
+                 target_s: float | None = None, margin: Any = None, round_rule: bool = False) -> dict:
+    """``place_in_cells`` in seconds for a whole stretch layer: every comp frame of [comp_in, comp_out), the
+    allowed raw_in interval ``interval_s`` = [a, b] seconds (e.g. raw_in_interval_both with ``round_rule``,
+    else raw_in_interval; for D3 also intersected with the preserved-frames range). Returns {raw_in (s),
+    cell ([lo, hi] s), half (frames), best_half (frames), pinned, n_breaks}."""
+    rf = float(Fraction(raw_fps))
+    u = float(v) * _ratio(comp_fps, raw_fps)
+    a_s, b_s = float(interval_s[0]), float(interval_s[1])
+    base = math.floor(a_s * rf)
+    d = np.arange(0, max(1, int(comp_out) - int(comp_in)), dtype=np.float64)
+    t = None if target_s is None else float(target_s) * rf - base
+    p = place_in_cells(a_s * rf - base, b_s * rf - base, u, d, t, margin, round_rule)
+    return {"raw_in": (base + p["x"]) / rf, "cell": [(base + p["lo"]) / rf, (base + p["hi"]) / rf],
+            "half": p["half"], "best_half": p["best_half"], "pinned": p["pinned"], "n_breaks": p["n_breaks"]}
+
+
+def layer_cell(raw_in_s: float, comp_in: int, comp_out: int, v: float, comp_fps: Any, raw_fps: Any) -> dict:
+    """The floor-rule breakpoint cell of EVERY frame of [comp_in, comp_out) that contains raw_in (seconds):
+    {cell ([lo, hi] s), half (frames) -- the most slack any raw_in showing exactly these frames can have}."""
+    rf = float(Fraction(raw_fps))
+    u = float(v) * _ratio(comp_fps, raw_fps)
+    base = math.floor(float(raw_in_s) * rf)
+    d = np.arange(0, max(1, int(comp_out) - int(comp_in)), dtype=np.float64)
+    lo, hi = cell_around(float(raw_in_s) * rf - base, u, d)
+    return {"cell": [(base + lo) / rf, (base + hi) / rf], "half": (hi - lo) / 2.0}
+
+
+def float_min_slack(x: float, u: float, d: Any) -> float:
+    """Float slack (frames) of local position x over frames d: min distance of x + u d to an integer."""
+    pos = float(x) + float(u) * np.asarray(d, dtype=np.float64)
+    fr = pos - np.floor(pos)
+    return float(np.minimum(fr, 1.0 - fr).min()) if fr.size else 0.5
+
+
+def _exact(x: Any) -> Fraction:
+    """The exact rational value of a written number (a float's binary value, a decimal string's value)."""
+    if isinstance(x, Fraction):
+        return x
+    if isinstance(x, str):
+        return Fraction(x)
+    if isinstance(x, (int, np.integer)):
+        return Fraction(int(x))
+    return Fraction(float(x))
+
+
+def exact_line_slack(p0: Any, step: Any, d0: int, d1: int) -> tuple[Fraction, int]:
+    """Exact minimum over integers d in [d0, d1) of the distance of p0 + step * d (RAW frame positions,
+    Fractions) to the nearest integer. Returns (slack, d) -- (1/2, d0) for an empty range."""
+    p0, step = _exact(p0), _exact(step)
+    den = math.lcm(p0.denominator, step.denominator)
+    a = p0.numerator * (den // p0.denominator)
+    s = step.numerator * (den // step.denominator)
+    best, arg = den, int(d0)                       # numerators over den; den = a distance of one frame
+    for dd in range(int(d0), int(d1)):
+        r = (a + s * dd) % den
+        m = min(r, den - r)
+        if m < best:
+            best, arg = m, dd
+            if m == 0:
+                break
+    if best == den:
+        return Fraction(1, 2), int(d0)
+    return Fraction(best, den), arg
+
+
+def exact_min_slack(raw_in: Any, v: Any, comp_in: int, k0: int, k1: int, comp_fps: Any, raw_fps: Any
+                    ) -> tuple[Fraction, int]:
+    """Exact AE floor-rule slack of a stretch segment: min over comp frames k in [k0, k1) of the distance of
+    raw_fps * (raw_in + v (k - comp_in) / comp_fps) to the nearest integer (RAW frames, Fraction), with
+    raw_in and v as WRITTEN (a float's exact binary value, e.g. the cutlist's 9-decimal seconds). Returns
+    (slack, k at the minimum)."""
+    rf, cf = Fraction(raw_fps), Fraction(comp_fps)
+    s, d = exact_line_slack(rf * _exact(raw_in), rf * _exact(v) / cf, int(k0) - int(comp_in), int(k1) - int(comp_in))
+    return s, int(comp_in) + d
+
+
 def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_in: int, v: float,
                  comp_fps: Any, raw_fps: Any, prefer: tuple[Sequence[int], Sequence[int]] | None = None,
                  penalties: tuple[Any, Any, Any] | None = None) -> dict:
     """Phase-solve raw_in (seconds) for a segment with its speed v fixed (the snapped speed).
 
     Chebyshev LP with u fixed: max t s.t. lo_k + t <= x + u d_k <= hi_k + 1 - t, -tau <= t <= 0.5
-    (closed form, see ``chebyshev_x``). raw_in = centre of the floor-rule feasible interval, or -- when
+    (closed form, see ``chebyshev_x``). The allowed interval is the floor-rule feasible interval, or -- when
     the set that ALSO satisfies round-to-nearest sampling (lo_k - 0.5 <= x + u d_k < hi_k + 0.5) is
-    non-empty (wider than 2 * TIE_SLACK) -- the centre of that overlap, so the result holds under
-    either rule.
+    non-empty (wider than 2 * TIE_SLACK) -- that overlap, so the result holds under either rule. raw_in is
+    the midpoint of the breakpoint cell of that interval with the most slack for EVERY frame from comp_in to
+    the last constraint frame (``place_in_cells``, FX-10; = the interval centre when no breakpoint lies
+    inside, e.g. all frames exact), never the bare centre.
 
     Soft ranges are tolerances, not evidence: when ``prefer`` = (plo, phi) (the MEASURED argmax range per
     frame, e.g. refine's pristine raw_lo/raw_hi) or explicit ``penalties`` = (i, j, w) (frame index into
@@ -320,6 +514,11 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
       data_cost       total penalty at raw_in (0 without prefer / penalties)
       ok              the constraints are feasible (t* >= -tau)
       used_both       raw_in was taken from interval_both
+      min_slack       floor-rule slack (frames) of raw_in over every frame comp_in .. last constraint
+      cell            [a, b] seconds: the breakpoint cell raw_in sits in (None when infeasible)
+      cell_width      its width (frames)
+      best_slack      the most slack (frames) any raw_in of the allowed interval has = half the widest cell
+      pinned          no breakpoint inside the allowed interval: the frames pin raw_in to ONE cell
     """
     d, lo_rel, hi_rel, base = _prep(ks, lo, hi, comp_in)
     rf = Fraction(raw_fps)
@@ -349,6 +548,14 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
     if ok and both_hi - both_lo > 2 * TIE_SLACK:
         x = (both_lo + both_hi) / 2.0
         used_both = True
+    # FX-10: not the interval centre (it can sit on a breakpoint of a non-binding frame) but the midpoint
+    # of the max-min-slack cell of EVERY frame from comp_in to the last constraint frame
+    span = np.arange(min(0.0, float(d.min())), float(d.max()) + 1.0)
+    cell = None
+    if ok:
+        cell = place_in_cells(both_lo if used_both else a_int, both_hi if used_both else b_int, u, span,
+                              round_rule=used_both)
+        x = cell["x"]
     pos = x + u * d
     fslack = np.minimum(pos - lo_rel, hi_rel + 1.0 - pos)
     tie_mask = fslack < TIE_SLACK
@@ -379,6 +586,11 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
         "u": u,
         "base": base,
         "x": x,
+        "min_slack": float_min_slack(x, u, span),
+        "cell": [sec(cell["lo"]), sec(cell["hi"])] if cell else None,
+        "cell_width": float(cell["hi"] - cell["lo"]) if cell else 0.0,
+        "best_slack": float(cell["best_half"]) if cell else 0.0,
+        "pinned": bool(cell["pinned"]) if cell else False,
     }
 
 

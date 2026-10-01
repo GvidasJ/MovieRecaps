@@ -598,10 +598,7 @@ def _warnings(ctx: Any) -> list[str]:
     nir = [s for s in cl.segments if s.type == "not_in_raw"]
     out.append("- NOT-IN-RAW ranges: " + (", ".join(f"{s.comp_in}–{s.comp_out - 1} ({timecode(s.comp_in, comp_fps)}–"
                                                      f"{timecode(s.comp_out, comp_fps)})" for s in nir) or "none"))
-    sens = [s for s in cl.segments if s.type == "raw" and s.time_mode != "remap" and (
-        s.ae_margin_ms is not None and s.ae_margin_ms < float(getattr(cfg, "ae_min_margin_ms", 1.0)) - 1e-6)]
-    out.append("- AE-rule-sensitive segments (tiny phase margin; use `--ae-time-mode frames` if AE is off by a frame): "
-               + (", ".join(f"S{s.id:02d} ({s.ae_margin_ms if s.ae_margin_ms is not None else '?'} ms)" for s in sens) or "none"))
+    out += ae_phase_lines(cl, cfg)
     nre = not_reproduced(getattr(ctx, "verify", None))
     if nre:
         out.append("- Frames not reproduced exactly (s9_2): " + "; ".join(nre))
@@ -660,6 +657,40 @@ def _warnings(ctx: Any) -> list[str]:
     errs = getattr(ctx, "errors", None) or []
     if errs:
         out += ["", "Stage errors:", ""] + [f"- {e.get('stage')}: {e.get('error')}" for e in errs]
+    return out
+
+
+def ae_phase_lines(cl: Any, cfg: Any) -> list[str]:
+    """AE floor-rule safety (DESIGN §7.3, FX-10), from the exact slack of every frame of each stretch segment
+    as written: cadence-pinned phases are INFORMATION ('phase pinned by cadence (±0.083 ms)': the measured
+    frames -- or the audio in-point -- fix raw_in inside one breakpoint cell; exported frame-exact while AE's
+    time resolution is unverified), real razor edges (``pipeline.ae_rule_sensitive``) one warning line."""
+    from .config import Config
+    from .pipeline import ae_phase_class, ae_rule_sensitive, phase_slack
+    cfg = cfg if cfg is not None else Config()
+    cf, rf = cl.comp_fps, cl.raw_fps
+    mode = str(getattr(cfg, "ae_time_mode", "auto") or "auto")
+    tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
+    pinned, risky = [], []
+    for s in cl.segments:
+        info = phase_slack(s, cf, rf)
+        if info is None:
+            continue
+        if ae_rule_sensitive(s, cfg, cf, rf):
+            risky.append(f"S{s.id:02d} ({info['slack_ms']:.6f} ms at frame {info['k']})")
+        elif ae_phase_class(info, cfg) == "pinned":
+            by = ("frames" if info["video_pinned"] else
+                  "audio in-point" if (s.audio or {}).get("phase_source") == "audio" else "frame-rate lattice")
+            pinned.append(f"S{s.id:02d} (±{info['slack_ms']:.3f} ms, {by})")
+    out = []
+    if pinned:
+        out.append(f"- Phase pinned by cadence (information, not a risk): {len(pinned)} segment(s) — "
+                   + ", ".join(pinned) + f" — raw_in is fixed inside one breakpoint cell of the {fps_str(rf)}-in-"
+                   f"{fps_str(cf)} cadence (maximal information); exported frame-exact (time-remap HOLD keys at "
+                   "j + 0.25) because After Effects' time resolution is unverified (s9_6)")
+    out.append(f"- AE-rule-sensitive segments (exact floor-rule slack below {tol:g} RAW frame although more was "
+               "possible" + (f", or kept in {mode} mode" if mode in ("stretch", "remap") else "") + "): "
+               + (", ".join(risky) if risky else "none"))
     return out
 
 

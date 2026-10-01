@@ -3,6 +3,7 @@ selection (setpts=(PTS-STARTPTS)/v with double arithmetic + truncation, then fps
 on common source rates, the AE floor rule, speed ranges, snapping, and the segment DP on 1-frame skips."""
 from __future__ import annotations
 
+import math
 from fractions import Fraction as F
 
 import numpy as np
@@ -364,3 +365,129 @@ def test_exact_speed_range_equals_highs():
             n_feas += 1
             assert a[0] == pytest.approx(b[0], abs=2e-6) and a[1] == pytest.approx(b[1], abs=2e-6)
     assert n_feas > 20
+
+
+# ---------------------------------------------------------------------------------------------------
+# FX-10: AE floor-rule safety -- breakpoint cells, max-min-slack placement, exact slack
+# ---------------------------------------------------------------------------------------------------
+
+R23976 = F(24000, 1001)
+U24 = R23976 / C30                                    # 800/1001 RAW frames per comp frame
+
+
+def _brute_slack(raw_in, v, comp_in, k0, k1, cf, rf):
+    best = None
+    for k in range(k0, k1):
+        p = rf * (F(raw_in) + F(v) * F(k - comp_in) / cf)
+        fl = p.numerator // p.denominator
+        s = min(p - fl, fl + 1 - p)
+        if best is None or s < best[0]:
+            best = (s, k)
+    return best
+
+
+def test_exact_min_slack_equals_brute_force_fractions():
+    rng = np.random.default_rng(4)
+    for _ in range(30):
+        rf = [R2997, R23976, F(25), F(60)][int(rng.integers(4))]
+        v = [1.0, 1.1, 0.5, 1 / 1.1][int(rng.integers(4))]
+        raw_in = round(float(rng.uniform(1, 600)), 9)
+        n = int(rng.integers(1, 120))
+        s, k = ps.exact_min_slack(raw_in, v, 10, 10, 10 + n, C30, rf)
+        assert (s, k) == _brute_slack(raw_in, v, 10, 10, 10 + n, C30, rf)
+    assert ps.exact_min_slack(1.0, 1.0, 0, 0, 1, C30, F(30))[0] == 0
+
+
+def _slip_cell(n: int) -> tuple[F, F]:
+    """A cadence-slip cell of n frames at 23.976 in 30: the breakpoint gap of width 4/1001 frame."""
+    bp = sorted({(-U24 * d) % 1 for d in range(n)})
+    for a, b in zip(bp, bp[1:]):
+        if b - a == F(4, 1001):
+            return a, b
+    raise AssertionError("no slip cell")
+
+
+@pytest.mark.parametrize("n", [12, 81])
+def test_slip_cell_pins_the_phase(n):
+    """u = 800/1001: exact frames across a cadence slip (a 5-frame window with 3 RAW advances) pin raw_in to
+    ONE breakpoint cell of 4/1001 frame; the placement is its midpoint, +-2/1001 frame = +-0.083 ms. That is
+    maximal information (the real run's 9 'AE-rule-sensitive 0.083333 ms' segments), reported as pinned."""
+    a, b = _slip_cell(n)
+    j0 = 5000
+    x_true = j0 + (a + b) / 2 - F(1, 8008)             # anywhere inside the cell
+    frames = [math.floor(x_true + U24 * d) for d in range(n)]
+    sol = ps.solve_raw_in(np.arange(100, 100 + n), frames, frames, 100, 1.0, C30, R23976)
+    assert sol["ok"] and sol["pinned"]
+    assert sol["cell_width"] == pytest.approx(4 / 1001, abs=1e-9)
+    assert sol["min_slack"] == pytest.approx(2 / 1001, abs=1e-9)
+    assert sol["best_slack"] == pytest.approx(2 / 1001, abs=1e-9)
+    assert sol["margin_ms"] == pytest.approx(2 / 24000 * 1000, abs=1e-9)          # 0.083333 ms
+    raw_in = round(sol["raw_in"], 9)
+    slack, _k = ps.exact_min_slack(raw_in, 1.0, 100, 100, 100 + n, C30, R23976)
+    assert abs(float(slack) - 2 / 1001) < 2e-8                                     # the 9-decimal raw_in as written
+    assert [ps.ae_frame(raw_in, 1.0, 100 + d, 100, C30, R23976) for d in range(n)] == frames
+    adv = [frames[d + 5] - frames[d] for d in range(n - 5)]                       # the slip: 3 advances in 5
+    assert min(adv) == 3 and max(adv) == 4
+
+
+def test_s32_replica_centre_on_a_breakpoint_is_moved_to_the_best_cell():
+    """The real run's S32 (k 592-596, v = 1, 23.976 in 30): k594 is ambiguous (RAW 1058 or 1059), so its
+    breakpoint is NOT an interval edge; the floor interval [1058258, 1058660]/24000 s has its centre exactly
+    on that breakpoint (x + u*2 = 1059 -> AE showed 1058 only through 8e-9 frame of 9-decimal rounding). The
+    max-min-slack placement keeps every exact frame and leaves >= 1/(4*1001) frame of slack on every frame."""
+    ks = np.arange(592, 596)
+    lo = np.array([1057, 1058, 1058, 1059])
+    hi = np.array([1057, 1058, 1059, 1059])
+    sol = ps.solve_raw_in(ks, lo, hi, 592, 1.0, C30, R23976)
+    a, b = sol["interval_floor"]
+    assert a == pytest.approx(1058258 / 24000, abs=1e-12) and b == pytest.approx(1058660 / 24000, abs=1e-12)
+    centre = round((a + b) / 2, 9)
+    assert centre == 44.102458333                                                   # the run's raw_in
+    s_old, k_old = ps.exact_min_slack(centre, 1.0, 592, 592, 596, C30, R23976)
+    assert k_old == 594 and float(s_old) < 1e-7                                     # razor edge
+    raw_in = round(sol["raw_in"], 9)
+    s_new, _k = ps.exact_min_slack(raw_in, 1.0, 592, 592, 596, C30, R23976)
+    assert float(s_new) >= 1 / (4 * 1001)
+    assert not sol["pinned"] and sol["best_slack"] == pytest.approx(sol["min_slack"], abs=1e-9)
+    for k, l_, h_ in zip(ks, lo, hi):                                               # exact frames unchanged
+        j = ps.ae_frame(raw_in, 1.0, int(k), 592, C30, R23976)
+        assert l_ <= j <= h_
+        if l_ == h_:
+            assert j == ps.ae_frame(centre, 1.0, int(k), 592, C30, R23976)
+
+
+def test_place_in_cells_widest_cell_target_margin_and_wide_window():
+    u = float(U24)
+    d = np.arange(12)
+    a, b = 0.0, 3.0
+    p = ps.place_in_cells(a, b, u, d)
+    edges = np.concatenate([[a], ps.breakpoints_in(a, b, u, d), [b]])
+    widths = np.diff(edges)
+    assert p["hi"] - p["lo"] == pytest.approx(widths.max()) and p["x"] == pytest.approx((p["lo"] + p["hi"]) / 2)
+    assert p["best_half"] == pytest.approx(widths.max() / 2) and not p["pinned"]
+    # a target inside a wide cell is kept; near an edge it is clamped to the margin
+    t = p["lo"] + 0.3 * (p["hi"] - p["lo"])
+    q = ps.place_in_cells(a, b, u, d, target=t, margin=lambda w: 0.05 * w)
+    assert q["x"] == pytest.approx(t)
+    q = ps.place_in_cells(a, b, u, d, target=p["lo"] + 1e-6, margin=lambda w: 0.05 * w)
+    assert q["x"] == pytest.approx(q["lo"] + 0.05 * (q["hi"] - q["lo"]))
+    # outside [a, b]: the nearest cell
+    q = ps.place_in_cells(a, b, u, d, target=-0.4, margin=lambda w: 0.05 * w)
+    assert q["lo"] == pytest.approx(a)
+    # a seconds-wide interval (static shot) gives the same result as a full enumeration around the target
+    big = ps.place_in_cells(10.0, 2000.0, u, d, target=1234.567, margin=lambda w: 0.05 * w)
+    small = ps.place_in_cells(1230.0, 1240.0, u, d, target=1234.567, margin=lambda w: 0.05 * w)
+    assert big["x"] == pytest.approx(small["x"], abs=1e-9) and big["lo"] == pytest.approx(small["lo"], abs=1e-9)
+    assert ps.place_in_cells(10.0, 2000.0, u, d)["best_half"] == pytest.approx(
+        ps.place_in_cells(0.0, 1.0, u, d)["best_half"], abs=1e-9)
+    # floor∩round (u = 1): the round-rule breakpoints cut too -> the quarter-frame point of the overlap
+    r = ps.place_in_cells(199.0, 201.5, 1.0, np.arange(30), round_rule=True)
+    assert r["x"] == pytest.approx(200.25) and r["half"] == pytest.approx(0.25)
+
+
+def test_layer_cell_and_place_raw_in_in_seconds():
+    iv = [1058258 / 24000, 1058660 / 24000]                                         # the S32 replica
+    p = ps.place_raw_in(iv, 592, 596, 1.0, C30, R23976)
+    c = ps.layer_cell(p["raw_in"], 592, 596, 1.0, C30, R23976)
+    assert c["cell"][0] == pytest.approx(p["cell"][0], abs=1e-12) and c["half"] == pytest.approx(p["half"], abs=1e-9)
+    assert iv[0] <= p["raw_in"] <= iv[1]

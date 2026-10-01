@@ -19,7 +19,10 @@
  *     current time (not 0) and with hostile render switches, so the JSX must set everything explicitly;
  *   - every array handed to the script is created in the script's (poisoned, ES3-like) realm;
  *   - File.exists / File.modified use the REAL file system (so a wrong relative path or a broken join
- *     is caught); only the saved .aep is virtual (the mock never writes a project file).
+ *     is caught); only the saved .aep is virtual (the mock never writes a project file); text files the
+ *     script writes (File.open("w") / write / writeln / close) are kept in the record's files_written;
+ *   - expressions: Property.valueAtTime(t, false) evaluates exactly one, thisLayer.sourceTime(time) (layer
+ *     time through Time Remap, the JSX's AE time check); any other sets expressionError, like AE.
  * Scenarios (run_mock.js): default | media_missing (the media files are reported missing, openDialog
  * returns null) | new_project_null | no_marker_property | quantize_time (startTime to 10 ms, stretch to
  * 1e-3 %) | fps_misread_down / fps_misread_up (AE reads the footage at rate * 1000/1001 or * 1001/1000)
@@ -98,7 +101,7 @@ function createMock(opts) {
 
   const rec = {
     record_type: 'ae_mock', scenario: scenario, jsx_path: jsxPath, status: 'running',
-    alerts: [], logs: [], mock_errors: [], clamps: [], dialogs: [], saved: [],
+    alerts: [], logs: [], mock_errors: [], clamps: [], dialogs: [], saved: [], files_written: {},
     calls: { newProject: 0, openDialog: 0, beginUndoGroup: 0, endUndoGroup: 0, importFile: 0, save: 0,
       openInViewer: 0, alert: 0 },
   };
@@ -266,7 +269,31 @@ function createMock(opts) {
     get parent() { return wrap(new FolderObj(path.dirname(this._p))); }
     toString() { return this._p; }
   }
-  class FileObj extends FsEntry { constructor(p) { super(p, 'File'); } }
+  // Text files the script writes (ae_time_check.txt): mode "w" only, kept in rec.files_written (path -> text).
+  class FileObj extends FsEntry {
+    constructor(p) { super(p, 'File'); this._mode = null; this._buf = ''; this._enc = 'ASCII'; this._lf = 'Unix'; }
+    get encoding() { return this._enc; }
+    set encoding(v) { this._enc = str(v, 'File.encoding'); }
+    get lineFeed() { return this._lf; }
+    set lineFeed(v) { this._lf = str(v, 'File.lineFeed'); }
+    open(mode) {
+      str(mode, 'File.open(mode)');
+      if (mode !== 'w') throw err('File.open("' + mode + '"): the mock only writes text files (mode "w")');
+      this._mode = 'w';
+      this._buf = '';
+      return true;
+    }
+    _needOpen(what) { if (this._mode === null) throw err('File.' + what + ': the file is not open'); }
+    write() { this._needOpen('write'); this._buf += Array.prototype.join.call(arguments, ''); return true; }
+    writeln() { this._needOpen('writeln'); this._buf += Array.prototype.join.call(arguments, '') + '\n'; return true; }
+    close() {
+      if (this._mode === null) return false;
+      rec.files_written[this._p] = this._buf;
+      savedPaths.set(this._p, Date.now());
+      this._mode = null;
+      return true;
+    }
+  }
   class FolderObj extends FsEntry {
     constructor(p) { super(p, 'Folder'); }
     get exists() { try { return fs.existsSync(this._p) || this._p === path.dirname(jsxPath); } catch (e) { return false; } }
@@ -319,6 +346,7 @@ function createMock(opts) {
       case 'ADBE Gaussian Blur 2-0001': return ['Blurriness', PV.OneD, 1, 0, { range: [0, 3000] }];
       case 'ADBE Gaussian Blur 2-0002': return ['Blur Dimensions', PV.OneD, 1, 1, { range: [1, 3], integer: true }];
       case 'ADBE Gaussian Blur 2-0003': return ['Repeat Edge Pixels', PV.OneD, 1, 0, { range: [0, 1], integer: true }];
+      case 'ADBE Slider Control-0001': return ['Slider', PV.OneD, 1, 0, { range: [-1e6, 1e6] }];
       case 'ADBE Marker': return ['Marker', PV.MARKER, 0, null, { marker: true }];
       default: return null;
     }
@@ -340,6 +368,9 @@ function createMock(opts) {
       this._parent = parent;
       this._compTime = !!compTime;
       this._touched = false;
+      this._expr = '';
+      this._exprEnabled = false;
+      this._exprError = '';
     }
     _what() { return 'Property "' + this._mn + '"'; }
     _lt(t) {
@@ -418,7 +449,40 @@ function createMock(opts) {
       if (ts.length !== vs.length) throw err(this._what() + '.setValuesAtTimes: ' + ts.length + ' times but ' + vs.length + ' values');
       for (let i = 0; i < ts.length; i++) this._addKey(ts[i], vs[i]);
     }
-    valueAtTime(t) { num(t, this._what() + '.valueAtTime'); return this.value; }
+    // valueAtTime(t, false) evaluates the property's expression; the mock knows exactly one,
+    // thisLayer.sourceTime(time) (the JSX's AE time check); anything else sets expressionError like AE does
+    valueAtTime(t, preExpression) {
+      num(t, this._what() + '.valueAtTime');
+      if (preExpression !== undefined) bool(preExpression, this._what() + '.valueAtTime(preExpression)');
+      if (this._expr !== '' && this._exprEnabled && preExpression === false) {
+        const L = this._owner;
+        if (this._expr.replace(/\s+/g, '') === 'thisLayer.sourceTime(time)' && L instanceof AVLayer) {
+          this._exprError = '';
+          return L._sourceTime(t);
+        }
+        this._exprError = 'AE mock: unsupported expression "' + this._expr + '"';
+      }
+      return this.value;
+    }
+    get expression() { return this._expr; }
+    set expression(v) { this._expr = str(v, this._what() + '.expression'); this._exprEnabled = this._expr !== ''; this._exprError = ''; }
+    get expressionEnabled() { return this._exprEnabled; }
+    set expressionEnabled(v) { this._exprEnabled = bool(v, this._what() + '.expressionEnabled'); }
+    get expressionError() { return this._exprError; }
+    get canSetExpression() { return !this._opt.marker; }
+    // the keyed value at LAYER time lt (LINEAR / HOLD out-interpolation; held outside the keys)
+    _valueAtLT(lt) {
+      const ks = this._keys;
+      if (!ks.length) return this._value;
+      let i = -1;
+      for (let q = 0; q < ks.length; q++) if (ks[q].lt <= lt + 1e-9) i = q;
+      if (i < 0) return ks[0].value;
+      if (i >= ks.length - 1) return ks[ks.length - 1].value;
+      if (ks[i].outInterp === 'HOLD') return ks[i].value;
+      const t0 = ks[i].lt, t1 = ks[i + 1].lt;
+      if (t1 <= t0) return ks[i + 1].value;
+      return ks[i].value + (lt - t0) / (t1 - t0) * (ks[i + 1].value - ks[i].value);
+    }
     get numKeys() { return this._keys.length; }
     keyTime(i) { return this._ct(this._keys[this._needKeys(i, 'keyTime')].lt); }
     keyValue(i) { const v = this._keys[this._needKeys(i, 'keyValue')].value; return Array.isArray(v) ? carr(v) : v; }
@@ -506,16 +570,26 @@ function createMock(opts) {
     get inverted() { return this._inverted; }
     set inverted(v) { this._inverted = bool(v, 'Mask.inverted'); }
   }
+  // effect matchName -> [display name, parameter matchNames (1-based by position)]
+  const EFFECT_PARAMS = {
+    'ADBE Gaussian Blur 2': ['Gaussian Blur', ['ADBE Gaussian Blur 2-0001', 'ADBE Gaussian Blur 2-0002', 'ADBE Gaussian Blur 2-0003']],
+    'ADBE Slider Control': ['Slider Control', ['ADBE Slider Control-0001']],
+  };
   class EffectGroup extends PropertyGroup {
     constructor(owner, mn, parent) {
-      super(owner, mn, 'Gaussian Blur', ['ADBE Gaussian Blur 2-0001', 'ADBE Gaussian Blur 2-0002', 'ADBE Gaussian Blur 2-0003'], parent);
+      super(owner, mn, EFFECT_PARAMS[mn][0], EFFECT_PARAMS[mn][1], parent);
       this._cls = 'Effect';
       this._enabled = true;
     }
     get enabled() { return this._enabled; }
     set enabled(v) { this._enabled = bool(v, 'Effect.enabled'); }
+    remove() {
+      const a = this._parent._items;
+      if (a.indexOf(this) < 0) throw err('Effect.remove(): the effect was already removed');
+      a.splice(a.indexOf(this), 1);
+    }
   }
-  const EFFECTS = new Set(['ADBE Gaussian Blur 2']);
+  const EFFECTS = new Set(Object.keys(EFFECT_PARAMS));
   class IndexedGroup {
     constructor(owner, mn, display, kind) {
       this._cls = 'PropertyGroup';
@@ -942,6 +1016,11 @@ function createMock(opts) {
       const c = this._clamp(v, 'outPoint');
       if (c <= this._in) throw err('AVLayer.outPoint ' + c + ' must be > inPoint ' + this._in + ' (layer "' + this._name + '")');
       this._out = c;
+    }
+    // the expression sourceTime(t): layer time ((t - startTime) * 100 / stretch), through Time Remap if enabled
+    _sourceTime(t) {
+      const lt = (t - this._startTime) * 100 / this._stretch;
+      return this._remap ? this._remapProp._valueAtLT(lt) : lt;
     }
     get canSetTimeRemapEnabled() { return this._kind !== 'solid'; }
     get timeRemapEnabled() { return this._remap; }

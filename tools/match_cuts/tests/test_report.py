@@ -185,7 +185,10 @@ def test_report_renders_every_section(tmp_path):
     assert "Ambiguous-identical frames (neighbouring RAW frames identical): 2" in md
     assert "Timing-tie frames (AE floor/round may differ by one frame): 1" in md
     assert "NOT-IN-RAW ranges: 150–179" in md
-    assert "AE-rule-sensitive segments" in md and "S05 (0.1 ms)" in md
+    # FX-10: the 1.1x layer's phase is fixed by the 29.97-in-30 lattice (cells of ~1/91 frame): information
+    assert ("Phase pinned by cadence (information, not a risk): 1 segment(s) — S05 (±0.092 ms, frame-rate lattice)"
+            in md)
+    assert "AE-rule-sensitive segments (exact floor-rule slack below 0.01 RAW frame although more was possible): none" in md
     assert "pitch-preserved speed change" in md and "compare.mp4 took long" in md and "S8 EDL: ValueError: boom" in md
     # verification details, AE how-to, outputs, timings
     assert "| 0.95-0.98 | 12 |" in md and "pitch_preserved" in md and "[x] MAIN comp created" in md

@@ -29,7 +29,9 @@ class Config:
     force_conform: bool = False            # conform RAW even if AE-safe (testing)
     conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
     ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
-    ae_min_margin_ms: float = 1.0          # phase margin below which a segment is "AE-rule-sensitive"
+    ae_slack_tol_frames: float = 0.01      # exact AE floor-rule slack (RAW frames; min over EVERY frame of a layer, from the
+                                           # values written) below which --ae-time-mode auto exports the layer frame-exact
+                                           # (HOLD keys at j + 0.25) -- AE's time resolution is unverified until s9_6 (FX-10)
     run_ae: bool = True                    # open After Effects (when installed) to run the JSX and save the .aep
     ae_timeout_s: float = 600.0            # how long to wait for After Effects to save recreated_edit.aep
     conform_h264_preset: str = "veryfast"  # libx264 preset for raw_ae.mp4 (RAW > 10 min or conform_codec=h264)
@@ -234,7 +236,7 @@ class Config:
         d = self.to_dict()
         for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
-                  "ae_time_mode", "ae_min_margin_ms", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
+                  "ae_time_mode", "ae_slack_tol_frames", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",

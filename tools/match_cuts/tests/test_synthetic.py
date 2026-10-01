@@ -397,6 +397,30 @@ def test_ae_simulated_frames_equal_truth(e2e, cutlist):
                             ["seg", "kind", "k", "truth", "AE", "diff", "raw_in_s", "speed"], rows)
 
 
+def test_ae_plan_survives_start_time_error(e2e):
+    """FX-10 (DESIGN §7.3): every stretch / remap layer of the AE plan keeps an exact floor-rule slack of at
+    least ae_slack_tol_frames on every frame (layers below it were exported frame-exact), so simulate_ae with
+    every startTime +-1e-6 s shows identical RAW frames on every layer."""
+    from match_cuts import export_ae
+    from match_cuts.config import Config
+    plan = json.loads(_need(e2e, "ae_plan.json", "work").read_text())
+    tol = Config().ae_slack_tol_frames
+    low = [[L["id"], L["timeMode"], L.get("minSlack"), L.get("minSlackK")] for L in plan["layers"]
+           if L["kind"] == "raw" and L["timeMode"] in ("stretch", "remap") and float(L.get("minSlack", 0.0)) < tol]
+    assert not low, _table(f"stretch / remap layers with an exact slack below {tol} RAW frame:",
+                           ["layer", "mode", "min slack", "at MAIN frame"], low)
+    base = export_ae.raw_frames_by_layer(export_ae.simulate_ae(plan))
+    assert base
+    rows = []
+    for off in (1e-6, -1e-6):
+        got = export_ae.raw_frames_by_layer(export_ae.simulate_ae(plan, start_offset_s=off))
+        for lid in sorted(set(base) | set(got)):
+            if got.get(lid) != base.get(lid):
+                diff = [K for K in base.get(lid, {}) if got.get(lid, {}).get(K) != base[lid][K]]
+                rows.append([off, lid, diff[:8]])
+    assert not rows, _table("simulate_ae changes with startTime +-1e-6 s:", ["offset s", "layer", "frames"], rows)
+
+
 def _ae_check_part(s92: dict, src: str) -> dict | None:
     d = s92.get(src)
     return d if isinstance(d, dict) else None

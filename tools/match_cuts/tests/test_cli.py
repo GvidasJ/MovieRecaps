@@ -349,7 +349,7 @@ def test_solve_segment_phase_fills_fields_and_drops_outliers(monkeypatch):
     assert s.raw_in_frame == 200 and s.raw_out_frame == 229 and s.time_mode == "stretch"
     assert s.raw_in_interval == [pytest.approx(200 / 30), pytest.approx(201 / 30)]
     assert s.raw_in_seconds == pytest.approx(200.25 / 30)          # centre of floor ∩ round
-    assert s.ae_margin_ms == pytest.approx(0.5 / 30 * 1000)
+    assert s.ae_margin_ms == pytest.approx(0.25 / 30 * 1000)          # exact floor-rule slack of every frame (FX-10)
     assert not warns
     fm.raw[12] = fm.raw_lo[12] = fm.raw_hi[12] = fm.soft_lo[12] = fm.soft_hi[12] = 250
     s2 = Segment(2, "raw", 0, 30, speed=1.0)
@@ -365,14 +365,13 @@ def test_solve_segment_phase_fills_fields_and_drops_outliers(monkeypatch):
         setattr(fm2, col, t2)
     warns = pipeline.solve_segment_phase(s3, fm2, F30, F30, Config(), null_dlog(), phase)
     # no floor-and-round raw_in alone is not a risk (AE samples with the floor rule): no per-segment warning;
-    # the final, aggregated check flags it only when the floor margin is below ae_min_margin_ms
+    # the final, aggregated check flags it only for a real razor edge (FX-10: exact slack of every frame)
     assert s3.raw_in_interval_both is None
     assert not any("AE-rule-sensitive" in w for w in warns)
-    agg = pipeline.flag_ae_rule_sensitive([s3], Config())
-    if s3.ae_margin_ms < Config().ae_min_margin_ms:
-        assert len(agg) == 1 and "S" in agg[0] and "--ae-time-mode frames" in agg[0] and "AE-rule-sensitive" in s3.notes
-    else:
-        assert agg == [] and "AE-rule-sensitive" not in (s3.notes or "")
+    agg = pipeline.flag_ae_rule_sensitive([s3], Config(), F30, F30)
+    info = pipeline.phase_slack(s3, F30, F30)
+    assert pipeline.ae_phase_class(info, Config()) == "ok" and info["slack_frames"] >= 0.01
+    assert agg == [] and "AE-rule-sensitive" not in (s3.notes or "")
     assert s3.raw_in_interval[0] <= s3.raw_in_seconds <= s3.raw_in_interval[1]
     assert [phase.ae_frame(s3.raw_in_seconds, 1.1, k, 0, F30, F30) for k in range(30)] == t2.tolist()
     # remap segments take raw_in from their keys
@@ -687,7 +686,8 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     segs = cl["segments"]
     assert [s["comp_in"] for s in segs] == [0, 12, 20, 26]
     assert segs[0]["raw_in_frame"] == 20 and segs[0]["raw_in_seconds"] == pytest.approx(20.25 / 30, abs=1e-9)
-    assert segs[0]["raw_in_interval"] == [pytest.approx(20 / 30), pytest.approx(21 / 30)] and segs[0]["ae_margin_ms"] > 16
+    assert segs[0]["raw_in_interval"] == [pytest.approx(20 / 30), pytest.approx(21 / 30)]
+    assert segs[0]["ae_margin_ms"] == pytest.approx(0.25 / 30 * 1000, abs=1e-6)     # exact slack (FX-10)
     assert segs[2]["label"].startswith("MISSING - not in RAW") and segs[2]["raw_in_seconds"] is None
     assert set(cl["provenance"]["timings"]) >= {"S0 env", "S2 probe+conform", "S9 verify", "total"}
     assert cl["provenance"]["input_hashes"]["competitor"] == file_hash(clips["portrait"])
@@ -787,13 +787,17 @@ def test_segment_phase_solution_is_adopted_and_validated(monkeypatch):
     fm.status = np.full(20, Status.MATCH, np.int8)
     for col in ("raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi"):
         setattr(fm, col, truth)
-    # segment.py already solved (e.g. with blend-frame constraints the FrameMap cannot hold): kept as is
+    # segment.py already solved (e.g. with blend-frame constraints the FrameMap cannot hold): its intervals are
+    # kept; raw_in is re-placed inside them at the max-min-slack cell midpoint of EVERY frame (FX-10)
     s = Segment(1, "raw", 0, 20, speed=1.0, raw_in_seconds=(300 + 0.4) / 30 + 1e-12,
                 raw_in_interval=[300 / 30, 301 / 30], raw_in_interval_both=[300 / 30, 300.5 / 30], ae_margin_ms=13.3)
     dl_entries = []
     dlog = types.SimpleNamespace(record=lambda *a, **k: dl_entries.append((a, k)))
     warns = pipeline.solve_segment_phase(s, fm, F30, F30, Config(), dlog, phase)
-    assert s.raw_in_seconds == pytest.approx(300.4 / 30, abs=1e-9) and s.raw_in_seconds == round(s.raw_in_seconds, 9)
+    assert s.raw_in_seconds == pytest.approx(300.25 / 30, abs=1e-9) and s.raw_in_seconds == round(s.raw_in_seconds, 9)
+    assert s.raw_in_interval == [pytest.approx(300 / 30), pytest.approx(301 / 30)]
+    assert s.ae_margin_ms == pytest.approx(0.25 / 30 * 1000, abs=1e-6)
+    assert dl_entries[-1][1]["ae_phase"] == "ok" and dl_entries[-1][1]["ae_slack_frames"] == pytest.approx(0.25)
     assert s.raw_in_frame == 300 and s.raw_out_frame == 319 and not warns
     assert dl_entries[-1][1]["source"] == "segment" and dl_entries[-1][1]["violations"] == []
     # a raw_in that contradicts the FrameMap is kept but the frames are listed
@@ -881,9 +885,9 @@ def _solved(seg: Segment, fm: FrameMap, cf: Fraction, rf: Fraction) -> Segment:
 
 
 def test_audio_informed_phase_sign_and_clamping():
-    """D3 (REQ-1 / F7): raw_in := raw_in + v * lag (lag_ms > 0 = rebuilt audio late = raw_in too small),
-    clamped into floor∩round with a max(1 ms, min(5 % of the width, 5 % of a RAW frame)) margin, never
-    changing a matched frame."""
+    """D3 (REQ-1 / F7, FX-10): raw_in := raw_in + v * lag (lag_ms > 0 = rebuilt audio late = raw_in too
+    small), placed in the breakpoint cell of floor∩round with a margin of max(5 % of the cell,
+    ae_slack_tol_frames) -- in cells, never integer ms -- never changing a matched frame."""
     from match_cuts import phase_solve
     cf = rf = F30
     fm = _phase_fm(30, 200)
@@ -907,13 +911,16 @@ def test_audio_informed_phase_sign_and_clamping():
     assert s.ae_margin_ms == pytest.approx((old + 0.003 - 200 / 30) * 1000, abs=1e-5)
     s, (old, frames), _, _ = run(-3.0)                                # rebuilt early -> earlier
     assert s.raw_in_seconds == pytest.approx(old - 0.003, abs=1e-9)
-    # NLE in-point at the frame boundary: the audio asks for the lower bound; clamped 1 ms inside
+    # NLE in-point at the frame boundary: the audio asks for the lower bound; clamped 5 % of the 0.5-frame
+    # floor∩round cell inside (0.833 ms at 30p; formerly a fixed 1 ms)
+    m = pipeline.audio_phase_margin(0.5, cfg.ae_slack_tol_frames) / 30
+    assert m == pytest.approx(0.025 / 30)
     s, (old, frames), _, _ = run(-8.333)
-    assert s.raw_in_seconds == pytest.approx(200 / 30 + 0.001, abs=3e-9)
-    assert s.ae_margin_ms >= 1.0 and "AE-rule-sensitive" not in (s.notes or "")   # rounding never eats the margin
+    assert s.raw_in_seconds == pytest.approx(200 / 30 + m, abs=3e-9)
+    assert s.ae_margin_ms == pytest.approx(m * 1000, abs=2e-6) and "AE-rule-sensitive" not in (s.notes or "")
     s, _, _, _ = run(+14.0)                    # outside by 5.67 ms (<= the 10 ms tolerance): upper bound - margin
-    assert s.raw_in_seconds == pytest.approx(200.5 / 30 - 0.001, abs=3e-9)
-    assert s.raw_in_interval_both[1] - s.raw_in_seconds >= 0.001
+    assert s.raw_in_seconds == pytest.approx(200.5 / 30 - m, abs=3e-9)
+    assert s.raw_in_interval_both[1] - s.raw_in_seconds >= m - 1e-9
     # far outside (> tolerance): the audio says nothing about the phase -> raw_in never moves (the AE
     # margin is not shrunk towards an edge the audio does not reach); ONE run-level warning lists them
     s, (old, _), moved, warns = run(+50.0)
@@ -927,8 +934,10 @@ def test_audio_informed_phase_sign_and_clamping():
         s11.raw_in_interval_both[1] - s11.raw_in_interval_both[0]
     s, (old, frames), _, _ = run(+1.0, speed=1.1, fmap=fm11)
     lo_b, hi_b = (s11.raw_in_interval_both or s11.raw_in_interval)
-    m = max(0.001, min(0.05 * width, 0.05 / 30))
-    assert m == pipeline.audio_phase_margin_s(width, rf, cfg.ae_min_margin_ms)
+    # 1.1x at 30p: the breakpoints of the 30 frames are 0.1 frame apart, so the interval is ONE cell
+    assert width * 30 <= 0.1 + 1e-6
+    m = pipeline.audio_phase_margin(width * 30, cfg.ae_slack_tol_frames) / 30
+    assert m == pytest.approx(max(0.05 * width, (0.01 + 1e-6) / 30))
     assert s.raw_in_seconds == pytest.approx(min(max(old + 1.1 * 0.001, lo_b + m), hi_b - m), abs=2e-9)
     assert [phase_solve.ae_frame(s.raw_in_seconds, 1.1, k, 0, cf, rf) for k in range(30)] == frames
     # weak correlation / an audio exception / a replaced track: the video phase stays
@@ -1008,12 +1017,16 @@ def test_audio_phase_same_rate_24p_nle_inpoint_and_static_shot(monkeypatch, tmp_
     assert abs(s1.audio["lag_ms_video"]) > 10.0
     assert s1.audio["phase_source"] == "audio" and abs(s1.audio["lag_ms"]) < 3.0 and s1.audio["corr"] >= 0.8
     both_w = s1.raw_in_interval_both[1] - s1.raw_in_interval_both[0]
-    assert abs(s1.raw_in_seconds - float(Fraction(j1) / fps)) <= pipeline.audio_phase_margin_s(both_w) + 1e-6
-    assert pipeline.audio_phase_margin_s(both_w) == pytest.approx(0.05 * both_w)     # 5 % of 20.85 ms > 1 ms
+    m = pipeline.audio_phase_margin(both_w * float(fps), Config().ae_slack_tol_frames) / float(fps)
+    assert m == pytest.approx(0.05 * both_w)          # 5 % of the 0.5-frame floor∩round cell = 1.04 ms (FX-10)
+    assert abs(s1.raw_in_seconds - float(Fraction(j1) / fps)) <= m + 1e-6
     assert [phase_solve.ae_frame(s1.raw_in_seconds, 1.0, k, 0, fps, fps) for k in range(n1)] == list(range(j1, j1 + n1))
-    # S2: static shot; the audio places the in-point
+    # S2: static shot; the audio places the in-point -- in its breakpoint cell, the cell margin away from the
+    # frame boundary the in-point sits on (FX-10: not ON it, where every frame of the layer would be at a
+    # boundary; same 0.5-frame floor∩round cells as S1)
     assert s2.audio["phase_source"] == "audio" and abs(s2.audio["lag_ms"]) < 3.0 and s2.audio["exception"] is None
-    assert abs(s2.raw_in_seconds - float(Fraction(j2) / fps)) < 0.0005
+    assert abs(s2.raw_in_seconds - float(Fraction(j2) / fps)) <= m + 0.0005
+    assert pipeline.phase_slack(s2, fps, fps)["slack_frames"] >= Config().ae_slack_tol_frames
     assert "wide audio search" in s2.notes
     assert s2.raw_in_interval_both[0] < s2.raw_in_seconds < s2.raw_in_interval_both[1]
     for k in range(n1, 2 * n1):
@@ -1471,7 +1484,10 @@ def test_audio_phase_static_only_edit_is_not_mistaken_for_replaced_audio(monkeyp
     s = segs[0]
     assert s.audio["phase_source"] == "audio" and abs(s.audio["lag_ms"]) < 3.0
     assert audio_result["status"] == "ok" and s.audio["exception"] is None
-    assert abs(s.raw_in_seconds - float(Fraction(j2) / fps)) < 0.0005
+    # on the in-point up to the cell margin (5 % of the 0.5-frame floor∩round cell, FX-10)
+    m = pipeline.audio_phase_margin(0.5, Config().ae_slack_tol_frames) / float(fps)
+    assert abs(s.raw_in_seconds - float(Fraction(j2) / fps)) <= m + 0.0005
+    assert pipeline.phase_slack(s, fps, fps)["slack_frames"] >= Config().ae_slack_tol_frames
 
 
 @pytest.mark.parametrize("run_len", [180, 900])
@@ -1503,9 +1519,14 @@ def test_audio_phase_static_shot_inpoint_on_the_interval_edge(run_len):
     dlog = types.SimpleNamespace(record=lambda st, dec, **k: recs.append((st, dec, k)))
     moved, warns = pipeline.audio_informed_phase([seg], res, fm, comp_y, raw_y, sr, cf, rf, Config(), dlog)
     assert moved == [1] and not warns and seg.audio["phase_source"] == "audio"
-    margin = pipeline.audio_phase_margin_s(hi - lo, rf, Config().ae_min_margin_ms)
-    assert margin == pytest.approx(0.05 / float(rf)) and margin < 0.002         # 5 % of a frame, not of 4-28 s
+    # FX-10: the margin is relative to the BREAKPOINT CELL the in-point lies in, not to the 4-28 s interval;
+    # at 29.97 in 30 the 60 frames' breakpoints sit 1/1001 frame apart right after a frame boundary, so the
+    # in-point lands in a cadence-narrow cell (its midpoint): pinned by the audio, exported frame-exact
     assert 0.0 <= seg.raw_in_seconds - true_in <= 0.002
+    info = pipeline.phase_slack(seg, cf, rf)
+    assert info["cell_ms"] == pytest.approx(1000.0 / 1001 / float(rf), rel=1e-3)
+    assert info["slack_frames"] == pytest.approx(0.5 / 1001, rel=1e-3)
+    assert pipeline.ae_phase_class(info, Config()) == "pinned" and not pipeline.ae_rule_sensitive(seg, Config(), cf, rf)
     rebuilt = audio_align.resample_at(raw_y, (seg.raw_in_seconds + np.arange(comp_y.size) / sr) * sr)
     lag, peak = audio_align.xcorr_lag(comp_y, rebuilt, sr, 2.0)                   # verify c5's +-2 s search
     assert abs(lag) * 1000.0 < 3.0 and peak > 0.9
@@ -1558,7 +1579,8 @@ def test_readme_usage_exit_codes_match_d5():
 def test_design_contract_crossfade_keying_and_d3_margin():
     """Review AE2-4 / R2-2: DESIGN.md (the contract every module follows) states the crossfade keying
     export_ae implements -- the UPPER layer of the pair is keyed, an incoming MAIN-level (D1) layer
-    RISING -- and the D3 margin rule pipeline.audio_phase_margin_s implements."""
+    RISING -- and the D3 margin rule pipeline.audio_phase_margin implements (FX-10: in breakpoint cells,
+    never integer milliseconds)."""
     design = (_TOOL_DIR / "DESIGN.md").read_text(encoding="utf-8")
     flat = " ".join(line.strip().lstrip("#").strip() for line in design.splitlines())
     assert "ONLY the upper (outgoing) layer A is keyed" not in flat and "B stays 100 %" not in flat
@@ -1567,13 +1589,12 @@ def test_design_contract_crossfade_keying_and_d3_margin():
     d1 = flat[flat.index("**D1 Per-period layout.**"):flat.index("**D2 Box refinement")]
     assert "keys B rising" in d1 and "UPPER layer of the pair is keyed" in d1
     d3 = flat[flat.index("**D3 Audio-informed phase.**"):flat.index("**D4 Verification")]
-    assert "max(ae_min_margin_ms, min(5 % of its width, 5 % of a RAW frame))" in d3
-    assert "max(1 ms, 5 % of its width)" not in d3
+    assert "min(cell / 2, max(5 % of the cell, ae_slack_tol_frames))" in d3
+    assert "max(ae_min_margin_ms" not in d3 and "max(1 ms, 5 % of its width)" not in d3
     assert pipeline.AUDIO_PHASE_MARGIN_FRAC == 0.05
-    rf = Fraction(30000, 1001)
-    assert pipeline.audio_phase_margin_s(4.0, rf, 1.0) == pytest.approx(0.05 / float(rf))     # wide: 5 % of a frame
-    assert pipeline.audio_phase_margin_s(0.004, rf, 1.0) == pytest.approx(0.001)              # the 1 ms floor
-    assert pipeline.audio_phase_margin_s(0.03, rf, 1.0) == pytest.approx(0.0015)              # 5 % of the width
+    assert pipeline.audio_phase_margin(0.5, 0.01) == pytest.approx(0.025)               # 5 % of the cell
+    assert pipeline.audio_phase_margin(0.1, 0.01) == pytest.approx(0.01 + 1e-6)         # the slack tolerance
+    assert pipeline.audio_phase_margin(4 / 1001, 0.01) == pytest.approx(2 / 1001)       # a cadence cell: its midpoint
 
 
 def test_no_ae_flag_and_timeout_reach_the_config():
@@ -1606,21 +1627,3 @@ def test_after_effects_wait_can_be_skipped_with_ctrl_c(tmp_path, monkeypatch):
     res = pipeline.run_after_effects(env, jsx, timeout=5.0, poll_s=0.01)
     assert calls["n"] == 1
     assert res["status"] == "not_available" and "Ctrl+C" in res["reason"]
-
-
-def test_ae_rule_sensitive_is_one_aggregated_warning_for_real_risks_only():
-    """A 23.976 RAW in a 30 fps edit never satisfies floor AND round sampling; that alone is not a risk (AE uses
-    the floor rule) and must not produce a warning per segment. Only a floor margin below ae_min_margin_ms is
-    flagged, as ONE summary warning."""
-    from match_cuts import pipeline
-    from match_cuts.config import Config
-    from match_cuts.model import Segment
-    cfg = Config()
-    segs = []
-    for i, (m, both) in enumerate([(4.1, None), (1.0, None), (0.083, None), (0.5, [1.0, 1.1]), (8.0, [0.0, 1.0])], 1):
-        s = Segment(i, "raw", 10 * i, 10 * i + 10, speed=1.0, ae_margin_ms=m, raw_in_interval_both=both,
-                    raw_in_interval=[0.0, 1.0], notes="AE-rule-sensitive" if i == 1 else "")
-        segs.append(s)
-    warns = pipeline.flag_ae_rule_sensitive(segs, cfg)
-    assert len(warns) == 1 and "2 segment(s)" in warns[0] and "S03" in warns[0] and "S04" in warns[0]
-    assert [("AE-rule-sensitive" in (s.notes or "")) for s in segs] == [False, False, True, True, False]
