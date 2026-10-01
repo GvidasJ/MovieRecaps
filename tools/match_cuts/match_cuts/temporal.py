@@ -86,14 +86,17 @@ def scale_of(shape: Sequence[int], max_side: int) -> float:
 
 
 def _zncc(a: np.ndarray, b: np.ndarray, m: np.ndarray) -> float:
+    """Masked ZNCC. The dot products use einsum, never BLAS: OpenBLAS threads a ddot this long, and on a busy machine
+    every call then waits for its threads to wake (measured 6 ms instead of 0.3 ms per call, 3x the whole temporal
+    signature); einsum is single-threaded and its summation order does not depend on the thread count."""
     x = a[m].astype(np.float64)
     y = b[m].astype(np.float64)
     if x.size < MIN_PIXELS:
         return float("nan")
     x -= x.mean()
     y -= y.mean()
-    den = math.sqrt(float(x @ x) * float(y @ y))
-    return float(x @ y / den) if den > 1e-9 else float("nan")
+    den = math.sqrt(float(np.einsum("i,i->", x, x)) * float(np.einsum("i,i->", y, y)))
+    return float(np.einsum("i,i->", x, y)) / den if den > 1e-9 else float("nan")
 
 
 # ---------------------------------------------------------------------------------------------

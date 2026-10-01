@@ -1168,7 +1168,11 @@ editor clip, framing against the truth Sim (c4 vs truth), speeds snapped to the 
 c5 with the measured offset and no D3 clamp warnings, J/L == truth, no cut inside a repeat pair, the dark shot on
 its line, no fake freeze / a true freeze at v = 0, the gray chain never NOT-IN-RAW, the lookalike never matched,
 and every wrong frame flagged by verification. Each assertion the current pipeline fails is `xfail(strict=True)`
-naming its fix (FX-01..FX-09); a fix removes its xfail.
+naming its fix (FX-01..FX-09); a fix removes its xfail. The overall verdict is pinned exactly (wave 4,
+`test_cli_succeeds` / `test_verify_criteria`): c1, c2, c4, c5, c6 pass (or pass with listed exceptions); c3 fails
+exactly when 'uncertain' segments exist and only for them (s9_2 / s9_2b / s9_2c / s9_3 pass, the uncertain
+accounting lists the cutlist's uncertain segments, each a truth gray-chain / lookalike range, and the UNCERTAIN line
+is the only verification failure); the CLI exits 1 and prints that reason. mini / full keep requiring a full PASS.
 
 ## 7. Decisions from the final adversarial review (v3)
 
