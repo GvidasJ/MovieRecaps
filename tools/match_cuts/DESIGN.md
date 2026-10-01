@@ -392,7 +392,9 @@ def line_search(k, comp, raw, allowed, cfg, js, flip) -> list[Anchor]        # F
     # line_search_nfeatures) with relaxed acceptance (>= near_miss_inliers at inlier ratio >= line_search_min_ratio;
     # the global min_inliers is unchanged) -- CANDIDATES only: the anchor test (Sim re-estimated over the exact RAW
     # frames around it, masked ZNCC >= match_thresh - anchor_zncc_slack) decides, best inliers first, at most
-    # line_search_verify per frame. run_line_searches: the worker-pool version (input order kept).
+    # line_search_verify per frame. run_line_searches: the worker-pool version (input order kept); it first computes
+    # the SIFT features of every RAW frame of the batch's windows once (a pool of their own) and the searches read
+    # them from the state (neighbouring frames search largely the same window; identical features, wave 4).
 def sparse_search(comp, raw, layout, overlays, index, hints, cfg, dlog, frames=None) -> list[Anchor]
     # every cfg.comp_search_stride frames (or `frames`); audio-restricted (±audio_restrict_s) first,
     # global fallback. multiprocessing (fork; memmaps shared; seed_everything per worker).
@@ -1208,6 +1210,15 @@ verification honesty) were fixed under these shared rules:
     (elapsed)`, or the stage heartbeat's `<stage>: still running (elapsed)` (`common.stage_heartbeat`, entered
     by `pipeline._stage`). `pool_stall_timeout_s`, `pool_max_failures` and `progress_log_s` are run settings,
     never part of the analysis cache keys.
+  * *Single-threaded OpenBLAS* (wave 4). `pipeline.run`, every `parallel_map` task (fork, spawn, inline) and the
+    layout spawn workers pin numpy's OpenBLAS to one thread (`common.single_thread_blas` / `set_blas_threads`;
+    the audio stages did already). The analysis only runs small and medium products -- the ZNCC of a few
+    candidates over one box ROI (`scoring.zncc_rows`), pixel dot products (`temporal._zncc`) -- and OpenBLAS splits
+    a dot product of >= ~20000 elements between its threads: 7x slower for these sizes (measured 8.4 vs 1.2 ms for
+    7 x 60000 under load; with 4 worker processes each waking 4 BLAS threads, worse) and the last bits of the result
+    depended on the machine's CPU count. Measured on the base commit vs this change (same machine): mini and
+    film24 cutlist.json / csv / XML / EDL / JSX, verify.json and frame_map.npz byte-identical; film24 wall 764 ->
+    260 s (S5.3 359 -> 100 s, S9 215 -> 65 s), mini 639 -> 204 s.
   * *Windows files.* Outputs are replaced through `common.replace_file` (retried for 5 s on PermissionError --
     a virus scanner, Excel holding `cutlist.csv`, a player holding the preview -- then a PermissionError that
     names the file and says to close the program); preview / compare renders are muxed into their temp

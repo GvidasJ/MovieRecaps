@@ -488,15 +488,19 @@ def _fork_map(items: list, workers: int, chunksize: int | None, name: str) -> li
     # never runs a destructor of an inherited object. Verified deadlock otherwise: a stray PyAV
     # decoder (frame-threaded) reached by the child's GC calls avcodec_free_context, which waits on
     # decoder threads that do not exist in the child (futex hang in pthread_cond_destroy).
+    t0 = time.perf_counter()
     gc.collect()
     gc.freeze()
     pool = None
+    tm: dict[str, float] = {"gc": time.perf_counter() - t0}
     try:
         n = min(int(workers), len(items))
         cs = _chunk(len(items), workers, chunksize)
+        t1 = time.perf_counter()
         with _common.FORK_LOCK:
             pool = mp.get_context("fork").Pool(n)
         alive = _threads_after_fork()
+        tm["fork"] = time.perf_counter() - t1
         if alive:
             _FORK_UNSAFE[0] = f"{alive} native thread(s) were running when the worker pool forked"
             POOL_STATS["fork_unsafe"] += 1
@@ -507,17 +511,24 @@ def _fork_map(items: list, workers: int, chunksize: int | None, name: str) -> li
             return None
         POOL_STATS["fork"] += 1
         tasks = list(enumerate(items))
+        t2 = time.perf_counter()
         out, reason = _collect(pool, _invoke_chunk, tasks, cs, name, "fork")
+        tm["run"] = time.perf_counter() - t2
         if reason is None:
             return [out[i] for i in range(len(items))]
         close_pool(pool, kill=True)
         pool = None
         return _finish_after_failure(items, out, name, reason)
     finally:
+        t3 = time.perf_counter()
         if pool is not None:
             close_pool(pool)
         gc.unfreeze()
         cv2.setNumThreads(prev_threads)
+        tm["close"] = time.perf_counter() - t3
+        log.debug("parallel_map(%s): %d tasks on %d fork workers, chunk %d: %s", name, len(items),
+                  min(int(workers), len(items)), _chunk(len(items), workers, chunksize),
+                  ", ".join(f"{k} {v:.3f} s" for k, v in tm.items()))
 
 
 def _spawn_map(fn: Callable, items: list, workers: int, state: dict, seed: int,
@@ -1312,7 +1323,7 @@ def _line_raw_features(raw: Proxy, j: int, flip: bool, nfeat: int) -> tuple[np.n
 
 def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg, js: Sequence[int], flip: bool,
                 roi: tuple[int, int, int, int] | None = None, report: list | None = None,
-                source: str = "line") -> list[Anchor]:
+                source: str = "line", feats: dict | None = None) -> list[Anchor]:
     """Line-constrained re-search of competitor frame k (FX-08 'search before giving up'): pairwise SIFT + RANSAC
     against EACH RAW frame of ``js`` -- a neighbouring run's predicted window, a handful of frames instead of the
     whole RAW -- with relaxed acceptance (>= near_miss_inliers inliers at an inlier ratio >= line_search_min_ratio;
@@ -1321,7 +1332,8 @@ def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg
     decides, best-inlier candidates first, at most ``line_search_verify`` of them (candidates within refine_radius
     of an accepted anchor converge onto it). RAW features are computed on the frames themselves with
     line_search_nfeatures (a RAW-only overlay such as a legal disclaimer takes part of a small budget). Returns
-    verified anchors best-first (source ``source``)."""
+    verified anchors best-first (source ``source``). ``feats``: precomputed {(j, flip): RAW features} (the same
+    :func:`_line_raw_features` values, computed once per batch by :func:`run_line_searches`)."""
     img = np.asarray(comp.get(k))
     h, w = img.shape[:2]
     if roi is None:
@@ -1336,7 +1348,8 @@ def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg
         return []
     cands = []
     for j in sorted({int(j) for j in js if raw.has(int(j))}):
-        rpts, rdesc = _line_raw_features(raw, j, flip, nfeat)
+        pre = feats.get((j, bool(flip))) if feats else None
+        rpts, rdesc = pre if pre is not None else _line_raw_features(raw, j, flip, nfeat)
         M, n_inl, n_good = _ransac(cpts, cdesc, rpts, rdesc, cfg)
         ratio = n_inl / n_good if n_good else 0.0
         if M is None or n_inl < n_min or ratio < r_min:
@@ -1367,16 +1380,29 @@ def _line_worker(state: dict, task: tuple[int, tuple[int, ...], bool]) -> tuple[
     k, js, flip = task
     rep: list = []
     anchors = line_search(int(k), state["comp"], state["raw"], state["allowed"](int(k)), state["cfg"], js, bool(flip),
-                          roi=state["roi"], report=rep)
+                          roi=state["roi"], report=rep, feats=state.get("line_feats"))
     return int(k), [a.to_dict() for a in anchors[:int(getattr(state["cfg"], "anchors_per_frame", 3))]], rep[:12]
+
+
+def _line_feat_worker(state: dict, task: tuple[int, bool]) -> tuple[np.ndarray, np.ndarray]:
+    """SIFT features of RAW frame j (or its mirror) for line searches (:func:`_line_raw_features`)."""
+    j, flip = task
+    return _line_raw_features(state["raw"], int(j), bool(flip), int(state["nfeat"]))
 
 
 def run_line_searches(comp: Proxy, raw: Proxy, allowed: Callable[[int], np.ndarray], roi: tuple[int, int, int, int],
                       tasks: Sequence[tuple[int, Sequence[int], bool]], cfg) -> list[tuple[int, list[Anchor], list]]:
     """:func:`line_search` on many (k, RAW window, flip) tasks in a worker pool. Input order kept."""
-    state = {"comp": comp, "raw": raw, "cfg": cfg, "allowed": allowed, "roi": roi}
     items = [(int(k), tuple(int(j) for j in js), bool(fl)) for k, js, fl in tasks]
-    res = parallel_map(_line_worker, items, cfg.resolved_workers(), state, cfg.seed, min_items=4)
+    workers = cfg.resolved_workers()
+    # the RAW frames' SIFT features first, once each (neighbouring competitor frames search largely the same RAW
+    # window: computed per task, every worker recomputed them), then the searches read them from the state
+    nfeat = int(getattr(cfg, "line_search_nfeatures", 2 * int(cfg.sift_nfeatures)))
+    need = sorted({(int(j), bool(fl)) for _k, js, fl in items for j in js if raw.has(int(j))})
+    feats = dict(zip(need, parallel_map(_line_feat_worker, need, workers, {"raw": raw, "nfeat": nfeat}, cfg.seed,
+                                        label="line search features")))
+    state = {"comp": comp, "raw": raw, "cfg": cfg, "allowed": allowed, "roi": roi, "line_feats": feats}
+    res = parallel_map(_line_worker, items, workers, state, cfg.seed, min_items=4)
     return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
 
 

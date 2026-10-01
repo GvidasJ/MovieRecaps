@@ -155,6 +155,51 @@ def test_fork_pool_runs_without_native_threads_in_the_parent(watchdog):
     assert cv2.getNumThreads() == 4                                 # restored after the pool
 
 
+def _zncc_task(state, x):
+    """A score the size of a real box ROI (60000 px): its last bits depend on OpenBLAS's thread count."""
+    from match_cuts import scoring
+    rng = np.random.default_rng(x)
+    v = rng.normal(100, 30, 60000).astype(np.float32)
+    m = rng.normal(100, 30, (7, 60000)).astype(np.float32)
+    return scoring.zncc_rows(v, m).tobytes()
+
+
+@pytest.mark.skipif(common.blas_ctl() is None, reason="numpy's OpenBLAS is not controllable here")
+def test_pool_tasks_run_single_threaded_blas_whatever_the_parent_uses(watchdog, monkeypatch):
+    """Every parallel_map task (inline, fork, spawn) runs with one OpenBLAS thread: the same arithmetic on every
+    path and machine. (A dot product of >= ~20000 elements is split between OpenBLAS threads, so its last bits
+    follow the thread count -- and it was 7x slower for these sizes.)"""
+    items = list(range(8))
+    with common.single_thread_blas():
+        want = [_zncc_task({}, x) for x in items]
+    old = common.set_blas_threads(4)
+    try:
+        assert vm.parallel_map(_zncc_task, items, 1, {}, seed=1) == want            # inline
+        assert vm.parallel_map(_zncc_task, items, 3, {}, seed=1) == want            # fork (Linux)
+        monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
+        assert vm.parallel_map(_zncc_task, items, 3, {}, seed=1) == want            # spawn
+        assert common.blas_ctl()[1]() == 4                                          # the parent's setting is kept
+    finally:
+        if old is not None:
+            common.set_blas_threads(old)
+
+
+def test_single_thread_blas_restores_and_set_returns_previous():
+    ctl = common.blas_ctl()
+    if ctl is None:
+        assert common.set_blas_threads(1) is None
+        return
+    old = common.set_blas_threads(3)
+    try:
+        assert ctl[1]() == 3
+        with common.single_thread_blas():
+            assert ctl[1]() == 1
+        assert ctl[1]() == 3
+        assert common.set_blas_threads(2) == 3
+    finally:
+        common.set_blas_threads(old)
+
+
 def test_package_never_starts_the_ducc_fft_pool():
     import match_cuts  # noqa: F401 - the import sets it
     assert os.environ.get("DUCC0_NUM_THREADS") == "1"
