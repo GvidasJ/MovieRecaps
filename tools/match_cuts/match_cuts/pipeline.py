@@ -579,17 +579,34 @@ def _fill_phase_fields(seg: Segment, fm: FrameMap, res: dict, comp_fps: Fraction
             fm.tie[k] = True
     seg.raw_in_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, comp_fps, raw_fps))
     seg.raw_out_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_out - 1, seg.comp_in, comp_fps, raw_fps))
-    sensitive = (seg.ae_margin_ms is not None and seg.ae_margin_ms < cfg.ae_min_margin_ms) or seg.raw_in_interval_both is None
-    if sensitive:
-        why = []
-        if seg.ae_margin_ms is not None and seg.ae_margin_ms < cfg.ae_min_margin_ms:
-            why.append(f"margin {seg.ae_margin_ms:.4f} ms < {cfg.ae_min_margin_ms} ms")
-        if seg.raw_in_interval_both is None:
-            why.append("no raw_in satisfies both floor and round sampling")
-        warnings.append(f"{name}: AE-rule-sensitive segment ({'; '.join(why)}); if After Effects shows an "
-                        "off-by-one frame, re-export with --ae-time-mode frames")
-        seg.notes = _append_note(seg.notes, "AE-rule-sensitive")
+    # AE-rule sensitivity is judged on the FINAL segments (after the audio-informed phase) in
+    # flag_ae_rule_sensitive(); nothing to report here
     return warnings
+
+
+def ae_rule_sensitive(seg: Segment, cfg: Config) -> bool:
+    """A real AE timing risk: the floor-rule phase margin is below ae_min_margin_ms. (No floor∩round
+    overlap alone is NOT a risk -- AE samples footage with the floor rule, and a 23.976 source in a 30 fps
+    edit never satisfies both rules -- it is only noted.)"""
+    m = seg.ae_margin_ms
+    return seg.type == "raw" and seg.time_mode != "remap" and m is not None and \
+        math.isfinite(float(m)) and float(m) < float(cfg.ae_min_margin_ms) - 1e-6
+
+
+def flag_ae_rule_sensitive(segments: list[Segment], cfg: Config) -> list[str]:
+    """Tag AE-rule-sensitive segments in their notes (and only them) and return ONE aggregated warning."""
+    ids = []
+    for s in segments:
+        s.notes = "; ".join(p for p in (s.notes or "").split("; ") if p and p != "AE-rule-sensitive")
+        if ae_rule_sensitive(s, cfg):
+            s.notes = _append_note(s.notes, "AE-rule-sensitive")
+            ids.append(s.id)
+    if not ids:
+        return []
+    shown = ", ".join(f"S{i:02d}" for i in ids[:12]) + (f" (+{len(ids) - 12} more)" if len(ids) > 12 else "")
+    return [f"{len(ids)} segment(s) have a phase margin below {cfg.ae_min_margin_ms:g} ms ({shown}): the JSX re-checks "
+            "them in After Effects and switches to frame-exact remapping if AE stores times differently; "
+            "--ae-time-mode frames forces it"]
 
 
 def _append_note(notes: str, extra: str) -> str:
@@ -1064,6 +1081,7 @@ def build_cutlist(ctx: Context, segments: list[Segment], audio_result: dict, seg
         audio_block["hint_windows"] = int(len(ctx.hints.comp_t))
         audio_block["hint_windows_confident"] = int(ctx.hints.confident(cfg.audio_min_conf).sum())
     warnings: list[str] = []
+    seg_warnings = [w for w in seg_warnings if "AE-rule-sensitive" not in w] + flag_ae_rule_sensitive(segments, cfg)
     for w in list(ctx.analysis_warnings) + list(seg_warnings):
         if w not in warnings:
             warnings.append(w)
@@ -1526,22 +1544,40 @@ def run_after_effects(env: dict, jsx_path: str | Path, timeout: float = 3600.0, 
     def saved() -> bool:
         return aep.exists() and aep.stat().st_mtime_ns != before
 
+    log.info("S7.6: opening After Effects (%s) to run %s -- waiting up to %.0f min for %s.",
+             Path(app).name, jsx.name, timeout / 60.0, aep.name)
+    log.info("      If After Effects shows a dialog (save the current project? / 'Allow Scripts to Write Files'), "
+             "answer it there. Press Ctrl+C here to skip this step (the run continues); --no-ae disables it.")
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     except OSError as e:
         return {"status": "failed", "cmd": cmd, "error": str(e)}
-    deadline = time.monotonic() + timeout
+    t0 = time.monotonic()
+    deadline = t0 + timeout
+    next_note = t0 + 60.0
     last_size = -1
-    while time.monotonic() < deadline:
-        if saved():
-            size = aep.stat().st_size
-            if size == last_size and size > 0:
-                break                          # written completely
-            last_size = size
-        elif proc.poll() is not None and env.get("os") == "Darwin":
-            break                              # osascript returned without a saved project
-        time.sleep(poll_s)
+    interrupted = False
+    try:
+        while time.monotonic() < deadline:
+            if saved():
+                size = aep.stat().st_size
+                if size == last_size and size > 0:
+                    break                          # written completely
+                last_size = size
+            elif proc.poll() is not None and env.get("os") == "Darwin":
+                break                              # osascript returned without a saved project
+            if time.monotonic() >= next_note:
+                log.info("      still waiting for After Effects to save %s (%.0f s / %.0f s; Ctrl+C skips)",
+                         aep.name, time.monotonic() - t0, timeout)
+                next_note += 60.0
+            time.sleep(poll_s)
+    except KeyboardInterrupt:
+        interrupted = True
+        log.warning("S7.6: skipped by the user (Ctrl+C); After Effects is left open -- run %s there yourself "
+                    "if it did not finish", jsx.name)
     ok = saved()
+    if interrupted and not ok:
+        return {"status": "not_available", "cmd": cmd, "reason": "skipped by the user (Ctrl+C)"}
     rc = proc.poll()
     err = ""
     if rc is not None and proc.stderr is not None:
@@ -1934,8 +1970,13 @@ def stage_ae(ctx: Context) -> None:
         ctx.mock[scenario] = rec if ok and rec is not None else {
             "status": "error", "error": (ctx.errors[-1]["error"] if ctx.errors else "no record")}
     dump_json(ctx.mock, cfg.work / "ae_mock_runs.json")
-    ctx.ae_run = run_after_effects(ctx.env, jsx) if ctx.env.get("ae_app") else {
-        "status": "not_available", "reason": f"After Effects not installed on this machine ({ctx.env.get('os')})"}
+    if not ctx.env.get("ae_app"):
+        ctx.ae_run = {"status": "not_available",
+                      "reason": f"After Effects not installed on this machine ({ctx.env.get('os')})"}
+    elif not getattr(cfg, "run_ae", True):
+        ctx.ae_run = {"status": "not_available", "reason": "skipped (--no-ae): run build_ae_project.jsx in After Effects"}
+    else:
+        ctx.ae_run = run_after_effects(ctx.env, jsx, timeout=float(getattr(cfg, "ae_timeout_s", 600.0)))
     if ctx.ae_run.get("status") == "ok":
         ctx.paths["aep"] = ctx.ae_run["aep"]
     elif ctx.ae_run.get("status") == "failed":

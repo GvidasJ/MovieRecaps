@@ -545,8 +545,7 @@ def _warnings(ctx: Any) -> list[str]:
     out.append("- NOT-IN-RAW ranges: " + (", ".join(f"{s.comp_in}–{s.comp_out - 1} ({timecode(s.comp_in, comp_fps)}–"
                                                      f"{timecode(s.comp_out, comp_fps)})" for s in nir) or "none"))
     sens = [s for s in cl.segments if s.type == "raw" and s.time_mode != "remap" and (
-        (s.ae_margin_ms is not None and s.ae_margin_ms < float(getattr(cfg, "ae_min_margin_ms", 1.0)))
-        or (s.raw_in_seconds is not None and s.raw_in_interval_both is None))]
+        s.ae_margin_ms is not None and s.ae_margin_ms < float(getattr(cfg, "ae_min_margin_ms", 1.0)) - 1e-6)]
     out.append("- AE-rule-sensitive segments (tiny phase margin; use `--ae-time-mode frames` if AE is off by a frame): "
                + (", ".join(f"S{s.id:02d} ({s.ae_margin_ms if s.ae_margin_ms is not None else '?'} ms)" for s in sens) or "none"))
     nre = not_reproduced(getattr(ctx, "verify", None))

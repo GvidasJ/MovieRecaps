@@ -495,11 +495,13 @@ class _PlanBuilder:
         return _t(k, self.F)
 
     # -- bookkeeping ---------------------------------------------------------------------------
-    def warn(self, msg: str) -> None:
+    def warn(self, msg: str, quiet: bool = False) -> None:
+        """Record a plan warning (shown in the JSX alert and the report). quiet=True: per-segment detail that
+        the pipeline already summarises in one line -- logged at DEBUG only."""
         msg = ascii_text(msg, 400)
         if msg not in self.warnings:
             self.warnings.append(msg)
-        log.warning("export_ae: %s", msg)
+        (log.debug if quiet else log.warning)("export_ae: %s", msg)
 
     def decide(self, decision: str, **evidence: Any) -> None:
         self.decisions.append({"decision": decision, **evidence})
@@ -684,13 +686,12 @@ class _PlanBuilder:
         margin = getattr(seg, "ae_margin_ms", None)
         both = getattr(seg, "raw_in_interval_both", None)
         floor_iv = getattr(seg, "raw_in_interval", None)
+        del both, floor_iv  # no floor/round overlap alone is not a risk (AE uses the floor rule)
         if mode in ("stretch", "remap") and v > 0 and (
-                (margin is not None and math.isfinite(float(margin)) and float(margin) < self.min_margin_ms)
-                or (floor_iv is not None and both is None)):
+                margin is not None and math.isfinite(float(margin)) and float(margin) < self.min_margin_ms - 1e-6):
             L["aeRuleSensitive"] = True
-            self.warn(f"S{sid:02d}: AE-rule-sensitive (phase margin "
-                      f"{'n/a' if margin is None else f'{float(margin):.3f} ms'}); if AE shows a neighbouring "
-                      "frame, re-export with --ae-time-mode frames")
+            self.warn(f"S{sid:02d}: AE-rule-sensitive (phase margin {float(margin):.3f} ms); if AE shows a "
+                      "neighbouring frame, re-export with --ae-time-mode frames", quiet=True)
         oob = [j for j in expect if j < 0 or j >= self.raw_frames]
         if oob:
             self.warn(f"S{sid:02d}: expected RAW frames outside [0, {self.raw_frames}) ({oob[0]}...); AE holds the "

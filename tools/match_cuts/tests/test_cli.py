@@ -364,8 +364,15 @@ def test_solve_segment_phase_fills_fields_and_drops_outliers(monkeypatch):
     for col in ("raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi"):
         setattr(fm2, col, t2)
     warns = pipeline.solve_segment_phase(s3, fm2, F30, F30, Config(), null_dlog(), phase)
-    assert s3.raw_in_interval_both is None and "AE-rule-sensitive" in s3.notes
-    assert any("AE-rule-sensitive" in w and "--ae-time-mode frames" in w for w in warns)
+    # no floor-and-round raw_in alone is not a risk (AE samples with the floor rule): no per-segment warning;
+    # the final, aggregated check flags it only when the floor margin is below ae_min_margin_ms
+    assert s3.raw_in_interval_both is None
+    assert not any("AE-rule-sensitive" in w for w in warns)
+    agg = pipeline.flag_ae_rule_sensitive([s3], Config())
+    if s3.ae_margin_ms < Config().ae_min_margin_ms:
+        assert len(agg) == 1 and "S" in agg[0] and "--ae-time-mode frames" in agg[0] and "AE-rule-sensitive" in s3.notes
+    else:
+        assert agg == [] and "AE-rule-sensitive" not in (s3.notes or "")
     assert s3.raw_in_interval[0] <= s3.raw_in_seconds <= s3.raw_in_interval[1]
     assert [phase.ae_frame(s3.raw_in_seconds, 1.1, k, 0, F30, F30) for k in range(30)] == t2.tolist()
     # remap segments take raw_in from their keys
@@ -1558,3 +1565,53 @@ def test_design_contract_crossfade_keying_and_d3_margin():
     assert pipeline.audio_phase_margin_s(4.0, rf, 1.0) == pytest.approx(0.05 / float(rf))     # wide: 5 % of a frame
     assert pipeline.audio_phase_margin_s(0.004, rf, 1.0) == pytest.approx(0.001)              # the 1 ms floor
     assert pipeline.audio_phase_margin_s(0.03, rf, 1.0) == pytest.approx(0.0015)              # 5 % of the width
+
+
+def test_no_ae_flag_and_timeout_reach_the_config():
+    from match_cuts import cli
+    args = cli.build_parser().parse_args(["--no-ae", "--ae-timeout", "42"])
+    cfg = cli.config_from_args(args)
+    assert cfg.run_ae is False and cfg.ae_timeout_s == 42.0
+    cfg2 = cli.config_from_args(cli.build_parser().parse_args([]))
+    assert cfg2.run_ae is True and cfg2.ae_timeout_s == 600.0
+
+
+def test_after_effects_wait_can_be_skipped_with_ctrl_c(tmp_path, monkeypatch):
+    """User report: the run looked stuck after 'wrote build_ae_project.jsx' -- it was silently waiting (up to an
+    hour) for After Effects. The wait is announced, and Ctrl+C skips only this step instead of killing the run."""
+    import sys as _sys
+    from match_cuts import pipeline
+    jsx = tmp_path / "build_ae_project.jsx"
+    jsx.write_text("// test")
+    fake = tmp_path / "fake_ae.py"
+    fake.write_text("import time\ntime.sleep(30)\n")
+    env = {"ae_app": _sys.executable, "os": "Windows"}
+    calls = {"n": 0}
+
+    def sleepy(_s):
+        calls["n"] += 1
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pipeline.time, "sleep", sleepy)
+    # AfterFX.exe -r <jsx>  ->  here: python -r <jsx> exits at once with an error; the wait loop still runs
+    res = pipeline.run_after_effects(env, jsx, timeout=5.0, poll_s=0.01)
+    assert calls["n"] == 1
+    assert res["status"] == "not_available" and "Ctrl+C" in res["reason"]
+
+
+def test_ae_rule_sensitive_is_one_aggregated_warning_for_real_risks_only():
+    """A 23.976 RAW in a 30 fps edit never satisfies floor AND round sampling; that alone is not a risk (AE uses
+    the floor rule) and must not produce a warning per segment. Only a floor margin below ae_min_margin_ms is
+    flagged, as ONE summary warning."""
+    from match_cuts import pipeline
+    from match_cuts.config import Config
+    from match_cuts.model import Segment
+    cfg = Config()
+    segs = []
+    for i, (m, both) in enumerate([(4.1, None), (1.0, None), (0.083, None), (0.5, [1.0, 1.1]), (8.0, [0.0, 1.0])], 1):
+        s = Segment(i, "raw", 10 * i, 10 * i + 10, speed=1.0, ae_margin_ms=m, raw_in_interval_both=both,
+                    raw_in_interval=[0.0, 1.0], notes="AE-rule-sensitive" if i == 1 else "")
+        segs.append(s)
+    warns = pipeline.flag_ae_rule_sensitive(segs, cfg)
+    assert len(warns) == 1 and "2 segment(s)" in warns[0] and "S03" in warns[0] and "S04" in warns[0]
+    assert [("AE-rule-sensitive" in (s.notes or "")) for s in segs] == [False, False, True, True, False]

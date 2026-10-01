@@ -202,8 +202,12 @@ run itself failed (bad inputs, a crashed stage); `3` nothing failed but a criter
 
 Headless: macOS `osascript -e 'tell application "Adobe After Effects 2024" to DoScriptFile "/abs/path/build_ae_project.jsx"'`,
 Windows `"C:\Program Files\Adobe\Adobe After Effects 2024\Support Files\AfterFX.exe" -r C:\abs\path\build_ae_project.jsx`.
-When After Effects is installed on the machine running match_cuts, this happens automatically and
-`aerender` renders the comp for check 9.6.
+When After Effects is installed on the machine running match_cuts, this happens automatically (stage
+S7.6: After Effects opens, runs the script and saves `recreated_edit.aep`; the console says so and waits up
+to `--ae-timeout` seconds, default 600) and `aerender` renders the comp for check 9.6. If After Effects
+shows a dialog (*save the current project?*, or the scripting-permission alert below), answer it there.
+**Ctrl+C** during that wait skips only this step and the run continues; `--no-ae` turns it off — then run
+`output/build_ae_project.jsx` yourself.
 
 ## Troubleshooting
 
@@ -247,8 +251,9 @@ drift in frames when it is more than cosmetic), and checks the frame count exact
 the comp rate: a 29.97 fps source inside a 30 fps edit plays at speed 1.000. Runtime warnings are listed in
 the final alert and stored in the comment of the `Recreated Edit` comp.
 
-**Off-by-one frames in AE on some segments** — the report lists *AE-rule-sensitive* segments (phase
-margin below `ae_min_margin_ms`, or no start time that satisfies both floor and round sampling). The JSX
+**Off-by-one frames in AE on some segments** — the report lists *AE-rule-sensitive* segments (floor-rule
+phase margin below `ae_min_margin_ms`; a 23.976 source in a 30 fps edit never satisfies the round rule too,
+which is normal and not flagged). The JSX
 already re-checks every stretch-mode layer from the values AE stored and switches mismatching layers to
 frame-exact time remapping; to force it for every layer, re-export with `--ae-time-mode frames`.
 

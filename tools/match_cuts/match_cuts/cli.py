@@ -111,6 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="folder scanned for the two videos when --competitor/--raw are not given and the "
                         "default names do not exist (default ./input)")
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
+    p.add_argument("--no-ae", action="store_true",
+                   help="do not open After Effects automatically (run output/build_ae_project.jsx yourself)")
+    p.add_argument("--ae-timeout", default=600.0, type=float, metavar="SECONDS",
+                   help="how long to wait for After Effects to save recreated_edit.aep (default 600)")
     p.add_argument("--skip-preview", action="store_true", help="do not render preview_recreation.mp4")
     p.add_argument("--skip-compare", action="store_true", help="do not render compare.mp4")
     p.add_argument("--no-swap", action="store_true",
@@ -135,6 +139,8 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.ae_time_mode = args.ae_time_mode
     cfg.verbose = bool(args.verbose)
     cfg.skip_preview = bool(args.skip_preview)
+    cfg.run_ae = not bool(getattr(args, "no_ae", False))
+    cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
     if args.seed is not None:
         cfg.seed = int(args.seed)
