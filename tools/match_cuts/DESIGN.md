@@ -1087,7 +1087,11 @@ verification honesty) were fixed under these shared rules:
   convention); one ~1 s fullscreen segment exercises D1. `tests/test_synthetic_av_offset.py` (slow) delays
   the mini competitor's whole audio track by 86 ms (`adelay` + `atrim`, video copied) to exercise D9: the
   published offset interval must contain -86 ms, c5 = pass_with_exceptions(av_offset), no fake J/L, AE twins
-  only for genuine J/L in raw sync, lags ~0 in competitor sync; the original mini publishes offset 0.
+  only for genuine J/L in raw sync, lags ~0 in competitor sync (+ the XML / EDL audio events, nearest frame and
+  remainder, re-parsed exactly); the original mini publishes offset 0. film24 (§6.1) also asserts that the layers of
+  one time line (pan_step, punch_pan, line_across_shots) stay ONE exact line through the placement and D3, and that
+  the video-only blend slow motion and freeze keep continuous audio (an audio line within 3 ms of the truth, no
+  silent gap in the preview audio) while the foreign NOT-IN-RAW insert stays silent.
 * **D9 Global A/V offset (one model for every audio consumer).** A competitor whose whole soundtrack is
   shifted against its picture (repost, platform transcode, NLE export; the first real run: 86 ms late) is
   ONE measured property of the input, not dozens of per-segment failures. Convention (one sign everywhere):
