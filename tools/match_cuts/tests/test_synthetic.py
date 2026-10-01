@@ -911,12 +911,16 @@ def _published_av_offset_ms(cutlist: dict) -> float | None:
 
 def test_film24_av_offset_published(e2e, cutlist):
     """FX-02: the cutlist publishes ONE global A/V offset (measured, xcorr convention) whose interval contains the
-    truth split delay (content 38 ms + post-edit 48 ms = competitor audio 86 ms late: lag -86 ms)."""
+    truth split delay (content 38 ms + post-edit 48 ms = competitor audio 86 ms late: lag -86 ms). A zero truth
+    (film24_av0) publishes exactly 0 (status 'zero', DESIGN §7 D9), its interval still containing 0."""
     _need_film()
     want = _av_lag_truth(e2e["truth"])
     av = (cutlist.get("audio") or {}).get("av_offset") or {}
     lo, hi = (av.get("lag_ms_interval") or [None, None])[:2]
-    assert av.get("status") == "measured" and _published_av_offset_ms(cutlist) is not None, av
+    if want == 0.0:
+        assert av.get("status") == "zero" and av.get("lag_ms") == 0.0, av
+    else:
+        assert av.get("status") == "measured" and _published_av_offset_ms(cutlist) is not None, av
     assert lo is not None and lo <= want <= hi, f"published A/V offset interval {[lo, hi]} ms, truth {want} ms"
 
 
