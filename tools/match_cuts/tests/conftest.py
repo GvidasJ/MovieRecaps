@@ -1,8 +1,8 @@
 """Shared pytest configuration for match_cuts.
 
 * registers the ``slow`` marker; slow tests run only with ``--runslow`` or ``MATCH_CUTS_SLOW=1``
-* session fixtures ``synthetic_mini`` / ``synthetic_full``: the synthetic RAW + competitor + truth generated
-  (or reused from cache) by ``tests/synth.py`` into ``work/synthetic/<profile>``
+* session fixtures ``synthetic_mini`` / ``synthetic_full`` / ``synthetic_film24``: the synthetic RAW +
+  competitor + truth generated (or reused from cache) by ``tests/synth.py`` into ``work/synthetic/<profile>``
 * ``venv_python``: the interpreter the CLI tests must use
 
 Keep this file light: it is imported by every test module (no heavy imports at module level).
@@ -68,3 +68,10 @@ def synthetic_mini() -> dict:
 def synthetic_full() -> dict:
     """{raw, competitor, truth, id, frame_png, out_dir, summary} of the 'full' synthetic pair (cached)."""
     return _synthetic("full")
+
+
+@pytest.fixture(scope="session")
+def synthetic_film24() -> dict:
+    """{raw, competitor, truth, id, frame_png, out_dir, summary} of the 'film24' synthetic pair (cached): RAW
+    24000/1001 on a 30 fps NLE timeline with the real-run regimes (DESIGN §6.1)."""
+    return _synthetic("film24")

@@ -25,7 +25,14 @@ so the transform / timing conventions of match_cuts are cross-checked instead of
                      under ±0.5 % scale / ±2 px perturbation; >= 50 RANSAC inliers per shot/crop) must pass
                      before truth.json is written.
 
-API: ``make_synthetic(out_dir, profile='full'|'mini', force=False) -> dict`` (cached, deterministic).
+Profile ``film24`` (DESIGN §6.1) reproduces the regimes of the first real run instead: RAW 24000/1001 placed on a
+30 fps NLE timeline (raw_in on the n/30 grid, AE floor rule, the 24->30 pulldown repeat cadence), editor pans /
+punch-ins / reframes animated by ``perspective`` quads over RAW shots that move on their own (camera pan with
+parallax, RAW-native zoom + roll), one time line across RAW-native shot changes with a dark low-texture shot,
+3-5 frame chains, a frame-blended 0.25x slow motion, a true freeze under an animated caption, a split A/V delay
+(content offset + post-edit delay) with one genuine L-cut, and 44.1 kHz competitor audio.
+
+API: ``make_synthetic(out_dir, profile='full'|'mini'|'film24', force=False) -> dict`` (cached, deterministic).
 CLI: ``python tests/synth.py --profile mini --out work/synthetic/mini [--force] [--keep-build]``.
 """
 from __future__ import annotations
@@ -52,10 +59,10 @@ import numpy as np
 
 log = logging.getLogger("match_cuts.synth")
 
-SYNTH_VERSION = 2                     # 2: NLE audio in-points (D8), fullscreen chain
-RAW_FPS = Fraction(30000, 1001)
+SYNTH_VERSION = 3                     # 2: NLE audio in-points (D8), fullscreen chain; 3: per-profile RAW fps, film24
+RAW_FPS = Fraction(30000, 1001)       # default RAW rate (profiles mini / full); Profile.raw_fps overrides it
 COMP_FPS = Fraction(30)
-RAW_TB = Fraction(1, 30000)           # -video_track_timescale 30000 on raw.mp4 and id.mp4
+RAW_TB = Fraction(1, 30000)           # -video_track_timescale 30000 on raw.mp4 and id.mp4 (= 1 / fps numerator)
 TICKS_PER_COMP_FRAME = 1000           # 1/30 s in RAW_TB ticks
 AUDIO_SR = 48000
 SAMPLES_PER_COMP_FRAME = AUDIO_SR // 30   # 1600
@@ -64,6 +71,8 @@ FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 MAX_PARALLEL = 3                      # max concurrent ffmpeg processes (shared machine)
 ID_W, ID_H = 512, 64
 GEOMETRY_WHITELIST = ("hflip", "scale", "crop", "perspective", "pad", "format", "setsar")
+# film24: appearance / chain-local overlay filters applied AFTER the geometry (never moving pixels)
+LOOK_WHITELIST = ("unsharp", "eq", "drawtext")
 
 # pinned encoder settings (byte-stable output: fixed thread count, bitexact container)
 X264_RAW = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-bf", "3", "-g", "250", "-threads", "4",
@@ -74,6 +83,19 @@ X264_ID = ["-c:v", "libx264", "-qp", "0", "-preset", "veryfast", "-threads", "4"
            "-video_track_timescale", "30000"]
 FFV1 = ["-c:v", "ffv1", "-level", "3", "-g", "1", "-threads", "1"]
 BITEXACT = ["-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact", "-map_metadata", "-1"]
+
+
+def raw_tb(fps: Fraction) -> Fraction:
+    """MP4 track time base of a RAW / ID video at `fps`: 1 / numerator (1/30000 at 30000/1001, 1/24000 at
+    24000/1001), so every frame PTS is an integer number of ticks."""
+    return Fraction(1, fps.numerator)
+
+
+def x264_args(base: Sequence[str], fps: Fraction) -> list[str]:
+    """Pinned encoder args with the track timescale of `fps` (identical to `base` at 30000/1001)."""
+    a = list(base)
+    a[a.index("-video_track_timescale") + 1] = str(raw_tb(fps).denominator)
+    return a
 
 # DESIGN proxy sizes / scoring parameters (config.Config defaults; read from it when importable)
 _CFG_DEFAULTS = {"raw_proxy_width": 640, "comp_proxy_scale": 0.5, "comp_proxy_max_width": 640,
@@ -115,6 +137,23 @@ class ChainSpec:
     punch_zoom: float = 1.25
     xfade: int = 0                    # this chain crossfades into the next one over `xfade` frames
     note: str = ""
+    # ---- film24 (DESIGN §6.1; all defaults keep the mini / full chains unchanged) -------------------------
+    # Editor framing animated by ONE perspective quad on the box-size stream: knots (n, z, dx, dy), piecewise
+    # linear in the local frame n (z = zoom about the box centre, (dx, dy) = content displacement in competitor
+    # px of THIS profile, not scaled by `unit`); a framing step is two knots at adjacent frames.
+    quad: tuple | None = None
+    clips: tuple = ()                 # local frames where a new editor clip (layer) starts inside this chain
+    freeze_at: int | None = None      # local frame from which the frame shown at freeze_at-1 is held (v = 0)
+    retime: str = "none"              # 'blend': framerate=fps=30 frame blending of setpts/speed (video only)
+    look: str = ""                    # appearance filters after the geometry (LOOK_WHITELIST), e.g. sharpening
+    caption_fx: bool = False          # chain-local animated drawtext over the freeze (box px, measured)
+    clip_kinds: tuple = ()            # truth kind per editor clip (default: `kind` for every clip)
+    audio_ext: int = 0                # L-cut: this chain's audio continues `audio_ext` frames into the next chain
+    static_content: bool = False      # RAW content nearly static: self-check margin relaxed (DESIGN §6.1)
+    min_inliers: int | None = None    # measured lower inlier floor for low-texture / blurred content (else 50)
+    gray: bool = False                # gray-zone chain: truth ZNCC must lie in [GRAY_MIN, GRAY_MAX) (self-check)
+    foreign: ShotSpec | None = None   # NOT-IN-RAW lookalike: generator rendered at RAW size, cover framing
+    lookalike: int = -1               # RAW shot the foreign insert imitates (its best ZNCC is self-checked)
 
 
 @dataclass(frozen=True)
@@ -124,6 +163,24 @@ class ShotSpec:
     skip: int = 0                     # generator frames skipped before the shot starts
     tags: tuple = ()                  # e.g. ('mandelbrot',) -> never used for flip / push-in / punch-in
     layer: tuple | None = None        # (seed, opacity, cell divisor): translucent Game-of-Life texture layer
+    length: int | None = None         # RAW frames (None: the profile's shot_len)
+    min_inliers: int | None = None    # film24: measured inlier floor of a low-texture shot (self-check, recorded)
+    # film24: the competitor's MASTER of this shot differs from our RAW copy (the RAW has a RAW-only overlay, or
+    # is a motion-blurred copy of a sharp master); graph template of the master (same frame numbering, its own
+    # generator skip). All competitor chains are then rendered from raw_master.mp4.
+    master: str | None = None
+    master_skip: int | None = None
+
+
+@dataclass(frozen=True)
+class AudioPlan:
+    """Competitor audio timing (film24): a split A/V delay. `content_offset` samples (48 kHz): every chain's
+    audio starts this many samples EARLIER in RAW than its picture in-point (pre-edit offset of the source);
+    `post_delay` samples: the edited original track is delayed by adelay before the music is mixed in (moves
+    the audio switch points at the cuts too). `comp_sr` = the competitor's AAC sample rate."""
+    content_offset: int = 0
+    post_delay: int = 0
+    comp_sr: int = AUDIO_SR
 
 
 @dataclass(frozen=True)
@@ -139,10 +196,30 @@ class Profile:
     unit: float                       # length unit relative to the full profile (1.0 / 0.5)
     caption_seed: int = 7
     n_shots: int = 12
+    raw_fps: Fraction = RAW_FPS
+    shots: tuple | None = None        # None: SHOTS[:n_shots]
+    timing: str = "frame"             # 'frame': -ss chain from a RAW frame boundary; 'grid': 30 fps NLE timeline
+    raw_overlays: bool = True         # RAW-anchored grid + frame counter in the SAFE REGION
+    audio: AudioPlan = AudioPlan()
+
+    @property
+    def shot_specs(self) -> tuple:
+        return SHOTS[:self.n_shots] if self.shots is None else self.shots
+
+    def shot_length(self, i: int) -> int:
+        n = self.shot_specs[i].length
+        return self.shot_len if n is None else n
+
+    def shot_start(self, i: int) -> int:
+        return sum(self.shot_length(t) for t in range(i))
 
     @property
     def raw_frames(self) -> int:
-        return self.n_shots * self.shot_len
+        return sum(self.shot_length(i) for i in range(len(self.shot_specs)))
+
+    @property
+    def raw_tb(self) -> Fraction:
+        return raw_tb(self.raw_fps)
 
     def u(self, v: float) -> int:
         """A full-profile length scaled to this profile (rounded to an int)."""
@@ -405,12 +482,24 @@ def decode_id_frames(frames: np.ndarray, sep: float = 60.0) -> tuple[np.ndarray,
 
 
 def make_id_video(path: Path, n_frames: int, fps: Fraction = RAW_FPS) -> None:
-    """Lossless H.264 ID video (MP4, timescale 30000): frame n shows code n."""
+    """Lossless H.264 ID video (MP4, timescale = fps numerator, e.g. 30000): frame n shows code n."""
     if n_frames >= 1 << 16:
         raise ValueError("ID code is 16-bit")
     run_ffmpeg(["-y", "-f", "lavfi", "-i",
                 f"color=c=black:s={ID_W}x{ID_H}:r={fps_str(fps)},format=gray,geq=lum='{id_geq_expr()}',"
-                f"trim=end_frame={n_frames}", *X264_ID, *BITEXACT, str(path)], label="id video")
+                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps), *BITEXACT, str(path)], label="id video")
+
+
+ALT_LO, ALT_HI = 16, 240
+
+
+def make_alt_video(path: Path, n_frames: int, fps: Fraction) -> None:
+    """Lossless 64x32 'blend probe' video with the RAW's PTS: even frames luma ALT_LO, odd frames ALT_HI. A
+    timing chain that blends two consecutive RAW frames a, a+1 shows ALT_LO + alpha*(ALT_HI - ALT_LO) (or the
+    mirror), so the blend weight is MEASURED to 1/224 (DESIGN §6.1: framerate blend truth)."""
+    run_ffmpeg(["-y", "-f", "lavfi", "-i",
+                f"color=c=black:s=64x32:r={fps_str(fps)},format=gray,geq=lum='if(mod(N,2),{ALT_HI},{ALT_LO})',"
+                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps), *BITEXACT, str(path)], label="alt video")
 
 
 # =====================================================================================================
@@ -500,6 +589,76 @@ def expected_chain_frames(j: int, speed: str, n_out: int, phase: float,
     return j + np.searchsorted(r, np.arange(n_out), side="right").astype(np.int64) - 1
 
 
+# ---- film24: 30 fps NLE timeline (DESIGN §6.1) ----------------------------------------------------------
+# The RAW clip sits on a 30 fps timeline with its t = 0 on a frame boundary and every split on the grid, so a
+# chain starting at grid slot n0 has raw_in = n0/30 EXACTLY and shows RAW floor(raw_fps*(n0+i)/30) at its local
+# frame i (sample-and-hold = the AE floor rule; at 24000/1001 every 5th comp frame repeats a RAW frame).
+# ffmpeg: fps=30:round=up maps a frame with PTS t to slot ceil(30 t), so slot m shows the last frame with
+# t <= m/30. The seek restores the RAW's own (integer) PTS so the grid stays anchored at RAW t = 0.
+
+def grid_frame(m: int, src_fps: Fraction) -> int:
+    """RAW frame shown at slot m of the 30 fps grid (floor rule, exact)."""
+    return math.floor(src_fps * m / COMP_FPS)
+
+
+def grid_n0(j: int, src_fps: Fraction) -> int:
+    """First grid slot showing RAW frame j (its raw_in n0/30 lies in RAW frame j's display window)."""
+    n0 = math.ceil(Fraction(j) * COMP_FPS / src_fps)
+    if grid_frame(n0, src_fps) != j:
+        raise ValueError(f"RAW frame {j} is never shown on the 30 fps grid")
+    return n0
+
+
+def grid_seek_frame(n0: int, src_fps: Fraction) -> int:
+    """RAW frame the grid chain seeks to (two frames before the first one it shows)."""
+    return max(0, grid_frame(n0, src_fps) - 2)
+
+
+def grid_timing_filters(n0: int, n_play: int, n_out: int, src_fps: Fraction) -> str:
+    """Timing chain of a grid chain: slots [n0, n0+n_play) of the 30 fps timeline, then (freeze) the last one
+    held for n_out - n_play frames (tpad clone). Integer arithmetic only: setpts restores the RAW PTS in ticks
+    of 1/fps-numerator, fps converts with round=up, trim selects slots by PTS (time base 1/30)."""
+    ticks = Fraction(1) / (src_fps * raw_tb(src_fps))
+    if ticks.denominator != 1:
+        raise ValueError("grid timing needs an integer number of ticks per RAW frame")
+    js = grid_seek_frame(n0, src_fps)
+    s = (f"setpts=PTS-STARTPTS+{js * int(ticks)},fps=30:round=up,trim=start_pts={n0}:end_pts={n0 + n_play},"
+         f"setpts=PTS-STARTPTS")
+    if n_out > n_play:
+        s += f",tpad=stop_mode=clone:stop={n_out - n_play}"
+    return s
+
+
+def expected_grid_frames(n0: int, n_play: int, n_out: int, src_fps: Fraction) -> np.ndarray:
+    """Model of :func:`grid_timing_filters` (the ID measurement must agree exactly)."""
+    f = [grid_frame(n0 + i, src_fps) for i in range(n_play)]
+    return np.array(f + [f[-1]] * (n_out - n_play), np.int64)
+
+
+def blend_timing_filters(speed: str, n_out: int) -> str:
+    """Frame-blended slow motion (video only): setpts/v, then framerate=fps=30 with blending on every
+    in-between position (interp 0..255) and scene detection off; first output frame = RAW j exactly."""
+    if not 0 < Fraction(speed) < 1:
+        raise ValueError("a blend chain is a slow motion (0 < v < 1)")
+    return (f"setpts=(PTS-STARTPTS)/{speed},framerate=fps=30:interp_start=0:interp_end=255:scene=100,"
+            f"trim=end_frame={n_out}")
+
+
+def blend_model(j: int, speed: str, n_out: int, src_fps: Fraction) -> list[tuple[int, float]]:
+    """(RAW base frame a, fractional position of local frame i between a and a+1), i.e. the source time
+    j + i*v*raw_fps/30 of each output frame."""
+    out = []
+    for i in range(n_out):
+        t = Fraction(i) * Fraction(speed) * src_fps / COMP_FPS
+        out.append((j + math.floor(t), float(t - math.floor(t))))
+    return out
+
+
+def repeat_pairs(frames: Sequence[int]) -> list[int]:
+    """Local indices i of consecutive frames (i, i+1) showing the same RAW frame (pulldown repeats)."""
+    return [i for i in range(len(frames) - 1) if int(frames[i]) == int(frames[i + 1])]
+
+
 # =====================================================================================================
 # Geometry (own numpy code -- deliberately independent of match_cuts.geometry)
 # =====================================================================================================
@@ -529,17 +688,26 @@ class Geometry:
     push_a: float | None = None     # push-in: z(n) = 1 + push_a * n   (n = local frame, 0-based)
     punch_at: int | None = None     # punch-in: z = 1 for n < punch_at else punch_zoom
     punch_zoom: float = 1.0
+    quad: tuple | None = None       # film24: knots (n, z, dx, dy), piecewise linear (see ChainSpec.quad)
 
     def zoom(self, n: int) -> float:
+        if self.quad is not None:
+            return _pw_value(self.quad, n, 1)
         if self.push_a is not None:
             return 1.0 + float(self.push_a) * n
         if self.punch_at is not None:
             return 1.0 if n < self.punch_at else float(self.punch_zoom)
         return 1.0
 
+    def disp(self, n: int) -> tuple[float, float]:
+        """Content displacement (dx, dy) in box px at local frame n (quad chains only, else 0)."""
+        if self.quad is None:
+            return 0.0, 0.0
+        return _pw_value(self.quad, n, 2), _pw_value(self.quad, n, 3)
+
     @property
     def animated(self) -> bool:
-        return self.push_a is not None or self.punch_at is not None
+        return self.push_a is not None or self.punch_at is not None or self.quad is not None
 
     def filters(self) -> str:
         f = []
@@ -547,7 +715,9 @@ class Geometry:
             f.append("hflip")
         f.append(f"scale={self.sw}:{self.sh}:flags=bicubic")
         f.append(f"crop={self.bw}:{self.bh}:{self.cx}:{self.cy}:exact=1")
-        if self.push_a is not None:
+        if self.quad is not None:
+            f.append(_perspective_quad(self.quad))
+        elif self.push_a is not None:
             z = f"(1+{self.push_a!r}*(in-1))"
             f.append(_perspective(z))
         elif self.punch_at is not None:
@@ -564,13 +734,15 @@ class Geometry:
 
         ffmpeg's ``perspective`` maps output pixel INDEX x (not its centre x + 0.5) through the quad
         (verified with the calibration texture), so a zoom z about the box centre additionally shifts the
-        content by -(z - 1)/2 px in both axes. That is what the competitor shows, so it is part of the truth."""
+        content by -(z - 1)/2 px in both axes. That is what the competitor shows, so it is part of the truth.
+        A quad chain's displacement (dx, dy) moves the content by exactly (dx, dy) box px on top of that."""
         z = self.zoom(n)
         S = _D(self.sw / self.raw_w, self.sh / self.raw_h)
         C = _T(-self.cx, -self.cy)
         Z = _T(self.bw / 2, self.bh / 2) @ _D(z, z) @ _T(-self.bw / 2, -self.bh / 2)
         if self.animated:
-            Z = _T(-(z - 1) / 2, -(z - 1) / 2) @ Z
+            dx, dy = self.disp(n)
+            Z = _T(dx - (z - 1) / 2, dy - (z - 1) / 2) @ Z
         return Z @ C @ S
 
     def affine_comp(self, n: int = 0) -> np.ndarray:
@@ -590,6 +762,54 @@ def _perspective(z: str) -> str:
     r = f"H*(1-1/{z})/2"
     return (f"perspective=x0='{q}':y0='{r}':x1='W-{q}':y1='{r}':x2='{q}':y2='H-{r}':x3='W-{q}':y3='H-{r}'"
             f":eval=frame:sense=source:interpolation=cubic")
+
+
+def _pw_value(knots: tuple, n: float, col: int) -> float:
+    """Piecewise-linear value of knot column `col` at local frame n (constant beyond the end knots). The
+    arithmetic is the one of :func:`_pw_expr` (v_i + slope*(n - n_i)), so ffmpeg and the truth agree."""
+    if n <= knots[0][0]:
+        return float(knots[0][col])
+    for a, b in zip(knots[:-1], knots[1:]):
+        if n < b[0]:
+            slope = (float(b[col]) - float(a[col])) / (b[0] - a[0])
+            return float(a[col]) + slope * (n - a[0])
+    return float(knots[-1][col])
+
+
+def _pw_expr(knots: tuple, col: int, var: str = "(in-1)") -> str:
+    """ffmpeg expression of :func:`_pw_value` in `var` (nested if(lt(var, n_next), segment, ...))."""
+    out = repr(float(knots[-1][col]))
+    for a, b in reversed(list(zip(knots[:-1], knots[1:]))):
+        slope = (float(b[col]) - float(a[col])) / (b[0] - a[0])
+        seg = repr(float(a[col])) if slope == 0 else f"({float(a[col])!r}+({slope!r})*({var}-{a[0]}))"
+        out = f"if(lt({var},{b[0]}),{seg},{out})"
+    return out
+
+
+def _perspective_quad(knots: tuple) -> str:
+    """perspective quad of a zoom z about the box centre plus a content displacement (dx, dy) (CORNER box px):
+    the output corner (0, 0) samples the source at (W*(1-1/z)/2 - dx/z, H*(1-1/z)/2 - dy/z), etc. Every output
+    pixel samples inside the box-size source as long as |dx| <= W*(z-1)/2 and |dy| <= H*(z-1)/2 (checked by
+    :func:`check_quad`)."""
+    z, dx, dy = (f"({_pw_expr(knots, c)})" for c in (1, 2, 3))
+    q = f"(W*(1-1/{z})/2-{dx}/{z})"
+    qe = f"(W-W*(1-1/{z})/2-{dx}/{z})"
+    r = f"(H*(1-1/{z})/2-{dy}/{z})"
+    re_ = f"(H-H*(1-1/{z})/2-{dy}/{z})"
+    return (f"perspective=x0='{q}':y0='{r}':x1='{qe}':y1='{r}':x2='{q}':y2='{re_}':x3='{qe}':y3='{re_}'"
+            f":eval=frame:sense=source:interpolation=cubic")
+
+
+def check_quad(knots: tuple, n_frames: int, bw: int, bh: int) -> None:
+    """Knots start at frame 0, end at n_frames-1, increase strictly, z >= 1 and the displaced window stays
+    inside the box-size source on every frame (no edge pixels, DESIGN §6.1)."""
+    ns = [k[0] for k in knots]
+    if ns[0] != 0 or ns[-1] != n_frames - 1 or any(b <= a for a, b in zip(ns[:-1], ns[1:])):
+        raise ValueError(f"quad knots {ns} must run 0..{n_frames - 1}, strictly increasing")
+    for n in range(n_frames):
+        z, dx, dy = (_pw_value(knots, n, c) for c in (1, 2, 3))
+        if z < 1.0 or abs(dx) > bw * (z - 1) / 2 + 1e-9 or abs(dy) > bh * (z - 1) / 2 + 1e-9:
+            raise ValueError(f"quad frame {n}: z={z}, d=({dx}, {dy}) samples outside the {bw}x{bh} source")
 
 
 def lsq_similarity(A: np.ndarray, region: tuple[float, float, float, float], grid: int = 41) -> dict:
@@ -669,8 +889,13 @@ def geometry_for(profile: Profile, spec: ChainSpec) -> Geometry:
     push_a = None
     if spec.push_end is not None:
         push_a = float(f"{(spec.push_end - 1.0) / (spec.n - 1):.12g}")
+    if spec.quad is not None:
+        if push_a is not None or spec.punch_at is not None:
+            raise ValueError("a quad chain carries its own zoom (no push_end / punch_at)")
+        check_quad(spec.quad, spec.n, bw, bh)
     return Geometry(W, H, spec.flip, sw, sh, cx, cy, bw, bh, bx, by, push_a=push_a,
-                    punch_at=spec.punch_at, punch_zoom=spec.punch_zoom if spec.punch_at is not None else 1.0)
+                    punch_at=spec.punch_at, punch_zoom=spec.punch_zoom if spec.punch_at is not None else 1.0,
+                    quad=spec.quad)
 
 
 def visible_raw_rect(g: Geometry, n: int) -> tuple[float, float, float, float]:
@@ -999,16 +1224,19 @@ def count_frames(path: str | os.PathLike) -> int:
 # RAW generation
 # =====================================================================================================
 
-def shot_graph(p: Profile, s: ShotSpec) -> str:
-    """The shot's lavfi graph (one unlabeled output stream, RAW size, yuv420p)."""
+def shot_graph(p: Profile, s: ShotSpec, master: bool = False) -> str:
+    """The shot's lavfi graph (one unlabeled output stream, RAW size, yuv420p); master=True: the graph of the
+    competitor's master of this shot (ShotSpec.master)."""
     W, H = p.raw_w, p.raw_h
-    R = fps_str(RAW_FPS)
+    R = fps_str(p.raw_fps)
     vals = {"W": W, "H": H, "R": R, "W2": W // 2, "H2": H // 2, "W4": W // 4, "H4": H // 4,
             "W6": W // 6, "H6": H // 6, "W8": W // 8, "H8": H // 8, "LW": 160, "LH": 90,
             "OW": even(W / 4), "OH": even(H / 3), "OX": even(W * 0.375), "OY": even(H * 0.28),
             "AX": even(W * 0.26), "AY": even(H * 0.23),
-            "GX0": W // 10, "GY0": H // 10, "GX1": W - W // 10, "GY1": H - H // 10}
-    g = s.graph.format(**vals) + f",scale={W}:{H}:flags=neighbor,format=yuv420p"
+            "GX0": W // 10, "GY0": H // 10, "GX1": W - W // 10, "GY1": H - H // 10,
+            # film24: wide static textures panned by a moving crop (camera pan), 4-px cells
+            "W4X": 4 * W, "W3X": 3 * W, "CW": W // 4, "CH": H // 4, "CW4": W, "CW16": W // 16, "CH16": H // 16}
+    g = (s.master if master else s.graph).format(**vals) + f",scale={W}:{H}:flags=neighbor,format=yuv420p"
     if s.layer is None:
         return g
     seed, opacity, div = s.layer
@@ -1085,24 +1313,41 @@ def raw_audio_graph(n_samples: int) -> str:
             f"atrim=end_sample={n_samples},aformat=sample_fmts=flt:channel_layouts=mono[a]")
 
 
-def generate_raw(p: Profile, build: Path, out: Path, ov: Overlays) -> dict:
-    """12 shots in parallel (lossless NUT), concat + overlays once, audio; raw.mp4 (+ timings)."""
+def generate_raw(p: Profile, build: Path, out: Path, ov: Overlays | None) -> dict:
+    """The shots in parallel (lossless NUT), concat + overlays once (ov=None: no RAW overlays), audio; raw.mp4
+    (+ timings)."""
     t0 = time.perf_counter()
     jobs = []
-    for i, s in enumerate(SHOTS[:p.n_shots]):
+    for i, s in enumerate(p.shot_specs):
         dst = build / f"shot_{i:02d}.nut"
         g = shot_graph(p, s)
-        chain = (f"{g},trim=start_frame={s.skip}:end_frame={s.skip + p.shot_len},setpts=PTS-STARTPTS,"
+        n = p.shot_length(i)
+        chain = (f"{g},trim=start_frame={s.skip}:end_frame={s.skip + n},setpts=PTS-STARTPTS,"
                  f"setsar=1,format=yuv420p[out]")
 
-        def job(chain=chain, dst=dst, i=i):
+        def job(chain=chain, dst=dst, i=i, n=n):
             run_ffmpeg(["-y", "-filter_threads", "1", "-filter_complex", chain, "-map", "[out]",
-                        "-frames:v", str(p.shot_len), *FFV1, str(dst)], label=f"shot {i}")
+                        "-frames:v", str(n), *FFV1, str(dst)], label=f"shot {i}")
             return dst
         jobs.append(job)
+    masters = {}
+    for i, s in enumerate(p.shot_specs):
+        if s.master is None:
+            continue
+        dst = build / f"master_{i:02d}.nut"
+        n, sk = p.shot_length(i), s.skip if s.master_skip is None else s.master_skip
+        chain = (f"{shot_graph(p, s, master=True)},trim=start_frame={sk}:end_frame={sk + n},setpts=PTS-STARTPTS,"
+                 f"setsar=1,format=yuv420p[out]")
+        masters[i] = dst
+
+        def mjob(chain=chain, dst=dst, i=i, n=n):
+            run_ffmpeg(["-y", "-filter_threads", "1", "-filter_complex", chain, "-map", "[out]",
+                        "-frames:v", str(n), *FFV1, str(dst)], label=f"master {i}")
+            return dst
+        jobs.append(mjob)
     audio_wav = build / "raw_audio.wav"
 
-    n_exact = p.raw_frames * Fraction(AUDIO_SR) / RAW_FPS
+    n_exact = p.raw_frames * Fraction(AUDIO_SR) / p.raw_fps
     if n_exact.denominator != 1:
         raise ValueError("RAW audio length must be an integer number of samples")
 
@@ -1112,22 +1357,36 @@ def generate_raw(p: Profile, build: Path, out: Path, ov: Overlays) -> dict:
                     str(audio_wav)], label="raw audio")
         return n
     results = parallel(jobs + [audio_job])
-    shots, n_samples = results[:-1], results[-1]
+    shots, n_samples = results[:len(p.shot_specs)], results[-1]
     t_shots = time.perf_counter() - t0
     for i, sp in enumerate(shots):
         cnt = count_frames(sp)
-        if cnt != p.shot_len:
-            raise RuntimeError(f"shot {i} has {cnt} frames, expected {p.shot_len}")
+        if cnt != p.shot_length(i):
+            raise RuntimeError(f"shot {i} has {cnt} frames, expected {p.shot_length(i)}")
     ins = []
     for sp in shots:
         ins += ["-i", str(sp)]
     k = len(shots)
-    fc = ("".join(f"[{i}:v]" for i in range(k)) + f"concat=n={k}:v=1:a=0,{raw_overlay_filters(ov)},"
-          f"format=yuv420p[v]")
+    post = f"{raw_overlay_filters(ov)}," if ov is not None else ""
+    fc = "".join(f"[{i}:v]" for i in range(k)) + f"concat=n={k}:v=1:a=0,{post}format=yuv420p[v]"
     run_ffmpeg(["-y", *ins, "-i", str(audio_wav), "-filter_complex", fc, "-map", "[v]", "-map", f"{k}:a",
-                *X264_RAW, "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR), *BITEXACT, str(out)],
-               label="raw.mp4")
-    return {"shots_s": t_shots, "encode_s": time.perf_counter() - t0 - t_shots, "audio_samples": n_samples}
+                *x264_args(X264_RAW, p.raw_fps), "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR), *BITEXACT,
+                str(out)], label="raw.mp4")
+    res = {"shots_s": t_shots, "encode_s": time.perf_counter() - t0 - t_shots, "audio_samples": n_samples,
+           "master": None}
+    if masters:
+        # the competitor's source: the same RAW timeline with each master shot substituted (video only)
+        for i, mp in masters.items():
+            if count_frames(mp) != p.shot_length(i):
+                raise RuntimeError(f"master of shot {i} has {count_frames(mp)} frames")
+        mins = []
+        for i, sp in enumerate(shots):
+            mins += ["-i", str(masters.get(i, sp))]
+        fc = "".join(f"[{i}:v]" for i in range(k)) + f"concat=n={k}:v=1:a=0,{post}format=yuv420p[v]"
+        res["master"] = build / "raw_master.mp4"
+        run_ffmpeg(["-y", *mins, "-filter_complex", fc, "-map", "[v]", "-an", *x264_args(X264_RAW, p.raw_fps),
+                    *BITEXACT, str(res["master"])], label="raw_master.mp4")
+    return res
 
 
 # =====================================================================================================
@@ -1147,6 +1406,8 @@ class Chain:
     geom: Geometry | None = None
     frames: np.ndarray | None = None   # measured RAW frame per local frame (ID chain)
     expected: np.ndarray | None = None
+    n0: int | None = None              # grid chains: first slot of the 30 fps timeline (raw_in = n0/30)
+    blend: list | None = None          # blend chains: measured (raw_a, raw_b | None, alpha_b | None) per frame
 
     @property
     def in_raw(self) -> bool:
@@ -1155,22 +1416,30 @@ class Chain:
 
 def resolve_chains(p: Profile) -> list[Chain]:
     chains, k = [], 0
+    shots = p.shot_specs
     for i, spec in enumerate(p.chains):
         c = Chain(i, spec, comp_in=k)
         if c.in_raw:
-            if spec.shot >= p.n_shots or spec.off < 0:
+            if spec.shot >= len(shots) or spec.off < 0:
                 raise ValueError(f"bad shot for {spec}")
-            c.j = spec.shot * p.shot_len + spec.off
-            if spec.off + src_frames_needed(spec.n, spec.speed) > p.shot_len:
-                raise ValueError(f"chain {i} runs past the end of shot {spec.shot}")
-            if "mandelbrot" in SHOTS[spec.shot].tags and (spec.flip or spec.push_end or spec.punch_at or
+            if "mandelbrot" in shots[spec.shot].tags and (spec.flip or spec.push_end or spec.punch_at or
                                                           is_fullscreen(spec)):
                 raise ValueError("mandelbrot shots are not used for flip / push-in / punch-in / fullscreen")
-            c.phase = choose_phase(spec.speed, spec.n)
-            c.ss = ss_seconds(c.j)
-            c.timing = timing_filters(spec.speed, spec.n, c.phase)
+            if p.timing == "grid":
+                _resolve_grid_chain(p, c)
+            else:
+                c.j = spec.shot * p.shot_len + spec.off
+                if spec.off + src_frames_needed(spec.n, spec.speed) > p.shot_len:
+                    raise ValueError(f"chain {i} runs past the end of shot {spec.shot}")
+                c.phase = choose_phase(spec.speed, spec.n)
+                c.ss = ss_seconds(c.j)
+                c.timing = timing_filters(spec.speed, spec.n, c.phase)
+                c.expected = expected_chain_frames(c.j, spec.speed, spec.n, c.phase)
             c.geom = geometry_for(p, spec)
-            c.expected = expected_chain_frames(c.j, spec.speed, spec.n, c.phase)
+        elif spec.foreign is not None:
+            if p.timing != "grid" or not 0 <= spec.lookalike < len(shots):
+                raise ValueError("a foreign lookalike insert is a film24 chain imitating a RAW shot")
+            c.geom = geometry_for(p, spec)
         chains.append(c)
         k += spec.n - spec.xfade
     for a, b in zip(chains[:-1], chains[1:]):
@@ -1185,6 +1454,57 @@ def resolve_chains(p: Profile) -> list[Chain]:
     return chains
 
 
+def shot_of_frame(p: Profile, j: int) -> int:
+    """Index of the RAW shot containing RAW frame j."""
+    for i in range(len(p.shot_specs)):
+        if p.shot_start(i) <= j < p.shot_start(i) + p.shot_length(i):
+            return i
+    raise ValueError(f"RAW frame {j} outside the RAW ({p.raw_frames} frames)")
+
+
+def chain_clips(c: Chain) -> list[tuple[int, int]]:
+    """Local [a, b) ranges of the editor clips (layers) of a chain: split at spec.clips, at the punch-in and
+    at the start of a freeze."""
+    cuts = sorted(set(c.spec.clips) | ({c.spec.punch_at} if c.spec.punch_at is not None else set()) |
+                  ({c.spec.freeze_at} if c.spec.freeze_at is not None else set()))
+    edges = [0, *cuts, c.spec.n]
+    return list(zip(edges[:-1], edges[1:]))
+
+
+def _resolve_grid_chain(p: Profile, c: Chain) -> None:
+    """film24 chains: v = 1 grid timing (+ freeze), or a frame-blended slow motion seeked to RAW j."""
+    spec, fps = c.spec, p.raw_fps
+    c.j = p.shot_start(spec.shot) + spec.off
+    if spec.retime == "blend":
+        if spec.clips or spec.freeze_at is not None:
+            raise ValueError("a blend chain is one clip")
+        c.ss = ss_seconds(c.j, fps)
+        c.timing = blend_timing_filters(spec.speed, spec.n)
+        shown = [a + (1 if f > 0 else 0) for a, f in blend_model(c.j, spec.speed, spec.n, fps)]
+    else:
+        if Fraction(spec.speed) != 1:
+            raise ValueError("grid chains play at v = 1 (retimes: retime='blend' or freeze_at)")
+        if spec.retime != "none" or spec.xfade:
+            raise ValueError("grid chains: no crossfades")
+        c.n0 = grid_n0(c.j, fps)
+        n_play = spec.n if spec.freeze_at is None else spec.freeze_at
+        c.ss = ss_seconds(grid_seek_frame(c.n0, fps), fps)
+        c.timing = grid_timing_filters(c.n0, n_play, spec.n, fps)
+        c.expected = expected_grid_frames(c.n0, n_play, spec.n, fps)
+        shown = [int(x) for x in c.expected]
+        if any((fps * (c.n0 + i) / COMP_FPS).denominator == 1 for i in range(n_play)):
+            raise ValueError(f"chain {c.index}: a RAW frame boundary falls exactly on a grid slot (timing tie)")
+    if shown[-1] + 2 >= p.raw_frames:
+        raise ValueError(f"chain {c.index} runs past the end of the RAW")
+    # every editor clip shows ONE RAW shot (a chain may cross RAW-native shot changes only at clip starts)
+    for a, b in chain_clips(c):
+        sh = {shot_of_frame(p, j) for j in shown[a:b]}
+        if len(sh) != 1:
+            raise ValueError(f"chain {c.index} clip [{a},{b}) spans RAW shots {sorted(sh)}")
+    if shot_of_frame(p, shown[0]) != spec.shot:
+        raise ValueError(f"chain {c.index} starts outside shot {spec.shot}")
+
+
 def decode_id_chain(id_mp4: Path, c: Chain) -> np.ndarray:
     raw = run_ffmpeg(["-ss", c.ss, "-i", str(id_mp4), "-filter_complex", f"[0:v]{c.timing},format=gray[v]",
                       "-map", "[v]", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture=True, label="id chain")
@@ -1197,6 +1517,68 @@ def decode_id_chain(id_mp4: Path, c: Chain) -> np.ndarray:
     return left
 
 
+BLEND_PURE_EPS = 0.02          # measured blend weight within this of 0 / 1 -> a pure RAW frame
+BLEND_MODEL_TOL = 0.03         # measured weight vs the source-time model (framerate quantises to ~1/16 .. 1/64)
+
+
+def measure_blend_chain(alt_mp4: Path, id_mp4: Path, c: Chain, src_fps: Fraction) -> list[tuple]:
+    """MEASURED truth of a frame-blend chain: per output frame (raw_a, raw_b | None, alpha_b | None). The blend
+    weight comes from the alternating-level probe video (:func:`make_alt_video`) through the identical timing
+    chain; the frame pair from the source-time model, which must agree with the measured weight within
+    BLEND_MODEL_TOL; the ID chain must decode every pure frame to its RAW frame (blends may still decode when
+    alpha is small, then to raw_a or raw_b)."""
+    raw = run_ffmpeg(["-ss", c.ss, "-i", str(alt_mp4), "-filter_complex", f"[0:v]{c.timing},format=gray[v]",
+                      "-map", "[v]", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture=True, label="blend probe")
+    lv = np.frombuffer(raw, np.uint8).reshape(-1, 32, 64)[:, 8:24, 16:48].astype(np.float64).mean(axis=(1, 2))
+    if len(lv) != c.spec.n:
+        raise RuntimeError(f"blend chain {c.index}: probe has {len(lv)} frames, expected {c.spec.n}")
+    out = []
+    for i, ((ra, frac), level) in enumerate(zip(blend_model(c.j, c.spec.speed, c.spec.n, src_fps), lv)):
+        la, lb = (ALT_HI, ALT_LO) if ra % 2 else (ALT_LO, ALT_HI)
+        al = float((level - la) / (lb - la))
+        if abs(al - frac) > BLEND_MODEL_TOL:
+            raise RuntimeError(f"blend chain {c.index} frame {i}: measured weight {al:.4f} vs model {frac:.4f}")
+        if al <= BLEND_PURE_EPS:
+            out.append((ra, None, None))
+        elif al >= 1 - BLEND_PURE_EPS:
+            out.append((ra + 1, None, None))
+        else:
+            out.append((ra, ra + 1, round(al, 4)))
+    raw = run_ffmpeg(["-ss", c.ss, "-i", str(id_mp4), "-filter_complex", f"[0:v]{c.timing},format=gray[v]",
+                      "-map", "[v]", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture=True, label="blend id")
+    left, _ = decode_id_frames(np.frombuffer(raw, np.uint8).reshape(-1, ID_H, ID_W))
+    for i, (ra, rb, al) in enumerate(out):
+        ok = left[i] == ra if rb is None else left[i] in (-1, ra, rb)
+        if not ok:
+            raise RuntimeError(f"blend chain {c.index} frame {i}: ID {left[i]} vs measured ({ra}, {rb}, {al})")
+    return out
+
+
+def measure_caption_fx(p: Profile, c: Chain) -> list[dict]:
+    """Per-frame bbox (competitor px, CORNER) of the freeze's animated caption, measured by rendering the same
+    drawtext alone on a black box-size stream."""
+    bx, by, bw, bh, _ = p.box
+    chain = f"color=c=black:s={bw}x{bh}:r=30,trim=end_frame={c.spec.n},{caption_fx_filter(p, c)},format=gray"
+    out = []
+    for n, fr in enumerate(iter_raw_frames(["-f", "lavfi", "-i", chain, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                                           bw, bh, "caption fx")):
+        on = fr > 24
+        if not on.any():
+            if n >= c.spec.freeze_at:
+                raise RuntimeError(f"animated caption invisible on local frame {n}")
+            continue
+        if n < c.spec.freeze_at:
+            raise RuntimeError(f"animated caption visible before the freeze (local frame {n})")
+        ys, xs = np.nonzero(on)
+        out.append({"k": c.comp_in + n, "x": int(xs.min()) + bx, "y": int(ys.min()) + by,
+                    "w": int(xs.max() - xs.min() + 1), "h": int(ys.max() - ys.min() + 1)})
+    if len(out) != c.spec.n - c.spec.freeze_at:
+        raise RuntimeError("animated caption frame count mismatch")
+    if len({(d["x"], d["y"]) for d in out}) < 2:
+        raise RuntimeError("the freeze caption does not move")
+    return out
+
+
 def not_in_raw_graph(bw: int, bh: int, n: int, unit: float) -> str:
     fs = max(12, int(round(96 * unit)))
     return (f"gradients=s={bw}x{bh}:r=30:speed=0.03:seed=9:c0=0x3010a0:c1=0xff7a00:c2=0x00c8a0:n=3:"
@@ -1205,15 +1587,50 @@ def not_in_raw_graph(bw: int, bh: int, n: int, unit: float) -> str:
             f"y=(h-th)/2:fontsize={fs}:fontcolor=white:borderw={max(2, int(6 * unit))}:bordercolor=black")
 
 
+def caption_fx_filter(p: Profile, c: Chain) -> str:
+    """Chain-local animated caption over the freeze (box px, upper box area away from the caption band): a word
+    sliding right by 6 px/frame, so the frozen competitor frames are NOT static unless it is masked."""
+    fs = max(12, int(round(64 * p.unit)))
+    k0 = c.spec.freeze_at
+    return _drawtext("FROZEN", f"'{p.u(60)}+6*(n-{k0})'", str(p.u(140)), fs, "#ffe600",
+                     border=max(2, p.u(5)), enable=f"gte(n,{k0})")
+
+
+def look_filters(p: Profile, c: Chain) -> str:
+    """Appearance / chain-local overlay filters applied after the geometry ('' for mini / full chains)."""
+    f = [x for x in c.spec.look.split(",") if x]
+    if c.spec.caption_fx:
+        if c.spec.freeze_at is None:
+            raise ValueError("caption_fx is the freeze's animated caption")
+        f.append(caption_fx_filter(p, c))
+    for name in (x.split("=")[0] for x in f):
+        if name not in LOOK_WHITELIST:
+            raise ValueError(f"look filter {name} not whitelisted")
+    return "".join("," + x for x in f)
+
+
 def render_chain(raw_mp4: Path, c: Chain, dst: Path, p: Profile) -> None:
     if c.in_raw:
         run_ffmpeg(["-y", "-threads", "2", "-ss", c.ss, "-i", str(raw_mp4), "-filter_threads", "1",
-                    "-filter_complex", f"[0:v]{c.timing},{c.geom.filters()},setsar=1,format=yuv420p[v]",
-                    "-map", "[v]", *FFV1, str(dst)], label=f"segment chain {c.index}")
+                    "-filter_complex", f"[0:v]{c.timing},{c.geom.filters()}{look_filters(p, c)},setsar=1,"
+                    f"format=yuv420p[v]", "-map", "[v]", *FFV1, str(dst)], label=f"segment chain {c.index}")
+    elif c.spec.foreign is not None:
+        run_ffmpeg(["-y", "-filter_threads", "1", "-filter_complex", f"{foreign_graph(p, c)},{c.geom.filters()}"
+                    f"{look_filters(p, c)},setsar=1,format=yuv420p[v]", "-map", "[v]", *FFV1, str(dst)],
+                   label=f"foreign insert {c.index}")
     else:
         bx, by, bw, bh, _ = p.box
         run_ffmpeg(["-y", "-filter_complex", f"{not_in_raw_graph(bw, bh, c.spec.n, p.unit)},setsar=1,"
                     f"format=yuv420p[v]", "-map", "[v]", *FFV1, str(dst)], label="not-in-raw insert")
+
+
+def foreign_graph(p: Profile, c: Chain) -> str:
+    """A NOT-IN-RAW lookalike: its generator rendered at RAW size and rate (never part of raw.mp4), put on the
+    30 fps grid like a RAW clip (sample and hold); the chain's geometry follows."""
+    s = c.spec.foreign
+    need = math.ceil(c.spec.n * p.raw_fps / COMP_FPS) + 2
+    return (f"{shot_graph(p, s)},trim=start_frame={s.skip}:end_frame={s.skip + need},setpts=PTS-STARTPTS,"
+            f"fps=30:round=up,trim=end_frame={c.spec.n}")
 
 
 def composite_graph(chains: list[Chain], inputs: list[str], tail: str, canvas: Profile | None = None) -> str:
@@ -1368,15 +1785,50 @@ def audio_start_sample(frames: np.ndarray, speed: str, src_fps: Fraction = RAW_F
     return int(math.ceil(audio_in_point(frames, speed, src_fps) * AUDIO_SR))
 
 
+def picture_in_point(p: Profile, c: Chain) -> Fraction:
+    """RAW time (s) of the chain's local frame 0 on its time map: n0/30 on the 30 fps grid; a blend chain's
+    first frame IS RAW j, i.e. j/fps."""
+    return Fraction(c.n0) / COMP_FPS if c.n0 is not None else Fraction(c.j) / p.raw_fps
+
+
+def _grid_audio_span(p: Profile, chains: list[Chain], ci: int) -> tuple[int, int, dict]:
+    """film24 chain audio (always v = 1: blend / freeze are video-only retimes): starts at the picture in-point
+    minus the content offset (pre-edit A/V offset of the source), shifted by the previous chain's L-cut
+    extension; lasts n - that extension + this chain's own extension (genuine L-cut, DESIGN §6.1)."""
+    c = chains[ci]
+    prev = chains[ci - 1] if ci > 0 else None
+    ext_in = prev.spec.audio_ext if prev is not None and prev.in_raw else 0
+    ext_out = c.spec.audio_ext
+    if ext_out and not (ci + 1 < len(chains) and chains[ci + 1].in_raw):
+        raise ValueError("an L-cut extends into a following RAW chain")
+    t_in = picture_in_point(p, c)
+    s_pic = t_in * AUDIO_SR
+    if s_pic.denominator != 1:
+        raise ValueError(f"chain {c.index}: picture in-point {t_in} is not on a 48 kHz sample")
+    s0 = int(s_pic) + ext_in * SAMPLES_PER_COMP_FRAME - p.audio.content_offset
+    out = (c.spec.n - ext_in + ext_out) * SAMPLES_PER_COMP_FRAME
+    if s0 < 0 or out <= 0:
+        raise ValueError(f"chain {c.index}: bad audio span ({s0}, {out})")
+    return s0, out, {"raw_in_seconds": s0 / AUDIO_SR, "start_sample": s0, "picture_in_seconds": float(t_in),
+                     "picture_in": fps_str(t_in) if t_in.denominator != 1 else str(t_in.numerator),
+                     "content_offset_samples": p.audio.content_offset, "in_offset_frames": ext_in,
+                     "out_offset_frames": ext_out, "in_point": "picture in-point - content offset"}
+
+
 def build_competitor_audio(p: Profile, chains: list[Chain], raw_audio: Path, dst: Path, n_comp: int) -> dict:
     """Separate audio graph: per chain sample-exact atrim (tape-style asetrate for v != 1) starting at the NLE
     in-point (:func:`audio_start_sample`), acrossfade for the crossfade, NOT-IN-RAW tone, concat; music under
     it (-12 dB, amix normalize=0). Returns per-chain audio start (seconds) and sample counts."""
     parts, labels, info, inputs = [], [], {}, []
-    for c in chains:
+    for ci, c in enumerate(chains):
         n = c.spec.n
         out_samples = n * SAMPLES_PER_COMP_FRAME
-        if c.in_raw:
+        if c.in_raw and p.timing == "grid":
+            s0, out_samples, info[c.index] = _grid_audio_span(p, chains, ci)
+            chain = (f"[{len(inputs) // 2}:a]atrim=start_sample={s0}:end_sample={s0 + out_samples + 4800},"
+                     f"asetpts=PTS-STARTPTS,atrim=end_sample={out_samples},asetpts=PTS-STARTPTS")
+            inputs += ["-i", str(raw_audio)]
+        elif c.in_raw:
             a, b = floor_interval(c.frames, c.spec.speed)
             s0 = audio_start_sample(c.frames, c.spec.speed)
             if not a <= Fraction(s0, AUDIO_SR) < min(b, a + Fraction(1, AUDIO_SR)):
@@ -1415,7 +1867,8 @@ def build_competitor_audio(p: Profile, chains: list[Chain], raw_audio: Path, dst
     total = n_comp * SAMPLES_PER_COMP_FRAME
     music = ("0.30*sin(2*PI*110*t)*(0.6+0.4*sin(2*PI*2*t))+0.22*sin(2*PI*164.81*t)*(0.5+0.5*sin(2*PI*2*t+2.1))"
              "+0.18*sin(2*PI*220*t+sin(2*PI*0.5*t))*(0.5+0.5*sin(2*PI*4*t))")
-    parts.append("".join(cat) + f"concat=n={len(cat)}:v=0:a=1[orig]")
+    delay = f",adelay=delays={p.audio.post_delay}S:all=1" if p.audio.post_delay else ""
+    parts.append("".join(cat) + f"concat=n={len(cat)}:v=0:a=1{delay}[orig]")
     parts.append(f"aevalsrc=exprs='{music}':s={AUDIO_SR},atrim=end_sample={total},volume=-12dB,"
                  f"aformat=sample_fmts=flt:channel_layouts=mono[m]")
     parts.append(f"[orig][m]amix=inputs=2:duration=first:normalize=0,atrim=end_sample={total},"
@@ -1553,11 +2006,22 @@ def _self_check_frames(items: list[tuple]) -> list[tuple]:
 
 
 def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dict], segs: list[dict],
-               captions: list[dict], scratch: Path, workers: int = MAX_PARALLEL) -> dict:
+               captions: list[dict], scratch: Path, workers: int = MAX_PARALLEL,
+               extra_masks: list[dict] | None = None, pairs: list[list[int]] | None = None,
+               foreign: list[dict] | None = None) -> dict:
     """(a) every matchable competitor frame: the truth RAW frame beats j±1, j±2 by >= SELF_MARGIN_MIN masked
     ZNCC at the DESIGN proxy sizes under ±0.5 % scale / ±2 px perturbations (mask = rounded box minus the
     dilated caption bboxes); (b) >= SELF_INLIERS_MIN SIFT + RANSAC inliers (RAW -> comp, pairwise Lowe
-    ratio) on the first / middle / last frame of every segment. Returns the statistics."""
+    ratio) on the first / middle / last frame of every segment. Returns the statistics.
+
+    film24 (DESIGN §6.1): the per-frame truth Sim (`frames_truth[k]['sim']`) is used when present;
+    `extra_masks` = per-frame bboxes {k, x, y, w, h} masked like captions (the freeze's animated caption);
+    segments with `static_content` need only a positive NOMINAL margin (their frames are nearly identical by
+    design, the failure is recorded as 'relaxed'); a segment's measured `min_inliers` replaces the inlier floor
+    (recorded); `pairs` = pulldown repeat pairs (k, k+1): comp(k) warped by the truth framing change must match
+    comp(k+1) (masked ZNCC >= REPEAT_PAIR_MIN); `gray` segments: truth nominal ZNCC in [GRAY_MIN, GRAY_MAX) (and
+    a positive nominal margin); `foreign` = [{seg, frames, raw_range, sim, flip}] NOT-IN-RAW lookalikes: their
+    best ZNCC over the imitated RAW shot (at the insert's framing) must lie in [FOREIGN_MIN, FOREIGN_MAX)."""
     import cv2
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
@@ -1575,15 +2039,17 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
         if fr["raw_a"] is None or (fr["alpha_b"] is not None and fr["alpha_b"] > 0):
             continue
         s = seg_by_id[fr["seg"]]
-        items.append((fr["k"], fr["raw_a"], _sim_at(s, fr["k"]), s["flip"]))
+        items.append((fr["k"], fr["raw_a"], fr.get("sim") or _sim_at(s, fr["k"]), s["flip"]))
         need.update(range(fr["raw_a"] - 2, fr["raw_a"] + 3))
+    for f in foreign or []:
+        need.update(range(*f["raw_range"]))
     comp_d = decode_gray(comp_mp4, (cw, ch), roi=roi)
     comp = np.stack([comp_d[k] for k in range(len(comp_d))])
     del comp_d
     raws = decode_gray(raw_mp4, (rw, rh), keep=lambda i: i in need)
     dil = 3
     cap_boxes: dict[int, list] = {}
-    for c in captions:
+    for c in captions + [{**m, "k_in": m["k"], "k_out": m["k"] + 1} for m in (extra_masks or [])]:
         b = (int(math.floor(c["x"] * comp_ratio[0])) - dil - x0, int(math.floor(c["y"] * comp_ratio[1])) - dil - y0,
              int(math.ceil((c["x"] + c["w"]) * comp_ratio[0])) + dil - x0,
              int(math.ceil((c["y"] + c["h"]) * comp_ratio[1])) + dil - y0)
@@ -1643,11 +2109,13 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
                             Mc = _T(0.5, 0.5) @ np.vstack([M, [0, 0, 1]]) @ _T(-0.5, -0.5)
                             Mf = np.linalg.inv(_D(*comp_ratio)) @ Mc @ _D(*raw_ratio)
                             pc = np.array([box_c[0], box_c[1], 1.0])
-                            pr = np.linalg.inv(sim_matrix(_sim_at(s, k))) @ pc
+                            pr = np.linalg.inv(sim_matrix(fr.get("sim") or _sim_at(s, k))) @ pc
                             err = float(np.linalg.norm((Mf @ pr)[:2] - pc[:2]))
                 key = f"{s['id']}@{k}"
                 inl[key] = n_in
                 centre_err[key] = err
+        rep = _repeat_pair_scores(comp, frames_truth, pairs, comp_ratio, (x0, y0)) if pairs is not None else None
+        fgn = _foreign_scores(comp, raws, foreign, comp_ratio, raw_ratio, (x0, y0), p.raw_w) if foreign else None
     finally:
         _SC.clear()
         for f in npys:
@@ -1663,8 +2131,40 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
         d["min_score"] = min(d["min_score"], sc)
         d["min_pixels"] = min(d["min_pixels"], npx)
     fails_m = [r for r in res if r[2] < SELF_MARGIN_MIN]
-    fails_i = {k: v for k, v in inl.items() if v < SELF_INLIERS_MIN}
-    return {
+    # static content (film24): nearly identical consecutive RAW frames by design -> the truth frame must only
+    # stay the nominal argmax; every such frame is listed (measured, never silently exempt)
+    def _relaxable(r: tuple) -> bool:
+        s = seg_by_id[frames_truth[r[0]]["seg"]]
+        return bool(s.get("static_content") or s.get("gray")) and r[7] > 0
+    relaxed = [r for r in fails_m if _relaxable(r)]
+    fails_m = [r for r in fails_m if r not in relaxed]
+    gray = None
+    gray_ids = {s["id"] for s in segs if s.get("gray")}
+    if gray_ids:
+        sc_g = [r[6] for r in res if frames_truth[r[0]]["seg"] in gray_ids]
+        gray = {"min": float(min(sc_g)), "max": float(max(sc_g)), "median": float(np.median(sc_g)),
+                "range": [GRAY_MIN, GRAY_MAX], "ok": bool(GRAY_MIN <= min(sc_g) and max(sc_g) < GRAY_MAX)}
+    floors = {f"{s['id']}@": s.get("min_inliers") for s in segs if s.get("min_inliers") is not None}
+    fails_i, lowered = {}, {}
+    for k, v in inl.items():
+        floor = next((f for pre, f in floors.items() if k.startswith(pre)), None)
+        if v < SELF_INLIERS_MIN:
+            if floor is not None and v >= floor:
+                lowered[k] = {"inliers": v, "floor": floor}
+            else:
+                fails_i[k] = v
+    extra = {}
+    if relaxed or floors:
+        extra["relaxed_margin_frames"] = [{"k": r[0], "raw": r[1], "margin": r[2], "nominal_margin": r[7],
+                                           "seg": frames_truth[r[0]]["seg"]} for r in relaxed]
+        extra["lowered_inlier_floors"] = lowered
+    if rep is not None:
+        extra["repeat_pairs"] = rep
+    if gray is not None:
+        extra["gray"] = gray
+    if fgn is not None:
+        extra["foreign"] = fgn
+    return {**extra,
         "proxy_raw": [rw, rh], "proxy_comp": [cw, ch], "frames_checked": len(res),
         "perturbations": [list(t) for t in _PERTURB],
         "min_margin": float(margins.min()), "median_margin": float(np.median(margins)),
@@ -1682,8 +2182,82 @@ def self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, frames_truth: list[dic
         "inliers": inl,
         "ransac_centre_err_px": centre_err,
         "inlier_failures": fails_i,
-        "ok": bool(not fails_m and not fails_i and inl),
+        "ok": bool(not fails_m and not fails_i and inl and (rep is None or rep["ok"]) and
+                   (gray is None or gray["ok"]) and (fgn is None or fgn["ok"])),
     }
+
+
+GRAY_MIN, GRAY_MAX = 0.65, 0.90        # gray chain: truth ZNCC between none_thresh-ish and match_thresh
+FOREIGN_MIN, FOREIGN_MAX = 0.60, 0.90  # foreign lookalike: best ZNCC over the imitated RAW shot
+
+
+def _foreign_scores(comp: np.ndarray, raws: dict, foreign: list[dict], comp_ratio: tuple, raw_ratio: tuple,
+                    origin: tuple[int, int], raw_w: int) -> dict:
+    """Best masked ZNCC of every NOT-IN-RAW lookalike frame over all frames of the RAW shot it imitates, each
+    warped by the insert's own (static) framing at the DESIGN proxy sizes."""
+    import cv2
+    x0, y0 = origin
+    h, w = comp.shape[1:]
+    out, bad = {}, {}
+    for f in foreign:
+        F = np.array([[-1.0, 0, raw_w], [0, 1, 0], [0, 0, 1]]) if f["flip"] else np.eye(3)
+        M = corner_to_cv(_T(-x0, -y0) @ _D(*comp_ratio) @ sim_matrix(f["sim"]) @ F @ np.linalg.inv(_D(*raw_ratio)))
+        ok = cv2.warpAffine(np.full(next(iter(raws.values())).shape, 255, np.uint8), M, (w, h),
+                            flags=cv2.INTER_NEAREST)
+        warped = {j: cv2.GaussianBlur(cv2.warpAffine(raws[j].astype(np.float32), M, (w, h), flags=cv2.INTER_LINEAR),
+                                      (0, 0), 1.0) for j in range(*f["raw_range"])}
+        for k in f["frames"]:
+            m = _frame_mask(k) & (cv2.erode(ok, np.ones((3, 3), np.uint8)) > 0)
+            ck = cv2.GaussianBlur(comp[k].astype(np.float32), (0, 0), 1.0)[m]
+            rows = np.stack([warped[j][m] for j in sorted(warped)])
+            sc = _zncc_rows(ck, rows)
+            out[str(k)] = {"best": float(sc.max()), "raw": int(sorted(warped)[int(np.argmax(sc))])}
+            if not FOREIGN_MIN <= sc.max() < FOREIGN_MAX:
+                bad[str(k)] = float(sc.max())
+    best = [v["best"] for v in out.values()]
+    return {"per_frame": out, "min": min(best), "max": max(best), "range": [FOREIGN_MIN, FOREIGN_MAX],
+            "failures": bad, "ok": not bad}
+
+
+REPEAT_PAIR_MIN = 0.98        # comp(k) -> comp(k+1) masked ZNCC at a pulldown repeat (only codec noise differs)
+
+
+def _repeat_pair_scores(comp: np.ndarray, frames_truth: list[dict], pairs: list[list[int]],
+                        comp_ratio: tuple[float, float], origin: tuple[int, int]) -> dict:
+    """Competitor-only evidence of the pulldown cadence: at a truth repeat pair (k, k+1) the competitor frame
+    k warped by the editor's own framing change (truth Sim k+1 o Sim k^-1) equals frame k+1 up to codec noise.
+    Also reports the same score on the other consecutive pairs of the same chains (RAW content changes)."""
+    import cv2
+    x0, y0 = origin
+    P = _T(-x0, -y0) @ _D(*comp_ratio)
+    h, w = comp.shape[1:]
+
+    def score(k: int) -> float:
+        a, b = frames_truth[k], frames_truth[k + 1]
+        W = P @ sim_matrix(b["sim"]) @ np.linalg.inv(sim_matrix(a["sim"])) @ np.linalg.inv(P)
+        src = cv2.GaussianBlur(comp[k].astype(np.float32), (0, 0), 1.0)
+        warped = cv2.warpAffine(src, corner_to_cv(W), (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        ok = cv2.warpAffine(np.full((h, w), 255, np.uint8), corner_to_cv(W), (w, h), flags=cv2.INTER_NEAREST)
+        m = _SC["mask_base"] & (cv2.erode(ok, np.ones((5, 5), np.uint8)) > 0)
+        for kk in (k, k + 1):
+            for (bx0, by0, bx1, by1) in _SC["cap_boxes"].get(kk, []):
+                m[max(0, by0):max(0, by1), max(0, bx0):max(0, bx1)] = False
+        tgt = cv2.GaussianBlur(comp[k + 1].astype(np.float32), (0, 0), 1.0)
+        return float(_zncc_rows(tgt[m], warped[m][None])[0])
+    rep = {k: score(k) for k, _ in pairs}
+    in_pair = {k for k, _ in pairs}
+    other = {}
+    for fr, nx in zip(frames_truth[:-1], frames_truth[1:]):
+        k = fr["k"]
+        if k in in_pair or fr.get("chain") is None or fr.get("chain") != nx.get("chain") or fr["sim"] is None or \
+                nx["sim"] is None or fr["class"] == "blend" or nx["class"] == "blend" or fr["raw_a"] == nx["raw_a"]:
+            continue
+        other[k] = score(k)
+    bad = {k: v for k, v in rep.items() if v < REPEAT_PAIR_MIN}
+    return {"n": len(rep), "min": min(rep.values(), default=None), "median": float(np.median(list(rep.values())))
+            if rep else None, "other_pairs_max": max(other.values(), default=None),
+            "other_pairs_median": float(np.median(list(other.values()))) if other else None,
+            "per_pair": {str(k): round(v, 5) for k, v in rep.items()}, "failures": bad, "ok": not bad}
 
 
 def audio_self_check(raw_mp4: Path, comp_mp4: Path, segs: list[dict], max_lag_ms: float = 1.0) -> dict:
@@ -1723,6 +2297,88 @@ def audio_self_check(raw_mp4: Path, comp_mp4: Path, segs: list[dict], max_lag_ms
             "min_corr": min((v["corr"] for v in res.values()), default=0.0), "failures": bad, "ok": not bad}
 
 
+AV_CONTENT_TOL_MS = 0.5       # film24: measured sound-vs-picture offset vs the planned split delay
+AV_SWITCH_TOL_MS = 1.0        # median audio switch delay at the cuts vs the post-edit delay
+AV_SWITCH_EACH_TOL_MS = 3.0   # any single cut (AAC frames smear a hard switch by a fraction of a ms)
+
+
+def film_audio_self_check(p: Profile, raw_mp4: Path, comp_mp4: Path, segs: list[dict], cuts: list[dict],
+                          jl: list[dict]) -> dict:
+    """film24 audio truth, measured on the DECODED files (independent of how the graph was built):
+    (1) per v = 1 clip >= 12 frames: xcorr of the competitor audio with the RAW audio played from the clip's
+        PICTURE in-point -> the sound-vs-picture lag must equal -(content + post) ms (xcorr convention: negative
+        = competitor audio late) within AV_CONTENT_TOL_MS;
+    (2) per cut between two chains: the sample where the competitor audio switches from chain A's audio line
+        to chain B's (least squares over a window, each model = RAW audio on its own line incl. the delays)
+        minus the picture cut (and minus the truth L-cut offset) = the post-edit delay: median within
+        AV_SWITCH_TOL_MS, every cut within AV_SWITCH_EACH_TOL_MS."""
+    from scipy.signal import correlate
+    sr = AUDIO_SR
+    raw = _decode_audio(raw_mp4, sr).astype(np.float64)
+    comp = _decode_audio(comp_mp4, sr).astype(np.float64)
+    post = p.audio.post_delay
+    want_lag_ms = -1000.0 * (p.audio.content_offset + post) / sr
+    spf = SAMPLES_PER_COMP_FRAME
+    by_id = {s["id"]: s for s in segs}
+    lags, bad = {}, {}
+    pad = int(0.25 * sr)
+    for s in segs:
+        if s["type"] != "raw" or s["comp_out"] - s["comp_in"] < 12 or s.get("retime") != "none":
+            continue
+        a = s["audio"]
+        k0 = s["comp_in"] + a["in_offset_frames"] + 2          # 2 frames > the post-edit delay
+        k1 = s["comp_out"] + a["out_offset_frames"]
+        c = comp[k0 * spf:k1 * spf]
+        r0 = a["picture_raw_in_seconds"] + (k0 - s["comp_in"]) / 30.0      # RAW picture time at k0 (v = 1)
+        i0 = int(round(r0 * sr)) - pad
+        ref = raw[max(0, i0):i0 + len(c) + 2 * pad]
+        xc = correlate(ref, c, mode="valid", method="fft")
+        lag = int(np.argmax(xc)) - pad + (max(0, i0) - i0)
+        lag_ms = 1000.0 * lag / sr
+        peak = float(xc.max() / (np.linalg.norm(c) * np.linalg.norm(ref[int(np.argmax(xc)):int(np.argmax(xc)) +
+                                                                          len(c)]) + 1e-12))
+        lags[str(s["id"])] = {"lag_ms": lag_ms, "corr": peak}
+        if abs(lag_ms - want_lag_ms) > AV_CONTENT_TOL_MS:
+            bad[str(s["id"])] = lag_ms
+
+    def line(seg: dict, q: np.ndarray) -> np.ndarray:
+        """Chain audio line of `seg` at competitor samples q (incl. content offset and post delay)."""
+        a = seg["audio"]
+        r = a["raw_in_seconds"] * sr + (q - post - seg["comp_in"] * spf)
+        return raw[np.clip(np.round(r).astype(np.int64), 0, raw.size - 1)]
+
+    ext = {d["cut"]: d["offset_frames"] for d in jl}
+    switches, bad_sw = {}, {}
+    for cu in cuts:
+        if cu.get("same_time_line"):
+            continue
+        A, B = by_id[cu["a_seg"]], by_id[cu["b_seg"]]
+        if A["type"] != "raw" or B["type"] != "raw":
+            continue
+        K, e = cu["k"], ext.get(cu["k"], 0)
+        qa0 = (A["comp_in"] + A["audio"]["in_offset_frames"]) * spf + post
+        qb1 = (B["comp_out"] + B["audio"]["out_offset_frames"]) * spf + post
+        lo, hi = max(qa0 + 240, K * spf - 3 * spf), min(qb1 - 240, (K + e + 4) * spf + post)
+        q = np.arange(lo, hi)
+        c = comp[lo:hi]
+        ra, rb = (c - line(A, q)) ** 2, (c - line(B, q)) ** 2
+        e_split = np.concatenate([[0.0], np.cumsum(ra)]) + (rb.sum() - np.concatenate([[0.0], np.cumsum(rb)]))
+        q_sw = lo + int(np.argmin(e_split))
+        d_ms = 1000.0 * (q_sw - (K + e) * spf) / sr
+        switches[str(K)] = {"switch_delay_ms": d_ms, "jl_offset_frames": e}
+    med = float(np.median([v["switch_delay_ms"] for v in switches.values()])) if switches else None
+    want_sw = 1000.0 * post / sr
+    for k, v in switches.items():
+        if abs(v["switch_delay_ms"] - want_sw) > AV_SWITCH_EACH_TOL_MS:
+            bad_sw[k] = v["switch_delay_ms"]
+    ok = bool(lags and switches and not bad and not bad_sw and abs(med - want_sw) <= AV_SWITCH_TOL_MS)
+    return {"want_lag_ms": want_lag_ms, "segments": lags,
+            "median_lag_ms": float(np.median([v["lag_ms"] for v in lags.values()])) if lags else None,
+            "max_abs_err_ms": max((abs(v["lag_ms"] - want_lag_ms) for v in lags.values()), default=None),
+            "lag_failures": bad, "want_switch_ms": want_sw, "switches": switches, "median_switch_ms": med,
+            "switch_failures": bad_sw, "ok": ok}
+
+
 def _decode_audio(path: Path, sr: int) -> np.ndarray:
     raw = run_ffmpeg(["-i", str(path), "-map", "0:a", "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"], capture=True,
                      label="decode audio")
@@ -1751,6 +2407,175 @@ def _sim_at(seg: dict, k: int) -> dict:
 # Truth assembly
 # =====================================================================================================
 
+def _clip_keys(g: Geometry, comp_in: int, a: int, b: int) -> list[dict]:
+    """Linear AE keys reproducing the clip's per-frame truth Sim exactly: the clip ends plus every quad knot
+    inside the clip ([] when the framing is static)."""
+    sims = [g.truth_sim(n) for n in range(a, b)]
+    if all(abs(s[f] - sims[0][f]) < 1e-9 for s in sims for f in ("scale", "rotation_deg", "tx", "ty")):
+        return []
+    ns = sorted({a, b - 1} | {int(kn[0]) for kn in (g.quad or ()) if a <= kn[0] < b} |
+                ({b - 1} if g.push_a is not None else set()))
+    keys = [{"comp_frame": comp_in + n, **g.truth_sim(n)} for n in ns]
+    probe = {"transform_keys": keys, "transform": sims[0]}
+    for n in range(a, b):
+        want, got = sims[n - a], _sim_at(probe, comp_in + n)
+        if abs(got["scale"] - want["scale"]) > 1e-9 or abs(got["tx"] - want["tx"]) > 1e-6 or \
+                abs(got["ty"] - want["ty"]) > 1e-6:
+            raise RuntimeError(f"clip keys {ns} do not reproduce frame {n} linearly")
+    return keys
+
+
+def build_film_truth(p: Profile, chains: list[Chain], audio_info: dict) \
+        -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """film24 truth: one segment per EDITOR CLIP (layer): chains split at framing steps (reframes at RAW-native
+    cuts, punch-ins) and at the start of a freeze; clips of one chain share one time line (`time_line`). Per
+    competitor frame: RAW frame(s) and the truth Sim. Returns (segments, frames, cuts, jl_cuts)."""
+    segs: list[dict] = []
+    for c in chains:
+        spec = c.spec
+        kinds = list(spec.clip_kinds) if spec.clip_kinds else None
+        clips = chain_clips(c)
+        if kinds is not None and len(kinds) != len(clips):
+            raise ValueError(f"chain {c.index}: {len(clips)} clips, {len(kinds)} clip_kinds")
+        for pi, (a, b) in enumerate(clips):
+            sid = len(segs) + 1
+            kind = kinds[pi] if kinds else spec.kind
+            seg = {"id": sid, "chain": c.index, "time_line": c.index, "clip": pi, "kind": kind,
+                   "type": "raw" if c.in_raw else "not_in_raw", "comp_in": c.comp_in + a, "comp_out": c.comp_in + b,
+                   "note": spec.note, "flip": bool(spec.flip), "transition_in": None, "transition_out": None,
+                   "transform": None, "transform_keys": [], "animated": False, "layout_mode": "boxed",
+                   "box": None, "region": 0, "static_content": bool(spec.static_content),
+                   "min_inliers": spec.min_inliers}
+            if not c.in_raw:
+                seg.update(raw_in_frame=None, raw_out_frame=None, raw_frames=[], speed=1.0, speed_str="1",
+                           shot=-1, shot_name=None, retime="none", label="NOT-IN-RAW insert",
+                           audio={"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None,
+                                  "exception": "not_in_raw", "raw_in_seconds": None})
+                if spec.foreign is not None:       # lookalike: framing truth for the self-check, never a match
+                    look = p.shot_specs[spec.lookalike]
+                    seg.update(label="NOT-IN-RAW lookalike", lookalike_shot=spec.lookalike,
+                               lookalike_name=look.name, generator=shot_graph(p, spec.foreign),
+                               transform=c.geom.truth_sim(0))
+                segs.append(seg)
+                continue
+            g = c.geom
+            fr = [int(x) for x in c.frames[a:b]]
+            freeze = spec.freeze_at is not None and a >= spec.freeze_at
+            retime = "frame_blend" if spec.retime == "blend" else ("freeze" if freeze else "none")
+            speed = "0" if freeze else spec.speed
+            shot = shot_of_frame(p, fr[0])
+            ai = audio_info[c.index]
+            if c.n0 is not None:
+                t_in = Fraction(c.n0 + (spec.freeze_at - 1 if freeze else a)) / COMP_FPS
+            else:
+                t_in = Fraction(c.j) / p.raw_fps
+            sh = p.shot_specs[shot]
+            seg["static_content"] = bool(spec.static_content or "static" in sh.tags)
+            seg["gray"] = bool(spec.gray)
+            seg["min_inliers"] = spec.min_inliers if spec.min_inliers is not None else sh.min_inliers
+            seg.update(shot=shot, shot_name=sh.name, speed=float(Fraction(speed)), speed_str=speed,
+                       retime=retime, raw_in_frame=fr[0], raw_out_frame=fr[-1], raw_frames=fr,
+                       raw_in_seconds=float(t_in), raw_in_exact=fps_str(t_in), raw_in_grid_slot=(
+                           None if c.n0 is None else c.n0 + (spec.freeze_at - 1 if freeze else a)),
+                       chain_raw_start=c.j, ss=c.ss, timing_filter=c.timing, geometry_filter=g.filters(),
+                       look_filter=look_filters(p, c).lstrip(","),
+                       geometry={"flip": g.flip, "scale_w": g.sw, "scale_h": g.sh, "crop_x": g.cx, "crop_y": g.cy,
+                                 "box_x": g.bx, "box_y": g.by, "box_w": g.bw, "box_h": g.bh,
+                                 "zoom_first": g.zoom(a), "zoom_last": g.zoom(b - 1),
+                                 "disp_first": list(g.disp(a)), "disp_last": list(g.disp(b - 1)),
+                                 "quad": [list(k) for k in g.quad] if g.quad else None})
+            seg["transform"] = g.truth_sim(a)
+            seg["transform_keys"] = _clip_keys(g, c.comp_in, a, b)
+            seg["animated"] = bool(seg["transform_keys"])
+            if retime == "none":
+                lo, hi = floor_interval(fr, speed, p.raw_fps)
+                if not lo <= t_in < hi:
+                    raise RuntimeError(f"segment {sid}: raw_in {t_in} outside its floor interval [{lo}, {hi})")
+                seg["raw_in_interval_floor"] = [float(lo), float(hi)]
+            elif freeze:
+                seg["raw_in_interval_floor"] = [float(Fraction(fr[0]) / p.raw_fps),
+                                                float(Fraction(fr[0] + 1) / p.raw_fps)]
+            else:
+                seg["raw_in_interval_floor"] = None
+            first, last = pi == 0, pi == len(clips) - 1
+            seg["audio"] = {"in_offset_frames": ai["in_offset_frames"] if first else 0,
+                            "out_offset_frames": ai["out_offset_frames"] if last else 0,
+                            "pitch_preserved": None, "exception": None,
+                            # RAW time of the chain's v = 1 audio line at the clip's first frame (the content
+                            # offset included, the post-edit delay -- a competitor-time shift -- not)
+                            "raw_in_seconds": ai["raw_in_seconds"] + (a - ai["in_offset_frames"]) / 30.0,
+                            "picture_raw_in_seconds": float(t_in),
+                            "mode": "v1" if retime == "none" else "v1_video_only_retime",
+                            "in_point": ai.get("in_point")}
+            segs.append(seg)
+    n_comp = max(s["comp_out"] for s in segs)
+    frames: list[dict] = [None] * n_comp  # type: ignore[list-item]
+    by_id = {s["id"]: s for s in segs}
+    for s in segs:
+        c = chains[s["chain"]]
+        for i, k in enumerate(range(s["comp_in"], s["comp_out"])):
+            n = k - c.comp_in
+            fr = {"k": k, "seg": s["id"], "chain": c.index, "n": n, "raw_a": None, "seg_b": None, "raw_b": None,
+                  "alpha_b": None, "sim": None, "class": "not_in_raw"}
+            if s["type"] == "raw":
+                fr.update(raw_a=s["raw_frames"][i], sim=c.geom.truth_sim(n),
+                          cls="static" if s["static_content"] else ("gray" if s["gray"] else "exact"))
+                fr["class"] = fr.pop("cls")
+                if c.blend is not None:
+                    ra, rb, al = c.blend[n]
+                    fr.update(raw_a=ra, seg_b=s["id"] if rb is not None else None, raw_b=rb, alpha_b=al)
+                    if rb is not None:
+                        fr["class"] = "blend"
+            if frames[k] is not None:
+                raise RuntimeError(f"film truth overlaps at frame {k}")
+            frames[k] = fr
+    if any(f is None for f in frames):
+        raise RuntimeError("truth does not tile the competitor timeline")
+    cuts = []
+    for a, b in zip(segs[:-1], segs[1:]):
+        if a["chain"] != b["chain"]:
+            typ = "cut"
+        elif b.get("retime") == "freeze":
+            typ = "freeze_start"
+        else:
+            typ = "reframe"            # framing step on the same time line (RAW-native cut or punch-in)
+        cuts.append({"k": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "type": typ, "b_kind": b["kind"],
+                     "ambiguity": None, "same_time_line": a["chain"] == b["chain"]})
+    jl = []
+    for a, b in zip(segs[:-1], segs[1:]):
+        ext = a["audio"]["out_offset_frames"] if a["type"] == "raw" else 0
+        if ext:
+            if b["audio"]["in_offset_frames"] != ext:
+                raise RuntimeError("L-cut bookkeeping error")
+            jl.append({"cut": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "offset_frames": ext,
+                       "type": "L" if ext > 0 else "J"})
+    del by_id
+    return segs, frames, cuts, jl
+
+
+def film_repeat_pairs(p: Profile, chains: list[Chain], frames: list[dict]) -> dict:
+    """Pulldown repeat pairs: consecutive competitor frames of ONE grid chain that show the same RAW frame
+    (freeze holds and blends excluded), measured (ID) and by the floor rule; they must be identical."""
+    meas, model, framing_step = [], [], []
+    for c in chains:
+        if c.n0 is None or not c.in_raw:
+            continue
+        n_play = c.spec.n if c.spec.freeze_at is None else c.spec.freeze_at
+        got = repeat_pairs([int(x) for x in c.frames[:n_play]])
+        want = [i for i in range(n_play - 1) if grid_frame(c.n0 + i, p.raw_fps) == grid_frame(c.n0 + i + 1, p.raw_fps)]
+        meas += [c.comp_in + i for i in got]
+        model += [c.comp_in + i for i in want]
+        steps = set(c.spec.clips) | ({c.spec.punch_at} if c.spec.punch_at is not None else set())
+        framing_step += [c.comp_in + i for i in got if i + 1 in steps]
+    if meas != model:
+        raise RuntimeError(f"repeat pairs differ from the floor rule: {sorted(set(meas) ^ set(model))[:10]}")
+    for k in meas:
+        if frames[k]["raw_a"] != frames[k + 1]["raw_a"]:
+            raise RuntimeError(f"repeat pair {k} is not a repeat in the truth frames")
+    return {"pairs": [[k, k + 1] for k in meas], "with_framing_step": [[k, k + 1] for k in framing_step],
+            "rule": "floor(raw_fps*(n0+i)/30) == floor(raw_fps*(n0+i+1)/30) (30 fps grid, AE floor rule)"}
+
+
 def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
         -> tuple[list[dict], list[dict], list[dict]]:
     """Truth segments (the punch-in chain yields two) + per-competitor-frame truth."""
@@ -1767,7 +2592,7 @@ def build_truth_segments(p: Profile, chains: list[Chain], audio_info: dict) \
             sid = len(segs) + 1
             seg = {"id": sid, "chain": c.index, "kind": kind, "type": "raw" if c.in_raw else "not_in_raw",
                    "comp_in": c.comp_in + a, "comp_out": c.comp_in + b, "note": spec.note,
-                   "shot": spec.shot, "shot_name": SHOTS[spec.shot].name if c.in_raw else None,
+                   "shot": spec.shot, "shot_name": p.shot_specs[spec.shot].name if c.in_raw else None,
                    "speed": float(Fraction(spec.speed)), "speed_str": spec.speed, "flip": bool(spec.flip),
                    "transition_in": None, "transition_out": None, "transform": None, "transform_keys": [],
                    "animated": False,
@@ -1957,8 +2782,9 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     lp = layout_plan(p)
     band = (lp.caption_y - p.u(30), lp.caption_y + lp.caption_fs + p.u(40))
     geoms = [(c.spec, c.geom) for c in chains if c.in_raw]
-    safe = safe_region(p, geoms, band)
-    ov = plan_overlays(p, safe)
+    safe = safe_region(p, geoms, band) if p.raw_overlays else None
+    ov = plan_overlays(p, safe) if p.raw_overlays else None
+    film = p.timing == "grid"
     log.info("synthetic %s: %d chains, %d competitor frames, SAFE REGION %s", p.name, len(chains), n_comp, safe)
 
     # ---- geometry calibration (own numpy truth vs the exact ffmpeg filter strings) ---------------------
@@ -1980,23 +2806,36 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     # ---- RAW + ID video --------------------------------------------------------------------------------
     t0 = time.perf_counter()
     raw_info = generate_raw(p, build, raw_mp4, ov)
-    make_id_video(id_mp4, p.raw_frames)
+    make_id_video(id_mp4, p.raw_frames, p.raw_fps)
+    blends = [c for c in chains if c.in_raw and c.spec.retime == "blend"]
+    alt_mp4 = build / "alt.mp4"
+    if blends:
+        make_alt_video(alt_mp4, p.raw_frames, p.raw_fps)
     timings.update(raw_shots_s=raw_info["shots_s"], raw_encode_s=raw_info["encode_s"],
                    raw_total_s=time.perf_counter() - t0)
-    for sp in build.glob("shot_*.nut"):
+    for sp in [*build.glob("shot_*.nut"), *build.glob("master_*.nut")]:
         sp.unlink()
+    comp_src = raw_info["master"] or raw_mp4
     pr, tbr = decode_pts(raw_mp4)
     pi, tbi = decode_pts(id_mp4)
     if len(pr) != p.raw_frames:
         raise RuntimeError(f"raw.mp4 has {len(pr)} frames, expected {p.raw_frames}")
-    if [Fraction(x) * tbr for x in pr] != [Fraction(x) * tbi for x in pi] or tbr != RAW_TB:
-        raise RuntimeError("id.mp4 PTS differ from raw.mp4 PTS (or time base is not 1/30000)")
-    if [Fraction(x) * tbr for x in pr] != [Fraction(i) / RAW_FPS for i in range(p.raw_frames)]:
+    if [Fraction(x) * tbr for x in pr] != [Fraction(x) * tbi for x in pi] or tbr != p.raw_tb:
+        raise RuntimeError(f"id.mp4 PTS differ from raw.mp4 PTS (or time base is not {p.raw_tb})")
+    if [Fraction(x) * tbr for x in pr] != [Fraction(i) / p.raw_fps for i in range(p.raw_frames)]:
         raise RuntimeError("raw.mp4 PTS are not i/fps")
+    if raw_info["master"]:
+        pm, tbm = decode_pts(comp_src)
+        if [Fraction(x) * tbm for x in pm] != [Fraction(x) * tbr for x in pr]:
+            raise RuntimeError("raw_master.mp4 PTS differ from raw.mp4 PTS")
+    if blends:
+        pa, tba = decode_pts(alt_mp4)
+        if [Fraction(x) * tba for x in pa] != [Fraction(x) * tbr for x in pr]:
+            raise RuntimeError("alt.mp4 PTS differ from raw.mp4 PTS")
 
     # ---- truth timing: every chain on the ID video ------------------------------------------------------
     t0 = time.perf_counter()
-    in_raw = [c for c in chains if c.in_raw]
+    in_raw = [c for c in chains if c.in_raw and c.spec.retime != "blend"]
     got = parallel([lambda c=c: decode_id_chain(id_mp4, c) for c in in_raw])
     for c, fr in zip(in_raw, got):
         c.frames = fr
@@ -2004,6 +2843,9 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
             diff = np.nonzero(fr != c.expected)[0]
             raise RuntimeError(f"ID chain {c.index} differs from the timing model at local frames {diff[:10]}: "
                                f"measured {fr[diff[:10]]}, model {c.expected[diff[:10]]}")
+    for c in blends:
+        c.blend = measure_blend_chain(alt_mp4, id_mp4, c, p.raw_fps)
+        c.frames = np.array([b[0] for b in c.blend], np.int64)
     idl, idr = id_composite(id_mp4, chains)
     if len(idl) != n_comp:
         raise RuntimeError(f"ID composite has {len(idl)} frames, expected {n_comp}")
@@ -2012,7 +2854,7 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     # ---- competitor video ------------------------------------------------------------------------------
     t0 = time.perf_counter()
     seg_paths = [build / f"chain_{c.index:02d}.nut" for c in chains]
-    parallel([lambda c=c, d=d: render_chain(raw_mp4, c, d, p) for c, d in zip(chains, seg_paths)])
+    parallel([lambda c=c, d=d: render_chain(comp_src, c, d, p) for c, d in zip(chains, seg_paths)])
     for c, d in zip(chains, seg_paths):
         cnt = count_frames(d)
         if cnt != c.spec.n:
@@ -2025,6 +2867,7 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     for c in cap_truth:
         if c["y"] < band[0] or c["y"] + c["h"] > band[1]:
             raise RuntimeError(f"caption {c} outside the planned caption band {band}")
+    cap_fx = [m for c in chains if c.spec.caption_fx for m in measure_caption_fx(p, c)]
     bx, by, bw, bh, br = p.box
     fs_ranges = fullscreen_ranges(chains)
     glyph = {}
@@ -2059,7 +2902,7 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     comp_wav = build / "competitor_audio.wav"
     audio_info = build_competitor_audio(p, chains, raw_dec, comp_wav, n_comp)
     run_ffmpeg(["-y", "-i", str(comp_video), "-i", str(comp_wav), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_SR), *BITEXACT, str(comp_mp4)], label="mux")
+                "-c:a", "aac", "-b:a", "192k", "-ar", str(p.audio.comp_sr), *BITEXACT, str(comp_mp4)], label="mux")
     timings["audio_s"] = time.perf_counter() - t0
 
     # ---- competitor assertions --------------------------------------------------------------------------
@@ -2070,50 +2913,73 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
         raise RuntimeError("competitor PTS are not k/30")
 
     # ---- truth tables -----------------------------------------------------------------------------------
-    segs, frames, transitions = build_truth_segments(p, chains, audio_info)
+    jl, rep = [], None
+    if film:
+        segs, frames, cuts, jl = build_film_truth(p, chains, audio_info)
+        transitions = []
+        rep = film_repeat_pairs(p, chains, frames)
+    else:
+        segs, frames, transitions = build_truth_segments(p, chains, audio_info)
     for fr in frames:        # whole-graph ID decode must agree with the per-chain truth
         k = fr["k"]
         want_l = -1 if fr["raw_a"] is None else fr["raw_a"]
         want_r = want_l if fr["seg_b"] is None else fr["raw_b"]
+        if fr.get("class") == "blend":          # a frame blend: no code, or the code of one of its frames
+            if idl[k] not in (-1, fr["raw_a"], fr["raw_b"]) or idr[k] not in (-1, fr["raw_a"], fr["raw_b"]):
+                raise RuntimeError(f"ID composite frame {k}: ({idl[k]}, {idr[k]}) is not blend {fr}")
+            continue
         if idl[k] != want_l or idr[k] != want_r:
             raise RuntimeError(f"ID composite frame {k}: ({idl[k]}, {idr[k]}) != truth ({want_l}, {want_r})")
 
     # ---- self-checks at proxy sizes ---------------------------------------------------------------------
     t0 = time.perf_counter()
-    sc = self_check(p, raw_mp4, comp_mp4, frames, segs, cap_truth, build)
-    asc = audio_self_check(raw_mp4, comp_mp4, segs)
+    foreign = [{"seg": s["id"], "frames": list(range(s["comp_in"], s["comp_out"])), "sim": s["transform"],
+                "flip": s["flip"], "raw_range": (p.shot_start(s["lookalike_shot"]),
+                                                 p.shot_start(s["lookalike_shot"]) + p.shot_length(s["lookalike_shot"]))}
+               for s in segs if s.get("lookalike_shot") is not None]
+    sc = self_check(p, raw_mp4, comp_mp4, frames, segs, cap_truth, build, extra_masks=cap_fx or None,
+                    pairs=rep["pairs"] if rep is not None else None, foreign=foreign or None)
+    if film:
+        asc = film_audio_self_check(p, raw_mp4, comp_mp4, segs, cuts, jl)
+    else:
+        asc = audio_self_check(raw_mp4, comp_mp4, segs)
     sc["audio"] = asc
     timings["self_check_s"] = time.perf_counter() - t0
     if not asc["ok"]:
-        raise RuntimeError(f"audio self-check failed (segment: lag ms): {asc['failures']}")
+        write_json(out / "self_check_failed.json", sc)
+        raise RuntimeError(f"audio self-check failed: {json.dumps(asc, default=_json_default)[:1500]}")
     if not sc["ok"]:
         write_json(out / "self_check_failed.json", sc)
         raise RuntimeError(f"synthetic self-check failed: min margin {sc['min_margin']:.4f} "
                            f"({sc['n_margin_failures']} frames < {SELF_MARGIN_MIN}), min inliers {sc['min_inliers']}"
-                           f" (failures {sc['inlier_failures']}); details in {out / 'self_check_failed.json'}")
+                           f" (failures {sc['inlier_failures']}, repeat pairs "
+                           f"{(sc.get('repeat_pairs') or {}).get('failures')}); details in "
+                           f"{out / 'self_check_failed.json'}")
     (out / "self_check_failed.json").unlink(missing_ok=True)
 
     # ---- write truth ------------------------------------------------------------------------------------
-    cuts = []
-    for a, b in zip(segs[:-1], segs[1:]):
-        typ = "crossfade" if b["transition_in"] else ("punch_in" if b["kind"] == "punchin" else "cut")
-        cuts.append({"k": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "type": typ,
-                     "b_kind": b["kind"], "ambiguity": None})
+    if not film:
+        cuts = []
+        for a, b in zip(segs[:-1], segs[1:]):
+            typ = "crossfade" if b["transition_in"] else ("punch_in" if b["kind"] == "punchin" else "cut")
+            cuts.append({"k": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "type": typ,
+                         "b_kind": b["kind"], "ambiguity": None})
     raw_samples = raw_info["audio_samples"]
     n_music = n_comp
     truth = {
         "version": SYNTH_VERSION, "key": key, "profile": p.name, "ffmpeg_version": ffmpeg_version(),
-        "raw": {"file": "raw.mp4", "width": p.raw_w, "height": p.raw_h, "fps": fps_str(RAW_FPS),
-                "frames": p.raw_frames, "time_base": fps_str(RAW_TB), "audio_sr": AUDIO_SR,
+        "raw": {"file": "raw.mp4", "width": p.raw_w, "height": p.raw_h, "fps": fps_str(p.raw_fps),
+                "frames": p.raw_frames, "time_base": fps_str(p.raw_tb), "audio_sr": AUDIO_SR,
                 "audio_samples": raw_samples, "audio_channels": 1,
-                "shots": [{"index": i, "name": s.name, "raw_in": i * p.shot_len, "raw_out": (i + 1) * p.shot_len,
-                           "filter": shot_graph(p, s), "skip": s.skip} for i, s in enumerate(SHOTS[:p.n_shots])],
-                "overlays": {"grid": list(ov.grid), "grid_cell": ov.cell, "counter_centre_x": ov.counter_x,
-                             "counter_top_y": ov.counter_y, "counter_fontsize": ov.counter_fs,
-                             "safe_region": list(safe)}},
+                "shots": [{"index": i, "name": s.name, "raw_in": p.shot_start(i),
+                           "raw_out": p.shot_start(i) + p.shot_length(i), "filter": shot_graph(p, s), "skip": s.skip}
+                          for i, s in enumerate(p.shot_specs)],
+                "overlays": ({"grid": list(ov.grid), "grid_cell": ov.cell, "counter_centre_x": ov.counter_x,
+                              "counter_top_y": ov.counter_y, "counter_fontsize": ov.counter_fs,
+                              "safe_region": list(safe)} if ov is not None else None)},
         "competitor": {"file": "competitor.mp4", "width": p.comp_w, "height": p.comp_h, "fps": fps_str(COMP_FPS),
-                       "frames": n_comp, "audio_sr": AUDIO_SR, "audio_channels": 2},
-        "id": {"file": "id.mp4", "width": ID_W, "height": ID_H, "fps": fps_str(RAW_FPS), "frames": p.raw_frames,
+                       "frames": n_comp, "audio_sr": p.audio.comp_sr, "audio_channels": 2},
+        "id": {"file": "id.mp4", "width": ID_W, "height": ID_H, "fps": fps_str(p.raw_fps), "frames": p.raw_frames,
                "code": "16-bit, 16 px blocks, top row code / bottom row complement, halves duplicated"},
         "frames": frames,
         "segments": segs,
@@ -2145,6 +3011,8 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
                                         "rule raw_in interval (the first RAW frame's boundary), DESIGN §7 D8",
                         "segment_box": "null = layout.box (region 0); fullscreen = whole canvas, radius 0 (region 1)"},
     }
+    if film:
+        _film_truth_extras(p, truth, chains, segs, rep, jl, cap_fx)
     files = {}
     for name in ("raw.mp4", "competitor.mp4", "id.mp4", "frame.png"):
         files[name] = {"bytes": (out / name).stat().st_size, "blake2b": file_digest(out / name)}
@@ -2159,12 +3027,57 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     return truth
 
 
+def _film_truth_extras(p: Profile, truth: dict, chains: list[Chain], segs: list[dict], rep: dict, jl: list[dict],
+                       cap_fx: list[dict]) -> None:
+    """film24 additions to truth.json (DESIGN §6.1)."""
+    sr = AUDIO_SR
+    content, post = p.audio.content_offset, p.audio.post_delay
+    truth["timeline"] = {
+        "model": "30 fps NLE timeline: RAW t=0 on a frame boundary, every split on the grid; a clip starting at "
+                 "grid slot n shows RAW floor(raw_fps*(n+i)/30) at its local frame i (raw_in = n/30 exactly)",
+        "raw_fps": fps_str(p.raw_fps), "comp_fps": fps_str(COMP_FPS)}
+    truth["pulldown"] = rep
+    truth["time_lines"] = [
+        {"chain": c.index, "kind": c.spec.kind, "segments": [s["id"] for s in segs if s["chain"] == c.index],
+         "comp_in": c.comp_in, "comp_out": c.comp_in + c.spec.n, "raw_start": c.j, "grid_slot": c.n0,
+         "raw_in_seconds": float(picture_in_point(p, c)), "raw_in_exact": fps_str(picture_in_point(p, c)),
+         "speed": c.spec.speed, "retime": c.spec.retime, "freeze_at": c.spec.freeze_at,
+         "quad": [list(k) for k in c.geom.quad] if c.geom.quad else None, "look": c.spec.look or None,
+         "note": c.spec.note}
+        for c in chains if c.in_raw]
+    au = truth["audio"]
+    au.update(comp_sr=p.audio.comp_sr, pitch_preserved=None,
+              speed_method="all audio plays at v = 1 (blend / freeze are video-only retimes)",
+              crossfade=None, jl_cuts=jl,
+              av_offset={
+                  "content_offset_samples": content, "content_offset_ms": 1000.0 * content / sr,
+                  "post_delay_samples": post, "post_delay_ms": 1000.0 * post / sr,
+                  "total_ms": 1000.0 * (content + post) / sr,
+                  "lag_ms": -1000.0 * (content + post) / sr,
+                  "convention": "lag_ms in xcorr convention (match_cuts.audio_align.xcorr_lag): negative = the "
+                                "competitor audio is LATE relative to its picture, using RAW's own A/V sync",
+                  "content": "pre-edit: every chain's audio starts content_offset samples earlier in RAW than its "
+                             "picture in-point (does not move the audio switch points)",
+                  "post": "post-edit: adelay on the edited original track before the music (moves every audio "
+                          "switch point by post_delay_ms)",
+                  "measured": (truth["self_check"].get("audio") or {}).get("median_lag_ms"),
+                  "measured_switch_ms": (truth["self_check"].get("audio") or {}).get("median_switch_ms")})
+    truth["layout"]["animated_captions"] = cap_fx
+    truth["conventions"].update(
+        raw_in="picture in-point on the 30 fps grid (n/30 s exact; blend chains: their first RAW frame j/fps)",
+        audio_raw_in="RAW time of the chain's v = 1 audio line at the clip's first frame: the picture in-point "
+                     "minus the content offset; the post-edit delay is a competitor-time shift (audio.av_offset)",
+        frames="per competitor frame: raw_a (+ raw_b / alpha_b for a frame blend), sim = truth Sim, class in "
+               "exact | static (nearly static RAW content) | blend | not_in_raw",
+        segments="one segment per EDITOR CLIP; clips of one chain share a time line (time_lines)")
+
+
 def _summary(p: Profile, truth: dict) -> dict:
     segs = truth["segments"]
     sc = truth["self_check"]
     return {
         "profile": p.name,
-        "raw_frames": truth["raw"]["frames"], "raw_duration_s": truth["raw"]["frames"] / float(RAW_FPS),
+        "raw_frames": truth["raw"]["frames"], "raw_duration_s": truth["raw"]["frames"] / float(p.raw_fps),
         "competitor_frames": truth["competitor"]["frames"],
         "competitor_duration_s": truth["competitor"]["frames"] / 30.0,
         "segments": len(segs), "cuts": len(truth["cuts"]),
@@ -2182,6 +3095,181 @@ def _summary(p: Profile, truth: dict) -> dict:
         "calibration_max_dpos": max(v["max_dpos"] for v in truth["calibration"].values()),
         "calibration_max_ds": max(v["max_ds"] for v in truth["calibration"].values()),
     }
+
+
+# =====================================================================================================
+# Profile film24 (DESIGN §6.1): the regimes of the first real run
+# =====================================================================================================
+
+FILM_FPS = Fraction(24000, 1001)
+
+
+def _static_tex(seed: int, cells: str, ratio: float, c1: str, c0: str, size: str, label: str) -> str:
+    """A STATIC binary Game-of-Life texture (rule B/S012345678: no births, every cell survives) scaled with
+    nearest neighbour to `size` (a world the camera can pan over without it changing)."""
+    return (f"life=s={cells}:r={{R}}:seed={seed}:ratio={ratio}:rule=B/S012345678:life_color={c1}:death_color={c0},"
+            f"scale={size}:flags=neighbor,format=yuv420p[{label}]")
+
+
+def _zoom_roll_quad(n_a: int, n_len: int, rate: float, roll_deg: float) -> str:
+    """RAW-native camera zoom (x `rate` per RAW frame) and roll (`roll_deg` per RAW frame) about the frame
+    centre between generator frames n_a and n_a + n_len (static before / after), as one perspective quad."""
+    u = f"max(0,min(in-1-{n_a},{n_len}))"
+    z, t = f"pow({rate},{u})", f"({roll_deg}*PI/180*{u})"
+    xs, ys = [], []
+    for sx, sy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+        xs.append(f"W/2+(cos({t})*({sx})*W/2-sin({t})*({sy})*H/2)/{z}")
+        ys.append(f"H/2+(sin({t})*({sx})*W/2+cos({t})*({sy})*H/2)/{z}")
+    return ("perspective=" + ":".join(f"x{i}='{xs[i]}':y{i}='{ys[i]}'" for i in range(4)) +
+            ":eval=frame:sense=source:interpolation=cubic")
+
+
+_VPAN = ("life=s={LW}x{LH}:r={R}:seed=111:ratio=0.5:mold=30:life_color=#ff8040:death_color=#002040:"
+         "mold_color=#30a030,scale={W}:{H}:flags=neighbor")
+_DISCLAIMER = _drawtext("Driver assistance features are not substitutes for attentive driving", "(w-tw)/2", "396",
+                        22, "white", border=2)
+_GRAY = (_static_tex(131, "320x45", 0.4, "#e0c080", "#203040", "{W4X}:{H}", "f") + ";" +
+         _static_tex(132, "160x23", 0.45, "#5090d0", "#402818", "{W4X}:{H}", "c") + ";"
+         "[f][c]blend=all_mode=normal:all_opacity=0.4,crop={W}:{H}:x='40+6*n':y=0:exact=1")
+
+FILM24_SHOTS: tuple[ShotSpec, ...] = (
+    # 0: evolving Game of Life (opener, a 4-frame flash chain, the L-cut's first chain)
+    ShotSpec("f24_life_open", "life=s={LW}x{LH}:r={R}:seed=61:ratio=0.32:mold=10:life_color=#f0c040:"
+                              "death_color=#102048:mold_color=#783028,scale={W}:{H}:flags=neighbor", skip=60),
+    # 1: camera pan 14 RAW px / frame over a static two-scale world + a parallax testsrc2 object (-3 px / frame)
+    ShotSpec("f24_pan_cam", _static_tex(71, "640x90", 0.38, "#d8b070", "#182838", "{W4X}:{H}", "f") + ";" +
+             _static_tex(72, "160x23", 0.45, "#60a0e0", "#402010", "{W4X}:{H}", "c") + ";"
+             "[f][c]blend=all_mode=normal:all_opacity=0.4,crop={W}:{H}:x='40+14*n':y=0:exact=1[bg];"
+             "testsrc2=s=240x180:r={R},hue=h=60,format=yuv420p[fg];[bg][fg]overlay=x='560-3*n':y=180",
+             tags=("camera_pan",)),
+    # 2: camera pan -9 RAW px / frame + a parallax testsrc object moving the other way (+4 px / frame)
+    ShotSpec("f24_pan_cam2", _static_tex(81, "640x90", 0.42, "#e07050", "#102830", "{W4X}:{H}", "f") + ";" +
+             _static_tex(82, "160x23", 0.5, "#a0e060", "#301040", "{W4X}:{H}", "c") + ";"
+             "[f][c]blend=all_mode=normal:all_opacity=0.4,crop={W}:{H}:x='2600-9*n':y=0:exact=1[bg];"
+             "testsrc=s=200x200:r={R},hue=h=200,format=yuv420p[fg];[bg][fg]overlay=x='100+4*n':y=260",
+             tags=("camera_pan",)),
+    # 3: RAW-native zoom 2 % and roll 0.07 deg per RAW frame (generator frames 40..85) of a static world with
+    #    an evolving 'screen' (escalade case: time vs scale / rotation confound under constant editor framing)
+    ShotSpec("f24_zoom_roll", _static_tex(91, "160x90", 0.4, "#e0e0a0", "#203020", "{W}:{H}", "f") + ";" +
+             _static_tex(92, "40x23", 0.5, "#a03060", "#103050", "{W}:{H}", "c") + ";"
+             "life=s=60x40:r={R}:seed=93:ratio=0.35:life_color=#ffffff:death_color=#000000,"
+             "scale=300:200:flags=neighbor,format=yuv420p[e];"
+             "[f][c]blend=all_mode=normal:all_opacity=0.35[b];[b][e]overlay=x=330:y=170," +
+             _zoom_roll_quad(40, 45, 1.02, 0.07), tags=("raw_zoom_roll",)),
+    # 4-6: three RAW-native shots crossed by ONE v = 1 time line (line_across_shots); 5 is dark, low texture,
+    #      nearly static (only a small display bar changes every RAW frame)
+    ShotSpec("f24_lineA", "testsrc2=s={W}x{H}:r={R},hue=h=300", skip=20, layer=(1201, 0.35, 8), length=60),
+    ShotSpec("f24_dark", "color=c=0x4c5664:s={W}x{H}:r={R},drawbox=x=0:y=0:w={W}:h=150:color=0x6c7888:t=fill,"
+                         "drawbox=x=40:y=290:w=880:h=230:color=0x262c34:t=fill,"
+                         "drawbox=x=110:y=320:w=210:h=150:color=0x8894a4:t=5,"
+                         "drawbox=x=640:y=320:w=210:h=150:color=0x8894a4:t=5,"
+                         "drawbox=x=200:y=200:w=560:h=40:color=0x3a424e:t=fill," +
+             ",".join(_drawtext(t, str(x), str(y), fs, "0xb8c0d0") for t, x, y, fs in (
+                 ("120", 170, 352, 44), ("km/h", 172, 412, 22), ("D4", 705, 352, 48), ("rpm x1000", 676, 418, 20),
+                 ("12.41", 430, 205, 26), ("21 C", 640, 205, 26))) + ",format=yuv420p[base];"
+                         "color=c=black:s=180x90:r={R},format=gray,geq=lum='if(lt(X,12+mod(N*9,156)),210,36)',"
+                         "format=yuv420p[disp];[base][disp]overlay=x=390:y=350,eq=brightness=-0.25:contrast=0.5",
+             # measured 24-26 SIFT inliers (darkened, few shapes; DESIGN floor 50) -> recorded floor 20
+             tags=("static", "dark", "low_texture"), length=18, min_inliers=20),
+    ShotSpec("f24_lineC", "testsrc2=s={W4}x{H4}:r={R},split=4[a][b][c][d];[b]hue=h=40[b2];[c]hue=h=140,hflip[c2];"
+                          "[d]hue=h=240,vflip[d2];[a][b2]hstack[t];[c2][d2]hstack[u];[t][u]vstack,"
+                          "scale={W}:{H}:flags=bicubic", skip=50, layer=(1203, 0.3, 8), length=120),
+    # 7-8: pan_step (S60): a slow editor pan on the end of 7, the framing snaps back at the RAW cut to 8
+    ShotSpec("f24_panstep_P", "life=s={LW}x{LH}:r={R}:seed=101:ratio=0.45:rule=B36/S23:life_color=#40e0ff:"
+                              "death_color=#201000,scale={W}:{H}:flags=neighbor", skip=40),
+    ShotSpec("f24_panstep_Q", "gradients=s={W}x{H}:r={R}:speed=0.03:seed=5:n=3:c0=0xc04020:c1=0x20c0a0:"
+                              "c2=0x4040e0:x0={GX0}:y0={GY0}:x1={GX1}:y1={GY1}", layer=(1208, 0.4, 8), length=100),
+    # 9: punch_pan (S93): punch-in x1.7 mid-shot, then a 6 px / frame editor pan
+    ShotSpec("f24_punch", "testsrc2=s={W}x{H}:r={R},hue=h=30", skip=25, layer=(1209, 0.35, 8)),
+    # 10: two_clip_pans (1757/1758): two chains on one RAW line, +5 RAW frame jump, independent pans; the RAW
+    #     carries a static legal disclaimer the competitor's master does not have (RAW-only overlay)
+    # measured 24-34 inliers: the disclaimer's glyph corners take part of the RAW proxy's SIFT budget -> floor 20
+    ShotSpec("f24_vpan", _VPAN + "," + _DISCLAIMER, skip=30, master=_VPAN, tags=("raw_only_overlay",),
+             min_inliers=20),
+    # 11: frame-blended 0.25x slow motion source
+    ShotSpec("f24_blend", "smptehdbars=s={W}x{H}:r={R}[b];testsrc2=s={OW}x{OH}:r={R},hue=h=120[o];"
+                          "[b][o]overlay=x='{OX}+{AX}*sin(2*PI*t/3)':y='{OY}+{AY}*cos(2*PI*t/2.3)'",
+             layer=(1211, 0.3, 8), length=60),
+    # 12: true freeze source (+ a 5-frame flash chain)
+    ShotSpec("f24_freeze", "life=s={LW}x{LH}:r={R}:seed=121:ratio=0.4:mold=15:life_color=#ff60a0:death_color=#003020:"
+                           "mold_color=#a0a000,scale={W}:{H}:flags=neighbor", skip=30, length=100),
+    # 13: gray: RAW = a 5-frame motion-blurred (centred tmix) fast camera pan; the competitor's master is the sharp
+    #     pan (generator skip - 2 = the blur centre), sharpened again by the chain (AI-enhanced look, 1180-1208)
+    # measured 19-30 inliers (motion-blurred RAW vs a sharpened master) -> floor 15
+    ShotSpec("f24_gray", _GRAY + ",tmix=frames=5", skip=12, master=_GRAY, master_skip=10, length=100,
+             tags=("motion_blur",), min_inliers=15),
+)
+
+
+def _film24_profile() -> Profile:
+    """Profile film24 (mini-sized: RAW 960x540 @ 24000/1001, competitor 540x960 @ 30). Chains that cross RAW
+    shot changes get their clip boundaries from the grid rule (the first local frame showing the next shot)."""
+    base = Profile("film24", 960, 540, 150, 540, 960, (30, 230, 480, 500, 20), (), 0.5, caption_seed=11,
+                   raw_fps=FILM_FPS, shots=FILM24_SHOTS, timing="grid", raw_overlays=False,
+                   audio=AudioPlan(content_offset=1824, post_delay=2304, comp_sr=44100))
+
+    def shown(shot: int, off: int, n: int) -> list[int]:
+        n0 = grid_n0(base.shot_start(shot) + off, FILM_FPS)
+        return [grid_frame(n0 + i, FILM_FPS) for i in range(n)]
+
+    def first_in(shot: int, frs: list[int]) -> int:
+        return next(i for i, j in enumerate(frs) if j >= base.shot_start(shot))
+    # line_across_shots: the last 12 RAW frames of 4, all of 5 (dark), then 20 comp frames of 6
+    fr = shown(4, 48, 120)
+    k1, k2 = first_in(5, fr), first_in(6, fr)
+    n_line = k2 + 20
+    line_quad = ((0, 1.0, 0.0, 0.0), (k1 - 1, 1.0, 0.0, 0.0), (k1, 1.25, -40.0, 20.0), (k2 - 1, 1.25, -40.0, 20.0),
+                 (k2, 1.1, 20.0, -12.0), (n_line - 1, 1.1, 20.0, -12.0))
+    # pan_step: the last 24 RAW frames of 7 (editor pan ~ -1 px / frame), then 20 comp frames of 8 (snap back)
+    fr = shown(7, 126, 80)
+    ks = first_in(8, fr)
+    n_step = ks + 20
+    step_quad = ((0, 1.1, 14.0, 0.0), (ks - 1, 1.1, -14.0, 0.0), (ks, 1.1, 14.0, 0.0), (n_step - 1, 1.1, 14.0, 0.0))
+    # two_clip_pans: chain B starts 5 RAW frames after the frame following chain A's last frame
+    fr_a = shown(10, 40, 20)
+    off_b = fr_a[-1] + 1 + 5 - base.shot_start(10)
+    chains = (
+        ChainSpec("normal", shot=0, off=20, n=36, audio_ext=6, note="genuine 6-frame L-cut into the next chain"),
+        ChainSpec("normal", shot=7, off=20, n=36, note="L-cut: its audio starts 6 frames late"),
+        ChainSpec("pan", shot=1, off=50, n=40, quad=((0, 1.6, 97.5, 0.0), (39, 1.6, -97.5, 0.0)),
+                  note="editor pan -5 px/frame over a RAW camera pan (14 RAW px/frame) with parallax (1411 case)"),
+        ChainSpec("short", shot=0, off=100, n=4, note="4-frame flash chain"),
+        ChainSpec("pan_accel", shot=2, off=50, n=30,
+                  quad=((0, 1.6, -110.0, 0.0), (19, 1.6, -30.2, 0.0), (29, 1.6, 107.8, 0.0)),
+                  note="editor pan 4.2 then 13.8 px/frame (break at local 19) over a RAW camera pan (39-69 case)"),
+        ChainSpec("raw_zoom_roll", shot=3, off=44, n=40,
+                  note="constant editor framing over a RAW-native zoom 2 %/frame + roll 0.07 deg/frame"),
+        ChainSpec("short", shot=6, off=80, n=3, note="3-frame flash chain"),
+        ChainSpec("line_across_shots", shot=4, off=48, n=n_line, quad=line_quad, clips=(k1, k2),
+                  clip_kinds=("line_a", "line_dark", "line_c"),
+                  note="ONE v=1 time line across two RAW-native shot changes, editor reframe at each (571-665)"),
+        ChainSpec("short", shot=12, off=70, n=5, note="5-frame flash chain"),
+        ChainSpec("pan_step", shot=7, off=126, n=n_step, quad=step_quad, clips=(ks,),
+                  clip_kinds=("pan_step_pan", "pan_step_back"),
+                  note="slow editor pan, framing snaps back at the RAW-native cut (S60)"),
+        ChainSpec("punch_pan", shot=9, off=40, n=40,
+                  quad=((0, 1.0, 0.0, 0.0), (13, 1.0, 0.0, 0.0), (14, 1.7, 75.0, 0.0), (39, 1.7, -75.0, 0.0)),
+                  clips=(14,), clip_kinds=("punch_pan_pre", "punch_pan"), min_inliers=35,   # measured 40-45 (x1.7)
+                  note="punch-in x1.7, then a 6 px/frame editor pan (S93)"),
+        ChainSpec("blend_slow", shot=11, off=20, n=30, speed="0.25", retime="blend",
+                  note="framerate-blended 0.25x slow motion (video only; audio continues at v=1)"),
+        ChainSpec("foreign", shot=-1, n=24, foreign=dataclasses.replace(FILM24_SHOTS[11], name="f24_foreign",
+                                                                      layer=(9911, 0.3, 8), length=None),
+                  lookalike=11, note="NOT-IN-RAW lookalike of shot 11 (other texture seed): gray-zone ZNCC, never RAW"),
+        ChainSpec("freeze", shot=12, off=30, n=30, freeze_at=20, caption_fx=True, clip_kinds=("freeze_play", "freeze"),
+                  note="plays 20 frames, then a TRUE 10-frame freeze under an animated caption"),
+        ChainSpec("two_clip_pan_a", shot=10, off=40, n=20, quad=((0, 1.5, 60.0, 0.0), (19, 1.5, -60.0, 0.0)),
+                  note="first of two pan clips on one RAW line"),
+        ChainSpec("two_clip_pan_b", shot=10, off=off_b, n=20, quad=((0, 1.5, -56.0, 0.0), (19, 1.5, 50.4, 0.0)),
+                  note="second pan clip: +5 RAW frames jump, pan reversed (1757/1758)"),
+        ChainSpec("gray", shot=13, off=30, n=30, look="unsharp=9:9:2.5,eq=contrast=1.25", gray=True,
+                  note="motion-blurred RAW vs a sharp, sharpened competitor master: truth ZNCC in the gray zone"),
+        ChainSpec("normal", shot=8, off=60, n=36, note="closing chain"),
+    )
+    return dataclasses.replace(base, chains=chains)
+
+
+PROFILES["film24"] = _film24_profile()
 
 
 def main(argv: list[str] | None = None) -> int:
