@@ -512,6 +512,28 @@ def test_sustained_jump_inside_a_pan_is_kept(tmp_path):
         assert ds < 0.003 and dp < 1.5, (k, ds, dp)
 
 
+def test_near_miss_anchors_only_join_an_existing_time_line(tmp_path):
+    """FX-03 step 3: RANSAC near-misses never start a run. One on the run's time line joins it (and is used); one
+    at another RAW time (a lookalike) is dropped -- no track of its own, every frame stays on the truth."""
+    frames = np.stack(S.make_shot(91, 80, 0))
+    n = 30
+    sim = S.centred_sim(0.85, 0.0)
+    truth = [S.ae_frame(3.5, 1.0, k, 0) for k in range(n)]
+    raw, comp, layout = _mini(frames, truth, sim, np.random.default_rng(37))
+
+    def anchor(k, j, src):
+        return vm.Anchor(k, j, False, sim, 8 if src.endswith("_near") else 40, 0.6, 5.0, 0.97, src)
+    anchors = [anchor(k, truth[k], "global") for k in range(0, 13, 3)]
+    anchors += [anchor(21, truth[21], "global_near"), anchor(27, truth[27] + 30, "global_near")]
+    fm, recs = _fm_run(raw, comp, layout, tmp_path, anchors, rescue=False)
+    assert (fm.status == Status.MATCH).all() and all(fm.raw[k] == truth[k] for k in range(n))
+    assert len(set(fm.track.tolist())) == 1
+    rec = [r for r in recs if r["decision"] == "near_miss_anchors"]
+    assert rec and rec[0]["joined"] == [[21, truth[21]]] and rec[0]["dropped"] == 1
+    tracks = [r for r in recs if r["decision"] == "track"]
+    assert all(all(a[0] <= 12 for a in r["anchors"]) for r in tracks)       # near-misses start no run
+
+
 def test_pyramid_ecc_converges_where_single_level_sticks(tmp_path):
     """FX-03 step 2: a strong 20 px periodic texture over coarse structure, init 13 px off: single-level ECC
     settles on a neighbouring period (the stuck refit keys of the real run), the coarse-to-fine measurement

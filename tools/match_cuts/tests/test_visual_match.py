@@ -286,6 +286,29 @@ def test_cluster_aware_votes_find_the_right_shot(scene, built):
     assert ok >= len(frames) - 1
 
 
+def test_search_frame_near_misses_are_marked_and_opt_in(scene, built, tmp_path):
+    """RANSAC near-misses (near_miss_inliers <= inliers < min_inliers) never become anchors: without near_miss
+    the frame has none; with near_miss=True (sparse search / rescue) the ZNCC-verified ones come back as
+    '<source>_near' (refine lets them only join an existing time line). min_inliers is raised here so that every
+    candidate is a near-miss."""
+    import dataclasses
+    idx = built["index"]
+    cfg = dataclasses.replace(built["cfg"], min_inliers=100000)
+    comp, raw, truth = scene["comp"], scene["raw"], scene["truth"]
+    am = _allowed(scene, cfg)
+    roi = vm.box_roi(scene["layout"], comp)
+    k = 88
+    assert vm.search_frame(k, comp, raw, idx, am(k), cfg, roi=roi) == []
+    near = vm.search_frame(k, comp, raw, idx, am(k), cfg, roi=roi, near_miss=True, source="rescue")
+    assert near and all(a.source == "rescue_near" for a in near) and len(near) <= 2
+    assert near[0].raw == truth[k]["raw"] and near[0].zncc >= cfg.match_thresh - cfg.anchor_zncc_slack
+    assert vm.search_frame(k, comp, raw, idx, am(k), dataclasses.replace(cfg, near_miss_inliers=0), roi=roi,
+                           near_miss=True) == []
+    # a proper anchor always wins: near-misses only stand in when nothing passes
+    a = vm.search_frame(k, comp, raw, idx, am(k), built["cfg"], roi=roi, near_miss=True)
+    assert a and all(not x.source.endswith("_near") for x in a)
+
+
 def test_search_frame_normal_flip_and_not_in_raw(scene, built):
     idx, cfg = built["index"], built["cfg"]
     comp, raw, truth = scene["comp"], scene["raw"], scene["truth"]

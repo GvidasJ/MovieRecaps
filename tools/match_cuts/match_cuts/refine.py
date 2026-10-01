@@ -4,8 +4,9 @@ Algorithm (all scores are ``scoring`` masked ZNCC in competitor space). TIME LIN
 shot a wrong RAW frame (m +- 1) plus a compensating shift / zoom / rotation scores almost like the truth, so
 RAW time is decided before framing and never by a free per-frame or per-candidate framing fit.
 
-0. The competitor's own temporal signature (temporal.py, comp-only): pair labels REPEAT / MOVE / UNKNOWN /
-   CUT and each pair's editor move (FrameMap ``pair_label`` / ``pair_warp``). REPEAT / MOVE give a time
+0. The competitor's own temporal signature (temporal.py, comp-only; measured where a line can repeat RAW frames,
+   slope <= temporal_refine_max_slope): pair labels REPEAT / MOVE / UNKNOWN / CUT and each pair's editor move
+   (FrameMap ``pair_label`` / ``pair_warp``, -1 / NaN where not measured). REPEAT / MOVE give a time
    line's speed and fractional phase, never its integer offset; a repeat pair's warp is the editor's own crop
    velocity (FX-07, refine side).
 1. Anchors (visual_match) are grouped into RUNS by RAW time only: same flip, gaps <= max_gap, within
@@ -940,11 +941,11 @@ def _w_resid(state: dict, task: tuple) -> np.ndarray:
 def _w_measure(state: dict, task: tuple) -> tuple[dict, float, bool]:
     """Per-frame framing measurement of RAW j on comp frame k (:func:`ecc_measure`, coarse-to-fine, extra
     starts = e.g. the nearest anchors' Sims)."""
-    k, j, flip, sim_d, starts = task
+    k, j, flip, sim_d, starts, phase = task
     comp, raw, cfg = state["comp"], state["raw"], state["cfg"]
     r = ecc_measure(np.asarray(comp.get(k)), np.asarray(raw.get(j)), Sim.from_dict(sim_d), flip,
                     float(raw.full_size[0]), tuple(raw.ratio), tuple(comp.ratio), state["allowed"](k), cfg,
-                    roi=state["roi"], starts=[Sim.from_dict(d) for d in starts])
+                    roi=state["roi"], starts=[Sim.from_dict(d) for d in starts], phase=phase)
     return r.sim.to_dict(), float(r.z), bool(r.converged)
 
 
@@ -1072,6 +1073,11 @@ class _Refiner:
         self.cap = max(0, int(cfg.framing_sample_step))       # model extrapolation beyond the last key (frames)
         self.meas_cache: dict[tuple[int, int, bool], tuple[dict, float, bool]] = {}
         self.labels: dict[int, int] = {}                      # competitor pair (k, k+1) -> _LAB_*
+        from .temporal import Signature
+        self._sig = Signature()                               # comp-only pair measurements (lazy, _ensure_labels)
+        self._sig_done: set[int] = set()
+        self._lab = None
+        self.repeat_max_slope = float(getattr(cfg, "temporal_refine_max_slope", 0.95))
         self.warps: dict[int, tuple[float, float, float, float]] = {}   # pair (k, k+1) -> editor move (comp full-res)
 
     # -- plumbing -------------------------------------------------------------------------------
@@ -1160,6 +1166,9 @@ class _Refiner:
             else:
                 runs.append([a])
         made = [self._new_track(r[0].flip, r) for r in runs]
+        if self.u1 <= self.repeat_max_slope:
+            self._ensure_labels([(t.anchors[0].k - self.ext, t.anchors[0].k + self.ext) for t in made
+                                 if len({a.k for a in t.anchors}) == 1])
         for t in made:
             t.line = self._run_line(t.anchors)
             t.keys = self._initial_keys(t)
@@ -1438,7 +1447,9 @@ class _Refiner:
             if key in self.meas_cache or key in seen or not self.raw.has(int(j)):
                 continue
             seen.add(key)
-            tasks.append((int(k), int(j), bool(t.flip), init.to_dict(), self._anchor_starts(t, int(k), init)))
+            # a fitted track's path is a close init: no phase-correlation start needed
+            tasks.append((int(k), int(j), bool(t.flip), init.to_dict(), self._anchor_starts(t, int(k), init),
+                          not t.fitted))
             keys.append(key)
         if not tasks:
             return
@@ -1479,6 +1490,7 @@ class _Refiner:
         tol = float(cfg.line_time_tol)
         plans: list[dict] = []
         items: list[tuple[_Track, int, int, Sim]] = []
+        pre = []
         for t in tracks:
             if t.id not in self.tracks:
                 continue
@@ -1488,6 +1500,11 @@ class _Refiner:
             hk, hj = self._hints(t, K)
             line = (_robust_line(hk, hj, self.slopes, self.u1, tol, float(cfg.line_min_inlier_frac))
                     if len(np.unique(hk)) >= 2 else None)
+            pre.append((t, K, hk, hj, line))
+        # the competitor's repeat cadence where a line can repeat RAW frames at all
+        self._ensure_labels([(int(K[0]), int(K[-1])) for _, K, _, _, line in pre
+                             if line is not None and 0.0 < line[0] <= self.repeat_max_slope])
+        for t, K, hk, hj, line in pre:
             init = {int(k): _sim_at(t.keys, int(k), self.raw_wh, self.max_gap) for k in K}
             plan: dict[str, Any] = {"t": t, "K": K, "line": None, "cells": [], "fam": {}, "init": init}
             if line is None:
@@ -1509,7 +1526,8 @@ class _Refiner:
                 plan.update(line=(u, xc), cells=cells, c0=c0)
                 j0 = c0["j"]
                 plan["fam"][0] = dict(zip(K.tolist(), j0.tolist()))
-                samp = sorted(set(range(0, len(K), self.stride)) | {len(K) - 1})
+                # +-1 families on the global framing_sample_step grid (shared with the confound check's samples)
+                samp = sorted({i for i, k in enumerate(K.tolist()) if k % self.stride == 0} | {0, len(K) - 1})
                 for d in (-1, 1):
                     plan["fam"][d] = {int(K[i]): int(j0[i] + d) for i in samp}
             for jd in plan["fam"].values():
@@ -1957,7 +1975,7 @@ class _Refiner:
             F = np.flatnonzero((fm.track == tid) & (fm.status == Status.MATCH))
             if len(F) == 0:
                 continue
-            samp = sorted(set(F[::self.stride].tolist()) | {int(F[-1])})
+            samp = sorted({int(k) for k in F if k % self.stride == 0} | {int(F[0]), int(F[-1])})
             fam = {d: {int(k): int(fm.raw[k]) + d for k in samp if self.raw.has(int(fm.raw[k]) + d)} for d in (-1, 0, 1)}
             for jd in fam.values():
                 items += [(t, k, j, fm.sim(k)) for k, j in jd.items()]
@@ -2236,23 +2254,36 @@ class _Refiner:
         fm.sim_meas, fm.sim_meas_score = sm, sz
 
     # -- 0. the competitor's own temporal signature (FX-07, refine side) ----------------------------
-    def _temporal(self) -> None:
+    def _ensure_labels(self, ranges: Iterable[tuple[int, int]]) -> None:
         """Comp-only pair labels (temporal.py: REPEAT / MOVE / UNKNOWN / CUT with per-shot noise floors) and the
-        pairs' editor moves, measured on the box ROI with refine's allowed masks. REPEAT / MOVE positions give a
-        time line's speed and fractional phase (candidate-line pruning, never the integer offset); a repeat
-        pair's warp is the editor's own crop velocity (initial model of a one-anchor run). Static, low-texture
-        and frame-blended content gives no labels and changes nothing."""
+        pairs' editor moves over the comp frames [k0, k1] of ``ranges`` (measured once, on the box ROI with
+        refine's allowed masks; the whole signature is relabelled). REPEAT / MOVE positions give a time line's
+        speed and fractional phase (candidate-line pruning, never the integer offset); a repeat pair's warp is the
+        editor's own crop velocity (initial model of a one-anchor run). Measured only where a line can repeat
+        RAW frames at all (u <= REPEAT_MAX_SLOPE: e.g. 23.976 / 25 fps RAW at speed 1 on 30 fps); static,
+        low-texture and frame-blended content gives no labels and changes nothing (FX-07)."""
         from . import temporal
-        if self.N < 3:
+        todo = set()
+        for k0, k1 in ranges:
+            for k in range(max(0, int(k0) - 1), min(self.N - 1, int(k1) + 1)):
+                if k not in self._sig_done:
+                    todo.add(k)
+        if not todo:
             return
-        chunk = 48
-        tasks = [(k0, min(self.N, k0 + chunk)) for k0 in range(0, self.N, chunk)]
-        sig = temporal.Signature()
-        for rows in self._map(_w_temporal, tasks):
+        ks = sorted(todo)
+        self._sig_done.update(ks)
+        chunks, run = [], [ks[0]]
+        for k in ks[1:]:
+            if k == run[-1] + 1 and len(run) < 48:
+                run.append(k)
+            else:
+                chunks.append((run[0], run[-1] + 1))
+                run = [k]
+        chunks.append((run[0], run[-1] + 1))
+        for rows in self._map(_w_temporal, chunks):
             for k, g, v in rows:
-                pm = temporal.PairMeasure(*v)
-                (sig.d1 if g == 1 else sig.d2)[int(k)] = pm
-        lab = temporal.label_pairs(sig, self.cfg)
+                (self._sig.d1 if g == 1 else self._sig.d2)[int(k)] = temporal.PairMeasure(*v)
+        lab = self._lab = temporal.label_pairs(self._sig, self.cfg)
         code = {temporal.UNKNOWN: _LAB_UNKNOWN, temporal.REPEAT: _LAB_REPEAT, temporal.MOVE: _LAB_MOVE,
                 temporal.CUT: _LAB_CUT}
         self.labels = {int(k): code[v] for k, v in lab.label.items()}
@@ -2260,10 +2291,18 @@ class _Refiner:
         f = temporal.scale_of((h, w), int(getattr(self.cfg, "temporal_max_side", 200)))
         rx, ry = float(self.comp.ratio[0]), float(self.comp.ratio[1])
         self.warps = {int(k): (float(pm.dx) / f / rx, float(pm.dy) / f / ry, float(pm.ds), float(pm.dtheta))
-                      for k, pm in sig.d1.items() if np.isfinite(pm.cc)}
-        summ = temporal.summary(lab)
+                      for k, pm in self._sig.d1.items() if np.isfinite(pm.cc)}
+        self.stats["temporal_pairs"] = len(self._sig.d1) + len(self._sig.d2)
+
+    def _labels_summary(self) -> None:
+        from . import temporal
+        if self._lab is None:
+            self.dlog.record("refine", "temporal_labels", counts=None, pairs_measured=0,
+                             note=f"no time line can repeat a RAW frame (slope > {self.repeat_max_slope})")
+            return
+        summ = temporal.summary(self._lab)
         self.dlog.record("refine", "temporal_labels", counts=summ["counts"], repeats=summ["runs"]["repeat"][:200],
-                         shots=len(lab.shots))
+                         pairs_measured=len(self._sig.d1))
 
     # -- 7. debug images --------------------------------------------------------------------------
     def _debug_pngs(self, fm: FrameMap, debug_dir: str | Path | None) -> int:
@@ -2324,8 +2363,6 @@ class _Refiner:
             t1 = time.perf_counter()
             tm[name] = round(tm.get(name, 0.0) + t1 - t0, 2)
             t0 = t1
-        self._temporal()
-        lap("temporal")
         tracks = self._link(self.anchors)
         if self.near:
             joined, rest = self._join(self.near)
@@ -2346,6 +2383,7 @@ class _Refiner:
         lap("finalize")
         self._confound_check(fm, self._delta)
         lap("confound")
+        self._labels_summary()
         n_png = self._debug_pngs(fm, debug_dir)
         lap("debug_png")
         counts = {name: int(np.sum(fm.status == v)) for name, v in

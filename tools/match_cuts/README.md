@@ -306,6 +306,7 @@ changed, update this table with the reason.
 | refine | `ecc_pyramid_levels` / `ecc_pyramid_min_side` | 3 / 40 px | coarse-to-fine framing measurement (proxy, 1/2, 1/4 while the template keeps 40 px) |
 | refine | `line_time_tol` / `line_min_inlier_frac` | 2 frames / 0.7 | time-line-first runs: anchors within ±2 RAW frames of a snap-speed line; a track follows one line when 70 % of its points do |
 | refine | `path_median` / `anchor_time_delta` / `near_miss_inliers` | 5 / 0.003 / 6 | framing-path outlier window; anchor time ambiguity; RANSAC near-misses that may only join an existing time line |
+| refine | `temporal_refine_max_slope` | 0.95 | refine measures the competitor's repeat cadence only where a time line can repeat RAW frames (RAW frames per comp frame <= this) |
 | segments | `speed_snap_values` / `speed_snap_tol` | 1.00 1.05 1.10 1.15 1.20 1.25 1.50 2.00 and inverses / 0.3 % | speed snapping |
 | segments | `lambda_cut` / `lambda_unsnapped` | 1.0 / 3.0 | DP costs |
 | segments | `punch_scale_step` / `punch_pos_step` | 0.01 / 4 px | punch-in cut detection |

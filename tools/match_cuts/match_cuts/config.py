@@ -153,7 +153,9 @@ class Config:
     # time-line-first refine (DESIGN §5 refine.py, FX-03): anchors are grouped by RAW time, framing is a path
     line_time_tol: float = 2.0             # an anchor joins a run within +-this many RAW frames of its snap-speed line
     line_min_inlier_frac: float = 0.7      # a track follows ONE snap-speed line when this fraction of its points is within line_time_tol
-    path_median: int = 5                   # running median over the per-frame measurements before the path's RDP keys
+    path_median: int = 5                   # outlier window (frames) of the per-frame measurements before the path's RDP keys
+    temporal_refine_max_slope: float = 0.95  # refine measures the comp-only repeat cadence where a line can repeat RAW
+                                           #   frames (RAW frames per comp frame <= this: 23.976 / 25 -> 30 at v = 1)
 
     # ---- segmentation (Stage 5.4 / 6) ---------------------------------------------------
     speed_snap_values: tuple = (1.0, 1.05, 1.10, 1.15, 1.20, 1.25, 1.50, 2.00,

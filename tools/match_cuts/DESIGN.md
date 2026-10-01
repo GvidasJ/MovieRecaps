@@ -352,7 +352,9 @@ def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cac
     #   rotation scores almost like the truth (the first real run: 10 of 12 anchors of one pan one frame off,
     #   fake 0.6-1.0 deg rotations, one track per anchor, the FrameMap HELD between keys). RAW time is decided
     #   before framing and never by a free per-frame or per-candidate framing fit; framing is a smooth PATH.
-    # 0 competitor-only temporal signature (temporal.py on the box ROI, refine's masks): pair labels REPEAT /
+    # 0 competitor-only temporal signature (temporal.py on the box ROI, refine's masks), measured on the frames
+    #   of tracks whose line can repeat a RAW frame at all (slope <= temporal_refine_max_slope, e.g. 23.976 or
+    #   25 fps RAW at v = 1 on 30 fps; a 29.97 RAW never repeats): pair labels REPEAT /
     #   MOVE / UNKNOWN / CUT + each pair's editor move -> FrameMap pair_label / pair_warp. REPEAT/MOVE give a
     #   line's speed and fractional phase (never the integer offset); a repeat pair's warp is the editor's crop
     #   velocity (initial model of a one-anchor run). Static / blended content gives no labels (FX-07).

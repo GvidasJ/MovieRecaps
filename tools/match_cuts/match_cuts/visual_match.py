@@ -1139,7 +1139,8 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
     if roi is None:
         roi = mask_bbox(allowed, (h, w))
     cpts, cdesc = detect_sift(img, allowed, cfg.sift_nfeatures, roi)
-    if len(cdesc) < max(3, cfg.min_inliers):
+    near_min = int(getattr(cfg, "near_miss_inliers", 0) or 0) if near_miss else 0
+    if len(cdesc) < max(3, min(cfg.min_inliers, near_min) if near_min else cfg.min_inliers):
         if report is not None:
             report.append({"k": int(k), "reason": "few_keypoints", "n": int(len(cdesc))})
         return []
@@ -1161,29 +1162,14 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
     radius = max(int(cfg.refine_radius), index.step // 2 + 1)
     accept = cfg.match_thresh - cfg.anchor_zncc_slack
     found: dict[tuple[int, bool], Anchor] = {}
-    near: dict[tuple[int, bool], Anchor] = {}
-    near_min = int(getattr(cfg, "near_miss_inliers", 0) or 0) if near_miss else 0
-    for j, flip, votes in cands:
-        if any(a.flip == flip and abs(a.raw - j) <= radius + 1 for a in found.values()):
-            continue      # would re-estimate onto an already accepted exact frame
-        rpts, rdesc = _raw_features(raw, index, j, flip, cfg.sift_nfeatures)
-        M, n_inl, n_good = _ransac(cpts, cdesc, rpts, rdesc, cfg)
-        ratio = n_inl / n_good if n_good else 0.0
-        is_near = False
-        if M is None or n_inl < cfg.min_inliers or ratio < cfg.min_inlier_ratio:
-            if report is not None:
-                report.append({"k": int(k), "raw": int(j), "flip": bool(flip), "votes": round(votes, 2),
-                               "reason": "ransac", "inliers": n_inl, "good": n_good})
-            if not (near_min and M is not None and near_min <= n_inl < cfg.min_inliers
-                    and ratio >= cfg.min_inlier_ratio):
-                continue
-            is_near = True
+
+    def verify(j: int, flip: bool, votes: float, M: np.ndarray, n_inl: int, ratio: float, src: str) -> Anchor | None:
         try:
             sim = from_cv_matrix(M, False, W, tuple(raw.ratio), tuple(comp.ratio))
         except ValueError:
-            continue
+            return None
         if not (0.02 < sim.s < 50.0):
-            continue
+            return None
         # re-estimate against the best EXACT RAW frame near the index frame
         js = [i for i in range(j - radius, j + radius + 1) if raw.has(i)]
         sc = scorer.scores(js, sim, flip)
@@ -1191,20 +1177,40 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
         if ib < 0:
             if report is not None:
                 report.append({"k": int(k), "raw": int(j), "flip": bool(flip), "reason": "no_score"})
-            continue
+            return None
         jb, sim2, z2, ambiguous = _reestimate(img, raw, js[ib], sim, flip, allowed, roi, comp, cfg)
         if not np.isfinite(z2) or z2 < accept:
             if report is not None:
                 report.append({"k": int(k), "raw": int(jb), "flip": bool(flip), "reason": "zncc",
                                "zncc": None if not np.isfinite(z2) else round(float(z2), 4), "inliers": n_inl})
+            return None
+        return Anchor(int(k), int(jb), bool(flip), sim2, int(n_inl), float(ratio), float(votes), float(z2), src,
+                      bool(ambiguous))
+
+    pending: list[tuple] = []
+    for j, flip, votes in cands:
+        if any(a.flip == flip and abs(a.raw - j) <= radius + 1 for a in found.values()):
+            continue      # would re-estimate onto an already accepted exact frame
+        rpts, rdesc = _raw_features(raw, index, j, flip, cfg.sift_nfeatures)
+        M, n_inl, n_good = _ransac(cpts, cdesc, rpts, rdesc, cfg)
+        ratio = n_inl / n_good if n_good else 0.0
+        if M is None or n_inl < cfg.min_inliers or ratio < cfg.min_inlier_ratio:
+            if report is not None:
+                report.append({"k": int(k), "raw": int(j), "flip": bool(flip), "votes": round(votes, 2),
+                               "reason": "ransac", "inliers": n_inl, "good": n_good})
+            if near_min and M is not None and near_min <= n_inl < cfg.min_inliers and ratio >= cfg.min_inlier_ratio:
+                pending.append((j, flip, votes, M, n_inl, ratio))
             continue
-        a = Anchor(int(k), int(jb), bool(flip), sim2, int(n_inl), float(ratio), float(votes), float(z2),
-                   source + "_near" if is_near else source, bool(ambiguous))
-        key = (a.raw, a.flip)
-        tgt = near if is_near else found
-        if key not in tgt or a.zncc > tgt[key].zncc:
-            tgt[key] = a
-    if not found and near:
+        a = verify(j, flip, votes, M, n_inl, ratio, source)
+        if a is not None and ((a.raw, a.flip) not in found or a.zncc > found[(a.raw, a.flip)].zncc):
+            found[(a.raw, a.flip)] = a
+    if not found and pending:
+        # near-misses (verified like anchors, at most the two with the most inliers): join-only evidence
+        near: dict[tuple[int, bool], Anchor] = {}
+        for j, flip, votes, M, n_inl, ratio in sorted(pending, key=lambda p: (-p[4], -p[2], p[0], p[1]))[:2]:
+            a = verify(j, flip, votes, M, n_inl, ratio, source + "_near")
+            if a is not None and ((a.raw, a.flip) not in near or a.zncc > near[(a.raw, a.flip)].zncc):
+                near[(a.raw, a.flip)] = a
         return sorted(near.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
     return sorted(found.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
 
