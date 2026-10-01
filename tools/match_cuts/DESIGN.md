@@ -65,6 +65,8 @@ references; the RawIndex as its cached files) and results are bit-identical acro
 forking the parent runs `gc.collect(); gc.freeze()` and sets OpenCV to 1 thread — a forked child must never run a
 destructor of an inherited object (verified deadlock: a stray frame-threaded PyAV decoder freed by the
 child's GC hangs in avcodec_free_context). Pools that decode video use the 'spawn' context.
+Hang protection (D7): no fork while native thread pools run, and a watchdog on every pool (`common`
+"Worker pools" section; details in D7).
 
 ## 2. Conventions
 
@@ -409,7 +411,9 @@ def line_search(k, comp, raw, allowed, cfg, js, flip) -> list[Anchor]        # F
     # line_search_nfeatures) with relaxed acceptance (>= near_miss_inliers at inlier ratio >= line_search_min_ratio;
     # the global min_inliers is unchanged) -- CANDIDATES only: the anchor test (Sim re-estimated over the exact RAW
     # frames around it, masked ZNCC >= match_thresh - anchor_zncc_slack) decides, best inliers first, at most
-    # line_search_verify per frame. run_line_searches: the worker-pool version (input order kept).
+    # line_search_verify per frame. run_line_searches: the worker-pool version (input order kept); it first computes
+    # the SIFT features of every RAW frame of the batch's windows once (a pool of their own) and the searches read
+    # them from the state (neighbouring frames search largely the same window; identical features, wave 4).
 def sparse_search(comp, raw, layout, overlays, index, hints, cfg, dlog, frames=None) -> list[Anchor]
     # every cfg.comp_search_stride frames (or `frames`); audio-restricted (±audio_restrict_s) first,
     # global fallback. multiprocessing (fork; memmaps shared; seed_everything per worker).
@@ -1245,6 +1249,49 @@ verification honesty) were fixed under these shared rules:
 * **D7 Parallelism.** `fork` pools only on Linux; `spawn` elsewhere (Windows/macOS, or
   `MATCH_CUTS_START_METHOD=spawn`) with picklable state (`Proxy` pickles as paths, `RawIndex` as its cache
   file); results bit-identical across start methods and worker counts.
+  * *No fork with native threads alive* (wave 4; a wave-3 CLI run hung 25 min in the S5.3 fork pool with
+    scipy's ducc FFT threads in the parent). The package sets `DUCC0_NUM_THREADS=1` at import (every FFT here
+    runs with workers=1, so the ducc pool is never started); before forking, `parallel_map` sets OpenCV to 1
+    thread and releases PyAV's per-thread swscale context (`common.release_native_threads`: PyAV 19 keeps one
+    per thread, with live slice threads, for `to_ndarray`) and resets scipy's HiGHS scheduler (`linprog` leaves
+    an idle worker thread; it restarts with the next solve); OpenBLAS stops its own threads around fork
+    (pthread_atfork). Right after forking, a census (`common.native_threads`: OS threads of `/proc/self/task`
+    minus Python's threads, re-checked for 150 ms) must find no native thread; otherwise the fork pool is
+    discarded unused and this call and every later one in the process use spawn workers (warning once;
+    identical results). The stage heartbeat (a Python thread) logs only under `common.FORK_LOCK`, which the
+    fork holds, so a child never inherits a half-written log line.
+  * *Watchdog.* Every pool (`parallel_map` fork / spawn, the layout text-line spawn pool) is collected through
+    `common.watched_results` with chunks of `imap(_unordered)` at chunksize 1 (the only iterators with
+    `next(timeout)`): no result for `pool_stall_timeout_s` (300 s) or an exited worker process (the OS killed
+    it, e.g. out of memory: `multiprocessing.Pool` would lose its task and wait forever; a worker killed while
+    holding the task-queue lock also blocks every other worker) raises `PoolFailure`. The pool is then killed
+    (`common.close_pool`: `Pool.terminate()` runs in a daemon thread because it blocks on such a lock; workers
+    are SIGKILLed; never waits more than ~10 s) and the tasks without a result run in the parent, in input
+    order. Results stay bit-identical: every task is seeded on its own (`seed_everything` before each item)
+    and placed by its input index. After `pool_max_failures` (2) stops, later `parallel_map` calls run in the
+    parent. A task's own exception still propagates unchanged.
+  * *Progress.* `common.Progress` counts pool / serial tasks; whenever the package logger was silent for
+    `progress_log_s` (30 s), one line is logged: the open counter's `<stage>: <name>: done/total tasks done
+    (elapsed)`, or the stage heartbeat's `<stage>: still running (elapsed)` (`common.stage_heartbeat`, entered
+    by `pipeline._stage`). `pool_stall_timeout_s`, `pool_max_failures` and `progress_log_s` are run settings,
+    never part of the analysis cache keys.
+  * *Single-threaded OpenBLAS* (wave 4). `pipeline.run`, every `parallel_map` task (fork, spawn, inline) and the
+    layout spawn workers pin numpy's OpenBLAS to one thread (`common.single_thread_blas` / `set_blas_threads`;
+    the audio stages did already). The analysis only runs small and medium products -- the ZNCC of a few
+    candidates over one box ROI (`scoring.zncc_rows`), pixel dot products (`temporal._zncc`) -- and OpenBLAS splits
+    a dot product of >= ~20000 elements between its threads: 7x slower for these sizes (measured 8.4 vs 1.2 ms for
+    7 x 60000 under load; with 4 worker processes each waking 4 BLAS threads, worse) and the last bits of the result
+    depended on the machine's CPU count. Measured on the base commit vs wave 4 (same machine, 4 CPUs shared with
+    another job): mini, film24 and full cutlist.json / csv / XML / EDL / JSX, verify.json and frame_map.npz
+    byte-identical; mini wall 639 -> 165 s (CPU 21m07 -> 6m20), film24 764 -> 200-260 s (CPU 27m56 -> ~8m30;
+    S5.2 121 -> 42 s, S5.3 359 -> 66-100 s, S9 215 -> 53-65 s), full 1353 -> 797 s (CPU 79m41 -> 30m43; S5.2 309 ->
+    151 s, S5.3 521 -> 153 s, S9 338 -> 306 s). Line searches describe each RAW frame once per batch (below).
+  * *Windows files.* Outputs are replaced through `common.replace_file` (retried for 5 s on PermissionError --
+    a virus scanner, Excel holding `cutlist.csv`, a player holding the preview -- then a PermissionError that
+    names the file and says to close the program); preview / compare renders are muxed into their temp
+    folder first. Debug images go through `common.write_image` (`cv2.imencode` + Python file I/O:
+    `cv2.imwrite` cannot open non-ASCII Windows paths). A console that cannot encode a character writes a
+    backslash escape instead of failing (`setup_logging`).
 * **D8 Synthetic.** Competitor audio starts at the frame boundary of each segment's first RAW frame (NLE
   convention); one ~1 s fullscreen segment exercises D1. `tests/test_synthetic_av_offset.py` (slow) delays
   the mini competitor's whole audio track by 86 ms (`adelay` + `atrim`, video copied) to exercise D9: the

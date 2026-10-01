@@ -60,7 +60,7 @@ from typing import Any, Callable, Iterator, Sequence
 
 import numpy as np
 
-from .common import ffmpeg_bin, fps_str, log, parse_fps, timecode
+from .common import ffmpeg_bin, fps_str, log, parse_fps, replace_file, timecode
 from .geometry import CORNER_TO_CV, CV_TO_CORNER, Sim, interpolate_keys, to_cv_matrix, translate3, h3
 from .model import Box, Cutlist, Segment
 
@@ -1556,7 +1556,8 @@ def render_preview(cutlist: Cutlist, raw_path: str | os.PathLike, out_path: str 
                 n += 1
         if n != ctx.n_frames:
             raise RuntimeError(f"rendered {n} frames, expected {ctx.n_frames}")
-        _mux(video, wav, out)
+        _mux(video, wav, tmpdir / out.name)
+        replace_file(tmpdir / out.name, out)     # a player holding the old preview open: retried, then explained
     finally:
         for p in sorted(tmpdir.glob("*")):
             p.unlink(missing_ok=True)
@@ -1727,7 +1728,8 @@ def render_compare(comp_path: str | os.PathLike, preview_frames_source: Any, cut
                     strip = _label_strip(pw, [f"{title}  frame {k}", f"{tc}  {lab}"], geo)
                     panels.append(np.vstack([strip, img]))
                 wr.write(np.hstack(panels))
-        _mux(video, Path(comp_path), out, audio_map="1:a:0?")
+        _mux(video, Path(comp_path), tmpdir / out.name, audio_map="1:a:0?")
+        replace_file(tmpdir / out.name, out)
     finally:
         rec.close()
         for p in sorted(tmpdir.glob("*")):

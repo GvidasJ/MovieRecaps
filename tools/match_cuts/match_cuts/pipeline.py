@@ -52,9 +52,10 @@ import numpy as np
 
 from . import __version__
 from . import phase_solve as _ps
-from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, file_hash, fmt_seconds,
-                     fps_str, json_default, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
-                     setup_logging, stage_key, timecode)
+from .common import (STAGE_VERSION, Cache, DecisionLog, configure_pools, dump_json, ffmpeg_bin, ffprobe_bin, file_hash,
+                     fmt_seconds, fps_str, json_default, limit_native_threads, load_decisions, log, null_dlog,
+                     params_hash, replace_file, save_decisions, seed_everything, set_blas_threads, setup_logging,
+                     stage_heartbeat, stage_key, timecode)
 from .config import Config
 from .geometry import Sim
 from .model import (AudioHints, Cutlist, FrameMap, Layout, Segment, Status, StreamInfo, cutlist_layout)
@@ -150,10 +151,13 @@ class Context:
 
 @contextlib.contextmanager
 def _stage(ctx: Context, name: str) -> Iterator[None]:
+    """Time a stage; long stages log progress / a heartbeat at least every cfg.progress_log_s (common.Progress,
+    common.stage_heartbeat), so the console is never silent for long."""
     log.info("== %s", name)
     t0 = time.perf_counter()
     try:
-        yield
+        with stage_heartbeat(name):
+            yield
     finally:
         dt = time.perf_counter() - t0
         ctx.timings[name] = round(ctx.timings.get(name, 0.0) + dt, 3)
@@ -1773,7 +1777,7 @@ def cached_hints(ctx: Context, compute: Callable[[], AudioHints]) -> AudioHints:
             tmp = p.with_name(p.stem + ".tmp.npz")
             hints.save(tmp)
         store_decisions(ctx, "audio_align", key, list(cap))
-        os.replace(tmp, p)
+        replace_file(tmp, p)
     else:
         log.info("audio hints: cache hit %s", p.name)
         ctx.dlog.record("audio_align", "cache_hit", key=key)
@@ -1907,8 +1911,8 @@ def save_frame_map_cache(fm: FrameMap, overlays: Any, fm_path: Path, ov_path: Pa
     fm.save(tmp)
     ov_tmp = ov_path.with_name(ov_path.stem + ".tmp.npz")
     overlays.save(ov_tmp)
-    os.replace(ov_tmp, ov_path)
-    os.replace(tmp, fm_path)     # the FrameMap file last: its existence marks a complete entry
+    replace_file(ov_tmp, ov_path)
+    replace_file(tmp, fm_path)   # the FrameMap file last: its existence marks a complete entry
 
 
 def hint_windows(hints: AudioHints, raw_fps: Fraction, n_raw: int, cfg: Config, extra_times: list[float] = ()) -> list[tuple[int, int]]:
@@ -2635,6 +2639,10 @@ def run(cfg: Config) -> dict:
     _guard_paths(cfg)
     _prepare_dirs(cfg)
     setup_logging(cfg.verbose, log_file=cfg.work / "match_cuts.log")
+    limit_native_threads()                 # before the first FFT (DESIGN D7 fork hygiene)
+    prev_blas = set_blas_threads(1)        # small products only: faster and CPU-count independent (DESIGN D7)
+    configure_pools(stall_s=cfg.pool_stall_timeout_s, progress_s=cfg.progress_log_s,
+                    max_failures=cfg.pool_max_failures)
     log.info("match_cuts %s: competitor=%s raw=%s out=%s work=%s layout=%s comp_size=%s fps=%s", __version__,
              cfg.competitor, cfg.raw, cfg.out_dir, cfg.work_dir, cfg.layout_mode, cfg.comp_size, cfg.fps_mode)
     ctx = Context(cfg=cfg, dlog=DecisionLog(cfg.work / "decisions.jsonl", truncate=True), cache=Cache(cfg.work))
@@ -2678,6 +2686,8 @@ def run(cfg: Config) -> dict:
                 log.error("INPUT FILE CHANGED DURING THE RUN: %s", p)
         ctx.dlog.close()
         copy_decision_log(cfg)
+        if prev_blas is not None:
+            set_blas_threads(prev_blas)
     criteria = ctx.verify.get("criteria", {})
     checks = ctx.verify.get("checks", {})
     code = exit_code_for(criteria, checks)
@@ -2694,7 +2704,7 @@ def copy_decision_log(cfg: Config) -> Path | None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(dst.name + ".tmp")
             shutil.copyfile(src, tmp)
-            os.replace(tmp, dst)
+            replace_file(tmp, dst)
             return dst
     except OSError as e:
         log.warning("could not copy the decision log to %s: %s", dst, e)

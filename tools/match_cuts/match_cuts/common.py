@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import subprocess
+import sys
 import time
 from fractions import Fraction
 from pathlib import Path
@@ -251,8 +252,33 @@ class Cache:
         val = compute()
         tmp = p.with_suffix(".tmp.npz")
         np.savez_compressed(tmp, **val)
-        os.replace(tmp, p)
+        replace_file(tmp, p)
         return val
+
+
+# Windows: a file that another program holds open without delete sharing (Excel with cutlist.csv, a video
+# player with preview_recreation.mp4, a virus scanner briefly checking a fresh file) cannot be replaced or
+# removed -- os.replace raises PermissionError (WinError 5 / 32). Retried for a few seconds, then explained.
+REPLACE_RETRY_S = 5.0
+
+
+def replace_file(src: str | os.PathLike, dst: str | os.PathLike, retry_s: float | None = None) -> None:
+    """``os.replace(src, dst)``, retried on PermissionError for up to ``retry_s`` seconds (REPLACE_RETRY_S); then
+    a PermissionError that names the file and says to close the program holding it."""
+    limit = REPLACE_RETRY_S if retry_s is None else float(retry_s)
+    t0 = time.monotonic()
+    delay = 0.05
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            if time.monotonic() - t0 >= limit:
+                raise PermissionError(
+                    e.errno, f"cannot replace {dst}: the file is in use or read-only ({e.strerror}). Close the program "
+                    f"that has it open (e.g. Excel, a video player, After Effects) and run again", str(dst)) from e
+            time.sleep(delay)
+            delay = min(0.5, delay * 2)
 
 
 def atomic_write_text(path: str | os.PathLike, text: str) -> None:
@@ -262,7 +288,22 @@ def atomic_write_text(path: str | os.PathLike, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, p)
+    replace_file(tmp, p)
+
+
+def write_image(path: str | os.PathLike, img: np.ndarray, ext: str = ".png") -> bool:
+    """Write an image atomically through Python file I/O (``cv2.imencode``): ``cv2.imwrite`` cannot open
+    non-ASCII paths on Windows (e.g. C:\\Users\\Žygimantas\\...). Returns False when encoding failed."""
+    import cv2
+    p = Path(path)
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.stem + ".tmp" + ext)
+    tmp.write_bytes(buf.tobytes())
+    replace_file(tmp, p)
+    return True
 
 
 # --------------------------------------------------------------------------------------
@@ -405,11 +446,22 @@ def null_dlog() -> DecisionLog:
     return _NULL_DLOG
 
 
+def _tolerant_stream(stream: Any) -> None:
+    """Characters the console cannot encode become backslash escapes instead of logging errors (Windows: a
+    redirected stderr uses the ANSI code page, e.g. cp1252, which has no arrows / >= signs)."""
+    try:
+        if getattr(stream, "errors", "strict") == "strict" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):  # pragma: no cover - a replaced / closed stream
+        pass
+
+
 def setup_logging(verbose: bool = False, log_file: str | os.PathLike | None = None) -> None:
     root = logging.getLogger(LOG_NAME)
     root.setLevel(logging.DEBUG)
     for h in list(root.handlers):
         root.removeHandler(h)
+    _tolerant_stream(sys.stderr)
     sh = logging.StreamHandler()
     sh.setLevel(logging.DEBUG if verbose else logging.INFO)
     sh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
@@ -458,3 +510,377 @@ def ffprobe_bin() -> str:
 def chunks(seq: list, n: int) -> Iterable[list]:
     for i in range(0, len(seq), n):
         yield seq[i:i + n]
+
+
+# --------------------------------------------------------------------------------------
+# Worker pools: native-thread hygiene, watchdog, progress (DESIGN D7)
+# --------------------------------------------------------------------------------------
+#
+# Hang protection. A ``multiprocessing.Pool`` waits forever when a worker dies (killed by the OS when the
+# machine runs out of memory, or a crash) or deadlocks: the lost task never reports back, and a worker that
+# died while holding the pool's queue lock blocks every other worker on that semaphore (seen in wave 3: a CLI
+# run sat silently in the S5.3 pool for 25 min). Two defences:
+#   * hygiene -- never fork while native thread pools run in the parent (their locks would be copied into the
+#     child in whatever state they had): scipy's ducc FFT pool is never started (DUCC0_NUM_THREADS=1 at package
+#     import; every FFT here runs single-threaded anyway), PyAV's per-thread swscale context (and its slice
+#     threads) is released and OpenCV's pool is set to one thread before forking. OpenBLAS stops its own threads
+#     around fork (pthread_atfork). A census right after forking counts the OS threads Python does not own; any
+#     survivor makes ``visual_match.parallel_map`` discard that fork pool and use spawn workers instead.
+#   * watchdog -- results are collected with a timeout: no result for ``POOL_WATCHDOG['stall_s']`` or a dead
+#     worker process stops the pool with a clear warning and the remaining tasks run in this process. Every task
+#     is seeded on its own, so the results are bit-identical, only slower.
+
+POOL_WATCHDOG: dict[str, float] = {"stall_s": 300.0, "progress_s": 30.0, "poll_s": 0.5, "max_failures": 2}
+
+
+def configure_pools(stall_s: float | None = None, progress_s: float | None = None,
+                    max_failures: int | None = None) -> None:
+    """Set the watchdog limits (Config.pool_stall_timeout_s / progress_log_s / pool_max_failures)."""
+    if stall_s is not None:
+        POOL_WATCHDOG["stall_s"] = max(1.0, float(stall_s))
+    if progress_s is not None:
+        POOL_WATCHDOG["progress_s"] = max(1.0, float(progress_s))
+    if max_failures is not None:
+        POOL_WATCHDOG["max_failures"] = max(0, int(max_failures))
+
+
+class PoolFailure(RuntimeError):
+    """A worker pool stopped delivering results (no result within the stall timeout, or a worker died)."""
+
+
+def native_threads() -> int | None:
+    """OS threads of this process that Python does not own (native library pools), or None when the platform
+    cannot tell (no /proc/self/task: Windows, macOS)."""
+    import threading
+    try:
+        n = len(os.listdir("/proc/self/task"))
+    except OSError:
+        return None
+    return max(0, n - threading.active_count())
+
+
+def release_native_threads() -> None:
+    """Free the native thread pools of THIS thread that it does not need right now (call before forking).
+
+    PyAV (19) keeps one swscale context per thread (``av.video.frame._thread_local.reformatter``) for
+    ``frame.to_ndarray``; its slice threads live as long as the context. A forked child inherits that context
+    without its threads and hangs in its next conversion. Dropping the reference frees the context (the next
+    conversion makes a new one; pixels are identical). scipy's HiGHS (``linprog``) keeps a scheduler with idle
+    worker threads after a solve: reset (it restarts with the next solve). Only touches modules already imported."""
+    import sys
+    fr = sys.modules.get("av.video.frame")
+    tl = getattr(fr, "_thread_local", None) if fr is not None else None
+    if tl is not None and getattr(tl, "reformatter", None) is not None:
+        try:
+            tl.reformatter = None
+        except Exception:  # noqa: BLE001 - best effort: the census after forking still catches survivors
+            pass
+    # scipy's HiGHS LP solver (phase_solve's linprog) keeps a global task scheduler with idle worker threads after a
+    # solve; stopped here (it restarts on the next solve, same options -> same results)
+    hs = sys.modules.get("scipy.optimize._highspy._core")
+    reset = getattr(getattr(hs, "_Highs", None), "resetGlobalScheduler", None) if hs is not None else None
+    if callable(reset):
+        try:
+            reset(True)
+        except Exception:  # noqa: BLE001 - best effort, as above
+            pass
+
+
+def limit_native_threads() -> None:
+    """Never start scipy's ducc FFT thread pool: every FFT in this package runs with workers=1, and the pool's
+    idle threads would otherwise be alive whenever a worker pool forks. Must run before the first scipy FFT
+    (the pool size is read once); an explicit DUCC0_NUM_THREADS in the environment wins."""
+    os.environ.setdefault("DUCC0_NUM_THREADS", "1")
+
+
+_BLAS_CTL: list = []
+
+
+def blas_lib_paths(d: str) -> list[str]:
+    """numpy's bundled OpenBLAS in its ``numpy.libs`` folder: ``.so`` on Linux, ``.dll`` on Windows (the
+    Windows wheels name it e.g. ``libscipy_openblas64_-<hash>.dll``), ``.dylib`` on macOS builds that bundle it."""
+    import glob
+    out: list[str] = []
+    for pat in ("*openblas*.so*", "*openblas*.dll", "*openblas*.dylib"):
+        out += glob.glob(os.path.join(d, pat))
+    return sorted(set(out))
+
+
+def blas_ctl():
+    """(set_num_threads, get_num_threads) of numpy's bundled OpenBLAS via ctypes, or None (e.g. macOS Accelerate)."""
+    if not _BLAS_CTL:
+        found = None
+        try:
+            import ctypes
+            d = os.path.join(os.path.dirname(np.__file__), os.pardir, "numpy.libs")
+            for path in blas_lib_paths(d):
+                lib = ctypes.CDLL(path)
+                for sn, gn in (("scipy_openblas_set_num_threads64_", "scipy_openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads64_", "openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads", "openblas_get_num_threads")):
+                    if hasattr(lib, sn) and hasattr(lib, gn):
+                        found = (getattr(lib, sn), getattr(lib, gn))
+                        break
+                if found:
+                    break
+        except Exception:          # pragma: no cover - platform specific
+            found = None
+        _BLAS_CTL.append(found)
+    return _BLAS_CTL[0]
+
+
+def set_blas_threads(n: int) -> int | None:
+    """Set numpy's OpenBLAS thread count; returns the previous count (None when not controllable)."""
+    ctl = blas_ctl()
+    if ctl is None:
+        return None
+    setter, getter = ctl
+    try:
+        old = int(getter())
+        setter(max(1, int(n)))
+    except Exception:              # pragma: no cover
+        return None
+    return old
+
+
+@contextlib.contextmanager
+def single_thread_blas() -> Iterator[None]:
+    """Pin OpenBLAS to one thread for the duration (restored afterwards; no-op if not controllable).
+
+    The analysis runs only small and medium products (ZNCC of a few candidates over one box ROI, pixel dot
+    products). A multi-threaded OpenBLAS splits a dot product over >= ~20000 elements between its threads, which
+    (a) is up to 7x slower for these sizes (thread wake-ups; worse with worker processes or a busy machine:
+    zncc_rows 8.4 ms vs 1.2 ms for 7 x 60000, measured) and (b) makes the last bits of every such result depend on
+    the machine's CPU count. ``pipeline.run`` and every ``parallel_map`` task therefore run single-threaded."""
+    old = set_blas_threads(1)
+    try:
+        yield
+    finally:
+        if old is not None:
+            set_blas_threads(old)
+
+
+_STAGE: list[str] = [""]
+_STAGE_T0: list[float] = [time.monotonic()]
+_LAST_INFO: list[float] = [time.monotonic()]
+
+
+def current_stage() -> str:
+    """Name of the innermost pipeline stage running now ('' outside a stage) -- prefixes progress lines."""
+    return _STAGE[0]
+
+
+def progress_name(name: str) -> str:
+    st = current_stage()
+    return f"{st}: {name}" if st else name
+
+
+class _InfoClock(logging.Filter):
+    """Remembers when the last INFO-or-higher line of the package logger was emitted (heartbeat input)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.INFO:
+            _LAST_INFO[0] = time.monotonic()
+        return True
+
+
+if not any(isinstance(f, _InfoClock) for f in log.filters):
+    log.addFilter(_InfoClock())
+
+
+_ACTIVE: list["Progress"] = []          # open Progress counters, innermost last (the heartbeat reports it)
+
+
+class Progress:
+    """Counts finished work items. Whenever the package logger has been silent for POOL_WATCHDOG['progress_s']
+    seconds, ``<stage>: <name>: done/total <unit> done (elapsed)`` is logged -- by :meth:`tick` or by the stage
+    heartbeat, whichever notices first, so a silent period gives one line. Use as a context manager (or call
+    :meth:`close`) so the heartbeat stops reporting it."""
+
+    def __init__(self, name: str, total: int, unit: str = "tasks"):
+        self.name, self.total, self.unit = name, int(total), unit
+        self.done = 0
+        self.t0 = time.monotonic()
+        _ACTIVE.append(self)
+
+    def __enter__(self) -> "Progress":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        for i in range(len(_ACTIVE) - 1, -1, -1):
+            if _ACTIVE[i] is self:
+                del _ACTIVE[i]
+                break
+
+    def line(self) -> str:
+        """'<stage>: <name>: done/total <unit> done (<stage> running for <elapsed>)' -- the stage's elapsed time
+        (what a user waits for), the counter's own outside a stage."""
+        t0 = _STAGE_T0[0] if current_stage() else self.t0
+        return (f"{progress_name(self.name)}: {self.done}/{self.total} {self.unit} done "
+                f"({elapsed_str(time.monotonic() - t0)})")
+
+    def step(self, n: int = 1) -> None:
+        self.done += n
+        self.tick()
+
+    def tick(self) -> None:
+        if time.monotonic() - _LAST_INFO[0] >= POOL_WATCHDOG["progress_s"]:
+            log.info("%s", self.line())
+
+
+def elapsed_str(s: float) -> str:
+    """'42 s' / '3 min 05 s'."""
+    m, sec = divmod(int(round(s)), 60)
+    return f"{m} min {sec:02d} s" if m else f"{sec} s"
+
+
+def watched_results(it: Any, total: int, name: str, procs: Iterable[Any] = (), what: str = "worker pool",
+                    count: Callable[[Any], int] | None = None, total_items: int | None = None) -> Iterator[Any]:
+    """Yield ``total`` results of a multiprocessing ``IMapIterator`` / ``IMapUnorderedIterator`` (``imap`` /
+    ``imap_unordered`` with chunksize 1: only those have ``next(timeout)``), logging progress (``count(result)``
+    items of ``total_items`` per result; default one task each); raise :class:`PoolFailure` when no result
+    arrives for POOL_WATCHDOG['stall_s'] seconds or one of ``procs`` (the pool's worker processes) has exited --
+    its task (or the pool's queue lock) may be lost, so the pool could never finish. A task's own exception
+    propagates unchanged."""
+    from multiprocessing import TimeoutError as MPTimeout
+    procs = list(procs)
+    got = 0
+    last = time.monotonic()
+    poll = float(POOL_WATCHDOG["poll_s"])
+    with Progress(name, total if total_items is None else total_items) as prog:
+        while got < total:
+            try:
+                r = it.next(timeout=poll)
+            except MPTimeout:
+                now = time.monotonic()
+                dead = [p for p in procs if getattr(p, "exitcode", None) is not None]
+                if dead:
+                    p = dead[0]
+                    raise PoolFailure(f"{what}: worker process {getattr(p, 'pid', '?')} exited unexpectedly "
+                                      f"(exit code {p.exitcode}) after {prog.done}/{prog.total} tasks") from None
+                if now - last >= POOL_WATCHDOG["stall_s"]:
+                    raise PoolFailure(f"{what}: no result for {now - last:.0f} s after {prog.done}/{prog.total} "
+                                      "tasks") from None
+                prog.tick()
+                continue
+            except StopIteration:
+                return
+            got += 1
+            last = time.monotonic()
+            yield r
+            prog.step(count(r) if count is not None else 1)
+
+
+def pool_workers(pool: Any) -> list:
+    """The worker processes of a multiprocessing pool (private ``_pool`` list; empty if unavailable)."""
+    return list(getattr(pool, "_pool", None) or [])
+
+
+def close_pool(pool: Any, kill: bool = False, wait_s: float = 10.0) -> bool:
+    """Terminate a multiprocessing pool without blocking the caller for more than about ``wait_s`` seconds.
+
+    ``Pool.terminate()`` itself hangs when a dead worker still holds the pool's queue lock, so it runs in a
+    daemon thread; with ``kill`` (a stalled / broken pool) the worker processes are killed right away, and
+    always when terminate does not finish in time (the cleanup thread is then abandoned). Returns True when the
+    pool shut down cleanly."""
+    import threading
+
+    def _kill() -> None:
+        for p in pool_workers(pool):
+            try:
+                if p.exitcode is None:
+                    p.kill()
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+
+    th = threading.Thread(target=_terminate_quietly, args=(pool,), name="match_cuts-pool-close", daemon=True)
+    th.start()
+    if kill:
+        th.join(0.2)               # terminate() first stops the pool from replacing dead workers
+        _kill()
+    th.join(wait_s)
+    if th.is_alive():
+        _kill()
+        th.join(1.0)
+        log.debug("worker pool shutdown did not finish within %.0f s - workers killed, cleanup left to a "
+                  "background thread", wait_s)
+        return False
+    return True
+
+
+def _terminate_quietly(pool: Any) -> None:
+    try:
+        pool.terminate()
+        pool.join()
+    except Exception:  # noqa: BLE001 - best effort
+        pass
+
+
+def _new_lock() -> Any:
+    import threading
+    return threading.Lock()
+
+
+# Held by the fork path of visual_match.parallel_map while it forks, and by the heartbeat while it logs: a
+# forked child never inherits a half-written log line (stream / handler locks held by another thread). The
+# child gets a fresh, unlocked one (it inherits the lock held by the forking thread).
+FORK_LOCK = _new_lock()
+
+
+def _reset_fork_lock() -> None:
+    global FORK_LOCK
+    FORK_LOCK = _new_lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_fork_lock)
+
+
+class _Heartbeat:
+    """Daemon thread that logs '<stage>: still running (n s)' -- or the open :class:`Progress` counter's line --
+    when the package logger was silent for POOL_WATCHDOG['progress_s'] seconds, so a long stage never looks
+    frozen (innermost stage only)."""
+
+    def __init__(self, stage: str):
+        import threading
+        self.stage = stage
+        self.t0 = time.monotonic()
+        self.stop = threading.Event()
+        self.th = threading.Thread(target=self._run, name="match_cuts-heartbeat", daemon=True)
+
+    def _run(self) -> None:
+        while True:
+            period = float(POOL_WATCHDOG["progress_s"])
+            wait = min(period, max(0.5, period - (time.monotonic() - _LAST_INFO[0])))
+            if self.stop.wait(wait):
+                return
+            if time.monotonic() - _LAST_INFO[0] < period or _STAGE[0] != self.stage:
+                continue
+            with FORK_LOCK:
+                if self.stop.is_set():
+                    return
+                prog = _ACTIVE[-1] if _ACTIVE else None
+                if prog is not None:
+                    log.info("%s", prog.line())
+                else:
+                    log.info("%s: still running (%s)", self.stage, elapsed_str(time.monotonic() - self.t0))
+
+
+@contextlib.contextmanager
+def stage_heartbeat(stage: str) -> Iterator[None]:
+    """Run the block as pipeline stage ``stage``: progress lines are prefixed with it and a heartbeat thread
+    breaks any console silence longer than POOL_WATCHDOG['progress_s']."""
+    prev, prev_t0 = _STAGE[0], _STAGE_T0[0]
+    _STAGE[0], _STAGE_T0[0] = stage, time.monotonic()
+    _LAST_INFO[0] = time.monotonic()
+    hb = _Heartbeat(stage)
+    hb.th.start()
+    try:
+        yield
+    finally:
+        hb.stop.set()
+        hb.th.join(5.0)
+        _STAGE[0], _STAGE_T0[0] = prev, prev_t0

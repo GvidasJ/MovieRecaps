@@ -8,8 +8,11 @@ cv2.resize) to cover decoding, compression and colour sampling.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import time
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 
@@ -519,6 +522,50 @@ def test_process_pool_matches_sequential(tmp_path, monkeypatch):
     assert sorted((c["comp_in"], c["comp_out"]) for c in lay_seq.captions) == [(a, b) for _w, a, b in plan]
     assert ov_seq.frames() == ov_par.frames()
     assert all(np.array_equal(ov_seq.get(k), ov_par.get(k)) for k in ov_seq.frames())
+
+
+@dataclass
+class _HangInWorker(L._Detector):
+    """Text-line detector that blocks forever on frame ``hang_k`` when it runs in a pool worker (never in
+    the parent): a stuck spawn worker for the layout pool's watchdog (module-level: picklable)."""
+    parent: int = 0
+    hang_k: int = -1
+
+    def __call__(self, k, f):
+        if k == self.hang_k and os.getpid() != self.parent:
+            time.sleep(3600)
+        return super().__call__(k, f)
+
+
+def test_process_pool_watchdog_finishes_a_stuck_pool_here(tmp_path, monkeypatch, caplog):
+    """Hang protection (DESIGN D7): a stuck text-line worker stops the spawn pool after the stall timeout and
+    the remaining chunks are detected in this process -- the same lines as the sequential detector."""
+    import logging
+    from match_cuts import common
+    monkeypatch.setitem(common.POOL_WATCHDOG, "stall_s", 6.0)
+    monkeypatch.setitem(common.POOL_WATCHDOG, "poll_s", 0.1)
+    h, w, n = 160, 90, 260
+    frames = np.zeros((n, h, w), np.uint8)
+    frames[:, 30:130, 5:85] = _moving(100, 80, n, 7)
+    for k in range(40, 90):
+        img = cv2.cvtColor(frames[k], cv2.COLOR_GRAY2BGR)
+        put_outlined(img, "HI", (25, 110), 0.7, (255, 255, 255), 2, 2)
+        frames[k] = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    npy = tmp_path / "proxy.npy"
+    np.save(npy, frames)
+    proxy = make_proxy(np.load(npy, mmap_mode="r"), (2 * w, 2 * h), npy_path=str(npy))
+    det = L._Detector(np.zeros((h, w), bool), (0, 0, w, h), None, 6, 60, w, True, L._text_params(Config()))
+    hang = _HangInWorker(**{f: getattr(det, f) for f in det.__dataclass_fields__}, parent=os.getpid(), hang_k=70)
+    seq = [r for _kl, _fr, res in L._detections(proxy, n, det, 1) for r in res]
+    assert sum(1 for r in seq if r) >= 40                          # the caption frames have lines
+    t0 = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        got = [(kl, res) for kl, _fr, res in L._detections(proxy, n, hang, 2)]
+    assert time.monotonic() - t0 < 120
+    assert [k for kl, _res in got for k in kl] == list(range(n))
+    par = [r for _kl, res in got for r in res]
+    assert [[(x.x0, x.y0, x.x1, x.y1) for x in r] for r in par] == [[(x.x0, x.y0, x.x1, x.y1) for x in r] for r in seq]
+    assert "stopped the worker pool" in caplog.text and "no result for" in caplog.text
 
 
 # ----------------------------------------------------------------------------------------------

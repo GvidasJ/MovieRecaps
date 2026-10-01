@@ -40,9 +40,11 @@ from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 
+from . import common as _common
 from . import scoring
-from .common import (Cache, DecisionLog, file_hash, fps_str, log, null_dlog, params_hash, seed_everything,
-                     stage_key)
+from .common import (POOL_WATCHDOG, Cache, DecisionLog, PoolFailure, Progress, close_pool, file_hash, fps_str, log,
+                     native_threads, null_dlog, params_hash, pool_workers, progress_name, release_native_threads,
+                     seed_everything, single_thread_blas, stage_key, watched_results)
 from .geometry import Sim, from_cv_matrix
 from .model import AudioHints, Layout, Proxy
 
@@ -57,9 +59,11 @@ __all__ = ["RawIndex", "Anchor", "search_frame", "sparse_search", "run_searches"
 
 _WSTATE: dict[str, Any] = {}
 START_METHOD_ENV = "MATCH_CUTS_START_METHOD"
-# how parallel_map calls ran in THIS process (diagnostics + tests): inline / fork / spawn pools, and
-# spawn requests that fell back to inline (unpicklable state or an unguarded __main__)
-POOL_STATS: dict[str, int] = {"inline": 0, "fork": 0, "spawn": 0, "spawn_fallback": 0, "spawn_mem_capped": 0}
+# how parallel_map calls ran in THIS process (diagnostics + tests): inline / fork / spawn pools,
+# spawn requests that fell back to inline (unpicklable state or an unguarded __main__), pools the watchdog
+# stopped, fork pools discarded because native threads survived the fork, calls run inline after too many stops
+POOL_STATS: dict[str, int] = {"inline": 0, "fork": 0, "spawn": 0, "spawn_fallback": 0, "spawn_mem_capped": 0,
+                              "watchdog": 0, "fork_unsafe": 0, "pools_disabled": 0}
 _WARNED: set[str] = set()
 
 # Spawn workers cannot share the parent's FLANN kd-tree (fork shares it copy-on-write): every worker that
@@ -285,17 +289,14 @@ def _spawn_pool(n: int):
     return p["pool"], p["dir"]
 
 
-def shutdown_workers() -> None:
-    """Terminate the persistent spawn pool of this process (also run at interpreter exit)."""
+def shutdown_workers(kill: bool = False) -> None:
+    """Terminate the persistent spawn pool of this process (also run at interpreter exit). Never blocks for
+    long (:func:`common.close_pool`): a broken pool's workers are killed (``kill``: at once)."""
     p = _POOL
     pool, d, pid = p["pool"], p["dir"], p["pid"]
     p.update(pool=None, n=0, dir=None, pid=None)
     if pool is not None and pid == os.getpid():
-        try:
-            pool.terminate()
-            pool.join()
-        except Exception:  # pragma: no cover - best effort at shutdown
-            pass
+        close_pool(pool, kill=kill)
     if d and pid == os.getpid():
         import shutil
         shutil.rmtree(d, ignore_errors=True)
@@ -331,7 +332,7 @@ def _spawn_payload(fn: Callable, state: dict, seed: int) -> bytes | None:
 
 
 def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: int, state: dict,
-                 seed: int, chunksize: int | None = None, min_items: int = 8) -> list[Any]:
+                 seed: int, chunksize: int | None = None, min_items: int = 8, label: str | None = None) -> list[Any]:
     """Apply ``fn(state, item)`` to every item; results in INPUT order (deterministic).
 
     Start method (:func:`start_method`): 'fork' on Linux, 'spawn' elsewhere, override
@@ -340,9 +341,9 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
     and spawn runs and do not depend on which worker processed which item.
 
     * fork: big read-only objects in ``state`` (memmapped proxies, the FLANN index) are inherited
-      copy-on-write, never pickled; only items and results are pickled. OpenCV's thread pool is set to
-      1 thread in the parent before forking and restored afterwards (``cv2.setNumThreads`` inside a
-      forked child deadlocks with the pthreads backend -- verified).
+      copy-on-write, never pickled; only items and results are pickled. Native thread pools are stopped
+      before forking (:func:`_fork_map`); when the census after forking still finds native threads, that
+      pool is discarded and this call and every later one use spawn workers.
     * spawn: ``fn`` and ``state`` are pickled once per call into a file the workers of a persistent
       per-process pool load once per call. ``fn`` and callables in ``state`` must be module-level;
       ``model.Proxy`` pickles as its memmapped file (re-opened in the worker), :class:`RawIndex` as its
@@ -352,6 +353,11 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
       descriptor), so with a RawIndex in ``state`` the pool is capped by the available RAM
       (:func:`_spawn_mem_cap`, logged; single-process when only one worker fits) and a later state
       without a RawIndex drops the workers' trees.
+    * watchdog (both): results are collected with :func:`common.watched_results`; a pool that delivers no
+      result for ``common.POOL_WATCHDOG['stall_s']`` seconds or loses a worker process is stopped with a
+      warning and the tasks without a result run in this process (same results). After
+      ``POOL_WATCHDOG['max_failures']`` such stops, later calls run in this process. Long calls log progress
+      (``label``, default the function name) every ``POOL_WATCHDOG['progress_s']`` seconds.
     """
     global _WSTATE
     items = list(items)
@@ -359,49 +365,183 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
     _WSTATE = dict(state)
     _WSTATE["__fn__"] = fn
     _WSTATE["__seed__"] = int(seed)
+    name = label or _task_name(fn)
     try:
         if workers <= 1 or len(items) < max(2, min_items):
             POOL_STATS["inline"] += 1
-            return [_invoke(it) for it in items]
-        if start_method() == "spawn":
-            return _spawn_map(fn, items, int(workers), state, seed, chunksize)
-        POOL_STATS["fork"] += 1
-        if _POOL["pool"] is not None:
-            shutdown_workers()               # never fork while a spawn pool's handler threads run
-        import cv2
-        import gc
-        prev_threads = cv2.getNumThreads()
-        cv2.setNumThreads(1)
-        # Collect cyclic garbage in the PARENT and freeze everything that exists now, so a forked child
-        # never runs a destructor of an inherited object. Verified deadlock otherwise: a stray PyAV
-        # decoder (frame-threaded) reached by the child's GC calls avcodec_free_context, which waits on
-        # decoder threads that do not exist in the child (futex hang in pthread_cond_destroy).
-        gc.collect()
-        gc.freeze()
-        try:
-            ctx = mp.get_context("fork")
-            n = min(int(workers), len(items))
-            cs = chunksize or max(1, min(16, len(items) // (n * 6) or 1))
-            with ctx.Pool(n) as pool:
-                return pool.map(_invoke, items, chunksize=cs)
-        finally:
-            gc.unfreeze()
-            cv2.setNumThreads(prev_threads)
+            return _inline(items, name)
+        if _POOL_FAILURES[0] >= int(POOL_WATCHDOG["max_failures"]) > 0:
+            POOL_STATS["inline"] += 1
+            POOL_STATS["pools_disabled"] += 1
+            return _inline(items, name)
+        if start_method() == "spawn" or _FORK_UNSAFE[0]:
+            return _spawn_map(fn, items, int(workers), state, seed, chunksize, name)
+        res = _fork_map(items, int(workers), chunksize, name)
+        if res is None:                          # native threads survived the fork: spawn workers instead
+            return _spawn_map(fn, items, int(workers), state, seed, chunksize, name)
+        return res
     finally:
         _WSTATE = prev_state
 
 
+# Watchdog bookkeeping of THIS process: pools stopped by the watchdog, and the reason fork is unsafe here
+# (native threads survived a fork) -- then every later call uses spawn workers.
+_POOL_FAILURES = [0]
+_FORK_UNSAFE: list[str] = [""]
+
+
+def _chunk(n_items: int, workers: int, chunksize: int | None) -> int:
+    n = min(workers, n_items)
+    return chunksize or max(1, min(16, n_items // (n * 6) or 1))
+
+
+def _inline(items: list, name: str, done: dict[int, Any] | None = None) -> list[Any]:
+    """Run the items (those without a result in ``done``) in this process, in input order, with progress."""
+    done = {} if done is None else done
+    todo = [i for i in range(len(items)) if i not in done]
+    with Progress(name, len(items)) as prog, single_thread_blas():
+        prog.done = len(items) - len(todo)
+        for i in todo:
+            done[i] = _invoke(items[i])
+            prog.step()
+    return [done[i] for i in range(len(items))]
+
+
+def _task_name(fn: Callable) -> str:
+    """Short progress label of an item function: '_search_worker' -> 'search', '_w_eval' -> 'eval'."""
+    name = str(getattr(fn, "__name__", "tasks")).strip("_")
+    for pre in ("w_",):
+        name = name[len(pre):] if name.startswith(pre) else name
+    for suf in ("_worker",):
+        name = name[:-len(suf)] if name.endswith(suf) else name
+    return name or "tasks"
+
+
+def _invoke_chunk(chunk: list[tuple[int, Any]]) -> list[tuple[int, Any]]:
+    """Fork-pool entry point: a chunk of (input index, item) -> (input index, result) (results arrive out of
+    order; the pool's own chunking cannot be used -- only chunksize-1 iterators take a timeout). Every task runs
+    with single-threaded OpenBLAS, as in the parent (``common.single_thread_blas``: same arithmetic on every path
+    and machine)."""
+    with single_thread_blas():
+        return [(i, _invoke(item)) for i, item in chunk]
+
+
+def _spawn_invoke_chunk(chunk: list[tuple[str, str, int, Any]]) -> list[tuple[int, Any]]:
+    """Spawn-pool entry point: a chunk of (token, state file, input index, item)."""
+    with single_thread_blas():
+        return [(i, _spawn_invoke((token, path, item))) for token, path, i, item in chunk]
+
+
+def _collect(pool: Any, func: Callable, tasks: list, cs: int, name: str, kind: str
+             ) -> tuple[dict[int, Any], str | None]:
+    """{input index: result} of the pool's tasks (sent in chunks of ``cs``), and the watchdog's reason when it
+    stopped the collection early."""
+    procs = pool_workers(pool)
+    chunks = [tasks[j:j + cs] for j in range(0, len(tasks), cs)]
+    out: dict[int, Any] = {}
+    it = pool.imap_unordered(func, chunks)
+    try:
+        for res in watched_results(it, len(chunks), name, procs, what=f"{kind} pool", count=len,
+                                   total_items=len(tasks)):
+            for i, r in res:
+                out[i] = r
+    except PoolFailure as e:
+        return out, str(e)
+    return out, None
+
+
+def _finish_after_failure(items: list, out: dict[int, Any], name: str, reason: str) -> list[Any]:
+    """Watchdog stop: log it, count it, and compute the tasks without a result in this process."""
+    _POOL_FAILURES[0] += 1
+    POOL_STATS["watchdog"] += 1
+    left = len(items) - len(out)
+    log.warning("%s: %s - stopped the worker pool; running the remaining %d of %d tasks in this process "
+                "(identical results, only slower)%s", progress_name(name), reason, left, len(items),
+                "; later steps of this run will not use worker pools"
+                if _POOL_FAILURES[0] >= int(POOL_WATCHDOG["max_failures"]) > 0 else "")
+    return _inline(items, name, out)
+
+
+def _threads_after_fork() -> int:
+    """Native threads alive in this process right after forking (0 = none, or unknown on this platform).
+    Re-checked briefly, so a Python thread that is just exiting is not counted."""
+    n = 0
+    for attempt in range(4):
+        n = native_threads() or 0
+        if n == 0:
+            return 0
+        time.sleep(0.05)
+    return n
+
+
+def _fork_map(items: list, workers: int, chunksize: int | None, name: str) -> list[Any] | None:
+    """The fork-pool path of :func:`parallel_map` (``_WSTATE`` already holds fn + state + seed); None when
+    native threads survived the fork (the pool is discarded unused; the caller uses spawn workers)."""
+    if _POOL["pool"] is not None:
+        shutdown_workers()                   # never fork while a spawn pool's handler threads run
+    import cv2
+    import gc
+    prev_threads = cv2.getNumThreads()
+    cv2.setNumThreads(1)                     # stops OpenCV's pool threads (setNumThreads in a child deadlocks)
+    release_native_threads()                 # PyAV's swscale slice threads
+    # Collect cyclic garbage in the PARENT and freeze everything that exists now, so a forked child
+    # never runs a destructor of an inherited object. Verified deadlock otherwise: a stray PyAV
+    # decoder (frame-threaded) reached by the child's GC calls avcodec_free_context, which waits on
+    # decoder threads that do not exist in the child (futex hang in pthread_cond_destroy).
+    t0 = time.perf_counter()
+    gc.collect()
+    gc.freeze()
+    pool = None
+    tm: dict[str, float] = {"gc": time.perf_counter() - t0}
+    try:
+        n = min(int(workers), len(items))
+        cs = _chunk(len(items), workers, chunksize)
+        t1 = time.perf_counter()
+        with _common.FORK_LOCK:
+            pool = mp.get_context("fork").Pool(n)
+        alive = _threads_after_fork()
+        tm["fork"] = time.perf_counter() - t1
+        if alive:
+            _FORK_UNSAFE[0] = f"{alive} native thread(s) were running when the worker pool forked"
+            POOL_STATS["fork_unsafe"] += 1
+            log.warning("worker pools: %s (a forked worker could inherit their locks and hang) - using spawn "
+                        "workers for the rest of this run (identical results)", _FORK_UNSAFE[0])
+            close_pool(pool, kill=True)
+            pool = None
+            return None
+        POOL_STATS["fork"] += 1
+        tasks = list(enumerate(items))
+        t2 = time.perf_counter()
+        out, reason = _collect(pool, _invoke_chunk, tasks, cs, name, "fork")
+        tm["run"] = time.perf_counter() - t2
+        if reason is None:
+            return [out[i] for i in range(len(items))]
+        close_pool(pool, kill=True)
+        pool = None
+        return _finish_after_failure(items, out, name, reason)
+    finally:
+        t3 = time.perf_counter()
+        if pool is not None:
+            close_pool(pool)
+        gc.unfreeze()
+        cv2.setNumThreads(prev_threads)
+        tm["close"] = time.perf_counter() - t3
+        log.debug("parallel_map(%s): %d tasks on %d fork workers, chunk %d: %s", name, len(items),
+                  min(int(workers), len(items)), _chunk(len(items), workers, chunksize),
+                  ", ".join(f"{k} {v:.3f} s" for k, v in tm.items()))
+
+
 def _spawn_map(fn: Callable, items: list, workers: int, state: dict, seed: int,
-               chunksize: int | None) -> list[Any]:
+               chunksize: int | None, name: str = "tasks") -> list[Any]:
     workers = _spawn_mem_cap(workers, state)
     if workers <= 1:                              # the parent already holds the tree: no worker copy
         POOL_STATS["inline"] += 1
-        return [_invoke(it) for it in items]
+        return _inline(items, name)
     payload = _spawn_payload(fn, state, seed)
     if payload is None:
         POOL_STATS["spawn_fallback"] += 1
         POOL_STATS["inline"] += 1
-        return [_invoke(it) for it in items]
+        return _inline(items, name)
     POOL_STATS["spawn"] += 1
     pool, d = _spawn_pool(workers)
     _CALL_SEQ[0] += 1
@@ -409,18 +549,22 @@ def _spawn_map(fn: Callable, items: list, workers: int, state: dict, seed: int,
     path = os.path.join(d, f"state-{_CALL_SEQ[0]}.pkl")
     with open(path, "wb") as f:
         f.write(payload)
-    n = min(workers, len(items))
-    cs = chunksize or max(1, min(16, len(items) // (n * 6) or 1))
+    cs = _chunk(len(items), workers, chunksize)
     try:
-        return pool.map(_spawn_invoke, [(token, path, it) for it in items], chunksize=cs)
+        tasks = [(token, path, i, it) for i, it in enumerate(items)]
+        out, reason = _collect(pool, _spawn_invoke_chunk, tasks, cs, name, "spawn")
     except BaseException:
-        shutdown_workers()                        # never reuse a pool after a failure / interrupt
+        shutdown_workers(kill=True)               # never reuse a pool after a failure / interrupt
         raise
     finally:
         try:
             os.remove(path)
         except OSError:  # pragma: no cover - removed with the pool directory at exit
             pass
+    if reason is None:
+        return [out[i] for i in range(len(items))]
+    shutdown_workers(kill=True)
+    return _finish_after_failure(items, out, name, reason)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1179,7 +1323,7 @@ def _line_raw_features(raw: Proxy, j: int, flip: bool, nfeat: int) -> tuple[np.n
 
 def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg, js: Sequence[int], flip: bool,
                 roi: tuple[int, int, int, int] | None = None, report: list | None = None,
-                source: str = "line") -> list[Anchor]:
+                source: str = "line", feats: dict | None = None) -> list[Anchor]:
     """Line-constrained re-search of competitor frame k (FX-08 'search before giving up'): pairwise SIFT + RANSAC
     against EACH RAW frame of ``js`` -- a neighbouring run's predicted window, a handful of frames instead of the
     whole RAW -- with relaxed acceptance (>= near_miss_inliers inliers at an inlier ratio >= line_search_min_ratio;
@@ -1188,7 +1332,8 @@ def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg
     decides, best-inlier candidates first, at most ``line_search_verify`` of them (candidates within refine_radius
     of an accepted anchor converge onto it). RAW features are computed on the frames themselves with
     line_search_nfeatures (a RAW-only overlay such as a legal disclaimer takes part of a small budget). Returns
-    verified anchors best-first (source ``source``)."""
+    verified anchors best-first (source ``source``). ``feats``: precomputed {(j, flip): RAW features} (the same
+    :func:`_line_raw_features` values, computed once per batch by :func:`run_line_searches`)."""
     img = np.asarray(comp.get(k))
     h, w = img.shape[:2]
     if roi is None:
@@ -1203,7 +1348,8 @@ def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg
         return []
     cands = []
     for j in sorted({int(j) for j in js if raw.has(int(j))}):
-        rpts, rdesc = _line_raw_features(raw, j, flip, nfeat)
+        pre = feats.get((j, bool(flip))) if feats else None
+        rpts, rdesc = pre if pre is not None else _line_raw_features(raw, j, flip, nfeat)
         M, n_inl, n_good = _ransac(cpts, cdesc, rpts, rdesc, cfg)
         ratio = n_inl / n_good if n_good else 0.0
         if M is None or n_inl < n_min or ratio < r_min:
@@ -1234,16 +1380,29 @@ def _line_worker(state: dict, task: tuple[int, tuple[int, ...], bool]) -> tuple[
     k, js, flip = task
     rep: list = []
     anchors = line_search(int(k), state["comp"], state["raw"], state["allowed"](int(k)), state["cfg"], js, bool(flip),
-                          roi=state["roi"], report=rep)
+                          roi=state["roi"], report=rep, feats=state.get("line_feats"))
     return int(k), [a.to_dict() for a in anchors[:int(getattr(state["cfg"], "anchors_per_frame", 3))]], rep[:12]
+
+
+def _line_feat_worker(state: dict, task: tuple[int, bool]) -> tuple[np.ndarray, np.ndarray]:
+    """SIFT features of RAW frame j (or its mirror) for line searches (:func:`_line_raw_features`)."""
+    j, flip = task
+    return _line_raw_features(state["raw"], int(j), bool(flip), int(state["nfeat"]))
 
 
 def run_line_searches(comp: Proxy, raw: Proxy, allowed: Callable[[int], np.ndarray], roi: tuple[int, int, int, int],
                       tasks: Sequence[tuple[int, Sequence[int], bool]], cfg) -> list[tuple[int, list[Anchor], list]]:
     """:func:`line_search` on many (k, RAW window, flip) tasks in a worker pool. Input order kept."""
-    state = {"comp": comp, "raw": raw, "cfg": cfg, "allowed": allowed, "roi": roi}
     items = [(int(k), tuple(int(j) for j in js), bool(fl)) for k, js, fl in tasks]
-    res = parallel_map(_line_worker, items, cfg.resolved_workers(), state, cfg.seed, min_items=4)
+    workers = cfg.resolved_workers()
+    # the RAW frames' SIFT features first, once each (neighbouring competitor frames search largely the same RAW
+    # window: computed per task, every worker recomputed them), then the searches read them from the state
+    nfeat = int(getattr(cfg, "line_search_nfeatures", 2 * int(cfg.sift_nfeatures)))
+    need = sorted({(int(j), bool(fl)) for _k, js, fl in items for j in js if raw.has(int(j))})
+    feats = dict(zip(need, parallel_map(_line_feat_worker, need, workers, {"raw": raw, "nfeat": nfeat}, cfg.seed,
+                                        label="line search features")))
+    state = {"comp": comp, "raw": raw, "cfg": cfg, "allowed": allowed, "roi": roi, "line_feats": feats}
+    res = parallel_map(_line_worker, items, workers, state, cfg.seed, min_items=4)
     return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
 
 

@@ -49,14 +49,13 @@ of small matrix products, which a multi-threaded BLAS on a busy machine makes ~1
 from __future__ import annotations
 
 import math
-from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Sequence
 
 import numpy as np
 
-from .common import DecisionLog, log, null_dlog, parse_fps
+from .common import DecisionLog, blas_ctl, blas_lib_paths, log, null_dlog, parse_fps, single_thread_blas
 from .model import AudioHints, Segment
 
 # ---------------------------------------------------------------------------------------------
@@ -84,55 +83,11 @@ _MAX_LAG_SEG_S = 0.1          # per-segment lag search (same as verify s9_5)
 _MIN_SEG_S = 0.5              # shorter audio ranges -> 'too_short' when they do not line up
 
 
-_BLAS_CTL: list = []
-
-
-def _blas_ctl():
-    """(set_num_threads, get_num_threads) of numpy's bundled OpenBLAS via ctypes, or None."""
-    if not _BLAS_CTL:
-        found = None
-        try:
-            import ctypes
-            import glob
-            import os
-            d = os.path.join(os.path.dirname(np.__file__), os.pardir, "numpy.libs")
-            for path in sorted(glob.glob(os.path.join(d, "*openblas*.so*"))):
-                lib = ctypes.CDLL(path)
-                for sn, gn in (("scipy_openblas_set_num_threads64_", "scipy_openblas_get_num_threads64_"),
-                               ("openblas_set_num_threads64_", "openblas_get_num_threads64_"),
-                               ("openblas_set_num_threads", "openblas_get_num_threads")):
-                    if hasattr(lib, sn) and hasattr(lib, gn):
-                        found = (getattr(lib, sn), getattr(lib, gn))
-                        break
-                if found:
-                    break
-        except Exception:          # pragma: no cover - platform specific
-            found = None
-        _BLAS_CTL.append(found)
-    return _BLAS_CTL[0]
-
-
-@contextmanager
-def single_thread_blas():
-    """Pin OpenBLAS to one thread for the duration (restored afterwards; no-op if not controllable).
-
-    This stage runs thousands of small matrix products; with a multi-threaded OpenBLAS on a busy
-    machine each one costs ~100x more (measured: 8 ms vs 0.08 ms for 132x513 @ 513x40)."""
-    ctl = _blas_ctl()
-    if ctl is None:
-        yield
-        return
-    setter, getter = ctl
-    try:
-        old = int(getter())
-    except Exception:              # pragma: no cover
-        yield
-        return
-    setter(1)
-    try:
-        yield
-    finally:
-        setter(max(1, old))
+# OpenBLAS thread control lives in common (the whole run pins it to one thread, DESIGN D7); these names stay for
+# this module's callers. This stage runs thousands of small matrix products; with a multi-threaded OpenBLAS on a
+# busy machine each one costs ~100x more (measured: 8 ms vs 0.08 ms for 132x513 @ 513x40).
+_blas_lib_paths = blas_lib_paths
+_blas_ctl = blas_ctl
 
 
 def _mono(y: Any) -> np.ndarray:

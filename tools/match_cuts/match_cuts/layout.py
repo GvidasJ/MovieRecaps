@@ -85,7 +85,7 @@ from typing import Any, Iterator, Sequence
 import numpy as np
 
 from .common import (Cache, DecisionLog, atomic_write_text, file_hash, json_default, log, null_dlog, params_hash,
-                     stage_key)
+                     replace_file, stage_key, write_image)
 from .model import Box, Layout, LayoutPeriod, Proxy, Zone
 
 __all__ = ["OverlayMasks", "analyze_layout", "refine_box_from_raw", "measure_box_from_raw", "box_coverage",
@@ -143,7 +143,7 @@ def _save_npz_deterministic(path: str | os.PathLike, arrays: dict[str, np.ndarra
             zi.compress_type = zipfile.ZIP_DEFLATED
             zi.external_attr = 0o644 << 16
             zf.writestr(zi, buf.getvalue())
-    os.replace(tmp, p)
+    replace_file(tmp, p)
 
 
 class OverlayMasks:
@@ -1960,7 +1960,9 @@ def _spawn_safe() -> bool:
 
 def _spawn_init(npy_path: str, detector: _Detector) -> None:
     import cv2
+    from .common import set_blas_threads
     cv2.setNumThreads(1)
+    set_blas_threads(1)                      # as in the parent (pipeline.run): same arithmetic on every path
     _WORKER["frames"] = np.load(npy_path, mmap_mode="r")
     _WORKER["detect"] = detector
 
@@ -1982,10 +1984,33 @@ def _detections(comp: Proxy, n: int, detect: _Detector, workers: int) -> Iterato
                 and tuple(np.load(npy, mmap_mode="r").shape) == (n, int(comp.size[1]), int(comp.size[0]))
                 and _spawn_safe())
     if use_proc:
+        # hang protection (DESIGN D7): results are collected with the pool watchdog; a stalled pool or a dead
+        # worker stops the pool and the remaining chunks run here (same detector, same frames -> same lines)
         import multiprocessing as mp
-        with mp.get_context("spawn").Pool(workers, initializer=_spawn_init, initargs=(npy, detect)) as pool:
-            for (a, b), res in zip(bounds, pool.imap(_spawn_chunk, bounds)):
-                yield list(range(a, b)), np.stack([np.asarray(comp.get(k)) for k in range(a, b)]), res
+        from .common import PoolFailure, close_pool, pool_workers, watched_results
+        pool = mp.get_context("spawn").Pool(workers, initializer=_spawn_init, initargs=(npy, detect))
+        clean = False
+        i = 0
+        try:
+            try:
+                for res in watched_results(pool.imap(_spawn_chunk, bounds), len(bounds), "text lines",
+                                           pool_workers(pool), what="spawn pool"):
+                    a, b = bounds[i]
+                    i += 1
+                    yield list(range(a, b)), np.stack([np.asarray(comp.get(k)) for k in range(a, b)]), res
+                clean = True
+            except PoolFailure as e:
+                log.warning("layout: text lines: %s - stopped the worker pool; detecting the remaining %d of %d "
+                            "chunks in this process (identical results, only slower)", e, len(bounds) - i, len(bounds))
+                close_pool(pool, kill=True)
+                pool = None
+                for a, b in bounds[i:]:
+                    kl = list(range(a, b))
+                    fr = np.stack([np.asarray(comp.get(k)) for k in kl])
+                    yield kl, fr, [detect(k, f) for k, f in zip(kl, fr)]
+        finally:
+            if pool is not None:
+                close_pool(pool, kill=not clean)
         return
     from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
@@ -2606,10 +2631,7 @@ def _draw_layout_png(path: Path, comp: Proxy, st: _Stats, layout: Layout, events
             f"zones {len(layout.zones)} | extra regions {len(layout.extra_regions)}")
     cv2.putText(T, info, (4, 24 * rows + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     img = np.vstack([np.hstack([A, B]), T])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.stem + ".tmp.png")
-    cv2.imwrite(str(tmp), img)
-    os.replace(tmp, path)
+    write_image(path, img)                   # unicode-safe (cv2.imwrite cannot open non-ASCII Windows paths)
 
 
 # ================================================================================================
@@ -3255,10 +3277,7 @@ def _draw_refine_png(path: Path, frames: list[dict], nI: np.ndarray, nO: np.ndar
            f"(was x{old.x:g} y{old.y:g} w{old.w:g} h{old.h:g} r{old.corner_radius:g}), {len(frames)} frames")
     cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
     cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.stem + ".tmp.png")
-    cv2.imwrite(str(tmp), img)
-    os.replace(tmp, path)
+    write_image(path, img)                   # unicode-safe (cv2.imwrite cannot open non-ASCII Windows paths)
 
 
 def _bg_gray(bg: dict) -> float:

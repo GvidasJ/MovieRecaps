@@ -337,6 +337,28 @@ def test_search_frame_normal_flip_and_not_in_raw(scene, built):
     assert vm.search_frame(88, comp, raw, idx, am(88), cfg, window=(0, 60), roi=roi) == []
 
 
+def test_run_line_searches_with_precomputed_raw_features_equals_single_searches(scene, built):
+    """run_line_searches computes every RAW frame's SIFT features once per batch (wave-4 performance: neighbouring
+    competitor frames search largely the same RAW window) -- the anchors must equal one line_search per frame."""
+    cfg, comp, raw, truth = built["cfg"], scene["comp"], scene["raw"], scene["truth"]
+    am = _allowed(scene, cfg)
+    roi = vm.box_roi(scene["layout"], comp)
+    tasks = [(k, list(range(max(0, truth[k]["raw"] - 4), truth[k]["raw"] + 5)), bool(truth[k]["flip"]))
+             for k in (5, 6, 7, 55, 56, 90, 91, 92, 93)]
+    vm._LINE_FEAT.clear()
+    from match_cuts.common import single_thread_blas
+    with single_thread_blas():               # as every parallel_map task (the ZNCC's last bits follow the BLAS threads)
+        single = [vm.line_search(k, comp, raw, am(k), cfg, js, fl, roi=roi) for k, js, fl in tasks]
+    vm._LINE_FEAT.clear()
+    batch = vm.run_line_searches(comp, raw, am, roi, tasks, cfg)
+    assert [k for k, _a, _r in batch] == [k for k, _js, _fl in tasks]
+    got = [[a.to_dict() for a in anchors] for _k, anchors, _rep in batch]
+    want = [[a.to_dict() for a in anchors[:int(cfg.anchors_per_frame)]] for anchors in single]
+    assert got == want
+    assert any(got)                                                   # the searches do find the truth
+    assert all(a["raw"] == truth[k]["raw"] for (k, _js, _fl), ads in zip(tasks, got) for a in ads[:1])
+
+
 def test_sparse_search_parallel_deterministic_and_cached(scene, built, tmp_path):
     idx, cfg = built["index"], built["cfg"]
     comp, raw, truth = scene["comp"], scene["raw"], scene["truth"]
