@@ -1125,7 +1125,8 @@ class TemporalFrames:
 
     def __init__(self, comp: Any, raw: Any, segments: Sequence[Segment], allowed_fn: Callable[[int], np.ndarray | None],
                  box_fn: Callable[[int], Box | dict | None] | None, box: Box | dict | None, raw_wh: tuple[float, float],
-                 comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None, cfg: Any):
+                 comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None, cfg: Any,
+                 mask_out: Callable[[int], np.ndarray | None] | None = None):
         self.comp, self.raw, self.cfg = comp, raw, cfg
         self.allowed_fn, self.box_fn, self.box = allowed_fn, box_fn, box
         self.raw_wh, self.comp_fps, self.raw_fps, self.n_raw = raw_wh, comp_fps, raw_fps, n_raw
@@ -1133,6 +1134,7 @@ class TemporalFrames:
         self.seg_at = single_raw_segments(segments, self.n)
         self.blur = float(getattr(cfg, "score_blur", 1.0))
         self.max_side = int(getattr(cfg, "temporal_max_side", 200) or 0)
+        self.mask_out = mask_out          # extra pixels removed from BOTH sequences (animated text overlays)
 
     def roi(self, k: int) -> tuple[int, int, int, int]:
         b = self.box_fn(int(k)) if self.box_fn is not None else self.box
@@ -1149,7 +1151,11 @@ class TemporalFrames:
     def _mask(self, k: int, roi: tuple[int, int, int, int]) -> np.ndarray:
         x, y, w, h = roi
         al = self.allowed_fn(int(k))
-        return np.ones((h, w), bool) if al is None else np.asarray(al)[y:y + h, x:x + w].astype(bool)
+        m = np.ones((h, w), bool) if al is None else np.asarray(al)[y:y + h, x:x + w].astype(bool)
+        ex = self.mask_out(int(k)) if self.mask_out is not None else None
+        if ex is not None:
+            m = m & ~np.asarray(ex, bool)[y:y + h, x:x + w]
+        return m
 
     def comp_frame(self, k: int):
         from . import temporal
@@ -1179,6 +1185,47 @@ class TemporalFrames:
         return temporal.prepare(w, valid & self._mask(k, roi), self.max_side, self._blur_at(roi))
 
 
+def recreation_proxy_frame(comp: Any, raw: Any, seg_at: dict[int, Segment], k: int, raw_wh: tuple[float, float],
+                           comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None) -> np.ndarray | None:
+    """The recreation at competitor frame k on the WHOLE competitor proxy (uint8): the shown RAW proxy frame (a Frame
+    Mix's two frames mixed) warped with its segment's own model, 0 outside the RAW frame; None when k is not shown by
+    one raw segment."""
+    from . import scoring
+    s = seg_at.get(int(k))
+    if s is None:
+        return None
+    sh = seg_shown(s, int(k), comp_fps, raw_fps, n_raw)
+    sim = seg_sim(s, int(k), *raw_wh)
+    if sh is None or sim is None or not raw.has(int(sh[0])):
+        return None
+    j, f = sh
+    full = (0, 0, int(comp.size[0]), int(comp.size[1]))
+    img, valid = scoring.warp_to_roi(np.asarray(raw.get(int(j))), sim, bool(s.flip_h), float(raw_wh[0]), raw.ratio,
+                                     comp.ratio, full)
+    if f > 0.0 and raw.has(int(j) + 1):
+        img1, v1 = scoring.warp_to_roi(np.asarray(raw.get(int(j) + 1)), sim, bool(s.flip_h), float(raw_wh[0]), raw.ratio,
+                                       comp.ratio, full)
+        img, valid = (1.0 - f) * img + f * img1, valid & v1
+    return np.clip(np.rint(np.where(valid, img, 0.0)), 0, 255).astype(np.uint8)
+
+
+def animated_text_zones(comp: Any, raw: Any, segments: Sequence[Segment], layout: Any, overlays: Any,
+                        raw_wh: tuple[float, float], comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None,
+                        cfg: Any) -> list[dict]:
+    """Animated (moving) text overlays of the competitor for the temporal signature (s9_2b, wave 4): the layout
+    module's comp-only detector (layout.animated_text_overlays: outlined text that moves over the picture), each word
+    checked against the recreation -- one the recreation also shows is picture content, never masked. Returns every
+    candidate (kind 'overlay' | 'picture_content'); [] without a layout module / proxy."""
+    from . import layout as layout_mod
+    fn = getattr(layout_mod, "animated_text_overlays", None)
+    if fn is None or comp is None or getattr(comp, "frames", None) is None:
+        return []
+    seg_at = single_raw_segments(segments, int(comp.n))
+    ref = (lambda k: recreation_proxy_frame(comp, raw, seg_at, k, raw_wh, comp_fps, raw_fps, n_raw)) \
+        if raw is not None and getattr(raw, "frames", None) is not None else None
+    return fn(comp, layout, cfg, overlays=overlays, reference=ref)
+
+
 def temporal_signatures(tf: TemporalFrames, cfg: Any) -> tuple[Any, Any, Any]:
     """(competitor signature (k, k+1) and (k, k+2), its labels, recreation signature (k, k+1))."""
     from . import temporal
@@ -1192,9 +1239,12 @@ def temporal_signatures(tf: TemporalFrames, cfg: Any) -> tuple[Any, Any, Any]:
 
 
 def check_temporal(segments: Sequence[Segment], labels: Any, comp_sig: Any, rec_sig: Any, comp_fps: Fraction,
-                   raw_fps: Fraction, n_raw: int | None, n: int, cfg: Any) -> dict:
+                   raw_fps: Fraction, n_raw: int | None, n: int, cfg: Any, masked: Sequence[dict] = ()) -> dict:
     """s9_2b: the recreation's temporal signature against the competitor's (comp-only labels, temporal.py).
-    For every pair (k, k+1) of frames each shown by ONE raw segment:
+    Both signatures are measured on the layout's caption / overlay masks AND without the animated text overlays
+    ``masked`` (``animated_text_zones``, kind 'overlay': moving words the recreation does not show), so a hold
+    under a sliding caption is judged by the motion OUTSIDE the overlays. For every pair (k, k+1) of frames each
+    shown by ONE raw segment:
 
     * the competitor MOVEs but the recreation shows the same RAW frame twice -> 'recreation repeats';
     * the competitor REPEATs but the recreation changes RAW frame by more than the shot's repeat/move split
@@ -1307,13 +1357,17 @@ def check_temporal(segments: Sequence[Segment], labels: Any, comp_sig: Any, rec_
         exceptions.append(f"temporal signature differs on {len(bad)}/{n_pairs} frame pairs: {listing}")
     counts = labels.counts()
     status = _status_from(len(failures), len(exceptions))
+    ov = [z for z in masked if z.get("kind", "overlay") == "overlay"]
     summary = (f"{n_pairs} frame pairs, {n_checked} with a competitor repeat/move label ({counts.get(T.REPEAT, 0)} "
                f"repeat, {counts.get(T.MOVE, 0)} move, {counts.get(T.UNKNOWN, 0)} unknown, {counts.get(T.CUT, 0)} cut); "
-               f"{len(bad)} disagree, {len(mismatch)} motion mismatch(es)")
+               f"{len(bad)} disagree, {len(mismatch)} motion mismatch(es)"
+               + (f"; {len(ov)} animated text overlay(s) masked ("
+                  + ", ".join(f"frames {z['comp_in']}-{z['comp_out'] - 1}" for z in ov[:4]) + ")" if ov else ""))
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions,
             "pairs": n_pairs, "checked": n_checked, "unmeasured": n_unmeasured, "fraction_agree": round(frac, 6),
             "disagreements": bad[:500], "n_disagreements": len(bad), "motion_mismatch": mismatch,
-            "labels": T.summary(labels), "noise_floor": g_floor, "bias": {str(k): round(math.exp(v), 4) for k, v in bias.items()}}
+            "labels": T.summary(labels), "noise_floor": g_floor, "bias": {str(k): round(math.exp(v), 4) for k, v in bias.items()},
+            "animated_text": [{k: v for k, v in z.items() if k != "rects"} for z in masked][:50]}
 
 
 def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
@@ -4001,10 +4055,17 @@ def verify_all(ctx: Any) -> dict:
     temporal_state: dict[str, Any] = {}
 
     def s9_2b() -> dict:
-        tf = TemporalFrames(ctx.comp_proxy, ctx.raw_proxy, segs, allowed, box_fn, dom, raw_wh, comp_fps, raw_fps, n_raw, cfg)
+        from . import layout as layout_mod
+        zones = animated_text_zones(ctx.comp_proxy, ctx.raw_proxy, segs, getattr(ctx, "layout", None),
+                                    verify_overlays(ctx), raw_wh, comp_fps, raw_fps, n_raw, cfg)
+        shape = (int(ctx.comp_proxy.size[1]), int(ctx.comp_proxy.size[0]))
+        d = int(getattr(cfg, "overlay_dilate_px", 3))
+        mask_out = (lambda k: layout_mod.animated_text_mask(zones, k, shape, d)) if zones else None
+        tf = TemporalFrames(ctx.comp_proxy, ctx.raw_proxy, segs, allowed, box_fn, dom, raw_wh, comp_fps, raw_fps, n_raw, cfg,
+                            mask_out=mask_out)
         comp_sig, labels, rec_sig = temporal_signatures(tf, cfg)
         temporal_state["labels"] = labels
-        return check_temporal(segs, labels, comp_sig, rec_sig, comp_fps, raw_fps, n_raw, n, cfg)
+        return check_temporal(segs, labels, comp_sig, rec_sig, comp_fps, raw_fps, n_raw, n, cfg, masked=zones)
 
     checks["s9_2b_temporal"] = _run_check("s9_2b_temporal", s9_2b)
     extra["cuts"] = _run_check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg,

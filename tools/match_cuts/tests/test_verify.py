@@ -1811,6 +1811,117 @@ def test_freeze_against_a_moving_competitor_is_a_motion_mismatch():
     assert r["status"] == "pass" and r["n_disagreements"] == 0, r
 
 
+def _outlined_word(img: np.ndarray, text: str, x: int, y: int, size: int = 14, stroke: int = 2) -> None:
+    """Burn an outlined caption word into ``img`` in place: DejaVu Sans Bold, white fill, black stroke (ffmpeg
+    drawtext's fontcolor=white:borderw=N:bordercolor=black, like the synthetic captions)."""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+    im = Image.fromarray(img)
+    ImageDraw.Draw(im).text((int(x), int(y)), text, font=font, fill=255, stroke_width=stroke, stroke_fill=0)
+    img[:] = np.asarray(im)
+
+
+def _dim(frames: np.ndarray) -> np.ndarray:
+    """A mid-gray picture (no texture blob reaches the caption's white level)."""
+    return np.clip(np.rint(0.5 * frames.astype(np.float32) + 40.0), 0, 255).astype(np.uint8)
+
+
+def _temporal_with_overlays(comp, raw, segs, cfg, raw_fps=F30):
+    """s9_2b as verify_all runs it: animated text overlays (layout's comp-only detector, checked against the
+    recreation) masked from both signatures."""
+    from match_cuts import layout as layout_mod
+    from match_cuts.model import Layout
+    lay = Layout(comp_w=comp.size[0], comp_h=comp.size[1], box=Box.from_dict(FIX_BOX))
+    raw_wh = (float(raw.size[0]), float(raw.size[1]))
+    zones = verify.animated_text_zones(comp, raw, segs, lay, None, raw_wh, F30, raw_fps, raw.n, cfg)
+    shape = (comp.size[1], comp.size[0])
+    mask_out = (lambda k: layout_mod.animated_text_mask(zones, k, shape, 3)) if zones else None
+    tf = verify.TemporalFrames(comp, raw, segs, lambda k: None, None, FIX_BOX, raw_wh, F30, raw_fps, raw.n, cfg,
+                               mask_out=mask_out)
+    comp_sig, labels, rec_sig = verify.temporal_signatures(tf, cfg)
+    return verify.check_temporal(segs, labels, comp_sig, rec_sig, F30, raw_fps, raw.n, comp.n, cfg, masked=zones), zones
+
+
+def _freeze_case(play_during_hold: bool):
+    """30 competitor frames (30 fps RAW): plays RAW 10..19, then holds RAW 20 (or keeps playing 20..29 when
+    ``play_during_hold``), then plays RAW 30..; a caption word slides 3 px / frame over frames 10..19. The
+    recreation plays, HOLDS RAW 20 on 10..19, plays."""
+    import motion_fixtures as mf
+    n = 30
+    raw_frames = _dim(mf.two_layer_raw(60))
+    js = np.array([10 + k if k < 10 else (20 + (k - 10) if play_during_hold else 20) if k < 20 else 30 + (k - 20)
+                   for k in range(n)])
+    pan = lambda k: -20.0 - 1.2 * k          # noqa: E731
+    frames = mf.render(raw_frames, js, mf.pan_sims(n), (160, 120), noise=1.0).copy()
+    for k in range(10, 20):
+        _outlined_word(frames[k], "STOP", 30 + 3 * (k - 10), 35, size=10, stroke=1)
+    comp = _fps_proxy(frames, "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    hold = [_line_seg(1, 0, 10, 10.5, F30, pan), _line_seg(2, 10, 20, 20.5, F30, pan, speed=0.0),
+            _line_seg(3, 20, n, 30.5, F30, pan)]
+    return comp, raw, hold
+
+
+def test_true_freeze_under_a_sliding_caption_is_not_a_motion_mismatch():
+    """Wave 4 (b), film24 S19: a TRUE freeze (the competitor holds RAW 20) under a caption word that slides 3 px per
+    frame. The word is an animated text overlay (it moves over the picture and the recreation never shows it): it is
+    masked from both temporal signatures, so the motion is judged OUTSIDE it -- the hold agrees. Without the mask the
+    sliding word reads as competitor motion (the old false 'motion mismatch')."""
+    cfg = Config()
+    comp, raw, hold = _freeze_case(play_during_hold=False)
+    r, zones = _temporal_with_overlays(comp, raw, hold, cfg)
+    ov = [z for z in zones if z["kind"] == "overlay"]
+    assert len(ov) == 1 and ov[0]["comp_in"] == 10 and ov[0]["comp_out"] == 20, zones
+    assert ov[0]["step"][0] == pytest.approx(3.0, abs=0.5) and ov[0]["glyphs"] == 4
+    assert not r["motion_mismatch"] and r["status"] == "pass", r
+    assert r["animated_text"] and "animated text overlay(s) masked" in r["summary"]
+    unmasked, _labels = _temporal_check(comp, raw, hold, cfg, raw_fps=F30)
+    assert unmasked["motion_mismatch"], unmasked          # the false positive the overlay mask removes
+
+
+def test_hold_against_a_moving_competitor_stays_a_motion_mismatch_under_a_sliding_caption():
+    """Negative control: the competitor PLAYS during the hold (and a caption slides over it). Masking the caption
+    must not hide the picture's motion outside it: still a motion mismatch."""
+    cfg = Config()
+    comp, raw, hold = _freeze_case(play_during_hold=True)
+    r, zones = _temporal_with_overlays(comp, raw, hold, cfg)
+    assert any(z["kind"] == "overlay" for z in zones), zones
+    assert r["status"] == "fail" and r["motion_mismatch"], r
+    assert r["motion_mismatch"][0]["segment"] == 2
+
+
+def test_animated_text_the_compared_picture_also_shows_is_picture_content():
+    """Negative control of the overlay test itself: a word moving over the picture is an overlay only when the
+    compared picture (verification: the recreation) never shows it on its place. The same word present in the
+    reference -- text carried by the RAW (a scrolling credit, a sign on a moving object) -- is 'picture_content' and
+    never masked; a word that moves WITH the picture is never even a candidate."""
+    import motion_fixtures as mf
+    from match_cuts import layout as layout_mod
+    from match_cuts.model import Layout
+    cfg = Config()
+    n = 12
+    base = _dim(mf.two_layer_raw(1))[0]
+    frames = np.repeat(mf.render(base[None], [0], [Sim(1.0, 0.0, -20.0, -15.0)], (160, 120), noise=0.0), n, axis=0)
+    with_word = frames.copy()
+    for k in range(n):
+        _outlined_word(with_word[k], "CREDITS", 30 + 3 * k, 35)
+    comp = _fps_proxy(with_word, "competitor", F30)
+    lay = Layout(comp_w=160, comp_h=120, box=Box.from_dict(FIX_BOX))
+    alone = layout_mod.animated_text_overlays(comp, lay, cfg)
+    assert [z["kind"] for z in alone] == ["overlay"] and alone[0]["glyphs"] == 7
+    no_word = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: frames[k])
+    assert [z["kind"] for z in no_word] == ["overlay"]
+    shown = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: with_word[k])
+    assert [z["kind"] for z in shown] == ["picture_content"], shown
+    assert layout_mod.animated_text_mask(shown, 5, (120, 160)) is None
+    assert layout_mod.animated_text_mask(no_word, 5, (120, 160)).any()
+    # the word panning WITH the picture (an editor pan over burned-in text) is no candidate at all
+    pan_frames = mf.render(np.repeat(with_word[:1], 1, axis=0), [0] * n,
+                           [Sim(1.0, 0.0, -2.0 * k, 0.0) for k in range(n)], (140, 110), noise=0.0)
+    panned = _fps_proxy(np.pad(pan_frames, ((0, 0), (5, 5), (10, 10))), "competitor", F30)
+    assert layout_mod.animated_text_overlays(panned, lay, cfg) == []
+
+
 class PanStub:
     """Stub scorer for a continuous shot under an editor pan: truth RAW frame 100 + k, true framing tx(k) =
     2 k (comp px). score = 1 - 0.02 |dj| - 0.01 |tx - tx(k) - P dj| (a time error dj is compensated by P px of
