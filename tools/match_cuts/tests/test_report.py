@@ -169,7 +169,7 @@ def test_report_renders_every_section(tmp_path):
     rows = [ln for ln in md.splitlines() if ln.startswith("| S0") and "f / " in ln]
     assert len(rows) == 8
     assert "animated (2 keys, ease_in)" in rows[1] and "| yes |" in rows[1] and "out: crossfade 6f" in rows[1]
-    assert "in: crossfade 6f" in rows[2] and "2 ambiguous-identical" in rows[2]
+    assert "in: crossfade 6f" in rows[2] and "2 frames with identical RAW neighbours" in rows[2]
     assert "MISSING - not in RAW" in rows[3]
     assert "1.1000 (unsnapped)" in rows[4] and "J/L audio -4/0f" in rows[4] and "1 timing-tie" in rows[4]
     assert "dip #000000" in rows[5] and "freeze" in rows[6] and "rot 1.50°" in rows[7]
@@ -208,11 +208,11 @@ def test_report_without_verification_and_with_a_broken_section(tmp_path, monkeyp
     def broken(ctx):
         raise RuntimeError("section bug")
     sections = list(report.SECTIONS)
-    sections[4] = ("Edit-style breakdown", broken)
+    sections[5] = ("Edit-style breakdown", broken)
     monkeypatch.setattr(report, "SECTIONS", sections)
     md = report.render_report(ctx)
     assert "_Section could not be rendered: RuntimeError: section bug_" in md
-    assert "## 6. Warnings" in md and "## 10. Environment and timings" in md
+    assert "## 7. Warnings" in md and "## 11. Environment and timings" in md
 
 
 def test_edit_breakdown_numbers(tmp_path):
@@ -447,3 +447,91 @@ def test_uncertain_ranges_and_frame_mix_in_the_report(tmp_path):
     assert "S05: frame-blend retiming (verified path; exported with AE Frame Blending > Frame Mix)" in md
     eb = report.edit_breakdown(ctx.cutlist, ctx.layout, ctx.cfg)
     assert eb["uncertain"] == [(150, 180)] and eb["not_in_raw"] == []
+
+
+def test_plain_language_summary_with_raw_only_overlays_and_uncertain_frames(tmp_path):
+    """FX-12 / wave 4: report.md starts with a plain-language summary for a non-expert user -- the result, one
+    simple line per check, what failed and why, what to check by hand in After Effects (uncertain frames to rebuild,
+    a RAW-only overlay to mask: the recreation shows it, the competitor does not) and one-line headlines; the RAW-only
+    overlay is also listed under 'Anything AE can't reproduce'."""
+    ctx = make_ctx(tmp_path)
+    segs = ctx.cutlist.segments
+    segs[3] = Segment(4, "uncertain", 150, 180, label="UNCERTAIN - best RAW 1662-1673, ZNCC 0.50-0.89", uncertain=True)
+    ctx.verify["criteria"]["c3_source_frames"]["status"] = "fail"
+    ctx.verify["failures"] = ["c3_source_frames: 30 frames in 1 UNCERTAIN segment(s) (neither matched nor NOT-IN-RAW): ..."]
+    line = ("RAW-only overlay at 284,392,393,26 (x,y,w,h in RAW px) over frames 426-465: not shown by the competitor "
+            "(segment(s) S20, S21)")
+    ctx.verify["raw_only_overlays"] = {"lines": [line], "regions": [
+        {"segment": 20, "raw_rect": [283.5, 391.5, 393.0, 25.5], "frames": [426, 465]}], "rejected": []}
+    ctx.verify["checks"]["s9_3_visual"]["raw_only_overlay_frames"] = list(range(427, 466))
+    md = report.render_report(ctx)
+    assert md.index("## 1. Summary") < md.index("## 2. Acceptance criteria")
+    summ = md[md.index("## 1. Summary"):md.index("## 2. Acceptance criteria")]
+    assert "**Result: FAIL**" in summ
+    assert "| Every frame shows the right frame of your RAW video. | NOT OK |" in summ
+    assert "the tool is not sure which RAW frame this is" in summ and "It did not guess." in summ
+    assert "rebuild them by hand" in summ
+    assert "your RAW video shows text or a graphic at x 284, y 392 (size 393 × 26 RAW pixels)" in summ
+    assert "add a mask or a blur there in After Effects" in summ
+    assert "Headlines:" in summ and "RAW-only overlays: 1" in summ and "Uncertain: 30 frames in 1 segment(s)" in summ
+    assert "UNCERTAIN segment" not in summ.split("What failed and why:")[1].split("Check by hand")[0].replace(
+        "Other problem", "")                                     # the uncertain failure is said in words once
+    cant = next(ln for ln in md.splitlines() if ln.startswith("- Anything AE can't reproduce"))
+    assert line in cant and "the recreation (AE / preview) SHOWS it, the competitor does not" in cant
+    assert "39 matched frames reach the visual threshold only with them excluded: 427-465" in md
+
+
+def test_reassigned_rows_are_complete_and_grouped_with_class_gap_delta(tmp_path):
+    """FX-12: every re-assigned / mismatched frame is listed (not the first 8), grouped by reason, each with its
+    measured / shown frames, class, gap and delta; the low-margin line is refine's own flags only."""
+    ctx = make_ctx(tmp_path)
+    fm = ctx.fm
+    for k in ("status", "raw", "raw_lo", "raw_hi", "low_margin"):
+        fm.d["pre_segment_" + k] = np.asarray(fm.d[k]).copy()
+    fm.d["pre_segment_low_margin"][200] = True
+    rows = [{"k": 10 + i, "m": 100 + i, "ae": 101 + i, "why": "model", "class": "within noise", "gap": 0.0004,
+             "delta": 0.002} for i in range(6)]
+    rows += [{"k": 50 + i, "m": 300 + i, "ae": 298 + i, "why": "tiny_segment_merged", "class": "systematic run",
+              "gap": 0.0011, "delta": 0.001} for i in range(4)]
+    rows.append({"k": 90, "m": 500, "ae": 503, "why": "drop", "class": "outside noise", "gap": 0.021, "delta": 0.002})
+    ctx.verify["checks"]["s9_2_ae_sim"] = {"status": "fail", "plan": {"reassigned": rows, "n_reassigned": len(rows),
+                                                                     "mismatches": [], "n_mismatches": 0}, "mock": {}}
+    md = report.render_report(ctx)
+    head = next(ln for ln in md.splitlines() if ln.startswith("- Frames that do not show refine's measured best frame"))
+    assert ": 11 — by reason:" in head
+    lines = md.splitlines()
+    i = lines.index(head)
+    grp = lines[i + 1:i + 4]
+    assert grp[0].startswith("  - model: 6 (6 within noise)") and "k 15: measured 105 → shown 106 (within noise, gap +0.0004, delta 0.0020)" in grp[0]
+    assert grp[1].startswith("  - tiny_segment_merged: 4 (4 systematic run)")
+    assert grp[2].startswith("  - drop: 1 (1 outside noise)") and "gap +0.0210" in grp[2]
+    low = next(ln for ln in lines if ln.startswith("- Low-margin frames"))
+    assert ": 1 — 200" in low
+    assert "| 90 | 500 | 503 | drop | outside noise | +0.0210 | 0.0020 |" in md
+
+
+def test_input_facts_list_the_edit_lists_instead_of_guessing(tmp_path):
+    """FX-12: the inputs table lists the FACTS -- per-track MP4 edit lists (media_time), iTunSMPB, stream durations --
+    instead of 'edit list: yes / no' (which only meant 'no non-benign edit list'): a clip muxed with the default edit
+    lists vs remuxed with -use_editlist 0."""
+    import shutil
+    import subprocess
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not on PATH")
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=30:d=1", "-f", "lavfi",
+                    "-i", "sine=f=440:sample_rate=44100:d=1", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(a)],
+                   check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(a), "-c", "copy", "-use_editlist", "0", str(b)], check=True)
+    fa, fb = report.container_facts(a), report.container_facts(b)
+    assert "audio track" in fa["elst"] and "media_time 1024/44100" in fa["elst"], fa
+    assert "media_time" not in fb["elst"] and "none" in fb["elst"], fb
+    assert fa["smpb"] in ("absent",) or fa["smpb"].startswith("present")
+    assert fa["durations"].startswith("video 1.0") and " / audio " in fa["durations"]
+    assert report.container_facts(tmp_path / "missing.mp4") == {"elst": "n/a", "smpb": "n/a", "durations": "n/a"}
+    ctx = make_ctx(tmp_path)
+    ctx.comp_input.path = str(a)
+    md = report.render_report(ctx)
+    assert "| edit lists (elst, per track) |" in md and "| iTunSMPB (encoder gapless info) |" in md
+    assert "| edit list |" not in md

@@ -157,7 +157,7 @@ def segment_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[str
     if seg.uncertain:
         notes.append("UNCERTAIN")
     if seg.ambiguous_frames:
-        notes.append(f"{len(seg.ambiguous_frames)} ambiguous-identical")
+        notes.append(f"{len(seg.ambiguous_frames)} frames with identical RAW neighbours")
     if seg.tie_frames:
         notes.append(f"{len(seg.tie_frames)} timing-tie")
     if seg.retime and seg.retime != "none":
@@ -205,6 +205,119 @@ def headline(ver: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------------------------
+# Plain-language summary (FX-12): for a non-expert user whose English is a second language
+# ---------------------------------------------------------------------------------------------
+
+PLAIN_STATUS = {"pass": "OK", "pass_with_exceptions": "OK, with notes", "fail": "NOT OK", "not_available": "not checked"}
+PLAIN_WHAT = {
+    "c1_coverage": "Every frame of the competitor video is rebuilt or marked.",
+    "c2_cuts": "Every cut is on the right frame.",
+    "c3_source_frames": "Every frame shows the right frame of your RAW video.",
+    "c4_speed_framing": "Speed, zoom, position, flip and rotation are right.",
+    "c5_audio": "The sound lines up with the picture.",
+    "c6_after_effects": "The After Effects script builds the project.",
+}
+
+
+def raw_only_overlays(ver: dict | None) -> list[dict]:
+    """verify's measured RAW-only overlay regions ({segment, raw_rect [x, y, w, h] RAW px, frames [a, b], ...})."""
+    return list((((ver or {}).get("raw_only_overlays") or {}).get("regions")) or [])
+
+
+def raw_only_overlay_text(ver: dict | None) -> list[str]:
+    """One line per RAW-only overlay (consecutive segments merged), as verify words it."""
+    return list((((ver or {}).get("raw_only_overlays") or {}).get("lines")) or [])
+
+
+def animated_text(ver: dict | None) -> list[dict]:
+    t = (((ver or {}).get("checks") or {}).get("s9_2b_temporal") or {})
+    return [z for z in (t.get("animated_text") or []) if z.get("kind", "overlay") == "overlay"]
+
+
+def headlines(ctx: Any) -> list[str]:
+    """One-line headlines (FX-12): the A/V offset and the audio switch baseline, uncertain segments, RAW-only overlays,
+    phases pinned by the cadence, moving competitor text."""
+    cl = getattr(ctx, "cutlist", None)
+    ver = getattr(ctx, "verify", None)
+    out = []
+    if cl is not None:
+        sync = av_offset_line(cl)
+        if sync:
+            out.append(f"Audio: {sync}.")
+        unc = [s for s in cl.segments if s.type == "uncertain"]
+        if unc:
+            out.append(f"Uncertain: {sum(s.comp_out - s.comp_in for s in unc)} frames in {len(unc)} segment(s) — "
+                       + ", ".join(f"{s.comp_in}–{s.comp_out - 1}" for s in unc) + ".")
+    ov = raw_only_overlay_text(ver)
+    if ov:
+        out.append(f"RAW-only overlays: {len(ov)} — " + "; ".join(ov) + ".")
+    if cl is not None:
+        try:
+            pin = [ln for ln in ae_phase_lines(cl, getattr(ctx, "cfg", None)) if "Phase pinned" in ln]
+        except Exception:  # noqa: BLE001 - a headline must never break the report
+            pin = []
+        if pin:
+            n = pin[0].split(":", 1)[1].split("segment(s)")[0].strip()
+            out.append(f"Phases pinned by the cadence (information, not a risk): {n} segment(s).")
+    at = animated_text(ver)
+    if at:
+        out.append("Moving competitor text (not rebuilt; ignored by the motion checks): "
+                   + ", ".join(f"frames {z['comp_in']}–{z['comp_out'] - 1}" for z in at) + ".")
+    return out
+
+
+def _summary(ctx: Any) -> list[str]:
+    """What passed, what failed and why, and what to check by hand in After Effects -- short sentences, simple words."""
+    ver = getattr(ctx, "verify", None) or {}
+    crit = ver.get("criteria") or {}
+    cl = getattr(ctx, "cutlist", None)
+    fps = cl.comp_fps if cl is not None else None
+    tc = (lambda k: f" ({timecode(k, fps)})") if fps else (lambda k: "")  # noqa: E731
+    out = [f"**Result: {headline(ver)}**", ""]
+    if crit:
+        out += [md_table(["What was checked", "Result"],
+                         [[PLAIN_WHAT[k], PLAIN_STATUS.get((crit.get(k) or {}).get("status"), "not run")]
+                          for k in CRITERIA_KEYS]), ""]
+    why: list[str] = []
+    hand: list[str] = []
+    segs = list(cl.segments) if cl is not None else []
+    for s in segs:
+        if s.type == "uncertain":
+            why.append(f"Frames {s.comp_in}–{s.comp_out - 1}{tc(s.comp_in)}: the tool is not sure which RAW frame this is "
+                       f"({s.label or 'no clear match'}). It did not guess. These frames count as a failure of check 3.")
+            hand.append(f"Frames {s.comp_in}–{s.comp_out - 1}: rebuild them by hand. The 'UNCERTAIN' guide layer in After "
+                        "Effects shows the best RAW frames the tool found.")
+        elif s.type == "not_in_raw":
+            hand.append(f"Frames {s.comp_in}–{s.comp_out - 1}{tc(s.comp_in)}: this part is not in your RAW video. Put your "
+                        "own footage on the 'MISSING' solid in After Effects.")
+    for r in raw_only_overlays(ver):
+        x, y, w, h = r["raw_rect"]
+        hand.append(f"Frames {r['frames'][0]}–{r['frames'][1]}: your RAW video shows text or a graphic at x {x:.0f}, "
+                    f"y {y:.0f} (size {w:.0f} × {h:.0f} RAW pixels) that the competitor does not show. The After Effects "
+                    "project shows it too. If you do not want it, add a mask or a blur there in After Effects.")
+    for s in segs:
+        if s.frame_mix:
+            hand.append(f"S{s.id:02d} (frames {s.comp_in}–{s.comp_out - 1}): slow motion made by mixing two frames. After "
+                        "Effects uses Frame Mix here. Look at it once.")
+    for z in animated_text(ver):
+        hand.append(f"Frames {z['comp_in']}–{z['comp_out'] - 1}: the competitor has moving text on top of the video. The "
+                    "tool does not rebuild text. Add your own text in After Effects if you want it.")
+    other = [f for f in (ver.get("failures") or []) if "UNCERTAIN segment" not in f]
+    for f in other[:8]:
+        why.append(f"Other problem: {f}")
+    if len(other) > 8:
+        why.append(f"... and {len(other) - 8} more (see 'Verification details').")
+    out += ["What failed and why:", ""] + ([f"- {w}" for w in why] if why else ["- Nothing failed."]) + [""]
+    out += ["Check by hand in After Effects:", ""] + ([f"- {h}" for h in hand] if hand else
+                                                    ["- Nothing special. Turn on the 'REFERENCE – competitor' layer to "
+                                                     "compare (black = same picture)."]) + [""]
+    hl = headlines(ctx)
+    if hl:
+        out += ["Headlines:", ""] + [f"- {h}" for h in hl]
+    return out
+
+
+# ---------------------------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------------------------
 
@@ -238,6 +351,62 @@ def _criteria(ctx: Any) -> list[str]:
     return out
 
 
+_FACTS_MEMO: dict[str, dict] = {}
+
+
+def container_facts(path: str | os.PathLike | None) -> dict:
+    """Input FACTS instead of guesses (FX-12): the per-track MP4 / MOV edit lists (probe.read_edit_lists: every
+    entry's media_time and duration), the iTunSMPB tag (encoder gapless info) when present, and the video / audio
+    stream durations the container states. Nothing is inferred from them (no AAC-priming or A/V-offset claim): the
+    A/V offset is measured from the content (§7 D9). {'elst', 'smpb', 'durations'}: strings, 'n/a' when unreadable."""
+    p = str(path or "")
+    if p in _FACTS_MEMO:
+        return _FACTS_MEMO[p]
+    out = {"elst": "n/a", "smpb": "n/a", "durations": "n/a"}
+    if p and Path(p).is_file():
+        try:
+            from .probe import read_edit_lists
+            tracks = read_edit_lists(p)
+            parts = []
+            for t in tracks:
+                kind = {"vide": "video", "soun": "audio"}.get(t.handler, t.handler or "?")
+                if not t.entries:
+                    parts.append(f"{kind} track {t.track_id}: none")
+                    continue
+                ents = "; ".join(("empty edit" if mt < 0 else
+                                  f"media_time {mt}/{t.media_timescale} = {mt / max(1, t.media_timescale):.6f} s")
+                                 + f", duration {sd / max(1, t.movie_timescale):.3f} s" + (f", rate {rate:g}" if rate != 1 else "")
+                                 for sd, mt, rate in t.entries)
+                parts.append(f"{kind} track {t.track_id}: {len(t.entries)} entr{'y' if len(t.entries) == 1 else 'ies'} "
+                             f"({ents})")
+            out["elst"] = "; ".join(parts) if parts else "none (no MP4 / MOV track boxes)"
+        except Exception as e:  # noqa: BLE001 - a fact we cannot read is reported as such
+            out["elst"] = f"not read ({type(e).__name__})"
+        try:
+            from .probe import ffprobe_json
+            js = ffprobe_json(p)
+            tags = dict((js.get("format") or {}).get("tags") or {})
+            for s in js.get("streams") or []:
+                tags.update(s.get("tags") or {})
+            smpb = next((v for k, v in tags.items() if k.lower() == "itunsmpb"), None)
+            out["smpb"] = f"present ({' '.join(str(smpb).split()[:4])} ...)" if smpb else "absent"
+            durs = []
+            for kind in ("video", "audio"):
+                st = next((s for s in js.get("streams") or [] if s.get("codec_type") == kind), None)
+                if st is None:
+                    durs.append(f"{kind} none")
+                    continue
+                d = st.get("duration")
+                durs.append(f"{kind} {float(d):.3f} s" if d not in (None, "N/A") else f"{kind} unknown")
+            out["durations"] = " / ".join(durs)
+        except Exception as e:  # noqa: BLE001
+            out["smpb"] = out["durations"] = f"not read ({type(e).__name__})"
+    if len(_FACTS_MEMO) > 16:
+        _FACTS_MEMO.clear()
+    _FACTS_MEMO[p] = out
+    return out
+
+
 def _stream_rows(info: Any, src: Any, conf: Any) -> list[tuple[str, str]]:
     def g(o, a, d=""):
         return getattr(o, a, d) if o is not None else d
@@ -258,11 +427,14 @@ def _stream_rows(info: Any, src: Any, conf: Any) -> list[tuple[str, str]]:
         ("CFR / VFR", ("VFR" if g(o, "vfr", False) else "CFR") + f" (PTS jitter {float(g(o, 'pts_jitter', 0.0)):.3f} frames)"),
         ("start times (v / a) / A-V offset", f"{float(g(o, 'v_start_time', 0.0)):.6f}s / {float(g(o, 'a_start_time', 0.0)):.6f}s / "
                                              f"{float(g(o, 'av_offset', 0.0)) * 1000:.3f} ms"),
-        ("edit list", "yes" if g(o, "edit_list", False) else "no"),
         ("audio", (f"{g(o, 'acodec')} {g(o, 'a_sample_rate', 0)} Hz × {g(o, 'a_channels', 0)} ch" if g(o, "has_audio", False)
                    else "none")),
         ("AE issues", ", ".join(g(o, "ae_issues", []) or []) or "none (AE-safe)"),
     ]
+    facts = container_facts(g(o, "path", ""))
+    i = next((n for n, r in enumerate(rows) if r[0] == "audio"), len(rows))
+    rows[i:i] = [("edit lists (elst, per track)", facts["elst"]), ("iTunSMPB (encoder gapless info)", facts["smpb"]),
+                 ("stream durations (video / audio)", facts["durations"])]
     if conf is not None:
         rows.append(("imported by AE", f"{g(conf, 'file_rel') or g(conf, 'file_abs') or g(conf, 'path')}"))
         rows.append(("conform", ("transcoded — " if g(conf, "conformed", False) else "not needed — ") + str(g(conf, "reason", ""))))
@@ -593,13 +765,16 @@ def _warnings(ctx: Any) -> list[str]:
         if len(lm):
             out.append(f"- Low-margin frames (best RAW frame beats its neighbours by < {getattr(cfg, 'low_margin_eps', 0.001)}): "
                        f"{len(lm)} — {_ranges_str(lm, comp_fps)}")
-        if re_rows:
+        vrows = verified_reassigned(getattr(ctx, "verify", None))
+        if vrows:
+            out += reassigned_lines(vrows, comp_fps)
+        elif re_rows:
             ex = "; ".join(f"k {r['k']}: " + (f"measured {r['measured']} → model {r['model']}" if r["measured"] is not None
                                               else f"unmatched → model {r['model']}")
-                           + (f" (score gap {r['gap']:.4f})" if r.get("gap") is not None else "") for r in re_rows[:8])
+                           + (f" (score gap {r['gap']:.4f})" if r.get("gap") is not None else "") for r in re_rows)
             out.append(f"- Re-assigned by segmentation (the segment model's RAW frame replaced refine's measured best "
                        f"frame; counted against criterion 3): {len(re_rows)} — {_ranges_str(re_set, comp_fps)}"
-                       + (f" — {ex}" + (" …" if len(re_rows) > 8 else "") if ex else ""))
+                       + (f" — {ex}" if ex else ""))
     else:
         amb = [k for s in cl.segments for k in s.ambiguous_frames]
         out.append(f"- Ambiguous-identical frames: {len(amb)} — {_ranges_str(amb, comp_fps)}")
@@ -661,6 +836,9 @@ def _warnings(ctx: Any) -> list[str]:
             cant.append(f"S{s.id:02d}: pitch-preserved speed change (AE stretch changes pitch; use Time-Stretch on the audio)")
         if s.uncertain:
             cant.append(f"S{s.id:02d}: uncertain — {s.notes or 'see decisions.jsonl'}")
+    for line in raw_only_overlay_text(getattr(ctx, "verify", None)):
+        cant.append(f"{line} — the recreation (AE / preview) SHOWS it, the competitor does not: mask or blur it in "
+                    "After Effects if you want it hidden")
     out.append("- Anything AE can't reproduce: " + ("; ".join(cant) if cant else "nothing detected"))
     seen = set()
     extra = []
@@ -736,6 +914,37 @@ def reassigned_frames(fm: Any) -> list[dict]:
                     and np.isfinite(cand[k, b]):
                 row["gap"] = float(cand[k, a] - cand[k, b])
         out.append(row)
+    return out
+
+
+def verified_reassigned(ver: dict | None) -> list[dict]:
+    """s9_2's re-assigned and mismatched rows (the plan's; the mock record's only when it differs) with verify's
+    evidence (why / class / gap / delta, FX-11)."""
+    s92 = ((ver or {}).get("checks") or {}).get("s9_2_ae_sim") or {}
+    r = s92.get("plan") or {}
+    rows = [dict(x, list="reassigned") for x in (r.get("reassigned") or [])]
+    rows += [dict(x, list="mismatch") for x in (r.get("mismatches") or [])]
+    return sorted(rows, key=lambda x: int(x.get("k", 0)))
+
+
+def reassigned_lines(rows: list[dict], comp_fps: Fraction | None = None) -> list[str]:
+    """The COMPLETE list of re-assigned / mismatched frames, grouped by reason, with each group's classes and every
+    frame's evidence (measured m -> shown, class, gap, delta) -- FX-12; counted against criterion 3, never exempt."""
+    if not rows:
+        return []
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        groups.setdefault(str(r.get("why") or ("mismatch" if r.get("list") == "mismatch" else "model")), []).append(r)
+    out = [f"- Frames that do not show refine's measured best frame (counted against criterion 3): {len(rows)} — by reason:"]
+    for why, rs in sorted(groups.items(), key=lambda kv: int(kv[1][0]["k"])):
+        cls = Counter(str(x.get("class") or "not measured") for x in rs)
+        ev = "; ".join(f"k {x['k']}: {('measured ' + str(x['m'])) if x.get('m') is not None else 'unmatched'} → shown "
+                       f"{x.get('ae')}" + (f" ({x['class']}, gap {x['gap']:+.4f}, delta {x['delta']:.4f})"
+                                           if x.get("gap") is not None and x.get("delta") is not None else
+                                           (f" (delta {x['delta']:.4f})" if x.get("delta") is not None else ""))
+                       for x in rs)
+        out.append(f"  - {why}: {len(rs)} ({', '.join(f'{v} {c}' for c, v in sorted(cls.items()))}) — "
+                   f"{_ranges_str([x['k'] for x in rs], comp_fps)} — {ev}")
     return out
 
 
@@ -816,6 +1025,19 @@ def _verification(ctx: Any) -> list[str]:
                 "", md_table(["ZNCC bin", "frames"], [[k, v] for k, v in (dist.get("hist") or {}).items()])]
         if vis.get("failed_frames"):
             out.append(f"Failure thumbnails: `debug/verify_failures/` ({len(vis['failed_frames'])} frames).")
+    ov_lines = raw_only_overlay_text(ver)
+    if ov_lines:
+        ex = vis.get("raw_only_overlay_frames") or []
+        out += ["", "RAW-only overlays (measured; static in RAW coordinates, a RAW graphic the competitor lacks, small; "
+                    "excluded from the visual, temporal and ±1 refit checks, every other pixel still compared): "
+                + "; ".join(ov_lines)
+                + (f". {len(ex)} matched frames reach the visual threshold only with them excluded: "
+                   f"{_ranges_str(ex, None, 12)}." if ex else ".")]
+    rej = ((ver.get("raw_only_overlays") or {}).get("rejected")) or []
+    if rej:
+        out += ["", "Regions that looked like RAW-only overlays but were NOT accepted (still compared): " + "; ".join(
+            f"S{int(r['segment']):02d}" + (f" at {r['raw_rect'][0]:.0f},{r['raw_rect'][1]:.0f}" if r.get("raw_rect") else "")
+            + f": {r.get('why')}" for r in rej[:8])]
     t = checks.get("s9_2b_temporal") or {}
     lab = (t.get("labels") or {}).get("counts") or {}
     if lab:
@@ -823,6 +1045,20 @@ def _verification(ctx: Any) -> list[str]:
                     f"{lab.get('move', 0)} move, {lab.get('unknown', 0)} unknown, {lab.get('cut', 0)} cut; "
                     f"{t.get('n_disagreements', 0)} pairs where the recreation disagrees, "
                     f"{len(t.get('motion_mismatch') or [])} motion mismatch(es)."]
+        at = animated_text(ver)
+        if at:
+            out.append("Moving competitor text masked from both signatures (it moves over the picture and the recreation "
+                       "never shows it; the motion is judged outside it): " + ", ".join(
+                           f"frames {z['comp_in']}–{z['comp_out'] - 1} at x {z['x']:.0f}, y {z['y']:.0f} "
+                           f"({z['glyphs']} glyphs, {z['step'][0]:+.1f}/{z['step'][1]:+.1f} px per frame)" for z in at) + ".")
+    vrows = verified_reassigned(ver)
+    if vrows:
+        out += ["", "Frames that do not show refine's measured best frame (s9_2; each frame's two candidates re-scored "
+                    "with their own per-frame framing):", "",
+                md_table(["k", "measured m", "shown (AE)", "reason", "class", "gap", "delta"],
+                         [[x["k"], x.get("m"), x.get("ae"), x.get("why"), x.get("class"),
+                           "" if x.get("gap") is None else f"{x['gap']:+.4f}",
+                           "" if x.get("delta") is None else f"{x['delta']:.4f}"] for x in vrows])]
     found = independent_findings(ver)
     if found:
         out += ["", "Independent checks (they never reuse an analysis decision):", ""] + [f"- {x}" for x in found]
@@ -903,6 +1139,7 @@ def _environment(ctx: Any) -> list[str]:
 
 
 SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
+    ("Summary", _summary),
     ("Acceptance criteria", _criteria),
     ("Inputs", _inputs),
     ("Detected layout", _layout),
