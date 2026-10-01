@@ -8,8 +8,9 @@ notes filled in. raw_in_seconds & co. are filled with the same phase solve the p
 
 Algorithm overview
   1. Runs. The timeline is split into runs of MATCH / NONE / UNIFORM frames; MATCH runs are split further
-     at flip changes and at transform steps (punch-ins: consecutive-frame steps, or a fast change over at
-     most 2*framing_sample_step frames localised by scoring every frame under both transforms).
+     at flip changes and at framing steps the pixels CONFIRM (FX-06: detrended per-frame increments -- found at
+     any pan speed --, both sides' trends extrapolated across the step, the old framing winning before and the
+     new one after on the frames around it); unconfirmed steps are only DP candidates.
   2. Cuts = DP over candidate cut positions of each MATCH sub-run (never greedy prefixes). Candidates:
      boundaries of greedy free-speed runs (+-1), phase breaks at the dominant speed / 1.0 inside runs
      within 15 % of that speed and at the nearest snap speed, RAW increment anomalies, track changes, audio
@@ -26,8 +27,10 @@ Algorithm overview
      not free choices: a 2-frame jump cut on slow footage is a cut, a 1.03x shot is not snapped to 1.0);
      + lambda_cut per cut; equal costs -> fewer segments. A 1-frame-skip jump cut therefore stays a cut
      between two 1.0 segments instead of becoming a fake 1.02-1.05x segment.
-  3. Clean-up: 1-2 frame segments explained by a neighbour's model are merged (matching errors), genuine
-     ones are kept (verified flash cuts); adjacent compatible segments are merged when one model is
+  3. Clean-up (FX-04: neighbours' framing EXTRAPOLATED / re-measured, never held): 1-2 frame segments explained
+     by a neighbour's model are merged (matching errors, re-checked after the refit); the others are verified
+     flash cuts only when their own frames beat the neighbours by more than the noise (else uncertain);
+     adjacent compatible segments are merged when one model is
      cheaper; chains of >= 2 one-frame skips that one line (any speed) reproduces at least as well are one
      retimed segment; adjacent segments at the same speed are merged when one line explains both with runs
      of <= 2 low-margin near misses (a sub-frame phase cut bought only by the data term needs
@@ -48,9 +51,14 @@ Algorithm overview
      and vice versa); the cut is moved otherwise (never at a layout period boundary, never while both
      models show the same frame on both sides). Afterwards neighbours whose models agree at the boundary
      (same speed, RAW frame and framing on both sides: no discontinuity of m(k)) are merged -- no phantom
-     cuts.
-  7. Retiming (frame blending), freeze / reverse / ramps (remap keys), framing (constant or RDP keys,
-     rotation only above rotation_min_deg, full-affine check when the similarity fits poorly), phase solve
+     cuts. Then the UNION TEST (FX-04, FX-07): a triggered cut (criterion-2 oscillation, competitor repeat
+     pair, confounded frames, short tracks, time lines that meet) must beat the continuous hypothesis on the
+     pixels; inside the noise the repeat pair / audio decide, else it is kept and reported uncertain. A NONE
+     frame repeating a matched frame takes its RAW frame when it scores alike (comp-duplicate invariant).
+  7. Retiming (frame blending), freeze / reverse / ramps (remap keys), framing (FX-06: consistent (RAW frame,
+     Sim) samples on every frame -- re-assigned frames measured again --, least-squares AE-linear keys at the
+     measured noise, rotation by a pixel test, full-affine check when the similarity fits poorly), time ties
+     (segments on one time line share one phase solve), phase solve
      (the phase that reproduces the most measured frames inside the soft intersection, not its centre;
      raw_in_interval / ae_margin_ms refer to that sub-interval; speed_range = the speeds reproducing what
      the segment claims), FrameMap write-back (m(k) := model frame where consistent, BLEND, tie,
@@ -84,6 +92,19 @@ _PRUNED = object()   # fit(): feasible, but no explanation can cost <= bound
 
 def _cfg(cfg: Any, name: str, default: Any) -> Any:
     return getattr(cfg, name, default)
+
+
+def _rng(frames: Iterable[int], cap: int = 12) -> str:
+    """'3-7, 12, 20-21' for sorted runs of frame numbers (at most ``cap`` runs)."""
+    fr = sorted(set(int(f) for f in frames))
+    runs: list[list[int]] = []
+    for f in fr:
+        if runs and f == runs[-1][1] + 1:
+            runs[-1][1] = f
+        else:
+            runs.append([f, f])
+    txt = ", ".join(f"{a}-{b}" if b > a else f"{a}" for a, b in runs[:cap])
+    return txt + (f" (+{len(runs) - cap} more)" if len(runs) > cap else "")
 
 
 # =================================================================================================
@@ -129,6 +150,12 @@ class _Frames:
         self.tx = np.asarray(fm.tx).astype(np.float64)
         self.ty = np.asarray(fm.ty).astype(np.float64)
         self.low_margin = np.asarray(fm.low_margin).astype(bool).copy()
+        # FX-03 refine: the Sim columns are the run's smooth path, sim_meas the per-frame ECC measurement of RAW
+        # m(k); 'confounded' frames tie with m+-1 under its own path; pair_label = comp-only temporal labels
+        self.sim_meas = np.asarray(fm.sim_meas).astype(np.float64)
+        self.sim_meas_score = np.asarray(fm.sim_meas_score).astype(np.float64)
+        self.confounded = np.asarray(fm.confounded).astype(bool)
+        self.pair_label = np.asarray(fm.pair_label).astype(np.int64)
         self.cand = np.asarray(fm.cand).astype(np.float64)
         self.cand_j0 = np.asarray(fm.cand_j0).astype(np.int64)
         if self.cand.ndim != 2 or self.cand.shape[0] != n:
@@ -215,6 +242,23 @@ class _Frames:
             return None
         th = self.theta[k] if math.isfinite(self.theta[k]) else 0.0
         return Sim(float(self.s[k]), float(th), float(self.tx[k]), float(self.ty[k]))
+
+    def measured(self, k: int) -> Sim | None:
+        """refine's per-frame framing measurement of RAW m(k) (sim_meas), when it scores at least like the path
+        value (a failed ECC that fell back below the path is not a measurement); None otherwise."""
+        if not (0 <= k < self.n):
+            return None
+        v = self.sim_meas[k]
+        if not (np.all(np.isfinite(v)) and v[0] > 0):
+            return None
+        z, zp = self.sim_meas_score[k], self.score[k]
+        if math.isfinite(zp) and not (math.isfinite(z) and z >= zp - self.delta[k]):
+            return None
+        return Sim(float(v[0]), float(v[1]), float(v[2]), float(v[3]))
+
+    def repeat_pair(self, c: int) -> bool:
+        """Comp frames (c-1, c) are a competitor REPEAT pair (temporal.py label of pair c-1)."""
+        return 0 < c < self.n and int(self.pair_label[c - 1]) == 1
 
 
 # =================================================================================================
@@ -895,7 +939,14 @@ class _Builder:
         self.cf = Fraction(comp.fps)
         self.rf = Fraction(raw.fps)
         self.F = _Frames(src, cfg)
-        self.unreliable_sim: set[int] = set()   # frames inside a localised framing step (interpolated Sims)
+        self.unreliable_sim: set[int] = set()   # transition frames before a localised framing step (no measurement)
+        self.step_after: dict[int, list[Sim]] = {}   # frames after a localised step inside its stretch -> ECC inits
+        self.soft_steps: set[int] = set()       # framing-step candidates the pixels did not confirm (DP candidates)
+        self.hard_steps: set[int] = set()       # framing steps the pixels confirmed (cuts no merge may remove)
+        self.union_cuts: set[int] = set()       # extra union-test triggers from the caller (e.g. large J/L, FX-09)
+        self.time_conflicts: set[int] = set()   # re-assigned frames whose own RAW frame still wins (framing samples)
+        self.scene_changes: list[int] = []      # PySceneDetect changes (independent evidence of the union test)
+        self._ecc: dict[tuple, tuple[Sim, float] | None] = {}   # (k, j, flip) -> re-measured framing (or None)
         self.S = _Solver(self.F, cfg, self.cf, self.rf, hints)
         self.P = _Scorer(comp, raw, layout, overlays, cfg)
         self.n = fm.n
@@ -1037,8 +1088,59 @@ class _Builder:
         dp = dp + np.abs(np.radians(th1 - th0)) * self.box_r   # rotation as displacement at the box edge
         return ds, dp
 
+    # ---------------------------------------------------------------------------------------------
+    # framing steps (FX-06): detrended increments, trends extrapolated across, confirmed by the pixels
+    # ---------------------------------------------------------------------------------------------
+    def _framing_vec(self, sims_or_idx: Any, pref: np.ndarray | None = None, log_scale: bool = True
+                     ) -> tuple[np.ndarray, np.ndarray]:
+        """(V, pref): per frame [Px, Py, log s (or s), theta deg], Px / Py = the image of the RAW point ``pref``
+        (default: the box-centre pre-image of the median Sim) -- decorrelates scale and translation. Input: FrameMap
+        frame indices or a list of Sims."""
+        if isinstance(sims_or_idx, np.ndarray):
+            s, th, tx, ty = self._sim_arrays(sims_or_idx)
+        else:
+            s = np.array([x.s for x in sims_or_idx], np.float64)
+            th = np.array([x.theta_deg for x in sims_or_idx], np.float64)
+            tx = np.array([x.tx for x in sims_or_idx], np.float64)
+            ty = np.array([x.ty for x in sims_or_idx], np.float64)
+        if pref is None:
+            med = Sim(float(np.median(s)), float(np.median(th)), float(np.median(tx)), float(np.median(ty)))
+            pref = med.inverse().apply([self.center])[0]
+        c, sn = np.cos(np.radians(th)), np.sin(np.radians(th))
+        px = s * (c * pref[0] - sn * pref[1]) + tx
+        py = s * (sn * pref[0] + c * pref[1]) + ty
+        return np.c_[px, py, np.log(s) if log_scale else s, th], pref
+
+    @staticmethod
+    def _vec_sim(v: np.ndarray, pref: np.ndarray, log_scale: bool = True) -> Sim:
+        """Inverse of ``_framing_vec`` for one row."""
+        s = float(math.exp(v[2])) if log_scale else float(v[2])
+        th = float(v[3])
+        c, sn = math.cos(math.radians(th)), math.sin(math.radians(th))
+        return Sim(s, th, float(v[0] - s * (c * pref[0] - sn * pref[1])), float(v[1] - s * (sn * pref[0] + c * pref[1])))
+
+    @staticmethod
+    def _line(ks: np.ndarray, V: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Least-squares line V(t) = a + b t through the rows (one row: constant)."""
+        if len(ks) < 2:
+            return V[0].astype(np.float64).copy(), np.zeros(V.shape[1])
+        A = np.c_[np.ones(len(ks)), np.asarray(ks, np.float64)]
+        coef, *_ = np.linalg.lstsq(A, V, rcond=None)
+        return coef[0], coef[1]
+
     def transform_steps(self, r0: int, r1: int) -> list[int]:
-        """Comp frames k (cut before k) where the framing steps inside a MATCH run (punch-in)."""
+        """Comp frames k (cut before k) where the framing STEPS inside a MATCH run (punch-in / reframe; FX-06 4).
+
+        The per-frame increments of the framing (box-centre pre-image position, log scale, rotation) minus the
+        median of the 2 x 2 framing_sample_step increments around them -- a pan's own velocity and a velocity knot
+        cancel, so the speed of a pan never hides a step (the S60 1-frame snap-back inside a 0.92 px/frame pan
+        did) -- are 'fast' above
+        punch_*_step / (2 framing_sample_step) per frame. For every fast stretch [ka, kb] of at most
+        2 framing_sample_step frames the linear trends of up to framing_sample_step + 1 frames on each side,
+        EXTRAPOLATED across it (never held), must differ by more than punch_pos_step px or punch_scale_step
+        everywhere in between (trends that meet inside the stretch are a velocity change). The step is then
+        localised and confirmed by the pixels (``_localise_step``): confirmed steps are returned (cuts),
+        unconfirmed ones are only DP candidates (``soft_steps``)."""
         F, cfg = self.F, self.cfg
         idx = np.arange(r0, r1)
         good = np.isfinite(F.s[idx]) & (F.s[idx] > 0)
@@ -1047,13 +1149,21 @@ class _Builder:
             return []
         thr_s = float(_cfg(cfg, "punch_scale_step", 0.01))
         thr_p = float(_cfg(cfg, "punch_pos_step", 4.0))
-        W = 2 * int(_cfg(cfg, "framing_sample_step", 3))
-        ds, dp = self._change(idx[:-1], idx[1:])
-        span = np.maximum(idx[1:] - idx[:-1], 1)
-        fast = (ds / span > thr_s / W) | (dp / span > thr_p / W)
+        fs = max(1, int(_cfg(cfg, "framing_sample_step", 3)))
+        W, L = 2 * fs, fs + 1
+        V, pref = self._framing_vec(idx)
+        span = np.maximum(np.diff(idx), 1).astype(np.float64)
+        dV = np.diff(V, axis=0) / span[:, None]
+        m = dV.shape[0]
+        med = np.empty_like(dV)
+        for i in range(m):        # +-W increments: a step spread over up to W frames stays a minority
+            med[i] = np.median(dV[max(0, i - W):min(m, i + W + 1)], axis=0)
+        e = dV - med
+        exc_p = np.hypot(e[:, 0], e[:, 1]) + np.abs(np.radians(e[:, 3])) * self.box_r
+        exc_s = np.abs(np.expm1(e[:, 2]))
+        fast = (exc_s > thr_s / W) | (exc_p > thr_p / W)
         steps: list[int] = []
         i = 0
-        m = fast.size
         while i < m:
             if not fast[i]:
                 i += 1
@@ -1061,49 +1171,104 @@ class _Builder:
             j = i
             while j + 1 < m and fast[j + 1]:
                 j += 1
-            ka, kb = int(idx[i]), int(idx[j + 1])      # Sims before / after the fast stretch
-            tds, tdp = self._change(np.array([ka]), np.array([kb]))
-            if (tds[0] > thr_s or tdp[0] > thr_p) and (kb - ka) <= W:
-                cut = self._localise_step(ka, kb, float(tds[0]), float(tdp[0]))
-                steps.append(cut)
+            ia, ib = i, j + 1                            # index of the last frame before / first after the stretch
+            ka, kb = int(idx[ia]), int(idx[ib])
             i = j + 1
+            if kb - ka > W:
+                continue                                 # a slow change is animation, not a step
+            left, right = slice(max(0, ia - L + 1), ia + 1), slice(ib, ib + L)
+            lineA = self._line(idx[left], V[left])
+            lineB = self._line(idx[right], V[right])
+            # how well each side follows its own trend: a jump must stand out of that noise (3x) -- two wrong,
+            # alternating tracks (the confound) never make a step
+            res_p, res_s = 0.0, 0.0
+            for sl, (la, lb) in ((left, lineA), (right, lineB)):
+                R_ = V[sl] - (la + np.outer(idx[sl], lb))
+                res_p = max(res_p, float(np.max(np.hypot(R_[:, 0], R_[:, 1]) + np.abs(np.radians(R_[:, 3])) * self.box_r)))
+                res_s = max(res_s, float(np.max(np.abs(np.expm1(R_[:, 2])))))
+            ts = np.linspace(ka, kb, 2 * (kb - ka) + 1)
+            D = (lineA[0] + np.outer(ts, lineA[1])) - (lineB[0] + np.outer(ts, lineB[1]))
+            dpos = np.hypot(D[:, 0], D[:, 1]) + np.abs(np.radians(D[:, 3])) * self.box_r
+            dsc = np.abs(np.expm1(D[:, 2]))
+            jump = np.maximum(dpos / max(thr_p, 3.0 * res_p), dsc / max(thr_s, 3.0 * res_s))
+            t = int(np.argmin(jump))
+            if jump[t] <= 1.0:
+                continue                                 # the trends meet inside the stretch: a velocity change
+            cut, ok = self._localise_step(ka, kb, lineA, lineB, pref, float(dsc[t]), float(dpos[t]), r0, r1)
+            if ok:
+                steps.append(cut)
+                self.hard_steps.add(cut)
+            else:
+                self.soft_steps.add(cut)
         return steps
 
-    def _localise_step(self, ka: int, kb: int, ds: float, dp: float) -> int:
-        """Cut position between frames ka (old framing) and kb (new framing): the first frame scored
-        better under the new transform by > 3 delta_k (DESIGN), else the Sim midpoint."""
+    def _localise_step(self, ka: int, kb: int, lineA: tuple, lineB: tuple, pref: np.ndarray, ds: float, dp: float,
+                       r0: int, r1: int) -> tuple[int, bool]:
+        """(cut, confirmed) of a framing step between frames ka (old framing) and kb (new framing). Both sides'
+        trends are EXTRAPOLATED over the frames around the stretch (simA / simB). With pixels every MATCH frame in
+        [ka - n + 1, kb + n) (n = step_confirm_frames) is scored under both on its own RAW frame: the cut is the
+        first frame after ka where the new framing wins by > 3 delta_k, CONFIRMED only when the old framing wins by
+        > 3 delta_k on the (up to n) scored frames before it and the new one on the (up to n) frames from it --
+        consecutive steps are validated too (FX-06 4). Without pixels the FrameMap decides (consecutive frames: the
+        cut is kb; a stretch: where half of the change is reached). Only the transition frames (ka, cut) lose their
+        Sims (``unreliable_sim``); frames [cut, kb) are measured again (``step_after``: their ECC inits)."""
         F = self.F
-        if kb == ka + 1:
-            cut = kb
-            how = "consecutive_step"
-        else:
-            cut = None
-            how = "sim_midpoint"
-            simA, simB = F.sim(ka), F.sim(kb)
-            if self.P.ok and simA is not None and simB is not None:
-                for k in range(ka, kb + 1):
-                    j = int(F.raw[k])
-                    if j < 0:
-                        continue
-                    sc = self.P.zncc_set(k, [(j, simA, bool(F.flip[k])), (j, simB, bool(F.flip[k]))])
-                    if sc is None or not np.all(np.isfinite(sc)):
-                        continue
-                    if sc[1] > sc[0] + 3.0 * F.delta[k]:
-                        cut, how = k, "scored_both_transforms"
-                        break
-            if cut is None:
+        nb = max(1, int(_cfg(self.cfg, "step_confirm_frames", 2)))
+        flip = bool(F.flip[ka])
+
+        def simA(f: float) -> Sim:
+            return self._vec_sim(lineA[0] + lineA[1] * f, pref)
+
+        def simB(f: float) -> Sim:
+            return self._vec_sim(lineB[0] + lineB[1] * f, pref)
+        ev: dict = {"from": ka, "to": kb, "d_scale": ds, "d_pos_px": dp}
+        if not self.P.ok:
+            confirmed = True
+            if kb == ka + 1:
+                cut, how = kb, "consecutive_step"
+            else:
+                how = "sim_midpoint"
                 thr_s = float(_cfg(self.cfg, "punch_scale_step", 0.01))
                 thr_p = float(_cfg(self.cfg, "punch_pos_step", 4.0))
                 ks_ = np.arange(ka, kb + 1)
+                ks_ = ks_[np.isfinite(F.s[ks_]) & (F.s[ks_] > 0)]
                 ds_, dp_ = self._change(np.full(ks_.size, ka), ks_)
                 prog = ds_ / thr_s + dp_ / thr_p
                 tot = max(float(prog[-1]), 1e-12)
                 cut = next((int(k) for k, p_ in zip(ks_, prog) if p_ / tot >= 0.5), kb)
                 cut = max(ka + 1, min(kb, cut))
-        self.unreliable_sim.update(range(ka + 1, kb))
-        self.log("transform_step", comp_frame=int(cut), evidence={"from": ka, "to": kb, "d_scale": ds,
-                                                                   "d_pos_px": dp, "method": how})
-        return int(cut)
+            how += " (no pixels: FrameMap only)"
+        else:
+            rows: dict[int, tuple[float, float]] = {}
+            for f in range(max(r0, ka - nb + 1), min(r1, kb + nb)):
+                if F.status[f] != Status.MATCH or F.raw[f] < 0 or bool(F.flip[f]) != flip:
+                    continue
+                sc = self.P.zncc_set(f, [(int(F.raw[f]), simA(f), flip), (int(F.raw[f]), simB(f), flip)])
+                if sc is None or not np.all(np.isfinite(sc)):
+                    continue
+                rows[f] = (float(sc[0]), float(sc[1]))
+            ev["scores"] = {str(f): [round(a_, 6), round(b_, 6)] for f, (a_, b_) in sorted(rows.items())}
+            cut = next((f for f in sorted(rows) if ka < f <= kb and rows[f][1] - rows[f][0] > 3.0 * F.delta[f]), None)
+            if cut is None:
+                confirmed, how = False, "not_confirmed: the new framing never wins by > 3 delta"
+                cut = kb
+            else:
+                before = [f for f in sorted(rows) if f < cut][-nb:]
+                after = [f for f in sorted(rows) if f >= cut][:nb]
+                confirmed = bool(before) and bool(after) and \
+                    all(rows[f][0] - rows[f][1] > 3.0 * F.delta[f] for f in before) and \
+                    all(rows[f][1] - rows[f][0] > 3.0 * F.delta[f] for f in after)
+                how = "scored_both_transforms" if confirmed else \
+                    "not_confirmed: the old framing does not win before the step or the new one after it"
+        ev["method"] = how
+        if confirmed:
+            self.unreliable_sim.update(range(ka + 1, cut))
+            for f in range(cut, kb):
+                self.step_after[f] = [simB(f), simA(f)]
+            self.log("transform_step", comp_frame=int(cut), evidence=ev)
+        else:
+            self.log("transform_step_unconfirmed", comp_frame=int(cut), evidence=ev)
+        return int(cut), bool(confirmed)
 
     def match_subruns(self, r0: int, r1: int) -> list[tuple[int, int]]:
         F = self.F
@@ -1264,6 +1429,10 @@ class _Builder:
             if F.track[k] != F.track[k - 1]:
                 cands.add(k)
         cands.update(self._audio_steps(r0, r1))
+        # framing steps the pixels did not confirm are candidates only (FX-04 1): a cut there must be bought by
+        # the time evidence like any other
+        cands.update(c for c in self.soft_steps if r0 < c < r1)
+        cands.update(c for c in self.scene_changes if r0 < c < r1)     # PySceneDetect changes (FX-06 6)
         return sorted(c for c in cands if r0 <= c <= r1)
 
     def _audio_steps(self, r0: int, r1: int) -> set[int]:
@@ -1341,9 +1510,13 @@ class _Builder:
         self.S._relax_cache[key] = r
         return r
 
+    def cut_cost(self, c: int) -> float:
+        """lambda_cut, + lambda_repeat_cut for a time cut between the two frames of a competitor REPEAT pair (FX-07:
+        both frames show the same image; soft evidence -- a cut there must be bought by more time evidence)."""
+        return self.S.l_cut + (float(_cfg(self.cfg, "lambda_repeat_cut", 1.0)) if self.F.repeat_pair(c) else 0.0)
+
     def dp_run(self, r0: int, r1: int) -> list[_Seg]:
         P = self.candidates(r0, r1)
-        lam = self.S.l_cut
         max_fail = int(_cfg(self.cfg, "dp_max_consecutive_fail", 6))
         # best[p] = (cost, q, model, number of segments); equal costs (1e-9) -> fewer segments (a constant
         # non-snap speed whose regular 1-frame steps could also be read as equally many 1-frame jump cuts)
@@ -1355,7 +1528,7 @@ class _Builder:
             for qi in range(pi - 1, -1, -1):
                 q = P[qi]
                 prev, _pq, _pm, pn = best.get(q, (math.inf, None, None, 0))
-                lamq = lam if q > r0 else 0.0
+                lamq = self.cut_cost(q) if q > r0 else 0.0
                 bound = (bc - prev - lamq + 2e-9) if math.isfinite(prev) else -math.inf
                 if bound < 0.0 and ("r", q, p, self.S.dominant) not in self.S._cache:
                     # nothing in [q, p) can improve p: skip the fit (counted as feasible, so the streak of
@@ -1494,107 +1667,305 @@ class _Builder:
         return ps.feasible_speed_range(ks[keep], plo, phi, comp_in, self.cf, self.rf)
 
     # ---------------------------------------------------------------------------------------------
-    # framing
+    # framing (FX-06): consistent (RAW frame, Sim) samples -> constant or measured AE-linear keys
     # ---------------------------------------------------------------------------------------------
-    def framing(self, seg: _Seg, force: bool = False) -> dict:
-        if seg.framing is not None and not force and seg.framing.get("_range") == (seg.a, seg.b):
-            return seg.framing
-        F, cfg = self.F, self.cfg
-        ks = [k for k in range(seg.a, seg.b) if F.status[k] == Status.MATCH and bool(F.flip[k]) == seg.flip
-              and F.sim(k) is not None]
-        if any(k not in self.unreliable_sim for k in ks):
-            ks = [k for k in ks if k not in self.unreliable_sim]
-        if not ks:
-            # nearest frame with a transform (placeholder-adjacent tiny segments)
-            near = [k for k in range(max(0, seg.a - 30), min(self.n, seg.b + 30))
-                    if F.sim(k) is not None and bool(F.flip[k]) == seg.flip]
-            ks = sorted(near, key=lambda k: abs(k - seg.a))[:1]
-        if not ks:
-            fr = {"transform": Sim.identity().to_dict(), "keys": [], "easing": "linear", "animated": False,
-                  "_range": (seg.a, seg.b), "notes": ["no transform measured"]}
-            seg.framing = fr
-            return fr
-        step = max(1, int(_cfg(cfg, "framing_sample_step", 3)))
-        samp = ks[::step]
-        if samp[-1] != ks[-1]:
-            samp.append(ks[-1])
-        idx = np.array(samp)
-        s, th, tx, ty = self._sim_arrays(idx)
-        sim0 = Sim(float(np.median(s)), float(np.median(th)), float(np.median(tx)), float(np.median(ty)))
-        # visible reference point: the RAW point at the box centre under the median Sim
-        pref = sim0.inverse().apply([self.center])[0]
-        c, sn = np.cos(np.radians(th)), np.sin(np.radians(th))
-        Px = s * (c * pref[0] - sn * pref[1]) + tx
-        Py = s * (sn * pref[0] + c * pref[1]) + ty
-        s_spread = float((s.max() - s.min()) / np.median(s))
-        p_spread = float(max(np.ptp(Px), np.ptp(Py)) + np.radians(np.ptp(th)) * self.box_r)
+    def _model_key(self, seg: _Seg) -> tuple | None:
+        m = seg.model
+        if m is None:
+            return None
+        ri = m.sol.get("raw_in", float("nan")) if m.sol else float("nan")
+        return (round(float(ri), 9) if math.isfinite(ri) else None, float(m.v), int(m.comp_in))
+
+    def _remeasure(self, k: int, j: int, flip: bool, inits: Sequence[Sim | None]) -> tuple[Sim, float] | None:
+        """Framing of RAW j on comp frame k measured by ECC (refine.ecc_measure: coarse-to-fine, every init a start):
+        (Sim, masked ZNCC on this module's scorer) of a converged result, None without pixels / convergence."""
+        inits = [s for s in inits if s is not None and math.isfinite(s.s) and s.s > 0]
+        if not self.P.ok or not inits or not (0 <= k < self.n) or getattr(self.comp, "frames", None) is None \
+                or getattr(self.raw, "frames", None) is None or not self.raw.has(int(j)):
+            return None
+        key = (int(k), int(j), bool(flip), tuple((round(s.s, 6), round(s.theta_deg, 4), round(s.tx, 2), round(s.ty, 2))
+                                                 for s in inits))
+        if key in self._ecc:
+            return self._ecc[key]
+        from .refine import ecc_measure
+        out = None
+        try:
+            r = ecc_measure(np.asarray(self.comp.get(int(k))), np.asarray(self.raw.get(int(j))), inits[0], bool(flip),
+                            self.P.raw_w, tuple(self.raw.ratio), tuple(self.comp.ratio), self.P.allowed(int(k)), self.cfg,
+                            roi=self.P.roi, starts=inits[1:])
+            # the best-scoring of the ECC optimum and the inits (an exact init is not moved by ECC: 'not converged');
+            # accepted when ECC converged or the framing matches the frame (>= match_thresh - anchor_zncc_slack)
+            cands = [r.sim] + inits
+            z = self.P.zncc_set(int(k), [(int(j), s, bool(flip)) for s in cands])
+            if z is not None and np.isfinite(z).any():
+                i = int(np.nanargmax(z))
+                thr = float(_cfg(self.cfg, "match_thresh", 0.9)) - float(_cfg(self.cfg, "anchor_zncc_slack", 0.05))
+                if (r.converged and i == 0) or float(z[i]) >= thr:
+                    out = (cands[i], float(z[i]))
+        except Exception as e:  # noqa: BLE001 - a failed measurement is 'no measurement', never fatal
+            log.debug("segment: ECC re-measurement of k=%d j=%d failed: %s", k, j, e)
+        self._ecc[key] = out
+        return out
+
+    def _framing_samples(self, seg: _Seg) -> tuple[list[tuple[int, Sim, int]], dict]:
+        """(k, Sim, RAW frame shown) framing samples of a segment and {'remeasured', 'dropped', 'conflict'} frames.
+
+        Where the segment shows the RAW frame refine measured (or one visually identical to it) the sample is refine's
+        per-frame measurement (sim_meas; the path value when the ECC fell back). A frame the segment RE-ASSIGNS to
+        another RAW frame carries a Sim fitted to that other frame (FX-06 1: the merge at 1444 imported 2066's Sim onto
+        2064, ZNCC 0.685): it is measured again by ECC on the shown frame (inits: the path, the trend of the samples
+        so far), else left out -- and when its own frame still wins by > 3 delta_k it is a 'conflict' (evidence that
+        the segment's time model is wrong there). Frames after a localised framing step inside its stretch are
+        measured again the same way; transition frames before it are left out."""
+        F = self.F
+        has = seg.model is not None and math.isfinite(seg.model.sol.get("raw_in", float("nan"))
+                                                       if seg.model.sol else float("nan"))
+        out: list[tuple[int, Sim, int]] = []
+        info: dict[str, list] = {"remeasured": [], "dropped": [], "conflict": []}
+        for k in range(seg.a, seg.b):
+            if F.status[k] != Status.MATCH or bool(F.flip[k]) != seg.flip or k in self.unreliable_sim:
+                continue
+            j = int(self.pred(seg, k)) if has else int(F.raw[k])
+            own = bool(F.raw_lo[k] <= j <= F.raw_hi[k])
+            meas = F.measured(k) if own else None
+            if own and k not in self.step_after:
+                s = meas or F.sim(k)
+                if s is not None:
+                    out.append((k, s, j))
+                continue
+            if meas is not None:                       # after a step: refine's own per-frame measurement
+                out.append((k, meas, j))
+                continue
+            inits: list[Sim | None] = list(self.step_after.get(k, []))
+            if len(out) >= 2 and out[-1][0] - out[-2][0] > 0:      # previous sample + its velocity
+                (k1, s1, _), (k0, s0, _) = out[-1], out[-2]
+                u = (k - k1) / float(k1 - k0)
+                inits.append(Sim(s1.s + u * (s1.s - s0.s), s1.theta_deg + u * (s1.theta_deg - s0.theta_deg),
+                                 s1.tx + u * (s1.tx - s0.tx), s1.ty + u * (s1.ty - s0.ty)))
+            elif out:
+                inits.append(out[-1][1])
+            inits.append(F.sim(k))
+            r = self._remeasure(k, j, seg.flip, inits)
+            if r is None:
+                info["dropped"].append(k)
+                continue
+            out.append((k, r[0], j))
+            info["remeasured"].append(k)
+            if not own and F.sim(k) is not None and F.raw[k] >= 0:
+                z = self.P.zncc_set(k, [(int(F.raw[k]), F.measured(k) or F.sim(k), seg.flip)])
+                if z is not None and math.isfinite(float(z[0])) and float(z[0]) > r[1] + 3.0 * F.delta[k]:
+                    info["conflict"].append(k)
+        return out, info
+
+    @staticmethod
+    def _lsq_keys(t: np.ndarray, V: np.ndarray, knots: Sequence[int]) -> np.ndarray:
+        """Least-squares values at the knot samples of the piecewise-linear (AE-linear) curve through V(t)."""
+        T = t[list(knots)]
+        n, m = len(t), len(T)
+        A = np.zeros((n, m))
+        i = np.clip(np.searchsorted(T, t, side="right") - 1, 0, m - 2)
+        u = (t - T[i]) / (T[i + 1] - T[i])
+        A[np.arange(n), i] = 1.0 - u
+        A[np.arange(n), i + 1] += u
+        coef, *_ = np.linalg.lstsq(A, V, rcond=None)
+        return coef
+
+    def _rotation_test(self, tk: np.ndarray, jk: Sequence[int], knot_t: np.ndarray, keysV: np.ndarray,
+                       pref: np.ndarray, flip: bool) -> tuple[bool, str]:
+        """Rotation by a pixel test, not a vote (FX-06 5): up to 8 sample frames scored under the fitted keys and
+        under the same keys with theta = 0 (derotated about the box-centre pre-image); the rotation is kept only
+        when it wins by > 3 soft_delta_max on most of them."""
+        dmax = float(_cfg(self.cfg, "soft_delta_max", 0.01))
+        k0V = keysV.copy()
+        k0V[:, 3] = 0.0
+        pick = np.unique(np.linspace(0, len(tk) - 1, min(8, len(tk))).round().astype(int))
+        wins = scored = 0
+        for i in pick:
+            k = int(tk[i])
+            vr = np.array([np.interp(k, knot_t, keysV[:, c]) for c in range(4)])
+            v0 = np.array([np.interp(k, knot_t, k0V[:, c]) for c in range(4)])
+            sc = self.P.zncc_set(k, [(int(jk[i]), self._vec_sim(vr, pref, False), flip),
+                                     (int(jk[i]), self._vec_sim(v0, pref, False), flip)])
+            if sc is None or not np.all(np.isfinite(sc)):
+                continue
+            scored += 1
+            wins += int(float(sc[0]) - float(sc[1]) > 3.0 * dmax)
+        keep = scored > 0 and wins > scored / 2.0
+        return keep, f"rotation pixel test: theta wins on {wins}/{scored} sampled frames"
+
+    def _fit_framing(self, ks: np.ndarray, sims: list[Sim], js: Sequence[int], flip: bool) -> dict:
+        """Constant transform or AE-linear keys from per-frame samples (FX-06 2): samples off the local trend of their
+        neighbours removed (refine's outlier rule: a wrong-frame measurement), median-3 smoothed; knots by RDP at the
+        measured noise (>= rdp_pos_tol px / rdp_scale_tol / 0.05 deg), key values by least squares over the samples
+        (a step stays a step -- segmentation cuts there -- and a velocity knot stays a knot), then max-error
+        refinement: the worst sample further than the tolerance from the keys becomes a key until none is. The first
+        and last keys sit on the first and last sample. Rotation only when the pixels prefer it (``_rotation_test``)."""
+        from .refine import _local_line_dev, _running_median
+        cfg = self.cfg
+        V, pref = self._framing_vec(list(sims), log_scale=False)          # [Px, Py, s, theta]
+        t = np.asarray(ks, np.float64)
+        n = len(t)
+        s_med = float(np.median(V[:, 2]))
+        keep = np.ones(n, bool)
+        if n >= 4:
+            w = int(_cfg(cfg, "path_median", 5))
+            for c, floor in ((0, 1.0), (1, 1.0), (2, 0.002 * s_med), (3, 0.1)):
+                dev = _local_line_dev(t, V[:, c], w)
+                sig = 1.4826 * float(np.median(np.abs(dev)))
+                keep &= np.abs(dev) <= max(3.5 * sig, floor)
+            if keep.sum() < 2:
+                keep[:] = True
+        out_k = [int(k) for k in np.asarray(ks)[~keep]]
+        tk, Vk = t[keep], V[keep]
+        jk = [j for j, kp in zip(js, keep) if kp]
+        Vs = np.stack([_running_median(Vk[:, c], 3) for c in range(4)], axis=1)
+        # reference curve: the local least-squares line through each sample and its 2 + 2 neighbours (measurement
+        # noise -- correlated over the frames that show one RAW frame -- averages out, a velocity knot only rounds)
+        R = Vs.copy()
+        if len(tk) >= 5:
+            for i in range(len(tk)):
+                a = min(max(0, i - 2), len(tk) - 5)
+                a_, b_ = self._line(tk[a:a + 5], Vk[a:a + 5])
+                R[i] = a_ + b_ * tk[i]
+        # measurement noise: robust spread of the samples around the reference (white noise: residual std ~ 0.89
+        # sigma) and around the chord of their two neighbours (catches an alternation; ~ 1.22 sigma)
+        sig = np.zeros(4)
+        if len(tk) >= 3:
+            u = (tk[1:-1] - tk[:-2]) / (tk[2:] - tk[:-2])
+            r = Vk[1:-1] - (Vk[:-2] + u[:, None] * (Vk[2:] - Vk[:-2]))
+            sig = 1.4826 * np.median(np.abs(r), axis=0) / 1.2247
+        if len(tk) >= 5:
+            sig = np.maximum(sig, 1.4826 * np.median(np.abs(Vk - R), axis=0) / 0.8944)
+        s_spread = float(np.ptp(R[:, 2]) / s_med)          # spreads of the reference: measurement noise averaged
+        p_spread = float(max(np.ptp(R[:, 0]), np.ptp(R[:, 1])) + np.radians(np.ptp(R[:, 3])) * self.box_r)
         rot_min = float(_cfg(cfg, "rotation_min_deg", 0.2))
         stable = (s_spread < float(_cfg(cfg, "framing_scale_spread", 0.003))
                   and p_spread < float(_cfg(cfg, "framing_pos_spread", 1.5)))
-        notes = []
-        if stable or idx.size < 2:
-            t = self._derotate(sim0, pref, rot_min)
-            fr = {"transform": t.to_dict(), "keys": [], "easing": "linear", "animated": False}
+        notes: list[str] = []
+        if out_k:
+            notes.append(f"framing: {len(out_k)} sample(s) off the local trend of their neighbours left out "
+                         f"({_rng(out_k)})")
+        if stable or len(tk) < 2:
+            keysV = np.median(Vk, axis=0)[None, :]
+            knot_t = tk[:1]
         else:
-            # light smoothing: each interior sample -> least-squares line through it and its two neighbours
-            # evaluated at its time (exact for linear motion whatever the sample spacing), then RDP
-            tt = idx.astype(np.float64)
+            tol = np.array([max(float(_cfg(cfg, "rdp_pos_tol", 0.5)), 3.5 * sig[0]),
+                            max(float(_cfg(cfg, "rdp_pos_tol", 0.5)), 3.5 * sig[1]),
+                            max(float(_cfg(cfg, "rdp_scale_tol", 0.001)) * s_med, 3.5 * sig[2]),
+                            max(0.05, 3.5 * sig[3])])
+            knots = sorted(rdp(np.c_[tk, R], tol))
 
-            def sm(a: np.ndarray) -> np.ndarray:
-                if a.size < 3:
-                    return a.copy()
-                o = a.copy()
-                t3 = np.stack([tt[:-2], tt[1:-1], tt[2:]], axis=1)
-                y3 = np.stack([a[:-2], a[1:-1], a[2:]], axis=1)
-                tm, ym = t3.mean(axis=1, keepdims=True), y3.mean(axis=1, keepdims=True)
-                sl = ((t3 - tm) * (y3 - ym)).sum(axis=1) / np.maximum(((t3 - tm) ** 2).sum(axis=1), 1e-12)
-                o[1:-1] = ym[:, 0] + sl * (tt[1:-1] - tm[:, 0])
-                return o
-            s2, th2, Px2, Py2 = sm(s), sm(th), sm(Px), sm(Py)
-            pts = np.stack([idx.astype(np.float64), s2 / float(np.median(s)), Px2, Py2, th2], axis=1)
-            tol = [float(_cfg(cfg, "rdp_scale_tol", 0.001)), float(_cfg(cfg, "rdp_pos_tol", 0.5)),
-                   float(_cfg(cfg, "rdp_pos_tol", 0.5)), 0.05]
-            keep = rdp(pts, tol)
-            keys = []
-            use_rot = bool(np.max(np.abs(th2)) > rot_min)
-            for i in keep:
-                thi = float(th2[i]) if use_rot else 0.0
-                ci, si = math.cos(math.radians(thi)), math.sin(math.radians(thi))
-                sc = float(s2[i])
-                txi = float(Px2[i]) - sc * (ci * pref[0] - si * pref[1])
-                tyi = float(Py2[i]) - sc * (si * pref[0] + ci * pref[1])
-                keys.append({"comp_frame": int(idx[i]), "scale": float(sc), "rotation_deg": float(thi),
-                             "tx": float(txi), "ty": float(tyi)})
-            easing = _easing(idx, s2, Px2, Py2)
-            fr = {"transform": {k: keys[0][k] for k in ("scale", "rotation_deg", "tx", "ty")}, "keys": keys,
-                  "easing": easing, "animated": True}
-            notes.append(f"animated framing: {len(keys)} keys, scale {s.min():.4f}->{s.max():.4f}, easing {easing}")
+            def max_err(kn: list[int]) -> tuple[float, int, np.ndarray]:
+                kv = self._lsq_keys(tk, Vk, kn)
+                model = np.stack([np.interp(tk, tk[kn], kv[:, c]) for c in range(4)], axis=1)
+                err = np.max(np.abs(model - Vk) / tol, axis=1)
+                w_ = int(np.argmax(err))
+                return float(err[w_]), w_, kv
+            e_, wst, keysV = max_err(knots)
+            while e_ > 1.0 + 1e-9 and wst not in knots:
+                knots = sorted(set(knots) | {wst})
+                e_, wst, keysV = max_err(knots)
+            # knots the least-squares values made redundant (the reference rounds a velocity knot over a few
+            # frames): dropped while every sample stays within the tolerance
+            while len(knots) > 2:
+                trials = [(max_err(knots[:q] + knots[q + 1:]), q) for q in range(1, len(knots) - 1)]
+                (e2, _w2, kv2), q = min(trials, key=lambda t_: (t_[0][0], t_[1]))
+                if e2 > max(1.0, e_) + 1e-9:
+                    break
+                knots = knots[:q] + knots[q + 1:]
+                keysV = kv2
+            knot_t = tk[knots]
+        use_rot = bool(np.max(np.abs(Vs[:, 3])) > rot_min)
+        if use_rot and self.P.ok:
+            use_rot, how = self._rotation_test(tk, jk, knot_t, keysV, pref, flip)
+            notes.append(how + ("" if use_rot else ": rotation set to 0"))
+        if not use_rot:
+            keysV = keysV.copy()
+            keysV[:, 3] = 0.0
+        spread = {"scale": s_spread, "pos_px": p_spread}
+        if len(keysV) == 1:
+            t0 = self._vec_sim(keysV[0], pref, False)
+            return {"transform": t0.to_dict(), "keys": [], "easing": "linear", "animated": False, "notes": notes,
+                    "spread": spread}
+        keys = []
+        for tt, v in zip(knot_t, keysV):
+            sk = self._vec_sim(v, pref, False)
+            keys.append({"comp_frame": int(tt), "scale": float(sk.s), "rotation_deg": float(sk.theta_deg),
+                         "tx": float(sk.tx), "ty": float(sk.ty)})
+        easing = _easing(tk, Vs[:, 2], Vs[:, 0], Vs[:, 1])
+        notes.append(f"animated framing: {len(keys)} keys, scale {Vs[:, 2].min():.4f}->{Vs[:, 2].max():.4f}, "
+                     f"easing {easing}")
+        return {"transform": {k: keys[0][k] for k in ("scale", "rotation_deg", "tx", "ty")}, "keys": keys,
+                "easing": easing, "animated": True, "notes": notes, "spread": spread}
+
+    def framing(self, seg: _Seg, force: bool = False) -> dict:
+        """Framing of a raw segment (prompt 5.5, FX-06): samples from ``_framing_samples`` (consistent (RAW frame,
+        Sim) pairs), summarised by ``_fit_framing``. Every key is a measurement-backed value; frames the samples do
+        not reach at the segment's edges are reported (AE holds the edge key there), never extrapolated."""
+        key = (seg.a, seg.b, self._model_key(seg), bool(seg.flip))
+        if seg.framing is not None and not force and seg.framing.get("_key") == key:
+            return seg.framing
+        F = self.F
+        samples, info = self._framing_samples(seg)
+        notes: list[str] = []
+        if not samples:
+            # nearest frame with a transform (placeholder-adjacent tiny segments)
+            near = [k for k in range(max(0, seg.a - 30), min(self.n, seg.b + 30))
+                    if F.sim(k) is not None and bool(F.flip[k]) == seg.flip]
+            near = sorted(near, key=lambda k: abs(k - seg.a))[:1]
+            if near:
+                samples = [(near[0], F.measured(near[0]) or F.sim(near[0]), int(F.raw[near[0]]))]
+                notes.append(f"no measured framing inside the segment: frame {near[0]}'s used")
+        if not samples:
+            fr = {"transform": Sim.identity().to_dict(), "keys": [], "easing": "linear", "animated": False,
+                  "_range": (seg.a, seg.b), "_key": key, "notes": ["no transform measured"], "_samples": {}}
+            seg.framing = fr
+            return fr
+        ks = np.array([k for k, _, _ in samples], np.int64)
+        fr = self._fit_framing(ks, [s for _, s, _ in samples], [j for _, _, j in samples], seg.flip)
+        notes = notes + fr.pop("notes")
+        if info["remeasured"]:
+            notes.append(f"framing measured again on frames {_rng(info['remeasured'])} (RAW frame differs from "
+                         "refine's, or after a framing step)")
+        if info["dropped"]:
+            notes.append(f"framing not measurable on frames {_rng(info['dropped'])} (left out)")
+        if info["conflict"]:
+            notes.append(f"frames {_rng(info['conflict'])}: refine's own RAW frame still matches better than the "
+                         "segment's (re-measured) -- time model questionable there")
+            self.time_conflicts.update(info["conflict"])
+            self.log("framing_time_conflict", comp_range=[seg.a, seg.b], evidence={"frames": info["conflict"]})
+        match = [k for k in range(seg.a, seg.b) if F.status[k] == Status.MATCH and bool(F.flip[k]) == seg.flip]
+        if match and samples and (int(ks[0]) > match[0] or int(ks[-1]) < match[-1]):
+            held = [k for k in match if k < int(ks[0]) or k > int(ks[-1])]
+            notes.append(f"edge framing not measured on frames {_rng(held)} (the edge key is held there)")
         fr["_range"] = (seg.a, seg.b)
+        fr["_key"] = key
+        fr["_ks"] = [int(k) for k in ks]
         fr["notes"] = notes
-        fr["spread"] = {"scale": s_spread, "pos_px": p_spread}
+        fr["_samples"] = {int(k): (int(j), s) for k, s, j in samples if k in set(info["remeasured"])}
         seg.framing = fr
         return fr
 
-    @staticmethod
-    def _derotate(sim: Sim, pref: np.ndarray, rot_min: float) -> Sim:
-        """Zero a rotation below rot_min while keeping the box-centre pre-image fixed."""
-        if abs(sim.theta_deg) > rot_min:
-            return sim
-        p = sim.apply([pref])[0]
-        return Sim(sim.s, 0.0, float(p[0] - sim.s * pref[0]), float(p[1] - sim.s * pref[1]))
-
     def sim_at(self, seg: _Seg, k: int) -> Sim:
+        """The segment's framing at comp frame k: AE-linear between its keys; beyond the first / last key the edge
+        segment is EXTRAPOLATED for at most framing_sample_step frames (then held) -- a pan's framing held at its
+        last key lags v px per frame and makes every neighbour test (criterion 2, merges) unfair (FX-04 4)."""
         fr = self.framing(seg)
         if fr["keys"]:
-            raw_w, raw_h = self.raw.full_size
-            return interpolate_keys(fr["keys"], k, raw_w, raw_h)
+            from .refine import _sim_at
+            cap = max(1, int(_cfg(self.cfg, "framing_sample_step", 3)))
+            return _sim_at(fr["keys"], k, (float(self.raw.full_size[0]), float(self.raw.full_size[1])), cap)
         return Sim.from_dict(fr["transform"])
 
     # ---------------------------------------------------------------------------------------------
     # clean-up passes
     # ---------------------------------------------------------------------------------------------
     def _explains(self, seg: _Seg, k: int) -> tuple[bool, dict]:
-        """Does seg's model explain comp frame k (a frame currently outside / at the edge of seg)?"""
+        """Does seg's model explain comp frame k (a frame currently outside / at the edge of seg)? Its time line
+        extended and its framing EXTRAPOLATED (``sim_at``) and, with pixels, measured again on frame k by ECC from
+        there (FX-04 5: the held key of a pan lags v px per frame and always lost). Explained when the model's
+        frame scores within 3 delta_k of the frame's own (RAW frame, Sim); ev['own_wins'] = the own pair beats it by
+        more than 3 delta_k (positive evidence of a genuine flash cut), ev['score_model'] / ev['score_own']."""
         F = self.F
         j = int(self.pred(seg, k))
         ev: dict = {"k": k, "pred": j, "soft": [int(F.lo[k]), int(F.hi[k])]}
@@ -1606,14 +1977,23 @@ class _Builder:
         ev["deficit"] = dfc
         same_track = F.track[k] == seg.track
         if math.isfinite(dfc) and same_track:
+            ev["own_wins"] = bool(dfc > 5.0 * F.delta[k])
             return dfc <= 5.0 * F.delta[k], ev
         if self.P.ok:
-            own = F.sim(k)
+            own = F.measured(k) or F.sim(k)
             if own is not None and F.raw[k] >= 0:
-                sc = self.P.zncc_set(k, [(j, self.sim_at(seg, k), seg.flip), (int(F.raw[k]), own, bool(F.flip[k]))])
-                if sc is not None and np.all(np.isfinite(sc)):
-                    ev["score_model"], ev["score_own"] = float(sc[0]), float(sc[1])
-                    return bool(sc[0] >= sc[1] - 3.0 * F.delta[k]), ev
+                sm = self.sim_at(seg, k)
+                items = [(j, sm, seg.flip), (int(F.raw[k]), own, bool(F.flip[k]))]
+                r = self._remeasure(k, j, seg.flip, [sm, own])
+                if r is not None:
+                    items.append((j, r[0], seg.flip))
+                sc = self.P.zncc_set(k, items)
+                if sc is not None and np.all(np.isfinite(sc[:2])):
+                    zm = float(np.nanmax([sc[0]] + ([sc[2]] if r is not None else [])))
+                    ev["score_model"], ev["score_own"] = zm, float(sc[1])
+                    ev["framing"] = "re-measured" if r is not None and float(sc[2]) >= float(sc[0]) else "extrapolated"
+                    ev["own_wins"] = bool(sc[1] > zm + 3.0 * F.delta[k])
+                    return bool(zm >= sc[1] - 3.0 * F.delta[k]), ev
         return False, ev
 
     def _widen(self, k: int, j: int, why: str) -> None:
@@ -1622,10 +2002,26 @@ class _Builder:
         F.hi[k] = max(F.hi[k], j)
         F.touched[k] = why
 
+    def _score_model(self, S: _Seg, k: int) -> float:
+        """Score of comp frame k under S's model: its RAW frame with the framing extrapolated / interpolated by the
+        keys and, with pixels, measured again by ECC from there (the better of the two)."""
+        j = int(self.pred(S, k))
+        sm = self.sim_at(S, k)
+        z = self._frame_score(S, k)
+        r = self._remeasure(k, j, S.flip, [sm])
+        if r is not None and (not math.isfinite(z) or r[1] > z):
+            return r[1]
+        return z
+
     def merge_tiny(self, segs: list[_Seg]) -> list[_Seg]:
-        """1-2 frame raw segments: merge into a neighbour whose model explains them (matching error),
-        otherwise keep them as verified flash cuts."""
+        """1-2 frame raw segments: merged into a neighbour whose model explains them (``_explains``: the neighbour's
+        time line with its framing extrapolated / re-measured), re-checked AFTER the merged segment's refit (a frame
+        that now scores more than 3 delta_k below the check reverts the merge, FX-06 1). The others are logged
+        'flash_cut_verified' only when every frame's own (RAW frame, Sim) beats each adjacent neighbour's model by
+        more than 3 delta_k; else 'flash_cut_unverified' (segment uncertain, noted). Islands next to a NONE /
+        uniform run are reported for the not-in-RAW resolver (FX-08)."""
         changed = True
+        checks: dict[int, list] = {}        # id(tiny) -> the explains evidence of its neighbours
         while changed:
             changed = False
             for i, t in enumerate(segs):
@@ -1644,6 +2040,8 @@ class _Builder:
                         continue
                     if (side < 0 and nb.b != t.a) or (side > 0 and nb.a != t.b):
                         continue
+                    if (t.a if side < 0 else t.b) in self.hard_steps:
+                        continue            # a confirmed framing step is a cut (FX-06): never merged across
                     if not self._same_period(min(nb.a, t.a), max(nb.b, t.b)) and \
                             not self._framing_close(t, nb):
                         # a 1-2 frame sliver across a layout period boundary is merged only into a neighbour with
@@ -1651,56 +2049,103 @@ class _Builder:
                         # period split stands (D1)
                         continue
                     res = [self._explains(nb, k) for k in range(t.a, t.b)]
+                    checks.setdefault(id(t), []).append({"neighbour": [nb.a, nb.b], "checks": [r[1] for r in res]})
                     if all(r[0] for r in res):
                         trial = _Seg("raw", min(nb.a, t.a), max(nb.b, t.b), model=nb.model, flip=nb.flip,
                                      track=nb.track, extra=dict(nb.extra))
                         saved = {k: (int(self.F.lo[k]), int(self.F.hi[k])) for k in range(t.a, t.b)}
                         for k in range(t.a, t.b):
                             self._widen(k, int(self.pred(nb, k)), "tiny_segment_merged")
-                        if self.refit(trial, keep_v=True):
+                        ok = self.refit(trial, keep_v=True)
+                        drop = []
+                        if ok and self.P.ok:
+                            # the refit (new phase, new framing fit) must keep explaining the merged frames
+                            for k, r in zip(range(t.a, t.b), res):
+                                z0 = r[1].get("score_model")
+                                if z0 is not None and math.isfinite(z0):
+                                    z1 = self._score_model(trial, k)
+                                    if not math.isfinite(z1) or z1 < z0 - 3.0 * self.F.delta[k]:
+                                        drop.append({"k": k, "checked": z0, "after_refit": z1})
+                        if ok and not drop:
                             self.log("merge_tiny_segment", comp_range=[t.a, t.b], evidence={
                                 "into": [nb.a, nb.b], "checks": [r[1] for r in res]})
                             segs[min(i, ni)] = trial
                             del segs[max(i, ni)]
                             changed = True
                             break
+                        if drop:
+                            self.log("merge_tiny_reverted", comp_range=[t.a, t.b], evidence={
+                                "into": [nb.a, nb.b], "frames": drop})
                         for k, (lo, hi) in saved.items():
                             self.F.lo[k], self.F.hi[k] = lo, hi
                             self.F.touched.pop(k, None)
                 if changed:
                     break
-        for t in segs:
-            if t.kind == "raw" and t.length <= 2:
-                self.log("flash_cut_verified", comp_range=[t.a, t.b], evidence={
-                    "speed": t.model.v, "raw": [int(self.F.raw[k]) for k in range(t.a, t.b)],
-                    "score": [float(self.F.score[k]) for k in range(t.a, t.b)]})
+        for i, t in enumerate(segs):
+            if t.kind != "raw" or t.length > 2:
+                continue
+            ev = {"speed": t.model.v, "raw": [int(self.F.raw[k]) for k in range(t.a, t.b)],
+                  "score": [float(self.F.score[k]) for k in range(t.a, t.b)], "neighbours": checks.get(id(t), [])}
+            nbs = [segs[i + d] for d in (-1, 1) if 0 <= i + d < len(segs)
+                   and (segs[i + d].b == t.a if d < 0 else segs[i + d].a == t.b)]
+            if any(nb.kind in ("none", "uniform") for nb in nbs):
+                self.log("tiny_island_next_to_none", comp_range=[t.a, t.b], evidence=ev)
+                t.notes.append(f"{t.length}-frame island next to an unmatched run: left for the not-in-RAW resolver")
+            raw_nbs = [c for c in ev["neighbours"]]
+            verified = bool(raw_nbs) and all(all(c.get("own_wins") for c in nbc["checks"]) for nbc in raw_nbs)
+            if verified:
+                self.log("flash_cut_verified", comp_range=[t.a, t.b], evidence=ev)
+            else:
+                self.log("flash_cut_unverified", comp_range=[t.a, t.b], evidence=ev)
+                if raw_nbs:
+                    t.uncertain = True
+                    t.notes.append(f"{t.length}-frame segment kept but not verified as a flash cut: its own RAW frame "
+                                   "does not beat the neighbours' time line by more than the noise")
         return segs
 
+    def _sim_change(self, a: Sim, b: Sim) -> tuple[float, float]:
+        """(|scale ratio - 1|, box-centre displacement px incl. rotation at the box edge) between two framings."""
+        dp = float(self._centre_shift(a.s, a.theta_deg, a.tx, a.ty, b.s, b.theta_deg, b.tx, b.ty))
+        dp += abs(math.radians(b.theta_deg - a.theta_deg)) * self.box_r
+        return abs(b.s / a.s - 1.0), dp
+
+    def _framing_jump(self, A: _Seg, B: _Seg) -> tuple[float, float] | None:
+        """(scale, position px) jump of the framing at the boundary A|B: the longer side's framing EXTRAPOLATED
+        across the boundary (FX-04 4: never held) against the other side's framing at its measured sample nearest
+        to the boundary (a short side's constant framing is only known there). None when a side has no measured
+        framing."""
+        fa, fb = self.framing(A), self.framing(B)
+        if not fa.get("_ks") or not fb.get("_ks"):
+            return None
+        if A.length >= B.length:
+            k = min(fb["_ks"])
+            return self._sim_change(self.sim_at(A, k), self.sim_at(B, k))
+        k = max(fa["_ks"])
+        return self._sim_change(self.sim_at(B, k), self.sim_at(A, k))
+
     def _framing_close(self, t: _Seg, nb: _Seg) -> bool:
-        """The measured framing of tiny segment t matches its neighbour nb at their common boundary."""
-        it = [k for k in range(t.a, t.b) if self.F.sim(k) is not None]
-        side = range(nb.b - 1, nb.a - 1, -1) if nb.b <= t.a else range(nb.a, nb.b)
-        ib = [k for k in side if self.F.sim(k) is not None][:1]
-        if not it or not ib or t.flip != nb.flip:
+        """The framing of tiny segment t matches its neighbour nb's (extrapolated) at their common boundary."""
+        if t.flip != nb.flip or t.kind != "raw" or nb.kind != "raw":
             return False
-        ds, dp = self._change(np.array(it[:1]), np.array(ib))
-        return bool(ds[0] <= float(_cfg(self.cfg, "punch_scale_step", 0.01))
-                    and dp[0] <= float(_cfg(self.cfg, "punch_pos_step", 4.0)))
+        A, B = (nb, t) if nb.b <= t.a else (t, nb)
+        j = self._framing_jump(A, B)
+        return bool(j is not None and j[0] <= float(_cfg(self.cfg, "punch_scale_step", 0.01))
+                    and j[1] <= float(_cfg(self.cfg, "punch_pos_step", 4.0)))
 
     def _compatible(self, A: _Seg, B: _Seg) -> bool:
+        """Same flip, same layout period and no framing step at the boundary (``_framing_jump`` within
+        punch_scale_step / punch_pos_step)."""
         if A.kind != "raw" or B.kind != "raw" or A.flip != B.flip:
             return False
         if not self._same_period(min(A.a, B.a), max(A.b, B.b)):
             return False            # D1: never merge across a layout period boundary
-        ka, kb = A.b - 1, B.a
-        ia = [k for k in range(A.b - 1, A.a - 1, -1) if self.F.sim(k) is not None][:1]
-        ib = [k for k in range(B.a, B.b) if self.F.sim(k) is not None][:1]
-        if not ia or not ib:
+        if A.b == B.a and B.a in self.hard_steps:
+            return False            # a framing step the pixels confirmed (FX-06)
+        j = self._framing_jump(A, B)
+        if j is None:
             return True
-        ds, dp = self._change(np.array(ia), np.array(ib))
-        del ka, kb
-        return bool(ds[0] <= float(_cfg(self.cfg, "punch_scale_step", 0.01))
-                    and dp[0] <= float(_cfg(self.cfg, "punch_pos_step", 4.0)))
+        return bool(j[0] <= float(_cfg(self.cfg, "punch_scale_step", 0.01))
+                    and j[1] <= float(_cfg(self.cfg, "punch_pos_step", 4.0)))
 
     def merge_adjacent(self, segs: list[_Seg]) -> list[_Seg]:
         """Merge adjacent compatible raw segments when one model explains both more cheaply."""
@@ -1711,7 +2156,7 @@ class _Builder:
                 trial = _Seg("raw", A.a, B.b, model=A.model, flip=A.flip, track=A.track,
                              extra={**A.extra, **B.extra})
                 if self.refit(trial, keep_v=False) and \
-                        trial.model.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut - 1e-9:
+                        trial.model.cost <= self.seg_cost(A) + self.seg_cost(B) + self.cut_cost(B.a) - 1e-9:
                     self.log("merge_adjacent", comp_range=[A.a, B.b], evidence={
                         "costs": [self.seg_cost(A), self.seg_cost(B), trial.model.cost], "speed": trial.model.v})
                     segs[i:i + 2] = [trial]
@@ -1751,7 +2196,7 @@ class _Builder:
                 changed, fixed = self._cut_evidence(A, B, m)
                 if changed < int(_cfg(self.cfg, "phase_cut_min_frames", 6)) or fixed < 0.75 * changed:
                     extra = min(self.S.l_phase, max(0.0, m.data - A.model.data - B.model.data))
-            if m is not None and m.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut + extra - 1e-9:
+            if m is not None and m.cost <= self.seg_cost(A) + self.seg_cost(B) + self.cut_cost(B.a) + extra - 1e-9:
                 trial.model = m
                 for k in m.drops:   # later refits use the isolated-only rule: fold the runs into the ranges
                     self._widen(k, int(self.pred(trial, k)), "continuous_merge")
@@ -1854,12 +2299,20 @@ class _Builder:
                 i += 1
                 continue
             acc = []
+            sims: dict[int, Sim] = {}
             for k in range(N.a, N.b):
                 j = int(self.pred(trial, k))
                 sim = self.sim_at(trial, k)
                 sc = self.P.zncc_set(k, [(j, sim, trial.flip)])
                 if sc is not None and math.isfinite(sc[0]) and sc[0] >= thr:
                     acc.append((k, j, j, "single", float(sc[0]), j))
+                    sims[k] = sim
+                    continue
+                # the neighbours' framing measured again on this frame (FX-04 7), from the interpolated one
+                r = self._remeasure(k, j, trial.flip, [sim])
+                if r is not None and r[1] >= thr:
+                    acc.append((k, j, j, "single_remeasured", float(r[1]), j))
+                    sims[k] = r[0]
                     continue
                 ok = False
                 for j0 in (j - 1, j):
@@ -1868,6 +2321,7 @@ class _Builder:
                             and 0.1 < bf["alpha_a"] < 0.9:
                         heavier = j0 if bf["alpha_a"] >= 0.5 else j0 + 1
                         acc.append((k, j0, j0 + 1, "blend", float(bf["zfit"]), heavier))
+                        sims[k] = sim
                         ok = True
                         break
                 if not ok:
@@ -1884,6 +2338,7 @@ class _Builder:
                 F.track[k] = trial.track
                 F.low_margin[k] = True
                 F.touched[k] = f"none_absorbed_{how}"
+                F.s[k], F.theta[k], F.tx[k], F.ty[k] = sims[k].s, sims[k].theta_deg, sims[k].tx, sims[k].ty
                 if how == "blend":
                     trial.blend_frames.append(k)
             self.refit(trial, keep_v=True)
@@ -2272,7 +2727,7 @@ class _Builder:
                     for k in m.drops:
                         self._widen(k, int(self.pred(trial, k)), "phantom_cut_merge")
                     ok = self.refit(trial, keep_v=True)
-            if ok and trial.model.cost <= self.seg_cost(A) + self.seg_cost(B) + self.S.l_cut + 1e-9:
+            if ok and trial.model.cost <= self.seg_cost(A) + self.seg_cost(B) + self.cut_cost(B.a) + 1e-9:
                 self.log("phantom_cut_merged", comp_frame=int(B.a), evidence={
                     "segments": [[A.a, A.b], [B.a, B.b]], "speed": trial.model.v,
                     "pred": [int(self.pred(trial, B.a - 1)), int(self.pred(trial, B.a))],
@@ -2420,9 +2875,13 @@ class _Builder:
 
     def _repeat_pair_cuts(self, positions: Sequence[int]) -> list[int]:
         """Visited cut positions p whose frames (p-1, p) are a competitor REPEAT pair (temporal.py, comp-only
-        labels around the positions)."""
+        labels: refine's FrameMap pair_label where measured, else measured here around the positions)."""
+        F = self.F
+        known = [int(p) for p in positions if 0 < int(p) < self.n and int(F.pair_label[int(p) - 1]) >= 0]
+        out = [p for p in known if F.repeat_pair(p)]
+        positions = [int(p) for p in positions if int(p) not in known]
         if not self.P.ok or not positions:
-            return []
+            return out
         from . import temporal
         max_side = int(_cfg(self.cfg, "temporal_max_side", 200))
         x, y, w, h = self.P.roi
@@ -2437,8 +2896,375 @@ class _Builder:
             lab = temporal.local_labels(get, max(0, min(positions) - 8), min(self.n - 1, max(positions) + 8), self.cfg)
         except Exception as e:  # noqa: BLE001 - evidence only: never break segmentation
             log.debug("segment: temporal labels around %s failed: %s", positions, e)
-            return []
-        return [int(p) for p in positions if lab.get(int(p) - 1) == temporal.REPEAT]
+            return out
+        return sorted(out + [int(p) for p in positions if lab.get(int(p) - 1) == temporal.REPEAT])
+
+    # ---------------------------------------------------------------------------------------------
+    # union test (FX-04 3/6): a cut must beat the continuous hypothesis
+    # ---------------------------------------------------------------------------------------------
+    def _hard_pair(self, A: _Seg, B: _Seg) -> bool:
+        return bool(A.kind == "raw" and B.kind == "raw" and A.b == B.a and B.trans_in is None and A.trans_out is None
+                    and B.cut_ambiguity is None and A.model is not None and B.model is not None and not A.ramp
+                    and not B.ramp and self._same_period(A.a, B.b))
+
+    def _lines_meet(self, A: _Seg, B: _Seg) -> bool:
+        """B's time line meets A's extended one at the cut: within one competitor frame's worth of RAW time (a
+        time-continuous cut: a reframe on one line, or no edit at all; FX-09's 'large J/L where two lines meet')."""
+        c = B.a
+        try:
+            return abs(A.model.pos(c) - B.model.pos(c)) <= self.S.ratio + 1e-9
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def _union_triggers(self, A: _Seg, B: _Seg) -> list[str]:
+        """Why the cut A|B must face the continuous hypothesis (FX-04 6): criterion 2 could not place it (FX-05), it
+        splits a competitor REPEAT pair (FX-07), confounded frames or a chain of >= 3 short refine tracks around it,
+        refine's own frame beats a re-assigned one near it, the two time lines meet at it, or the caller asks."""
+        F, c = self.F, B.a
+        out = []
+        osc = B.c2_oscillation or {}
+        if osc:
+            out.append("criterion2_oscillation")
+        # the cut, or a position criterion 2 moved it over (the DP's own cut among them), splits a REPEAT pair
+        if F.repeat_pair(c) or any(F.repeat_pair(int(p)) for p in osc.get("oscillation", [])) or \
+                osc.get("repeat_pair_cuts"):
+            out.append("repeat_pair")
+        if F.confounded[max(0, c - 2):min(self.n, c + 2)].any():
+            out.append("confounded")
+        w = int(_cfg(self.cfg, "union_track_window", 6))
+        sl = slice(max(A.a, c - w), min(B.b, c + w))
+        tr = F.track[sl][F.status[sl] == Status.MATCH]
+        if len(set(int(x) for x in tr) - {-1}) >= 3:
+            out.append("short_tracks")
+        if any(abs(k - c) <= 2 for k in self.time_conflicts):
+            out.append("framing_time_conflict")
+        if self._lines_meet(A, B):
+            out.append("lines_meet")
+        if c in self.union_cuts:
+            out.append("caller")
+        return out
+
+    def _audio_continuous(self, A: _Seg, B: _Seg) -> bool | None:
+        """The coarse audio line (AudioHints, confident windows within 1 s of the cut on both sides) runs on across
+        the cut without a lag step (raw_t - speed * comp_t agrees within half a RAW frame): True / False, None when
+        the audio does not cover both sides."""
+        h = self.hints
+        if h is None or len(getattr(h, "comp_t", [])) < 2:
+            return None
+        conf = h.confident(float(_cfg(self.cfg, "audio_min_conf", 1.3)))
+        t = B.a / float(self.cf)
+        sp = np.where(np.isfinite(h.speed), h.speed, 1.0)
+        off = h.raw_t - sp * h.comp_t
+        left = conf & (h.comp_t < t) & (h.comp_t >= t - 1.0)
+        right = conf & (h.comp_t > t) & (h.comp_t <= t + 1.0)
+        if not left.any() or not right.any():
+            return None
+        return bool(abs(float(np.median(off[left])) - float(np.median(off[right]))) * float(self.rf) <= 0.5)
+
+    def _union_eval(self, A: _Seg, B: _Seg, line: _Seg) -> dict:
+        """Score the union hypothesis 'line's time model over A and B' against the split, frame by frame, with the
+        framing of the split side extrapolated / interpolated and, with pixels, re-measured by ECC on the frame
+        (both hypotheses get the same treatment). Rows only for frames whose RAW frame differs."""
+        F = self.F
+        rows, same = [], 0
+        # nearest the cut first; the first frame the union explains clearly worse ends the test (a real cut is
+        # rejected after a few ECC measurements, a spurious one is scored on every frame it changes)
+        for k in sorted(range(A.a, B.b), key=lambda k_: (abs(k_ - B.a + 0.5), k_)):
+            if rows and rows[-1].get("z_line") is not None and rows[-1]["z_line"] < rows[-1]["z_split"] - rows[-1]["d3"]:
+                break
+            if F.status[k] != Status.MATCH:
+                continue
+            S = A if k < B.a else B
+            if bool(F.flip[k]) != S.flip:
+                continue
+            ju, js = int(self.pred(line, k)), int(self.pred(S, k))
+            if ju == js:
+                same += 1
+                continue
+            sm = self.sim_at(S, k)
+            items = [(ju, sm, S.flip), (js, sm, S.flip)]
+            ru = self._remeasure(k, ju, S.flip, [sm])
+            rs = self._remeasure(k, js, S.flip, [sm])
+            sc = self.P.zncc_set(k, items) if self.P.ok else None
+            if sc is None or not np.all(np.isfinite(sc)):
+                du, ds = F.deficit(k, ju), F.deficit(k, js)     # pixel-free: refine's candidate vector
+                if not (math.isfinite(du) and math.isfinite(ds)):
+                    rows.append({"k": k, "line": ju, "split": js, "z_line": None, "z_split": None})
+                    continue
+                zu, zs = -du, -ds
+            else:
+                zu = max(float(sc[0]), ru[1] if ru is not None else -math.inf)
+                zs = max(float(sc[1]), rs[1] if rs is not None else -math.inf)
+            rows.append({"k": k, "line": ju, "split": js, "z_line": round(zu, 6), "z_split": round(zs, 6),
+                         "d3": round(3.0 * float(F.delta[k]), 6)})
+        scored = [r for r in rows if r["z_line"] is not None]
+        worse = [r["k"] for r in scored if r["z_line"] < r["z_split"] - r["d3"]]
+        better = [r["k"] for r in scored if r["z_line"] > r["z_split"] + r["d3"]]
+        gain = float(sum(r["z_line"] - r["z_split"] for r in scored))
+        return {"rows": rows, "same": same, "worse": worse, "better": better, "gain": round(gain, 6),
+                "unscored": len(rows) - len(scored)}
+
+    def union_test(self, segs: list[_Seg]) -> list[_Seg]:
+        """FX-04 3/6, FX-07 (a): every triggered hard cut A|B faces the continuous hypothesis -- A's time line
+        extended over B, or B's over A, each frame scored against the split with re-measured framing
+        (``_union_eval``). No union where the framing steps at the cut (a reframe on one line is a cut; the
+        segments share their phase, ``time_ties``). A union no frame of which is worse than the split by more than
+        3 delta_k is merged when it is better somewhere by more than 3 delta_k or changes no frame; inside the noise
+        the independent evidence decides -- a competitor REPEAT pair at the cut, or audio running on without a lag
+        step with no scene change detected -- and otherwise the cut is kept and reported uncertain (never silently
+        merged or kept). The merged segment's soft ranges admit the union's frames on the changed frames only."""
+        i = 0
+        while i + 1 < len(segs):
+            A, B = segs[i], segs[i + 1]
+            if not self._hard_pair(A, B) or A.flip != B.flip:
+                i += 1
+                continue
+            trig = self._union_triggers(A, B)
+            if not trig:
+                i += 1
+                continue
+            c = B.a
+            ev: dict[str, Any] = {"cut": c, "triggers": trig, "segments": [[A.a, A.b], [B.a, B.b]]}
+            jump = self._framing_jump(A, B)
+            if not self._compatible(A, B):
+                ev.update(result="framing_step", framing_jump=None if jump is None else [round(jump[0], 5),
+                                                                                       round(jump[1], 3)])
+                self.log("union_test", comp_frame=c, evidence=ev)
+                i += 1
+                continue
+            best = None
+            for name, line in (("A_line", A), ("B_line", B)):
+                r = self._union_eval(A, B, line)
+                ev[name] = {k: v for k, v in r.items() if k != "rows"}
+                ev[name]["rows"] = r["rows"][:40]
+                if r["worse"] or r["unscored"]:
+                    continue
+                key = (bool(r["better"]) or not r["rows"], r["gain"], name == "A_line")
+                if best is None or key > best[0]:
+                    best = (key, name, line, r)
+            if best is None:
+                ev["result"] = "cut_verified"
+                self.log("union_test", comp_frame=c, evidence=ev)
+                i += 1
+                continue
+            _key, name, line, r = best
+            decided = bool(r["better"]) or not r["rows"]
+            why = "the union explains frames better" if r["better"] else "no frame changes"
+            if not decided:
+                aud = self._audio_continuous(A, B)
+                scene = any(abs(f - c) <= 1 for f in self.scene_changes)
+                ev.update(audio_continuous=aud, scene_change=scene)
+                if "repeat_pair" in trig:
+                    decided, why = True, "competitor repeat pair at the cut (the same image on both frames)"
+                elif aud and not scene:
+                    decided, why = True, "audio runs on without a lag step and no scene change is detected"
+            if not decided:
+                ev["result"] = "undecided"
+                self.log("union_test", comp_frame=c, evidence=ev)
+                B.uncertain = True
+                B.notes.append(f"cut at {c} not decidable: {name.replace('_', ' ')} explains both sides within the "
+                               f"score noise and no independent evidence decides ({', '.join(trig)})")
+                i += 1
+                continue
+            # B's notes about the removed cut (criterion 2's verdict on it) go with it
+            notes = A.notes + [nt for nt in B.notes if not nt.startswith("criterion 2 not satisfied")]
+            U = _Seg("raw", A.a, B.b, model=line.model, flip=A.flip, track=line.track, extra={**A.extra, **B.extra},
+                     trans_in=A.trans_in, trans_out=B.trans_out, notes=notes,
+                     uncertain=A.uncertain or B.uncertain, blend_frames=sorted(set(A.blend_frames) | set(B.blend_frames)))
+            saved = {k: (int(self.F.lo[k]), int(self.F.hi[k])) for k in range(A.a, B.b)}
+            for row in r["rows"]:
+                self._widen(int(row["k"]), int(row["line"]), "union_merged")
+            if not self.refit(U, keep_v=True):
+                for k, (lo, hi) in saved.items():
+                    self.F.lo[k], self.F.hi[k] = lo, hi
+                    self.F.touched.pop(k, None)
+                ev["result"] = "union_infeasible"
+                self.log("union_test", comp_frame=c, evidence=ev)
+                B.notes.append(f"cut at {c}: the continuous hypothesis explains both sides but one time line cannot "
+                               "hold all frames")
+                i += 1
+                continue
+            ev.update(result="merged", line=name, why=why)
+            self.log("union_test", comp_frame=c, evidence=ev)
+            U.notes.append(f"cut at {c} removed: {why} ({', '.join(trig)})")
+            segs[i:i + 2] = [U]
+            i = max(0, i - 1)
+        return segs
+
+    # ---------------------------------------------------------------------------------------------
+    # competitor repeat pairs (FX-07): no time cut inside, same RAW content on both frames
+    # ---------------------------------------------------------------------------------------------
+    def repeat_pairs(self, segs: list[_Seg]) -> list[_Seg]:
+        """FX-07 (c) comp-duplicate invariant, NONE side: a competitor REPEAT pair (k, k+1) whose one frame is matched
+        by an adjacent raw segment and the other is NONE. The NONE frame takes its partner's RAW frame when it scores
+        under the partner's (RAW frame, framing) within 3 delta_k of the partner and above match_thresh -
+        anchor_zncc_slack (identical frames score alike: a measurement, not a guess) and the segment's time line
+        can hold it; otherwise the pair stays split and the invariant check reports it."""
+        if not self.P.ok:
+            return segs
+        F, cfg = self.F, self.cfg
+        thr = float(_cfg(cfg, "match_thresh", 0.9)) - float(_cfg(cfg, "anchor_zncc_slack", 0.05))
+        changed = True
+        while changed:
+            changed = False
+            for i in range(len(segs) - 1):
+                X, Y = segs[i], segs[i + 1]
+                if X.b != Y.a or not F.repeat_pair(Y.a):
+                    continue
+                if X.kind == "none" and Y.kind == "raw":
+                    N, R, k, kp = X, Y, Y.a - 1, Y.a
+                elif X.kind == "raw" and Y.kind == "none":
+                    N, R, k, kp = Y, X, X.b, X.b - 1
+                else:
+                    continue
+                if F.status[kp] != Status.MATCH or bool(F.flip[kp]) != R.flip or R.model is None:
+                    continue
+                jp, sp = int(self.pred(R, kp)), self.sim_at(R, kp)
+                zk = self.P.zncc_set(k, [(jp, sp, R.flip)])
+                zp = self.P.zncc_set(kp, [(jp, sp, R.flip)])
+                ev = {"pair": [min(k, kp), max(k, kp)], "raw": jp}
+                if zk is None or zp is None or not (math.isfinite(float(zk[0])) and math.isfinite(float(zp[0]))):
+                    continue
+                ev.update(score=round(float(zk[0]), 6), partner_score=round(float(zp[0]), 6))
+                if not (float(zk[0]) >= thr and float(zk[0]) >= float(zp[0]) - 3.0 * F.delta[kp]):
+                    self.log("repeat_pair_not_absorbed", comp_frame=int(k), evidence=ev)
+                    continue
+                old = {a: getattr(F, a)[k] for a in ("status", "raw", "lo", "hi", "raw_lo", "raw_hi", "flip", "track",
+                                                     "low_margin", "s", "theta", "tx", "ty")}
+                F.status[k], F.raw[k] = Status.MATCH, jp
+                F.lo[k] = F.hi[k] = F.raw_lo[k] = F.raw_hi[k] = jp
+                F.flip[k], F.track[k], F.low_margin[k] = R.flip, R.track, True
+                F.s[k], F.theta[k], F.tx[k], F.ty[k] = sp.s, sp.theta_deg, sp.tx, sp.ty
+                ra, rb = R.a, R.b
+                if k < R.a:
+                    R.a = k
+                else:
+                    R.b = k + 1
+                if not self.refit(R, keep_v=True):
+                    R.a, R.b = ra, rb
+                    for a, v in old.items():
+                        getattr(F, a)[k] = v
+                    self.refit(R, keep_v=True)
+                    self.log("repeat_pair_not_absorbed", comp_frame=int(k), evidence={**ev, "reason": "time line"})
+                    continue
+                F.touched[k] = "repeat_pair_absorbed"
+                if k < kp:
+                    N.b = k
+                else:
+                    N.a = k + 1
+                if N.length <= 0:
+                    segs.remove(N)
+                R.notes.append(f"frame {k} (NONE) repeats frame {kp}: shows the same RAW frame {jp}")
+                self.log("repeat_pair_absorbed", comp_frame=int(k), evidence=ev)
+                changed = True
+                break
+        return segs
+
+    def repeat_invariant(self, segs: list[_Seg]) -> None:
+        """FX-07 (c) check on the final segments: both frames of every competitor REPEAT pair must get the same
+        status and the same RAW content (the same frame, or visually identical ones: RAW's own duplicates are
+        fine). A time cut inside a pair is allowed only where the framing steps on one time line. Conflicts are
+        logged (comp_duplicate_conflict) and noted on the segment."""
+        F = self.F
+        pos = {}
+        for S in segs:
+            for k in range(S.a, S.b):
+                pos.setdefault(k, S)
+        bad = []
+        for k in np.flatnonzero(F.pair_label == 1):
+            k = int(k)
+            if k + 1 >= self.n:
+                continue
+            X, Y = pos.get(k), pos.get(k + 1)
+            if X is None or Y is None:
+                continue
+            why = None
+            if X.kind != Y.kind:
+                why = f"{X.kind} vs {Y.kind}"
+            elif X.kind == "raw":
+                jx, jy = int(self.pred(X, k)), int(self.pred(Y, k + 1))
+                same = jx == jy or (F.raw_lo[k] <= jy <= F.raw_hi[k] and F.raw_lo[k + 1] <= jx <= F.raw_hi[k + 1])
+                if X is not Y and not (self._lines_meet(X, Y) and not self._compatible(X, Y)):
+                    why = f"time cut inside the pair (RAW {jx} | {jy})"
+                elif not same and X is Y:
+                    why = f"RAW {jx} vs {jy} on one time line (phase contradicts the repeat cadence)"
+            if why:
+                bad.append({"pair": [k, k + 1], "why": why})
+                Y.notes.append(f"competitor frames {k}/{k + 1} are identical but {why}")
+        if bad:
+            self.log("comp_duplicate_conflict", evidence={"count": len(bad), "pairs": bad[:200]})
+
+    # ---------------------------------------------------------------------------------------------
+    # time ties (FX-04 2): segments on one time line share one phase solve
+    # ---------------------------------------------------------------------------------------------
+    def time_ties(self, segs: list[_Seg]) -> None:
+        """Adjacent stretch segments at the same speed with a hard cut between them whose MEASURED frames (refine's
+        argmax ranges, tolerated drops left out) fit ONE line -- a reframe at a RAW-native shot change, a framing
+        step on a continuous clip -- are phase-solved together (phase_solve.solve_shared_raw_in): every member gets
+        the shared line's raw_in at its comp_in and the shared interval, so the layers keep one time line."""
+        groups: list[list[_Seg]] = []
+        cur: list[_Seg] = []
+        for S in segs:
+            if not (S.kind == "raw" and S.model is not None and not S.ramp and S.model.v > 0):
+                if len(cur) > 1:
+                    groups.append(cur)
+                cur = []
+                continue
+            if cur:
+                A = cur[-1]
+                if A.b == S.a and abs(A.model.v - S.model.v) <= 1e-12 and S.trans_in is None and A.trans_out is None \
+                        and S.cut_ambiguity is None and self._tied(cur + [S]):
+                    cur.append(S)
+                    continue
+                if len(cur) > 1:
+                    groups.append(cur)
+            cur = [S]
+        if len(cur) > 1:
+            groups.append(cur)
+        for g in groups:
+            if len(g) < 2:
+                continue
+            parts, pens = [], []
+            for S in g:
+                ks, lo, hi = self.constraints(S)
+                keep = ~np.isin(ks, np.asarray(S.model.drops, dtype=np.int64)) if S.model.drops else np.ones(ks.size, bool)
+                parts.append((ks[keep], lo[keep], hi[keep], S.a))
+            kk = np.concatenate([p[0] for p in parts])
+            ll = np.concatenate([p[1] for p in parts])
+            hh = np.concatenate([p[2] for p in parts])
+            pen = self.S.penalties(kk, ll, hh)
+            sols = ps.solve_shared_raw_in(parts, g[0].model.v, self.cf, self.rf, penalties=pen)
+            if not sols or not all(s.get("ok") for s in sols):
+                continue
+            for S, sol in zip(g, sols):
+                S.model.sol = sol
+                S.notes.append(f"time line shared with segment(s) {', '.join(f'[{o.a},{o.b})' for o in g if o is not S)}"
+                               " (one phase solve)")
+            self.log("time_tie", comp_range=[g[0].a, g[-1].b], evidence={
+                "segments": [[S.a, S.b] for S in g], "speed": g[0].model.v,
+                "raw_in": [round(float(s["raw_in"]), 9) for s in sols], "margin_ms": round(float(sols[0]["margin_ms"]), 4)})
+
+    def _tied(self, group: list[_Seg]) -> bool:
+        """What the segments of ``group`` (same speed) CLAIM fits one line: refine's measured range where a segment's
+        model shows it, the model's frame where the segment re-assigns a frame (tolerated drops left out) -- the
+        Chebyshev LP over all of them is feasible. A 1-frame skip between two exactly measured sides never is."""
+        v = group[0].model.v
+        kk, plo, phi = [], [], []
+        for S in group:
+            ks, lo, hi = self.constraints(S)
+            if S.model.drops:
+                keep = ~np.isin(ks, np.asarray(S.model.drops, dtype=np.int64))
+                ks, lo, hi = ks[keep], lo[keep], hi[keep]
+            a, b = self.F.pristine(ks, lo, hi)
+            j = np.asarray(self.pred(S, ks), dtype=np.int64)
+            inside = (a <= j) & (j <= b)
+            kk.append(ks)
+            plo.append(np.where(inside, a, j))
+            phi.append(np.where(inside, b, j))
+        ks = np.concatenate(kk)
+        if ks.size == 0:
+            return False
+        return bool(ps.is_feasible(ks, np.concatenate(plo), np.concatenate(phi), int(group[0].a), self.cf, self.rf, v=v))
 
     # ---------------------------------------------------------------------------------------------
     # retiming, remap, ramps
@@ -2570,7 +3396,9 @@ class _Builder:
         for k in m.drops:   # tolerated isolated frames: their soft range now includes the model frame
             self._widen(k, int(self.pred(S, k)), "drop")
         ks, lo, hi = self.constraints(S)
-        if ks.size:
+        if ks.size and m.sol.get("shared"):
+            sol = m.sol             # one phase solve with the segments on its time line (time_ties)
+        elif ks.size:
             # the phase follows the measured frames (data term); tolerated drops keep their widened soft range
             # but carry no preference
             pen = self.S.penalties(ks, lo, hi)
@@ -2703,11 +3531,14 @@ class _Builder:
         tie = np.zeros(fm.n, bool)
         flip = np.asarray(fm.flip).copy()
         track = np.asarray(fm.track).copy()
+        sims = np.stack([np.asarray(fm.s), np.asarray(fm.theta), np.asarray(fm.tx), np.asarray(fm.ty)], axis=1).copy()
+        meas = np.asarray(fm.sim_meas).copy()
         changed = []
         for S, seg in zip(work, segs):
             if seg.type != "raw":
                 continue
             pieces = S.ramp if S.ramp else [S]
+            remeasured = (S.framing or {}).get("_samples") or {}
             for p in pieces:
                 if not p.model.sol or "raw_in" not in p.model.sol or not math.isfinite(p.model.raw_in):
                     continue
@@ -2715,9 +3546,10 @@ class _Builder:
                     if F.status[k] != Status.MATCH or bool(F.flip[k]) != p.flip:
                         continue
                     j = int(self.pred(p, k))
-                    if status[k] != Status.MATCH:   # absorbed NONE frames
+                    if status[k] != Status.MATCH:   # absorbed NONE frames (with the framing they were scored under)
                         status[k] = Status.MATCH
                         flip[k], track[k] = p.flip, p.track
+                        sims[k] = (F.s[k], F.theta[k], F.tx[k], F.ty[k])
                     lo_k, hi_k = p.extra.get(k, (int(F.lo[k]), int(F.hi[k])))
                     if not (lo_k <= j <= hi_k):
                         if k not in p.model.drops:
@@ -2729,6 +3561,11 @@ class _Builder:
                         raw[k] = j
                         rlo[k] = rhi[k] = j
                         low[k] = True
+                        rm = remeasured.get(k)
+                        if rm is not None and int(rm[0]) == j:
+                            # FX-06 1: the framing measured on the frame now shown (a consistent (RAW frame, Sim) pair)
+                            sims[k] = meas[k] = (rm[1].s, rm[1].theta_deg, rm[1].tx, rm[1].ty)
+                            changed[-1]["sim"] = "re-measured"
                     slo[k], shi[k] = lo_k, hi_k
             for k in seg.tie_frames:
                 tie[k] = True
@@ -2739,14 +3576,40 @@ class _Builder:
         fm.status, fm.raw, fm.raw_lo, fm.raw_hi = status, raw, rlo, rhi
         fm.soft_lo, fm.soft_hi, fm.low_margin, fm.tie = slo, shi, low, tie
         fm.flip, fm.track = flip, track
+        fm.s, fm.theta, fm.tx, fm.ty = sims[:, 0], sims[:, 1], sims[:, 2], sims[:, 3]
+        fm.sim_meas = meas
         if changed:
             self.log("frame_map_corrected", evidence={"frames": changed[:500], "count": len(changed)})
 
     # ---------------------------------------------------------------------------------------------
+    def confounded_notes(self, segs: list[_Seg]) -> None:
+        """DESIGN refine step 7: frames refine found time / translation confounded (m+-1 with its own framing path
+        scores within noise of m) are named in their segment's notes."""
+        F = self.F
+        for S in segs:
+            if S.kind != "raw":
+                continue
+            ks = [k for k in range(S.a, S.b) if F.status[k] == Status.MATCH and bool(F.confounded[k])]
+            if ks:
+                S.notes.append(f"time/translation confounded frames {_rng(ks)} (RAW m+-1 with its own framing scores "
+                               "within noise: soft range m+-1)")
+
+    def _scene_changes(self) -> list[int]:
+        """PySceneDetect changes of the competitor (cached), the union test's independent evidence; [] without."""
+        path = getattr(self.comp, "path", "")
+        if not bool(_cfg(self.cfg, "scenedetect", True)) or not path or not Path(path).exists():
+            return []
+        try:
+            return [int(f) for f in scenedetect_changes(path, self.cfg)]
+        except Exception as e:  # scenedetect missing / decode failure: evidence only, never fatal
+            log.debug("segment: scene changes unavailable for the union test: %s", e)
+            return []
+
     def run(self) -> list[Segment]:
         seed_everything(int(_cfg(self.cfg, "seed", 12345)))
         if self.n == 0:
             return []
+        self.scene_changes = self._scene_changes()
         self.S.dominant = self._dominant_from_hints()
         work = self._segment_pass()
         dom = self._dominant_from_segments(work)
@@ -2761,12 +3624,14 @@ class _Builder:
         work = self.merge_retime_chains(work)
         work = self.merge_continuous(work)
         work = self.absorb_none(work)
+        work = self.repeat_pairs(work)
         self.final_speeds(work)
         self.speed_only_cuts(work)
         work = self.transitions(work)
         work = self.uniform_runs(work)
         self.check_cuts(work)
         work = self.merge_phantom_cuts(work)
+        work = self.union_test(work)
         self.retime(work)
         work = self.ramps(work)
         for S in work:
@@ -2774,6 +3639,9 @@ class _Builder:
                 self.framing(S, force=True)
                 self.full_affine_check(S)
         work.sort(key=lambda s: (s.a, s.b))
+        self.time_ties(work)
+        self.repeat_invariant(work)
+        self.confounded_notes(work)
         segs = [self.to_segment(S) for S in work]
         order = sorted(range(len(segs)), key=lambda i: (segs[i].comp_in, segs[i].comp_out))
         work = [work[i] for i in order]
@@ -2952,7 +3820,45 @@ def scenedetect_changes(path: str, cfg: Any) -> list[int]:
     return compute()["changes"]
 
 
+def _model_sim(b: _Builder, s: Segment, k: int) -> Sim | None:
+    """A final segment's framing at comp frame k (AE rule: keys interpolated, held outside)."""
+    if s.transform_keys:
+        return interpolate_keys(s.transform_keys, k, float(b.raw.full_size[0]), float(b.raw.full_size[1]))
+    return Sim.from_dict(s.transform) if s.transform else None
+
+
+def _change_framing(b: _Builder, seg: Segment, f: int) -> dict | None:
+    """Framing evidence at a scene change f inside a raw segment (FX-06 6): the measured framing jump (refine's
+    per-frame measurement of f-2, f-1 extrapolated to f against f's) and the segment model's deviation from the
+    measurement on f-1 / f (box-centre px, relative scale)."""
+    F = b.F
+
+    def meas(k: int) -> Sim | None:
+        if not (0 <= k < b.n) or F.status[k] != Status.MATCH:
+            return None
+        return F.measured(k) or F.sim(k)
+    m2, m1, m0 = meas(f - 2), meas(f - 1), meas(f)
+    if m1 is None or m0 is None:
+        return None
+    pred = m1 if m2 is None else Sim(2 * m1.s - m2.s, 2 * m1.theta_deg - m2.theta_deg, 2 * m1.tx - m2.tx,
+                                     2 * m1.ty - m2.ty)
+    js, jp = b._sim_change(pred, m0)
+    dev_s = dev_p = 0.0
+    for k, mk in ((f - 1, m1), (f, m0)):
+        md = _model_sim(b, seg, k) if seg.comp_in <= k < seg.comp_out else None
+        if md is not None:
+            ds_, dp_ = b._sim_change(md, mk)
+            dev_s, dev_p = max(dev_s, ds_), max(dev_p, dp_)
+    return {"jump_px": round(jp, 3), "jump_scale": round(js, 5), "model_dev_px": round(dev_p, 3),
+            "model_dev_scale": round(dev_s, 5)}
+
+
 def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
+    """PySceneDetect cross-check (DESIGN §5 segment.py): every detected scene change must coincide (+-1) with a
+    cut / transition; an unexplained change inside a raw segment is checked against the framing (FX-06 6: a measured
+    framing jump or a model off the measurement above punch_pos_step / punch_scale_step is reported as 'framing step
+    not represented', never asserted away), a caption event of the layout or a score dip; a cut PySceneDetect did
+    not see is described by its RAW jump and its framing change (position, scale and rotation)."""
     if not bool(_cfg(b.cfg, "scenedetect", True)):
         b.log("scenedetect_skipped", evidence={"reason": "disabled by cfg.scenedetect"})
         return {"status": "skipped"}
@@ -2966,6 +3872,8 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
         log.warning("segment: PySceneDetect cross-check failed: %s", e)
         b.log("scenedetect_failed", evidence={"error": str(e)[:300]})
         return {"status": "failed", "error": str(e)}
+    thr_s = float(_cfg(b.cfg, "punch_scale_step", 0.01))
+    thr_p = float(_cfg(b.cfg, "punch_pos_step", 4.0))
     cuts: dict[int, Segment] = {}
     windows: list[tuple[int, int, str]] = []
     for s in segs:
@@ -2979,7 +3887,8 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
                     windows.append((s.comp_out - int(t["duration_frames"]), s.comp_out, t["type"]))
         if s.type in ("flash", "dip", "not_in_raw"):
             windows.append((s.comp_in, s.comp_out, s.type))
-    agree, unexplained, missed = [], [], []
+    caps = [c for c in (getattr(b.layout, "captions", None) or []) if isinstance(c, dict)]
+    agree, unexplained, missed, steps = [], [], [], []
     for f in changes:
         near_cut = [c for c in cuts if abs(c - f) <= 1]
         near_win = [w for w in windows if w[0] - 1 <= f <= w[1] + 1]
@@ -2987,14 +3896,26 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
             agree.append(f)
             continue
         seg = next((s for s in segs if s.comp_in <= f < s.comp_out), None)
-        why = "inside a continuous mapping (same RAW line, no transform/flip change): motion, lighting, " \
-              "caption or overlay change -- not a cut"
-        ev = {"frame": f, "segment": seg.id if seg else None}
+        why = "inside a continuous mapping (same RAW line; measured framing continuous, model on the measurement): " \
+              "motion, lighting or overlay change -- not a cut"
+        ev: dict[str, Any] = {"frame": f, "segment": seg.id if seg else None}
         if seg is not None and seg.type == "raw":
+            fr = _change_framing(b, seg, f)
+            ev["framing"] = fr
             sc = b.F.score[max(0, f - 1):f + 1]
             ev["scores"] = [float(x) for x in sc]
-            if np.isfinite(sc).all() and float(np.min(sc)) < float(_cfg(b.cfg, "match_thresh", 0.9)):
+            cap = [c for c in caps if min(abs(int(c.get("comp_in", -9)) - f), abs(int(c.get("comp_out", -9)) - f)) <= 1]
+            if fr is not None and (fr["jump_px"] > thr_p or fr["jump_scale"] > thr_s or fr["model_dev_px"] > thr_p
+                                   or fr["model_dev_scale"] > thr_s):
+                why = (f"framing step not represented: measured framing jump {fr['jump_px']:.1f} px / scale "
+                       f"{100 * fr['jump_scale']:.2f} %, segment model off the measurement by {fr['model_dev_px']:.1f} px")
+                steps.append(f)
+            elif fr is None:
+                why = "inside a segment where the framing is not measured on both sides (not checked)"
+            elif np.isfinite(sc).all() and float(np.min(sc)) < float(_cfg(b.cfg, "match_thresh", 0.9)):
                 why = "inside a segment but the match score dips there (check overlays / a missed flash cut)"
+            elif cap:
+                why = f"caption change (layout caption event {int(cap[0].get('comp_in'))}-{int(cap[0].get('comp_out'))})"
             seg.notes = (seg.notes + "; " if seg.notes else "") + f"PySceneDetect change at {f}: {why}"
         unexplained.append({**ev, "explanation": why})
     changes_set = set(changes)
@@ -3004,17 +3925,24 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
         prev = next((p for p in segs if p.comp_out == c and p.type == "raw"), None)
         if s.type == "raw" and prev is not None and s.raw_in_frame is not None and prev.raw_out_frame is not None:
             jump = s.raw_in_frame - prev.raw_out_frame
-            why = (f"same-shot jump cut (RAW jump {jump} frames, same framing)" if s.flip_h == prev.flip_h
-                   and s.transform and prev.transform and
-                   abs(s.transform["scale"] / max(prev.transform["scale"], 1e-9) - 1) < 0.01
-                   else f"low-contrast cut (RAW jump {jump} frames)")
+            a_, b_ = _model_sim(b, prev, c - 1), _model_sim(b, s, c)
+            same = bool(s.flip_h == prev.flip_h and a_ is not None and b_ is not None and
+                        (lambda d: d[0] <= thr_s and d[1] <= thr_p)(b._sim_change(a_, b_)))
+            if jump in (0, 1):
+                why = (f"no RAW skip (RAW jump {jump}: one time line) and " +
+                       ("the same framing" if same else "a framing change (reframe on the time line)"))
+            elif jump == -1:
+                why = "1-frame RAW repeat back (RAW jump -1)" + ("" if same else " with a framing change")
+            else:
+                why = (f"same-shot jump cut (RAW jump {jump} frames, same framing)" if same
+                       else f"low-contrast cut (RAW jump {jump} frames)")
         else:
             why = "cut next to a transition / placeholder (content change is gradual or uniform)"
         missed.append({"cut": c, "explanation": why})
     b.log("scenedetect_crosscheck", evidence={"detected": changes, "agree": agree, "unexplained": unexplained,
-                                              "cuts_not_detected": missed})
+                                              "cuts_not_detected": missed, "framing_steps_not_represented": steps})
     return {"status": "ok", "detected": changes, "agree": agree, "unexplained": unexplained,
-            "cuts_not_detected": missed}
+            "cuts_not_detected": missed, "framing_steps_not_represented": steps}
 
 
 # =================================================================================================
@@ -3154,7 +4082,8 @@ def plot_scores(segs: Sequence[Segment], fm: FrameMap, cfg: Any, path: str | Pat
 # public API
 # =================================================================================================
 
-_WRITTEN = ("status", "raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi", "low_margin", "flip", "track", "tie")
+_WRITTEN = ("status", "raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi", "low_margin", "flip", "track", "tie", "s",
+            "theta", "tx", "ty", "sim_meas")
 _PRE = "pre_segment_"
 
 
@@ -3163,31 +4092,36 @@ def _pristine(fm: FrameMap) -> FrameMap:
     original columns in the column store (keys 'pre_segment_<name>', saved/loaded with the FrameMap), so
     re-running it on its own output reads exactly the same input (determinism, Stage 9.7)."""
     d = fm.__dict__["d"]
-    if all(_PRE + k in d for k in _WRITTEN):
-        src = fm.copy()
-        for k in _WRITTEN:
-            setattr(src, k, d[_PRE + k])
-        return src
+    for k in _WRITTEN:          # per column: a FrameMap written before a column joined _WRITTEN keeps the others
+        if _PRE + k not in d:
+            d[_PRE + k] = np.asarray(d[k]).copy()
+    src = fm.copy()
     for k in _WRITTEN:
-        d[_PRE + k] = np.asarray(d[k]).copy()
-    return fm.copy()
+        setattr(src, k, d[_PRE + k])
+    return src
 
 
 def build_segments(fm: FrameMap, comp: Any, raw: Any, layout: Any, overlays: Any, cfg: Any,
-                   dlog: DecisionLog | None, debug_dir: Any, hints: Any = None) -> list[Segment]:
+                   dlog: DecisionLog | None, debug_dir: Any, hints: Any = None,
+                   union_cuts: Iterable[int] = ()) -> list[Segment]:
     """Stage 5.4-5.5: cut the competitor timeline into segments (DESIGN §5 segment.py).
 
     fm        FrameMap from refine (mutated in place: m(k) corrected to the segment model where the soft
-              range allows it (low_margin flagged), crossfade overlap frames -> Status.BLEND, tie flags,
-              soft ranges widened for tolerated isolated frames; refine's columns are kept as
-              'pre_segment_*' entries of the column store, so re-running on the output is exact).
+              range allows it (low_margin flagged) -- with the framing measured on the frame now shown --,
+              crossfade overlap frames -> Status.BLEND, tie flags, soft ranges widened for tolerated isolated
+              frames; refine's columns are kept as 'pre_segment_*' entries of the column store, so re-running
+              on the output is exact).
     comp, raw Proxy objects (fps, sizes, ratios; pixels used when ``frames`` is not None).
     layout    Layout (box / static mask) or None; overlays: layout.OverlayMasks or None.
     hints     AudioHints (speed evidence for the DP, lag steps as cut candidates) or None.
+    union_cuts comp frames whose cuts must face the continuous hypothesis in any case (union test; e.g. the cuts
+              of a previous pass where audio_align logged 'jl_not_exported': a large J/L where B's time line meets
+              A's, FX-09) -- the union test also finds such cuts itself (time lines that meet).
     Returns segments with ids 1..N in competitor order; NOT-IN-RAW placeholders, flashes and dips are
     segments too. Writes debug/mapping.png and debug/scores.png when debug_dir is given.
     """
     b = _Builder(fm, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints, src=_pristine(fm))
+    b.union_cuts = {int(c) for c in union_cuts}
     segs = b.run()
     b.crosscheck = _crosscheck(b, segs)
     if b.debug_dir is not None:

@@ -310,6 +310,7 @@ changed, update this table with the reason.
 | segments | `speed_snap_values` / `speed_snap_tol` | 1.00 1.05 1.10 1.15 1.20 1.25 1.50 2.00 and inverses / 0.3 % | speed snapping |
 | segments | `lambda_cut` / `lambda_unsnapped` | 1.0 / 3.0 | DP costs |
 | segments | `punch_scale_step` / `punch_pos_step` | 0.01 / 4 px | punch-in cut detection |
+| segments | `step_confirm_frames` / `lambda_repeat_cut` / `union_track_window` | 2 / 1.0 / 6 | a framing step is a cut only when the pixels confirm it on up to 2 frames per side; extra DP cost of a cut inside a competitor repeat pair; union-test trigger window (>= 3 refine tracks) |
 | segments | `transition_search` / `blend_rel` | 20 / 0.5 | crossfade detection |
 | segments | `framing_scale_spread` / `framing_pos_spread` | 0.3 % / 1.5 px | constant vs animated framing |
 | segments | `rdp_pos_tol` / `rdp_scale_tol` / `rotation_min_deg` | 0.5 px / 0.1 % / 0.2° | keyframe simplification, rotation |

@@ -177,6 +177,11 @@ class Config:
     link_pos_tol: float = 2.0              # ... and 2 px (comp full res) after the track trend
     punch_scale_step: float = 0.01         # transform step between frames that is a cut (punch-in)
     punch_pos_step: float = 4.0
+    step_confirm_frames: int = 2           # a framing step is a cut only when the pixels confirm it on up to this many
+                                           #   frames per side (old framing wins before, new after, by > 3 delta_k)
+    lambda_repeat_cut: float = 1.0         # DP cost of a time cut between the two frames of a competitor REPEAT pair
+                                           #   (FX-07: the same image on both frames; soft evidence, never a hard rule)
+    union_track_window: int = 6            # union-test trigger: >= 3 refine tracks within +-this many frames of a cut
     transition_search: int = 20            # frames either side of a cut examined for blends
     blend_rel: float = 0.5                 # blend frame: (1 - zncc_fit) <= blend_rel * (1 - best single zncc)
     framing_scale_spread: float = 0.003    # < -> constant framing

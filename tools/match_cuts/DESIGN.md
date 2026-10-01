@@ -427,6 +427,11 @@ def solve_raw_in(ks, lo, hi, comp_in, v, comp_fps, raw_fps) -> dict
     # {'raw_in': seconds (centre; if the round-to-nearest-feasible set overlaps, its centre), 'slack': t*
     #  (frames), 'interval_floor': [a, b] seconds, 'interval_both': [a, b] | None, 'margin_ms',
     #  'tie_frames': [k where slack < 1e-4], 'ok': bool}
+def solve_shared_raw_in(parts, v, comp_fps, raw_fps, penalties=None) -> list[dict]
+    # TIME-TIED segments (segment.py time ties, FX-04 2): parts = [(ks, lo, hi, comp_in), ...] at one speed v
+    # solved ONCE (solve_raw_in of the union at the first comp_in); every part gets that line's values at its own
+    # comp_in (raw_in / interval_* shifted by v·Δcomp_in/comp_fps), the shared slack / margin_ms, its own frames'
+    # tie_frames / frame_slack and 'shared' = {comp_in, parts, raw_in}.
 def ae_frame(raw_in, v, k, comp_in, comp_fps, raw_fps, rule='floor') -> int   # the AE rule (§2.1)
 def snap_speed(v_ols, vrange, cfg, preferred=()) -> tuple[float, bool]
     # candidates = cfg.speed_snap_values ∪ preferred (speeds of already-solved segments) inside the
@@ -436,23 +441,72 @@ def snap_speed(v_ols, vrange, cfg, preferred=()) -> tuple[float, bool]
 
 ### segment.py  (Stage 5.4–5.5)
 ```python
-def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints=None) -> list[Segment]
+def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints=None,
+                   union_cuts=()) -> list[Segment]
+    # A CUT MUST BEAT THE CONTINUOUS HYPOTHESIS (FX-04, after the first real run: one smooth pan was chopped into
+    #   1-frame layers with fake rotations and 'verified' flash cuts; every repair pass compared HELD framings).
+    # FRAMING STEPS (FX-06 4) inside a MATCH run: per-frame increments of the framing (box-centre pre-image
+    #   position, log scale, rotation) minus the median of the +-2 framing_sample_step increments around them (a
+    #   pan's own velocity and a velocity knot cancel: the step is found at ANY pan speed -- S60's 1-frame
+    #   snap-back inside a 0.92 px/frame pan was not) are 'fast' above punch_*_step / (2 framing_sample_step);
+    #   a fast stretch [ka, kb] (<= 2 framing_sample_step frames) is a step when the linear trends of up to
+    #   framing_sample_step + 1 frames on each side, EXTRAPOLATED across it, differ by more than punch_pos_step
+    #   px / punch_scale_step everywhere in between AND by 3x their own residual (two wrong alternating tracks
+    #   never make a step). Localised and CONFIRMED by the pixels: every MATCH frame in [ka-n+1, kb+n)
+    #   (n = step_confirm_frames) scored on its RAW frame under both extrapolated trends; cut = first frame
+    #   after ka where the new one wins by > 3δ_k, confirmed only if the old one wins by > 3δ_k on the (<= n)
+    #   scored frames before it and the new one on the (<= n) from it (consecutive steps too). Without pixels
+    #   the FrameMap decides. Confirmed steps split the run (a transform change is a cut, never HOLD keys in
+    #   one layer; no merge pass crosses them); unconfirmed ones are DP candidates only. Only the transition
+    #   frames (ka, cut) lose their Sims; frames [cut, kb) are measured again (below).
     # CUTS = DP over candidate cut positions (NOT greedy maximal prefixes: greedy turns 1-frame-skip jump
     #   cuts into fake 1.02-1.05x speeds and pushes boundaries late). Candidates: frames where the
-    #   increment deviates from the floor pattern, track / flip changes, transform steps (punch-in:
-    #   |Δs| > punch_scale_step or |Δpos| > punch_pos_step — located by scoring every frame between two
-    #   sampled transforms under both and cutting where the new one wins by > 3δ_k), audio lag steps.
+    #   increment deviates from the floor pattern, track / flip changes, unconfirmed framing steps,
+    #   PySceneDetect changes, audio lag steps.
     #   cost(segment) = 0 if a snap/dominant speed is feasible on the soft ranges, lambda_unsnapped if only
     #   an unsnapped speed is, inf if infeasible (after allowing isolated single-frame violations with
-    #   margin < 5δ_k that no competing hypothesis explains); + lambda_cut per cut. Cuts with no RAW
+    #   margin < 5δ_k that no competing hypothesis explains); + lambda_cut per cut, + lambda_repeat_cut for a
+    #   cut between the two frames of a competitor REPEAT pair (FX-07 a: soft evidence). Cuts with no RAW
     #   discontinuity (speed change only): at the intersection of the two lines, cut_ambiguity=[a, b].
+    # NEIGHBOUR TESTS (FX-04 4/5/7): a segment's framing beyond its first / last key is EXTRAPOLATED along the
+    #   edge key segment for at most framing_sample_step frames (sim_at), never held at once. _compatible: no
+    #   confirmed step and the longer side's framing extrapolated to the other side's nearest measured sample
+    #   within punch_scale_step / punch_pos_step. _explains (tiny segments, absorb_none): the neighbour's time
+    #   line with its framing extrapolated and, with pixels, measured again by ECC on the frame; explained when
+    #   within 3δ_k of the frame's own (RAW frame, Sim); a merge is re-checked AFTER the merged segment's refit
+    #   (a frame scoring > 3δ_k below the check reverts it). Unmerged 1-2 frame segments are logged
+    #   'flash_cut_verified' only when every frame's own pair beats each adjacent neighbour's model by > 3δ_k;
+    #   else 'flash_cut_unverified' (uncertain + note); islands next to a NONE / uniform run are logged
+    #   'tiny_island_next_to_none' for the not-in-RAW resolver (FX-08).
     # Criterion 2 check per cut (A's last frame scores higher under A's model than B's, and vice versa);
     #   move the cut otherwise; log. A visited set guards the mover (it used to oscillate between two positions
     #   with identical evidence): on a revisit, or after 3 moves, every visited position is re-evaluated (models
     #   refitted for it) by the summed score of A's frames under A + B's frames under B around the positions,
     #   the best is kept, criterion2_fail is logged with {oscillation: positions, scores, repeat_pair (a
-    #   position splits a competitor REPEAT pair, temporal.py), reason} and a segment note is added
-    #   (_Seg.c2_oscillation keeps the evidence for the continuous-shot / union test). Passing cuts untouched.
+    #   position splits a competitor REPEAT pair: FrameMap pair_label, else temporal.py around it), reason} and a
+    #   segment note is added (_Seg.c2_oscillation keeps the evidence for the union test). Passing cuts untouched.
+    # UNION TEST (FX-04 3/6, FX-07 a), after criterion 2 and the phantom-cut merge, on every hard cut A|B with a
+    #   trigger: criterion-2 oscillation, a REPEAT pair at the cut (or at a position criterion 2 moved it over),
+    #   confounded frames within +-2, >= 3 refine tracks within +-union_track_window frames, a re-assigned frame
+    #   whose own RAW frame still wins near it, the two time lines meet at the cut (|ΔRAW position| <= one comp
+    #   frame of RAW time: also audio_align's 'large J/L where two lines meet', FX-09), or the caller's
+    #   union_cuts. A framing step at the cut keeps it (a reframe on one time line: the segments share their
+    #   phase, below). Else A's line extended over B and B's over A, each frame whose RAW frame changes scored
+    #   against the split with the same framing treatment (sim_at + ECC re-measure). A line no frame of which is
+    #   worse by > 3δ_k is merged when it is better somewhere by > 3δ_k or changes no frame; inside the noise
+    #   independent evidence decides -- a competitor REPEAT pair, or audio (AudioHints) running on without a lag
+    #   step with no scene change detected -- else the cut stays, uncertain, with a note (never silently merged
+    #   or kept). The merged segment's soft ranges admit the union's frames on the changed frames only.
+    # COMPETITOR REPEAT PAIRS (FX-07 c): a NONE frame whose REPEAT partner is matched by the adjacent raw segment
+    #   takes the partner's RAW frame when it scores under the partner's (RAW frame, framing) within 3δ_k of the
+    #   partner and >= match_thresh - anchor_zncc_slack and the time line holds it (repeat_pair_absorbed);
+    #   finally every REPEAT pair is checked (same status, same RAW content -- RAW's own duplicates allowed --,
+    #   no time cut inside unless a framing step on one line): violations -> comp_duplicate_conflict + notes.
+    # TIME TIES (FX-04 2): adjacent stretch segments at the same speed with a hard cut whose CLAIMED frames
+    #   (refine's measured range where the model shows it, the model frame where it re-assigns; drops left out)
+    #   fit one line -- a reframe at a RAW-native shot change, a framing step on a continuous clip -- are
+    #   phase-solved together (phase_solve.solve_shared_raw_in): each gets the shared line's raw_in at its
+    #   comp_in and the shared interval (log time_tie, note 'time line shared').
     # TRANSITIONS (before NONE runs become placeholders): for every cut and every NONE/low run <=
     #   transition_search between two raw segments, for k in [cut-transition_search, cut+transition_search]:
     #   scoring.fit_blend over A ∈ {Â(k)-1..Â(k)+1} × B ∈ {B̂(k)-1..B̂(k)+1} (phase-model predictions
@@ -466,18 +520,36 @@ def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_d
     #   phase solve; still infeasible -> uncertain=True + warning). Freeze / reverse / ramps -> time_mode
     #   remap + time_remap_keys (freeze key values (j + 0.25)/raw_fps).
     # SPEED: v_ols (robust) -> speed_measured; feasible range -> speed_range; phase_solve.snap_speed.
-    # FRAMING (5.5): track model Sims every framing_sample_step frames; stable (scale spread < 0.3 %,
-    #   position spread < 1.5 px) -> constant transform; else animated -> smooth, geometry.rdp
-    #   (rdp_pos_tol, rdp_scale_tol) -> transform_keys (linear; easing reported in `easing` only).
-    #   Rotation only if |θ| > 0.2°. Full affine only if clearly better (report it; AE uses the similarity).
+    # FRAMING (5.5, FX-06 1/2/5): samples = consistent (RAW frame, Sim) pairs on EVERY frame: refine's per-frame
+    #   measurement sim_meas (the path value where the ECC fell back below it) where the segment shows the frame
+    #   refine measured (or a visually identical one); a frame the segment RE-ASSIGNS carries a Sim fitted to
+    #   another RAW frame (the 1444 c2 failure) -> measured again by ECC (refine.ecc_measure, inits: the path, the
+    #   samples' trend; accepted when converged or >= match_thresh - anchor_zncc_slack) or left out; its own frame
+    #   still winning by > 3δ_k is a 'framing_time_conflict' (a union-test trigger). Summary: samples off the
+    #   local trend of their neighbours removed (refine's rule), knots by RDP on a local least-squares reference
+    #   (+-2 frames) at the measured noise (>= rdp_pos_tol / rdp_scale_tol / 0.05 deg, 3.5 σ), key VALUES by
+    #   least squares over the samples, max-error refinement against the samples, redundant knots pruned; keys
+    #   on the first and last sample (edge frames without a measurement are noted, never extrapolated). Stable
+    #   (scale spread < framing_scale_spread, position spread < framing_pos_spread) -> constant transform.
+    #   Rotation by a PIXEL test, not a vote: kept only when the fitted θ beats θ = 0 (derotated about the box
+    #   centre) by > 3 soft_delta_max on most of <= 8 sampled frames (no pixels: |θ| > rotation_min_deg after
+    #   outlier removal). Keys are linear (easing reported in `easing` only). Full affine only if clearly
+    #   better (report it; AE uses the similarity). The FrameMap write-back stores the re-measured framing of
+    #   re-assigned frames (Sim columns + sim_meas: export, preview and verify see a matching pair).
     # PySceneDetect (backend='opencv'; AdaptiveDetector(adaptive_threshold=2.0) + ContentDetector(15)) on
-    #   the competitor: each change must coincide (±1 frame) with a cut/transition; disagreements logged
-    #   and explained in notes.
+    #   the competitor: each change must coincide (±1 frame) with a cut/transition. An unexplained change inside
+    #   a raw segment is checked (FX-06 6): refine's measured framing jump there (f-2, f-1 extrapolated vs f) or
+    #   the model's deviation from the measurement above punch_pos_step / punch_scale_step -> 'framing step not
+    #   represented' (crosscheck 'framing_steps_not_represented'); else a score dip, a layout caption event, or
+    #   continuous framing. A cut it did not see is described by its RAW jump and framing change (position,
+    #   scale, rotation): a RAW jump of 0 / 1 is one time line, -1 a 1-frame repeat back, never a 'same-shot jump cut'.
+    # confounded frames (refine) are named in their segment's notes.
     # Writes debug/mapping.png (comp time x vs RAW time y; segments lines, cuts jumps, NOT-IN-RAW shaded,
     #   crossfades marked) and debug/scores.png (score, margin, thresholds, cuts).
 ```
 The pipeline then calls `phase_solve.solve_raw_in` per segment (using the soft ranges) and fills
-`raw_in_seconds`, `raw_in_interval`, `raw_in_interval_both`, `ae_margin_ms`, `tie_frames`.
+`raw_in_seconds`, `raw_in_interval`, `raw_in_interval_both`, `ae_margin_ms`, `tie_frames` -- or adopts the
+segmentation's own solution (time-tied segments: the shared line's values).
 
 ### export_ae.py  (Stage 7)
 ```python

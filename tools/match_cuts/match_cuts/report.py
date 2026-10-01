@@ -10,6 +10,7 @@ rendered says so in the report (and in the log) instead of aborting the run.
 """
 from __future__ import annotations
 
+import math
 import os
 import statistics
 import traceback
@@ -356,9 +357,24 @@ def _union_len(ranges: list[tuple[int, int]]) -> tuple[int, list[tuple[int, int]
     return sum(b - a + 1 for a, b in merged), [(a, b) for a, b in merged]
 
 
+def _continuous_cut(a: Any, b: Any, ratio: float) -> bool:
+    """Adjacent stretch segments whose cut does not leave the RAW time line: B starts where A's line continues
+    (RAW jump floor(u) .. ceil(u), u = RAW frames per comp frame at their common speed) -- a reframe / framing
+    step or a phase-only cut: never a jump back, never a re-used RAW moment."""
+    if a.comp_out != b.comp_in or a.time_remap_keys or b.time_remap_keys or a.raw_out_frame is None \
+            or b.raw_in_frame is None or a.speed is None or b.speed is None \
+            or abs(float(a.speed) - float(b.speed)) > 1e-9:
+        return False
+    u = float(a.speed) * ratio
+    if u <= 0:
+        return False
+    return math.floor(u) <= int(b.raw_in_frame) - int(a.raw_out_frame) <= math.ceil(u)
+
+
 def edit_breakdown(cutlist: Any, layout: Any = None, cfg: Any = None) -> dict:
     """Numbers for the edit-style breakdown (also usable by tests)."""
     comp_fps = cutlist.comp_fps
+    ratio = float(Fraction(cutlist.raw_fps) / Fraction(comp_fps)) if cutlist.raw_fps and comp_fps else 1.0
     segs = sorted(cutlist.segments, key=lambda s: (s.comp_in, s.id))
     raws = [s for s in segs if s.type == "raw"]
     lens = [(s.comp_out - s.comp_in) / float(comp_fps) for s in raws]
@@ -375,13 +391,17 @@ def edit_breakdown(cutlist: Any, layout: Any = None, cfg: Any = None) -> dict:
         prev = b + 1
     if n_raw and prev < n_raw:
         cut_out.append((prev, n_raw - 1))
-    # re-use: frames covered by >= 2 segments
+    # re-use: frames covered by >= 2 segments -- except the one RAW frame two adjacent segments on ONE time line
+    # both show at their cut (a cut inside the 23.976 -> 30 repeat cadence; FX-04: derived from the final segments)
+    used_seg = [s for s in raws if s.raw_in_frame is not None and s.raw_out_frame is not None]
     reuse = []
     for i in range(len(used)):
         for j in range(i + 1, len(used)):
             a, b = max(used[i][0], used[j][0]), min(used[i][1], used[j][1])
-            if a <= b:
-                reuse.append((a, b, raws[i].id, raws[j].id))
+            if a <= b and not (a == b and _continuous_cut(used_seg[i], used_seg[j], ratio)):
+                reuse.append((a, b, used_seg[i].id, used_seg[j].id))
+    # cuts that do not leave the time line (no RAW frame skipped or repeated back): reframes / framing steps
+    reframes = [(a.id, b.id) for a, b in zip(raws[:-1], raws[1:]) if _continuous_cut(a, b, ratio)]
     ordered = [s for s in raws if s.raw_in_frame is not None]
     hook = len(ordered) >= 2 and ordered[0].raw_in_frame > ordered[1].raw_in_frame
     non_chrono = []        # segments that start earlier in RAW than where the previous segment ended
@@ -413,7 +433,7 @@ def edit_breakdown(cutlist: Any, layout: Any = None, cfg: Any = None) -> dict:
         "raw_used_frames": used_len, "raw_frames": n_raw, "raw_used_pct": 100.0 * used_len / n_raw if n_raw else 0.0,
         "raw_cut_out": cut_out, "reuse": reuse, "non_chronological": non_chrono, "hook": bool(hook), "punch_ins": punch,
         "speeds": dict(sorted(speeds.items())), "flips": [s.id for s in raws if s.flip_h], "rotations": rot,
-        "animated": [s.id for s in raws if s.transform_keys], "transitions": dict(trans),
+        "animated": [s.id for s in raws if s.transform_keys], "transitions": dict(trans), "reframes": reframes,
         "not_in_raw": [(s.comp_in, s.comp_out) for s in segs if s.type == "not_in_raw"],
         "freeze_reverse_ramp": [s.id for s in raws if s.time_remap_keys],
     }
@@ -445,6 +465,9 @@ def _breakdown(ctx: Any) -> list[str]:
         out.append("- Freeze / reverse / ramp (time-remapped): " + ", ".join(f"S{i:02d}" for i in b["freeze_reverse_ramp"]))
     out.append(f"- Zoom punch-ins: {len(b['punch_ins'])}" + (" (" + ", ".join(f"S{a:02d}→S{c:02d} ×{r:.3f}" for a, c, r in b["punch_ins"]) + ")"
                                                          if b["punch_ins"] else ""))
+    if b["reframes"]:
+        out.append(f"- Reframes on one time line (cuts without a RAW skip): {len(b['reframes'])} ("
+                   + ", ".join(f"S{a:02d}→S{c:02d}" for a, c in b["reframes"]) + ")")
     out.append(f"- Animated zooms/pans: {len(b['animated'])}" + (" (" + ", ".join(f"S{i:02d}" for i in b["animated"]) + ")" if b["animated"] else ""))
     out.append(f"- Horizontal flips: {len(b['flips'])}" + (" (" + ", ".join(f"S{i:02d}" for i in b["flips"]) + ")" if b["flips"] else ""))
     out.append(f"- Rotation: {len(b['rotations'])} segments" + (" (" + ", ".join(f"S{i:02d}" for i in b["rotations"]) + ")" if b["rotations"] else ""))

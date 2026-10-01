@@ -31,7 +31,8 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 __all__ = [
-    "TAU", "TIE_SLACK", "feasible_speed_range", "is_feasible", "solve_raw_in", "ae_frame", "snap_speed",
+    "TAU", "TIE_SLACK", "feasible_speed_range", "is_feasible", "solve_raw_in", "solve_shared_raw_in", "ae_frame",
+    "snap_speed",
     "estimate_speed", "dominant_speed", "chebyshev_x", "best_subinterval", "min_penalty", "prefer_penalties",
 ]
 
@@ -379,6 +380,49 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
         "base": base,
         "x": x,
     }
+
+
+def solve_shared_raw_in(parts: Sequence[tuple[Sequence[int], Sequence[int], Sequence[int], int]], v: float,
+                        comp_fps: Any, raw_fps: Any, penalties: tuple[Any, Any, Any] | None = None) -> list[dict]:
+    """One phase solve for TIME-TIED segments (DESIGN §5 segment.py, FX-04 2): consecutive segments at the same speed
+    v that show ONE RAW time line (a reframe at a RAW-native shot change, a framing step on a continuous clip).
+
+    ``parts`` = [(ks, lo, hi, comp_in), ...] in competitor order; ``penalties`` (i, j, w) index the concatenation of
+    the parts' ks (see :func:`prefer_penalties`). The union is solved once by :func:`solve_raw_in` at the first part's
+    comp_in c0; every part gets that line's values at its own comp_in: raw_in_i = raw_in + v (comp_in_i - c0) /
+    comp_fps (interval_floor / interval_soft / interval_both shifted alike, so AE's floor rule gives the same RAW
+    frame on every comp frame whichever layer shows it), the shared slack / margin_ms / data_cost / ok, its own
+    frames' tie_frames and frame_slack, and 'shared' = {'comp_in': c0, 'parts': n, 'raw_in': the line's raw_in at
+    c0}. Returns one dict per part (the keys of :func:`solve_raw_in`)."""
+    if not parts:
+        return []
+    ks = np.concatenate([np.asarray(p[0], dtype=np.int64).ravel() for p in parts])
+    lo = np.concatenate([np.asarray(p[1], dtype=np.int64).ravel() for p in parts])
+    hi = np.concatenate([np.asarray(p[2], dtype=np.int64).ravel() for p in parts])
+    c0 = int(parts[0][3])
+    sol = solve_raw_in(ks, lo, hi, c0, v, comp_fps, raw_fps, penalties=penalties)
+    cf = float(Fraction(comp_fps))
+    u = float(sol["u"])
+    fslack = np.asarray(sol["frame_slack"])
+    ties = set(int(k) for k in sol["tie_frames"])
+    out: list[dict] = []
+    off = 0
+    for pk, _lo, _hi, ci in parts:
+        pk = np.asarray(pk, dtype=np.int64).ravel()
+        sh_s = float(v) * (int(ci) - c0) / cf
+        sh_f = u * (int(ci) - c0)
+
+        def shift(iv: Any) -> list[float] | None:
+            return None if iv is None else [float(iv[0]) + sh_s, float(iv[1]) + sh_s]
+        d = dict(sol)
+        d.update(raw_in=float(sol["raw_in"]) + sh_s, raw_in_frames=float(sol["raw_in_frames"]) + sh_f,
+                 interval_floor=shift(sol["interval_floor"]), interval_soft=shift(sol["interval_soft"]),
+                 interval_both=shift(sol["interval_both"]), x=float(sol["x"]) + sh_f,
+                 tie_frames=sorted(int(k) for k in pk if int(k) in ties), frame_slack=fslack[off:off + pk.size],
+                 shared={"comp_in": c0, "parts": len(parts), "raw_in": float(sol["raw_in"])})
+        out.append(d)
+        off += pk.size
+    return out
 
 
 def ae_frame(raw_in: float, v: float, k: int | np.ndarray, comp_in: int, comp_fps: Any, raw_fps: Any,

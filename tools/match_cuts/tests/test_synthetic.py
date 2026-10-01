@@ -723,20 +723,12 @@ FILM_GROUPS = {
 }
 
 # Assertions the CURRENT pipeline fails on film24 -> the fix that must make them pass (strict xfail).
-_ACCEL = ("FX-06: one exact segment since FX-03 and refine's path is within 0.4 px, but segment.framing's sparse "
-          "smoothed keys miss the 4.2 -> 13.8 px/frame knot by up to 12 px")
-_STEP = ("FX-06: refine splits its track at the snap-back (frames exact since FX-03) but segmentation keeps one "
-         "segment across the framing step, keys ramp through it")
-_PUNCH = ("FX-06: refine splits its track at the x1.7 punch (frames exact since FX-03) but segmentation keeps one "
-          "segment across the step, keys ramp through it (up to 28 px)")
 _TWO = ("FX-08: the second pan clip is exact since FX-03, the first has no anchor and no near-miss (RANSAC <= 5 "
         "inliers under the RAW-only disclaimer) -> NOT-IN-RAW placeholder; needs a line-constrained search")
 FILM_XFAIL: dict[tuple[str, str], str] = {
-    # pan: frames exact, one segment and the truth framing since the time-line-first refine (FX-03)
-    ("framing", "pan_accel"): _ACCEL,          # frames exact, one segment, true speed since FX-03; framing: FX-06
-    **{(t, "pan_step"): _STEP for t in ("one_segment_per_clip", "framing")},     # frames exact since FX-03
-    # punch_pan: frames exact since FX-03 (a near-miss anchor joins the run's time line)
-    **{(t, "punch_pan"): _PUNCH for t in ("one_segment_per_clip", "framing")},
+    # pan, pan_accel: frames exact, one segment and the truth framing since the time-line-first refine (FX-03) and
+    # the measured framing summary (FX-06); pan_step, punch_pan: the framing step is a confirmed cut on one time
+    # line with a shared phase (FX-06, FX-04)
     **{(t, "two_clip_pans"): _TWO for t in ("frames_exact", "one_segment_per_clip", "framing")},
     ("one_segment_per_clip", "gray"): "FX-08: the gray-zone chain becomes a NOT-IN-RAW placeholder",
     ("speed", "blend_slow"): "FX-08: the frame-blend slow motion is fitted as v=0.2536 instead of 0.25 / frame_blend",
@@ -1012,7 +1004,9 @@ def test_film24_gray_chain_never_not_in_raw(e2e, cutlist):
     assert not bad, f"gray chain frames under a NOT-IN-RAW placeholder: {bad}"
 
 
-@film_xfail("FX-07/FX-04: segmentation cuts between the two frames of pulldown repeat pairs")
+@film_xfail("FX-08: the one cut left inside a repeat pair is 444|445, the edge of the anchorless first two-clip pan "
+            "(NOT-IN-RAW placeholder | 1-frame island; refine's comp labels there are UNKNOWN, so the comp-duplicate "
+            "invariant has no repeat pair to act on) -- needs the line-constrained search")
 def test_film24_no_cut_inside_repeat_pair(e2e, cutlist):
     """FX-07: no time cut between the two frames of a competitor pulldown repeat pair (24 -> 30 cadence), except
     where the truth itself cuts (a framing step may sit there)."""
