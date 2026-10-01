@@ -238,10 +238,10 @@ class Cache:
     def json(self, stage: str, key: str, compute: Callable[[], Any]) -> Any:
         p = self.path(stage, key, ".json")
         if p.exists():
-            return json.loads(p.read_text())
+            return json.loads(p.read_text(encoding="utf-8"))
         val = compute()
         atomic_write_text(p, json.dumps(val, default=json_default, indent=1, sort_keys=True))
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
 
     def npz(self, stage: str, key: str, compute: Callable[[], dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
         p = self.path(stage, key, ".npz")
@@ -256,10 +256,12 @@ class Cache:
 
 
 def atomic_write_text(path: str | os.PathLike, text: str) -> None:
+    """Write UTF-8 text atomically. Never the platform default encoding: on Windows that is cp1252, which
+    cannot encode the arrows / dashes / ± of report.md and crashed S10 (UnicodeEncodeError)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, p)
 
 
@@ -290,7 +292,7 @@ def dump_json(obj: Any, path: str | os.PathLike, indent: int = 2) -> None:
 
 
 def load_json(path: str | os.PathLike) -> Any:
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------
@@ -322,7 +324,7 @@ class DecisionLog:
         self.path = Path(path) if path else None
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(self.path, "w" if truncate else "a") if self.path else None
+        self._fh = open(self.path, "w" if truncate else "a", encoding="utf-8") if self.path else None
         self._captures: list[DecisionCapture] = []
 
     def _emit(self, entry: dict) -> None:
@@ -378,7 +380,7 @@ def load_decisions(path: str | os.PathLike) -> list[dict]:
     p = Path(path)
     if not p.exists():
         return out
-    for line in p.read_text().splitlines():
+    for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -414,7 +416,7 @@ def setup_logging(verbose: bool = False, log_file: str | os.PathLike | None = No
     root.addHandler(sh)
     if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(log_file, mode="a")
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
         root.addHandler(fh)
@@ -438,7 +440,8 @@ class Timer:
 
 def run(cmd: list[str], check: bool = True, capture: bool = True, **kw) -> subprocess.CompletedProcess:
     log.debug("run: %s", " ".join(map(str, cmd)))
-    res = subprocess.run(list(map(str, cmd)), capture_output=capture, text=True, **kw)
+    res = subprocess.run(list(map(str, cmd)), capture_output=capture, text=True, encoding="utf-8", errors="replace",
+                         **kw)
     if check and res.returncode != 0:
         raise RuntimeError(f"command failed ({res.returncode}): {' '.join(map(str, cmd))}\n{res.stderr[-4000:]}")
     return res

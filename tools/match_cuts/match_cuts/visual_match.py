@@ -124,7 +124,7 @@ def _spawn_safe() -> bool:
     if spec is not None and str(getattr(spec, "name", "")).endswith("__main__"):
         return True
     try:
-        txt = Path(f).read_text(errors="ignore")
+        txt = Path(f).read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
     return "__name__" in txt and "__main__" in txt
@@ -199,7 +199,7 @@ def _available_ram() -> int | None:
     plat = _platform()
     try:
         if plat.startswith("linux"):
-            with open("/proc/meminfo") as f:
+            with open("/proc/meminfo", encoding="utf-8") as f:
                 for line in f:
                     if line.startswith("MemAvailable:"):
                         return int(line.split()[1]) * 1024
@@ -220,7 +220,8 @@ def _available_ram() -> int | None:
         elif plat == "darwin":
             import re
             import subprocess
-            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=5).stdout
             m = re.search(r"page size of (\d+) bytes", out)
             page = int(m.group(1)) if m else 4096
             pages = 0

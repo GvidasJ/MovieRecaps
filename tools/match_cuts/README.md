@@ -215,6 +215,11 @@ shows a dialog (*save the current project?*, or the scripting-permission alert b
 Scripts to Write Files and Access Network* (in versions before 16.1: *Preferences → General*), then run
 the script again.
 
+**`UnicodeEncodeError: 'charmap' codec can't encode character …` (Windows)** — fixed: every text file
+(report, cut list, XML/EDL, logs) is written as UTF-8 whatever the system code page. Update with
+`git pull` and rerun; the analysis is cached, so only the exports and the report are redone. On an older
+copy, `$env:PYTHONUTF8 = "1"` in PowerShell before the run works around it.
+
 **Media not found / relink** — the script looks for the media next to itself (`media/…`), then at the
 absolute path recorded at export time, then opens *Locate the RAW video*. RAW files above
 `large_file_bytes` (2 GB) are not copied into `media/`; they are referenced by absolute path, so keep

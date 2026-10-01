@@ -1058,7 +1058,7 @@ def _validate_edl(cutlist: Cutlist, edl_path: Path, events: list[EditEvent], err
     cn, rn = _nominal(comp_fps), _nominal(raw_fps)
     res: dict[str, Any] = {}
     # own parser (exact M2 fields)
-    own = parse_edl_text(edl_path.read_text())
+    own = parse_edl_text(edl_path.read_text(encoding="utf-8"))
     items = []
     for e in own:
         rec_in, rec_out = _tc_to_frames(e["rec_in"], cn), _tc_to_frames(e["rec_out"], cn)

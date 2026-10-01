@@ -2147,10 +2147,10 @@ def run_jsx_in_mock(jsx_path: str | os.PathLike, footage_meta: dict, scenario: s
     with tempfile.TemporaryDirectory(prefix="mc_aemock_") as td:
         meta_p = Path(td) / "meta.json"
         out_p = Path(td) / "record.json"
-        meta_p.write_text(json.dumps(footage_meta or {}, default=int))
+        meta_p.write_text(json.dumps(footage_meta or {}, default=int), encoding="utf-8")
         try:
             res = subprocess.run([node, str(runner), str(jsx), str(meta_p), scenario, str(out_p)],
-                                 capture_output=True, text=True, timeout=timeout)
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired:
             return {"record_type": "ae_mock", "status": "node_error", "scenario": scenario,
                     "error": f"mock run timed out after {timeout} s"}
@@ -2159,7 +2159,7 @@ def run_jsx_in_mock(jsx_path: str | os.PathLike, footage_meta: dict, scenario: s
         if not out_p.exists():
             return {"record_type": "ae_mock", "status": "node_error", "scenario": scenario,
                     "error": (res.stderr or res.stdout)[-4000:], "returncode": res.returncode}
-        rec = json.loads(out_p.read_text())
+        rec = json.loads(out_p.read_text(encoding="utf-8"))
     rec.setdefault("record_type", "ae_mock")
     rec["node"] = node
     if res.stderr.strip():

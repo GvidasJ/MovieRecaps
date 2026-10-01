@@ -281,14 +281,15 @@ def _parse_version(text: str) -> tuple[int, ...]:
 def _detect_sync_args(binary: str) -> tuple[str, ...]:
     """Passthrough frame-sync flag the given ffmpeg accepts (cached per binary)."""
     try:
-        out = subprocess.run([binary, "-hide_banner", "-version"], capture_output=True, text=True, timeout=30).stdout
+        out = subprocess.run([binary, "-hide_banner", "-version"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         out = ""
     ver = _parse_version(out)
     if not ver:                  # git / distro build without a release number: ask the option parser
         try:
             helptext = subprocess.run([binary, "-hide_banner", "-h", "long"], capture_output=True, text=True,
-                                      timeout=30).stdout
+                                      encoding="utf-8", errors="replace", timeout=30).stdout
         except (OSError, subprocess.SubprocessError):
             helptext = ""
         if helptext and "-fps_mode" not in helptext:
@@ -657,7 +658,7 @@ def _load_state(media: Path) -> dict:
     p = media / CONFORM_JSON
     if p.exists():
         try:
-            return json.loads(p.read_text())
+            return json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             log.warning("%s unreadable; ignoring the conform cache", p)
     return {}
@@ -772,7 +773,7 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
     t0 = time.perf_counter()
     log.info("conform %s: %s -> %s (%s, %s, %d frames)", role, src.name, dst.name, plan["codec"], plan["mode"],
              plan["expected_frames"])
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         if tmp.exists():
             tmp.unlink()

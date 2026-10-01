@@ -1861,7 +1861,7 @@ def _spawn_safe() -> bool:
     if spec is not None and str(getattr(spec, "name", "")).endswith("__main__"):
         return True
     try:
-        txt = Path(f).read_text(errors="ignore")
+        txt = Path(f).read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
     return "__name__" in txt and "__main__" in txt
@@ -2347,7 +2347,7 @@ def _analyze(comp: Proxy, cfg: Any, cache: Cache | None, debug_dir: str | os.Pat
     dbg = Path(debug_dir) if debug_dir is not None else None
     if cache is not None and pj.exists() and ps.exists() and po.exists():
         import json
-        layout = Layout.from_dict(json.loads(pj.read_text()))
+        layout = Layout.from_dict(json.loads(pj.read_text(encoding="utf-8")))
         layout.static_mask_file, layout.overlay_mask_file = str(ps), str(po)
         overlays = OverlayMasks.load(po)
         if dbg is not None and pp.exists():

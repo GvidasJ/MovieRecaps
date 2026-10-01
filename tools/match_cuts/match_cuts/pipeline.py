@@ -177,7 +177,8 @@ def _tool_version(binary: str | None) -> str | None:
     if not binary:
         return None
     try:
-        res = subprocess.run([binary, "-version"], capture_output=True, text=True, timeout=30)
+        res = subprocess.run([binary, "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.search(r"version\s+n?(\d+(?:\.\d+)*)", res.stdout or "")
@@ -262,7 +263,8 @@ def check_env() -> dict:
     node_v = None
     if node:
         try:
-            node_v = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+            node_v = subprocess.run([node, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                    timeout=30).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             node_v = None
     env = {
@@ -1549,7 +1551,8 @@ def run_after_effects(env: dict, jsx_path: str | Path, timeout: float = 3600.0, 
     log.info("      If After Effects shows a dialog (save the current project? / 'Allow Scripts to Write Files'), "
              "answer it there. Press Ctrl+C here to skip this step (the run continues); --no-ae disables it.")
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace")
     except OSError as e:
         return {"status": "failed", "cmd": cmd, "error": str(e)}
     t0 = time.monotonic()
@@ -1916,12 +1919,12 @@ def stage_segments(ctx: Context) -> None:
     prev = cfg.out / "cutlist.json"
     if prev.exists():
         try:
-            ctx.previous_cutlist = json.loads(prev.read_text())
+            ctx.previous_cutlist = json.loads(prev.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             ctx.previous_cutlist = None
     # the layout used by S5.4+ is persisted and re-read, so this run and the s9_7 re-run use the same object
     dump_json(ctx.layout.to_dict(), cfg.work / "layout.json")
-    ctx.layout = Layout.from_dict(json.loads((cfg.work / "layout.json").read_text()))
+    ctx.layout = Layout.from_dict(json.loads((cfg.work / "layout.json").read_text(encoding="utf-8")))
     ctx.fm, ctx.segments, ctx.audio_result, ctx.cutlist = segment_and_assemble(ctx, ctx.fm_pre, ctx.dlog, cfg.debug_dir)
     ctx.fm.save(cfg.work / "frame_map.npz")
     for w in ctx.cutlist.warnings:
@@ -2318,7 +2321,8 @@ def fresh_context_from_cache(ctx: Context, rerun_dir: Path | None = None) -> Con
     new.comp_audio, new.raw_audio = _readonly(ctx.comp_audio), _readonly(ctx.raw_audio)
     new.audio_sr = ctx.audio_sr
     lay_path = cfg.work / "layout.json"
-    new.layout = Layout.from_dict(json.loads(lay_path.read_text())) if lay_path.exists() else copy.deepcopy(ctx.layout)
+    new.layout = (Layout.from_dict(json.loads(lay_path.read_text(encoding="utf-8"))) if lay_path.exists()
+                  else copy.deepcopy(ctx.layout))
     new.main_fps, new.main_size = ctx.main_fps, ctx.main_size
     new.analysis_warnings = list(ctx.analysis_warnings)
     new.keys = dict(ctx.keys)

@@ -1329,7 +1329,7 @@ def _mux(video: Path, audio_src: Path | None, out: Path, audio_codec_args: Seque
     else:
         cmd += ["-map", "0:v:0", "-c:v", "copy"]
     cmd += ["-movflags", "+faststart", str(out)]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         raise RuntimeError(f"ffmpeg mux failed for {out}: {res.stderr[-3000:]}")
 

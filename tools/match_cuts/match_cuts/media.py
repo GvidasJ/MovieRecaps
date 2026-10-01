@@ -235,7 +235,8 @@ def _audio_channels(path: str | Path, stream_index: int = 0) -> int | None:
     from .common import ffprobe_bin
 
     res = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", f"a:{stream_index}",
-                          "-show_entries", "stream=channels", "-of", "json", str(path)], capture_output=True, text=True)
+                          "-show_entries", "stream=channels", "-of", "json", str(path)], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
     try:
         streams = json.loads(res.stdout).get("streams", [])
     except Exception:

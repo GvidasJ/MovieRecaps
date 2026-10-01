@@ -156,7 +156,7 @@ def quick_probe(path: str | Path) -> dict:
     cmd = [ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries",
            "stream=width,height,sample_aspect_ratio,duration:stream_side_data=rotation:stream_tags=rotate:format=duration",
            "-of", "json", str(path)]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         raise InputError(f"cannot read {path}: {res.stderr.strip()[-300:]}")
     d = json.loads(res.stdout or "{}")
@@ -294,7 +294,18 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 20) ->
     return "\n".join(lines)
 
 
+def _tolerant_console() -> None:
+    """Console text the terminal cannot encode (cp1252 / cp437 on Windows when output is redirected) is
+    replaced instead of raising UnicodeEncodeError; files are always written as UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _tolerant_console()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

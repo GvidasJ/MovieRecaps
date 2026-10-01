@@ -106,7 +106,7 @@ def nearest_common_rate(fr: Fraction | float, tol: float = NOMINAL_FPS_TOL) -> F
 
 
 def _run_json(cmd: list[str]) -> dict:
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         hint = ""
         if "moov atom not found" in (res.stderr or ""):
@@ -570,7 +570,7 @@ def _packet_ends(path: str | os.PathLike, intervals: str, timeout: float = TAIL_
     cmd = [ffprobe_bin(), "-v", "error", "-read_intervals", intervals, "-show_entries",
            "packet=stream_index,pts_time,dts_time,duration_time", "-of", "compact=p=0", str(path)]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         log.info("%s: packet listing failed (%s)", path, e)
         return None
@@ -664,7 +664,7 @@ def truncation_info(info: StreamInfo) -> dict | None:
     side = _sidecar(info, ".ffprobe.json") if info.pts_file else None
     if side is not None and side.exists():
         try:
-            pj = json.loads(side.read_text())
+            pj = json.loads(side.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pj = None
     if "truncation" in ex:
@@ -812,7 +812,7 @@ def probe(path: str | os.PathLike, role: str, work_dir: str | os.PathLike, decod
     pts_path = cache.path("probe", key, ".pts.npy")
     if jpath.exists() and (not decode or pts_path.exists()):
         try:
-            info = StreamInfo.from_dict(json.loads(jpath.read_text()))
+            info = StreamInfo.from_dict(json.loads(jpath.read_text(encoding="utf-8")))
             info.path, info.role = abspath, role
             if decode:
                 info.pts_file = str(pts_path)
@@ -971,7 +971,7 @@ def probe_extra(info: StreamInfo) -> dict:
     if info.pts_file:
         side = _sidecar(info, ".extra.json")
         if side.exists():
-            return json.loads(side.read_text())
+            return json.loads(side.read_text(encoding="utf-8"))
     return {}
 
 

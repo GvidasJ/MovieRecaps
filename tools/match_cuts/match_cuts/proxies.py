@@ -210,8 +210,7 @@ class _FrameStore:
             return have
         rows = len(have)
         new_ids: list[int] = []
-        mode = "r+b" if self.data.exists() else "w+b"
-        with open(self.data, mode) as f:
+        with open(self.data, "r+b" if self.data.exists() else "w+b") as f:
             f.seek(rows * fs)
             with _reader(info_like["path"], Fraction(info_like["fps"]), info_like["vindex"], info_like["rotation"],
                          Fraction(info_like["sar"])) as rd:
@@ -319,7 +318,7 @@ def extend_proxy(proxy: Proxy, windows, cfg, cache: Cache) -> Proxy:
     params = data.with_name(data.name[:-len(".u8")] + ".store.json")
     if not params.exists():
         raise RuntimeError(f"extend_proxy: store parameters {params} missing")
-    info_like = json.loads(params.read_text())
+    info_like = json.loads(params.read_text(encoding="utf-8"))
     key = data.name[:-len(".u8")]
     store = _FrameStore(cache, key)
     if store.data != data:           # cache root moved: use the proxy's own files

@@ -2378,7 +2378,8 @@ def check_ae_render(env: dict, aep: str | None, preview: str | None, n_main: int
         cmd = [aerender, "-project", str(Path(aep).resolve()), "-comp", MAIN_COMP_NAME, "-RStemplate", "Best Settings",
                "-OMtemplate", tmpl, "-output", str(target)]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=6 * 3600)
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=6 * 3600)
         except (OSError, subprocess.SubprocessError) as e:
             tried.append({"template": tmpl, "error": str(e)})
             continue
@@ -2468,7 +2469,7 @@ def check_determinism(ctx: Any) -> dict:
         failures.append(f"re-assembly from caches differs: {cmp['differences'][:5]}")
     p = Path(ctx.cfg.out) / "cutlist.json"
     if p.exists():
-        disk = compare_cutlists(json.loads(p.read_text()), first)
+        disk = compare_cutlists(json.loads(p.read_text(encoding="utf-8")), first)
         if not disk["identical"]:
             failures.append(f"written cutlist.json differs from the in-memory cutlist: {disk['differences'][:5]}")
     prev = compare_with_previous_run(getattr(ctx, "previous_cutlist", None), first)
