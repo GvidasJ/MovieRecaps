@@ -595,9 +595,12 @@ def test_mock_catches_keys_written_before_timing(tmp_path):
 })();
 """
     timing = "L.startTime = 2; L.inPoint = 2; L.outPoint = 4;"
+    # the JSX's order: keys first, then AE's own start / end keys removed (removing the last Time Remap key
+    # would turn time remapping off and hide the property)
     keys = ("L.timeRemapEnabled = true; var P = L.property(\"ADBE Time Remapping\");"
-            "while (P.numKeys > 0) { P.removeKey(P.numKeys); }"
-            "P.setValuesAtTimes([2, 4], [100.5 / 29.97002997002997, 160.5 / 29.97002997002997]);")
+            "P.setValuesAtTimes([2, 4], [100.5 / 29.97002997002997, 160.5 / 29.97002997002997]);"
+            "for (var i = P.numKeys; i >= 1; i--) { var t = P.keyTime(i);"
+            " if (Math.abs(t - 2) > 1e-6 && Math.abs(t - 4) > 1e-6 && P.numKeys > 1) { P.removeKey(i); } }")
     results = {}
     for name, body in (("right", timing + keys), ("wrong", keys + timing)):
         p = tmp_path / f"snippet_{name}.jsx"
