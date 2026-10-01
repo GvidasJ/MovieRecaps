@@ -1434,3 +1434,27 @@ def test_placeholder_match_split_across_a_repeat_pair_is_flagged(tmp_path):
     conf = [r for r in rec if r["decision"] == "comp_duplicate_conflict"]
     assert conf and conf[0]["evidence"]["pairs"][0]["pair"] == [19, 20]
     assert "competitor frames 19/20 are identical" in segs[2].notes
+
+
+@pytest.mark.parametrize("gap", [0.0005, 0.02])
+def test_union_test_for_a_callers_cut(monkeypatch, tmp_path, gap):
+    """FX-04 3 / FX-09: a cut the caller names (union_cuts, e.g. a large J/L where two lines meet) faces the
+    continuous hypothesis. B's measured line is two RAW frames behind A's: when the pixels prefer A's line by more
+    than the noise on B's frames the cut goes; inside the noise with no independent evidence (no repeat pair, no
+    audio) it stays and is reported uncertain -- never silently."""
+    a = ff_select(30, 1.0, 1000)
+    line = ff_select(60, 1.0, 1000)
+    b = line[30:] - 2                      # B shows two RAW frames again (no single line holds both)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(m=b, n=30, track=1)])
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - gap * abs(j - int(line[k])))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, *proxies(fm.n), None, None, cfg_(), dl, None, union_cuts=[30])
+    dl.close()
+    u = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "union_test"]
+    assert u and "caller" in u[0]["evidence"]["triggers"]
+    if gap > 0.01:
+        assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 60)] and u[0]["evidence"]["result"] == "merged"
+        assert np.array_equal(_ae(segs), line)
+    else:      # (criterion 2 may have moved the near-tie cut a few frames: the caller's trigger follows it)
+        assert len(segs) == 2 and u[0]["evidence"]["result"] == "undecided"
+        assert segs[1].uncertain and "not decidable" in segs[1].notes

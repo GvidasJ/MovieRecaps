@@ -2942,7 +2942,7 @@ class _Builder:
             out.append("framing_time_conflict")
         if self._lines_meet(A, B):
             out.append("lines_meet")
-        if c in self.union_cuts:
+        if c in self.union_cuts or any(int(p) in self.union_cuts for p in osc.get("oscillation", [])):
             out.append("caller")
         return out
 
