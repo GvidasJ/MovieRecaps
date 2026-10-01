@@ -1117,7 +1117,8 @@ class _Builder:
         s = float(math.exp(v[2])) if log_scale else float(v[2])
         th = float(v[3])
         c, sn = math.cos(math.radians(th)), math.sin(math.radians(th))
-        return Sim(s, th, float(v[0] - s * (c * pref[0] - sn * pref[1])), float(v[1] - s * (sn * pref[0] + c * pref[1])))
+        return Sim(s, th, float(v[0] - s * (c * pref[0] - sn * pref[1])),
+                   float(v[1] - s * (sn * pref[0] + c * pref[1])))
 
     @staticmethod
     def _line(ks: np.ndarray, V: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1184,7 +1185,8 @@ class _Builder:
             res_p, res_s = 0.0, 0.0
             for sl, (la, lb) in ((left, lineA), (right, lineB)):
                 R_ = V[sl] - (la + np.outer(idx[sl], lb))
-                res_p = max(res_p, float(np.max(np.hypot(R_[:, 0], R_[:, 1]) + np.abs(np.radians(R_[:, 3])) * self.box_r)))
+                rp_ = np.hypot(R_[:, 0], R_[:, 1]) + np.abs(np.radians(R_[:, 3])) * self.box_r
+                res_p = max(res_p, float(np.max(rp_)))
                 res_s = max(res_s, float(np.max(np.abs(np.expm1(R_[:, 2])))))
             ts = np.linspace(ka, kb, 2 * (kb - ka) + 1)
             D = (lineA[0] + np.outer(ts, lineA[1])) - (lineB[0] + np.outer(ts, lineB[1]))
@@ -1691,8 +1693,8 @@ class _Builder:
         out = None
         try:
             r = ecc_measure(np.asarray(self.comp.get(int(k))), np.asarray(self.raw.get(int(j))), inits[0], bool(flip),
-                            self.P.raw_w, tuple(self.raw.ratio), tuple(self.comp.ratio), self.P.allowed(int(k)), self.cfg,
-                            roi=self.P.roi, starts=inits[1:])
+                            self.P.raw_w, tuple(self.raw.ratio), tuple(self.comp.ratio), self.P.allowed(int(k)),
+                            self.cfg, roi=self.P.roi, starts=inits[1:])
             # the best-scoring of the ECC optimum and the inits (an exact init is not moved by ECC: 'not converged');
             # accepted when ECC converged or the framing matches the frame (>= match_thresh - anchor_zncc_slack)
             cands = [r.sim] + inits
@@ -2970,7 +2972,8 @@ class _Builder:
         # nearest the cut first; the first frame the union explains clearly worse ends the test (a real cut is
         # rejected after a few ECC measurements, a spurious one is scored on every frame it changes)
         for k in sorted(range(A.a, B.b), key=lambda k_: (abs(k_ - B.a + 0.5), k_)):
-            if rows and rows[-1].get("z_line") is not None and rows[-1]["z_line"] < rows[-1]["z_split"] - rows[-1]["d3"]:
+            last = rows[-1] if rows else None
+            if last is not None and last.get("z_line") is not None and last["z_line"] < last["z_split"] - last["d3"]:
                 break
             if F.status[k] != Status.MATCH:
                 continue
@@ -3069,8 +3072,8 @@ class _Builder:
             # B's notes about the removed cut (criterion 2's verdict on it) go with it
             notes = A.notes + [nt for nt in B.notes if not nt.startswith("criterion 2 not satisfied")]
             U = _Seg("raw", A.a, B.b, model=line.model, flip=A.flip, track=line.track, extra={**A.extra, **B.extra},
-                     trans_in=A.trans_in, trans_out=B.trans_out, notes=notes,
-                     uncertain=A.uncertain or B.uncertain, blend_frames=sorted(set(A.blend_frames) | set(B.blend_frames)))
+                     trans_in=A.trans_in, trans_out=B.trans_out, notes=notes, uncertain=A.uncertain or B.uncertain,
+                     blend_frames=sorted(set(A.blend_frames) | set(B.blend_frames)))
             saved = {k: (int(self.F.lo[k]), int(self.F.hi[k])) for k in range(A.a, B.b)}
             for row in r["rows"]:
                 self._widen(int(row["k"]), int(row["line"]), "union_merged")
@@ -3224,10 +3227,11 @@ class _Builder:
         for g in groups:
             if len(g) < 2:
                 continue
-            parts, pens = [], []
+            parts = []
             for S in g:
                 ks, lo, hi = self.constraints(S)
-                keep = ~np.isin(ks, np.asarray(S.model.drops, dtype=np.int64)) if S.model.drops else np.ones(ks.size, bool)
+                keep = ~np.isin(ks, np.asarray(S.model.drops, dtype=np.int64)) if S.model.drops else \
+                    np.ones(ks.size, bool)
                 parts.append((ks[keep], lo[keep], hi[keep], S.a))
             kk = np.concatenate([p[0] for p in parts])
             ll = np.concatenate([p[1] for p in parts])
@@ -3238,11 +3242,12 @@ class _Builder:
                 continue
             for S, sol in zip(g, sols):
                 S.model.sol = sol
-                S.notes.append(f"time line shared with segment(s) {', '.join(f'[{o.a},{o.b})' for o in g if o is not S)}"
-                               " (one phase solve)")
+                others = ", ".join(f"[{o.a},{o.b})" for o in g if o is not S)
+                S.notes.append(f"time line shared with segment(s) {others} (one phase solve)")
             self.log("time_tie", comp_range=[g[0].a, g[-1].b], evidence={
                 "segments": [[S.a, S.b] for S in g], "speed": g[0].model.v,
-                "raw_in": [round(float(s["raw_in"]), 9) for s in sols], "margin_ms": round(float(sols[0]["margin_ms"]), 4)})
+                "raw_in": [round(float(s["raw_in"]), 9) for s in sols],
+                "margin_ms": round(float(sols[0]["margin_ms"]), 4)})
 
     def _tied(self, group: list[_Seg]) -> bool:
         """What the segments of ``group`` (same speed) CLAIM fits one line: refine's measured range where a segment's
@@ -3264,7 +3269,8 @@ class _Builder:
         ks = np.concatenate(kk)
         if ks.size == 0:
             return False
-        return bool(ps.is_feasible(ks, np.concatenate(plo), np.concatenate(phi), int(group[0].a), self.cf, self.rf, v=v))
+        return bool(ps.is_feasible(ks, np.concatenate(plo), np.concatenate(phi), int(group[0].a), self.cf, self.rf,
+                                   v=v))
 
     # ---------------------------------------------------------------------------------------------
     # retiming, remap, ramps
@@ -3908,14 +3914,16 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
             if fr is not None and (fr["jump_px"] > thr_p or fr["jump_scale"] > thr_s or fr["model_dev_px"] > thr_p
                                    or fr["model_dev_scale"] > thr_s):
                 why = (f"framing step not represented: measured framing jump {fr['jump_px']:.1f} px / scale "
-                       f"{100 * fr['jump_scale']:.2f} %, segment model off the measurement by {fr['model_dev_px']:.1f} px")
+                       f"{100 * fr['jump_scale']:.2f} %, segment model off the measurement by "
+                       f"{fr['model_dev_px']:.1f} px")
                 steps.append(f)
             elif fr is None:
                 why = "inside a segment where the framing is not measured on both sides (not checked)"
             elif np.isfinite(sc).all() and float(np.min(sc)) < float(_cfg(b.cfg, "match_thresh", 0.9)):
                 why = "inside a segment but the match score dips there (check overlays / a missed flash cut)"
             elif cap:
-                why = f"caption change (layout caption event {int(cap[0].get('comp_in'))}-{int(cap[0].get('comp_out'))})"
+                ci, co = int(cap[0].get("comp_in")), int(cap[0].get("comp_out"))
+                why = f"caption change (layout caption event {ci}-{co})"
             seg.notes = (seg.notes + "; " if seg.notes else "") + f"PySceneDetect change at {f}: {why}"
         unexplained.append({**ev, "explanation": why})
     changes_set = set(changes)
