@@ -1021,7 +1021,7 @@ def test_film24_continuous_audio_over_video_only_retimes(e2e, cutlist, verify):
     picture-synced RAW time is the truth's audio time + the content offset within 3 ms; the recreation has no silent
     gap there (preview audio RMS within 3 dB of the competitor's over the same audio, A/V offset applied) and c5
     measures the piece on its line (ok; a piece shorter than verify_audio_min_s alone stays the inconclusive
-    too_short); the NOT-IN-RAW insert with foreign audio stays silent (no line, not_in_raw)."""
+    too_short); the foreign insert stays silent (no line; a not_in_raw placeholder or, FX-08, 'uncertain')."""
     _need_film()
     truth = e2e["truth"]
     cf = _fps(cutlist["competitor"]["fps"])
@@ -1064,7 +1064,9 @@ def test_film24_continuous_audio_over_video_only_retimes(e2e, cutlist, verify):
     foreign = next(t for t in truth["segments"] if t["kind"] == "foreign")
     for s in _covering(cutlist, (foreign["comp_in"] + foreign["comp_out"]) // 2):
         a = s.get("audio") or {}
-        if a.get("line") or s["type"] != "not_in_raw" or a.get("exception") != "not_in_raw":
+        # NOT-IN-RAW placeholder or (FX-08: best ZNCC 0.66-0.70 >= none_thresh) an 'uncertain' segment -- either way
+        # silent: no audio line, its own type as the audio exception
+        if a.get("line") or s["type"] not in ("not_in_raw", "uncertain") or a.get("exception") != s["type"]:
             rows.append(["foreign", s["id"], "foreign audio must stay silent", a.get("line"), a.get("exception")])
     assert not rows, _table("continuous audio over video-only retimes (FX-14):",
                             ["chain", "segment", "problem", "line", "c5"], rows)
