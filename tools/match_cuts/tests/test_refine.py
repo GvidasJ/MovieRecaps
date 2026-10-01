@@ -619,3 +619,110 @@ def test_path_line_and_extrapolation_helpers():
     best, dis = refine._label_speed_choice(K, alts, lab12)
     assert best == 1 and dis[1] == 0 < dis[0], dis
     assert refine._label_speed_choice(K, alts, {k: 0 for k in range(11)}) == (0, [])
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: search before giving up; three states (MATCH / UNRESOLVED / NONE)
+# ---------------------------------------------------------------------------------------------
+
+def _eval_state(raw: Proxy, comp: Proxy, layout: Layout, cfg) -> dict:
+    return {"comp": comp, "raw": raw, "cfg": cfg, "roi": vm.box_roi(layout, comp),
+            "allowed": vm.AllowedMasks(layout, None, comp, cfg, use_layout_module=False),
+            "raw_wh": (float(S.RAW_FULL[0]), float(S.RAW_FULL[1])), "cap": 0}
+
+
+@pytest.mark.parametrize("lure", [0.5, 0.8])
+def test_eval_window_widens_below_none_thresh_even_with_an_interior_argmax(tmp_path, lure):
+    """_w_eval (FX-08): competitor frame 0 shows RAW 16 while the track predicts RAW 10. RAW 10 is a lure (a mix
+    of RAW 16 and an unrelated texture), the interior argmax of the +-R window. A lure below none_thresh says the
+    window missed the frame: the whole +-track_search_radius window is scored and RAW 16 found. A lure in the gray
+    zone or above is the frame's own evidence: no blind widening (the old edge rule alone)."""
+    W, H = S.RAW_FULL
+    frames = np.stack([_texture(H, W, 300 + i) for i in range(24)])
+    frames[10] = np.clip(lure * frames[16].astype(np.float32) + (1 - lure) * _texture(H, W, 999), 0,
+                         255).astype(np.uint8)
+    sim = S.centred_sim(0.85, 0.0)
+    raw, comp, layout = _mini(frames, [16], sim, np.random.default_rng(3))
+    cfg = S.make_config(tmp_path, workers=1)
+    st = _eval_state(raw, comp, layout, cfg)
+    lo, arr, jb, sb, edge, widened = refine._w_eval(st, (0, [refine._key(0, sim)], False, 10, 3, 8))
+    s10 = float(arr[10 - lo])
+    if s10 < cfg.none_thresh:
+        assert jb == 16 and sb > 0.95 and widened, (jb, sb, s10)
+        assert lo <= 2 and lo + len(arr) - 1 >= 18
+    else:
+        assert jb == 10 and not widened and lo == 7, (jb, s10, lo)
+
+
+def _two_clips(seed: int = 41):
+    """Clip A (frames 0-14) and clip B (15-39) on ONE time line with a +5 RAW frame jump at 15 and unrelated
+    framings (A x1.35 punched in and shifted: no ECC start from B's framing converges; the film24 two-clip pan / the
+    real run's 1757 case)."""
+    frames = np.stack(S.make_shot(seed, 60, 0))
+    truth = [S.ae_frame(3.5, 1.0, k, 0) + (5 if k >= 15 else 0) for k in range(40)]
+    sims = [S.centred_sim(0.85 * 1.35, 0.0, raw_pt=(380.0, 230.0)) if k < 15 else S.centred_sim(0.85, 0.0)
+            for k in range(40)]
+    raw, comp, layout = _mini(frames, truth, sims, np.random.default_rng(seed))
+    return raw, comp, layout, truth, sims
+
+
+def test_anchorless_clip_is_found_by_the_line_constrained_search(tmp_path):
+    """FX-08 'search before giving up': clip A has no anchor (none passed the global min_inliers). Its neighbour B's
+    time line extended over A, scored under B's framing, misses (another scale and position). The line-constrained
+    re-search --
+    pairwise SIFT of A's frames against the RAW frames of B's line +- track_search_radius, relaxed RANSAC
+    acceptance, the anchor's ZNCC test unchanged -- finds verified anchors; A becomes a run of its own: every frame
+    MATCH on the truth. Without the re-search the same frames are left unexplained."""
+    raw, comp, layout, truth, sims = _two_clips()
+    anchors = [vm.Anchor(k, truth[k], False, sims[k], 40, 0.8, 10.0, 0.97) for k in range(15, 40, 3)]
+    fm, recs = _fm_run(raw, comp, layout, tmp_path, anchors, rescue=False)
+    bad = [(k, int(fm.status[k]), int(fm.raw[k]), truth[k]) for k in range(40)
+           if fm.status[k] != Status.MATCH or fm.raw[k] != truth[k]]
+    assert not bad, bad
+    ls = [r for r in recs if r["decision"] == "line_search"]
+    assert ls and any(r["found"] for r in ls) and all(r["comp_frame"] < 15 for r in ls)
+    for k in range(15):
+        ds, dp = S.sim_error(fm.sim(k), sims[k])
+        assert ds < 0.003 and dp < 1.5, (k, ds, dp)
+
+    orig = refine._Refiner._line_search
+    try:
+        refine._Refiner._line_search = lambda self: False
+        fm2, _ = _fm_run(raw, comp, layout, tmp_path / "off", anchors, rescue=False)
+    finally:
+        refine._Refiner._line_search = orig
+    assert not any(fm2.status[k] == Status.MATCH and fm2.raw[k] == truth[k] for k in range(12))
+
+
+def test_three_states_match_unresolved_none(tmp_path):
+    """refine's three states (FX-08). Frames 0-19 and 40-59 are exact; 20-29 continue clip 1's time line through a
+    heavy foreign overlay (the picture is half RAW, half something else: best ZNCC in the gray zone, no detail-score
+    support) -> UNRESOLVED with their best hypothesis kept; 30-39 are foreign content -> NONE (every hypothesis,
+    incl. both neighbours' lines widened to track_search_radius, below none_thresh)."""
+    W, H = S.RAW_FULL
+    frames = np.stack(S.make_shot(51, 120, 0))
+    truth = [S.ae_frame(3.5, 1.0, k, 0) if k < 30 else S.ae_frame(60.5, 1.0, k, 40) for k in range(60)]
+    sim = S.centred_sim(0.85, 0.0)
+    raw, comp, layout = _mini(frames, truth, sim, np.random.default_rng(5))
+    cp = np.asarray(comp.frames).copy()
+    rng = np.random.default_rng(6)
+    for k in range(20, 40):
+        fg = cv2.resize(_texture(H, W, 700 + k, cell=10), (cp.shape[2], cp.shape[1]), interpolation=cv2.INTER_AREA)
+        w_raw = 0.55 if k < 30 else 0.0
+        cp[k] = np.clip(w_raw * cp[k].astype(np.float32) + (1 - w_raw) * fg + rng.normal(0, 1.0, fg.shape), 0,
+                        255).astype(np.uint8)
+    comp = Proxy("competitor", "", cp, comp.full_size, comp.ratio, comp.fps, comp.pts, comp.n)
+    anchors = [vm.Anchor(k, truth[k], False, sim, 40, 0.8, 10.0, 0.97) for k in list(range(0, 20, 3)) +
+               list(range(40, 60, 3))]
+    fm, recs = _fm_run(raw, comp, layout, tmp_path, anchors, rescue=False)
+    for k in list(range(20)) + list(range(40, 60)):
+        assert fm.status[k] == Status.MATCH and fm.raw[k] == truth[k], (k, int(fm.status[k]), int(fm.raw[k]))
+    for k in range(20, 30):
+        assert fm.status[k] == Status.UNRESOLVED, (k, int(fm.status[k]), float(fm.score[k]))
+        assert 0.6 <= fm.score[k] < 0.9 and fm.track[k] >= 0 and fm.raw[k] == -1 and fm.conf[k] == 0.0
+    for k in range(30, 40):
+        assert fm.status[k] == Status.NONE, (k, int(fm.status[k]), float(fm.score[k]))
+        assert not (fm.score[k] >= 0.6)
+    det = [r for r in recs if r["decision"] == "detail_promotion"]
+    assert det and det[0]["promoted"] == []
+    assert any(r["decision"] == "gap_lines" for r in recs)

@@ -736,6 +736,24 @@ def _is_near(a: Anchor) -> bool:
     return str(getattr(a, "source", "")).endswith("_near")
 
 
+def _is_gray(a: Anchor) -> bool:
+    """A full RANSAC match whose ZNCC lies in the gray zone (visual_match.search_frame, FX-08): seeds a WEAK track
+    whose scores are UNRESOLVED evidence, never an anchor."""
+    return str(getattr(a, "source", "")).endswith("_gray")
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Maximal runs [a, b) of True in a bool array."""
+    out, a = [], None
+    for k, v in enumerate(np.asarray(mask, bool).tolist() + [False]):
+        if v and a is None:
+            a = k
+        elif not v and a is not None:
+            out.append((a, k))
+            a = None
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # Tracks and hypotheses
 # ---------------------------------------------------------------------------------------------
@@ -770,6 +788,7 @@ class _Track:
     line: tuple[float, float] | None = None    # (u, x): the track's time line j(k) = floor(x + u k), or None
     meas: dict[int, tuple[int, Sim, float, bool]] = field(default_factory=dict)   # k -> (j, Sim, z, converged)
     fitted: bool = False           # the time-line-first framing fit ran at least once
+    weak: bool = False             # seeded by gray-zone matches only (FX-08): UNRESOLVED evidence, no pass-2 masks
 
     def is_constant(self) -> bool:
         return len(self.keys) <= 1
@@ -845,6 +864,14 @@ def _w_eval(state: dict, task: tuple) -> tuple:
             break
         widened = True
         jb = best()
+    # FX-08: a best score below none_thresh says the window missed the frame (a jump on the line), wherever the argmax
+    # lies -- the whole +-Rmax window is scored before the frame may count as NOT-IN-RAW evidence
+    if not (S.get(jb, -np.inf) >= float(cfg.none_thresh)) and (jhat - lo < Rmax or hi - jhat < Rmax):
+        nlo, nhi = max(0, jhat - Rmax), min(n - 1, jhat + Rmax)
+        ev(nlo, nhi)
+        lo, hi = min(lo, nlo), max(hi, nhi)
+        widened = True
+        jb = best()
     edge = jb >= 0 and ((jb == lo and lo > 0) or (jb == hi and hi < n - 1))
     if jb >= 0:
         ev(jb - R, jb + R)
@@ -885,13 +912,15 @@ def _w_final(state: dict, task: tuple) -> tuple:
                 break
             d += 1
             ev([jb + direction * d])
-    # visually identical neighbours
+    # visually identical neighbours (FX-08: contrast-relative, a max over tiles, on the layout's mask only -- never
+    # on pass-2 residual masks, which hide exactly the pixels where a wrong match differs)
     W = float(raw.full_size[0])
     rr, cr = tuple(raw.ratio), tuple(comp.ratio)
     roi = state["roi"]
     wb, vb = scoring.warp_to_roi(np.asarray(raw.get(jb)), sim, flip, W, rr, cr, roi)
     x0, y0, w, h = roi
-    am = allowed[y0:y0 + h, x0:x0 + w] & vb
+    lay = state["allowed"].layout_only(k) if hasattr(state["allowed"], "layout_only") else allowed
+    am = lay[y0:y0 + h, x0:x0 + w] & vb
     raw_lo = raw_hi = jb
     for direction in (-1, 1):
         for d in range(1, _IDENTICAL_MAX + 1):
@@ -902,9 +931,10 @@ def _w_final(state: dict, task: tuple) -> tuple:
             m = am & vj
             if m.sum() < 64:
                 break
-            mad = float(np.mean(np.abs(wb[m] - wj[m])))
-            z = scoring.zncc(wb, wj, m)
-            if mad <= cfg.identical_mad or (np.isfinite(z) and z >= cfg.identical_thresh):
+            same, _ev = scoring.identical_images(wb, wj, m, cfg.identical_mad, cfg.identical_thresh,
+                                                 int(cfg.identical_tiles), float(cfg.identical_contrast_ref),
+                                                 float(cfg.identical_contrast_min))
+            if same:
                 if direction < 0:
                     raw_lo = j
                 else:
@@ -999,6 +1029,37 @@ def _w_temporal(state: dict, task: tuple) -> list[tuple[int, int, tuple]]:
     return out
 
 
+def _w_detail(state: dict, task: tuple) -> dict:
+    """Detail-score promotion test of an UNRESOLVED frame (FX-08): RAW jb under the hypothesis' framing and its
+    neighbours jb +- 1, +- 2 each under its OWN re-measured framing (ecc_measure from the hypothesis), scored by
+    scoring.detail_score (blur-matched gradient ZNCC). Equal explanations under their own framing (a camera pan over
+    a static world) leave no margin: the frame stays unresolved."""
+    k, keys, flip, jb = task
+    comp, raw, cfg = state["comp"], state["raw"], state["cfg"]
+    sim = _sim_at(keys, k, state["raw_wh"], state.get("cap", 0))
+    roi = state["roi"]
+    x0, y0, w, h = roi
+    img = np.asarray(comp.get(k))
+    allowed = state["allowed"](k)
+    c = img[y0:y0 + h, x0:x0 + w].astype(np.float32)
+    W, rr, cr = float(raw.full_size[0]), tuple(raw.ratio), tuple(comp.ratio)
+    kern = scoring.blur_kernels()
+    out = {"k": int(k), "jb": int(jb), "scores": {}}
+    for d in (0, -1, 1, -2, 2):
+        j = jb + d
+        if not raw.has(j):
+            continue
+        s = sim
+        if d != 0:
+            r = ecc_measure(img, np.asarray(raw.get(j)), sim, flip, W, rr, cr, allowed, cfg, roi=roi, phase=False)
+            s = r.sim
+        wr, vr = scoring.warp_to_roi(np.asarray(raw.get(j)), s, flip, W, rr, cr, roi)
+        m = allowed[y0:y0 + h, x0:x0 + w] & vr
+        det, z, kname = scoring.detail_score(c, wr, m, kern)
+        out["scores"][d] = (det, z, kname)
+    return out
+
+
 def _masks_from_residuals_local(residuals: dict[int, np.ndarray], base_allowed: np.ndarray,
                                 cfg) -> dict[int, np.ndarray]:
     """Local equivalent of layout.masks_from_residuals: pixels whose residual >= overlay_resid_thresh in
@@ -1055,8 +1116,10 @@ class _Refiner:
                  allowed: AllowedMasks, residual_fn: Callable | None):
         self.comp, self.raw, self.layout, self.overlays = comp, raw, layout, overlays
         valid = [a for a in anchors if 0 <= a.k < comp.n and 0 <= a.raw < raw.n]
-        self.anchors = [a for a in valid if not _is_near(a)]
+        self.anchors = [a for a in valid if not _is_near(a) and not _is_gray(a)]
         self.near = [a for a in valid if _is_near(a)]        # RANSAC near-misses: join-only (FX-03 step 3)
+        self.gray = [a for a in valid if _is_gray(a)]        # gray-zone matches: weak tracks only (FX-08)
+        self.line_done: set[tuple[int, bool]] = set()        # (k, flip) already line-searched
         self.hints, self.index, self.cfg, self.dlog = hints, index, cfg, dlog
         self.allowed = allowed
         self.residual_fn = residual_fn
@@ -1825,8 +1888,9 @@ class _Refiner:
         fn = self.residual_fn
         if fn is None:
             return []
+        # a weak (gray-zone) track's residuals would mask exactly where its unverified hypothesis differs (FX-08)
         eligible = [k for k in range(self.N) if self.win_tid[k] >= 0 and np.isfinite(self.win_s[k])
-                    and self.win_s[k] >= self.cfg.none_thresh]
+                    and self.win_s[k] >= self.cfg.none_thresh and not self.tracks[int(self.win_tid[k])].weak]
         core_all = [k for k in eligible if k not in self.pass2_done]
         if not core_all:
             return []
@@ -1932,6 +1996,10 @@ class _Refiner:
         for k, anchors, rep in found:
             confirms = []
             for a in anchors:
+                if _is_gray(a):
+                    a.source = "rescue_gray"
+                    self.gray.append(a)
+                    continue
                 if _is_near(a):
                     a.source = "rescue_near"
                     near.append(a)
@@ -1958,6 +2026,113 @@ class _Refiner:
         made = self._link(rest)
         self._converge(joined + made)
         return True
+
+    # -- 5b. search before giving up (FX-08) ------------------------------------------------------------------
+    def _gap_runs(self) -> list[tuple[int, int, list[tuple[_Track, int]]]]:
+        """Runs [a, b) of frames no track explains (score < match_thresh, not uniform) with the tracks winning the
+        frame just before (side -1) / just after (side +1) them: the neighbours' time lines."""
+        thr = self.cfg.match_thresh
+        good = (self.win_tid >= 0) & (self.win_s >= thr)
+        out = []
+        for a, b in _runs(~good & ~self.uniform):
+            nbs = []
+            for k, side in ((a - 1, -1), (b, 1)):
+                if 0 <= k < self.N and good[k]:
+                    t = self.tracks.get(int(self.win_tid[k]))
+                    if t is not None and not t.weak:
+                        nbs.append((t, side))
+            out.append((a, b, nbs))
+        return out
+
+    def _line_at(self, t: _Track, k: int) -> int:
+        """RAW frame a track's time line predicts at comp frame k (its fitted line, else its support trend)."""
+        if t.line is not None:
+            return int(math.floor(t.line[1] + t.line[0] * k + 1e-9))
+        return int(round(t.predict(k, self.u1)))
+
+    def _propagate(self) -> list[int]:
+        """The previous and next runs' time lines scored across short gaps (<= line_gap_s, FX-08): every gap
+        frame gets the neighbours' hypotheses (window around the line, widened to track_search_radius when it scores
+        below none_thresh), so a frame is NOT-IN-RAW evidence only after its neighbours' lines were tried."""
+        gmax = int(math.ceil(float(getattr(self.cfg, "line_gap_s", 1.0)) * float(self.comp.fps)))
+        pairs: list[tuple[int, _Track]] = []
+        for a, b, nbs in self._gap_runs():
+            if b - a > gmax:
+                continue
+            for t, _side in nbs:
+                new = [k for k in range(a, b) if t.id not in self.hyp[k]]
+                if new:
+                    t.span = [min(t.span[0], a), max(t.span[1], b - 1)]
+                    pairs += [(k, t) for k in new]
+        if not pairs:
+            return []
+        self._evaluate(pairs)
+        frames = sorted({k for k, _ in pairs})
+        self._assign(frames)
+        self.dlog.record("refine", "gap_lines", frames=frames[:500], tracks=sorted({t.id for _, t in pairs}))
+        return frames
+
+    def _line_search(self) -> bool:
+        """Line-constrained SIFT re-search (FX-08): frames of a gap within line_search_reach of a neighbouring run are
+        searched pairwise against the RAW frames of that run's time line +- track_search_radius
+        (visual_match.line_search: relaxed RANSAC acceptance on a handful of frames, the anchor's ZNCC test unchanged);
+        verified matches become anchors -- on an existing track's line they join it, otherwise they start runs."""
+        from .visual_match import run_line_searches
+        cfg = self.cfg
+        reach = int(getattr(cfg, "line_search_reach", 30))
+        Rw = int(max(cfg.track_search_radius, cfg.refine_radius))
+        tasks: dict[tuple[int, bool], set[int]] = {}
+        for a, b, nbs in self._gap_runs():
+            for t, side in nbs:
+                ks = list(range(a, min(b, a + reach)) if side < 0 else range(max(a, b - reach), b))
+                if len(ks) > 2 * self.stride:
+                    off = (self.stride // 2 + 1) % self.stride
+                    ks = sorted({ks[0], ks[-1]} | {k for k in ks if k % self.stride == off})
+                for k in ks:
+                    if (k, t.flip) in self.line_done:
+                        continue
+                    jp = self._line_at(t, k)
+                    js = {j for j in range(jp - Rw, jp + Rw + 1) if self.raw.has(j)}
+                    if js:
+                        tasks.setdefault((k, t.flip), set()).update(js)
+        if not tasks:
+            return False
+        items = sorted(tasks.items())
+        self.line_done.update(key for key, _ in items)
+        self.stats["line_searches"] = self.stats.get("line_searches", 0) + len(items)
+        res = run_line_searches(self.comp, self.raw, self.allowed, self.roi,
+                                [(k, sorted(js), fl) for (k, fl), js in items], cfg)
+        new: list[Anchor] = []
+        for (key, js), (k, anchors, rep) in zip(items, res):
+            self.dlog.record("refine", "line_search", comp_frame=int(k), flip=bool(key[1]),
+                             window=[min(js), max(js)], found=[{"raw": a.raw, "zncc": round(a.zncc, 4),
+                                                                "inliers": a.inliers} for a in anchors],
+                             current={"track": int(self.win_tid[k]), "raw": int(self.win_j[k]),
+                                      "score": None if not np.isfinite(self.win_s[k]) else round(float(self.win_s[k]), 4)},
+                             rejected=rep[:4])
+            new += anchors
+        if not new:
+            return False
+        self.anchors.extend(new)
+        joined, rest = self._join(new)
+        made = self._link(rest)
+        self._converge(joined + made)
+        return True
+
+    def _weak_tracks(self) -> None:
+        """Gray-zone matches (FX-08) on frames still unexplained seed WEAK tracks: their scores give those frames
+        UNRESOLVED evidence (best RAW frames, ZNCC) instead of NONE; they never grow, never merge, never set pass-2
+        masks and a frame they explain is a match only at >= match_thresh like any other."""
+        thr = self.cfg.match_thresh
+        seeds = [a for a in self.gray if not self.uniform[a.k] and not (self.win_tid[a.k] >= 0 and self.win_s[a.k] >= thr)]
+        if not seeds:
+            return
+        made = self._link(seeds)
+        for t in made:
+            t.weak = True
+        self.dlog.record("refine", "weak_tracks", tracks=[t.id for t in made],
+                         seeds=[[a.k, a.raw, round(a.zncc, 4)] for a in seeds][:200])
+        self._converge(made)
 
     def _join(self, new: list[Anchor]) -> tuple[list[_Track], list[Anchor]]:
         """Rescue anchors on an existing track's time line (|integer residual| <= line_time_tol, within max_gap of
@@ -2118,13 +2293,47 @@ class _Refiner:
                              score=round(peak, 5) if np.isfinite(peak) else None)
 
     # -- 6. finalize ------------------------------------------------------------------------------
+    def _promote(self) -> set[int]:
+        """Gray-zone frames promoted to MATCH by the detail-sensitive second score (FX-08): the frame's best
+        hypothesis (none_thresh <= score < match_thresh, not uniform) reaches match_thresh on the blur-matched
+        gradient ZNCC AND beats RAW jb +- 1, +- 2 under their own re-measured framing by > detail_margin.
+        Everything else stays UNRESOLVED (never promoted on the plain score)."""
+        cfg = self.cfg
+        thr, nt = float(cfg.match_thresh), float(cfg.none_thresh)
+        cand = [k for k in range(self.N) if self.win_tid[k] >= 0 and not self.uniform[k]
+                and np.isfinite(self.win_s[k]) and nt <= self.win_s[k] < thr]
+        if not cand:
+            return set()
+        tasks = [(k, self.tracks[int(self.win_tid[k])].keys, self.tracks[int(self.win_tid[k])].flip,
+                  int(self.win_j[k])) for k in cand]
+        margin = float(getattr(cfg, "detail_margin", 0.02))
+        out: set[int] = set()
+        rows = []
+        for k, r in zip(cand, self._map(_w_detail, tasks)):
+            sc = r["scores"]
+            d0 = sc.get(0, (float("nan"),))[0]
+            others = [v[0] for d, v in sc.items() if d != 0 and np.isfinite(v[0])]
+            best_other = max(others) if others else float("-inf")
+            ok = bool(np.isfinite(d0) and d0 >= thr and d0 > best_other + margin)
+            if ok:
+                out.add(int(k))
+            rows.append({"k": int(k), "raw": int(self.win_j[k]), "score": round(float(self.win_s[k]), 4),
+                         "detail": None if not np.isfinite(d0) else round(float(d0), 4),
+                         "kernel": sc.get(0, (0, 0, ""))[2],
+                         "neighbours": None if not others else round(float(best_other), 4), "promoted": ok})
+        self._detail = {r["k"]: r["detail"] for r in rows}
+        self.dlog.record("refine", "detail_promotion", frames=len(rows), promoted=sorted(out)[:500],
+                         margin=margin, evidence=rows[:300])
+        return out
+
     def _finalize(self) -> FrameMap:
         cfg = self.cfg
         fm = FrameMap(self.N)
         thr = cfg.match_thresh
         R = int(cfg.refine_radius)
         half = CAND_W // 2
-        match = [k for k in range(self.N) if self.win_tid[k] >= 0 and self.win_s[k] >= thr]
+        promoted = self._promote()
+        match = [k for k in range(self.N) if self.win_tid[k] >= 0 and (self.win_s[k] >= thr or k in promoted)]
         # provisional soft delta per track (margin of the argmax within its own window) -> how far the
         # candidate window must extend so that the soft range {S >= max - delta} is never truncated
         prov: dict[int, list[float]] = {}
@@ -2205,10 +2414,15 @@ class _Refiner:
         fm.s, fm.theta, fm.tx, fm.ty = sims[:, 0], sims[:, 1], sims[:, 2], sims[:, 3]
         fm.cand, fm.cand_j0 = cand, cand_j0
         fm.mean, fm.std = self._mean, self._std
-        # UNIFORM / NONE
+        # UNIFORM / UNRESOLVED / NONE (FX-08): NONE only when EVERY evaluated hypothesis scored < none_thresh
+        nt = float(cfg.none_thresh)
         for k in range(self.N):
-            if status[k] != Status.MATCH and self.uniform[k]:
+            if status[k] == Status.MATCH:
+                continue
+            if self.uniform[k]:
                 status[k] = Status.UNIFORM
+            elif track[k] >= 0 and np.isfinite(score[k]) and score[k] >= nt:
+                status[k] = Status.UNRESOLVED
         fm.status = status
         # per-track delta, soft ranges, low_margin, confidence
         delta: dict[int, float] = {}
@@ -2237,6 +2451,8 @@ class _Refiner:
             elif st == Status.UNIFORM:
                 sd = float(self._std[k]) if np.isfinite(self._std[k]) else 0.0
                 conf[k] = min(1.0, max(0.0, 1.0 - sd / max(cfg.uniform_std, 1e-6)))
+            elif st == Status.UNRESOLVED:
+                conf[k] = 0.0               # neither a match nor NOT-IN-RAW: no state is supported
             else:
                 sc = float(score[k])
                 span = max(cfg.match_thresh - cfg.none_thresh, 1e-6)
@@ -2258,6 +2474,11 @@ class _Refiner:
         for k, w in self.warps.items():
             warp[k] = w
         fm.pair_label, fm.pair_warp = lab, warp
+        det = np.full(self.N, np.nan, np.float32)
+        for k, v in getattr(self, "_detail", {}).items():
+            if v is not None:
+                det[k] = v
+        fm.detail = det
         self._delta = delta
         return fm
 
@@ -2409,6 +2630,19 @@ class _Refiner:
             self._overlay_pass2()
             lap("overlay_pass2")
         lap("rescue")
+        # FX-08 search before giving up: neighbours' lines across short gaps, line-constrained SIFT, gray evidence
+        for _ in range(2):
+            self._propagate()
+            found = self._line_search()
+            lap("line_search")
+            if found:
+                self._overlay_pass2()
+                lap("overlay_pass2")
+            else:
+                break
+        self._propagate()
+        self._weak_tracks()
+        lap("weak_tracks")
         fm = self._finalize()
         lap("finalize")
         self._confound_check(fm, self._delta)
@@ -2417,7 +2651,8 @@ class _Refiner:
         n_png = self._debug_pngs(fm, debug_dir)
         lap("debug_png")
         counts = {name: int(np.sum(fm.status == v)) for name, v in
-                  (("match", Status.MATCH), ("none", Status.NONE), ("uniform", Status.UNIFORM))}
+                  (("match", Status.MATCH), ("none", Status.NONE), ("uniform", Status.UNIFORM),
+                   ("unresolved", Status.UNRESOLVED))}
         self.dlog.record("refine", "frame_map", counts=counts, tracks=len(self.tracks),
                          low_margin=int(fm.low_margin.sum()),
                          widened=[int(k) for k in np.flatnonzero(fm.widened)][:500],

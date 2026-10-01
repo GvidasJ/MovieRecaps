@@ -491,3 +491,23 @@ def test_layer_cell_and_place_raw_in_in_seconds():
     c = ps.layer_cell(p["raw_in"], 592, 596, 1.0, C30, R23976)
     assert c["cell"][0] == pytest.approx(p["cell"][0], abs=1e-12) and c["half"] == pytest.approx(p["half"], abs=1e-9)
     assert iv[0] <= p["raw_in"] <= iv[1]
+
+
+def test_freeze_needs_one_common_raw_frame():
+    """FX-08: at v = 0 every frame sits at the SAME position, so frames measured on RAW j and on j + 1 cannot share a
+    freeze -- the tolerant closed constraints would admit them only at the single point x = j + 1 (the real run's
+    10-frame fake freeze over frames measured 1672 and 1673). A moving line keeps its timing-tie tolerance."""
+    ks = np.arange(10)
+    lo = np.array([1672, 1672] + [1673] * 8)
+    assert not ps.is_feasible(ks, lo, lo, 0, C30, R23976, v=0.0)
+    assert not ps.solve_raw_in(ks, lo, lo, 0, 0.0, C30, R23976)["ok"]
+    same = np.full(10, 1673)
+    sol = ps.solve_raw_in(ks, same, same, 0, 0.0, C30, R23976)
+    assert sol["ok"] and ps.ae_frame(sol["raw_in"], 0.0, 9, 0, C30, R23976) == 1673
+    assert ps.is_feasible(ks, same, same, 0, C30, R23976, v=0.0)
+    # soft ranges that all contain one frame: a freeze on it is feasible
+    assert ps.is_feasible(ks, np.full(10, 1672), np.full(10, 1673), 0, C30, R23976, v=0.0)
+    assert ps.freeze_gap(0.0) > 0 > ps.freeze_gap(0.8)
+    # moving lines keep the tie tolerance (setpts=PTS/1.1 exact .5 ties stay feasible)
+    m = ff_select(40, F(1, 30000), 1001, 1.1, C30, 500)
+    assert ps.is_feasible(np.arange(40), m, m, 0, C30, R2997, v=1.1)

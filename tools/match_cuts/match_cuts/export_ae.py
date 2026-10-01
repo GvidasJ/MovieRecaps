@@ -64,6 +64,7 @@ MAIN_COMP_NAME = "Recreated Edit"
 BOX_COMP_NAME = "Video Box"
 REFERENCE_NAME = "REFERENCE - competitor (turn on: black = match)"
 PLACEHOLDER_RGB = [0.85, 0.1, 0.55]
+UNCERTAIN_RGB = [0.95, 0.62, 0.05]       # 'uncertain' segments (FX-08): amber solid + a guide layer of the evidence
 TIME_MODES = ("auto", "stretch", "remap", "frames")
 LAYOUT_MODES = ("match", "fill", "source")
 # Mock scenarios (ae_mock.js): the first four are the pipeline's c6 set; the others exercise the JSX guards
@@ -580,7 +581,7 @@ class _PlanBuilder:
              "expect": [], "remap": [], "flip": False, "xf": None, "opacity": [], "opacityValue": 100.0,
              "audioKeys": [], "enabled": True, "audio": False, "guide": False, "blend": "normal",
              "mask": None, "maskPath": None, "blur": None, "color": None, "w": None, "h": None,
-             "aeRuleSensitive": False, "note": ""}
+             "aeRuleSensitive": False, "note": "", "frameMix": False}
         L.update(kw)
         L["inPoint"] = self.T(L["compIn"])
         L["outPoint"] = self.T(L["compOut"])
@@ -602,6 +603,33 @@ class _PlanBuilder:
                            xf=_static_xf((w / 2.0, h / 2.0), (cx, cy)), **kw)
 
     # -- transforms ----------------------------------------------------------------------------
+    def uncertain_guide(self, seg: Segment, k_in: int, k_out: int, place: dict) -> dict | None:
+        """GUIDE layer of an 'uncertain' segment (FX-08): the best-evidence RAW frame of every competitor frame
+        (frames without evidence hold the nearest one) as frame-exact HOLD-like remap keys at (j + 0.25) / raw_fps
+        under the evidence's framing; guideLayer = true (seen in the viewer, never rendered), no audio. None when no
+        frame has evidence."""
+        ev = [e for e in (seg.evidence or []) if int(e.get("raw", -1)) >= 0 and e.get("sim")]
+        if not ev:
+            return None
+        rf = float(self.raw_fps)
+        by_k = {int(e["comp_frame"]): e for e in ev}
+        keys, tkeys = [], []
+        for k in range(int(seg.comp_in), int(seg.comp_out)):
+            e = by_k.get(k) or min(ev, key=lambda x: (abs(int(x["comp_frame"]) - k), int(x["comp_frame"])))
+            keys.append({"comp_frame": k, "raw_seconds": (int(e["raw"]) + 0.25) / rf})
+            tkeys.append({"comp_frame": k, **e["sim"]})
+        keys.append({"comp_frame": int(seg.comp_out), "raw_seconds": keys[-1]["raw_seconds"]})
+        pseudo = Segment(int(seg.id), "raw", int(seg.comp_in), int(seg.comp_out), speed=1.0,
+                         raw_in_seconds=keys[0]["raw_seconds"], flip_h=bool(seg.flip_h),
+                         transform=seg.transform or dict(ev[0]["sim"]), transform_keys=tkeys,
+                         time_remap_keys=keys, time_mode="remap")
+        layers = self.raw_layers(pseudo, k_in, k_out, place)
+        G = layers[0]
+        G.update(id=f"unc{int(seg.id)}g", kind="raw_guide", guide=True, audio=False,
+                 name=ascii_text(f"GUIDE - best RAW evidence: {seg.label}", 240))
+        self.decide("uncertain_guide", segment=int(seg.id), frames=len(keys) - 1, evidence=len(ev))
+        return G
+
     def seg_xf(self, seg: Segment, place: dict | None = None) -> dict:
         place = place if place is not None else self.place(seg)
         flip = bool(seg.flip_h)
@@ -721,7 +749,9 @@ class _PlanBuilder:
         # exports the layer frame-exact (HOLD keys at j + 0.25: 0.25 frame of slack); a pinned phase is then
         # information, not a risk (the pipeline's single aggregated warning covers real razor edges)
         slack, slack_k = layer_min_slack(L, mode, F, self.R)
-        if mode in ("stretch", "remap") and float(slack) < self.slack_tol:
+        # a verified frame-blend path keeps its linear keys whatever the floor-rule slack: AE's Frame Mix shows
+        # (1 - f) RAW[j] + f RAW[j + 1], so a position on an integer is ~the same picture either side of it (FX-08)
+        if mode in ("stretch", "remap") and float(slack) < self.slack_tol and not seg.frame_mix:
             if self.time_mode_cfg == "auto":
                 self.decide("time_mode_slack", segment=sid, from_mode=mode, to_mode="frames",
                             slack_frames=round(float(slack), 12), frame=slack_k, tol_frames=self.slack_tol)
@@ -829,16 +859,23 @@ def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict, start_offset_s: floa
     exact float expressions of the JSX and the mock (bit-identical). ``start_offset_s``: AE stores the
     layer's startTime that much off (FX-10 robustness check; remap / frames keys live in layer time and
     move with it, so only stretch mode is affected)."""
+    return [math.floor(p + AE_EPS) for p in _layer_raw_positions(L, mode, F, R, start_offset_s)]
+
+
+def _layer_raw_positions(L: dict, mode: str, F: dict, R: dict, start_offset_s: float = 0.0) -> list[float]:
+    """Continuous RAW position (frames, raw_fps * sourceTime) per MAIN frame [compIn, compOut) of a RAW layer under
+    a time mode (:func:`_layer_raw_frames` floors it; a Frame Mix layer blends RAW floor(p) and floor(p) + 1 by
+    the fraction, FX-08)."""
     rf = R["num"] / R["den"]
     k0, k1 = int(L["compIn"]), int(L["compOut"])
-    out: list[int] = []
+    out: list[float] = []
     if mode == "stretch":
         start, st = L["startStretch"], L["stretch"]
         if start is None or st is None:
             raise ValueError(f"layer {L['id']}: stretch mode needs speed > 0")
         start = start + float(start_offset_s)
         for K in range(k0, k1):
-            out.append(math.floor((_t(K, F) - start) * (100.0 / st) * rf + AE_EPS))
+            out.append((_t(K, F) - start) * (100.0 / st) * rf)
         return out
     start = _t(k0, F)
     if mode == "remap":
@@ -855,8 +892,15 @@ def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict, start_offset_s: floa
         raise ValueError(f"unknown time mode {mode!r}")
     for K in range(k0, k1):
         val = _interp(times, vals, holds, _layer_time(_t(K, F), start, 100.0))
-        out.append(math.floor(val * rf + AE_EPS))
+        out.append(val * rf)
     return out
+
+
+def mix_fraction(p: float) -> float:
+    """Weight of RAW floor(p) + 1 in AE's Frame Mix at RAW position p (0 on a frame boundary within the AE rule's
+    epsilon: the frame shows alone)."""
+    j = math.floor(p + AE_EPS)
+    return float(min(1.0, max(0.0, p - j)))
 
 
 def layer_min_slack(L: dict, mode: str, F: dict, R: dict) -> tuple[Fraction, int]:
@@ -975,7 +1019,7 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             mp = {"keys": [dict(k=0, **rounded_rect_shape(0.0, 0.0, float(sw), float(sh), rad))]}
         return {"comp": "main", "w": sw, "h": sh, "center": (x + w / 2.0, y + h / 2.0), "maskPath": mp}
 
-    n_raw = n_placeholder = n_main_seg = 0
+    n_raw = n_placeholder = n_main_seg = n_uncertain = 0
     for i, seg in enumerate(segs):
         sid = int(seg.id)
         c_in, c_out = _int(seg.comp_in, f"segment {sid} comp_in"), _int(seg.comp_out, f"segment {sid} comp_out")
@@ -1003,10 +1047,21 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
         tc_in, tc_out = timecode(k_in, b.main_fps), timecode(k_out, b.main_fps)
         cut_label = "Start" if i == 0 else f"Cut {i:02d}"
         if seg.type == "raw":
-            if getattr(seg, "retime", "none") not in (None, "none"):
+            if not seg.frame_mix and getattr(seg, "retime", "none") not in (None, "none"):
                 b.warn(f"S{sid:02d}: the competitor used {seg.retime} retiming; the layer shows whole RAW frames "
                        "(switch on Frame Blending > Frame Mix in AE to approximate it)")
             layers = b.raw_layers(seg, k_in, k_out, place)
+            # FX-08: a verified frame-blend path is Frame Mix on its LINEAR remap keys (the fraction of the position
+            # is the blend weight); frame-exact HOLD keys at j + 0.25 would turn it into a constant 25 % mix
+            mix = seg.frame_mix and layers[0]["timeMode"] == "remap"
+            if mix:
+                layers[0]["frameMix"] = True
+                layers[0]["name"] = ascii_text(layers[0]["name"] + "  FRAME MIX", 240)
+                b.decide("frame_mix", segment=sid, reason="verified frame-blend path (FX-08): AE Frame Mix on the "
+                                                           "linear time-remap keys")
+            elif seg.frame_mix:
+                b.warn(f"S{sid:02d}: verified frame-blend path exported in {layers[0]['timeMode']} mode without "
+                       "Frame Mix: the layer shows whole RAW frames")
             chrono.append(layers[0])
             seg_layer[sid] = layers[0]
             carrier[sid] = layers[1] if len(layers) > 1 else layers[0]
@@ -1032,6 +1087,19 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             upper.append(L)
             seg_layer[sid] = L
             add_marker(k_in, f"{cut_label} | {seg.type} {col}")
+        elif seg.type == "uncertain":
+            # FX-08: neither a match nor NOT-IN-RAW -- an amber solid (what renders) under a GUIDE layer of the
+            # best-evidence RAW frames (visible in the viewer, never rendered) + a marker with the evidence
+            label = ascii_text(seg.label or f"UNCERTAIN ({tc_in}-{tc_out})", 200).strip()
+            G = b.uncertain_guide(seg, k_in, k_out, place)
+            if G is not None:
+                chrono.append(G)
+            L = b._solid(f"unc{sid}", "uncertain", label, UNCERTAIN_RGB, k_in, k_out, seg=sid,
+                         **seg_solid_kw(place))
+            chrono.append(L)
+            seg_layer[sid] = L
+            n_uncertain += 1
+            add_marker(k_in, f"{cut_label} | {label}")
         else:
             if seg.type != "not_in_raw":
                 b.warn(f"S{sid:02d}: unknown segment type {seg.type!r} exported as a NOT-IN-RAW placeholder")
@@ -1351,7 +1419,8 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
         "markers": [{"k": int(K), "text": "\n".join(markers[K])} for K in sorted(markers)],
         "fpsSource": {"active": b.main_fps != b.comp_fps, "mainFps": fps_str(b.main_fps),
                       "maxErrorS": max_err, "perSegment": fps_err, "perSegmentOut": fps_err_out},
-        "summary": {"segments": n_raw + n_placeholder + len(upper), "raw": n_raw, "placeholders": n_placeholder,
+        "summary": {"segments": n_raw + n_placeholder + n_uncertain + len(upper), "raw": n_raw,
+                    "placeholders": n_placeholder, "uncertain": n_uncertain,
                     "cuts": max(0, len(kmap) - 1), "duration": f"{b.T(b.N):.3f}", "frames": int(b.N),
                     "framesModeLayers": frames_layers, "mainLevelSegments": n_main_seg,
                     "audioPlaceholders": n_audio_ph, "overlayGuides": n_overlay_guides},
@@ -1454,6 +1523,7 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None,
         main_stack = box_stack + main_stack         # a plan without the pre-comp layer: the box comp alone
         box_stack = []
     frames: dict[str, dict[int, int]] = {}
+    mixes: dict[str, dict[int, float]] = {}
     for L in main_stack + box_stack:
         if L["kind"] != "raw":
             continue
@@ -1465,8 +1535,11 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None,
         elif time_mode_override == "stretch" and L["stretch"] is not None and L["startStretch"] is not None \
                 and abs(L["startStretch"]) <= AE_TIME_SAFE_S:
             mode = "stretch"
-        js = _layer_raw_frames(L, mode, F, R, start_offset_s)
-        frames[L["id"]] = {K: j for K, j in zip(range(int(L["compIn"]), int(L["compOut"])), js)}
+        ps_ = _layer_raw_positions(L, mode, F, R, start_offset_s)
+        ks = range(int(L["compIn"]), int(L["compOut"]))
+        frames[L["id"]] = {K: math.floor(p + AE_EPS) for K, p in zip(ks, ps_)}
+        if L.get("frameMix") and mode == "remap":      # Frame Mix: RAW j + 1 blended in by the fraction (FX-08)
+            mixes[L["id"]] = {K: mix_fraction(p) for K, p in zip(ks, ps_)}
 
     def walk(st: list[dict], K: int, w_in: float, entries: list[dict], depth: int) -> float:
         """Composite one comp top-down; returns its transparency (what shows through it)."""
@@ -1480,8 +1553,11 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None,
                 remaining *= 1.0 - op * (1.0 - trans)
                 continue
             if L["kind"] == "raw":
-                entries.append({"layer": L["id"], "seg": L["seg"], "raw_frame": int(frames[L["id"]][K]),
-                                "opacity": op, "weight": w_in * remaining * op})
+                e = {"layer": L["id"], "seg": L["seg"], "raw_frame": int(frames[L["id"]][K]),
+                     "opacity": op, "weight": w_in * remaining * op}
+                if L["id"] in mixes:
+                    e["mix"] = mixes[L["id"]][K]
+                entries.append(e)
             remaining *= (1.0 - op)
         return remaining
 
@@ -1548,6 +1624,7 @@ def _simulate_record(rec: dict) -> dict[int, list[dict]]:
         remaining = 1.0
         if depth > 8:
             return remaining
+        comp_mix = bool(comp.get("frameBlending"))
         for L in comp["layers"]:
             if not L.get("enabled", True) or L.get("guideLayer"):
                 continue
@@ -1572,16 +1649,19 @@ def _simulate_record(rec: dict) -> dict[int, list[dict]]:
                 if f.get("comment") == "mc:raw":
                     rf = raw_rate(f)
                     if L.get("timeRemapEnabled"):
-                        j = math.floor(src_t * rf + AE_EPS)
+                        p = src_t * rf
                     else:
-                        j = math.floor((t - float(L["startTime"])) * (100.0 / float(L["stretch"])) * rf + AE_EPS)
+                        p = (t - float(L["startTime"])) * (100.0 / float(L["stretch"])) * rf
+                    j = math.floor(p + AE_EPS)
                     lid = tag[3:] if tag.startswith("mc:") else str(L.get("name"))
                     seg = None
                     m = re.match(r"seg(\d+)$", lid)
                     if m:
                         seg = int(m.group(1))
-                    entries.append({"layer": lid, "seg": seg, "raw_frame": int(j), "opacity": op,
-                                    "weight": w_in * remaining * op})
+                    e = {"layer": lid, "seg": seg, "raw_frame": int(j), "opacity": op, "weight": w_in * remaining * op}
+                    if comp_mix and L.get("frameBlendingType") == "FRAME_MIX":     # AE Frame Mix (FX-08)
+                        e["mix"] = mix_fraction(p)
+                    entries.append(e)
             remaining *= (1.0 - op)
         return remaining
 
@@ -1902,7 +1982,10 @@ __HEADER__
                 if (P.expressionError !== "" || !(fd > 0)) { r = null; break; }
                 pos = st / fd;
                 r.n++;
-                if (Math.floor(pos + 1e-9) !== s.expect[k - s.compIn]) {
+                // a Frame Mix layer (FX-08) shows (1 - f) RAW j + f RAW j + 1: the floor of a position on a frame
+                // boundary is the same picture either way, its POSITION must hold
+                if (s.frameMix ? Math.abs(pos - planPos(s, k, mode)) > 1e-3 :
+                        Math.floor(pos + 1e-9) !== s.expect[k - s.compIn]) {
                     r.bad++;
                     if (r.first < 0) { r.first = k; }
                 }
@@ -1958,7 +2041,9 @@ __HEADER__
     function renderSwitches(L, s) {
         L.quality = LayerQuality.BEST;
         L.motionBlur = false;
-        if (s.source === "raw" || s.source === "box" || s.source === "ref") {
+        if (s.frameMix) {
+            L.frameBlendingType = FrameBlendingType.FRAME_MIX;      // a verified frame-blend path (FX-08)
+        } else if (s.source === "raw" || s.source === "box" || s.source === "ref") {
             L.frameBlendingType = FrameBlendingType.NO_FRAME_BLEND;
         } else {
             try { L.frameBlendingType = FrameBlendingType.NO_FRAME_BLEND; } catch (e0) { }
@@ -2138,7 +2223,8 @@ __HEADER__
             }
             if (chk !== null && chk.bad > 0) {
                 warn(s.name + ": After Effects' own source time shows another RAW frame than planned on " + chk.bad +
-                     " frame(s) (first at MAIN frame " + chk.first + ") in " + mode + " mode");
+                     " frame(s) (first at MAIN frame " + chk.first + ") in " + mode + " mode" +
+                     (s.frameMix ? " (Frame Mix position)" : ""));
             }
             timeCheck(s, mode, chk);
         }
@@ -2195,6 +2281,9 @@ __HEADER__
         comps.box = box;
         srcs.box = box;
         for (i = 0; i < P.layers.length; i++) { makeLayer(comps, srcs, P.layers[i]); }
+        for (i = 0; i < P.layers.length; i++) {
+            if (P.layers[i].frameMix && comps[P.layers[i].comp] !== null) { comps[P.layers[i].comp].frameBlending = true; }
+        }
         addMarkers(main);
         try { main.openInViewer(); } catch (eV) { }
         res.main = main;
@@ -2206,7 +2295,8 @@ __HEADER__
     function summary(saved) {
         var S = PLAN.summary, lines = [], i, n, shownW = 0, shownP = 0, where, hidW, hidStored;
         lines.push("match_cuts: built \"" + PLAN.main.name + "\"" + (saved ? " and saved recreated_edit.aep" : " (NOT saved)"));
-        lines.push(S.raw + " RAW segments, " + S.placeholders + " NOT-IN-RAW placeholders, " + S.cuts + " cuts");
+        lines.push(S.raw + " RAW segments, " + S.placeholders + " NOT-IN-RAW placeholders, " +
+                   (S.uncertain ? S.uncertain + " UNCERTAIN (guide layers), " : "") + S.cuts + " cuts");
         lines.push("duration " + S.duration + " s = " + PLAN.main.frames + " frames at " + C.num + "/" + C.den + " fps");
         if (TC.layers > 0) {
             lines.push("AE time check: " + TC.layers + " RAW layer(s), " + TC.frames + " frames, " + TC.bad +
@@ -2493,7 +2583,8 @@ def record_layer_problems(PL: dict, RL: dict, F: dict, tol: float = 1e-6) -> lis
             if m.get("mode") != "ADD" or any(abs(float(x)) > 0 for x in (m.get("feather") or [0])):
                 out.append(f"mask path: mode {m.get('mode')} / feather {m.get('feather')} (want ADD / 0)")
     if PL["source"] in ("raw", "box") and PL["kind"] != "raw_audio":
-        if RL.get("quality") != "BEST" or RL.get("frameBlendingType") != "NO_FRAME_BLEND" or RL.get("motionBlur"):
+        want_fb = "FRAME_MIX" if PL.get("frameMix") else "NO_FRAME_BLEND"
+        if RL.get("quality") != "BEST" or RL.get("frameBlendingType") != want_fb or RL.get("motionBlur"):
             out.append(f"render switches quality={RL.get('quality')} frameBlending={RL.get('frameBlendingType')} "
                        f"motionBlur={RL.get('motionBlur')}")
     if bool(RL.get("enabled")) != bool(PL["enabled"]) or bool(RL.get("guideLayer")) != bool(PL["guide"]):
@@ -2679,8 +2770,10 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                     failures.append(f"default: {PL['id']} timeRemapEnabled {RL.get('timeRemapEnabled')} (plan {PL['timeMode']})")
                 if not runtime_frames:
                     failures.extend(f"default: {PL['id']} {m}" for m in record_layer_problems(PL, RL, F))
+            mix_comps = {str(L["comp"]) for L in plan["layers"] if L.get("frameMix")}
             for c in rec.get("comps", []):
-                if c.get("frameBlending") or c.get("motionBlur"):
+                tag = str(c.get("comment", "")).replace("mc:", "")
+                if c.get("motionBlur") or (c.get("frameBlending") and tag not in mix_comps):
                     failures.append(f"default: comp {c.get('name')} has frame blending / motion blur on")
             for f in rec.get("footage", []):
                 if f.get("comment") == "mc:raw" and f.get("fieldSeparationType") != "OFF":

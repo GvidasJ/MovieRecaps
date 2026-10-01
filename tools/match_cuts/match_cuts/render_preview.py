@@ -260,7 +260,9 @@ class Layer:
     sim: Sim | None = None                      # constant transform (MAIN px, CORNER)
     keys: list[dict] = field(default_factory=list)                     # interpolate_keys dicts (MAIN)
     color: tuple[float, float, float] = (0.0, 0.0, 0.0)                # BGR 0..255 (solids)
-    label: str = ""                             # NOT-IN-RAW placeholder label (drawn)
+    label: str = ""                             # NOT-IN-RAW placeholder / UNCERTAIN label (drawn)
+    mix: bool = False                           # verified frame-blend path (FX-08): AE Frame Mix = linear blend of
+                                                #   RAW floor(p) and floor(p) + 1 by the fraction of p
     main: bool = False                          # D1: MAIN-level layer (Segment.box set) above the Video Box
     clip: tuple[float, float, float, float, float] | None = None       # MAIN-level clip (x, y, w, h, radius)
     #                                             MAIN px, CORNER; None = no mask (the whole canvas)
@@ -525,6 +527,13 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
         kmap[sid] = (k_in, k_out)
         pl = place(seg)
         places[sid] = pl
+        if seg.type == "uncertain":
+            # FX-08: what AE renders is the amber UNCERTAIN solid (the evidence is a guide layer, never rendered)
+            from .export_ae import UNCERTAIN_RGB
+            col = tuple(255.0 * float(c) for c in list(UNCERTAIN_RGB)[:3][::-1])
+            chrono.append(Layer(0, "solid", sid, "uncertain", k_in, k_out, color=col,
+                                label=seg.label or f"UNCERTAIN ({timecode(k_in, main_fps)}-{timecode(k_out, main_fps)})"))
+            continue
         if seg.type == "raw":
             v = float(seg.speed)
             raw_in = _seg_raw_in(seg, raw_fps)
@@ -557,8 +566,9 @@ def make_context(cutlist: Cutlist, cfg: Any, layout_mode: str | None = None,
             else:
                 warnings.append(f"S{sid:02d}: no transform; identity used")
                 sim, mkeys = to_main_sim(Sim(), flip, pl["fill_box"]), []
+            mix = seg.frame_mix
             chrono.append(Layer(0, "raw", sid, "raw", k_in, k_out, raw_in=raw_in_m, speed=v, remap=remap,
-                                flip=flip, sim=sim, keys=mkeys))
+                                flip=flip, sim=sim, keys=mkeys, mix=mix))
         elif seg.type in ("dip", "flash"):
             if seg.type == "dip":
                 tt = str((_transition_dict(seg.transition_in) or {}).get("type", "")) + \
@@ -614,14 +624,45 @@ def _raw_path_from_cutlist(cutlist: Cutlist, cfg: Any) -> str | None:
 # Per-frame rendering
 # ---------------------------------------------------------------------------------------------
 
-def layer_raw_frame(L: Layer, K: int, ctx: RenderContext) -> int:
-    """RAW frame a RAW layer shows at MAIN frame K (AE rule, clamped to the RAW extent)."""
+def _layer_pos(L: Layer, K: int, ctx: RenderContext) -> float:
+    """Continuous RAW position (frames) of a RAW layer at MAIN frame K."""
     rf = float(ctx.raw_fps)
     if L.remap:
-        j = math.floor(_interp_keys(L.remap, float(K)) * rf + AE_EPS)
-    else:
-        j = math.floor(rf * (L.raw_in + L.speed * ((K - L.k_in) / float(ctx.fps))) + AE_EPS)
+        return _interp_keys(L.remap, float(K)) * rf
+    return rf * (L.raw_in + L.speed * ((K - L.k_in) / float(ctx.fps)))
+
+
+def layer_raw_frame(L: Layer, K: int, ctx: RenderContext) -> int:
+    """RAW frame a RAW layer shows at MAIN frame K (AE rule, clamped to the RAW extent)."""
+    j = math.floor(_layer_pos(L, K, ctx) + AE_EPS)
     return int(min(max(j, 0), ctx.n_raw - 1))
+
+
+def layer_mix(L: Layer, K: int, ctx: RenderContext) -> float:
+    """Weight of RAW frame j + 1 in a Frame Mix layer at MAIN frame K (0 for any other layer)."""
+    if not L.mix:
+        return 0.0
+    j = layer_raw_frame(L, K, ctx)
+    if j + 1 >= ctx.n_raw:
+        return 0.0
+    return float(min(1.0, max(0.0, _layer_pos(L, K, ctx) - j)))
+
+
+def _raw_image(L: Layer, K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> np.ndarray:
+    """The RAW image a RAW layer shows at MAIN frame K: frame j, or -- Frame Mix -- (1 - f) j + f (j + 1); a frame not
+    in ``raw_frames`` raises KeyError(frame) (callers fetch it and retry)."""
+    j = layer_raw_frame(L, K, ctx)
+    if j not in raw_frames:
+        raise KeyError(j)
+    f = layer_mix(L, K, ctx)
+    if f <= 1e-6:
+        return raw_frames[j]
+    if j + 1 not in raw_frames:
+        raise KeyError(j + 1)
+    a, b = raw_frames[j], raw_frames[j + 1]
+    if a.shape != b.shape:
+        return a
+    return np.clip(np.rint(a.astype(np.float32) * (1.0 - f) + b.astype(np.float32) * f), 0, 255).astype(np.uint8)
 
 
 def _clip_hides_roi(L: Layer, ctx: RenderContext) -> bool:
@@ -713,7 +754,7 @@ def _placeholder_image(L: Layer, ctx: RenderContext) -> np.ndarray:
         vy0, vy1 = (int(ys.min()), int(ys.max())) if ys.size else (0, rh - 1)
     else:
         vx0, vx1, vy0, vy1 = 0, rw - 1, 0, rh - 1
-    lines = ["NOT IN RAW"] + _wrap(_ascii(L.label), 28)
+    lines = (["UNCERTAIN"] if L.seg_type == "uncertain" else ["NOT IN RAW"]) + _wrap(_ascii(L.label), 28)
     avail_w = max(8, int(0.85 * (vx1 - vx0)))
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 1.0
@@ -759,9 +800,7 @@ def _stack(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -> tup
             continue
         if L.kind == "raw":
             j = layer_raw_frame(L, K, ctx)
-            if j not in raw_frames:
-                raise KeyError(j)
-            img = raw_frames[j]
+            img = _raw_image(L, K, ctx, raw_frames)
             if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
                 raise ValueError(f"RAW frame {j} is {img.shape[1]}x{img.shape[0]}, expected "
                                  f"{ctx.raw_size[0]}x{ctx.raw_size[1]}")
@@ -861,9 +900,7 @@ def _opaque_top(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarray]) -
         rw, rh = ctx.roi[2], ctx.roi[3]
         if L.kind == "raw":
             j = layer_raw_frame(L, K, ctx)
-            if j not in raw_frames:
-                raise KeyError(j)
-            img = raw_frames[j]
+            img = _raw_image(L, K, ctx, raw_frames)
             if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
                 return None
             M = _roi_matrix(_layer_sim(L, K, ctx), L.flip, ctx)
@@ -910,9 +947,7 @@ def _main_layer(L: Layer, K: int, ctx: RenderContext, raw_frames: dict[int, np.n
     full = (0, 0, W, H)
     if L.kind == "raw":
         j = layer_raw_frame(L, K, ctx)
-        if j not in raw_frames:
-            raise KeyError(j)
-        img = raw_frames[j]
+        img = _raw_image(L, K, ctx, raw_frames)
         if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
             raise ValueError(f"RAW frame {j} is {img.shape[1]}x{img.shape[0]}, expected "
                              f"{ctx.raw_size[0]}x{ctx.raw_size[1]}")
@@ -941,9 +976,7 @@ def _main_opaque_top(K: int, ctx: RenderContext, raw_frames: dict[int, np.ndarra
     full = (0, 0, W, H)
     if L.kind == "raw":
         j = layer_raw_frame(L, K, ctx)
-        if j not in raw_frames:
-            raise KeyError(j)
-        img = raw_frames[j]
+        img = _raw_image(L, K, ctx, raw_frames)
         if img.shape[1] != ctx.raw_size[0] or img.shape[0] != ctx.raw_size[1]:
             return None
         M = _roi_matrix(_layer_sim(L, K, ctx), L.flip, ctx, full)
@@ -1129,17 +1162,19 @@ def iter_render(ctx: RenderContext, raw_path: str | os.PathLike | None = None, s
     if not path:
         raise ValueError("render_preview: no RAW path (pass raw_path or put file_abs in cutlist.raw)")
     stop = ctx.n_frames if stop is None else min(int(stop), ctx.n_frames)
-    need: dict[int, list[int]] = {}
+    need: dict = {}
     for L in ctx.layers:
         if L.kind != "raw":
             continue
         js = [layer_raw_frame(L, K, ctx) for K in range(max(L.k_in, start), min(L.k_out, stop)) if L.op(K) > 0]
         if js:
             need[L.idx] = js
-    streams: dict[int, _LayerStream] = {}
+            if L.mix:            # Frame Mix: RAW j + 1 as a second monotone stream
+                need[(L.idx, 1)] = [min(j + 1, ctx.n_raw - 1) for j in js]
+    streams: dict = {}
     try:
         for K in range(int(start), stop):
-            for li in [li for li in streams if not ctx.layers[li].active(K)]:
+            for li in [li for li in streams if not ctx.layers[li if isinstance(li, int) else li[0]].active(K)]:
                 streams.pop(li).close()
             frames: dict[int, np.ndarray] = {}
             for L in ctx.layers:
@@ -1150,6 +1185,11 @@ def iter_render(ctx: RenderContext, raw_path: str | os.PathLike | None = None, s
                 j = layer_raw_frame(L, K, ctx)
                 img = streams[L.idx].get(j)            # every stream advances on every frame it serves
                 frames.setdefault(j, img)
+                if (L.idx, 1) in need:
+                    if (L.idx, 1) not in streams:
+                        streams[(L.idx, 1)] = _LayerStream(path, ctx.raw_fps, need[(L.idx, 1)])
+                    j1 = min(j + 1, ctx.n_raw - 1)
+                    frames.setdefault(j1, streams[(L.idx, 1)].get(j1))
             img = render_frame(K, ctx, frames)
             info = [(L.seg_id, j, float(w)) for L, j, w in frame_sources(K, ctx)]
             yield K, img, info

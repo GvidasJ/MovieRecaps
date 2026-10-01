@@ -744,3 +744,64 @@ def test_d1_render_preview_end_to_end(raw_clip, tmp_path):
         p = psnr(frames[k].astype(float), d1_expected(k, segs, raw), m)
         assert p > 33.0, (k, p)
     assert sorted(sid for sid, _, _ in res["raw_frames"][77]) == [4, 5]
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: Frame Mix of a verified frame-blend path; the 'uncertain' solid
+# ---------------------------------------------------------------------------------------------
+
+def fx08_segments() -> list[Segment]:
+    keys = [{"comp_frame": 30, "raw_seconds": raw_time(100, 0.1)},
+            {"comp_frame": 60, "raw_seconds": raw_time(100, 0.1) + 0.25 * 30 / 30}]
+    return [
+        Segment(id=1, type="raw", comp_in=0, comp_out=30, raw_in_seconds=raw_time(10, 0.5), speed=1.0,
+                transform=centred(0.75)),
+        Segment(id=2, type="raw", comp_in=30, comp_out=60, raw_in_seconds=keys[0]["raw_seconds"], speed=0.25,
+                time_mode="remap", time_remap_keys=keys, retime="frame_blend", transform=centred(0.75)),
+        Segment(id=3, type="uncertain", comp_in=60, comp_out=90, uncertain=True, transform=centred(0.75),
+                label="UNCERTAIN - best RAW 150-160, ZNCC 0.70-0.85 (00:00:02:00-00:00:03:00)"),
+        Segment(id=4, type="raw", comp_in=90, comp_out=120, raw_in_seconds=raw_time(170, 0.5), speed=1.0,
+                transform=centred(0.75)),
+    ]
+
+
+def test_frame_mix_blends_adjacent_raw_frames_and_uncertain_renders_its_solid(raw_frames):
+    """render_frame: a verified frame-blend path (Frame Mix) shows (1 - f) RAW[floor p] + f RAW[floor p + 1] at its
+    continuous position p (reference built here; better than either frame alone wherever f is not ~0 / 1, and both
+    frames are needed); without retime 'frame_blend' the same keys show whole frames. An 'uncertain' segment
+    renders AE's amber solid with an 'UNCERTAIN' label -- never RAW frames (its evidence is a guide layer)."""
+    segs = fx08_segments()
+    ctx = rp.make_context(make_cutlist(segments=segs, n=120), Config())
+    m = box_interior()
+    s2 = segs[1]
+    a, b = (Fraction(d["raw_seconds"]) for d in s2.time_remap_keys)
+    n_mixed = 0
+    for k in range(30, 60):
+        p = RF * (a + (b - a) * Fraction(k - 30, 30))
+        j, f = math.floor(p), float(p - math.floor(p))
+        sim = sim_at(s2, k)
+        ref = (1 - f) * ref_warp(raw_frames[j], sim, False) + f * ref_warp(raw_frames[j + 1], sim, False)
+        got = rp.render_frame(k, ctx, raw_frames).astype(np.float64)
+        pm = psnr(got, ref, m)
+        assert pm > 35.0, (k, f, pm)
+        if 0.2 < f < 0.8:
+            n_mixed += 1
+            for jj in (j, j + 1):
+                assert psnr(got, ref_warp(raw_frames[jj], sim, False), m) < pm - 3.0, (k, f, jj)
+            with pytest.raises(KeyError):
+                rp.render_frame(k, ctx, {jj: im for jj, im in raw_frames.items() if jj != j + 1})
+    assert n_mixed >= 10
+    plain = [s if s.id != 2 else Segment(**{**s.to_dict(), "retime": "none"}) for s in segs]
+    ctx2 = rp.make_context(make_cutlist(segments=plain, n=120), Config())
+    k = next(k for k in range(30, 60) if 0.3 < float(RF * (a + (b - a) * Fraction(k - 30, 30))) % 1 < 0.7)
+    j = math.floor(RF * (a + (b - a) * Fraction(k - 30, 30)))
+    assert psnr(rp.render_frame(k, ctx2, raw_frames).astype(float), ref_warp(raw_frames[j], sim_at(s2, k), False),
+                m) > 35.0
+    amber = np.array(rp._hex_bgr([0.95, 0.62, 0.05]))
+    for k in (60, 89):
+        img = rp.render_frame(k, ctx, raw_frames)
+        band = img[int(BOX["y"]) + 20:int(BOX["y"]) + 60, int(BOX["x"]) + 30:int(BOX["x"] + BOX["w"]) - 30]
+        assert np.all(np.abs(np.median(band.reshape(-1, 3), axis=0) - amber) <= 2)
+        mid = img[int(BOX_C[1]) - 40:int(BOX_C[1]) + 40, int(BOX["x"]) + 10:int(BOX["x"] + BOX["w"]) - 10]
+        assert (mid.astype(int).sum(axis=2) > 600).sum() > 50, "UNCERTAIN label not drawn"
+        assert rp.frame_sources(k, ctx) == []

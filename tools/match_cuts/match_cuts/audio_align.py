@@ -1479,7 +1479,8 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
     out: dict[int, dict] = {}
     for s in segs:
         out[s.id] = {"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None, "lag_ms": None,
-                     "corr": None, "exception": "not_in_raw" if s.type == "not_in_raw" else None}
+                     "corr": None, "exception": "not_in_raw" if s.type == "not_in_raw" else
+                     ("uncertain" if s.type == "uncertain" else None)}
     notes: list[str] = []
     n_frames = max((int(s.comp_out) for s in segs), default=0)
 

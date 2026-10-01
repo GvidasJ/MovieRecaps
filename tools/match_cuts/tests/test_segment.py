@@ -1458,3 +1458,176 @@ def test_union_test_for_a_callers_cut(monkeypatch, tmp_path, gap):
     else:      # (criterion 2 may have moved the near-tie cut a few frames: the caller's trigger follows it)
         assert len(segs) == 2 and u[0]["evidence"]["result"] == "undecided"
         assert segs[1].uncertain and "not decidable" in segs[1].notes
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: honest NOT-IN-RAW / UNRESOLVED / freeze decisions
+# ---------------------------------------------------------------------------------------------
+
+def _unresolved(fm: FrameMap, a: int, b: int, j0: int, scores) -> None:
+    """Frames [a, b) UNRESOLVED: best hypotheses RAW j0.. at the given gray-zone scores (refine's columns)."""
+    half = fm.cand.shape[1] // 2
+    for i, k in enumerate(range(a, b)):
+        fm.status[k] = Status.UNRESOLVED
+        fm.raw[k] = fm.raw_lo[k] = fm.raw_hi[k] = fm.soft_lo[k] = fm.soft_hi[k] = -1
+        fm.score[k] = float(scores[i])
+        fm.cand_j0[k] = j0 + i - half
+        fm.track[k] = 9
+        fm.s[k], fm.theta[k], fm.tx[k], fm.ty[k] = 1.0, 0.0, 0.0, 0.0
+
+
+def test_unresolved_run_is_an_uncertain_segment_and_a_low_run_a_placeholder():
+    """A 12-frame run at 0.70-0.88 is ONE 'uncertain' segment (no placeholder, no match) with its evidence and a
+    label; a run whose every hypothesis is < none_thresh stays an exact NOT-IN-RAW placeholder."""
+    a, b, c = ff_select(40, 1.0, 300), ff_select(30, 1.0, 1200), ff_select(30, 1.0, 2500)
+    fm, _ = build_fm([Spec(m=a, n=40), Spec(kind="none", n=12), Spec(m=b, n=30, track=1), Spec(kind="none", n=10),
+                      Spec(m=c, n=30, track=2)])
+    _unresolved(fm, 40, 52, 700, np.linspace(0.70, 0.88, 12))
+    fm.score[82:92] = 0.45
+    segs = run(fm, *proxies(fm.n))
+    assert [(s.type, s.comp_in, s.comp_out) for s in segs] == [
+        ("raw", 0, 40), ("uncertain", 40, 52), ("raw", 52, 82), ("not_in_raw", 82, 92), ("raw", 92, 122)]
+    u = segs[1]
+    assert u.label.startswith("UNCERTAIN - best RAW 700-711, ZNCC 0.70-0.88") and u.uncertain
+    assert u.audio["exception"] == "uncertain" and u.confidence == 0.0 and u.raw_in_seconds is None
+    assert [e["raw"] for e in u.evidence] == list(range(700, 712)) and u.transform is not None
+    assert segs[3].audio["exception"] == "not_in_raw"
+    assert all(fm.status[k] == Status.UNRESOLVED for k in range(40, 52))
+
+
+def test_short_none_run_inside_an_unresolved_stretch_joins_it():
+    a, c = ff_select(30, 1.0, 300), ff_select(30, 1.0, 2500)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(kind="none", n=12), Spec(m=c, n=30, track=2)])
+    _unresolved(fm, 30, 35, 700, [0.7] * 5)
+    _unresolved(fm, 37, 42, 707, [0.7] * 5)
+    segs = run(fm, *proxies(fm.n))
+    assert [(s.type, s.comp_in, s.comp_out) for s in segs] == [("raw", 0, 30), ("uncertain", 30, 42), ("raw", 42, 72)]
+    assert [e["raw"] for e in segs[1].evidence][5:7] == [-1, -1]
+
+
+class _Ov:
+    """Overlay masks of an animated caption (comp proxy pixels)."""
+
+    def __init__(self, masks: dict):
+        self.masks = masks
+
+    def get(self, k):
+        return self.masks.get(k)
+
+
+def _freeze_scene(moving: bool, caption: bool = False):
+    """20 frames of v = 1 on RAW 100.., then 10 frames refine measured all on RAW 125 (a freeze candidate), then 20
+    frames elsewhere. moving: a dark bar crosses the competitor's frames 6 px per frame (content motion no editor
+    transform compensates; the RAW does not hold it); caption: an animated white bar over the (static) freeze,
+    masked by the overlay masks."""
+    bank = texture_bank(400, seed=11)
+    a, c = ff_select(20, 1.0, 100), ff_select(20, 1.0, 300)
+    fm, _ = build_fm([Spec(m=a, n=20), Spec(kind="freeze", n=10, j0=125, track=1), Spec(m=c, n=20, track=2)])
+    comp = [bank[j] for j in a]
+    ov = {}
+    rng = np.random.default_rng(3)
+    for i in range(10):
+        img = bank[125].copy()
+        if moving:
+            img[:, 5 + 6 * i:15 + 6 * i] = 10
+        img = np.clip(img.astype(np.float32) + rng.normal(0.0, 0.4, img.shape), 0, 255).round().astype(np.uint8)
+        if caption:
+            img = img.copy()
+            img[20:34, 30:30 + 8 * (i + 1)] = 250
+            m = np.zeros(img.shape, bool)
+            m[18:36, 28:120] = True
+            ov[20 + i] = m
+        comp.append(img)
+    comp += [bank[j] for j in c]
+    return fm, np.stack(comp), bank, ov
+
+
+@pytest.mark.parametrize("caption", [False, True])
+def test_true_freeze_is_admitted(tmp_path, caption):
+    fm, comp, bank, ov = _freeze_scene(moving=False, caption=caption)
+    cp, rp = pix_proxies(comp, bank)
+    segs = build_segments(fm, cp, rp, None, _Ov(ov) if caption else None, cfg_(), None, None)
+    fz = [s for s in segs if s.type == "raw" and s.speed == 0.0]
+    assert len(fz) == 1 and fz[0].comp_in <= 20 and fz[0].comp_out == 30, [(s.type, s.comp_in, s.comp_out, s.speed)
+                                                                         for s in segs]
+
+
+def test_freeze_is_rejected_when_the_competitor_moves(tmp_path):
+    """Soft ranges all contain RAW 125, but the competitor's frames move: v = 0 is infeasible (not just costlier) and
+    the held still is reported as an 'uncertain' stretch, never a freeze or a near-zero speed shown as exact."""
+    fm, comp, bank, _ = _freeze_scene(moving=True)
+    cp, rp = pix_proxies(comp, bank)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, cp, rp, None, None, cfg_(), dl, None)
+    dl.close()
+    assert not [s for s in segs if s.type == "raw" and s.speed == 0.0]
+    cover = [s for s in segs if s.comp_in < 30 and s.comp_out > 20]
+    assert all(s.type == "uncertain" for s in cover if s.comp_in >= 20), [(s.type, s.comp_in, s.comp_out) for s in segs]
+    assert any(s.type == "uncertain" for s in cover)
+    recs = records(tmp_path / "d.jsonl")
+    names = {r["decision"] for r in recs}
+    assert "freeze_not_static" in names
+    # the refused freeze span is summarised once, after the segments record
+    rej = [r for r in recs if r["decision"] == "freeze_rejected"]
+    assert len(rej) == 1 and any(a <= 25 < b for a, b in rej[0]["evidence"]["spans"]), rej
+
+
+def test_pulldown_cadence_is_not_static():
+    """A dimming display on a near-static shot at v = 1 (23.976 -> 30): exact repeats every 5th pair with small
+    changes between them is a cadence (v = 1), not a freeze -- even though every change is tiny."""
+    from match_cuts.segment import _Builder
+    fm, _ = build_fm([Spec(m=ff_select(30, 1.0, 100), n=30)])
+    fm.pair_label[np.arange(2, 30, 5)] = 1
+    base = texture_bank(1, seed=2)[0].astype(np.float32)
+    frames, level = [], 0.0
+    for k in range(30):
+        if k == 0 or (k - 1) % 5 != 2:          # a repeat pair (k-1, k) keeps the image
+            level += 1.0
+        img = base.copy()
+        img[40:70, 40:120] = np.clip(img[40:70, 40:120] - level, 0, 255)
+        frames.append(img.astype(np.uint8))
+    cp, rp = pix_proxies(np.stack(frames), texture_bank(200, seed=3))
+    b = _Builder(fm, cp, rp, None, None, cfg_(freeze_static_mad=1.0), None, None, None)
+    assert b.static_floor(0, 30) is not None
+    assert not b.static(5, 25)
+
+
+def test_freeze_at_a_single_point_tie_is_never_a_freeze():
+    """Frames measured RAW j and j + 1 (both exact) cannot share a v = 0 segment (FX-08, phase_solve.freeze_gap)."""
+    m = np.array([1672, 1672] + [1673] * 8)
+    a, c = ff_select(20, 1.0, 1500), ff_select(20, 1.0, 1800)
+    fm, _ = build_fm([Spec(m=a, n=20), Spec(m=m, n=10, track=1), Spec(m=c, n=20, track=2)])
+    segs = run(fm, *proxies(fm.n))
+    assert not [s for s in segs if s.type == "raw" and s.speed == 0.0 and s.comp_in <= 20 and s.comp_out >= 22]
+
+
+def test_frame_blend_slow_motion_snaps_to_025_with_a_verified_path():
+    """A 0.25x frame-blended slow motion (ffmpeg framerate blend: linear in the fractional source position): the
+    single-frame argmax picks the heavier frame and bends the measured speed; the blends' positions give the
+    path, its speed snaps to 0.25 (retime_snap_values) and every frame matches the path's Frame Mix ->
+    retime 'frame_blend' with linear remap keys; AE's floor rule shows the pure frames exactly."""
+    bank = texture_bank(400, seed=7)
+    n = 40
+    u = 0.25 * float(R2997) / 30.0
+    x0 = 150.0
+    p = x0 + u * np.arange(n)
+    comp, col = [], []
+    for pk in p:
+        j, f = int(np.floor(pk + 1e-9)), float(pk - np.floor(pk + 1e-9))
+        comp.append((bank[j].astype(np.float32) * (1 - f) + bank[j + 1].astype(np.float32) * f).astype(np.uint8))
+        col.append(int(np.floor(pk + 0.5)))
+    a, c = ff_select(20, 1.0, 20), ff_select(20, 1.0, 300)
+    fm, _ = build_fm([Spec(m=a, n=20), Spec(m=np.array(col), n=n, track=1), Spec(m=c, n=20, track=2)])
+    comp = [bank[j] for j in a] + comp + [bank[j] for j in c]
+    segs = run(fm, *pix_proxies(np.stack(comp), bank))
+    s = next(s for s in segs if s.comp_in <= 25 < s.comp_out)
+    assert (s.type, s.comp_in, s.comp_out) == ("raw", 20, 60), [(x.type, x.comp_in, x.comp_out, x.speed) for x in segs]
+    assert s.speed == 0.25 and s.retime == "frame_blend" and s.time_remap_keys and "verified" in s.notes
+    k0, k1 = s.time_remap_keys[0], s.time_remap_keys[-1]
+    for i, pk in enumerate(p):
+        k = 20 + i
+        val = k0["raw_seconds"] + (k1["raw_seconds"] - k0["raw_seconds"]) * (k - k0["comp_frame"]) / (
+            k1["comp_frame"] - k0["comp_frame"])
+        assert abs(val * float(R2997) - pk) < 0.05
+        if pk - math.floor(pk + 1e-9) < 0.9:      # (f > 0.9: Frame Mix shows ~j + 1 either way)
+            assert math.floor(val * float(R2997) + 1e-9) == math.floor(pk + 1e-9), (k, pk)

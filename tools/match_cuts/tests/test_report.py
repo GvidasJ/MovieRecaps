@@ -184,7 +184,7 @@ def test_report_renders_every_section(tmp_path):
     assert "Low-confidence frames (conf < 0.5): 3" in md and "debug/low_confidence/" in md
     assert "Ambiguous-identical frames (neighbouring RAW frames identical): 2" in md
     assert "Timing-tie frames (AE floor/round may differ by one frame): 1" in md
-    assert "NOT-IN-RAW ranges: 150–179" in md
+    assert "NOT-IN-RAW ranges (every hypothesis below none_thresh): 150–179" in md and "UNCERTAIN ranges" in md
     # FX-10: the 1.1x layer's phase is fixed by the 29.97-in-30 lattice (cells of ~1/91 frame): information
     assert ("Phase pinned by cadence (information, not a risk): 1 segment(s) — S05 (±0.092 ms, frame-rate lattice)"
             in md)
@@ -426,3 +426,24 @@ def test_independent_check_findings_are_listed_with_frames(tmp_path):
     assert "- Motion mismatch (s9_2b)" in md and "12 repeat, 40 move" in md
     assert "| 01: S03\\|S04 |" in md or "S03\\|S04" in md or "S03|S04" in md
     assert "inside a repeat pair" in md
+
+
+def test_uncertain_ranges_and_frame_mix_in_the_report(tmp_path):
+    """FX-08: an 'uncertain' segment is listed with its label under UNCERTAIN ranges (not as NOT-IN-RAW), its table row
+    shows the label instead of RAW timecodes, the edit breakdown counts it, and a verified frame-blend path is shown
+    as 'frame blend (Frame Mix)' in the speed column and among what AE reproduces with Frame Mix."""
+    ctx = make_ctx(tmp_path)
+    segs = ctx.cutlist.segments
+    label = "UNCERTAIN - best RAW 1662-1673, ZNCC 0.50-0.89 (00:00:05:00-00:00:06:00)"
+    segs[3] = Segment(4, "uncertain", 150, 180, label=label, uncertain=True, confidence=0.0)
+    s5 = segs[4]
+    s5.speed, s5.retime, s5.time_mode, s5.unsnapped = 0.25, "frame_blend", "remap", False
+    s5.time_remap_keys = [{"comp_frame": 180, "raw_seconds": 700.25 / float(R_FPS)},
+                          {"comp_frame": 240, "raw_seconds": 700.25 / float(R_FPS) + 0.5}]
+    md = report.render_report(ctx)
+    assert "NOT-IN-RAW ranges (every hypothesis below none_thresh): none" in md
+    assert f"UNCERTAIN ranges" in md and f"150–179 (00:00:05:00–00:00:06:00) {label}" in md
+    assert "0.2500 frame blend (Frame Mix)" in md
+    assert "S05: frame-blend retiming (verified path; exported with AE Frame Blending > Frame Mix)" in md
+    eb = report.edit_breakdown(ctx.cutlist, ctx.layout, ctx.cfg)
+    assert eb["uncertain"] == [(150, 180)] and eb["not_in_raw"] == []

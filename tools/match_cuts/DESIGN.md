@@ -175,7 +175,10 @@ visual verification always uses a match-geometry render at competitor size and f
   `model.cutlist_layout(layout, cfg.layout_mode)` (`mode` = LAYOUT_MODE, `layout_kind` = detected).
 * `FrameMap` — m(k) column store (`FRAME_MAP_FIELDS`; attribute assignment writes the store):
   `raw` best frame; `raw_lo..raw_hi` = RAW frames **visually identical** to `raw` in the visible
-  region (RAW-vs-RAW, warped & masked: mean |diff| ≤ `identical_mad` or ZNCC ≥ `identical_thresh`) —
+  region (RAW-vs-RAW, warped, the layout's masks only -- never refine's pass-2 residual masks, which hide exactly
+  where a wrong match differs; a MAX OVER TILES (`identical_tiles`²): every tile's mean |diff| ≤ `identical_mad` ×
+  clip((p98 − p2) / `identical_contrast_ref`, `identical_contrast_min`, 1) or its ZNCC ≥ `identical_thresh`, so a
+  small changing region (a dimming dashboard display) is never diluted by a static frame, FX-08) —
   the only criterion-3 exemption; `low_margin` flag = score gap ≤ `low_margin_eps` (never an
   exemption); `soft_lo..soft_hi` = soft range for the LP `{j : S_k(j) ≥ max S_k − δ_k}` with
   `δ_k = scoring.noise_delta(track's best scores) = clip(3·1.4826·MAD(best scores), soft_delta_min,
@@ -186,9 +189,18 @@ visual verification always uses a match-geometry render at competitor size and f
   raw per-frame ECC measurement of RAW m(k) (FX-03); `confounded` = m±1 with its own refitted path scores within
   the track's noise (soft range widened to m±1; segmentation reads no time or framing step into it);
   `pair_label` (−1 unmeasured, 0 unknown, 1 repeat, 2 move, 3 cut) / `pair_warp[k, 0:4]` (dx, dy comp full-res
-  px, ds, dθ) = the competitor's own pair (k, k+1) signature (temporal.py, refine's masks; FX-07).
+  px, ds, dθ) = the competitor's own pair (k, k+1) signature (temporal.py, refine's masks; FX-07); `detail` =
+  the detail-sensitive second score of a gray-zone frame's best hypothesis (FX-08). `status` ∈ {MATCH,
+  UNRESOLVED, NONE, UNIFORM, BLEND} -- THREE states for a non-uniform frame (FX-08): MATCH (≥ match_thresh, or a
+  gray-zone frame promoted by the detail score), UNRESOLVED (best hypothesis in [none_thresh, match_thresh): it
+  keeps that hypothesis' track / score / Sim / candidate vector, raw = −1, conf 0), NONE (EVERY evaluated
+  hypothesis < none_thresh -- the only NOT-IN-RAW evidence).
 * `AudioHints` — per competitor audio window: `comp_t`, `raw_t`, `speed`, `conf`, `psr`, `peak`.
-* `Segment` — prompt Stage 6 fields + extras (see model.py). `type ∈ {raw, not_in_raw, dip, flash}`;
+* `Segment` — prompt Stage 6 fields + extras (see model.py). `type ∈ {raw, not_in_raw, dip, flash, uncertain}`
+  (closed list; `uncertain` (FX-08) = an UNRESOLVED stretch: neither a RAW claim nor a NOT-IN-RAW claim, label
+  'UNCERTAIN - best RAW a-b, ZNCC x-y (timecodes)', `evidence` = [{comp_frame, raw (−1: none ≥ none_thresh),
+  score, sim, flip}] per frame, confidence 0, `audio.exception = 'uncertain'` -- a marker, never one of the
+  closed exception codes: criterion 3 counts its frames as failures);
   freeze (v = 0), reverse (v < 0) and ramps are `type = raw` with `time_mode = remap`
   (`time_remap_keys` non-empty). `transform` = canonical Sim dict; `transform_keys` =
   `[{comp_frame, scale, rotation_deg, tx, ty}]` (absolute comp frames, AE-linear). `audio =
@@ -198,7 +210,9 @@ visual verification always uses a match-geometry render at competitor size and f
   switch baseline, §7 D9). `lag_ms` / `lag_ms_video` are residuals after the run's A/V offset (§7 D9).
   `exception` ∈ {too_short, not_in_raw, audio_replaced, pitch_preserved, music_dominated, no_audio} (closed
   list; criterion 5 adds the RUN-level code `av_offset`, never a segment's own code). `retime` ∈ {none,
-  frame_blend, optical_flow}, `uncertain`, `unsnapped`, `cut_ambiguity=[a,b]`, `tie_frames`,
+  frame_blend, optical_flow} (`frame_blend` with linear `time_remap_keys` carrying the measured continuous RAW
+  position and not uncertain = a VERIFIED frame-blend path, `Segment.frame_mix`: AE Frame Mix, FX-08),
+  `uncertain`, `unsnapped`, `cut_ambiguity=[a,b]`, `tie_frames`,
   `low_margin_frames`, `ae_margin_ms` (the exact AE floor-rule slack of the written raw_in over EVERY frame
   of the segment, ms, §2.1 / §7.3 -- no longer the distance to the interval edges), `region`, `box`.
 * **Crossfade convention (matches ffmpeg `xfade=fade` and linear AE opacity keys):** a crossfade of
@@ -342,7 +356,7 @@ class RawIndex:        # SIFT on sampled RAW proxy frames; descriptors stored ui
 @dataclass
 class Anchor:          # verified match of one competitor frame
     k: int; raw: int; flip: bool; sim: Sim; inliers: int; inlier_ratio: float; votes: float
-    zncc: float; source: str   # 'global' | 'audio' | 'rescue'
+    zncc: float; source: str   # 'global' | 'audio' | 'rescue' | 'line'; '<src>_near' / '<src>_gray' (below)
 def search_frame(k, comp, raw, index, allowed, cfg, window=None) -> list[Anchor]
     # SIFT on comp frame inside `allowed`; query normal + flipped descriptors for votes; verify each
     # candidate with pairwise ratio 0.75 + estimateAffinePartial2D (RAW->comp, §2.2; flip: vs
@@ -356,6 +370,16 @@ def search_frame(k, comp, raw, index, allowed, cfg, window=None) -> list[Anchor]
     # near_miss=True (sparse search, rescue): when no candidate passes, near-misses (near_miss_inliers <=
     # inliers < min_inliers) passing the same re-estimation + ZNCC test are returned as source '<src>_near':
     # refine lets them only JOIN an existing run whose time line they continue (min_inliers is unchanged).
+    # When nothing passes at all, the full RANSAC matches whose re-estimated ZNCC lies in the gray zone
+    # [none_thresh, accept) come back as '<src>_gray' (<= 2, FX-08): refine seeds WEAK tracks from them -- UNRESOLVED
+    # evidence (a processed / motion-blurred picture of RAW content is not NOT-IN-RAW), never an anchor.
+def line_search(k, comp, raw, allowed, cfg, js, flip) -> list[Anchor]        # FX-08 'search before giving up'
+    # pairwise SIFT + RANSAC of comp frame k against EACH RAW frame of js (a neighbouring run's predicted window,
+    # a handful of frames instead of the whole RAW; RAW features computed on the frames themselves with
+    # line_search_nfeatures) with relaxed acceptance (>= near_miss_inliers at inlier ratio >= line_search_min_ratio;
+    # the global min_inliers is unchanged) -- CANDIDATES only: the anchor test (Sim re-estimated over the exact RAW
+    # frames around it, masked ZNCC >= match_thresh - anchor_zncc_slack) decides, best inliers first, at most
+    # line_search_verify per frame. run_line_searches: the worker-pool version (input order kept).
 def sparse_search(comp, raw, layout, overlays, index, hints, cfg, dlog, frames=None) -> list[Anchor]
     # every cfg.comp_search_stride frames (or `frames`); audio-restricted (±audio_restrict_s) first,
     # global fallback. multiprocessing (fork; memmaps shared; seed_everything per worker).
@@ -405,14 +429,30 @@ def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cac
     # 3 for every frame k and every track active near k: predicted ĵ (the track's line); score RAW frames
     #   ĵ-R..ĵ+R (R = refine_radius) under the track's path (scoring.score_candidates); if the argmax is on the
     #   window edge, extend in that direction (up to track_search_radius, then visual_match.search_frame) until
-    #   interior; store S_k in cand/cand_j0 (CAND_W window centred on m). Tracks showing the same RAW frame
-    #   within 2e-3 explain a frame equally: the larger track keeps it.
+    #   interior; a best score below none_thresh -- wherever the argmax lies -- says the window missed the frame
+    #   (a jump on the line): the whole ±track_search_radius window is scored before the frame can count as
+    #   NOT-IN-RAW evidence (FX-08); store S_k in cand/cand_j0 (CAND_W window centred on m). Tracks showing the
+    #   same RAW frame within 2e-3 explain a frame equally: the larger track keeps it.
     # 4 overlay pass 2: residual masks (layout.masks_from_residuals), re-score.
     # 5 rescue: frames with score < match_thresh OR score < rolling track median(±5) - max(rel_drop_min,
     #   4·MAD) -> search_frame on them (catches 1–2 frame flash cuts, jump cuts inside a track; runs longer than
     #   2 strides: both ends + every stride-th frame BETWEEN the sparse search's grid); anchors on an
-    #   existing track's line join it, others start runs; re-score. Remaining: region std < uniform_std ->
-    #   UNIFORM; else NONE.
+    #   existing track's line join it, others start runs; re-score.
+    # 5b SEARCH BEFORE GIVING UP (FX-08), on every run of frames no track explains (< match_thresh, not uniform),
+    #   at most twice: (i) the previous and next runs' time lines scored across gaps <= line_gap_s (window widened
+    #   as in 3); (ii) line-constrained SIFT re-search (visual_match.line_search) of the gap frames within
+    #   line_search_reach of a neighbouring run against that run's line ± track_search_radius -- verified anchors
+    #   join an existing track's line or start a run, then overlay pass 2 again (a RAW-only overlay such as a
+    #   legal disclaimer is masked by its residuals); (iii) gray-zone RANSAC matches ('_gray') on frames still
+    #   unexplained seed WEAK tracks: UNRESOLVED evidence only (no growth, no merges, no pass-2 masks).
+    #   THREE STATES (finalize): a gray-zone frame (none_thresh <= best < match_thresh) is promoted to MATCH only by
+    #   the detail-sensitive second score -- scoring.detail_score (blur matching: the zero-phase kernel family
+    #   applied to the sharper image, then gradient ZNCC) of its best hypothesis >= match_thresh AND above RAW
+    #   jb ± 1, ± 2 under their OWN re-measured framing (ecc_measure from the hypothesis) by > detail_margin (a pan
+    #   over a static world explains every neighbour alike: no margin, no promotion; FrameMap 'detail'); else
+    #   UNRESOLVED. Remaining frames: region std < uniform_std -> UNIFORM; else NONE (every evaluated hypothesis
+    #   < none_thresh). Never a promotion on the plain score: ZNCC is non-discriminative on sharpened / blurred
+    #   material (the real run's comp 1203 scored 0.989 against a visibly different RAW frame).
     # 6 raw_lo/raw_hi = visually identical frames (§3); low_margin; soft_lo/soft_hi; conf = f(score, margin).
     #   Sim columns = the track's PATH value; sim_meas / sim_meas_score = the per-frame ECC measurement of
     #   RAW m(k) (consistent (RAW frame, Sim) pairs).
@@ -438,6 +478,10 @@ def ecc_measure(comp_img, raw_img, sim0, flip, raw_w, raw_ratio, comp_ratio, all
 def feasible_speed_range(ks, lo, hi, comp_in, comp_fps, raw_fps, v_bounds=(-8, 8), tau=1e-6) -> tuple[float, float] | None
     # scipy.optimize.linprog (HiGHS) in local units: min / max u subject to the tolerant constraints.
 def is_feasible(ks, lo, hi, comp_in, comp_fps, raw_fps, v=None) -> bool
+    # FX-08: NO single-point tie at v = 0. Every frame of a freeze sits at the SAME x, so frames measured on RAW j
+    # and j + 1 would be 'feasible' only at the point x = j + 1 of the tolerant closed constraints (the real run's
+    # 10-frame fake freeze over frames measured 1672 and 1673); a freeze needs one common RAW frame of width
+    # > 2 TIE_SLACK (freeze_gap(u): 2 TIE_SLACK at u = 0, -2 tau otherwise -- moving lines keep the tie tolerance).
 def solve_raw_in(ks, lo, hi, comp_in, v, comp_fps, raw_fps) -> dict
     # Chebyshev LP with u fixed: max t s.t. lo_k+t <= x+u·d_k <= hi_k+1-t, -tau <= t <= 0.5.
     # {'raw_in': seconds (the midpoint of the max-min-slack breakpoint cell of every frame comp_in .. last
@@ -503,8 +547,22 @@ def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_d
     #   within 3δ_k of the frame's own (RAW frame, Sim); a merge is re-checked AFTER the merged segment's refit
     #   (a frame scoring > 3δ_k below the check reverts it). Unmerged 1-2 frame segments are logged
     #   'flash_cut_verified' only when every frame's own pair beats each adjacent neighbour's model by > 3δ_k;
-    #   else 'flash_cut_unverified' (uncertain + note); islands next to a NONE / uniform run are logged
-    #   'tiny_island_next_to_none' for the not-in-RAW resolver (FX-08).
+    #   else 'flash_cut_unverified' (uncertain + note); islands next to a NONE / uniform / uncertain run are
+    #   logged 'tiny_island_next_to_none'. ISLANDS (FX-08 6): a 1-2 frame RAW island next to a NONE / uncertain run
+    #   is kept only when its own model leaves the adjacent unmatched frames (<= 2 per side) below none_thresh;
+    #   one it explains at a gray-zone score is part of that unresolved stretch (the real run's S63: comp 1191 and
+    #   1192 show one picture, 1191 scored 0.826 under 1192's model) -> island + run = ONE 'uncertain' segment.
+    # FREEZE ADMISSION (FX-08 5): v = 0 is a DP candidate only where the competitor itself is STATIC over the
+    #   segment: every pair (k, k+1) aligned (temporal.align_pair: editor transform compensated; captions /
+    #   overlays masked by the segment masks) has mean |diff| <= max(freeze_static_ratio x the competitor's own
+    #   noise floor = the median of its REPEAT pairs (pulldown duplicates, refine's labels) nearby,
+    #   freeze_static_mad), and the pairs show no pulldown CADENCE (exact repeats at a regular 1-in-5 spacing with
+    #   small changes between them = v = 1 on a near-static shot -- the real run's dimming dashboard 593-604 --
+    #   not a freeze). A moving competitor makes the freeze infeasible (never just costlier); log
+    #   freeze_not_static per measured span and one freeze_rejected summary (the spans a freeze would otherwise
+    #   have explained) after the segments record. MOVING HOLDS: a RAW
+    #   segment whose model holds one RAW frame for >= 3 frames where the competitor is not static (and no
+    #   frame-blend path was verified) is 'retimed / interpolated - unresolved' -> an 'uncertain' segment.
     # Criterion 2 check per cut (A's last frame scores higher under A's model than B's, and vice versa);
     #   move the cut otherwise; log. A visited set guards the mover (it used to oscillate between two positions
     #   with identical evidence): on a revisit, or after 3 moves, every visited position is re-evaluated (models
@@ -541,11 +599,24 @@ def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_d
     #   (1 - zncc_fit) <= blend_rel·(1 - best single-source zncc). Fit α_B(k) = (k-O)/D by least squares
     #   over the blend frames: O = round(zero crossing), D = round(1/slope). Apply §3 crossfade convention,
     #   add the chosen A/B frames as constraints, re-solve. Dips: blends with a uniform colour; flash:
-    #   UNIFORM runs of 1–2 frames; NONE runs -> 'not_in_raw' placeholders (label with RAW-free timecodes).
-    # RETIMING: within speed != 1 runs, frames with low single-frame score but fit_blend(RAW[j], RAW[j+1])
-    #   >= match_thresh with 0.1 < α < 0.9 on >= 20 % of frames -> retime=frame_blend (excluded from the
-    #   phase solve; still infeasible -> uncertain=True + warning). Freeze / reverse / ramps -> time_mode
-    #   remap + time_remap_keys (freeze key values (j + 0.25)/raw_fps).
+    #   UNIFORM runs of 1–2 frames; NONE runs -> 'not_in_raw' placeholders (label with RAW-free timecodes);
+    #   UNRESOLVED runs -> 'uncertain' segments (FX-08: label 'UNCERTAIN - best RAW a-b, ZNCC x-y', the evidence
+    #   per frame for the guide layer, no timing claim); NONE runs of <= 2 frames touching an unresolved run join
+    #   it (calling them NOT-IN-RAW would claim more than the evidence).
+    # RETIMING (FX-08): in a v != 1 (v > 0) raw segment every matched frame is fitted as a blend of RAW j0, j0 + 1
+    #   under the segment's framing (gain-free alpha); a blend frame fits >= match_thresh with 0.1 < alpha < 0.9
+    #   and (1 - zfit) <= blend_rel (1 - best single). With >= 20 % (and >= 3) blend frames their CONTINUOUS
+    #   positions j0 + alpha_B give the path (least squares; the single-frame argmax picks the heavier source and
+    #   bends the measured speed: 0.2536 for a 0.25x blend); speed snapped to speed_snap_values ∪
+    #   retime_snap_values (25 / 20 / 33 % presets) within speed_snap_tol; phase = the blends' median, kept inside
+    #   the floor intervals of the measured pairs (2 TIE_SLACK) and never moved further (Frame Mix blends by the
+    #   fraction: the measured phase IS the weight). VERIFIED when the fixed mix (1 - f) RAW[floor p] +
+    #   f RAW[floor p + 1] scores >= match_thresh on EVERY matched frame -> retime 'frame_blend' with two linear
+    #   remap keys (Segment.frame_mix: AE Frame Mix, a linear blend in the preview); the frame it SHOWS as one
+    #   frame (framing samples, write-back) is the mix's dominant frame floor(p + 0.5). Not verified ->
+    #   'retimed / interpolated - unresolved' = an 'uncertain' segment -- never a fake freeze or a bent unsnapped
+    #   speed presented as exact (no optical-flow fitting: unverifiable on sharpened material). Freeze / reverse /
+    #   ramps -> time_mode remap + time_remap_keys (freeze key values (j + 0.25)/raw_fps).
     # SPEED: v_ols (robust) -> speed_measured; feasible range -> speed_range; phase_solve.snap_speed.
     # FRAMING (5.5, FX-06 1/2/5): samples = consistent (RAW frame, Sim) pairs on EVERY frame: refine's per-frame
     #   measurement sim_meas (the path value where the ECC fell back below it) where the segment shows the frame
@@ -628,8 +699,18 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # one 'AE time check' line in the alert. Remap: stretch=100, startTime=tIn,
     # in/out, assert canSetTimeRemapEnabled, enable, remove ALL keys, setValuesAtTimes, LINEAR (HOLD in
     # frames mode). Every layer: frameBlendingType NO_FRAME_BLEND, quality BEST, samplingQuality BILINEAR
-    # (try), motionBlur false; comp.frameBlending = false. startTime/inPoint/outPoint set explicitly on
-    # EVERY layer (solids, pre-comp, reference).
+    # (try), motionBlur false; comp.frameBlending = false -- except a VERIFIED frame-blend path (FX-08,
+    # Segment.frame_mix): FRAME_MIX on its LINEAR remap keys (the position's fraction is the blend weight) and
+    # frameBlending on the comp holding it; it is never switched to frames mode by the slack rule (HOLD keys at
+    # j + 0.25 would make a constant 25 % mix; its picture is continuous in the position, so the floor rule's slack
+    # decides nothing visible -- the JSX's AE source-time check judges its POSITION within 1e-3 frame); a forced
+    # --ae-time-mode frames exports whole frames without Frame Mix and warns. startTime/inPoint/outPoint set
+    # explicitly on EVERY layer (solids, pre-comp, reference).
+    # UNCERTAIN segments (FX-08): an amber solid (UNCERTAIN_RGB, labelled 'UNCERTAIN - best RAW a-b, ZNCC x-y') in
+    # the stack -- what renders -- under a GUIDE layer 'GUIDE - best RAW evidence: ...' (kind raw_guide, RAW footage,
+    # frame-exact remap keys at (j + 0.25)/raw_fps of each frame's best-evidence RAW frame -- frames without evidence
+    # hold the nearest one -- under the evidence framing; guideLayer, no audio: visible in the viewer, never
+    # rendered, not a RAW video layer for c6) and a comp marker with the label. summary.uncertain counts them.
     # Keys: setValuesAtTimes then per key setInterpolationTypeAtKey(LINEAR, LINEAR); spatial props also
     # setSpatialAutoBezierAtKey(false), setSpatialContinuousAtKey(false), setSpatialTangentsAtKey(z, z)
     # (z = [0,0,0] for ThreeD_SPATIAL). Only matchNames ('ADBE Transform Group'/'ADBE Position',
@@ -700,8 +781,10 @@ def validate_exports(cutlist, xml_path, edl_path) -> dict
 def make_context(cutlist, cfg, layout_mode=None, target_size=None, fps=None) -> RenderContext
 def render_frame(k, ctx, raw_frames: dict) -> np.ndarray   # BGR: background, layers (flip, warpAffine with
     # geometry.interpolate_keys, crossfade out = (1-α_B)·A + α_B·B, dips), rounded box coverage mask,
-    # NOT-IN-RAW placeholder (coloured, labelled). RAW frame per layer = phase_solve.ae_frame (AE rule)
-    # or the plan's frames-mode value.
+    # NOT-IN-RAW placeholder (coloured, labelled), UNCERTAIN solid (amber, labelled 'UNCERTAIN': what AE renders;
+    # the evidence is a guide layer). RAW frame per layer = phase_solve.ae_frame (AE rule) or the plan's
+    # frames-mode value; a Frame Mix layer (Segment.frame_mix, FX-08) = the linear blend (1 - f) RAW[floor p] +
+    # f RAW[floor p + 1] at its continuous position p (a second sequential decode stream for RAW floor p + 1).
 def render_preview(cutlist, raw_path, out_path, cfg, layout_mode=None) -> dict
     # own frame-exact renderer: per segment one seek + sequential decode (VideoReader); two readers for
     # overlaps; FFmpegWriter H.264 CRF <= 16 yuv420p +faststart; audio via build_audio muxed (AAC).
@@ -724,7 +807,7 @@ def verify_all(ctx) -> dict
   #  'checks': {s9_1_coverage, s9_2_ae_sim, s9_3_visual, s9_4_cut_images, s9_5_audio, s9_6_ae_render,
   #             s9_7_determinism}: {...}, 'failures': [...]}
   # c1 <- s9_1: segments + placeholders tile [0, N) exactly; overlaps only = measured transitions;
-  #      extra-region frames -> pass_with_exceptions.
+  #      extra-region frames -> pass_with_exceptions; placeholders and 'uncertain' segments carry labels.
   # Hypothesis-neutral rules (never re-use an analysis decision): verify imports no decision function of
   #   segment.py / refine.py -- only the scorers, temporal.py and the shared ECC primitive
   #   refine.refine_transform; framing is RE-MEASURED (ECC, incl. a global phase-correlation start), never
@@ -735,7 +818,12 @@ def verify_all(ctx) -> dict
   #      A-model and B-model predicted RAW frames (phase_solve.ae_frame; when the RAW frames differ, each
   #      hypothesis' framing re-measured on that frame by ECC -- own: max(model, refit); other: max(held key,
   #      refit from its own and from the shown framing)); crossfades: the fitted α ramp is checked instead;
-  #      NOT-IN-RAW neighbours: placeholder frame scores below none_thresh against the extended neighbour model.
+  #      NOT-IN-RAW neighbours (FX-08: NOT-IN-RAW only when EVERY hypothesis is below none_thresh -- the same
+  #      rule refine applies, implemented independently): the placeholder's boundary frame must stay below
+  #      none_thresh under every hypothesis its RAW neighbours offer -- the adjacent neighbour AND the one across
+  #      the placeholder, each by its time line extended and by its boundary RAW frame HELD (a freeze), each with
+  #      its framing re-measured when the scorer can; the RAW side's own frame must reach none_thresh. An
+  #      'uncertain' neighbour claims nothing: only the RAW side is checked (raw_to_uncertain / uncertain_to_raw).
   #      No-cut alternative: A's time line extended over B's first verify_union_frames frames (and B's back over
   #      A's last ones) with re-measured framing; a line within the cut's score noise (scoring.noise_delta of
   #      the shown scores next to the cut) of the split on all of them -> 'spurious cut'; when both lines show
@@ -747,7 +835,14 @@ def verify_all(ctx) -> dict
   #      misidentification'. Speed-only cuts (cut_ambiguity) and layout changes are exempt from these tests.
   # c3 <- s9_2 (AE simulation from ae_plan AND from the mock-run record == m(k) for >= frame_exact_min of
   #      matched frames; exemptions only ambiguous-identical [raw_lo, raw_hi] and timing-tie frames — both
-  #      listed) AND s9_2b AND s9_2c AND s9_3.
+  #      listed) AND s9_2b AND s9_2c AND s9_3 AND the UNCERTAIN accounting (FX-08: every frame of an 'uncertain'
+  #      segment is a criterion-3 FAILURE -- neither matched nor NOT-IN-RAW -- never an exception).
+  #      FRAME MIX (FX-08): the simulations carry a Frame Mix layer's weight f of RAW floor(p) + 1 ('mix'); AE
+  #      shows (1 - f) RAW j + f RAW j + 1, so refine's single-frame argmax on a frame-blended competitor frame
+  #      is compared with the mix's DOMINANT frame (exact, listed as Frame Mix); the lighter source counts only
+  #      within verify_mix_tie of an even mix (a listed blend tie). s9_2b renders the recreation's mix and treats
+  #      two frames as the same picture only at the same (j, f); s9_2c refits the neighbours of the dominant
+  #      frame against the mix itself (ProxyScorer.score_with_mix, one common mask).
   # s9_2b temporal signature (temporal.py): the competitor's comp-only pair labels (repeat / move / unknown /
   #      cut, per competitor shot with a measured noise floor) against the recreation's pairs measured the
   #      same way (RAW m(k), m(k+1) each warped with its own model). Disagreements: competitor MOVE where the
@@ -777,7 +872,8 @@ def verify_all(ctx) -> dict
   #      from the closed list (§3) -> pass_with_exceptions.
   # c6: mock-run (no alert containing 'Error'; MAIN frameRate == main_fps within 1e-9; duration ==
   #      frames·frameDuration; work area == duration; saved path == <script dir>/recreated_edit.aep; one
-  #      layer per segment with name/startTime/stretch/in/out == plan; media_missing scenario aborts
+  #      layer per segment with name/startTime/stretch/in/out == plan (guide layers are not RAW video layers);
+  #      media_missing scenario aborts
   #      cleanly and calls openDialog) + s9_6 aerender if available. Linux: 'pass' means mock-verified;
   #      details say 'mock only'. Node missing -> not_available.
   # s9_6 also carries 'ae_time' (verify.ae_time_calibration, FX-10): the slack tolerance, the layers the plan
@@ -823,7 +919,9 @@ def write_report(ctx, path) -> None      # prompt Stage 10 sections: inputs (cod
     # VFR/offset issues, conform + why, fps-source max error), layout (+ layout.png), segment table
     # (# · comp in–out tc+frames · duration · RAW in–out tc · speed · flip · scale/position or 'animated' ·
     # transition · confidence · notes), edit-style breakdown, warnings (low-confidence, ambiguous-identical,
-    # timing-tie, NOT-IN-RAW, phase pinned by cadence (information) and AE-rule-sensitive segments (one line, §7.3), extra regions, anything AE can't reproduce),
+    # timing-tie, NOT-IN-RAW (every hypothesis below none_thresh), UNCERTAIN ranges with their labels (FX-08),
+    # phase pinned by cadence (information) and AE-rule-sensitive segments (one line, §7.3), extra regions,
+    # anything AE can't reproduce -- a verified frame-blend path is exported with Frame Mix and says so),
     # criteria table c1..c6, how to open in AE (+ preference, reference layer), timings.
 def check_env() -> dict                  # pipeline.py
 def run(cfg: Config) -> dict             # pipeline.py: S0..S10; pipeline.Context dataclass holds everything
@@ -1201,3 +1299,47 @@ Rules (§2.1 has the definitions):
   S26 / S32 razor; the S26 D3 replica), `test_export_ae` (frames export, startTime ±1e-6 s invariance, the
   mock JSX's sourceTime check catching what the read-back misses), `test_verify` (s9_6 calibration),
   `test_synthetic` (simulate_ae with startTime ±1e-6 s identical for every layer on mini / film24).
+* A Frame Mix layer (§7.4) is the one stretch / remap layer allowed below the slack tolerance: its picture
+  (1 - f) RAW[j] + f RAW[j + 1] is continuous in the position, so the floor rule decides nothing visible; its
+  POSITION is what the JSX's AE source-time check judges (within 1e-3 frame).
+
+### 7.4 Honest NOT-IN-RAW / UNRESOLVED / freeze decisions (FX-08)
+
+The first real run called 22 frames NOT-IN-RAW that were RAW content (596-604: RAW 1061-1070 at v = 1, rejected
+only because SIFT found 8-10 inliers where min_inliers is 12; 1180-1191 / 1193: motion-blurred RAW at 0.50-0.89),
+failed c2 three times because refine (NONE below match_thresh) and verify (placeholder below none_thresh) applied
+different rules, and showed a 10-frame freeze on RAW 1673 while the competitor moved (frames measured 1672 and 1673
+'shared' one freeze at the single point x = 1673 of the tolerant constraints). Rules since then (§3, §5):
+* **Three states.** NONE / NOT-IN-RAW only when EVERY evaluated hypothesis is below none_thresh; the best in
+  [none_thresh, match_thresh) is UNRESOLVED -> an 'uncertain' segment: amber solid + a guide layer of the
+  best-evidence RAW frames + a marker 'UNCERTAIN - best RAW a-b, ZNCC x-y', a criterion-3 FAILURE, never an
+  exception or a placeholder. Verify's c2 placeholder check keeps its own implementation of the same rule (all
+  neighbour hypotheses incl. the boundary frame held and the neighbour across the placeholder).
+* **Search before giving up** (refine 3 / 5b): windows widen to track_search_radius whenever the best is below
+  none_thresh; neighbouring runs' lines are scored across short gaps; a line-constrained SIFT re-search with
+  relaxed RANSAC acceptance in the neighbours' predicted window yields CANDIDATES the anchor's ZNCC test must
+  still accept (min_inliers itself is unchanged: inlier counts did not separate good from bad anchors in the
+  real run); gray-zone RANSAC matches seed weak tracks that only provide UNRESOLVED evidence.
+* **Promotion only by a detail-sensitive score** (blur-matched gradient ZNCC with a margin over RAW jb ± 1, ± 2
+  under their own framing) -- never by the plain score: ZNCC is non-discriminative on sharpened / blurred content.
+  film24's lookalike (best 0.66-0.70 against its model shot, detail 0.13-0.20) is therefore 'uncertain', not
+  NOT-IN-RAW: the spec's rule (every hypothesis below none_thresh) decides, and the gray zone claims nothing.
+* **Identity test** contrast-relative, a max over tiles, on the layout's masks only (dark dashboard frames with a
+  dimming display were 'ambiguous-identical' on residual-masked pixels).
+* **Freeze only when the competitor is static** (transform-compensated, captions masked, noise floor from its own
+  repeat pairs; a 1-in-5 repeat cadence means v = 1, not a freeze), and never on a single-point tie (§5
+  phase_solve). A hold the competitor does not share is 'uncertain', unless a frame-blend path explains it.
+* **Frame blend** (segment RETIMING): the blends' continuous positions give the path, a snapped speed and the
+  measured phase; exported as AE Frame Mix only when the fixed mix reaches match_thresh on every frame;
+  otherwise 'retimed / interpolated - unresolved'. Verify judges a Frame Mix frame by its dominant source.
+* Rejected (diagnosis): promoting every 0.6-0.9 frame to a match, an 'approximate' c3 exception, one shared
+  placeholder function for segment and verify (destroys verify's independence), optical-flow fitting of slow
+  motion on sharpened frames (unverifiable), making a freeze 'more expensive' instead of infeasible, a dense
+  ±2 s ZNCC scan along the audio line, changing the global min_inliers.
+* Tests: `test_refine` (window widening below none_thresh, the anchorless clip found by the line-constrained
+  search, MATCH / UNRESOLVED / NONE), `test_scoring` (tile identity, detail score), `test_segment` (uncertain vs
+  placeholder, freeze admission incl. an animated caption, the cadence, the single-point tie, the 0.25 frame-blend
+  path), `test_phase_solve` (freeze_gap), `test_verify` (c2 placeholder hypotheses, uncertain = c3 failure, Frame
+  Mix dominant frame), `test_export_ae` / `test_render_preview` (Frame Mix, uncertain solid + guide, mock), film24
+  (two-clip pan exact, gray chain one uncertain segment, lookalike never matched, blend 0.25 Frame Mix, true
+  freeze v = 0, dark shot on its line).

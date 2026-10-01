@@ -52,6 +52,7 @@ STATUSES = ("pass", "pass_with_exceptions", "fail", "not_available")
 AUDIO_EXCEPTION_CODES = frozenset({"too_short", "not_in_raw", "audio_replaced", "pitch_preserved",
                                    "music_dominated", "no_audio", "av_offset"})
 AUDIO_RUN_EXCEPTION_CODES = frozenset({"av_offset"})   # run-level only (DESIGN §7 D9), never a segment's own code
+AUDIO_UNCERTAIN_CODE = "uncertain"   # an 'uncertain' segment (FX-08) makes no audio claim: listed, never an exception
 MAIN_COMP_NAME = "Recreated Edit"
 KEY_HOLD = 6614            # KeyframeInterpolationType.HOLD enum value in AE
 MAX_FAILURE_IMAGES = 200
@@ -160,7 +161,9 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
             failures.append(f"{_seg_name(s)}: raw segment without a RAW mapping (raw_in_seconds / remap keys)")
         if s.type == "not_in_raw" and not (s.label or "").strip():
             failures.append(f"{_seg_name(s)}: NOT-IN-RAW placeholder without a label")
-        if s.type not in ("raw", "not_in_raw", "dip", "flash"):
+        if s.type == "uncertain" and not (s.label or "").strip():
+            failures.append(f"{_seg_name(s)}: UNCERTAIN segment without a label")
+        if s.type not in ("raw", "not_in_raw", "dip", "flash", "uncertain"):
             failures.append(f"{_seg_name(s)}: unknown segment type {s.type!r}")
     gaps = _ranges(np.nonzero(count == 0)[0]) if n else []
     for a, b in gaps:
@@ -334,6 +337,33 @@ def seg_raw_frame(seg: Segment, k: int, comp_fps: Fraction, raw_fps: Fraction, n
     return j
 
 
+def seg_raw_position(seg: Segment, k: int, comp_fps: Fraction, raw_fps: Fraction) -> float | None:
+    """Continuous RAW position (frames, raw_fps * source time) of the segment's time model at comp frame k."""
+    if seg.type != "raw":
+        return None
+    if seg.time_remap_keys:
+        from .pipeline import remap_raw_seconds
+        t = remap_raw_seconds(seg.time_remap_keys, k)
+        return None if t is None else float(t) * float(raw_fps)
+    if seg.raw_in_seconds is None:
+        return None
+    return float(raw_fps) * (float(seg.raw_in_seconds) + float(seg.speed) * (int(k) - int(seg.comp_in)) / float(comp_fps))
+
+
+def seg_shown(seg: Segment, k: int, comp_fps: Fraction, raw_fps: Fraction,
+              n_raw: int | None = None) -> tuple[int, float] | None:
+    """(RAW frame j, weight f of RAW j + 1) the segment shows at comp frame k: f = 0 except on a verified frame-blend
+    path, whose AE Frame Mix shows (1 - f) RAW j + f RAW j + 1 at the fraction of its position (FX-08)."""
+    j = seg_raw_frame(seg, k, comp_fps, raw_fps, n_raw)
+    if j is None:
+        return None
+    if not seg.frame_mix or (n_raw is not None and j + 1 >= n_raw):
+        return j, 0.0
+    p = seg_raw_position(seg, k, comp_fps, raw_fps)
+    f = 0.0 if p is None else float(min(1.0, max(0.0, p - j)))
+    return j, (f if f > PLAN_FRAME_TOL else 0.0)
+
+
 def seg_sim(seg: Segment, k: float, raw_w: float, raw_h: float) -> Sim | None:
     """Segment transform at comp frame k (AE-linear keys, held outside the key range)."""
     if seg.transform_keys:
@@ -442,6 +472,37 @@ class ProxyScorer:
                 s = (1 - self.grad_weight) * s + self.grad_weight * scoring.zncc(g, scoring._gradmag(w[0]), valid)
             out[i] = s
         return out
+
+    def score_with_mix(self, k: int, a: Cand, b: Cand, f: float,
+                       cands: Sequence[Cand | None] = ()) -> tuple[float, np.ndarray]:
+        """(score of the FIXED mix (1 - f) A + f B -- AE's Frame Mix of a frame-blend path, FX-08 --, scores of
+        ``cands``) on comp frame k, all on one common valid mask (directly comparable)."""
+        from . import scoring
+        out = np.full(len(cands), np.nan)
+        region = self._region(k)
+        if region is None:
+            return float("nan"), out
+        wa, wb = self._warp(a, region.roi), self._warp(b, region.roi)
+        warped = [self._warp(c, region.roi) for c in cands]
+        if wa is None or wb is None:
+            return float("nan"), out
+        valid = region.mask & wa[1] & wb[1]
+        for w in warped:
+            if w is not None:
+                valid &= w[1]
+        if int(valid.sum()) < self.min_pixels:
+            return float("nan"), out
+        def zz(img: np.ndarray) -> float:
+            s = scoring.zncc(region.img, img, valid)
+            if self.grad_weight > 0:
+                g = region.grad if region.grad is not None else scoring._gradmag(region.img)
+                s = (1 - self.grad_weight) * s + self.grad_weight * scoring.zncc(g, scoring._gradmag(img), valid)
+            return float(s)
+        z = zz((1.0 - float(f)) * wa[0] + float(f) * wb[0])
+        for i, w in enumerate(warped):
+            if w is not None:
+                out[i] = zz(w[0])
+        return z, out
 
     def blend(self, k: int, a: Cand | None, b: Cand | None) -> tuple[float, float]:
         """(alpha_B, zncc_of_fit) of comp[k] ~ g * ((1-alpha_B)*A + alpha_B*B) + c. alpha_B comes from the
@@ -559,6 +620,10 @@ def _pair_kind(a: Segment, b: Segment) -> str:
         return "raw_to_placeholder"
     if a.type == "not_in_raw" and b.type == "raw":
         return "placeholder_to_raw"
+    if a.type == "raw" and b.type == "uncertain":
+        return "raw_to_uncertain"
+    if a.type == "uncertain" and b.type == "raw":
+        return "uncertain_to_raw"
     if a.type == "raw" and b.type in ("dip", "flash"):
         return "raw_to_uniform"
     if a.type in ("dip", "flash") and b.type == "raw":
@@ -744,6 +809,31 @@ def _excursion(models: "_Models", a: Segment, b: Segment, c: Segment, n_side: in
     return {"frames": list(range(b.comp_in, b.comp_out)), "offsets": offs}
 
 
+def _placeholder_hypotheses(scorer: Any, models: "_Models", k: int, neighbours: Sequence[Segment]) -> list[dict]:
+    """Scores of placeholder frame k under every hypothesis of its RAW neighbours (FX-08 c2): each neighbour's time
+    line extended to k (model frame + framing) and its boundary RAW frame held with its boundary framing (a freeze),
+    each the max of the model framing and -- when the scorer can re-measure -- the framing refitted on k."""
+    out: list[dict] = []
+    for n in neighbours:
+        kb = n.comp_in if n.comp_in > k else n.comp_out - 1
+        cands = [("line", models.cand(n, k))]
+        cb = models.cand(n, kb)
+        if cb is not None:
+            cands.append(("hold", cb))
+        for name, c in cands:
+            if c is None:
+                continue
+            vals = [float(scorer.score(k, [c])[0])]
+            if _can_refit(scorer):
+                r = scorer.refit(k, c)
+                if r is not None:
+                    vals.append(float(scorer.score(k, [(c[0], r[0], c[2])])[0]))
+            s = _nanmax(vals)
+            out.append({"neighbour": n.id, "hypothesis": name, "raw": int(c[0]),
+                        "s": None if math.isnan(s) else round(s, 6)})
+    return out
+
+
 def fit_crossfade_window(rows: Sequence[tuple[int, float]], pure: float | None = None) -> tuple[int, int] | None:
     """(O, D) of a linear crossfade alpha_B(k) = (k - O) / D fitted to measured (k, alpha_B) pairs the way
     segment.py finds crossfades: least squares over the ramp frames (0.02 < alpha < 0.98), O = round(zero
@@ -786,7 +876,11 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
     speed-only cut (cut_ambiguity) or a layout change. Crossfades: the fitted alpha ramp must follow the
     declared one, the window (O, D) re-fitted from the alpha measured over O-3 .. O+D+2 must equal the
     declared one (off by one frame = fail), frame O (and O-1) must be pure A and O+D pure B. NOT-IN-RAW
-    neighbours: the placeholder frame scores below none_thresh against the extended neighbour model.
+    neighbours (FX-08, the same rule refine applies: NOT-IN-RAW only when EVERY hypothesis is below none_thresh):
+    the placeholder's boundary frame scores below none_thresh against every hypothesis its neighbours offer --
+    each RAW neighbour's time line extended AND its boundary RAW frame held (a freeze), each with its framing
+    re-measured when the scorer can, for the adjacent neighbour and the one across the placeholder. An UNCERTAIN
+    neighbour (no claim) is not compared; its RAW neighbour's boundary frame must still match its own model.
     Dips/flashes: the uniform side is uniform.
 
     Hypothesis-neutral additions (a scorer with ``refit``, i.e. ECC re-measurement of framing):
@@ -941,13 +1035,29 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
             k_r = r.comp_out - 1 if kind == "raw_to_placeholder" else r.comp_in
             k_p = ph.comp_in if kind == "raw_to_placeholder" else ph.comp_out - 1
             s_r = float(scorer.score(k_r, [models.cand(r, k_r)])[0])
-            cp = models.cand(r, k_p)
-            s_p = float(scorer.score(k_p, [cp])[0]) if cp is not None else float("nan")
             sides.append({"side": "raw_frame", "k": int(k_r), "s_own": None if math.isnan(s_r) else round(s_r, 6),
                           "result": "unscorable" if math.isnan(s_r) else ("ok" if s_r >= none_thresh else "fail")})
+            # every hypothesis the neighbours offer (FX-08): the adjacent RAW neighbour and the one across the
+            # placeholder, each by its extended time line and by its boundary frame held
+            far = segs[i + 2] if kind == "raw_to_placeholder" and i + 2 < len(segs) else \
+                (segs[i - 1] if kind == "placeholder_to_raw" and i >= 1 else None)
+            hyp = _placeholder_hypotheses(scorer, models, k_p, [r] + ([far] if far is not None and far.type == "raw"
+                                                                       else []))
+            vals = [h["s"] for h in hyp if h.get("s") is not None]
+            s_p = max(vals) if vals else float("nan")
             sides.append({"side": "placeholder_frame", "k": int(k_p), "s_ext": None if math.isnan(s_p) else round(s_p, 6),
+                          "hypotheses": hyp,
                           "result": "ok" if (math.isnan(s_p) or s_p < none_thresh) else "fail",
-                          "reason": f"placeholder vs extended {_seg_name(r)} model must be < none_thresh {none_thresh}"})
+                          "reason": f"placeholder vs every neighbour hypothesis (time line extended, boundary frame "
+                                    f"held) must be < none_thresh {none_thresh}"})
+        elif kind in ("raw_to_uncertain", "uncertain_to_raw"):
+            r = a if kind == "raw_to_uncertain" else b
+            k_r = r.comp_out - 1 if kind == "raw_to_uncertain" else r.comp_in
+            s_r = float(scorer.score(k_r, [models.cand(r, k_r)])[0])
+            sides.append({"side": "raw_frame", "k": int(k_r), "s_own": None if math.isnan(s_r) else round(s_r, 6),
+                          "result": "unscorable" if math.isnan(s_r) else ("ok" if s_r >= none_thresh else "fail")})
+            sides.append({"side": "uncertain", "result": "n/a",
+                          "reason": "an UNCERTAIN segment claims no RAW frame (counted under criterion 3)"})
         elif kind in ("raw_to_uniform", "uniform_to_raw"):
             r, u = (a, b) if kind == "raw_to_uniform" else (b, a)
             k_r = r.comp_out - 1 if kind == "raw_to_uniform" else r.comp_in
@@ -1054,13 +1164,18 @@ class TemporalFrames:
         s = self.seg_at.get(int(k))
         if s is None:
             return None
-        j = seg_raw_frame(s, int(k), self.comp_fps, self.raw_fps, self.n_raw)
+        sh = seg_shown(s, int(k), self.comp_fps, self.raw_fps, self.n_raw)
         sim = seg_sim(s, int(k), *self.raw_wh)
-        if j is None or sim is None or not self.raw.has(int(j)):
+        if sh is None or sim is None or not self.raw.has(int(sh[0])):
             return None
+        j, f = sh
         roi = self.roi(k)
         w, valid = scoring.warp_to_roi(np.asarray(self.raw.get(int(j))), sim, bool(s.flip_h), float(self.raw_wh[0]),
                                        self.raw.ratio, self.comp.ratio, roi)
+        if f > 0.0 and self.raw.has(int(j) + 1):      # Frame Mix of a frame-blend path (FX-08)
+            w1, v1 = scoring.warp_to_roi(np.asarray(self.raw.get(int(j) + 1)), sim, bool(s.flip_h),
+                                         float(self.raw_wh[0]), self.raw.ratio, self.comp.ratio, roi)
+            w, valid = (1.0 - f) * w + f * w1, valid & v1
         return temporal.prepare(w, valid & self._mask(k, roi), self.max_side, self._blur_at(roi))
 
 
@@ -1106,12 +1221,14 @@ def check_temporal(segments: Sequence[Segment], labels: Any, comp_sig: Any, rec_
         s0, s1 = seg_at.get(k), seg_at.get(k + 1)
         if s0 is None or s1 is None:
             continue
-        j0, j1 = seg_raw_frame(s0, k, comp_fps, raw_fps, n_raw), seg_raw_frame(s1, k + 1, comp_fps, raw_fps, n_raw)
-        if j0 is None or j1 is None:
+        sh0, sh1 = seg_shown(s0, k, comp_fps, raw_fps, n_raw), seg_shown(s1, k + 1, comp_fps, raw_fps, n_raw)
+        if sh0 is None or sh1 is None:
             continue
+        (j0, f0), (j1, f1) = sh0, sh1
         n_pairs += 1
         lab = labels.get(k)
-        same = j0 == j1 and bool(s0.flip_h) == bool(s1.flip_h)
+        # the same picture twice: one RAW frame (or one Frame Mix of the same two frames at the same weight)
+        same = j0 == j1 and abs(f0 - f1) <= PLAN_FRAME_TOL and bool(s0.flip_h) == bool(s1.flip_h)
         if same:
             same_pairs.append((k, s0.id if s0 is s1 else -1, lab))
         pc = comp_sig.d1.get(k)
@@ -1224,10 +1341,15 @@ def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, r
         for k in range(max(0, s.comp_in), min(int(n), s.comp_out)):
             if seg_at.get(k) is not s or k >= len(status) or int(status[k]) != Status.MATCH:
                 continue
-            j = seg_raw_frame(s, k, comp_fps, raw_fps, n_raw)
+            sh = seg_shown(s, k, comp_fps, raw_fps, n_raw)
             sim = seg_sim(s, k, *raw_wh)
-            if j is None or sim is None:
+            if sh is None or sim is None:
                 continue
+            j0, f = sh
+            # a Frame Mix (FX-08) shows (1 - f) RAW j0 + f RAW j0 + 1: the neighbours of its dominant frame are judged
+            # against the mix itself (and the dominant frame's own refit)
+            mixed = f > 0.0 and hasattr(scorer, "score_with_mix")
+            j = j0 + 1 if mixed and f >= 0.5 else j0
             flip = bool(s.flip_h)
             inits = [derotated(sim, box_centre)] if box_centre is not None and abs(sim.theta_deg) > 1e-9 else []
             fits: dict[int, Sim] = {}
@@ -1240,7 +1362,11 @@ def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, r
 
             def scores() -> tuple[float, dict[int, float]]:
                 order = sorted(fits)
-                sc = scorer.score(k, [(j, sim, flip)] + [(jj, fits[jj], flip) for jj in order])
+                others = [(jj, fits[jj], flip) for jj in order]
+                if mixed:
+                    z0, sc = scorer.score_with_mix(k, (j0, sim, flip), (j0 + 1, sim, flip), f, others)
+                    return float(z0), {jj: float(sc[i]) for i, jj in enumerate(order)}
+                sc = scorer.score(k, [(j, sim, flip)] + others)
                 return float(sc[0]), {jj: float(sc[1 + i]) for i, jj in enumerate(order)}
             z_shown, z = scores()
             if not math.isfinite(z_shown):
@@ -1294,14 +1420,21 @@ def visible_raw_frame(entries: Sequence[dict] | None) -> int | None:
     are sorted ascending, AE's 1 = top). With compositing weights (export_ae.simulate_ae), the entry
     whose weight is 1 is the visible one; otherwise the top-most fully opaque layer. Returns None for a
     blend (crossfade interior), when nothing covers the frame, or when a non-RAW layer covers it."""
+    e = visible_entry(entries)
+    j = None if e is None else e.get("raw_frame")
+    return None if j is None else int(j)
+
+
+def visible_entry(entries: Sequence[dict] | None) -> dict | None:
+    """The simulated layer entry that fully shows at one MAIN frame (see :func:`visible_raw_frame`); its 'mix' (when
+    present) is the Frame Mix weight of RAW raw_frame + 1 (FX-08)."""
     ents = [e for e in (entries or []) if not e.get("guide")]
     if ents and all(isinstance(e.get("layer"), (int, np.integer)) for e in ents):
         ents = sorted(ents, key=lambda e: int(e["layer"]))
     if ents and all(e.get("weight") is not None for e in ents):
         for e in ents:
             if float(e["weight"]) >= 0.99999:
-                j = e.get("raw_frame")
-                return None if j is None else int(j)
+                return e
         return None
     percent = any(float(e.get("opacity", 100) if e.get("opacity") is not None else 100) > 1.0 + 1e-9 for e in ents)
     for e in ents:
@@ -1309,8 +1442,7 @@ def visible_raw_frame(entries: Sequence[dict] | None) -> int | None:
         op = 100.0 if op is None else float(op)
         full = op >= 99.999 if percent else op >= 0.99999
         if full:
-            j = e.get("raw_frame")
-            return None if j is None else int(j)
+            return e
     return None
 
 
@@ -1509,6 +1641,9 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
                 seg_of_k[k] = s
     n_matched = n_exact = 0
     ambiguous, ties, grid, reassigned, mismatches, excluded = [], [], [], [], [], []
+    frame_mix: list[dict] = []          # Frame Mix frames (FX-08), the exact ones included in n_exact
+    mix_ties: list[dict] = []           # ... whose m is the lighter source of a near-even mix (blend tie)
+    mix_tie = float(getattr(cfg, "verify_mix_tie", 0.1))
     plan_bad: list[dict] = []
     n_trans = n_solid = 0
 
@@ -1526,7 +1661,7 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
             if prob:
                 plan_bad.append({"K": K, "what": "transition", "problem": prob})
             continue
-        if cov is not None and len(cov) == 1 and cov[0].type in ("dip", "flash", "not_in_raw"):
+        if cov is not None and len(cov) == 1 and cov[0].type in ("dip", "flash", "not_in_raw", "uncertain"):
             n_solid += 1
             w = sum(_entry_weight(e) for e in ents)
             if w > PLAN_SOLID_MAX_WEIGHT:
@@ -1536,7 +1671,9 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
         k = main_to_comp(K, cf, mf)
         if not (0 <= k < fm.n) or int(post_status[k]) != Status.MATCH:
             continue
-        j = visible_raw_frame(ents)
+        ve = visible_entry(ents)
+        j = None if ve is None or ve.get("raw_frame") is None else int(ve["raw_frame"])
+        mix = None if ve is None or ve.get("mix") is None else float(ve["mix"])
         # -- plan vs cutlist on single-segment frames ----------------------------------------------------
         if cov is not None and len(cov) == 1 and cov[0].type == "raw":
             want = tl.raw_frames(cov[0], K)
@@ -1553,6 +1690,23 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
             reassigned.append({**row, "m": None, "model": int(post_raw[k]),
                                "why": "no refine measurement (NONE frame absorbed by segmentation)"})
             continue
+        if mix is not None and j is not None and mix > PLAN_FRAME_TOL:
+            # Frame Mix (FX-08): AE shows (1 - f) RAW j + f RAW j + 1. On a frame-blended competitor frame refine's
+            # single-frame argmax is the heavier source -> compared with the mix's DOMINANT frame; m on the lighter
+            # side counts only within verify_mix_tie of an even mix (a blend tie); otherwise the dominant frame is
+            # judged like any shown frame below
+            row["mix"] = round(mix, 4)
+            dom = j + 1 if mix >= 0.5 else j
+            if m == dom:
+                n_exact += 1
+                frame_mix.append(row)
+                continue
+            if m in (j, j + 1) and abs(mix - 0.5) <= mix_tie:
+                frame_mix.append({**row, "tie": True})
+                mix_ties.append(row)
+                continue
+            j = dom
+            row["ae"] = j
         if j is not None and j == m:
             n_exact += 1
             continue
@@ -1575,7 +1729,7 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
         mismatches.append({**row, "range": [lo, hi], "soft": soft,
                            "within_soft": bool(j is not None and soft[0] >= 0 and soft[0] <= j <= soft[1]),
                            "score": None if np.isnan(fm.score[k]) else round(float(fm.score[k]), 4)})
-    n_ok = n_exact + len(ambiguous) + len(ties) + len(grid)
+    n_ok = n_exact + len(ambiguous) + len(ties) + len(grid) + len(mix_ties)
     frac = n_ok / n_matched if n_matched else 1.0
     failures: list[str] = []
     exceptions: list[str] = []
@@ -1589,15 +1743,19 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
         failures.append(f"{source}: {len(plan_bad)} MAIN frame(s) do not reproduce the cutlist (first: "
                         + "; ".join(f"K={x['K']}: {x['problem']}" for x in plan_bad[:3]) + ")")
     for name, lst in (("ambiguous-identical", ambiguous), ("timing-tie", ties),
+                      ("on the lighter side of a near-even Frame Mix (blend tie)", mix_ties),
                       ("between the bracketing competitor frames (different MAIN grid)", grid),
                       ("re-assigned by segmentation (AE shows the segment model's frame, not refine's measurement)",
                        reassigned),
                       ("not reproduced exactly (AE frame differs from the measured m(k))", mismatches)):
         if lst:
             exceptions.append(f"{source}: {len(lst)} frame(s) {name}: k = {_ranges([x['k'] for x in lst])[:10]}")
-    n_exc = len(ambiguous) + len(ties) + len(grid) + len(reassigned) + len(mismatches)
+    n_exc = len(ambiguous) + len(ties) + len(grid) + len(reassigned) + len(mismatches) + len(mix_ties)
     status = "fail" if failures else ("pass_with_exceptions" if n_exc else "pass")
-    summary = (f"{source}: {n_exact}/{n_matched} exact, {len(ambiguous)} ambiguous-identical, {len(ties)} timing-tie, "
+    summary = (f"{source}: {n_exact}/{n_matched} exact"
+               + (f" ({len(frame_mix) - len(mix_ties)} on a Frame Mix's dominant frame)" if frame_mix else "")
+               + f", {len(ambiguous)} ambiguous-identical, {len(ties)} timing-tie, "
+               + (f"{len(mix_ties)} Frame Mix tie, " if mix_ties else "")
                + (f"{len(grid)} between competitor frames (MAIN grid), " if not same_grid else "")
                + f"{len(reassigned)} re-assigned, {len(mismatches)} mismatched ({frac:.4%} ok)")
     if tl is not None:
@@ -1606,6 +1764,7 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions,
             "reference": ref_name, "matched": n_matched, "exact": n_exact, "fraction_ok": round(frac, 6),
             "ambiguous_identical": ambiguous, "timing_tie": ties, "grid": grid[:500], "n_grid": len(grid),
+            "frame_mix": frame_mix[:500], "n_frame_mix": len(frame_mix), "frame_mix_tie": mix_ties,
             "reassigned": reassigned[:500], "n_reassigned": len(reassigned),
             "mismatches": mismatches[:500], "n_mismatches": len(mismatches), "excluded_near_cuts": len(excluded),
             "plan_mismatches": plan_bad[:500], "n_plan_mismatches": len(plan_bad),
@@ -1808,6 +1967,7 @@ def simulate_record(rec: dict, raw_name: str, raw_fps: Fraction, main_fps: Fract
         remaining = 1.0
         if depth > 8:
             return remaining
+        comp_mix = bool(comp.get("frameBlending"))
         for L in _record_layers(comp):
             if L.get("enabled") is False or L.get("guideLayer") is True:
                 continue
@@ -1833,9 +1993,15 @@ def simulate_record(rec: dict, raw_name: str, raw_fps: Fraction, main_fps: Fract
                 key = _layer_tag(L) or str(L.get("name"))
                 order.setdefault(key, len(order))
                 sm = re.match(r"seg(\d+)$", key)
-                entries.append({"layer": key, "name": L.get("name"), "seg": int(sm.group(1)) if sm else None,
-                                "raw_frame": int(math.floor(src_t * footage_rate(L) + 1e-9)),
-                                "opacity": op, "weight": w_in * remaining * op})
+                p = src_t * footage_rate(L)
+                j = int(math.floor(p + 1e-9))
+                e = {"layer": key, "name": L.get("name"), "seg": int(sm.group(1)) if sm else None,
+                     "raw_frame": j, "opacity": op, "weight": w_in * remaining * op}
+                # AE Frame Mix (layer FRAME_MIX + the comp's frame-blending switch): RAW j + 1 blended in by the
+                # fraction of the source position (FX-08)
+                if comp_mix and L.get("frameBlendingType") == "FRAME_MIX":
+                    e["mix"] = float(min(1.0, max(0.0, p - j)))
+                entries.append(e)
             remaining *= 1.0 - op
         return remaining
 
@@ -2002,7 +2168,8 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
                 rec_by_tag[_layer_tag(L)] = L
             rec_by_name.setdefault(str(L.get("name")), L)
             is_raw = (L.get("sourceId") in raw_ids) if raw_ids else _layer_source_name(L) == raw_name
-            if is_raw and L.get("enabled") is not False:
+            # guide layers (an 'uncertain' segment's best-evidence RAW frames, FX-08) are never rendered
+            if is_raw and L.get("enabled") is not False and L.get("guideLayer") is not True:
                 n_rec_raw += 1
     raw_plan = plan_segment_layers(plan)
     chk("one RAW video layer per segment", n_rec_raw == len(raw_plan), {"recorded": n_rec_raw, "plan": len(raw_plan)})
@@ -2545,6 +2712,11 @@ def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarr
         code_in = au.get("exception")
         row: dict[str, Any] = {"id": s.id, "type": s.type}
         name = _seg_name(s)
+        if s.type == "uncertain":
+            # no RAW timing is claimed, so no audio is (FX-08): listed; its frames fail criterion 3 instead
+            row.update(result="uncertain", code=AUDIO_UNCERTAIN_CODE)
+            rows.append(row)
+            continue
         if code_in is not None and (code_in not in AUDIO_EXCEPTION_CODES or code_in in AUDIO_RUN_EXCEPTION_CODES):
             failures.append(f"{name}: audio exception code {code_in!r} is not in the closed list"
                             + (" of segment codes (run-level code)" if code_in in AUDIO_RUN_EXCEPTION_CODES else ""))
@@ -2810,7 +2982,14 @@ class RenderedFrames:
         fs = getattr(render_preview, "frame_sources", None)
         if fs is not None and not isinstance(self.rctx, dict):
             try:
-                return {int(j) for _L, j, _w in fs(int(k), self.rctx) if j is not None and 0 <= int(j) < self.n_raw}
+                out = set()
+                for L, j, _w in fs(int(k), self.rctx):
+                    if j is None or not 0 <= int(j) < self.n_raw:
+                        continue
+                    out.add(int(j))
+                    if getattr(L, "mix", False) and int(j) + 1 < self.n_raw:     # Frame Mix: RAW j + 1 too (FX-08)
+                        out.add(int(j) + 1)
+                return out
             except Exception:  # noqa: BLE001 - fall back to the segment models (render_frame retries a miss)
                 pass
         out = set()
@@ -2941,11 +3120,13 @@ def _failure_image(path: Path, comp: np.ndarray, rec: np.ndarray, roi: tuple[int
     cv2.imwrite(str(path), tile)
 
 
-def placeholder_gray() -> float | None:
-    """Luma (0..255) of the NOT-IN-RAW placeholder solid (export_ae.PLACEHOLDER_RGB)."""
+def placeholder_gray(name: str = "PLACEHOLDER_RGB") -> float | None:
+    """Luma (0..255) of the NOT-IN-RAW placeholder solid (export_ae.PLACEHOLDER_RGB; UNCERTAIN_RGB for the
+    uncertain solid)."""
     try:
-        from .export_ae import PLACEHOLDER_RGB as rgb
-    except ImportError:  # pragma: no cover
+        from . import export_ae
+        rgb = getattr(export_ae, name)
+    except (ImportError, AttributeError):  # pragma: no cover
         return None
     r, g, b = (float(c) for c in list(rgb)[:3])
     return 255.0 * (0.299 * r + 0.587 * g + 0.114 * b)
@@ -2992,10 +3173,14 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
     uniform_fail: list[dict] = []
     ph_fail: list[dict] = []
     nir = np.zeros(n, bool)
+    unc = np.zeros(n, bool)
     for s in segments or []:
         if s.type == "not_in_raw":
             nir[max(0, s.comp_in):min(n, s.comp_out)] = True
+        if s.type == "uncertain":
+            unc[max(0, s.comp_in):min(n, s.comp_out)] = True
     want_ph = placeholder_gray() if nir.any() else None
+    want_unc = placeholder_gray("UNCERTAIN_RGB") if unc.any() else None
     n_img = 0
     n_uniform = n_ph = 0
 
@@ -3027,11 +3212,11 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
                                          "rec_std": round(sr, 2)})
                     image(k, c, rec, roi, float("nan"))
             continue
-        if st == Status.NONE and nir[k]:
+        if (st == Status.NONE and nir[k]) or unc[k]:
             n_ph += 1
-            ok, why = _is_placeholder(rec[y:y + h, x:x + w], want_ph)
+            ok, why = _is_placeholder(rec[y:y + h, x:x + w], want_unc if unc[k] else want_ph)
             if not ok:
-                ph_fail.append({"k": int(k), "why": why})
+                ph_fail.append({"k": int(k), "why": why, "segment": "uncertain" if unc[k] else "not_in_raw"})
                 image(k, c, rec, roi, float("nan"))
             continue
         s = scoring.zncc(_blur(c[y:y + h, x:x + w], blur), _blur(rec[y:y + h, x:x + w], blur), m)
@@ -3045,7 +3230,7 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
             if cv.size and float(cv.std()) >= 2.0 * uni_std:      # near-uniform (deep in a dip): not gated
                 blend_fail.append(k)
                 image(k, c, rec, roi, s)
-    matched = status[:n] == Status.MATCH
+    matched = (status[:n] == Status.MATCH) & ~unc
     missing = np.nonzero(matched & ~seen)[0]
     nan_fail = [k for k in fails if math.isnan(scores[k])]
     real_fail = [k for k in fails if not math.isnan(scores[k])]
@@ -3070,7 +3255,7 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
         failures.append(f"{len(uniform_fail)} dip/flash (uniform) frames not reproduced (competitor vs recreation "
                         f"mean/std): {uniform_fail[:3]}")
     if ph_fail:
-        failures.append(f"{len(ph_fail)} NOT-IN-RAW frames do not show the placeholder: {ph_fail[:3]}")
+        failures.append(f"{len(ph_fail)} NOT-IN-RAW / UNCERTAIN frames do not show their labelled solid: {ph_fail[:3]}")
     exceptions = [f"{len(nan_fail)} matched frames unscorable (too few visible pixels): {_ranges(nan_fail)[:10]}"] if nan_fail else []
     status_out = _status_from(len(failures), len(exceptions))
     summary = (f"{int(matched.sum())} matched frames, min ZNCC {dist.get('min', float('nan'))}, median "
@@ -3088,6 +3273,19 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
 # ---------------------------------------------------------------------------------------------
 # s9_4 cut images
 # ---------------------------------------------------------------------------------------------
+
+def check_uncertain(segments: Sequence[Segment]) -> dict:
+    """Criterion 3 accounting of 'uncertain' segments (FX-08): their frames are neither mapped to a RAW frame nor
+    NOT-IN-RAW, so they are FAILURES of criterion 3 ('uncertain' class) -- never exceptions, never placeholders."""
+    rows = [{"id": s.id, "comp_in": int(s.comp_in), "comp_out": int(s.comp_out), "label": s.label}
+            for s in segments if s.type == "uncertain"]
+    n = sum(r["comp_out"] - r["comp_in"] for r in rows)
+    failures = [f"{n} frames in {len(rows)} UNCERTAIN segment(s) (neither matched nor NOT-IN-RAW): "
+                + "; ".join(f"S{r['id']:02d} {r['comp_in']}-{r['comp_out'] - 1} {r['label']}" for r in rows[:8])] \
+        if rows else []
+    return {"status": "fail" if rows else "pass", "summary": f"{n} uncertain frames in {len(rows)} segment(s)",
+            "failures": failures, "segments": rows, "frames": n}
+
 
 def cut_frames(segments: Sequence[Segment]) -> list[int]:
     segs = sorted(segments, key=lambda s: (s.comp_in, s.id))
@@ -3917,13 +4115,14 @@ def verify_all(ctx: Any) -> dict:
         "bracketing competitor frames; frame-exact only with --fps competitor)")
     c2 = {"status": aggregate([extra["cuts"]["status"], checks["s9_4_cut_images"]["status"]]),
           "summary": extra["cuts"].get("summary", "") + exact_note, "details": extra["cuts"]}
+    unc = check_uncertain(segs)
     c3 = {"status": aggregate([checks["s9_2_ae_sim"]["status"], checks["s9_3_visual"]["status"],
-                               checks["s9_2b_temporal"]["status"], checks["s9_2c_refit"]["status"]]),
+                               checks["s9_2b_temporal"]["status"], checks["s9_2c_refit"]["status"], unc["status"]]),
           "summary": (f"AE sim: {p2.get('summary')}; visual: {checks['s9_3_visual'].get('summary')}; temporal: "
-                      f"{checks['s9_2b_temporal'].get('summary')}; +-1 refit: {checks['s9_2c_refit'].get('summary')}"
-                      + exact_note),
+                      f"{checks['s9_2b_temporal'].get('summary')}; +-1 refit: {checks['s9_2c_refit'].get('summary')}; "
+                      f"uncertain: {unc['summary']}" + exact_note),
           "details": {"s9_2": checks["s9_2_ae_sim"], "s9_3": {k: v for k, v in checks["s9_3_visual"].items()},
-                      "s9_2b": checks["s9_2b_temporal"], "s9_2c": checks["s9_2c_refit"]}}
+                      "s9_2b": checks["s9_2b_temporal"], "s9_2c": checks["s9_2c_refit"], "uncertain": unc}}
     mock_only = checks["s9_6_ae_render"]["status"] == "not_available"
     c6_status = aggregate([extra["mock"]["status"], checks["s9_6_ae_render"]["status"]])
     c6 = {"status": c6_status,
