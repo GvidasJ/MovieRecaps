@@ -77,6 +77,19 @@ def test_console_logging_never_fails_on_unencodable_characters():
     assert "S05: lag" in out and "\\u2265" in out and "\\u2192" in out
 
 
+def test_single_thread_blas_finds_the_windows_openblas_dll(tmp_path):
+    """The audio stages pin numpy's OpenBLAS to one thread (thousands of tiny products; also the same arithmetic
+    as on Linux). On Windows the library is a .dll in numpy.libs -- it used to be looked for as .so only."""
+    from match_cuts import audio_align
+    for name in ("libscipy_openblas64_-43e11ff0749b8cbe0a615c9cf6737e0e.dll", "libscipy_openblas64_-f48b.so",
+                 "libopenblas.0.dylib", "msvcp140.dll"):
+        (tmp_path / name).write_bytes(b"")
+    names = sorted(os.path.basename(p) for p in audio_align._blas_lib_paths(str(tmp_path)))
+    assert names == ["libopenblas.0.dylib", "libscipy_openblas64_-43e11ff0749b8cbe0a615c9cf6737e0e.dll",
+                     "libscipy_openblas64_-f48b.so"]
+    assert audio_align._blas_ctl() is not None or os.name != "posix"     # found here (Linux wheel)
+
+
 def test_pool_functions_are_picklable_for_spawn_workers():
     """Spawn workers receive every item function by reference: they must be module-level (no lambdas or
     closures), including the ones waves 2-3 added (line search, temporal signature, detail score)."""

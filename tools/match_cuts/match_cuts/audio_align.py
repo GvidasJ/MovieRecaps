@@ -87,16 +87,26 @@ _MIN_SEG_S = 0.5              # shorter audio ranges -> 'too_short' when they do
 _BLAS_CTL: list = []
 
 
+def _blas_lib_paths(d: str) -> list[str]:
+    """numpy's bundled OpenBLAS in its ``numpy.libs`` folder: ``.so`` on Linux, ``.dll`` on Windows (the
+    Windows wheels name it e.g. ``libscipy_openblas64_-<hash>.dll``), ``.dylib`` on macOS builds that bundle it."""
+    import glob
+    import os
+    out: list[str] = []
+    for pat in ("*openblas*.so*", "*openblas*.dll", "*openblas*.dylib"):
+        out += glob.glob(os.path.join(d, pat))
+    return sorted(set(out))
+
+
 def _blas_ctl():
     """(set_num_threads, get_num_threads) of numpy's bundled OpenBLAS via ctypes, or None."""
     if not _BLAS_CTL:
         found = None
         try:
             import ctypes
-            import glob
             import os
             d = os.path.join(os.path.dirname(np.__file__), os.pardir, "numpy.libs")
-            for path in sorted(glob.glob(os.path.join(d, "*openblas*.so*"))):
+            for path in _blas_lib_paths(d):
                 lib = ctypes.CDLL(path)
                 for sn, gn in (("scipy_openblas_set_num_threads64_", "scipy_openblas_get_num_threads64_"),
                                ("openblas_set_num_threads64_", "openblas_get_num_threads64_"),
