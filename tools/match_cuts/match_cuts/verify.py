@@ -1530,7 +1530,8 @@ def animated_text_zones(comp: Any, raw: Any, segments: Sequence[Segment], layout
     """Animated (moving) text overlays of the competitor for the temporal signature (s9_2b, wave 4): the layout
     module's comp-only detector (layout.animated_text_overlays: outlined text that moves over the picture), each word
     checked against the recreation -- one the recreation also shows is picture content, never masked. Returns every
-    candidate (kind 'overlay' | 'picture_content'); [] without a layout module / proxy."""
+    candidate (kind 'overlay' | 'picture_content' | 'not_compared': no RAW segment shows its frames); [] without a
+    layout module / proxy."""
     from . import layout as layout_mod
     fn = getattr(layout_mod, "animated_text_overlays", None)
     if fn is None or comp is None or getattr(comp, "frames", None) is None:

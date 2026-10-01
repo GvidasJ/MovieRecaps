@@ -330,7 +330,9 @@ def animated_text_overlays(comp, layout, cfg, frames=None, overlays=None, static
     # around it (temporal.align_pair with the text masked: text panning WITH the picture is picture content).
     # reference(k) (verify: the recreation) -- a word the compared picture also shows on its place (ZNCC >= 0.7 or
     # a detected line there) is kind 'picture_content' (scrolling credits, a sign on a parallax object), never an
-    # overlay. -> [{comp_in, comp_out, rects {k: proxy bbox}, x, y, w, h, step, relative, glyphs, kind, why}]
+    # overlay; a word on frames where reference(k) gives no picture at all (NOT-IN-RAW / uncertain) is 'not_compared'
+    # (not judged, not masked, not reported). -> [{comp_in, comp_out, rects {k: proxy bbox}, x, y, w, h, step,
+    # relative, glyphs, kind, why}]
 def animated_text_mask(events, k, shape, dilate_px=0) -> np.ndarray | None   # kind 'overlay' rects at frame k
 ```
 Box semantics: `Box(x, y, w, h, corner_radius)` in competitor full-res CORNER coordinates — the exact

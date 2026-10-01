@@ -2307,7 +2307,8 @@ def animated_text_overlays(comp: Proxy, layout: Layout | None, cfg: Any, frames:
     recreation's RAW frame warped into the competitor proxy, same size) or None. A moving word is an OVERLAY only when
     that picture never shows outlined text on the word's place (the same detector, bbox IoU >= 0.2 on any frame):
     text in the picture itself -- a sign carried by a parallax object, scrolling credits the RAW holds -- is
-    ``kind`` 'picture_content' (with ``why``), never an overlay. Every candidate is returned; callers use kind ==
+    ``kind`` 'picture_content' (with ``why``), never an overlay; a word on frames where ``reference`` gives no picture
+    at all (NOT-IN-RAW / uncertain stretches) is 'not_compared'. Every candidate is returned; callers use kind ==
     'overlay' only."""
     from . import temporal
     n = int(comp.n)
@@ -2425,7 +2426,8 @@ def animated_text_overlays(comp: Proxy, layout: Layout | None, cfg: Any, frames:
             if seen:
                 kind, why = "picture_content", f"the compared picture shows it too (frames {seen[:5]})"
             elif n_ref == 0:
-                why = "moves over the picture; no compared picture on its frames"
+                # nothing to compare it with (a NOT-IN-RAW / uncertain stretch): neither an overlay nor picture content
+                kind, why = "not_compared", "moves over the picture; no compared picture on its frames (not judged)"
         rects: dict[int, list[int]] = {}
         for k in range(fr[0], fr[-1] + 1):
             if k in own:

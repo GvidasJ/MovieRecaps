@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 import match_cuts
+from match_cuts import pipeline  # noqa: F401 - imported with the REAL phase_solve, before any test stubs it
 from match_cuts import verify
 from match_cuts.config import Config
 from match_cuts.geometry import Sim
@@ -2003,6 +2004,10 @@ def test_animated_text_the_compared_picture_also_shows_is_picture_content():
     assert [z["kind"] for z in shown] == ["picture_content"], shown
     assert layout_mod.animated_text_mask(shown, 5, (120, 160)) is None
     assert layout_mod.animated_text_mask(no_word, 5, (120, 160)).any()
+    # no compared picture on any of its frames (a NOT-IN-RAW / uncertain stretch): not judged, never masked or reported
+    nothing = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: None)
+    assert [z["kind"] for z in nothing] == ["not_compared"], nothing
+    assert layout_mod.animated_text_mask(nothing, 5, (120, 160)) is None
     # the word panning WITH the picture (an editor pan over burned-in text) is no candidate at all
     pan_frames = mf.render(np.repeat(with_word[:1], 1, axis=0), [0] * n,
                            [Sim(1.0, 0.0, -2.0 * k, 0.0) for k in range(n)], (140, 110), noise=0.0)
