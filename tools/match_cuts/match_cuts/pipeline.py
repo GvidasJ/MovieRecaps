@@ -66,8 +66,10 @@ PHASE_TAU = 1e-6            # frame tolerance of the phase LP (DESIGN §2.1)
 DEFAULT_SEG_AUDIO = {"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None,
                      "lag_ms": None, "corr": None, "exception": None,
                      "phase_source": None,      # 'audio' | 'video': what placed raw_in inside its interval (D3)
-                     "lag_ms_video": None}      # lag at the video-only raw_in (lag_ms = residual after D3); both
+                     "lag_ms_video": None,      # lag at the video-only raw_in (lag_ms = residual after D3); both
                                                 # relative to the run's A/V offset cutlist.audio.av_offset (D9)
+                     "line": None}              # FX-14: the audio line this segment's audio follows instead of its
+                                                # picture map (video-only retime / uncertain / placeholder), or None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -595,6 +597,109 @@ def _fill_phase_fields(seg: Segment, fm: FrameMap, res: dict, comp_fps: Fraction
     return warnings
 
 
+def _group_shift_s(seg: Segment, c0: int, comp_fps: Fraction) -> float:
+    """RAW seconds a time-line member's raw_in lies after the line's raw_in at c0: v·(comp_in − c0)/comp_fps."""
+    return float(seg.speed) * float(Fraction(int(seg.comp_in) - int(c0)) / Fraction(comp_fps))
+
+
+def time_line_groups(segments: list[Segment], dlog: DecisionLog | None = None) -> list[list[Segment]]:
+    """The time-tied groups of the segmentation (``Segment.time_line``, FX-04 2): segments with the same group id
+    that show ONE RAW time line. A group is used only as maximal runs of >= 2 ADJACENT forward stretch members at
+    the same speed with a raw_in (a member the segmentation re-solved on its own, a gap or another speed splits
+    it; logged). Returns the runs in competitor order."""
+    by_id: dict[int, list[Segment]] = {}
+    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+        if getattr(s, "time_line", None) is not None:
+            by_id.setdefault(int(s.time_line), []).append(s)
+    out: list[list[Segment]] = []
+    for gid in sorted(by_id):
+        run: list[Segment] = []
+        runs: list[list[Segment]] = []
+        for s in by_id[gid]:
+            ok = (s.type == "raw" and segment_time_mode(s) != "remap" and s.time_mode != "remap"
+                  and s.raw_in_seconds is not None and s.speed is not None and math.isfinite(float(s.speed))
+                  and float(s.speed) > 0 and bool(s.raw_in_interval))
+            if ok and run and int(run[-1].comp_out) == int(s.comp_in) and float(run[-1].speed) == float(s.speed):
+                run.append(s)
+                continue
+            if len(run) > 1:
+                runs.append(run)
+            run = [s] if ok else []
+        if len(run) > 1:
+            runs.append(run)
+        if dlog is not None and (len(runs) != 1 or sum(len(r) for r in runs) != len(by_id[gid])):
+            dlog.record("phase_solve", "time_line_split", time_line=gid,
+                        members=[s.id for s in by_id[gid]], runs=[[s.id for s in r] for r in runs])
+        out.extend(runs)
+    return sorted(out, key=lambda r: (r[0].comp_in, r[0].id))
+
+
+def _group_interval(group: list[Segment], comp_fps: Fraction) -> tuple[list[float] | None, list[float] | None]:
+    """(floor, floor∩round) raw_in intervals of a time-line group at its first member's comp_in: the
+    intersection of every member's own interval shifted back along the line (one shared solve gives the same
+    interval up to the 9-decimal rounding; floor∩round only when every member has one)."""
+    c0 = int(group[0].comp_in)
+    fl = [-math.inf, math.inf]
+    both: list[float] | None = [-math.inf, math.inf]
+    for s in group:
+        sh = _group_shift_s(s, c0, comp_fps)
+        fl = [max(fl[0], float(s.raw_in_interval[0]) - sh), min(fl[1], float(s.raw_in_interval[1]) - sh)]
+        if both is not None and s.raw_in_interval_both:
+            both = [max(both[0], float(s.raw_in_interval_both[0]) - sh),
+                    min(both[1], float(s.raw_in_interval_both[1]) - sh)]
+        else:
+            both = None
+    if not (fl[1] > fl[0]):
+        return None, None
+    if both is not None and not (both[1] > both[0]):
+        both = None
+    return fl, both
+
+
+def _set_group_raw_in(group: list[Segment], raw_in0: float, fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
+                      phase) -> None:
+    """Write one line's raw_in into every member: raw_in_i = raw_in0 + v·(comp_in_i − c0)/comp_fps as a 9-decimal
+    value; each member's exact slack (ae_margin_ms) and tie frames are then recomputed over its own frames."""
+    c0 = int(group[0].comp_in)
+    for s in group:
+        s.raw_in_seconds = fmt_seconds(float(raw_in0) + _group_shift_s(s, c0, comp_fps))
+        _refresh_phase_after_move(s, fm, comp_fps, raw_fps, phase)
+
+
+def place_time_lines(segments: list[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction, cfg: Config,
+                     dlog: DecisionLog, phase=None) -> list[str]:
+    """Re-place every time-tied group as ONE line (DESIGN §5 segment.py time ties, §7.3): solve_segment_phase
+    placed each member in the breakpoint cells of its OWN frames, so the members of one RAW line could drift
+    apart by up to the interval width (two layers of one continuous clip showing different sub-frame phases).
+    Here the line's raw_in at the first member's comp_in is the max-min-slack cell midpoint of EVERY frame of
+    the whole group inside the members' common interval (floor∩round when all have it, else floor;
+    ``phase_solve.place_raw_in``), and every member gets that line at its own comp_in (one common shift). Each
+    member's exact slack is then checked on its own layer (ae_margin_ms). Returns warnings (none expected)."""
+    if phase is None:
+        from . import phase_solve as phase
+    warnings: list[str] = []
+    for group in time_line_groups(segments, dlog):
+        c0, c1 = int(group[0].comp_in), int(group[-1].comp_out)
+        v = float(group[0].speed)
+        fl, both = _group_interval(group, comp_fps)
+        ids = [s.id for s in group]
+        if fl is None:
+            warnings.append(f"time line S{ids[0]:02d}-S{ids[-1]:02d}: the members' raw_in intervals do not overlap; "
+                            "each keeps its own phase")
+            dlog.record("phase_solve", "time_line_skipped", segments=ids, reason="no common raw_in interval")
+            continue
+        allowed = both or fl
+        before = [s.raw_in_seconds for s in group]
+        p = _ps.place_raw_in(allowed, c0, c1, v, comp_fps, raw_fps, round_rule=bool(both))
+        _set_group_raw_in(group, float(p["raw_in"]), fm, comp_fps, raw_fps, phase)
+        dlog.record("phase_solve", "time_line_placed", segments=ids, comp_range=[c0, c1], speed=v,
+                    interval=[round(allowed[0], 9), round(allowed[1], 9)], rule="both" if both else "floor",
+                    raw_in=round(float(p["raw_in"]), 9), cell_half_frames=round(float(p["half"]), 12),
+                    raw_in_before=before, raw_in_after=[s.raw_in_seconds for s in group],
+                    ae_margin_ms=[s.ae_margin_ms for s in group])
+    return warnings
+
+
 def _slack_evidence(seg: Segment, comp_fps: Fraction, raw_fps: Fraction, cfg: Config) -> dict:
     """Decision-log fields of the AE floor-rule slack of a solved segment (FX-10)."""
     info = phase_slack(seg, comp_fps, raw_fps)
@@ -606,7 +711,13 @@ def _slack_evidence(seg: Segment, comp_fps: Fraction, raw_fps: Fraction, cfg: Co
             "ae_video_pinned": info["video_pinned"]}
 
 
-def phase_slack(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> dict | None:
+def time_line_spans(segments: list[Segment]) -> dict[int, tuple[int, int]]:
+    """{segment id: (c0, c1)} the competitor range of the time line each time-tied member belongs to."""
+    return {int(s.id): (int(g[0].comp_in), int(g[-1].comp_out)) for g in time_line_groups(segments) for s in g}
+
+
+def phase_slack(seg: Segment, comp_fps: Fraction, raw_fps: Fraction,
+                line: tuple[int, int] | None = None) -> dict | None:
     """AE floor-rule slack of a 'raw' stretch segment as written (DESIGN §2.1, FX-10), or None (no raw_in,
     remap / freeze / reverse: their keys are judged by the export).
 
@@ -617,18 +728,26 @@ def phase_slack(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> dict | N
                  exactly the same frames can have; cell_ms its width
     best         the most slack any raw_in of the solved interval (floor∩round, else floor) can have = half its
                  widest cell (None without an interval)
-    video_pinned no breakpoint inside that interval: the measured frames pin raw_in to ONE cell"""
+    video_pinned no breakpoint inside that interval: the measured frames pin raw_in to ONE cell
+
+    ``line`` = (c0, c1): the segment is a member of a time-tied group spanning comp frames [c0, c1)
+    (``time_line_spans``) whose raw_in follows the group's ONE line: the cell / best / pinned of that line
+    (breakpoints of every frame of the group) decide, the slack stays the layer's own."""
     if seg.type != "raw" or seg.raw_in_seconds is None or segment_time_mode(seg) == "remap" or seg.time_mode == "remap":
         return None
     v = float(seg.speed)
     if not (math.isfinite(v) and v > 0) or seg.comp_out <= seg.comp_in:
         return None
     s, k = _ps.exact_min_slack(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, seg.comp_out, comp_fps, raw_fps)
-    lc = _ps.layer_cell(seg.raw_in_seconds, seg.comp_in, seg.comp_out, v, comp_fps, raw_fps)
+    c0, c1, sh = int(seg.comp_in), int(seg.comp_out), 0.0
+    if line is not None and int(line[0]) <= c0 and c1 <= int(line[1]) and (int(line[0]), int(line[1])) != (c0, c1):
+        c0, c1 = int(line[0]), int(line[1])
+        sh = _group_shift_s(seg, c0, comp_fps)
+    lc = _ps.layer_cell(float(seg.raw_in_seconds) - sh, c0, c1, v, comp_fps, raw_fps)
     allowed = seg.raw_in_interval_both or seg.raw_in_interval
     best, video_pinned = None, False
     if allowed and float(allowed[1]) > float(allowed[0]):
-        p = _ps.place_raw_in(allowed, seg.comp_in, seg.comp_out, v, comp_fps, raw_fps,
+        p = _ps.place_raw_in([float(allowed[0]) - sh, float(allowed[1]) - sh], c0, c1, v, comp_fps, raw_fps,
                              round_rule=bool(seg.raw_in_interval_both))
         best, video_pinned = float(p["best_half"]), bool(p["pinned"])
     return {"slack": s, "slack_frames": float(s), "slack_ms": float(s / Fraction(raw_fps)) * 1000.0, "k": int(k),
@@ -655,13 +774,15 @@ def ae_phase_class(info: dict | None, cfg: Config) -> str:
     return "razor"
 
 
-def ae_rule_sensitive(seg: Segment, cfg: Config, comp_fps: Fraction, raw_fps: Fraction) -> bool:
+def ae_rule_sensitive(seg: Segment, cfg: Config, comp_fps: Fraction, raw_fps: Fraction,
+                      line: tuple[int, int] | None = None) -> bool:
     """A real AE timing risk (FX-10): the exact floor-rule slack of the written raw_in is below
     cfg.ae_slack_tol_frames although its breakpoint cell allows more ('razor'), or the phase is pinned by
     the cadence but the configured --ae-time-mode keeps the layer in stretch / remap mode (no frame-exact
     export removes the risk). A pinned phase exported frame-exact is information, not a risk; no
-    floor∩round overlap alone is not a risk either (AE samples with the floor rule)."""
-    cls = ae_phase_class(phase_slack(seg, comp_fps, raw_fps), cfg)
+    floor∩round overlap alone is not a risk either (AE samples with the floor rule). ``line``: see phase_slack
+    (a time-tied member pinned by its group's line is pinned, not razor)."""
+    cls = ae_phase_class(phase_slack(seg, comp_fps, raw_fps, line), cfg)
     if cls == "razor":
         return True
     return cls == "pinned" and str(getattr(cfg, "ae_time_mode", "auto") or "auto") in ("stretch", "remap")
@@ -674,11 +795,12 @@ def flag_ae_rule_sensitive(segments: list[Segment], cfg: Config, comp_fps: Fract
     rows = []
     mode = str(getattr(cfg, "ae_time_mode", "auto") or "auto")
     tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
+    spans = time_line_spans(segments)
     for s in segments:
         s.notes = "; ".join(p for p in (s.notes or "").split("; ")
                             if p and p != "AE-rule-sensitive" and not p.startswith("AE-rule-sensitive ("))
-        info = phase_slack(s, comp_fps, raw_fps)
-        if ae_rule_sensitive(s, cfg, comp_fps, raw_fps):
+        info = phase_slack(s, comp_fps, raw_fps, spans.get(int(s.id)))
+        if ae_rule_sensitive(s, cfg, comp_fps, raw_fps, spans.get(int(s.id))):
             s.notes = _append_note(s.notes, f"AE-rule-sensitive (slack {info['slack_ms']:.6f} ms at frame {info['k']})")
             rows.append((s.id, info))
     if not rows:
@@ -910,25 +1032,34 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     run-level warning. Segments whose interval is wider than +-100 ms in competitor time (static /
     ambiguous-identical shots) also get a wider search, centred on that feasible range (+ the offset) and
     covering all of it (half-width capped at AUDIO_PHASE_WIDE_MAX_S).
+
+    A TIME-TIED group (``time_line_groups``: segments showing one RAW line) moves as ONE line: its residual is
+    the weighted mean (audio seconds x corr^2) of its confidently correlated members' residuals -- which must
+    agree within cfg.audio_lag_tol_ms, else the group keeps its video phase --, the feasible range is the
+    intersection of every member's range shifted along the line, the target is placed in the breakpoint cells
+    of every frame of the whole group, and every member gets the same shift (the members never drift apart).
+
     Sets seg.audio['phase_source'] ('audio' when the audio target placed raw_in | 'video') and seg.audio['lag_ms_video'] (the
     first-pass residual); the caller re-runs analyze_segments_audio so lag_ms becomes the residual at the
     new raw_in. Returns (ids moved, warnings)."""
     if phase is None:
         from . import phase_solve as phase
     per = (audio_result or {}).get("segments") or {}
+    measured = (audio_result or {}).get("_measured") or {}
     status = (audio_result or {}).get("status")
     strong = float(getattr(cfg, "verify_audio_strong_corr", 0.8))
     comp = np.zeros(0, np.float32) if comp_y is None else np.asarray(comp_y, np.float32).reshape(-1)
     raw = np.zeros(0, np.float32) if raw_y is None else np.asarray(raw_y, np.float32).reshape(-1)
     moved: list[int] = []
     warnings: list[str] = []
-    far: list[tuple[int, float]] = []          # (segment, ms outside the feasible range): kept at the video phase
+    far: list[tuple[list[int], float]] = []    # (segments, ms outside the feasible range): kept at the video phase
     tol_ms = float(getattr(cfg, "audio_lag_tol_ms", 10.0))
     slack_tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
     rf_f = float(Fraction(raw_fps))
-    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
-        if s.type != "raw":
-            continue
+
+    def evaluate(s: Segment) -> dict:
+        """The segment's own D3 inputs: its audio candidate (lag s, corr, how) or None + why; for a stretch
+        segment with a phase ('struct') its interval and the preserved-frames range at its current raw_in."""
         au = {**DEFAULT_SEG_AUDIO, **(s.audio or {})}
         upd = per.get(s.id, per.get(str(s.id))) or {}
         au.update({k: v for k, v in upd.items() if k in ("lag_ms", "corr", "exception")})
@@ -937,39 +1068,41 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
         s.audio = au
         ev: dict[str, Any] = {"segment": s.id, "lag_ms_video": au.get("lag_ms"), "corr": au.get("corr"),
                               "exception": au.get("exception"), "raw_in_video": s.raw_in_seconds}
-
-        def skip(reason: str) -> None:
-            dlog.record("phase_solve", "audio_phase_skipped", reason=reason, **ev)
-
-        if status == "no_audio":
-            # ('audio_replaced' runs still try the wide search below: a run whose every segment is a static
-            # shot misplaced by > 100 ms looks replaced to the +-100 ms search; the strong-corr gate
-            # keeps genuinely replaced audio out)
-            skip(f"run audio status {status}")
-            continue
+        out: dict[str, Any] = {"seg": s, "ev": ev, "cand": None, "why": None, "struct": False}
+        # ('audio_replaced' runs still try the wide search below: a run whose every segment is a static shot
+        # misplaced by > 100 ms looks replaced to the +-100 ms search; the strong-corr gate keeps genuinely
+        # replaced audio out)
+        no_audio = f"run audio status {status}" if status == "no_audio" else None
         v = float(s.speed) if s.speed is not None else float("nan")
         if segment_time_mode(s) == "remap" or s.time_mode == "remap" or not math.isfinite(v) or v <= 0:
-            skip("not a stretch segment")
-            continue
+            out["why"] = no_audio or "not a stretch segment"
+            return out
         if s.raw_in_seconds is None:
-            skip("no raw_in")
-            continue
+            out["why"] = no_audio or "no raw_in"
+            return out
         interval, kind = audio_phase_interval(s)
         if interval is None or interval[1] <= interval[0]:
-            skip("no feasible raw_in interval")
-            continue
-        width = interval[1] - interval[0]
-        exc = au.get("exception")
-        if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
-            skip(f"audio exception {exc}")
-            continue
-        cand = None
-        if exc is None and au.get("lag_ms") is not None and au.get("corr") is not None and float(au["corr"]) >= strong:
-            cand = (float(au["lag_ms"]) / 1000.0, float(au["corr"]), "xcorr")
+            out["why"] = no_audio or "no feasible raw_in interval"
+            return out
         old = float(s.raw_in_seconds)
         p_lo, p_hi, n_keep = preserved_frames_interval(s, fm, old, comp_fps, raw_fps, kind == "both")
         lo_e, hi_e = max(interval[0], p_lo), min(interval[1], p_hi)
-        half_comp_s = 0.5 * width / v
+        out.update(v=v, old=old, interval=interval, kind=kind, width=interval[1] - interval[0], p_lo=p_lo, p_hi=p_hi,
+                   n_keep=n_keep, lo_e=lo_e, hi_e=hi_e, struct=True)
+        if no_audio:
+            out["why"] = no_audio
+            return out
+        exc = au.get("exception")
+        if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
+            out["why"] = f"audio exception {exc}"
+            return out
+        if au.get("line"):
+            out["why"] = "its audio follows an audio line, not its picture (FX-14)"
+            return out
+        cand = None
+        if exc is None and au.get("lag_ms") is not None and au.get("corr") is not None and float(au["corr"]) >= strong:
+            cand = (float(au["lag_ms"]) / 1000.0, float(au["corr"]), "xcorr")
+        half_comp_s = 0.5 * out["width"] / v
         if half_comp_s > AUDIO_PHASE_NARROW_S and comp.size and raw.size:
             # centred on the reachable range (not on raw_in) and covering all of it: an in-point anywhere in
             # a wide ambiguous interval is found even when raw_in sits off-centre
@@ -985,60 +1118,177 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             if wide is not None and wide[1] >= strong and (cand is None or wide[1] > cand[1] + AUDIO_PHASE_WIDE_GAIN):
                 cand = (wide[0], wide[1], "xcorr_wide")
         if cand is None:
-            skip(f"audio not confidently aligned (corr {au.get('corr')} < {strong} or exception {exc})")
-            continue
-        lag_s, corr, how = cand
-        target = old + v * lag_s
-        out_ms = max(lo_e - target, target - hi_e, 0.0) / v * 1000.0
-        ev.update(raw_in_audio_target=round(target, 9), outside_ms=round(out_ms, 3), av_offset_ms=round(float(av_offset_s) * 1000.0, 3))
-        if out_ms > tol_ms:
-            # the audio implies an in-point the picture rules out: keep the video placement (never shrink the
-            # AE margin towards an edge the audio does not actually reach)
-            far.append((int(s.id), out_ms if target > hi_e else -out_ms))
-            skip(f"audio target {out_ms:.1f} ms outside the video-feasible range (> {tol_ms:g} ms)")
-            continue
+            out["why"] = f"audio not confidently aligned (corr {au.get('corr')} < {strong} or exception {exc})"
+        out["cand"] = cand
+        return out
+
+    def skip(e: dict, reason: str, **extra: Any) -> None:
+        dlog.record("phase_solve", "audio_phase_skipped", reason=reason, **extra, **e["ev"])
+
+    def place(c0: int, c1: int, v: float, lo_e: float, hi_e: float, target: float, kind: str) -> dict | str:
+        """D3 placement of a target over the comp frames [c0, c1) (FX-10 cells, margin in cells), or why not."""
         if (hi_e - lo_e) * rf_f <= 2 * _ps.SLACK_MERGE:
-            skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.6f} ms leaves no room to move")
-            continue
-        # FX-10: cells of EVERY frame of the layer; margin in cells (never integer ms)
-        pl = _ps.place_raw_in([lo_e, hi_e], s.comp_in, s.comp_out, v, comp_fps, raw_fps, target_s=target,
-                              margin=lambda w: audio_phase_margin(w, slack_tol),
-                              round_rule=kind == "both")
+            return f"feasible range {max(0.0, hi_e - lo_e) * 1000:.6f} ms leaves no room to move"
+        pl = _ps.place_raw_in([lo_e, hi_e], c0, c1, v, comp_fps, raw_fps, target_s=target,
+                              margin=lambda w: audio_phase_margin(w, slack_tol), round_rule=kind == "both")
         c_lo, c_hi = (float(x) for x in pl["cell"])
         cell_f = (c_hi - c_lo) * rf_f
-        margin_f = min(pl["half"], audio_phase_margin(cell_f, slack_tol))
-        new = fmt_seconds(pl["raw_in"])
-        if not (c_lo < new < c_hi):          # the 9-decimal rounding left a cell narrower than 1 ns
-            skip(f"rounded raw_in outside its {cell_f:.3g}-frame breakpoint cell")
+        return {"raw_in": float(pl["raw_in"]), "cell": (c_lo, c_hi), "cell_f": cell_f,
+                "margin_f": min(pl["half"], audio_phase_margin(cell_f, slack_tol))}
+
+    groups = time_line_groups(segments)
+    first_of = {id(g[0]): g for g in groups}
+    in_group = {id(s) for g in groups for s in g}
+    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+        if s.type != "raw":
             continue
-        clamped = abs(new - target) > 5e-10
-        au["phase_source"] = "audio"
-        rec = dict(ev, raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
-                   lag_ms_used=round(lag_s * 1000.0, 3), corr_used=round(corr, 4), source=how, interval=kind,
-                   interval_s=[round(interval[0], 9), round(interval[1], 9)],
-                   cell_s=[round(c_lo, 9), round(c_hi, 9)], cell_frames=round(cell_f, 9),
-                   margin_frames=round(margin_f, 9), margin_ms=round(margin_f / rf_f * 1000.0, 6),
-                   preserved_range_s=[None if not math.isfinite(p_lo) else round(p_lo, 9),
-                                      None if not math.isfinite(p_hi) else round(p_hi, 9)],
-                   preserved_frames=n_keep, clamped=clamped, speed=v)
-        if abs(new - old) <= 5e-10:
-            dlog.record("phase_solve", "audio_phase", moved=False, **rec)
+        if id(s) in in_group and id(s) not in first_of:
+            continue                                   # handled with its time line's first member
+        unit = first_of.get(id(s), [s])
+        evals = [evaluate(m) for m in unit]
+        if len(unit) == 1:
+            e = evals[0]
+            if e["cand"] is None:
+                skip(e, e["why"])
+                continue
+            lag_s, corr, how = e["cand"]
+            v, old, lo_e, hi_e = e["v"], e["old"], e["lo_e"], e["hi_e"]
+            target = old + v * lag_s
+            out_ms = max(lo_e - target, target - hi_e, 0.0) / v * 1000.0
+            e["ev"].update(raw_in_audio_target=round(target, 9), outside_ms=round(out_ms, 3),
+                           av_offset_ms=round(float(av_offset_s) * 1000.0, 3))
+            if out_ms > tol_ms:
+                # the audio implies an in-point the picture rules out: keep the video placement (never shrink the
+                # AE margin towards an edge the audio does not actually reach)
+                far.append(([int(s.id)], out_ms if target > hi_e else -out_ms))
+                skip(e, f"audio target {out_ms:.1f} ms outside the video-feasible range (> {tol_ms:g} ms)")
+                continue
+            pl = place(s.comp_in, s.comp_out, v, lo_e, hi_e, target, e["kind"])
+            if isinstance(pl, str):
+                skip(e, pl)
+                continue
+            c_lo, c_hi = pl["cell"]
+            new = fmt_seconds(pl["raw_in"])
+            if not (c_lo < new < c_hi):          # the 9-decimal rounding left a cell narrower than 1 ns
+                skip(e, f"rounded raw_in outside its {pl['cell_f']:.3g}-frame breakpoint cell")
+                continue
+            clamped = abs(new - target) > 5e-10
+            s.audio["phase_source"] = "audio"
+            rec = dict(e["ev"], raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
+                       lag_ms_used=round(lag_s * 1000.0, 3), corr_used=round(corr, 4), source=how, interval=e["kind"],
+                       interval_s=[round(e["interval"][0], 9), round(e["interval"][1], 9)],
+                       cell_s=[round(c_lo, 9), round(c_hi, 9)], cell_frames=round(pl["cell_f"], 9),
+                       margin_frames=round(pl["margin_f"], 9), margin_ms=round(pl["margin_f"] / rf_f * 1000.0, 6),
+                       preserved_range_s=[None if not math.isfinite(e["p_lo"]) else round(e["p_lo"], 9),
+                                          None if not math.isfinite(e["p_hi"]) else round(e["p_hi"], 9)],
+                       preserved_frames=e["n_keep"], clamped=clamped, speed=v)
+            if abs(new - old) <= 5e-10:
+                dlog.record("phase_solve", "audio_phase", moved=False, **rec)
+                continue
+            s.raw_in_seconds = new
+            _refresh_phase_after_move(s, fm, comp_fps, raw_fps, phase)
+            rec.update(raw_in_frame=s.raw_in_frame, raw_out_frame=s.raw_out_frame, ae_margin_ms=s.ae_margin_ms)
+            dlog.record("phase_solve", "audio_phase", moved=True, **rec)
+            moved.append(int(s.id))
+            if how == "xcorr_wide":
+                s.notes = _append_note(s.notes, f"raw_in placed by a wide audio search (lag {lag_s * 1000:+.1f} ms "
+                                                f"inside a {e['width'] * 1000:.0f} ms feasible interval)")
             continue
-        s.raw_in_seconds = new
-        _refresh_phase_after_move(s, fm, comp_fps, raw_fps, phase)
-        rec.update(raw_in_frame=s.raw_in_frame, raw_out_frame=s.raw_out_frame, ae_margin_ms=s.ae_margin_ms)
-        dlog.record("phase_solve", "audio_phase", moved=True, **rec)
-        moved.append(int(s.id))
-        if how == "xcorr_wide":
-            s.notes = _append_note(s.notes, f"raw_in placed by a wide audio search (lag {lag_s * 1000:+.1f} ms "
-                                            f"inside a {width * 1000:.0f} ms feasible interval)")
+
+        # ---- a time-tied group: ONE line, one common shift ------------------------------------------
+        ids = [m.id for m in unit]
+        live = evals
+        if not all(e["struct"] for e in live):
+            for e in live:
+                skip(e, e["why"] if not e["struct"] else "a member of its time line has no stretch phase", time_line=ids)
+            continue
+        c0, c1 = int(unit[0].comp_in), int(unit[-1].comp_out)
+        v = live[0]["v"]
+        contrib = [e for e in live if e["cand"] is not None]
+        if not contrib:
+            for e in live:
+                skip(e, e["why"] or "no member of its time line is confidently aligned", time_line=ids)
+            continue
+        lags = np.array([e["cand"][0] for e in contrib], np.float64)
+        wts = []
+        for e in contrib:
+            mm = measured.get(e["seg"].id, measured.get(str(e["seg"].id))) or {}
+            dur = float(mm.get("dur_s") or e["seg"].length / float(Fraction(comp_fps)))
+            wts.append(dur * e["cand"][1] ** 2)
+        wts = np.asarray(wts, np.float64)
+        lag_s = float(np.dot(wts, lags) / wts.sum())
+        spread_ms = float(lags.max() - lags.min()) * 1000.0
+        members = [{"segment": e["seg"].id, "lag_ms": round(e["cand"][0] * 1000.0, 3), "corr": round(e["cand"][1], 4),
+                    "source": e["cand"][2], "weight": round(float(w), 6)} for e, w in zip(contrib, wts)]
+        if spread_ms > tol_ms:
+            for e in live:
+                skip(e, f"its time line's members disagree by {spread_ms:.1f} ms (> {tol_ms:g} ms): one line cannot "
+                        "follow both", time_line=ids, members=members)
+            continue
+        both = all(e["kind"] == "both" for e in live)
+        lo_e, hi_e = -math.inf, math.inf
+        for e in live:
+            m = e["seg"]
+            sh = _group_shift_s(m, c0, comp_fps)
+            if both:
+                a, b = e["lo_e"], e["hi_e"]
+            else:
+                a_i, b_i = (float(x) for x in m.raw_in_interval)
+                p_lo, p_hi, _n = preserved_frames_interval(m, fm, e["old"], comp_fps, raw_fps, False)
+                a, b = max(a_i, p_lo), min(b_i, p_hi)
+            lo_e, hi_e = max(lo_e, a - sh), min(hi_e, b - sh)
+        old0 = live[0]["old"]
+        target = old0 + v * lag_s
+        out_ms = max(lo_e - target, target - hi_e, 0.0) / v * 1000.0
+        grp = {"time_line": ids, "members": members, "lag_ms_used": round(lag_s * 1000.0, 3),
+               "members_spread_ms": round(spread_ms, 3), "raw_in_audio_target": round(target, 9),
+               "outside_ms": round(out_ms, 3), "av_offset_ms": round(float(av_offset_s) * 1000.0, 3)}
+        if not (hi_e > lo_e) or out_ms > tol_ms:
+            if hi_e > lo_e:
+                far.append((ids, out_ms if target > hi_e else -out_ms))
+            for e in live:
+                skip(e, (f"audio target {out_ms:.1f} ms outside the time line's video-feasible range (> {tol_ms:g} ms)"
+                         if hi_e > lo_e else "the time line's members have no common feasible range"), **grp)
+            continue
+        pl = place(c0, c1, v, lo_e, hi_e, target, "both" if both else "floor")
+        if isinstance(pl, str):
+            for e in live:
+                skip(e, pl, **grp)
+            continue
+        c_lo, c_hi = pl["cell"]
+        news = [fmt_seconds(pl["raw_in"] + _group_shift_s(m, c0, comp_fps)) for m in unit]
+        if not all(c_lo < x - _group_shift_s(m, c0, comp_fps) < c_hi for x, m in zip(news, unit)):
+            for e in live:
+                skip(e, f"rounded raw_in outside the time line's {pl['cell_f']:.3g}-frame breakpoint cell", **grp)
+            continue
+        new0 = pl["raw_in"]
+        did_move = abs(new0 - old0) > 5e-10
+        if did_move:
+            _set_group_raw_in(unit, new0, fm, comp_fps, raw_fps, phase)
+        for e in live:
+            m = e["seg"]
+            m.audio["phase_source"] = "audio"
+            rec = dict(e["ev"], **grp, raw_in=m.raw_in_seconds, shift_ms=round((new0 - old0) * 1000.0, 6), own_audio=e["why"],
+                       source="time_line", interval="both" if both else "floor",
+                       cell_s=[round(c_lo, 9), round(c_hi, 9)], cell_frames=round(pl["cell_f"], 9),
+                       margin_frames=round(pl["margin_f"], 9), margin_ms=round(pl["margin_f"] / rf_f * 1000.0, 6),
+                       clamped=abs(new0 - target) > 5e-10, speed=v)
+            if did_move:
+                rec.update(raw_in_frame=m.raw_in_frame, raw_out_frame=m.raw_out_frame, ae_margin_ms=m.ae_margin_ms)
+            dlog.record("phase_solve", "audio_phase", moved=did_move, **rec)
+            if did_move:
+                moved.append(int(m.id))
     if far:
-        shown = ", ".join(f"S{i:02d} {d:+.1f} ms" for i, d in far[:12]) + (f" (+{len(far) - 12} more)" if len(far) > 12 else "")
-        warnings.append(f"audio-informed phase (D3): {len(far)} segment(s) keep their video phase because their audio "
+        def lab(ids: list[int]) -> str:
+            return f"S{ids[0]:02d}" if len(ids) == 1 else f"S{ids[0]:02d}-S{ids[-1]:02d} (one time line)"
+        shown = ", ".join(f"{lab(i)} {d:+.1f} ms" for i, d in far[:12]) + (f" (+{len(far) - 12} more)" if len(far) > 12 else "")
+        n_far = sum(len(i) for i, _ in far)
+        warnings.append(f"audio-informed phase (D3): {n_far} segment(s) keep their video phase because their audio "
                         f"in-point lies more than {tol_ms:g} ms outside the video-feasible interval after the run's "
                         f"A/V offset {float(av_offset_s) * 1000.0:+.1f} ms ({shown})")
-        dlog.record("phase_solve", "audio_phase_far", segments=[i for i, _ in far], outside_ms=[round(d, 3) for _, d in far],
-                    av_offset_ms=round(float(av_offset_s) * 1000.0, 3), tol_ms=tol_ms)
+        dlog.record("phase_solve", "audio_phase_far", segments=[x for i, _ in far for x in i],
+                    outside_ms=[round(d, 3) for _, d in far], av_offset_ms=round(float(av_offset_s) * 1000.0, 3),
+                    tol_ms=tol_ms)
     return moved, warnings
 
 
@@ -1282,6 +1532,8 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
     seg_warn: list[str] = []
     for s in segments:
         seg_warn.extend(solve_segment_phase(s, fm, ctx.comp_fps, ctx.raw_fps, cfg, dlog))
+    # a time-tied group keeps ONE line: placed once over all its members' frames (each member above saw only its own)
+    seg_warn.extend(place_time_lines(segments, fm, ctx.comp_fps, ctx.raw_fps, cfg, dlog))
     comp_y = ctx.comp_audio if ctx.comp_audio is not None else np.zeros(0, np.float32)
     raw_y = ctx.raw_audio if ctx.raw_audio is not None else np.zeros(0, np.float32)
 

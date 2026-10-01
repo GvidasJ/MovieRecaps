@@ -326,7 +326,8 @@ def test_segments_lag_pitch_and_music_bed(edit, raw, cfg):
     n = segs[-1].comp_out
     for s in segs:
         a = out["segments"][s.id]
-        assert set(a) == {"in_offset_frames", "out_offset_frames", "pitch_preserved", "lag_ms", "corr", "exception"}
+        assert set(a) == {"in_offset_frames", "out_offset_frames", "pitch_preserved", "lag_ms", "corr", "exception",
+                          "line"}
         assert a["in_offset_frames"] == 0 and a["out_offset_frames"] == 0
         assert abs(a["lag_ms"]) < 0.5 and a["corr"] > 0.8 and a["exception"] is None
         assert a["pitch_preserved"] is (False if s.speed != 1.0 else None)   # tape: pitch follows speed

@@ -25,6 +25,18 @@ becomes a dissolve of ``D`` frames that STARTS at the edit point ``O`` (EDL: ``D
 handle -- exactly the linear AE opacity ramp. NOT-IN-RAW placeholders, dips and flashes are black events
 (EDL ``BL`` reel, XML slug generator); a dip is a black event with dissolves on both sides.
 
+Audio (:func:`audio_items`)
+---------------------------
+RAW sync (``cutlist.settings.audio_sync`` = raw, the default) without audio lines: the audio follows the picture
+events (cuts only; J/L offsets are listed in cutlist.csv) -- XML audio clipitems at the video record ranges, EDL
+``B`` events. Otherwise every audible segment gets its OWN audio event (XML audio clipitem, EDL ``A`` event after
+the video events, which become ``V``): competitor sync (DESIGN §7 D9, ``export_ae.audio_sync_params``) moves the
+range by round(switch baseline x fps) frames (+ the genuine J/L offsets) and plays RAW time tau + v·g (the measured
+A/V offset); a segment whose audio follows an audio line (FX-14: video-only retime / uncertain / placeholder over
+continuous audio) plays that line. Editorial formats address whole frames: the source in is the NEAREST RAW frame
+of the exact RAW time and the remainder (ms, < half a RAW frame) is written next to the event (XML clip comment,
+EDL ``* AUDIO`` comment); AE and the preview keep it sample-exact.
+
 Time conventions
 ----------------
 * Record timecode: competitor frame index counted at the nominal competitor rate, NDF, from 00:00:00:00.
@@ -56,7 +68,8 @@ from .geometry import Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
 
 __all__ = ["EditEvent", "edit_events", "write_csv", "write_fcp7_xml", "write_edl", "validate_exports",
-           "edl_m2", "parse_edl_text", "parse_fcp7_xml", "CSV_COLUMNS", "added_audio_markers"]
+           "edl_m2", "parse_edl_text", "parse_fcp7_xml", "CSV_COLUMNS", "added_audio_markers", "AudioItem",
+           "audio_items"]
 
 _AE_EPS = 1e-9
 SPEED_TOL = 0.002                    # validate_exports: relative speed tolerance (0.2 %)
@@ -297,6 +310,90 @@ def edit_events(cutlist: Cutlist) -> list[EditEvent]:
     return events
 
 
+@dataclass
+class AudioItem:
+    """One audio event of the exports when the audio does not simply follow the picture events (module docstring)."""
+    seg: Segment
+    rec_in: int                    # record range [rec_in, rec_out), competitor frames
+    rec_out: int
+    src_in: int                    # NEAREST RAW frame of the exact RAW time played at rec_in
+    speed: float
+    remainder_ms: float            # exact RAW time at rec_in - src_in / raw_fps (ms; the sub-frame part formats lose)
+    what: str                      # 'picture' | 'audio line'
+
+    @property
+    def n_rec(self) -> int:
+        return self.rec_out - self.rec_in
+
+
+def audio_sync_info(cutlist: Cutlist) -> dict:
+    """{'mode', 'lag_s' (content offset g of the exported audio, 0 in raw sync), 'shift' (switch shift in competitor
+    frames), 'split' (separate audio events needed: competitor sync or any audio line)} -- export_ae's single rule."""
+    from .export_ae import audio_sync_params
+    mode = str((cutlist.settings or {}).get("audio_sync") or "raw")
+    g, sh = audio_sync_params(cutlist, cutlist.comp_fps, mode)
+    lines = any((s.audio or {}).get("line") for s in cutlist.segments)
+    return {"mode": mode, "lag_s": float(g), "shift": int(sh), "split": mode == "competitor" or lines}
+
+
+def audio_items(cutlist: Cutlist) -> list[AudioItem]:
+    """The audio events of the XML / EDL (module docstring): one per segment that plays RAW audio (its own map or
+    its audio line, render_preview.audio_segment), in competitor sync over [comp_in + in_offset, comp_out +
+    out_offset) + the switch shift with RAW time tau + v·g, in raw sync over its picture record range; clipped to
+    [0, competitor frames). Empty when the audio simply follows the picture events (raw sync, no audio line)."""
+    from .render_preview import audio_segment
+    info = audio_sync_info(cutlist)
+    if not info["split"]:
+        return []
+    comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
+    n_total = int(cutlist.competitor["frames"])
+    g, sh = info["lag_s"], info["shift"]
+    comp_sync = info["mode"] == "competitor"
+    rec = {ev.seg.id: ev for ev in edit_events(cutlist) if ev.seg is not None}
+    out: list[AudioItem] = []
+    for seg in sorted(cutlist.segments, key=lambda s: (int(s.comp_in), int(s.comp_out), int(s.id))):
+        a = audio_segment(seg)
+        ev = rec.get(seg.id)
+        if a is None or ev is None:
+            continue
+        au = seg.audio or {}
+        if comp_sync:
+            k0 = int(seg.comp_in) + int(au.get("in_offset_frames") or 0) + sh
+            k1 = int(seg.comp_out) + int(au.get("out_offset_frames") or 0) + sh
+            if not au.get("in_offset_frames"):
+                k0 = ev.rec_in + sh                          # crossfade / trimmed record ranges stay those of the event
+            if not au.get("out_offset_frames"):
+                k1 = ev.rec_out + sh
+        else:
+            k0, k1 = ev.rec_in, ev.rec_out
+        k0, k1 = max(0, k0), min(n_total, k1)
+        if k1 <= k0:
+            continue
+        # the RAW time at record frame k0: the segment's own map + v·g (the switch shift moves the RANGE only, exactly
+        # like export_ae's twins and build_audio; a remap curve plays g later: its value at k0 + g·fps)
+        if a.time_remap_keys:
+            tau = _remap_seconds(a.time_remap_keys, float(k0) + g * float(comp_fps))
+            v = seg_speed(a, comp_fps)
+        else:
+            v = float(a.speed)
+            tau = _raw_in_seconds(a, raw_fps) + v * (float(Fraction(k0 - int(seg.comp_in)) / comp_fps) + g)
+        j = int(round(tau * float(raw_fps)))
+        out.append(AudioItem(seg, k0, k1, max(0, j), v, (tau - j / float(raw_fps)) * 1000.0,
+                             "audio line" if au.get("line") else "picture"))
+    return out
+
+
+def _audio_note(cutlist: Cutlist) -> str:
+    """One line describing the exported audio sync (XML marker / EDL note)."""
+    info = audio_sync_info(cutlist)
+    if info["mode"] == "competitor":
+        return (f"AUDIO SYNC competitor: RAW audio at the competitor's measured A/V offset {info['lag_s'] * 1000.0:+.1f} ms "
+                f"(xcorr convention), switches moved {info['shift']:+d} frame(s); source = nearest RAW frame, the "
+                "sub-frame remainder is noted per audio event (AE / preview are sample-exact)")
+    return ("AUDIO: RAW lip-sync; audio lines (continuous audio under video-only retimes / placeholders) as separate "
+            "audio events; source = nearest RAW frame, remainder noted per event")
+
+
 def _media(cutlist: Cutlist, cfg: Any, role: str) -> tuple[str, str]:
     """(basename, absolute path) of the AE-imported media of a role ('raw' | 'competitor')."""
     block = cutlist.raw if role == "raw" else cutlist.competitor
@@ -459,7 +556,9 @@ def write_edl(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> Non
     comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
     raw_name, raw_abs = _media(cutlist, cfg, "raw")
     has_audio = bool(cutlist.raw.get("has_audio", True))
-    chan = "B" if has_audio else "V"
+    a_items = audio_items(cutlist) if has_audio else []
+    split = has_audio and audio_sync_info(cutlist)["split"]
+    chan = "B" if has_audio and not split else "V"     # separate A events carry the audio (module docstring)
     events = edit_events(cutlist)
     # CMX readers (OTIO included) reject comment lines before the first event: the conventions go
     # under event 001 instead.
@@ -472,6 +571,8 @@ def write_edl(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> Non
     if cutlist.added_audio:
         notes.append("* NOTE: YELLOW locators = audio the competitor added (music / SFX / voice-over), not "
                      "recreated: labelled placeholders for your own")
+    if split:
+        notes.append(f"* NOTE: {_audio_note(cutlist)}; video events V, audio events A (after the video events)")
     # added-audio placeholders: a YELLOW locator on the event where each range starts
     aa_by_event: dict[int, list[dict]] = {}
     for mk in added_audio_markers(cutlist):
@@ -524,6 +625,17 @@ def write_edl(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> Non
         lines.append("")
         prev = ev
         prev_src_out = s_out if ev.kind == "clip" else ev.n_rec
+    # separate audio events (competitor sync / audio lines): nearest RAW frame + the remainder as a comment
+    for num, it in enumerate(a_items, start=len(events) + 1):
+        ev = EditEvent(it.seg, "clip", it.rec_in, it.rec_out, speed=it.speed, src_in=it.src_in)
+        s_in, s_out, m2 = _edl_src(ev, raw_fps, comp_fps)
+        lines.append(_edl_line(num, EDL_REEL, "A", "C", _tc(s_in, raw_fps), _tc(s_out, raw_fps),
+                               _tc(it.rec_in, comp_fps), _tc(it.rec_out, comp_fps)))
+        lines.append(f"* FROM CLIP NAME: {raw_name}")
+        if m2 is not None:
+            lines.append(f"M2   {EDL_REEL:<8} {_m2_field(m2)}        {_tc(s_in, raw_fps)}")
+        lines.append(f"* AUDIO: {_seg_label(it.seg)} {it.what}, nearest RAW frame, remainder {it.remainder_ms:+.3f} ms")
+        lines.append("")
     atomic_write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
@@ -888,8 +1000,42 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             _sub(gi, "anamorphic", "FALSE")
             _sub(gi, "alphatype", "black")
             _effect(gi, "Slug", "slug", "Matte", "generator")
-    # audio track: RAW audio at the video record ranges (cuts only; J/L offsets are in cutlist.csv)
-    if has_audio:
+    # audio track: RAW audio at the video record ranges (cuts only; J/L offsets are in cutlist.csv) -- or, in
+    # competitor sync / with audio lines, the separate audio events (audio_items: nearest frame + remainder)
+    a_items = audio_items(cutlist) if has_audio else []
+    if a_items:
+        audio = _sub(media, "audio")
+        _sub(audio, "numOutputChannels", 2)
+        afmt = _sub(audio, "format")
+        asc = _sub(afmt, "samplecharacteristics")
+        _sub(asc, "depth", 16)
+        _sub(asc, "samplerate", int(audio_info["sample_rate"]))
+        atrack = _sub(audio, "track")
+        for n_a, it in enumerate(a_items, start=1):
+            ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
+            _sub(ai, "name", f"{_seg_label(it.seg)} {raw_name} audio")
+            _sub(ai, "enabled", "TRUE")
+            _sub(ai, "duration", raw_frames)
+            _rate_el(ai, raw_fps)
+            _sub(ai, "start", it.rec_in)
+            _sub(ai, "end", it.rec_out)
+            _sub(ai, "in", int(it.src_in))
+            _sub(ai, "out", int(it.src_in) + _src_advance(it.speed, it.n_rec, raw_fps, comp_fps))
+            _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
+            if abs(it.speed - 1.0) > 1e-9:
+                _time_remap(ai, it.speed, "audio")
+            st = _sub(ai, "sourcetrack")
+            _sub(st, "mediatype", "audio")
+            _sub(st, "trackindex", 1)
+            cm = _sub(ai, "comments")
+            _sub(cm, "mastercomment1", f"{_seg_label(it.seg)} {it.what}: nearest RAW frame, remainder "
+                                       f"{it.remainder_ms:+.3f} ms")
+        mk = _sub(seq, "marker")
+        _sub(mk, "name", "Audio sync")
+        _sub(mk, "comment", _audio_note(cutlist))
+        _sub(mk, "in", 0)
+        _sub(mk, "out", -1)
+    elif has_audio:
         audio = _sub(media, "audio")
         _sub(audio, "numOutputChannels", 2)
         afmt = _sub(audio, "format")
@@ -1058,7 +1204,16 @@ def _validate_edl(cutlist: Cutlist, edl_path: Path, events: list[EditEvent], err
     cn, rn = _nominal(comp_fps), _nominal(raw_fps)
     res: dict[str, Any] = {}
     # own parser (exact M2 fields)
-    own = parse_edl_text(edl_path.read_text(encoding="utf-8"))
+    own_all = parse_edl_text(edl_path.read_text(encoding="utf-8"))
+    own = [e for e in own_all if e["chan"] in ("V", "B")]
+    own_a = [e for e in own_all if e["chan"] not in ("V", "B")]
+    want_a = audio_items(cutlist) if bool(cutlist.raw.get("has_audio", True)) else []
+    if len(own_a) != len(want_a):
+        errors.append(f"EDL: {len(own_a)} audio events, expected {len(want_a)}")
+    for e, it in zip(own_a, want_a):
+        got = (_tc_to_frames(e["rec_in"], cn), _tc_to_frames(e["rec_out"], cn), _tc_to_frames(e["src_in"], rn))
+        if got != (it.rec_in, it.rec_out, it.src_in):
+            errors.append(f"EDL audio {_seg_label(it.seg)}: record/source {got} != {(it.rec_in, it.rec_out, it.src_in)}")
     items = []
     for e in own:
         rec_in, rec_out = _tc_to_frames(e["rec_in"], cn), _tc_to_frames(e["rec_out"], cn)
@@ -1085,7 +1240,7 @@ def _validate_edl(cutlist: Cutlist, edl_path: Path, events: list[EditEvent], err
         want = f"LOC: {_tc(mk['comp_in'], comp_fps)} YELLOW  {mk['label']}"
         if not any(c.startswith(want) for c in locs):
             errors.append(f"EDL: no locator for the {mk['label']!r} added-audio placeholder")
-    res["own"] = {"events": len(own), "total_frames": items[-1]["end"] if items else 0}
+    res["own"] = {"events": len(own), "audio_events": len(own_a), "total_frames": items[-1]["end"] if items else 0}
     # OTIO cmx_3600 adapter (rate = competitor fps; one rate for source and record)
     try:
         import opentimelineio as otio
@@ -1170,6 +1325,12 @@ def _validate_xml(cutlist: Cutlist, xml_path: Path, events: list[EditEvent], err
         if (mk["label"], mk["comp_in"], mk["comp_out"]) not in got_mk:
             errors.append(f"XML: no range marker for the {mk['label']!r} added-audio placeholder "
                           f"[{mk['comp_in']}, {mk['comp_out']})")
+    want_a = audio_items(cutlist) if bool(cutlist.raw.get("has_audio", True)) else []
+    if want_a:
+        got_a = [(it["start"], it["end"], it["in"]) for it in own["audio_items"]]
+        exp_a = [(it.rec_in, it.rec_out, it.src_in) for it in want_a]
+        if got_a != exp_a:
+            errors.append(f"XML: audio items {got_a[:6]} != {exp_a[:6]}")
     want_tr = [(ev.rec_in, ev.rec_in + ev.dissolve_in) for ev in events if ev.dissolve_in]
     got_tr = [(t["start"], t["end"]) for t in own["transitions"]]
     if got_tr != want_tr:

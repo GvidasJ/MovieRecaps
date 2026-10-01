@@ -763,9 +763,15 @@ class _PlanBuilder:
         L["note"] = ascii_text(reason, 300)
 
         out = [L]
+        au = seg.audio or {}
+        if au.get("line"):
+            # its audio follows an audio line (FX-14): one audio-only layer per line run (audio_line_layer) plays
+            # it; the picture layer is silent
+            L["audio"] = False
+            self.decide("audio_line_member", segment=sid, line=au["line"].get("id"))
+            return out
         # audio: J/L duplicate, audio twin of a frames-mode layer, or -- competitor sync (D9) -- every RAW
         # segment's audio as a twin carrying the competitor's measured offset (DESIGN §3 / §5 / §7 D9)
-        au = seg.audio or {}
         in_off = int(au.get("in_offset_frames") or 0)
         out_off = int(au.get("out_offset_frames") or 0)
         sync = self.comp_sync
@@ -822,6 +828,60 @@ class _PlanBuilder:
             elif sync:
                 L["audio"] = False                    # nothing of its audio is heard in competitor sync
         return out
+
+
+    # -- audio lines (FX-14) ------------------------------------------------------------------------
+    def audio_line_layer(self, run: list[Segment]) -> dict | None:
+        """ONE audio-only RAW layer for a run of consecutive segments whose audio follows the same audio line
+        (FX-14: continuous audio under a video-only retime / freeze / uncertain segment / placeholder): the line's
+        stretch map (picture-synced RAW time ``line.raw_in_seconds`` at the first segment's comp_in, speed
+        ``line.speed``) over the run's MAIN frames, the competitor sync's content offset and switch shift on top
+        like every audio twin (D9), clamped to the RAW extent. None when nothing of it is audible."""
+        if not self.has_audio or not run:
+            return None
+        line = run[0].audio["line"]
+        v = _num(line.get("speed"), f"segment {run[0].id} audio line speed")
+        if not v > 0:
+            raise ValueError(f"ae_plan: segment {run[0].id} audio line speed {v} <= 0")
+        r_seg = _num(line.get("raw_in_seconds"), f"segment {run[0].id} audio line raw_in_seconds")
+        c_in, c_out = int(run[0].comp_in), int(run[-1].comp_out)
+        k_in, k_out = self.to_main(c_in), self.to_main(c_out)
+        err_s = float(Fraction(k_in) / self.main_fps - Fraction(c_in) / self.comp_fps)
+        sync = self.comp_sync
+        sh = self.sync_shift_k if sync else 0
+        g_s = self.sync_lag_s if sync else 0.0
+        r0 = r_seg + v * (err_s + g_s)               # RAW time the line plays at MAIN frame k_in
+        a_in, a_out = max(0, k_in + sh), min(self.N, k_out + sh)
+        stretch = 100.0 / v
+        mf = self.mf
+        st0 = self.T(k_in) - r0 / (100.0 / stretch)
+        mode = "stretch" if (abs(st0) <= AE_TIME_SAFE_S and stretch <= AE_STRETCH_LIMIT) else "remap"
+        lo_t, hi_t = st0, st0 + self.raw_dur * stretch / 100.0
+        a0, a1 = a_in, a_out
+        a_in = max(a_in, math.ceil(lo_t * mf - 1e-6))
+        while a_in < a_out and self.T(a_in) < lo_t:
+            a_in += 1
+        a_out = min(a_out, math.floor(hi_t * mf + 1e-6))
+        while a_out > a_in and self.T(a_out) > hi_t:
+            a_out -= 1
+        ids = "-".join(f"S{int(s.id):02d}" for s in (run[0], run[-1])) if len(run) > 1 else f"S{int(run[0].id):02d}"
+        if (a0, a1) != (a_in, a_out):
+            self.warn(f"{ids}: audio line clamped to the RAW extent ({a0}-{a1} -> {a_in}-{a_out})")
+        if a_out <= a_in:
+            return None
+        a_raw_in = r0 + v * ((a_in - k_in) / mf)
+        a_start = (self.T(a_in) - a_raw_in / (100.0 / stretch)) if mode == "stretch" else None
+        keys = [{"k": a_in, "v": a_raw_in}, {"k": a_out, "v": a_raw_in + v * ((a_out - a_in) / mf)}]
+        why = f"audio line: {ascii_text(str(line.get('source') or 'continuous audio'), 80)}"
+        A = self._layer(id=f"line{int(run[0].id)}_audio", kind="raw_audio", comp=self.seg_comp, source="raw",
+                        seg=int(run[0].id), compIn=a_in, compOut=a_out, timeMode=mode, speed=v,
+                        stretch=stretch if mode == "stretch" else None, rawIn=a_raw_in, startStretch=a_start,
+                        startTime=a_start if mode == "stretch" else self.T(a_in), expect=[], remap=keys, flip=False,
+                        enabled=False, audio=True, name=ascii_text(f"{ids}  audio ({why})", 240), note=why)
+        self.decide("audio_line", segments=[int(s.id) for s in run], line=line.get("id"), source=line.get("source"),
+                    comp_in=a_in, comp_out=a_out, mode=mode, speed=v, raw_in=a_raw_in,
+                    **({"av_offset_ms": round(g_s * 1000.0, 3), "switch_shift_frames": sh} if sync else {}))
+        return A
 
 
 def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict, start_offset_s: float = 0.0) -> list[int]:
@@ -1044,6 +1104,21 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             seg_layer[sid] = L
             n_placeholder += 1
             add_marker(k_in, f"{cut_label} | MISSING not in RAW {tc_in}-{tc_out}" + (f" | {label}" if label else ""))
+
+    # ---- audio lines (FX-14): one audio-only layer per run of segments on the same line ----------
+    run: list[Segment] = []
+    for seg in segs + [None]:
+        line = ((seg.audio or {}).get("line") if seg is not None and int(seg.id) in kmap else None)
+        if run and (line is None or line.get("id") != run[0].audio["line"].get("id")
+                    or int(seg.comp_in) != int(run[-1].comp_out)):
+            A = b.audio_line_layer(run)
+            if A is not None:
+                audio_dups.append(A)
+                for s in run:
+                    carrier[int(s.id)] = A
+            run = []
+        if line is not None:
+            run.append(seg)
 
     # ---- transitions (crossfades / dips): only the UPPER layer of each pair is keyed ----------
     keyed: dict[str, dict[float, float]] = {}

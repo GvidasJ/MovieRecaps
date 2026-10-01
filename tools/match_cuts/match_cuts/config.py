@@ -108,6 +108,8 @@ class Config:
     audio_jl_strong_margin: float = 0.5    # ... and the switch is this decisive (local NCC margin on both sides)
     audio_jl_baseline_min_cuts: int = 3    # fewer baseline cuts -> the baseline is not measured
     audio_jl_min_frames: float = 0.5       # J/L threshold: |switch - baseline| >= max(this many frames, 3 sigma)
+    audio_jl_min_decisive: float = 0.3     # J/L evidence on both sides: each model explains its side of the switch by this local-NCC margin
+    audio_peak_unique_margin: float = 0.1  # a short window's lag (or an audio line) counts only when its xcorr peak beats the best sidelobe by this
     audio_jl_large_frames: int = 4         # a J/L this large next to a retimed segment / on a continuous line is evidence, not exported
     audio_sync: str = "raw"                # raw | competitor: export audio keeps RAW lip-sync, or reproduces the competitor's offset
 

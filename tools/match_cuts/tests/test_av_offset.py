@@ -300,6 +300,68 @@ def test_jl_against_the_switch_baseline(kind):
         assert per[cut_index]["out_offset_frames"] == frames and per[cut_index + 1]["in_offset_frames"] == frames
 
 
+def test_split_offset_baseline_from_decisive_cuts_when_few_strong():
+    """film24's split delay (content 38 + post-edit 48 ms: lag -86 ms, switches +48 ms) with a genuine 10-frame
+    L-cut: the L-cut's B segment correlates < 0.8 over its whole core (its first frames play A's audio), so only two
+    cuts are 'strong' and the baseline used to stay unknown -- the L-cut then read against the band edge 86 ms (+9
+    instead of +10). The decisive tier (both models explain their side of the cut) measures +48 ms."""
+    raw = _raw_noise()
+    layout = [(0, 30, 2.0), (30, 60, 9.0), (60, 90, 15.0), (90, 120, 21.0), (120, 150, 27.0)]
+    comp = _competitor(raw, layout, -0.086, 0.048, jl={1: 10})
+    segs = _segments(layout)
+    recs = []
+    dlog = type("D", (), {"record": lambda self, *a, **k: recs.append((a, k))})()
+    res = aa.analyze_segments_audio(segs, comp, raw, SR, FPS, Config(), dlog, av_offset_s=-0.086)
+    sw = res["_switch_baseline"]
+    assert sw["tier"] == "decisive" and sw["n"] >= 3 and sw["ms"] == pytest.approx(48.0, abs=4.0), sw
+    strong_tier = [k for a, k in recs if a[1] == "switch_baseline"][0]
+    assert len([c for c in strong_tier["candidates"] if min(c["pk0"]) >= 0.8]) < 3      # the strong tier alone: 2
+    assert [(c["cut"], c["offset_frames"]) for c in res["cuts"]] == [(30, 10)], res["cuts"]
+    assert res["segments"][1]["out_offset_frames"] == 10 and res["segments"][2]["in_offset_frames"] == 10
+
+
+def test_jl_needs_evidence_on_both_sides():
+    """film24's fake 1-frame 'J-cut' at 189: after a 3-frame segment whose model is a little off (its 25 ms floor
+    interval, an unmeasurable core next to an 86 ms offset) neither model explains the audio before the cut; the
+    best switch lands at the edge of the search window. No J/L without both sides observed."""
+    n = 40 * SR
+    t = np.arange(n) / SR                    # tonal RAW (like film24's FM tones): a model half a period off
+    raw = (0.07 * np.sin(2 * np.pi * 220.0 * t) + 0.03 * np.random.default_rng(5).standard_normal(n)).astype(np.float32)
+    layout = [(0, 30, 2.0), (30, 33, 9.0), (33, 63, 15.0)]   # S03's tone phase equals S02's: it 'explains' S02
+    comp = _competitor(raw, layout, -0.086, 0.048)
+    segs = _segments(layout)
+    segs[1].raw_in_seconds = 9.0 + 0.00227                   # the short segment's picture phase 2.3 ms off its audio
+    recs = []
+    dlog = type("D", (), {"record": lambda self, *a, **k: recs.append((a, k))})()
+    res = aa.analyze_segments_audio(segs, comp, raw, SR, FPS, Config(), dlog, av_offset_s=-0.086)
+    assert res["_switch_baseline"]["ms"] is None                         # two cuts: no baseline
+    edges = {k["cut"]: k for a, k in recs if a[1] in ("audio_cut_matches_video", "jl_cut")}
+    # the margin test alone would export a 1-frame L at 30 and a 1-frame J at 33 (switches at the window edges)
+    assert edges[30]["measured_offset"] == 1 and edges[33]["measured_offset"] == -1
+    assert all(e["mean_margin"] >= 0.3 and min(e["sides"]) == 0 for e in edges.values()), edges
+    assert res["cuts"] == [], res["cuts"]
+    assert all(res["segments"][s.id]["in_offset_frames"] == 0 == res["segments"][s.id]["out_offset_frames"]
+               for s in segs)
+
+
+def test_short_window_lag_only_when_the_peak_is_unique():
+    """xcorr_lag_side: noise has one peak; a tone repeats every period (the sidelobe reaches the peak) -- a short
+    window of periodic audio gives no unique lag. With inner_s it tests a hypothesis: the best lag within +-inner
+    against the best beyond it."""
+    rng = np.random.default_rng(3)
+    x = rng.standard_normal(SR).astype(np.float32)
+    lag, pk, side = aa.xcorr_lag_side(x[100:1700], x[80:1680], SR, 0.05)         # b = a delayed by 20 samples
+    assert lag == pytest.approx(20 / SR, abs=1e-5) and pk > 0.99 and side < 0.3
+    t = np.arange(1600) / SR
+    tone = np.sin(2 * np.pi * 220.0 * t).astype(np.float32)
+    lag, pk, side = aa.xcorr_lag_side(tone, np.roll(tone, 7), SR, 0.05)
+    assert pk > 0.95 and pk - side < 0.05                                          # not unique
+    lag, pk, side = aa.xcorr_lag_side(x[100:1700], x[80:1680], SR, 0.05, inner_s=0.002)
+    assert lag == pytest.approx(20 / SR, abs=1e-5) and side < 0.3
+    lag, pk, side = aa.xcorr_lag_side(x[100:1700], x[60:1660], SR, 0.05, inner_s=0.002)   # true lag 40 samples
+    assert pk < 0.3 and side > 0.99                                                # beyond the hypothesis window
+
+
 def test_jl_ranges_stay_ordered():
     """A short segment between an L-cut at its in-point and a J-cut at its out-point: the switches are
     chosen so its audio range keeps a0 < a1 (the real run's inverted S36 [613, 612))."""
