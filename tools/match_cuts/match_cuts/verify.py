@@ -1959,6 +1959,71 @@ def _check_transition_frame(ents: list[dict], a: Segment, b: Segment, K: int, tl
     return None
 
 
+def _tie_slack(seg: Segment | None, k: int, comp_fps: Fraction, raw_fps: Fraction) -> float | None:
+    """Distance (RAW frames) of the segment's own continuous position at comp frame k to the nearest frame boundary
+    -- the per-frame slack of the plan, which reproduces the cutlist exactly (plan vs cutlist is checked on every
+    frame). None for a hold (speed 0: a freeze is exported with keys inside a RAW frame) or a non-raw segment."""
+    if seg is None or seg.type != "raw" or float(seg.speed or 0.0) == 0.0:
+        return None
+    p = seg_raw_position(seg, k, comp_fps, raw_fps)
+    if p is None or not math.isfinite(p):
+        return None
+    return abs(p - round(p))
+
+
+def reassignment_evidence(rows: list[dict], fm: FrameMap, seg_of_k: dict[int, Segment], scorer: Any,
+                          raw_wh: tuple[float, float], cfg: Any, memo: dict | None = None, limit: int = 200) -> None:
+    """FX-11 / FX-12 evidence of re-assigned and mismatched c3 rows, in place: ``why`` (segment.py's reason,
+    FrameMap 'reassigned'), the AE frame's and refine's frame's scores each under its OWN per-frame ECC refit (from
+    the segment model; not the model's framing), ``gap`` = z(m) - z(AE frame), the frame's ``delta`` (refine's score
+    noise) and a ``class``: 'within noise' (gap <= delta), 'outside noise', or 'systematic run' (>= 2 consecutive rows
+    re-assigned in the same direction whose summed gap exceeds delta -- the measured frames jointly prefer another
+    line). Evidence only: no class is an exemption."""
+    from .model import REASSIGN_REASONS
+    dmin = float(getattr(cfg, "soft_delta_min", 0.001))
+    ra = np.asarray(fm.reassigned) if "reassigned" in fm.__dict__.get("d", {}) else None
+    dcol = np.asarray(fm.delta) if "delta" in fm.__dict__.get("d", {}) else None
+    memo = {} if memo is None else memo
+    for r in rows:
+        k = int(r["k"])
+        if ra is not None and 0 <= k < len(ra):
+            r["why"] = REASSIGN_REASONS[int(ra[k])] if int(ra[k]) > 0 else r.get("why", "mismatch")
+        d = float(dcol[k]) if dcol is not None and 0 <= k < len(dcol) and math.isfinite(float(dcol[k])) else dmin
+        r["delta"] = round(d, 6)
+    if scorer is None or not hasattr(scorer, "refit"):
+        return
+    for r in rows[:int(limit)]:
+        k, j, m = int(r["k"]), r.get("ae"), r.get("m")
+        s = seg_of_k.get(k)
+        sim = seg_sim(s, k, *raw_wh) if s is not None else None
+        if j is None or m is None or sim is None:
+            continue
+        zs = []
+        for jj in (int(m), int(j)):
+            key = (k, jj, bool(s.flip_h))
+            if key not in memo:
+                fit = scorer.refit(k, (jj, sim, bool(s.flip_h)))
+                memo[key] = float(fit[1]) if fit is not None else float(scorer.score(k, [(jj, sim, bool(s.flip_h))])[0])
+            zs.append(memo[key])
+        if all(math.isfinite(z) for z in zs):
+            r["z_m"], r["z_ae"] = round(zs[0], 5), round(zs[1], 5)
+            r["gap"] = round(zs[0] - zs[1], 5)
+    for r in rows:
+        g = r.get("gap")
+        r["class"] = None if g is None else ("within noise" if g <= r["delta"] else "outside noise")
+    by_k = sorted((r for r in rows if r.get("ae") is not None and r.get("m") is not None), key=lambda r: r["k"])
+    run: list[dict] = []
+    for r in by_k + [None]:
+        if r is not None and run and r["k"] == run[-1]["k"] + 1 and \
+                np.sign(r["ae"] - r["m"]) == np.sign(run[-1]["ae"] - run[-1]["m"]):
+            run.append(r)
+            continue
+        if len(run) >= 2 and sum(max(0.0, float(x.get("gap") or 0.0)) for x in run) > max(x["delta"] for x in run):
+            for x in run:
+                x["class"] = "systematic run"
+        run = [r] if r is not None else []
+
+
 def _measured_reference(fm: FrameMap) -> tuple[dict[str, np.ndarray], str]:
     """refine's measurement (DESIGN §7 D4): the 'pre_segment_*' columns segment.py keeps, else the FrameMap
     itself (maps that never went through segmentation)."""
@@ -1975,7 +2040,8 @@ def _measured_reference(fm: FrameMap) -> tuple[dict[str, np.ndarray], str]:
 def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fraction, n_main: int,
                  cut_frames_main: Iterable[int], cfg: Any, source: str = "plan",
                  segments: Sequence[Segment] | None = None, raw_fps: Fraction | None = None,
-                 n_raw: int | None = None) -> dict:
+                 n_raw: int | None = None, scorer: Any = None, raw_wh: tuple[float, float] | None = None,
+                 evidence_memo: dict | None = None) -> dict:
     """Criterion 3 / Stage 9.2: the RAW frame AE shows (simulated from the plan or the mock record) against
     the RAW frame the competitor showed.
 
@@ -2084,8 +2150,15 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
             ambiguous.append({**row, "range": [lo, hi]})
             continue
         if j is not None and (bool(tie_post[k]) or bool(ref["tie"][k])) and abs(j - m) <= 1:
-            ties.append(row)
-            continue
+            # FX-11: a tie is a property of sampling a moving line ON a frame boundary -- accepted only where the
+            # covering segment's own position is within TIE_SLACK of a boundary; a hold (freeze, frame-exact keys
+            # at j + 0.25) never ties (with segments; without them the tie flag is all there is)
+            sl = _tie_slack(seg_of_k.get(k), k, cf, Fraction(raw_fps) if raw_fps is not None else cf) \
+                if segments is not None else 0.0
+            if sl is not None and sl < float(getattr(_phase(), "TIE_SLACK", 1e-4)):
+                ties.append({**row, "slack": None if segments is None else round(sl, 7)})
+                continue
+            row["tie_rejected"] = "hold" if sl is None else f"slack {sl:.2e} RAW frame >= TIE_SLACK"
         if j is not None and not same_grid:
             br = _grid_bracket(k, m, ref, seg_of_k, cf, Fraction(raw_fps) if raw_fps is not None else cf)
             if br is not None and br[0] <= j <= br[1]:
@@ -2100,6 +2173,14 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
                            "score": None if np.isnan(fm.score[k]) else round(float(fm.score[k]), 4)})
     n_ok = n_exact + len(ambiguous) + len(ties) + len(grid) + len(mix_ties)
     frac = n_ok / n_matched if n_matched else 1.0
+    for r in mismatches:
+        r.setdefault("why", "mismatch")
+    if raw_wh is not None and (reassigned or mismatches):
+        reassignment_evidence(reassigned + mismatches, fm, seg_of_k, scorer, raw_wh, cfg, evidence_memo)
+    classes: dict[str, int] = {}
+    for r in reassigned + mismatches:
+        if r.get("class"):
+            classes[r["class"]] = classes.get(r["class"], 0) + 1
     failures: list[str] = []
     exceptions: list[str] = []
     if n_matched == 0:
@@ -2118,7 +2199,12 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
                        reassigned),
                       ("not reproduced exactly (AE frame differs from the measured m(k))", mismatches)):
         if lst:
-            exceptions.append(f"{source}: {len(lst)} frame(s) {name}: k = {_ranges([x['k'] for x in lst])[:10]}")
+            cls: dict[str, int] = {}
+            for x in lst:
+                if x.get("class"):
+                    cls[x["class"]] = cls.get(x["class"], 0) + 1
+            extra_c = (" (" + ", ".join(f"{v} {c}" for c, v in sorted(cls.items())) + ")") if cls else ""
+            exceptions.append(f"{source}: {len(lst)} frame(s) {name}: k = {_ranges([x['k'] for x in lst])[:10]}{extra_c}")
     n_exc = len(ambiguous) + len(ties) + len(grid) + len(reassigned) + len(mismatches) + len(mix_ties)
     status = "fail" if failures else ("pass_with_exceptions" if n_exc else "pass")
     summary = (f"{source}: {n_exact}/{n_matched} exact"
@@ -2136,8 +2222,38 @@ def check_ae_sim(frames: dict, fm: FrameMap, comp_fps: Fraction, main_fps: Fract
             "frame_mix": frame_mix[:500], "n_frame_mix": len(frame_mix), "frame_mix_tie": mix_ties,
             "reassigned": reassigned[:500], "n_reassigned": len(reassigned),
             "mismatches": mismatches[:500], "n_mismatches": len(mismatches), "excluded_near_cuts": len(excluded),
+            "reassigned_classes": classes,
             "plan_mismatches": plan_bad[:500], "n_plan_mismatches": len(plan_bad),
             "transition_frames_checked": n_trans, "solid_frames_checked": n_solid}
+
+
+_AE_SIM_LISTS = ("ambiguous_identical", "timing_tie", "grid", "frame_mix_tie", "reassigned", "mismatches",
+                 "plan_mismatches")
+
+
+def _ae_sim_signature(r: dict) -> str:
+    """What a check_ae_sim result classified, independent of its source label."""
+    sig = {name: [x.get("k", x.get("K")) for x in (r.get(name) or [])] for name in _AE_SIM_LISTS}
+    sig.update({k: r.get(k) for k in ("status", "matched", "exact", "fraction_ok", "n_plan_mismatches")})
+    return json.dumps(sig, sort_keys=True, default=str)
+
+
+def merge_ae_sim(p2: dict, m2: dict) -> dict:
+    """s9_2 from the plan and the mock-run record. When both classify every frame identically (the usual case) the
+    result is printed ONCE ('plan == mock record', FX-12); otherwise both are listed."""
+    if p2.get("status") == m2.get("status") and "matched" in p2 and "matched" in m2 and \
+            _ae_sim_signature(p2) == _ae_sim_signature(m2):
+        lab = lambda s: s.replace("plan:", "plan == mock record:", 1) if s.startswith("plan:") else s  # noqa: E731
+        p = dict(p2)
+        p["failures"] = [lab(f) for f in p2.get("failures", [])]
+        p["exceptions"] = [lab(e) for e in p2.get("exceptions", [])]
+        p["summary"] = lab(str(p2.get("summary", "")))
+        return {"status": p2["status"], "summary": p["summary"], "failures": p["failures"], "exceptions": p["exceptions"],
+                "plan": p, "mock": {"status": m2["status"], "summary": "identical to the plan's simulation",
+                                    "same_as_plan": True}, "same": True}
+    return {"status": aggregate([p2["status"], m2["status"]]), "summary": f"{p2.get('summary')} | {m2.get('summary')}",
+            "failures": p2.get("failures", []) + m2.get("failures", []),
+            "exceptions": p2.get("exceptions", []) + m2.get("exceptions", []), "plan": p2, "mock": m2, "same": False}
 
 
 def _grid_bracket(k: int, m: int, ref: dict, seg_of_k: dict[int, Segment], comp_fps: Fraction,
@@ -4445,7 +4561,8 @@ def verify_all(ctx: Any) -> dict:
         if ctx.plan is None:
             return {"status": "fail", "summary": "no AE plan", "failures": ["ae_plan missing"]}
         return check_ae_sim(export_ae.simulate_ae(ctx.plan), ctx.fm, comp_fps, main_fps, n_main, cut_main, cfg, "plan",
-                            segments=segs, raw_fps=raw_fps, n_raw=n_raw)
+                            segments=segs, raw_fps=raw_fps, n_raw=n_raw, scorer=get_scorer_ov(), raw_wh=raw_wh,
+                            evidence_memo=ev_memo)
 
     def s9_2_mock() -> dict:
         rec = (ctx.mock or {}).get("default")
@@ -4455,13 +4572,12 @@ def verify_all(ctx: Any) -> dict:
             return {"status": "fail", "summary": "mock run failed", "failures": [str(_get(rec, "error"))]}
         sim = simulate_record(rec, raw_name, raw_fps, main_fps, n_main)
         return check_ae_sim(sim, ctx.fm, comp_fps, main_fps, n_main, cut_main, cfg, "mock record",
-                            segments=segs, raw_fps=raw_fps, n_raw=n_raw)
+                            segments=segs, raw_fps=raw_fps, n_raw=n_raw, scorer=get_scorer_ov(), raw_wh=raw_wh,
+                            evidence_memo=ev_memo)
 
+    ev_memo: dict = {}
     p2, m2 = _run_check("s9_2_plan", s9_2_plan), _run_check("s9_2_mock", s9_2_mock)
-    checks["s9_2_ae_sim"] = {"status": aggregate([p2["status"], m2["status"]]),
-                             "summary": f"{p2.get('summary')} | {m2.get('summary')}",
-                             "failures": p2.get("failures", []) + m2.get("failures", []),
-                             "exceptions": p2.get("exceptions", []) + m2.get("exceptions", []), "plan": p2, "mock": m2}
+    checks["s9_2_ae_sim"] = merge_ae_sim(p2, m2)
 
     # s9_3 visual + s9_4 cut images on the match-geometry recreation
     src_holder: dict[str, Any] = {}

@@ -600,6 +600,94 @@ def test_ae_sim_compares_with_the_pre_segment_measurement():
     assert [x["k"] for x in r["ambiguous_identical"]] == [5] and not r["reassigned"]
 
 
+def test_ae_sim_ties_only_from_the_plans_own_slack(phase):
+    """FX-11: a timing tie is a property of sampling a moving line ON a frame boundary. With the cutlist, a frame
+    flagged 'tie' is accepted only where its segment's own position is within TIE_SLACK of a boundary: a freeze
+    (speed 0, a remap hold) never ties (an AE frame one off there is a mismatch), and neither does a stretch frame
+    with plenty of slack."""
+    tie_slack = 1e-4                            # phase_solve.TIE_SLACK (the fixture stubs phase_solve)
+    n = 40
+    # S1: v = 1 at 30 fps whose position at k = 10 sits exactly on a boundary (raw_in = 100 / 30 s: integer
+    # positions everywhere); S2: a 10-frame freeze on RAW 200
+    s1 = seg(1, "raw", 0, 30, 100)
+    s1.raw_in_seconds = 100 / 30.0
+    s2 = seg(2, "raw", 30, n, None, speed=0.0)
+    s2.time_remap_keys = [{"comp_frame": 30, "raw_seconds": 200.25 / 30.0}, {"comp_frame": 40, "raw_seconds": 200.25 / 30.0}]
+    truth = [100 + k for k in range(30)] + [200] * 10
+    fm = _with_pre_segment(frame_map(truth))
+    sim = list(truth)
+    sim[10] = truth[10] - 1                     # the floor of an exact boundary may land one lower: a real tie
+    sim[33] = truth[33] + 1                     # one off on the freeze
+    fm.tie[10] = fm.tie[33] = True
+    fm.d["pre_segment_tie"] = np.asarray(fm.tie).copy()
+    r = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, n, [], Config(), segments=[s1, s2], raw_fps=F30)
+    assert [x["k"] for x in r["timing_tie"]] == [10] and r["timing_tie"][0]["slack"] < tie_slack
+    assert [x["k"] for x in r["mismatches"]] == [33] and r["mismatches"][0]["tie_rejected"] == "hold"
+    # a stretch frame with 0.5 RAW frame of slack is no tie either
+    s1.raw_in_seconds = 100.5 / 30.0
+    r = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, n, [], Config(), segments=[s1, s2], raw_fps=F30)
+    assert 10 not in [x["k"] for x in r["timing_tie"]] and "slack" in r["mismatches"][0]["tie_rejected"]
+
+
+class RefitStub(StubScorer):
+    """StubScorer whose refit returns the stub score (its 'own framing' measurement)."""
+
+    def refit(self, k, cand, inits=()):
+        return cand[1], float(self.score(k, [cand])[0])
+
+
+def test_ae_sim_reassigned_rows_carry_reason_gap_delta_and_class(phase):
+    """FX-11 / FX-12: every re-assigned / mismatched c3 row says WHY (segment.py's reason column), the scores of
+    refine's frame and of the AE frame each under its own per-frame refit, the gap, refine's delta and a class --
+    within noise / outside noise / systematic run (consecutive rows in one direction whose summed gap exceeds delta).
+    Evidence only: the fraction and the status do not change."""
+    from match_cuts.model import reassign_code
+    truth = list(range(100, 300))
+    fm = _with_pre_segment(frame_map(truth))
+    fm.delta = np.full(200, 0.003, np.float32)
+    re_ks = {50: 1, 120: 1, 121: 1, 122: 1}
+    for k, d in re_ks.items():
+        fm.d["pre_segment_raw"][k] = truth[k] + d
+        fm.d["pre_segment_raw_lo"][k] = fm.d["pre_segment_raw_hi"][k] = truth[k] + d
+    ra = np.zeros(200, np.int8)
+    ra[50] = reassign_code("model")
+    ra[[120, 121, 122]] = reassign_code("tiny_segment_merged")
+    fm.reassigned = ra
+    segs = [seg(1, "raw", 0, 200, 100)]
+    segs[0].raw_in_seconds = 100.5 / 30.0
+    # the stub's 'truth' is refine's measured frame: m beats the AE frame by 0.02 per RAW frame
+    scorer = RefitStub({k: int(fm.d["pre_segment_raw"][k]) for k in range(200)})
+    base = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config(), segments=segs, raw_fps=F30)
+    r = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config(), segments=segs, raw_fps=F30,
+                            scorer=scorer, raw_wh=(1920.0, 1080.0))
+    assert r["status"] == base["status"] and r["fraction_ok"] == base["fraction_ok"]
+    rows = {x["k"]: x for x in r["reassigned"]}
+    assert rows[50]["why"] == "model" and rows[120]["why"] == "tiny_segment_merged"
+    assert rows[50]["gap"] == pytest.approx(0.02, abs=1e-6) and rows[50]["delta"] == pytest.approx(0.003)
+    assert rows[50]["class"] == "outside noise"
+    assert {rows[k]["class"] for k in (120, 121, 122)} == {"systematic run"}
+    assert r["reassigned_classes"] == {"outside noise": 1, "systematic run": 3}
+    assert any("systematic run" in e for e in r["exceptions"])
+
+
+def test_ae_sim_plan_and_mock_record_printed_once_when_identical():
+    """FX-12: s9_2 from the plan and from the mock-run record classify every frame the same in the usual case: the
+    result is printed once ('plan == mock record'), otherwise both are listed."""
+    truth = list(range(100, 300))
+    fm = frame_map(truth)
+    sim = list(truth)
+    sim[9] = truth[9] + 3
+    p2 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="plan")
+    m2 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="mock record")
+    merged = verify.merge_ae_sim(p2, m2)
+    assert merged["same"] and len(merged["exceptions"]) == len(p2["exceptions"])
+    assert all(e.startswith("plan == mock record:") for e in merged["exceptions"])
+    sim[11] = truth[11] + 2
+    m3 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="mock record")
+    merged = verify.merge_ae_sim(p2, m3)
+    assert not merged["same"] and len(merged["exceptions"]) == len(p2["exceptions"]) + len(m3["exceptions"])
+
+
 def _two_seg_cutlist(n: int = 400, cut: int = 200) -> list[Segment]:
     return [seg(1, "raw", 0, cut, 1000), seg(2, "raw", cut, n, 3000)]
 
