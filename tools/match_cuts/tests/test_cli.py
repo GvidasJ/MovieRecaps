@@ -696,7 +696,8 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     decisions = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
     assert any(d["stage"] == "phase_solve" and d["decision"] == "raw_in" for d in decisions)
     report = (out / "report.md").read_text()
-    assert "## 1. Acceptance criteria" in report and "Section could not be rendered" not in report
+    assert report.index("## 1. Summary") < report.index("## 2. Acceptance criteria")   # plain-language summary first
+    assert "Section could not be rendered" not in report
     for line in ("c1 coverage", "c6 After Effects", "9.7 determinism"):
         assert line in printed
     assert calls["refine"] == 1 and calls["index"] == 1
