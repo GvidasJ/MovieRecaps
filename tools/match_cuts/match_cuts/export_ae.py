@@ -1969,6 +1969,19 @@ __HEADER__
         }
     }
 
+    // Remove every key of P whose time is not one of 'times' (never the last key: P keeps the plan's keys).
+    function removeStrayKeys(P, times) {
+        var i, j, t, ours;
+        for (i = P.numKeys; i >= 1; i--) {
+            t = P.keyTime(i);
+            ours = false;
+            for (j = 0; j < times.length; j++) {
+                if (Math.abs(times[j] - t) < 1e-6) { ours = true; break; }
+            }
+            if (!ours && P.numKeys > 1) { P.removeKey(i); }
+        }
+    }
+
     // Stretch mode (strict order: stretch -> startTime -> inPoint -> outPoint), then the self-check
     // recomputes every frame from the READ-BACK startTime/stretch. Returns the number of mismatches.
     function placeStretch(L, s) {
@@ -1994,11 +2007,13 @@ __HEADER__
         L.inPoint = tIn;
         L.outPoint = tOut;
         if (!L.canSetTimeRemapEnabled) { throw new Error("layer " + L.name + " cannot be time-remapped"); }
+        // Time Remap is hidden until time remapping is enabled, and removing its LAST key turns time remapping
+        // off again (AE: "Can not 'set value at times' ... the property or a parent property is hidden"): enable
+        // it first, write the plan's keys, and only then remove AE's own start / end keys that are not ours
         L.timeRemapEnabled = true;
         L.inPoint = tIn;
         L.outPoint = tOut;
         P = L.property("ADBE Time Remapping");
-        while (P.numKeys > 0) { P.removeKey(P.numKeys); }
         if (frameExact) {
             for (i = 0; i < s.expect.length; i++) {
                 times.push(T(s.compIn + i, C));
@@ -2010,7 +2025,9 @@ __HEADER__
                 vals.push(s.remap[i].v);
             }
         }
+        if (!L.timeRemapEnabled) { L.timeRemapEnabled = true; }
         setKeys(P, times, vals, frameExact);
+        removeStrayKeys(P, times);
         if (P.numKeys !== times.length) { warn(L.name + ": " + P.numKeys + " time remap keys (expected " + times.length + ")"); }
         if (Math.abs(L.inPoint - tIn) > 1e-6 || Math.abs(L.outPoint - tOut) > 1e-6) {
             warn(L.name + ": in/out point differs from the plan");
@@ -2163,8 +2180,11 @@ __HEADER__
 
     function applyAudioKeys(L, s) {
         var P, t = [], v = [], i;
-        if (s.audioKeys.length === 0 || !L.hasAudio) { return; }
-        P = L.property("ADBE Audio Group").property("ADBE Audio Levels");
+        // Audio Levels is hidden on a layer without audio: no keys there (AE would stop the script)
+        if (s.audioKeys.length === 0 || !L.hasAudio || !L.audioEnabled) { return; }
+        P = L.property("ADBE Audio Group");
+        if (P === null) { return; }
+        P = P.property("ADBE Audio Levels");
         for (i = 0; i < s.audioKeys.length; i++) {
             t.push(T(s.audioKeys[i].k, C));
             v.push([s.audioKeys[i].v, s.audioKeys[i].v]);

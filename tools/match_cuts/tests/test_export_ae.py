@@ -829,6 +829,54 @@ def test_plan_dip_flash_and_lcut():
     assert ea.raw_frames_by_layer(sim) == expected_frames(cl)
 
 
+HIDDEN = "Can not 'set value at times' with this property, because the property or a parent property is hidden"
+
+
+@needs_node
+def test_time_remap_keys_are_written_while_time_remapping_is_on(tmp_path):
+    """Real After Effects turns time remapping OFF when the last Time Remap key is removed, and then refuses
+    to key the hidden property (the user's 'build_ae_project.jsx failed (line 101)'). The JSX writes the plan's
+    keys first and only then removes AE's own start / end keys; the old remove-all-first order must fail."""
+    cl, cfg, plan, jsx = build(tmp_path, ae_time_mode="frames")
+    res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("default",))
+    assert res["status"] == "pass", res["failures"]
+    assert ea.raw_frames_by_layer(ea.simulate_ae(res["records"]["default"])) == expected_frames(cl)
+    text = jsx.read_text(encoding="utf-8")
+    ours = '        P = L.property("ADBE Time Remapping");\n        if (frameExact) {'
+    reenable = "        if (!L.timeRemapEnabled) { L.timeRemapEnabled = true; }\n"
+    assert ours in text and reenable in text
+    old = text.replace(ours, '        P = L.property("ADBE Time Remapping");\n'
+                             '        while (P.numKeys > 0) { P.removeKey(P.numKeys); }\n        if (frameExact) {')
+    old = old.replace(reenable, "")
+    bad = tmp_path / "old_order.jsx"
+    bad.write_text(old, encoding="utf-8")
+    rec = ea.run_jsx_in_mock(bad, meta_for(cl))
+    assert any("failed" in a for a in rec["alerts"]), rec["alerts"]
+    assert any(HIDDEN in e for e in rec["mock_errors"]), rec["mock_errors"]
+    assert rec["saved"] == []
+
+
+@needs_node
+def test_audio_levels_are_not_keyed_on_a_layer_without_audio(tmp_path):
+    """The plan has crossfade Audio Levels keys, but After Effects reads the RAW without audio: Audio Levels is
+    hidden there, so the JSX must skip those keys (writing them stops the script, as the mock now does)."""
+    cl, cfg, plan, jsx = build(tmp_path)
+    assert layer(plan, "seg4")["audioKeys"] and layer(plan, "seg5")["audioKeys"]
+    meta = meta_for(cl)
+    for spec in meta.values():
+        spec["has_audio"] = False
+    rec = ea.run_jsx_in_mock(jsx, meta)
+    assert not any("failed" in a for a in rec["alerts"]), rec["alerts"]
+    assert not any(HIDDEN in e for e in rec["mock_errors"]) and rec["saved"], rec["mock_errors"]
+    guard = "        if (s.audioKeys.length === 0 || !L.hasAudio || !L.audioEnabled) { return; }\n"
+    text = jsx.read_text(encoding="utf-8")
+    assert guard in text
+    bad = tmp_path / "no_guard.jsx"
+    bad.write_text(text.replace(guard, "        if (s.audioKeys.length === 0) { return; }\n"), encoding="utf-8")
+    rec2 = ea.run_jsx_in_mock(bad, meta)
+    assert any(HIDDEN in e for e in rec2["mock_errors"]), rec2["mock_errors"]
+
+
 @needs_node
 def test_mock_dip_flash_lcut_and_blur_background(tmp_path):
     cl = dip_cutlist()

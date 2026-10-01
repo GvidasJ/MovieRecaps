@@ -383,8 +383,18 @@ function createMock(opts) {
       const L = this._owner;
       return L._startTime + lt * L._stretch / 100;
     }
-    _editable() {
-      if (this._opt.remap && !this._owner._remap) throw err(this._what() + ': time remapping is not enabled on layer "' + this._owner._name + '"');
+    // After Effects hides Time Remap until time remapping is enabled, and Audio Levels on a layer without audio;
+    // writing a hidden property stops the script with this exact error
+    _hidden() {
+      if (this._opt.remap) return !this._owner._remap;
+      if (this._mn === 'ADBE Audio Levels') return !(this._owner._hasAudio && this._owner._hasAudio());
+      return false;
+    }
+    _editable(verb) {
+      if (this._hidden()) {
+        throw err('After Effects error: Can not \'' + (verb || 'set value') + '\' with this property, because the ' +
+                  'property or a parent property is hidden. (' + this._what() + ' on layer "' + this._owner._name + '")');
+      }
     }
     _validate(v) {
       const what = this._what();
@@ -437,14 +447,14 @@ function createMock(opts) {
       return Array.isArray(v) ? carr(v) : v;
     }
     setValue(v) {
-      this._editable();
+      this._editable('set value');
       if (this._keys.length > 0) throw err(this._what() + '.setValue: the property has keyframes (use setValueAtTime)');
       this._value = this._validate(v);
       this._touched = true;
     }
-    setValueAtTime(t, v) { this._editable(); this._addKey(t, v); }
+    setValueAtTime(t, v) { this._editable('set value at time'); this._addKey(t, v); }
     setValuesAtTimes(ts, vs) {
-      this._editable();
+      this._editable('set value at times');
       if (!Array.isArray(ts) || !Array.isArray(vs)) throw err(this._what() + '.setValuesAtTimes: expected two Arrays');
       if (ts.length !== vs.length) throw err(this._what() + '.setValuesAtTimes: ' + ts.length + ' times but ' + vs.length + ' values');
       for (let i = 0; i < ts.length; i++) this._addKey(ts[i], vs[i]);
@@ -486,7 +496,11 @@ function createMock(opts) {
     get numKeys() { return this._keys.length; }
     keyTime(i) { return this._ct(this._keys[this._needKeys(i, 'keyTime')].lt); }
     keyValue(i) { const v = this._keys[this._needKeys(i, 'keyValue')].value; return Array.isArray(v) ? carr(v) : v; }
-    removeKey(i) { this._keys.splice(this._needKeys(i, 'removeKey'), 1); }
+    removeKey(i) {
+      this._keys.splice(this._needKeys(i, 'removeKey'), 1);
+      // like After Effects: removing the LAST Time Remap key turns time remapping off (Time Remap is hidden again)
+      if (this._opt.remap && this._keys.length === 0 && this._owner._remap) this._owner.timeRemapEnabled = false;
+    }
     setInterpolationTypeAtKey(i, inT, outT) {
       const k = this._keys[this._needKeys(i, 'setInterpolationTypeAtKey')];
       const a = enumIn(inT, 'KeyframeInterpolationType', this._what() + '.setInterpolationTypeAtKey(inType)');
@@ -1050,7 +1064,8 @@ function createMock(opts) {
         case 'ADBE Time Remapping':
           if (!this.canSetTimeRemapEnabled) return null;
           return wrap(this._remapProp);
-        case 'ADBE Audio Group': return this._hasAudio() ? wrap(this._group('audio')) : null;
+        // AE keeps the Audio group of a footage / comp layer without audio, but HIDDEN (writing it throws)
+        case 'ADBE Audio Group': return this._kind === 'solid' ? null : wrap(this._group('audio'));
         case 'ADBE Mask Parade': return wrap(this._group('masks'));
         case 'ADBE Effect Parade': return wrap(this._group('effects'));
         default: break;
