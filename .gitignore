@@ -13,3 +13,5 @@ node_modules/
 # example outputs: keep the small proof files, not the media / renders
 examples/**/media/
 examples/**/*.mp4
+# temporary agent worktrees
+.claude/worktrees/
