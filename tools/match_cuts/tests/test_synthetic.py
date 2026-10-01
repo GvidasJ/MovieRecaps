@@ -27,7 +27,10 @@ Slow: run with ``--runslow`` or ``MATCH_CUTS_SLOW=1``.
 30 fps grid, editor pans over moving RAW shots, a split 86 ms A/V delay, retimes, gray / lookalike inserts) plus
 the ``test_film24_*`` truth assertions below. Every film24 assertion that the CURRENT pipeline fails is marked
 ``xfail(strict=True)`` with the fix that must make it pass (FX-xx of the real-run diagnosis); a fix removes its
-xfail, and a strict XPASS tells whoever lands it to do so. ``MATCH_CUTS_E2E_REUSE=<dir>`` reuses a finished CLI
+xfail, and a strict XPASS tells whoever lands it to do so. film24's verdict is pinned exactly (wave 4): c1, c2, c4,
+c5, c6 pass (or pass with listed exceptions); c3 fails ONLY for its 'uncertain' segments (the gray-zone chain and
+the lookalike insert, undecidable by construction), so the CLI exits 1 and says so (test_cli_succeeds,
+test_verify_criteria); mini / full keep requiring a full PASS. ``MATCH_CUTS_E2E_REUSE=<dir>`` reuses a finished CLI
 run in <dir> (``output/``, ``work/``) instead of running the CLI (test development only).
 """
 from __future__ import annotations
@@ -285,10 +288,64 @@ def _inverse_apply(sim: dict, q: tuple[float, float]) -> np.ndarray:
 # tests
 # ------------------------------------------------------------------------------------------------------
 
-@film_xfail("FX-02/FX-03/FX-04/FX-08: the CLI exits 1 on film24 (criteria c2-c5 fail)")
-def test_cli_succeeds(e2e):
+def _variant_xfail():
+    """The A/V-offset variants of film24 (film24_av0 / _avm50 / _av150, FX-02) were never calibrated: their honest
+    outcome is not pinned (non-strict xfail there; no mark on mini / full / film24)."""
+    return pytest.mark.xfail(FILM and PROFILE != "film24", strict=False,
+                             reason="film24 A/V-offset variant: honest outcome not calibrated (FX-02)")
+
+
+def _undecidable(truth: dict) -> list[tuple[int, int]]:
+    """Truth ranges whose honest state may be 'uncertain' (``_type_ok``): film24's gray-zone chain and its NOT-IN-RAW
+    lookalike -- undecidable from the pixels by construction. Empty on mini / full."""
+    return sorted((int(t["comp_in"]), int(t["comp_out"])) for t in truth["segments"]
+                  if t.get("kind") == "gray" or t.get("lookalike_shot") is not None)
+
+
+def _uncertain_segments(cutlist: dict) -> list[tuple[int, int]]:
+    return sorted((int(s["comp_in"]), int(s["comp_out"])) for s in cutlist["segments"] if s["type"] == "uncertain")
+
+
+CLI_CRITERION_LABELS = {"c1_coverage": "c1 coverage", "c2_cuts": "c2 frame-exact cuts",
+                        "c3_source_frames": "c3 frame-exact source frames", "c4_speed_framing": "c4 speed / framing",
+                        "c5_audio": "c5 audio", "c6_after_effects": "c6 After Effects"}
+
+
+@_variant_xfail()
+def test_cli_succeeds(e2e, cutlist):
+    """mini / full: exit 0 (PASS). film24 (wave 4, the honest outcome): an 'uncertain' segment is a criterion-3
+    FAILURE (neither matched nor NOT-IN-RAW), so the CLI exits 1 (FAIL) -- for that reason ONLY: c1, c2, c4, c5,
+    c6 PASS / PASS*, c3 FAIL, every verification failure it prints is the UNCERTAIN line, and the uncertain segments
+    are exactly truth ranges that cannot be decided (``_undecidable``). No uncertain segment -> exit 0."""
     proc = e2e["proc"]
-    assert proc.returncode == 0, f"CLI exit code {proc.returncode} after {e2e['elapsed']:.0f}s{_tail(proc)}"
+    unc = _uncertain_segments(cutlist)
+    if not FILM or not unc:
+        assert proc.returncode == 0, f"CLI exit code {proc.returncode} after {e2e['elapsed']:.0f}s{_tail(proc)}"
+        return
+    text = proc.stdout + "\n" + proc.stderr
+    allowed = set(_undecidable(e2e["truth"]))
+    rows = [["uncertain segment", f"{a}-{b - 1}", "a truth gray / lookalike range", sorted(allowed)]
+            for a, b in unc if (a, b) not in allowed]
+    if proc.returncode != 1:
+        rows.append(["exit code", proc.returncode, 1, "FAIL code (an uncertain segment fails criterion 3)"])
+    if "match_cuts result: FAIL" not in text:
+        rows.append(["headline", "-", "match_cuts result: FAIL", "missing"])
+    for key, label in CLI_CRITERION_LABELS.items():
+        line = next((ln for ln in text.splitlines() if ln.strip().startswith(label)), None)
+        st = line.strip()[len(label):].split()[0] if line else None
+        want = ("FAIL",) if key == "c3_source_frames" else ("PASS", "PASS*")
+        if st not in want:
+            rows.append([label, st, "/".join(want), (line or "no summary line").strip()[:160]])
+        elif key == "c3_source_frames" and f"{sum(b - a for a, b in unc)} uncertain frames in {len(unc)} segment" \
+                not in line:
+            rows.append([label, st, "says why (uncertain frames / segments)", line.strip()[:200]])
+    said = [ln for ln in text.splitlines() if "verification: " in ln]
+    if not any("UNCERTAIN segment" in ln for ln in said):
+        rows.append(["warning", "-", "verification: c3_source_frames: ... UNCERTAIN segment(s) ...", "not printed"])
+    rows += [["warning", "-", "only the UNCERTAIN failure", ln.strip()[:200]] for ln in said
+             if "UNCERTAIN segment" not in ln]
+    assert not rows, _table(f"film24 CLI outcome is not the honest one (exit {proc.returncode}):",
+                            ["what", "got", "want", "detail"], rows) + _tail(proc, 30)
 
 
 def test_coverage_and_totals(e2e, cutlist):
@@ -621,11 +678,48 @@ def test_not_in_raw_placeholder(e2e, cutlist):
     assert got == want, f"NOT-IN-RAW placeholders {got} != truth {want} (uncertain segments: {sorted(unc)})"
 
 
-@film_xfail("FX-01..FX-09: c2-c5 fail on film24")
-def test_verify_criteria(verify):
+def _c3_uncertain_rows(truth: dict, cutlist: dict, verify: dict) -> list[list]:
+    """film24's honest criterion 3 (wave 4): status 'fail' exactly when 'uncertain' segments exist, and ONLY for
+    them -- s9_2 (AE simulation), s9_2b (temporal), s9_2c (+-1 refit) and s9_3 (visual) all pass (with their listed
+    exceptions), the uncertain accounting lists exactly the cutlist's uncertain segments, each one a truth range
+    that cannot be decided (``_undecidable``), and every verification failure is that one UNCERTAIN line."""
+    c3 = (verify.get("criteria") or {}).get("c3_source_frames") or {}
+    det = c3.get("details") or {}
+    unc = _uncertain_segments(cutlist)
+    rows = []
+    if (c3.get("status") != "fail") if unc else (c3.get("status") not in OK):
+        rows.append(["c3_source_frames", c3.get("status"),
+                     f"want {'fail (uncertain segments)' if unc else 'pass|pass_with_exceptions'}: "
+                     f"{c3.get('summary', '')[:300]}"])
+    for sub in ("s9_2", "s9_2b", "s9_2c", "s9_3"):
+        d = det.get(sub) or {}
+        if d.get("status") not in OK:
+            rows.append([f"c3 {sub}", d.get("status"),
+                         f"want pass|pass_with_exceptions: {json.dumps(d.get('failures'), default=str)[:300]}"])
+    u = det.get("uncertain") or {}
+    got = sorted((int(r["comp_in"]), int(r["comp_out"])) for r in u.get("segments") or [])
+    if got != unc or int(u.get("frames", -1)) != sum(b - a for a, b in unc):
+        rows.append(["c3 uncertain", f"{got} ({u.get('frames')} frames)", f"want the cutlist's {unc}"])
+    allowed = set(_undecidable(truth))
+    rows += [["c3 uncertain", f"{a}-{b - 1}", f"want a truth gray / lookalike range {sorted(allowed)}"]
+             for a, b in unc if (a, b) not in allowed]
+    fails = list(verify.get("failures") or [])
+    if unc and not (len(fails) == 1 and fails[0].startswith("c3_source_frames: ") and "UNCERTAIN segment" in fails[0]):
+        rows.append(["failures", f"{len(fails)} lines", f"want exactly the c3 UNCERTAIN line: "
+                                                        f"{json.dumps(fails, default=str)[:400]}"])
+    return rows
+
+
+@_variant_xfail()
+def test_verify_criteria(e2e, cutlist, verify):
+    """c1, c2, c4, c5 pass (or pass with listed exceptions), c6 pass, 9.7 pass. c3: mini / full pass; film24 fails
+    exactly for its 'uncertain' segments and nothing else (``_c3_uncertain_rows``)."""
     crit = verify.get("criteria", {})
     rows = []
     for c in ("c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio"):
+        if c == "c3_source_frames" and FILM:
+            rows += _c3_uncertain_rows(e2e["truth"], cutlist, verify)
+            continue
         st = (crit.get(c) or {}).get("status")
         if st not in OK:
             rows.append([c, st, json.dumps((crit.get(c) or {}).get("details"), default=str)[:300]])
