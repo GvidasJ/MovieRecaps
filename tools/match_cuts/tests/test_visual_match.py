@@ -367,9 +367,65 @@ def test_audio_window_restricts_search(scene, built):
     assert res[0][1] and res[0][1][0].source == "audio" and res[0][1][0].raw == truth[k]["raw"]
 
 
+def _rotated_neighbour_scene(j0: int = 12):
+    """RAW = one shot where frame j0+1 is frame j0 rotated 0.9 deg and shifted 10 px (a jolt of the camera); the
+    competitor's single frame shows RAW j0 unrotated."""
+    frames = np.stack(make_shot(21, 30, 0))
+    W, H = RAW_FULL
+    M = cv2.getRotationMatrix2D((W / 2.0, H / 2.0), 0.9, 1.0)
+    M[0, 2] += 10.0
+    frames[j0 + 1] = cv2.warpAffine(frames[j0], M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    rw, rh = int(W * PR), int(H * PR)
+    rawp = np.stack([cv2.resize(f, (rw, rh), interpolation=cv2.INTER_AREA) for f in frames])
+    raw = Proxy("raw", "", rawp, RAW_FULL, (rw / W, rh / H), RAW_FPS, np.arange(len(frames)) / float(RAW_FPS),
+                len(frames))
+    cw, chh = COMP_FULL
+    cov = np.zeros((chh, cw), np.float32)
+    cov[int(BOX.y):int(BOX.y + BOX.h), int(BOX.x):int(BOX.x + BOX.w)] = 1.0
+    sim = centred_sim(0.85, 0.0)
+    m = to_cv_matrix(sim, False, W, (1.0, 1.0), (1.0, 1.0))
+    img = np.clip(cv2.warpAffine(frames[j0].astype(np.float32), m, (cw, chh)) * cov
+                  + np.random.default_rng(4).normal(0, 1.5, (chh, cw)), 0, 255).astype(np.uint8)
+    cp = np.stack([cv2.resize(img, (int(cw * PR), int(chh * PR)), interpolation=cv2.INTER_AREA)])
+    comp = Proxy("competitor", "", cp, COMP_FULL, (PR, PR), COMP_FPS, np.zeros(1), 1)
+    return raw, comp, Layout(comp_w=cw, comp_h=chh, box=BOX), sim, frames, M
+
+
+def test_anchor_keeps_theta_zero_against_a_rotated_neighbour(scene, built, tmp_path):
+    """FX-03 step 1 (anchor re-estimation over jb-1..jb+1 from the RANSAC Sim and its derotated version): RAW j+1
+    = RAW j rotated 0.9 deg + shifted 10 px explains the competitor's unrotated RAW j as well, with a rotated
+    Sim -> the anchor is (j, theta = 0), from the global search and when re-estimation starts from the rotated
+    neighbour's own Sim. A competitor framing genuinely rotated 1.5 deg keeps 1.5 +- 0.1."""
+    j0 = 12
+    raw, comp, layout, sim, frames, M = _rotated_neighbour_scene(j0)
+    cfg = make_config(tmp_path)
+    index = vm.RawIndex.build(raw, cfg, None)
+    am = vm.AllowedMasks(layout, None, comp, cfg, use_layout_module=False)
+    roi = vm.box_roi(layout, comp)
+    anchors = vm.search_frame(0, comp, raw, index, am(0), cfg, roi=roi)
+    assert anchors and anchors[0].raw == j0, [(a.raw, round(a.sim.theta_deg, 3), round(a.zncc, 4)) for a in anchors]
+    assert abs(anchors[0].sim.theta_deg) < 0.05
+    ds, dp = sim_error(anchors[0].sim, sim)
+    assert ds < 0.003 and dp < 1.5, (ds, dp)
+    # start from the rotated neighbour's own hypothesis: the Sim mapping RAW j0+1 onto the competitor
+    rot = Sim.from_matrix(sim.matrix() @ np.linalg.inv(np.vstack([M, [0.0, 0.0, 1.0]])))
+    assert abs(rot.theta_deg) > 0.8
+    j, s2, z2, _amb = vm._reestimate(np.asarray(comp.get(0)), raw, j0 + 1, rot, False, am(0), roi, comp, cfg)
+    assert j == j0 and abs(s2.theta_deg) < 0.05 and z2 > 0.97, (j, s2, z2)
+    # a genuinely rotated competitor framing (the scene's 1.5 deg re-use) keeps its rotation
+    sam = _allowed(scene, built["cfg"])
+    sroi = vm.box_roi(scene["layout"], scene["comp"])
+    for k in (110, 116):
+        a = vm.search_frame(k, scene["comp"], scene["raw"], built["index"], sam(k), built["cfg"], roi=sroi)
+        assert a and a[0].raw == scene["truth"][k]["raw"] and abs(a[0].sim.theta_deg - 1.5) < 0.1, \
+            (k, [(x.raw, x.sim.theta_deg) for x in a])
+
+
 def test_anchor_roundtrip_and_allowed_masks(scene):
-    a = vm.Anchor(3, 17, True, Sim(0.9, 0.0, -1.5, 2.5), 40, 0.8, 12.5, 0.97, "rescue")
+    a = vm.Anchor(3, 17, True, Sim(0.9, 0.0, -1.5, 2.5), 40, 0.8, 12.5, 0.97, "rescue", True)
     assert vm.Anchor.from_dict(a.to_dict()) == a
+    legacy = {k: v for k, v in a.to_dict().items() if k != "time_ambiguous"}
+    assert vm.Anchor.from_dict(legacy).time_ambiguous is False
     cfg = Config()
     am = vm.AllowedMasks(scene["layout"], None, scene["comp"], cfg, use_layout_module=False)
     m = am(0)

@@ -291,10 +291,21 @@ FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
     "cand_j0": (np.int32, -1),      # RAW index of cand[:, 0]
     "widened": (np.bool_, False),   # the search window had to be extended (argmax was on the edge)
     "tie": (np.bool_, False),       # timing-tie frame (phase LP slack < 1e-4 frame) - set by segment.py
-    "confounded": (np.bool_, False),  # pure pan: time and translation trade off (refine step 2)
+    "confounded": (np.bool_, False),  # m+-1 with its own refitted framing path scores within noise of m (refine)
+    "sim_meas_score": (np.float32, np.nan),  # masked ZNCC of the per-frame framing measurement (sim_meas)
+    "pair_label": (np.int8, -1),    # competitor pair (k, k+1): -1 unmeasured, 0 unknown, 1 repeat, 2 move, 3 cut
 }
 
 CAND_W = 15   # per-frame candidate score vector length stored in FrameMap.cand (RAW cand_j0 .. cand_j0+14)
+
+# 2-D columns: name -> (width, dtype)
+FRAME_MAP_MATRICES: dict[str, tuple[int, type]] = {
+    "cand": (CAND_W, np.float32),       # candidate score vector S_k(cand_j0 + i) under the frame's Sim
+    "sim_meas": (4, np.float64),        # raw per-frame framing measurement (s, theta, tx, ty) of RAW m(k) (ECC);
+                                        # the Sim columns hold the track's smooth path value (refine)
+    "pair_warp": (4, np.float32),       # editor framing change of pair (k, k+1) measured comp-only (temporal.py):
+                                        # centre displacement dx, dy (comp full-res px), relative scale - 1, rotation (deg)
+}
 
 
 class FrameMap:
@@ -308,13 +319,14 @@ class FrameMap:
             for k, (t, v) in FRAME_MAP_FIELDS.items():
                 if k not in data:
                     data[k] = np.full(self.n, v, dtype=t)
-        if "cand" not in data:
-            data["cand"] = np.full((self.n, CAND_W), np.nan, dtype=np.float32)
+        for name, (width, t) in FRAME_MAP_MATRICES.items():
+            if name not in data:
+                data[name] = np.full((self.n, width), np.nan, dtype=t)
         object.__setattr__(self, "d", data)
 
     def __setattr__(self, name: str, value) -> None:
         # fm.status = array  ->  writes into the column store (so save()/load() keep it)
-        if name in FRAME_MAP_FIELDS or name == "cand":
+        if name in FRAME_MAP_FIELDS or name in FRAME_MAP_MATRICES:
             d = self.__dict__["d"]
             t = d[name].dtype
             v = np.asarray(value, dtype=t)
@@ -336,6 +348,12 @@ class FrameMap:
 
     def set_sim(self, k: int, sim) -> None:
         self.d["s"][k], self.d["theta"][k], self.d["tx"][k], self.d["ty"][k] = sim.s, sim.theta_deg, sim.tx, sim.ty
+
+    def sim_measured(self, k: int):
+        """The raw per-frame framing measurement of frame k (None when not measured)."""
+        from .geometry import Sim
+        v = self.d["sim_meas"][k]
+        return Sim(*(float(x) for x in v)) if np.all(np.isfinite(v)) else None
 
     def cand_scores(self, k: int) -> tuple[int, np.ndarray]:
         """(j0, scores[CAND_W]) candidate score vector of frame k (NaN where not evaluated)."""

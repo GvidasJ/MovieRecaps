@@ -166,7 +166,12 @@ visual verification always uses a match-geometry render at competitor size and f
   `δ_k = scoring.noise_delta(track's best scores) = clip(3·1.4826·MAD(best scores), soft_delta_min,
   soft_delta_max)` — the score NOISE, never the spread of margins (margins measure discriminability; a
   margin-based δ let a frame 0.18 below its own best count as 'explained' and hid a jump cut); `cand_j0` + `cand[k, 0:CAND_W]` = the
-  candidate score vector S_k around m (NaN where not evaluated); `widened`, `tie`, `mean`/`std`.
+  candidate score vector S_k around m (NaN where not evaluated); `widened`, `tie`, `mean`/`std`. The Sim columns
+  (`s`, `theta`, `tx`, `ty`) hold the track's smooth framing PATH at k; `sim_meas[k, 0:4]` / `sim_meas_score` = the
+  raw per-frame ECC measurement of RAW m(k) (FX-03); `confounded` = m±1 with its own refitted path scores within
+  the track's noise (soft range widened to m±1; segmentation reads no time or framing step into it);
+  `pair_label` (−1 unmeasured, 0 unknown, 1 repeat, 2 move, 3 cut) / `pair_warp[k, 0:4]` (dx, dy comp full-res
+  px, ds, dθ) = the competitor's own pair (k, k+1) signature (temporal.py, refine's masks; FX-07).
 * `AudioHints` — per competitor audio window: `comp_t`, `raw_t`, `speed`, `conf`, `psr`, `peak`.
 * `Segment` — prompt Stage 6 fields + extras (see model.py). `type ∈ {raw, not_in_raw, dip, flash}`;
   freeze (v = 0), reverse (v < 0) and ramps are `type = raw` with `time_mode = remap`
@@ -327,7 +332,14 @@ def search_frame(k, comp, raw, index, allowed, cfg, window=None) -> list[Anchor]
     # candidate with pairwise ratio 0.75 + estimateAffinePartial2D (RAW->comp, §2.2; flip: vs
     # cv2.flip(raw)); accept inliers >= cfg.min_inliers(12) and ratio >= 0.3 AND masked ZNCC of the
     # warped candidate >= match_thresh - anchor_zncc_slack. Before storing: re-estimate against the best
-    # EXACT RAW frame near the index frame (score j-3..j+3 under the Sim, refit on the argmax).
+    # EXACT RAW frame near the index frame: jb = argmax of j-3..j+3 under the RANSAC Sim, then for jb-1..jb+1
+    # coarse-to-fine ECC (refine.ecc_measure) from the RANSAC Sim AND its derotated version; a rotation is kept
+    # only when the best free result beats the best theta = 0 refit (scale + translation, every frame again) by
+    # > 3 soft_delta_max, else the theta = 0 hypothesis decides the frame (a jolting camera: RAW j+1 rotated
+    # imitates RAW j). Runner-up within anchor_time_delta -> Anchor.time_ambiguous (evidence only).
+    # near_miss=True (sparse search, rescue): when no candidate passes, near-misses (near_miss_inliers <=
+    # inliers < min_inliers) passing the same re-estimation + ZNCC test are returned as source '<src>_near':
+    # refine lets them only JOIN an existing run whose time line they continue (min_inliers is unchanged).
 def sparse_search(comp, raw, layout, overlays, index, hints, cfg, dlog, frames=None) -> list[Anchor]
     # every cfg.comp_search_stride frames (or `frames`); audio-restricted (±audio_restrict_s) first,
     # global fallback. multiprocessing (fork; memmaps shared; seed_everything per worker).
@@ -336,24 +348,68 @@ def sparse_search(comp, raw, layout, overlays, index, hints, cfg, dlog, frames=N
 ### refine.py  (Stage 5.3, produces m(k))
 ```python
 def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cache, dlog, debug_dir) -> FrameMap
-    # 1 link anchors into tracks: same flip, |Δs|/s <= link_scale_tol, |Δpos| <= link_pos_tol (after the
-    #   track's linear trend), raw-vs-k slope consistent (incl. 0 / negative).
-    # 2 transform = per-TRACK model (constant, or RDP keys if animated), never per-frame free ECC:
-    #   ECC on sampled frames against the MODEL frame m(k); accept an update only if it raises masked
-    #   ZNCC over its init; robust fit over the track; alternate transform fit <-> frame assignment until
-    #   m(k) stops changing (<= 3 iterations). Constant pans where raw_in±1 with a refitted transform
-    #   scores within noise -> flag 'time_translation_confounded' (dlog + segment notes).
-    # 3 for every frame k and every track active near k: predicted ĵ (robust linear fit); score RAW
-    #   frames ĵ-R..ĵ+R (R = refine_radius) under the track transform (scoring.score_candidates); if the
-    #   argmax is on the window edge, extend in that direction (up to track_search_radius, then
-    #   visual_match.search_frame) until interior; store S_k in cand/cand_j0 (CAND_W window centred on m).
+    # TIME LINE FIRST (FX-03): in a moving shot a wrong RAW frame (m±1) plus a compensating shift / zoom /
+    #   rotation scores almost like the truth (the first real run: 10 of 12 anchors of one pan one frame off,
+    #   fake 0.6-1.0 deg rotations, one track per anchor, the FrameMap HELD between keys). RAW time is decided
+    #   before framing and never by a free per-frame or per-candidate framing fit; framing is a smooth PATH.
+    # 0 competitor-only temporal signature (temporal.py on the box ROI, refine's masks): pair labels REPEAT /
+    #   MOVE / UNKNOWN / CUT + each pair's editor move -> FrameMap pair_label / pair_warp. REPEAT/MOVE give a
+    #   line's speed and fractional phase (never the integer offset); a repeat pair's warp is the editor's crop
+    #   velocity (initial model of a one-anchor run). Static / blended content gives no labels (FX-07).
+    # 1 RUNS: anchors grouped by RAW time only -- same flip, gaps <= max_gap, one anchor per comp frame,
+    #   |integer residual| <= line_time_tol from the run's robust snap-speed line j(k) = floor(x + u k) (one
+    #   comp frame so far: the best snap slope through both, 1.0 preferred). No framing gate: a pan / zoom of
+    #   any speed is one run; a framing STEP splits the track after measurement (2). RANSAC near-misses
+    #   (near_miss_inliers <= inliers < min_inliers, ZNCC-verified) only JOIN an existing run they continue.
+    # 2 per track, the time-line-first framing fit (alternating with frame assignment, <= 3 iterations):
+    #   a. frames: those it wins + every frame between its first and last anchor no other track explains;
+    #      time evidence: anchors + argmax of won frames -> robust snap-speed line (>= line_min_inlier_frac of
+    #      the points within line_time_tol), else (ramp, jump inside) the argmax itself is measured.
+    #   b. candidate lines = floor-phase cells of x within ±1.5 frames (<= 48), pruned SOFTLY by the repeat /
+    #      move labels (cells with the fewest disagreements + 1 stay); central cell c0 = best argmax agreement.
+    #   c. framing MEASURED (ecc_measure: pyramid + phase-correlation start + the nearest anchors' Sims as
+    #      starts) at c0's RAW frame on EVERY frame, at c0 ± 1 every framing_sample_step frames; ONE smooth
+    #      path per family (fit_path: outliers vs the local trend of their neighbours -- a wrong-frame
+    #      measurement -- removed, median-3, max-error RDP at the measured noise >= rdp_pos_tol / rdp_scale_tol /
+    #      0.05 deg; piecewise linear, NO steps; constant -> 1 key; theta zeroed when every key <= 0.2 deg).
+    #   d. every cell scored on every frame under its family's path; the highest summed score wins: per-frame
+    #      ±1 alternatives are judged under the SAME path, so a time error cannot hide behind a compensating
+    #      framing (an accelerating pan stays <= 3 keys; one key per frame for noise never happens).
+    #   e. the chosen line measured where not yet, its path refitted; a framing STEP in the measurements
+    #      (two-sided linear trends that cannot meet between the frames: > punch_pos_step px / punch_scale_step;
+    #      a velocity knot is not a step) splits the track. Model = the path; support = the line.
+    #   Beyond its first / last key the model is EXTRAPOLATED along the edge segment for at most
+    #   framing_sample_step frames (then held), never held at once. Growing tracks measure the frames they
+    #   grow into on their line first (init = the path extrapolated, i.e. previous frames + velocity; new
+    #   samples beyond a framing step stay out).
+    # 3 for every frame k and every track active near k: predicted ĵ (the track's line); score RAW frames
+    #   ĵ-R..ĵ+R (R = refine_radius) under the track's path (scoring.score_candidates); if the argmax is on the
+    #   window edge, extend in that direction (up to track_search_radius, then visual_match.search_frame) until
+    #   interior; store S_k in cand/cand_j0 (CAND_W window centred on m). Tracks showing the same RAW frame
+    #   within 2e-3 explain a frame equally: the larger track keeps it.
     # 4 overlay pass 2: residual masks (layout.masks_from_residuals), re-score.
     # 5 rescue: frames with score < match_thresh OR score < rolling track median(±5) - max(rel_drop_min,
-    #   4·MAD) -> search_frame on them (catches 1–2 frame flash cuts, jump cuts inside a track), new tracks,
-    #   re-score. Remaining: region std < uniform_std -> UNIFORM; else NONE.
+    #   4·MAD) -> search_frame on them (catches 1–2 frame flash cuts, jump cuts inside a track); anchors on an
+    #   existing track's line join it, others start runs; re-score. Remaining: region std < uniform_std ->
+    #   UNIFORM; else NONE.
     # 6 raw_lo/raw_hi = visually identical frames (§3); low_margin; soft_lo/soft_hi; conf = f(score, margin).
-    # 7 debug/low_confidence/k#####.png for conf < low_conf_thresh (competitor | best warped | 2nd best), max 200.
+    #   Sim columns = the track's PATH value; sim_meas / sim_meas_score = the per-frame ECC measurement of
+    #   RAW m(k) (consistent (RAW frame, Sim) pairs).
+    # 7 confound check on EVERY track: m±1 measured every framing_sample_step frames and fitted as their own
+    #   path (only the path is refitted); m is compared under a path from the same sampled frames. Within the
+    #   track's score noise delta (tie) -> FrameMap 'confounded' + soft range widened to m±1 (segmentation
+    #   must not read a time or framing step into it); strictly better by > 3 delta -> the frame is reassigned
+    #   (m±1 with that path's framing; dlog confound_reassign). dlog time_translation_confounded when every
+    #   frame of a track ties.
+    # 8 debug/low_confidence/k#####.png for conf < low_conf_thresh (competitor | best warped | 2nd best), max 200.
 def refine_transform(comp_img, raw_img, sim0, flip, raw_w, raw_ratio, comp_ratio, allowed, cfg) -> tuple[Sim, float]
+    # single-level ECC (verify's shared primitive; unchanged)
+def ecc_measure(comp_img, raw_img, sim0, flip, raw_w, raw_ratio, comp_ratio, allowed, cfg, roi=None, starts=(),
+                lock_theta=False, levels=None, phase=True) -> EccResult(sim, z, converged, z0)
+    # coarse-to-fine (ecc_pyramid_levels while the template's short side >= ecc_pyramid_min_side): every start
+    # (sim0, starts, sim0 moved by the phase-correlation translation) optimised at the coarsest level, the best
+    # continues; lock_theta = scale + translation only (Gauss-Newton, rotation 0); kept only if it raises the
+    # masked ZNCC over sim0 at proxy resolution.
 ```
 
 ### phase_solve.py  (Stage 6; pure math, no I/O; §2.1 formulation)
@@ -624,7 +680,11 @@ def label_pairs(sig, cfg, breaks=()) -> Labels
 def local_labels(get, k0, k1, cfg) -> Labels ; summary(labels) -> dict
 ```
 Nothing in temporal.py needs RAW or a segmentation; the noise floor is measured per shot (the repeat-vs-move
-margin is ~0.001 ZNCC at thumbnail scale -- no absolute threshold separates them).
+margin is ~0.001 ZNCC at thumbnail scale -- no absolute threshold separates them). refine measures the same
+comp-only signature with its own masks (time-line evidence, FX-07; FrameMap pair_label / pair_warp) and verify
+re-measures it independently with layout-only masks; the measurement / labelling settings (temporal_max_side,
+temporal_shot_cc, temporal_gap_ratio, temporal_growth_ratio, temporal_ecc_*) are therefore analysis parameters
+(cache keys), temporal_mag_ratio stays verify-only.
 
 ### report.py (Stage 10), pipeline.py, cli.py, README.md
 ```python

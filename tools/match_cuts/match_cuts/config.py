@@ -8,9 +8,10 @@ import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# verification-only settings (hypothesis-neutral checks): never part of the analysis cache keys
-VERIFY_ONLY_PARAMS = ("temporal_max_side", "temporal_shot_cc", "temporal_gap_ratio", "temporal_growth_ratio",
-                      "temporal_mag_ratio", "temporal_ecc_iterations", "temporal_ecc_eps", "verify_refit_margin",
+# verification-only settings (hypothesis-neutral checks): never part of the analysis cache keys. The temporal
+# signature's measurement / labelling settings are shared with refine (comp-only repeat cadence as time-line
+# evidence, FX-07), so they ARE analysis parameters.
+VERIFY_ONLY_PARAMS = ("temporal_mag_ratio", "verify_refit_margin",
                       "verify_union_frames", "verify_excursion_frames", "verify_framing_min_samples",
                       "verify_framing_all_max", "verify_low_score_margin")
 
@@ -124,6 +125,8 @@ class Config:
     ransac_reproj_px: float = 3.0          # comp-proxy px (RANSAC is RAW -> comp)
     min_inliers: int = 12
     min_inlier_ratio: float = 0.30
+    near_miss_inliers: int = 6             # RANSAC near-misses (>= this, < min_inliers; ZNCC-verified) may only JOIN an
+                                           # existing track whose RAW time line they continue (refine, FX-03 step 3)
     anchor_zncc_slack: float = 0.05        # anchor accepted only if masked ZNCC >= match_thresh - slack
     audio_restrict_s: float = 2.0          # search +- this around a confident audio hint
 
@@ -144,6 +147,13 @@ class Config:
     low_conf_thresh: float = 0.5           # frames below get debug/low_confidence/k#####.png (max 200)
     ecc_iterations: int = 60
     ecc_eps: float = 1e-5
+    ecc_pyramid_levels: int = 3            # coarse-to-fine framing measurement (refine.ecc_measure): proxy, 1/2, 1/4 ...
+    ecc_pyramid_min_side: int = 40         # ... while the coarsest template's short side stays >= this (px)
+    anchor_time_delta: float = 0.003       # anchor re-estimation: runner-up RAW frame within this ZNCC -> time_ambiguous
+    # time-line-first refine (DESIGN §5 refine.py, FX-03): anchors are grouped by RAW time, framing is a path
+    line_time_tol: float = 2.0             # an anchor joins a run within +-this many RAW frames of its snap-speed line
+    line_min_inlier_frac: float = 0.7      # a track follows ONE snap-speed line when this fraction of its points is within line_time_tol
+    path_median: int = 5                   # running median over the per-frame measurements before the path's RDP keys
 
     # ---- segmentation (Stage 5.4 / 6) ---------------------------------------------------
     speed_snap_values: tuple = (1.0, 1.05, 1.10, 1.15, 1.20, 1.25, 1.50, 2.00,
