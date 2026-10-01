@@ -1123,6 +1123,32 @@ def test_genuine_two_frame_stutter_keeps_its_cuts(monkeypatch, tmp_path):
     assert any(r["decision"] == "flash_cut_verified" and r["comp_range"] == [20, 22] for r in rec)
 
 
+def test_short_segment_verdict_is_logged_only_for_final_segments(monkeypatch, tmp_path):
+    """FX-12: merge_tiny's 'flash_cut_verified' / 'flash_cut_unverified' verdict is logged only for short segments that
+    are still segments of the RESULT (the real run logged 26 verified flash cuts, several merged away later). A later
+    step that replaces the short segment (here: a copy, as any merge creates a new segment) drops its verdict."""
+    import copy
+    from match_cuts import segment as seg_mod
+    a = ff_select(20, 1.0, 1000)
+    st = a[18:20].copy()
+    b = ff_select(20, 1.0, int(a[-1]) + 3)
+    m = np.concatenate([a, st, b])
+    fm, bd = build_fm([Spec(m=a, n=20), Spec(m=st, n=2, track=1), Spec(m=b, n=20, track=2)])
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - 0.03 * abs(j - int(m[k])))
+    orig = seg_mod._Builder.merge_continuous
+
+    def replaced(self, work):
+        work = orig(self, work)
+        return [copy.copy(S) if (S.a, S.b) == (20, 22) else S for S in work]
+    monkeypatch.setattr(seg_mod._Builder, "merge_continuous", replaced)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 20), (20, 22), (22, 42)]
+    rec = records(tmp_path / "d.jsonl")
+    assert not any(r["decision"] in ("flash_cut_verified", "flash_cut_unverified") for r in rec)
+
+
 def test_three_frame_skip_inside_a_pan_stays_a_cut(monkeypatch, tmp_path):
     """FX-04 guard: a +3 RAW frame jump cut inside an editor pan whose own frames clearly win (pixels), with the cut
     on a competitor repeat pair and confounded frames around it (union test triggered): the cut is kept."""
@@ -1441,6 +1467,28 @@ def test_scene_change_with_an_unrepresented_framing_step_is_reported(tmp_path, m
     assert any("framing step not represented" in (s.notes or "") for s in segs)
     miss = {d["cut"]: d["explanation"] for d in rec["cuts_not_detected"]}
     assert 40 in miss and "jump cut" not in miss[40] and "one time line" in miss[40]
+
+
+def test_scene_changes_at_caption_events_are_explained_once_per_segment(tmp_path, monkeypatch):
+    """FX-12: PySceneDetect changes inside a segment at the layout's caption event boundaries are explained
+    specifically ('caption event boundary') in ONE aggregated note per segment, not one generic sentence each."""
+    from match_cuts import segment as seg_mod
+    from match_cuts.model import Layout
+    clip = tmp_path / "comp.mp4"
+    clip.write_bytes(b"\0")
+    monkeypatch.setattr(seg_mod, "scenedetect_changes", lambda path, cfg: [12, 30])
+    fm, _ = build_fm([Spec(m=ff_select(60, 1.0, 300), n=60)])
+    comp, raw = proxies(fm.n, path=str(clip))
+    lay = Layout(comp_w=int(comp.full_size[0]), comp_h=int(comp.full_size[1]),
+                 captions=[{"type": "captions", "comp_in": 12, "comp_out": 30, "x": 10.0, "y": 10.0, "w": 50.0, "h": 10.0}])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, comp, raw, lay, None, cfg_(), dl, None)
+    dl.close()
+    assert len(segs) == 1
+    notes = segs[0].notes
+    assert notes.count("PySceneDetect changes inside") == 1 and "12, 30 caption event boundary" in notes, notes
+    rec = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "scenedetect_crosscheck"][0]["evidence"]
+    assert [u["category"] for u in rec["unexplained"]] == ["caption event boundary"] * 2
 
 
 def test_placeholder_match_split_across_a_repeat_pair_is_flagged(tmp_path):

@@ -4365,10 +4365,14 @@ def _box(ctx: Any) -> Box | dict | None:
 
 
 def _run_check(name: str, fn: Callable[[], dict]) -> dict:
+    import time
+    t0 = time.perf_counter()
     try:
         res = fn()
         if not isinstance(res, dict) or res.get("status") not in STATUSES:
             raise ValueError(f"check returned an invalid result: {res!r:.200}")
+        res["seconds"] = round(time.perf_counter() - t0, 2)
+        log.info("verify %s: %s (%.1fs)", name, res.get("status"), res["seconds"])
         return res
     except Exception as e:  # noqa: BLE001 - a crashed check is a failed check (never a pass)
         log.error("verification check %s crashed: %s\n%s", name, e, traceback.format_exc())

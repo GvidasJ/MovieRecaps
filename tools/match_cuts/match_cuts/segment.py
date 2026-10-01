@@ -967,6 +967,7 @@ class _Builder:
         self.hard_steps: set[int] = set()       # framing steps the pixels confirmed (cuts no merge may remove)
         self.union_cuts: set[int] = set()       # extra union-test triggers from the caller (e.g. large J/L, FX-09)
         self.time_conflicts: set[int] = set()   # re-assigned frames whose own RAW frame still wins (framing samples)
+        self._flash_logs: dict[int, tuple] = {}  # id(_Seg) -> (seg, decision, evidence): merge_tiny's short-segment verdicts
         self.scene_changes: list[int] = []      # PySceneDetect changes (independent evidence of the union test)
         self._ecc: dict[tuple, tuple[Sim, float] | None] = {}   # (k, j, flip) -> re-measured framing (or None)
         self.S = _Solver(self.F, cfg, self.cf, self.rf, hints)
@@ -2204,10 +2205,9 @@ class _Builder:
                 t.notes.append(f"{t.length}-frame island next to an unmatched run: left for the not-in-RAW resolver")
             raw_nbs = [c for c in ev["neighbours"]]
             verified = bool(raw_nbs) and all(all(c.get("own_wins") for c in nbc["checks"]) for nbc in raw_nbs)
-            if verified:
-                self.log("flash_cut_verified", comp_range=[t.a, t.b], evidence=ev)
-            else:
-                self.log("flash_cut_unverified", comp_range=[t.a, t.b], evidence=ev)
+            # FX-12: the verdict is LOGGED only for segments that survive every later merge (run(): final segments)
+            self._flash_logs[id(t)] = (t, "flash_cut_verified" if verified else "flash_cut_unverified", ev)
+            if not verified:
                 if raw_nbs:
                     t.uncertain = True
                     t.notes.append(f"{t.length}-frame segment kept but not verified as a flash cut: its own RAW frame "
@@ -3981,6 +3981,10 @@ class _Builder:
         self.time_ties(work)
         self.repeat_invariant(work)
         self.confounded_notes(work)
+        live = {id(S) for S in work}
+        for key, (S, name, ev) in sorted(self._flash_logs.items(), key=lambda kv: (kv[1][0].a, kv[1][0].b)):
+            if key in live:                     # a short segment that is still a segment of the result
+                self.log(name, comp_range=[S.a, S.b], evidence=ev)
         segs = [self.to_segment(S) for S in work]
         order = sorted(range(len(segs)), key=lambda i: (segs[i].comp_in, segs[i].comp_out))
         work = [work[i] for i in order]
@@ -4270,6 +4274,8 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
             windows.append((s.comp_in, s.comp_out, s.type))
     caps = [c for c in (getattr(b.layout, "captions", None) or []) if isinstance(c, dict)]
     agree, unexplained, missed, steps = [], [], [], []
+    per_seg: dict[int, dict[str, list[int]]] = {}       # FX-12: one aggregated note per segment and category
+    seg_by_id = {s.id: s for s in segs}
     for f in changes:
         near_cut = [c for c in cuts if abs(c - f) <= 1]
         near_win = [w for w in windows if w[0] - 1 <= f <= w[1] + 1]
@@ -4280,6 +4286,7 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
         why = "inside a continuous mapping (same RAW line; measured framing continuous, model on the measurement): " \
               "motion, lighting or overlay change -- not a cut"
         ev: dict[str, Any] = {"frame": f, "segment": seg.id if seg else None}
+        cat = "motion, lighting or overlay change inside a continuous mapping"
         if seg is not None and seg.type == "raw":
             fr = _change_framing(b, seg, f)
             ev["framing"] = fr
@@ -4291,16 +4298,25 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
                 why = (f"framing step not represented: measured framing jump {fr['jump_px']:.1f} px / scale "
                        f"{100 * fr['jump_scale']:.2f} %, segment model off the measurement by "
                        f"{fr['model_dev_px']:.1f} px")
+                cat = "framing step not represented (CHECK)"
                 steps.append(f)
             elif fr is None:
                 why = "inside a segment where the framing is not measured on both sides (not checked)"
+                cat = "framing not measured on both sides (not checked)"
             elif np.isfinite(sc).all() and float(np.min(sc)) < float(_cfg(b.cfg, "match_thresh", 0.9)):
                 why = "inside a segment but the match score dips there (check overlays / a missed flash cut)"
+                cat = "match score dips (CHECK: overlay or a missed flash cut)"
             elif cap:
                 ci, co = int(cap[0].get("comp_in")), int(cap[0].get("comp_out"))
                 why = f"caption change (layout caption event {ci}-{co})"
-            seg.notes = (seg.notes + "; " if seg.notes else "") + f"PySceneDetect change at {f}: {why}"
+                cat = "caption event boundary"
+            per_seg.setdefault(seg.id, {}).setdefault(cat, []).append(int(f))
+        ev["category"] = cat
         unexplained.append({**ev, "explanation": why})
+    for sid, cats in sorted(per_seg.items()):
+        s_ = seg_by_id[sid]
+        s_.notes = (s_.notes + "; " if s_.notes else "") + "PySceneDetect changes inside: " + "; ".join(
+            f"{_rng(fr)} {cat}" for cat, fr in sorted(cats.items(), key=lambda kv: kv[1][0]))
     changes_set = set(changes)
     for c, s in sorted(cuts.items()):
         if any(abs(c - f) <= 1 for f in changes_set):
