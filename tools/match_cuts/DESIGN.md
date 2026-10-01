@@ -1159,11 +1159,13 @@ verification honesty) were fixed under these shared rules:
     `audio_peak_unique_margin`) -- never `audio_replaced_corr` 0.30; a piece too short to measure is bridged
     only between two verified pieces of the same line. A real NOT-IN-RAW insert with foreign audio verifies no
     line and stays silent. A line piece's exception is None; it says nothing about D3 or the offset estimate;
-    a J/L at a cut the line makes seamless is removed. Export: ONE audio-only RAW layer per run of consecutive
+    a J/L at a cut next to a line piece is removed (inside one line the anchor's audio simply continues; at
+    another cut the switch was measured with the piece's picture model, which does not carry its audio). Export: ONE audio-only RAW layer per run of consecutive
     pieces on one line (`export_ae._PlanBuilder.audio_line_layer`, the picture layers silent; competitor sync
     adds v·g and the switch shift like every twin), `render_preview.build_audio` plays the line (also under a
     placeholder), XML / EDL get a separate audio event; c5 measures the piece on its line like any segment
-    (never exempted as not_in_raw).
+    (never exempted as not_in_raw; a lone piece shorter than `verify_audio_min_s` stays the inconclusive
+    too_short like any short piece).
   * Criterion 5 (`verify.check_audio`): lags searched around the expected lag E (g in raw sync, 0 in
     competitor sync) over the samples where both surely play the segment (switch baseline / band), judged as
     residuals within ±tol; verify re-estimates the offset (median measured lag + the offset the recreation
