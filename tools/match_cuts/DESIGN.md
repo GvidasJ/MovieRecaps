@@ -178,8 +178,10 @@ visual verification always uses a match-geometry render at competitor size and f
   region (RAW-vs-RAW, warped, the layout's masks only -- never refine's pass-2 residual masks, which hide exactly
   where a wrong match differs; a MAX OVER TILES (`identical_tiles`²): every tile's mean |diff| ≤ `identical_mad` ×
   clip((p98 − p2) / `identical_contrast_ref`, `identical_contrast_min`, 1) or its ZNCC ≥ `identical_thresh`, so a
-  small changing region (a dimming dashboard display) is never diluted by a static frame, FX-08) —
-  the only criterion-3 exemption; `low_margin` flag = score gap ≤ `low_margin_eps` (never an
+  small changing region (a dimming dashboard display) is never diluted by a static frame, FX-08; FX-11 adds the
+  spec's own noise-calibrated test PER TILE: peak · (1 − ZNCC_tile(RAW_m, RAW_j)) ≤ δ_k at competitor resolution with
+  the score blur -- the best frame's score could not tell them apart even on that tile; contiguous from m only, so a
+  periodic alias further away is never included) — the only criterion-3 exemption; `low_margin` flag = score gap ≤ `low_margin_eps` (never an
   exemption); `soft_lo..soft_hi` = soft range for the LP `{j : S_k(j) ≥ max S_k − δ_k}` with
   `δ_k = scoring.noise_delta(track's best scores) = clip(3·1.4826·MAD(best scores), soft_delta_min,
   soft_delta_max)` — the score NOISE, never the spread of margins (margins measure discriminability; a
@@ -190,7 +192,12 @@ visual verification always uses a match-geometry render at competitor size and f
   the track's noise (soft range widened to m±1; segmentation reads no time or framing step into it);
   `pair_label` (−1 unmeasured, 0 unknown, 1 repeat, 2 move, 3 cut) / `pair_warp[k, 0:4]` (dx, dy comp full-res
   px, ds, dθ) = the competitor's own pair (k, k+1) signature (temporal.py, refine's masks; FX-07); `detail` =
-  the detail-sensitive second score of a gray-zone frame's best hypothesis (FX-08). `status` ∈ {MATCH,
+  the detail-sensitive second score of a gray-zone frame's best hypothesis (FX-08); `delta` = the frame's score
+  noise δ_k (FX-11, persisted); `reassigned` = 0, or the code (`model.REASSIGN_REASONS`: model, drop,
+  tiny_segment_merged, criterion2_moved, continuous_merge, phantom_cut_merge, union_merged, frame_blend,
+  none_absorbed, repeat_pair_absorbed, other) of why segment.py showed its model's frame instead of refine's best
+  (FX-12; write_back no longer sets low_margin on it). The candidate vector `cand` is measured ENTIRELY under the
+  frame's final framing and m(k) is its argmax (FX-11). `status` ∈ {MATCH,
   UNRESOLVED, NONE, UNIFORM, BLEND} -- THREE states for a non-uniform frame (FX-08): MATCH (≥ match_thresh, or a
   gray-zone frame promoted by the detail score), UNRESOLVED (best hypothesis in [none_thresh, match_thresh): it
   keeps that hypothesis' track / score / Sim / candidate vector, raw = −1, conf 0), NONE (EVERY evaluated
@@ -315,6 +322,16 @@ def layout_overlay_masks(layout, shape=None, ratio=None, dilate_px=3) -> LayoutO
     # caption period, stickers, ...) on their active frames -- a word the per-frame detection missed is still
     # covered. Never refine's pass-2 residual masks. verify's only overlays (get / get_dilated like OverlayMasks).
 def masks_from_residuals(residuals: dict[int, np.ndarray], base_allowed, cfg) -> dict[int, np.ndarray]
+def animated_text_overlays(comp, layout, cfg, frames=None, overlays=None, static=None, reference=None) -> list[dict]
+    # verification helper (wave 4): MOVING outlined text the layout stage's static-glyph tracks never link (a word
+    # sliding over a true freeze, film24 S19): the same per-frame detector, lines linked by motion-compensated
+    # glyph agreement (glyph-mask IoU >= 0.6 after a per-frame shift, same fill), >= overlay_min_frames frames,
+    # >= 3 glyphs of caption size, moving >= 0.75 proxy px / frame AND >= 1 px / frame relative to the picture
+    # around it (temporal.align_pair with the text masked: text panning WITH the picture is picture content).
+    # reference(k) (verify: the recreation) -- a word the compared picture also shows on its place (ZNCC >= 0.7 or
+    # a detected line there) is kind 'picture_content' (scrolling credits, a sign on a parallax object), never an
+    # overlay. -> [{comp_in, comp_out, rects {k: proxy bbox}, x, y, w, h, step, relative, glyphs, kind, why}]
+def animated_text_mask(events, k, shape, dilate_px=0) -> np.ndarray | None   # kind 'overlay' rects at frame k
 ```
 Box semantics: `Box(x, y, w, h, corner_radius)` in competitor full-res CORNER coordinates — the exact
 rectangle the video is clipped to (e.g. x=60 means the first video column is pixel 60).
@@ -464,7 +481,11 @@ def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cac
     #   UNRESOLVED. Remaining frames: region std < uniform_std -> UNIFORM; else NONE (every evaluated hypothesis
     #   < none_thresh). Never a promotion on the plain score: ZNCC is non-discriminative on sharpened / blurred
     #   material (the real run's comp 1203 scored 0.989 against a visibly different RAW frame).
-    # 6 raw_lo/raw_hi = visually identical frames (§3); low_margin; soft_lo/soft_hi; conf = f(score, margin).
+    # 6 raw_lo/raw_hi = visually identical frames (§3: FX-08 tiles OR the FX-11 noise-calibrated tile test with the
+    #   track's provisional delta); low_margin; soft_lo/soft_hi; conf = f(score, margin); FrameMap 'delta'. The
+    #   candidate window is RE-SCORED under the final keys (the hypothesis-time vector only names the frames; FX-11:
+    #   the real run's m(644) was not the argmax of its own vector) and m(k) = its argmax (moved only when strictly
+    #   better; dlog final_rescore_moved; a confound re-assignment keeps its frame).
     #   Sim columns = the track's PATH value; sim_meas / sim_meas_score = the per-frame ECC measurement of
     #   RAW m(k) (consistent (RAW frame, Sim) pairs).
     # 7 confound check on EVERY track: m±1 measured every framing_sample_step frames and fitted as their own
@@ -856,6 +877,28 @@ def verify_all(ctx) -> dict
   #      matched frames; exemptions only ambiguous-identical [raw_lo, raw_hi] and timing-tie frames — both
   #      listed) AND s9_2b AND s9_2c AND s9_3 AND the UNCERTAIN accounting (FX-08: every frame of an 'uncertain'
   #      segment is a criterion-3 FAILURE -- neither matched nor NOT-IN-RAW -- never an exception).
+  #      TIES (FX-11): a frame flagged 'tie' counts as a timing tie only where its segment's OWN position is within
+  #      TIE_SLACK of a frame boundary (the plan reproduces the cutlist on every frame); a hold (speed 0, keys inside
+  #      a RAW frame) never ties. RE-ASSIGNED / MISMATCHED rows carry evidence, never an exemption (FX-11/12): why
+  #      (FrameMap 'reassigned'), the scores of refine's m and of the AE frame each under its OWN per-frame ECC refit,
+  #      gap, refine's delta and a class -- within noise / outside noise / systematic run (>= 2 consecutive rows
+  #      re-assigned in one direction whose summed gap exceeds delta). Plan and mock record classifying every frame
+  #      alike are printed ONCE ('plan == mock record').
+  # RAW-ONLY OVERLAYS (wave 4, find_raw_only_overlays): a burned-in graphic the RAW carries and the competitor's
+  #      master did not (a legal disclaimer, a subtitle, a channel bug: film24's two-clip pan, the real run's 605+
+  #      shots) is MEASURED per raw segment where both the RAW and the competitor play (>= 3 distinct RAW frames shown,
+  #      competitor per-pixel std >= verify_overlay_comp_var): the competitor warped back into RAW coordinates with the
+  #      segment's own model vs the shown RAW frame (gain / offset, score blur); a region is a RAW-only overlay when it
+  #      is STATIC in RAW coordinates over >= verify_overlay_raw_span RAW frames (a time error lives where the RAW
+  #      changes), persistently different (residual > max(resid_min, resid_k robust sigmas) on >= persist of the
+  #      frames that see it), carries a RAW GRAPHIC the competitor lacks (edge energy RAW >= grad_ratio x competitor's)
+  #      and all regions of the segment cover <= verify_overlay_max_frac of the visible picture. Accepted regions
+  #      (bounding boxes in RAW px, text-line glyph groups merged) are mapped through every frame's own model and
+  #      excluded from s9_3, s9_2b and s9_2c; s9_3 lists every frame that reaches verify_zncc only with them excluded
+  #      ('RAW-only overlay at x,y,w,h in RAW px over frames a-b: not shown by the competitor' -- an explained
+  #      exception: the frame must still reach the threshold on everything else). The report says the recreation
+  #      SHOWS it (mask it in AE). Never explained: a wrong / far-away frame, a misframing, a competitor-side element,
+  #      a hold, a block over the size limit (tests).
   #      FRAME MIX (FX-08): the simulations carry a Frame Mix layer's weight f of RAW floor(p) + 1 ('mix'); AE
   #      shows (1 - f) RAW j + f RAW j + 1, so refine's single-frame argmax on a frame-blended competitor frame
   #      is compared with the mix's DOMINANT frame (exact, listed as Frame Mix); the lighter source counts only
@@ -869,7 +912,11 @@ def verify_all(ctx) -> dict
   #      (above the shot's repeat/move split and temporal_mag_ratio x the competitor's residual); both moving
   #      with residuals more than temporal_mag_ratio apart after the shot's measured comp/recreation bias.
   #      They count against frame_exact_min over all pairs considered; a recreation hold of >= 4 frames whose
-  #      labelled competitor pairs mostly MOVE is a 'motion mismatch' (always a failure).
+  #      labelled competitor pairs mostly MOVE is a 'motion mismatch' (always a failure). Both signatures are
+  #      measured without the ANIMATED text overlays (layout.animated_text_overlays checked against the recreation:
+  #      moving words the recreation never shows) and the RAW-only overlays: the motion-mismatch rule judges the
+  #      motion OUTSIDE them (film24 S19: a true freeze under a sliding caption is no mismatch; a hold against a
+  #      playing competitor under the same caption still is).
   # s9_2c +-1 refit: every matched single-segment frame, RAW j-1 / j+1 each with its own ECC framing (from
   #      the shown framing and its derotated version; j's own refit when a neighbour comes within
   #      verify_refit_margin of the shown score); a neighbour beating max(shown, refit of j) by more than
@@ -902,7 +949,8 @@ def verify_all(ctx) -> dict
   #      rendered right + render mismatches below 2 x the tolerance: the evidence that may later justify a
   #      smaller ae_slack_tol_frames.
   # s9_3 visual: masked ZNCC competitor vs match-geometry recreation per frame (reuse preview_recreation.mp4
-  #      when mode is match at competitor size, else render_frame in memory); distribution; failures ->
+  #      when mode is match at competitor size, else render_frame in memory; measured RAW-only overlays excluded and
+  #      every frame they explain listed); distribution; failures ->
   #      debug/verify_failures/k#####.png. s9_4: debug/cuts/cut_XX.png (k-1, k, k+1, k+2 competitor vs
   #      recreation). s9_7: re-run S5.4 -> S6 assembly (segment, phase solve, audio per segment, Cutlist) from
   #      cached FrameMap/AudioHints in a fresh context and byte-compare cutlist JSON (timings excluded).
@@ -914,7 +962,10 @@ def prepare(img, mask, max_side, blur=0.0) -> (img, mask)   # downscale to max_s
 def align_pair(a, ma, b, mb, cfg=None) -> PairMeasure
     # phase-correlation translation -> ECC (MOTION_AFFINE, masks) -> closest similarity (an editor move:
     # |ds| <= 10 %, |rot| <= 5 deg, shift <= 25 % of the long side, else the translation only) -> masked ZNCC
-    # cc, mad, (dx, dy, ds, dtheta). r = 1 - cc.
+    # cc, mad, (dx, dy, ds, dtheta). r = 1 - cc. When that start gives no converged fit above temporal_shot_cc
+    # (phase correlation locks onto an ALIAS of a periodic texture: film24 pair 122, -17/+17 px for a 6 px pan),
+    # ECC is also started from the identity, coarse to fine (2 halving levels), and the fit with the higher
+    # post-warp ZNCC is kept -- the same rule on every sequence.
 def measure(get, ks, cfg, pairs=None, gaps=(1, 2), same=None) -> Signature   # d1[k] = (k, k+1), d2[k] = (k, k+2)
 def label_pairs(sig, cfg, breaks=()) -> Labels
     # shots = runs of pairs with cc >= temporal_shot_cc (else CUT); per shot: largest gap of sorted log r; a gap
@@ -934,11 +985,18 @@ temporal_shot_cc, temporal_gap_ratio, temporal_growth_ratio, temporal_ecc_*) are
 
 ### report.py (Stage 10), pipeline.py, cli.py, README.md
 ```python
-def write_report(ctx, path) -> None      # prompt Stage 10 sections: inputs (codecs, fps, sizes, durations,
-    # VFR/offset issues, conform + why, fps-source max error), layout (+ layout.png), segment table
+def write_report(ctx, path) -> None      # FX-12: FIRST a plain-language summary for a non-expert user (short
+    # sentences: the result, one line per check, what failed and why, what to check by hand in AE -- uncertain frames,
+    # NOT-IN-RAW, RAW-only overlays to mask, Frame Mix, moving competitor text -- and one-line headlines: A/V offset +
+    # switch baseline, uncertain segments, RAW-only overlays, pinned phases); then the prompt Stage 10 sections:
+    # inputs (codecs, fps, sizes, durations, VFR/offset issues, per-track MP4 edit lists (media_time), iTunSMPB and
+    # stream durations as FACTS -- no AAC-priming guess --, conform + why, fps-source max error), layout (+ layout.png),
+    # segment table
     # (# · comp in–out tc+frames · duration · RAW in–out tc · speed · flip · scale/position or 'animated' ·
     # transition · confidence · notes), edit-style breakdown, warnings (low-confidence, ambiguous-identical,
-    # timing-tie, NOT-IN-RAW (every hypothesis below none_thresh), UNCERTAIN ranges with their labels (FX-08),
+    # timing-tie, every re-assigned / mismatched frame grouped by reason with class / gap / delta (FX-12),
+    # NOT-IN-RAW (every hypothesis below none_thresh), UNCERTAIN ranges with their labels (FX-08), RAW-only
+    # overlays (under 'anything AE can't reproduce': the recreation shows them),
     # phase pinned by cadence (information) and AE-rule-sensitive segments (one line, §7.3), extra regions,
     # anything AE can't reproduce -- a verified frame-blend path is exported with Frame Mix and says so),
     # criteria table c1..c6, how to open in AE (+ preference, reference layer), timings.
@@ -1419,3 +1477,35 @@ different rules, and showed a 10-frame freeze on RAW 1673 while the competitor m
   Mix dominant frame), `test_export_ae` / `test_render_preview` (Frame Mix, uncertain solid + guide, mock), film24
   (two-clip pan exact, gray chain one uncertain segment, lookalike never matched, blend 0.25 Frame Mix, true
   freeze v = 0, dark shot on its line).
+
+### 7.5 Verification accounting without new exemptions (wave 4: FX-11, FX-12, film24 (a)-(c))
+
+film24's last verify failures were false positives of verification itself, and the real run's c3 accounting mixed
+benign and real re-assignments. Every fix keeps verification independent and the spec tolerances unchanged:
+* **(a) RAW-only overlays** (§5 verify): measured, never assumed -- static in RAW coordinates where the RAW plays,
+  persistently different, a RAW graphic the competitor lacks, small; masked in s9_3 / s9_2b / s9_2c with an
+  explained exception per frame; the report tells the user the recreation SHOWS it (mask it in AE). film24: the
+  disclaimer at RAW 284,392,393,26 over 426-465 (39 frames 0.85-0.91 -> 0.996-0.999); negative tests: a wrong frame,
+  a 6 px misframing, a competitor word over a static RAW patch, a hold, a 40 % block are never explained.
+* **(b) Motion mismatch at a true freeze under a sliding caption**: layout.animated_text_overlays (moving outlined
+  text, relative to the picture, absent from the recreation) is masked from both temporal signatures; the motion is
+  judged outside it. A hold against a playing competitor under the same caption, and moving text the recreation
+  shows (picture content), still fail.
+* **(c) film24 pair 122 'recreation jumps'**: a measurement failure of temporal.align_pair, not a cut -- phase
+  correlation returned a -17/+17 px alias of the Game-of-Life cell grid for the recreation's true 6 px pan; ECC did
+  not converge from there (cc -0.03 vs the competitor's 0.96). Fixed by the identity start, coarse to fine (§5).
+* **FX-11** (still applicable after waves 1-3): the candidate vector re-scored under the final keys (m = its argmax);
+  the noise-calibrated identity per tile (§3); the per-frame delta persisted; ties only from the plan's own slack;
+  re-assigned rows classified with per-frame ECC refits -- evidence, never an exemption (the 'noise-ambiguous'
+  exemption and score-flatness exemptions stay rejected).
+* **FX-12**: write_back labels re-assignments with a reason instead of forcing low_margin (confidence unchanged);
+  short-segment verdicts logged only for final segments; PySceneDetect changes explained once per segment by
+  category; s9_2 printed once when the plan and the mock record agree; the report's plain-language summary,
+  headlines, complete grouped lists and input facts (§5 report).
+* Tests: `test_temporal` (alias start), `test_verify` (true freeze under a sliding caption passes and fails without
+  the mask; a playing competitor under the caption still fails; picture-content text is never masked; RAW-only
+  overlay found / masked / reported and its five negative controls; ties from slack; evidence classes; plan == mock
+  once), `test_refine` (re-scored vector argmax, noise identity per tile with contiguity and a changing bar),
+  `test_segment` (reasons instead of low_margin, rerun determinism, short-segment logs, scene-change categories),
+  `test_report` (summary, grouped lists, edit-list facts), film24 e2e (c3 fails ONLY for the two deliberate
+  'uncertain' segments; the CLI exits 1 saying so).
