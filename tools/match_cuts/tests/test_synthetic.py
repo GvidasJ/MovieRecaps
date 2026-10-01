@@ -300,7 +300,7 @@ def test_coverage_and_totals(e2e, cutlist):
                             ["comp_frame", "layers", "expected"], rows)
 
 
-@film_xfail("FX-08: frames of chains without any anchor or near-miss (pan_step, the first two-clip pan) stay NONE "
+@film_xfail("FX-08: frames of chains without any anchor or near-miss (the first two-clip pan) stay NONE "
             "(the editor-pan time/translation confound is fixed, FX-03)")
 def test_frame_map_equals_truth(e2e, frame_map):
     truth = e2e["truth"]
@@ -573,7 +573,7 @@ def test_crossfade(e2e, cutlist):
             f"crossfade alpha (incoming) {alpha} != truth {tr['alpha']}"
 
 
-@film_xfail("FX-08: NOT-IN-RAW placeholders on the anchorless pan_step / first two-clip pan and the gray chain")
+@film_xfail("FX-08: NOT-IN-RAW placeholders on the anchorless first two-clip pan and the gray chain")
 def test_not_in_raw_placeholder(e2e, cutlist):
     truth = e2e["truth"]
     want = [(r["comp_in"], r["comp_out"]) for r in truth["not_in_raw"]]
@@ -725,8 +725,8 @@ FILM_GROUPS = {
 # Assertions the CURRENT pipeline fails on film24 -> the fix that must make them pass (strict xfail).
 _ACCEL = ("FX-06: one exact segment since FX-03 and refine's path is within 0.4 px, but segment.framing's sparse "
           "smoothed keys miss the 4.2 -> 13.8 px/frame knot by up to 12 px")
-_STEP = ("FX-08 (+FX-06): no anchor and no near-miss in the chain (RANSAC <= 11 inliers on the upscaled cellular "
-         "automaton) -> NOT-IN-RAW placeholder; needs a line-constrained search")
+_STEP = ("FX-06: refine splits its track at the snap-back (frames exact since FX-03) but segmentation keeps one "
+         "segment across the framing step, keys ramp through it")
 _PUNCH = ("FX-06: refine splits its track at the x1.7 punch (frames exact since FX-03) but segmentation keeps one "
           "segment across the step, keys ramp through it (up to 28 px)")
 _TWO = ("FX-08: the second pan clip is exact since FX-03, the first has no anchor and no near-miss (RANSAC <= 5 "
@@ -734,7 +734,7 @@ _TWO = ("FX-08: the second pan clip is exact since FX-03, the first has no ancho
 FILM_XFAIL: dict[tuple[str, str], str] = {
     # pan: frames exact, one segment and the truth framing since the time-line-first refine (FX-03)
     ("framing", "pan_accel"): _ACCEL,          # frames exact, one segment, true speed since FX-03; framing: FX-06
-    **{(t, "pan_step"): _STEP for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    **{(t, "pan_step"): _STEP for t in ("one_segment_per_clip", "framing")},     # frames exact since FX-03
     # punch_pan: frames exact since FX-03 (a near-miss anchor joins the run's time line)
     **{(t, "punch_pan"): _PUNCH for t in ("one_segment_per_clip", "framing")},
     **{(t, "two_clip_pans"): _TWO for t in ("frames_exact", "one_segment_per_clip", "framing")},
