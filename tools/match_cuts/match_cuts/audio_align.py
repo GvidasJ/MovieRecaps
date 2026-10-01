@@ -1896,11 +1896,13 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
       * the one just after it, extended backward;
       * a retimed piece's own picture in-point at speed 1 (a video-only slow motion / hold over audio that keeps
         playing), its in-point corrected by the measured residual.
-    Each piece is verified on its own surely-played window: xcorr peak >= verify_audio_strong_corr, beating its
-    best sidelobe by audio_peak_unique_margin (a CONFIDENT peak, not audio_replaced_corr) and -- for a neighbour's
-    line, which must continue without a jump -- a residual within audio_lag_tol_ms. A line runs from its anchor
-    over consecutive verified pieces; a piece too short to measure is bridged only between two verified pieces of
-    the same line. A real NOT-IN-RAW insert (foreign audio) verifies no line and stays silent. Sets
+    Each piece is verified on its own surely-played window with a CONFIDENT peak (>= verify_audio_strong_corr,
+    never audio_replaced_corr): a neighbour's line, which must continue without a jump, is a hypothesis test -- its
+    best alignment within ±audio_lag_tol_ms must reach strong and beat every other alignment up to the residual
+    search; an own in-point (no anchor) must be the unique peak of the search (by audio_peak_unique_margin over the
+    best sidelobe). A line runs from its anchor over consecutive verified pieces; a piece too short to measure is
+    bridged only between two verified pieces of the same line. A real NOT-IN-RAW insert (foreign audio) verifies
+    no line and stays silent. Sets
     out[id]['line'] = {id (comp frame where the line is anchored), raw_in_seconds (the line's picture-synced RAW
     time at the piece's comp_in), speed, source, lag_ms, corr} and the piece's lag_ms / corr; a J/L offset at a cut
     the line makes seamless is removed. Returns {segment id: line model}."""

@@ -237,3 +237,20 @@ def test_music_bed_under_a_dynamic_original_is_one_music_run():
     steady = (rng.standard_normal(n) * 0.1).astype(np.float32)
     added = aa._added_audio(steady + fx, steady, np.ones(n, bool), sr, FPS, n_frames, -20.0, null_dlog())
     assert [a["type"] for a in added] == ["sfx"]
+
+
+def test_report_names_audio_lines_and_the_switch_baseline_support():
+    """report.py: a line piece's row says so; the audio-sync line names how many cuts (and which tier) measured
+    the switch baseline."""
+    from types import SimpleNamespace
+    from match_cuts import report
+    s = _freeze(2, 30, 45, 3.0)
+    s.audio["line"] = {"id": 0, "raw_in_seconds": 3.0, "speed": 1.0, "source": "S01 continued", "lag_ms": 0.0,
+                       "corr": 0.95}
+    row = report.segment_row(s, FPS, FPS)
+    assert "audio line (S01 continued)" in row[-1]
+    cl = SimpleNamespace(audio={"av_offset": {"status": "measured", "lag_ms": -86.0, "lag_ms_interval": [-86.6, -84.3],
+                                              "n_segments": 15, "coverage": 1.0, "switch_baseline_ms": 49.8,
+                                              "switch_baseline": {"n": 4, "tier": "decisive"}, "sync_mode": "raw",
+                                              "text": "competitor audio is 86.0 ms later"}}, settings={})
+    assert "(switch baseline over 4 decisive cut(s))" in report.av_offset_line(cl)
