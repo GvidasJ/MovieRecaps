@@ -52,6 +52,37 @@ def test_align_pair_recovers_a_shift_and_scores_a_repeat():
     assert mov.r > 10 * half.r and mov.r > 100 * rep.r      # a non-rigid change survives the alignment
 
 
+def test_align_pair_recovers_from_a_phase_correlation_alias(monkeypatch):
+    """film24 pair 122 (wave 4): on a blocky periodic texture phase correlation returned an alias (-17.2, +17.4 px)
+    for a true 6 px editor pan of the recreation; ECC from there did not converge and the pair read cc = -0.03 --
+    'recreation jumps 27x more than the competitor' on a correct frame pair. The identity start rescues it: the
+    same measurement as without the alias, aligned, on the true shift."""
+    import cv2
+    rng = np.random.default_rng(3)
+    g0 = (rng.random((24, 30)) < 0.4).astype(np.float32)        # Game-of-Life-like blocky cells (8 px, nearest)
+    flips = rng.random(g0.shape) < 0.05
+    g1 = np.where(flips, 1.0 - g0, g0).astype(np.float32)          # the next generation
+    cells = [cv2.resize(g, (240, 192), interpolation=cv2.INTER_NEAREST) * 180 + 30 for g in (g0, g1)]
+    a = cv2.warpAffine(cells[0], np.float32([[1, 0, -20], [0, 1, -20]]), (160, 120))
+    c = cv2.warpAffine(cells[1], np.float32([[1, 0, -26], [0, 1, -20]]), (160, 120))     # next frame, panned 6 px
+    g = _getter(np.stack([a, c]))
+    pa, pc = g(0), g(1)
+    good = temporal.align_pair(pa[0], pa[1], pc[0], pc[1])
+    assert good.aligned and good.dx == pytest.approx(-6.0, abs=0.2) and good.cc > 0.85
+    monkeypatch.setattr(temporal, "_phase_shift", lambda *_a: (-17.16, 17.39))          # the alias start
+    calls = []
+    real_ecc = temporal._ecc_from
+    monkeypatch.setattr(temporal, "_ecc_from", lambda *a_, **k_: calls.append(a_[4].copy()) or real_ecc(*a_, **k_))
+    alias = temporal.align_pair(pa[0], pa[1], pc[0], pc[1])
+    assert len(calls) >= 2 and np.allclose(calls[1], np.eye(2, 3))      # the identity start (coarse to fine) was tried
+    assert alias.aligned and alias.dx == pytest.approx(good.dx, abs=0.05) and alias.cc == pytest.approx(good.cc, abs=1e-4)
+    # an exact repeat never needs the second start (its phase shift IS the identity)
+    calls.clear()
+    monkeypatch.setattr(temporal, "_phase_shift", lambda *_a: (0.2, -0.1))
+    rep = temporal.align_pair(pa[0], pa[1], pa[0], pa[1])
+    assert len(calls) == 1 and rep.cc > 0.9999
+
+
 def test_labels_on_a_pulldown_cadence_under_a_pan_match_the_truth():
     """(f) 23.976 -> 30 cadence (a RAW repeat every 5 competitor frames) plus an editor pan of 1.2 px/frame and
     encode noise: every labelled pair is right, and most pairs get a label."""

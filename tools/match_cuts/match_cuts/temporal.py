@@ -41,6 +41,9 @@ MIN_PIXELS = 64              # fewer valid pixels after alignment -> unmeasured
 MAX_PAIR_SCALE = 0.10        # |relative scale change|
 MAX_PAIR_ROT_DEG = 5.0
 MAX_PAIR_SHIFT = 0.25        # translation, fraction of the image's long side
+IDENTITY_START_PX = 1.0      # a phase-correlation start this close to no motion IS the identity start
+IDENTITY_START_LEVELS = 2    # coarse-to-fine levels of the identity start (x4: a 12 px motion starts 3 px away)
+ECC_PYRAMID_MIN_SIDE = 16    # a pyramid level keeps at least this many px on its short side
 
 
 def _cfg(cfg: Any, name: str, default: Any) -> Any:
@@ -165,34 +168,57 @@ def _similarity(W: np.ndarray, shape: Sequence[int]) -> np.ndarray | None:
     return np.hstack([S, (tc - S @ c)[:, None]]).astype(np.float32)
 
 
-def align_pair(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, cfg: Any = None) -> PairMeasure:
-    """Align ``b`` onto ``a`` (both prepared, same shape): phase-correlation translation, then ECC
-    (MOTION_AFFINE; template = a with its mask, input = b with its mask) projected to the closest similarity
-    (``_similarity``); measure the masked ZNCC and the mean |diff| of a and the warped b over a's mask & b's
-    warped mask & the warp's support."""
+def _ecc_from(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, W0: np.ndarray, crit: tuple
+              ) -> np.ndarray | None:
+    """ECC (MOTION_AFFINE) from the start ``W0`` projected to the closest editor similarity; None when ECC does not
+    converge or the fit is outside the MAX_PAIR_* bounds."""
     import cv2
-    out = PairMeasure()
-    if a is None or b is None or a.shape != b.shape:
-        return out
-    ma, mb = np.asarray(ma, bool), np.asarray(mb, bool)
-    if int((ma & mb).sum()) < MIN_PIXELS:
-        return out
-    sx, sy = _phase_shift(a, ma, b, mb)
-    W = np.array([[1.0, 0.0, sx], [0.0, 1.0, sy]], np.float32)
-    iters = int(_cfg(cfg, "temporal_ecc_iterations", 40))
-    eps = float(_cfg(cfg, "temporal_ecc_eps", 1e-5))
-    crit = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, iters, eps)
     try:
         if hasattr(cv2, "findTransformECCWithMask"):
-            _cc, Wm = cv2.findTransformECCWithMask(a, b, ma.astype(np.uint8) * 255, mb.astype(np.uint8) * 255, W.copy(),
+            _cc, Wm = cv2.findTransformECCWithMask(a, b, ma.astype(np.uint8) * 255, mb.astype(np.uint8) * 255, W0.copy(),
                                                    cv2.MOTION_AFFINE, crit, 1)
         else:  # pragma: no cover - older OpenCV: no input mask
-            _cc, Wm = cv2.findTransformECC(a, b, W.copy(), cv2.MOTION_AFFINE, crit, ma.astype(np.uint8) * 255, 1)
-        Ws = _similarity(Wm, a.shape)
-        if Ws is not None:
-            W, out.aligned = Ws, True
+            _cc, Wm = cv2.findTransformECC(a, b, W0.copy(), cv2.MOTION_AFFINE, crit, ma.astype(np.uint8) * 255, 1)
     except cv2.error:
-        pass
+        return None
+    return _similarity(Wm, a.shape)
+
+
+def _ecc_pyramid(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, crit: tuple,
+                 levels: int = IDENTITY_START_LEVELS) -> np.ndarray | None:
+    """ECC from the identity, coarse to fine: each level halves the images (INTER_AREA; a mask pixel survives only
+    when fully valid), so a motion of several pixels is a sub-pixel start at the coarsest level. A level whose ECC
+    fails passes its start on unchanged; the full-resolution fit decides (None when it fails)."""
+    import cv2
+    pyr = [(a, ma, b, mb)]
+    for _ in range(int(levels)):
+        pa, pma, pb, pmb = pyr[-1]
+        h, w = pa.shape
+        if min(h, w) < 2 * ECC_PYRAMID_MIN_SIDE:
+            break
+        size = (w // 2, h // 2)
+        down = lambda x: cv2.resize(x, size, interpolation=cv2.INTER_AREA)  # noqa: E731
+        pyr.append((down(pa), down(pma.astype(np.float32)) >= 0.999, down(pb), down(pmb.astype(np.float32)) >= 0.999))
+    W = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], np.float32)
+    for lev in range(len(pyr) - 1, -1, -1):
+        la, lma, lb, lmb = pyr[lev]
+        if int((lma & lmb).sum()) < MIN_PIXELS:
+            continue
+        Ws = _ecc_from(la, lma, lb, lmb, W, crit)
+        if lev == 0:
+            return Ws
+        if Ws is not None:
+            W = Ws
+        W = W.copy()
+        W[:, 2] *= 2.0                         # translation to the next (finer) level
+    return None
+
+
+def _measure_warp(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, W: np.ndarray, aligned: bool
+                  ) -> PairMeasure:
+    """The pair's post-warp masked ZNCC / mean |diff| and the warp's similarity parameters under ``W``."""
+    import cv2
+    out = PairMeasure(aligned=bool(aligned))
     h, w = a.shape
     flags = cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP
     bw = cv2.warpAffine(b, W, (w, h), flags=flags, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
@@ -211,6 +237,40 @@ def align_pair(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, cfg
     out.dx, out.dy = float(d[0]), float(d[1])
     out.ds = math.sqrt(max(abs(float(np.linalg.det(A))), 1e-12)) - 1.0
     out.dtheta = math.degrees(math.atan2(A[1, 0] - A[0, 1], A[0, 0] + A[1, 1]))
+    return out
+
+
+def align_pair(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray, cfg: Any = None) -> PairMeasure:
+    """Align ``b`` onto ``a`` (both prepared, same shape): phase-correlation translation, then ECC
+    (MOTION_AFFINE; template = a with its mask, input = b with its mask) projected to the closest similarity
+    (``_similarity``); measure the masked ZNCC and the mean |diff| of a and the warped b over a's mask & b's
+    warped mask & the warp's support.
+
+    Phase correlation can lock onto an ALIAS of a periodic texture (blocky cell grids, stripes: film24 pair 122,
+    a -17/+17 px peak for a true 6 px editor pan) and ECC from there does not converge. When the first start does
+    not give a converged fit above ``temporal_shot_cc`` (a pair that would read as a cut), ECC is also started from
+    the identity (no motion, the small-motion prior of consecutive frames) and the start whose fit has the higher
+    post-warp ZNCC is kept -- measured the same way on every sequence (competitor and recreation alike)."""
+    import cv2
+    if a is None or b is None or a.shape != b.shape:
+        return PairMeasure()
+    ma, mb = np.asarray(ma, bool), np.asarray(mb, bool)
+    if int((ma & mb).sum()) < MIN_PIXELS:
+        return PairMeasure()
+    sx, sy = _phase_shift(a, ma, b, mb)
+    W0 = np.array([[1.0, 0.0, sx], [0.0, 1.0, sy]], np.float32)
+    iters = int(_cfg(cfg, "temporal_ecc_iterations", 40))
+    eps = float(_cfg(cfg, "temporal_ecc_eps", 1e-5))
+    crit = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, iters, eps)
+    Ws = _ecc_from(a, ma, b, mb, W0, crit)
+    out = _measure_warp(a, ma, b, mb, W0 if Ws is None else Ws, Ws is not None)
+    shot_cc = float(_cfg(cfg, "temporal_shot_cc", 0.8))
+    if (Ws is None or not (out.cc >= shot_cc)) and math.hypot(sx, sy) > IDENTITY_START_PX:
+        Wi = _ecc_pyramid(a, ma, b, mb, crit)
+        if Wi is not None:
+            alt = _measure_warp(a, ma, b, mb, Wi, True)
+            if math.isfinite(alt.cc) and not (alt.cc <= out.cc):
+                out = alt
     return out
 
 
