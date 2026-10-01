@@ -489,6 +489,9 @@ def plan_fingerprint(name: str, monkeypatch) -> tuple[str, int]:
         return b""
     monkeypatch.setattr(S, "run_ffmpeg", fake_run)
     monkeypatch.setattr(S, "count_frames", lambda p: prof.shot_len)
+    # the recorder sees the commands in completion order: run synth's parallel jobs in input order, else the
+    # thread scheduling (a loaded machine) reorders e.g. 'shot 11' and 'raw audio' and the digest flakes
+    monkeypatch.setattr(S, "parallel", lambda jobs, workers=0: [j() for j in jobs])
     build, out = Path("/BUILD"), Path("/OUT")
     chains = S.resolve_chains(prof)
     n_comp = sum(c.spec.n - c.spec.xfade for c in chains)

@@ -303,14 +303,19 @@ changed, update this table with the reason.
 | refine | `identical_thresh` / `identical_mad` | 0.9995 / 0.75 | ambiguous-identical RAW neighbours |
 | refine | `refine_radius` / `score_blur` / `grad_weight` | 3 / 1.0 / 0.0 | candidate window, blur sigma, gradient ZNCC weight (graded material) |
 | refine | `uniform_std` / `low_conf_thresh` | 4.0 / 0.5 | dip/flash detection / low-confidence thumbnails |
+| refine | `ecc_pyramid_levels` / `ecc_pyramid_min_side` | 3 / 40 px | coarse-to-fine framing measurement (proxy, 1/2, 1/4 while the template keeps 40 px) |
+| refine | `line_time_tol` / `line_min_inlier_frac` | 2 frames / 0.7 | time-line-first runs: anchors within ±2 RAW frames of a snap-speed line; a track follows one line when 70 % of its points do |
+| refine | `path_median` / `anchor_time_delta` / `near_miss_inliers` | 5 / 0.003 / 6 | framing-path outlier window; anchor time ambiguity; RANSAC near-misses that may only join an existing time line |
+| refine | `temporal_refine_max_slope` | 0.95 | refine measures the competitor's repeat cadence only where a time line can repeat RAW frames (RAW frames per comp frame <= this) |
 | segments | `speed_snap_values` / `speed_snap_tol` | 1.00 1.05 1.10 1.15 1.20 1.25 1.50 2.00 and inverses / 0.3 % | speed snapping |
 | segments | `lambda_cut` / `lambda_unsnapped` | 1.0 / 3.0 | DP costs |
 | segments | `punch_scale_step` / `punch_pos_step` | 0.01 / 4 px | punch-in cut detection |
+| segments | `step_confirm_frames` / `lambda_repeat_cut` / `union_track_window` | 2 / 1.0 / 6 | a framing step is a cut only when the pixels confirm it on up to 2 frames per side; extra DP cost of a cut inside a competitor repeat pair; union-test trigger window (>= 3 refine tracks) |
 | segments | `transition_search` / `blend_rel` | 20 / 0.5 | crossfade detection |
 | segments | `framing_scale_spread` / `framing_pos_spread` | 0.3 % / 1.5 px | constant vs animated framing |
 | segments | `rdp_pos_tol` / `rdp_scale_tol` / `rotation_min_deg` | 0.5 px / 0.1 % / 0.2° | keyframe simplification, rotation |
 | verify | `verify_zncc` / `audio_lag_tol_ms` / `frame_exact_min` | 0.90 / 10 ms / 0.99 | Stage 9 thresholds |
-| verify | `temporal_gap_ratio` / `temporal_growth_ratio` / `temporal_mag_ratio` / `temporal_shot_cc` | 2.5 / 1.5 / 3.0 / 0.8 | temporal signature: repeat vs move cluster gap, motion growth over two frames, comp vs recreation residual ratio, shot change |
+| verify | `temporal_gap_ratio` / `temporal_growth_ratio` / `temporal_mag_ratio` / `temporal_shot_cc` | 2.5 / 1.5 / 3.0 / 0.8 | temporal signature: repeat vs move cluster gap, motion growth over two frames, comp vs recreation residual ratio, shot change (all but `temporal_mag_ratio` also drive refine's comp-only repeat labels) |
 | verify | `verify_refit_margin` / `verify_union_frames` / `verify_excursion_frames` | 0.01 / 2 / 3 | ±1 refit margin floor (with 3 x the measured noise), c2 no-cut frames per side, excursion distance |
 | verify | `verify_framing_min_samples` / `verify_framing_all_max` / `verify_low_score_margin` | 5 / 6 / 0.02 | c4 sampling, unconverged low-score rule |
 

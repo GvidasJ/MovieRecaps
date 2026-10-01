@@ -231,6 +231,22 @@ def test_edit_breakdown_numbers(tmp_path):
     assert (105, 114, 2, 9) in b["reuse"]
 
 
+def test_edit_breakdown_reframe_on_one_time_line_is_no_reuse(tmp_path):
+    """FX-04 8: two segments on ONE time line split by a reframe (the cut inside a 23.976 -> 30 repeat: both show
+    RAW 4120) are a reframe, not a re-used RAW moment nor a jump back."""
+    ctx = make_ctx(tmp_path)
+    last = max(ctx.cutlist.segments, key=lambda s: s.comp_out)
+    k0 = last.comp_out
+    a = Segment(20, "raw", k0, k0 + 20, raw_in_frame=4105, raw_out_frame=4120, speed=1.0, transform=Sim().to_dict())
+    b_ = Segment(21, "raw", k0 + 20, k0 + 40, raw_in_frame=4120, raw_out_frame=4135, speed=1.0,
+                 transform=Sim(1.25, 0.0, -10.0, -20.0).to_dict())
+    ctx.cutlist.segments += [a, b_]
+    ctx.cutlist.raw["fps"] = "24000/1001"
+    b = report.edit_breakdown(ctx.cutlist)
+    assert not any(r[2:] == (20, 21) for r in b["reuse"])
+    assert (20, 21) in b["reframes"] and 21 not in b["non_chronological"]
+
+
 def test_md_table_escapes_pipes():
     t = report.md_table(["a", "b"], [["x|y", None]])
     assert t.splitlines()[2] == "| x\\|y |  |"

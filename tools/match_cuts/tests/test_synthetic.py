@@ -300,8 +300,8 @@ def test_coverage_and_totals(e2e, cutlist):
                             ["comp_frame", "layers", "expected"], rows)
 
 
-@film_xfail("FX-03/FX-08: refine's m(k) leaves the RAW line in editor pans (time/translation confound), "
-            "pan frames NONE")
+@film_xfail("FX-08: frames of chains without any anchor or near-miss (the first two-clip pan) stay NONE "
+            "(the editor-pan time/translation confound is fixed, FX-03)")
 def test_frame_map_equals_truth(e2e, frame_map):
     truth = e2e["truth"]
     status, raw = frame_map["status"], frame_map["raw"]
@@ -336,7 +336,8 @@ def test_frame_map_equals_truth(e2e, frame_map):
                             ["k", "seg", "kind", "truth", "m(k)", "status", "note"], rows)
 
 
-@film_xfail("FX-03/FX-04/FX-06: spurious cuts inside editor pans, editor clips merged into placeholders")
+@film_xfail("FX-08: the only cut off the truth is 445, the edge of the anchorless first two-clip pan (NOT-IN-RAW "
+            "placeholder | 1-frame island); the pan / step / punch chains cut exactly since FX-03 / FX-06")
 def test_cuts_exact(e2e, cutlist):
     truth = e2e["truth"]
     segs = _segments(cutlist)
@@ -470,7 +471,6 @@ def test_fullscreen_segment(e2e, cutlist, frame_map):
                             ["field", "truth", "cutlist"], rows)
 
 
-@film_xfail("FX-03/FX-04: pan_accel is chopped into slivers too short to measure (segmentation, not audio)")
 def test_audio_phase_lag(e2e, cutlist):
     """DESIGN §7 D3/D8/D9: the synthetic audio starts at the NLE in-point (lower bound of the floor interval);
     after the audio-informed phase every measurable RAW segment's residual audio lag is within +-3 ms. lag_ms is
@@ -500,7 +500,8 @@ def test_audio_phase_lag(e2e, cutlist):
                              "raw_in_s", "truth audio raw_in_s"], rows)
 
 
-@film_xfail("FX-03/FX-06/FX-08: pan framing tens of px off without keys; blend slow motion fitted as v=0.2536")
+@film_xfail("FX-08: the blend slow motion is fitted as v=0.2536 (every pan / step / punch framing is within tolerance "
+            "since FX-03 / FX-06)")
 def test_speed_flip_framing(e2e, cutlist):
     truth = e2e["truth"]
     matched, _ = _match_segments(truth, cutlist)
@@ -574,7 +575,7 @@ def test_crossfade(e2e, cutlist):
             f"crossfade alpha (incoming) {alpha} != truth {tr['alpha']}"
 
 
-@film_xfail("FX-03/FX-08: NOT-IN-RAW placeholders inside the pan, punch and gray chains")
+@film_xfail("FX-08: NOT-IN-RAW placeholders on the anchorless first two-clip pan and the gray chain")
 def test_not_in_raw_placeholder(e2e, cutlist):
     truth = e2e["truth"]
     want = [(r["comp_in"], r["comp_out"]) for r in truth["not_in_raw"]]
@@ -724,20 +725,14 @@ FILM_GROUPS = {
 }
 
 # Assertions the CURRENT pipeline fails on film24 -> the fix that must make them pass (strict xfail).
-_PAN = ("FX-03/FX-04 (+FX-08): editor pan over a moving RAW shot -> RAW j+-1 hidden by compensating shifts, "
-        "1-3 frame segments and NOT-IN-RAW placeholders")
-_ACCEL = "FX-03/FX-04: accelerating editor pan -> wrong RAW frames under compensating shift / rotation, slivers"
-_STEP = "FX-03/FX-06 (+FX-08): the slow pan before the framing step becomes a NOT-IN-RAW placeholder"
-_PUNCH = "FX-03/FX-06 (+FX-08): the editor pan after the x1.7 punch-in becomes a NOT-IN-RAW placeholder"
-_TWO = "FX-03/FX-04 (+FX-08): both pan clips on one RAW line become NOT-IN-RAW placeholders / slivers"
+_TWO = ("FX-08: the second pan clip is exact since FX-03, the first has no anchor and no near-miss (RANSAC <= 5 "
+        "inliers under the RAW-only disclaimer) -> NOT-IN-RAW placeholder; needs a line-constrained search")
 FILM_XFAIL: dict[tuple[str, str], str] = {
-    **{(t, "pan"): _PAN for t in ("frames_exact", "one_segment_per_clip", "framing")},
-    **{(t, "pan_accel"): _ACCEL for t in ("frames_exact", "one_segment_per_clip", "framing")},
-    **{(t, "pan_step"): _STEP for t in ("frames_exact", "one_segment_per_clip", "framing")},
-    **{(t, "punch_pan"): _PUNCH for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    # pan, pan_accel: frames exact, one segment and the truth framing since the time-line-first refine (FX-03) and
+    # the measured framing summary (FX-06); pan_step, punch_pan: the framing step is a confirmed cut on one time
+    # line with a shared phase (FX-06, FX-04)
     **{(t, "two_clip_pans"): _TWO for t in ("frames_exact", "one_segment_per_clip", "framing")},
     ("one_segment_per_clip", "gray"): "FX-08: the gray-zone chain becomes a NOT-IN-RAW placeholder",
-    ("speed", "pan_accel"): "FX-03/FX-04: fake 2.0x segments from the time/translation confound",
     ("speed", "blend_slow"): "FX-08: the frame-blend slow motion is fitted as v=0.2536 instead of 0.25 / frame_blend",
 }
 
@@ -902,7 +897,8 @@ def test_film24_av_offset_published(e2e, cutlist):
     assert lo is not None and lo <= want <= hi, f"published A/V offset interval {[lo, hi]} ms, truth {want} ms"
 
 
-@film_xfail("FX-03/FX-04: only 11 strong segments survive the pan confound, so the offset interval is 4.3 ms wide")
+@film_xfail("FX-02/FX-08: the published offset interval is [-86.6, -84.3] ms, 2.4 ms wide (4.3 ms before the "
+            "segmentation fixes); the placeholders / short pieces leave too few strong segments")
 def test_film24_av_offset_precise(e2e, cutlist):
     """FX-02 with intact segmentation: the published offset is precise -- interval <= 2 ms wide and centre within
     0.5 ms of the truth (the real run's 34 strong segments gave a 0.4 ms interval)."""
@@ -931,8 +927,7 @@ def _warnings(e2e: dict) -> list[str]:
     return [ln.strip() for ln in (text + "\n" + e2e["proc"].stdout).splitlines() if "audio implies raw_in" in ln]
 
 
-@film_xfail("FX-03/FX-04/FX-09: no strong cut survives the pan confound, so there is no switch baseline; "
-            "fake J/L next to slivers and placeholders; the genuine 6-frame L-cut reads +5")
+@film_xfail("FX-09: the genuine 6-frame L-cut at 36 reads +5 and a fake 1-frame J-cut is exported at 189 (S7|S8)")
 def test_film24_jl_cuts_equal_truth(e2e, cutlist):
     """FX-09: the detected J/L cuts equal the truth exactly: the one genuine 6-frame L-cut (A.out = B.in = +6)
     and nothing else -- the uniform 48 ms post-edit switch delay is a baseline, not 1-2 frame L-cuts."""
@@ -1011,7 +1006,9 @@ def test_film24_gray_chain_never_not_in_raw(e2e, cutlist):
     assert not bad, f"gray chain frames under a NOT-IN-RAW placeholder: {bad}"
 
 
-@film_xfail("FX-07/FX-04: segmentation cuts between the two frames of pulldown repeat pairs")
+@film_xfail("FX-08: the one cut left inside a repeat pair is 444|445, the edge of the anchorless first two-clip pan "
+            "(NOT-IN-RAW placeholder | 1-frame island; refine's comp labels there are UNKNOWN, so the comp-duplicate "
+            "invariant has no repeat pair to act on) -- needs the line-constrained search")
 def test_film24_no_cut_inside_repeat_pair(e2e, cutlist):
     """FX-07: no time cut between the two frames of a competitor pulldown repeat pair (24 -> 30 cadence), except
     where the truth itself cuts (a framing step may sit there)."""

@@ -4,6 +4,7 @@ selection patterns (see test_phase_solve.ff_select), plus small proxy arrays whe
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -124,7 +125,12 @@ def check_model(seg, fm, allow_ties=True):
     ks, lo, hi = segment_constraints(seg, fm)
     sol = ps.solve_raw_in(ks, lo, hi, seg.comp_in, seg.speed, C30, R2997)
     assert sol["ok"]
-    assert sol["raw_in"] == pytest.approx(seg.raw_in_seconds, abs=1e-12)
+    if "time line shared" in (seg.notes or ""):
+        # FX-04 2: one phase solve with the segments on its time line -- inside this segment's own interval
+        a, b = sol["interval_soft"]
+        assert a - 1e-12 <= seg.raw_in_seconds <= b + 1e-12
+    else:
+        assert sol["raw_in"] == pytest.approx(seg.raw_in_seconds, abs=1e-12)
     pred = ps.ae_frame(seg.raw_in_seconds, seg.speed, ks, seg.comp_in, C30, R2997)
     bad = [int(k) for k, p, a, b in zip(ks, pred, lo, hi) if not a <= p <= b]
     bad += [int(k) for k, p in zip(ks, pred) if fm.status[k] == Status.MATCH and p != fm.raw[k]]
@@ -942,3 +948,513 @@ def test_criterion2_moves_exhausted_keeps_the_best_position(tmp_path, monkeypatc
     assert fails[0]["evidence"]["oscillation"] == [30, 29, 28, 27] and fails[0]["evidence"]["cut"] == 29
     assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 29), (29, 60)]
     assert "was moved over" in segs[1].notes and "kept 29" in segs[1].notes, segs[1].notes
+
+
+# ---------------------------------------------------------------------------------------------------
+# FX-04 / FX-06 / FX-07 (first real run): a cut must beat the continuous hypothesis, measured framing summary,
+# framing steps at any pan speed, competitor repeat pairs
+# ---------------------------------------------------------------------------------------------------
+
+R24 = F(24000, 1001)
+BOX_C = (540.0, 960.0)          # box centre of the test geometry (no layout: the comp centre, 1080 x 1920)
+
+
+def _px(sim: Sim, ref: Sim) -> float:
+    """Box-centre displacement (comp px) between two framings: |sim(ref^-1(c)) - c|."""
+    p = ref.inverse().apply([BOX_C])[0]
+    return float(np.hypot(*(sim.apply([p])[0] - np.asarray(BOX_C))))
+
+
+class _StubScorer:
+    """Pixel-free stand-in of segment._Scorer: score(k, RAW j, Sim) from a function (e.g. consistent with a known
+    pan); blends and regions unavailable."""
+
+    def __init__(self, fn):
+        self.ok = True
+        self.fn = fn
+        self.roi = (0, 0, 8, 8)
+        self.raw_w = 1920.0
+        self.blur = 1.0
+
+    def zncc_set(self, k, items):
+        return np.array([self.fn(int(k), int(j), sim, bool(fl)) for j, sim, fl in items], np.float64)
+
+    def blend_fit(self, *a, **kw):
+        return None
+
+    def region(self, k):
+        return None
+
+    def allowed(self, k):
+        return np.ones((8, 8), bool)
+
+
+def _stub(monkeypatch, fn):
+    from match_cuts import segment as seg_mod
+    monkeypatch.setattr(seg_mod, "_Scorer", lambda *a, **kw: _StubScorer(fn))
+
+
+def _pan_sim(k: int, v_px: float = -3.0, s: float = 0.5, k_punch: int | None = None, z: float = 1.25) -> Sim:
+    """A linear editor pan (tx moves v_px comp px per frame); from k_punch on punched in by z about the centre."""
+    sim = Sim(s, 0.0, 60.0 + v_px * k, 690.0)
+    if k_punch is not None and k >= k_punch:
+        cx, cy = BOX_C
+        sim = Sim(sim.s * z, 0.0, z * (sim.tx - cx) + cx, z * (sim.ty - cy) + cy)
+    return sim
+
+
+def _alternating_pan_fm(n: int = 16, k_punch: int | None = None):
+    """FX-04 fixture: one v = 1 time line under a linear editor pan, as a confounded refine sees it: even frames on
+    track 0 (right RAW frame, right framing), odd frames on track 1 (RAW + 1 with a framing 15 px off that
+    compensates, confounded: soft range covers the line), two 1-frame +12 RAW excursions (track 2)."""
+    m = ff_select(n, 1.0, 1000)
+    sims, raw, tr, lo, hi = [], m.copy(), np.zeros(n, np.int64), m.copy(), m.copy()
+    conf = np.zeros(n, bool)
+    for k in range(n):
+        s = _pan_sim(k, k_punch=k_punch)
+        if k % 2:
+            raw[k] = m[k] + 1
+            s = s.translated(15.0, 0.0)
+            tr[k], conf[k] = 1, True
+            lo[k], hi[k] = m[k], m[k] + 1
+        sims.append((s.s, s.theta_deg, s.tx, s.ty))
+    for k in (5, 10):
+        raw[k] = lo[k] = hi[k] = m[k] + 12
+        tr[k], conf[k] = 2, False
+        s = _pan_sim(k, k_punch=k_punch)
+        sims[k] = (s.s, s.theta_deg, s.tx, s.ty)
+    fm, _ = build_fm([Spec(m=raw, n=n, sim_fn=lambda i: sims[i])])
+    fm.raw_lo = fm.raw_hi = raw
+    fm.soft_lo, fm.soft_hi, fm.track, fm.confounded = lo, hi, tr, conf
+    return fm, m
+
+
+def _pan_score(m, k_punch=None):
+    """Stub pixels consistent with the linear pan on the time line m: -0.03 per RAW frame off the line, -0.004 per
+    comp px of framing error."""
+    def fn(k, j, sim, flip):
+        return 0.99 - 0.03 * abs(j - int(m[k])) - 0.004 * _px(sim, _pan_sim(k, k_punch=k_punch))
+    return fn
+
+
+def test_alternating_tracks_on_one_line_give_one_segment_with_two_keys(monkeypatch, tmp_path):
+    """FX-04: alternating refine tracks (Sims 15 px apart, RAW +-1 confounded) and two 1-frame +12 excursions on one
+    v = 1 line under a linear pan. Pixels (stub) consistent with the pan: no framing step is confirmed, the
+    excursions are merged into the line (neighbour's framing extrapolated, not held), the re-assigned frames' foreign
+    Sims are left out of the framing: ONE segment with the pan's 2 keys."""
+    fm, m = _alternating_pan_fm()
+    _stub(monkeypatch, _pan_score(m))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out, s.speed) for s in segs] == [(0, 16, 1.0)]
+    assert np.array_equal(_ae(segs), m)
+    keys = segs[0].transform_keys
+    assert len(keys) == 2 and (keys[0]["comp_frame"], keys[1]["comp_frame"]) == (0, 14)
+    for key in keys:
+        assert _px(Sim.from_dict(key), _pan_sim(key["comp_frame"])) < 0.01
+    rec = records(tmp_path / "d.jsonl")
+    assert not any(r["decision"] == "transform_step" for r in rec)
+    assert not any(r["decision"] == "flash_cut_verified" for r in rec)
+
+
+def test_alternating_tracks_with_a_sustained_punch_give_two_segments(monkeypatch, tmp_path):
+    """FX-04 / FX-06: the same fixture with a real sustained x1.25 punch at frame 8: the step is confirmed by the
+    pixels (old framing wins before, new after) -> 2 segments on one time line (shared phase)."""
+    fm, m = _alternating_pan_fm(k_punch=8)
+    _stub(monkeypatch, _pan_score(m, k_punch=8))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 8), (8, 16)]
+    assert np.array_equal(_ae(segs), m)
+    assert segs[1].transform_keys[0]["scale"] == pytest.approx(0.625, rel=1e-6)
+    rec = records(tmp_path / "d.jsonl")
+    st = [r for r in rec if r["decision"] == "transform_step"]
+    assert [r["comp_frame"] for r in st] == [8] and st[0]["evidence"]["method"] == "scored_both_transforms"
+    assert any(r["decision"] == "time_tie" for r in rec)
+    assert segs[1].raw_in_seconds == pytest.approx(segs[0].raw_in_seconds + 8 / 30, abs=1e-9)
+
+
+def test_genuine_two_frame_stutter_keeps_its_cuts(monkeypatch, tmp_path):
+    """FX-04 guard: a 2-frame stutter (the editor shows RAW 18-19 of the shot again, then continues on the line):
+    the pixels say the repeated frames are what they are -- the cuts stay, a VERIFIED flash cut."""
+    a = ff_select(20, 1.0, 1000)
+    st = a[18:20].copy()
+    b = ff_select(20, 1.0, int(a[-1]) + 3)          # C continues A's line
+    m = np.concatenate([a, st, b])
+    fm, bd = build_fm([Spec(m=a, n=20), Spec(m=st, n=2, track=1), Spec(m=b, n=20, track=2)])
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - 0.03 * abs(j - int(m[k])))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 20), (20, 22), (22, 42)]
+    assert np.array_equal(_ae(segs), m)
+    rec = records(tmp_path / "d.jsonl")
+    assert any(r["decision"] == "flash_cut_verified" and r["comp_range"] == [20, 22] for r in rec)
+
+
+def test_three_frame_skip_inside_a_pan_stays_a_cut(monkeypatch, tmp_path):
+    """FX-04 guard: a +3 RAW frame jump cut inside an editor pan whose own frames clearly win (pixels), with the cut
+    on a competitor repeat pair and confounded frames around it (union test triggered): the cut is kept."""
+    a = ff_select(25, 1.0, 1000)
+    b = ff_select(25, 1.0, int(a[-1]) + 4)
+    m = np.concatenate([a, b])
+    fm, _ = build_fm([Spec(m=a, n=25, sim_fn=lambda i: _tup(_pan_sim(i))),
+                      Spec(m=b, n=25, track=1, sim_fn=lambda i: _tup(_pan_sim(25 + i)))])
+    fm.pair_label = np.where(np.arange(fm.n) == 24, 1, 0)
+    conf = np.zeros(fm.n, bool)
+    conf[24:26] = True
+    fm.confounded = conf
+
+    def fn(k, j, sim, fl):
+        return 0.99 - 0.02 * abs(j - int(m[k])) - 0.004 * _px(sim, _pan_sim(k))
+    _stub(monkeypatch, fn)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 25), (25, 50)]
+    rec = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "union_test"]
+    assert rec and rec[0]["evidence"]["result"] == "cut_verified"
+
+
+def test_unverifiable_sliver_is_flash_cut_unverified(tmp_path):
+    """FX-04 5: a 1-frame segment nothing can test (no pixels, no candidate vector, another track) is no longer
+    logged as a verified flash cut: 'flash_cut_unverified', the segment is uncertain and says why."""
+    a = ff_select(30, 1.0, 1000)
+    one = np.array([3000])
+    b = ff_select(30, 1.0, int(a[-1]) + 2)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(m=one, n=1, track=1), Spec(m=b, n=30, track=2)])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 30), (30, 31), (31, 61)]
+    rec = records(tmp_path / "d.jsonl")
+    assert any(r["decision"] == "flash_cut_unverified" for r in rec)
+    assert not any(r["decision"] == "flash_cut_verified" for r in rec)
+    assert segs[1].uncertain and "not verified as a flash cut" in segs[1].notes
+
+
+def test_reframe_on_one_time_line_shares_raw_in():
+    """FX-04 2: two segments on ONE v = 1 time line (RAW 23.976 on 30 fps) split by an editor reframe at a
+    RAW-native shot change share one phase solve: the second segment's raw_in is the first's line at its comp_in,
+    its interval the shifted shared interval."""
+    m = np.asarray([int(math.floor(k * float(R24) / 30.0 + 1e-9)) + 400 for k in range(60)])
+    s0, s1 = (0.5, 0.0, 60.0, 690.0), (0.55, 0.0, 6.0, 594.0)
+    fm, _ = build_fm([Spec(m=m[:25], n=25, sim=s0), Spec(m=m[25:], n=35, sim=s1, track=1)])
+    comp = Proxy("competitor", "", None, (1080, 1920), (0.5, 0.5), C30, np.arange(fm.n) / 30.0, fm.n)
+    raw = Proxy("raw", "", None, (1920, 1080), (1 / 3, 1 / 3), R24, np.zeros(1), 200000)
+    segs = run(fm, comp, raw)
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 25), (25, 60)]
+    A, B = segs
+    assert B.raw_in_seconds == pytest.approx(A.raw_in_seconds + 25 / 30.0, abs=1e-9)
+    assert B.raw_in_interval[0] == pytest.approx(A.raw_in_interval[0] + 25 / 30.0, abs=1e-9)
+    assert B.raw_in_interval[1] == pytest.approx(A.raw_in_interval[1] + 25 / 30.0, abs=1e-9)
+    pred = np.concatenate([ps.ae_frame(s.raw_in_seconds, 1.0, np.arange(s.comp_in, s.comp_out), s.comp_in, C30, R24)
+                           for s in segs])
+    assert np.array_equal(pred, m)
+    assert "time line shared" in B.notes
+
+
+def test_solve_shared_raw_in_matches_one_solve():
+    """phase_solve.solve_shared_raw_in == solve_raw_in of the union, values moved to every part's comp_in."""
+    m = np.asarray([int(math.floor(k * float(R24) / 30.0 + 1e-9)) + 700 for k in range(50)])
+    ks = np.arange(50)
+    parts = [(ks[:20], m[:20], m[:20], 0), (ks[20:], m[20:], m[20:], 20)]
+    sols = ps.solve_shared_raw_in(parts, 1.0, C30, R24)
+    one = ps.solve_raw_in(ks, m, m, 0, 1.0, C30, R24)
+    assert sols[0]["raw_in"] == pytest.approx(one["raw_in"], abs=1e-12)
+    assert sols[1]["raw_in"] == pytest.approx(one["raw_in"] + 20 / 30.0, abs=1e-12)
+    assert sols[1]["margin_ms"] == pytest.approx(one["margin_ms"])
+    assert sols[1]["shared"] == {"comp_in": 0, "parts": 2, "raw_in": pytest.approx(one["raw_in"])}
+    assert len(sols[1]["frame_slack"]) == 30
+    for s, (k_, _lo, _hi, c) in zip(sols, parts):
+        assert np.array_equal(ps.ae_frame(s["raw_in"], 1.0, k_, c, C30, R24), m[k_])
+
+
+# -- FX-06 with pixels: textured RAW, editor pans as warps -------------------------------------------------
+
+def _pan_proxies(m: np.ndarray, sim_of, seed: int = 21):
+    bank = texture_bank(int(m.max()) + 2, seed=seed)
+    comp = np.stack([_warp(bank[j], sim_of(k)) for k, j in enumerate(m)])
+    return pix_proxies(comp, bank), bank
+
+
+def _tup(s: Sim) -> tuple:
+    return (s.s, s.theta_deg, s.tx, s.ty)
+
+
+def test_s60_step_back_inside_a_pan_is_a_cut(tmp_path):
+    """FX-06 (S60 replica): a slow editor pan (-0.92 comp px per frame) that snaps back to its start framing at a
+    RAW-native cut, on ONE continuous time line. The detrended detector sees the step whatever the pan speed, the
+    pixels confirm it: a cut at the step (shared raw_in), framing within 0.5 px on every frame (was 20.9 px)."""
+    K, n = 30, 50
+    m = ff_select(n, 1.0, 20)
+
+    def truth(k):
+        return Sim(1.3, 0.0, -28.8 - 0.92 * (k if k < K else 0), -19.2)
+    (cp, rp), _bank = _pan_proxies(m, truth)
+    fm, _ = build_fm([Spec(m=m[:K], n=K, sim_fn=lambda i: _tup(truth(i))),
+                      Spec(m=m[K:], n=n - K, sim_fn=lambda i: _tup(truth(K + i)), track=1)])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, cp, rp, dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, K), (K, n)]
+    assert segs[1].raw_in_seconds == pytest.approx(segs[0].raw_in_seconds + K / 30.0, abs=1e-9)
+    from match_cuts.geometry import interpolate_keys
+    for s in segs:
+        for k in range(s.comp_in, s.comp_out):
+            got = interpolate_keys(s.transform_keys, k, W, H) if s.transform_keys else Sim.from_dict(s.transform)
+            p = truth(k).inverse().apply([[W / 2, H / 2]])[0]
+            assert float(np.hypot(*(got.apply([p])[0] - [W / 2, H / 2]))) < 0.5, k
+    st = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "transform_step"]
+    assert [r["comp_frame"] for r in st] == [K] and st[0]["evidence"]["method"] == "scored_both_transforms"
+
+
+def test_s93_punch_then_fast_pan_gets_a_measured_key_at_the_step(tmp_path):
+    """FX-06 (S93 replica): a x1.71 punch at k0 followed by a -6.35 px/frame pan; refine's FrameMap ramps over
+    k0..k0+4 (ka = k0 - 1, kb = k0 + 5). Only the transition frames before the localised cut lose their Sims; the
+    frames after it are measured again by ECC, so the punched segment has a key AT k0 within 0.5 px of the truth
+    (AE used to hold the k0 + 5 key backwards over k0..k0+4: 31 px)."""
+    k0, n = 20, 40
+    m = ff_select(n, 1.0, 30)
+    a = Sim(1.0, 0.0, 0.0, 0.0)
+
+    def truth(k):
+        if k < k0:
+            return a
+        z = 1.712
+        return Sim(z, 0.0, (1 - z) * W / 2 - 6.35 * 0.2 * (k - k0), (1 - z) * H / 2)
+    (cp, rp), _bank = _pan_proxies(m, truth)
+
+    def fm_sim(k):         # refine's ramp: the Sims interpolated between k0 - 1 and k0 + 5
+        if k0 - 1 < k < k0 + 5:
+            u = (k - (k0 - 1)) / 6.0
+            A, B = truth(k0 - 1), truth(k0 + 5)
+            return (A.s + u * (B.s - A.s), 0.0, A.tx + u * (B.tx - A.tx), A.ty + u * (B.ty - A.ty))
+        return _tup(truth(k))
+    fm, _ = build_fm([Spec(m=m, n=n, sim_fn=fm_sim)])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, cp, rp, dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, k0), (k0, n)]
+    st = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "transform_step"]
+    assert st and st[0]["evidence"]["from"] == k0 - 1 and st[0]["evidence"]["to"] == k0 + 5
+    keys = segs[1].transform_keys
+    assert keys and keys[0]["comp_frame"] == k0
+    c = [W / 2, H / 2]
+    for k in range(k0, n):
+        from match_cuts.geometry import interpolate_keys
+        got = interpolate_keys(keys, k, W, H)
+        p = truth(k).inverse().apply([c])[0]
+        assert float(np.hypot(*(got.apply([p])[0] - c))) < 0.5, k
+
+
+def test_single_rotated_sample_does_not_tilt_the_segment():
+    """FX-06 5: 11 samples at theta = 0 plus one wrong-frame measurement at 0.92 deg (with the compensating shift):
+    every key has theta = 0 (the old 'any sample > 0.2 deg' vote tilted S93 by 0.92 / 0.31 deg)."""
+    def sim(i):
+        s = _pan_sim(i, v_px=-2.0)
+        if i == 6:
+            s = Sim(s.s, 0.92, s.tx + 9.0, s.ty - 4.0)
+        return _tup(s)
+    fm, _ = build_fm([Spec(m=ff_select(12, 1.0, 500), n=12, sim_fn=sim)])
+    segs = run(fm, *proxies(fm.n))
+    assert len(segs) == 1
+    s = segs[0]
+    assert s.transform["rotation_deg"] == 0.0 and all(k["rotation_deg"] == 0.0 for k in s.transform_keys)
+    assert len(s.transform_keys) == 2
+    for key in s.transform_keys:
+        assert _px(Sim.from_dict(key), _pan_sim(key["comp_frame"], v_px=-2.0)) < 0.01
+
+
+def test_reassigned_frame_framing_is_measured_again(tmp_path):
+    """FX-06 1: refine put frame 15 on RAW m+1 with a Sim fitted to THAT frame (soft range m..m+1); the segment shows
+    m there. The foreign Sim is not a sample of the segment's framing: frame 15 is measured again by ECC on the
+    shown frame, and the segment's framing explains it (side score >= 0.95; the merge at 1444 gave 0.685)."""
+    n = 30
+    m = ff_select(n, 1.0, 40)
+
+    def truth(k):
+        return Sim(1.3, 0.0, -28.8 - 0.9 * k, -19.2)
+    (cp, rp), bank = _pan_proxies(m, truth, seed=23)
+    fm, _ = build_fm([Spec(m=m, n=n, sim_fn=lambda i: _tup(truth(i)) if i != 15 else
+                           _tup(truth(i).translated(10.0, -6.0)))])
+    raw = np.asarray(fm.raw).copy()
+    raw[15] = m[15] + 1
+    lo, hi = raw.copy(), raw.copy()
+    lo[15] = m[15]
+    fm.raw, fm.raw_lo, fm.raw_hi, fm.soft_lo, fm.soft_hi = raw, raw, raw, lo, hi
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, cp, rp, dlog=dl)
+    dl.close()
+    assert len(segs) == 1 and np.array_equal(_ae(segs), m)
+    s = segs[0]
+    assert "framing measured again on frames 15" in s.notes
+    from match_cuts.geometry import interpolate_keys
+    from match_cuts.scoring import prepare_comp, score_candidates
+    got = interpolate_keys(s.transform_keys, 15, W, H) if s.transform_keys else Sim.from_dict(s.transform)
+    p = truth(15).inverse().apply([[W / 2, H / 2]])[0]
+    assert float(np.hypot(*(got.apply([p])[0] - [W / 2, H / 2]))) < 0.5
+    reg = prepare_comp(cp.get(15), (0, 0, W // 2, H // 2), np.ones((H // 2, W // 2), bool), 1.0, with_grad=False)
+    z = score_candidates(reg, [bank[m[15]]], got, False, float(W), (0.5, 0.5), (0.5, 0.5), blur=1.0)[0]
+    assert z >= 0.95
+    # the FrameMap gets the consistent pair: the frame now shown and the framing measured on it
+    w = Sim(float(fm.s[15]), float(fm.theta[15]), float(fm.tx[15]), float(fm.ty[15]))
+    assert int(fm.raw[15]) == int(m[15]) and float(np.hypot(*(w.apply([p])[0] - [W / 2, H / 2]))) < 0.5
+
+
+def test_held_track_switch_inside_a_linear_pan_is_no_step(tmp_path):
+    """FX-06 4: a linear editor pan whose FrameMap holds two tracks (40 px apart at the switch): compared
+    EXTRAPOLATED and scored on the pixels, neither held framing wins on both sides -> no framing step, one
+    segment (only a DP candidate)."""
+    n, K = 40, 20
+    m = ff_select(n, 1.0, 60)
+
+    def truth(k):
+        return Sim(1.3, 0.0, -28.8 - 0.6 * k, -19.2)
+    (cp, rp), _bank = _pan_proxies(m, truth, seed=24)
+    held = {0: truth(K - 20), 1: truth(K + 20)}
+    fm, _ = build_fm([Spec(m=m[:K], n=K, sim=_tup(held[0])), Spec(m=m[K:], n=n - K, sim=_tup(held[1]), track=1)])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, cp, rp, dlog=dl)
+    dl.close()
+    rec = records(tmp_path / "d.jsonl")
+    assert not any(r["decision"] == "transform_step" for r in rec)
+    assert any(r["decision"] == "transform_step_unconfirmed" for r in rec)
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, n)]
+
+
+# -- FX-07: competitor repeat pairs ---------------------------------------------------------------------
+
+def test_cut_inside_a_repeat_pair_faces_the_continuous_line(monkeypatch, tmp_path):
+    """FX-07 (a), the S77/S78 pattern: on a 23.976 -> 30 line, from the second frame of a competitor REPEAT pair
+    on, refine measured one RAW frame back (2053 -> 2052, narrow soft ranges): the DP has to cut inside the pair. The
+    union test (triggered by the repeat pair) finds the continuous line within the noise (slow content) and the
+    repeat pair decides: ONE segment."""
+    n = 40
+    m = np.asarray([int(math.floor(k * float(R24) / 30.0 + 1e-9)) + 2030 for k in range(n)])
+    rep = [k for k in range(1, n) if m[k] == m[k - 1]]
+    c = rep[3]                                  # frames (c-1, c) show one RAW frame
+    raw = m.copy()
+    raw[c:] = m[c:] - 1                      # from the pair's second frame on: one frame back
+    fm, _ = build_fm([Spec(m=raw, n=n)])
+    fm.pair_label = np.where(np.arange(n) == c - 1, 1, 2)
+    comp = Proxy("competitor", "", None, (1080, 1920), (0.5, 0.5), C30, np.arange(n) / 30.0, n)
+    rawp = Proxy("raw", "", None, (1920, 1080), (1 / 3, 1 / 3), R24, np.zeros(1), 200000)
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - 0.0005 * abs(j - int(m[k])))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, comp, rawp, dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, n)]
+    pred = ps.ae_frame(segs[0].raw_in_seconds, 1.0, np.arange(n), 0, C30, R24)
+    assert np.array_equal(pred, m)
+    u = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "union_test"]
+    assert u and u[0]["evidence"]["result"] == "merged" and "repeat_pair" in u[0]["evidence"]["triggers"]
+
+
+def test_repeat_pair_cut_costs_more_in_the_dp():
+    """FX-07 (a) soft evidence: the DP charges lambda_repeat_cut on top of lambda_cut for a cut between the two
+    frames of a competitor REPEAT pair."""
+    from match_cuts import segment as seg_mod
+    fm, _ = build_fm([Spec(m=ff_select(20, 1.0, 100), n=20)])
+    fm.pair_label = np.where(np.arange(20) == 9, 1, 0)
+    b = seg_mod._Builder(fm, *proxies(20), None, None, cfg_(), None, None, None)
+    assert b.cut_cost(10) == pytest.approx(2.0) and b.cut_cost(11) == pytest.approx(1.0)
+
+
+def test_none_frame_of_a_repeat_pair_takes_its_partners_raw_frame(tmp_path):
+    """FX-07 (c) comp-duplicate invariant: frame 19 is NONE (no anchor) but repeats frame 20, which the next segment
+    matches: identical frames score alike under the partner's (RAW frame, framing) -> 19 shows the same RAW frame
+    and the 1-frame placeholder disappears (the 1191 = 1192 case of the first real run)."""
+    bank = texture_bank(400, seed=31)
+    a = ff_select(20, 1.0, 10)
+    b = np.asarray([int(math.floor(k * float(R24) / 30.0 + 1e-9)) + 200 for k in range(25)])
+    first = next(k for k in range(1, 25) if b[k] == b[k - 1])
+    b = b[first - 1:]                       # B starts with a repeat pair: frames 19 (NONE) and 20 show b[0]
+    nb = len(b)
+    comp = np.concatenate([bank[a[:19]], bank[[b[0]]], bank[b[1:]]])
+    fm, _ = build_fm([Spec(m=a[:19], n=19), Spec(kind="none", n=1), Spec(m=b[1:], n=nb - 1, track=1)])
+    fm.pair_label = np.where(np.arange(fm.n) == 19, 1, 2)
+    cp = Proxy("competitor", "", comp, (W, H), (0.5, 0.5), C30, np.arange(fm.n) / 30.0, fm.n)
+    rp = Proxy("raw", "", bank, (W, H), (0.5, 0.5), R24, np.zeros(1), len(bank))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, cp, rp, dlog=dl)
+    dl.close()
+    assert [(s.type, s.comp_in, s.comp_out) for s in segs] == [("raw", 0, 19), ("raw", 19, fm.n)]
+    assert int(fm.raw[19]) == int(b[0]) and int(fm.status[19]) == Status.MATCH
+    rec = records(tmp_path / "d.jsonl")
+    assert any(r["decision"] == "repeat_pair_absorbed" and r["comp_frame"] == 19 for r in rec)
+
+
+def test_scene_change_with_an_unrepresented_framing_step_is_reported(tmp_path, monkeypatch):
+    """FX-06 6: a PySceneDetect change inside one segment is no longer asserted to be 'no transform change': refine's
+    per-frame measurement jumps 40 px there while the path (and so the segment's model) does not -> reported as
+    'framing step not represented' (and the change is a DP candidate); a time-continuous cut is never called a
+    'same-shot jump cut'."""
+    from match_cuts import segment as seg_mod
+    clip = tmp_path / "comp.mp4"
+    clip.write_bytes(b"\0")
+    monkeypatch.setattr(seg_mod, "scenedetect_changes", lambda path, cfg: [20, 45])
+    s0 = (0.5, 0.0, 60.0, 690.0)
+    m = ff_select(60, 1.0, 300)
+    fm, _ = build_fm([Spec(m=m[:40], n=40, sim=s0), Spec(m=m[40:], n=20, sim=(0.55, 0.0, 6.0, 594.0), track=1)])
+    meas = np.tile(np.asarray(s0, np.float64), (fm.n, 1))
+    meas[20:40, 2] += 40.0                                    # measured: a 40 px step at 20 the path smoothed away
+    meas[40:] = (0.55, 0.0, 6.0, 594.0)
+    fm.sim_meas, fm.sim_meas_score = meas, np.full(fm.n, 0.99)
+    comp, raw = proxies(fm.n, path=str(clip))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, comp, raw, None, None, cfg_(), dl, None)
+    dl.close()
+    rec = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "scenedetect_crosscheck"][0]["evidence"]
+    assert rec["framing_steps_not_represented"] == [20]
+    assert any("framing step not represented" in (s.notes or "") for s in segs)
+    miss = {d["cut"]: d["explanation"] for d in rec["cuts_not_detected"]}
+    assert 40 in miss and "jump cut" not in miss[40] and "one time line" in miss[40]
+
+
+def test_placeholder_match_split_across_a_repeat_pair_is_flagged(tmp_path):
+    """FX-07 (c): the competitor labels frames 19/20 a REPEAT pair, but frame 19 (NONE) does not score like its
+    partner under the partner's RAW frame and framing -> it is not absorbed, and the comp-duplicate invariant reports
+    the placeholder / match split (comp_duplicate_conflict + a segment note) instead of passing it silently."""
+    bank = texture_bank(400, seed=33)
+    other = texture_bank(1, seed=34)[0]
+    a = ff_select(19, 1.0, 10)
+    b = ff_select(30, 1.0, 200)
+    comp = np.concatenate([bank[a], other[None], bank[b]])
+    fm, _ = build_fm([Spec(m=a, n=19), Spec(kind="none", n=1), Spec(m=b, n=30, track=1)])
+    fm.pair_label = np.where(np.arange(fm.n) == 19, 1, 2)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *pix_proxies(comp, bank), dlog=dl)
+    dl.close()
+    assert [(s.type, s.comp_in, s.comp_out) for s in segs] == [("raw", 0, 19), ("not_in_raw", 19, 20), ("raw", 20, 50)]
+    rec = records(tmp_path / "d.jsonl")
+    assert any(r["decision"] == "repeat_pair_not_absorbed" and r["comp_frame"] == 19 for r in rec)
+    conf = [r for r in rec if r["decision"] == "comp_duplicate_conflict"]
+    assert conf and conf[0]["evidence"]["pairs"][0]["pair"] == [19, 20]
+    assert "competitor frames 19/20 are identical" in segs[2].notes
+
+
+@pytest.mark.parametrize("gap", [0.0005, 0.02])
+def test_union_test_for_a_callers_cut(monkeypatch, tmp_path, gap):
+    """FX-04 3 / FX-09: a cut the caller names (union_cuts, e.g. a large J/L where two lines meet) faces the
+    continuous hypothesis. B's measured line is two RAW frames behind A's: when the pixels prefer A's line by more
+    than the noise on B's frames the cut goes; inside the noise with no independent evidence (no repeat pair, no
+    audio) it stays and is reported uncertain -- never silently."""
+    a = ff_select(30, 1.0, 1000)
+    line = ff_select(60, 1.0, 1000)
+    b = line[30:] - 2                      # B shows two RAW frames again (no single line holds both)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(m=b, n=30, track=1)])
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - gap * abs(j - int(line[k])))
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, *proxies(fm.n), None, None, cfg_(), dl, None, union_cuts=[30])
+    dl.close()
+    u = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "union_test"]
+    assert u and "caller" in u[0]["evidence"]["triggers"]
+    if gap > 0.01:
+        assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 60)] and u[0]["evidence"]["result"] == "merged"
+        assert np.array_equal(_ae(segs), line)
+    else:      # (criterion 2 may have moved the near-tie cut a few frames: the caller's trigger follows it)
+        assert len(segs) == 2 and u[0]["evidence"]["result"] == "undecided"
+        assert segs[1].uncertain and "not decidable" in segs[1].notes
