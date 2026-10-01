@@ -248,7 +248,7 @@ def check_env() -> dict:
     ffv, fpv = _tool_version(ff), _tool_version(fp)
     versions: dict[str, str | None] = {}
     for dist in ("numpy", "scipy", "opencv-contrib-python-headless", "opencv-contrib-python", "opencv-python",
-                 "av", "soundfile", "matplotlib", "scikit-image", "opentimelineio", "scenedetect"):
+                 "av", "soundfile", "matplotlib", "opentimelineio", "scenedetect"):
         try:
             versions[dist] = md.version(dist)
         except md.PackageNotFoundError:

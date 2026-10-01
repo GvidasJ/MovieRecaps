@@ -20,18 +20,25 @@ Optional: **Node.js** (runs the generated `.jsx` in a strict ExtendScript/After 
 criterion 6), **After Effects CC 2019+** (runs the `.jsx` and renders with `aerender`).
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate                     # Windows: .venv\Scripts\activate
-pip install -r tools/match_cuts/requirements.txt
-# scenedetect WITHOUT its opencv extra, so there is only one cv2 package:
-pip install --no-deps scenedetect click platformdirs
-pip install -e tools/match_cuts          # provides `python -m match_cuts` and `match-cuts`
+python -m venv .venv
+. .venv/bin/activate                     # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e tools/match_cuts          # the tool + everything it needs (numpy, scipy, OpenCV, PyAV, ...)
+# optional extras:
+pip install --no-deps scenedetect click platformdirs   # PySceneDetect cross-check of the cuts
+pip install -e "tools/match_cuts[exports]"             # OpenTimelineIO re-parse check of XML/EDL
+pip install -e "tools/match_cuts[dev]"                 # pytest, to run the tests
 ```
 
+Check the install with `python -c "import numpy, cv2, av; print('ok')"`. Python 3.11 or 3.12 is the
+safest choice: brand-new Python releases sometimes lack prebuilt wheels for a dependency, and pip then
+tries to compile it (on Windows that fails without Visual C++ build tools). The optional extras are not
+needed to run the tool (OpenTimelineIO in particular may need a compiler); without them the run skips
+those extra checks and says so.
+
 Install exactly one OpenCV wheel (`opencv-contrib-python-headless` or `opencv-contrib-python`, never
-together with `opencv-python`). PySceneDetect must use `backend='opencv'` (its PyAV backend crashes with
-PyAV ≥ 19). The FCP-XML / CMX3600 readers are the separate OTIO plugins `otio-fcp-adapter` and
-`otio-cmx3600-adapter` (in `requirements.txt`).
+together with `opencv-python`) — this is why PySceneDetect is installed with `--no-deps`. PySceneDetect
+must use `backend='opencv'` (its PyAV backend crashes with PyAV ≥ 19).
 
 Installing ffmpeg: Linux `apt install ffmpeg`, macOS `brew install ffmpeg`, Windows
 `winget install Gyan.FFmpeg`.

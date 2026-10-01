@@ -11,9 +11,9 @@ verification report). Requirements: [`MATCH_CUTS_PROMPT.md`](MATCH_CUTS_PROMPT.m
 Quick start (Python ≥ 3.10, ffmpeg ≥ 5.1 recommended):
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -r tools/match_cuts/requirements.txt && pip install --no-deps scenedetect click platformdirs
-pip install -e tools/match_cuts
+python -m venv .venv && . .venv/bin/activate      # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e tools/match_cuts                   # installs the tool and all it needs
+pip install --no-deps scenedetect click platformdirs   # optional cut cross-check
 # put the two videos in ./input/ (competitor.mp4 = the short edit, raw.mp4 = the source), then:
 python -m match_cuts --competitor input/competitor.mp4 --raw input/raw.mp4 --out output
 ```

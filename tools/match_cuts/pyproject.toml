@@ -7,6 +7,22 @@ name = "match_cuts"
 version = "0.1.0"
 description = "Rebuild a short-form competitor edit frame-exactly from its RAW source and export an After Effects project"
 requires-python = ">=3.10"
+# Everything the tool needs to run. (Install PySceneDetect separately WITHOUT its dependencies -- see
+# README -- its metadata pulls opencv-python, which conflicts with the contrib build below.)
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "opencv-contrib-python-headless>=4.9",
+    "av>=12",
+    "soundfile>=0.12",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# optional: re-parse the exported XML/EDL with OpenTimelineIO as an extra validation (the tool's own
+# parsers always run); OTIO may need a C++ compiler on Python versions without prebuilt wheels
+exports = ["opentimelineio>=0.17", "otio-fcp-adapter", "otio-cmx3600-adapter"]
+dev = ["pytest>=8"]
 
 [project.scripts]
 match-cuts = "match_cuts.cli:main"
