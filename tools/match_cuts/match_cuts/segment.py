@@ -3717,6 +3717,7 @@ class _Builder:
             seg.raw_in_seconds = float(sol["raw_in"])
             seg.raw_in_interval = list(sol["interval_floor"])
             seg.raw_in_interval_both = list(sol["interval_both"]) if sol["interval_both"] else None
+            seg.time_line = int(sol["shared"]["comp_in"]) if sol.get("shared") else None    # time_ties group id
             seg.ae_margin_ms = float(sol["margin_ms"])
             seg.raw_in_frame = int(self.pred(S, S.a))
             seg.raw_out_frame = int(self.pred(S, S.b - 1))

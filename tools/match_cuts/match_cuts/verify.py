@@ -2661,6 +2661,8 @@ def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarr
     explanation from the closed list (too_short, not_in_raw, audio_replaced, pitch_preserved,
     music_dominated, no_audio; run-level av_offset) -> pass_with_exceptions. A confident correlation
     (>= 0.8) with a lag out of tolerance is a failure whatever the code; an unknown code is a failure.
+    A segment whose audio follows an audio line (FX-14, ``audio['line']``: the recreation plays that line there,
+    also under a placeholder) is measured like any other -- never exempted as not_in_raw.
 
     Explanations come from the analysis (the segment's audio_align code, pitch analysis, the run-level
     audio status), never from this check: music_dominated is accepted only as the segment's own code.
@@ -2727,11 +2729,14 @@ def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarr
             row.update(result="n/a")
             rows.append(row)
             continue
-        if s.type == "not_in_raw":
+        if s.type == "not_in_raw" and not au.get("line"):
             row.update(result="exception", code="not_in_raw")
             exceptions.append(f"{name}: not_in_raw")
             rows.append(row)
             continue
+        if au.get("line"):
+            # its audio follows an audio line (FX-14): the recreation plays that line here, measured like any other
+            row["audio_line"] = au["line"].get("id")
         a0 = int(s.comp_in) + int(au.get("in_offset_frames") or 0)
         a1 = int(s.comp_out) + int(au.get("out_offset_frames") or 0)
         dur = (a1 - a0) / fps

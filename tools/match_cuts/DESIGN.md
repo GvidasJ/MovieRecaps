@@ -204,10 +204,16 @@ visual verification always uses a match-geometry render at competitor size and f
   freeze (v = 0), reverse (v < 0) and ramps are `type = raw` with `time_mode = remap`
   (`time_remap_keys` non-empty). `transform` = canonical Sim dict; `transform_keys` =
   `[{comp_frame, scale, rotation_deg, tx, ty}]` (absolute comp frames, AE-linear). `audio =
-  {in_offset_frames, out_offset_frames, pitch_preserved, lag_ms, corr, exception}`: the audio range is
+  {in_offset_frames, out_offset_frames, pitch_preserved, lag_ms, corr, exception, phase_source, lag_ms_video,
+  line}`: the audio range is
   `[comp_in + in_offset, comp_out + out_offset)` (negative in_offset = J-cut, positive out_offset =
   L-cut; the extension uses the same (raw_in, v) map; J/L = the switch differs from the run's measured
   switch baseline, §7 D9). `lag_ms` / `lag_ms_video` are residuals after the run's A/V offset (§7 D9).
+  `line` = None, or the AUDIO LINE the segment's audio follows instead of its picture map (FX-14, §7 D9 'audio
+  lines': a video-only retime / freeze / uncertain piece / placeholder over continuous audio): {id (comp frame
+  where the line is anchored), raw_in_seconds (the line's picture-synced RAW time at the segment's comp_in),
+  speed, source, lag_ms, corr}. `time_line` = None, or the time-tied group (segment.py time ties, FX-04 2: the
+  comp_in of the group's first segment) whose members show ONE RAW line (one phase, one D3 shift, §7 D3).
   `exception` ∈ {too_short, not_in_raw, audio_replaced, pitch_preserved, music_dominated, no_audio} (closed
   list; criterion 5 adds the RUN-level code `av_offset`, never a segment's own code). `retime` ∈ {none,
   frame_blend, optical_flow} (`frame_blend` with linear `time_remap_keys` carrying the measured continuous RAW
@@ -326,10 +332,15 @@ def coarse_align(comp_y, raw_y, sr, cfg, dlog) -> AudioHints     # empty audio -
     # windows v ∈ [0.90, 1.30] step 0.01 (tape-style speed-ups shift pitch: onset envelope is robust).
     # conf = peak / second peak (outside ±0.3 s), psr = peak-to-sidelobe.
 def xcorr_lag(a, b, sr, max_lag_s) -> tuple[float, float]   # (lag_s, peak): b delayed by lag vs a
+def xcorr_lag_side(a, b, sr, max_lag_s, inner_s=None) -> tuple[float, float, float]
+    # + the best SIDELOBE (outside the peak's main lobe): peak - side says whether the lag is unique (short
+    # windows of tonal audio / a music bed repeat every period); inner_s: hypothesis test -- the best lag
+    # within ±inner_s vs the best correlation beyond it
 def analyze_segments_audio(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog, *, av_offset_s=0.0, pass_name=None) -> dict
     # (§7 D9) every lag search renders the RAW pre-shifted by av_offset_s and searches the residual
     # (±min(audio_residual_search_s, half the range)); J/L against the measured switch baseline; also returns
-    # '_av_offset_s', '_switch_baseline', '_measured' (run internals, never cutlist fields)
+    # '_av_offset_s', '_switch_baseline', '_measured' (run internals, never cutlist fields); audio lines over
+    # video-only retimes / uncertain pieces / placeholders (FX-14, §7 D9) set Segment.audio['line']
 def av_offset_prior(hints, segments, comp_fps, cfg, dlog) -> dict        # search centre from the S5.1 windows
 def av_offset_probe(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog) -> dict   # fallback: one wide search per segment
 def av_offset_estimate(segments, audio_result, cfg, dlog, *, prior=None) -> dict   # published cutlist.audio.av_offset
@@ -769,6 +780,13 @@ def write_edl(cutlist, path, cfg)
     # CMX3600, FCM: NON-DROP FRAME. Record TC at comp nominal rate; source TC = RAW frame counted at
     # nominal round(raw_fps), NDF. M2 field = speed·raw_fps (3 decimals; negative reverse; 0 freeze).
     # NOT-IN-RAW / dip / flash -> BL events. Crossfade -> 'D <frames>' event.
+def audio_items(cutlist) -> list[AudioItem]
+    # separate audio events (§7 D9 export sync): empty in raw sync without audio lines (the audio follows the
+    # picture events: XML audio clipitems at the video ranges, EDL 'B'); else one per audible segment (its own
+    # map or its audio line) -- competitor sync: range + round(b·fps) + genuine J/L, RAW time tau + v·g. The
+    # formats address whole frames: source in = the NEAREST RAW frame, the sub-frame remainder (ms) written
+    # next to the event (XML clip comment, EDL '* AUDIO' comment); EDL video events become 'V', audio events
+    # 'A' after them; XML: one audio clipitem per item + an 'Audio sync' marker.
 def validate_exports(cutlist, xml_path, edl_path) -> dict
     # OTIO read with rate = comp fps (cmx_3600 uses ONE rate: M2 read as field/rate) and own XML parser
     # (the fcp adapter ignores timeremap); compare frame numbers, not seconds: total == competitor
@@ -793,7 +811,8 @@ def build_audio(cutlist, raw_audio, sr, *, fps=None, n_frames=None, audio_sync=N
                 switch_baseline_s=None) -> np.ndarray   # sample-accurate; tape-style resample for v != 1
     # audio sync (§7 D9): export_ae.audio_sync_params -- raw = RAW lip-sync; competitor = content + v·g, ranges
     # moved by round(switch baseline · fps) frames (exactly like the AE audio twins)
-    # (like AE stretch); J/L ranges; crossfade gains as in export_ae; placeholders silent.
+    # (like AE stretch); J/L ranges; crossfade gains as in export_ae; placeholders silent unless they carry an
+    # audio line (render_preview.audio_segment: a segment with Segment.audio['line'] plays that line, FX-14).
 def render_compare(comp_path, preview_frames_source, cutlist, out_path, cfg) -> None
     # hstack competitor | recreation (match geometry) | amplified |diff| (×4), same height (scaled to
     # 960 px high), burned-in frame number, timecode, segment id; competitor audio.
@@ -1137,6 +1156,21 @@ verification honesty) were fixed under these shared rules:
   (`Segment.audio.phase_source`, `lag_ms_video`). Segments whose interval is wider than ±100 ms (static /
   ambiguous-identical) also get a wide search centred on the feasible interval and covering all of it
   (half-width capped at 60 s).
+  **Time lines** (`pipeline.time_line_groups`, `place_time_lines`): a time-tied group (`Segment.time_line`,
+  written by segment.py's time ties: adjacent stretch segments at one speed whose frames fit ONE RAW line --
+  a framing step, a punch-in, reframes at RAW-native shot changes) is used as maximal runs of >= 2 adjacent
+  members with a raw_in interval (a member re-solved on its own, a gap or another speed splits it; logged).
+  The per-layer placement saw only each member's own frames, so the layers of one continuous clip could show
+  different sub-frame phases (drift up to the interval width); the group is re-placed as ONE line: the line's
+  raw_in at the first member's comp_in c0 is the max-min-slack cell midpoint of EVERY frame of the group inside
+  the members' common interval (floor∩round when all have one), and member i gets
+  `raw_in_i = raw_in_0 + v·(comp_in_i − c0)/comp_fps` as a 9-decimal value whose exact slack is then checked
+  on its own layer (`ae_margin_ms`). The AE phase class of a member (pinned / razor, FX-10) uses its LINE's
+  cell (`phase_slack(..., line)`). D3 moves a group by ONE common shift: the group residual is the weighted
+  mean (audio seconds × corr²) of its confidently correlated members' residuals, which must agree within
+  `audio_lag_tol_ms` (else the video phase is kept, logged), the feasible range is the intersection of every
+  member's range shifted along the line, the target is placed in the cells of every frame of the group, and
+  a member without confident audio of its own moves with its line.
 * **D4 Verification references.** Criterion 3 compares the AE result with refine's PRE-segmentation
   measurement (`fm.d['pre_segment_*']`); frames segmentation re-assigned to its model are a listed
   `reassigned` class counted against `frame_exact_min`; a plan that disagrees with the cutlist always fails.
@@ -1151,7 +1185,11 @@ verification honesty) were fixed under these shared rules:
   convention); one ~1 s fullscreen segment exercises D1. `tests/test_synthetic_av_offset.py` (slow) delays
   the mini competitor's whole audio track by 86 ms (`adelay` + `atrim`, video copied) to exercise D9: the
   published offset interval must contain -86 ms, c5 = pass_with_exceptions(av_offset), no fake J/L, AE twins
-  only for genuine J/L in raw sync, lags ~0 in competitor sync; the original mini publishes offset 0.
+  only for genuine J/L in raw sync, lags ~0 in competitor sync (+ the XML / EDL audio events, nearest frame and
+  remainder, re-parsed exactly); the original mini publishes offset 0. film24 (§6.1) also asserts that the layers of
+  one time line (pan_step, punch_pan, line_across_shots) stay ONE exact line through the placement and D3, and that
+  the video-only blend slow motion and freeze keep continuous audio (an audio line within 3 ms of the truth, no
+  silent gap in the preview audio) while the foreign NOT-IN-RAW insert stays silent.
 * **D9 Global A/V offset (one model for every audio consumer).** A competitor whose whole soundtrack is
   shifted against its picture (repost, platform transcode, NLE export; the first real run: 86 ms late) is
   ONE measured property of the input, not dozens of per-segment failures. Convention (one sign everywhere):
@@ -1188,10 +1226,44 @@ verification honesty) were fixed under these shared rules:
   * Audio switches (FX-09): each hard cut's switch time is measured sub-hop; the run's switch baseline b =
     weighted median over decisive cuts between ≥ 10-frame, corr ≥ 0.8 segments (any value: an offset of the
     finished mix moves every switch by −g, one in the source none); |b| below half the J/L threshold is 0;
-    unknown b = anywhere in [0, −g]. A cut is J/L only when |switch − b| ≥ max(`audio_jl_min_frames` frame,
-    3σ) with the margin test passing (offset_frames = round((switch − b)·fps), genuine 1-frame J/L stay
-    detectable); ranges stay ordered (a0 < a1); a J/L ≥ `audio_jl_large_frames` next to a retimed segment or
-    where B's time line meets A's extended line is logged as evidence, not exported.
+    unknown b = anywhere in [0, −g]. With fewer than `audio_jl_baseline_min_cuts` such cuts the DECISIVE tier
+    decides: cuts between ≥ 10-frame segments with both models whose switch is decisive (local-NCC margin ≥
+    `audio_jl_strong_margin` on both sides) whatever the cores' whole correlation (a genuine J/L at a
+    segment's other end lowers it -- film24's S02 after the 6-frame L-cut -- without making this switch less
+    clear; `switch_baseline.tier`). Once b is known, a model whose band-excluded core was too short to measure
+    (3–5 frame segments) is aligned on the window where the competitor plays it (core + b), its lag used only
+    when that xcorr peak is UNIQUE (peak − best sidelobe ≥ `audio_peak_unique_margin`: short windows of tonal
+    audio repeat every period), and the switches next to it are measured again. A cut is J/L only when
+    |switch − b| ≥ max(`audio_jl_min_frames` frame, 3σ) with the margin test passing AND evidence on both
+    sides (≥ 2 local-NCC frames each side, decisiveness ≥ `audio_jl_min_decisive`: a switch at the edge of the
+    search window, one side never observed, is not a J/L -- film24's fake 1-frame J at 189) (offset_frames =
+    round((switch − b)·fps), genuine 1-frame J/L stay detectable); ranges stay ordered (a0 < a1); a J/L ≥
+    `audio_jl_large_frames` next to a retimed segment or where B's time line meets A's extended line is logged
+    as evidence, not exported. Added audio: residual runs are merged across short gaps / unobservable frames
+    FIRST and each merged run is classified on the residual of its observable frames (a steady music bed
+    under a dynamic original only crosses the threshold where the original is quiet: typed piece by piece every
+    < 1.5 s piece looked like an effect -- film24's −12 dB bed read 'sfx'); the residual is the competitor minus
+    the offset-corrected rebuild (each model rendered at g + its residual).
+  * Audio lines (FX-14, `audio_align._audio_lines`): a REGION is a maximal run of adjacent pieces whose own
+    picture map does not explain their audio (corr < `verify_audio_strong_corr` or residual beyond
+    `audio_lag_tol_ms`) and that are a placeholder, a retimed segment (remap / freeze / speed ≠ 1 / frame
+    blend), an uncertain segment or a piece shorter than 0.5 s. Candidate lines (picture-synced RAW time,
+    played at g like any segment): the confidently explained segment just before the region extended forward,
+    the one just after extended backward, and a retimed piece's own picture in-point at speed 1 corrected by
+    its measured residual (video-only slow motion / freeze over audio that keeps playing). A piece takes a
+    line only on CONFIDENT evidence over its surely-played window: a neighbour's line is a hypothesis test
+    (the best lag within ±tol correlates ≥ `verify_audio_strong_corr` and beats every other alignment up to
+    the residual search), an own in-point must be the unique peak of the search (≥ strong, margin
+    `audio_peak_unique_margin`) -- never `audio_replaced_corr` 0.30; a piece too short to measure is bridged
+    only between two verified pieces of the same line. A real NOT-IN-RAW insert with foreign audio verifies no
+    line and stays silent. A line piece's exception is None; it says nothing about D3 or the offset estimate;
+    a J/L at a cut next to a line piece is removed (inside one line the anchor's audio simply continues; at
+    another cut the switch was measured with the piece's picture model, which does not carry its audio). Export: ONE audio-only RAW layer per run of consecutive
+    pieces on one line (`export_ae._PlanBuilder.audio_line_layer`, the picture layers silent; competitor sync
+    adds v·g and the switch shift like every twin), `render_preview.build_audio` plays the line (also under a
+    placeholder), XML / EDL get a separate audio event; c5 measures the piece on its line like any segment
+    (never exempted as not_in_raw; a lone piece shorter than `verify_audio_min_s` stays the inconclusive
+    too_short like any short piece).
   * Criterion 5 (`verify.check_audio`): lags searched around the expected lag E (g in raw sync, 0 in
     competitor sync) over the samples where both surely play the segment (switch baseline / band), judged as
     residuals within ±tol; verify re-estimates the offset (median measured lag + the offset the recreation
@@ -1206,7 +1278,11 @@ verification honesty) were fixed under these shared rules:
     puts every RAW segment's audio on an audio-only twin whose source time is shifted by v·g (sample-accurate
     through the twin's own stretch startTime / shifted remap keys) with in/out at cut + round(b·fps) +
     genuine J/L, video layers silent and NO container shift on top (that would count the offset twice).
-    `render_preview.build_audio` mirrors it; FCP7 XML / EDL keep RAW sync (not covered).
+    `render_preview.build_audio` mirrors it. FCP7 XML / EDL (`export_xml_edl.audio_items`): in competitor sync
+    (or with audio lines) every audible segment gets its own audio event at the same range and RAW time; the
+    formats address whole frames, so the source in is the NEAREST RAW frame and the sub-frame remainder (ms,
+    < half a RAW frame) is written next to the event (XML clip comment, EDL `* AUDIO` comment; EDL video events
+    `V`, audio events `A`); `validate_exports` checks the audio events' record / source frames.
 
 ### 7.1 Second review round (review of the v3 diff)
 

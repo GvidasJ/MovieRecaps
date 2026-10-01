@@ -169,6 +169,9 @@ def segment_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[str
         notes.append(f"audio: {au['exception']}")
     if au.get("in_offset_frames") or au.get("out_offset_frames"):
         notes.append(f"J/L audio {au.get('in_offset_frames')}/{au.get('out_offset_frames')}f")
+    if au.get("line"):
+        # FX-14: its audio is one continuous audio line (a video-only retime / placeholder over playing audio)
+        notes.append(f"audio line ({au['line'].get('source')})")
     return [f"S{seg.id:02d}", comp, dur, raw, speed, "yes" if seg.flip_h else "", _framing_str(seg),
             _transition_str(seg), f"{seg.confidence:.2f}", "; ".join(notes)]
 
@@ -523,7 +526,9 @@ def av_offset_line(cl: Any) -> str:
         line = f"A/V offset not measured ({av.get('reason') or 'no evidence'}); audio is judged against RAW's own sync"
     b = av.get("switch_baseline_ms")
     if b is not None and st == "measured":
-        line += f"; the competitor's audio switches {float(b):+.1f} ms after each picture cut (switch baseline)"
+        sw = av.get("switch_baseline") or {}
+        over = f" over {sw['n']} {sw.get('tier') or 'strong'} cut(s)" if sw.get("n") else ""
+        line += f"; the competitor's audio switches {float(b):+.1f} ms after each picture cut (switch baseline{over})"
     if st == "measured":
         line += ("; export keeps RAW lip-sync (--audio-sync raw)" if mode != "competitor"
                  else "; export reproduces the competitor's offset (--audio-sync competitor)")
@@ -677,17 +682,18 @@ def ae_phase_lines(cl: Any, cfg: Any) -> list[str]:
     frames -- or the audio in-point -- fix raw_in inside one breakpoint cell; exported frame-exact while AE's
     time resolution is unverified), real razor edges (``pipeline.ae_rule_sensitive``) one warning line."""
     from .config import Config
-    from .pipeline import ae_phase_class, ae_rule_sensitive, phase_slack
+    from .pipeline import ae_phase_class, ae_rule_sensitive, phase_slack, time_line_spans
     cfg = cfg if cfg is not None else Config()
     cf, rf = cl.comp_fps, cl.raw_fps
     mode = str(getattr(cfg, "ae_time_mode", "auto") or "auto")
     tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
     pinned, risky = [], []
+    spans = time_line_spans(list(cl.segments))          # time-tied members: their group's line decides the cell
     for s in cl.segments:
-        info = phase_slack(s, cf, rf)
+        info = phase_slack(s, cf, rf, spans.get(int(s.id)))
         if info is None:
             continue
-        if ae_rule_sensitive(s, cfg, cf, rf):
+        if ae_rule_sensitive(s, cfg, cf, rf, spans.get(int(s.id))):
             risky.append(f"S{s.id:02d} ({info['slack_ms']:.6f} ms at frame {info['k']})")
         elif ae_phase_class(info, cfg) == "pinned":
             by = ("frames" if info["video_pinned"] else

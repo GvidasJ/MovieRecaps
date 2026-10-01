@@ -965,6 +965,132 @@ def test_audio_informed_phase_keeps_measured_frames():
     assert [phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, 0, cf, rf, rule="round") for k in range(30)] == frames
 
 
+F24 = Fraction(24000, 1001)
+
+
+def _time_line(n_slot: int, bounds: list[int], pad: int = 1, v: float = 1.0):
+    """A time-tied group as segment.py hands it over (FX-04 2): 23.976 RAW on the 30 fps grid (raw_in = n/30), soft
+    ranges +-pad around the exact frames, ONE shared phase solve over all members (phase_solve.solve_shared_raw_in);
+    every member carries the line's values at its own comp_in and Segment.time_line = the first comp_in."""
+    from match_cuts import phase_solve
+    n = bounds[-1]
+    fm = FrameMap(n)
+    fm.status = np.full(n, Status.MATCH, np.int8)
+    truth = np.array([math.floor(F24 * (Fraction(n_slot, 30) + Fraction(k, 30))) for k in range(n)], np.int32)
+    for col in ("raw", "raw_lo", "raw_hi"):
+        setattr(fm, col, truth)
+    fm.soft_lo, fm.soft_hi = truth - pad, truth + pad
+    parts = [(np.arange(a, b), truth[a:b] - pad, truth[a:b] + pad, a) for a, b in zip(bounds[:-1], bounds[1:])]
+    sols = phase_solve.solve_shared_raw_in(parts, v, F30, F24)
+    segs = [Segment(i, "raw", a, b, speed=v, raw_in_seconds=float(sol["raw_in"]), raw_in_interval=list(sol["interval_floor"]),
+                    raw_in_interval_both=list(sol["interval_both"]) if sol["interval_both"] else None,
+                    ae_margin_ms=float(sol["margin_ms"]), time_line=int(bounds[0]))
+            for i, ((a, b), sol) in enumerate(zip(zip(bounds[:-1], bounds[1:]), sols), start=1)]
+    return fm, segs, truth
+
+
+def _line_drift_ms(segs: list[Segment]) -> list[float]:
+    """Each member's raw_in minus the first member's line at its comp_in (ms)."""
+    s0 = segs[0]
+    return [(s.raw_in_seconds - (s0.raw_in_seconds + float(s.speed) * float(Fraction(s.comp_in - s0.comp_in, 30)))) * 1000.0
+            for s in segs]
+
+
+@pytest.mark.parametrize("slot,bounds", [(811, [0, 15, 38, 58]), (1362, [0, 14, 40]), (251, [0, 4, 9])])
+def test_time_line_group_is_placed_as_one_line(slot, bounds):
+    """FX-04 2 x FX-10: the members of one time line were re-placed each over its OWN frames (per-member breakpoint
+    cells) and drifted apart by up to 7.7 ms; place_time_lines places the line ONCE over every frame of the group
+    (one common shift): members on one line to the 9-decimal rounding, every frame inside its soft range, each
+    member's ae_margin_ms its own exact slack, and the group's min slack = the max-min slack of all frames."""
+    from match_cuts import phase_solve
+    fm, segs, truth = _time_line(slot, bounds)
+    for s in segs:
+        pipeline.solve_segment_phase(s, fm, F30, F24, Config(), null_dlog())
+    before = _line_drift_ms(segs)
+    assert max(abs(d) for d in before) > 0.2                          # the per-member placement drifts apart
+    recs = []
+    dlog = types.SimpleNamespace(record=lambda *a, **k: recs.append((a, k)))
+    assert pipeline.place_time_lines(segs, fm, F30, F24, Config(), dlog) == []
+    assert max(abs(d) for d in _line_drift_ms(segs)) <= 1e-6         # one line (9-decimal seconds)
+    assert all(s.raw_in_seconds == round(s.raw_in_seconds, 9) for s in segs)
+    for s in segs:
+        for k in range(s.comp_in, s.comp_out):
+            assert truth[k] - 1 <= phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, s.comp_in, F30, F24) <= truth[k] + 1
+        sl, _k = phase_solve.exact_min_slack(s.raw_in_seconds, 1.0, s.comp_in, s.comp_in, s.comp_out, F30, F24)
+        assert s.ae_margin_ms == pytest.approx(float(sl / F24) * 1000.0, abs=1e-6)
+    allowed = segs[0].raw_in_interval_both or segs[0].raw_in_interval
+    best = phase_solve.place_raw_in(allowed, bounds[0], bounds[-1], 1.0, F30, F24,
+                                    round_rule=bool(segs[0].raw_in_interval_both))["best_half"]
+    assert min(s.ae_margin_ms for s in segs) == pytest.approx(best / float(F24) * 1000.0, abs=2e-6)
+    placed = [k for a, k in recs if a[1] == "time_line_placed"]
+    assert len(placed) == 1 and placed[0]["segments"] == [s.id for s in segs]
+    # the classification of a member pinned by its LINE uses the line's cell (pinned / ok, never 'razor')
+    spans = pipeline.time_line_spans(segs)
+    assert spans == {s.id: (bounds[0], bounds[-1]) for s in segs}
+    for s in segs:
+        assert pipeline.ae_phase_class(pipeline.phase_slack(s, F30, F24, spans[s.id]), Config()) in ("ok", "pinned")
+
+
+def test_time_line_groups_split_on_gaps_speed_and_resolved_members():
+    """Only maximal runs of >= 2 adjacent forward stretch members at one speed are a line; a member re-solved on
+    its own (no raw_in interval), another speed or a gap splits the group (logged)."""
+    def mk(i, a, b, v=1.0, tl=0, iv=(1.0, 1.01)):
+        return Segment(i, "raw", a, b, speed=v, raw_in_seconds=1.0 + a / 30, raw_in_interval=list(iv) if iv else None,
+                       time_line=tl)
+    segs = [mk(1, 0, 10), mk(2, 10, 20), mk(3, 20, 30, v=1.1), mk(4, 30, 40, v=1.1), mk(5, 40, 50, v=1.1, iv=None),
+            mk(6, 50, 60, v=1.1), mk(7, 70, 80, tl=70), mk(8, 81, 90, tl=70), mk(9, 90, 99, tl=None)]
+    recs = []
+    groups = pipeline.time_line_groups(segs, types.SimpleNamespace(record=lambda *a, **k: recs.append(k)))
+    assert [[s.id for s in g] for g in groups] == [[1, 2], [3, 4]]
+    assert [(r["time_line"], r["runs"]) for r in recs] == [(0, [[1, 2], [3, 4]]), (70, [])]
+    assert pipeline.time_line_groups([mk(1, 0, 10), Segment(2, "not_in_raw", 10, 20, time_line=0)]) == []
+
+
+def test_audio_informed_phase_moves_a_time_line_by_one_shift():
+    """D3 per time line: ONE common shift from the members' combined residual (weights = audio seconds x corr^2);
+    members that disagree beyond the lag tolerance keep their video phase; a member without confident audio
+    still moves with its line."""
+    from match_cuts import phase_solve
+
+    def run(lags: dict, corrs: dict | None = None):
+        fm, segs, truth = _time_line(811, [0, 15, 38, 58])
+        for s in segs:
+            pipeline.solve_segment_phase(s, fm, F30, F24, Config(), null_dlog())
+            s.audio = dict(pipeline.DEFAULT_SEG_AUDIO)
+        pipeline.place_time_lines(segs, fm, F30, F24, Config(), null_dlog())
+        old = [s.raw_in_seconds for s in segs]
+        corrs = corrs or {}
+        res = {"segments": {s.id: {"lag_ms": lags.get(s.id), "corr": corrs.get(s.id, 0.95 if lags.get(s.id) is not None
+                                                                              else None), "exception": None}
+                            for s in segs}, "status": "ok",
+               "_measured": {s.id: {"dur_s": s.length / 30.0} for s in segs}}
+        pipeline.apply_segment_audio(segs, res)
+        recs = []
+        dlog = types.SimpleNamespace(record=lambda *a, **k: recs.append((a, k)))
+        moved, warns = pipeline.audio_informed_phase(segs, res, fm, None, None, 16000, F30, F24, Config(), dlog)
+        return segs, old, moved, warns, recs, truth
+
+    segs, old, moved, warns, recs, truth = run({1: 1.0, 2: 1.4, 3: 0.6})
+    shifts = [(s.raw_in_seconds - o) * 1000.0 for s, o in zip(segs, old)]
+    assert moved == [1, 2, 3] and not warns
+    assert max(shifts) - min(shifts) <= 2e-6 and abs(shifts[0]) > 0.1   # one shift for the whole line
+    assert max(abs(d) for d in _line_drift_ms(segs)) <= 1e-6
+    w = np.array([15, 23, 20]) * 0.95 ** 2
+    want = float(np.dot(w, [1.0, 1.4, 0.6]) / w.sum())
+    used = {k["lag_ms_used"] for a, k in recs if a[1] == "audio_phase"}
+    assert used == {round(want, 3)} and all(s.audio["phase_source"] == "audio" for s in segs)
+    for s in segs:
+        for k in range(s.comp_in, s.comp_out):
+            assert truth[k] - 1 <= phase_solve.ae_frame(s.raw_in_seconds, 1.0, k, s.comp_in, F30, F24) <= truth[k] + 1
+    # a member without confident audio moves with its line
+    segs, old, moved, _, _, _ = run({1: 1.0, 3: 1.2}, {2: 0.2})
+    assert moved == [1, 2, 3] and max(abs(d) for d in _line_drift_ms(segs)) <= 1e-6
+    # members that disagree by more than the lag tolerance: one line cannot follow both -> video phase kept
+    segs, old, moved, _, recs, _ = run({1: 1.0, 2: 14.0})
+    assert not moved and [s.raw_in_seconds for s in segs] == old
+    assert any("disagree" in k.get("reason", "") for a, k in recs if a[1] == "audio_phase_skipped")
+
+
 def _assembly_ctx(tmp_path: Path, fps: Fraction, n_comp: int, n_raw: int, comp_y, raw_y, sr: int) -> "pipeline.Context":
     cfg = Config()
     cfg.out_dir, cfg.work_dir = str(tmp_path / "o"), str(tmp_path / "w")

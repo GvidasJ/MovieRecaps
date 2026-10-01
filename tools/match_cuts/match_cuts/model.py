@@ -471,6 +471,8 @@ class Segment:
     ambiguous_frames: list[int] = field(default_factory=list)  # competitor frames with ambiguous-identical RAW
     raw_in_interval: list[float] | None = None                 # feasible raw_in interval (floor rule)
     raw_in_interval_both: list[float] | None = None            # feasible under floor AND round rules
+    time_line: int | None = None           # time-tied group (segment.py time ties, FX-04 2): the comp_in of the group's
+                                           # first segment; members show ONE RAW line (one phase, one D3 shift)
     color: str | None = None               # dip / flash colour
     label: str = ""                        # e.g. NOT-IN-RAW placeholder label
     notes: str = ""

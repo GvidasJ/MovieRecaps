@@ -461,3 +461,71 @@ def test_fullscreen_segment_is_cropped_to_and_framed_from_its_own_box(tmp_path):
     assert scales == [pytest.approx(100 * want1.s, abs=1e-4), pytest.approx(100 * want2.s, abs=1e-4)]
     res = ex.validate_exports(cl, tmp_path / "f.xml", tmp_path / "f.xml")
     assert not any(e.startswith("XML") for e in res["errors"])
+
+
+# ---------------------------------------------------------------------------------------------
+# audio sync (DESIGN §7 D9, FX-13) and audio lines (FX-14) in the editorial formats
+# ---------------------------------------------------------------------------------------------
+
+def _competitor_sync(cl: Cutlist, lag_ms: float = -86.0, baseline_ms: float = 48.0) -> Cutlist:
+    cl.audio = {"status": "ok", "av_offset": {"status": "measured", "lag_ms": lag_ms, "switch_baseline_ms": baseline_ms,
+                                              "sync_mode": "competitor"}}
+    cl.settings = {"audio_sync": "competitor"}
+    return cl
+
+
+def test_competitor_sync_audio_events_nearest_frame_and_remainder(tmp_path):
+    """--audio-sync competitor: every audible segment gets its own audio event, moved by round(48 ms x 30) = 1 frame
+    and playing RAW time tau + v g (g = -86 ms): source in = the NEAREST RAW frame, the sub-frame remainder written
+    next to it (XML clip comment, EDL '* AUDIO' line); the video events stay exact, both files validate."""
+    cl = _competitor_sync(make_cutlist())
+    items = ex.audio_items(cl)
+    by = {it.seg.id: it for it in items}
+    assert set(by) == {1, 2, 3, 4, 5, 7, 9, 10, 11}                       # placeholders / dips play nothing
+    s1 = cl.segments[0]
+    it = by[1]
+    assert (it.rec_in, it.rec_out) == (1, 46)
+    tau = s1.raw_in_seconds + 1.0 * (1 / 30 - 0.086)                       # its map at record frame 1, 86 ms earlier
+    assert it.src_in == round(tau * float(RF)) and it.remainder_ms == pytest.approx((tau - it.src_in / float(RF)) * 1000)
+    assert abs(it.remainder_ms) <= 0.5e3 / float(RF) + 1e-9
+    assert by[2].speed == pytest.approx(1.1) and by[11].rec_out == N         # the last one is cut at the end
+    xml, edl = tmp_path / "e.xml", tmp_path / "e.edl"
+    ex.write_fcp7_xml(cl, xml, Config(out_dir=str(tmp_path)))
+    ex.write_edl(cl, edl, Config(out_dir=str(tmp_path)))
+    res = ex.validate_exports(cl, xml, edl)
+    assert res["ok"], res["errors"]
+    own = ex.parse_fcp7_xml(xml)
+    assert [(a["start"], a["end"], a["in"]) for a in own["audio_items"]] == [(i.rec_in, i.rec_out, i.src_in) for i in items]
+    assert "remainder" in xml.read_text() and any(m["name"] == "Audio sync" for m in own["markers"])
+    evs = ex.parse_edl_text(edl.read_text())
+    assert {e["chan"] for e in evs} == {"V", "A"} and sum(e["chan"] == "A" for e in evs) == len(items)
+    assert "* AUDIO: S01 picture, nearest RAW frame, remainder" in edl.read_text()
+    tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30.0)
+    assert [t.kind for t in tl.tracks].count(otio.schema.TrackKind.Audio) >= 1
+    # tampering with an audio event is caught
+    a1 = next(e for e in evs if e["chan"] == "A")
+    bad = tmp_path / "bad.edl"
+    bad.write_text(edl.read_text().replace(f"{a1['src_in']} {a1['src_out']} {a1['rec_in']}",
+                                           f"{a1['src_out']} {a1['src_out']} {a1['rec_in']}", 1))
+    assert not ex.validate_exports(cl, xml, bad)["ok"]
+
+
+def test_raw_sync_exports_unchanged_and_audio_lines_get_their_own_events(tmp_path):
+    """RAW sync without audio lines: the audio follows the picture (B events, clipitems at the video ranges) exactly
+    as before. An audio line (FX-14) -- here under the NOT-IN-RAW placeholder -- makes the audio separate events:
+    the placeholder gets the line's audio event, the video events become V."""
+    cl = make_cutlist()
+    assert ex.audio_items(cl) == [] and not ex.audio_sync_info(cl)["split"]
+    segs = make_segments()
+    segs[5].audio = {"in_offset_frames": 0, "out_offset_frames": 0, "exception": None, "lag_ms": 0.0, "corr": 0.95,
+                     "line": {"id": 175, "raw_in_seconds": rt(4100, .3), "speed": 1.0, "source": "S05 continued",
+                              "lag_ms": 0.0, "corr": 0.95}}
+    cl = make_cutlist(segments=segs)
+    items = {it.seg.id: it for it in ex.audio_items(cl)}
+    assert items[6].what == "audio line" and (items[6].rec_in, items[6].rec_out) == (210, 240)
+    assert items[6].src_in == round(rt(4100, .3) * float(RF)) and items[1].rec_in == 0
+    xml, edl = tmp_path / "l.xml", tmp_path / "l.edl"
+    ex.write_fcp7_xml(cl, xml, Config(out_dir=str(tmp_path)))
+    ex.write_edl(cl, edl, Config(out_dir=str(tmp_path)))
+    assert ex.validate_exports(cl, xml, edl)["ok"]
+    assert "S06 audio line, nearest RAW frame" in edl.read_text()

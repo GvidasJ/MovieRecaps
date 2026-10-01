@@ -1275,6 +1275,19 @@ def _sample_at(K: int | Fraction, sr: int, fps: Fraction) -> int:
     return math.floor(Fraction(K) * sr / Fraction(fps) + Fraction(1, 2))
 
 
+def audio_segment(seg: Segment) -> Segment | None:
+    """The segment whose RAW map plays this segment's AUDIO: the segment itself (a RAW segment), or -- when its
+    audio follows a verified audio line (FX-14, ``seg.audio['line']``: a video-only retime, an uncertain segment
+    or a placeholder over continuous audio) -- a stretch view of that line over the same range (raw_in = the
+    line's picture-synced RAW time at comp_in, its speed); None when it plays no RAW audio (placeholders, dips)."""
+    line = (seg.audio or {}).get("line")
+    if line:
+        import dataclasses
+        return dataclasses.replace(seg, type="raw", raw_in_seconds=float(line["raw_in_seconds"]),
+                                   speed=float(line["speed"]), time_remap_keys=[], time_mode="stretch")
+    return seg if seg.type == "raw" else None
+
+
 def _audio_frames(seg: Segment, main_fps: Fraction, comp_fps: Fraction, N: int, shift_k: int) -> tuple[int, int]:
     """MAIN frames [a0, a1) of a segment's audio: [comp_in + in_offset, comp_out + out_offset) (J/L, DESIGN
     §3) moved by the export's switch shift (D9 competitor sync), clipped to [0, N]."""
@@ -1297,11 +1310,13 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
     out_offset) (J/L cuts, DESIGN §3) = output samples [floor(K_a sr/fps + 1/2), floor(K_b sr/fps + 1/2)).
     Output sample n (time n/sr) plays RAW time tau(n) = raw_in' + v (n/sr - K_in/fps), i.e. RAW sample
     position tau*sr, via :func:`sample_positions` (tape-style: speed and pitch change together, like an AE
-    stretched layer; v = 1 is a sub-sample fractional shift). time_remap_keys are applied piecewise
+    stretched layer; v = 1 is a sub-sample fractional shift). A segment whose audio follows an audio line
+    (FX-14, ``audio_segment``) plays that line instead -- also a placeholder. time_remap_keys are applied piecewise
     (frozen pieces are silent). Crossfades: gains from export_ae's Audio Levels keys (20 log10 of
     1 - alpha_B for A and alpha_B for B at each overlap frame, B back to 0 dB at O + D), interpolated
     linearly in dB between the key times like AE; at every overlap frame boundary the gains are exactly
-    the linear 1 - alpha_B / alpha_B. Overlapping audio ranges sum. NOT-IN-RAW / dips / flashes: silent.
+    the linear 1 - alpha_B / alpha_B. Overlapping audio ranges sum. NOT-IN-RAW (without an audio line) / dips /
+    flashes: silent.
 
     Audio sync (DESIGN §7 D9, mirrors export_ae's audio twins; ``export_ae.audio_sync_params``): 'raw'
     (cutlist.settings.audio_sync default) keeps RAW lip-sync; 'competitor' plays every segment's audio with
@@ -1327,9 +1342,10 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
         if b > a:
             kmap[int(s.id)] = (a, b)
     _, audio_db = _transition_keys(segs, kmap, main_fps, comp_fps)
-    for seg in segs:
-        sid = int(seg.id)
-        if seg.type != "raw" or sid not in kmap:
+    for seg0 in segs:
+        sid = int(seg0.id)
+        seg = audio_segment(seg0)               # its own map, or the audio line it follows (FX-14)
+        if seg is None or sid not in kmap:
             continue
         k_in, _k_out = kmap[sid]
         v = float(seg.speed)
@@ -1449,8 +1465,9 @@ def load_raw_audio(cutlist: Cutlist, raw_path: str | os.PathLike, *, fps: Fracti
     from .export_ae import audio_sync_params
     g_s, shift_k = audio_sync_params(cutlist, main_fps)
     spans: list[tuple[int, int, int]] = []           # (s0, s1, segment id)
-    for seg in cutlist.segments:
-        if seg.type != "raw":
+    for seg0 in cutlist.segments:
+        seg = audio_segment(seg0)                    # an audio line plays its own RAW span (FX-14)
+        if seg is None:
             continue
         a0, a1 = _audio_frames(seg, main_fps, comp_fps, N, shift_k)
         span = _seg_raw_time_span(seg, a0, a1, main_fps, comp_fps, raw_fps, g_s) if a1 > a0 else None
@@ -1484,6 +1501,8 @@ def load_raw_audio(cutlist: Cutlist, raw_path: str | os.PathLike, *, fps: Fracti
             seg.raw_in_seconds = float((Fraction(int(seg.raw_in_frame)) + Fraction(1, 2)) / raw_fps) + d
         for key in seg.time_remap_keys or []:
             key["raw_seconds"] = float(key["raw_seconds"]) + d
+        if (seg.audio or {}).get("line"):
+            seg.audio["line"]["raw_in_seconds"] = float(seg.audio["line"]["raw_in_seconds"]) + d
     log.info("preview audio: %d RAW window(s), %.1f s of %.1f s decoded", len(windows), off / sr, total_s)
     audio = np.concatenate(parts) if parts else np.zeros((0, ch), np.float32)
     return audio, sr, cl

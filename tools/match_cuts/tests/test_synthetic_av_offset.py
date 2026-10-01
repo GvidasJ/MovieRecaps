@@ -132,6 +132,14 @@ def test_competitor_sync_reproduces_the_offset(runs):
     assert plan["audioSync"]["lagMs"] == pytest.approx(av["lag_ms"]) and plan["audioSync"]["twins"] == n_raw
     assert not any(L["audio"] for L in plan["layers"] if L["kind"] == "raw")       # video layers silent
     assert ver["criteria"]["c6_after_effects"]["status"] in ("pass", "not_available")
+    # FX-13: the editorial formats carry the same audio sync (nearest RAW frame + the sub-frame remainder noted)
+    # and re-parse exactly (s9_8 'exports validated')
+    out = runs["competitor"][1]
+    edl = (out / "recreated_edit.edl").read_text()
+    a_events = [ln for ln in edl.splitlines() if ln[:3].isdigit() and ln.split()[2] == "A"]
+    assert len(a_events) == n_raw and edl.count("* AUDIO: ") == n_raw and "AUDIO SYNC competitor" in edl
+    assert "Audio sync" in (out / "recreated_edit.xml").read_text()
+    assert "exports validated" in ver["checks"]["s9_8_deliverables"]["summary"], ver["checks"]["s9_8_deliverables"]
     assert all(c["status"] in OK + ("not_available",) for c in ver["criteria"].values())
     # the analysis is identical in both modes (only export settings differ)
     raw_cl = _load(runs, "raw")[1]
