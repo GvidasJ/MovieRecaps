@@ -657,7 +657,7 @@ def ae_phase_class(info: dict | None, cfg: Config) -> str:
 
 def ae_rule_sensitive(seg: Segment, cfg: Config, comp_fps: Fraction, raw_fps: Fraction) -> bool:
     """A real AE timing risk (FX-10): the exact floor-rule slack of the written raw_in is below
-    cfg.ae_slack_tol_frames although the solved interval allows more ('razor'), or the phase is pinned by
+    cfg.ae_slack_tol_frames although its breakpoint cell allows more ('razor'), or the phase is pinned by
     the cadence but the configured --ae-time-mode keeps the layer in stretch / remap mode (no frame-exact
     export removes the risk). A pinned phase exported frame-exact is information, not a risk; no
     floor∩round overlap alone is not a risk either (AE samples with the floor rule)."""
@@ -902,9 +902,9 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     raw_in too small) is placed inside raw_in_interval_both (else raw_in_interval) ∩ the range that keeps
     every correctly shown matched frame (refine's measurement) on its RAW frame, in BREAKPOINT CELLS of
     every frame of the layer (FX-10, ``phase_solve.place_raw_in``): the cell containing the target, or the
-    nearest one whose half-width reaches min(cfg.ae_slack_tol_frames, the best available), and the target
-    clamped to ``audio_phase_margin`` (5 % of that cell, at least the slack tolerance) from its edges --
-    never an integer-millisecond margin, so no frame of the layer lands on a frame boundary. A target
+    nearest one, and the target clamped to ``audio_phase_margin`` (5 % of that cell, at least the slack
+    tolerance, at most its half) from its edges -- never an integer-millisecond margin, so no frame of the
+    layer lands on a frame boundary (a cadence-narrow cell gets its midpoint: pinned by the audio). A target
     outside that video-feasible range by more than cfg.audio_lag_tol_ms (competitor time) does not move
     raw_in at all (the audio says nothing usable about the phase); those segments are listed in ONE
     run-level warning. Segments whose interval is wider than +-100 ms in competitor time (static /
