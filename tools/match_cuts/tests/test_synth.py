@@ -614,6 +614,14 @@ def test_film24_plan_has_every_regime():
                 [math.floor(FPS24 * (c.n0 + i) / 30) for i in range(n_play)]
 
 
+def test_film24_av_offset_variants_differ_only_in_audio():
+    """FX-02's offset variants: the film24 edit with total lags 0 / +50 / -150 ms (xcorr convention)."""
+    for name, lag_ms in (("film24_av0", 0.0), ("film24_avm50", 50.0), ("film24_av150", -150.0)):
+        v = S.PROFILES[name]
+        assert -1000 * (v.audio.content_offset + v.audio.post_delay) / S.AUDIO_SR == lag_ms
+        assert S.dataclasses.replace(v, name="film24", audio=F24.audio) == F24
+
+
 def test_film24_truth_tables_without_media():
     """Truth assembly on the planned frames (no ffmpeg): one segment per editor clip, linear keys reproducing
     every frame's Sim, shared time lines, cut types, the L-cut, repeat pairs at the floor-rule positions."""
@@ -768,7 +776,9 @@ def _tiny_film_profile(**audio) -> S.Profile:
 
 
 @pytest.mark.parametrize("audio,want_lag,want_sw", [
-    ({"content_offset": 1824, "post_delay": 2304, "comp_sr": 44100}, -86.0, 48.0), ({}, 0.0, 0.0)])
+    ({"content_offset": 1824, "post_delay": 2304, "comp_sr": 44100}, -86.0, 48.0), ({}, 0.0, 0.0),
+    ({"content_offset": -2400, "comp_sr": 44100}, 50.0, 0.0),                       # film24_avm50: audio early
+    ({"content_offset": 4896, "post_delay": 2304, "comp_sr": 44100}, -150.0, 48.0)])  # film24_av150
 def test_film24_audio_split_delay_measured_by_xcorr(tmp_path, audio, want_lag, want_sw):
     """Split A/V delay (38 ms content offset + 48 ms post-edit adelay) with a genuine 6-frame L-cut, through AAC
     (44.1 kHz): the decoded competitor audio lags its picture by 86.0 +- 0.5 ms (xcorr convention: -86) and
@@ -791,3 +801,47 @@ def test_film24_audio_split_delay_measured_by_xcorr(tmp_path, audio, want_lag, w
     assert res["median_switch_ms"] == pytest.approx(want_sw, abs=1.0)
     assert res["switches"][str(jl[0]["cut"])]["jl_offset_frames"] == 6
     assert len(res["switches"]) == 3 and len(res["segments"]) == 3      # the 5-frame chain has no lag
+
+
+@pytest.mark.slow
+def test_film24_generated_truth_self_checks(synthetic_film24):
+    """The generated film24 pair (cached): every recorded self-check holds -- calibration < 0.25 px on every frame
+    of every animated chain, repeat pairs exactly at the floor-rule positions and visible in the competitor's own
+    pixels, the measured A/V split (-86 ms lag, 48 ms switch delay), the gray-zone and lookalike ZNCC ranges;
+    relaxed margins / lowered inlier floors only where the profile declares them."""
+    import json
+    from pathlib import Path
+    truth = json.loads(Path(synthetic_film24["truth"]).read_text())
+    sc = truth["self_check"]
+    assert truth["raw"]["fps"] == "24000/1001" and truth["competitor"]["audio_sr"] == 44100
+    tls = truth["time_lines"]
+    for tl in tls:
+        cal = truth["calibration"][str(tl["chain"])]
+        assert cal["max_dpos"] < S.CALIB_POS_TOL and cal["max_ds"] < S.CALIB_SCALE_TOL
+        if tl["quad"]:
+            assert cal["frames"] == tl["comp_out"] - tl["comp_in"]
+    want = []
+    for tl in tls:
+        if tl["grid_slot"] is None:
+            continue
+        n0, n_play = tl["grid_slot"], tl["freeze_at"] or tl["comp_out"] - tl["comp_in"]
+        want += [tl["comp_in"] + i for i in range(n_play - 1)
+                 if S.grid_frame(n0 + i, FPS24) == S.grid_frame(n0 + i + 1, FPS24)]
+    pairs = truth["pulldown"]["pairs"]
+    assert [p[0] for p in pairs] == sorted(want) and len(pairs) > 80
+    rp = sc["repeat_pairs"]
+    assert rp["ok"] and rp["n"] == len(pairs) and rp["min"] >= S.REPEAT_PAIR_MIN > rp["other_pairs_max"]
+    au, off = sc["audio"], truth["audio"]["av_offset"]
+    assert off["lag_ms"] == -86.0 and off["content_offset_ms"] == 38.0 and off["post_delay_ms"] == 48.0
+    assert au["ok"] and abs(au["median_lag_ms"] - off["lag_ms"]) <= 0.5 and au["max_abs_err_ms"] <= 0.5
+    assert abs(au["median_switch_ms"] - off["post_delay_ms"]) <= 1.0
+    assert all(abs(v["switch_delay_ms"] - 48.0) <= S.AV_SWITCH_EACH_TOL_MS for v in au["switches"].values())
+    lcut = truth["audio"]["jl_cuts"]
+    assert len(lcut) == 1 and au["switches"][str(lcut[0]["cut"])]["jl_offset_frames"] == 6
+    assert sc["gray"]["ok"] and S.GRAY_MIN <= sc["gray"]["min"] and sc["gray"]["max"] < S.GRAY_MAX
+    assert sc["foreign"]["ok"] and S.FOREIGN_MIN <= sc["foreign"]["min"] and sc["foreign"]["max"] < S.FOREIGN_MAX
+    segs = {s["id"]: s for s in truth["segments"]}
+    assert all(segs[r["seg"]]["static_content"] or segs[r["seg"]]["gray"] for r in sc["relaxed_margin_frames"])
+    for key, v in sc["lowered_inlier_floors"].items():
+        assert segs[int(key.split("@")[0])]["min_inliers"] == v["floor"] <= v["inliers"]
+    assert sc["ok"] and sc["n_margin_failures"] == 0 and not sc["inlier_failures"]

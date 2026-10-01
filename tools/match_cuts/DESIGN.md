@@ -566,8 +566,9 @@ frames`, failing-criterion playbook from Stage 9), changed defaults.
 
 ## 6. Synthetic test (Stage 1) — `tests/synth.py` + `tests/test_synthetic.py`
 
-`synth.make_synthetic(out_dir, profile='full'|'mini') -> dict` (cached by a key that includes the
-ffmpeg version string and the synth source hash; byte-stable: pinned x264 args incl. `-threads 4`).
+`synth.make_synthetic(out_dir, profile='full'|'mini'|'film24') -> dict` (cached by a key that includes the
+ffmpeg version string and the synth source hash; byte-stable: pinned x264 args incl. `-threads 4`, film24 one
+thread, §6.1).
 `mini` = the same feature list at reduced scale (RAW 960×540, ~60 s; competitor 540×960, ~20 s) for fast
 integration loops; `full` = the prompt's spec.
 
@@ -637,6 +638,86 @@ matched frame (exact); cuts ±0 frames (speed-only cuts: truth inside cut_ambigu
 ±1 % / ±4 px; push-in keys reproduce the truth within tolerance at every frame; crossfade (O, D=6);
 NOT-IN-RAW placeholder range exact; c1–c5 ∈ {pass, pass_with_exceptions}, c6 == pass (mock), s9_7 pass;
 a second CLI run gives a byte-identical cutlist.json.
+
+The paragraphs above are the contract of the `mini` / `full` profiles (RAW 30000/1001, 12 × `shot_len` frames,
+the 5400-frame assert). RAW rate, shot list (with per-shot lengths), timing model, RAW overlays, audio plan and
+x264 thread count are `Profile` fields whose defaults reproduce those profiles exactly: `test_synth.py` pins the
+sha256 of every ffmpeg argument / filtergraph / truth frame of `mini` and `full` to the pre-film24 generator and
+compares the generated mini files with the pre-film24 digests.
+
+### 6.1 Profile `film24` — the regimes of the first real run
+
+Why: the real run (competitor 30 fps, RAW H.264 24000/1001, AAC 44.1 kHz) failed on regimes the 30000/1001
+profiles never exercise. `film24` (mini-sized: RAW 960×540 @ 24000/1001, 14 shots of 18–150 frames, 1608 frames;
+competitor 540×960 @ 30, 532 frames; generation ~2 min, one CLI run ~4 min on 4 cores) reproduces them:
+
+* **30 fps NLE timeline.** The RAW clip sits on a 30 fps timeline with RAW t = 0 on a frame boundary and every split
+  on the grid: a clip starting at grid slot n shows RAW `floor(raw_fps·(n+i)/30)` (AE floor rule, raw_in = n/30
+  exactly, 0.04–0.2 ms wide floor intervals), so every 5th competitor frame repeats a RAW frame (the 24→30
+  pulldown cadence). ffmpeg: `-ss` half a frame before RAW js, `setpts=PTS-STARTPTS+js·1001` (restores the RAW's
+  own integer PTS so the grid stays anchored at t = 0), `fps=30:round=up` (slot m shows the last frame with
+  PTS ≤ m/30), `trim=start_pts=n:end_pts=n+N` (time base 1/30), `setpts=PTS-STARTPTS`; measured on the ID video
+  (time base 1/24000) and equal to the model. A grid slot exactly on a RAW frame boundary is refused (tie).
+* **Editor animation via ONE perspective quad on the box-size stream** (the §6 rule, generalised): knots
+  `(n, z, dx, dy)`, piecewise linear in the local frame (a step = two knots on adjacent frames); the quad samples
+  the source at `(W(1−1/z)/2 − dx/z, …)`, i.e. a zoom z about the box centre plus a content displacement (dx, dy);
+  `|dx| ≤ W(z−1)/2`, `|dy| ≤ H(z−1)/2` is asserted, so no edge pixel is ever sampled. Truth: the index quirk
+  −(z−1)/2 plus exactly (dx, dy). Pans run at a constant z = 1.6 / 1.5 (pan room), the punch-in steps 1 → 1.7.
+  Calibrated on every frame of every animated chain (< 0.25 px).
+* **Chains** (`_film24_profile`): `pan` (−5 px/frame over a RAW camera pan of 14 RAW px/frame on a static world
+  with a parallax testsrc2 object), `pan_accel` (4.2 then 13.8 px/frame, break at local 19, over a camera pan),
+  `pan_step` (≈ −1 px/frame on the last RAW frames of one shot, the framing snaps back at the RAW-native cut to the
+  next shot), `punch_pan` (×1.7 punch mid-shot, then −6 px/frame), `two_clip_pans` (two clips on one RAW line,
+  +5 RAW frames skipped, opposite pans), `raw_zoom_roll` (constant editor framing over a RAW-native zoom of 2 %
+  and roll of 0.07° per RAW frame), `line_across_shots` (ONE v = 1 time line across two RAW-native shot changes,
+  an editor reframe at each; the middle shot is dark, low-texture and nearly static: `eq=brightness=-0.25:
+  contrast=0.5` — −0.35 crushed the shapes to black, mean luma 6.6 vs ~25 measured on the real dashboard — with a
+  small display bar changing every RAW frame), three 3–5 frame `short` chains between long ones, `blend_slow`
+  (`framerate=fps=30` blending of setpts/0.25, scene detection off; video only), `freeze` (20 frames, then a TRUE
+  10-frame hold via `tpad=stop_mode=clone` under a sliding chain-local caption), `gray` (RAW = a centred 5-frame
+  `tmix` motion blur of a camera pan; the competitor's master is the sharp pan, further `unsharp=9:9:2.5,
+  eq=contrast=1.25`), `foreign` (NOT-IN-RAW lookalike: the blend shot's generator with another texture seed), and
+  a RAW-only legal disclaimer (`drawtext` on one RAW shot that the competitor's master does not carry). Shots with a
+  `master` graph make the competitor render from `raw_master.mp4` (the same timeline with those shots substituted,
+  same PTS, asserted); this is the only way to show content the RAW copy lacks (sharp detail) or to omit what it
+  adds (disclaimer) — the gray / disclaimer regimes cannot be produced from raw.mp4 itself.
+* **Audio**: all chain audio plays at v = 1 (blend / freeze are video-only retimes). Split A/V delay: every chain's
+  audio starts 1824 samples (38 ms) earlier in RAW than its picture in-point (pre-edit content offset, does not move
+  the switch points), and the concatenated original track gets `adelay=2304S` (48 ms post-edit delay, moves every
+  switch point) before the music is mixed in: the competitor audio is 86 ms late (xcorr lag −86 ms). One genuine
+  6-frame L-cut (A's audio continues 6 frames, B's starts 6 frames late). Competitor AAC at 44.1 kHz.
+* **Encoding**: every film24 x264 encode uses one thread — with 4 frame threads x264 produced a different
+  bitstream for identical input in 1 of 3 runs on this content (identical decoded frames); one thread is
+  byte-stable (verified by generating twice).
+
+**truth.json additions**: one segment per EDITOR CLIP (chains split at framing steps and at the start of a freeze;
+`time_line` ties the clips of one chain), `raw_in_seconds` = the picture in-point (n/30 exact, `raw_in_exact`,
+`raw_in_grid_slot`), per-frame `sim` (truth Sim) and `class` (exact | static | gray | blend | not_in_raw),
+blend frames with `raw_b`/`alpha_b` MEASURED through an alternating-level probe video (weights within 0.03 of the
+source-time model), `cuts[].type` ∈ {cut, reframe, freeze_start} with the freeze start's `ambiguity` (frames that
+already show the held frame), `pulldown.pairs` (repeat pairs, equal to the floor-rule positions), `time_lines`,
+`audio.av_offset` {content 38 ms, post 48 ms, total 86 ms, `lag_ms` −86 in xcorr convention}, `audio.jl_cuts`, and
+`layout.animated_captions` (measured per frame).
+
+**Self-checks** (before truth.json is written): calibration on every frame of animated chains; the margin check
+of §6 with the per-frame Sim; segments of `static` RAW content or the `gray` chain may miss the 0.01 margin under
+perturbation but must keep a positive nominal margin (listed as `relaxed_margin_frames`); measured inlier floors
+replace the 50-inlier floor for the dark shot (measured 24–26 → 20), the disclaimer shot (24–48 → 20), the
+blurred gray shot (20–28 → 15), the ×1.7 punch (32–47 → 25) and the ×1.6 accelerating pan (48–56 → 40), recorded as
+`lowered_inlier_floors`; every pulldown repeat pair: competitor frame k warped by the truth framing change matches
+frame k+1 (masked ZNCC ≥ 0.98; measured ≥ 0.997, other consecutive pairs ≤ 0.979); decoded audio: sound-vs-picture
+lag −86 ± 0.5 ms on every v = 1 clip ≥ 12 frames, switch delay 48 ± 1 ms (median; every cut ± 3 ms; the L-cut at
+6 frames + 48 ms); gray chain truth ZNCC ∈ [0.65, 0.90) (measured 0.82); the lookalike's best ZNCC over its model
+shot ∈ [0.60, 0.90) (measured 0.75–0.81).
+
+**test_synthetic.py with `MATCH_CUTS_PROFILE=film24`** runs the §6 tests (profile-aware: RAW fps from the truth,
+no crossfade / fullscreen, lag judged against the truth A/V offset, freeze speed 0, truth cut ambiguity) plus
+`test_film24_*`: frames exact against truth.json (AE simulation of the cutlist, never refine), one segment per
+editor clip, framing against the truth Sim (c4 vs truth), speeds snapped to the truth, the published A/V offset,
+c5 with the measured offset and no D3 clamp warnings, J/L == truth, no cut inside a repeat pair, the dark shot on
+its line, no fake freeze / a true freeze at v = 0, the gray chain never NOT-IN-RAW, the lookalike never matched,
+and every wrong frame flagged by verification. Each assertion the current pipeline fails is `xfail(strict=True)`
+naming its fix (FX-01..FX-09); a fix removes its xfail.
 
 ## 7. Decisions from the final adversarial review (v3)
 

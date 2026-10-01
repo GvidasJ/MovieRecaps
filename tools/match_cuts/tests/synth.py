@@ -3288,6 +3288,11 @@ def _film24_profile() -> Profile:
 
 
 PROFILES["film24"] = _film24_profile()
+# A/V-offset variants of film24 (FX-02): the same edit, only the audio plan differs (total sound-vs-picture lag in
+# xcorr convention: 0, +50 ms = competitor audio EARLY, -150 ms = late; the post-edit switch delay 0 / 0 / 48 ms)
+for _name, _audio in (("film24_av0", AudioPlan(0, 0, 44100)), ("film24_avm50", AudioPlan(-2400, 0, 44100)),
+                      ("film24_av150", AudioPlan(4896, 2304, 44100))):
+    PROFILES[_name] = dataclasses.replace(PROFILES["film24"], name=_name, audio=_audio)
 
 
 def main(argv: list[str] | None = None) -> int:
