@@ -336,7 +336,8 @@ def test_frame_map_equals_truth(e2e, frame_map):
                             ["k", "seg", "kind", "truth", "m(k)", "status", "note"], rows)
 
 
-@film_xfail("FX-03/FX-04/FX-06: spurious cuts inside editor pans, editor clips merged into placeholders")
+@film_xfail("FX-08: the only cut off the truth is 445, the edge of the anchorless first two-clip pan (NOT-IN-RAW "
+            "placeholder | 1-frame island); the pan / step / punch chains cut exactly since FX-03 / FX-06")
 def test_cuts_exact(e2e, cutlist):
     truth = e2e["truth"]
     segs = _segments(cutlist)
@@ -499,7 +500,8 @@ def test_audio_phase_lag(e2e, cutlist):
                              "raw_in_s", "truth audio raw_in_s"], rows)
 
 
-@film_xfail("FX-03/FX-06/FX-08: pan framing tens of px off without keys; blend slow motion fitted as v=0.2536")
+@film_xfail("FX-08: the blend slow motion is fitted as v=0.2536 (every pan / step / punch framing is within tolerance "
+            "since FX-03 / FX-06)")
 def test_speed_flip_framing(e2e, cutlist):
     truth = e2e["truth"]
     matched, _ = _match_segments(truth, cutlist)
@@ -895,7 +897,8 @@ def test_film24_av_offset_published(e2e, cutlist):
     assert lo is not None and lo <= want <= hi, f"published A/V offset interval {[lo, hi]} ms, truth {want} ms"
 
 
-@film_xfail("FX-03/FX-04: only 11 strong segments survive the pan confound, so the offset interval is 4.3 ms wide")
+@film_xfail("FX-02/FX-08: the published offset interval is [-86.6, -84.3] ms, 2.4 ms wide (4.3 ms before the "
+            "segmentation fixes); the placeholders / short pieces leave too few strong segments")
 def test_film24_av_offset_precise(e2e, cutlist):
     """FX-02 with intact segmentation: the published offset is precise -- interval <= 2 ms wide and centre within
     0.5 ms of the truth (the real run's 34 strong segments gave a 0.4 ms interval)."""
@@ -924,8 +927,7 @@ def _warnings(e2e: dict) -> list[str]:
     return [ln.strip() for ln in (text + "\n" + e2e["proc"].stdout).splitlines() if "audio implies raw_in" in ln]
 
 
-@film_xfail("FX-03/FX-04/FX-09: no strong cut survives the pan confound, so there is no switch baseline; "
-            "fake J/L next to slivers and placeholders; the genuine 6-frame L-cut reads +5")
+@film_xfail("FX-09: the genuine 6-frame L-cut at 36 reads +5 and a fake 1-frame J-cut is exported at 189 (S7|S8)")
 def test_film24_jl_cuts_equal_truth(e2e, cutlist):
     """FX-09: the detected J/L cuts equal the truth exactly: the one genuine 6-frame L-cut (A.out = B.in = +6)
     and nothing else -- the uniform 48 ms post-edit switch delay is a baseline, not 1-2 frame L-cuts."""
