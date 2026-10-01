@@ -458,3 +458,336 @@ def test_caption_recall_uses_per_event_entries_only():
     only_long = {"competitor": {"fps": 30}, "layout": {"captions": [
         {"type": "captions", "comp_in": 10, "comp_out": 100}]}, "overlays_detected": []}
     assert TS.caption_recall(truth, only_long, n)[0] == pytest.approx(0.5)
+
+
+# ------------------------------------------------------------------------------------------------------
+# The existing profiles are unchanged by the film24 work (DESIGN §6.1)
+# ------------------------------------------------------------------------------------------------------
+
+# sha256 of every ffmpeg command line / filtergraph + the chain plan + the truth frame table that synth.py
+# produces for the profile, recorded with the generator BEFORE the film24 profile existed (SYNTH_VERSION 2).
+PLAN_SHA256_PRE_FILM24 = {"mini": "1f039c89f50b5c15b60be20c5bbc06fc89e6b3c48f63eb57ef7bf9df5dc08819",
+                          "full": "e0b566bd51e89309a720b596a5a5b1f7bb3de4facca8174b2881ec7325a11785"}
+# blake2b-128 of the generated mini files (same generator), valid for this ffmpeg build only
+MINI_FILES_PRE_FILM24 = {"ffmpeg": "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers",
+                         "raw.mp4": "4cc4d62bc9b50f048a864f4ac8f77e1d",
+                         "competitor.mp4": "15158ac35ecb298ceb788bb8e8855e3e",
+                         "id.mp4": "1707f3c733fb705805dc60826f0c4559", "frame.png": "1d39b45378beb6c965e78e4291fcddec"}
+
+
+def plan_fingerprint(name: str, monkeypatch) -> tuple[str, int]:
+    """sha256 over everything synth.py would hand to ffmpeg for profile `name` (ffmpeg is never run)."""
+    import hashlib
+    import json
+    import types
+    from pathlib import Path
+    prof = S.PROFILES[name]
+    rec = []
+
+    def fake_run(args, *, capture=False, timeout=None, label=""):
+        rec.append([label, [str(a) for a in args]])
+        return b""
+    monkeypatch.setattr(S, "run_ffmpeg", fake_run)
+    monkeypatch.setattr(S, "count_frames", lambda p: prof.shot_len)
+    build, out = Path("/BUILD"), Path("/OUT")
+    chains = S.resolve_chains(prof)
+    n_comp = sum(c.spec.n - c.spec.xfade for c in chains)
+    lp = S.layout_plan(prof)
+    band = (lp.caption_y - prof.u(30), lp.caption_y + lp.caption_fs + prof.u(40))
+    safe = S.safe_region(prof, [(c.spec, c.geom) for c in chains if c.in_raw], band)
+    ov = S.plan_overlays(prof, safe)
+    plan = {"n_comp": n_comp, "safe": list(safe), "ov": [list(ov.grid), ov.cell, ov.counter_x, ov.counter_y,
+                                                           ov.counter_fs, ov.counter_border]}
+    plan["chains"] = [[c.index, c.comp_in, c.j, c.phase, c.ss, c.timing, c.geom.filters() if c.geom else None,
+                       c.expected.tolist() if c.expected is not None else None] for c in chains]
+    plan["shots"] = [S.shot_graph(prof, s) for s in S.SHOTS[:prof.n_shots]]
+    S.generate_raw(prof, build, out / "raw.mp4", ov)
+    S.make_id_video(out / "id.mp4", prof.raw_frames)
+    for c in chains:
+        S.render_chain(out / "raw.mp4", c, build / f"chain_{c.index:02d}.nut", prof)
+    caps = S.plan_captions(prof, n_comp, prof.caption_seed)
+    plan["caps"] = caps
+    plan["comp_filter"] = S.competitor_video_filter(prof, chains, caps, lp)
+    for c in chains:
+        if c.in_raw:
+            c.frames = c.expected
+    import soundfile
+    monkeypatch.setattr(soundfile, "info", lambda p: types.SimpleNamespace(frames=n_comp * S.SAMPLES_PER_COMP_FRAME))
+    plan["audio_info"] = {str(k): v for k, v in S.build_competitor_audio(prof, chains, build / "raw_decoded.wav",
+                                                                         build / "competitor_audio.wav",
+                                                                         n_comp).items()}
+    segs, frames, _ = S.build_truth_segments(prof, chains, {c.index: {"raw_in_seconds": 0.0} for c in chains})
+    plan["truth_frames"] = frames
+    plan["truth_segs"] = [{k: v for k, v in s.items() if k not in ("raw_in_seconds_chain_audio", "audio")}
+                          for s in segs]
+    plan["commands"] = rec
+    blob = json.dumps(plan, sort_keys=True, default=S._json_default)
+    return hashlib.sha256(blob.encode()).hexdigest(), len(rec)
+
+
+@pytest.mark.parametrize("name", ["mini", "full"])
+def test_existing_profiles_plan_unchanged(name, monkeypatch):
+    """Making the RAW rate, shot list, timing model, overlays and audio plan profile fields (film24) must not
+    change a single ffmpeg argument, filtergraph or truth frame of the mini / full profiles."""
+    digest, n_cmd = plan_fingerprint(name, monkeypatch)
+    assert n_cmd >= 30
+    assert digest == PLAN_SHA256_PRE_FILM24[name], f"{name}: generation plan changed ({n_cmd} commands)"
+
+
+@pytest.mark.slow
+def test_mini_files_hash_identical_to_pre_film24(synthetic_mini):
+    """The generated mini media are byte-identical to the pre-film24 generator's output (same ffmpeg build)."""
+    if S.ffmpeg_version() != MINI_FILES_PRE_FILM24["ffmpeg"]:
+        pytest.skip(f"recorded with {MINI_FILES_PRE_FILM24['ffmpeg']!r}")
+    from pathlib import Path
+    out = Path(synthetic_mini["out_dir"])
+    got = {n: S.file_digest(out / n) for n in ("raw.mp4", "competitor.mp4", "id.mp4", "frame.png")}
+    assert got == {n: MINI_FILES_PRE_FILM24[n] for n in got}
+
+
+# ------------------------------------------------------------------------------------------------------
+# film24 (DESIGN §6.1): edit plan, grid timing, repeat pairs, blend truth, pan geometry, A/V split
+# ------------------------------------------------------------------------------------------------------
+
+F24 = S.PROFILES["film24"]
+FPS24 = Fraction(24000, 1001)
+
+
+def test_film24_plan_has_every_regime():
+    p = F24
+    assert p.raw_fps == FPS24 and p.raw_tb == Fraction(1, 24000) and p.timing == "grid"
+    assert not p.raw_overlays and p.audio.comp_sr == 44100
+    assert (p.audio.content_offset, p.audio.post_delay) == (1824, 2304)            # 38 ms + 48 ms
+    assert 1000 * (p.audio.content_offset + p.audio.post_delay) / S.AUDIO_SR == 86.0
+    chains = S.resolve_chains(p)
+    kinds = [c.spec.kind for c in chains]
+    for k in ("pan", "pan_accel", "pan_step", "punch_pan", "raw_zoom_roll", "line_across_shots", "blend_slow",
+              "freeze", "two_clip_pan_a", "two_clip_pan_b", "gray", "foreign"):
+        assert kinds.count(k) == 1, k
+    shorts = [c for c in chains if c.spec.kind == "short"]
+    assert len(shorts) >= 3 and all(3 <= c.spec.n <= 5 for c in shorts)
+    for c in shorts:                         # flash chains sit between long chains
+        i = chains.index(c)
+        assert chains[i - 1].spec.n >= 30 and chains[i + 1].spec.n >= 30
+    assert [c.spec.audio_ext for c in chains if c.spec.audio_ext] == [6]
+    by = {c.spec.kind: c for c in chains}
+
+    def vel(c: S.Chain, n: int) -> float:    # editor pan velocity: competitor px / frame of the content
+        return S._pw_value(c.spec.quad, n + 1, 2) - S._pw_value(c.spec.quad, n, 2)
+    assert vel(by["pan"], 10) == pytest.approx(-5.0)
+    assert vel(by["pan_accel"], 5) == pytest.approx(4.2) and vel(by["pan_accel"], 25) == pytest.approx(13.8)
+    assert vel(by["punch_pan"], 20) == pytest.approx(-6.0)
+    assert by["punch_pan"].geom.zoom(14) / by["punch_pan"].geom.zoom(13) == pytest.approx(1.7)
+    # the RAW shots under the pans move on their own; the zoom/roll shot zooms natively
+    assert "camera_pan" in p.shot_specs[by["pan"].spec.shot].tags
+    assert "camera_pan" in p.shot_specs[by["pan_accel"].spec.shot].tags
+    assert "raw_zoom_roll" in p.shot_specs[by["raw_zoom_roll"].spec.shot].tags
+    assert not by["raw_zoom_roll"].geom.animated                      # constant editor framing
+    # one time line across RAW-native shot changes: every clip starts exactly on the next RAW shot
+    for kind, n_clips in (("line_across_shots", 3), ("pan_step", 2)):
+        c = by[kind]
+        clips = S.chain_clips(c)
+        assert len(clips) == n_clips
+        shots = [S.shot_of_frame(p, int(c.expected[a])) for a, _ in clips]
+        assert shots == list(range(c.spec.shot, c.spec.shot + n_clips))
+        for a, _ in clips[1:]:
+            assert S.shot_of_frame(p, int(c.expected[a - 1])) != S.shot_of_frame(p, int(c.expected[a]))
+            assert c.geom.truth_sim(a - 1) != c.geom.truth_sim(a)           # an editor reframe at the RAW cut
+    line = by["line_across_shots"]
+    dark = p.shot_specs[S.shot_of_frame(p, int(line.expected[S.chain_clips(line)[1][0]]))]
+    assert {"static", "dark", "low_texture"} <= set(dark.tags)
+    a, b = by["two_clip_pan_a"], by["two_clip_pan_b"]                     # +5 RAW frames skipped between them
+    assert int(b.expected[0]) - int(a.expected[-1]) == 6
+    # retimes, gray, foreign, RAW-only overlay
+    assert by["blend_slow"].spec.speed == "0.25" and by["blend_slow"].spec.retime == "blend"
+    assert by["freeze"].spec.freeze_at == 20 and by["freeze"].spec.caption_fx
+    assert len(set(by["freeze"].expected[19:].tolist())) == 1
+    assert by["gray"].spec.gray and "unsharp" in by["gray"].spec.look
+    assert p.shot_specs[by["gray"].spec.shot].master is not None
+    assert by["foreign"].spec.foreign is not None and not by["foreign"].in_raw
+    assert any("raw_only_overlay" in s.tags and s.master for s in p.shot_specs)
+    # every RAW chain's raw_in sits on the 30 fps grid (NLE timeline) and every frame follows the floor rule
+    for c in chains:
+        if c.n0 is not None:
+            n_play = c.spec.freeze_at or c.spec.n
+            assert [int(x) for x in c.expected[:n_play]] == \
+                [math.floor(FPS24 * (c.n0 + i) / 30) for i in range(n_play)]
+
+
+def test_film24_truth_tables_without_media():
+    """Truth assembly on the planned frames (no ffmpeg): one segment per editor clip, linear keys reproducing
+    every frame's Sim, shared time lines, cut types, the L-cut, repeat pairs at the floor-rule positions."""
+    p = F24
+    chains = S.resolve_chains(p)
+    for c in chains:
+        if c.spec.retime == "blend":
+            c.blend = [(a, a + 1, f) if f > 0.02 else (a, None, None) for a, f in
+                       S.blend_model(c.j, c.spec.speed, c.spec.n, p.raw_fps)]
+            c.frames = np.array([bl[0] for bl in c.blend])
+        elif c.in_raw:
+            c.frames = c.expected
+    info = {c.index: S._grid_audio_span(p, chains, i)[2] for i, c in enumerate(chains) if c.in_raw}
+    segs, frames, cuts, jl = S.build_film_truth(p, chains, info)
+    assert len(frames) == sum(c.spec.n for c in chains)
+    assert len(segs) == sum(len(S.chain_clips(c)) for c in chains)
+    by_kind = {s["kind"]: s for s in segs}
+    assert [s["kind"] for s in segs if s["time_line"] == by_kind["line_dark"]["time_line"]] == \
+        ["line_a", "line_dark", "line_c"]
+    assert by_kind["line_dark"]["static_content"] and by_kind["line_dark"]["shot_name"] == "f24_dark"
+    assert len(by_kind["pan"]["transform_keys"]) == 2 and len(by_kind["pan_accel"]["transform_keys"]) == 3
+    assert by_kind["raw_zoom_roll"]["transform_keys"] == [] and by_kind["line_dark"]["transform_keys"] == []
+    assert by_kind["freeze"]["speed"] == 0.0 and by_kind["freeze"]["retime"] == "freeze"
+    assert by_kind["blend_slow"]["retime"] == "frame_blend" and by_kind["gray"]["gray"]
+    assert by_kind["foreign"]["type"] == "not_in_raw" and by_kind["foreign"]["lookalike_shot"] == 11
+    for s in segs:
+        if s["type"] != "raw":
+            continue
+        for k in range(s["comp_in"], s["comp_out"]):        # keys reproduce the per-frame truth Sim
+            want, got = frames[k]["sim"], S._sim_at(s, k)
+            assert abs(got["tx"] - want["tx"]) < 1e-6 and abs(got["scale"] - want["scale"]) < 1e-9
+        if s["retime"] == "none":                            # raw_in = n/30 exactly, inside its floor interval
+            assert Fraction(s["raw_in_exact"]) * 30 == s["raw_in_grid_slot"]
+            lo, hi = s["raw_in_interval_floor"]
+            assert lo - 1e-12 <= s["raw_in_seconds"] < hi
+    types = {c["k"]: c["type"] for c in cuts}
+    assert types[by_kind["line_dark"]["comp_in"]] == "reframe"
+    assert types[by_kind["freeze"]["comp_in"]] == "freeze_start" and types[by_kind["pan"]["comp_in"]] == "cut"
+    assert len(jl) == 1 and jl[0]["offset_frames"] == 6 and jl[0]["type"] == "L"
+    sa, sb = (next(s for s in segs if s["id"] == jl[0][x]) for x in ("a_seg", "b_seg"))
+    assert sa["audio"]["out_offset_frames"] == 6 and sb["audio"]["in_offset_frames"] == 6
+    rep = S.film_repeat_pairs(p, chains, frames)
+    pairs = [k for k, _ in rep["pairs"]]
+    assert len(pairs) > 60
+    for k in pairs:                                          # exactly the floor-rule positions
+        fr = frames[k]
+        c = chains[fr["chain"]]
+        assert S.grid_frame(c.n0 + fr["n"], p.raw_fps) == S.grid_frame(c.n0 + fr["n"] + 1, p.raw_fps)
+    pan = by_kind["pan"]                                     # 23.976 -> 30: every 5th frame repeats
+    in_pan = [k for k in pairs if pan["comp_in"] <= k < pan["comp_out"] - 1]
+    assert len(in_pan) >= 7 and np.all(np.diff(in_pan) == 5)
+
+
+def _grid_chain(index: int, j: int, n: int, freeze_at: int | None = None) -> S.Chain:
+    c = S.Chain(index, S.ChainSpec("t", shot=0, off=j, n=n, freeze_at=freeze_at))
+    c.j, c.n0 = j, S.grid_n0(j, FPS24)
+    n_play = n if freeze_at is None else freeze_at
+    c.ss = S.ss_seconds(S.grid_seek_frame(c.n0, FPS24), FPS24)
+    c.timing = S.grid_timing_filters(c.n0, n_play, n, FPS24)
+    c.expected = S.expected_grid_frames(c.n0, n_play, n, FPS24)
+    return c
+
+
+@pytest.fixture(scope="module")
+def id24(tmp_path_factory):
+    d = tmp_path_factory.mktemp("id24")
+    idv, alt = d / "id24.mp4", d / "alt24.mp4"
+    S.make_id_video(idv, 400, FPS24)
+    S.make_alt_video(alt, 400, FPS24)
+    return idv, alt
+
+
+def test_film24_grid_timing_measured_on_id_video(id24):
+    """The 30 fps-grid timing chain (incl. a freeze) measured on a 24000/1001 ID video equals the floor rule
+    floor(raw_fps*(n0+i)/30); the pulldown repeats sit exactly at the floor-rule positions (every 5th frame)."""
+    idv, _ = id24
+    pts, tb = S.decode_pts(idv)
+    assert tb == Fraction(1, 24000) and pts[:3] == [0, 1001, 2002]
+    for c in (_grid_chain(0, 12, 40), _grid_chain(1, 200, 25), _grid_chain(2, 333, 30, freeze_at=18)):
+        got = S.decode_id_chain(idv, c)
+        assert got.tolist() == c.expected.tolist()
+        n_play = c.spec.freeze_at or c.spec.n
+        rp = S.repeat_pairs(got[:n_play])
+        assert rp == [i for i in range(n_play - 1)
+                      if S.grid_frame(c.n0 + i, FPS24) == S.grid_frame(c.n0 + i + 1, FPS24)]
+        assert len(rp) >= (n_play - 1) // 5 - 1 and set(np.diff(rp).tolist()) <= {4, 5}
+        lo, hi = S.floor_interval(got[:n_play], "1", FPS24)
+        assert lo <= Fraction(c.n0, 30) < hi                  # raw_in = n0/30 on the grid
+        if c.spec.freeze_at:
+            assert len(set(got[c.spec.freeze_at - 1:].tolist())) == 1
+
+
+def test_film24_blend_chain_truth_is_measured(id24):
+    """framerate blending at 0.25x: the alternating-level probe measures every blend weight, which follows the
+    source-time model; pure frames decode to their RAW frame on the ID video."""
+    idv, alt = id24
+    c = S.Chain(0, S.ChainSpec("blend_slow", shot=0, off=100, n=30, speed="0.25", retime="blend"))
+    c.j, c.ss, c.timing = 100, S.ss_seconds(100, FPS24), S.blend_timing_filters("0.25", 30)
+    bl = S.measure_blend_chain(alt, idv, c, FPS24)
+    assert len(bl) == 30 and bl[0] == (100, None, None)
+    assert len([b for b in bl if b[1] is not None]) >= 20
+    for (a, rb, al), (ma, frac) in zip(bl, S.blend_model(100, "0.25", 30, FPS24)):
+        if rb is not None:
+            assert a == ma and rb == ma + 1 and abs(al - frac) <= S.BLEND_MODEL_TOL
+    assert {b[0] for b in bl} == set(range(100, 106))
+
+
+def test_film24_pan_quad_geometry_calibration(calib):
+    """Editor pan / punch quads (zoom + displacement, a step) on the box-size stream: the ffmpeg perspective
+    output equals the truth on EVERY frame within 0.25 px; a truth that ignores the displacement or is 0.5 px
+    off is rejected; knots sampling outside the source are refused."""
+    tex, png = calib
+    quad = ((0, 1.6, 20.0, -6.0), (4, 1.6, -12.0, -6.0), (5, 1.25, 8.0, 3.0), (7, 1.25, 8.0, 3.0))
+    S.check_quad(quad, 8, 160, 130)
+    g = S.Geometry(320, 180, False, 256, 144, 41, 7, 160, 130, 10, 20, quad=quad)
+    assert g.animated and g.disp(2) == pytest.approx((4.0, -6.0)) and g.zoom(6) == 1.25
+    r = S.verify_geometry(g, tex, png, 8)
+    assert r["ok"] and r["frames"] == 8, r
+    flipped = S.Geometry(320, 180, True, 256, 144, 41, 7, 160, 130, 10, 20, quad=quad)
+    assert S.verify_geometry(flipped, tex, png, 8)["ok"]
+
+    def no_disp(n):
+        z = g.zoom(n)
+        A = S._T(10, 20) @ S._T(-(z - 1) / 2, -(z - 1) / 2) @ S._T(80, 65) @ S._D(z, z) @ S._T(-80, -65) @ \
+            S._T(-41, -7) @ S._D(256 / 320, 144 / 180)
+        return S.lsq_similarity(A, (10, 20, 160, 130))
+
+    def half_px(n):
+        s = g.truth_sim(n)
+        return {**s, "tx": s["tx"] + 0.5}
+
+    def calibrates(truth) -> bool:
+        import cv2
+        try:
+            return S.verify_geometry(g, tex, png, 8, truth=truth)["ok"]
+        except cv2.error:                    # ECC does not even converge on a 20 px misplacement
+            return False
+    assert not calibrates(no_disp)
+    assert not calibrates(half_px)
+    with pytest.raises(ValueError):
+        S.check_quad(((0, 1.2, 0.0, 0.0), (7, 1.2, 30.0, 0.0)), 8, 160, 130)    # 30 > 160*0.2/2
+    with pytest.raises(ValueError):
+        S.check_quad(((0, 1.0, 0.0, 0.0), (7, 1.0, 0.0, 0.0)), 9, 160, 130)     # knots must end at n-1
+
+
+def _tiny_film_profile(**audio) -> S.Profile:
+    shots = tuple(S.ShotSpec(f"t{i}", "color=c=gray:s={W}x{H}:r={R}", length=60) for i in range(4))
+    chains = (S.ChainSpec("normal", shot=0, off=5, n=30, audio_ext=6), S.ChainSpec("normal", shot=1, off=10, n=24),
+              S.ChainSpec("short", shot=2, off=4, n=5), S.ChainSpec("normal", shot=3, off=8, n=30))
+    return S.Profile("tiny24", 960, 540, 60, 540, 960, (30, 230, 480, 500, 20), chains, 0.5, raw_fps=FPS24,
+                     shots=shots, timing="grid", raw_overlays=False, audio=S.AudioPlan(**audio))
+
+
+@pytest.mark.parametrize("audio,want_lag,want_sw", [
+    ({"content_offset": 1824, "post_delay": 2304, "comp_sr": 44100}, -86.0, 48.0), ({}, 0.0, 0.0)])
+def test_film24_audio_split_delay_measured_by_xcorr(tmp_path, audio, want_lag, want_sw):
+    """Split A/V delay (38 ms content offset + 48 ms post-edit adelay) with a genuine 6-frame L-cut, through AAC
+    (44.1 kHz): the decoded competitor audio lags its picture by 86.0 +- 0.5 ms (xcorr convention: -86) and
+    switches 48 +- 1 ms after each picture cut (6 frames + 48 ms at the L-cut). Without the delays: 0 and 0."""
+    p = _tiny_film_profile(**audio)
+    chains = S.resolve_chains(p)
+    for c in chains:
+        c.frames = c.expected
+    raw = tmp_path / "raw.wav"
+    S.run_ffmpeg(["-y", "-filter_complex", S.raw_audio_graph(p.raw_frames * 2002), "-map", "[a]", "-c:a",
+                  "pcm_f32le", str(raw)])
+    wav, m4a = tmp_path / "comp.wav", tmp_path / "comp.m4a"
+    info = S.build_competitor_audio(p, chains, raw, wav, sum(c.spec.n for c in chains))
+    S.run_ffmpeg(["-y", "-i", str(wav), "-c:a", "aac", "-b:a", "192k", "-ar", str(p.audio.comp_sr), str(m4a)])
+    segs, _, cuts, jl = S.build_film_truth(p, chains, info)
+    assert [d["offset_frames"] for d in jl] == [6]
+    res = S.film_audio_self_check(p, raw, m4a, segs, cuts, jl)
+    assert res["ok"], res
+    assert res["median_lag_ms"] == pytest.approx(want_lag, abs=0.5)
+    assert res["median_switch_ms"] == pytest.approx(want_sw, abs=1.0)
+    assert res["switches"][str(jl[0]["cut"])]["jl_offset_frames"] == 6
+    assert len(res["switches"]) == 3 and len(res["segments"]) == 3      # the 5-frame chain has no lag

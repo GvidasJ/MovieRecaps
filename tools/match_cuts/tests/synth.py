@@ -91,10 +91,15 @@ def raw_tb(fps: Fraction) -> Fraction:
     return Fraction(1, fps.numerator)
 
 
-def x264_args(base: Sequence[str], fps: Fraction) -> list[str]:
-    """Pinned encoder args with the track timescale of `fps` (identical to `base` at 30000/1001)."""
+def x264_args(base: Sequence[str], fps: Fraction | None = None, threads: int = 4) -> list[str]:
+    """Pinned encoder args with the track timescale of the RAW rate `fps` (None: keep base's) and `threads`
+    encoder threads (identical to `base` for 30000/1001 and 4 threads). film24 encodes with ONE thread: with 4
+    frame threads x264 measurably produced a different bitstream for identical input in 1 of 3 runs (same
+    decoded frames); one thread is byte-stable."""
     a = list(base)
-    a[a.index("-video_track_timescale") + 1] = str(raw_tb(fps).denominator)
+    if fps is not None:
+        a[a.index("-video_track_timescale") + 1] = str(raw_tb(fps).denominator)
+    a[a.index("-threads") + 1] = str(threads)
     return a
 
 # DESIGN proxy sizes / scoring parameters (config.Config defaults; read from it when importable)
@@ -201,6 +206,7 @@ class Profile:
     timing: str = "frame"             # 'frame': -ss chain from a RAW frame boundary; 'grid': 30 fps NLE timeline
     raw_overlays: bool = True         # RAW-anchored grid + frame counter in the SAFE REGION
     audio: AudioPlan = AudioPlan()
+    x264_threads: int = 4             # film24: 1 (byte-stable, see x264_args)
 
     @property
     def shot_specs(self) -> tuple:
@@ -481,25 +487,27 @@ def decode_id_frames(frames: np.ndarray, sep: float = 60.0) -> tuple[np.ndarray,
     return res[0], res[1]
 
 
-def make_id_video(path: Path, n_frames: int, fps: Fraction = RAW_FPS) -> None:
+def make_id_video(path: Path, n_frames: int, fps: Fraction = RAW_FPS, threads: int = 4) -> None:
     """Lossless H.264 ID video (MP4, timescale = fps numerator, e.g. 30000): frame n shows code n."""
     if n_frames >= 1 << 16:
         raise ValueError("ID code is 16-bit")
     run_ffmpeg(["-y", "-f", "lavfi", "-i",
                 f"color=c=black:s={ID_W}x{ID_H}:r={fps_str(fps)},format=gray,geq=lum='{id_geq_expr()}',"
-                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps), *BITEXACT, str(path)], label="id video")
+                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps, threads), *BITEXACT, str(path)],
+               label="id video")
 
 
 ALT_LO, ALT_HI = 16, 240
 
 
-def make_alt_video(path: Path, n_frames: int, fps: Fraction) -> None:
+def make_alt_video(path: Path, n_frames: int, fps: Fraction, threads: int = 1) -> None:
     """Lossless 64x32 'blend probe' video with the RAW's PTS: even frames luma ALT_LO, odd frames ALT_HI. A
     timing chain that blends two consecutive RAW frames a, a+1 shows ALT_LO + alpha*(ALT_HI - ALT_LO) (or the
     mirror), so the blend weight is MEASURED to 1/224 (DESIGN §6.1: framerate blend truth)."""
     run_ffmpeg(["-y", "-f", "lavfi", "-i",
                 f"color=c=black:s=64x32:r={fps_str(fps)},format=gray,geq=lum='if(mod(N,2),{ALT_HI},{ALT_LO})',"
-                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps), *BITEXACT, str(path)], label="alt video")
+                f"trim=end_frame={n_frames}", *x264_args(X264_ID, fps, threads), *BITEXACT, str(path)],
+               label="alt video")
 
 
 # =====================================================================================================
@@ -1370,7 +1378,8 @@ def generate_raw(p: Profile, build: Path, out: Path, ov: Overlays | None) -> dic
     post = f"{raw_overlay_filters(ov)}," if ov is not None else ""
     fc = "".join(f"[{i}:v]" for i in range(k)) + f"concat=n={k}:v=1:a=0,{post}format=yuv420p[v]"
     run_ffmpeg(["-y", *ins, "-i", str(audio_wav), "-filter_complex", fc, "-map", "[v]", "-map", f"{k}:a",
-                *x264_args(X264_RAW, p.raw_fps), "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR), *BITEXACT,
+                *x264_args(X264_RAW, p.raw_fps, p.x264_threads), "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR),
+                *BITEXACT,
                 str(out)], label="raw.mp4")
     res = {"shots_s": t_shots, "encode_s": time.perf_counter() - t0 - t_shots, "audio_samples": n_samples,
            "master": None}
@@ -1384,7 +1393,8 @@ def generate_raw(p: Profile, build: Path, out: Path, ov: Overlays | None) -> dic
             mins += ["-i", str(masters.get(i, sp))]
         fc = "".join(f"[{i}:v]" for i in range(k)) + f"concat=n={k}:v=1:a=0,{post}format=yuv420p[v]"
         res["master"] = build / "raw_master.mp4"
-        run_ffmpeg(["-y", *mins, "-filter_complex", fc, "-map", "[v]", "-an", *x264_args(X264_RAW, p.raw_fps),
+        run_ffmpeg(["-y", *mins, "-filter_complex", fc, "-map", "[v]", "-an",
+                    *x264_args(X264_RAW, p.raw_fps, p.x264_threads),
                     *BITEXACT, str(res["master"])], label="raw_master.mp4")
     return res
 
@@ -2539,8 +2549,14 @@ def build_film_truth(p: Profile, chains: list[Chain], audio_info: dict) \
             typ = "freeze_start"
         else:
             typ = "reframe"            # framing step on the same time line (RAW-native cut or punch-in)
+        amb = None
+        if typ == "freeze_start":      # the frames before the hold that already show the held RAW frame: the
+            k0 = b["comp_in"]          # boundary may sit at any of them (identical output, DESIGN §6.1)
+            while k0 - 1 >= a["comp_in"] and frames[k0 - 1]["raw_a"] == frames[b["comp_in"]]["raw_a"]:
+                k0 -= 1
+            amb = [k0, b["comp_in"]]
         cuts.append({"k": b["comp_in"], "a_seg": a["id"], "b_seg": b["id"], "type": typ, "b_kind": b["kind"],
-                     "ambiguity": None, "same_time_line": a["chain"] == b["chain"]})
+                     "ambiguity": amb, "same_time_line": a["chain"] == b["chain"]})
     jl = []
     for a, b in zip(segs[:-1], segs[1:]):
         ext = a["audio"]["out_offset_frames"] if a["type"] == "raw" else 0
@@ -2806,7 +2822,7 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     # ---- RAW + ID video --------------------------------------------------------------------------------
     t0 = time.perf_counter()
     raw_info = generate_raw(p, build, raw_mp4, ov)
-    make_id_video(id_mp4, p.raw_frames, p.raw_fps)
+    make_id_video(id_mp4, p.raw_frames, p.raw_fps, p.x264_threads)
     blends = [c for c in chains if c.in_raw and c.spec.retime == "blend"]
     alt_mp4 = build / "alt.mp4"
     if blends:
@@ -2882,7 +2898,8 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
         ins += ["-loop", "1", "-framerate", "30", "-i", str(glyph_png)]
     fc = competitor_video_filter(p, chains, caps, lp)
     comp_video = build / "competitor_video.mp4"
-    run_ffmpeg(["-y", *ins, "-filter_complex", fc, "-map", "[vout]", "-an", *X264_COMP, *BITEXACT,
+    run_ffmpeg(["-y", *ins, "-filter_complex", fc, "-map", "[vout]", "-an", *x264_args(X264_COMP, None, p.x264_threads),
+                *BITEXACT,
                 str(comp_video)], label="competitor video")
     # the fullscreen frames must be exactly the planned ones (picture outside the box; black elsewhere)
     fs_got, fs_frac = measure_fullscreen_frames(comp_video, p, lp, zones)
@@ -2935,7 +2952,8 @@ def _generate(p: Profile, out: Path, key: str, keep_build: bool) -> dict:
     t0 = time.perf_counter()
     foreign = [{"seg": s["id"], "frames": list(range(s["comp_in"], s["comp_out"])), "sim": s["transform"],
                 "flip": s["flip"], "raw_range": (p.shot_start(s["lookalike_shot"]),
-                                                 p.shot_start(s["lookalike_shot"]) + p.shot_length(s["lookalike_shot"]))}
+                                                 p.shot_start(s["lookalike_shot"]) +
+                                                 p.shot_length(s["lookalike_shot"]))}
                for s in segs if s.get("lookalike_shot") is not None]
     sc = self_check(p, raw_mp4, comp_mp4, frames, segs, cap_truth, build, extra_masks=cap_fx or None,
                     pairs=rep["pairs"] if rep is not None else None, foreign=foreign or None)
@@ -3183,7 +3201,7 @@ FILM24_SHOTS: tuple[ShotSpec, ...] = (
     ShotSpec("f24_punch", "testsrc2=s={W}x{H}:r={R},hue=h=30", skip=25, layer=(1209, 0.35, 8)),
     # 10: two_clip_pans (1757/1758): two chains on one RAW line, +5 RAW frame jump, independent pans; the RAW
     #     carries a static legal disclaimer the competitor's master does not have (RAW-only overlay)
-    # measured 24-34 inliers: the disclaimer's glyph corners take part of the RAW proxy's SIFT budget -> floor 20
+    # measured 24-48 inliers: the disclaimer's glyph corners take part of the RAW proxy's SIFT budget -> floor 20
     ShotSpec("f24_vpan", _VPAN + "," + _DISCLAIMER, skip=30, master=_VPAN, tags=("raw_only_overlay",),
              min_inliers=20),
     # 11: frame-blended 0.25x slow motion source
@@ -3195,7 +3213,7 @@ FILM24_SHOTS: tuple[ShotSpec, ...] = (
                            "mold_color=#a0a000,scale={W}:{H}:flags=neighbor", skip=30, length=100),
     # 13: gray: RAW = a 5-frame motion-blurred (centred tmix) fast camera pan; the competitor's master is the sharp
     #     pan (generator skip - 2 = the blur centre), sharpened again by the chain (AI-enhanced look, 1180-1208)
-    # measured 19-30 inliers (motion-blurred RAW vs a sharpened master) -> floor 15
+    # measured 20-28 inliers (motion-blurred RAW vs a sharpened master) -> floor 15
     ShotSpec("f24_gray", _GRAY + ",tmix=frames=5", skip=12, master=_GRAY, master_skip=10, length=100,
              tags=("motion_blur",), min_inliers=15),
 )
@@ -3206,7 +3224,7 @@ def _film24_profile() -> Profile:
     shot changes get their clip boundaries from the grid rule (the first local frame showing the next shot)."""
     base = Profile("film24", 960, 540, 150, 540, 960, (30, 230, 480, 500, 20), (), 0.5, caption_seed=11,
                    raw_fps=FILM_FPS, shots=FILM24_SHOTS, timing="grid", raw_overlays=False,
-                   audio=AudioPlan(content_offset=1824, post_delay=2304, comp_sr=44100))
+                   audio=AudioPlan(content_offset=1824, post_delay=2304, comp_sr=44100), x264_threads=1)
 
     def shown(shot: int, off: int, n: int) -> list[int]:
         n0 = grid_n0(base.shot_start(shot) + off, FILM_FPS)
@@ -3234,7 +3252,7 @@ def _film24_profile() -> Profile:
         ChainSpec("pan", shot=1, off=50, n=40, quad=((0, 1.6, 97.5, 0.0), (39, 1.6, -97.5, 0.0)),
                   note="editor pan -5 px/frame over a RAW camera pan (14 RAW px/frame) with parallax (1411 case)"),
         ChainSpec("short", shot=0, off=100, n=4, note="4-frame flash chain"),
-        ChainSpec("pan_accel", shot=2, off=50, n=30,
+        ChainSpec("pan_accel", shot=2, off=50, n=30, min_inliers=40,        # measured 48-56 (x1.6 over a camera pan)
                   quad=((0, 1.6, -110.0, 0.0), (19, 1.6, -30.2, 0.0), (29, 1.6, 107.8, 0.0)),
                   note="editor pan 4.2 then 13.8 px/frame (break at local 19) over a RAW camera pan (39-69 case)"),
         ChainSpec("raw_zoom_roll", shot=3, off=44, n=40,
@@ -3249,7 +3267,7 @@ def _film24_profile() -> Profile:
                   note="slow editor pan, framing snaps back at the RAW-native cut (S60)"),
         ChainSpec("punch_pan", shot=9, off=40, n=40,
                   quad=((0, 1.0, 0.0, 0.0), (13, 1.0, 0.0, 0.0), (14, 1.7, 75.0, 0.0), (39, 1.7, -75.0, 0.0)),
-                  clips=(14,), clip_kinds=("punch_pan_pre", "punch_pan"), min_inliers=35,   # measured 40-45 (x1.7)
+                  clips=(14,), clip_kinds=("punch_pan_pre", "punch_pan"), min_inliers=25,   # measured 32-47 (x1.7)
                   note="punch-in x1.7, then a 6 px/frame editor pan (S93)"),
         ChainSpec("blend_slow", shot=11, off=20, n=30, speed="0.25", retime="blend",
                   note="framerate-blended 0.25x slow motion (video only; audio continues at v=1)"),
