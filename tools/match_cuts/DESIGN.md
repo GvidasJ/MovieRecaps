@@ -1217,9 +1217,11 @@ verification honesty) were fixed under these shared rules:
     candidates over one box ROI (`scoring.zncc_rows`), pixel dot products (`temporal._zncc`) -- and OpenBLAS splits
     a dot product of >= ~20000 elements between its threads: 7x slower for these sizes (measured 8.4 vs 1.2 ms for
     7 x 60000 under load; with 4 worker processes each waking 4 BLAS threads, worse) and the last bits of the result
-    depended on the machine's CPU count. Measured on the base commit vs this change (same machine): mini and
-    film24 cutlist.json / csv / XML / EDL / JSX, verify.json and frame_map.npz byte-identical; film24 wall 764 ->
-    260 s (S5.3 359 -> 100 s, S9 215 -> 65 s), mini 639 -> 204 s.
+    depended on the machine's CPU count. Measured on the base commit vs wave 4 (same machine, 4 CPUs shared with
+    another job): mini, film24 and full cutlist.json / csv / XML / EDL / JSX, verify.json and frame_map.npz
+    byte-identical; mini wall 639 -> 165 s (CPU 21m07 -> 6m20), film24 764 -> 200-260 s (CPU 27m56 -> ~8m30;
+    S5.2 121 -> 42 s, S5.3 359 -> 66-100 s, S9 215 -> 53-65 s), full 1353 -> 797 s (CPU 79m41 -> 30m43; S5.2 309 ->
+    151 s, S5.3 521 -> 153 s, S9 338 -> 306 s). Line searches describe each RAW frame once per batch (below).
   * *Windows files.* Outputs are replaced through `common.replace_file` (retried for 5 s on PermissionError --
     a virus scanner, Excel holding `cutlist.csv`, a player holding the preview -- then a PermissionError that
     names the file and says to close the program); preview / compare renders are muxed into their temp
