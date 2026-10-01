@@ -139,12 +139,14 @@ def segment_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[str
         raw = f"{timecode(seg.raw_in_frame, raw_fps)}–{timecode(seg.raw_out_frame if seg.raw_out_frame is not None else seg.raw_in_frame, raw_fps)}"
         if seg.raw_in_seconds is not None:
             raw += f" (raw_in {seg.raw_in_seconds:.6f}s)"
-    elif seg.type == "not_in_raw":
-        raw = seg.label or "NOT-IN-RAW"
+    elif seg.type in ("not_in_raw", "uncertain"):
+        raw = seg.label or ("NOT-IN-RAW" if seg.type == "not_in_raw" else "UNCERTAIN")
     else:
         raw = f"{seg.type}" + (f" {seg.color}" if seg.color else "")
     if seg.type != "raw":
         speed = ""
+    elif seg.frame_mix:
+        speed = f"{seg.speed:.4f} frame blend (Frame Mix)"
     elif seg.time_remap_keys:
         speed = "freeze" if seg.speed == 0 else ("reverse" if seg.speed < 0 else "ramp") + f" ({len(seg.time_remap_keys)} remap keys)"
     else:
@@ -435,6 +437,7 @@ def edit_breakdown(cutlist: Any, layout: Any = None, cfg: Any = None) -> dict:
         "speeds": dict(sorted(speeds.items())), "flips": [s.id for s in raws if s.flip_h], "rotations": rot,
         "animated": [s.id for s in raws if s.transform_keys], "transitions": dict(trans), "reframes": reframes,
         "not_in_raw": [(s.comp_in, s.comp_out) for s in segs if s.type == "not_in_raw"],
+        "uncertain": [(s.comp_in, s.comp_out) for s in segs if s.type == "uncertain"],
         "freeze_reverse_ramp": [s.id for s in raws if s.time_remap_keys],
     }
 
@@ -596,8 +599,14 @@ def _warnings(ctx: Any) -> list[str]:
         amb = [k for s in cl.segments for k in s.ambiguous_frames]
         out.append(f"- Ambiguous-identical frames: {len(amb)} — {_ranges_str(amb, comp_fps)}")
     nir = [s for s in cl.segments if s.type == "not_in_raw"]
-    out.append("- NOT-IN-RAW ranges: " + (", ".join(f"{s.comp_in}–{s.comp_out - 1} ({timecode(s.comp_in, comp_fps)}–"
-                                                     f"{timecode(s.comp_out, comp_fps)})" for s in nir) or "none"))
+    out.append("- NOT-IN-RAW ranges (every hypothesis below none_thresh): "
+               + (", ".join(f"{s.comp_in}–{s.comp_out - 1} ({timecode(s.comp_in, comp_fps)}–"
+                            f"{timecode(s.comp_out, comp_fps)})" for s in nir) or "none"))
+    unc = [s for s in cl.segments if s.type == "uncertain"]
+    out.append("- UNCERTAIN ranges (best hypothesis between none_thresh and match_thresh: neither matched nor "
+               "NOT-IN-RAW; criterion-3 failures, a guide layer of the best evidence in AE): "
+               + ("; ".join(f"{s.comp_in}–{s.comp_out - 1} ({timecode(s.comp_in, comp_fps)}–{timecode(s.comp_out, comp_fps)})"
+                            f" {s.label}" for s in unc) or "none"))
     out += ae_phase_lines(cl, cfg)
     nre = not_reproduced(getattr(ctx, "verify", None))
     if nre:
@@ -639,7 +648,9 @@ def _warnings(ctx: Any) -> list[str]:
             cant.append(f"S{s.id:02d}: frames {_ranges_str(sorted(set(bad)), comp_fps)} shown full-screen by the "
                         "competitor but rebuilt inside the video box")
     for s in cl.segments:
-        if s.retime and s.retime != "none":
+        if s.frame_mix:
+            cant.append(f"S{s.id:02d}: frame-blend retiming (verified path; exported with AE Frame Blending > Frame Mix)")
+        elif s.retime and s.retime != "none":
             cant.append(f"S{s.id:02d}: {s.retime} retiming (AE Frame Blending approximates it)")
         if (s.audio or {}).get("pitch_preserved") and s.speed not in (0, 1):
             cant.append(f"S{s.id:02d}: pitch-preserved speed change (AE stretch changes pitch; use Time-Stretch on the audio)")

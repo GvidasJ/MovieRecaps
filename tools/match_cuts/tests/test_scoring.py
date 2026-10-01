@@ -87,3 +87,67 @@ def test_grad_zncc_sees_a_misframe_that_plain_zncc_misses_on_dark_frames():
     m[10:110, 10:150] = True
     assert scoring.grad_zncc(a, a + 5.0, m) == pytest.approx(1.0)            # gain / offset free
     assert math.isnan(scoring.grad_zncc(a[:4, :4], b[:4, :4]))             # too few pixels
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: contrast-relative tile identity test and the detail-sensitive second score
+# ---------------------------------------------------------------------------------------------
+
+def _world(seed: int, h: int, w: int, cell: int = 8) -> np.ndarray:
+    import cv2
+    rng = np.random.default_rng(seed)
+    small = rng.uniform(0, 255, (h // cell + 2, w // cell + 2)).astype(np.float32)
+    big = cv2.resize(small, ((w // cell + 2) * cell, (h // cell + 2) * cell), interpolation=cv2.INTER_NEAREST)
+    return big[:h, :w]
+
+
+def test_identical_images_is_a_contrast_relative_max_over_tiles():
+    """Identity of two RAW frames (FX-08): noise is identical; a small region that changes is caught on its tile
+    although the whole-frame mean |diff| is far below identical_mad (no dilution); on a dark, low-contrast frame
+    (a dimming car display) the threshold scales with the frame's contrast."""
+    import cv2
+    rng = np.random.default_rng(1)
+    h, w = 90, 120
+    m = np.ones((h, w), bool)
+    a = cv2.GaussianBlur(rng.uniform(0, 255, (h, w)).astype(np.float32), (0, 0), 1.0)
+    same, ev = scoring.identical_images(a, a + rng.normal(0, 0.3, a.shape), m, 0.75, 0.9995)
+    assert same and ev["tiles"] == 16
+    b = a.copy()
+    b[10:25, 10:30] -= 8.0
+    assert float(np.mean(np.abs(a - b))) < 0.75
+    same, ev = scoring.identical_images(a, b, m, 0.75, 0.9995)
+    assert not same and ev["worst_mad"] > 2.0
+    dark = (a - a.mean()) / a.std() * 6.0 + 25.0                      # p98 - p2 ~ 24 levels: factor 0.25
+    d2 = dark.copy()
+    d2[40:70, 40:100] -= 0.9                                          # the display dims by < 1 level
+    assert float(np.mean(np.abs(dark - d2))) < 0.2
+    same, ev = scoring.identical_images(dark, d2, m, 0.75, 0.9995)
+    assert not same and ev["thresh"] == pytest.approx(0.1875)
+    assert scoring.identical_images(dark, dark + rng.normal(0, 0.15, a.shape), m, 0.75, 0.9995)[0]
+    assert not scoring.identical_images(a, a, np.zeros((h, w), bool), 0.75, 0.9995)[0]       # nothing to judge
+
+
+def test_detail_score_blur_matches_a_sharpened_competitor_frame():
+    """A sharpened competitor frame vs a motion-blurred RAW frame of the same moment (the gray-zone regime of the
+    real run's 1180-1208): the plain ZNCC is in the gray zone; after blur matching (a zero-phase horizontal box on
+    the sharper image) the gradient ZNCC of the TRUE frame rises above match_thresh and beats the RAW frames one
+    camera step away (unrefitted) and a lookalike of the same statistics by a clear margin."""
+    import cv2
+    h, w, pan = 90, 120, 2
+    world, foreign = _world(3, h, w + 200), _world(9, h, w + 200)
+
+    def raw(j: int, src: np.ndarray = world) -> np.ndarray:            # 5-frame tmix of a camera pan
+        return np.mean([src[:, 40 + pan * (j + d):40 + pan * (j + d) + w] for d in (-2, -1, 0, 1, 2)], axis=0)
+
+    img = world[:, 40 + pan * 10:40 + pan * 10 + w].astype(np.float32)
+    comp = np.clip((img + 2.5 * (img - cv2.GaussianBlur(img, (0, 0), 1.5)) - 128) * 1.25 + 128, 0, 255)
+    m = np.ones((h, w), bool)
+    m[:3] = m[-3:] = False
+    plain = scoring.zncc(cv2.GaussianBlur(comp, (0, 0), 1.0), cv2.GaussianBlur(raw(10), (0, 0), 1.0), m)
+    assert 0.6 <= plain < 0.9
+    d_true, z_true, kern = scoring.detail_score(comp, raw(10), m)
+    assert d_true >= 0.9 and z_true > plain and kern.startswith("h")
+    for other in (raw(9), raw(11), raw(10, foreign)):
+        assert scoring.detail_score(comp, other, m)[0] < d_true - 0.02
+    assert scoring.detail_score(comp, raw(10, foreign), m)[0] < 0.3
+    assert math.isnan(scoring.detail_score(comp[:8, :8], raw(10)[:8, :8], m[:8, :8])[0])

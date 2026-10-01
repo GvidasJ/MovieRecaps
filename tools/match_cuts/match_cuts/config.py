@@ -13,7 +13,7 @@ from pathlib import Path
 # evidence, FX-07), so they ARE analysis parameters.
 VERIFY_ONLY_PARAMS = ("temporal_mag_ratio", "verify_refit_margin",
                       "verify_union_frames", "verify_excursion_frames", "verify_framing_min_samples",
-                      "verify_framing_all_max", "verify_low_score_margin")
+                      "verify_framing_all_max", "verify_low_score_margin", "verify_mix_tie")
 
 
 @dataclass
@@ -138,9 +138,26 @@ class Config:
     score_blur: float = 1.0
     grad_weight: float = 0.0               # >0 adds gradient-magnitude ZNCC (graded material)
     match_thresh: float = 0.90             # masked ZNCC needed to accept a match (tuned on synthetic)
-    none_thresh: float = 0.60              # below this for every hypothesis -> NONE candidate
-    identical_thresh: float = 0.9995       # RAW-vs-RAW ZNCC above which neighbours are 'identical'
-    identical_mad: float = 0.75            # ... or mean |diff| (8-bit, proxy, visible region) below this
+    none_thresh: float = 0.60              # EVERY evaluated hypothesis below this -> NONE (NOT-IN-RAW); the best in
+                                           #   [none_thresh, match_thresh) -> UNRESOLVED ('uncertain' segment) unless the
+                                           #   detail score promotes it (FX-08); verify c2 uses the same threshold
+    detail_margin: float = 0.02            # detail-score promotion: blur-matched gradient ZNCC >= match_thresh AND above
+                                           #   RAW m+-1, m+-2 under their own framing by more than this (FX-08)
+    line_gap_s: float = 1.0                # FX-08: the neighbours' time lines are scored across unexplained gaps up to
+                                           #   this long (s): NOT-IN-RAW only after the obvious hypotheses were tried
+    line_search_reach: int = 30            # FX-08: gap frames within this many frames of a neighbouring run are
+                                           #   searched pairwise against that run's line +- track_search_radius ...
+    line_search_min_ratio: float = 0.6     # ... accepting RANSAC candidates with >= near_miss_inliers at this inlier
+                                           #   ratio (a handful of RAW frames, not the whole RAW; ZNCC still decides)
+    line_search_nfeatures: int = 1000      # ... with SIFT on the frames themselves (a RAW-only overlay such as a legal
+                                           #   disclaimer takes part of a small budget)
+    line_search_verify: int = 3            # ... verifying at most this many candidates per frame (best inliers first)
+    identical_thresh: float = 0.9995       # RAW-vs-RAW ZNCC above which neighbours are 'identical' ...
+    identical_mad: float = 0.75            # ... or mean |diff| (8-bit, proxy) below this x the contrast factor -- on
+                                           #   EVERY tile (scoring.identical_images, FX-08; layout mask, no pass-2 masks)
+    identical_tiles: int = 4               # tiles per side of the identity test (a max over tiles: no dilution)
+    identical_contrast_ref: float = 128.0  # contrast factor = clip((p98 - p2) / this, identical_contrast_min, 1):
+    identical_contrast_min: float = 0.25   #   a dark low-contrast frame needs a proportionally smaller change
     low_margin_eps: float = 0.001          # score gap flagged low_margin (never an ambiguity exemption)
     soft_delta_min: float = 0.001          # soft LP range delta_k = clip(3 * robust std of the track's best scores,
     soft_delta_max: float = 0.01           #   soft_delta_min, soft_delta_max)  (scoring.noise_delta)
@@ -163,6 +180,12 @@ class Config:
     speed_snap_values: tuple = (1.0, 1.05, 1.10, 1.15, 1.20, 1.25, 1.50, 2.00,
                                 1 / 1.05, 1 / 1.10, 1 / 1.15, 1 / 1.20, 1 / 1.25, 1 / 1.50, 0.5)
     speed_snap_tol: float = 0.003
+    retime_snap_values: tuple = (0.25, 0.2, 1 / 3)   # FX-08: extra snap values of a FRAME-BLEND path only (NLE slow-motion
+                                           #   presets 25 / 20 / 33 %); its blend positions measure the speed directly
+                                           #   and the snap still needs speed_snap_tol (not DP candidates)
+    freeze_static_mad: float = 0.25        # FX-08 freeze admission: every aligned competitor pair inside a v = 0 segment
+    freeze_static_ratio: float = 10.0      #   within max(this ratio x its repeat-pair noise floor, freeze_static_mad)
+                                           #   mean |diff| (8-bit, temporal proxy, captions / overlays masked)
     min_segment_frames: int = 1
     lambda_cut: float = 1.0                # DP cost per cut
     lambda_unsnapped: float = 3.0          # DP cost of a segment whose speed cannot be snapped (> lambda_cut)
@@ -221,6 +244,8 @@ class Config:
     verify_framing_min_samples: int = 5    # c4: independently measured framing samples per segment (at least) ...
     verify_framing_all_max: int = 6        # ... and every frame of segments up to this length
     verify_low_score_margin: float = 0.02  # c4: unconverged sample whose model gradient score is this far below its neighbours' median -> failure
+    verify_mix_tie: float = 0.1            # c3 Frame Mix (FX-08): refine's single-frame argmax on the LIGHTER source of a
+                                           #   frame-blend mix counts as a blend tie only within this of an even (0.5) mix
 
     def resolved_workers(self) -> int:
         import os

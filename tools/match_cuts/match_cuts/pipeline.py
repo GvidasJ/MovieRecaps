@@ -1142,11 +1142,18 @@ def segment_warnings(segments: list[Segment], comp_fps: Fraction, audio_result: 
         if s.type == "not_in_raw":
             out.append(f"NOT-IN-RAW: comp frames {s.comp_in}-{s.comp_out - 1} "
                        f"({timecode(s.comp_in, comp_fps)}-{timecode(s.comp_out, comp_fps)}) - placeholder '{s.label}'")
-        if s.uncertain:
+        if s.type == "uncertain":
+            out.append(f"UNCERTAIN: comp frames {s.comp_in}-{s.comp_out - 1} "
+                       f"({timecode(s.comp_in, comp_fps)}-{timecode(s.comp_out, comp_fps)}) - '{s.label}' "
+                       "(neither matched nor NOT-IN-RAW: rebuild by hand from the guide layer)")
+        elif s.uncertain:
             out.append(f"{name}: uncertain ({s.notes or 'see decisions.jsonl'})")
         if s.unsnapped and s.type == "raw":
             out.append(f"{name}: speed {s.speed:.4f} could not be snapped to a common value")
-        if s.retime and s.retime != "none":
+        if s.frame_mix:
+            out.append(f"{name}: competitor used frame-blend retiming at speed {s.speed:g} - verified path, exported "
+                       "with AE Frame Mix")
+        elif s.retime and s.retime != "none":
             out.append(f"{name}: competitor used {s.retime} retiming - AE Frame Blending only approximates it")
         if s.type == "raw" and s.speed not in (0, 1) and (s.audio or {}).get("pitch_preserved"):
             out.append(f"{name}: competitor preserved pitch at speed {s.speed:.3f}; AE's time stretch changes pitch")

@@ -150,6 +150,98 @@ def score_candidates(comp: CompRegion, raw_frames: Sequence[np.ndarray], sim: Si
     return s
 
 
+def identical_images(a: np.ndarray, b: np.ndarray, mask: np.ndarray, mad_thresh: float, zncc_thresh: float,
+                     tiles: int = 4, contrast_ref: float = 128.0, contrast_min: float = 0.25,
+                     min_pixels: int = 32) -> tuple[bool, dict]:
+    """Are two (warped) RAW frames visually identical inside ``mask`` (FX-08 identity test)? Judged as a MAX OVER
+    TILES (``tiles`` x ``tiles`` grid over the mask's bounding box, tiles with >= ``min_pixels`` valid pixels):
+    every tile must have mean |a - b| <= the contrast-relative threshold OR its ZNCC >= ``zncc_thresh``. The mean
+    |diff| threshold is ``mad_thresh`` scaled by the frame's robust contrast (p98 - p2 of ``a`` in the mask)
+    relative to ``contrast_ref``, clipped to [contrast_min, 1]: on a dark, low-contrast frame (a dimming car display)
+    the same absolute change is a much larger part of the picture, and a small changing region must not be diluted
+    by a large static one (the real run's 4-frame error behind 'ambiguous-identical' 592-595). Returns
+    (identical, evidence {'worst_mad', 'thresh', 'tiles'})."""
+    m = np.asarray(mask, bool)
+    ev: dict = {"worst_mad": None, "thresh": None, "tiles": 0}
+    if int(m.sum()) < 64:
+        return False, ev
+    av = np.asarray(a)[m].astype(np.float64)
+    lo, hi = np.percentile(av, [2.0, 98.0])
+    thr = float(mad_thresh) * float(np.clip((hi - lo) / max(float(contrast_ref), 1e-6), contrast_min, 1.0))
+    ev["thresh"] = round(thr, 4)
+    ys, xs = np.nonzero(m)
+    y0, y1, x0, x1 = int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
+    ty = np.linspace(y0, y1, int(tiles) + 1).astype(int)
+    tx = np.linspace(x0, x1, int(tiles) + 1).astype(int)
+    worst, n = 0.0, 0
+    for i in range(int(tiles)):
+        for j in range(int(tiles)):
+            mt = m[ty[i]:ty[i + 1], tx[j]:tx[j + 1]]
+            if int(mt.sum()) < min_pixels:
+                continue
+            at = np.asarray(a)[ty[i]:ty[i + 1], tx[j]:tx[j + 1]][mt].astype(np.float64)
+            bt = np.asarray(b)[ty[i]:ty[i + 1], tx[j]:tx[j + 1]][mt].astype(np.float64)
+            mad = float(np.mean(np.abs(at - bt)))
+            n += 1
+            worst = max(worst, mad)
+            if mad <= thr:
+                continue
+            z = zncc(at, bt)
+            if not (math.isfinite(z) and z >= zncc_thresh):
+                ev.update(worst_mad=round(worst, 4), tiles=n)
+                return False, ev
+    ev.update(worst_mad=round(worst, 4), tiles=n)
+    return n > 0, ev
+
+
+def blur_kernels(max_len: int = 15) -> list[tuple[str, np.ndarray]]:
+    """The zero-phase (symmetric) blur family of the detail score's blur matching: identity, isotropic Gaussians and
+    horizontal / vertical box (linear motion) blurs up to ``max_len`` px. A symmetric kernel cannot shift content,
+    so fitting it per candidate never trades time for position (unlike a free framing fit)."""
+    import cv2
+    out: list[tuple[str, np.ndarray]] = [("id", np.ones((1, 1), np.float32))]
+    for s in (0.7, 1.2, 2.0, 3.0):
+        g = cv2.getGaussianKernel(int(2 * math.ceil(3 * s) + 1), s).astype(np.float32)
+        out.append((f"g{s}", g @ g.T))
+    for n in range(3, int(max_len) + 1, 4):
+        box = np.full((1, n), 1.0 / n, np.float32)
+        out.append((f"h{n}", box))
+        out.append((f"v{n}", box.T.copy()))
+    return out
+
+
+def detail_score(comp_img: np.ndarray, raw_img: np.ndarray, mask: np.ndarray,
+                 kernels: Sequence[tuple[str, np.ndarray]] | None = None) -> tuple[float, float, str]:
+    """Detail-sensitive second score (FX-08) of a competitor ROI against a warped RAW candidate (both float, same
+    shape; ``mask`` = valid pixels): BLUR MATCHING first -- each zero-phase kernel of ``blur_kernels`` applied to the
+    SHARPER of the two images (gradient energy relative to variance), the one maximising the plain masked ZNCC kept
+    -- then the gradient-domain ZNCC (``grad_zncc``) of the blur-matched pair. A sharpened or AI-enhanced competitor
+    frame correlates with a motion-blurred RAW frame only at low frequencies; after blur matching the detail of the
+    TRUE frame lines up, a different frame's does not. Returns (detail, plain ZNCC after blur matching, kernel)."""
+    import cv2
+    a = np.asarray(comp_img, np.float32)
+    b = np.asarray(raw_img, np.float32)
+    m = np.asarray(mask, bool)
+    if int(m.sum()) < 256:
+        return float("nan"), float("nan"), ""
+
+    def sharpness(x: np.ndarray) -> float:
+        g = _gradmag(x)[m]
+        v = float(np.var(x[m]))
+        return float(np.mean(g * g)) / v if v > 1e-6 else 0.0
+    sharp_comp = sharpness(a) >= sharpness(b)
+    best = (-np.inf, None, "", None)
+    for name, K in (kernels or blur_kernels()):
+        x = cv2.filter2D(a, -1, K, borderType=cv2.BORDER_REFLECT) if sharp_comp else a
+        y = b if sharp_comp else cv2.filter2D(b, -1, K, borderType=cv2.BORDER_REFLECT)
+        z = zncc(x, y, m)
+        if math.isfinite(z) and z > best[0]:
+            best = (z, x, name, y)
+    if best[1] is None:
+        return float("nan"), float("nan"), ""
+    return float(grad_zncc(best[1], best[3], m)), float(best[0]), best[2]
+
+
 def noise_delta(best_scores, dmin: float = 0.001, dmax: float = 0.01) -> float:
     """Score-noise tolerance delta for one track (DESIGN §3): 3 x the robust std (1.4826·MAD) of the
     track's BEST scores, clamped to [dmin, dmax].

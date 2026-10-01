@@ -570,7 +570,7 @@ class AllowedMasks:
         d = int(getattr(cfg, "overlay_dilate_px", 3))
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * d + 1, 2 * d + 1)) if d > 0 else None
 
-    def _compute(self, k: int) -> np.ndarray:
+    def _compute(self, k: int, extra: bool = True) -> np.ndarray:
         import cv2
         if self._base_fn is not None:
             m = np.asarray(self._base_fn(k), bool).copy()
@@ -584,13 +584,18 @@ class AllowedMasks:
                 if self._kernel is not None:
                     ov = cv2.dilate(ov, self._kernel)
                 m &= ov == 0
-        ex = self._extra_mask(int(k))
+        ex = self._extra_mask(int(k)) if extra else None
         if ex is not None:
             m &= ~ex
         return m
 
     def __call__(self, k: int) -> np.ndarray:
         return self._compute(int(k))
+
+    def layout_only(self, k: int) -> np.ndarray:
+        """The mask without refine's pass-2 residual masks (``extra``): residuals of the match being judged mask
+        its own mismatch away, so tests that must not depend on that match (the RAW identity test) use this."""
+        return self._compute(int(k), extra=False)
 
     def _extra_mask(self, k: int) -> np.ndarray | None:
         ex = self.extra.get(k)
@@ -976,7 +981,9 @@ class Anchor:
     inlier_ratio: float
     votes: float
     zncc: float
-    source: str = "global"        # 'global' | 'audio' | 'rescue'; '<source>_near' = a RANSAC near-miss (join-only)
+    source: str = "global"        # 'global' | 'audio' | 'rescue' | 'line'; '<source>_near' = a RANSAC near-miss
+                                  # (join-only); '<source>_gray' = a full RANSAC match whose ZNCC lies in the gray zone
+                                  # [none_thresh, accept) -- evidence for an UNRESOLVED frame, never an anchor (FX-08)
     time_ambiguous: bool = False  # the best two (RAW frame, Sim) hypotheses of jb-1..jb+1 within anchor_time_delta
 
     def to_dict(self) -> dict:
@@ -1112,6 +1119,134 @@ def _reestimate(img: np.ndarray, raw: Proxy, jb: int, sim: Sim, flip: bool, allo
     return int(order[0]), best.sim, float(best.z), amb
 
 
+def _verify_candidate(k: int, img: np.ndarray, comp: Proxy, raw: Proxy, allowed: np.ndarray | None,
+                      roi: tuple[int, int, int, int], scorer: "_Scorer", cfg, j: int, flip: bool, votes: float,
+                      M: np.ndarray, n_inl: int, ratio: float, src: str, radius: int,
+                      report: list | None, gray: list | None = None) -> Anchor | None:
+    """The anchor test of one RANSAC candidate (RAW frame j, matrix M): the Sim is re-estimated against the best
+    EXACT RAW frame within ``radius`` of j (score j-radius..j+radius under the RANSAC Sim -> jb, then
+    :func:`_reestimate` over jb-1..jb+1) and accepted only when its masked ZNCC >= match_thresh - anchor_zncc_slack.
+    A rejected candidate whose ZNCC still reaches none_thresh is appended to ``gray`` (source '<src>_gray') when
+    given: geometric evidence that the frame's content is in RAW at a gray-zone score (FX-08)."""
+    W = float(raw.full_size[0])
+    try:
+        sim = from_cv_matrix(M, False, W, tuple(raw.ratio), tuple(comp.ratio))
+    except ValueError:
+        return None
+    if not (0.02 < sim.s < 50.0):
+        return None
+    js = [i for i in range(j - radius, j + radius + 1) if raw.has(i)]
+    sc = scorer.scores(js, sim, flip)
+    ib = _nanargmax(sc)
+    if ib < 0:
+        if report is not None:
+            report.append({"k": int(k), "raw": int(j), "flip": bool(flip), "reason": "no_score"})
+        return None
+    jb, sim2, z2, ambiguous = _reestimate(img, raw, js[ib], sim, flip, allowed, roi, comp, cfg)
+    if not np.isfinite(z2) or z2 < cfg.match_thresh - cfg.anchor_zncc_slack:
+        if report is not None:
+            report.append({"k": int(k), "raw": int(jb), "flip": bool(flip), "reason": "zncc",
+                           "zncc": None if not np.isfinite(z2) else round(float(z2), 4), "inliers": n_inl})
+        if gray is not None and np.isfinite(z2) and z2 >= float(cfg.none_thresh):
+            gray.append(Anchor(int(k), int(jb), bool(flip), sim2, int(n_inl), float(ratio), float(votes), float(z2),
+                               src + "_gray", bool(ambiguous)))
+        return None
+    return Anchor(int(k), int(jb), bool(flip), sim2, int(n_inl), float(ratio), float(votes), float(z2), src,
+                  bool(ambiguous))
+
+
+_LINE_FEAT: OrderedDict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = OrderedDict()
+
+
+def _line_raw_features(raw: Proxy, j: int, flip: bool, nfeat: int) -> tuple[np.ndarray, np.ndarray]:
+    """SIFT of RAW proxy frame j (or its mirror) with ``nfeat`` features, computed on the frame itself (never the
+    index's budget-limited features), per-process LRU."""
+    import cv2
+    key = (int(j), int(flip), int(nfeat))
+    hit = _LINE_FEAT.get(key)
+    if hit is not None:
+        _LINE_FEAT.move_to_end(key)
+        return hit
+    img = np.asarray(raw.get(j))
+    if flip:
+        img = cv2.flip(img, 1)
+    feat = detect_sift(img, None, nfeat)
+    _LINE_FEAT[key] = feat
+    if len(_LINE_FEAT) > 96:
+        _LINE_FEAT.popitem(last=False)
+    return feat
+
+
+def line_search(k: int, comp: Proxy, raw: Proxy, allowed: np.ndarray | None, cfg, js: Sequence[int], flip: bool,
+                roi: tuple[int, int, int, int] | None = None, report: list | None = None,
+                source: str = "line") -> list[Anchor]:
+    """Line-constrained re-search of competitor frame k (FX-08 'search before giving up'): pairwise SIFT + RANSAC
+    against EACH RAW frame of ``js`` -- a neighbouring run's predicted window, a handful of frames instead of the
+    whole RAW -- with relaxed acceptance (>= near_miss_inliers inliers at an inlier ratio >= line_search_min_ratio;
+    the global min_inliers is unchanged). Such a match is only a CANDIDATE: the anchor test (Sim re-estimated over
+    the exact RAW frames around it, masked ZNCC >= match_thresh - anchor_zncc_slack, :func:`_verify_candidate`)
+    decides, best-inlier candidates first, at most ``line_search_verify`` of them (candidates within refine_radius
+    of an accepted anchor converge onto it). RAW features are computed on the frames themselves with
+    line_search_nfeatures (a RAW-only overlay such as a legal disclaimer takes part of a small budget). Returns
+    verified anchors best-first (source ``source``)."""
+    img = np.asarray(comp.get(k))
+    h, w = img.shape[:2]
+    if roi is None:
+        roi = mask_bbox(allowed, (h, w))
+    nfeat = int(getattr(cfg, "line_search_nfeatures", 2 * int(cfg.sift_nfeatures)))
+    cpts, cdesc = detect_sift(img, allowed, nfeat, roi)
+    n_min = int(getattr(cfg, "near_miss_inliers", 6))
+    r_min = float(getattr(cfg, "line_search_min_ratio", 0.6))
+    if len(cdesc) < max(3, n_min):
+        if report is not None:
+            report.append({"k": int(k), "reason": "few_keypoints", "n": int(len(cdesc))})
+        return []
+    cands = []
+    for j in sorted({int(j) for j in js if raw.has(int(j))}):
+        rpts, rdesc = _line_raw_features(raw, j, flip, nfeat)
+        M, n_inl, n_good = _ransac(cpts, cdesc, rpts, rdesc, cfg)
+        ratio = n_inl / n_good if n_good else 0.0
+        if M is None or n_inl < n_min or ratio < r_min:
+            continue
+        cands.append((j, M, n_inl, ratio))
+    if not cands:
+        if report is not None:
+            report.append({"k": int(k), "reason": "no_candidate", "window": [min(js), max(js)] if js else None})
+        return []
+    scorer = _Scorer(img, roi, allowed, raw, comp.ratio, cfg)
+    radius = int(cfg.refine_radius)
+    found: dict[tuple[int, bool], Anchor] = {}
+    tried = 0
+    for j, M, n_inl, ratio in sorted(cands, key=lambda c: (-c[2], -c[3], c[0])):
+        if tried >= int(getattr(cfg, "line_search_verify", 3)):
+            break
+        if any(abs(a.raw - j) <= radius for a in found.values()):
+            continue
+        tried += 1
+        a = _verify_candidate(k, img, comp, raw, allowed, roi, scorer, cfg, j, flip, float(n_inl), M, n_inl, ratio,
+                              source, radius, report)
+        if a is not None and ((a.raw, a.flip) not in found or a.zncc > found[(a.raw, a.flip)].zncc):
+            found[(a.raw, a.flip)] = a
+    return sorted(found.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
+
+
+def _line_worker(state: dict, task: tuple[int, tuple[int, ...], bool]) -> tuple[int, list[dict], list]:
+    k, js, flip = task
+    rep: list = []
+    anchors = line_search(int(k), state["comp"], state["raw"], state["allowed"](int(k)), state["cfg"], js, bool(flip),
+                          roi=state["roi"], report=rep)
+    return int(k), [a.to_dict() for a in anchors[:int(getattr(state["cfg"], "anchors_per_frame", 3))]], rep[:12]
+
+
+def run_line_searches(comp: Proxy, raw: Proxy, allowed: Callable[[int], np.ndarray], roi: tuple[int, int, int, int],
+                      tasks: Sequence[tuple[int, Sequence[int], bool]], cfg) -> list[tuple[int, list[Anchor], list]]:
+    """:func:`line_search` on many (k, RAW window, flip) tasks in a worker pool. Input order kept."""
+    state = {"comp": comp, "raw": raw, "cfg": cfg, "allowed": allowed, "roi": roi}
+    items = [(int(k), tuple(int(j) for j in js), bool(fl)) for k, js, fl in tasks]
+    res = parallel_map(_line_worker, items, cfg.resolved_workers(), state, cfg.seed, min_items=4)
+    return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
+
+
 def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.ndarray | None, cfg,
                  window: tuple[int, int] | None = None, source: str = "global",
                  roi: tuple[int, int, int, int] | None = None,
@@ -1121,7 +1256,10 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
     ``near_miss``: when no candidate passes, RANSAC near-misses (near_miss_inliers <= inliers < min_inliers,
     ratio >= min_inlier_ratio) that pass the same re-estimation and ZNCC test are returned with source
     '<source>_near'. They are NOT anchors of their own: refine lets them only join an existing track whose RAW
-    time line they continue (FX-03 step 3; min_inliers itself is unchanged).
+    time line they continue (FX-03 step 3; min_inliers itself is unchanged). When nothing passes at all, the full
+    RANSAC matches whose re-estimated ZNCC lies in the gray zone [none_thresh, accept) are returned with source
+    '<source>_gray' (at most two): refine scores the frames around them as evidence for UNRESOLVED, never as a
+    match (FX-08 -- a sharpened / motion-blurred / processed picture of RAW content is not NOT-IN-RAW).
 
     SIFT inside ``allowed`` (bool [h, w] at comp proxy res; None = whole frame); the mirrored frame's
     descriptors (a permutation, :func:`mirror_features`) only vote; candidates = cluster-aware index
@@ -1158,34 +1296,14 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
     cands = [c for c in cands if c[2] >= min_frac * vmax][:top]
 
     scorer = _Scorer(img, roi, allowed, raw, comp.ratio, cfg)
-    W = float(raw.full_size[0])
     radius = max(int(cfg.refine_radius), index.step // 2 + 1)
-    accept = cfg.match_thresh - cfg.anchor_zncc_slack
     found: dict[tuple[int, bool], Anchor] = {}
 
+    gray: list[Anchor] = []
+
     def verify(j: int, flip: bool, votes: float, M: np.ndarray, n_inl: int, ratio: float, src: str) -> Anchor | None:
-        try:
-            sim = from_cv_matrix(M, False, W, tuple(raw.ratio), tuple(comp.ratio))
-        except ValueError:
-            return None
-        if not (0.02 < sim.s < 50.0):
-            return None
-        # re-estimate against the best EXACT RAW frame near the index frame
-        js = [i for i in range(j - radius, j + radius + 1) if raw.has(i)]
-        sc = scorer.scores(js, sim, flip)
-        ib = _nanargmax(sc)
-        if ib < 0:
-            if report is not None:
-                report.append({"k": int(k), "raw": int(j), "flip": bool(flip), "reason": "no_score"})
-            return None
-        jb, sim2, z2, ambiguous = _reestimate(img, raw, js[ib], sim, flip, allowed, roi, comp, cfg)
-        if not np.isfinite(z2) or z2 < accept:
-            if report is not None:
-                report.append({"k": int(k), "raw": int(jb), "flip": bool(flip), "reason": "zncc",
-                               "zncc": None if not np.isfinite(z2) else round(float(z2), 4), "inliers": n_inl})
-            return None
-        return Anchor(int(k), int(jb), bool(flip), sim2, int(n_inl), float(ratio), float(votes), float(z2), src,
-                      bool(ambiguous))
+        return _verify_candidate(k, img, comp, raw, allowed, roi, scorer, cfg, j, flip, votes, M, n_inl, ratio, src,
+                                 radius, report, gray if src == source else None)
 
     pending: list[tuple] = []
     for j, flip, votes in cands:
@@ -1211,7 +1329,14 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
             a = verify(j, flip, votes, M, n_inl, ratio, source + "_near")
             if a is not None and ((a.raw, a.flip) not in near or a.zncc > near[(a.raw, a.flip)].zncc):
                 near[(a.raw, a.flip)] = a
-        return sorted(near.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
+        if near:
+            return sorted(near.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
+    if not found and gray:
+        best: dict[tuple[int, bool], Anchor] = {}
+        for a in gray:
+            if (a.raw, a.flip) not in best or a.zncc > best[(a.raw, a.flip)].zncc:
+                best[(a.raw, a.flip)] = a
+        return sorted(best.values(), key=lambda a: (-a.zncc, -a.inliers, a.raw, a.flip))[:2]
     return sorted(found.values(), key=lambda a: (-a.zncc, a.raw, a.flip))
 
 
@@ -1251,10 +1376,13 @@ def _search_worker(state: dict, task: tuple[int, tuple[int, int] | None, str]) -
     if window is not None:
         anchors = search_frame(k, comp, raw, index, allowed, cfg, window=window, source="audio", roi=roi, report=rep,
                                near_miss=True)
-    if not anchors or all(a.source.endswith("_near") for a in anchors):
+    weak = ("_near", "_gray")
+    if not anchors or all(a.source.endswith(weak) for a in anchors):
         glob = search_frame(k, comp, raw, index, allowed, cfg, window=None, source=source, roi=roi, report=rep,
                             near_miss=True)
-        if glob and (not anchors or not all(a.source.endswith("_near") for a in glob)):
+        rank = lambda aa: 0 if not aa else (2 if not all(a.source.endswith(weak) for a in aa) else  # noqa: E731
+                                            (1 if any(a.source.endswith("_near") for a in aa) else 0.5))
+        if glob and rank(glob) > rank(anchors):
             anchors = glob
     keep = int(getattr(cfg, "anchors_per_frame", 3))
     return int(k), [a.to_dict() for a in anchors[:keep]], rep[:12]

@@ -1565,3 +1565,94 @@ def test_parse_time_check_rows():
     assert rows["seg7"] == {"mode": "remap", "unavailable": True}
     s = ea.time_check_summary(rows)
     assert s["layers"] == 1 and s["frames"] == 12 and s["unavailable"] == ["seg7"] and s["layers_off"] == []
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: a verified frame-blend path (Frame Mix) and an 'uncertain' segment (amber solid + evidence guide)
+# ---------------------------------------------------------------------------------------------
+
+BLEND_KEYS = [{"comp_frame": 45, "raw_seconds": raw_time(2000, 0.0)},
+              {"comp_frame": 85, "raw_seconds": raw_time(2000, 0.0) + 0.25 * 40 / 30}]
+UNC_LABEL = "UNCERTAIN - best RAW 3000-3011, ZNCC 0.75-0.75 (00:00:02:25-00:00:03:20)"
+
+
+def _fx08_cutlist() -> Cutlist:
+    ev = [{"comp_frame": k, "raw": 3000 + (k - 85) // 2, "score": 0.75, "sim": dict(SIM1), "flip": False}
+          if k % 4 else {"comp_frame": k, "raw": -1, "score": 0.4, "sim": None, "flip": False} for k in range(85, 110)]
+    segs = [Segment(id=1, type="raw", comp_in=0, comp_out=45, raw_in_seconds=raw_time(900, 0.5), speed=1.0,
+                    transform=dict(SIM1)),
+            Segment(id=2, type="raw", comp_in=45, comp_out=85, raw_in_seconds=BLEND_KEYS[0]["raw_seconds"], speed=0.25,
+                    time_mode="remap", time_remap_keys=copy.deepcopy(BLEND_KEYS), retime="frame_blend",
+                    transform=dict(SIM1)),
+            Segment(id=3, type="uncertain", comp_in=85, comp_out=110, label=UNC_LABEL, uncertain=True, evidence=ev,
+                    transform=dict(SIM1)),
+            Segment(id=4, type="raw", comp_in=110, comp_out=150, raw_in_seconds=raw_time(1200, 0.5), speed=1.0,
+                    transform=dict(SIM1))]
+    return make_cutlist(segs, comp_frames=150)
+
+
+def _blend_pos(K: int) -> Fraction:
+    a, b = (Fraction(d["raw_seconds"]) for d in BLEND_KEYS)
+    return RF * (a + (b - a) * Fraction(K - 45, 40))
+
+
+def test_plan_frame_mix_layer_and_uncertain_guide():
+    """A verified frame-blend path is ONE RAW layer with Frame Mix on its linear remap keys -- kept in remap mode
+    although a position sits on a frame boundary (its picture is continuous in the position; frame-exact HOLD keys
+    at j + 0.25 would make it a constant 25 % mix); simulate_ae gives floor(p) and the mix weight of floor(p) + 1.
+    An 'uncertain' segment renders as an amber solid (no RAW claim) under a GUIDE layer of its best-evidence RAW
+    frames (frames without evidence hold the nearest one; never rendered) and a marker with its label."""
+    cl = _fx08_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    L2 = layer(plan, "seg2")
+    assert L2["frameMix"] and L2["timeMode"] == "remap" and L2["name"].endswith("FRAME MIX")
+    assert L2["minSlack"] < Config().ae_slack_tol_frames
+    assert not layer(plan, "seg1")["frameMix"]
+    sp = ea.simulate_ae(plan)
+    for K in range(45, 85):
+        p = _blend_pos(K)
+        (e,) = sp[K]
+        assert e["raw_frame"] == math.floor(p) and e["mix"] == pytest.approx(float(p - math.floor(p)), abs=1e-6)
+    assert "mix" not in sp[10][0]
+    U, G = layer(plan, "unc3"), layer(plan, "unc3g")
+    assert U["kind"] == "uncertain" and U["color"] == ea.UNCERTAIN_RGB and U["name"].startswith("UNCERTAIN - best RAW")
+    assert G["guide"] and G["kind"] == "raw_guide" and not G["audio"] and "GUIDE - best RAW evidence" in G["name"]
+    want = []
+    for k in range(85, 110):
+        e = next(x for x in sorted(cl.segments[2].evidence, key=lambda x: (abs(x["comp_frame"] - k), x["comp_frame"]))
+                 if x["raw"] >= 0)
+        want.append(e["raw"])
+    assert G["expect"] == want
+    assert all(sp[K] == [] for K in range(85, 110))                  # the guide is never rendered
+    mk = {m["k"]: m["text"] for m in plan["markers"]}
+    assert "UNCERTAIN - best RAW 3000-3011" in mk[85]
+    assert plan["summary"]["uncertain"] == 1 and plan["summary"]["placeholders"] == 0 and plan["summary"]["raw"] == 3
+    # a forced frame-exact export keeps whole frames and says so
+    plan_f = ea.ae_plan(cl, Config(ae_time_mode="frames"), meta_for(cl))
+    assert not layer(plan_f, "seg2")["frameMix"]
+    assert any("without Frame Mix" in w for w in plan_f["warnings"])
+
+
+@needs_node
+def test_mock_frame_mix_and_uncertain_guide(tmp_path):
+    """The JSX in the strict AE mock: the frame-blend layer gets FrameBlendingType.FRAME_MIX and its comp's
+    frame-blending switch (every other layer / comp stays off), the evidence layer is a guide layer, c6's RAW layer
+    count ignores it, and the record simulates to the plan's frames and mix weights."""
+    from match_cuts import verify
+    cl, cfg, plan, jsx = build(tmp_path, _fx08_cutlist())
+    res = ea.mock_verify(jsx, plan, meta_for(cl))
+    assert res["status"] == "pass", res["failures"]
+    rec = res["records"]["default"]
+    by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+    assert by["mc:seg2"]["frameBlendingType"] == "FRAME_MIX" and by["mc:seg1"]["frameBlendingType"] == "NO_FRAME_BLEND"
+    assert by["mc:unc3g"]["guideLayer"] and by["mc:unc3g"]["frameBlendingType"] == "NO_FRAME_BLEND"
+    comps = {c["comment"].split("\n")[0]: c for c in rec["comps"]}
+    assert comps["mc:box"]["frameBlending"] and not comps["mc:main"]["frameBlending"]
+    sr, sp = ea.simulate_ae(rec), ea.simulate_ae(plan)
+    for K in range(150):
+        assert [(e["layer"], e["raw_frame"], round(e.get("mix", 0.0), 6)) for e in sr[K]] == \
+            [(e["layer"], e["raw_frame"], round(e.get("mix", 0.0), 6)) for e in sp[K]], K
+    mock = verify.check_mock(plan, res["records"], Fraction(30), 150, tmp_path, "raw.mp4")
+    assert mock["status"] == "pass", mock["failures"]
+    vr = verify.simulate_record(rec, "raw.mp4", RF, Fraction(30), 150)
+    assert [round(e["mix"], 6) for e in vr[60]] == [round(e["mix"], 6) for e in sp[60]]

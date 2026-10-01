@@ -20,7 +20,10 @@ Frame ``k`` is consistent with ``(x, u)`` when (closed and tolerant, tau = 1e-6 
 The tolerance makes exact timing ties (ffmpeg ``setpts=PTS/1.1`` resolving an exact .5 either way,
 editing apps rounding in floating point) feasible instead of splitting segments; frames whose
 Chebyshev slack is below ``TIE_SLACK`` (1e-4 frame) are reported as *timing-tie* frames: they may differ
-by one frame from the AE rule and are listed like ambiguous-identical frames.
+by one frame from the AE rule and are listed like ambiguous-identical frames. NOT at u = 0 (a freeze, FX-08):
+every frame then sits at the SAME position x, so frames measured on RAW j and on j + 1 cannot both be shown --
+the closed tolerance would satisfy both only at the single point x = j + 1 (the real run's 10-frame fake freeze
+over frames measured 1672 and 1673). A freeze needs a common RAW frame of width > 2 * TIE_SLACK (``freeze_gap``).
 
 AE floor-rule safety (DESIGN §2.1, FX-10). Frame d of a layer changes its RAW frame where x + u d crosses an
 integer, i.e. at the BREAKPOINTS x = n - u d (every integer n). They are 1-periodic in x and cut the feasible
@@ -43,13 +46,21 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 __all__ = [
-    "TAU", "TIE_SLACK", "feasible_speed_range", "is_feasible", "solve_raw_in", "solve_shared_raw_in", "ae_frame",
+    "TAU", "TIE_SLACK", "freeze_gap", "feasible_speed_range", "is_feasible", "solve_raw_in", "solve_shared_raw_in",
+    "ae_frame",
     "snap_speed",
     "estimate_speed", "dominant_speed", "chebyshev_x", "best_subinterval", "min_penalty", "prefer_penalties",
 ]
 
 TAU = 1e-6          # constraint tolerance (RAW frames)
 TIE_SLACK = 1e-4    # Chebyshev slack below which a frame is a timing-tie frame (RAW frames)
+
+
+def freeze_gap(u: float) -> float:
+    """Least width umin - lmax of the feasible x interval of a line with slope ``u`` (local frames): -2 * TAU (the
+    tolerant closed constraints admit timing ties) for any moving line, + 2 * TIE_SLACK for a freeze (u = 0: all
+    frames share one position, so a single-point tie would show one RAW frame where the frames measured two)."""
+    return 2.0 * TIE_SLACK if float(u) == 0.0 else -2.0 * TAU
 _AE_EPS = 1e-9      # the AE floor rule's epsilon (DESIGN §2.1)
 
 
@@ -182,9 +193,11 @@ def is_feasible(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_in
         return feasible_speed_range(ks, lo, hi, comp_in, comp_fps, raw_fps, tau=tau) is not None
     d, lo_rel, hi_rel, _ = _prep(ks, lo, hi, comp_in)
     u = float(v) * _ratio(comp_fps, raw_fps)
-    lmax = float((lo_rel - u * d).max()) - tau
-    umin = float((hi_rel + 1.0 - u * d).min()) + tau
-    return lmax <= umin
+    lmax = float((lo_rel - u * d).max())
+    umin = float((hi_rel + 1.0 - u * d).min())
+    if u == 0.0:                       # a freeze: one common RAW frame, never a single-point tie (freeze_gap)
+        return umin - lmax >= freeze_gap(u)
+    return lmax - tau <= umin + tau
 
 
 def best_subinterval(starts: Any, ends: Any, costs: Any, xlo: float, xhi: float,
@@ -524,7 +537,7 @@ def solve_raw_in(ks: Sequence[int], lo: Sequence[int], hi: Sequence[int], comp_i
     rf = Fraction(raw_fps)
     u = float(v) * _ratio(comp_fps, rf)
     x, t, lmax, umin = chebyshev_x(d, lo_rel, hi_rel, u)
-    ok = t >= -TAU
+    ok = t >= -TAU if u != 0.0 else umin - lmax >= freeze_gap(u)       # freeze: no single-point tie (FX-08)
     a_int, b_int = lmax, umin
     data_cost = 0.0
     if penalties is None and prefer is not None:

@@ -2046,3 +2046,83 @@ def test_layout_overlay_masks_never_include_residual_masks(tmp_path):
     assert ov.get(9) is None and ov.get(4) is None and ov.get(0).all()
     d = ov.get_dilated(6, 2)
     assert d[16, 20] and not d[12, 20]
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-08: honest NOT-IN-RAW / UNCERTAIN accounting
+# ---------------------------------------------------------------------------------------------
+
+class SharpStubScorer(StubScorer):
+    """1.0 on the truth RAW frame only, 0.3 on any other (no slope that would let a neighbouring frame pass)."""
+
+    def score(self, k, cands):
+        out = []
+        for c in cands:
+            t = self.truth.get(k)
+            out.append(float("nan") if c is None else (0.2 if t is None else (1.0 if int(c[0]) == t else 0.3)))
+        return np.array(out, float)
+
+
+def test_placeholder_must_beat_every_neighbour_hypothesis(phase):
+    """c2 at a NOT-IN-RAW placeholder (FX-08): every hypothesis its neighbours offer must stay below none_thresh --
+    the adjacent neighbour's time line extended AND its boundary RAW frame held (a freeze), and the neighbour across
+    the placeholder too. A placeholder frame that IS the neighbour's last frame held fails although the extended
+    line misses it."""
+    segs = [seg(1, "raw", 0, 10, 100), seg(2, "not_in_raw", 10, 15), seg(3, "raw", 15, 25, 300)]
+    truth = {k: (100 + k if k < 10 else (None if k < 15 else 300 + k - 15)) for k in range(25)}
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, SharpStubScorer(truth), Config())
+    assert r["status"] == "pass", r["failures"]
+    hyp = r["cuts"][0]["sides"][1]["hypotheses"]
+    assert {(h["neighbour"], h["hypothesis"]) for h in hyp} == {(1, "line"), (1, "hold"), (3, "line"), (3, "hold")}
+    held = dict(truth)
+    held[10] = 109                 # the placeholder's first frame repeats A's last frame (a hold)
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, SharpStubScorer(held), Config())
+    assert r["status"] == "fail" and r["cuts"][0]["status"] == "fail"
+    far = dict(truth)
+    far[10] = 300                  # ... or shows B's first frame (the neighbour across the placeholder)
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, SharpStubScorer(far), Config())
+    assert r["cuts"][0]["status"] == "fail"
+
+
+def test_uncertain_segments_fail_c3_and_claim_no_cut_or_audio(phase):
+    """An 'uncertain' segment (FX-08) is covered (c1, labelled), its cuts check only the RAW side (c2), its frames are
+    criterion-3 FAILURES (never exceptions), and c5 lists it as 'uncertain' without an exception."""
+    u = seg(2, "uncertain", 10, 15, label="UNCERTAIN - best RAW 700-704, ZNCC 0.70-0.85", uncertain=True)
+    u.audio = {**u.audio, "exception": "uncertain"}
+    segs = [seg(1, "raw", 0, 10, 100), u, seg(3, "raw", 15, 60, 300)]
+    assert verify.check_coverage(segs, 60)["status"] == "pass"
+    nolabel = copy.deepcopy(segs)
+    nolabel[1].label = ""
+    assert verify.check_coverage(nolabel, 60)["status"] == "fail"
+    truth = {k: (100 + k if k < 10 else (None if k < 15 else 300 + k - 15)) for k in range(60)}
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, StubScorer(truth), Config())
+    assert [c["kind"] for c in r["cuts"]] == ["raw_to_uncertain", "uncertain_to_raw"] and r["status"] == "pass"
+    unc = verify.check_uncertain(segs)
+    assert unc["status"] == "fail" and unc["frames"] == 5 and "UNCERTAIN" in unc["failures"][0]
+    assert verify.check_uncertain([segs[0], segs[2]])["status"] == "pass"
+    sr, y = _audio_setup()
+    a = verify.check_audio(segs, y, y, sr, F30, {"status": "ok"}, [], Config(), xcorr=_xc(0.002, 0.95))
+    row = next(x for x in a["segments"] if x["id"] == 2)
+    assert row["result"] == "uncertain" and not any("S02" in e for e in a["exceptions"])
+
+
+def test_ae_sim_frame_mix_compares_the_dominant_frame():
+    """s9_2 on a Frame Mix layer (FX-08): AE shows (1 - f) RAW j + f RAW j + 1; refine's single-frame argmax on a
+    frame-blended competitor frame is the heavier source, so it is compared with the mix's DOMINANT frame. The
+    lighter source counts only near an even mix (verify_mix_tie, a listed blend tie); anything else is judged like
+    any shown frame (a frame outside the mix is a mismatch)."""
+    n = 40
+    truth = [100 + k // 4 for k in range(n)]                         # refine's measured m(k)
+    fm = frame_map(truth)
+    # (shown floor frame - m, weight of floor + 1): a pure frame, m dominant at 0.25, an even mix, m dominant at 0.75
+    kinds = [(0, 0.0), (0, 0.25), (0, 0.5), (-1, 0.75)]
+    ents = {K: [{"layer": 1, "raw_frame": truth[K] + kinds[K % 4][0], "opacity": 100.0, "mix": kinds[K % 4][1]}]
+            for K in range(n)}
+    r = verify.check_ae_sim(ents, fm, F30, F30, n, [], Config())
+    assert r["status"] == "pass_with_exceptions" and r["exact"] == 30 and len(r["frame_mix_tie"]) == 10, r["summary"]
+    assert r["n_frame_mix"] == 30 and r["fraction_ok"] == 1.0 and "Frame Mix" in r["summary"]
+    # the lighter source of a clear (0.75) mix is no tie: judged as the dominant frame -> a mismatch
+    bad = {K: [dict(e[0])] for K, e in ents.items()}
+    bad[3][0].update(raw_frame=truth[3], mix=0.75)                  # shows mostly truth + 1, m = truth
+    r = verify.check_ae_sim(bad, fm, F30, F30, n, [], Config())
+    assert [x["k"] for x in r["mismatches"]] == [3] and r["mismatches"][0]["ae"] == truth[3] + 1

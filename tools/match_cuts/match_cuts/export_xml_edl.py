@@ -284,8 +284,8 @@ def edit_events(cutlist: Cutlist) -> list[EditEvent]:
             if j0 < 0:
                 ev.warnings.append(f"RAW frame {j0} before the RAW start at record {rec_in}; clamped to 0")
         else:
-            label = seg.label or {"not_in_raw": "NOT-IN-RAW placeholder", "dip": "dip", "flash": "flash"}.get(
-                seg.type, seg.type)
+            label = seg.label or {"not_in_raw": "NOT-IN-RAW placeholder", "dip": "dip", "flash": "flash",
+                                  "uncertain": "UNCERTAIN"}.get(seg.type, seg.type)
             if seg.type in ("dip", "flash") and seg.color:
                 label += f" {seg.color}"
             ev = EditEvent(seg, "black", rec_in, rec_out, dissolve, 0, 1.0, None, label)
@@ -368,8 +368,8 @@ def _csv_row(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> list[Any]:
                f"{_tc_display(max(0, raw_out_f if raw_out_f is not None else raw_in_f), raw_fps)}")
         if seg.raw_in_seconds is not None:
             raw += f" (raw_in {float(seg.raw_in_seconds):.6f}s)"
-    elif seg.type == "not_in_raw":
-        raw = seg.label or "NOT-IN-RAW"
+    elif seg.type in ("not_in_raw", "uncertain"):
+        raw = seg.label or ("NOT-IN-RAW" if seg.type == "not_in_raw" else "UNCERTAIN")
     else:
         raw = seg.type + (f" {seg.color}" if seg.color else "")
     if seg.type != "raw":

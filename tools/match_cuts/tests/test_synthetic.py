@@ -156,17 +156,27 @@ def _truth_cut_range(truth: dict, k: int) -> tuple[int, int]:
     return k, k
 
 
+def _type_ok(t: dict, s: dict) -> bool:
+    """May cutlist segment ``s`` stand for truth segment ``t``? Same type class -- except FX-08's honest 'uncertain'
+    (best hypothesis between none_thresh and match_thresh: no RAW claim, no NOT-IN-RAW claim), accepted for exactly
+    two film24 truth segments: the gray-zone chain (matched only with detail-score support, else uncertain) and the
+    NOT-IN-RAW lookalike (its gray-zone ZNCC against the model shot rules out NOT-IN-RAW, which needs EVERY
+    hypothesis below none_thresh). Tests judging RAW timing / framing / audio skip an uncertain match."""
+    if s["type"] == "uncertain":
+        return t.get("kind") == "gray" or t.get("lookalike_shot") is not None
+    return (s["type"] == "not_in_raw") == (t["type"] == "not_in_raw")
+
+
 def _match_segments(truth: dict, cutlist: dict) -> tuple[dict[int, dict], list[dict]]:
-    """truth segment id -> cutlist segment with the same comp_in (or inside the truth cut's ambiguity) and type;
-    unmatched truth segments."""
+    """truth segment id -> cutlist segment with the same comp_in (or inside the truth cut's ambiguity) and type
+    (``_type_ok``); unmatched truth segments."""
     by_in: dict[int, list[dict]] = {}
     for s in cutlist["segments"]:
         by_in.setdefault(int(s["comp_in"]), []).append(s)
     matched, missing = {}, []
     for t in truth["segments"]:
         lo, hi = _truth_cut_range(truth, t["comp_in"])
-        cands = [s for k in range(lo, hi + 1) for s in by_in.get(k, [])
-                 if (s["type"] == "not_in_raw") == (t["type"] == "not_in_raw")]
+        cands = [s for k in range(lo, hi + 1) for s in by_in.get(k, []) if _type_ok(t, s)]
         if cands:
             matched[t["id"]] = cands[0]
         else:
@@ -300,8 +310,6 @@ def test_coverage_and_totals(e2e, cutlist):
                             ["comp_frame", "layers", "expected"], rows)
 
 
-@film_xfail("FX-08: frames of chains without any anchor or near-miss (the first two-clip pan) stay NONE "
-            "(the editor-pan time/translation confound is fixed, FX-03)")
 def test_frame_map_equals_truth(e2e, frame_map):
     truth = e2e["truth"]
     status, raw = frame_map["status"], frame_map["raw"]
@@ -336,8 +344,6 @@ def test_frame_map_equals_truth(e2e, frame_map):
                             ["k", "seg", "kind", "truth", "m(k)", "status", "note"], rows)
 
 
-@film_xfail("FX-08: the only cut off the truth is 445, the edge of the anchorless first two-clip pan (NOT-IN-RAW "
-            "placeholder | 1-frame island); the pan / step / punch chains cut exactly since FX-03 / FX-06")
 def test_cuts_exact(e2e, cutlist):
     truth = e2e["truth"]
     segs = _segments(cutlist)
@@ -378,7 +384,7 @@ def test_ae_simulated_frames_equal_truth(e2e, cutlist):
     matched, _ = _match_segments(truth, cutlist)
     rows, n_frames = [], 0
     for t in truth["segments"]:
-        if t["type"] != "raw" or t["id"] not in matched:
+        if t["type"] != "raw" or t["id"] not in matched or matched[t["id"]]["type"] != "raw":
             continue
         s = matched[t["id"]]
         sim = _ae_frames(s, comp_fps, raw_fps)
@@ -400,13 +406,16 @@ def test_ae_simulated_frames_equal_truth(e2e, cutlist):
 def test_ae_plan_survives_start_time_error(e2e):
     """FX-10 (DESIGN §7.3): every stretch / remap layer of the AE plan keeps an exact floor-rule slack of at
     least ae_slack_tol_frames on every frame (layers below it were exported frame-exact), so simulate_ae with
-    every startTime +-1e-6 s shows identical RAW frames on every layer."""
+    every startTime +-1e-6 s shows identical RAW frames on every layer. A Frame Mix layer (FX-08, a verified
+    frame-blend path) keeps its measured phase instead: its picture (1 - f) RAW[j] + f RAW[j + 1] is continuous in
+    the position, so the floor rule's slack decides nothing visible (its frames and weights are compared below)."""
     from match_cuts import export_ae
     from match_cuts.config import Config
     plan = json.loads(_need(e2e, "ae_plan.json", "work").read_text())
     tol = Config().ae_slack_tol_frames
     low = [[L["id"], L["timeMode"], L.get("minSlack"), L.get("minSlackK")] for L in plan["layers"]
-           if L["kind"] == "raw" and L["timeMode"] in ("stretch", "remap") and float(L.get("minSlack", 0.0)) < tol]
+           if L["kind"] == "raw" and L["timeMode"] in ("stretch", "remap") and not L.get("frameMix")
+           and float(L.get("minSlack", 0.0)) < tol]
     assert not low, _table(f"stretch / remap layers with an exact slack below {tol} RAW frame:",
                            ["layer", "mode", "min slack", "at MAIN frame"], low)
     base = export_ae.raw_frames_by_layer(export_ae.simulate_ae(plan))
@@ -510,7 +519,7 @@ def test_audio_phase_lag(e2e, cutlist):
     rows = []
     for t in truth["segments"]:
         s = matched.get(t["id"])
-        if t["type"] != "raw" or s is None:
+        if t["type"] != "raw" or s is None or s["type"] != "raw":
             continue
         if float(t.get("speed", 1) or 0) != 1.0 or int(t["comp_out"]) - int(t["comp_in"]) < min_frames:
             continue
@@ -524,8 +533,6 @@ def test_audio_phase_lag(e2e, cutlist):
                              "raw_in_s", "truth audio raw_in_s"], rows)
 
 
-@film_xfail("FX-08: the blend slow motion is fitted as v=0.2536 (every pan / step / punch framing is within tolerance "
-            "since FX-03 / FX-06)")
 def test_speed_flip_framing(e2e, cutlist):
     truth = e2e["truth"]
     matched, _ = _match_segments(truth, cutlist)
@@ -533,7 +540,7 @@ def test_speed_flip_framing(e2e, cutlist):
     centre = (box["x"] + box["w"] / 2, box["y"] + box["h"] / 2)
     rows = []
     for t in truth["segments"]:
-        if t["type"] != "raw" or t["id"] not in matched:
+        if t["type"] != "raw" or t["id"] not in matched or matched[t["id"]]["type"] != "raw":
             continue
         s = matched[t["id"]]
         v, vt = float(s["speed"]), t["speed"]
@@ -599,12 +606,19 @@ def test_crossfade(e2e, cutlist):
             f"crossfade alpha (incoming) {alpha} != truth {tr['alpha']}"
 
 
-@film_xfail("FX-08: NOT-IN-RAW placeholders on the anchorless first two-clip pan and the gray chain")
 def test_not_in_raw_placeholder(e2e, cutlist):
+    """NOT-IN-RAW placeholders == the truth's NOT-IN-RAW ranges. FX-08: NOT-IN-RAW is claimed only when EVERY
+    hypothesis scores below none_thresh, so a truth NOT-IN-RAW range whose content reaches the gray zone against a
+    RAW shot (film24's lookalike, best ZNCC 0.60-0.90 by construction) may instead be ONE honest 'uncertain'
+    segment of exactly that range -- never a match, never split."""
     truth = e2e["truth"]
-    want = [(r["comp_in"], r["comp_out"]) for r in truth["not_in_raw"]]
-    got = [(int(s["comp_in"]), int(s["comp_out"])) for s in _segments(cutlist) if s["type"] == "not_in_raw"]
-    assert got == want, f"NOT-IN-RAW placeholders {got} != truth {want}"
+    look = {(s["comp_in"], s["comp_out"]) for s in truth["segments"] if s.get("lookalike_shot") is not None}
+    segs = _segments(cutlist)
+    unc = {(int(s["comp_in"]), int(s["comp_out"])) for s in segs if s["type"] == "uncertain"}
+    want = [(r["comp_in"], r["comp_out"]) for r in truth["not_in_raw"]
+            if not ((r["comp_in"], r["comp_out"]) in look and (r["comp_in"], r["comp_out"]) in unc)]
+    got = [(int(s["comp_in"]), int(s["comp_out"])) for s in segs if s["type"] == "not_in_raw"]
+    assert got == want, f"NOT-IN-RAW placeholders {got} != truth {want} (uncertain segments: {sorted(unc)})"
 
 
 @film_xfail("FX-01..FX-09: c2-c5 fail on film24")
@@ -642,8 +656,9 @@ def test_audio_truth(e2e, cutlist):
                 rows.append([t["id"], t["kind"], f, ta[f], a.get(f)])
         if t["type"] == "raw" and ta.get("pitch_preserved") is False and a.get("pitch_preserved") is not False:
             rows.append([t["id"], t["kind"], "pitch_preserved", False, a.get("pitch_preserved")])
-        if t["type"] == "not_in_raw" and a.get("exception") != "not_in_raw":
-            rows.append([t["id"], t["kind"], "exception", "not_in_raw", a.get("exception")])
+        want_exc = "uncertain" if s["type"] == "uncertain" else "not_in_raw"
+        if t["type"] == "not_in_raw" and a.get("exception") != want_exc:
+            rows.append([t["id"], t["kind"], "exception", want_exc, a.get("exception")])
     n = truth["competitor"]["frames"]
     music = [m for m in cutlist.get("added_audio", []) if m.get("type") == "music"]
     covered = np.zeros(n, bool)
@@ -749,15 +764,12 @@ FILM_GROUPS = {
 }
 
 # Assertions the CURRENT pipeline fails on film24 -> the fix that must make them pass (strict xfail).
-_TWO = ("FX-08: the second pan clip is exact since FX-03, the first has no anchor and no near-miss (RANSAC <= 5 "
-        "inliers under the RAW-only disclaimer) -> NOT-IN-RAW placeholder; needs a line-constrained search")
 FILM_XFAIL: dict[tuple[str, str], str] = {
     # pan, pan_accel: frames exact, one segment and the truth framing since the time-line-first refine (FX-03) and
     # the measured framing summary (FX-06); pan_step, punch_pan: the framing step is a confirmed cut on one time
-    # line with a shared phase (FX-06, FX-04)
-    **{(t, "two_clip_pans"): _TWO for t in ("frames_exact", "one_segment_per_clip", "framing")},
-    ("one_segment_per_clip", "gray"): "FX-08: the gray-zone chain becomes a NOT-IN-RAW placeholder",
-    ("speed", "blend_slow"): "FX-08: the frame-blend slow motion is fitted as v=0.2536 instead of 0.25 / frame_blend",
+    # line with a shared phase (FX-06, FX-04); two_clip_pans: the anchorless first clip is found by the
+    # line-constrained search from its neighbour's time line (FX-08); gray: one honest 'uncertain' segment, never a
+    # placeholder; blend_slow: a verified frame-blend path at 0.25 (FX-08)
 }
 
 
@@ -921,8 +933,8 @@ def test_film24_av_offset_published(e2e, cutlist):
     assert lo is not None and lo <= want <= hi, f"published A/V offset interval {[lo, hi]} ms, truth {want} ms"
 
 
-@film_xfail("FX-02/FX-08: the published offset interval is [-86.6, -84.3] ms, 2.4 ms wide (4.3 ms before the "
-            "segmentation fixes); the placeholders / short pieces leave too few strong segments")
+@film_xfail("FX-02: the published offset interval is [-86.6, -84.2] ms, 2.4 ms wide (4.3 ms before the segmentation "
+            "fixes; unchanged by FX-08, which removed the placeholders)")
 def test_film24_av_offset_precise(e2e, cutlist):
     """FX-02 with intact segmentation: the published offset is precise -- interval <= 2 ms wide and centre within
     0.5 ms of the truth (the real run's 34 strong segments gave a 0.4 ms interval)."""
@@ -1010,7 +1022,8 @@ def test_film24_true_freeze_is_v0(e2e, cutlist):
 
 
 def test_film24_foreign_lookalike_never_matched(e2e, cutlist, frame_map):
-    """The NOT-IN-RAW lookalike (gray-zone ZNCC against its RAW model shot) is a placeholder and never MATCH."""
+    """The NOT-IN-RAW lookalike (gray-zone ZNCC against its RAW model shot) is never MATCH and never shown by a RAW
+    segment (FX-08: a placeholder only if every hypothesis stays below none_thresh, else one 'uncertain' segment)."""
     _need_film()
     truth = e2e["truth"]
     t = next(s for s in truth["segments"] if s.get("lookalike_shot") is not None)
@@ -1019,7 +1032,6 @@ def test_film24_foreign_lookalike_never_matched(e2e, cutlist, frame_map):
     assert not bad, f"lookalike frames matched to RAW: {bad}"
 
 
-@film_xfail("FX-08: the sharpened gray-zone chain becomes a NOT-IN-RAW placeholder")
 def test_film24_gray_chain_never_not_in_raw(e2e, cutlist):
     """FX-08: the gray-zone chain (truth ZNCC 0.65-0.90: motion-blurred RAW, sharpened competitor) is never a
     NOT-IN-RAW placeholder: matched (detail score) or an honest 'uncertain' segment."""
@@ -1030,9 +1042,6 @@ def test_film24_gray_chain_never_not_in_raw(e2e, cutlist):
     assert not bad, f"gray chain frames under a NOT-IN-RAW placeholder: {bad}"
 
 
-@film_xfail("FX-08: the one cut left inside a repeat pair is 444|445, the edge of the anchorless first two-clip pan "
-            "(NOT-IN-RAW placeholder | 1-frame island; refine's comp labels there are UNKNOWN, so the comp-duplicate "
-            "invariant has no repeat pair to act on) -- needs the line-constrained search")
 def test_film24_no_cut_inside_repeat_pair(e2e, cutlist):
     """FX-07: no time cut between the two frames of a competitor pulldown repeat pair (24 -> 30 cadence), except
     where the truth itself cuts (a framing step may sit there)."""

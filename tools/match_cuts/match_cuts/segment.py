@@ -328,6 +328,8 @@ class _Solver:
         self.w_min = float(_cfg(cfg, "data_weight_min", 0.25))
         self.l_phase = float(_cfg(cfg, "lambda_phase_cut", 1.0))
         self.snaps = [float(s) for s in _cfg(cfg, "speed_snap_values", (1.0,))]
+        self.static_fn: Any = None      # (a, b) -> the competitor is static over [a, b) (freeze admission, FX-08)
+        self.freeze_rejected: set[tuple[int, int]] = set()
         self._cache: dict[tuple, Any] = {}
         self._relax_cache: dict[tuple, bool] = {}
         self._cand_cache: dict[tuple, list] = {}
@@ -444,7 +446,8 @@ class _Solver:
         L = lo_r - u * d
         U = hi_r + 1.0 - u * d
         lmax, umin = float(L.max()), float(U.min())
-        if lmax - _TAU <= umin + _TAU:
+        gap = ps.freeze_gap(u)          # a freeze (u = 0) never rests on a single-point tie (FX-08)
+        if umin - lmax >= gap:
             t = min((umin - lmax) / 2.0, 0.5)
             if with_interval:
                 return [], t, (lmax + umin) / 2.0, lmax, umin
@@ -456,7 +459,7 @@ class _Solver:
             return None
         lh = float(L[hard].max()) - _TAU
         uh = float(U[hard].min()) + _TAU
-        if lh > uh:
+        if uh - lh < gap + 2 * _TAU:
             return None
         di = np.nonzero(droppable)[0]
         Ld, Ud = L[di], U[di]
@@ -477,7 +480,7 @@ class _Solver:
         keep = np.ones(L.size, bool)
         keep[viol] = False
         lmax2, umin2 = float(L[keep].max()), float(U[keep].min())
-        if lmax2 - _TAU > umin2 + _TAU:
+        if umin2 - lmax2 < gap:
             return None
         x = (lmax2 + umin2) / 2.0
         t = min((umin2 - lmax2) / 2.0, 0.5)
@@ -566,6 +569,12 @@ class _Solver:
             lim = min(bt, bound)
             if bc > lim + 1e-9 and feasible:
                 break
+            if v == 0.0 and fixed_v is None and self.static_fn is not None and not self.static_fn(*span):
+                # FX-08: a freeze is a candidate only where the competitor itself is static (after transform
+                # compensation and caption masking); a moving competitor makes it infeasible, not just costlier
+                if self.try_u(0.0, ks, d, lo_r, hi_r, base, np.zeros(n, bool)) is not None:
+                    self.freeze_rejected.add((int(span[0]), int(span[1])))
+                continue
             ev = evaluate(v, bc, droppable, max_run, lim)
             if ev is None:
                 continue
@@ -845,6 +854,17 @@ class _Scorer:
             s = (1 - self.gw) * s + self.gw * zncc_rows(g, gm)
         return s
 
+    def mix_zncc(self, k: int, a_item: tuple[int, Sim, bool], b_item: tuple[int, Sim, bool], w_b: float) -> float:
+        """Masked ZNCC of comp frame k against the FIXED mix (1 - w_b) * A + w_b * B (AE Frame Mix of a frame-blend
+        path at its fractional source time); NaN when unscorable."""
+        from .scoring import zncc_rows
+        st = self._stack(k, [a_item, b_item])
+        if st is None:
+            return float("nan")
+        _reg, _mask, y, M, _ws = st
+        mix = (1.0 - float(w_b)) * M[0] + float(w_b) * M[1]
+        return float(zncc_rows(y, mix[None, :])[0])
+
     def blend_fit(self, k: int, a_items: Sequence[tuple[int, Sim, bool]],
                   b_items: Sequence[tuple[int, Sim, bool]]) -> dict | None:
         """All A x B two-source fits y ≈ alpha*A + (1-alpha)*B + c (scoring.fit_blend, vectorised via the
@@ -912,6 +932,7 @@ class _Seg:
     uncertain: bool = False
     framing: dict | None = None
     blend_frames: list = field(default_factory=list)
+    blend_path: tuple | None = None             # verified frame-blend path (x, u): RAW position x + u k (FX-08)
     ramp: list = field(default_factory=list)
     c2_oscillation: dict | None = None          # criterion-2 verdict of the cut at a (positions, scores, repeat pair)
 
@@ -949,6 +970,10 @@ class _Builder:
         self._ecc: dict[tuple, tuple[Sim, float] | None] = {}   # (k, j, flip) -> re-measured framing (or None)
         self.S = _Solver(self.F, cfg, self.cf, self.rf, hints)
         self.P = _Scorer(comp, raw, layout, overlays, cfg)
+        self._pair_mad: dict[int, float] = {}       # comp pair (k, k+1) -> aligned mean |diff| (freeze admission)
+        if self.P.ok and getattr(comp, "frames", None) is not None:
+            # the freeze gate needs the competitor's own pixels (FX-08); a FrameMap-only build has none to judge
+            self.S.static_fn = self.static
         self.n = fm.n
         cw, ch = (comp.full_size if getattr(comp, "full_size", None) else
                   (getattr(layout, "comp_w", 0), getattr(layout, "comp_h", 0)))
@@ -1040,6 +1065,80 @@ class _Builder:
                 "mode": mode, "region": s.region, "box": s.box, "period": list(per)})
 
     # ---------------------------------------------------------------------------------------------
+    # freeze admission (FX-08): the competitor must be static
+    # ---------------------------------------------------------------------------------------------
+    def pair_mad(self, k: int) -> float:
+        """Mean |diff| (8-bit) of competitor frames k and k+1 after aligning them (temporal.align_pair: editor
+        transform compensated) on the box ROI with the overlay masks (captions, refine's pass-2 masks), downscaled
+        like the temporal signature. NaN when unmeasurable."""
+        if k in self._pair_mad:
+            return self._pair_mad[k]
+        from . import temporal
+        v = float("nan")
+        if self.P.ok and 0 <= k and k + 1 < self.n:
+            x, y, w, h = self.P.roi
+            ms = int(_cfg(self.cfg, "temporal_max_side", 200))
+            blur = float(_cfg(self.cfg, "score_blur", 1.0)) * temporal.scale_of((h, w), ms)
+            pr = []
+            for kk in (k, k + 1):
+                if not self.comp.has(int(kk)):
+                    break
+                img = np.asarray(self.comp.get(int(kk)))[y:y + h, x:x + w]
+                m = np.asarray(self.P.allowed(int(kk)), bool)[y:y + h, x:x + w]
+                pr.append(temporal.prepare(img, m, ms, blur))
+            if len(pr) == 2:
+                pm = temporal.align_pair(pr[0][0], pr[0][1], pr[1][0], pr[1][1], self.cfg)
+                v = float(pm.mad) if math.isfinite(pm.mad) else float("nan")
+        self._pair_mad[k] = v
+        return v
+
+    def static_floor(self, a: int, b: int) -> float | None:
+        """The competitor's own noise floor near [a, b): median aligned mean |diff| of its REPEAT pairs (pulldown
+        duplicates, refine's temporal labels) -- up to 16 nearest within 150 frames. None without repeat pairs."""
+        reps = [int(k) for k in np.flatnonzero(self.F.pair_label == 1)]
+        if not reps:
+            return None
+        mid = 0.5 * (a + b)
+        near = sorted((k for k in reps if abs(k - mid) <= 150), key=lambda k: (abs(k - mid), k))[:16]
+        vals = [self.pair_mad(k) for k in near]
+        vals = [v for v in vals if math.isfinite(v)]
+        return float(np.median(vals)) if vals else None
+
+    def static(self, a: int, b: int) -> bool:
+        """Is the competitor static over [a, b) -- may [a, b) be a freeze (FX-08)? Every aligned pair (k, k+1) inside
+        must stay within max(freeze_static_ratio x the repeat-pair noise floor, freeze_static_mad), and the pairs must
+        not show a pulldown cadence (regular exact repeats with small changes between them: v = 1 on a near-static
+        shot, e.g. a dimming dashboard display -- not a freeze)."""
+        if b - a < 2 or not self.P.ok:
+            return b - a < 2
+        key = ("static", a, b)
+        if key in self.S._cache:
+            return self.S._cache[key]
+        floor = self.static_floor(a, b)
+        thr = max(float(_cfg(self.cfg, "freeze_static_ratio", 10.0)) * (floor or 0.0),
+                  float(_cfg(self.cfg, "freeze_static_mad", 0.25)))
+        mads = np.array([self.pair_mad(k) for k in range(a, b - 1)], np.float64)
+        ok = bool(np.all(np.isfinite(mads)) and np.all(mads <= thr))
+        cadence = False
+        if ok and floor is not None and mads.size >= 4:
+            low = mads <= 2.0 * max(floor, 1e-3)
+            pos = np.flatnonzero(low)
+            if 0 < pos.size < mads.size:
+                gap = float(_cfg(self.cfg, "temporal_gap_ratio", 2.5))
+                split = float(mads[~low].min()) >= gap * max(float(mads[low].max()), 1e-3)
+                steps = np.diff(pos)
+                regular = pos.size == 1 or (steps.min() >= 3 and steps.max() - steps.min() <= 1)
+                cadence = bool(split and regular)
+        res = ok and not cadence
+        self.S._cache[key] = res
+        if not res:
+            self.log("freeze_not_static", comp_range=[a, b], evidence={
+                "pair_mad": [None if not math.isfinite(m) else round(float(m), 4) for m in mads.tolist()],
+                "threshold": round(thr, 4), "repeat_floor": None if floor is None else round(floor, 5),
+                "cadence": cadence})
+        return res
+
+    # ---------------------------------------------------------------------------------------------
     def log(self, decision: str, **kw: Any) -> None:
         self.dlog.record("segment", decision, **kw)
 
@@ -1047,6 +1146,15 @@ class _Builder:
         if seg.model is None or not math.isfinite(seg.model.sol.get("raw_in", float("nan"))):
             return -1 if np.isscalar(k) else np.full(np.shape(k), -1, np.int64)
         return ps.ae_frame(seg.model.raw_in, seg.model.v, k, seg.model.comp_in, self.cf, self.rf)
+
+    def shown(self, seg: _Seg, k: int) -> int:
+        """The RAW frame a segment SHOWS at comp frame k as one frame: ``pred`` (the AE floor rule), except on a
+        verified frame-blend path (FX-08), whose Frame Mix shows (1 - f) RAW[j] + f RAW[j + 1] -- there the
+        dominant frame of the mix, floor(p + 0.5): what refine's single-frame argmax measures on a blend."""
+        if seg.blend_path is not None:
+            x, u_s = seg.blend_path
+            return int(math.floor(x + u_s * k + 0.5 + 1e-9))
+        return int(self.pred(seg, k))
 
     # ---------------------------------------------------------------------------------------------
     # runs and hard boundaries
@@ -1727,7 +1835,7 @@ class _Builder:
         for k in range(seg.a, seg.b):
             if F.status[k] != Status.MATCH or bool(F.flip[k]) != seg.flip or k in self.unreliable_sim:
                 continue
-            j = int(self.pred(seg, k)) if has else int(F.raw[k])
+            j = self.shown(seg, k) if has else int(F.raw[k])
             own = bool(F.raw_lo[k] <= j <= F.raw_hi[k])
             meas = F.measured(k) if own else None
             if own and k not in self.step_after:
@@ -2090,7 +2198,7 @@ class _Builder:
                   "score": [float(self.F.score[k]) for k in range(t.a, t.b)], "neighbours": checks.get(id(t), [])}
             nbs = [segs[i + d] for d in (-1, 1) if 0 <= i + d < len(segs)
                    and (segs[i + d].b == t.a if d < 0 else segs[i + d].a == t.b)]
-            if any(nb.kind in ("none", "uniform") for nb in nbs):
+            if any(nb.kind in ("none", "uniform", "uncertain") for nb in nbs):
                 self.log("tiny_island_next_to_none", comp_range=[t.a, t.b], evidence=ev)
                 t.notes.append(f"{t.length}-frame island next to an unmatched run: left for the not-in-RAW resolver")
             raw_nbs = [c for c in ev["neighbours"]]
@@ -2104,6 +2212,47 @@ class _Builder:
                     t.notes.append(f"{t.length}-frame segment kept but not verified as a flash cut: its own RAW frame "
                                    "does not beat the neighbours' time line by more than the noise")
         return segs
+
+    def islands(self, segs: list[_Seg]) -> list[_Seg]:
+        """FX-08: a 1-2 frame RAW island next to a NONE / unresolved run is kept only when its own model leaves the
+        adjacent unmatched frames (up to 2 per side) below none_thresh: an island whose model explains its unmatched
+        neighbours at a gray-zone score is part of that unresolved stretch (the real run's S63: comp 1191 and 1192
+        show one picture, 1191 scored 0.826 under 1192's model), so island and run become ONE 'uncertain' segment."""
+        if not self.P.ok:
+            return segs
+        nt = float(_cfg(self.cfg, "none_thresh", 0.6))
+        changed = True
+        while changed:
+            changed = False
+            for i, t in enumerate(segs):
+                if t.kind != "raw" or t.length > 2:
+                    continue
+                for d in (-1, 1):
+                    if not (0 <= i + d < len(segs)):
+                        continue
+                    N = segs[i + d]
+                    if N.kind not in ("none", "uncertain") or (N.b != t.a if d < 0 else N.a != t.b):
+                        continue
+                    ks = list(range(max(N.a, t.a - 2), t.a)) if d < 0 else list(range(t.b, min(N.b, t.b + 2)))
+                    sc = {k: self._score_model(t, k) for k in ks}
+                    hit = {k: v for k, v in sc.items() if math.isfinite(v) and v >= nt}
+                    if not hit:
+                        continue
+                    lo, hi = min(t.a, N.a), max(t.b, N.b)
+                    U = _Seg("uncertain", lo, hi, notes=N.notes + [
+                        f"{t.length}-frame RAW island {t.a}-{t.b - 1} (RAW {[int(self.F.raw[k]) for k in range(t.a, t.b)]})"
+                        f" explains its unmatched neighbour(s) {sorted(hit)} at {[round(v, 3) for v in hit.values()]}"
+                        f" >= none_thresh: one unresolved stretch"])
+                    for k in range(t.a, t.b):        # the island's frames are evidence of the stretch, not a match
+                        self.F.status[k] = Status.UNRESOLVED
+                    self.log("tiny_island_unresolved", comp_range=[t.a, t.b], evidence={
+                        "neighbour": [N.a, N.b, N.kind], "scores": {str(k): round(v, 4) for k, v in sc.items()}})
+                    segs[min(i, i + d):max(i, i + d) + 1] = [U]
+                    changed = True
+                    break
+                if changed:
+                    break
+        return self._merge_unresolved(segs)
 
     def _sim_change(self, a: Sim, b: Sim) -> tuple[float, float]:
         """(|scale ratio - 1|, box-centre displacement px incl. rotation at the box edge) between two framings."""
@@ -2291,7 +2440,7 @@ class _Builder:
         i = 0
         while i + 2 < len(segs):
             A, N, B = segs[i], segs[i + 1], segs[i + 2]
-            if not (N.kind == "none" and A.kind == "raw" and B.kind == "raw" and A.b == N.a and N.b == B.a
+            if not (N.kind in ("none", "uncertain") and A.kind == "raw" and B.kind == "raw" and A.b == N.a and N.b == B.a
                     and N.length <= max_len and self._compatible(A, B)):
                 i += 1
                 continue
@@ -2408,7 +2557,7 @@ class _Builder:
             while j < len(segs) and segs[j].a - A.b <= self.ts:
                 if segs[j].kind == "raw" and segs[j].length > 2:
                     break
-                if segs[j].kind not in ("none", "raw"):
+                if segs[j].kind not in ("none", "uncertain", "raw"):
                     gap_ok = False
                     break
                 j += 1
@@ -2423,7 +2572,7 @@ class _Builder:
             O, D, info = res
             inner = segs[i + 1:j]
             if any(s.kind == "raw" and not (O <= s.a and s.b <= O + D) for s in inner) or \
-                    any(s.kind == "none" and not (O <= s.a and s.b <= O + D + 1) for s in inner) or \
+                    any(s.kind in ("none", "uncertain") and not (O <= s.a and s.b <= O + D + 1) for s in inner) or \
                     not (A.a < O and O + D < B.b) or not (O <= B.a and A.b <= O + D):
                 self.log("crossfade_rejected", comp_range=[A.b, B.a], evidence={"O": O, "D": D, **info})
                 i += 1
@@ -3114,9 +3263,9 @@ class _Builder:
                 X, Y = segs[i], segs[i + 1]
                 if X.b != Y.a or not F.repeat_pair(Y.a):
                     continue
-                if X.kind == "none" and Y.kind == "raw":
+                if X.kind in ("none", "uncertain") and Y.kind == "raw":
                     N, R, k, kp = X, Y, Y.a - 1, Y.a
-                elif X.kind == "raw" and Y.kind == "none":
+                elif X.kind == "raw" and Y.kind in ("none", "uncertain"):
                     N, R, k, kp = Y, X, X.b, X.b - 1
                 else:
                     continue
@@ -3208,7 +3357,7 @@ class _Builder:
         groups: list[list[_Seg]] = []
         cur: list[_Seg] = []
         for S in segs:
-            if not (S.kind == "raw" and S.model is not None and not S.ramp and S.model.v > 0):
+            if not (S.kind == "raw" and S.model is not None and not S.ramp and S.model.v > 0 and S.blend_path is None):
                 if len(cur) > 1:
                     groups.append(cur)
                 cur = []
@@ -3314,43 +3463,165 @@ class _Builder:
                 S.model = old
 
     def retime(self, segs: list[_Seg]) -> None:
+        """Frame-blend retiming (FX-08). In a retimed segment (v != 1, v > 0) every matched frame is fitted as a blend
+        of RAW j0 and j0 + 1 under the segment's framing (scoring.blend_alpha_cov, gain-free alpha); a blend frame
+        fits at >= match_thresh with 0.1 < alpha < 0.9 and clearly better than any single frame ((1 - zfit) <=
+        blend_rel (1 - best single)) -- the single-frame argmax of a blend picks the heavier frame and bends the
+        measured speed (0.2536 for a 0.25x blend). With >= 20 % blend frames the blends' continuous positions
+        j0 + alpha_B give the path directly (``_frame_blend_path``): verified -> retime 'frame_blend' (AE Frame Mix,
+        a linear blend in the preview); not verified -> the segment is 'retimed / interpolated - unresolved'
+        (uncertain), never a fake freeze or an unsnapped speed presented as exact."""
         if not self.P.ok:
             return
         F, cfg = self.F, self.cfg
         mt = float(_cfg(cfg, "match_thresh", 0.9))
+        rel = float(_cfg(cfg, "blend_rel", 0.5))
         for S in segs:
-            if S.kind != "raw" or abs(S.model.v - 1.0) <= 0.005 or S.model.v <= 0:
+            if S.kind != "raw" or S.ramp or abs(S.model.v - 1.0) <= 0.005 or S.model.v <= 0:
                 continue
-            frames = [k for k in range(S.a, S.b) if F.status[k] == Status.MATCH]
-            if not frames:
+            frames = [k for k in range(S.a, S.b) if F.status[k] == Status.MATCH and bool(F.flip[k]) == S.flip]
+            if len(frames) < 4:
                 continue
-            blends = set(S.blend_frames)
-            pairs: dict[int, int] = {}
+            pos: dict[int, tuple[int, float, float]] = {}       # k -> (j0, alpha_B, zfit)
             for k in frames:
-                if k in blends or not (math.isfinite(F.score[k]) and F.score[k] < mt):
-                    continue
                 j = int(self.pred(S, k))
                 sim = self.sim_at(S, k)
+                best = None
                 for j0 in (j - 1, j):
                     bf = self.P.blend_fit(k, [(j0, sim, S.flip)], [(j0 + 1, sim, S.flip)])
-                    if bf and "zfit" in bf and bf["zfit"] >= mt and 0.1 < bf["alpha_a"] < 0.9:
-                        pairs[k] = j0
-                        break
-            if len(blends) + len(pairs) >= 0.2 * len(frames):
-                for k, j0 in pairs.items():      # a blend of j0 and j0+1 is consistent with showing either
-                    self._widen(k, j0, "frame_blend")
-                    self._widen(k, j0 + 1, "frame_blend")
-                blends |= set(pairs)
-                S.retime = "frame_blend"
-                S.blend_frames = sorted(blends)
-                ok = self.refit(S)
-                S.notes.append(f"frame-blend retiming: {len(blends)}/{len(frames)} frames are blends of adjacent "
-                               f"RAW frames (AE Frame Blending approximates it)")
-                if not ok:
-                    S.uncertain = True
-                    S.notes.append("phase solve infeasible even without the blended frames: timing uncertain")
-                self.log("retime_frame_blend", comp_range=[S.a, S.b], evidence={
-                    "blend_frames": S.blend_frames, "n_frames": len(frames), "feasible": ok})
+                    if not bf or "zfit" not in bf:
+                        continue
+                    af = bf.get("alpha_a_free", float("nan"))
+                    a_a = af if af is not None and math.isfinite(af) else bf["alpha_a"]
+                    single = float(np.nanmax(bf["single"]))
+                    if bf["zfit"] >= mt and 0.1 < a_a < 0.9 and (1.0 - bf["zfit"]) <= rel * (1.0 - single) and \
+                            (best is None or bf["zfit"] > best[2]):
+                        best = (j0, 1.0 - a_a, float(bf["zfit"]))
+                if best is not None:
+                    pos[k] = best
+            if len(pos) < max(3, 0.2 * len(frames)):
+                continue
+            self._frame_blend_path(S, frames, pos)
+
+    def _frame_blend_path(self, S: _Seg, frames: list[int], pos: dict[int, tuple[int, float, float]]) -> None:
+        """Fit and verify the frame-blend path of S (see ``retime``): RAW position p(k) = j0 + alpha_B on the blend
+        frames -> least squares line (residuals > 0.25 frame dropped once); speed snapped to speed_snap_values U
+        retime_snap_values within speed_snap_tol (else kept unsnapped); phase x = the blends' median, clamped into
+        the floor-rule interval of every frame's constraint (blend frames admit j0 and j0 + 1) with 2 x TIE_SLACK to
+        spare -- never moved further: Frame Mix blends by the fraction of the position, so the measured phase IS the
+        blend weight (FX-10's max-slack placement does not apply; a position on an integer is ~the same picture either
+        side of it). Verified when the mix (1 - f) RAW[floor p] + f RAW[floor p + 1] scores >= match_thresh on EVERY
+        matched frame."""
+        F, cfg = self.F, self.cfg
+        mt = float(_cfg(cfg, "match_thresh", 0.9))
+        ratio = float(self.rf / self.cf)
+        ks = np.array(sorted(pos), np.float64)
+        ps_ = np.array([pos[int(k)][0] + pos[int(k)][1] for k in ks], np.float64)
+        u, x0 = np.polyfit(ks, ps_, 1)
+        keep = np.abs(ps_ - (x0 + u * ks)) <= 0.25
+        if keep.sum() >= 3 and not keep.all():
+            u, x0 = np.polyfit(ks[keep], ps_[keep], 1)
+        v_fit = float(u) / ratio
+        tol = float(_cfg(cfg, "speed_snap_tol", 0.003))
+        snaps = sorted({float(s) for s in tuple(_cfg(cfg, "speed_snap_values", ())) +
+                        tuple(_cfg(cfg, "retime_snap_values", ()))})
+        near = [s for s in snaps if s > 0 and abs(v_fit / s - 1.0) <= tol]
+        v = min(near, key=lambda s: abs(v_fit / s - 1.0)) if near else v_fit
+        u_s = v * ratio
+        x_med = float(np.median(ps_[keep] - u_s * ks[keep]))
+        ev: dict[str, Any] = {"blend_frames": len(pos), "frames": len(frames), "v_fit": round(v_fit, 6), "v": v,
+                              "snapped": bool(near), "x": round(x_med, 5)}
+        # floor-rule interval of the phase: a blend frame shows floor(p) = j0; a near-pure frame at its measured
+        # frame m shows m (p in [m, m + 1)) unless the path puts it just below m (f > 0.9: Frame Mix shows ~m while
+        # AE's floor frame is m - 1 -- no floor claim, its soft range admits m - 1)
+        lo_c, hi_c = [], []
+        for k in frames:
+            if k in pos:
+                j0 = pos[k][0]
+                self._widen(k, j0, "frame_blend")          # a blend of j0 and j0 + 1 is consistent with either
+                self._widen(k, j0 + 1, "frame_blend")
+                lo_c.append(j0 - u_s * k)
+                hi_c.append(j0 + 1.0 - u_s * k)
+                continue
+            mk = int(F.raw[k])
+            if x_med + u_s * k >= mk - 0.05:
+                lo_c.append(mk - u_s * k)
+                hi_c.append(mk + 1.0 - u_s * k)
+            else:
+                self._widen(k, mk - 1, "frame_blend")
+        if not lo_c:
+            return
+        kk, lo, hi = self.constraints(S)
+        L, U = float(max(lo_c)), float(min(hi_c))
+        m = 2.0 * ps.TIE_SLACK
+        ok = U - L > 2.0 * m
+        x = float(min(max(x_med, L + m), U - m)) if ok else x_med
+        ev.update(interval=[round(L, 5), round(U, 5)], x_used=round(x, 5))
+        worst = None
+        if ok:
+            for k in frames:
+                p = x + u_s * k
+                j0 = int(math.floor(p + 1e-9))
+                sim = self.sim_at(S, k)
+                z = self.P.mix_zncc(k, (j0, sim, S.flip), (j0 + 1, sim, S.flip), p - j0)
+                if not math.isfinite(z) or z < mt:
+                    worst = (k, z) if worst is None or not math.isfinite(z) or z < worst[1] else worst
+        S.blend_frames = sorted(pos)
+        if ok and worst is None:
+            old = S.model
+            S.model = _Model(S.a, float(v), "fixed" if near else "unsnapped", old.cost, not near, None, v_fit, [],
+                             None, old.track, old.flip, old.n_frames, 0.0)
+            rf = float(self.rf)
+            pa = x + u_s * S.a
+            sol = ps.solve_raw_in(kk, lo, hi, S.a, float(v), self.cf, self.rf)
+            sol.update(raw_in=pa / rf, raw_in_frames=pa, ok=True)
+            S.model.sol = sol
+            S.retime = "frame_blend"
+            S.blend_path = (x, u_s)
+            S.notes.append(f"frame-blend retiming verified: {len(pos)}/{len(frames)} frames are blends of adjacent RAW "
+                           f"frames on one path at speed {v:g} (measured {v_fit:.5f}); every frame matches the Frame "
+                           "Mix of the path (AE Frame Blending > Frame Mix)")
+            self.log("retime_frame_blend", comp_range=[S.a, S.b], evidence={**ev, "verified": True})
+            return
+        # no verified path: the timing of the stretch is unresolved -- an 'uncertain' segment (its frames' own best RAW
+        # frames as evidence), never a segment at the bent single-frame speed presented as exact
+        S.kind, S.uncertain = "uncertain", True
+        S.notes.append(f"retimed / interpolated - unresolved: {len(pos)}/{len(frames)} frames are blends, but no "
+                       f"frame-blend path explains every frame (speed {v_fit:.5f}"
+                       + (f", frame {worst[0]} mix ZNCC {worst[1]:.3f}" if worst else ", no floor-rule phase") + ")")
+        self.log("retime_frame_blend", comp_range=[S.a, S.b], evidence={**ev, "verified": False,
+                                                                        "worst": None if worst is None else
+                                                                        [worst[0], round(float(worst[1]), 4)]})
+
+    def moving_holds(self, segs: list[_Seg]) -> None:
+        """FX-08: a RAW segment whose model holds one RAW frame for >= 3 consecutive frames (a freeze, or a near-zero
+        unsnapped speed once the freeze was rejected) while the competitor itself is NOT static there (``static``:
+        transform-compensated, captions masked, noise floor from its own repeat pairs) and no frame-blend path was
+        verified: the recreation would hold a still where the competitor moves (the real run's S65). Its timing is
+        'retimed / interpolated - unresolved' -> an 'uncertain' segment, never a freeze."""
+        if self.S.static_fn is None:
+            return
+        for S in segs:
+            if S.kind != "raw" or S.ramp or S.blend_path is not None or S.model is None or S.length < 3:
+                continue
+            js = np.asarray(self.pred(S, np.arange(S.a, S.b)), dtype=np.int64)
+            run0 = 0
+            bad = None
+            for i in range(1, len(js) + 1):
+                if i < len(js) and js[i] == js[run0]:
+                    continue
+                if i - run0 >= 3 and not self.static(S.a + run0, S.a + i):
+                    bad = (S.a + run0, S.a + i, int(js[run0]))
+                    break
+                run0 = i
+            if bad is None:
+                continue
+            S.kind, S.uncertain = "uncertain", True
+            S.notes.append(f"the model holds RAW {bad[2]} on frames {bad[0]}-{bad[1] - 1} while the competitor moves "
+                           f"(not static, no frame-blend path): retimed / interpolated - unresolved (speed "
+                           f"{S.model.v:.4g}), not a freeze")
+            self.log("moving_hold_unresolved", comp_range=[S.a, S.b], evidence={
+                "hold": list(bad), "speed": S.model.v, "kind": S.model.kind})
 
     def ramps(self, segs: list[_Seg]) -> list[_Seg]:
         """Chains of >= 3 raw pieces joined by speed-only cuts with monotone speeds -> one remap segment."""
@@ -3390,6 +3661,8 @@ class _Builder:
                           notes="; ".join(S.notes + ["no RAW match (NOT-IN-RAW placeholder)"]))
             seg.audio["exception"] = "not_in_raw"
             return seg
+        if S.kind == "uncertain":
+            return self._uncertain_segment(S)
         if S.kind in ("flash", "dip"):
             seg = Segment(0, S.kind, S.a, S.b, speed=1.0, color=S.color, transition_in=S.trans_in,
                           transition_out=S.trans_out, confidence=0.9,
@@ -3402,8 +3675,8 @@ class _Builder:
         for k in m.drops:   # tolerated isolated frames: their soft range now includes the model frame
             self._widen(k, int(self.pred(S, k)), "drop")
         ks, lo, hi = self.constraints(S)
-        if ks.size and m.sol.get("shared"):
-            sol = m.sol             # one phase solve with the segments on its time line (time_ties)
+        if ks.size and (m.sol.get("shared") or S.blend_path is not None):
+            sol = m.sol             # one phase solve with the segments on its time line (time_ties) / the blend path
         elif ks.size:
             # the phase follows the measured frames (data term); tolerated drops keep their widened soft range
             # but carry no preference
@@ -3450,7 +3723,15 @@ class _Builder:
         seg.tie_frames = tie
         in_seg = [k for k in range(S.a, S.b) if F.status[k] == Status.MATCH]
         seg.ambiguous_frames = [k for k in in_seg if F.raw_hi[k] > F.raw_lo[k]]
-        if m.v == 0.0 and ks.size:
+        if S.blend_path is not None:
+            # a verified frame-blend path: the measured continuous RAW position as linear remap keys (AE Frame Mix
+            # blends by its fraction; FX-10's placement inside the floor interval would move that fraction)
+            x, u_s = S.blend_path
+            rf = float(self.rf)
+            seg.time_mode = "remap"
+            seg.time_remap_keys = [{"comp_frame": S.a, "raw_seconds": round((x + u_s * S.a) / rf, 9)},
+                                   {"comp_frame": S.b, "raw_seconds": round((x + u_s * S.b) / rf, 9)}]
+        elif m.v == 0.0 and ks.size:
             j = int(self.pred(S, S.a))
             val = (j + 0.25) / float(self.rf)
             seg.time_mode = "remap"
@@ -3469,6 +3750,46 @@ class _Builder:
         # blend-frame constraints of crossfade segments (not representable in the FrameMap)
         seg.__dict__["_phase_extra"] = {int(k): (int(v[0]), int(v[1])) for k, v in S.extra.items()
                                         if self.F.status[k] != Status.MATCH}
+        return seg
+
+    def _uncertain_segment(self, S: _Seg) -> Segment:
+        """An UNRESOLVED stretch (FX-08): neither a match nor NOT-IN-RAW. Carries the best-evidence RAW frame per comp
+        frame (refine's best hypothesis, any score >= none_thresh) for a guide layer, a label 'UNCERTAIN - best RAW
+        a-b, ZNCC x-y' and no timing claim; counted as a criterion-3 failure ('uncertain'), never as an exception."""
+        F = self.F
+        half = int(F.cand.shape[1]) // 2 if F.cand.ndim == 2 else 0
+        nt = float(_cfg(self.cfg, "none_thresh", 0.6))
+        ev = []
+        for k in range(S.a, S.b):
+            j0, sc = int(F.cand_j0[k]), float(F.score[k])
+            j = j0 + half if j0 >= 0 else -1
+            if F.status[k] == Status.MATCH and F.raw[k] >= 0:
+                j = int(F.raw[k])
+            sim = F.sim(k)
+            good = j >= 0 and math.isfinite(sc) and sc >= nt and sim is not None
+            ev.append({"comp_frame": int(k), "raw": int(j) if good else -1,
+                       "score": round(sc, 5) if math.isfinite(sc) else None,
+                       "sim": sim.to_dict() if good else None, "flip": bool(F.flip[k])})
+        good = [e for e in ev if e["raw"] >= 0]
+        if good:
+            rs, ss = [e["raw"] for e in good], [e["score"] for e in good]
+            label = (f"UNCERTAIN - best RAW {min(rs)}-{max(rs)}, ZNCC {min(ss):.2f}-{max(ss):.2f} "
+                     f"({timecode(S.a, self.cf)}-{timecode(S.b, self.cf)})")
+        else:
+            label = f"UNCERTAIN - no RAW evidence ({timecode(S.a, self.cf)}-{timecode(S.b, self.cf)})"
+        seg = Segment(0, "uncertain", S.a, S.b, speed=1.0, confidence=0.0, label=label, uncertain=True,
+                      notes="; ".join(S.notes + [f"unresolved: best hypotheses score in [none_thresh, match_thresh) on "
+                                                 f"{len(good)}/{S.length} frames (no match, no NOT-IN-RAW claim)"]))
+        seg.evidence = ev
+        if good:
+            sims = [Sim.from_dict(e["sim"]) for e in good]
+            mid = sims[len(sims) // 2]
+            seg.transform = mid.to_dict()
+            seg.flip_h = bool(good[len(good) // 2]["flip"])
+            seg.raw_in_frame, seg.raw_out_frame = int(good[0]["raw"]), int(good[-1]["raw"])
+        seg.audio["exception"] = "uncertain"
+        self.log("uncertain_segment", comp_range=[S.a, S.b], evidence={"label": label, "frames": len(ev),
+                                                                        "with_evidence": len(good)})
         return seg
 
     def _ramp_segment(self, S: _Seg) -> Segment:
@@ -3551,7 +3872,7 @@ class _Builder:
                 for k in range(p.a, p.b):
                     if F.status[k] != Status.MATCH or bool(F.flip[k]) != p.flip:
                         continue
-                    j = int(self.pred(p, k))
+                    j = self.shown(p, k)
                     if status[k] != Status.MATCH:   # absorbed NONE frames (with the framing they were scored under)
                         status[k] = Status.MATCH
                         flip[k], track[k] = p.flip, p.track
@@ -3579,6 +3900,9 @@ class _Builder:
             if S.kind == "raw" and S.trans_in and S.trans_in.get("type") == "crossfade":
                 D = int(S.trans_in["duration_frames"])
                 status[S.a:S.a + D] = Status.BLEND
+            if S.kind == "uncertain":         # an island merged into an unresolved stretch (FX-08) is no match
+                sel = status[S.a:S.b] == Status.MATCH
+                status[S.a:S.b][sel] = Status.UNRESOLVED
         fm.status, fm.raw, fm.raw_lo, fm.raw_hi = status, raw, rlo, rhi
         fm.soft_lo, fm.soft_hi, fm.low_margin, fm.tie = slo, shi, low, tie
         fm.flip, fm.track = flip, track
@@ -3626,6 +3950,7 @@ class _Builder:
             self.S._relax_cache.clear()
             work = self._segment_pass()
         work = self.merge_tiny(work)
+        work = self.islands(work)
         work = self.merge_adjacent(work)
         work = self.merge_retime_chains(work)
         work = self.merge_continuous(work)
@@ -3639,6 +3964,7 @@ class _Builder:
         work = self.merge_phantom_cuts(work)
         work = self.union_test(work)
         self.retime(work)
+        self.moving_holds(work)
         work = self.ramps(work)
         for S in work:
             if S.kind == "raw":
@@ -3672,6 +3998,10 @@ class _Builder:
         self.log("segments", evidence={"count": len(segs), "segments": [
             {"id": s.id, "type": s.type, "comp": [s.comp_in, s.comp_out], "speed": s.speed,
              "raw_in_frame": s.raw_in_frame, "flip": s.flip_h} for s in segs]})
+        if self.S.freeze_rejected:
+            # FX-08: spans whose measured frames a freeze would have explained, refused because the competitor moves
+            # there (the per-span evidence is in the 'freeze_not_static' records)
+            self.log("freeze_rejected", evidence={"spans": [list(sp) for sp in sorted(self.S.freeze_rejected)][:200]})
         return segs
 
     def _segment_pass(self) -> list[_Seg]:
@@ -3683,9 +4013,41 @@ class _Builder:
                     work.extend(self.dp_run(r0, r1))
             elif st == Status.UNIFORM:
                 work.append(_Seg("uniform", a, b))
+            elif st == Status.UNRESOLVED:
+                work.append(_Seg("uncertain", a, b))
             else:
                 work.append(_Seg("none", a, b))
-        return work
+        return self._merge_unresolved(work)
+
+    @staticmethod
+    def _merge_unresolved(work: list[_Seg]) -> list[_Seg]:
+        """FX-08: NONE runs of <= 2 frames touching an UNRESOLVED run join it (calling 1-2 frames inside an unresolved
+        stretch NOT-IN-RAW would claim more than the evidence; 'uncertain' claims nothing), and adjacent uncertain
+        pieces become one."""
+        out: list[_Seg] = []
+        for S in work:
+            out.append(S)
+            changed = True
+            while changed and len(out) >= 2:
+                changed = False
+                X, Y = out[-2], out[-1]
+                if X.b != Y.a:
+                    break
+                kinds = {X.kind, Y.kind}
+                if kinds == {"uncertain"} or (kinds == {"uncertain", "none"} and
+                                              (Y if Y.kind == "none" else X).length <= 2):
+                    out[-2:] = [_Seg("uncertain", X.a, Y.b, notes=X.notes + Y.notes)]
+                    changed = True
+        # a short NONE run between an earlier uncertain run and the current one was kept above only when the
+        # uncertain run came first; a second pass catches 'none (<= 2), uncertain'
+        res: list[_Seg] = []
+        for S in out:
+            if res and res[-1].b == S.a and {res[-1].kind, S.kind} == {"uncertain", "none"} and \
+                    (S if S.kind == "none" else res[-1]).length <= 2:
+                res[-1] = _Seg("uncertain", res[-1].a, S.b, notes=res[-1].notes + S.notes)
+            else:
+                res.append(S)
+        return res
 
     def _dominant_from_hints(self) -> float:
         h = self.hints
@@ -3891,7 +4253,7 @@ def _crosscheck(b: _Builder, segs: list[Segment]) -> dict:
                     windows.append((s.comp_in, s.comp_in + int(t["duration_frames"]), t["type"]))
                 else:
                     windows.append((s.comp_out - int(t["duration_frames"]), s.comp_out, t["type"]))
-        if s.type in ("flash", "dip", "not_in_raw"):
+        if s.type in ("flash", "dip", "not_in_raw", "uncertain"):
             windows.append((s.comp_in, s.comp_out, s.type))
     caps = [c for c in (getattr(b.layout, "captions", None) or []) if isinstance(c, dict)]
     agree, unexplained, missed, steps = [], [], [], []
@@ -3961,6 +4323,7 @@ _INK = "#0b0b0b"
 _INK2 = "#52514e"
 _SURF = "#fcfcfb"
 _BLUE, _ORANGE, _AQUA, _RED, _VIOLET = "#2a78d6", "#eb6834", "#1baf7a", "#e34948", "#4a3aa7"
+_AMBER = "#d9a400"
 
 
 def _style_axes(ax) -> None:
@@ -4013,6 +4376,10 @@ def plot_mapping(segs: Sequence[Segment], fm: FrameMap, comp_fps: Any, raw_fps: 
             ax.axvspan(t0, t1, color=_RED, alpha=0.15, linewidth=0, zorder=1,
                        label="NOT-IN-RAW" if "nir" not in labelled else None)
             labelled.add("nir")
+        elif s.type == "uncertain":
+            ax.axvspan(t0, t1, color=_AMBER, alpha=0.2, linewidth=0, zorder=1,
+                       label="uncertain" if "unc" not in labelled else None)
+            labelled.add("unc")
         elif s.type in ("flash", "dip"):
             ax.axvspan(t0, t1, color=_INK2, alpha=0.18, linewidth=0, zorder=1,
                        label="flash / dip" if "fd" not in labelled else None)
@@ -4056,6 +4423,8 @@ def plot_scores(segs: Sequence[Segment], fm: FrameMap, cfg: Any, path: str | Pat
                 ax.axvline(s.comp_in, color="#c9c8c3", linewidth=0.8, linestyle="--", zorder=0)
             if s.type == "not_in_raw":
                 ax.axvspan(s.comp_in, s.comp_out, color=_RED, alpha=0.12, linewidth=0)
+            if s.type == "uncertain":
+                ax.axvspan(s.comp_in, s.comp_out, color=_AMBER, alpha=0.18, linewidth=0)
             if s.transition_in and s.transition_in.get("type") == "crossfade":
                 ax.axvspan(s.comp_in, s.comp_in + int(s.transition_in["duration_frames"]), color=_AQUA,
                            alpha=0.25, linewidth=0)

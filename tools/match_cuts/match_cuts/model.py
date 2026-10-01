@@ -261,10 +261,12 @@ class Layout:
 
 class Status:
     UNKNOWN = -1
-    NONE = 0          # no match anywhere (NOT-IN-RAW candidate)
+    NONE = 0          # every hypothesis scored < none_thresh (NOT-IN-RAW candidate)
     MATCH = 1         # mapped to a RAW frame
     BLEND = 2         # transition frame (mix of two sources) -- set by segment.py
     UNIFORM = 3       # (near-)uniform frame in the video region: dip / flash
+    UNRESOLVED = 4    # best hypothesis in [none_thresh, match_thresh) and no detail-score promotion (FX-08): an
+                      # 'uncertain' segment, never a NOT-IN-RAW placeholder and never a match
 
 
 FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
@@ -294,6 +296,9 @@ FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
     "confounded": (np.bool_, False),  # m+-1 with its own refitted framing path scores within noise of m (refine)
     "sim_meas_score": (np.float32, np.nan),  # masked ZNCC of the per-frame framing measurement (sim_meas)
     "pair_label": (np.int8, -1),    # competitor pair (k, k+1): -1 unmeasured, 0 unknown, 1 repeat, 2 move, 3 cut
+    "detail": (np.float32, np.nan),  # detail-sensitive second score of a gray-zone frame (FX-08, refine): blur-matched
+                                     # gradient ZNCC of its best hypothesis; a MATCH with score < match_thresh was
+                                     # promoted by it
 }
 
 CAND_W = 15   # per-frame candidate score vector length stored in FrameMap.cand (RAW cand_j0 .. cand_j0+14)
@@ -431,7 +436,9 @@ class Transition:
 @dataclass
 class Segment:
     id: int
-    type: str                              # 'raw' | 'not_in_raw' | 'dip' | 'flash'  (freeze/reverse/ramp = raw + remap)
+    type: str                              # 'raw' | 'not_in_raw' | 'dip' | 'flash' | 'uncertain' (FX-08: the best
+                                           # hypothesis in [none_thresh, match_thresh): neither a match nor NOT-IN-RAW)
+                                           # (freeze/reverse/ramp = raw + remap)
     comp_in: int
     comp_out: int                          # half-open
     raw_in_frame: int | None = None        # RAW frame shown at comp_in
@@ -467,10 +474,19 @@ class Segment:
     color: str | None = None               # dip / flash colour
     label: str = ""                        # e.g. NOT-IN-RAW placeholder label
     notes: str = ""
+    evidence: list[dict] = field(default_factory=list)   # 'uncertain' segments: best-evidence RAW frame per comp frame
+                                                         # [{comp_frame, raw, score, sim, flip}] (raw -1: none >= none_thresh)
 
     @property
     def length(self) -> int:
         return self.comp_out - self.comp_in
+
+    @property
+    def frame_mix(self) -> bool:
+        """A VERIFIED frame-blend path (FX-08): RAW segment, retime 'frame_blend', linear time-remap keys carrying the
+        continuous RAW position, not uncertain. AE shows it with Frame Blending > Frame Mix: (1 - f) RAW[floor p] +
+        f RAW[floor p + 1] at position p (export_ae, render_preview, verify all use this one predicate)."""
+        return self.type == "raw" and self.retime == "frame_blend" and bool(self.time_remap_keys) and not self.uncertain
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
