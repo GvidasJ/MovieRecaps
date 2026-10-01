@@ -47,6 +47,11 @@ class Config:
     compare_preset: str = "veryfast"
     large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
     workers: int = 0                       # 0 = os.cpu_count()
+    pool_stall_timeout_s: float = 300.0    # hang protection (DESIGN D7): a worker pool that delivers no result for this
+                                           # long (or loses a worker process) is stopped and its remaining tasks run in
+                                           # this process -- identical results, only slower
+    pool_max_failures: int = 2             # after this many stopped pools, later steps run without worker pools
+    progress_log_s: float = 30.0           # long steps log progress (and a stage heartbeat) at least this often
     verbose: bool = False
     seed: int = 12345
     skip_preview: bool = False             # tests may skip long renders
@@ -268,7 +273,7 @@ class Config:
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
-                  *VERIFY_ONLY_PARAMS):
+                  "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
         return d
 

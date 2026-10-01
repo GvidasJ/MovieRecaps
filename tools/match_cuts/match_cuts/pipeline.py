@@ -52,9 +52,9 @@ import numpy as np
 
 from . import __version__
 from . import phase_solve as _ps
-from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, file_hash, fmt_seconds,
-                     fps_str, json_default, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
-                     setup_logging, stage_key, timecode)
+from .common import (STAGE_VERSION, Cache, DecisionLog, configure_pools, dump_json, ffmpeg_bin, ffprobe_bin, file_hash,
+                     fmt_seconds, fps_str, json_default, limit_native_threads, load_decisions, log, null_dlog,
+                     params_hash, save_decisions, seed_everything, setup_logging, stage_heartbeat, stage_key, timecode)
 from .config import Config
 from .geometry import Sim
 from .model import (AudioHints, Cutlist, FrameMap, Layout, Segment, Status, StreamInfo, cutlist_layout)
@@ -150,10 +150,13 @@ class Context:
 
 @contextlib.contextmanager
 def _stage(ctx: Context, name: str) -> Iterator[None]:
+    """Time a stage; long stages log progress / a heartbeat at least every cfg.progress_log_s (common.Progress,
+    common.stage_heartbeat), so the console is never silent for long."""
     log.info("== %s", name)
     t0 = time.perf_counter()
     try:
-        yield
+        with stage_heartbeat(name):
+            yield
     finally:
         dt = time.perf_counter() - t0
         ctx.timings[name] = round(ctx.timings.get(name, 0.0) + dt, 3)
@@ -2635,6 +2638,9 @@ def run(cfg: Config) -> dict:
     _guard_paths(cfg)
     _prepare_dirs(cfg)
     setup_logging(cfg.verbose, log_file=cfg.work / "match_cuts.log")
+    limit_native_threads()                 # before the first FFT (DESIGN D7 fork hygiene)
+    configure_pools(stall_s=cfg.pool_stall_timeout_s, progress_s=cfg.progress_log_s,
+                    max_failures=cfg.pool_max_failures)
     log.info("match_cuts %s: competitor=%s raw=%s out=%s work=%s layout=%s comp_size=%s fps=%s", __version__,
              cfg.competitor, cfg.raw, cfg.out_dir, cfg.work_dir, cfg.layout_mode, cfg.comp_size, cfg.fps_mode)
     ctx = Context(cfg=cfg, dlog=DecisionLog(cfg.work / "decisions.jsonl", truncate=True), cache=Cache(cfg.work))

@@ -1982,10 +1982,33 @@ def _detections(comp: Proxy, n: int, detect: _Detector, workers: int) -> Iterato
                 and tuple(np.load(npy, mmap_mode="r").shape) == (n, int(comp.size[1]), int(comp.size[0]))
                 and _spawn_safe())
     if use_proc:
+        # hang protection (DESIGN D7): results are collected with the pool watchdog; a stalled pool or a dead
+        # worker stops the pool and the remaining chunks run here (same detector, same frames -> same lines)
         import multiprocessing as mp
-        with mp.get_context("spawn").Pool(workers, initializer=_spawn_init, initargs=(npy, detect)) as pool:
-            for (a, b), res in zip(bounds, pool.imap(_spawn_chunk, bounds)):
-                yield list(range(a, b)), np.stack([np.asarray(comp.get(k)) for k in range(a, b)]), res
+        from .common import PoolFailure, close_pool, pool_workers, watched_results
+        pool = mp.get_context("spawn").Pool(workers, initializer=_spawn_init, initargs=(npy, detect))
+        clean = False
+        i = 0
+        try:
+            try:
+                for res in watched_results(pool.imap(_spawn_chunk, bounds), len(bounds), "text lines",
+                                           pool_workers(pool), what="spawn pool"):
+                    a, b = bounds[i]
+                    i += 1
+                    yield list(range(a, b)), np.stack([np.asarray(comp.get(k)) for k in range(a, b)]), res
+                clean = True
+            except PoolFailure as e:
+                log.warning("layout: text lines: %s - stopped the worker pool; detecting the remaining %d of %d "
+                            "chunks in this process (identical results, only slower)", e, len(bounds) - i, len(bounds))
+                close_pool(pool, kill=True)
+                pool = None
+                for a, b in bounds[i:]:
+                    kl = list(range(a, b))
+                    fr = np.stack([np.asarray(comp.get(k)) for k in kl])
+                    yield kl, fr, [detect(k, f) for k, f in zip(kl, fr)]
+        finally:
+            if pool is not None:
+                close_pool(pool, kill=not clean)
         return
     from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
