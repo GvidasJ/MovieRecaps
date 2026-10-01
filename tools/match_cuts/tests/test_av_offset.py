@@ -264,6 +264,21 @@ def test_residual_search_reaches_a_4_frame_segment_and_no_fake_jl():
     assert old["_switch_baseline"]["ms"] == pytest.approx(86.0, abs=4.0) and old["cuts"] == []
 
 
+def test_wide_probe_finds_offsets_beyond_the_residual_search():
+    """No S5.1 prior (too few long windows): one wide per-segment search finds a 150 ms offset (beyond the
+    +-100 ms residual search), and around it every residual is ~0; a synced competitor probes to exactly 0."""
+    raw = _raw_noise()
+    segs = _segments(LAYOUT)
+    comp = _competitor(raw, LAYOUT, -0.150, 0.150)
+    pr = aa.av_offset_probe(segs, comp, raw, SR, FPS, Config(), null_dlog())
+    assert pr["accepted"] and pr["source"] == "probe" and abs(pr["lag_s"] + 0.150) < 0.0006, pr
+    res = aa.analyze_segments_audio(segs, comp, raw, SR, FPS, Config(), null_dlog(), av_offset_s=pr["lag_s"])
+    assert all(abs(v["lag_ms"]) < 1.0 and v["corr"] > 0.95 for v in res["segments"].values()), res["segments"]
+    assert res["cuts"] == []
+    pr = aa.av_offset_probe(segs, _competitor(raw, LAYOUT, 0.0, 0.0), raw, SR, FPS, Config(), null_dlog())
+    assert pr["accepted"] and pr["lag_s"] == 0.0
+
+
 @pytest.mark.parametrize("kind", ["post_edit", "pre_edit"])
 def test_jl_against_the_switch_baseline(kind):
     """48 ms offset applied after the edit (switches move: baseline ~ +48 ms) or inside the source (switches

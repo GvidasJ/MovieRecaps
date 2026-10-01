@@ -14,6 +14,7 @@ Asserted here, with the default --audio-sync raw:
   raw_in inside its floor interval; all criteria pass;
 and with --audio-sync competitor (same work dir, cached analysis): criterion 5 lags ~0 (the recreation
 carries the offset), one competitor-sync audio twin per RAW segment, the mock JSX run passes.
+Two more raw-sync runs: 150 ms late (beyond the +-100 ms per-segment search) and 50 ms early (the other sign).
 The original mini publishing exactly 0 is asserted by tests/test_synthetic.py::test_audio_truth.
 """
 from __future__ import annotations
@@ -46,16 +47,23 @@ def _run(py: str, comp: Path, raw: str, out: Path, work: Path, *extra: str) -> s
     return subprocess.run(cmd, cwd=str(TOOL_DIR), capture_output=True, text=True, timeout=3600)
 
 
-@pytest.fixture(scope="module")
-def delayed(synthetic_mini, tmp_path_factory) -> Path:
-    src = Path(synthetic_mini["competitor"])
+def _shifted(src: Path, samples: int, out: Path) -> Path:
+    """The competitor with its whole audio track delayed (samples > 0, adelay) or advanced (< 0, atrim + apad) by
+    whole 48 kHz samples, the original sample count kept, the video stream copied."""
     n = _decode_count(src)
-    out = tmp_path_factory.mktemp("av_offset") / "competitor_delayed_86ms.mp4"
+    af = (f"adelay=delays={samples}S:all=1,atrim=end_sample={n}" if samples > 0 else
+          f"atrim=start_sample={-samples},asetpts=PTS-STARTPTS,apad=whole_len={n}")
     subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
-                    "-af", f"adelay=delays={DELAY_SAMPLES}S:all=1,atrim=end_sample={n}", "-c:a", "aac", "-b:a", "320k",
-                    "-ar", "48000", "-movflags", "+faststart", str(out)], check=True, capture_output=True)
+                    "-af", af, "-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-movflags", "+faststart", str(out)],
+                   check=True, capture_output=True)
     assert _decode_count(out) == n
     return out
+
+
+@pytest.fixture(scope="module")
+def delayed(synthetic_mini, tmp_path_factory) -> Path:
+    return _shifted(Path(synthetic_mini["competitor"]), DELAY_SAMPLES,
+                    tmp_path_factory.mktemp("av_offset") / "competitor_delayed_86ms.mp4")
 
 
 @pytest.fixture(scope="module")
@@ -129,3 +137,23 @@ def test_competitor_sync_reproduces_the_offset(runs):
     raw_cl = _load(runs, "raw")[1]
     assert raw_cl["segments"] == cl["segments"]
     assert np.isclose(raw_cl["audio"]["av_offset"]["lag_ms"], av["lag_ms"])
+
+
+@pytest.mark.parametrize("delay_ms", [150.0, -50.0])
+def test_offsets_beyond_the_search_and_early_audio(venv_python, synthetic_mini, tmp_path, delay_ms):
+    """150 ms late (beyond the +-100 ms per-segment search: the prior / wide probe centres it) and 50 ms early
+    (the opposite sign): the published interval contains the truth +-0.5 ms with the right sign, c5 is
+    pass_with_exceptions(av_offset), no fake J/L, no D3 warnings."""
+    comp = _shifted(Path(synthetic_mini["competitor"]), int(round(delay_ms * 48)), tmp_path / "competitor.mp4")
+    proc = _run(venv_python, comp, synthetic_mini["raw"], tmp_path / "out", tmp_path / "work")
+    _, cl, ver, plan = _load({"raw": (proc, tmp_path / "out")}, "raw")
+    av = cl["audio"]["av_offset"]
+    lo, hi = av["lag_ms_interval"]
+    assert av["status"] == "measured" and lo <= -delay_ms + 0.5 and hi >= -delay_ms - 0.5, av
+    assert ("later" if delay_ms > 0 else "earlier") in av["text"]
+    det = ver["criteria"]["c5_audio"]["details"]
+    assert ver["criteria"]["c5_audio"]["status"] == "pass_with_exceptions" and det["failures"] == [], det["failures"]
+    assert sum(e.startswith("av_offset") for e in det["exceptions"]) == 1 and det["av_offset"]["confirmed"]
+    assert all(not (s["audio"]["in_offset_frames"] or s["audio"]["out_offset_frames"]) for s in cl["segments"])
+    assert [w for w in cl["warnings"] if "keep their video phase" in w or "audio implies raw_in" in w] == []
+    assert plan["audioSync"]["twins"] == 0

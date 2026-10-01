@@ -1204,6 +1204,11 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
     # D9: the competitor's global A/V offset -- a prior from the S5.1 windows centres the first pass, the
     # precise offset comes from that pass; every later audio consumer works on residuals around it
     prior = audio_align.av_offset_prior(ctx.hints, segments, ctx.comp_fps, cfg, dlog)
+    if not prior.get("accepted") and len(comp_y) and len(raw_y):
+        # too few long S5.1 windows: one wide per-segment search instead (offsets beyond the +-100 ms residual search)
+        probe = audio_align.av_offset_probe(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog)
+        if probe.get("accepted"):
+            prior = {**prior, **probe, "windows_reason": prior.get("reason")}
     g0 = float(prior["lag_s"])
     audio_result = analyse(g0, "video_phase")
     apply_segment_audio(segments, audio_result)

@@ -2051,6 +2051,57 @@ def av_offset_prior(hints: Any, segments: Sequence[Segment], comp_fps: Any, cfg:
     return out
 
 
+def av_offset_probe(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int, comp_fps: Any,
+                    cfg: Any, dlog: DecisionLog | None = None) -> dict:
+    """Fallback search centre when the S5.1 windows give no prior (too few long windows, DESIGN §7 D9): one
+    wide lag search (±cfg.av_offset_max_s, at most half the range) per speed-1 stretch segment with >=
+    av_offset_seg_min_s of core audio; the segments correlating >= verify_audio_strong_corr constrain the
+    offset exactly like the precise estimate (``solve_av_offset``: 0 exactly when 0 explains them).
+    Returns {'lag_s', 'accepted', 'source': 'probe', 'n_segments', 'interval_ms', 'reason'}."""
+    with single_thread_blas():
+        dlog = dlog or null_dlog()
+        fps = parse_fps(comp_fps)
+        sr = int(sr)
+        comp, raw = _mono(comp_y), _mono(raw_y)
+        out: dict[str, Any] = {"lag_s": 0.0, "accepted": False, "source": "probe", "n_segments": 0, "interval_ms": None,
+                               "reason": ""}
+        if comp.size == 0 or raw.size == 0:
+            out["reason"] = "no audio"
+            return out
+        max_s = float(_cfg(cfg, "av_offset_max_s", 1.0))
+        strong = float(_cfg(cfg, "verify_audio_strong_corr", 0.8))
+        min_s = float(_cfg(cfg, "av_offset_seg_min_s", 0.5))
+        eps = float(_cfg(cfg, "av_offset_eps_ms", 0.5)) / 1000.0
+        lo, hi, w = [], [], []
+        dur = 0.0
+        for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+            m = _build_model(s, fps, sr) if _stretch_v1(s) else None
+            if m is None:
+                continue
+            din, dout = _crossfade_frames(s)
+            a = int(round(Fraction(int(s.comp_in + din)) * sr / fps))
+            b = min(int(round(Fraction(int(s.comp_out - dout)) * sr / fps)), comp.size)
+            if b - a < int(min_s * sr):
+                continue
+            lag, pk = xcorr_lag(comp[a:b], m.render(raw, sr, a, b), sr, max_s)
+            if pk < strong:
+                continue
+            x_a = float(s.raw_in_seconds) + lag
+            ia, ib = (float(x) for x in s.raw_in_interval)
+            lo.append(x_a - ib - eps)
+            hi.append(x_a - ia + eps)
+            w.append((b - a) / sr * pk * pk)
+            dur += (b - a) / sr
+        sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur)
+        out.update(n_segments=sol["n"], reason=sol["reason"], accepted=sol["status"] in ("measured", "zero"),
+                   lag_s=float(sol["lag_s"]),
+                   interval_ms=None if sol["interval_s"] is None else [round(sol["interval_s"][0] * 1000.0, 3),
+                                                                       round(sol["interval_s"][1] * 1000.0, 3)])
+        dlog.record("audio_align", "av_offset_probe", lag_ms=round(out["lag_s"] * 1000.0, 3),
+                    **{k: v for k, v in out.items() if k != "lag_s"})
+        return out
+
+
 def av_offset_estimate(segments: Sequence[Segment], audio_result: dict, cfg: Any, dlog: DecisionLog | None = None,
                        *, prior: dict | None = None) -> dict:
     """The run's A/V offset from a per-segment audio pass (DESIGN §7 D9): every forward stretch segment with

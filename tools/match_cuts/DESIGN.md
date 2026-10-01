@@ -290,6 +290,7 @@ def analyze_segments_audio(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog, *, 
     # (±min(audio_residual_search_s, half the range)); J/L against the measured switch baseline; also returns
     # '_av_offset_s', '_switch_baseline', '_measured' (run internals, never cutlist fields)
 def av_offset_prior(hints, segments, comp_fps, cfg, dlog) -> dict        # search centre from the S5.1 windows
+def av_offset_probe(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog) -> dict   # fallback: one wide search per segment
 def av_offset_estimate(segments, audio_result, cfg, dlog, *, prior=None) -> dict   # published cutlist.audio.av_offset
 def stab_intervals(lo, hi, w) -> dict ; solve_av_offset(lo, hi, w, cfg, audio_s=None) -> dict
     # per segment: J/L offsets (sign convention §3), pitch_preserved (speed != 1: log-frequency spectrum
@@ -712,8 +713,10 @@ verification honesty) were fixed under these shared rules:
   * Prior (`audio_align.av_offset_prior`, start of S6): S5.1 windows (speed 1, waveform NCC ≥
     `av_offset_prior_wave_peak`, inside one speed-1 stretch segment) give the in-point their audio implies;
     accepted with ≥ `av_offset_prior_min_windows` windows within `av_offset_prior_max_mad_ms` MAD; the value
-    is the stabbing solution below on the window intervals (0 exactly when 0 explains them), else 0. It only
-    centres the first per-segment pass (|offset| > 100 ms and short segments become measurable).
+    is the stabbing solution below on the window intervals (0 exactly when 0 explains them). Too few
+    windows -> `av_offset_probe`: one wide search (±`av_offset_max_s`, at most half the range) per speed-1
+    segment ≥ 0.5 s, solved like the estimate; else 0. The prior only centres the first per-segment pass
+    (|offset| > 100 ms and short segments become measurable).
   * Estimate (`av_offset_estimate`, after the first pass): every forward stretch segment with corr ≥
     `verify_audio_strong_corr` over ≥ 0.5 s (or ≥ 0.25 s at corr ≥ 0.9) constrains g to
     `[(x_a − hi)/v, (x_a − lo)/v]` (x_a = video raw_in + v·measured lag, [lo, hi] its floor raw_in interval;
