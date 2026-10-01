@@ -1922,6 +1922,113 @@ def test_animated_text_the_compared_picture_also_shows_is_picture_content():
     assert layout_mod.animated_text_overlays(panned, lay, cfg) == []
 
 
+# -- RAW-only overlays (wave 4 (a)) --------------------------------------------------------------
+
+def _disclaimer_case(text_in_raw: bool = True, rec_offset: int = 0, rec_dx: float = 0.0, hold: bool = False,
+                     comp_logo: bool = False, big: bool = False, n: int = 30):
+    """RAW (30 fps): moving two-layer content; with ``text_in_raw`` a burned-in disclaimer line static in RAW
+    coordinates (``big``: a block covering ~40 % of the picture). The competitor's master shows the CLEAN RAW 10..39
+    under an editor pan (``comp_logo``: plus a competitor-only outlined word over a STATIC flat patch of the RAW).
+    The recreation: one raw segment on the true line shifted by ``rec_offset`` RAW frames, its framing by ``rec_dx``
+    px (``hold``: speed 0 on RAW 20)."""
+    import motion_fixtures as mf
+    clean = mf.two_layer_raw(60)
+    if comp_logo:
+        clean[:, 100:118, 100:170] = 90                      # a static flat patch of the RAW
+    raw_frames = clean.copy()
+    if text_in_raw:
+        for j in range(60):
+            if big:
+                raw_frames[j, 30:110, 40:160] = 200
+                _outlined_word(raw_frames[j], "BIG GRAPHIC", 55, 60, size=12, stroke=1)
+            else:
+                _outlined_word(raw_frames[j], "NOT A SUBSTITUTE", 55, 95, size=11, stroke=1)
+    js = np.arange(10, 10 + n)
+    comp_frames = mf.render(clean, js, mf.pan_sims(n), (160, 120), noise=1.0).copy()
+    if comp_logo:
+        for k in range(n):
+            x0 = int(round(100 - 20 - 1.2 * k))
+            _outlined_word(comp_frames[k], "LOGO", x0 + 4, 100 - 15 + 1, size=11, stroke=1)
+    comp = _fps_proxy(comp_frames, "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    pan = lambda k: -20.0 - 1.2 * k + rec_dx          # noqa: E731
+    seg_ = (_line_seg(1, 0, n, 20.5, F30, pan, speed=0.0) if hold
+            else _line_seg(1, 0, n, 10.5 + rec_offset, F30, pan))
+    return comp, raw, [seg_], frame_map(list(js))
+
+
+def _raw_overlays(comp, raw, segs, fm, cfg):
+    return verify.find_raw_only_overlays(comp, raw, segs, fm, lambda k: None, lambda k: FIX_BOX,
+                                         (float(raw.size[0]), float(raw.size[1])), F30, F30, raw.n, cfg)
+
+
+def _visual(comp, raw, segs, fm, cfg, ov=None):
+    seg_at = verify.single_raw_segments(segs, comp.n)
+    rec = [(k, verify.recreation_proxy_frame(comp, raw, seg_at, k, (float(raw.size[0]), float(raw.size[1])), F30, F30,
+                                             raw.n)) for k in range(comp.n)]
+    return verify.check_visual(comp, rec, fm, lambda k: None, FIX_BOX, cfg, None, "test", segments=segs,
+                               overlay_fn=ov.mask if ov else None,
+                               overlay_lines=verify.raw_only_overlay_lines(ov.regions) if ov else ())
+
+
+def test_raw_only_overlay_is_measured_masked_and_reported():
+    """Wave 4 (a), film24 clip B / the real run's 605+ shots: the RAW carries a burned-in disclaimer the competitor's
+    master does not have; every frame is exact but the visual check failed. The disclaimer is measured as a RAW-only
+    overlay (static in RAW coordinates while the RAW plays, persistent residual, a RAW graphic the competitor lacks,
+    small), reported with its RAW rectangle and frames, and excluded in s9_3: the frames pass as explained."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case()
+    plain = _visual(comp, raw, segs, fm, cfg)
+    assert plain["status"] == "fail" and plain["failed_frames"], plain["summary"]
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert len(ov.regions) == 1, (ov.regions, ov.rejected)
+    x, y, w, h = ov.regions[0]["raw_rect"]
+    assert 50 <= x <= 60 and 90 <= y + h and y <= 100 and w >= 60          # around the drawn line (x 55, y ~95-106)
+    lines = verify.raw_only_overlay_lines(ov.regions)
+    assert len(lines) == 1 and lines[0].startswith("RAW-only overlay at") and "not shown by the competitor" in lines[0]
+    res = _visual(comp, raw, segs, fm, cfg, ov)
+    assert res["status"] == "pass_with_exceptions", res["summary"]
+    assert set(plain["failed_frames"]) <= set(res["raw_only_overlay_frames"])
+    assert any("RAW-only overlay" in e for e in res["exceptions"])
+    m = ov.mask(12)
+    assert m is not None and m.any() and m.mean() < 0.15               # follows the frame's model, small
+
+
+@pytest.mark.parametrize("case", ["wrong_frame", "wrong_framing"])
+def test_raw_only_overlay_never_explains_a_wrong_frame_or_framing(case):
+    """Negative control: with the same RAW-only disclaimer, a recreation one RAW frame... three RAW frames late, or
+    misframed by 6 px, still fails s9_3 -- the overlay may be found (it is real), but every frame must still reach
+    the threshold on everything else, and a time / framing error lives where the RAW changes."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case(rec_offset=3) if case == "wrong_frame" else _disclaimer_case(rec_dx=6.0)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    res = _visual(comp, raw, segs, fm, cfg, ov)
+    assert res["status"] == "fail" and len(res["failed_frames"]) >= 0.9 * comp.n, res["summary"]
+    for r in ov.regions:                                     # whatever was accepted is the disclaimer, nothing else
+        assert r["raw_rect"][1] >= 80 and r["frac"] < 0.15
+    # and without any RAW-only content, nothing is explained at all
+    comp2, raw2, segs2, fm2 = _disclaimer_case(text_in_raw=False, rec_offset=3)
+    assert not _raw_overlays(comp2, raw2, segs2, fm2, cfg).regions
+
+
+def test_raw_only_overlay_rejects_competitor_side_elements_freezes_and_large_regions():
+    """Negative controls of the region tests: (1) a competitor-only word over a STATIC flat patch of the RAW is
+    persistent and static in RAW coordinates but the edges are the competitor's -- not a RAW graphic, rejected;
+    (2) a hold (one RAW frame shown) never measures 'static in RAW coordinates' -- nothing explained; (3) a RAW-only
+    block covering ~40 % of the picture is a mismatch spread over the frame -- nothing is explained, s9_3 fails."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case(text_in_raw=False, comp_logo=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions and any("no graphic the competitor lacks" in r["why"] for r in ov.rejected), ov.rejected
+    comp, raw, segs, fm = _disclaimer_case(hold=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions
+    comp, raw, segs, fm = _disclaimer_case(big=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions, ov.regions
+    assert _visual(comp, raw, segs, fm, cfg, ov)["status"] == "fail"
+
+
 class PanStub:
     """Stub scorer for a continuous shot under an editor pan: truth RAW frame 100 + k, true framing tx(k) =
     2 k (comp px). score = 1 - 0.02 |dj| - 0.01 |tx - tx(k) - P dj| (a time error dj is compensated by P px of

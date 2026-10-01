@@ -13,7 +13,11 @@ from pathlib import Path
 # evidence, FX-07), so they ARE analysis parameters.
 VERIFY_ONLY_PARAMS = ("temporal_mag_ratio", "verify_refit_margin",
                       "verify_union_frames", "verify_excursion_frames", "verify_framing_min_samples",
-                      "verify_framing_all_max", "verify_low_score_margin", "verify_mix_tie")
+                      "verify_framing_all_max", "verify_low_score_margin", "verify_mix_tie",
+                      "verify_overlay_samples", "verify_overlay_raw_span", "verify_overlay_static",
+                      "verify_overlay_resid_k", "verify_overlay_resid_min", "verify_overlay_persist",
+                      "verify_overlay_comp_var", "verify_overlay_grad_ratio", "verify_overlay_max_frac",
+                      "verify_overlay_min_px")
 
 
 @dataclass
@@ -248,6 +252,18 @@ class Config:
     verify_low_score_margin: float = 0.02  # c4: unconverged sample whose model gradient score is this far below its neighbours' median -> failure
     verify_mix_tie: float = 0.1            # c3 Frame Mix (FX-08): refine's single-frame argmax on the LIGHTER source of a
                                            #   frame-blend mix counts as a blend tie only within this of an even (0.5) mix
+    # RAW-only overlays (wave 4, DESIGN §5 verify): a burned-in graphic the RAW carries and the competitor does not show,
+    # MEASURED per raw segment and masked in s9_2b / s9_2c / s9_3 with an explanation (never assumed)
+    verify_overlay_samples: int = 16       # matched frames sampled per raw segment
+    verify_overlay_raw_span: int = 5       # the RAW must be static over at least this many distinct RAW frames ...
+    verify_overlay_static: float = 6.0     # ... per-pixel range (8-bit, score blur, RAW proxy) at most this
+    verify_overlay_resid_k: float = 4.0    # competitor vs recreation residual above median + this many robust sigmas ...
+    verify_overlay_resid_min: float = 12.0  # ... and above this (8-bit) ...
+    verify_overlay_persist: float = 0.8    # ... on at least this fraction of the sampled frames that see the pixel
+    verify_overlay_comp_var: float = 8.0   # the competitor's picture must change over the segment (75th pct per-pixel std)
+    verify_overlay_grad_ratio: float = 2.0  # the RAW's edge energy on the region >= this x the competitor's (a RAW graphic)
+    verify_overlay_max_frac: float = 0.15  # all regions of a segment cover at most this fraction of the visible picture
+    verify_overlay_min_px: int = 24        # a region needs at least this many RAW proxy pixels
 
     def resolved_workers(self) -> int:
         import os

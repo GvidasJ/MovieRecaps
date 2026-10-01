@@ -1185,6 +1185,321 @@ class TemporalFrames:
         return temporal.prepare(w, valid & self._mask(k, roi), self.max_side, self._blur_at(roi))
 
 
+# ---------------------------------------------------------------------------------------------
+# RAW-only overlays (wave 4): burned-in graphics the RAW carries and the competitor does not show
+# ---------------------------------------------------------------------------------------------
+#
+# A RAW upload may carry a legal disclaimer, a subtitle or a channel bug that the competitor's master did not have
+# (the real run's shots from 605 on, film24's two-clip pan). The recreation (AE / preview) shows it, the competitor
+# does not, and the visual check fails although every frame is exact. Such a region is measured, never assumed:
+# per raw segment, on sampled matched frames, the competitor is warped back into RAW coordinates with the
+# segment's own model and compared with the shown RAW frame (gain / offset fitted, score blur). Only a segment where
+# BOTH play is examined: >= 3 distinct RAW frames shown and the competitor's picture changing over the segment
+# (75th percentile of the per-pixel std >= verify_overlay_comp_var) -- a hold, a freeze or a static scene shown at a
+# wrong, far-away RAW frame (which would differ only where the RAW once changed) is never explained this way.
+# A RAW-only overlay is then a compact region where
+#   1. the RAW is STATIC in RAW coordinates (per-pixel range over >= verify_overlay_raw_span distinct RAW frames
+#      around the shown ones <= verify_overlay_static): a frame or time error only shows where the RAW CHANGES,
+#      so no wrong frame can produce a residual confined to a static region;
+#   2. the competitor differs from the recreation PERSISTENTLY (residual above max(verify_overlay_resid_min,
+#      verify_overlay_resid_k robust sigmas) on >= verify_overlay_persist of the frames that see the pixel);
+#   3. the RAW carries a GRAPHIC there that the competitor lacks: edge energy of the RAW >= verify_overlay_grad_ratio x
+#      the competitor's (warped to RAW coordinates, averaged over the segment) -- a competitor-side element (a sliding
+#      caption, a sticker) has its edges in the competitor and is never called RAW-only; a misframing has edges on
+#      both sides;
+#   4. it is small: all regions of a segment together cover <= verify_overlay_max_frac of the visible picture
+#      (a misframing or a different take differs EVERYWHERE and is never a set of small static regions).
+# Accepted regions (bounding boxes in RAW px) are masked -- mapped through each frame's own model -- in s9_3, s9_2b and
+# s9_2c; s9_3 lists every frame that passes only with the mask as explained ('RAW-only overlay at x,y,w,h in RAW px
+# over frames a-b: not shown by the competitor'), and the frame must still reach verify_zncc on everything else.
+
+def _gradmag_f(img: np.ndarray) -> np.ndarray:
+    import cv2
+    a = np.asarray(img, np.float32)
+    return cv2.magnitude(cv2.Sobel(a, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(a, cv2.CV_32F, 0, 1, ksize=3))
+
+
+def _sample_evenly(ks: Sequence[int], n: int) -> list[int]:
+    if len(ks) <= n:
+        return list(ks)
+    idx = np.unique(np.rint(np.linspace(0, len(ks) - 1, int(n))).astype(int))
+    return [ks[i] for i in idx]
+
+
+def _raw_span(js: Sequence[int], span: int, has: Callable[[int], bool]) -> list[int]:
+    """The distinct RAW frames ``js`` extended alternately below / above until at least ``span`` frames."""
+    out = sorted(set(int(j) for j in js))
+    lo, hi = (out[0], out[-1]) if out else (0, -1)
+    step = 0
+    while out and len(out) < int(span) and step < 4 * int(span):
+        step += 1
+        cand = lo - 1 if step % 2 else hi + 1
+        if has(cand):
+            out.append(cand)
+            lo, hi = min(lo, cand), max(hi, cand)
+        elif step % 2:
+            lo -= 1
+        else:
+            hi += 1
+    return sorted(set(out))
+
+
+class RawOnlyOverlays:
+    """Accepted RAW-only overlay regions per raw segment and their per-frame competitor-proxy masks (each frame's own
+    model maps the RAW-coordinate mask; dilated like the layout overlays + the score blur's reach)."""
+
+    def __init__(self, comp: Any, raw: Any, raw_wh: tuple[float, float], comp_fps: Fraction, raw_fps: Fraction,
+                 dilate_px: int):
+        self.comp, self.raw, self.raw_wh = comp, raw, raw_wh
+        self.comp_fps, self.raw_fps = comp_fps, raw_fps
+        self.dilate_px = int(dilate_px)
+        self.by_seg: dict[int, tuple[Segment, np.ndarray]] = {}       # segment id -> (segment, RAW proxy bool mask)
+        self.regions: list[dict] = []                                  # accepted, reported
+        self.rejected: list[dict] = []
+        self._memo: dict[int, np.ndarray | None] = {}
+        self._frame_seg: dict[int, Segment] = {}
+
+    def add(self, seg: Segment, raw_mask: np.ndarray, frames: Sequence[int]) -> None:
+        self.by_seg[int(seg.id)] = (seg, raw_mask)
+        for k in frames:
+            self._frame_seg[int(k)] = seg
+
+    def __bool__(self) -> bool:
+        return bool(self.by_seg)
+
+    def mask(self, k: int) -> np.ndarray | None:
+        """Bool competitor-proxy mask of the RAW-only overlays at frame k (None when none applies)."""
+        import cv2
+        from .geometry import to_cv_matrix
+        k = int(k)
+        if k in self._memo:
+            return self._memo[k]
+        s = self._frame_seg.get(k)
+        out = None
+        if s is not None:
+            sim = seg_sim(s, k, *self.raw_wh)
+            if sim is not None:
+                _seg, rm = self.by_seg[int(s.id)]
+                m = to_cv_matrix(sim, bool(s.flip_h), float(self.raw_wh[0]), self.raw.ratio, self.comp.ratio)
+                w, h = int(self.comp.size[0]), int(self.comp.size[1])
+                o = cv2.warpAffine(rm.astype(np.uint8) * 255, np.asarray(m, np.float64)[:2], (w, h),
+                                   flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0) > 0
+                if self.dilate_px > 0 and o.any():
+                    d = self.dilate_px
+                    o = cv2.dilate(o.astype(np.uint8), np.ones((2 * d + 1, 2 * d + 1), np.uint8)) > 0
+                out = o if o.any() else None
+        if len(self._memo) > 256:
+            self._memo.clear()
+        self._memo[k] = out
+        return out
+
+    def allowed(self, allowed_fn: Callable[[int], np.ndarray | None]) -> Callable[[int], np.ndarray | None]:
+        """``allowed_fn`` with the RAW-only overlays removed."""
+        def f(k: int) -> np.ndarray | None:
+            a = allowed_fn(int(k))
+            o = self.mask(int(k))
+            if o is None:
+                return a
+            if a is None:
+                return ~o
+            return np.asarray(a, bool) & ~o
+        return f
+
+
+def find_raw_only_overlays(comp: Any, raw: Any, segments: Sequence[Segment], fm: FrameMap,
+                           allowed_fn: Callable[[int], np.ndarray | None], box_fn: Callable[[int], Box | dict | None],
+                           raw_wh: tuple[float, float], comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None,
+                           cfg: Any) -> RawOnlyOverlays:
+    """RAW-only overlays of every raw segment (section comment above). Deterministic; layout-only masks."""
+    import cv2
+    from .geometry import to_cv_matrix
+    blur = float(getattr(cfg, "score_blur", 1.0))
+    reach = int(math.ceil(3.0 * blur))
+    dil = int(getattr(cfg, "overlay_dilate_px", 3)) + reach
+    out = RawOnlyOverlays(comp, raw, raw_wh, comp_fps, raw_fps, dil)
+    if comp is None or raw is None or getattr(comp, "frames", None) is None or getattr(raw, "frames", None) is None:
+        return out
+    n_s = int(getattr(cfg, "verify_overlay_samples", 16))
+    span = int(getattr(cfg, "verify_overlay_raw_span", 5))
+    st_thr = float(getattr(cfg, "verify_overlay_static", 6.0))
+    rk = float(getattr(cfg, "verify_overlay_resid_k", 4.0))
+    rmin = float(getattr(cfg, "verify_overlay_resid_min", 12.0))
+    persist = float(getattr(cfg, "verify_overlay_persist", 0.8))
+    cvar = float(getattr(cfg, "verify_overlay_comp_var", 8.0))
+    gratio = float(getattr(cfg, "verify_overlay_grad_ratio", 2.0))
+    max_frac = float(getattr(cfg, "verify_overlay_max_frac", 0.15))
+    min_px = int(getattr(cfg, "verify_overlay_min_px", 24))
+    n = int(comp.n)
+    status = np.asarray(fm.status) if fm is not None else None
+    seg_at = single_raw_segments(segments, n)
+    rw, rh = int(raw.size[0]), int(raw.size[1])
+    cw, ch = int(comp.size[0]), int(comp.size[1])
+    for s in sorted((s for s in segments if s.type == "raw"), key=lambda s: (s.comp_in, s.id)):
+        ks = [k for k in range(max(0, s.comp_in), min(n, s.comp_out)) if seg_at.get(k) is s and comp.has(k)
+              and (status is None or (k < len(status) and int(status[k]) == Status.MATCH))]
+        if len(ks) < 3:
+            continue
+        samples = []
+        for k in _sample_evenly(ks, n_s):
+            sh = seg_shown(s, k, comp_fps, raw_fps, n_raw)
+            sim = seg_sim(s, k, *raw_wh)
+            if sh is None or sim is None:
+                continue
+            j = int(sh[0]) + (1 if sh[1] >= 0.5 else 0)
+            if not raw.has(j):
+                continue
+            m = np.asarray(to_cv_matrix(sim, bool(s.flip_h), float(raw_wh[0]), raw.ratio, comp.ratio), np.float64)[:2]
+            x, y, w, h = proxy_roi(box_fn(k) if box_fn is not None else None, comp.size, comp.ratio)
+            al = allowed_fn(k)
+            am = np.zeros((ch, cw), np.uint8)
+            am[y:y + h, x:x + w] = 255 if al is None else (np.asarray(al, bool)[y:y + h, x:x + w] * 255).astype(np.uint8)
+            flags = cv2.WARP_INVERSE_MAP
+            c_r = cv2.warpAffine(np.asarray(comp.get(k), np.float32), m, (rw, rh), flags=cv2.INTER_LINEAR | flags,
+                                 borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            v_r = cv2.warpAffine(am, m, (rw, rh), flags=cv2.INTER_NEAREST | flags, borderMode=cv2.BORDER_CONSTANT,
+                                 borderValue=0)
+            v_r = cv2.erode(v_r, np.ones((2 * reach + 1, 2 * reach + 1), np.uint8)) > 0
+            if int(v_r.sum()) < 256:
+                continue
+            c_b = _blur(c_r, blur)
+            r_b = _blur(np.asarray(raw.get(j), np.float32), blur)
+            xs, ys = r_b[v_r].astype(np.float64), c_b[v_r].astype(np.float64)
+            A = np.stack([xs, np.ones_like(xs)], axis=1)
+            coef = np.linalg.lstsq(A, ys, rcond=None)[0]
+            res = np.abs(ys - A @ coef)
+            keep = res <= np.percentile(res, 80.0)            # refit without the worst 20 % (the overlay itself)
+            if int(keep.sum()) >= 64:
+                coef = np.linalg.lstsq(A[keep], ys[keep], rcond=None)[0]
+            R = np.abs(c_b - (coef[0] * r_b + coef[1]))
+            rv = R[v_r]
+            med = float(np.median(rv))
+            thr = max(rmin, med + rk * 1.4826 * float(np.median(np.abs(rv - med))))
+            samples.append((k, j, v_r, (R > thr) & v_r, c_b))
+        if len(samples) < 3:
+            continue
+        js = _raw_span([sm[1] for sm in samples], span, lambda j: raw.has(int(j)) and (n_raw is None or 0 <= j < n_raw))
+        stack = np.stack([_blur(np.asarray(raw.get(int(j)), np.float32), blur) for j in js])
+        raw_range = stack.max(axis=0) - stack.min(axis=0)
+        static = raw_range <= st_thr
+        valid = np.stack([sm[2] for sm in samples])
+        high = np.stack([sm[3] for sm in samples])
+        nv = valid.sum(axis=0)
+        nh = high.sum(axis=0)
+        cand = static & (nv >= 3) & (nh >= persist * np.maximum(nv, 1))
+        seen = nv > 0
+        visible = int(seen.sum())
+        if not cand.any() or visible == 0:
+            continue
+        cvals = np.stack([sm[4] for sm in samples])
+        cnt = np.maximum(nv, 1)
+        mean = np.where(valid, cvals, 0.0).sum(axis=0) / cnt
+        cstd = np.sqrt(np.maximum(np.where(valid, (cvals - mean) ** 2, 0.0).sum(axis=0) / cnt, 0.0))
+        rstd = stack.std(axis=0)
+        many = nv >= 3
+        play_c = float(np.percentile(cstd[many], 75)) if many.any() else 0.0
+        n_shown = len({sm[1] for sm in samples})
+        if n_shown < 3 or play_c < cvar:
+            # a hold / freeze or a static competitor: 'static in RAW coordinates' is not measurable (and a static scene
+            # shown at a wrong, far-away RAW frame would differ only where the RAW once changed) -- nothing explained
+            if int(cand.sum()) >= min_px:
+                out.rejected.append({"segment": int(s.id), "frames": [int(ks[0]), int(ks[-1])], "pixels": int(cand.sum()),
+                                     "why": f"{n_shown} distinct RAW frame(s) shown, competitor picture change "
+                                            f"{play_c:.1f} (8-bit std, 75th pct): a RAW-only overlay is only measured "
+                                            "where both play"})
+            continue
+        gr = _gradmag_f(stack.mean(axis=0))
+        gc = _gradmag_f(mean)
+        closed = cv2.morphologyEx(cand.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 5), np.uint8)) > 0
+        nlab, lab, stt, _c = cv2.connectedComponentsWithStats(closed.astype(np.uint8), connectivity=8)
+        # glyph groups of one text line (vertical overlap >= half the smaller height, gap <= 1.5 x the taller) -> one
+        # region: a disclaimer is one rectangle, not one per word
+        boxes = [[int(v) for v in stt[i, :4]] + [i] for i in range(1, nlab)]
+        parent = list(range(len(boxes)))
+
+        def find(a: int) -> int:
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+        for a in range(len(boxes)):
+            for b in range(a + 1, len(boxes)):
+                xa, ya, wa, ha, _ = boxes[a]
+                xb, yb, wb, hb, _ = boxes[b]
+                vov = min(ya + ha, yb + hb) - max(ya, yb)
+                gap = max(xa, xb) - min(xa + wa, xb + wb)
+                if vov >= 0.5 * min(ha, hb) and gap <= 1.5 * max(ha, hb):
+                    parent[find(a)] = find(b)
+        groups: dict[int, list[int]] = {}
+        for a in range(len(boxes)):
+            groups.setdefault(find(a), []).append(boxes[a][4])
+        acc_mask = np.zeros((rh, rw), bool)
+        regions = []
+        for members in sorted(groups.values(), key=lambda m: (int(stt[m[0], 1]), int(stt[m[0], 0]))):
+            x0 = min(int(stt[i, 0]) for i in members)
+            y0 = min(int(stt[i, 1]) for i in members)
+            ww = max(int(stt[i, 0] + stt[i, 2]) for i in members) - x0
+            hh = max(int(stt[i, 1] + stt[i, 3]) for i in members) - y0
+            comp_px = cand & np.isin(lab, members)
+            npx = int(comp_px.sum())
+            reg = {"segment": int(s.id), "raw_rect_proxy": [x0, y0, ww, hh], "pixels": npx,
+                   "raw_rect": [round(x0 / raw.ratio[0], 1), round(y0 / raw.ratio[1], 1), round(ww / raw.ratio[0], 1),
+                                round(hh / raw.ratio[1], 1)],
+                   "comp_std": round(float(np.median(cstd[comp_px])), 2) if npx else None,
+                   "raw_std": round(float(np.median(rstd[comp_px])), 2) if npx else None,
+                   "grad_raw": round(float(np.mean(gr[comp_px])), 2) if npx else None,
+                   "grad_comp": round(float(np.mean(gc[comp_px & many])), 2) if npx and (comp_px & many).any() else None,
+                   "frac": round(ww * hh / float(visible), 4), "raw_frames": [int(js[0]), int(js[-1])],
+                   "frames": [int(ks[0]), int(ks[-1])]}
+            if npx < min_px:
+                continue                       # specks: not even a candidate worth listing
+            why = None
+            if reg["grad_comp"] is None or reg["grad_raw"] < gratio * reg["grad_comp"]:
+                why = (f"the RAW shows no graphic the competitor lacks there (edge energy RAW {reg['grad_raw']} vs "
+                       f"competitor {reg['grad_comp']}, < {gratio:g}x): a competitor-side element or a mismatch")
+            elif reg["frac"] > max_frac:
+                why = f"too large ({reg['frac']:.1%} of the visible picture > {max_frac:.0%})"
+            if why is not None:
+                out.rejected.append({**reg, "why": why})
+                continue
+            regions.append(reg)
+            acc_mask[y0:y0 + hh, x0:x0 + ww] = True
+        if not regions:
+            continue
+        tot = float(acc_mask.sum()) / float(visible)
+        if tot > max_frac:
+            out.rejected.extend({**r, "why": f"the segment's regions together cover {tot:.1%} of the visible picture "
+                                             f"(> {max_frac:.0%}): a mismatch spread over the frame"} for r in regions)
+            continue
+        out.add(s, cv2.dilate(acc_mask.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0, ks)
+        vis = [k for k in ks if out.mask(k) is not None]
+        for r in regions:
+            r["frames"] = [int(vis[0]), int(vis[-1])] if vis else r["frames"]
+        out.regions.extend(regions)
+    return out
+
+
+def raw_only_overlay_lines(regions: Sequence[dict]) -> list[str]:
+    """One line per RAW-only overlay, consecutive segments with overlapping RAW rectangles merged."""
+    groups: list[dict] = []
+    for r in sorted(regions, key=lambda r: (r["frames"][0], r["segment"])):
+        x, y, w, h = r["raw_rect"]
+        g = groups[-1] if groups else None
+        if g is not None and r["frames"][0] <= g["frames"][1] + 1:
+            gx, gy, gw, gh = g["raw_rect"]
+            ix = max(0.0, min(gx + gw, x + w) - max(gx, x))
+            iy = max(0.0, min(gy + gh, y + h) - max(gy, y))
+            if ix * iy >= 0.3 * min(gw * gh, w * h):
+                x0, y0 = min(gx, x), min(gy, y)
+                g["raw_rect"] = [x0, y0, max(gx + gw, x + w) - x0, max(gy + gh, y + h) - y0]
+                g["frames"] = [g["frames"][0], max(g["frames"][1], r["frames"][1])]
+                g["segments"].append(r["segment"])
+                continue
+        groups.append({"raw_rect": [x, y, w, h], "frames": list(r["frames"]), "segments": [r["segment"]]})
+    return [f"RAW-only overlay at {g['raw_rect'][0]:.0f},{g['raw_rect'][1]:.0f},{g['raw_rect'][2]:.0f},"
+            f"{g['raw_rect'][3]:.0f} (x,y,w,h in RAW px) over frames {g['frames'][0]}-{g['frames'][1]}: not shown by the "
+            f"competitor (segment(s) {', '.join('S%02d' % s for s in g['segments'])})" for g in groups]
+
+
 def recreation_proxy_frame(comp: Any, raw: Any, seg_at: dict[int, Segment], k: int, raw_wh: tuple[float, float],
                            comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None) -> np.ndarray | None:
     """The recreation at competitor frame k on the WHOLE competitor proxy (uint8): the shown RAW proxy frame (a Frame
@@ -3210,13 +3525,19 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
                  allowed_fn: Callable[[int], np.ndarray | None], box: Box | dict | None, cfg: Any,
                  fail_dir: Path | None = None, source: str = "",
                  box_fn: Callable[[int], Box | dict | None] | None = None,
-                 segments: Sequence[Segment] | None = None) -> dict:
+                 segments: Sequence[Segment] | None = None,
+                 overlay_fn: Callable[[int], np.ndarray | None] | None = None,
+                 overlay_lines: Sequence[str] = ()) -> dict:
     """Masked ZNCC competitor vs match-geometry recreation on every frame (video region of THAT frame --
     ``box_fn(k)``, e.g. the whole canvas in a full-screen period --, static and overlay pixels excluded,
     cfg.score_blur). Every matched frame must reach cfg.verify_zncc; every crossfade (BLEND) frame too
     (cfg.verify_blend_zncc when set). UNIFORM frames (dips / flashes): the recreation's region is uniform
     with the competitor's mean luma. NONE frames of a NOT-IN-RAW segment (``segments``): the recreation
-    shows the placeholder solid."""
+    shows the placeholder solid.
+
+    ``overlay_fn(k)`` (wave 4): the MEASURED RAW-only overlays (``find_raw_only_overlays``) at frame k, excluded
+    too; a matched frame that reaches the threshold only with them excluded is listed as explained
+    (``overlay_lines`` say what and where) -- it must still reach the threshold on everything else."""
     from . import scoring
     thr = float(getattr(cfg, "verify_zncc", 0.9))
     blend_thr = float(getattr(cfg, "verify_blend_zncc", thr))
@@ -3242,6 +3563,7 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
     want_unc = placeholder_gray("UNCERTAIN_RGB") if unc.any() else None
     n_img = 0
     n_uniform = n_ph = 0
+    explained: list[int] = []
 
     def image(k: int, c: np.ndarray, rec: np.ndarray, roi, s: float) -> None:
         nonlocal n_img
@@ -3278,7 +3600,16 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
                 ph_fail.append({"k": int(k), "why": why, "segment": "uncertain" if unc[k] else "not_in_raw"})
                 image(k, c, rec, roi, float("nan"))
             continue
-        s = scoring.zncc(_blur(c[y:y + h, x:x + w], blur), _blur(rec[y:y + h, x:x + w], blur), m)
+        cb, rb = _blur(c[y:y + h, x:x + w], blur), _blur(rec[y:y + h, x:x + w], blur)
+        ov = overlay_fn(k) if overlay_fn is not None else None
+        if ov is not None:
+            mo = m & ~np.asarray(ov, bool)[y:y + h, x:x + w]
+            s_full = scoring.zncc(cb, rb, m)
+            s = scoring.zncc(cb, rb, mo)
+            if st == Status.MATCH and s >= thr and not (s_full >= thr):
+                explained.append(int(k))
+        else:
+            s = scoring.zncc(cb, rb, m)
         scores[k] = s
         if st == Status.MATCH and not (s >= thr):
             fails.append(k)
@@ -3316,12 +3647,18 @@ def check_visual(comp: Any, rec_frames: Iterable[tuple[int, np.ndarray]], fm: Fr
     if ph_fail:
         failures.append(f"{len(ph_fail)} NOT-IN-RAW / UNCERTAIN frames do not show their labelled solid: {ph_fail[:3]}")
     exceptions = [f"{len(nan_fail)} matched frames unscorable (too few visible pixels): {_ranges(nan_fail)[:10]}"] if nan_fail else []
+    if explained:
+        exceptions.append(f"{len(explained)} matched frames {_ranges(explained)[:10]} reach ZNCC {thr} only with the "
+                          "measured RAW-only overlay(s) excluded: " + "; ".join(overlay_lines or ["RAW-only overlay"]))
     status_out = _status_from(len(failures), len(exceptions))
     summary = (f"{int(matched.sum())} matched frames, min ZNCC {dist.get('min', float('nan'))}, median "
                f"{dist.get('median', float('nan'))}, {len(real_fail)} below {thr}; {int(blend.sum())} blend frames"
                f"{' (min ' + str(round(float(bs.min()), 5)) + ')' if bs.size else ''}, {n_uniform} uniform, "
-               f"{n_ph} placeholder frames checked" + (f" [{source}]" if source else ""))
+               f"{n_ph} placeholder frames checked"
+               + (f"; {len(explained)} frames explained by RAW-only overlay(s)" if explained else "")
+               + (f" [{source}]" if source else ""))
     return {"status": status_out, "summary": summary, "failures": failures, "exceptions": exceptions, "threshold": thr,
+            "raw_only_overlay_frames": explained[:1000], "raw_only_overlays": list(overlay_lines),
             "distribution": dist, "failed_frames": [int(k) for k in real_fail[:1000]],
             "blend_frames_min": round(float(bs.min()), 5) if bs.size else None, "blend_threshold": blend_thr,
             "blend_failed_frames": blend_fail[:1000], "uniform_frames_checked": n_uniform,
@@ -4051,6 +4388,26 @@ def verify_all(ctx: Any) -> dict:
     db = Box.from_dict(dom) if isinstance(dom, dict) else dom
     centre = (db.x + db.w / 2.0, db.y + db.h / 2.0) if db is not None else (comp_wh[0] / 2.0, comp_wh[1] / 2.0)
 
+    # RAW-only overlays (measured, explained; masked in s9_2b / s9_2c / s9_3 -- wave 4)
+    try:
+        rov = find_raw_only_overlays(ctx.comp_proxy, ctx.raw_proxy, segs, ctx.fm, allowed, box_fn, raw_wh, comp_fps,
+                                     raw_fps, n_raw, cfg)
+    except Exception as e:  # noqa: BLE001 - a failed measurement explains nothing (never a pass)
+        log.error("verify: RAW-only overlay measurement failed: %s\n%s", e, traceback.format_exc())
+        rov = RawOnlyOverlays(getattr(ctx, "comp_proxy", None), getattr(ctx, "raw_proxy", None), raw_wh, comp_fps,
+                              raw_fps, 0)
+    rov_lines = raw_only_overlay_lines(rov.regions)
+    allowed_ov = rov.allowed(allowed) if rov else allowed
+    scorer_ov = None
+
+    def get_scorer_ov() -> ProxyScorer:
+        nonlocal scorer_ov
+        if not rov:
+            return get_scorer()
+        if scorer_ov is None:
+            scorer_ov = ProxyScorer(ctx.comp_proxy, ctx.raw_proxy, _box(ctx), allowed_ov, raw_wh[0], cfg, box_fn=box_fn)
+        return scorer_ov
+
     # competitor-only temporal signature (labels) + the recreation's, shared by c2 and s9_2b
     temporal_state: dict[str, Any] = {}
 
@@ -4060,18 +4417,25 @@ def verify_all(ctx: Any) -> dict:
                                     verify_overlays(ctx), raw_wh, comp_fps, raw_fps, n_raw, cfg)
         shape = (int(ctx.comp_proxy.size[1]), int(ctx.comp_proxy.size[0]))
         d = int(getattr(cfg, "overlay_dilate_px", 3))
-        mask_out = (lambda k: layout_mod.animated_text_mask(zones, k, shape, d)) if zones else None
+
+        def mask_out(k: int) -> np.ndarray | None:
+            a = layout_mod.animated_text_mask(zones, k, shape, d) if zones else None
+            o = rov.mask(k) if rov else None
+            return a if o is None else (o if a is None else (a | o))
         tf = TemporalFrames(ctx.comp_proxy, ctx.raw_proxy, segs, allowed, box_fn, dom, raw_wh, comp_fps, raw_fps, n_raw, cfg,
-                            mask_out=mask_out)
+                            mask_out=mask_out if (zones or rov) else None)
         comp_sig, labels, rec_sig = temporal_signatures(tf, cfg)
         temporal_state["labels"] = labels
-        return check_temporal(segs, labels, comp_sig, rec_sig, comp_fps, raw_fps, n_raw, n, cfg, masked=zones)
+        res = check_temporal(segs, labels, comp_sig, rec_sig, comp_fps, raw_fps, n_raw, n, cfg, masked=zones)
+        if rov_lines:
+            res["raw_only_overlays"] = rov_lines
+        return res
 
     checks["s9_2b_temporal"] = _run_check("s9_2b_temporal", s9_2b)
     extra["cuts"] = _run_check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg,
                                                              labels=temporal_state.get("labels"), box_centre=centre))
     checks["s9_2c_refit"] = _run_check("s9_2c_refit", lambda: check_refit(segs, ctx.fm, comp_fps, raw_fps, raw_wh, n_raw,
-                                                                           get_scorer(), cfg, n, box_centre=centre))
+                                                                           get_scorer_ov(), cfg, n, box_centre=centre))
 
     # s9_2: AE semantics from the plan and from the mock-run record
     cut_main = [pipeline.to_main_frame(k, comp_fps, main_fps) for k in cut_frames(segs)]
@@ -4122,7 +4486,8 @@ def verify_all(ctx: Any) -> dict:
     def s9_3() -> dict:
         src, desc = get_src()
         res = check_visual(ctx.comp_proxy, src.gray(n, ctx.comp_proxy.size), ctx.fm, allowed, _box(ctx), cfg,
-                           cfg.debug_dir / "verify_failures", desc, box_fn=box_fn, segments=segs)
+                           cfg.debug_dir / "verify_failures", desc, box_fn=box_fn, segments=segs,
+                           overlay_fn=rov.mask if rov else None, overlay_lines=rov_lines)
         scores = res.pop("scores")
         np.save(Path(cfg.work) / "verify_zncc.npy", scores.astype(np.float32))
         res["scores_file"] = str(Path(cfg.work) / "verify_zncc.npy")
@@ -4216,7 +4581,10 @@ def verify_all(ctx: Any) -> dict:
     seen = set()
     failures = [f for f in failures if not (f in seen or seen.add(f))]
     return {"criteria": criteria, "checks": checks, "failures": failures,
-            "main_fps": fps_str(main_fps), "frames": n, "main_frames": n_main}
+            "main_fps": fps_str(main_fps), "frames": n, "main_frames": n_main,
+            "raw_only_overlays": {"lines": rov_lines, "regions": [{k: v for k, v in r.items() if k != "raw_rect_proxy"}
+                                                                   for r in rov.regions],
+                                  "rejected": rov.rejected[:50]}}
 
 
 def _collect_failures(d: Any) -> list[str]:
