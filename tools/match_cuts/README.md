@@ -72,10 +72,11 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 
 **A/V offset.** Many short-form edits play their sound a little early or late against the picture (for
 example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`) and the report
-shows it in one line, e.g. *"Audio sync: … (lag −85.4 ms, interval −86.6 … −84.2 ms, 16 segment(s); a
-property of the input files, measured); export keeps RAW lip-sync (--audio-sync raw)"*. It is a property of
-the competitor file, not an error of the recreation: criterion 5 checks every segment against it and lists it
-as one explained exception.
+shows it in one line, e.g. *"Audio sync: competitor audio is 85.4 ms later than its picture, relative to RAW's
+own A/V sync (lag -85.4 ms, interval -86.6 … -84.2 ms, 16 segment(s), coverage 100%; a property of the input
+files, measured); … export keeps RAW lip-sync (--audio-sync raw)"*. It is a property of the competitor file,
+not an error of the recreation: criterion 5 checks every segment against it and lists it as one explained
+exception.
 
 - `--audio-sync raw` (default): the AE project uses the RAW audio in its own lip-sync. Extra audio-only
   layers (`Sxx  audio (J/L cut)`) appear only where the editor really let the sound start before / end after
