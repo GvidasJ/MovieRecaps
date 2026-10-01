@@ -283,8 +283,37 @@ def test_isolated_low_margin_frame_is_overridden_not_cut():
     assert len(segs) == 1 and segs[0].speed == 1.0
     assert int(fm.raw[40]) == int(m[40]) and bool(fm.low_margin[40])
     assert 40 in segs[0].low_margin_frames
-    assert "re-assigned" in segs[0].notes and "[40]" in segs[0].notes
+    # FX-12: the re-assignment has its own column and reason; the note says what happened, not 'low-margin'
+    from match_cuts.model import REASSIGN_REASONS
+    assert int(fm.reassigned[40]) > 0 and REASSIGN_REASONS[int(fm.reassigned[40])] in ("drop", "model")
+    assert int(np.count_nonzero(fm.reassigned)) == 1
+    assert "frames shown from the segment model instead of refine's best measurement" in segs[0].notes
+    assert " 40" in segs[0].notes
     check_model(segs[0], fm)
+
+
+def test_reassigned_frames_are_not_labelled_low_margin():
+    """FX-12: write_back no longer forces low_margin on a frame it re-assigns -- a frame refine measured with a clear
+    margin keeps low_margin False and gets the 'reassigned' reason instead; the segment confidence still counts it."""
+    m = ff_select(90, 1.0, 700)
+    bad = m.copy()
+    bad[40] -= 1
+    fm, bd = build_fm([Spec(m=bad, n=90)])
+    marg = np.full(90, 0.04)
+    marg[40] = 0.003                            # above low_margin_eps: refine did NOT flag it low-margin ...
+    fm.margin = marg
+    fm.low_margin = marg < 0.001
+    slo, shi = np.asarray(fm.soft_lo).copy(), np.asarray(fm.soft_hi).copy()
+    shi[40] = m[40]                             # ... but the model's frame is inside its soft range (within noise)
+    fm.soft_lo, fm.soft_hi = slo, shi
+    segs = run(fm, *proxies(fm.n))
+    assert len(segs) == 1 and int(fm.raw[40]) == int(m[40])
+    from match_cuts.model import REASSIGN_REASONS
+    assert REASSIGN_REASONS[int(fm.reassigned[40])] == "model" and not bool(fm.low_margin[40])
+    assert 40 not in segs[0].low_margin_frames
+    assert "frames shown from the segment model instead of refine's best measurement: model 40" in segs[0].notes
+    assert segs[0].confidence < 0.95 + 1e-9      # still counted in the confidence
+    assert not np.any(fm.reassigned[np.arange(90) != 40])
 
 
 def test_speed_only_cut_has_ambiguity_window():
@@ -657,8 +686,8 @@ def test_noisy_refine_output_keeps_exact_cuts_and_fixes_frames():
     assert [(s.comp_in, s.comp_out) for s in segs] == list(zip(bd[:-1], bd[1:]))
     assert [s.speed for s in segs] == pytest.approx([1.0, 1.0, 1.1, 1.0])
     assert np.array_equal(np.asarray(fm.raw), truth)
-    for k in errs:
-        assert bool(fm.low_margin[k])
+    for k in errs:                     # FX-12: re-assigned (with its reason), not relabelled low-margin
+        assert int(fm.reassigned[k]) > 0, k
     for s in segs:
         check_model(s, fm)
 

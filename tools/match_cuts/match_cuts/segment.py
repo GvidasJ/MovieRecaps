@@ -80,7 +80,7 @@ import numpy as np
 from . import phase_solve as ps
 from .common import DecisionLog, log, null_dlog, seed_everything, timecode
 from .geometry import Sim, interpolate_keys, rdp
-from .model import FrameMap, Segment, Status
+from .model import REASSIGN_REASONS, FrameMap, Segment, Status, reassign_code
 
 __all__ = ["build_segments", "segment_constraints", "scenedetect_changes", "plot_mapping", "plot_scores"]
 
@@ -950,6 +950,7 @@ class _Builder:
                  dlog: DecisionLog | None, debug_dir: Any, hints: Any, src: FrameMap | None = None):
         self.fm = fm                      # write target
         src = fm if src is None else src  # refine's columns (read)
+        self.src = src
         self.cfg = cfg
         self.dlog = dlog or null_dlog()
         self.debug_dir = Path(debug_dir) if debug_dir else None
@@ -3850,17 +3851,20 @@ class _Builder:
     # write-back to the FrameMap
     # ---------------------------------------------------------------------------------------------
     def write_back(self, work: list[_Seg], segs: list[Segment]) -> None:
-        fm, F = self.fm, self.F
-        status = np.asarray(fm.status).copy()
-        raw = np.asarray(fm.raw).copy()
-        rlo, rhi = np.asarray(fm.raw_lo).copy(), np.asarray(fm.raw_hi).copy()
-        slo, shi = np.asarray(fm.soft_lo).copy(), np.asarray(fm.soft_hi).copy()
-        low = np.asarray(fm.low_margin).copy()
+        # starts from refine's columns (the pristine source: a re-run on its own output writes the same values and
+        # finds the same re-assignments)
+        fm, F, src = self.fm, self.F, self.src
+        status = np.asarray(src.status).copy()
+        raw = np.asarray(src.raw).copy()
+        rlo, rhi = np.asarray(src.raw_lo).copy(), np.asarray(src.raw_hi).copy()
+        slo, shi = np.asarray(src.soft_lo).copy(), np.asarray(src.soft_hi).copy()
+        low = np.asarray(src.low_margin).copy()
+        reassigned = np.zeros(fm.n, np.int8)       # FX-12: why the model's frame replaced refine's (never low_margin)
         tie = np.zeros(fm.n, bool)
-        flip = np.asarray(fm.flip).copy()
-        track = np.asarray(fm.track).copy()
-        sims = np.stack([np.asarray(fm.s), np.asarray(fm.theta), np.asarray(fm.tx), np.asarray(fm.ty)], axis=1).copy()
-        meas = np.asarray(fm.sim_meas).copy()
+        flip = np.asarray(src.flip).copy()
+        track = np.asarray(src.track).copy()
+        sims = np.stack([np.asarray(src.s), np.asarray(src.theta), np.asarray(src.tx), np.asarray(src.ty)], axis=1).copy()
+        meas = np.asarray(src.sim_meas).copy()
         changed = []
         for S, seg in zip(work, segs):
             if seg.type != "raw":
@@ -3884,11 +3888,12 @@ class _Builder:
                             continue          # e.g. a timing-tie frame: keep refine's frame (it is listed)
                         lo_k, hi_k = min(lo_k, j), max(hi_k, j)   # tolerated isolated low-margin frame
                     if not (int(rlo[k]) <= j <= int(rhi[k])):
-                        changed.append({"k": k, "old": int(raw[k]), "new": j,
-                                        "why": F.touched.get(k, "drop" if k in p.model.drops else "model")})
+                        why = F.touched.get(k, "drop" if k in p.model.drops else "model")
+                        changed.append({"k": k, "old": int(raw[k]), "new": j, "why": why,
+                                        "low_margin": bool(low[k])})
                         raw[k] = j
                         rlo[k] = rhi[k] = j
-                        low[k] = True
+                        reassigned[k] = reassign_code(why)
                         rm = remeasured.get(k)
                         if rm is not None and int(rm[0]) == j:
                             # FX-06 1: the framing measured on the frame now shown (a consistent (RAW frame, Sim) pair)
@@ -3906,6 +3911,7 @@ class _Builder:
                 status[S.a:S.b][sel] = Status.UNRESOLVED
         fm.status, fm.raw, fm.raw_lo, fm.raw_hi = status, raw, rlo, rhi
         fm.soft_lo, fm.soft_hi, fm.low_margin, fm.tie = slo, shi, low, tie
+        fm.reassigned = reassigned
         fm.flip, fm.track = flip, track
         fm.s, fm.theta, fm.tx, fm.ty = sims[:, 0], sims[:, 1], sims[:, 2], sims[:, 3]
         fm.sim_meas = meas
@@ -3984,18 +3990,24 @@ class _Builder:
         self.assign_regions(segs)
         self.write_back(work, segs)
         self._coverage_check(segs)
-        pre_raw = np.asarray(self.fm.d[_PRE + "raw"]) if (_PRE + "raw") in self.fm.d else None
+        ra = np.asarray(self.fm.reassigned)
         for s in segs:
             s.low_margin_frames = [k for k in range(s.comp_in, s.comp_out)
                                    if bool(self.fm.low_margin[k]) and self.fm.status[k] == Status.MATCH]
-            if s.type == "raw" and s.low_margin_frames:
+            moved = [k for k in range(s.comp_in, s.comp_out) if int(ra[k]) > 0 and self.fm.status[k] == Status.MATCH]
+            # confidence: refine's low-margin frames AND the frames the model re-assigned (each counted once); the
+            # labels stay honest -- a re-assigned frame is not called low-margin (FX-12)
+            weak = sorted(set(s.low_margin_frames) | set(moved))
+            if s.type == "raw" and weak:
                 n_in = max(1, sum(1 for k in range(s.comp_in, s.comp_out) if self.fm.status[k] == Status.MATCH))
-                s.confidence = round(float(s.confidence * max(0.5, 1.0 - len(s.low_margin_frames) / n_in)), 4)
-                if pre_raw is not None:
-                    fixed = [k for k in s.low_margin_frames if int(pre_raw[k]) != int(self.fm.raw[k])]
-                    if fixed:
-                        s.notes = (s.notes + "; " if s.notes else "") + \
-                            f"low-margin frames re-assigned to the segment model's RAW frame: {fixed}"
+                s.confidence = round(float(s.confidence * max(0.5, 1.0 - len(weak) / n_in)), 4)
+            if s.type == "raw" and moved:
+                why: dict[str, list[int]] = {}
+                for k in moved:
+                    why.setdefault(REASSIGN_REASONS[int(ra[k])], []).append(k)
+                s.notes = (s.notes + "; " if s.notes else "") + \
+                    "frames shown from the segment model instead of refine's best measurement: " + ", ".join(
+                        f"{w} {_rng(ks)}" for w, ks in sorted(why.items(), key=lambda kv: kv[1][0]))
         self.log("segments", evidence={"count": len(segs), "segments": [
             {"id": s.id, "type": s.type, "comp": [s.comp_in, s.comp_out], "speed": s.speed,
              "raw_in_frame": s.raw_in_frame, "flip": s.flip_h} for s in segs]})
@@ -4461,7 +4473,7 @@ def plot_scores(segs: Sequence[Segment], fm: FrameMap, cfg: Any, path: str | Pat
 # =================================================================================================
 
 _WRITTEN = ("status", "raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi", "low_margin", "flip", "track", "tie", "s",
-            "theta", "tx", "ty", "sim_meas")
+            "theta", "tx", "ty", "sim_meas", "reassigned")
 _PRE = "pre_segment_"
 
 
@@ -4485,7 +4497,8 @@ def build_segments(fm: FrameMap, comp: Any, raw: Any, layout: Any, overlays: Any
     """Stage 5.4-5.5: cut the competitor timeline into segments (DESIGN §5 segment.py).
 
     fm        FrameMap from refine (mutated in place: m(k) corrected to the segment model where the soft
-              range allows it (low_margin flagged) -- with the framing measured on the frame now shown --,
+              range allows it (FrameMap 'reassigned' = the reason code, model.REASSIGN_REASONS; low_margin stays
+              refine's measurement, FX-12) -- with the framing measured on the frame now shown --,
               crossfade overlap frames -> Status.BLEND, tie flags, soft ranges widened for tolerated isolated
               frames; refine's columns are kept as 'pre_segment_*' entries of the column store, so re-running
               on the output is exact).

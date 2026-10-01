@@ -726,3 +726,77 @@ def test_three_states_match_unresolved_none(tmp_path):
     det = [r for r in recs if r["decision"] == "detail_promotion"]
     assert det and det[0]["promoted"] == []
     assert any(r["decision"] == "gap_lines" for r in recs)
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-11: self-consistent candidate vectors, noise-calibrated RAW identity
+# ---------------------------------------------------------------------------------------------
+
+def _smooth(h: int, w: int, seed: int, sigma: float = 6.0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    img = cv2.GaussianBlur(rng.uniform(0, 255, (h, w)).astype(np.float32), (0, 0), sigma)
+    return np.clip((img - img.mean()) / max(float(img.std()), 1e-6) * 40.0 + 128.0, 0, 255)
+
+
+def test_final_vector_is_rescored_under_the_final_keys_and_m_is_its_argmax(tmp_path):
+    """FX-11 (the real run's k644: refine's m(644) = 1101 at 0.9517 while its own stored vector had 1098 at 0.9553):
+    the hypothesis-time vector was scored under an EARLIER framing. _w_final re-scores every evaluated frame under the
+    final keys -- no stale score survives -- and m is the argmax of that vector."""
+    W, H = S.RAW_FULL
+    frames = np.stack([_texture(H, W, 400 + i) for i in range(24)])
+    sim = S.centred_sim(0.85, 0.0)
+    raw, comp, layout = _mini(frames, [12], sim, np.random.default_rng(3))
+    cfg = S.make_config(tmp_path, workers=1)
+    st = _eval_state(raw, comp, layout, cfg)
+    stale = np.full(15, 0.2, np.float32)
+    stale[10 - 5] = 0.999                                   # 'RAW 10 best' -- measured under another framing
+    lo2, arr, rlo, rhi, m = refine._w_final(st, (0, [refine._key(0, sim)], False, 10, 5, stale, 3, 0.002, 0.002))
+    assert m == 12 and int(np.nanargmax(arr)) + lo2 == m, (m, lo2, arr)
+    assert float(arr[10 - lo2]) < 0.9                       # RAW 10 re-scored under the final framing
+    assert rlo == rhi == 12
+    kept = refine._w_final(st, (0, [refine._key(0, sim)], False, 10, 5, stale, 3, 0.002, 0.002, True))
+    assert kept[4] == 10                                    # a caller may keep its m (confound re-assignment)
+
+
+def test_noise_calibrated_identity_extends_the_identical_range_only_contiguously(tmp_path):
+    """FX-11 noise-calibrated identity (per tile, score blur): RAW 8..12 are the same smooth picture with fresh grain
+    (std 3: tile ZNCC < identical_thresh, mean |diff| above the contrast-relative MAD threshold -- the FX-08 test alone
+    calls them different) -> identical within the track's noise delta; RAW 7 is another picture and RAW 6 the same
+    picture again (a periodic alias): the range stops at the first break. Without delta it stays [10, 10]; a small
+    changing region (a display bar) keeps neighbours apart even with delta."""
+    W, H = S.RAW_FULL
+    rng = np.random.default_rng(11)
+    base = _smooth(H, W, 5)
+    frames = np.stack([_texture(H, W, 500 + i).astype(np.float32) for i in range(20)])
+    for j in (6, 8, 9, 10, 11, 12):
+        frames[j] = base + rng.normal(0, 3.0, base.shape)
+    frames = np.clip(np.rint(frames), 0, 255).astype(np.uint8)
+    sim = S.centred_sim(0.85, 0.0)
+    raw, comp, layout = _mini(frames, [10], sim, np.random.default_rng(3))
+    cfg = S.make_config(tmp_path, workers=1)
+    st = _eval_state(raw, comp, layout, cfg)
+    task = (0, [refine._key(0, sim)], False, 10, 10, np.zeros(0, np.float32), 3, 0.02)
+    lo2, arr, rlo, rhi, m = refine._w_final(st, task)
+    assert (rlo, rhi) == (10, 10)                           # FX-08 fixed thresholds: grain is not 'identical'
+    lo2, arr, rlo, rhi, m = refine._w_final(st, task + (0.004,))
+    assert m in (8, 9, 10, 11, 12) and (rlo, rhi) == (8, 12), (m, rlo, rhi, arr)
+    # a bar that changes on RAW 9 / 11 (a small region): never diluted by the static rest
+    bar = frames.copy()
+    bar[9, 250:290, 400:520] = 250
+    bar[11, 250:290, 400:520] = 10
+    raw2, comp2, layout2 = _mini(bar, [10], sim, np.random.default_rng(3))
+    st2 = _eval_state(raw2, comp2, layout2, cfg)
+    lo2, arr, rlo, rhi, m = refine._w_final(st2, task + (0.004,))
+    assert m == 10 and (rlo, rhi) == (10, 10), (m, rlo, rhi)
+
+
+def test_noise_identical_tiles():
+    a = _smooth(90, 120, 3).astype(np.float32)
+    m = np.ones(a.shape, bool)
+    b = a + np.random.default_rng(1).normal(0, 2.0, a.shape).astype(np.float32)
+    assert refine._noise_identical(a, b, m, 0.99, 0.004, 4, 1.0)
+    assert not refine._noise_identical(a, b, m, 0.99, 0.0002, 4, 1.0)      # below the noise of THIS track: different
+    c = a.copy()
+    c[10:20, 10:30] += 60.0                                                    # one tile changes
+    assert not refine._noise_identical(a, c, m, 0.99, 0.004, 4, 1.0)
+    assert not refine._noise_identical(a, a, m, 0.99, float("nan"), 4, 1.0)   # no measured noise: no claim

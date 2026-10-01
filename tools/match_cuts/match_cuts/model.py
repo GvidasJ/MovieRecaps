@@ -299,7 +299,25 @@ FRAME_MAP_FIELDS: dict[str, tuple[type, Any]] = {
     "detail": (np.float32, np.nan),  # detail-sensitive second score of a gray-zone frame (FX-08, refine): blur-matched
                                      # gradient ZNCC of its best hypothesis; a MATCH with score < match_thresh was
                                      # promoted by it
+    "delta": (np.float32, np.nan),  # the frame's score noise delta_k (FX-11, refine): scoring.noise_delta of its
+                                    # track's best scores -- the soft range and the noise-calibrated identity use it
+    "reassigned": (np.int8, 0),     # FX-12 (segment write_back): 0 = m(k) is refine's measurement, else the code
+                                    # (REASSIGN_REASONS) of why the segment model's frame replaced it
 }
+
+# why segmentation showed the segment model's RAW frame instead of refine's best (FrameMap 'reassigned'); index 0 =
+# not re-assigned; an unknown reason string maps to 'other'
+REASSIGN_REASONS: tuple[str, ...] = ("", "model", "drop", "tiny_segment_merged", "criterion2_moved", "continuous_merge",
+                                     "phantom_cut_merge", "union_merged", "frame_blend", "none_absorbed",
+                                     "repeat_pair_absorbed", "other")
+
+
+def reassign_code(why: str) -> int:
+    """FrameMap 'reassigned' code of a segment.py re-assignment reason ('none_absorbed_*' -> 'none_absorbed')."""
+    w = str(why or "")
+    if w.startswith("none_absorbed"):
+        w = "none_absorbed"
+    return REASSIGN_REASONS.index(w) if w in REASSIGN_REASONS else REASSIGN_REASONS.index("other")
 
 CAND_W = 15   # per-frame candidate score vector length stored in FrameMap.cand (RAW cand_j0 .. cand_j0+14)
 

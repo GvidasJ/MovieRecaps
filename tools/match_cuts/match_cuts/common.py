@@ -203,7 +203,7 @@ def params_hash(*parts: Any) -> str:
 # Bump a stage's version whenever its algorithm changes so stale cache entries are never reused.
 STAGE_VERSION: dict[str, int] = {
     "probe": 2, "conform": 1, "proxy": 1, "audio": 1, "layout": 2, "audio_align": 2, "raw_index": 1,
-    "sparse_search": 4, "frame_map": 5, "segments": 4, "scenedetect": 1,
+    "sparse_search": 4, "frame_map": 6, "segments": 5, "scenedetect": 1,
 }
 
 
