@@ -1,6 +1,6 @@
 """Command line: ``python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 [--comp-size WxH|competitor] [--fps competitor|source] [--work DIR] [--workers N] [--force-conform]
-[--ae-time-mode auto|stretch|remap|frames] [-v]`` (DESIGN.md §5 cli.py, prompt Configuration).
+[--ae-time-mode auto|stretch|remap|frames] [--audio-sync raw|competitor] [-v]`` (DESIGN.md §5 cli.py, prompt Configuration).
 
 Input auto-detection (prompt Configuration): the competitor is the portrait file, failing that the
 shorter one. Explicit arguments that look reversed are swapped with a warning; if the defaults do not
@@ -107,6 +107,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ae-time-mode", default="auto", choices=["auto", "stretch", "remap", "frames"],
                    help="how AE layers are timed: auto (stretch, per-layer frame-exact fallback), stretch, "
                         "remap (time remapping), frames (per-frame HOLD remap keys; immune to AE time rounding)")
+    p.add_argument("--audio-sync", default="raw", choices=["raw", "competitor"],
+                   help="export audio: raw = keep RAW's own lip-sync (audio-only layers only for genuine J/L cuts; "
+                        "default), competitor = reproduce the competitor's measured A/V offset sample-accurately "
+                        "(every segment's audio on an audio-only layer with shifted source time)")
     p.add_argument("--input-dir", default="./input", metavar="DIR",
                    help="folder scanned for the two videos when --competitor/--raw are not given and the "
                         "default names do not exist (default ./input)")
@@ -137,6 +141,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.workers = int(args.workers)
     cfg.force_conform = bool(args.force_conform)
     cfg.ae_time_mode = args.ae_time_mode
+    cfg.audio_sync = str(getattr(args, "audio_sync", "raw") or "raw")
     cfg.verbose = bool(args.verbose)
     cfg.skip_preview = bool(args.skip_preview)
     cfg.run_ae = not bool(getattr(args, "no_ae", False))

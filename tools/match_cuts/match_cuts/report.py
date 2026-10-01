@@ -467,10 +467,41 @@ def _breakdown(ctx: Any) -> list[str]:
             + (f" ({a.get('level_db'):.1f} dB)" if isinstance(a.get("level_db"), (int, float)) else "") for a in cl.added_audio))
     au = cl.audio or {}
     out.append(f"- Audio: status {au.get('status', '?')}" + ("; " + "; ".join(map(str, au.get("notes", []))) if au.get("notes") else ""))
+    sync = av_offset_line(cl)
+    if sync:
+        out.append(f"- Audio sync: {sync}")
     pp = [s.id for s in cl.segments if (s.audio or {}).get("pitch_preserved")]
     if pp:
         out.append("- Pitch preserved on speed-changed segments (AE's stretch changes pitch): " + ", ".join(f"S{i:02d}" for i in pp))
     return out
+
+
+def av_offset_line(cl: Any) -> str:
+    """One line on the competitor's measured A/V offset (DESIGN §7 D9): the offset in words with its
+    interval and support, the audio switch baseline and what the export does. '' when nothing was measured."""
+    av = (getattr(cl, "audio", None) or {}).get("av_offset") or {}
+    if not av:
+        return ""
+    st = av.get("status")
+    mode = av.get("sync_mode") or (getattr(cl, "settings", None) or {}).get("audio_sync") or "raw"
+    iv = av.get("lag_ms_interval")
+    n = av.get("n_segments")
+    cov = av.get("coverage")
+    support = (f"{n} segment(s)" + (f", coverage {float(cov):.0%}" if cov is not None else "")) if n else "no segment"
+    if st == "measured":
+        line = (f"{av.get('text')} (lag {float(av['lag_ms']):+.1f} ms, interval {float(iv[0]):+.1f} … {float(iv[1]):+.1f} ms, "
+                f"{support}; a property of the input files, measured)")
+    elif st == "zero":
+        line = f"{av.get('text')} (0 ms is consistent with {support})"
+    else:
+        line = f"A/V offset not measured ({av.get('reason') or 'no evidence'}); audio is judged against RAW's own sync"
+    b = av.get("switch_baseline_ms")
+    if b is not None and st == "measured":
+        line += f"; the competitor's audio switches {float(b):+.1f} ms after each picture cut (switch baseline)"
+    if st == "measured":
+        line += ("; export keeps RAW lip-sync (--audio-sync raw)" if mode != "competitor"
+                 else "; export reproduces the competitor's offset (--audio-sync competitor)")
+    return line
 
 
 def _is_zone_entry(o: dict, cl: Any) -> bool:
@@ -674,9 +705,16 @@ def _verification(ctx: Any) -> list[str]:
             out.append(f"Failure thumbnails: `debug/verify_failures/` ({len(vis['failed_frames'])} frames).")
     au = checks.get("s9_5_audio", {})
     if au.get("segments"):
+        off = au.get("av_offset") or {}
+        if off.get("published_ms") is not None:
+            out += ["", f"A/V offset: published {off['published_ms']:+.3f} ms ({off.get('mode')} sync), measured here "
+                        f"{off.get('verified_ms', 'n/a')} ms over {off.get('n', 0)} segment(s), tolerance ±{off.get('tolerance_ms')} ms: "
+                        + ("confirmed" if off.get("confirmed") else "NOT confirmed")
+                        + f"; every segment is judged on its residual after the expected lag {off.get('expected_lag_ms')} ms."]
         out += ["", f"Audio per segment ({au.get('audio_source', '')}; tolerance ±{au.get('tolerance_ms')} ms):", "",
-                md_table(["segment", "result", "lag ms", "corr", "code"],
-                         [[f"S{int(r['id']):02d}", r.get("result"), r.get("lag_ms", ""), r.get("corr", ""), r.get("code", "")]
+                md_table(["segment", "result", "lag ms", "residual ms", "corr", "code", "checked as"],
+                         [[f"S{int(r['id']):02d}", r.get("result"), r.get("lag_ms", ""), r.get("residual_ms", ""),
+                           r.get("corr", ""), r.get("code", ""), f"run {r['run']}" if r.get("run") else ""]
                           for r in au["segments"]])]
     crit = ver.get("criteria", {})
     cuts = ((crit.get("c2_cuts") or {}).get("details") or {}).get("cuts") or []

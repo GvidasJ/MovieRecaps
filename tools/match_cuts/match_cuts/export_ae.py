@@ -351,6 +351,41 @@ def _check_sim(d: dict, what: str) -> Sim:
 # ae_plan
 # ---------------------------------------------------------------------------------------------
 
+AUDIO_SYNC_MODES = ("raw", "competitor")
+
+
+def _round_half_away(x: float) -> int:
+    return int(math.copysign(math.floor(abs(x) + 0.5), x))
+
+
+def audio_sync_params(cutlist: Cutlist, main_fps: Fraction, audio_sync: str | None = None,
+                      av_offset_lag_s: float | None = None, switch_baseline_s: float | None = None) -> tuple[float, int]:
+    """(content lag g in seconds, switch shift in MAIN frames) of the exported audio (DESIGN §7 D9; the single
+    rule for the AE audio twins and render_preview.build_audio).
+
+    'raw' (``cutlist.settings.audio_sync`` default): (0, 0) -- every segment keeps RAW lip-sync and switches at
+    its picture cut (+ genuine J/L). 'competitor': g = cutlist.audio.av_offset.lag_ms when the offset was
+    measured (xcorr convention: g < 0 = the competitor's audio is late; a segment then plays RAW time
+    tau + v * g), and its audio range moves by round(switch baseline x MAIN fps) frames (0 when the
+    baseline is unknown). No extra shift of a container on top: the twins carry the whole offset.
+    Explicit ``av_offset_lag_s`` / ``switch_baseline_s`` override the published values."""
+    mode = str(audio_sync or (cutlist.settings or {}).get("audio_sync") or "raw")
+    if mode not in AUDIO_SYNC_MODES:
+        raise ValueError(f"unknown audio sync mode {mode!r} (expected {AUDIO_SYNC_MODES})")
+    av = (cutlist.audio or {}).get("av_offset") or {}
+    g = b = 0.0
+    if mode == "competitor":
+        if av.get("status") == "measured" and av.get("lag_ms") is not None:
+            g = float(av["lag_ms"]) / 1000.0
+        if av.get("switch_baseline_ms") is not None:
+            b = float(av["switch_baseline_ms"]) / 1000.0
+    if av_offset_lag_s is not None:
+        g = float(av_offset_lag_s)
+    if switch_baseline_s is not None:
+        b = float(switch_baseline_s)
+    return g, _round_half_away(b * float(Fraction(main_fps)))
+
+
 class _PlanBuilder:
     """Internal state of one ae_plan() call."""
 
@@ -378,6 +413,10 @@ class _PlanBuilder:
         self.F = _fps_dict(self.main_fps)
         self.R = _fps_dict(self.raw_fps)
         self.CF = _fps_dict(self.comp_fps)
+        # export audio sync (D9): raw = RAW lip-sync, competitor = the competitor's measured offset
+        self.audio_sync = str(getattr(self.cfg, "audio_sync", None) or (cutlist.settings or {}).get("audio_sync") or "raw")
+        self.sync_lag_s, self.sync_shift_k = audio_sync_params(cutlist, self.main_fps, self.audio_sync)
+        self.comp_sync = self.audio_sync == "competitor"
         self.mf = float(self.main_fps)
         self.rf = self.R["num"] / self.R["den"]
         self.Wc = _int(cutlist.competitor["width"], "competitor.width")
@@ -712,19 +751,25 @@ class _PlanBuilder:
         L["note"] = ascii_text(reason, 300)
 
         out = [L]
-        # audio: J/L duplicate or audio twin of a frames-mode layer (DESIGN §3 / §5)
+        # audio: J/L duplicate, audio twin of a frames-mode layer, or -- competitor sync (D9) -- every RAW
+        # segment's audio as a twin carrying the competitor's measured offset (DESIGN §3 / §5 / §7 D9)
         au = seg.audio or {}
         in_off = int(au.get("in_offset_frames") or 0)
         out_off = int(au.get("out_offset_frames") or 0)
-        if self.has_audio and (in_off or out_off or mode == "frames"):
-            a_in = max(0, self.to_main(int(seg.comp_in) + in_off))
-            a_out = min(self.N, self.to_main(int(seg.comp_out) + out_off))
+        sync = self.comp_sync
+        if self.has_audio and (in_off or out_off or mode == "frames" or sync):
+            sh = self.sync_shift_k if sync else 0
+            g_s = self.sync_lag_s if sync else 0.0
+            a_in = max(0, self.to_main(int(seg.comp_in) + in_off) + sh)
+            a_out = min(self.N, self.to_main(int(seg.comp_out) + out_off) + sh)
             a_mode = natural
             if a_mode == "stretch" and (abs(start_st) > AE_TIME_SAFE_S or stretch > AE_STRETCH_LIMIT):
                 a_mode = "remap"
             a_keys = rk
+            r0 = raw_in_m + v * g_s                  # RAW time the audio plays at MAIN frame k_in (content offset)
             if a_mode == "stretch":
-                lo_t, hi_t = start_st, start_st + self.raw_dur * stretch / 100.0
+                st0 = self.T(k_in) - r0 / (100.0 / stretch)
+                lo_t, hi_t = st0, st0 + self.raw_dur * stretch / 100.0
                 a0, a1 = a_in, a_out
                 a_in = max(a_in, math.ceil(lo_t * mf - 1e-6))
                 while a_in < a_out and self.T(a_in) < lo_t:
@@ -737,15 +782,20 @@ class _PlanBuilder:
             elif not remap_keys_in:
                 # extend the linear map over the audio range, never before RAW time 0
                 if v < 0:
-                    a_out = min(a_out, k_in + math.floor(raw_in_m * mf / -v + 1e-9))
+                    a_out = min(a_out, k_in + math.floor(r0 * mf / -v + 1e-9))
                 elif v > 0:
-                    a_in = max(a_in, k_in - math.floor(raw_in_m * mf / v + 1e-9))
-                a_keys = [{"k": a_in, "v": raw_in_m + v * ((a_in - k_in) / mf)},
-                          {"k": a_out, "v": raw_in_m + v * ((a_out - k_in) / mf)}]
+                    a_in = max(a_in, k_in - math.floor(r0 * mf / v + 1e-9))
+                a_keys = [{"k": a_in, "v": r0 + v * ((a_in - k_in) / mf)},
+                          {"k": a_out, "v": r0 + v * ((a_out - k_in) / mf)}]
+            elif g_s:
+                # time-remapped picture: the audio follows the same curve g later (key times - g)
+                a_keys = [{"k": _knum(float(d["k"]) - g_s * mf), "v": d["v"]} for d in rk]
             if a_out > a_in:
-                why = "J/L cut" if (in_off or out_off) else "audio of a frame-exact layer"
-                # the audio twin uses the same (raw_in, v) map; placeStretch pins its rawIn at its own compIn
-                a_raw_in = raw_in_m + v * ((a_in - k_in) / mf)
+                why = ("competitor A/V sync" if sync else
+                       "J/L cut" if (in_off or out_off) else "audio of a frame-exact layer")
+                # the audio twin uses the same (raw_in, v) map (+ the content offset); placeStretch pins its rawIn
+                # at its own compIn
+                a_raw_in = r0 + v * ((a_in - k_in) / mf)
                 a_start = (self.T(a_in) - a_raw_in / (100.0 / stretch)) if a_mode == "stretch" else None
                 A = self._layer(id=f"seg{sid}_audio", kind="raw_audio", comp=comp, source="raw", seg=sid, compIn=a_in,
                                 compOut=a_out, timeMode=a_mode, speed=v, stretch=stretch if a_mode == "stretch" else None,
@@ -755,7 +805,10 @@ class _PlanBuilder:
                                 audio=True, name=ascii_text(f"S{sid:02d}  audio ({why})", 240), note=why)
                 out.append(A)
                 L["audio"] = False
-                self.decide("audio_duplicate", segment=sid, reason=why, comp_in=a_in, comp_out=a_out, mode=a_mode)
+                self.decide("audio_duplicate", segment=sid, reason=why, comp_in=a_in, comp_out=a_out, mode=a_mode,
+                            **({"av_offset_ms": round(g_s * 1000.0, 3), "switch_shift_frames": sh} if sync else {}))
+            elif sync:
+                L["audio"] = False                    # nothing of its audio is heard in competitor sync
         return out
 
 
@@ -993,11 +1046,12 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
             if cx is not None and cy is not None:
                 ax = akeyed.setdefault(cx["id"], {})
                 ay = akeyed.setdefault(cy["id"], {})
+                ksh = b.sync_shift_k if b.comp_sync else 0        # the twins' audio switches later (D9)
                 for i2, a in enumerate(alpha):
-                    kk = b.to_main_f(o0 + i2)
+                    kk = b.to_main_f(o0 + i2) + ksh
                     ax[kk] = 20.0 * math.log10(max(1.0 - a, MIN_GAIN))
                     ay[kk] = 20.0 * math.log10(max(a, MIN_GAIN))
-                ay[b.to_main_f(o0 + D_eff)] = 0.0
+                ay[b.to_main_f(o0 + D_eff) + ksh] = 0.0
     for L in upper + chrono + audio_dups:
         if L["id"] in keyed:
             L["opacity"] = [{"k": _knum(k), "v": float(v)} for k, v in sorted(keyed[L["id"]].items())]
@@ -1235,6 +1289,8 @@ def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: Deci
                     "framesModeLayers": frames_layers, "mainLevelSegments": n_main_seg,
                     "audioPlaceholders": n_audio_ph, "overlayGuides": n_overlay_guides},
         "periods": period_info,
+        "audioSync": {"mode": b.audio_sync, "lagMs": round(b.sync_lag_s * 1000.0, 6), "switchShiftFrames": int(b.sync_shift_k),
+                      "twins": sum(1 for L in audio_dups if L.get("note") == "competitor A/V sync")},
         "warnings": b.warnings,
         "decisions": b.decisions,
     }

@@ -75,6 +75,32 @@ class Config:
     audio_replaced_corr: float = 0.30      # per-segment xcorr peak below which the audio does not follow RAW
     audio_jl_max_s: float = 1.0            # max J/L audio offset searched at a hard cut (s)
     audio_added_thresh_db: float = -20.0   # residual level (re the rebuilt original) that counts as added audio
+    audio_residual_search_s: float = 0.1   # per-segment lag search around the run's A/V offset (+-, also <= half the range)
+
+    # ---- global A/V offset (S6, DESIGN §7 D9) --------------------------------------------
+    av_offset_max_s: float = 1.0           # largest |competitor A/V offset| accepted (prior and estimate)
+    av_offset_prior_wave_peak: float = 0.8 # S5.1 windows used for the prior: waveform NCC >= this ...
+    av_offset_prior_min_windows: int = 8   # ... at least this many of them ...
+    av_offset_prior_max_mad_ms: float = 10.0   # ... agreeing within this MAD (ms) around their median
+    av_offset_seg_min_s: float = 0.5       # segments used for the estimate: >= this much audio at corr >= strong,
+    av_offset_seg_short_s: float = 0.25    #   or >= this much at corr >= av_offset_seg_short_corr
+    av_offset_seg_short_corr: float = 0.9
+    av_offset_eps_ms: float = 0.5          # every segment's offset interval is widened by this (ms) on both sides
+    av_offset_min_segments: int = 3        # acceptance: >= 3 segments ...
+    av_offset_min_audio_s: float = 2.0     # ... >= 2 s of audio ...
+    av_offset_min_coverage: float = 0.7    # ... the offset explains >= 70 % of the segment weight ...
+    av_offset_max_spread_ms: float = 2.0   # ... no single segment moves the max-coverage set by more than 2 ms ...
+    av_offset_min_ms: float = 2.0          # ... and |offset| >= 2 ms (smaller offsets are indistinguishable from phase)
+    av_offset_zero_frac: float = 0.9       # offset = 0 exactly when 0 explains >= this fraction of the best coverage
+
+    # ---- J/L audio cuts against the run's switch baseline (DESIGN §7 D9) ----------------------
+    audio_jl_strong_frames: int = 10       # baseline cuts: both segments >= this many frames ...
+    audio_jl_strong_corr: float = 0.8      # ... both models correlate >= this ...
+    audio_jl_strong_margin: float = 0.5    # ... and the switch is this decisive (local NCC margin on both sides)
+    audio_jl_baseline_min_cuts: int = 3    # fewer baseline cuts -> the baseline is not measured
+    audio_jl_min_frames: float = 0.5       # J/L threshold: |switch - baseline| >= max(this many frames, 3 sigma)
+    audio_jl_large_frames: int = 4         # a J/L this large next to a retimed segment / on a continuous line is evidence, not exported
+    audio_sync: str = "raw"                # raw | competitor: export audio keeps RAW lip-sync, or reproduces the competitor's offset
 
     # ---- visual search (Stage 5.2) ------------------------------------------------------
     sift_nfeatures: int = 500
@@ -152,6 +178,8 @@ class Config:
     verify_audio_min_corr: float = 0.30    # xcorr peak below which a segment's audio lag is not trusted
     verify_audio_strong_corr: float = 0.80 # peak above which a lag outside audio_lag_tol_ms always fails c5
     verify_full_rate_max_s: float = 900.0  # RAWs up to this long: final audio check at the original rate
+    verify_audio_min_s: float = 0.5        # c5: shorter audio ranges are checked as aggregated runs of consecutive pieces
+    verify_audio_run_search_ms: float = 20.0   # c5: residual lag search of an aggregated run of short pieces (+-)
 
     def resolved_workers(self) -> int:
         import os
@@ -171,7 +199,7 @@ class Config:
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
-                  "verify_full_rate_max_s"):
+                  "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync"):
             d.pop(k, None)
         return d
 

@@ -1122,6 +1122,7 @@ def _coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog
     conf = np.ones(N, np.float32)
     psr = np.zeros(N, np.float32)
     peak = np.zeros(N, np.float32)
+    wave = np.full(N, np.nan, np.float32)
     evid = []
     last_refined: float | None = None
     for i in range(N):
@@ -1142,6 +1143,7 @@ def _coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog
                 r.speed = r.v
             raw_t[i] = r.raw_t
             speed[i] = r.speed
+            wave[i] = r.wave_peak
         else:
             speed[i] = r.v
         evid.append({"i": i, "comp_t": round(float(comp_t[i]), 3), "raw_t": None if not np.isfinite(raw_t[i]) else round(float(raw_t[i]), 6),
@@ -1150,7 +1152,8 @@ def _coarse_align(comp_y: np.ndarray, raw_y: np.ndarray, sr: int, cfg: Any, dlog
                      "conf": round(float(r.conf), 3),
                      "psr": round(r.psr, 2), "wave_peak": None if not np.isfinite(r.wave_peak) else round(r.wave_peak, 4)})
     hints = AudioHints(comp_t=comp_t, raw_t=raw_t, speed=speed, conf=conf.astype(np.float32),
-                       psr=psr.astype(np.float32), peak=peak.astype(np.float32), window=float(A.W), hop=float(A.hop))
+                       psr=psr.astype(np.float32), peak=peak.astype(np.float32), window=float(A.W), hop=float(A.hop),
+                       wave_peak=wave.astype(np.float32))
     n_conf = int(hints.confident(mc).sum())
     speeds_found = sorted({round(float(s), 3) for s, c in zip(speed, hints.confident(mc)) if c and abs(s - 1.0) > 1e-9})
     dt = time.perf_counter() - t0
@@ -1393,18 +1396,27 @@ def _classify_added(res: np.ndarray, sr: int, frame: int) -> str:
 
 
 def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
-                           comp_fps: Any, cfg: Any, dlog: DecisionLog | None) -> dict:
+                           comp_fps: Any, cfg: Any, dlog: DecisionLog | None, *, av_offset_s: float = 0.0,
+                           pass_name: str | None = None) -> dict:
     """Stage 5.6: per-segment audio analysis against the RAW-rebuilt track.
 
     Returns ``{'segments': {id: {in_offset_frames, out_offset_frames, pitch_preserved, lag_ms, corr,
     exception}}, 'added_audio': [{type, comp_in, comp_out, level_db, level_dbfs}], 'status':
-    'ok'|'no_audio'|'audio_replaced', 'notes': [...], 'cuts': [J/L decisions]}``.
+    'ok'|'no_audio'|'audio_replaced', 'notes': [...], 'cuts': [J/L decisions], '_av_offset_s': the offset
+    used, '_switch_baseline': {...}, '_measured': {id: {lag_total_ms, dur_s, corr}}}`` (keys starting with
+    '_' are run internals, not cutlist fields).
 
-    * J/L (DESIGN §3): audio range = [comp_in + in_offset, comp_out + out_offset). At a hard cut A|B
-      where the competitor's audio switches at comp frame p != cut: A.out_offset = B.in_offset =
-      p - cut (negative = J-cut: B's audio leads; positive = L-cut: A's audio trails).
-    * lag_ms / corr: ``xcorr_lag(competitor, rebuilt)`` over the segment's audio range (crossfade
-      overlaps excluded): positive lag = rebuilt late.
+    * ``av_offset_s`` = the run's competitor A/V offset g (xcorr convention, DESIGN §7 D9; 0 = in sync):
+      every lag search renders the RAW pre-shifted by g and searches only the residual within
+      ``±min(cfg.audio_residual_search_s, half the range)``; ``lag_ms`` is that residual (measured lag - g).
+    * J/L (DESIGN §3, §7 D9): audio range = [comp_in + in_offset, comp_out + out_offset). The audio switch
+      time of every hard cut is measured (sub-hop); the run's switch baseline b = weighted median over
+      decisive cuts between long, well-correlated segments (any value: an offset applied after the edit
+      moves every switch). A cut is a J/L cut only when its switch differs from b by >= max(0.5 frame,
+      3 sigma): A.out_offset = B.in_offset = round((switch - b) * fps) (negative = J-cut: B's audio leads;
+      positive = L-cut: A's audio trails). Ranges always stay ordered (a0 < a1).
+    * lag_ms / corr: ``xcorr_lag(competitor, rebuilt)`` over the comp samples where the competitor plays the
+      segment's audio range (shifted by b; crossfade overlaps excluded): positive lag = rebuilt late.
     * pitch_preserved: stretch segments with speed != 1 only, else None: ``pitch_shift_test``
       (spectral shift) combined with ``feature_pitch_test`` (time-aligned tape vs unwarped features,
       which also requires the audio to be related to the RAW); disagreement or unrelated -> None.
@@ -1413,13 +1425,41 @@ def analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_
       merged across unobservable ranges (NOT-IN-RAW, dips, crossfades); level_db = residual level
       relative to the original (rebuilt) audio in the run, level_dbfs = absolute.
     * exception (closed list): not_in_raw, no_audio, audio_replaced, pitch_preserved,
-      music_dominated, too_short -- set when the segment's audio does not line up and why."""
+      music_dominated, too_short -- set when the segment's audio does not line up (judged on the residual)
+      and why."""
     with single_thread_blas():
-        return _analyze_segments_audio(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog)
+        return _analyze_segments_audio(segments, comp_y, raw_y, sr, comp_fps, cfg, dlog, float(av_offset_s or 0.0),
+                                       pass_name)
+
+
+def _round_half_away(x: float) -> int:
+    return int(math.copysign(math.floor(abs(x) + 0.5), x))
+
+
+def _weighted_median(x: np.ndarray, w: np.ndarray) -> float:
+    o = np.argsort(x, kind="stable")
+    x, w = np.asarray(x, np.float64)[o], np.asarray(w, np.float64)[o]
+    c = np.cumsum(w)
+    return float(x[int(np.searchsorted(c, 0.5 * c[-1]))])
+
+
+def _switch_time(sA: np.ndarray, sB: np.ndarray, jb: int, centres: np.ndarray, hop: int) -> float:
+    """Audio switch position (samples) before local-NCC frame ``jb``: the zero crossing of sA - sB between
+    the frame centres jb-1 and jb (linear, sub-hop), else half-way between them."""
+    nfr = sA.size
+    if jb <= 0:
+        return float(centres[0] - hop / 2.0)
+    if jb >= nfr:
+        return float(centres[-1] + hop / 2.0)
+    d0, d1 = float(sA[jb - 1] - sB[jb - 1]), float(sA[jb] - sB[jb])
+    if d0 > 0.0 > d1:
+        return float(centres[jb - 1] + hop * d0 / (d0 - d1))
+    return float(centres[jb] - hop / 2.0)
 
 
 def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
-                           comp_fps: Any, cfg: Any, dlog: DecisionLog | None) -> dict:
+                            comp_fps: Any, cfg: Any, dlog: DecisionLog | None, g: float = 0.0,
+                            pass_name: str | None = None) -> dict:
     """Implementation of ``analyze_segments_audio`` (runs with single-threaded BLAS)."""
     dlog = dlog or null_dlog()
     fps = parse_fps(comp_fps)
@@ -1430,6 +1470,12 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
     tol_ms = float(_cfg(cfg, "audio_lag_tol_ms", 10.0))
     jl_max_s = float(_cfg(cfg, "audio_jl_max_s", 1.0))
     thr_db = float(_cfg(cfg, "audio_added_thresh_db", -20.0))
+    res_s = float(_cfg(cfg, "audio_residual_search_s", _MAX_LAG_SEG_S))
+    tag = {"pass": pass_name} if pass_name else {}
+
+    def rec(decision: str, **ev: Any) -> None:
+        dlog.record("audio_segments", decision, **tag, **ev)
+
     out: dict[int, dict] = {}
     for s in segs:
         out[s.id] = {"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None, "lag_ms": None,
@@ -1447,8 +1493,9 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
             if s.type == "raw":
                 out[s.id]["exception"] = "no_audio"
         notes.append(f"no usable audio in the {which}: per-segment audio analysis skipped")
-        dlog.record("audio_segments", "no_audio", which=which)
-        return {"segments": out, "added_audio": [], "status": "no_audio", "notes": notes, "cuts": []}
+        rec("no_audio", which=which)
+        return {"segments": out, "added_audio": [], "status": "no_audio", "notes": notes, "cuts": [],
+                "_av_offset_s": g, "_switch_baseline": {"ms": None, "n": 0}, "_measured": {}}
 
     models: dict[int, _Model] = {}
     for s in segs:
@@ -1456,25 +1503,33 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
         if m is not None:
             models[s.id] = m
     n_total = min(comp.size, f2s(n_frames)) if n_frames else comp.size
+    # Where the competitor may switch to a segment's audio relative to its picture cut while the switch
+    # baseline is not known yet: anywhere between 0 (offset inside the source) and -g (offset applied to
+    # the finished mix). Comp windows that must hold only the segment's own audio leave that band out.
+    gl, gh = int(round(min(0.0, -g) * sr)), int(round(max(0.0, -g) * sr))
 
     # ---- core ranges (samples) and first lag estimate ------------------------------------------
     core: dict[int, tuple[int, int]] = {}
     lag0: dict[int, float] = {}
+    pk0: dict[int, float] = {}
     for s in segs:
         if s.id not in models:
             continue
         din, dout = _crossfade_frames(s)
         a, b = f2s(s.comp_in + din), min(f2s(s.comp_out - dout), comp.size)
         core[s.id] = (a, b)
-        if b - a >= int(0.1 * sr):
-            lag, pk = xcorr_lag(comp[a:b], models[s.id].render(raw, sr, a, b), sr, _MAX_LAG_SEG_S)
-            lag0[s.id] = lag if pk >= min_corr else 0.0
-        else:
-            lag0[s.id] = 0.0
+        lag0[s.id] = g                 # too short / weak: the run's offset (never 0 when the run is offset)
+        w0, w1 = a + gh, min(b + gl, comp.size)
+        if w1 - w0 >= int(0.1 * sr):
+            lag, pk = xcorr_lag(comp[w0:w1], models[s.id].render(raw, sr, w0, w1, g), sr, res_s)
+            pk0[s.id] = pk
+            if pk >= min_corr:
+                lag0[s.id] = g + lag
 
-    # ---- J/L cuts --------------------------------------------------------------------------------
-    cuts: list[dict] = []
+    # ---- J/L cuts: switch time per hard cut ------------------------------------------------------
     win, hop = int(round(0.03 * sr)), int(round(0.01 * sr))
+    side = 5                                                  # local-NCC frames per side for the decisiveness
+    meas: list[dict] = []
     for A, B in zip(segs[:-1], segs[1:]):
         if A.comp_out != B.comp_in or _crossfade_frames(A)[1] or _crossfade_frames(B)[0]:
             continue
@@ -1489,12 +1544,12 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
             jmax = min(jmax, A.length // 2)
         if jmax + lmax < 1:
             continue
-        n0, n1 = f2s(cut - jmax), min(f2s(cut + lmax), comp.size)
+        n0, n1 = max(0, f2s(cut - jmax) + gl), min(f2s(cut + lmax) + gh, comp.size)
         if n1 - n0 < win + hop:
             continue
         c = comp[n0:n1]
-        sA = _local_ncc(c, mA.render(raw, sr, n0, n1, lag0.get(A.id, 0.0)), win, hop)[0] if mA else None
-        sB = _local_ncc(c, mB.render(raw, sr, n0, n1, lag0.get(B.id, 0.0)), win, hop)[0] if mB else None
+        sA = _local_ncc(c, mA.render(raw, sr, n0, n1, lag0.get(A.id, g)), win, hop)[0] if mA else None
+        sB = _local_ncc(c, mB.render(raw, sr, n0, n1, lag0.get(B.id, g)), win, hop)[0] if mB else None
         nfr = (sA if sA is not None else sB).size
         if nfr < 2:
             continue
@@ -1514,22 +1569,89 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
         csB = np.concatenate([[0.0], np.cumsum(sB)])
         score = csA + (csB[-1] - csB)                         # switch before frame j, j = 0..nfr
         jb = int(np.argmax(score))
-        t_switch = (centres[jb] - hop / 2.0) if jb < nfr else (centres[-1] + hop / 2.0)
-        p = int(round(t_switch / sr * float(fps)))
-        p = int(np.clip(p, cut - jmax, cut + lmax))
-        gain = float(score[jb] - score[j_cut])
-        lo_j, hi_j = sorted((jb, j_cut))
-        diff = (sB - sA)[lo_j:hi_j] if jb < j_cut else (sA - sB)[lo_j:hi_j]
+        t_sw = _switch_time(sA, sB, jb, centres, hop)
+        pre = (sA - sB)[max(0, jb - 1 - side):max(0, jb - 1)]
+        post = (sB - sA)[min(nfr, jb + 1):min(nfr, jb + 1 + side)]
+        decisive = float(min(pre.mean(), post.mean())) if pre.size and post.size else 0.0
+        meas.append({"A": A, "B": B, "mA": mA, "mB": mB, "cut": cut, "jmax": jmax, "lmax": lmax, "sA": sA, "sB": sB,
+                     "centres": centres, "jb": jb, "j_cut": j_cut, "score": score, "t_sw": t_sw,
+                     "switch_s": t_sw / sr - float(Fraction(cut) / fps), "decisive": decisive})
+
+    # ---- the run's switch baseline (DESIGN §7 D9) ------------------------------------------------
+    k_strong = int(_cfg(cfg, "audio_jl_strong_frames", 10))
+    c_strong = float(_cfg(cfg, "audio_jl_strong_corr", 0.8))
+    m_strong = float(_cfg(cfg, "audio_jl_strong_margin", 0.5))
+    strong = [m for m in meas if m["mA"] is not None and m["mB"] is not None and m["A"].length >= k_strong
+              and m["B"].length >= k_strong and pk0.get(m["A"].id, 0.0) >= c_strong
+              and pk0.get(m["B"].id, 0.0) >= c_strong and m["decisive"] >= m_strong]
+    sigma = hop / math.sqrt(12.0) / sr                      # sub-hop switch estimate (window/hop geometry)
+    base: float | None = None
+    spread = None
+    if len(strong) >= int(_cfg(cfg, "audio_jl_baseline_min_cuts", 3)):
+        xs = np.array([m["switch_s"] for m in strong])
+        ws = np.array([m["decisive"] for m in strong])
+        base = _weighted_median(xs, ws)
+        spread = 1.4826 * _weighted_median(np.abs(xs - base), ws)
+        sigma = max(sigma, spread)
+    thr = max(float(_cfg(cfg, "audio_jl_min_frames", 0.5)) / float(fps), 3.0 * sigma)
+    if base is not None and abs(base) < 0.5 * thr:
+        base = 0.0                     # below half the J/L threshold: indistinguishable from switching at the cut
+    b_lo, b_hi = (base, base) if base is not None else (min(0.0, -g), max(0.0, -g))
+    switch_info = {"ms": None if base is None else round(base * 1000.0, 3), "n": len(strong),
+                   "spread_ms": None if spread is None else round(spread * 1000.0, 3),
+                   "threshold_ms": round(thr * 1000.0, 3), "range_ms": [round(b_lo * 1000.0, 3), round(b_hi * 1000.0, 3)]}
+    rec("switch_baseline", **switch_info, measured_cuts=len(meas), av_offset_ms=round(g * 1000.0, 3),
+        strong=[{"cut": m["cut"], "switch_ms": round(m["switch_s"] * 1000.0, 3), "decisive": round(m["decisive"], 4)}
+                for m in strong])
+
+    # ---- J/L decisions: switch vs baseline, ranges kept ordered --------------------------------
+    cuts: list[dict] = []
+    big = int(_cfg(cfg, "audio_jl_large_frames", 4))
+    for m in meas:
+        A, B, mA, mB, cut = m["A"], m["B"], m["mA"], m["mB"], m["cut"]
+        sA, sB, centres, jb = m["sA"], m["sB"], m["centres"], m["jb"]
+        sw = m["switch_s"]
+        near = min(max(sw, b_lo), b_hi)
+        dsw = sw - near                                    # how far the switch lies outside the baseline
+        offset = _round_half_away(dsw * float(fps))
+        # A's audio range must stay ordered: comp_out + offset > comp_in + in_offset(A)
+        off_lo = max(-m["jmax"], int(out[A.id]["in_offset_frames"]) - A.length + 1)
+        offset = int(min(max(offset, off_lo), m["lmax"]))
+        nfr = sA.size
+        j_ref = int(np.clip(np.searchsorted(centres, f2s(cut) + near * sr), 0, nfr))
+        gain = float(m["score"][jb] - m["score"][j_ref])
+        lo_j, hi_j = sorted((jb, j_ref))
+        diff = (sB - sA)[lo_j:hi_j] if jb < j_ref else (sA - sB)[lo_j:hi_j]
         mdiff = float(diff.mean()) if diff.size else 0.0
-        offset = p - cut
-        # the switch must be at least one comp frame away and the frames in between must clearly
-        # follow the other model (mean local-NCC margin >= 0.3)
-        accept = offset != 0 and diff.size >= 2 and mdiff >= 0.3
-        ev = {"cut": cut, "a": A.id, "b": B.id, "switch_frame": p, "offset_frames": offset if accept else 0,
-              "measured_offset": offset, "mean_margin": round(mdiff, 4), "gain": round(gain, 3),
+        # the switch must lie clearly outside the baseline and the frames in between must clearly follow
+        # the other model (mean local-NCC margin >= 0.3)
+        accept = abs(dsw) >= thr and offset != 0 and diff.size >= 2 and mdiff >= 0.3
+        reason = None
+        if accept and abs(offset) >= big:
+            # a large J/L next to a retimed segment, or where B's time line meets A's extended line, is
+            # evidence about the picture model (continuous audio over a freeze / slow motion, one shot
+            # split in two), not an editorial J/L cut: logged, not exported
+            retimed = [s.id for s in (A, B) if s.type == "raw" and (s.time_mode == "remap" or s.speed is None
+                                                                      or abs(float(s.speed) - 1.0) > 1e-6)]
+            t = np.array([m["t_sw"] / sr])
+            meets = (mA is not None and mB is not None
+                     and abs(float(mA.raw_seconds(t)[0]) - float(mB.raw_seconds(t)[0])) <= 1.0 / float(fps))
+            if retimed or meets:
+                accept = False
+                reason = (f"next to retimed segment(s) {', '.join(f'S{i:02d}' for i in retimed)}" if retimed
+                          else "the switch is where the next segment's time line meets the previous one's")
+        ev = {"cut": cut, "a": A.id, "b": B.id, "switch_ms": round(sw * 1000.0, 3),
+              "baseline_ms": None if base is None else round(base * 1000.0, 3),
+              "switch_frame": int(cut + offset), "offset_frames": offset if accept else 0, "measured_offset": offset,
+              "mean_margin": round(mdiff, 4), "decisive": round(m["decisive"], 4), "gain": round(gain, 3),
               "a_model": mA is not None, "b_model": mB is not None}
+        if reason:
+            ev["not_exported"] = reason
         cuts.append(ev)
-        dlog.record("audio_segments", "jl_cut" if accept else "audio_cut_matches_video", **ev)
+        rec("jl_cut" if accept else ("jl_not_exported" if reason else "audio_cut_matches_video"), **ev)
+        if reason:
+            notes.append(f"audio switch {offset:+d} frames from the picture cut at comp frame {cut} "
+                         f"(S{A.id:02d}|S{B.id:02d}) not exported as a J/L cut: {reason}")
         if accept:
             if mA is not None:
                 out[A.id]["out_offset_frames"] = offset
@@ -1539,8 +1661,13 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
                          f"audio {'leads' if offset < 0 else 'trails'} by {abs(offset)} frames")
 
     # ---- per-segment lag / corr over the final audio range + pitch -----------------------------
+    # the competitor plays a segment's audio range shifted by the switch baseline (or somewhere in the
+    # band while it is unknown): measure only where it surely plays this segment
+    sh_lo, sh_hi = int(round(b_lo * sr)), int(round(b_hi * sr))
     ranges: dict[int, tuple[int, int]] = {}
+    played: dict[int, tuple[int, int]] = {}
     silent: dict[int, str] = {}
+    measured: dict[int, dict] = {}
     for s in segs:
         if s.id not in models:
             continue
@@ -1549,35 +1676,38 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
         b = min(f2s(s.comp_out - (dout if dout else -out[s.id]["out_offset_frames"])), comp.size)
         a = max(0, a)
         ranges[s.id] = (a, b)
-        if b - a < int(0.1 * sr):
+        w0, w1 = max(0, a + sh_hi), min(b + sh_lo, comp.size)
+        played[s.id] = (w0, w1)
+        if w1 - w0 < int(0.1 * sr):
             continue
-        rb = models[s.id].render(raw, sr, a, b)
-        if _rms(comp[a:b]) < _SILENT_RMS:
+        rb = models[s.id].render(raw, sr, w0, w1, g)
+        if _rms(comp[w0:w1]) < _SILENT_RMS:
             silent[s.id] = "competitor"
             continue
         if _rms(rb) < _SILENT_RMS:
             silent[s.id] = "rebuilt"          # e.g. a freeze: AE plays no audio, the competitor does
             continue
-        lag, pk = xcorr_lag(comp[a:b], rb, sr, _MAX_LAG_SEG_S)
+        lag, pk = xcorr_lag(comp[w0:w1], rb, sr, res_s)
         out[s.id]["lag_ms"] = round(lag * 1000.0, 3)
         out[s.id]["corr"] = round(pk, 4)
+        measured[s.id] = {"lag_total_ms": round((g + lag) * 1000.0, 3), "dur_s": round((w1 - w0) / sr, 6),
+                          "corr": round(pk, 4)}
         m = models[s.id]
         if m.kind == "stretch" and m.v > 0 and abs(m.v - 1.0) > 1e-6:
-            r0 = m.raw_seconds(np.array([a / sr]))[0]
-            r1 = m.raw_seconds(np.array([b / sr]))[0]
+            r0 = m.raw_seconds(np.array([w0 / sr + g]))[0]
+            r1 = m.raw_seconds(np.array([w1 / sr + g]))[0]
             ra, rb_ = int(round(r0 * sr)), int(round(r1 * sr))
-            cpart, rpart = comp[a:b], raw[max(0, ra):max(0, rb_)]
+            cpart, rpart = comp[w0:w1], raw[max(0, ra):max(0, rb_)]
             pt = pitch_shift_test(cpart, rpart, m.v, sr)
             fm = feature_pitch_test(cpart, rpart, m.v, sr, cfg)
             out[s.id]["pitch_preserved"] = _pitch_decision(pt, fm)
-            dlog.record("audio_segments", "pitch", seg=s.id, speed=m.v, spectral=pt, features=fm,
-                        pitch_preserved=out[s.id]["pitch_preserved"])
-        lag0[s.id] = lag if pk >= min_corr else lag0.get(s.id, 0.0)
+            rec("pitch", seg=s.id, speed=m.v, spectral=pt, features=fm, pitch_preserved=out[s.id]["pitch_preserved"])
+        lag0[s.id] = (g + lag) if pk >= min_corr else lag0.get(s.id, g)
 
     # ---- run status -----------------------------------------------------------------------------
-    measured = [sid for sid, (a, b) in ranges.items() if b - a >= int(_MIN_SEG_S * sr) and out[sid]["corr"] is not None]
+    measured_ids = [sid for sid, (a, b) in ranges.items() if b - a >= int(_MIN_SEG_S * sr) and out[sid]["corr"] is not None]
     status = "ok"
-    if measured and all(out[sid]["corr"] < min_corr for sid in measured):
+    if measured_ids and all(out[sid]["corr"] < min_corr for sid in measured_ids):
         status = "audio_replaced"
         notes.append("competitor audio does not correlate with the RAW-rebuilt audio in any segment (audio replaced)")
 
@@ -1585,18 +1715,18 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
     rebuilt = np.zeros(n_total, np.float32)
     observable = np.zeros(n_total, bool)
     for s in segs:
-        if s.id not in models or s.id not in ranges:
+        if s.id not in models or s.id not in played:
             continue
-        a, b = ranges[s.id]
+        a, b = played[s.id]
         b = min(b, n_total)
         if b <= a or out[s.id]["pitch_preserved"]:
             continue       # a pitch-preserving stretch is RAW audio the tape rebuild cannot explain
-        g = 0.0
-        rb = models[s.id].render(raw, sr, a, b, lag0.get(s.id, 0.0))
+        gain = 0.0
+        rb = models[s.id].render(raw, sr, a, b, lag0.get(s.id, g))
         if status != "audio_replaced":
             den = float(np.dot(rb.astype(np.float64), rb))
-            g = float(np.clip(np.dot(comp[a:b].astype(np.float64), rb) / den, 0.0, 4.0)) if den > 0 else 0.0
-        rebuilt[a:b] += g * rb
+            gain = float(np.clip(np.dot(comp[a:b].astype(np.float64), rb) / den, 0.0, 4.0)) if den > 0 else 0.0
+        rebuilt[a:b] += gain * rb
         observable[a:b] = True
     if status == "audio_replaced":
         observable[:] = True
@@ -1636,17 +1766,18 @@ def _analyze_segments_audio(segments: Sequence[Segment], comp_y: np.ndarray, raw
                 over = any(ad["comp_in"] < s1 and ad["comp_out"] > s0 for ad in added)
                 exc = "music_dominated" if over else "audio_replaced"
         o["exception"] = exc
-        dlog.record("audio_segments", "segment", seg=s.id, range_samples=[a, b], lag_ms=lag, corr=corr,
-                    pitch_preserved=o["pitch_preserved"], in_offset=o["in_offset_frames"],
-                    out_offset=o["out_offset_frames"], exception=exc)
+        rec("segment", seg=s.id, range_samples=[a, b], lag_ms=lag, corr=corr,
+            pitch_preserved=o["pitch_preserved"], in_offset=o["in_offset_frames"],
+            out_offset=o["out_offset_frames"], exception=exc)
         if exc in ("audio_replaced", "music_dominated") and status != "audio_replaced":
             notes.append(f"S{s.id:02d}: competitor audio does not follow RAW ({exc}, corr {corr})")
         if o["pitch_preserved"]:
             notes.append(f"S{s.id:02d}: pitch preserved at speed {s.speed:.3f} (AE's stretch changes pitch)")
-    dlog.record("audio_segments", "summary", status=status, added_audio=added, cuts=len(cuts),
-                jl=[c for c in cuts if c["offset_frames"]])
-    return {"segments": out, "added_audio": added, "status": status, "notes": notes,
-            "cuts": [c for c in cuts if c["offset_frames"]]}
+    jl = [c for c in cuts if c["offset_frames"]]
+    rec("summary", status=status, added_audio=added, cuts=len(cuts), jl=jl, av_offset_ms=round(g * 1000.0, 3),
+        switch_baseline=switch_info)
+    return {"segments": out, "added_audio": added, "status": status, "notes": notes, "cuts": jl,
+            "_av_offset_s": g, "_switch_baseline": switch_info, "_measured": measured}
 
 
 def _added_audio(comp: np.ndarray, rebuilt: np.ndarray, observable: np.ndarray, sr: int, fps: Fraction,
@@ -1717,3 +1848,315 @@ def _added_audio(comp: np.ndarray, rebuilt: np.ndarray, observable: np.ndarray, 
                     level_db=out[-1]["level_db"], level_dbfs=out[-1]["level_dbfs"],
                     frames_flagged=int(b - a), threshold_db=thr_db)
     return out
+
+
+# =============================================================================================
+# Global A/V offset of the competitor (DESIGN §7 D9)
+# =============================================================================================
+#
+# One sign convention everywhere: the offset g is a LAG in xcorr_lag's convention between the
+# competitor's audio and the recreation that keeps RAW's own A/V sync (picture-synced RAW audio):
+# rebuilt(t) ~ competitor(t - g). g < 0 = the competitor's audio plays LATER than its picture (relative to
+# RAW's own sync); per-segment lags are residuals (measured lag - g). A speed-1 segment whose picture fixes
+# its raw_in to the floor interval [lo, hi] and whose audio implies the in-point x_a = raw_in + lag
+# constrains g to [x_a - hi, x_a - lo]; the run's offset is the point covered by the most segment weight.
+
+def stab_intervals(lo: Sequence[float], hi: Sequence[float], w: Sequence[float]) -> dict:
+    """Weighted maximum coverage ('interval stabbing') of closed intervals [lo_i, hi_i] with weights w_i.
+
+    Returns {'best': the largest covered weight, 'total': sum of weights, 'set': [a, b] (the widest
+    maximal run of points covered by 'best'; the lowest one on ties) or None when there is no interval}."""
+    lo, hi, w = (np.asarray(x, np.float64).reshape(-1) for x in (lo, hi, w))
+    keep = np.isfinite(lo) & np.isfinite(hi) & np.isfinite(w) & (hi >= lo) & (w > 0)
+    lo, hi, w = lo[keep], hi[keep], w[keep]
+    total = float(w.sum())
+    if lo.size == 0:
+        return {"best": 0.0, "total": total, "set": None}
+    # events: an interval opens before one closes at the same coordinate (closed intervals)
+    ev = sorted([(float(a), 0, float(x)) for a, x in zip(lo, w)] + [(float(b), 1, float(x)) for b, x in zip(hi, w)])
+    tol = 1e-9 * max(1.0, total)
+    cov, best, start, runs = 0.0, 0.0, None, []
+    for x, kind, wt in ev:
+        if kind == 0:
+            cov += wt
+            if cov > best + tol:
+                best, runs, start = cov, [], x
+            elif abs(cov - best) <= tol:
+                start = x
+        else:
+            if start is not None and abs(cov - best) <= tol:
+                runs.append((start, x))
+            start = None
+            cov -= wt
+    a, b = max(runs, key=lambda r: (r[1] - r[0], -r[0]))
+    return {"best": best, "total": total, "set": [a, b]}
+
+
+def coverage_at(x: float, lo: Sequence[float], hi: Sequence[float], w: Sequence[float]) -> float:
+    """Weight of the intervals [lo_i, hi_i] that contain x."""
+    lo, hi, w = (np.asarray(v, np.float64).reshape(-1) for v in (lo, hi, w))
+    return float(w[(lo <= x) & (x <= hi)].sum())
+
+
+def _stab_centre(st: dict, lo: np.ndarray, hi: np.ndarray, w: np.ndarray, zero_frac: float) -> float:
+    """Centre of the max-coverage set, or 0 exactly when 0 is in it or covers >= zero_frac of the best."""
+    a, b = st["set"]
+    if a <= 0.0 <= b or coverage_at(0.0, lo, hi, w) >= zero_frac * st["best"]:
+        return 0.0
+    return 0.5 * (a + b)
+
+
+def solve_av_offset(lo: Sequence[float], hi: Sequence[float], w: Sequence[float], cfg: Any,
+                    audio_s: float | None = None) -> dict:
+    """The run's A/V offset (seconds, xcorr convention) from per-segment offset intervals [lo_i, hi_i].
+
+    g = 0 EXACTLY when 0 is in the max-coverage set or covers >= cfg.av_offset_zero_frac of the best
+    coverage (a zero-offset input behaves exactly as without the offset model). Otherwise g = the centre
+    of the max-coverage set, accepted when there are >= av_offset_min_segments segments and >=
+    av_offset_min_audio_s of audio, the offset explains >= av_offset_min_coverage of the weight, no single
+    segment decides where it is (every leave-one-out max-coverage set lies within av_offset_max_spread_ms of
+    the published set; a segment may only narrow it) and av_offset_min_ms <= |g| <= av_offset_max_s; else
+    0 and today's per-segment behaviour. Returns {'status': 'measured' | 'zero' | 'not_measured', 'lag_s',
+    'interval_s' (the max-coverage set), 'centre_s', 'n', 'coverage', 'coverage_zero', 'spread_ms' (spread
+    of the leave-one-out centres), 'loo_distance_ms', 'audio_s', 'reason'}."""
+    lo, hi, w = (np.asarray(v, np.float64).reshape(-1) for v in (lo, hi, w))
+    n = int(lo.size)
+    zf = float(_cfg(cfg, "av_offset_zero_frac", 0.9))
+    out: dict[str, Any] = {"status": "not_measured", "lag_s": 0.0, "interval_s": None, "centre_s": None, "n": n,
+                           "coverage": None, "coverage_zero": None, "spread_ms": None, "loo_distance_ms": None,
+                           "audio_s": None if audio_s is None else round(float(audio_s), 3), "reason": ""}
+    st = stab_intervals(lo, hi, w)
+    if st["set"] is None or st["best"] <= 0:
+        out["reason"] = "no segment constrains the offset"
+        return out
+    a, b = st["set"]
+    c = _stab_centre(st, lo, hi, w, zf)
+    out.update(interval_s=[a, b], centre_s=0.5 * (a + b), coverage=st["best"] / st["total"],
+               coverage_zero=coverage_at(0.0, lo, hi, w) / st["total"])
+    if c == 0.0:
+        out.update(status="zero", reason="an offset of 0 explains the segments")
+        return out
+    loo, dist = [], 0.0
+    for i in range(n):
+        m = np.ones(n, bool)
+        m[i] = False
+        s_i = stab_intervals(lo[m], hi[m], w[m])
+        if s_i["set"] is None:
+            continue
+        c_i = _stab_centre(s_i, lo[m], hi[m], w[m], zf)
+        loo.append(c_i)
+        a_i, b_i = (0.0, 0.0) if c_i == 0.0 else s_i["set"]
+        dist = max(dist, a_i - b, a - b_i, 0.0)            # gap between that set and the published one
+    spread = (max(loo) - min(loo)) * 1000.0 if loo else 0.0
+    out.update(spread_ms=spread, loo_distance_ms=dist * 1000.0)
+    why = []
+    if n < int(_cfg(cfg, "av_offset_min_segments", 3)):
+        why.append(f"{n} segment(s)")
+    if audio_s is not None and audio_s < float(_cfg(cfg, "av_offset_min_audio_s", 2.0)):
+        why.append(f"{audio_s:.2f} s of audio")
+    if out["coverage"] < float(_cfg(cfg, "av_offset_min_coverage", 0.7)):
+        why.append(f"coverage {out['coverage']:.0%}")
+    if dist * 1000.0 > float(_cfg(cfg, "av_offset_max_spread_ms", 2.0)):
+        why.append(f"one segment moves the offset by {dist * 1000.0:.2f} ms")
+    if abs(c) * 1000.0 < float(_cfg(cfg, "av_offset_min_ms", 2.0)):
+        why.append(f"|offset| {abs(c) * 1000.0:.2f} ms below the minimum")
+    if abs(c) > float(_cfg(cfg, "av_offset_max_s", 1.0)):
+        why.append(f"|offset| {abs(c) * 1000.0:.1f} ms above the maximum")
+    if why:
+        out["reason"] = "not accepted: " + ", ".join(why)
+        return out
+    out.update(status="measured", lag_s=c, reason="accepted")
+    return out
+
+
+def av_offset_text(lag_ms: float | None) -> str:
+    """The offset in plain words (one sign convention: lag < 0 = the competitor's audio is LATE)."""
+    if lag_ms is None or not math.isfinite(float(lag_ms)) or abs(float(lag_ms)) < 1e-9:
+        return "competitor audio is in sync with its picture, relative to RAW's own A/V sync"
+    rel = "later" if float(lag_ms) < 0 else "earlier"
+    return f"competitor audio is {abs(float(lag_ms)):.1f} ms {rel} than its picture, relative to RAW's own A/V sync"
+
+
+def _stretch_seg(s: Segment) -> bool:
+    """A forward stretch segment with a feasible raw_in interval (can constrain the offset)."""
+    return (s.type == "raw" and s.time_mode != "remap" and not s.time_remap_keys and s.speed is not None
+            and float(s.speed) > 0 and s.raw_in_seconds is not None and bool(s.raw_in_interval))
+
+
+def _stretch_v1(s: Segment) -> bool:
+    return _stretch_seg(s) and abs(float(s.speed) - 1.0) <= 1e-6
+
+
+def av_offset_prior(hints: Any, segments: Sequence[Segment], comp_fps: Any, cfg: Any,
+                    dlog: DecisionLog | None = None) -> dict:
+    """Search centre of the first per-segment audio pass, from the S5.1 coarse windows (DESIGN §7 D9).
+
+    Every confident speed-1 window with a waveform NCC >= cfg.av_offset_prior_wave_peak lying inside one
+    speed-1 stretch segment gives the raw_in its audio implies, d = audio RAW time - picture RAW time, and
+    an offset interval against the segment's floor interval. Accepted with >= av_offset_prior_min_windows
+    windows whose d agree within av_offset_prior_max_mad_ms (MAD; the median ignores repeated-music
+    outliers); the prior is then the stabbing solution of the window intervals (0 exactly when 0 explains
+    them, as for the precise estimate; their median when no point covers av_offset_min_coverage of them),
+    else 0. Returns {'lag_s', 'accepted', 'n_windows', 'median_ms', 'mad_ms', 'interval_ms', 'reason'}."""
+    dlog = dlog or null_dlog()
+    fps = parse_fps(comp_fps)
+    out: dict[str, Any] = {"lag_s": 0.0, "accepted": False, "n_windows": 0, "median_ms": None, "mad_ms": None,
+                           "interval_ms": None, "reason": ""}
+    n_h = len(getattr(hints, "comp_t", [])) if hints is not None else 0
+    wp = getattr(hints, "wave_peak", None) if n_h else None
+    d, lo, hi = [], [], []
+    if n_h and wp is not None:
+        thr = float(_cfg(cfg, "av_offset_prior_wave_peak", 0.8))
+        eps = float(_cfg(cfg, "av_offset_eps_ms", 0.5)) / 1000.0
+        half = 0.5 * float(getattr(hints, "window", 1.0))
+        spans = [(float(Fraction(int(s.comp_in)) / fps), float(Fraction(int(s.comp_out)) / fps), s)
+                 for s in sorted(segments, key=lambda s: (s.comp_in, s.id)) if _stretch_v1(s)]
+        for t, r, v, pk in zip(np.asarray(hints.comp_t, np.float64), np.asarray(hints.raw_t, np.float64),
+                               np.asarray(hints.speed, np.float64), np.asarray(wp, np.float64)):
+            if not (np.isfinite(r) and np.isfinite(pk) and pk >= thr and abs(v - 1.0) <= 1e-6):
+                continue
+            for t0, t1, s in spans:
+                if t0 <= t - half and t + half <= t1:
+                    x_a = float(r - (t - t0))                       # the raw_in this window's audio implies
+                    a, b = (float(x) for x in s.raw_in_interval)
+                    d.append(x_a - float(s.raw_in_seconds))
+                    lo.append(x_a - b - eps)
+                    hi.append(x_a - a + eps)
+                    break
+    n = len(d)
+    out["n_windows"] = n
+    if n:
+        med = float(np.median(d))
+        out.update(median_ms=round(med * 1000.0, 3),
+                   mad_ms=round(float(np.median(np.abs(np.asarray(d) - med))) * 1000.0, 3))
+    if not n_h:
+        out["reason"] = "no audio hints"
+    elif n < int(_cfg(cfg, "av_offset_prior_min_windows", 8)):
+        out["reason"] = f"{n} usable window(s)"
+    elif out["mad_ms"] > float(_cfg(cfg, "av_offset_prior_max_mad_ms", 10.0)):
+        out["reason"] = f"windows disagree (MAD {out['mad_ms']:.2f} ms)"
+    else:
+        ones = np.ones(n)
+        st = stab_intervals(lo, hi, ones)
+        g0 = _stab_centre(st, np.asarray(lo), np.asarray(hi), ones, float(_cfg(cfg, "av_offset_zero_frac", 0.9)))
+        if g0 != 0.0 and st["best"] < float(_cfg(cfg, "av_offset_min_coverage", 0.7)) * n:
+            g0 = float(np.median(d))
+        if abs(g0) > float(_cfg(cfg, "av_offset_max_s", 1.0)):
+            out["reason"] = f"|prior| {abs(g0) * 1000.0:.1f} ms above the maximum"
+        else:
+            out.update(lag_s=g0, accepted=True, reason="0 explains the windows" if g0 == 0.0 else "accepted",
+                       interval_ms=[round(st["set"][0] * 1000.0, 3), round(st["set"][1] * 1000.0, 3)])
+    dlog.record("audio_align", "av_offset_prior", lag_ms=round(out["lag_s"] * 1000.0, 3),
+                **{k: v for k, v in out.items() if k != "lag_s"})
+    return out
+
+
+def av_offset_probe(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int, comp_fps: Any,
+                    cfg: Any, dlog: DecisionLog | None = None) -> dict:
+    """Fallback search centre when the S5.1 windows give no prior (too few long windows, DESIGN §7 D9): one
+    wide lag search (±cfg.av_offset_max_s, at most half the range) per speed-1 stretch segment with >=
+    av_offset_seg_min_s of core audio; the segments correlating >= verify_audio_strong_corr constrain the
+    offset exactly like the precise estimate (``solve_av_offset``: 0 exactly when 0 explains them).
+    Returns {'lag_s', 'accepted', 'source': 'probe', 'n_segments', 'interval_ms', 'reason'}."""
+    with single_thread_blas():
+        dlog = dlog or null_dlog()
+        fps = parse_fps(comp_fps)
+        sr = int(sr)
+        comp, raw = _mono(comp_y), _mono(raw_y)
+        out: dict[str, Any] = {"lag_s": 0.0, "accepted": False, "source": "probe", "n_segments": 0, "interval_ms": None,
+                               "reason": ""}
+        if comp.size == 0 or raw.size == 0:
+            out["reason"] = "no audio"
+            return out
+        max_s = float(_cfg(cfg, "av_offset_max_s", 1.0))
+        strong = float(_cfg(cfg, "verify_audio_strong_corr", 0.8))
+        min_s = float(_cfg(cfg, "av_offset_seg_min_s", 0.5))
+        eps = float(_cfg(cfg, "av_offset_eps_ms", 0.5)) / 1000.0
+        lo, hi, w = [], [], []
+        dur = 0.0
+        for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+            m = _build_model(s, fps, sr) if _stretch_v1(s) else None
+            if m is None:
+                continue
+            din, dout = _crossfade_frames(s)
+            a = int(round(Fraction(int(s.comp_in + din)) * sr / fps))
+            b = min(int(round(Fraction(int(s.comp_out - dout)) * sr / fps)), comp.size)
+            if b - a < int(min_s * sr):
+                continue
+            lag, pk = xcorr_lag(comp[a:b], m.render(raw, sr, a, b), sr, max_s)
+            if pk < strong:
+                continue
+            x_a = float(s.raw_in_seconds) + lag
+            ia, ib = (float(x) for x in s.raw_in_interval)
+            lo.append(x_a - ib - eps)
+            hi.append(x_a - ia + eps)
+            w.append((b - a) / sr * pk * pk)
+            dur += (b - a) / sr
+        sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur)
+        out.update(n_segments=sol["n"], reason=sol["reason"], accepted=sol["status"] in ("measured", "zero"),
+                   lag_s=float(sol["lag_s"]),
+                   interval_ms=None if sol["interval_s"] is None else [round(sol["interval_s"][0] * 1000.0, 3),
+                                                                       round(sol["interval_s"][1] * 1000.0, 3)])
+        dlog.record("audio_align", "av_offset_probe", lag_ms=round(out["lag_s"] * 1000.0, 3),
+                    **{k: v for k, v in out.items() if k != "lag_s"})
+        return out
+
+
+def av_offset_estimate(segments: Sequence[Segment], audio_result: dict, cfg: Any, dlog: DecisionLog | None = None,
+                       *, prior: dict | None = None) -> dict:
+    """The run's A/V offset from a per-segment audio pass (DESIGN §7 D9): every forward stretch segment with
+    corr >= cfg.verify_audio_strong_corr over >= av_offset_seg_min_s of audio (or >= av_offset_seg_short_s at
+    corr >= av_offset_seg_short_corr) gives the offset interval [(x_a - hi) / v, (x_a - lo) / v] (x_a = raw_in
+    + v x measured total lag, [lo, hi] = its floor raw_in interval; an offset in competitor time, exact for
+    an offset of the finished mix -- one inside the source scales by 1/v, which max coverage tolerates while
+    most weight is speed 1), widened by av_offset_eps_ms, weight = audio seconds x corr^2; ``solve_av_offset``
+    decides. The lags are audio_result['_measured'] totals, so the
+    pass's own search centre does not matter. Returns the published cutlist.audio.av_offset block:
+    {'status', 'lag_ms', 'lag_ms_interval', 'centre_ms', 'n_segments', 'coverage', 'coverage_zero',
+    'spread_ms', 'audio_s', 'reason', 'text', 'prior', 'segments'} plus 'lag_s' (seconds, not published)."""
+    dlog = dlog or null_dlog()
+    strong = float(_cfg(cfg, "verify_audio_strong_corr", 0.8))
+    min_s = float(_cfg(cfg, "av_offset_seg_min_s", 0.5))
+    short_s = float(_cfg(cfg, "av_offset_seg_short_s", 0.25))
+    short_c = float(_cfg(cfg, "av_offset_seg_short_corr", 0.9))
+    eps = float(_cfg(cfg, "av_offset_eps_ms", 0.5)) / 1000.0
+    meas = (audio_result or {}).get("_measured") or {}
+    lo, hi, w, ids, items = [], [], [], [], []
+    dur = 0.0
+    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+        m = meas.get(s.id, meas.get(str(s.id)))
+        if m is None or not _stretch_seg(s) or (s.audio or {}).get("exception") in (
+                "not_in_raw", "no_audio", "pitch_preserved", "audio_replaced", "music_dominated"):
+            continue
+        corr, d_s = float(m["corr"]), float(m["dur_s"])
+        if corr < strong or not (d_s >= min_s or (d_s >= short_s and corr >= short_c)):
+            continue
+        v = float(s.speed)
+        x_a = float(s.raw_in_seconds) + v * float(m["lag_total_ms"]) / 1000.0
+        a, b = (float(x) for x in s.raw_in_interval)
+        lo.append((x_a - b) / v - eps)
+        hi.append((x_a - a) / v + eps)
+        w.append(d_s * corr * corr)
+        ids.append(int(s.id))
+        dur += d_s
+        items.append({"seg": int(s.id), "speed": v, "lag_total_ms": float(m["lag_total_ms"]), "corr": corr,
+                      "dur_s": round(d_s, 4),
+                      "interval_ms": [round((x_a - b) / v * 1000.0, 3), round((x_a - a) / v * 1000.0, 3)]})
+    sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur)
+    lag_ms = round(sol["lag_s"] * 1000.0, 3)
+    iv = sol["interval_s"]
+    pr = dict(prior or {})
+    if "lag_s" in pr:
+        pr["lag_ms"] = round(float(pr.pop("lag_s")) * 1000.0, 3)
+    pub = {"status": sol["status"], "lag_ms": lag_ms,
+           "lag_ms_interval": None if iv is None else [round(iv[0] * 1000.0, 3), round(iv[1] * 1000.0, 3)],
+           "centre_ms": None if sol["centre_s"] is None else round(sol["centre_s"] * 1000.0, 3),
+           "n_segments": sol["n"], "coverage": None if sol["coverage"] is None else round(sol["coverage"], 4),
+           "coverage_zero": None if sol["coverage_zero"] is None else round(sol["coverage_zero"], 4),
+           "spread_ms": None if sol["spread_ms"] is None else round(sol["spread_ms"], 3),
+           "loo_distance_ms": None if sol["loo_distance_ms"] is None else round(sol["loo_distance_ms"], 3),
+           "audio_s": sol["audio_s"], "reason": sol["reason"], "text": av_offset_text(lag_ms), "prior": pr,
+           "segments": ids}
+    dlog.record("audio_align", "av_offset", **pub, evidence={"segments": items})
+    pub["lag_s"] = float(sol["lag_s"])
+    return pub

@@ -482,8 +482,11 @@ def install_stub_world(monkeypatch, calls: dict):
             allowed_mask=lambda layout, overlays, k, comp, dilate_px=None: np.ones((H, W), bool))
     install(monkeypatch, "audio_align", coarse_align=lambda *a, **k: AudioHints.empty(),
             xcorr_lag=lambda a, b, sr, m: (0.0, 1.0),
-            analyze_segments_audio=lambda segs, cy, ry, sr, fps, cfg, dlog: {
-                "segments": {}, "added_audio": [], "status": "no_audio", "notes": ["no audio in either file"]})
+            analyze_segments_audio=lambda segs, cy, ry, sr, fps, cfg, dlog, **k: {
+                "segments": {}, "added_audio": [], "status": "no_audio", "notes": ["no audio in either file"]},
+            av_offset_prior=lambda *a, **k: {"lag_s": 0.0, "accepted": False, "reason": "no audio hints"},
+            av_offset_estimate=lambda *a, **k: {"status": "not_measured", "lag_s": 0.0, "lag_ms": 0.0,
+                                                "text": "no audio"})
 
     @dataclasses.dataclass
     class Anchor:
@@ -908,9 +911,15 @@ def test_audio_informed_phase_sign_and_clamping():
     s, (old, frames), _, _ = run(-8.333)
     assert s.raw_in_seconds == pytest.approx(200 / 30 + 0.001, abs=3e-9)
     assert s.ae_margin_ms >= 1.0 and "AE-rule-sensitive" not in (s.notes or "")   # rounding never eats the margin
-    s, _, _, _ = run(+50.0)                                           # far outside: upper bound - margin
+    s, _, _, _ = run(+14.0)                    # outside by 5.67 ms (<= the 10 ms tolerance): upper bound - margin
     assert s.raw_in_seconds == pytest.approx(200.5 / 30 - 0.001, abs=3e-9)
     assert s.raw_in_interval_both[1] - s.raw_in_seconds >= 0.001
+    # far outside (> tolerance): the audio says nothing about the phase -> raw_in never moves (the AE
+    # margin is not shrunk towards an edge the audio does not reach); ONE run-level warning lists them
+    s, (old, _), moved, warns = run(+50.0)
+    assert s.raw_in_seconds == old and not moved and s.audio["phase_source"] == "video"
+    assert len(warns) == 1 and "1 segment(s) keep their video phase" in warns[0] and "S01 +41.7 ms" in warns[0]
+    assert "audio implies raw_in" not in warns[0]
     # speed 1.1: the RAW shift is v * lag
     fm11 = _phase_fm(30, 200, 1.1)
     s11 = _solved(Segment(1, "raw", 0, 30, speed=1.1), fm11, cf, rf)
@@ -939,7 +948,7 @@ def test_audio_informed_phase_keeps_measured_frames():
     old = s.raw_in_seconds
     frames = [phase_solve.ae_frame(old, 1.0, k, 0, cf, rf) for k in range(30)]
     assert frames == list(range(200, 230))
-    res = {"segments": {1: {"lag_ms": 30.0, "corr": 0.95, "exception": None}}, "status": "ok"}
+    res = {"segments": {1: {"lag_ms": 15.0, "corr": 0.95, "exception": None}}, "status": "ok"}   # 6.7 ms past
     pipeline.apply_segment_audio([s], res)
     pipeline.audio_informed_phase([s], res, fm, None, None, 16000, cf, rf, Config(), null_dlog())
     assert s.raw_in_seconds > old                                   # moved towards the audio ...

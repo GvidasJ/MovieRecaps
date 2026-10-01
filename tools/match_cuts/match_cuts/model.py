@@ -370,19 +370,26 @@ class AudioHints:
     peak: np.ndarray                       # float32 normalised correlation peak
     window: float = 1.0
     hop: float = 0.25
+    wave_peak: np.ndarray | None = None    # float32 waveform NCC of the sample-precise refinement (NaN: not refined)
+
+    def __post_init__(self) -> None:
+        if self.wave_peak is None:
+            self.wave_peak = np.full(np.shape(self.comp_t), np.nan, np.float32)
 
     def confident(self, min_conf: float = 1.5) -> np.ndarray:
         return np.isfinite(self.raw_t) & (self.conf >= min_conf)
 
     def save(self, path: str | Path) -> None:
         np.savez_compressed(path, comp_t=self.comp_t, raw_t=self.raw_t, speed=self.speed, conf=self.conf,
-                            psr=self.psr, peak=self.peak, window=np.array(self.window), hop=np.array(self.hop))
+                            psr=self.psr, peak=self.peak, window=np.array(self.window), hop=np.array(self.hop),
+                            wave_peak=self.wave_peak)
 
     @staticmethod
     def load(path: str | Path) -> "AudioHints":
         with np.load(path) as z:
             return AudioHints(z["comp_t"], z["raw_t"], z["speed"], z["conf"], z["psr"], z["peak"],
-                              float(z["window"]), float(z["hop"]))
+                              float(z["window"]), float(z["hop"]),
+                              z["wave_peak"] if "wave_peak" in z.files else None)
 
     @staticmethod
     def empty() -> "AudioHints":
