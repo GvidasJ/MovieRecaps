@@ -379,3 +379,31 @@ def test_main_grid_note_names_criterion_3(tmp_path):
     note = next(ln for ln in md.splitlines() if ln.startswith("_MAIN runs at"))
     assert "criterion 3 accepts" in note and "Criteria 2, 3 and 6 are frame-exact only with `--fps competitor`" in note
     assert "max error 16.600 ms" in note
+
+
+def test_independent_check_findings_are_listed_with_frames(tmp_path):
+    """FX-01: the hypothesis-neutral checks' failures (temporal signature, motion mismatch, +-1 refit, spurious
+    cuts / repeat pairs / excursions) reach the warnings and the verification section with frame lists."""
+    ctx = make_ctx(tmp_path)
+    ch = ctx.verify["checks"]
+    ch["s9_2b_temporal"] = {"status": "fail", "summary": "x", "pairs": 59, "n_disagreements": 3,
+                            "disagreements": [{"k": 20, "kind": "recreation_changes"}, {"k": 40, "kind": "recreation_changes"},
+                                              {"k": 7, "kind": "recreation_repeats"}],
+                            "motion_mismatch": [{"segment": 65, "frames": [1194, 1203], "comp_move": 8, "comp_repeat": 0}],
+                            "labels": {"counts": {"repeat": 12, "move": 40, "unknown": 5, "cut": 2}}}
+    ch["s9_2c_refit"] = {"status": "fail", "summary": "y", "n_neighbour_wins": 2,
+                         "neighbour_wins": [{"k": 1423, "raw": 2048, "z_shown": 0.97, "best_neighbour": 2047, "z_neighbour": 0.994},
+                                            {"k": 1424, "raw": 2048, "z_shown": 0.968, "best_neighbour": 2047, "z_neighbour": 0.992}]}
+    ctx.verify["criteria"]["c2_cuts"]["details"] = {"cuts": [
+        {"from": 3, "to": 4, "frame": 44, "kind": "hard", "status": "fail",
+         "sides": [{"side": "A_last", "result": "ok"}, {"side": "repeat_pair", "result": "fail"}]},
+        {"from": 4, "to": 5, "frame": 49, "kind": "hard", "status": "fail", "sides": [{"side": "no_cut", "result": "fail"}]}]}
+    lines = report.independent_findings(ctx.verify)
+    assert any(ln.startswith("Motion mismatch (s9_2b): S65 holds one RAW frame on frames 1194–1203") for ln in lines)
+    assert any("recreation changes at 20, 40" in ln and "recreation repeats at 7" in ln for ln in lines)
+    assert any("s9_2c" in ln and "1423-1424" in ln and "RAW 2047 0.994" in ln for ln in lines)
+    assert "Cuts failed as inside a repeat pair (c2): frames 44" in lines and "Cuts failed as spurious cut (c2): frames 49" in lines
+    md = report.render_report(ctx)
+    assert "- Motion mismatch (s9_2b)" in md and "12 repeat, 40 move" in md
+    assert "| 01: S03\\|S04 |" in md or "S03\\|S04" in md or "S03|S04" in md
+    assert "inside a repeat pair" in md

@@ -68,3 +68,22 @@ def test_segment_vectorised_free_alpha_matches_scoring():
     assert r["alpha_a_free"] == pytest.approx(alpha, abs=1e-6) and alpha == pytest.approx(0.3, abs=0.02)
     assert r["gain_free"] == pytest.approx(gain, abs=1e-6)
     assert abs(r["alpha_a"] - 0.3) > abs(r["alpha_a_free"] - 0.3)      # the constrained fit is the biased one
+
+
+def test_grad_zncc_sees_a_misframe_that_plain_zncc_misses_on_dark_frames():
+    """A dark frame dominated by a smooth vertical illumination ramp: a 12 px horizontal misframe keeps the
+    plain ZNCC high (the ramp does not change), the gradient-domain ZNCC drops (the edges moved)."""
+    import cv2
+    rng = np.random.default_rng(4)
+    h, w = 120, 160
+    yy = np.linspace(0, 1, h)[:, None]
+    tex = cv2.GaussianBlur(rng.normal(0, 1, (h, w + 40)).astype(np.float32), (0, 0), 1.5)
+    img = (8.0 + 50.0 * yy ** 1.5 + 3.0 * tex / tex.std()).astype(np.float32)
+    a, b = img[:, 20:20 + w], img[:, 32:32 + w]
+    assert scoring.zncc(a, b) > 0.9
+    assert scoring.grad_zncc(a, b) < 0.5
+    assert scoring.grad_zncc(a, a.copy()) == pytest.approx(1.0)
+    m = np.zeros((h, w), bool)
+    m[10:110, 10:150] = True
+    assert scoring.grad_zncc(a, a + 5.0, m) == pytest.approx(1.0)            # gain / offset free
+    assert math.isnan(scoring.grad_zncc(a[:4, :4], b[:4, :4]))             # too few pixels

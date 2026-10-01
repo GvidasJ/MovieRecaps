@@ -10,7 +10,8 @@ log), `geometry.py` (coordinate conventions, `Sim`, OpenCV/AE conversions, `inte
 rounded-rect mask, RDP), `media.py` (PTS-indexed `VideoReader`, `decode_pts`, `extract_audio`,
 `FFmpegWriter`), `model.py` (`StreamInfo`, `Proxy` (+ `get`/`has`), `Layout`/`Box`/`Zone`,
 `FrameMap`/`Status`/`CAND_W`, `AudioHints`, `Segment`, `Cutlist`, `cutlist_layout`), `scoring.py`
-(masked ZNCC in competitor space, `fit_blend`), `config.py` (`Config`: every threshold).
+(masked ZNCC in competitor space, `fit_blend`, gradient-domain `grad_zncc`), `config.py` (`Config`: every
+threshold), `temporal.py` (competitor-only temporal signature: repeat / move labels of frame pairs).
 
 Environment facts (verified): Linux, 4 CPUs, ffmpeg 6.1.1, Python 3.12 venv `/home/user/MovieRecaps/.venv`
 with **OpenCV 5.0** (contrib, headless; `cv2.SIFT_create`), numpy 2.5, PyAV 19, scipy, scikit-image,
@@ -39,7 +40,7 @@ cli.main -> pipeline.run(cfg)
   S6  phase solve + cutlist           phase_solve.solve_raw_in() per segment; pipeline assembles Cutlist -> cutlist.json
   S7  AE project                      export_ae.ae_plan() / write_jsx() / run_jsx_in_mock()
   S8  exports                         export_xml_edl.*, render_preview.render_preview(), render_compare()
-  S9  verification                    verify.verify_all()          -> criteria c1..c6 + checks s9_1..s9_7
+  S9  verification                    verify.verify_all()          -> criteria c1..c6 + checks s9_1..s9_8 (+ s9_2b, s9_2c)
   S10 report                          report.write_report()        -> report.md ; cli prints the summary
 ```
 
@@ -267,6 +268,11 @@ class OverlayMasks:     # per-frame bool masks at comp proxy res (np.packbits pe
 def box_coverage(layout, comp: Proxy) -> np.ndarray   # float [h, w] rounded-box coverage at proxy res
 def allowed_mask(layout, overlays, k, comp: Proxy, dilate_px=None) -> np.ndarray
     # bool [h, w]: coverage >= 0.99 AND NOT static AND NOT dilated overlay(k)
+def layout_overlay_masks(layout, shape=None, ratio=None, dilate_px=3) -> LayoutOverlays | None
+    # the layout stage's OWN findings: per-frame caption / text-overlay masks (layout.overlay_mask_file; else
+    # rectangles of layout.captions) united with its DYNAMIC zones (Zone.static False: the caption band over the
+    # caption period, stickers, ...) on their active frames -- a word the per-frame detection missed is still
+    # covered. Never refine's pass-2 residual masks. verify's only overlays (get / get_dilated like OverlayMasks).
 def masks_from_residuals(residuals: dict[int, np.ndarray], base_allowed, cfg) -> dict[int, np.ndarray]
 ```
 Box semantics: `Box(x, y, w, h, corner_radius)` in competitor full-res CORNER coordinates — the exact
@@ -380,7 +386,12 @@ def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_d
     #   margin < 5δ_k that no competing hypothesis explains); + lambda_cut per cut. Cuts with no RAW
     #   discontinuity (speed change only): at the intersection of the two lines, cut_ambiguity=[a, b].
     # Criterion 2 check per cut (A's last frame scores higher under A's model than B's, and vice versa);
-    #   move the cut otherwise; log.
+    #   move the cut otherwise; log. A visited set guards the mover (it used to oscillate between two positions
+    #   with identical evidence): on a revisit, or after 3 moves, every visited position is re-evaluated (models
+    #   refitted for it) by the summed score of A's frames under A + B's frames under B around the positions,
+    #   the best is kept, criterion2_fail is logged with {oscillation: positions, scores, repeat_pair (a
+    #   position splits a competitor REPEAT pair, temporal.py), reason} and a segment note is added
+    #   (_Seg.c2_oscillation keeps the evidence for the continuous-shot / union test). Passing cuts untouched.
     # TRANSITIONS (before NONE runs become placeholders): for every cut and every NONE/low run <=
     #   transition_search between two raw segments, for k in [cut-transition_search, cut+transition_search]:
     #   scoring.fit_blend over A ∈ {Â(k)-1..Â(k)+1} × B ∈ {B̂(k)-1..B̂(k)+1} (phase-model predictions
@@ -533,15 +544,51 @@ def verify_all(ctx) -> dict
   #             s9_7_determinism}: {...}, 'failures': [...]}
   # c1 <- s9_1: segments + placeholders tile [0, N) exactly; overlaps only = measured transitions;
   #      extra-region frames -> pass_with_exceptions.
+  # Hypothesis-neutral rules (never re-use an analysis decision): verify imports no decision function of
+  #   segment.py / refine.py -- only the scorers, temporal.py and the shared ECC primitive
+  #   refine.refine_transform; framing is RE-MEASURED (ECC, incl. a global phase-correlation start), never
+  #   the model's key held at its boundary (in a pan it lags v px per frame); scoring masks are the layout's own
+  #   caption / overlay masks and dynamic zones (layout.layout_overlay_masks), NEVER ctx.overlays (refine's pass-2 residual
+  #   masks are computed from the match being judged: a misframed match masks its own mismatch away).
   # c2: NEW independent check per cut: competitor frames comp_out(A)-1 and comp_in(B) scored against
-  #      A-model and B-model predicted RAW frames (phase_solve.ae_frame, each segment's own transform);
-  #      crossfades: the fitted α ramp is checked instead; NOT-IN-RAW neighbours: placeholder frame scores
-  #      below none_thresh against the extended neighbour model.
+  #      A-model and B-model predicted RAW frames (phase_solve.ae_frame; when the RAW frames differ, each
+  #      hypothesis' framing re-measured on that frame by ECC -- own: max(model, refit); other: max(held key,
+  #      refit from its own and from the shown framing)); crossfades: the fitted α ramp is checked instead;
+  #      NOT-IN-RAW neighbours: placeholder frame scores below none_thresh against the extended neighbour model.
+  #      No-cut alternative: A's time line extended over B's first verify_union_frames frames (and B's back over
+  #      A's last ones) with re-measured framing; a line within the cut's score noise (scoring.noise_delta of
+  #      the shown scores next to the cut) of the split on all of them -> 'spurious cut'; when both lines show
+  #      the same RAW frames the re-measured framing decides (each side's linear extrapolation must miss the
+  #      other side by a framing step: punch_scale_step / punch_pos_step / rotation, else 'spurious cut').
+  #      A hard cut between the two frames of a competitor REPEAT pair (temporal labels) fails. Excursion: a
+  #      1-2 frame segment more than verify_excursion_frames RAW frames off the line its neighbours share
+  #      (within +-1) must beat that line on its own frames by more than the noise, else 'suspected
+  #      misidentification'. Speed-only cuts (cut_ambiguity) and layout changes are exempt from these tests.
   # c3 <- s9_2 (AE simulation from ae_plan AND from the mock-run record == m(k) for >= frame_exact_min of
   #      matched frames; exemptions only ambiguous-identical [raw_lo, raw_hi] and timing-tie frames — both
-  #      listed) AND s9_3.
+  #      listed) AND s9_2b AND s9_2c AND s9_3.
+  # s9_2b temporal signature (temporal.py): the competitor's comp-only pair labels (repeat / move / unknown /
+  #      cut, per competitor shot with a measured noise floor) against the recreation's pairs measured the
+  #      same way (RAW m(k), m(k+1) each warped with its own model). Disagreements: competitor MOVE where the
+  #      recreation shows the same RAW frame twice; competitor REPEAT where the recreation changes RAW frame
+  #      (above the shot's repeat/move split and temporal_mag_ratio x the competitor's residual); both moving
+  #      with residuals more than temporal_mag_ratio apart after the shot's measured comp/recreation bias.
+  #      They count against frame_exact_min over all pairs considered; a recreation hold of >= 4 frames whose
+  #      labelled competitor pairs mostly MOVE is a 'motion mismatch' (always a failure).
+  # s9_2c +-1 refit: every matched single-segment frame, RAW j-1 / j+1 each with its own ECC framing (from
+  #      the shown framing and its derotated version; j's own refit when a neighbour comes within
+  #      verify_refit_margin of the shown score); a neighbour beating max(shown, refit of j) by more than
+  #      max(3 delta, verify_refit_margin) (delta = noise_delta of the segment's shown scores) is a frame shown
+  #      one RAW frame off with a compensating framing; counted against frame_exact_min, listed otherwise.
   # c4: speed inside [vmin, vmax] ± 0.5 % and snapped where a snap was feasible; framing: per-frame
-  #      measured Sims vs segment model within ±1 % scale / ±4 px; flip/rotation consistent.
+  #      measured Sims vs segment model within ±1 % scale / ±4 px; flip/rotation consistent. Independent
+  #      framing on >= verify_framing_min_samples frames per segment (every frame of segments of <=
+  #      verify_framing_all_max frames): ECC from the model perturbed by ±2 % / ±3 px and from a GLOBAL start
+  #      (phase correlation of the competitor ROI vs the warped RAW), never from the model itself; a better
+  #      framing off by more than the tolerance is a bad frame (> 20 % of the samples -> fail); an
+  #      unconverged sample fails when the model scores below verify_zncc or its gradient-domain ZNCC
+  #      (scoring.grad_zncc: dark / low-texture frames) lies more than max(3 x noise, verify_low_score_margin)
+  #      below the median of the neighbouring segments' measured samples; otherwise it is listed.
   # c5 <- s9_5: per-segment lag (recreated vs competitor audio) within ±10 ms -- the RESIDUAL after the
   #      expected lag (published A/V offset in raw sync, 0 in competitor sync), with verify's own re-estimate of
   #      the offset agreeing with the published one (§7 D9; else fail), short pieces checked as aggregated runs,
@@ -558,6 +605,26 @@ def verify_all(ctx) -> dict
   #      recreation). s9_7: re-run S5.4 -> S6 assembly (segment, phase solve, audio per segment, Cutlist) from
   #      cached FrameMap/AudioHints in a fresh context and byte-compare cutlist JSON (timings excluded).
 ```
+
+### temporal.py  (competitor-only temporal signature; shared by verify and segment)
+```python
+def prepare(img, mask, max_side, blur=0.0) -> (img, mask)   # downscale to max_side, blur; mask loses the blur's reach
+def align_pair(a, ma, b, mb, cfg=None) -> PairMeasure
+    # phase-correlation translation -> ECC (MOTION_AFFINE, masks) -> closest similarity (an editor move:
+    # |ds| <= 10 %, |rot| <= 5 deg, shift <= 25 % of the long side, else the translation only) -> masked ZNCC
+    # cc, mad, (dx, dy, ds, dtheta). r = 1 - cc.
+def measure(get, ks, cfg, pairs=None, gaps=(1, 2), same=None) -> Signature   # d1[k] = (k, k+1), d2[k] = (k, k+2)
+def label_pairs(sig, cfg, breaks=()) -> Labels
+    # shots = runs of pairs with cc >= temporal_shot_cc (else CUT); per shot: largest gap of sorted log r; a gap
+    # >= temporal_gap_ratio splits the shot: upper cluster MOVE, lower cluster REPEAT when the pair's
+    # interchangeability ratios r(k,k+2)/max(r(k,k+1), r(k+1,k+2)) and r(k-1,k+1)/max(..) stay <=
+    # temporal_growth_ratio (slow motion grows), else UNKNOWN; without a gap: if the shot's median growth >
+    # temporal_growth_ratio, pairs with their own growth above it are MOVE, the rest UNKNOWN ('moving');
+    # otherwise all UNKNOWN ('undecided': an all-repeat static run, a noise plate, saturated motion).
+def local_labels(get, k0, k1, cfg) -> Labels ; summary(labels) -> dict
+```
+Nothing in temporal.py needs RAW or a segmentation; the noise floor is measured per shot (the repeat-vs-move
+margin is ~0.001 ZNCC at thumbnail scale -- no absolute threshold separates them).
 
 ### report.py (Stage 10), pipeline.py, cli.py, README.md
 ```python
@@ -872,3 +939,17 @@ verification honesty) were fixed under these shared rules:
   only on positive agreement evidence beyond the edge (no growth over letterbox bars the competitor cropped).
 * **Spawn pools** are capped by available RAM when the state holds a RawIndex; the AE MAIN-comment warning
   store stays under AE's 15,999-byte `Item.comment` limit.
+
+### 7.2 Hypothesis-neutral verification (after the first real run)
+
+The first real run (23.976 RAW in a 30 fps competitor, editor pans over moving shots) passed checks that
+compared the tool with itself: c2 scored the 'other' side with the neighbour's key HELD at its boundary (a pan
+lags v px per frame, so all fake cuts in a pan passed), c3 compared with refine's own m(k) and masked with
+refine's residual masks (a 37 px misframe on a dark dashboard masked itself away), c4 re-measured framing at
+the model's own RAW frame from starts within 3 px. Frames one RAW frame off with a compensating framing
+counted as exact. Rules since then (§5 verify.py, temporal.py): verify only uses scorers, temporal.py and the
+shared ECC primitive; framing is re-measured (global start), never held; masks come from the layout only; the
+competitor's own temporal signature (comp-only repeat / move labels) and a +-1 RAW frame refit give c3 two
+references the model cannot fool; c2 tests the no-cut alternative and repeat pairs; noise floors are measured
+per shot / per segment from the data, never by relaxing a spec tolerance. Segmentation's criterion-2 mover
+keeps a visited set and reports an oscillation instead of stopping wherever its iterations ended.

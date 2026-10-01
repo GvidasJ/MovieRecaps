@@ -92,6 +92,22 @@ def zncc(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None = None) -> float:
     return float((a * b).sum() / den)
 
 
+def grad_zncc(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None = None) -> float:
+    """Gradient-domain ZNCC: normalised correlation of the stacked Sobel gradient vectors (gx, gy) of ``a``
+    and ``b`` over ``mask`` (eroded by one pixel so the mask edge itself adds no gradient). On dark or
+    low-texture frames plain ZNCC is dominated by smooth illumination that stays correlated under a
+    misframing; the gradient vectors follow the edges (direction included), so a shifted picture scores
+    low. NaN like ``zncc``."""
+    import cv2
+    a = np.asarray(a, np.float32)
+    b = np.asarray(b, np.float32)
+    m = np.ones(a.shape, bool) if mask is None else np.asarray(mask, bool)
+    m = cv2.erode(m.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    ga = np.concatenate([cv2.Sobel(a, cv2.CV_32F, 1, 0, ksize=3)[m], cv2.Sobel(a, cv2.CV_32F, 0, 1, ksize=3)[m]])
+    gb = np.concatenate([cv2.Sobel(b, cv2.CV_32F, 1, 0, ksize=3)[m], cv2.Sobel(b, cv2.CV_32F, 0, 1, ksize=3)[m]])
+    return zncc(ga, gb)
+
+
 def zncc_rows(vec: np.ndarray, mat: np.ndarray) -> np.ndarray:
     """ZNCC of one vector against each row of mat (same length). Returns float64 [n]."""
     v = np.asarray(vec, np.float64)
