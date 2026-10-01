@@ -881,3 +881,64 @@ def test_full_affine_reported_when_similarity_is_poor():
     fm.score = np.full(30, 0.85)
     segs = run(fm, *pix_proxies(comp, bank))
     assert len(segs) == 1 and "full affine fits clearly better" in segs[0].notes
+
+
+def test_criterion2_oscillation_gets_an_honest_verdict(tmp_path, monkeypatch):
+    """FX-05: criterion 2 used to run 3 iterations with no visited set and stop wherever the last move ended
+    (606/607, 1444/1445 and 1760/1761 in the real run, identical evidence each time). Now a revisit stops the
+    mover after at most 2 moves, every visited position is re-evaluated, the best summed score (A's frames under
+    A + B's frames under B) is kept, and criterion2_fail records the oscillation with a segment note."""
+    from match_cuts import segment as seg_mod
+    a, b = ff_select(30, 1.0, 1000), ff_select(30, 1.0, 3000)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(m=b, n=30, track=1)])
+    comp, raw = proxies(fm.n)
+
+    def side_scores(self, A, B, k):
+        c = B.a
+        if c == 30:          # A's last frame prefers B -> move the cut to 29
+            return (0.5, 0.9)
+        if c == 29:          # B's first frame prefers A -> move it back to 30
+            return (0.9, 0.5)
+        return (0.9, 0.5) if k < c else (0.5, 0.9)
+
+    def frame_score(self, S, k):      # the pixels: the true cut is at 30
+        return 1.0 if (S.a == 0) == (k < 30) else 0.4
+
+    monkeypatch.setattr(seg_mod._Builder, "_side_scores", side_scores)
+    monkeypatch.setattr(seg_mod._Builder, "_frame_score", frame_score)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, comp, raw, dlog=dl)
+    dl.close()
+    rec = records(tmp_path / "d.jsonl")
+    moves = [r for r in rec if r["decision"] == "criterion2_move"]
+    fails = [r for r in rec if r["decision"] == "criterion2_fail"]
+    assert len(moves) == 2, moves
+    assert len(fails) == 1 and fails[0]["evidence"]["reason"] == "oscillation"
+    ev = fails[0]["evidence"]
+    assert ev["oscillation"] == [30, 29] and ev["cut"] == 30 and ev["scores"]["30"] > ev["scores"]["29"]
+    assert "repeat_pair" in ev
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 30), (30, 60)]
+    note = segs[1].notes
+    assert "criterion 2 not satisfied" in note and "oscillated" in note and "kept 30" in note, note
+    assert np.array_equal(_ae(segs), np.concatenate([a, b]))
+
+
+def test_criterion2_moves_exhausted_keeps_the_best_position(tmp_path, monkeypatch):
+    """The mover keeps failing in one direction (3 moves): the final position is checked too, and the best of
+    the visited positions by summed score is kept and reported."""
+    from match_cuts import segment as seg_mod
+    a, b = ff_select(30, 1.0, 1000), ff_select(30, 1.0, 3000)
+    fm, _ = build_fm([Spec(m=a, n=30), Spec(m=b, n=30, track=1)])
+    comp, raw = proxies(fm.n)
+    monkeypatch.setattr(seg_mod._Builder, "_side_scores", lambda self, A, B, k: (0.5, 0.9))   # always 'move earlier'
+    monkeypatch.setattr(seg_mod._Builder, "_frame_score", lambda self, S, k: 1.0 if (S.a == 0) == (k < 29) else 0.4)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, comp, raw, dlog=dl)
+    dl.close()
+    rec = records(tmp_path / "d.jsonl")
+    fails = [r for r in rec if r["decision"] == "criterion2_fail"]
+    assert len([r for r in rec if r["decision"] == "criterion2_move"]) == 3
+    assert len(fails) == 1 and fails[0]["evidence"]["reason"] == "moves_exhausted"
+    assert fails[0]["evidence"]["oscillation"] == [30, 29, 28, 27] and fails[0]["evidence"]["cut"] == 29
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 29), (29, 60)]
+    assert "was moved over" in segs[1].notes and "kept 29" in segs[1].notes, segs[1].notes

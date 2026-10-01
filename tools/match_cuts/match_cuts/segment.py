@@ -869,6 +869,7 @@ class _Seg:
     framing: dict | None = None
     blend_frames: list = field(default_factory=list)
     ramp: list = field(default_factory=list)
+    c2_oscillation: dict | None = None          # criterion-2 verdict of the cut at a (positions, scores, repeat pair)
 
     @property
     def length(self) -> int:
@@ -2285,7 +2286,16 @@ class _Builder:
             i += 1
         return segs
 
+    C2_MAX_MOVES = 3
+
     def check_cuts(self, segs: list[_Seg]) -> None:
+        """Criterion 2 per hard cut: A's last frame must score higher under A's model than B's and B's first
+        frame the reverse; otherwise move the cut one frame towards the failing side and refit. A visited set
+        guards the mover (it used to oscillate between two positions with identical evidence and stop wherever
+        its last iteration ended): on a revisit, or when C2_MAX_MOVES moves did not satisfy criterion 2, every
+        visited position is re-evaluated (``_criterion2_verdict``), the one with the best summed score of A's
+        frames under A and B's frames under B is kept, and the cut is reported (criterion2_fail with the
+        oscillation evidence, a segment note). Cuts that pass are untouched."""
         for i in range(len(segs) - 1):
             A, B = segs[i], segs[i + 1]
             if not (A.kind == "raw" and B.kind == "raw" and A.b == B.a) or B.trans_in is not None \
@@ -2295,16 +2305,20 @@ class _Builder:
                 self.log("criterion2_layout_boundary", comp_frame=int(B.a), evidence={
                     "reason": "cut at a layout period boundary (not moved)"})
                 continue
-            for it in range(3):
+            visited: dict[int, tuple] = {}         # failing cut position -> state at that position
+            order: list[int] = []
+            history: list[dict] = []
+            moves = 0
+            while True:
                 c = B.a
                 if self._same_view(A, B, c - 1) and self._same_view(A, B, c):
                     # both models show the same frame on both sides: moving the cut cannot help (it would only
                     # oscillate); merge_phantom_cuts removes it
-                    self.log("criterion2_indistinguishable", comp_frame=int(c), evidence={"cut": c, "iteration": it})
+                    self.log("criterion2_indistinguishable", comp_frame=int(c), evidence={"cut": c, "iteration": moves})
                     break
                 s1 = self._side_scores(A, B, c - 1)
                 s2 = self._side_scores(A, B, c)
-                ev = {"cut": c, "last_A": s1, "first_B": s2, "iteration": it}
+                ev = {"cut": c, "last_A": s1, "first_B": s2, "iteration": moves}
                 if s1 is None or s2 is None:
                     self.log("criterion2_unchecked", comp_frame=int(c), evidence=ev)
                     break
@@ -2312,6 +2326,17 @@ class _Builder:
                 if okA and okB:
                     self.log("criterion2_pass", comp_frame=int(c), evidence=ev)
                     break
+                if c in visited or moves >= self.C2_MAX_MOVES:
+                    reason = "oscillation" if c in visited else "moves_exhausted"
+                    if c not in visited:
+                        visited[c] = self._c2_state(A, B)
+                        order.append(c)
+                    history.append({"cut": c, "last_A": s1, "first_B": s2})
+                    self._criterion2_verdict(A, B, visited, order, history, reason)
+                    break
+                visited[c] = self._c2_state(A, B)
+                order.append(c)
+                history.append({"cut": c, "last_A": s1, "first_B": s2})
                 move = None
                 if not okA and A.length > 1:
                     move = c - 1
@@ -2329,11 +2354,91 @@ class _Builder:
                 if self.refit(A) and self.refit(B):
                     self.F.touched[k_move] = "criterion2_moved"
                     self.log("criterion2_move", comp_frame=int(move), evidence=ev)
+                    moves += 1
                 else:
                     A.b, B.a, A.model, B.model, A.extra, B.extra = old
                     self.log("criterion2_fail", comp_frame=int(c), evidence={**ev, "move_infeasible": move})
                     B.notes.append(f"criterion 2 not satisfied at cut {c}; moving it is infeasible")
                     break
+
+    def _c2_state(self, A: _Seg, B: _Seg) -> tuple:
+        """Everything a criterion-2 move changes (restored by ``_criterion2_verdict``)."""
+        lo, hi = A.a, B.b
+        touched = {k: v for k, v in self.F.touched.items() if lo <= k < hi}
+        return (A.b, B.a, A.model, B.model, dict(A.extra), dict(B.extra), touched, A.track, B.track)
+
+    def _c2_restore(self, A: _Seg, B: _Seg, st: tuple) -> None:
+        A.b, B.a, A.model, B.model = st[0], st[1], st[2], st[3]
+        A.extra, B.extra = dict(st[4]), dict(st[5])
+        A.track, B.track = st[7], st[8]
+        for k in [k for k in self.F.touched if A.a <= k < B.b]:
+            self.F.touched.pop(k, None)
+        self.F.touched.update(st[6])
+
+    def _frame_score(self, S: _Seg, k: int) -> float:
+        """Score of comp frame k under segment S's model (pixels; the candidate vector without them)."""
+        j = int(self.pred(S, k))
+        if self.P.ok:
+            sc = self.P.zncc_set(k, [(j, self.sim_at(S, k), S.flip)])
+            if sc is not None and math.isfinite(float(sc[0])):
+                return float(sc[0])
+        v = self.F.cand_score(k, j)
+        return float(v) if math.isfinite(v) else float("nan")
+
+    def _criterion2_verdict(self, A: _Seg, B: _Seg, visited: dict[int, tuple], order: list[int], history: list[dict],
+                            reason: str) -> None:
+        """Honest verdict of a cut criterion 2 cannot place: re-evaluate every visited position (each with the
+        models refitted for it) by the summed score of A's frames under A plus B's frames under B over the frames
+        around the visited positions, keep the best, log criterion2_fail with the oscillation evidence (and
+        whether a visited position splits a competitor REPEAT pair -- two frames showing the same image, where no
+        cut can exist), add a segment note and mark the boundary for the continuous-shot (union) test."""
+        pos = sorted(visited)
+        w0 = max(A.a, pos[0] - 10)
+        w1 = min(B.b, pos[-1] + 10)
+        sums: dict[int, float] = {}
+        for p in order:
+            if p in sums:
+                continue
+            self._c2_restore(A, B, visited[p])
+            tot = 0.0
+            for k in range(w0, w1):
+                v = self._frame_score(A if k < p else B, k)
+                tot += v if math.isfinite(v) else 0.0
+            sums[p] = tot
+        best = max(order, key=lambda p: (round(sums[p], 9), -order.index(p)))
+        self._c2_restore(A, B, visited[best])
+        rp = self._repeat_pair_cuts(pos)
+        ev = {"cut": best, "reason": reason, "oscillation": order, "scores": {str(p): round(v, 6) for p, v in sums.items()},
+              "window": [w0, w1], "repeat_pair": bool(rp), "repeat_pair_cuts": rp, "history": history}
+        self.log("criterion2_fail", comp_frame=int(best), evidence=ev)
+        what = "oscillated between" if reason == "oscillation" else "was moved over"
+        B.notes.append(f"criterion 2 not satisfied: the cut {what} frames {sorted(set(order))}; kept {best} (best summed "
+                       f"score of both sides)" + (f"; {', '.join(f'{p - 1}|{p}' for p in rp)} split(s) a competitor repeat "
+                                                  "pair (the same image: no cut can exist there)" if rp else "")
+                       + "; boundary left for the continuous-shot test")
+        B.c2_oscillation = ev
+
+    def _repeat_pair_cuts(self, positions: Sequence[int]) -> list[int]:
+        """Visited cut positions p whose frames (p-1, p) are a competitor REPEAT pair (temporal.py, comp-only
+        labels around the positions)."""
+        if not self.P.ok or not positions:
+            return []
+        from . import temporal
+        max_side = int(_cfg(self.cfg, "temporal_max_side", 200))
+        x, y, w, h = self.P.roi
+        blur = self.P.blur * temporal.scale_of((h, w), max_side)
+
+        def get(k: int):
+            if not (0 <= k < self.comp.n):
+                return None
+            img = np.asarray(self.comp.get(int(k)))[y:y + h, x:x + w]
+            return temporal.prepare(img, np.asarray(self.P.allowed(int(k)))[y:y + h, x:x + w], max_side, blur)
+        try:
+            lab = temporal.local_labels(get, max(0, min(positions) - 8), min(self.n - 1, max(positions) + 8), self.cfg)
+        except Exception as e:  # noqa: BLE001 - evidence only: never break segmentation
+            log.debug("segment: temporal labels around %s failed: %s", positions, e)
+            return []
+        return [int(p) for p in positions if lab.get(int(p) - 1) == temporal.REPEAT]
 
     # ---------------------------------------------------------------------------------------------
     # retiming, remap, ramps

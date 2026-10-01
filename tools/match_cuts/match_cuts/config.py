@@ -8,6 +8,12 @@ import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# verification-only settings (hypothesis-neutral checks): never part of the analysis cache keys
+VERIFY_ONLY_PARAMS = ("temporal_max_side", "temporal_shot_cc", "temporal_gap_ratio", "temporal_growth_ratio",
+                      "temporal_mag_ratio", "temporal_ecc_iterations", "temporal_ecc_eps", "verify_refit_margin",
+                      "verify_union_frames", "verify_excursion_frames", "verify_framing_min_samples",
+                      "verify_framing_all_max", "verify_low_score_margin")
+
 
 @dataclass
 class Config:
@@ -152,6 +158,22 @@ class Config:
     verify_audio_min_corr: float = 0.30    # xcorr peak below which a segment's audio lag is not trusted
     verify_audio_strong_corr: float = 0.80 # peak above which a lag outside audio_lag_tol_ms always fails c5
     verify_full_rate_max_s: float = 900.0  # RAWs up to this long: final audio check at the original rate
+    # ---- hypothesis-neutral verification (DESIGN §5 verify / temporal.py) ----------------------------
+    # verify never re-uses a decision of the analysis: comp-only temporal labels, free (ECC) re-measurement
+    # of framing and +-1 RAW frame refits, masks from the layout only (never refine's residual masks)
+    temporal_max_side: int = 200           # temporal signature measured on the box ROI downscaled to this long side (px)
+    temporal_shot_cc: float = 0.8          # aligned consecutive-frame ZNCC below this = competitor shot change (pair not compared)
+    temporal_gap_ratio: float = 2.5        # repeat vs move: the shot's residual (1 - cc) clusters must be this factor apart
+    temporal_growth_ratio: float = 1.5     # residual over 2 frames / over 1 frame above this = the content moves (a repeat stays ~1)
+    temporal_mag_ratio: float = 3.0        # competitor vs recreation pair residuals (bias-corrected per shot) more than this factor apart disagree
+    temporal_ecc_iterations: int = 40      # pair alignment (affine ECC from a phase-correlation start): converges in a few iterations
+    temporal_ecc_eps: float = 1e-5
+    verify_refit_margin: float = 0.01      # +-1 refit: a neighbour RAW frame (own ECC framing) must beat the shown frame by > max(3*delta, this)
+    verify_union_frames: int = 2           # c2 no-cut alternative: frames per side scored under the other side's (extended) time line
+    verify_excursion_frames: int = 3       # c2: a 1-2 frame segment more than this many RAW frames off its neighbours' common line
+    verify_framing_min_samples: int = 5    # c4: independently measured framing samples per segment (at least) ...
+    verify_framing_all_max: int = 6        # ... and every frame of segments up to this length
+    verify_low_score_margin: float = 0.02  # c4: unconverged sample whose model gradient score is this far below its neighbours' median -> failure
 
     def resolved_workers(self) -> int:
         import os
@@ -171,7 +193,7 @@ class Config:
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
-                  "verify_full_rate_max_s"):
+                  "verify_full_rate_max_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
         return d
 

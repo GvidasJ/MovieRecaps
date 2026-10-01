@@ -1016,7 +1016,8 @@ def test_framing_is_measured_independently(phase):
 
         def f(sg, k, model):
             calls.append(k)
-            return {"sim": sim_true, "z": 0.99, "z_model": 0.80 if sim_true is not model else 0.99,
+            # an unconverged sample (sim None) keeps a good model score: only the flip is under test there
+            return {"sim": sim_true, "z": 0.99, "z_model": 0.80 if sim_true is not None and sim_true is not model else 0.99,
                     "flip_own": own, "flip_other": other}
         f.calls = calls
         return f
@@ -1659,3 +1660,336 @@ def test_unsnapped_check_drops_isolated_measured_outliers_and_never_uses_soft_ra
                  transform=dict(IDENT))
     r = verify.check_speed_framing([s1], _measured_fm(ones), F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg)
     assert r["status"] == "fail" and any("unsnapped although [1.0" in f for f in r["failures"]), r
+
+
+# ---------------------------------------------------------------------------------------------
+# hypothesis-neutral verification: temporal signature (s9_2b), +-1 refit (s9_2c), c2 no-cut alternative /
+# repeat pairs / excursions, layout-only masks, global-start framing (DESIGN §5 verify)
+# ---------------------------------------------------------------------------------------------
+
+F24 = Fraction(24)
+FIX_BOX = {"x": 20.0, "y": 15.0, "w": 120.0, "h": 90.0, "corner_radius": 0.0}
+
+
+def _fps_proxy(frames: np.ndarray, role: str, fps: Fraction) -> Proxy:
+    n, h, w = frames.shape
+    return Proxy(role, f"{role}.mp4", frames, (w, h), (1.0, 1.0), fps, np.arange(n) / float(fps), n)
+
+
+def _line_seg(id_, a, b, j_at_a: float, rate: Fraction, keys_tx, ty=-15.0, speed=1.0) -> Segment:
+    """Raw segment whose AE frame at comp frame a is floor(j_at_a) (RAW at ``rate`` fps, speed v) with linear
+    transform keys tx(k) = keys_tx(k) at its first and last frame."""
+    s = Segment(id=id_, type="raw", comp_in=a, comp_out=b, speed=speed)
+    s.raw_in_seconds = j_at_a / float(rate)
+    s.transform_keys = [{"comp_frame": k, "scale": 1.0, "rotation_deg": 0.0, "tx": float(keys_tx(k)), "ty": ty}
+                        for k in (a, b - 1)]
+    return s
+
+
+def _cadence_pan(n: int = 60, j0: int = 5, phase: float = 0.1, p1: float = 3.0):
+    """Competitor: RAW (24 fps, non-rigid two-layer content panning p1 px per RAW frame) shown at 30 fps with a
+    pulldown cadence floor(0.8 k + phase) + j0, under an editor pan of 1.2 px per frame, with noise."""
+    import motion_fixtures as mf
+    raw = mf.two_layer_raw(n + 20, w=260, p1=p1)      # wide enough for the whole pan
+    js = mf.cadence(n, 0.8, phase, j0)
+    comp = mf.render(raw, js, mf.pan_sims(n), (160, 120), noise=1.5)
+    return _fps_proxy(comp, "competitor", F30), _fps_proxy(raw, "raw", F24), js
+
+
+def _temporal_check(comp, raw, segs, cfg, raw_fps=F24):
+    tf = verify.TemporalFrames(comp, raw, segs, lambda k: None, None, FIX_BOX, (float(raw.size[0]), float(raw.size[1])),
+                               F30, raw_fps, raw.n, cfg)
+    comp_sig, labels, rec_sig = verify.temporal_signatures(tf, cfg)
+    return verify.check_temporal(segs, labels, comp_sig, rec_sig, F30, raw_fps, raw.n, comp.n, cfg), labels
+
+
+def _scorer(comp, raw, cfg):
+    return verify.ProxyScorer(comp, raw, FIX_BOX, lambda k: None, float(raw.size[0]), cfg)
+
+
+def test_shifted_recreation_with_compensating_framing_fails_refit_and_temporal_signature():
+    """(a) The time / translation confound: the recreation shows RAW j+1 (j-1) with its framing shifted by one
+    RAW frame's pan, so each frame still scores ~0.97 and every old check passed. Split into +1 / -1 / +1
+    pieces at the competitor's repeat pairs, as the tool did in the real run. The +-1 refit finds the true
+    neighbour on every frame, the temporal signature sees the recreation change RAW frame where the
+    competitor repeats, and c2 fails the cuts placed inside repeat pairs. The truthful recreation passes."""
+    cfg = Config()
+    comp, raw, js = _cadence_pan()
+    n, n_raw = comp.n, raw.n
+    pan = lambda off: (lambda k: -20.0 - 1.2 * k + 3.0 * off)            # noqa: E731 - compensating framing
+    truth = [_line_seg(1, 0, n, 5.1, F24, pan(0))]
+    r, labels = _temporal_check(comp, raw, truth, cfg)
+    assert r["status"] == "pass" and r["n_disagreements"] == 0, r
+    assert labels.counts()["repeat"] >= 8
+    rf = verify.check_refit(truth, frame_map(list(js)), F30, F24, (260.0, 150.0), n_raw, _scorer(comp, raw, cfg), cfg, n,
+                            box_centre=(80.0, 60.0))
+    assert rf["status"] == "pass" and rf["checked"] == n, rf
+    # +1 / -1 / +1 pieces, cuts between the two frames of the repeat pairs (20, 21) and (40, 41)
+    assert js[20] == js[21] and js[40] == js[41]
+    wrong = [_line_seg(1, 0, 21, 5.1 + 1, F24, pan(+1)), _line_seg(2, 21, 41, 5.1 + 0.8 * 21 - 1, F24, pan(-1)),
+             _line_seg(3, 41, n, 5.1 + 0.8 * 41 + 1, F24, pan(+1))]
+    sc = _scorer(comp, raw, cfg)
+    z = sc.score(30, [verify._Models(F30, F24, (260.0, 150.0), n_raw).cand(wrong[1], 30)])[0]
+    assert 0.9 < z < 0.99                       # the compensated wrong frame still looks like a match
+    rf = verify.check_refit(wrong, frame_map(list(js)), F30, F24, (260.0, 150.0), n_raw, sc, cfg, n,
+                            box_centre=(80.0, 60.0))
+    assert rf["status"] == "fail" and rf["n_neighbour_wins"] >= 0.9 * n, rf["summary"]
+    w0 = rf["neighbour_wins"][0]
+    assert w0["best_neighbour"] == js[w0["k"]] and w0["z_neighbour"] > w0["z_shown"] + 0.01
+    r, labels = _temporal_check(comp, raw, wrong, cfg)
+    assert r["status"] == "fail", r
+    kinds = {(d["k"], d["kind"]) for d in r["disagreements"]}
+    assert (20, "recreation_changes") in kinds and (40, "recreation_changes") in kinds
+    c = verify.check_cuts(wrong, F30, F24, (260.0, 150.0), n_raw, sc, cfg, labels=labels, box_centre=(80.0, 60.0))
+    assert c["status"] == "fail"
+    assert all(any(sd["side"] == "repeat_pair" and sd["result"] == "fail" for sd in cut["sides"]) for cut in c["cuts"])
+
+
+def test_freeze_against_a_moving_competitor_is_a_motion_mismatch():
+    """(b) A 10-frame freeze (speed 0) where the competitor keeps playing (one RAW frame per comp frame)."""
+    import motion_fixtures as mf
+    cfg = Config()
+    n = 30
+    raw_frames = mf.two_layer_raw(60)
+    js = np.arange(10, 10 + n)
+    comp = _fps_proxy(mf.render(raw_frames, js, mf.pan_sims(n), (160, 120), noise=1.0), "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    pan = lambda k: -20.0 - 1.2 * k          # noqa: E731
+    segs = [_line_seg(1, 0, 10, 10.5, F30, pan), _line_seg(2, 10, 20, 20.5, F30, pan, speed=0.0),
+            _line_seg(3, 20, n, 30.5, F30, pan)]
+    r, labels = _temporal_check(comp, raw, segs, cfg, raw_fps=F30)
+    assert labels.counts()["move"] >= 20 and labels.counts()["repeat"] == 0
+    assert r["status"] == "fail" and r["motion_mismatch"], r
+    assert r["motion_mismatch"][0]["segment"] == 2 and r["motion_mismatch"][0]["frames"] == [10, 19]
+    assert any("motion mismatch: S02" in f for f in r["failures"])
+    play = [_line_seg(1, 0, 10, 10.5, F30, pan), _line_seg(2, 10, 20, 20.5, F30, pan), _line_seg(3, 20, n, 30.5, F30, pan)]
+    r, _ = _temporal_check(comp, raw, play, cfg, raw_fps=F30)
+    assert r["status"] == "pass" and r["n_disagreements"] == 0, r
+
+
+class PanStub:
+    """Stub scorer for a continuous shot under an editor pan: truth RAW frame 100 + k, true framing tx(k) =
+    2 k (comp px). score = 1 - 0.02 |dj| - 0.01 |tx - tx(k) - P dj| (a time error dj is compensated by P px of
+    framing); ``refit`` (when enabled) re-measures the framing: tx(k) + P dj, score 1 - 0.01 |dj|."""
+    P = 6.0
+
+    def __init__(self, refit: bool = True):
+        if refit:
+            self.refit = self._refit
+
+    @staticmethod
+    def tx(k):
+        return 2.0 * k
+
+    def truth(self, k):
+        return 100 + int(k)
+
+    def _z(self, k, j, tx):
+        dj = int(j) - self.truth(k)
+        return 1.0 - 0.02 * abs(dj) - 0.01 * abs(tx - self.tx(k) - self.P * dj)
+
+    def score(self, k, cands):
+        return np.array([float("nan") if c is None else self._z(k, c[0], c[1].tx) for c in cands])
+
+    def _refit(self, k, cand, inits=()):
+        dj = int(cand[0]) - self.truth(k)
+        return Sim(1.0, 0.0, self.tx(k) + self.P * dj, 0.0), 1.0 - 0.01 * abs(dj)
+
+    def blend(self, k, a, b):
+        return float("nan"), float("nan")
+
+    def uniform(self, k):
+        return 0.0, 50.0
+
+
+def _pan_seg(id_, a, b, j_at_a, off_px=0.0, const_tx=None):
+    """30 fps raw segment showing RAW j_at_a + (k - a); framing = the pan tx(k) + off_px (linear keys), or a
+    constant tx."""
+    s = seg(id_, "raw", a, b, transform=Sim(1.0, 0.0, const_tx or 0.0, 0.0).to_dict())
+    s.raw_in_seconds = (j_at_a + 0.5) / 30.0
+    if const_tx is None:
+        s.transform = None
+        s.transform_keys = [{"comp_frame": k, "scale": 1.0, "rotation_deg": 0.0, "tx": PanStub.tx(k) + off_px, "ty": 0.0}
+                            for k in (a, b - 1)]
+    return s
+
+
+def test_linear_pan_split_into_constant_segments_is_a_spurious_cut(phase):
+    """(c) One continuous shot (RAW 100 + k) under a linear editor pan, cut into three segments with CONSTANT
+    framing (each its pan midpoint). With framing held at the neighbour's key, every cut 'verified both
+    sides'; with the framing re-measured, the time lines agree and the framing is continuous -> spurious."""
+    cfg = Config()
+    segs = [_pan_seg(1, 0, 10, 100, const_tx=9.0), _pan_seg(2, 10, 20, 110, const_tx=29.0),
+            _pan_seg(3, 20, 30, 120, const_tx=49.0)]
+    old = verify.check_cuts(segs, F30, F30, (64, 36), 1000, PanStub(refit=False), cfg, box_centre=(32, 18))
+    assert old["status"] == "pass", old                   # the blind spot of held-key framing
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, PanStub(), cfg, box_centre=(32, 18))
+    assert r["status"] == "fail" and len(r["failures"]) == 2, r
+    assert all("spurious cut" in f and "framing is continuous" in f for f in r["failures"])
+    assert r["cuts"][0]["framing_continuity"]["result"] == "continuous"
+    # alternating +1 / -1 / +1 time lines whose framing compensates the time error (the real 39-70 case)
+    alt = [_pan_seg(1, 0, 10, 101, PanStub.P), _pan_seg(2, 10, 20, 109, -PanStub.P), _pan_seg(3, 20, 30, 121, PanStub.P)]
+    r = verify.check_cuts(alt, F30, F30, (64, 36), 1000, PanStub(), cfg, box_centre=(32, 18))
+    assert r["status"] == "fail"
+    assert all(any(sd["side"] == "no_cut" and "time line extended" in sd["reason"] for sd in c["sides"]) for c in r["cuts"])
+
+    class JumpStub(PanStub):                      # a genuine same-shot jump cut: B skips 10 RAW frames
+        def truth(self, k):
+            return 100 + int(k) + (10 if k >= 10 else 0)
+
+        def _refit(self, k, cand, inits=()):
+            return Sim(1.0, 0.0, self.tx(k), 0.0), 1.0 - 0.02 * abs(int(cand[0]) - self.truth(k))
+    jump = [_pan_seg(1, 0, 10, 100), _pan_seg(2, 10, 20, 120)]
+    r = verify.check_cuts(jump, F30, F30, (64, 36), 1000, JumpStub(), cfg, box_centre=(32, 18))
+    assert r["status"] == "pass", r
+
+
+def test_cut_inside_a_competitor_repeat_pair_fails(phase):
+    """(d) A hard cut between the two frames of a competitor repeat pair (the same image) cannot exist."""
+    truth = {k: (100 + k if k < 10 else 500 + k - 10) for k in range(20)}
+    r = verify.check_cuts(_two_shots(), F30, F30, (64, 36), 1000, StubScorer(truth), Config(), labels={9: "repeat"})
+    assert r["status"] == "fail" and "repeat pair" in r["failures"][0]
+    r = verify.check_cuts(_two_shots(), F30, F30, (64, 36), 1000, StubScorer(truth), Config(), labels={9: "move"})
+    assert r["status"] == "pass"
+
+
+def test_excursion_must_beat_its_neighbours_line(phase):
+    """A 2-frame segment 12 RAW frames off the line its neighbours share: a misidentification unless its own
+    frames beat that line by more than the noise (then it is a verified flash cut)."""
+    cfg = Config()
+    segs = [_pan_seg(1, 0, 10, 100), _pan_seg(2, 10, 12, 122), _pan_seg(3, 12, 30, 112)]
+
+    class LineStub(PanStub):                   # the competitor shows the line on 10, 11 too; flat scores
+        def _z(self, k, j, tx):
+            return 1.0 - 0.002 * abs(int(j) - self.truth(k)) - 0.01 * abs(tx - self.tx(k))
+
+        def _refit(self, k, cand, inits=()):
+            return Sim(1.0, 0.0, self.tx(k), 0.0), 1.0 - 0.0005 * abs(int(cand[0]) - self.truth(k))
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, LineStub(), cfg, box_centre=(32, 18))
+    ex = r["cuts"][0]["excursion"]
+    assert ex["offsets"] == [12, 12] and not ex["verified"]
+    assert any("suspected misidentification" in f for f in r["failures"])
+
+    class FlashStub(PanStub):                  # the competitor really shows 122, 123 on 10, 11
+        def truth(self, k):
+            return 112 + int(k) if 10 <= k < 12 else 100 + int(k)
+
+        def _refit(self, k, cand, inits=()):
+            return Sim(1.0, 0.0, self.tx(k), 0.0), 1.0 - 0.02 * abs(int(cand[0]) - self.truth(k))
+    r = verify.check_cuts(segs, F30, F30, (64, 36), 1000, FlashStub(), cfg, box_centre=(32, 18))
+    assert r["cuts"][0]["excursion"]["verified"] and not any("misidentification" in f for f in r["failures"])
+
+
+def _dark_scene(seed: int = 21) -> np.ndarray:
+    """A dark interior: a smooth vertical illumination ramp (identical under any horizontal shift), faint
+    texture, and one bright, detailed display -- the only thing a horizontal misframe disturbs."""
+    import motion_fixtures as mf
+    h, w = 360, 480
+    yy = np.linspace(0.0, 1.0, h)[:, None]
+    img = 6.0 + 40.0 * yy ** 1.5 + np.zeros((1, w)) + mf.texture(h, w, seed, sigma=2.0, std=1.5, mean=0.0)
+    img[150:220, 180:300] = mf.texture(70, 120, seed + 1, sigma=1.0, std=30.0, mean=70.0)
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+
+def test_dark_misframe_hidden_by_residual_masks_fails_c3_and_c4(tmp_path):
+    """(e) A dark segment misframed by 35 px: the only mismatch is the bright display, which refine's pass-2
+    residual masks hide (the mismatch masks itself away). verify's masks come from the layout only, so s9_3
+    fails; c4's global-start ECC finds the true framing 35 px away and fails too."""
+    import motion_fixtures as mf
+    from match_cuts import layout as layout_mod
+    from match_cuts.layout import OverlayMasks
+    from match_cuts.model import Layout
+    cfg = Config()
+    n = 8
+    raw_frames = np.stack([_dark_scene()] * 12)
+    true = Sim(1.0, 0.0, -40.0, -30.0)
+    wrong = Sim(1.0, 0.0, -40.0 - 35.0, -30.0)
+    comp_frames = mf.render(raw_frames, np.zeros(n, int), [true] * n, (400, 300), noise=1.0)
+    rec_frames = mf.render(raw_frames, np.zeros(n, int), [wrong] * n, (400, 300), noise=0.0)
+    comp, raw = _fps_proxy(comp_frames, "competitor", F30), _fps_proxy(raw_frames, "raw", F30)
+    box = Box(20.0, 20.0, 360.0, 260.0, 0.0)
+    # layout masks: a caption (rows 250..270); refine's residual masks also cover where the display mismatches
+    cap = np.zeros((300, 400), bool)
+    cap[250:270, 60:340] = True
+    ov_layout, ov_refine = OverlayMasks((300, 400), 3), OverlayMasks((300, 400), 3)
+    resid = cap.copy()
+    resid[105:200, 100:300] = True
+    for k in range(n):
+        ov_layout.set(k, cap)
+        ov_refine.set(k, resid)
+    ov_path = tmp_path / "layout.overlays.npz"
+    ov_layout.save(ov_path)
+    lay = Layout(400, 300, mode="boxed", box=box, overlay_mask_file=str(ov_path))
+    ctx = types.SimpleNamespace(layout=lay, overlays=ov_refine, comp_proxy=comp, cfg=cfg, cutlist=None)
+    allowed = verify._allowed_fn(ctx)
+    m = allowed(3)
+    assert not m[260, 200] and m[150, 200]           # caption excluded, residual-masked display NOT excluded
+    fm = frame_map([0] * n)
+    s = seg(1, "raw", 0, n, 0, transform=wrong.to_dict())
+    s.raw_in_seconds = 0.5 / 30.0
+    hidden = lambda k: layout_mod.allowed_mask(lay, ov_refine, k, comp)     # noqa: E731 - the old mask
+    old = verify.check_visual(comp, list(enumerate(rec_frames)), fm, hidden, box, cfg)
+    assert old["status"] == "pass", old["summary"]                          # the misframe passed
+    new = verify.check_visual(comp, list(enumerate(rec_frames)), fm, allowed, box, cfg)
+    assert new["status"] == "fail", new["summary"]
+    scorer = verify.ProxyScorer(comp, raw, box, allowed, 480.0, cfg)
+    meas = verify.framing_measure(comp, raw, scorer, allowed, lambda k: box, (480.0, 360.0), F30, F30, raw.n, cfg)
+    r = verify.check_speed_framing([s], fm, F30, F30, (480.0, 360.0), box, (400.0, 300.0), cfg,
+                                   feasible_range=lambda *a: (0.999, 1.001), measure=meas)
+    assert r["status"] == "fail" and any("independently measured framing" in f for f in r["failures"]), r
+    ind = r["segments"][0]["independent"]
+    assert ind["n_samples"] >= 5 and ind["max_pos_err_px"] > 30.0
+
+
+def test_unconverged_framing_with_a_low_model_score_fails():
+    """c4: an unconverged sample is an exception only while the model scores like its neighbours; below
+    verify_zncc, or with a gradient-domain score far below the neighbouring segments' median, it fails."""
+    cfg = Config()
+    segs = [seg(1, "raw", 0, 10, 100), seg(2, "raw", 10, 20, 300), seg(3, "raw", 20, 30, 500)]
+    fm = frame_map(list(range(100, 110)) + list(range(300, 310)) + list(range(500, 510)))
+
+    def make(zm2, zg2):
+        def measure(sg, k, model):
+            if sg.id == 2:
+                return {"sim": None, "z_model": zm2, "z_grad_model": zg2, "flip_own": 0.95, "flip_other": 0.2}
+            return {"sim": model, "z": 0.99, "z_model": 0.99, "z_grad_model": 0.90 + 0.001 * (k % 3),
+                    "flip_own": 0.95, "flip_other": 0.2}
+        return measure
+
+    def run(m):
+        return verify.check_speed_framing(segs, fm, F30, F30, (64, 36), Box(0, 0, 64, 36), (64, 36), cfg,
+                                          feasible_range=lambda *a: (0.999, 1.001), measure=m)
+    r = run(make(0.97, 0.89))
+    assert r["status"] == "pass_with_exceptions" and not r["failures"], r
+    r = run(make(0.97, 0.40))                         # plain ZNCC fine, gradients disagree (dark misframe)
+    assert r["status"] == "fail" and "S02" in r["failures"][0] and "gradient" in r["failures"][0], r
+    r = run(make(0.85, 0.89))
+    assert r["status"] == "fail" and "model ZNCC 0.850" in r["failures"][0], r
+
+
+def test_global_init_recovers_a_large_shift():
+    """ProxyScorer.global_init: phase correlation moves the model to the true framing 30 px away."""
+    import motion_fixtures as mf
+    raw_frames = mf.two_layer_raw(3, h=200, w=260)
+    true = Sim(1.0, 0.0, -30.0, -20.0)
+    comp = _fps_proxy(mf.render(raw_frames, [1], [true], (200, 160), noise=0.5), "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    box = Box(10.0, 10.0, 180.0, 140.0, 0.0)
+    sc = verify.ProxyScorer(comp, raw, box, lambda k: None, 260.0, Config())
+    g = sc.global_init(0, (1, Sim(1.0, 0.0, -60.0, -12.0), False))
+    assert g is not None and g.tx == pytest.approx(-30.0, abs=1.0) and g.ty == pytest.approx(-20.0, abs=1.0)
+
+
+def test_layout_overlay_masks_never_include_residual_masks(tmp_path):
+    from match_cuts.layout import OverlayMasks, layout_overlay_masks
+    from match_cuts.model import Layout
+    lay = Layout(64, 36, captions=[{"comp_in": 2, "comp_out": 4, "x": 10.0, "y": 20.0, "w": 20.0, "h": 6.0}])
+    ov = layout_overlay_masks(lay, (36, 64), (1.0, 1.0))          # no file: caption rectangles
+    assert ov.get(1) is None and ov.get(2)[22, 15] and not ov.get(2)[5, 5]
+    m = OverlayMasks((36, 64), 2)
+    m.set(0, np.ones((36, 64), bool))
+    p = tmp_path / "ov.npz"
+    m.save(p)
+    lay.overlay_mask_file = str(p)
+    assert layout_overlay_masks(lay).get(0).all()
+    assert layout_overlay_masks(None) is None

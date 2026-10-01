@@ -551,6 +551,7 @@ def _warnings(ctx: Any) -> list[str]:
     nre = not_reproduced(getattr(ctx, "verify", None))
     if nre:
         out.append("- Frames not reproduced exactly (s9_2): " + "; ".join(nre))
+    out += [f"- {line}" for line in independent_findings(getattr(ctx, "verify", None))]
     lb = cl.layout or {}
     periods = [p for p in (lb.get("periods") or []) if isinstance(p, dict)]
     full = [p for p in periods if str(p.get("mode")) == "fullscreen"]
@@ -657,6 +658,47 @@ def not_reproduced(ver: dict | None) -> list[str]:
     return out
 
 
+CUT_SIDE_LABELS = {"no_cut": "spurious cut", "repeat_pair": "inside a repeat pair", "excursion": "excursion",
+                   "A_last": "A's last frame", "B_first": "B's first frame"}
+
+
+def independent_findings(ver: dict | None) -> list[str]:
+    """Findings of the hypothesis-neutral checks with frame lists: the temporal signature (s9_2b: pairs where the
+    recreation's frame-to-frame change disagrees with the competitor's repeat / move labels, motion mismatches),
+    the +-1 refit (s9_2c: frames where a neighbouring RAW frame with its own framing matches better) and the
+    c2 cuts failed by the no-cut alternative / a repeat pair / an excursion."""
+    checks = (ver or {}).get("checks") or {}
+    out = []
+    t = checks.get("s9_2b_temporal") or {}
+    for mm in t.get("motion_mismatch") or []:
+        out.append(f"Motion mismatch (s9_2b): S{int(mm['segment']):02d} holds one RAW frame on frames "
+                   f"{mm['frames'][0]}–{mm['frames'][1]} while the competitor moves")
+    kinds: dict[str, list[int]] = {}
+    for d in t.get("disagreements") or []:
+        kinds.setdefault(str(d.get("kind")), []).append(int(d["k"]))
+    if kinds:
+        out.append(f"Temporal signature disagrees with the competitor (s9_2b, {t.get('n_disagreements', 0)} of "
+                   f"{t.get('pairs', '?')} frame pairs k|k+1): " + "; ".join(
+                       f"{kd.replace('_', ' ')} at {_ranges_str(ks, None, 12)}" for kd, ks in kinds.items()))
+    r = checks.get("s9_2c_refit") or {}
+    wins = r.get("neighbour_wins") or []
+    if wins:
+        ex = "; ".join(f"k {w['k']}: shown RAW {w['raw']} {w['z_shown']} < RAW {w['best_neighbour']} {w['z_neighbour']}"
+                       for w in wins[:4])
+        out.append(f"A neighbouring RAW frame (own refitted framing) matches better (s9_2c, time/framing confound): "
+                   f"{r.get('n_neighbour_wins', len(wins))} frames — {_ranges_str([w['k'] for w in wins], None, 12)} — {ex}")
+    cuts = ((((ver or {}).get("criteria") or {}).get("c2_cuts") or {}).get("details") or {}).get("cuts") or []
+    bad = {}
+    for c in cuts:
+        for sd in c.get("sides") or []:
+            if sd.get("result") == "fail" and sd.get("side") in ("no_cut", "repeat_pair", "excursion"):
+                bad.setdefault(CUT_SIDE_LABELS[sd["side"]], []).append(int(c["frame"]))
+    for label, frames in bad.items():
+        out.append(f"Cuts failed as {label} (c2): frames {', '.join(str(f) for f in frames[:30])}"
+                   + (" …" if len(frames) > 30 else ""))
+    return out
+
+
 def _verification(ctx: Any) -> list[str]:
     ver = getattr(ctx, "verify", None) or {}
     checks = ver.get("checks", {})
@@ -672,6 +714,16 @@ def _verification(ctx: Any) -> list[str]:
                 "", md_table(["ZNCC bin", "frames"], [[k, v] for k, v in (dist.get("hist") or {}).items()])]
         if vis.get("failed_frames"):
             out.append(f"Failure thumbnails: `debug/verify_failures/` ({len(vis['failed_frames'])} frames).")
+    t = checks.get("s9_2b_temporal") or {}
+    lab = (t.get("labels") or {}).get("counts") or {}
+    if lab:
+        out += ["", f"Temporal signature (competitor-only labels of the frame pairs k|k+1): {lab.get('repeat', 0)} repeat, "
+                    f"{lab.get('move', 0)} move, {lab.get('unknown', 0)} unknown, {lab.get('cut', 0)} cut; "
+                    f"{t.get('n_disagreements', 0)} pairs where the recreation disagrees, "
+                    f"{len(t.get('motion_mismatch') or [])} motion mismatch(es)."]
+    found = independent_findings(ver)
+    if found:
+        out += ["", "Independent checks (they never reuse an analysis decision):", ""] + [f"- {x}" for x in found]
     au = checks.get("s9_5_audio", {})
     if au.get("segments"):
         out += ["", f"Audio per segment ({au.get('audio_source', '')}; tolerance ±{au.get('tolerance_ms')} ms):", "",
@@ -682,9 +734,11 @@ def _verification(ctx: Any) -> list[str]:
     cuts = ((crit.get("c2_cuts") or {}).get("details") or {}).get("cuts") or []
     if cuts:
         out += ["", "Cuts (competitor vs recreation images in `debug/cuts/cut_XX.png`):", "",
-                md_table(["cut", "frame", "kind", "status"],
+                md_table(["cut", "frame", "kind", "status", "failed"],
                          [[f"{i:02d}: S{int(c['from']):02d}|S{int(c['to']):02d}", f"{c['frame']} ({c.get('tc', '')})",
-                           c.get("kind"), c.get("status")] for i, c in enumerate(cuts, start=1)])]
+                           c.get("kind"), c.get("status"),
+                           ", ".join(CUT_SIDE_LABELS.get(sd.get("side"), str(sd.get("side"))) for sd in c.get("sides") or []
+                                     if sd.get("result") == "fail")] for i, c in enumerate(cuts, start=1)])]
     mock = ((crit.get("c6_after_effects") or {}).get("details") or {}).get("mock") or {}
     if mock.get("checks"):
         out += ["", "After Effects mock run:", ""] + [f"- [{'x' if c['ok'] else ' '}] {c['check']}" for c in mock["checks"]]

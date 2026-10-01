@@ -11,10 +11,16 @@
 
 Mapping: c1 <- s9_1; c2 <- an independent per-cut check (+ s9_4 cut images); c3 <- s9_2 (AE-semantics
 simulation of the ae_plan AND of the mock-run record, compared with refine's PRE-segmentation measurement
-and with the cutlist) + s9_3 (visual, + a probe of the delivered preview); c4 <- speed / framing / flip /
-rotation (framing and flip measured independently on sampled frames); c5 <- s9_5; c6 <- mock-run checks +
-s9_6 (aerender, when installed). s9_7 (determinism) and s9_8 (deliverables) count like the criteria
-(DESIGN §7 D4/D5).
+and with the cutlist) + s9_2b (temporal signature: the recreation's frame-to-frame changes against the
+competitor's comp-only repeat / move labels, temporal.py) + s9_2c (+-1 RAW frame refit) + s9_3 (visual, + a
+probe of the delivered preview); c4 <- speed / framing / flip / rotation (framing and flip measured
+independently on sampled frames, with a global start); c5 <- s9_5; c6 <- mock-run checks + s9_6 (aerender,
+when installed). s9_7 (determinism) and s9_8 (deliverables) count like the criteria (DESIGN §7 D4/D5).
+
+Hypothesis-neutral (DESIGN §5 verify): verification never imports a decision function of segment.py or
+refine.py (only the shared ECC primitive refine.refine_transform and the scorers), re-measures framing
+instead of trusting the model's held keys, and masks only what the layout stage found (captions / text
+overlays) -- never refine's pass-2 residual masks, which are computed from the match being judged.
 
 Every check function below takes plain data (segments, FrameMap, arrays, callables) so it can be unit
 tested without the analysis modules; ``verify_all`` wires them to a ``pipeline.Context``.
@@ -40,8 +46,8 @@ from .geometry import Sim, interpolate_keys
 from .model import Box, FrameMap, Segment, Status
 
 CRITERIA = ("c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio", "c6_after_effects")
-CHECKS = ("s9_1_coverage", "s9_2_ae_sim", "s9_3_visual", "s9_4_cut_images", "s9_5_audio", "s9_6_ae_render",
-          "s9_7_determinism", "s9_8_deliverables")
+CHECKS = ("s9_1_coverage", "s9_2_ae_sim", "s9_2b_temporal", "s9_2c_refit", "s9_3_visual", "s9_4_cut_images",
+           "s9_5_audio", "s9_6_ae_render", "s9_7_determinism", "s9_8_deliverables")
 STATUSES = ("pass", "pass_with_exceptions", "fail", "not_available")
 AUDIO_EXCEPTION_CODES = frozenset({"too_short", "not_in_raw", "audio_replaced", "pitch_preserved",
                                    "music_dominated", "no_audio"})
@@ -460,6 +466,83 @@ class ProxyScorer:
             return float("nan"), float("nan")
         return scoring.region_stats(np.asarray(self.comp.get(k)), self.roi_at(k), self.allowed_fn(k))
 
+    # -- free re-measurement of framing (hypothesis-neutral checks) ----------------------------------------
+    def refit(self, k: int, cand: Cand | None, inits: Sequence[Sim] = ()) -> tuple[Sim, float] | None:
+        """Framing of RAW frame cand[0] on comp frame k measured by ECC (refine.refine_transform, the
+        shared ECC recipe) from cand[1] and each of ``inits``; the best (Sim, score) -- the start itself
+        when no ECC run raised the score. None when the frame or the RAW frame is unavailable."""
+        from . import refine
+        if cand is None or cand[0] is None or cand[1] is None or not self.raw.has(int(cand[0])):
+            return None
+        if not (0 <= k < self.comp.n) or not self.comp.has(int(k)):
+            return None
+        j, sim0, flip = cand
+        comp_img, raw_img = np.asarray(self.comp.get(int(k))), np.asarray(self.raw.get(int(j)))
+        best: tuple[Sim, float] | None = None
+        for init in [sim0, *[s for s in inits if s is not None]]:
+            try:
+                sim, z = refine.refine_transform(comp_img, raw_img, init, bool(flip), self.raw_w, self.raw.ratio,
+                                                 self.comp.ratio, self.allowed_fn(int(k)), self.cfg, self.roi_at(int(k)))
+            except Exception:  # noqa: BLE001 - an ECC failure is an unmeasured start, not a crash
+                continue
+            if math.isfinite(float(z)) and (best is None or float(z) > best[1]):
+                best = (sim, float(z))
+        return best
+
+    def global_init(self, k: int, cand: Cand | None) -> Sim | None:
+        """cand[1] shifted by the phase-correlation translation between the comp ROI and the RAW frame warped
+        with cand[1] (a GLOBAL start for ECC, independent of how close the model is); None when unmeasurable."""
+        from . import scoring
+        region = self._region(int(k))
+        w = self._warp(cand, None if region is None else region.roi)
+        if region is None or w is None:
+            return None
+        m = region.mask & w[1]
+        if int(m.sum()) < self.min_pixels:
+            return None
+        sx, sy = temporal_phase_shift(region.img, m, w[0], m)
+        if sx == 0.0 and sy == 0.0:
+            return None
+        rx, ry = float(self.comp.ratio[0]), float(self.comp.ratio[1])
+        sim = cand[1]
+        # the RAW content at comp-proxy x + s matches the comp at x: move the picture by -s (comp full-res px)
+        return Sim(sim.s, sim.theta_deg, sim.tx - sx / rx, sim.ty - sy / ry)
+
+    def score_grad(self, k: int, cands: Sequence[Cand | None]) -> np.ndarray:
+        """Gradient-domain ZNCC (scoring.grad_zncc) of comp frame k against each candidate, on the common
+        valid mask -- the dark / low-texture companion of ``score``."""
+        from . import scoring
+        out = np.full(len(cands), np.nan)
+        region = self._region(k)
+        if region is None:
+            return out
+        warped = [self._warp(c, region.roi) for c in cands]
+        valid = region.mask.copy()
+        for w in warped:
+            if w is not None:
+                valid &= w[1]
+        if int(valid.sum()) < self.min_pixels:
+            return out
+        for i, w in enumerate(warped):
+            if w is not None:
+                out[i] = scoring.grad_zncc(region.img, w[0], valid)
+        return out
+
+
+def temporal_phase_shift(a: np.ndarray, ma: np.ndarray, b: np.ndarray, mb: np.ndarray) -> tuple[float, float]:
+    """Phase-correlation translation (sx, sy) with b(x + s) ~ a(x) (temporal._phase_shift)."""
+    from . import temporal
+    return temporal._phase_shift(np.asarray(a, np.float32), np.asarray(ma, bool), np.asarray(b, np.float32),
+                                 np.asarray(mb, bool))
+
+
+def derotated(sim: Sim, centre: Sequence[float]) -> Sim:
+    """``sim`` with theta = 0 keeping the RAW point it shows at ``centre`` (comp px) in place -- the second
+    ECC start of the +-1 refit (a compensating rotation must not survive just because ECC started there)."""
+    c = np.asarray(centre, np.float64).reshape(1, 2)
+    p = sim.inverse().apply(c)[0]
+    return Sim(sim.s, 0.0, float(c[0, 0] - sim.s * p[0]), float(c[0, 1] - sim.s * p[1]))
+
 
 # ---------------------------------------------------------------------------------------------
 # c2 cuts (independent check)
@@ -494,8 +577,44 @@ class _Models:
         return (j, sim, bool(seg.flip_h))
 
 
-def _side(scorer: Any, k: int, own: Cand | None, other: Cand | None) -> dict:
-    """Does comp frame k match its own segment model better than the other one?"""
+def _can_refit(scorer: Any) -> bool:
+    return callable(getattr(scorer, "refit", None))
+
+
+def _r6(v: float) -> float | None:
+    return None if v is None or not math.isfinite(float(v)) else round(float(v), 6)
+
+
+def _nanmax(vals: Iterable[float]) -> float:
+    v = [float(x) for x in vals if x is not None and math.isfinite(float(x))]
+    return max(v) if v else float("nan")
+
+
+def _timed_scores(scorer: Any, k: int, own: Cand, other: Cand) -> dict:
+    """Both TIME hypotheses of comp frame k with their framing re-measured by ECC (hypothesis-neutral c2):
+    own = max(own model, own frame refitted from it); other = max(other model held at its boundary key, other
+    frame refitted from the other model AND from the own model's framing). All scored on one common mask."""
+    r_own = scorer.refit(k, own)
+    r_oth = scorer.refit(k, other, [own[1]] if bool(own[2]) == bool(other[2]) else [])
+    cands = [own, other]
+    i_own = i_oth = None
+    if r_own is not None:
+        i_own = len(cands)
+        cands.append((own[0], r_own[0], own[2]))
+    if r_oth is not None:
+        i_oth = len(cands)
+        cands.append((other[0], r_oth[0], other[2]))
+    s = scorer.score(k, cands)
+    pick = lambda i: float(s[i]) if i is not None and i < len(s) else float("nan")  # noqa: E731
+    return {"s_own_model": pick(0), "s_other_held": pick(1), "s_own_refit": pick(i_own), "s_other_refit": pick(i_oth),
+            "s_own": _nanmax([pick(0), pick(i_own)]), "s_other": _nanmax([pick(1), pick(i_oth)])}
+
+
+def _side(scorer: Any, k: int, own: Cand | None, other: Cand | None, refit: bool = False) -> dict:
+    """Does comp frame k match its own segment model better than the other one? With ``refit`` (and a scorer
+    that can re-measure framing) the two models' RAW frames are compared with their framing re-measured on
+    THIS frame (``_timed_scores``), not with the neighbour's key held at its boundary (in a pan the held
+    framing lags v px per frame and always loses)."""
     res: dict[str, Any] = {"k": int(k), "own": None if own is None else int(own[0]),
                            "other": None if other is None else int(other[0])}
     if own is None:
@@ -504,10 +623,16 @@ def _side(scorer: Any, k: int, own: Cand | None, other: Cand | None) -> dict:
     if other is not None and own[0] == other[0] and own[2] == other[2] and _sims_close(own[1], other[1]):
         res.update(result="indistinguishable", reason="both models predict the same RAW frame and framing")
         return res
-    s = scorer.score(k, [own, other])
-    s_own, s_other = float(s[0]), float(s[1]) if len(s) > 1 else float("nan")
-    res.update(s_own=None if math.isnan(s_own) else round(s_own, 6),
-               s_other=None if math.isnan(s_other) else round(s_other, 6))
+    timed = (refit and other is not None and (own[0] != other[0] or bool(own[2]) != bool(other[2]))
+             and _can_refit(scorer))
+    if timed:
+        t = _timed_scores(scorer, k, own, other)
+        s_own, s_other = t["s_own"], t["s_other"]
+        res.update({key: _r6(v) for key, v in t.items()}, framing="re-measured")
+    else:
+        s = scorer.score(k, [own, other])
+        s_own, s_other = float(s[0]), float(s[1]) if len(s) > 1 else float("nan")
+        res.update(s_own=_r6(s_own), s_other=_r6(s_other))
     if math.isnan(s_own):
         res.update(result="unscorable", reason="too few scorable pixels")
         return res
@@ -515,6 +640,107 @@ def _side(scorer: Any, k: int, own: Cand | None, other: Cand | None) -> dict:
         s_other = -math.inf
     res["result"] = "ok" if s_own > s_other else "fail"
     return res
+
+
+def _cut_noise(scorer: Any, models: "_Models", a: Segment, b: Segment, cfg: Any, n: int = 10) -> float:
+    """Score noise delta of the two segments next to a cut: scoring.noise_delta of the shown models' scores on
+    up to ``n`` frames per side (DESIGN §3 delta: 3 x robust std, clipped to [soft_delta_min, soft_delta_max])."""
+    from . import scoring
+    vals = []
+    for seg, ks in ((a, range(max(a.comp_in, a.comp_out - n), a.comp_out)), (b, range(b.comp_in, min(b.comp_out, b.comp_in + n)))):
+        for k in ks:
+            c = models.cand(seg, k)
+            if c is not None:
+                vals.append(float(scorer.score(k, [c])[0]))
+    return scoring.noise_delta(vals, float(getattr(cfg, "soft_delta_min", 0.001)), float(getattr(cfg, "soft_delta_max", 0.01)))
+
+
+def _extrapolate(s0: Sim, s1: Sim, steps: float = 1.0) -> Sim:
+    """Linear extrapolation of the AE-linear parameters (scale, rotation, position) ``steps`` frames past s1."""
+    return Sim(s1.s + steps * (s1.s - s0.s), s1.theta_deg + steps * (s1.theta_deg - s0.theta_deg),
+               s1.tx + steps * (s1.tx - s0.tx), s1.ty + steps * (s1.ty - s0.ty))
+
+
+def _framing_continuity(scorer: Any, models: "_Models", a: Segment, b: Segment, centre: Sequence[float],
+                        cfg: Any) -> dict:
+    """Re-measured framing across a cut whose two sides show the same RAW frames: ECC framing of the shown RAW
+    frame on ka-1, ka (A) and kb, kb+1 (B); each side's linear extrapolation must miss the other side's
+    measured framing by a framing STEP (punch_scale_step / punch_pos_step / rotation) for the cut to be real."""
+    ka, kb = a.comp_out - 1, b.comp_in
+    ks = [k for k in (ka - 1, ka) if k >= a.comp_in] + [k for k in (kb, kb + 1) if k < b.comp_out]
+    f: dict[int, Sim] = {}
+    for k in ks:
+        own, oth = (a, b) if k < kb else (b, a)
+        c, o = models.cand(own, k), models.cand(oth, k)
+        if c is None:
+            continue
+        r = scorer.refit(k, c, [o[1]] if o is not None and bool(o[2]) == bool(c[2]) else [])
+        if r is not None:
+            f[k] = r[0]
+    if ka not in f or kb not in f:
+        return {"result": "unscorable", "reason": "framing not measurable at the cut"}
+    c = np.asarray(centre, np.float64).reshape(1, 2)
+    pred_b = _extrapolate(f[ka - 1], f[ka], kb - ka) if ka - 1 in f else f[ka]
+    pred_a = _extrapolate(f[kb + 1], f[kb], kb - ka) if kb + 1 in f else f[kb]
+    e1, e2 = _sim_errors(pred_b, f[kb], c), _sim_errors(pred_a, f[ka], c)
+    st, pt = float(getattr(cfg, "punch_scale_step", 0.01)), float(getattr(cfg, "punch_pos_step", 4.0))
+    rt = max(float(getattr(cfg, "rotation_min_deg", 0.2)), 0.2) + 0.05
+    step = any(e[0] > st or e[1] > pt or e[2] > rt for e in (e1, e2))
+    ev = {"scale_err": [round(e1[0], 5), round(e2[0], 5)], "pos_err_px": [round(e1[1], 3), round(e2[1], 3)],
+          "rot_err_deg": [round(e1[2], 4), round(e2[2], 4)], "frames": sorted(f)}
+    return {"result": "step" if step else "continuous", **ev}
+
+
+def _union_test(scorer: Any, models: "_Models", a: Segment, b: Segment, n_side: int, delta: float) -> dict:
+    """No-cut alternative of a hard cut A|B: A's time line extended over B's first ``n_side`` frames, and B's
+    extended back over A's last ones, each with its framing re-measured (ECC from the line's own model and
+    from the shown model). A line that scores within ``delta`` of the split (shown model or its refit) on ALL
+    tested frames explains both sides: the cut is spurious. Frames where line and split show the same RAW
+    frame are 'same_raw' (time cannot decide there)."""
+    out: dict[str, Any] = {"delta": round(float(delta), 6)}
+    fa = [k for k in range(max(a.comp_in, a.comp_out - n_side), a.comp_out)]
+    fb = [k for k in range(b.comp_in, min(b.comp_out, b.comp_in + n_side))]
+    for name, line, frames, split in (("A_line", a, fb, b), ("B_line", b, fa, a)):
+        rows = []
+        for k in frames:
+            sp, un = models.cand(split, k), models.cand(line, k)
+            if sp is None or un is None:
+                continue
+            row: dict[str, Any] = {"k": int(k), "split": int(sp[0]), "line": int(un[0])}
+            if int(sp[0]) == int(un[0]) and bool(sp[2]) == bool(un[2]):
+                row["same_raw"] = True
+                rows.append(row)
+                continue
+            t = _timed_scores(scorer, k, sp, un)
+            row.update(z_split=_r6(t["s_own"]), z_line=_r6(t["s_other"]))
+            rows.append(row)
+        timed = [r for r in rows if not r.get("same_raw")]
+        explained = bool(timed) and all(r.get("z_split") is not None and r.get("z_line") is not None
+                                        and r["z_line"] >= r["z_split"] - delta for r in timed) \
+            and all(r.get("same_raw") or r.get("z_line") is not None for r in rows)
+        out[name] = {"rows": rows, "explains_both_sides": explained,
+                     "all_same_raw": bool(rows) and all(r.get("same_raw") for r in rows)}
+    return out
+
+
+def _excursion(models: "_Models", a: Segment, b: Segment, c: Segment, n_side: int, off: int) -> dict | None:
+    """A 1-2 frame segment B between A and C whose RAW frames lie more than ``off`` RAW frames off the line A
+    and C share (A's line extended over C's first frames within +-1 of C's own): {'line_frames', 'offsets'}."""
+    if not (a.type == b.type == c.type == "raw") or b.comp_out - b.comp_in > 2 or bool(a.flip_h) != bool(c.flip_h):
+        return None
+    for k in range(c.comp_in, min(c.comp_out, c.comp_in + n_side)):
+        ja, jc = models.cand(a, k), models.cand(c, k)
+        if ja is None or jc is None or abs(int(ja[0]) - int(jc[0])) > 1:
+            return None
+    offs = []
+    for k in range(b.comp_in, b.comp_out):
+        ja, jb = models.cand(a, k), models.cand(b, k)
+        if ja is None or jb is None:
+            return None
+        offs.append(int(jb[0]) - int(ja[0]))
+    if not offs or not all(abs(o) > off for o in offs):
+        return None
+    return {"frames": list(range(b.comp_in, b.comp_out)), "offsets": offs}
 
 
 def fit_crossfade_window(rows: Sequence[tuple[int, float]], pure: float | None = None) -> tuple[int, int] | None:
@@ -550,7 +776,8 @@ def _layout_change(a: Segment, b: Segment) -> bool:
 
 
 def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fraction, raw_wh: tuple[float, float],
-               n_raw: int | None, scorer: Any, cfg: Any) -> dict:
+               n_raw: int | None, scorer: Any, cfg: Any, labels: Any = None,
+               box_centre: Sequence[float] | None = None) -> dict:
     """Criterion 2, independent of segment.py: at every cut A|B, comp frame comp_out(A)-1 scores higher
     against A's model (phase_solve.ae_frame + A's transform) than against B's model extended back, and
     comp frame comp_in(B) the reverse. A hard cut where both models show the same RAW frame, flip and
@@ -559,16 +786,36 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
     declared one, the window (O, D) re-fitted from the alpha measured over O-3 .. O+D+2 must equal the
     declared one (off by one frame = fail), frame O (and O-1) must be pure A and O+D pure B. NOT-IN-RAW
     neighbours: the placeholder frame scores below none_thresh against the extended neighbour model.
-    Dips/flashes: the uniform side is uniform."""
+    Dips/flashes: the uniform side is uniform.
+
+    Hypothesis-neutral additions (a scorer with ``refit``, i.e. ECC re-measurement of framing):
+
+    * the two models' RAW frames are compared with their framing RE-MEASURED on the boundary frame (never
+      the neighbour's key held at its boundary: in a pan that lags v px per frame and always loses);
+    * no-cut alternative (``_union_test``): A's time line extended over B's first ``verify_union_frames``
+      frames, and B's back over A's last ones, with re-measured framing; a line within the score noise of the
+      split on all of them explains both sides -> 'spurious cut'. When both lines show the same RAW frames,
+      the re-measured framing decides (``_framing_continuity``: no framing step -> 'spurious cut');
+    * excursion: a 1-2 frame segment more than ``verify_excursion_frames`` RAW frames off the line its two
+      neighbours share must beat that line on its own frames by more than the noise, else 'suspected
+      misidentification'.
+
+    ``labels`` (temporal.Labels or {k: label} of the competitor pairs (k, k+1)): a hard cut between the two
+    frames of a competitor REPEAT pair (the same image) fails. ``box_centre`` (comp px) enables the framing
+    continuity test."""
+    from .temporal import REPEAT
     models = _Models(comp_fps, raw_fps, raw_wh, n_raw)
     none_thresh = float(getattr(cfg, "none_thresh", 0.6))
     uniform_std = float(getattr(cfg, "uniform_std", 4.0))
     alpha_tol = float(getattr(cfg, "verify_alpha_tol", 0.15))
+    n_side = max(1, int(getattr(cfg, "verify_union_frames", 2) or 2))
+    ex_off = int(getattr(cfg, "verify_excursion_frames", 3) or 3)
+    refit = _can_refit(scorer)
     segs = sorted(segments, key=lambda s: (s.comp_in, s.id))
     cuts: list[dict] = []
     failures: list[str] = []
     exceptions: list[str] = []
-    for a, b in zip(segs[:-1], segs[1:]):
+    for i, (a, b) in enumerate(zip(segs[:-1], segs[1:])):
         kind = _pair_kind(a, b)
         c: dict[str, Any] = {"from": a.id, "to": b.id, "frame": int(b.comp_in), "kind": kind,
                              "tc": timecode(int(b.comp_in), comp_fps)}
@@ -576,13 +823,65 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
         notes: list[str] = []
         if kind == "hard":
             ka, kb = a.comp_out - 1, b.comp_in
-            sides.append({"side": "A_last", **_side(scorer, ka, models.cand(a, ka), models.cand(b, ka))})
-            sides.append({"side": "B_first", **_side(scorer, kb, models.cand(b, kb), models.cand(a, kb))})
-            if (all(sd.get("result") == "indistinguishable" for sd in sides) and not (a.cut_ambiguity or b.cut_ambiguity)
-                    and not _layout_change(a, b)):
+            sides.append({"side": "A_last", **_side(scorer, ka, models.cand(a, ka), models.cand(b, ka), refit)})
+            sides.append({"side": "B_first", **_side(scorer, kb, models.cand(b, kb), models.cand(a, kb), refit)})
+            exempt = bool(a.cut_ambiguity or b.cut_ambiguity) or _layout_change(a, b)
+            if all(sd.get("result") == "indistinguishable" for sd in sides) and not exempt:
                 for sd in sides:
                     sd.update(result="fail", reason="no discontinuity in m(k): spurious cut (both segment models "
                                                     "show the same RAW frame, flip and framing on both sides)")
+            elif refit and not exempt:
+                delta = _cut_noise(scorer, models, a, b, cfg)
+                u = _union_test(scorer, models, a, b, n_side, delta)
+                c["union"] = u
+                explains = [nm for nm, sg in (("A_line", a), ("B_line", b)) if u[nm]["explains_both_sides"]]
+                if explains:
+                    who = " and ".join(_seg_name(a if nm == "A_line" else b) for nm in explains)
+                    sides.append({"side": "no_cut", "result": "fail",
+                                  "reason": f"spurious cut: {who}'s time line extended over the other side explains "
+                                            f"both sides within the score noise (delta {delta:.4f}, framing "
+                                            "re-measured)"})
+                elif u["A_line"]["all_same_raw"] and u["B_line"]["all_same_raw"] and box_centre is not None:
+                    fc = _framing_continuity(scorer, models, a, b, box_centre, cfg)
+                    c["framing_continuity"] = fc
+                    if fc["result"] == "continuous":
+                        sides.append({"side": "no_cut", "result": "fail",
+                                      "reason": "spurious cut: both sides show the same RAW frames and the "
+                                                f"re-measured framing is continuous (extrapolation errors "
+                                                f"{fc['pos_err_px']} px, {fc['scale_err']} scale)"})
+                    elif fc["result"] == "unscorable":
+                        sides.append({"side": "no_cut", "result": "unscorable", "reason": fc.get("reason")})
+            if labels is not None and not exempt and labels.get(ka) == REPEAT:
+                sides.append({"side": "repeat_pair", "k": int(ka), "result": "fail",
+                              "reason": f"cut between the two frames of a competitor repeat pair ({ka}, {kb} show "
+                                        "the same image up to a similarity transform)"})
+            nxt = segs[i + 2] if i + 2 < len(segs) else None
+            if (nxt is not None and _pair_kind(b, nxt) == "hard" and not _layout_change(a, b)
+                    and not _layout_change(b, nxt) and not (b.cut_ambiguity or nxt.cut_ambiguity)):
+                ex = _excursion(models, a, b, nxt, n_side, ex_off)
+                if ex is not None:
+                    c["excursion"] = ex
+                    if not refit:
+                        sides.append({"side": "excursion", "result": "unscorable",
+                                      "reason": f"{_seg_name(b)} lies {ex['offsets']} RAW frames off the line of "
+                                                f"{_seg_name(a)}/{_seg_name(nxt)}: not verifiable without re-measured framing"})
+                    else:
+                        delta = c["union"]["delta"] if "union" in c else _cut_noise(scorer, models, a, b, cfg)
+                        rows = []
+                        for k in ex["frames"]:
+                            t = _timed_scores(scorer, k, models.cand(b, k), models.cand(a, k))
+                            rows.append({"k": int(k), "z_own": _r6(t["s_own"]), "z_line": _r6(t["s_other"])})
+                        ex["rows"] = rows
+                        verified = any(r["z_own"] is not None and (r["z_line"] is None or r["z_own"] > r["z_line"] + delta)
+                                       for r in rows)
+                        ex["verified"] = bool(verified)
+                        if verified:
+                            notes.append(f"{_seg_name(b)} is a verified flash cut off the line of its neighbours")
+                        else:
+                            sides.append({"side": "excursion", "result": "fail",
+                                          "reason": f"suspected misidentification: {_seg_name(b)} lies {ex['offsets']} "
+                                                    f"RAW frames off the line {_seg_name(a)} and {_seg_name(nxt)} share, "
+                                                    f"which explains its frames as well (delta {float(delta):.4f})"})
         elif kind == "crossfade":
             t = _transition_dict(b.transition_in) or _transition_dict(a.transition_out)
             d = int(t.get("duration_frames", 0))
@@ -692,6 +991,286 @@ def check_cuts(segments: Sequence[Segment], comp_fps: Fraction, raw_fps: Fractio
     n_pass = sum(1 for c in cuts if c["status"] == "pass")
     summary = f"{len(cuts)} cuts: {n_pass} verified both sides, {len(exceptions)} exceptions, {len(failures)} failed"
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions, "cuts": cuts}
+
+
+# ---------------------------------------------------------------------------------------------
+# s9_2b temporal signature and s9_2c +-1 refit (criterion 3, hypothesis-neutral)
+# ---------------------------------------------------------------------------------------------
+
+def single_raw_segments(segments: Sequence[Segment], n: int) -> dict[int, Segment]:
+    """Competitor frame -> the ONE raw segment covering it (frames inside a transition overlap or covered by a
+    placeholder / dip / flash are absent)."""
+    cover: dict[int, list[Segment]] = {}
+    for s in segments:
+        for k in range(max(0, int(s.comp_in)), min(int(n), int(s.comp_out))):
+            cover.setdefault(k, []).append(s)
+    return {k: v[0] for k, v in cover.items() if len(v) == 1 and v[0].type == "raw"}
+
+
+class TemporalFrames:
+    """Prepared ROI images (temporal.prepare) of the competitor proxy (``comp``) and of the recreation
+    (``rec``: each frame's RAW proxy frame warped with its segment's OWN model -- what AE shows), blurred
+    with cfg.score_blur (proxy px), masked with the layout-only allowed masks of that frame."""
+
+    def __init__(self, comp: Any, raw: Any, segments: Sequence[Segment], allowed_fn: Callable[[int], np.ndarray | None],
+                 box_fn: Callable[[int], Box | dict | None] | None, box: Box | dict | None, raw_wh: tuple[float, float],
+                 comp_fps: Fraction, raw_fps: Fraction, n_raw: int | None, cfg: Any):
+        self.comp, self.raw, self.cfg = comp, raw, cfg
+        self.allowed_fn, self.box_fn, self.box = allowed_fn, box_fn, box
+        self.raw_wh, self.comp_fps, self.raw_fps, self.n_raw = raw_wh, comp_fps, raw_fps, n_raw
+        self.n = int(comp.n)
+        self.seg_at = single_raw_segments(segments, self.n)
+        self.blur = float(getattr(cfg, "score_blur", 1.0))
+        self.max_side = int(getattr(cfg, "temporal_max_side", 200) or 0)
+
+    def roi(self, k: int) -> tuple[int, int, int, int]:
+        b = self.box_fn(int(k)) if self.box_fn is not None else self.box
+        return proxy_roi(b, self.comp.size, self.comp.ratio)
+
+    def same(self, k: int, k2: int) -> bool:
+        return self.roi(k) == self.roi(k2)
+
+    def _blur_at(self, roi: tuple[int, int, int, int]) -> float:
+        """cfg.score_blur (proxy px) at the scale temporal.prepare measures the ROI at."""
+        from . import temporal
+        return self.blur * temporal.scale_of((roi[3], roi[2]), self.max_side)
+
+    def _mask(self, k: int, roi: tuple[int, int, int, int]) -> np.ndarray:
+        x, y, w, h = roi
+        al = self.allowed_fn(int(k))
+        return np.ones((h, w), bool) if al is None else np.asarray(al)[y:y + h, x:x + w].astype(bool)
+
+    def comp_frame(self, k: int):
+        from . import temporal
+        if not (0 <= k < self.n) or not self.comp.has(int(k)):
+            return None
+        x, y, w, h = roi = self.roi(k)
+        img = np.asarray(self.comp.get(int(k)))[y:y + h, x:x + w]
+        return temporal.prepare(img, self._mask(k, roi), self.max_side, self._blur_at(roi))
+
+    def rec_frame(self, k: int):
+        from . import scoring, temporal
+        s = self.seg_at.get(int(k))
+        if s is None:
+            return None
+        j = seg_raw_frame(s, int(k), self.comp_fps, self.raw_fps, self.n_raw)
+        sim = seg_sim(s, int(k), *self.raw_wh)
+        if j is None or sim is None or not self.raw.has(int(j)):
+            return None
+        roi = self.roi(k)
+        w, valid = scoring.warp_to_roi(np.asarray(self.raw.get(int(j))), sim, bool(s.flip_h), float(self.raw_wh[0]),
+                                       self.raw.ratio, self.comp.ratio, roi)
+        return temporal.prepare(w, valid & self._mask(k, roi), self.max_side, self._blur_at(roi))
+
+
+def temporal_signatures(tf: TemporalFrames, cfg: Any) -> tuple[Any, Any, Any]:
+    """(competitor signature (k, k+1) and (k, k+2), its labels, recreation signature (k, k+1))."""
+    from . import temporal
+    ks = range(tf.n)
+    comp_sig = temporal.measure(tf.comp_frame, ks, cfg, gaps=(1, 2), same=tf.same)
+    breaks = [k for k in range(tf.n - 1) if not tf.same(k, k + 1)]
+    labels = temporal.label_pairs(comp_sig, cfg, breaks=breaks)
+    rec_ks = sorted(tf.seg_at)
+    rec_sig = temporal.measure(tf.rec_frame, rec_ks, cfg, gaps=(1,), same=tf.same)
+    return comp_sig, labels, rec_sig
+
+
+def check_temporal(segments: Sequence[Segment], labels: Any, comp_sig: Any, rec_sig: Any, comp_fps: Fraction,
+                   raw_fps: Fraction, n_raw: int | None, n: int, cfg: Any) -> dict:
+    """s9_2b: the recreation's temporal signature against the competitor's (comp-only labels, temporal.py).
+    For every pair (k, k+1) of frames each shown by ONE raw segment:
+
+    * the competitor MOVEs but the recreation shows the same RAW frame twice -> 'recreation repeats';
+    * the competitor REPEATs but the recreation changes RAW frame by more than the shot's repeat/move split
+      AND more than temporal_mag_ratio x the competitor's change -> 'recreation changes RAW frame';
+    * both change, but by residuals more than temporal_mag_ratio apart after the shot's own measured
+      comp/recreation bias (median over the shot's within-segment pairs) -> 'recreation jumps' / 'competitor
+      changes more' (fake boundaries, wrong skips, jump-backs);
+    * a hold of >= 4 frames in the recreation (>= 3 consecutive repeat pairs) whose labelled competitor pairs
+      mostly MOVE -> 'motion mismatch' (always a failure: a freeze where the competitor plays).
+
+    Unlabelled pairs (cut / unknown) are never evidence. Disagreeing pairs count against frame_exact_min over
+    all pairs considered (like the other criterion-3 frame classes); listed otherwise."""
+    from . import temporal as T
+    exact_min = float(getattr(cfg, "frame_exact_min", 0.99))
+    R = float(getattr(cfg, "temporal_mag_ratio", 3.0))
+    seg_at = single_raw_segments(segments, n)
+    floors = [float(s["floor"]) for s in labels.shots if s.get("floor")]
+    g_floor = float(np.median(floors)) if floors else None
+    n_pairs = n_checked = n_unmeasured = 0
+    bad: list[dict] = []
+    same_pairs: list[tuple[int, int, str]] = []           # (k, segment id, comp label) of recreation repeats
+    movemove: list[dict] = []
+    for k in range(int(n) - 1):
+        s0, s1 = seg_at.get(k), seg_at.get(k + 1)
+        if s0 is None or s1 is None:
+            continue
+        j0, j1 = seg_raw_frame(s0, k, comp_fps, raw_fps, n_raw), seg_raw_frame(s1, k + 1, comp_fps, raw_fps, n_raw)
+        if j0 is None or j1 is None:
+            continue
+        n_pairs += 1
+        lab = labels.get(k)
+        same = j0 == j1 and bool(s0.flip_h) == bool(s1.flip_h)
+        if same:
+            same_pairs.append((k, s0.id if s0 is s1 else -1, lab))
+        pc = comp_sig.d1.get(k)
+        if lab not in (T.REPEAT, T.MOVE) or pc is None or not math.isfinite(pc.cc):
+            continue
+        n_checked += 1
+        shot = labels.shot_info(k) or {}
+        floor = shot.get("floor") or g_floor
+        row = {"k": int(k), "comp": lab, "raw": [int(j0), int(j1)], "seg": [s0.id, s1.id], "r_comp": round(pc.r, 6)}
+        if same:
+            if lab == T.MOVE:
+                bad.append({**row, "kind": "recreation_repeats", "why": f"the recreation shows RAW {j0} twice where "
+                                                                         "the competitor changes"})
+            continue
+        pr = rec_sig.d1.get(k)
+        if pr is None or not math.isfinite(pr.cc):
+            n_unmeasured += 1
+            continue
+        row["r_rec"] = round(pr.r, 6)
+        if lab == T.REPEAT:
+            thr = float(shot.get("threshold") or 0.0)
+            if pr.r >= thr and pr.r > R * max(pc.r, float(floor or 0.0)):
+                bad.append({**row, "kind": "recreation_changes", "why": f"the recreation changes RAW {j0}->{j1} where "
+                                                                         "the competitor repeats its image"})
+            continue
+        movemove.append({**row, "shot": shot.get("id"), "within": s0 is s1, "_r": (pr.r, pc.r, float(floor or 0.0))})
+    bias: dict[Any, float] = {}
+    by_shot: dict[Any, list[float]] = {}
+    for m in movemove:
+        if m["within"]:
+            rr, rc, f = m["_r"]
+            by_shot.setdefault(m["shot"], []).append(math.log(max(rr, f, T.R_EPS) / max(rc, f, T.R_EPS)))
+    for sid, v in by_shot.items():
+        if len(v) >= 3:
+            bias[sid] = float(np.median(v))
+    for m in movemove:
+        rr, rc, f = m.pop("_r")
+        b = bias.get(m["shot"], 0.0)
+        lr = math.log(max(rr, f, T.R_EPS) / max(rc, f, T.R_EPS)) - b
+        m["ratio"] = round(math.exp(lr), 4)
+        if lr > math.log(R):
+            bad.append({**m, "kind": "recreation_jumps", "why": f"the recreation changes {m['ratio']:.1f}x more than "
+                                                                 f"the competitor (RAW {m['raw'][0]}->{m['raw'][1]})"})
+        elif lr < -math.log(R):
+            bad.append({**m, "kind": "competitor_changes_more", "why": f"the competitor changes {1 / m['ratio']:.1f}x "
+                                                                        f"more than the recreation (RAW {m['raw'][0]}->{m['raw'][1]})"})
+    # holds of the recreation against a moving competitor (S65-type freeze)
+    mismatch: list[dict] = []
+    run: list[tuple[int, int, str]] = []
+    for item in same_pairs + [(-10, -2, "")]:
+        if run and (item[0] != run[-1][0] + 1 or item[1] != run[-1][1] or item[1] < 0):
+            if len(run) >= 3:
+                n_mv = sum(1 for _k, _s, lab in run if lab == T.MOVE)
+                n_rp = sum(1 for _k, _s, lab in run if lab == T.REPEAT)
+                if n_mv >= 2 and n_mv > n_rp:
+                    mismatch.append({"segment": run[0][1], "frames": [run[0][0], run[-1][0] + 1], "comp_move": n_mv,
+                                     "comp_repeat": n_rp})
+            run = []
+        if item[1] >= 0:
+            run.append(item)
+    bad.sort(key=lambda d: d["k"])
+    frac = 1.0 - len(bad) / n_pairs if n_pairs else 1.0
+    failures: list[str] = []
+    exceptions: list[str] = []
+    for mm in mismatch:
+        failures.append(f"motion mismatch: S{int(mm['segment']):02d} holds one RAW frame on frames {mm['frames'][0]}-"
+                        f"{mm['frames'][1]} while the competitor moves ({mm['comp_move']} of its pairs change)")
+    kinds = {}
+    for d in bad:
+        kinds.setdefault(d["kind"], []).append(d["k"])
+    listing = "; ".join(f"{kd.replace('_', ' ')}: pairs k = {_ranges(ks)[:10]}" for kd, ks in kinds.items())
+    if bad and frac < exact_min:
+        failures.append(f"temporal signature differs from the competitor on {len(bad)}/{n_pairs} frame pairs "
+                        f"({frac:.4%} agree < {exact_min:.0%}): {listing}")
+    elif bad:
+        exceptions.append(f"temporal signature differs on {len(bad)}/{n_pairs} frame pairs: {listing}")
+    counts = labels.counts()
+    status = _status_from(len(failures), len(exceptions))
+    summary = (f"{n_pairs} frame pairs, {n_checked} with a competitor repeat/move label ({counts.get(T.REPEAT, 0)} "
+               f"repeat, {counts.get(T.MOVE, 0)} move, {counts.get(T.UNKNOWN, 0)} unknown, {counts.get(T.CUT, 0)} cut); "
+               f"{len(bad)} disagree, {len(mismatch)} motion mismatch(es)")
+    return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions,
+            "pairs": n_pairs, "checked": n_checked, "unmeasured": n_unmeasured, "fraction_agree": round(frac, 6),
+            "disagreements": bad[:500], "n_disagreements": len(bad), "motion_mismatch": mismatch,
+            "labels": T.summary(labels), "noise_floor": g_floor, "bias": {str(k): round(math.exp(v), 4) for k, v in bias.items()}}
+
+
+def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
+                raw_wh: tuple[float, float], n_raw: int | None, scorer: Any, cfg: Any, n: int,
+                box_centre: Sequence[float] | None = None) -> dict:
+    """s9_2c: +-1 RAW frame refit. On every matched frame shown by one raw segment, the shown RAW frame j and
+    its neighbours j-1, j+1 each get their OWN framing by ECC (from the shown model and, for a rotated model,
+    from its derotated version); a neighbour that beats the shown (frame, framing) -- and the shown frame's own
+    refit -- by more than max(3 * delta, verify_refit_margin) (delta = scoring.noise_delta of the segment's
+    shown scores) means the recreation shows the wrong RAW frame with a compensating framing (time /
+    translation confound). Such frames count against frame_exact_min; listed otherwise. RAW-identical
+    neighbours never trigger it (they score the same)."""
+    from . import scoring
+    exact_min = float(getattr(cfg, "frame_exact_min", 0.99))
+    floor_margin = float(getattr(cfg, "verify_refit_margin", 0.01))
+    dmin, dmax = float(getattr(cfg, "soft_delta_min", 0.001)), float(getattr(cfg, "soft_delta_max", 0.01))
+    if not _can_refit(scorer):
+        return {"status": "not_available", "summary": "no framing re-measurement available", "failures": []}
+    seg_at = single_raw_segments(segments, n)
+    status = np.asarray(fm.status)
+    rows_all: list[dict] = []
+    bad: list[dict] = []
+    for s in sorted((s for s in segments if s.type == "raw"), key=lambda s: (s.comp_in, s.id)):
+        rows = []
+        for k in range(max(0, s.comp_in), min(int(n), s.comp_out)):
+            if seg_at.get(k) is not s or k >= len(status) or int(status[k]) != Status.MATCH:
+                continue
+            j = seg_raw_frame(s, k, comp_fps, raw_fps, n_raw)
+            sim = seg_sim(s, k, *raw_wh)
+            if j is None or sim is None:
+                continue
+            flip = bool(s.flip_h)
+            inits = [derotated(sim, box_centre)] if box_centre is not None and abs(sim.theta_deg) > 1e-9 else []
+            fits: dict[int, Sim] = {}
+            for jj in (j - 1, j, j + 1):
+                if jj < 0 or (n_raw is not None and jj >= n_raw):
+                    continue
+                r = scorer.refit(k, (jj, sim, flip), inits)
+                if r is not None:
+                    fits[jj] = r[0]
+            order = sorted(fits)
+            sc = scorer.score(k, [(j, sim, flip)] + [(jj, fits[jj], flip) for jj in order])
+            z = {jj: float(sc[1 + i]) for i, jj in enumerate(order)}
+            z_shown = float(sc[0])
+            if not math.isfinite(z_shown):
+                continue
+            z_self = _nanmax([z_shown, z.get(j, float("nan"))])
+            nb = {jj: v for jj, v in z.items() if jj != j and math.isfinite(v)}
+            j_nb = max(nb, key=nb.get) if nb else None
+            rows.append({"k": int(k), "seg": s.id, "raw": int(j), "z_shown": round(z_shown, 6),
+                         "z_refit": _r6(z.get(j, float("nan"))), "best_neighbour": j_nb,
+                         "z_neighbour": None if j_nb is None else round(nb[j_nb], 6), "_self": z_self})
+        delta = scoring.noise_delta([r["z_shown"] for r in rows], dmin, dmax)
+        margin = max(3.0 * delta, floor_margin)
+        for r in rows:
+            z_self = r.pop("_self")
+            r["margin"] = round(margin, 6)
+            if r["z_neighbour"] is not None and r["z_neighbour"] > z_self + margin:
+                bad.append(r)
+        rows_all.extend(rows)
+    n_checked = len(rows_all)
+    frac = 1.0 - len(bad) / n_checked if n_checked else 1.0
+    failures: list[str] = []
+    exceptions: list[str] = []
+    listing = (f"frames {_ranges([r['k'] for r in bad])[:12]} (e.g. k={bad[0]['k']}: RAW {bad[0]['best_neighbour']} "
+               f"{bad[0]['z_neighbour']} vs shown RAW {bad[0]['raw']} {bad[0]['z_shown']})") if bad else ""
+    if bad and frac < exact_min:
+        failures.append(f"{len(bad)}/{n_checked} matched frames show a RAW frame whose neighbour (own refitted framing) "
+                        f"matches the competitor better ({frac:.4%} ok < {exact_min:.0%}): {listing}")
+    elif bad:
+        exceptions.append(f"{len(bad)}/{n_checked} matched frames: a neighbouring RAW frame matches better: {listing}")
+    status_out = _status_from(len(failures), len(exceptions))
+    summary = f"{n_checked} matched frames refitted with RAW j-1 / j / j+1: {len(bad)} where a neighbour wins ({frac:.4%} ok)"
+    return {"status": status_out, "summary": summary, "failures": failures, "exceptions": exceptions,
+            "checked": n_checked, "fraction_ok": round(frac, 6), "neighbour_wins": bad[:500], "n_neighbour_wins": len(bad)}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1522,14 +2101,19 @@ def check_mock(plan: dict | None, records: dict, main_fps: Fraction, n_main: int
 # c4 speed / framing / flip / rotation
 # ---------------------------------------------------------------------------------------------
 
-def framing_samples(seg: Segment, ks: Sequence[int], step: int) -> list[int]:
+def framing_samples(seg: Segment, ks: Sequence[int], step: int, min_samples: int = 0, all_max: int = 0) -> list[int]:
     """Frames of a segment where framing is measured independently: every ``step``-th matched frame, the
-    first and last matched frames and the transform key frames."""
+    first and last matched frames, the transform key frames and at least ``min_samples`` evenly spaced frames;
+    every matched frame of a segment with at most ``all_max`` of them."""
     ks = sorted(int(k) for k in ks)
     if not ks:
         return []
+    if len(ks) <= int(all_max):
+        return ks
     kset = set(ks)
     out = set(ks[::max(1, int(step))]) | {ks[0], ks[-1]}
+    if min_samples and min_samples > 1:
+        out |= {ks[int(i)] for i in np.round(np.linspace(0, len(ks) - 1, int(min_samples))).astype(int)}
     for kd in seg.transform_keys or []:
         kk = int(round(float(kd.get("comp_frame", -1))))
         if kk in kset:
@@ -1633,6 +2217,8 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
     centre = np.array([[b.x + b.w / 2, b.y + b.h / 2]]) if b is not None else np.array([[comp_wh[0] / 2, comp_wh[1] / 2]])
     used_speeds = sorted({round(float(s.speed), 6) for s in segments if s.type == "raw" and not s.unsnapped})
     flip_margin = 3.0 * float(getattr(cfg, "soft_delta_max", 0.01))
+    min_samples = int(getattr(cfg, "verify_framing_min_samples", 0) or 0)
+    all_max = int(getattr(cfg, "verify_framing_all_max", 0) or 0)
     if sample_step is None:
         n_match = int(np.sum(np.asarray(fm.status) == Status.MATCH))
         sample_step = max(FRAMING_SAMPLE_STEP, int(math.ceil(n_match / FRAMING_MAX_SAMPLES)) if n_match else 1)
@@ -1718,7 +2304,7 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
                             f"pos {worst_p:.2f} px, rot {worst_r:.3f}°)")
         if measure is not None and ks:
             ind = _independent_framing(s, ks, raw_wh, centre, measure, int(sample_step), scale_tol, pos_tol, rot_tol,
-                                       flip_margin)
+                                       flip_margin, min_samples, all_max)
             row["independent"] = ind
             if ind["n_measured"] and ind["n_bad"] > FRAMING_BAD_FRAC * ind["n_measured"]:
                 failures.append(f"{name}: independently measured framing differs from the segment model on "
@@ -1728,9 +2314,6 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
             elif ind["n_bad"]:
                 exceptions.append(f"{name}: independently measured framing off on {ind['n_bad']}/{ind['n_measured']} "
                                   f"sampled frames {ind['bad'][:5]}")
-            if ind["n_samples"] and not ind["n_measured"]:
-                exceptions.append(f"{name}: framing could not be measured independently (ECC did not converge on "
-                                  f"{ind['n_samples']} sampled frames)")
             if ind["flip"] == "wrong":
                 failures.append(f"{name}: flip_h={s.flip_h} but the mirrored hypothesis scores higher "
                                 f"(median own - mirrored {ind['flip_median_diff']:+.4f})")
@@ -1738,16 +2321,64 @@ def check_speed_framing(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fra
                 exceptions.append(f"{name}: flip not decidable from the pixels (median own - mirrored "
                                   f"{ind['flip_median_diff']:+.4f}, symmetric content?)")
         rows.append(row)
+    # unconverged samples (ECC from the model, the +-perturbed and the global starts found nothing better and
+    # did not come back to the model): an exception only while the model itself scores like its neighbours;
+    # a model below verify_zncc, or whose gradient-domain score falls below the neighbouring segments' median
+    # by more than max(3 x their noise, verify_low_score_margin), fails (dark / low-texture misframing)
+    _judge_unconverged(rows, cfg, failures, exceptions)
     status = _status_from(len(failures), len(exceptions))
     summary = f"{len(rows)} raw segments: {len(failures)} problems, {len(exceptions)} exceptions"
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions, "segments": rows}
 
 
+def _judge_unconverged(rows: list[dict], cfg: Any, failures: list[str], exceptions: list[str]) -> None:
+    from . import scoring
+    thr = float(getattr(cfg, "verify_zncc", 0.9))
+    floor_margin = float(getattr(cfg, "verify_low_score_margin", 0.02))
+    dmin, dmax = float(getattr(cfg, "soft_delta_min", 0.001)), float(getattr(cfg, "soft_delta_max", 0.01))
+    inds = [(r, r.get("independent")) for r in rows]
+    for i, (row, ind) in enumerate(inds):
+        if not ind:
+            continue
+        name = f"S{int(row['id']):02d}"
+        if not ind.get("unconverged_samples"):
+            if ind.get("n_samples") and not ind.get("n_measured"):
+                exceptions.append(f"{name}: framing could not be measured independently (no usable ECC result on "
+                                  f"{ind['n_samples']} sampled frames)")
+            continue
+        ref = [float(x["z_grad_model"]) for jj in (i - 1, i, i + 1) if 0 <= jj < len(inds) and inds[jj][1]
+               for x in inds[jj][1].get("samples", []) if x.get("cls") == "ok" and x.get("z_grad_model") is not None]
+        med = float(np.median(ref)) if len(ref) >= 3 else None
+        margin = max(3.0 * scoring.noise_delta(ref, dmin, dmax), floor_margin) if ref else floor_margin
+        low = []
+        for x in ind["unconverged_samples"]:
+            zm, zg = x.get("z_model"), x.get("z_grad_model")
+            why = None
+            if zm is not None and zm < thr:
+                why = f"model ZNCC {zm:.3f} < {thr}"
+            elif med is not None and zg is not None and zg < med - margin:
+                why = f"model gradient ZNCC {zg:.3f} < neighbours' median {med:.3f} - {margin:.3f}"
+            if why:
+                low.append(f"{x['k']} ({why})")
+        unc = [x["k"] for x in ind["unconverged_samples"]]
+        ind["unconverged_low_score"] = low[:20]
+        if low:
+            failures.append(f"{name}: framing could not be measured independently on frames {_ranges(unc)[:5]} and the "
+                            f"model scores low there: " + "; ".join(low[:3]))
+        elif not ind["n_measured"]:
+            exceptions.append(f"{name}: framing could not be measured independently (ECC did not converge on "
+                              f"{ind['n_samples']} sampled frames)")
+        else:
+            exceptions.append(f"{name}: framing not measurable on {len(unc)} of {ind['n_samples']} sampled frames "
+                              f"{_ranges(unc)[:5]} (model scores like its neighbours)")
+
+
 def _independent_framing(seg: Segment, ks: Sequence[int], raw_wh: tuple[float, float], centre: np.ndarray,
                          measure: Callable[[Segment, int, Sim], dict | None], step: int, scale_tol: float,
-                         pos_tol: float, rot_tol: float, flip_margin: float) -> dict:
-    samples = framing_samples(seg, ks, step)
-    bad, unconv, diffs = [], [], []
+                         pos_tol: float, rot_tol: float, flip_margin: float, min_samples: int = 0,
+                         all_max: int = 0) -> dict:
+    samples = framing_samples(seg, ks, step, min_samples, all_max)
+    bad, unconv, diffs, recs = [], [], [], []
     n_meas = 0
     ws = wp = 0.0
     for k in samples:
@@ -1760,26 +2391,38 @@ def _independent_framing(seg: Segment, ks: Sequence[int], raw_wh: tuple[float, f
         own, oth = r.get("flip_own"), r.get("flip_other")
         if own is not None and oth is not None and math.isfinite(float(own)) and math.isfinite(float(oth)):
             diffs.append(float(own) - float(oth))
+        zm = float(r.get("z_model", float("nan")))
+        zg = r.get("z_grad_model")
+        rec = {"k": int(k), "z_model": _r6(zm), "z_grad_model": None if zg is None else _r6(float(zg))}
+        recs.append(rec)
         meas = r.get("sim")
         if meas is None:
+            rec["cls"] = "unconverged"
+            unconv.append(rec)
             continue
         es, ep, er = _sim_errors(model, meas, centre)
-        z, zm = float(r.get("z", float("nan"))), float(r.get("z_model", float("nan")))
+        z = float(r.get("z", float("nan")))
+        rec.update(z=_r6(z), scale_err=round(es, 6), pos_err_px=round(ep, 3), rot_err_deg=round(er, 4))
         if es <= scale_tol and ep <= pos_tol and er <= rot_tol:
             n_meas += 1
+            rec["cls"] = "ok"
             ws, wp = max(ws, es), max(wp, ep)
             continue
         if math.isfinite(z) and (not math.isfinite(zm) or z > zm + 1e-4):
             n_meas += 1
+            rec["cls"] = "bad"
             bad.append(int(k))
             ws, wp = max(ws, es), max(wp, ep)
         else:
-            unconv.append(int(k))
+            rec["cls"] = "unconverged"
+            unconv.append(rec)
     med = float(np.median(diffs)) if diffs else float("nan")
     flip = "n/a" if not diffs else ("ok" if med > flip_margin else ("wrong" if med < -flip_margin else "undecidable"))
     return {"n_samples": len(samples), "n_measured": n_meas, "n_bad": len(bad), "bad": bad[:50],
-            "unconverged": unconv[:50], "max_scale_err": round(ws, 6), "max_pos_err_px": round(wp, 3),
-            "flip": flip, "flip_median_diff": None if not diffs else round(med, 5), "flip_samples": len(diffs)}
+            "unconverged": [x["k"] for x in unconv][:50], "unconverged_samples": unconv[:50],
+            "max_scale_err": round(ws, 6), "max_pos_err_px": round(wp, 3),
+            "flip": flip, "flip_median_diff": None if not diffs else round(med, 5), "flip_samples": len(diffs),
+            "samples": recs[:200]}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -2645,10 +3288,28 @@ def frame_box_fn(segments: Sequence[Segment], layout_block: dict | None, dominan
     return lambda k: over.get(int(k), dominant)
 
 
+def verify_overlays(ctx: Any) -> Any:
+    """Overlay masks verification may exclude: the LAYOUT stage's own caption / text-overlay masks
+    (layout.layout_overlay_masks: comp-only), never ``ctx.overlays`` -- that also holds refine's pass-2
+    residual masks, computed from the match being verified (a misframed match masks its own mismatch away)."""
+    from . import layout as layout_mod
+    lay = getattr(ctx, "layout", None)
+    comp = getattr(ctx, "comp_proxy", None)
+    shape = (int(comp.size[1]), int(comp.size[0])) if comp is not None else None
+    ratio = tuple(comp.ratio) if comp is not None else None
+    d = int(getattr(ctx.cfg, "overlay_dilate_px", 3))
+    fn = getattr(layout_mod, "layout_overlay_masks", None)
+    if fn is None:                       # a layout module without the provider (test stubs): no overlay masks
+        log.warning("verify: layout.layout_overlay_masks unavailable - scoring without overlay masks")
+        return None
+    return fn(lay, shape, ratio, d) if lay is not None else None
+
+
 def _allowed_fn(ctx: Any, box_fn: Callable[[int], Box | dict | None] | None = None) -> Callable[[int], np.ndarray | None]:
-    """Per-frame scoring mask: layout.allowed_mask (dominant box & ~static & ~overlay(k)); on frames shown in
-    a larger box (full-screen periods) also the pixels of that box outside the dominant box that are not
-    covered by an active zone, caption or overlay (the dominant layout's static canvas shows video there)."""
+    """Per-frame scoring mask: layout.allowed_mask (dominant box & ~static & ~layout overlay(k), the overlays
+    of ``verify_overlays`` -- never refine's residual masks); on frames shown in a larger box (full-screen
+    periods) also the pixels of that box outside the dominant box that are not covered by an active zone,
+    caption or overlay (the dominant layout's static canvas shows video there)."""
     from . import layout as layout_mod
     memo: dict[int, np.ndarray] = {}
     lay = getattr(ctx, "layout", None)
@@ -2656,7 +3317,8 @@ def _allowed_fn(ctx: Any, box_fn: Callable[[int], Box | dict | None] | None = No
     dom = _box(ctx)
     dom_roi = proxy_roi(dom, comp.size, comp.ratio) if dom is not None else None
     rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
-    d = int(getattr(ctx.overlays, "dilate_px", getattr(ctx.cfg, "overlay_dilate_px", 3)) or 0) if ctx.overlays is not None \
+    overlays = verify_overlays(ctx)
+    d = int(getattr(overlays, "dilate_px", getattr(ctx.cfg, "overlay_dilate_px", 3)) or 0) if overlays is not None \
         else int(getattr(ctx.cfg, "overlay_dilate_px", 3))
 
     def rect_off(m: np.ndarray, x: float, y: float, w: float, h: float) -> None:
@@ -2684,9 +3346,9 @@ def _allowed_fn(ctx: Any, box_fn: Callable[[int], Box | dict | None] | None = No
             if int(c.get("comp_in", 0)) <= k < int(c.get("comp_out", 0)) and all(q in c for q in ("x", "y", "w", "h")):
                 rect_off(extra, float(c["x"]), float(c["y"]), float(c["w"]), float(c["h"]))
         ov = None
-        if ctx.overlays is not None:
+        if overlays is not None:
             try:
-                ov = ctx.overlays.get_dilated(int(k), d) if hasattr(ctx.overlays, "get_dilated") else ctx.overlays.get(int(k))
+                ov = overlays.get_dilated(int(k), d) if hasattr(overlays, "get_dilated") else overlays.get(int(k))
             except Exception:  # noqa: BLE001 - no overlay mask for this frame
                 ov = None
         if ov is not None and np.asarray(ov).shape == extra.shape:
@@ -2697,7 +3359,7 @@ def _allowed_fn(ctx: Any, box_fn: Callable[[int], Box | dict | None] | None = No
         if k not in memo:
             if len(memo) > 64:
                 memo.clear()
-            base = layout_mod.allowed_mask(ctx.layout, ctx.overlays, int(k), ctx.comp_proxy)
+            base = layout_mod.allowed_mask(ctx.layout, overlays, int(k), ctx.comp_proxy)
             memo[k] = widened(int(k), np.asarray(base, bool)) if base is not None else base
         return memo[k]
     return f
@@ -2766,9 +3428,12 @@ def framing_measure(comp: Any, raw: Any, scorer: Any, allowed_fn: Callable[[int]
                     box_fn: Callable[[int], Box | dict | None], raw_wh: tuple[float, float], comp_fps: Fraction,
                     raw_fps: Fraction, n_raw: int | None, cfg: Any) -> Callable[[Segment, int, Sim], dict | None]:
     """measure(seg, k, model) for check_speed_framing: refine.refine_transform (ECC on the competitor proxy
-    ROI with the allowed mask) started from the model perturbed by ±FRAMING_PERTURB, the better of the two
-    runs; its score and the model's on the same pixels; the model's score with its own flip vs the mirrored
-    hypothesis (same Sim, opposite flip)."""
+    ROI with the layout-only allowed mask) started from the model perturbed by ±FRAMING_PERTURB and from a
+    GLOBAL start (the model moved by the phase-correlation translation between the competitor ROI and the
+    warped RAW frame, so a framing tens of px off is still found); never from the model itself; the best run
+    that improved on its start, its score and the model's on the same pixels, the model's gradient-domain
+    score (dark / low-texture frames) and the model's score with its own flip vs the mirrored hypothesis
+    (same Sim, opposite flip). 'sim' is None when no start improved (unconverged)."""
     from . import refine
     rel, px = FRAMING_PERTURB
 
@@ -2782,25 +3447,31 @@ def framing_measure(comp: Any, raw: Any, scorer: Any, allowed_fn: Callable[[int]
         centre = (bb.x + bb.w / 2.0, bb.y + bb.h / 2.0) if bb is not None else (comp.full_size[0] / 2.0, comp.full_size[1] / 2.0)
         roi = proxy_roi(b, comp.size, comp.ratio)
         comp_img, raw_img = np.asarray(comp.get(int(k))), np.asarray(raw.get(int(j)))
-        best = None
         first = 1.0 if int(k) % 2 == 0 else -1.0          # alternate the side of the start between samples
-        for sign in (first, -first):
-            init = perturb_sim(model, centre, sign * rel, sign * px, sign * px)
+        # never the model itself: ECC started there only confirms its own local optimum
+        starts = [perturb_sim(model, centre, sign * rel, sign * px, sign * px) for sign in (first, -first)]
+        g = scorer.global_init(k, (j, model, flip)) if hasattr(scorer, "global_init") else None
+        if g is not None:
+            starts.append(g)
+        found: list[Sim] = []
+        for init in starts:
             try:
                 sim, z = refine.refine_transform(comp_img, raw_img, init, flip, float(raw_wh[0]), raw.ratio, comp.ratio,
                                                  allowed_fn(k), cfg, roi)
-            except Exception:  # noqa: BLE001 - an ECC failure is an unmeasured sample, not a crash
+            except Exception:  # noqa: BLE001 - an ECC failure is an unmeasured start, not a crash
                 continue
             if sim is init or not math.isfinite(float(z)):
-                continue                        # ECC did not improve on the perturbed start: try the other side
-            best = (sim, float(z))
-            break
-        sc = scorer.score(k, [(j, model, flip), (j, model, not flip)])
+                continue                        # ECC did not improve on this start
+            found.append(sim)
+        sc = scorer.score(k, [(j, model, flip), (j, model, not flip)] + [(j, s, flip) for s in found])
         out = {"flip_own": float(sc[0]), "flip_other": float(sc[1]), "sim": None, "z": float("nan"),
-               "z_model": float(sc[0])}
-        if best is not None:
-            both = scorer.score(k, [(j, best[0], flip), (j, model, flip)])
-            out.update(sim=best[0], z=float(both[0]), z_model=float(both[1]))
+               "z_model": float(sc[0]), "starts": len(starts), "improved": len(found), "global_start": g is not None}
+        zs = [float(v) for v in sc[2:]]
+        if found and any(math.isfinite(v) for v in zs):
+            i = int(np.nanargmax(np.asarray(zs, np.float64)))
+            out.update(sim=found[i], z=zs[i])
+        if hasattr(scorer, "score_grad"):
+            out["z_grad_model"] = float(scorer.score_grad(k, [(j, model, flip)])[0])
         return out
     return measure
 
@@ -2836,7 +3507,24 @@ def verify_all(ctx: Any) -> dict:
             scorer = ProxyScorer(ctx.comp_proxy, ctx.raw_proxy, _box(ctx), allowed, raw_wh[0], cfg, box_fn=box_fn)
         return scorer
 
-    extra["cuts"] = _run_check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg))
+    dom = _box(ctx)
+    db = Box.from_dict(dom) if isinstance(dom, dict) else dom
+    centre = (db.x + db.w / 2.0, db.y + db.h / 2.0) if db is not None else (comp_wh[0] / 2.0, comp_wh[1] / 2.0)
+
+    # competitor-only temporal signature (labels) + the recreation's, shared by c2 and s9_2b
+    temporal_state: dict[str, Any] = {}
+
+    def s9_2b() -> dict:
+        tf = TemporalFrames(ctx.comp_proxy, ctx.raw_proxy, segs, allowed, box_fn, dom, raw_wh, comp_fps, raw_fps, n_raw, cfg)
+        comp_sig, labels, rec_sig = temporal_signatures(tf, cfg)
+        temporal_state["labels"] = labels
+        return check_temporal(segs, labels, comp_sig, rec_sig, comp_fps, raw_fps, n_raw, n, cfg)
+
+    checks["s9_2b_temporal"] = _run_check("s9_2b_temporal", s9_2b)
+    extra["cuts"] = _run_check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg,
+                                                             labels=temporal_state.get("labels"), box_centre=centre))
+    checks["s9_2c_refit"] = _run_check("s9_2c_refit", lambda: check_refit(segs, ctx.fm, comp_fps, raw_fps, raw_wh, n_raw,
+                                                                           get_scorer(), cfg, n, box_centre=centre))
 
     # s9_2: AE semantics from the plan and from the mock-run record
     cut_main = [pipeline.to_main_frame(k, comp_fps, main_fps) for k in cut_frames(segs)]
@@ -2946,9 +3634,13 @@ def verify_all(ctx: Any) -> dict:
         "bracketing competitor frames; frame-exact only with --fps competitor)")
     c2 = {"status": aggregate([extra["cuts"]["status"], checks["s9_4_cut_images"]["status"]]),
           "summary": extra["cuts"].get("summary", "") + exact_note, "details": extra["cuts"]}
-    c3 = {"status": aggregate([checks["s9_2_ae_sim"]["status"], checks["s9_3_visual"]["status"]]),
-          "summary": f"AE sim: {p2.get('summary')}; visual: {checks['s9_3_visual'].get('summary')}" + exact_note,
-          "details": {"s9_2": checks["s9_2_ae_sim"], "s9_3": {k: v for k, v in checks["s9_3_visual"].items()}}}
+    c3 = {"status": aggregate([checks["s9_2_ae_sim"]["status"], checks["s9_3_visual"]["status"],
+                               checks["s9_2b_temporal"]["status"], checks["s9_2c_refit"]["status"]]),
+          "summary": (f"AE sim: {p2.get('summary')}; visual: {checks['s9_3_visual'].get('summary')}; temporal: "
+                      f"{checks['s9_2b_temporal'].get('summary')}; +-1 refit: {checks['s9_2c_refit'].get('summary')}"
+                      + exact_note),
+          "details": {"s9_2": checks["s9_2_ae_sim"], "s9_3": {k: v for k, v in checks["s9_3_visual"].items()},
+                      "s9_2b": checks["s9_2b_temporal"], "s9_2c": checks["s9_2c_refit"]}}
     mock_only = checks["s9_6_ae_render"]["status"] == "not_available"
     c6_status = aggregate([extra["mock"]["status"], checks["s9_6_ae_render"]["status"]])
     c6 = {"status": c6_status,

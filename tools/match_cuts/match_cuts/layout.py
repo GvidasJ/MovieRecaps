@@ -394,6 +394,41 @@ def allowed_mask(layout: Layout, overlays: Any, k: int, comp: Proxy, dilate_px: 
     return base & ~ov
 
 
+def layout_overlay_masks(layout: Layout | None, shape: tuple[int, int] | None = None,
+                         ratio: tuple[float, float] | None = None, dilate_px: int = 3) -> OverlayMasks | None:
+    """The overlay masks the LAYOUT stage found on its own (captions / text overlays, competitor-only:
+    ``layout.overlay_mask_file``), never refine's pass-2 residual masks -- those are computed from the
+    match being judged and would hide its own mismatch (verify's masks, DESIGN §5 verify). Without the
+    file, ``shape`` (h, w) and ``ratio`` (proxy rx, ry) build rectangle masks from ``layout.captions``.
+    None when neither is available."""
+    if layout is None:
+        return None
+    p = getattr(layout, "overlay_mask_file", "") or ""
+    if p and Path(p).is_file():
+        try:
+            return OverlayMasks.load(p)
+        except Exception as e:  # noqa: BLE001 - fall back to the caption rectangles
+            log.warning("layout overlay masks %s unreadable (%s): using the caption rectangles", p, e)
+    if shape is None or ratio is None:
+        return None
+    h, w = int(shape[0]), int(shape[1])
+    rx, ry = float(ratio[0]), float(ratio[1])
+    ov = OverlayMasks((h, w), dilate_px)
+    for c in getattr(layout, "captions", None) or []:
+        if not isinstance(c, dict) or not all(q in c for q in ("x", "y", "w", "h", "comp_in", "comp_out")):
+            continue
+        x0, y0 = max(0, int(math.floor(float(c["x"]) * rx))), max(0, int(math.floor(float(c["y"]) * ry)))
+        x1 = min(w, int(math.ceil((float(c["x"]) + float(c["w"])) * rx)))
+        y1 = min(h, int(math.ceil((float(c["y"]) + float(c["h"])) * ry)))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        m = np.zeros((h, w), bool)
+        m[y0:y1, x0:x1] = True
+        for k in range(int(c["comp_in"]), int(c["comp_out"])):
+            ov.union(k, m)
+    return ov
+
+
 def masks_from_residuals(residuals: dict[int, np.ndarray], base_allowed: np.ndarray, cfg: Any) -> dict[int, np.ndarray]:
     """Overlay pass 2 (DESIGN §5 refine step 4): per-frame masks of pixels that consistently do not match RAW.
 
