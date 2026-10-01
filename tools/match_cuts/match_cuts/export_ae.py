@@ -43,7 +43,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Iterable
 
-from .common import DecisionLog, fps_str, log, null_dlog, parse_fps, timecode
+from .common import DecisionLog, fps_str, log, null_dlog, parse_fps, replace_file, timecode
 from . import phase_solve as ps
 from .geometry import AETransform, Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
@@ -1852,7 +1852,7 @@ def write_jsx(cutlist: Cutlist, plan: dict, out_path: str | os.PathLike, cfg: An
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(text, encoding="ascii", newline="\n")
-    os.replace(tmp, p)
+    replace_file(tmp, p)
     log.info("export_ae: wrote %s (%d layers, %d markers)", p, len(plan["layers"]), len(plan["markers"]))
 
 

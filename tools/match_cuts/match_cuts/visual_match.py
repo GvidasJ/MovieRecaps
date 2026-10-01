@@ -365,7 +365,7 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
     _WSTATE = dict(state)
     _WSTATE["__fn__"] = fn
     _WSTATE["__seed__"] = int(seed)
-    name = label or str(getattr(fn, "__name__", "tasks")).strip("_")
+    name = label or _task_name(fn)
     try:
         if workers <= 1 or len(items) < max(2, min_items):
             POOL_STATS["inline"] += 1
@@ -399,12 +399,22 @@ def _inline(items: list, name: str, done: dict[int, Any] | None = None) -> list[
     """Run the items (those without a result in ``done``) in this process, in input order, with progress."""
     done = {} if done is None else done
     todo = [i for i in range(len(items)) if i not in done]
-    prog = Progress(name, len(items))
-    prog.done = len(items) - len(todo)
-    for i in todo:
-        done[i] = _invoke(items[i])
-        prog.step()
+    with Progress(name, len(items)) as prog:
+        prog.done = len(items) - len(todo)
+        for i in todo:
+            done[i] = _invoke(items[i])
+            prog.step()
     return [done[i] for i in range(len(items))]
+
+
+def _task_name(fn: Callable) -> str:
+    """Short progress label of an item function: '_search_worker' -> 'search', '_w_eval' -> 'eval'."""
+    name = str(getattr(fn, "__name__", "tasks")).strip("_")
+    for pre in ("w_",):
+        name = name[len(pre):] if name.startswith(pre) else name
+    for suf in ("_worker",):
+        name = name[:-len(suf)] if name.endswith(suf) else name
+    return name or "tasks"
 
 
 def _invoke_chunk(chunk: list[tuple[int, Any]]) -> list[tuple[int, Any]]:

@@ -254,6 +254,25 @@ def test_stage_heartbeat_breaks_silence(monkeypatch, caplog):
     assert common.current_stage() == ""
 
 
+def test_heartbeat_reports_the_open_progress_counter(monkeypatch, caplog):
+    """A silent period gives ONE line: the open counter's 'done/total' (not a bare 'still running')."""
+    monkeypatch.setitem(common.POOL_WATCHDOG, "progress_s", 0.3)
+    with caplog.at_level(logging.INFO, logger="match_cuts"), common.stage_heartbeat("S5.3 refine"):
+        with common.Progress("ecc", 40) as prog:
+            prog.done = 12
+            time.sleep(0.8)                                         # no step() calls: only the heartbeat logs
+    assert "S5.3 refine: ecc: 12/40 tasks done" in caplog.text
+    assert "still running" not in caplog.text
+    assert not common._ACTIVE
+
+
+def test_task_names():
+    assert vm._task_name(vm._search_worker) == "search"
+    assert vm._task_name(_work) == "work"
+    from match_cuts import refine
+    assert vm._task_name(refine._w_eval) == "eval"
+
+
 def test_stage_heartbeat_quiet_while_the_stage_logs(monkeypatch, caplog):
     monkeypatch.setitem(common.POOL_WATCHDOG, "progress_s", 0.4)
     with caplog.at_level(logging.INFO, logger="match_cuts"), common.stage_heartbeat("S5.2 visual search"):

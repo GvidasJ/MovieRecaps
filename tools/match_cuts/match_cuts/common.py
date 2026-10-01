@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import subprocess
+import sys
 import time
 from fractions import Fraction
 from pathlib import Path
@@ -251,8 +252,33 @@ class Cache:
         val = compute()
         tmp = p.with_suffix(".tmp.npz")
         np.savez_compressed(tmp, **val)
-        os.replace(tmp, p)
+        replace_file(tmp, p)
         return val
+
+
+# Windows: a file that another program holds open without delete sharing (Excel with cutlist.csv, a video
+# player with preview_recreation.mp4, a virus scanner briefly checking a fresh file) cannot be replaced or
+# removed -- os.replace raises PermissionError (WinError 5 / 32). Retried for a few seconds, then explained.
+REPLACE_RETRY_S = 5.0
+
+
+def replace_file(src: str | os.PathLike, dst: str | os.PathLike, retry_s: float | None = None) -> None:
+    """``os.replace(src, dst)``, retried on PermissionError for up to ``retry_s`` seconds (REPLACE_RETRY_S); then
+    a PermissionError that names the file and says to close the program holding it."""
+    limit = REPLACE_RETRY_S if retry_s is None else float(retry_s)
+    t0 = time.monotonic()
+    delay = 0.05
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            if time.monotonic() - t0 >= limit:
+                raise PermissionError(
+                    e.errno, f"cannot replace {dst}: the file is in use or read-only ({e.strerror}). Close the program "
+                    f"that has it open (e.g. Excel, a video player, After Effects) and run again", str(dst)) from e
+            time.sleep(delay)
+            delay = min(0.5, delay * 2)
 
 
 def atomic_write_text(path: str | os.PathLike, text: str) -> None:
@@ -262,7 +288,22 @@ def atomic_write_text(path: str | os.PathLike, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, p)
+    replace_file(tmp, p)
+
+
+def write_image(path: str | os.PathLike, img: np.ndarray, ext: str = ".png") -> bool:
+    """Write an image atomically through Python file I/O (``cv2.imencode``): ``cv2.imwrite`` cannot open
+    non-ASCII paths on Windows (e.g. C:\\Users\\Žygimantas\\...). Returns False when encoding failed."""
+    import cv2
+    p = Path(path)
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.stem + ".tmp" + ext)
+    tmp.write_bytes(buf.tobytes())
+    replace_file(tmp, p)
+    return True
 
 
 # --------------------------------------------------------------------------------------
@@ -405,11 +446,22 @@ def null_dlog() -> DecisionLog:
     return _NULL_DLOG
 
 
+def _tolerant_stream(stream: Any) -> None:
+    """Characters the console cannot encode become backslash escapes instead of logging errors (Windows: a
+    redirected stderr uses the ANSI code page, e.g. cp1252, which has no arrows / >= signs)."""
+    try:
+        if getattr(stream, "errors", "strict") == "strict" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):  # pragma: no cover - a replaced / closed stream
+        pass
+
+
 def setup_logging(verbose: bool = False, log_file: str | os.PathLike | None = None) -> None:
     root = logging.getLogger(LOG_NAME)
     root.setLevel(logging.DEBUG)
     for h in list(root.handlers):
         root.removeHandler(h)
+    _tolerant_stream(sys.stderr)
     sh = logging.StreamHandler()
     sh.setLevel(logging.DEBUG if verbose else logging.INFO)
     sh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
@@ -558,25 +610,44 @@ if not any(isinstance(f, _InfoClock) for f in log.filters):
     log.addFilter(_InfoClock())
 
 
+_ACTIVE: list["Progress"] = []          # open Progress counters, innermost last (the heartbeat reports it)
+
+
 class Progress:
-    """Counts finished work items and logs ``<stage>: <name>: done/total <unit> done (s)`` at most every
-    POOL_WATCHDOG['progress_s'] seconds (only once the work has run that long)."""
+    """Counts finished work items. Whenever the package logger has been silent for POOL_WATCHDOG['progress_s']
+    seconds, ``<stage>: <name>: done/total <unit> done (elapsed)`` is logged -- by :meth:`tick` or by the stage
+    heartbeat, whichever notices first, so a silent period gives one line. Use as a context manager (or call
+    :meth:`close`) so the heartbeat stops reporting it."""
 
     def __init__(self, name: str, total: int, unit: str = "tasks"):
         self.name, self.total, self.unit = name, int(total), unit
         self.done = 0
-        self.t0 = self.last = time.monotonic()
+        self.t0 = time.monotonic()
+        _ACTIVE.append(self)
+
+    def __enter__(self) -> "Progress":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        for i in range(len(_ACTIVE) - 1, -1, -1):
+            if _ACTIVE[i] is self:
+                del _ACTIVE[i]
+                break
+
+    def line(self) -> str:
+        return (f"{progress_name(self.name)}: {self.done}/{self.total} {self.unit} done "
+                f"({elapsed_str(time.monotonic() - self.t0)})")
 
     def step(self, n: int = 1) -> None:
         self.done += n
         self.tick()
 
     def tick(self) -> None:
-        now = time.monotonic()
-        if now - self.last >= POOL_WATCHDOG["progress_s"]:
-            self.last = now
-            log.info("%s: %d/%d %s done (%s)", progress_name(self.name), self.done, self.total, self.unit,
-                     elapsed_str(now - self.t0))
+        if time.monotonic() - _LAST_INFO[0] >= POOL_WATCHDOG["progress_s"]:
+            log.info("%s", self.line())
 
 
 def elapsed_str(s: float) -> str:
@@ -595,31 +666,31 @@ def watched_results(it: Any, total: int, name: str, procs: Iterable[Any] = (), w
     propagates unchanged."""
     from multiprocessing import TimeoutError as MPTimeout
     procs = list(procs)
-    prog = Progress(name, total if total_items is None else total_items)
     got = 0
     last = time.monotonic()
     poll = float(POOL_WATCHDOG["poll_s"])
-    while got < total:
-        try:
-            r = it.next(timeout=poll)
-        except MPTimeout:
-            now = time.monotonic()
-            dead = [p for p in procs if getattr(p, "exitcode", None) is not None]
-            if dead:
-                p = dead[0]
-                raise PoolFailure(f"{what}: worker process {getattr(p, 'pid', '?')} exited unexpectedly "
-                                  f"(exit code {p.exitcode}) after {prog.done}/{prog.total} tasks") from None
-            if now - last >= POOL_WATCHDOG["stall_s"]:
-                raise PoolFailure(f"{what}: no result for {now - last:.0f} s after {prog.done}/{prog.total} "
-                                  "tasks") from None
-            prog.tick()
-            continue
-        except StopIteration:
-            return
-        got += 1
-        last = time.monotonic()
-        yield r
-        prog.step(count(r) if count is not None else 1)
+    with Progress(name, total if total_items is None else total_items) as prog:
+        while got < total:
+            try:
+                r = it.next(timeout=poll)
+            except MPTimeout:
+                now = time.monotonic()
+                dead = [p for p in procs if getattr(p, "exitcode", None) is not None]
+                if dead:
+                    p = dead[0]
+                    raise PoolFailure(f"{what}: worker process {getattr(p, 'pid', '?')} exited unexpectedly "
+                                      f"(exit code {p.exitcode}) after {prog.done}/{prog.total} tasks") from None
+                if now - last >= POOL_WATCHDOG["stall_s"]:
+                    raise PoolFailure(f"{what}: no result for {now - last:.0f} s after {prog.done}/{prog.total} "
+                                      "tasks") from None
+                prog.tick()
+                continue
+            except StopIteration:
+                return
+            got += 1
+            last = time.monotonic()
+            yield r
+            prog.step(count(r) if count is not None else 1)
 
 
 def pool_workers(pool: Any) -> list:
@@ -688,8 +759,9 @@ if hasattr(os, "register_at_fork"):
 
 
 class _Heartbeat:
-    """Daemon thread that logs '<stage>: still running (n s)' when the package logger was silent for
-    POOL_WATCHDOG['progress_s'] seconds, so a long stage never looks frozen (innermost stage only)."""
+    """Daemon thread that logs '<stage>: still running (n s)' -- or the open :class:`Progress` counter's line --
+    when the package logger was silent for POOL_WATCHDOG['progress_s'] seconds, so a long stage never looks
+    frozen (innermost stage only)."""
 
     def __init__(self, stage: str):
         import threading
@@ -709,7 +781,11 @@ class _Heartbeat:
             with FORK_LOCK:
                 if self.stop.is_set():
                     return
-                log.info("%s: still running (%s)", self.stage, elapsed_str(time.monotonic() - self.t0))
+                prog = _ACTIVE[-1] if _ACTIVE else None
+                if prog is not None:
+                    log.info("%s", prog.line())
+                else:
+                    log.info("%s: still running (%s)", self.stage, elapsed_str(time.monotonic() - self.t0))
 
 
 @contextlib.contextmanager

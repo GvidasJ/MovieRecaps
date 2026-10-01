@@ -64,11 +64,27 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 | `--workers N` | `0` | worker processes (0 = all CPUs) |
 | `--force-conform` | off | transcode RAW to an AE-safe copy even if it is already AE-safe |
 | `--ae-time-mode` | `auto` | how AE layers are timed: `stretch` (Time Stretch + Start Time), `remap` (time remapping), `frames` (one HOLD time-remap key per frame; immune to AE's time rounding), `auto` (stretch, with a per-layer switch to `frames` when the JSX's read-back self-check finds a mismatch) |
-| `--audio-sync` | `raw` | the exported audio when the competitor's soundtrack is offset against its picture (measured once per run, `cutlist.audio.av_offset`, one line in the report): `raw` keeps RAW's own lip-sync (audio-only layers only for genuine J/L cuts); `competitor` reproduces the competitor's offset sample-accurately (every segment's audio on an audio-only layer with shifted source time, switches at the competitor's measured switch baseline rounded to whole frames). The preview audio follows the same rule; FCP7 XML / EDL get separate audio events at the nearest RAW frame with the sub-frame remainder written next to each (they address whole frames). Audio that keeps playing under a video-only slow motion / freeze / placeholder (one verified audio line) is exported as one continuous audio-only layer in either mode |
+| `--audio-sync` | `raw` | which audio timing the export uses when the competitor's sound is shifted against its picture (see *A/V offset* below): `raw` keeps the RAW's own lip-sync; `competitor` copies the competitor's shift exactly |
 | `-v` | off | debug logging on the console |
 
 Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
-`--skip-preview`, `--skip-compare`, `--no-swap`, `--version`.
+`--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
+
+**A/V offset.** Many short-form edits play their sound a little early or late against the picture (for
+example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`) and the report
+shows it in one line, e.g. *"Audio sync: … (lag −85.4 ms, interval −86.6 … −84.2 ms, 16 segment(s); a
+property of the input files, measured); export keeps RAW lip-sync (--audio-sync raw)"*. It is a property of
+the competitor file, not an error of the recreation: criterion 5 checks every segment against it and lists it
+as one explained exception.
+
+- `--audio-sync raw` (default): the AE project uses the RAW audio in its own lip-sync. Extra audio-only
+  layers (`Sxx  audio (J/L cut)`) appear only where the editor really let the sound start before / end after
+  the picture cut (J/L cut).
+- `--audio-sync competitor`: every segment's sound goes on its own audio-only layer, shifted so it sounds
+  exactly like the competitor. The preview follows the same rule; FCP7 XML / EDL get separate audio events at
+  the nearest whole frame (the sub-frame rest is written as a comment next to each event).
+- Either way, sound that keeps playing under a video-only slow motion, freeze, uncertain range or placeholder
+  is exported as one continuous audio-only layer (`Sxx-Syy  audio (audio line: …)`) instead of silence.
 
 **Input auto-detection** (prompt Configuration): the competitor is the *portrait* file, failing that the
 *shorter* one. If `--competitor`/`--raw` look reversed they are swapped with a warning (`--no-swap`
@@ -176,6 +192,30 @@ automatically when an algorithm changes).
 
 ## Verification (Stage 9) and the acceptance criteria
 
+**In plain words.** After the analysis, Stage 9 checks the result again with methods that do not trust the
+analysis:
+
+- **c1 coverage** — every competitor frame belongs to exactly one segment, placeholder or *uncertain* range.
+- **c2 cuts** — at each cut, the frame before it really belongs to the left clip and the frame after it to the
+  right clip. It also asks the opposite question ("is there a cut at all?"): if one clip's time line explains
+  both sides just as well, the cut is reported as *spurious*.
+- **c3 source frames** — After Effects' frame rule is simulated on every frame and must show the measured RAW
+  frame (≥ 99 %). Two extra checks look only at the competitor and the recreation:
+  - *temporal signature*: where the competitor repeats a frame (pulldown) or moves, the recreation must do the
+    same (a *motion mismatch* is a held RAW frame while the competitor moves);
+  - *±1 refit*: the RAW frames just before and after the chosen one are tried with their own framing; if a
+    neighbour fits better, the chosen frame is wrong.
+  Frames of an *uncertain* range always count as failures here.
+- **c4 speed / framing** — speed, scale, position and rotation are measured again from scratch and must agree
+  with the segment (± 1 % scale, ± 4 px).
+- **c5 audio** — each segment's sound must line up with the competitor within ± 10 ms after the run's A/V
+  offset; anything else needs an explanation from a fixed list (too short, not in RAW, music, …).
+- **c6 After Effects** — the `.jsx` is run (in a strict mock without After Effects; with After Effects, also
+  rendered and compared frame by frame).
+
+A criterion is `pass`, `pass_with_exceptions` (every exception is listed with its reason), `fail` or
+`not_available`. The details per criterion:
+
 | criterion | checked by |
 |---|---|
 | **c1 coverage** | 9.1: segments + labelled NOT-IN-RAW placeholders tile `[0, N)` exactly; overlaps only where a measured transition of exactly that length explains them; raw segments must carry a RAW mapping |
@@ -201,9 +241,20 @@ run itself failed (bad inputs, a crashed stage); `3` nothing failed but a criter
 3. It builds the project (`01 Comps`, `02 Source`, `03 Reference`), the `Recreated Edit` comp at the
    competitor's exact size, frame rate and duration, and saves `recreated_edit.aep` next to the script.
 4. Guide layers (never rendered) outline the header, title, caption and watermark zones; coloured
-   `MISSING – not in RAW` solids mark the ranges you have to fill; comp markers sit on every cut.
-5. The `REFERENCE – competitor` layer on top is a switched-off guide layer in *Difference* mode:
+   `MISSING - not in RAW` solids mark the ranges you have to fill; comp markers sit on every cut.
+5. The `REFERENCE - competitor` layer on top is a switched-off guide layer in *Difference* mode:
    switch it on and black means the recreation matches.
+
+**What the layers mean**
+
+| you see | what it is | what to do |
+|---|---|---|
+| a RAW layer with *Time Stretch* | a normal segment: the clip plays at the measured speed from `raw_in_seconds` | nothing |
+| a RAW layer with *Time Remap* and a key on **every** frame (hold keys) | a *frame-exact* layer: the segment's timing sits so close to a frame boundary that After Effects' own time rounding could show the neighbouring frame, so each frame is pinned (`--ae-time-mode auto` does this by itself; common for a 23.976 fps RAW in a 30 fps edit) | do not edit the keys; move the whole layer if needed |
+| a layer whose name ends in `FRAME MIX`, with *Frame Blending → Frame Mix* switched on | the competitor used blended slow motion (each frame is a mix of two RAW frames); the path was verified frame by frame | keep frame blending on |
+| an **amber** solid `UNCERTAIN - best RAW …` with a comp marker `… UNCERTAIN`, under a guide layer `GUIDE - best RAW evidence: …` | an *uncertain* range: the best RAW frame found looks similar but not similar enough to call it a match (score between `none_thresh` 0.60 and `match_thresh` 0.90), and not different enough to call it NOT-IN-RAW. The guide layer shows the best evidence (visible in the viewer, never rendered) | compare the guide layer with the `REFERENCE - competitor` layer. If it shows the right footage, duplicate the guide layer, switch *Guide Layer* off and delete the amber solid; otherwise find the shot by hand. Until then these frames count as criterion-3 failures |
+| a coloured `MISSING - not in RAW` solid | footage that is not in the RAW at all (every hypothesis scores below 0.60) | fill it with other footage |
+| an audio-only layer `Sxx  audio (…)` | sound of a J/L cut, a continuous audio line, or (with `--audio-sync competitor`) the shifted sound of a segment | nothing |
 
 Headless: macOS `osascript -e 'tell application "Adobe After Effects 2024" to DoScriptFile "/abs/path/build_ae_project.jsx"'`,
 Windows `"C:\Program Files\Adobe\Adobe After Effects 2024\Support Files\AfterFX.exe" -r C:\abs\path\build_ae_project.jsx`.
@@ -250,9 +301,35 @@ two — are logged as explained, not warned. Split-screen / picture-in-picture r
 but not recreated (criterion 1 becomes `pass_with_exceptions`, listed under *Anything AE can't
 reproduce*).
 
-**Slow on Windows / macOS** — worker processes are `spawn`ed there (forking is only safe on Linux);
-results are identical, start-up costs a few seconds per pool. `MATCH_CUTS_START_METHOD=spawn|fork`
-overrides the choice.
+**The run looks stuck** — long stages print a line at least every 30 s (`S5.3 refine: eval: 340/1200 tasks
+done (1 min 05 s)` or `S9 verify: still running (2 min 00 s)`), so a quiet console for minutes means a real
+problem. Worker processes are watched: when a worker gets no result back for 5 minutes, or a worker process
+dies (for example Windows or Linux closes it because memory runs out), the run prints
+
+```
+WARNING S5.3 refine: eval: spawn pool: no result for 300 s after 412/1200 tasks - stopped the worker pool;
+running the remaining 788 of 1200 tasks in this process (identical results, only slower)
+```
+
+and continues in the main process with exactly the same results. After two such stops in one run, the rest of
+the run does not use worker processes at all. If the machine is short of memory, close other programs or run
+with `--workers 2` (fewer processes, less memory). `--workers 1` never starts worker processes.
+(Settings: `pool_stall_timeout_s`, `pool_max_failures`, `progress_log_s` in `config.py`.)
+
+**Windows notes**
+
+- Worker processes are *spawned* on Windows (and macOS); results are identical to Linux, each pool needs a
+  few seconds to start, and the first start can be slower while the virus scanner checks Python. To force a
+  start method: PowerShell `$env:MATCH_CUTS_START_METHOD = "spawn"` (Linux: `export
+  MATCH_CUTS_START_METHOD=spawn`).
+- Close the outputs in other programs before a re-run: Excel locks `cutlist.csv` and some video players lock
+  `preview_recreation.mp4` / `compare.mp4`. match_cuts retries for a few seconds, then stops with
+  *"cannot replace …: the file is in use … Close the program that has it open"*.
+- Paths with spaces or non-English letters (`C:\Users\Žygimantas\…`) work. Keep the whole project path short
+  (well under 260 characters), e.g. `C:\work\MovieRecaps`, because some Windows tools still fail on long
+  paths.
+- A RAW on another drive than the output folder is fine: it is copied (or referenced by its absolute path when
+  it is larger than 2 GB) into `output\media\`.
 
 **AE shows a different frame rate than expected** — AE sometimes misreads the rate of a file; the JSX
 compares the imported `frameRate` with the exact rate from the cut list and sets
@@ -326,6 +403,7 @@ changed, update this table with the reason.
 | verify | `temporal_gap_ratio` / `temporal_growth_ratio` / `temporal_mag_ratio` / `temporal_shot_cc` | 2.5 / 1.5 / 3.0 / 0.8 | temporal signature: repeat vs move cluster gap, motion growth over two frames, comp vs recreation residual ratio, shot change (all but `temporal_mag_ratio` also drive refine's comp-only repeat labels) |
 | verify | `verify_refit_margin` / `verify_union_frames` / `verify_excursion_frames` | 0.01 / 2 / 3 | ±1 refit margin floor (with 3 x the measured noise), c2 no-cut frames per side, excursion distance |
 | verify | `verify_framing_min_samples` / `verify_framing_all_max` / `verify_low_score_margin` | 5 / 6 / 0.02 | c4 sampling, unconverged low-score rule |
+| run | `pool_stall_timeout_s` / `pool_max_failures` / `progress_log_s` | 300 s / 2 / 30 s | hang protection: a worker pool with no result for this long (or a dead worker) is stopped and its remaining tasks run in the main process (same results); after this many stops no more pools; a progress line at least this often. Never part of the cache keys |
 
 Verification constants not (yet) in `Config` (read with a fallback): crossfade alpha tolerance 0.15
 (`verify_alpha_tol`), minimum audio correlation 0.3 for a valid lag (`verify_audio_min_corr`),

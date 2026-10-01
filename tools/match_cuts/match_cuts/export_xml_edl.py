@@ -63,7 +63,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from .common import atomic_write_text, fps_str, log, timecode
+from .common import atomic_write_text, fps_str, log, replace_file, timecode
 from .geometry import Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
 
@@ -525,7 +525,7 @@ def write_csv(cutlist: Cutlist, path: str | os.PathLike) -> None:
         w.writerow(CSV_COLUMNS)
         for seg in sorted(cutlist.segments, key=lambda s: (int(s.comp_in), int(s.id))):
             w.writerow(_csv_row(seg, comp_fps, raw_fps))
-    os.replace(tmp, p)
+    replace_file(tmp, p)                     # retried / explained when Excel holds cutlist.csv open (Windows)
 
 
 # ---------------------------------------------------------------------------------------------

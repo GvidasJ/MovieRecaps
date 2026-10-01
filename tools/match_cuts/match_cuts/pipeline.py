@@ -54,7 +54,8 @@ from . import __version__
 from . import phase_solve as _ps
 from .common import (STAGE_VERSION, Cache, DecisionLog, configure_pools, dump_json, ffmpeg_bin, ffprobe_bin, file_hash,
                      fmt_seconds, fps_str, json_default, limit_native_threads, load_decisions, log, null_dlog,
-                     params_hash, save_decisions, seed_everything, setup_logging, stage_heartbeat, stage_key, timecode)
+                     params_hash, replace_file, save_decisions, seed_everything, setup_logging, stage_heartbeat,
+                     stage_key, timecode)
 from .config import Config
 from .geometry import Sim
 from .model import (AudioHints, Cutlist, FrameMap, Layout, Segment, Status, StreamInfo, cutlist_layout)
@@ -1776,7 +1777,7 @@ def cached_hints(ctx: Context, compute: Callable[[], AudioHints]) -> AudioHints:
             tmp = p.with_name(p.stem + ".tmp.npz")
             hints.save(tmp)
         store_decisions(ctx, "audio_align", key, list(cap))
-        os.replace(tmp, p)
+        replace_file(tmp, p)
     else:
         log.info("audio hints: cache hit %s", p.name)
         ctx.dlog.record("audio_align", "cache_hit", key=key)
@@ -1910,8 +1911,8 @@ def save_frame_map_cache(fm: FrameMap, overlays: Any, fm_path: Path, ov_path: Pa
     fm.save(tmp)
     ov_tmp = ov_path.with_name(ov_path.stem + ".tmp.npz")
     overlays.save(ov_tmp)
-    os.replace(ov_tmp, ov_path)
-    os.replace(tmp, fm_path)     # the FrameMap file last: its existence marks a complete entry
+    replace_file(ov_tmp, ov_path)
+    replace_file(tmp, fm_path)   # the FrameMap file last: its existence marks a complete entry
 
 
 def hint_windows(hints: AudioHints, raw_fps: Fraction, n_raw: int, cfg: Config, extra_times: list[float] = ()) -> list[tuple[int, int]]:
@@ -2700,7 +2701,7 @@ def copy_decision_log(cfg: Config) -> Path | None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(dst.name + ".tmp")
             shutil.copyfile(src, tmp)
-            os.replace(tmp, dst)
+            replace_file(tmp, dst)
             return dst
     except OSError as e:
         log.warning("could not copy the decision log to %s: %s", dst, e)
