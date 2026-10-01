@@ -13,6 +13,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -47,6 +48,7 @@ def _dies(state, x):
 
 
 ITEMS = list(range(48))
+_REAL_THREADS_AFTER_FORK = vm._threads_after_fork
 
 
 def _expected():
@@ -60,6 +62,7 @@ def watchdog(monkeypatch):
     monkeypatch.setitem(common.POOL_WATCHDOG, "stall_s", 4.0)
     monkeypatch.setitem(common.POOL_WATCHDOG, "poll_s", 0.1)
     monkeypatch.setitem(common.POOL_WATCHDOG, "max_failures", 2)
+    monkeypatch.setattr(vm, "_threads_after_fork", lambda: 0)      # census: its own tests
     saved = (vm._POOL_FAILURES[0], vm._FORK_UNSAFE[0])
     vm._POOL_FAILURES[0], vm._FORK_UNSAFE[0] = 0, ""
     try:
@@ -125,6 +128,7 @@ def test_pools_are_disabled_after_repeated_failures(watchdog, monkeypatch, caplo
 def test_native_threads_surviving_the_fork_switch_to_spawn(watchdog, monkeypatch, caplog):
     """When the census right after forking still finds native threads, that fork pool is discarded unused and
     this call and every later one use spawn workers (identical results)."""
+    monkeypatch.setattr(vm, "_threads_after_fork", _REAL_THREADS_AFTER_FORK)
     monkeypatch.setattr(vm, "native_threads", lambda: 3)
     before = dict(vm.POOL_STATS)
     with caplog.at_level(logging.WARNING, logger="match_cuts"):
@@ -139,20 +143,59 @@ def test_native_threads_surviving_the_fork_switch_to_spawn(watchdog, monkeypatch
     assert vm.POOL_STATS["spawn"] == before["spawn"] + 2 and vm.POOL_STATS["fork"] == before["fork"]
 
 
+_CENSUS_SCRIPT = r"""
+import json, os, sys, threading
+import numpy as np
+import match_cuts                                   # sets DUCC0_NUM_THREADS before any FFT
+from match_cuts import common, visual_match as vm
+import cv2, av, scipy.fft
+from scipy.optimize import linprog
+
+def native():
+    return len(os.listdir("/proc/self/task")) - threading.active_count()
+
+def work(state, x):
+    return x * 2
+
+out = {"start": native()}
+cv2.setNumThreads(4)
+cv2.GaussianBlur(np.random.rand(600, 600).astype(np.float32), (9, 9), 2)            # OpenCV pool threads
+frame = av.VideoFrame.from_ndarray(np.zeros((720, 1280, 3), np.uint8), format="bgr24")
+frame.reformat(format="yuv420p").to_ndarray(format="bgr24")                         # PyAV swscale slice threads
+scipy.fft.rfft(np.random.rand(1 << 16))                                             # ducc FFT pool (never started)
+linprog(c=[1, 1], A_ub=[[-1, -1]], b_ub=[-1], bounds=[(0, None)] * 2, method="highs")   # HiGHS scheduler
+np.random.rand(600, 600) @ np.random.rand(600, 600)                                 # OpenBLAS threads
+out["before_pool"] = native()
+res = vm.parallel_map(work, list(range(40)), 3, {}, seed=1)
+out.update(ok=res == [2 * x for x in range(40)], stats=vm.POOL_STATS, unsafe=vm._FORK_UNSAFE[0],
+           cv2_threads=cv2.getNumThreads())
+print(json.dumps(out))
+"""
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc thread census is Linux-only")
-def test_fork_pool_runs_without_native_threads_in_the_parent(watchdog):
-    """The real census in this test process: hygiene leaves no native thread alive across the fork, so the
-    fork pool is kept (the package sets DUCC0_NUM_THREADS=1, OpenCV is set to one thread, PyAV's scaler is
-    released, OpenBLAS stops its own threads around fork)."""
-    import cv2
-    cv2.setNumThreads(4)
-    cv2.GaussianBlur(np.random.rand(600, 600).astype(np.float32), (9, 9), 2)     # OpenCV pool threads exist
-    before = dict(vm.POOL_STATS)
-    res = vm.parallel_map(_work, ITEMS, 3, {"mul": 7}, seed=5)
-    assert [r[:3] for r in res] == _expected()
-    assert vm.POOL_STATS["fork_unsafe"] == before["fork_unsafe"], vm._FORK_UNSAFE
-    assert vm.POOL_STATS["fork"] == before["fork"] + 1
-    assert cv2.getNumThreads() == 4                                 # restored after the pool
+def test_fork_pool_runs_without_native_threads_in_the_parent(tmp_path):
+    """The real census in a fresh process that has used every native thread pool the pipeline touches (OpenCV,
+    PyAV's scaler, scipy FFT, HiGHS, OpenBLAS): the hygiene leaves no native thread alive across the fork, so the
+    fork pool is kept (DUCC0_NUM_THREADS=1 at import, OpenCV set to one thread, PyAV's scaler released, HiGHS's
+    scheduler reset, OpenBLAS stops its own threads around fork). Run in a subprocess: earlier tests of this
+    session may leave threads of their own."""
+    import json
+    import subprocess
+    script = tmp_path / "census.py"
+    script.write_text(_CENSUS_SCRIPT, encoding="utf-8")
+    env = dict(os.environ)
+    env.pop(vm.START_METHOD_ENV, None)
+    env.pop("DUCC0_NUM_THREADS", None)
+    env["PYTHONPATH"] = os.pathsep.join([str(Path(vm.__file__).resolve().parents[1]), env.get("PYTHONPATH", "")])
+    r = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, encoding="utf-8", env=env,
+                       timeout=300)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["before_pool"] > 0                                   # the libraries really had threads running
+    assert out["ok"] and out["stats"]["fork"] == 1 and out["stats"]["fork_unsafe"] == 0, out
+    assert out["unsafe"] == ""
+    assert out["cv2_threads"] == 4                                  # restored after the pool
 
 
 def _zncc_task(state, x):

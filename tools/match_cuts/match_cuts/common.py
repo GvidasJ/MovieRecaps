@@ -565,7 +565,8 @@ def release_native_threads() -> None:
     PyAV (19) keeps one swscale context per thread (``av.video.frame._thread_local.reformatter``) for
     ``frame.to_ndarray``; its slice threads live as long as the context. A forked child inherits that context
     without its threads and hangs in its next conversion. Dropping the reference frees the context (the next
-    conversion makes a new one; pixels are identical). Only touches PyAV when it is already imported."""
+    conversion makes a new one; pixels are identical). scipy's HiGHS (``linprog``) keeps a scheduler with idle
+    worker threads after a solve: reset (it restarts with the next solve). Only touches modules already imported."""
     import sys
     fr = sys.modules.get("av.video.frame")
     tl = getattr(fr, "_thread_local", None) if fr is not None else None
@@ -573,6 +574,15 @@ def release_native_threads() -> None:
         try:
             tl.reformatter = None
         except Exception:  # noqa: BLE001 - best effort: the census after forking still catches survivors
+            pass
+    # scipy's HiGHS LP solver (phase_solve's linprog) keeps a global task scheduler with idle worker threads after a
+    # solve; stopped here (it restarts on the next solve, same options -> same results)
+    hs = sys.modules.get("scipy.optimize._highspy._core")
+    reset = getattr(getattr(hs, "_Highs", None), "resetGlobalScheduler", None) if hs is not None else None
+    if callable(reset):
+        try:
+            reset(True)
+        except Exception:  # noqa: BLE001 - best effort, as above
             pass
 
 

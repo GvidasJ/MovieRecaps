@@ -1189,7 +1189,8 @@ verification honesty) were fixed under these shared rules:
     scipy's ducc FFT threads in the parent). The package sets `DUCC0_NUM_THREADS=1` at import (every FFT here
     runs with workers=1, so the ducc pool is never started); before forking, `parallel_map` sets OpenCV to 1
     thread and releases PyAV's per-thread swscale context (`common.release_native_threads`: PyAV 19 keeps one
-    per thread, with live slice threads, for `to_ndarray`); OpenBLAS stops its own threads around fork
+    per thread, with live slice threads, for `to_ndarray`) and resets scipy's HiGHS scheduler (`linprog` leaves
+    an idle worker thread; it restarts with the next solve); OpenBLAS stops its own threads around fork
     (pthread_atfork). Right after forking, a census (`common.native_threads`: OS threads of `/proc/self/task`
     minus Python's threads, re-checked for 150 ms) must find no native thread; otherwise the fork pool is
     discarded unused and this call and every later one in the process use spawn workers (warning once;
