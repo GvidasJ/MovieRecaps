@@ -976,7 +976,7 @@ class Anchor:
     inlier_ratio: float
     votes: float
     zncc: float
-    source: str = "global"        # 'global' | 'audio' | 'rescue'
+    source: str = "global"        # 'global' | 'audio' | 'rescue'; '<source>_near' = a RANSAC near-miss (join-only)
     time_ambiguous: bool = False  # the best two (RAW frame, Sim) hypotheses of jb-1..jb+1 within anchor_time_delta
 
     def to_dict(self) -> dict:
