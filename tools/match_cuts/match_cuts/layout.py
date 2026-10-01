@@ -2220,6 +2220,253 @@ def _event_masks(events: list[dict], shape: tuple[int, int], dilate_px: int) -> 
 
 
 # ================================================================================================
+# 5b. Animated (moving) text overlays -- comp-only, for verification's temporal signature
+# ================================================================================================
+#
+# The layout stage links text lines while their CORE glyph pixels persist, so a word that slides over the
+# picture (an animated 'FROZEN' caption over a true freeze, film24) never links and is left to refine's residual
+# pass. Verification cannot use residual masks (they come from the match being judged), so its temporal
+# signature would read the sliding word as the competitor MOVING and call the recreation's correct hold a
+# 'motion mismatch'. ``animated_text_overlays`` finds such words from the competitor alone: the same per-frame
+# outlined-text detector, lines linked over time by MOTION-COMPENSATED glyph agreement (the same glyph mask and
+# fill after a per-frame shift), kept when the text moves (>= ANIM_MIN_STEP px / frame) AND moves relative to the
+# picture around it (>= ANIM_REL_MIN px / frame; the picture's own motion measured by temporal.align_pair with the
+# text masked) -- text that pans WITH the picture (a RAW burned-in subtitle under an editor pan) is picture
+# content and is never returned.
+
+ANIM_MIN_STEP = 0.75              # proxy px / frame: median motion of an animated text track
+ANIM_REL_MIN = 1.0                # proxy px / frame: median motion relative to the picture around the text
+ANIM_IOU_MIN = 0.6                # glyph-mask IoU of consecutive detections once the motion is removed
+ANIM_MAX_STEP_FRAC = 0.2          # max per-frame motion, fraction of the searched region's long side
+ANIM_MARGIN_FRAC = 0.3            # mask margin around a moving line, fraction of its glyph height (>= 2 px)
+ANIM_MIN_GLYPHS = 3               # glyphs of an animated text line (a word; two bright bars are not text)
+ANIM_MAX_H_FRAC = 0.15            # max glyph height, fraction of the searched region's height (caption-sized text)
+ANIM_REF_ZNCC = 0.7               # the compared picture correlates this well on the word's place: picture content
+
+
+def _placed_iou(a: _Line, b: _Line, sx: int, sy: int) -> float:
+    """IoU of ``a``'s glyph mask moved by (sx, sy) and ``b``'s glyph mask (frame coordinates)."""
+    ax0, ay0 = a.x0 + sx, a.y0 + sy
+    x0, y0 = min(ax0, b.x0), min(ay0, b.y0)
+    x1, y1 = max(ax0 + a.mask.shape[1], b.x1), max(ay0 + a.mask.shape[0], b.y1)
+    ma = np.zeros((y1 - y0, x1 - x0), bool)
+    mb = ma.copy()
+    ma[ay0 - y0:ay0 - y0 + a.mask.shape[0], ax0 - x0:ax0 - x0 + a.mask.shape[1]] = a.mask
+    mb[b.y0 - y0:b.y0 - y0 + b.mask.shape[0], b.x0 - x0:b.x0 - x0 + b.mask.shape[1]] = b.mask
+    u = int((ma | mb).sum())
+    return float((ma & mb).sum()) / u if u else 0.0
+
+
+def _moving_link(fa: np.ndarray, a: _Line, fb: np.ndarray, b: _Line, gap: int, max_step: float, same_t: float
+                 ) -> tuple[float, int, int] | None:
+    """(cost, sx, sy) of line ``b`` (frame fb) continuing line ``a`` (frame fa) ``gap`` frames later: the same text
+    (glyph count within 1, heights within 25 %, bbox size within 20 % + 2 px) moved by an integer shift (the bbox
+    offset +- 1 px, the best glyph-mask IoU >= ANIM_IOU_MIN) of at most ``max_step`` px per frame, its glyph fill
+    unchanged (mean |diff| <= ``same_t``). None when it does not continue."""
+    if abs(a.n_glyphs - b.n_glyphs) > 1 or abs(a.glyph_h - b.glyph_h) > 0.25 * max(a.glyph_h, b.glyph_h):
+        return None
+    wa, ha, wb, hb = a.x1 - a.x0, a.y1 - a.y0, b.x1 - b.x0, b.y1 - b.y0
+    if abs(wa - wb) > 0.2 * max(wa, wb) + 2 or abs(ha - hb) > 0.2 * max(ha, hb) + 2:
+        return None
+    best = None
+    for ddx in (-1, 0, 1):
+        for ddy in (-1, 0, 1):
+            sx, sy = b.x0 - a.x0 + ddx, b.y0 - a.y0 + ddy
+            if math.hypot(sx, sy) > max_step * gap:
+                continue
+            iou = _placed_iou(a, b, sx, sy)
+            if best is None or iou > best[0]:
+                best = (iou, sx, sy)
+    if best is None or best[0] < ANIM_IOU_MIN:
+        return None
+    iou, sx, sy = best
+    ys, xs = np.nonzero(a.mask)
+    ya, xa = ys + a.y0, xs + a.x0
+    yb, xb = ya + sy, xa + sx
+    ok = (yb >= 0) & (yb < fb.shape[0]) & (xb >= 0) & (xb < fb.shape[1])
+    if int(ok.sum()) < 3:
+        return None
+    mad = float(np.mean(np.abs(fa[ya[ok], xa[ok]].astype(np.float64) - fb[yb[ok], xb[ok]].astype(np.float64))))
+    if mad > same_t:
+        return None
+    return 1.0 - iou, sx, sy
+
+
+def animated_text_overlays(comp: Proxy, layout: Layout | None, cfg: Any, frames: Sequence[int] | None = None,
+                           overlays: Any = None, static: np.ndarray | None = None,
+                           reference: Any = None) -> list[dict]:
+    """Moving text overlays of the competitor (section comment above): [{comp_in, comp_out, rects {k: [x0, y0, x1,
+    y1]} (proxy px, the line's bbox with its outline margin, every frame of [comp_in, comp_out) -- a frame without
+    its own detection takes its neighbours' union), x, y, w, h (full-res union bbox), step (median per-frame motion,
+    full-res px [dx, dy]), relative (median motion relative to the picture, full-res px / frame), frames_detected,
+    glyphs, kind, why}]. ``frames`` (default all) are searched inside the video box (+2 px); ``static`` (bool proxy
+    mask, default the layout's static mask) is excluded from the detection; ``overlays`` (any get_dilated / get
+    provider, e.g. layout_overlay_masks) are masked when the picture's motion is measured. Deterministic.
+
+    ``reference(k)`` (optional) -> the picture the competitor's video is compared with at frame k (verification: the
+    recreation's RAW frame warped into the competitor proxy, same size) or None. A moving word is an OVERLAY only when
+    that picture never shows outlined text on the word's place (the same detector, bbox IoU >= 0.2 on any frame):
+    text in the picture itself -- a sign carried by a parallax object, scrolling credits the RAW holds -- is
+    ``kind`` 'picture_content' (with ``why``), never an overlay; a word on frames where ``reference`` gives no picture
+    at all (NOT-IN-RAW / uncertain stretches) is 'not_compared'. Every candidate is returned; callers use kind ==
+    'overlay' only."""
+    from . import temporal
+    n = int(comp.n)
+    w, h = int(comp.size[0]), int(comp.size[1])
+    rx, ry = float(comp.ratio[0]), float(comp.ratio[1])
+    if static is None:
+        sm = getattr(layout, "static_mask_file", "") if layout is not None else ""
+        static = np.load(sm).astype(bool) if sm and Path(sm).is_file() else None
+    if static is None or static.shape != (h, w):
+        static = np.zeros((h, w), bool)
+    b = layout.box if layout is not None and layout.box is not None else Box(0.0, 0.0, w / rx, h / ry, 0.0)
+    roi = (max(0, int(math.floor(b.x * rx)) - 2), max(0, int(math.floor(b.y * ry)) - 2),
+           min(w, int(math.ceil((b.x + b.w) * rx)) + 2), min(h, int(math.ceil((b.y + b.h) * ry)) + 2))
+    rw, rh = roi[2] - roi[0], roi[3] - roi[1]
+    if rw < 16 or rh < 16:
+        return []
+    min_h = max(6, int(round(float(_p(cfg, "TEXT_MIN_H_FRAC", TEXT_MIN_H_FRAC)) * w)))
+    det = _Detector(static, roi, None, min_h, max(min_h, int(0.3 * rh)), int(0.95 * rw), False, _text_params(cfg))
+    same_t = float(_p(cfg, "TEXT_SAME_MAD", TEXT_SAME_MAD))
+    max_step = ANIM_MAX_STEP_FRAC * max(rw, rh)
+    min_frames = max(2, int(_cfg(cfg, "overlay_min_frames", 3)))
+    ks = sorted({int(k) for k in (range(n) if frames is None else frames) if 0 <= int(k) < n and comp.has(int(k))})
+    tracks: list[dict] = []                 # {frames, lines, shifts}
+    prev: dict[int, np.ndarray] = {}
+    for k in ks:
+        f = np.asarray(comp.get(k))
+        lines = det(k, f)
+        cands = []
+        for ti, T in enumerate(tracks):
+            gap = k - T["frames"][-1]
+            if not (1 <= gap <= 2) or T["frames"][-1] not in prev:
+                continue
+            for li, L in enumerate(lines):
+                r = _moving_link(prev[T["frames"][-1]], T["lines"][-1], f, L, gap, max_step, same_t)
+                if r is not None:
+                    cands.append((r[0], ti, li, r[1] / gap, r[2] / gap))
+        cands.sort(key=lambda c: (c[0], c[1], c[2]))
+        used_t, used_l = set(), set()
+        for _cost, ti, li, sx, sy in cands:
+            if ti in used_t or li in used_l:
+                continue
+            used_t.add(ti)
+            used_l.add(li)
+            T = tracks[ti]
+            T["frames"].append(k)
+            T["lines"].append(lines[li])
+            T["shifts"].append((sx, sy))
+        for li, L in enumerate(lines):
+            if li not in used_l:
+                tracks.append({"frames": [k], "lines": [L], "shifts": []})
+        prev[k] = f
+        for old in [kk for kk in prev if kk < k - 2]:
+            del prev[old]
+    ms = int(_cfg(cfg, "temporal_max_side", 200) or 0)
+    blur = float(_cfg(cfg, "score_blur", 1.0))
+    out = []
+    for T in tracks:
+        fr = T["frames"]
+        if len(fr) < min_frames or len(fr) < 0.75 * (fr[-1] - fr[0] + 1) or not T["shifts"]:
+            continue
+        st = np.asarray(T["shifts"], np.float64)
+        step = np.median(st, axis=0)
+        if math.hypot(*step) < ANIM_MIN_STEP:
+            continue                       # static text: the layout stage's own caption / text events
+        gh = float(np.median([L.glyph_h for L in T["lines"]]))
+        if float(np.median([L.n_glyphs for L in T["lines"]])) < ANIM_MIN_GLYPHS or gh > ANIM_MAX_H_FRAC * rh:
+            continue                       # not a word of caption-sized text (bright bars, big shapes)
+        mg = max(2, int(round(ANIM_MARGIN_FRAC * gh)))
+        own = {k: (max(0, L.x0 - mg), max(0, L.y0 - mg), min(w, L.x1 + mg), min(h, L.y1 + mg))
+               for k, L in zip(fr, T["lines"])}
+        # the picture's own motion between consecutive detections, the text and the known overlays masked
+        rel = []
+        x0, y0, x1, y1 = roi
+        for i in range(1, len(fr)):
+            ka, kb = fr[i - 1], fr[i]
+            if kb != ka + 1:
+                continue
+            ims = []
+            for kk in (ka, kb):
+                m = ~static[y0:y1, x0:x1]
+                for q in (own[ka], own[kb]):
+                    m[max(0, q[1] - y0):max(0, q[3] - y0), max(0, q[0] - x0):max(0, q[2] - x0)] = False
+                ov = None
+                if overlays is not None:
+                    try:
+                        ov = overlays.get_dilated(int(kk)) if hasattr(overlays, "get_dilated") else overlays.get(int(kk))
+                    except Exception:  # noqa: BLE001 - no overlay mask for this frame
+                        ov = None
+                if ov is not None and np.asarray(ov).shape == (h, w):
+                    m &= ~np.asarray(ov, bool)[y0:y1, x0:x1]
+                img = np.asarray(comp.get(int(kk)))[y0:y1, x0:x1]
+                ims.append(temporal.prepare(img, m, ms, blur * temporal.scale_of((y1 - y0, x1 - x0), ms)))
+            pm = temporal.align_pair(ims[0][0], ims[0][1], ims[1][0], ims[1][1], cfg)
+            if not (pm.aligned and math.isfinite(pm.cc) and pm.cc >= float(_cfg(cfg, "temporal_shot_cc", 0.8))):
+                continue                   # a cut / unmeasurable picture: no reference motion
+            sc = temporal.scale_of((y1 - y0, x1 - x0), ms)
+            tx, ty = T["shifts"][i - 1]
+            rel.append(math.hypot(tx - pm.dx / sc, ty - pm.dy / sc))
+        if len(rel) < max(1, min_frames - 1) or float(np.median(rel)) < ANIM_REL_MIN:
+            continue                       # moves with the picture (picture content), or unmeasurable
+        kind, why = "overlay", "moves over the picture; not in the compared picture"
+        if reference is not None:
+            seen, n_ref = [], 0
+            for k, r in sorted(own.items()):
+                ref = reference(int(k))
+                if ref is None or np.asarray(ref).shape[:2] != (h, w):
+                    continue
+                ref = np.asarray(ref)
+                n_ref += 1
+                img = np.asarray(comp.get(int(k)))
+                z = _zncc(img[r[1]:r[3], r[0]:r[2]].astype(np.float32), ref[r[1]:r[3], r[0]:r[2]].astype(np.float32))
+                if (math.isfinite(z) and z >= ANIM_REF_ZNCC) or any(
+                        _iou((Lr.x0, Lr.y0, Lr.x1, Lr.y1), tuple(r)) >= 0.2 for Lr in det(int(k), ref)):
+                    seen.append(int(k))
+            if seen:
+                kind, why = "picture_content", f"the compared picture shows it too (frames {seen[:5]})"
+            elif n_ref == 0:
+                # nothing to compare it with (a NOT-IN-RAW / uncertain stretch): neither an overlay nor picture content
+                kind, why = "not_compared", "moves over the picture; no compared picture on its frames (not judged)"
+        rects: dict[int, list[int]] = {}
+        for k in range(fr[0], fr[-1] + 1):
+            if k in own:
+                rects[k] = list(own[k])
+                continue
+            a = max(kk for kk in own if kk < k)
+            c = min(kk for kk in own if kk > k)
+            rects[k] = [min(own[a][0], own[c][0]), min(own[a][1], own[c][1]), max(own[a][2], own[c][2]),
+                        max(own[a][3], own[c][3])]
+        ux0, uy0 = min(r[0] for r in rects.values()), min(r[1] for r in rects.values())
+        ux1, uy1 = max(r[2] for r in rects.values()), max(r[3] for r in rects.values())
+        out.append({"comp_in": int(fr[0]), "comp_out": int(fr[-1]) + 1, "rects": rects,
+                    "x": round(ux0 / rx, 2), "y": round(uy0 / ry, 2), "w": round((ux1 - ux0) / rx, 2),
+                    "h": round((uy1 - uy0) / ry, 2), "step": [round(float(step[0]) / rx, 2), round(float(step[1]) / ry, 2)],
+                    "relative": round(float(np.median(rel)) / ((rx + ry) / 2.0), 2), "frames_detected": len(fr),
+                    "glyphs": int(np.median([L.n_glyphs for L in T["lines"]])), "kind": kind, "why": why})
+    out.sort(key=lambda e: (e["comp_in"], e["y"], e["x"]))
+    return out
+
+
+def animated_text_mask(events: Sequence[dict], k: int, shape: tuple[int, int], dilate_px: int = 0) -> np.ndarray | None:
+    """Bool proxy mask of the animated text overlays of ``animated_text_overlays`` at frame ``k`` (their rects, plus
+    ``dilate_px``); None when none is active."""
+    out = None
+    h, w = int(shape[0]), int(shape[1])
+    d = int(dilate_px)
+    for e in events:
+        if e.get("kind", "overlay") != "overlay":
+            continue
+        r = (e.get("rects") or {}).get(int(k))
+        if r is None:
+            continue
+        if out is None:
+            out = np.zeros((h, w), bool)
+        out[max(0, r[1] - d):min(h, r[3] + d), max(0, r[0] - d):min(w, r[2] + d)] = True
+    return out
+
+
+# ================================================================================================
 # Periods / extra regions / dynamic zones
 # ================================================================================================
 

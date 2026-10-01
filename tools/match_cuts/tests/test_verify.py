@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 import match_cuts
+from match_cuts import pipeline  # noqa: F401 - imported with the REAL phase_solve, before any test stubs it
 from match_cuts import verify
 from match_cuts.config import Config
 from match_cuts.geometry import Sim
@@ -598,6 +599,94 @@ def test_ae_sim_compares_with_the_pre_segment_measurement():
     fm2.d["pre_segment_raw_lo"][5], fm2.d["pre_segment_raw_hi"][5] = 105, 106
     r = verify.check_ae_sim(_sim_frames(truth), fm2, F30, F30, 200, [], Config())
     assert [x["k"] for x in r["ambiguous_identical"]] == [5] and not r["reassigned"]
+
+
+def test_ae_sim_ties_only_from_the_plans_own_slack(phase):
+    """FX-11: a timing tie is a property of sampling a moving line ON a frame boundary. With the cutlist, a frame
+    flagged 'tie' is accepted only where its segment's own position is within TIE_SLACK of a boundary: a freeze
+    (speed 0, a remap hold) never ties (an AE frame one off there is a mismatch), and neither does a stretch frame
+    with plenty of slack."""
+    tie_slack = 1e-4                            # phase_solve.TIE_SLACK (the fixture stubs phase_solve)
+    n = 40
+    # S1: v = 1 at 30 fps whose position at k = 10 sits exactly on a boundary (raw_in = 100 / 30 s: integer
+    # positions everywhere); S2: a 10-frame freeze on RAW 200
+    s1 = seg(1, "raw", 0, 30, 100)
+    s1.raw_in_seconds = 100 / 30.0
+    s2 = seg(2, "raw", 30, n, None, speed=0.0)
+    s2.time_remap_keys = [{"comp_frame": 30, "raw_seconds": 200.25 / 30.0}, {"comp_frame": 40, "raw_seconds": 200.25 / 30.0}]
+    truth = [100 + k for k in range(30)] + [200] * 10
+    fm = _with_pre_segment(frame_map(truth))
+    sim = list(truth)
+    sim[10] = truth[10] - 1                     # the floor of an exact boundary may land one lower: a real tie
+    sim[33] = truth[33] + 1                     # one off on the freeze
+    fm.tie[10] = fm.tie[33] = True
+    fm.d["pre_segment_tie"] = np.asarray(fm.tie).copy()
+    r = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, n, [], Config(), segments=[s1, s2], raw_fps=F30)
+    assert [x["k"] for x in r["timing_tie"]] == [10] and r["timing_tie"][0]["slack"] < tie_slack
+    assert [x["k"] for x in r["mismatches"]] == [33] and r["mismatches"][0]["tie_rejected"] == "hold"
+    # a stretch frame with 0.5 RAW frame of slack is no tie either
+    s1.raw_in_seconds = 100.5 / 30.0
+    r = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, n, [], Config(), segments=[s1, s2], raw_fps=F30)
+    assert 10 not in [x["k"] for x in r["timing_tie"]] and "slack" in r["mismatches"][0]["tie_rejected"]
+
+
+class RefitStub(StubScorer):
+    """StubScorer whose refit returns the stub score (its 'own framing' measurement)."""
+
+    def refit(self, k, cand, inits=()):
+        return cand[1], float(self.score(k, [cand])[0])
+
+
+def test_ae_sim_reassigned_rows_carry_reason_gap_delta_and_class(phase):
+    """FX-11 / FX-12: every re-assigned / mismatched c3 row says WHY (segment.py's reason column), the scores of
+    refine's frame and of the AE frame each under its own per-frame refit, the gap, refine's delta and a class --
+    within noise / outside noise / systematic run (consecutive rows in one direction whose summed gap exceeds delta).
+    Evidence only: the fraction and the status do not change."""
+    from match_cuts.model import reassign_code
+    truth = list(range(100, 300))
+    fm = _with_pre_segment(frame_map(truth))
+    fm.delta = np.full(200, 0.003, np.float32)
+    re_ks = {50: 1, 120: 1, 121: 1, 122: 1}
+    for k, d in re_ks.items():
+        fm.d["pre_segment_raw"][k] = truth[k] + d
+        fm.d["pre_segment_raw_lo"][k] = fm.d["pre_segment_raw_hi"][k] = truth[k] + d
+    ra = np.zeros(200, np.int8)
+    ra[50] = reassign_code("model")
+    ra[[120, 121, 122]] = reassign_code("tiny_segment_merged")
+    fm.reassigned = ra
+    segs = [seg(1, "raw", 0, 200, 100)]
+    segs[0].raw_in_seconds = 100.5 / 30.0
+    # the stub's 'truth' is refine's measured frame: m beats the AE frame by 0.02 per RAW frame
+    scorer = RefitStub({k: int(fm.d["pre_segment_raw"][k]) for k in range(200)})
+    base = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config(), segments=segs, raw_fps=F30)
+    r = verify.check_ae_sim(_sim_frames(truth), fm, F30, F30, 200, [], Config(), segments=segs, raw_fps=F30,
+                            scorer=scorer, raw_wh=(1920.0, 1080.0))
+    assert r["status"] == base["status"] and r["fraction_ok"] == base["fraction_ok"]
+    rows = {x["k"]: x for x in r["reassigned"]}
+    assert rows[50]["why"] == "model" and rows[120]["why"] == "tiny_segment_merged"
+    assert rows[50]["gap"] == pytest.approx(0.02, abs=1e-6) and rows[50]["delta"] == pytest.approx(0.003)
+    assert rows[50]["class"] == "outside noise"
+    assert {rows[k]["class"] for k in (120, 121, 122)} == {"systematic run"}
+    assert r["reassigned_classes"] == {"outside noise": 1, "systematic run": 3}
+    assert any("systematic run" in e for e in r["exceptions"])
+
+
+def test_ae_sim_plan_and_mock_record_printed_once_when_identical():
+    """FX-12: s9_2 from the plan and from the mock-run record classify every frame the same in the usual case: the
+    result is printed once ('plan == mock record'), otherwise both are listed."""
+    truth = list(range(100, 300))
+    fm = frame_map(truth)
+    sim = list(truth)
+    sim[9] = truth[9] + 3
+    p2 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="plan")
+    m2 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="mock record")
+    merged = verify.merge_ae_sim(p2, m2)
+    assert merged["same"] and len(merged["exceptions"]) == len(p2["exceptions"])
+    assert all(e.startswith("plan == mock record:") for e in merged["exceptions"])
+    sim[11] = truth[11] + 2
+    m3 = verify.check_ae_sim(_sim_frames(sim), fm, F30, F30, 200, [], Config(), source="mock record")
+    merged = verify.merge_ae_sim(p2, m3)
+    assert not merged["same"] and len(merged["exceptions"]) == len(p2["exceptions"]) + len(m3["exceptions"])
 
 
 def _two_seg_cutlist(n: int = 400, cut: int = 200) -> list[Segment]:
@@ -1809,6 +1898,228 @@ def test_freeze_against_a_moving_competitor_is_a_motion_mismatch():
     play = [_line_seg(1, 0, 10, 10.5, F30, pan), _line_seg(2, 10, 20, 20.5, F30, pan), _line_seg(3, 20, n, 30.5, F30, pan)]
     r, _ = _temporal_check(comp, raw, play, cfg, raw_fps=F30)
     assert r["status"] == "pass" and r["n_disagreements"] == 0, r
+
+
+def _outlined_word(img: np.ndarray, text: str, x: int, y: int, size: int = 14, stroke: int = 2) -> None:
+    """Burn an outlined caption word into ``img`` in place: DejaVu Sans Bold, white fill, black stroke (ffmpeg
+    drawtext's fontcolor=white:borderw=N:bordercolor=black, like the synthetic captions)."""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+    im = Image.fromarray(img)
+    ImageDraw.Draw(im).text((int(x), int(y)), text, font=font, fill=255, stroke_width=stroke, stroke_fill=0)
+    img[:] = np.asarray(im)
+
+
+def _dim(frames: np.ndarray) -> np.ndarray:
+    """A mid-gray picture (no texture blob reaches the caption's white level)."""
+    return np.clip(np.rint(0.5 * frames.astype(np.float32) + 40.0), 0, 255).astype(np.uint8)
+
+
+def _temporal_with_overlays(comp, raw, segs, cfg, raw_fps=F30):
+    """s9_2b as verify_all runs it: animated text overlays (layout's comp-only detector, checked against the
+    recreation) masked from both signatures."""
+    from match_cuts import layout as layout_mod
+    from match_cuts.model import Layout
+    lay = Layout(comp_w=comp.size[0], comp_h=comp.size[1], box=Box.from_dict(FIX_BOX))
+    raw_wh = (float(raw.size[0]), float(raw.size[1]))
+    zones = verify.animated_text_zones(comp, raw, segs, lay, None, raw_wh, F30, raw_fps, raw.n, cfg)
+    shape = (comp.size[1], comp.size[0])
+    mask_out = (lambda k: layout_mod.animated_text_mask(zones, k, shape, 3)) if zones else None
+    tf = verify.TemporalFrames(comp, raw, segs, lambda k: None, None, FIX_BOX, raw_wh, F30, raw_fps, raw.n, cfg,
+                               mask_out=mask_out)
+    comp_sig, labels, rec_sig = verify.temporal_signatures(tf, cfg)
+    return verify.check_temporal(segs, labels, comp_sig, rec_sig, F30, raw_fps, raw.n, comp.n, cfg, masked=zones), zones
+
+
+def _freeze_case(play_during_hold: bool):
+    """30 competitor frames (30 fps RAW): plays RAW 10..19, then holds RAW 20 (or keeps playing 20..29 when
+    ``play_during_hold``), then plays RAW 30..; a caption word slides 3 px / frame over frames 10..19. The
+    recreation plays, HOLDS RAW 20 on 10..19, plays."""
+    import motion_fixtures as mf
+    n = 30
+    raw_frames = _dim(mf.two_layer_raw(60))
+    js = np.array([10 + k if k < 10 else (20 + (k - 10) if play_during_hold else 20) if k < 20 else 30 + (k - 20)
+                   for k in range(n)])
+    pan = lambda k: -20.0 - 1.2 * k          # noqa: E731
+    frames = mf.render(raw_frames, js, mf.pan_sims(n), (160, 120), noise=1.0).copy()
+    for k in range(10, 20):
+        _outlined_word(frames[k], "STOP", 30 + 3 * (k - 10), 35, size=10, stroke=1)
+    comp = _fps_proxy(frames, "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    hold = [_line_seg(1, 0, 10, 10.5, F30, pan), _line_seg(2, 10, 20, 20.5, F30, pan, speed=0.0),
+            _line_seg(3, 20, n, 30.5, F30, pan)]
+    return comp, raw, hold
+
+
+def test_true_freeze_under_a_sliding_caption_is_not_a_motion_mismatch():
+    """Wave 4 (b), film24 S19: a TRUE freeze (the competitor holds RAW 20) under a caption word that slides 3 px per
+    frame. The word is an animated text overlay (it moves over the picture and the recreation never shows it): it is
+    masked from both temporal signatures, so the motion is judged OUTSIDE it -- the hold agrees. Without the mask the
+    sliding word reads as competitor motion (the old false 'motion mismatch')."""
+    cfg = Config()
+    comp, raw, hold = _freeze_case(play_during_hold=False)
+    r, zones = _temporal_with_overlays(comp, raw, hold, cfg)
+    ov = [z for z in zones if z["kind"] == "overlay"]
+    assert len(ov) == 1 and ov[0]["comp_in"] == 10 and ov[0]["comp_out"] == 20, zones
+    assert ov[0]["step"][0] == pytest.approx(3.0, abs=0.5) and ov[0]["glyphs"] == 4
+    assert not r["motion_mismatch"] and r["status"] == "pass", r
+    assert r["animated_text"] and "animated text overlay(s) masked" in r["summary"]
+    unmasked, _labels = _temporal_check(comp, raw, hold, cfg, raw_fps=F30)
+    assert unmasked["motion_mismatch"], unmasked          # the false positive the overlay mask removes
+
+
+def test_hold_against_a_moving_competitor_stays_a_motion_mismatch_under_a_sliding_caption():
+    """Negative control: the competitor PLAYS during the hold (and a caption slides over it). Masking the caption
+    must not hide the picture's motion outside it: still a motion mismatch."""
+    cfg = Config()
+    comp, raw, hold = _freeze_case(play_during_hold=True)
+    r, zones = _temporal_with_overlays(comp, raw, hold, cfg)
+    assert any(z["kind"] == "overlay" for z in zones), zones
+    assert r["status"] == "fail" and r["motion_mismatch"], r
+    assert r["motion_mismatch"][0]["segment"] == 2
+
+
+def test_animated_text_the_compared_picture_also_shows_is_picture_content():
+    """Negative control of the overlay test itself: a word moving over the picture is an overlay only when the
+    compared picture (verification: the recreation) never shows it on its place. The same word present in the
+    reference -- text carried by the RAW (a scrolling credit, a sign on a moving object) -- is 'picture_content' and
+    never masked; a word that moves WITH the picture is never even a candidate."""
+    import motion_fixtures as mf
+    from match_cuts import layout as layout_mod
+    from match_cuts.model import Layout
+    cfg = Config()
+    n = 12
+    base = _dim(mf.two_layer_raw(1))[0]
+    frames = np.repeat(mf.render(base[None], [0], [Sim(1.0, 0.0, -20.0, -15.0)], (160, 120), noise=0.0), n, axis=0)
+    with_word = frames.copy()
+    for k in range(n):
+        _outlined_word(with_word[k], "CREDITS", 30 + 3 * k, 35)
+    comp = _fps_proxy(with_word, "competitor", F30)
+    lay = Layout(comp_w=160, comp_h=120, box=Box.from_dict(FIX_BOX))
+    alone = layout_mod.animated_text_overlays(comp, lay, cfg)
+    assert [z["kind"] for z in alone] == ["overlay"] and alone[0]["glyphs"] == 7
+    no_word = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: frames[k])
+    assert [z["kind"] for z in no_word] == ["overlay"]
+    shown = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: with_word[k])
+    assert [z["kind"] for z in shown] == ["picture_content"], shown
+    assert layout_mod.animated_text_mask(shown, 5, (120, 160)) is None
+    assert layout_mod.animated_text_mask(no_word, 5, (120, 160)).any()
+    # no compared picture on any of its frames (a NOT-IN-RAW / uncertain stretch): not judged, never masked or reported
+    nothing = layout_mod.animated_text_overlays(comp, lay, cfg, reference=lambda k: None)
+    assert [z["kind"] for z in nothing] == ["not_compared"], nothing
+    assert layout_mod.animated_text_mask(nothing, 5, (120, 160)) is None
+    # the word panning WITH the picture (an editor pan over burned-in text) is no candidate at all
+    pan_frames = mf.render(np.repeat(with_word[:1], 1, axis=0), [0] * n,
+                           [Sim(1.0, 0.0, -2.0 * k, 0.0) for k in range(n)], (140, 110), noise=0.0)
+    panned = _fps_proxy(np.pad(pan_frames, ((0, 0), (5, 5), (10, 10))), "competitor", F30)
+    assert layout_mod.animated_text_overlays(panned, lay, cfg) == []
+
+
+# -- RAW-only overlays (wave 4 (a)) --------------------------------------------------------------
+
+def _disclaimer_case(text_in_raw: bool = True, rec_offset: int = 0, rec_dx: float = 0.0, hold: bool = False,
+                     comp_logo: bool = False, big: bool = False, n: int = 30):
+    """RAW (30 fps): moving two-layer content; with ``text_in_raw`` a burned-in disclaimer line static in RAW
+    coordinates (``big``: a block covering ~40 % of the picture). The competitor's master shows the CLEAN RAW 10..39
+    under an editor pan (``comp_logo``: plus a competitor-only outlined word over a STATIC flat patch of the RAW).
+    The recreation: one raw segment on the true line shifted by ``rec_offset`` RAW frames, its framing by ``rec_dx``
+    px (``hold``: speed 0 on RAW 20)."""
+    import motion_fixtures as mf
+    clean = mf.two_layer_raw(60)
+    if comp_logo:
+        clean[:, 100:118, 100:170] = 90                      # a static flat patch of the RAW
+    raw_frames = clean.copy()
+    if text_in_raw:
+        for j in range(60):
+            if big:
+                raw_frames[j, 30:110, 40:160] = 200
+                _outlined_word(raw_frames[j], "BIG GRAPHIC", 55, 60, size=12, stroke=1)
+            else:
+                _outlined_word(raw_frames[j], "NOT A SUBSTITUTE", 55, 95, size=11, stroke=1)
+    js = np.arange(10, 10 + n)
+    comp_frames = mf.render(clean, js, mf.pan_sims(n), (160, 120), noise=1.0).copy()
+    if comp_logo:
+        for k in range(n):
+            x0 = int(round(100 - 20 - 1.2 * k))
+            _outlined_word(comp_frames[k], "LOGO", x0 + 4, 100 - 15 + 1, size=11, stroke=1)
+    comp = _fps_proxy(comp_frames, "competitor", F30)
+    raw = _fps_proxy(raw_frames, "raw", F30)
+    pan = lambda k: -20.0 - 1.2 * k + rec_dx          # noqa: E731
+    seg_ = (_line_seg(1, 0, n, 20.5, F30, pan, speed=0.0) if hold
+            else _line_seg(1, 0, n, 10.5 + rec_offset, F30, pan))
+    return comp, raw, [seg_], frame_map(list(js))
+
+
+def _raw_overlays(comp, raw, segs, fm, cfg):
+    return verify.find_raw_only_overlays(comp, raw, segs, fm, lambda k: None, lambda k: FIX_BOX,
+                                         (float(raw.size[0]), float(raw.size[1])), F30, F30, raw.n, cfg)
+
+
+def _visual(comp, raw, segs, fm, cfg, ov=None):
+    seg_at = verify.single_raw_segments(segs, comp.n)
+    rec = [(k, verify.recreation_proxy_frame(comp, raw, seg_at, k, (float(raw.size[0]), float(raw.size[1])), F30, F30,
+                                             raw.n)) for k in range(comp.n)]
+    return verify.check_visual(comp, rec, fm, lambda k: None, FIX_BOX, cfg, None, "test", segments=segs,
+                               overlay_fn=ov.mask if ov else None,
+                               overlay_lines=verify.raw_only_overlay_lines(ov.regions) if ov else ())
+
+
+def test_raw_only_overlay_is_measured_masked_and_reported():
+    """Wave 4 (a), film24 clip B / the real run's 605+ shots: the RAW carries a burned-in disclaimer the competitor's
+    master does not have; every frame is exact but the visual check failed. The disclaimer is measured as a RAW-only
+    overlay (static in RAW coordinates while the RAW plays, persistent residual, a RAW graphic the competitor lacks,
+    small), reported with its RAW rectangle and frames, and excluded in s9_3: the frames pass as explained."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case()
+    plain = _visual(comp, raw, segs, fm, cfg)
+    assert plain["status"] == "fail" and plain["failed_frames"], plain["summary"]
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert len(ov.regions) == 1, (ov.regions, ov.rejected)
+    x, y, w, h = ov.regions[0]["raw_rect"]
+    assert 50 <= x <= 60 and 90 <= y + h and y <= 100 and w >= 60          # around the drawn line (x 55, y ~95-106)
+    lines = verify.raw_only_overlay_lines(ov.regions)
+    assert len(lines) == 1 and lines[0].startswith("RAW-only overlay at") and "not shown by the competitor" in lines[0]
+    res = _visual(comp, raw, segs, fm, cfg, ov)
+    assert res["status"] == "pass_with_exceptions", res["summary"]
+    assert set(plain["failed_frames"]) <= set(res["raw_only_overlay_frames"])
+    assert any("RAW-only overlay" in e for e in res["exceptions"])
+    m = ov.mask(12)
+    assert m is not None and m.any() and m.mean() < 0.15               # follows the frame's model, small
+
+
+@pytest.mark.parametrize("case", ["wrong_frame", "wrong_framing"])
+def test_raw_only_overlay_never_explains_a_wrong_frame_or_framing(case):
+    """Negative control: with the same RAW-only disclaimer, a recreation one RAW frame... three RAW frames late, or
+    misframed by 6 px, still fails s9_3 -- the overlay may be found (it is real), but every frame must still reach
+    the threshold on everything else, and a time / framing error lives where the RAW changes."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case(rec_offset=3) if case == "wrong_frame" else _disclaimer_case(rec_dx=6.0)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    res = _visual(comp, raw, segs, fm, cfg, ov)
+    assert res["status"] == "fail" and len(res["failed_frames"]) >= 0.9 * comp.n, res["summary"]
+    for r in ov.regions:                                     # whatever was accepted is the disclaimer, nothing else
+        assert r["raw_rect"][1] >= 80 and r["frac"] < 0.15
+    # and without any RAW-only content, nothing is explained at all
+    comp2, raw2, segs2, fm2 = _disclaimer_case(text_in_raw=False, rec_offset=3)
+    assert not _raw_overlays(comp2, raw2, segs2, fm2, cfg).regions
+
+
+def test_raw_only_overlay_rejects_competitor_side_elements_freezes_and_large_regions():
+    """Negative controls of the region tests: (1) a competitor-only word over a STATIC flat patch of the RAW is
+    persistent and static in RAW coordinates but the edges are the competitor's -- not a RAW graphic, rejected;
+    (2) a hold (one RAW frame shown) never measures 'static in RAW coordinates' -- nothing explained; (3) a RAW-only
+    block covering ~40 % of the picture is a mismatch spread over the frame -- nothing is explained, s9_3 fails."""
+    cfg = Config()
+    comp, raw, segs, fm = _disclaimer_case(text_in_raw=False, comp_logo=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions and any("no graphic the competitor lacks" in r["why"] for r in ov.rejected), ov.rejected
+    comp, raw, segs, fm = _disclaimer_case(hold=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions
+    comp, raw, segs, fm = _disclaimer_case(big=True)
+    ov = _raw_overlays(comp, raw, segs, fm, cfg)
+    assert not ov.regions, ov.regions
+    assert _visual(comp, raw, segs, fm, cfg, ov)["status"] == "fail"
 
 
 class PanStub:

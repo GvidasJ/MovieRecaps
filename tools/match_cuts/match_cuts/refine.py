@@ -883,18 +883,64 @@ def _w_eval(state: dict, task: tuple) -> tuple:
     return int(lo_all), arr, int(jb), float(sb), bool(edge), bool(widened)
 
 
+def _noise_identical(a: np.ndarray, b: np.ndarray, m: np.ndarray, peak: float, delta: float, tiles: int,
+                     blur: float, min_pixels: int = 32) -> bool:
+    """FX-11 noise-calibrated identity, the spec's own definition ('difference below noise'), judged per TILE (FX-08:
+    a small changing region is never diluted): with the score blur applied, every tile of the warped RAW frames a and b
+    (both on the layout-only mask ``m``) satisfies peak * (1 - ZNCC_tile(a, b)) <= delta -- the score of the best frame
+    could not tell them apart even on that tile alone (a flat tile, ZNCC undefined, passes when its mean |diff| <=
+    delta * 255). A tile with too few pixels is skipped; no tile at all -> not identical."""
+    import cv2
+    if not (np.isfinite(peak) and np.isfinite(delta)) or delta <= 0:
+        return False
+    mm = np.asarray(m, bool)
+    if int(mm.sum()) < 64:
+        return False
+    ab = cv2.GaussianBlur(np.asarray(a, np.float32), (0, 0), blur) if blur > 0 else np.asarray(a, np.float32)
+    bb = cv2.GaussianBlur(np.asarray(b, np.float32), (0, 0), blur) if blur > 0 else np.asarray(b, np.float32)
+    ys, xs = np.nonzero(mm)
+    y0, y1, x0, x1 = int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
+    ty = np.linspace(y0, y1, int(tiles) + 1).astype(int)
+    tx = np.linspace(x0, x1, int(tiles) + 1).astype(int)
+    n = 0
+    for i in range(int(tiles)):
+        for j in range(int(tiles)):
+            mt = mm[ty[i]:ty[i + 1], tx[j]:tx[j + 1]]
+            if int(mt.sum()) < min_pixels:
+                continue
+            at = ab[ty[i]:ty[i + 1], tx[j]:tx[j + 1]][mt].astype(np.float64)
+            bt = bb[ty[i]:ty[i + 1], tx[j]:tx[j + 1]][mt].astype(np.float64)
+            n += 1
+            z = scoring.zncc(at, bt)
+            if np.isfinite(z):
+                if peak * (1.0 - z) > delta:
+                    return False
+            elif float(np.mean(np.abs(at - bt))) > delta * 255.0:
+                return False
+    return n > 0
+
+
 def _w_final(state: dict, task: tuple) -> tuple:
     """Candidate vector around m (>= m±R, extended up to ±CAND_W//2 while the edge score is within ``cap``
     of the peak, so the soft range is never cut by the window) and the visually-identical RAW range
-    [raw_lo, raw_hi] (RAW-vs-RAW, warped & masked)."""
-    k, keys, flip, jb, lo, scores, R, cap = task
+    [raw_lo, raw_hi] (RAW-vs-RAW, warped & masked).
+
+    FX-11: EVERY score of the vector is measured under the FINAL keys -- the hypothesis-time vector only says which
+    frames were evaluated (within the CAND_W window); scores of an earlier framing are never mixed in -- and m is
+    the argmax of that vector (moved only when another frame scores strictly higher; a 10th task element True keeps
+    the given m, e.g. a confound re-assignment decided under its own path). ``delta`` (optional 9th task element, the
+    track's score noise) adds the noise-calibrated identity (``_noise_identical``) to the FX-08 test.
+    Returns (lo, scores, raw_lo, raw_hi, m)."""
+    k, keys, flip, jb, lo, scores, R, cap = task[:8]
+    delta = float(task[8]) if len(task) > 8 and task[8] is not None else float("nan")
+    keep = bool(task[9]) if len(task) > 9 else False
     comp, raw, cfg = state["comp"], state["raw"], state["cfg"]
     n = raw.n
     sim = _sim_at(keys, k, state["raw_wh"], state.get("cap", 0))
     allowed = state["allowed"](k)
     sc = _Scorer(np.asarray(comp.get(k)), state["roi"], allowed, raw, comp.ratio, cfg)
-    S = {lo + i: float(v) for i, v in enumerate(scores) if np.isfinite(v)}
     half = CAND_W // 2
+    S: dict[int, float] = {}
 
     def ev(js: list[int]) -> None:
         js = [j for j in js if 0 <= j < n and j not in S and raw.has(j)]
@@ -902,7 +948,14 @@ def _w_final(state: dict, task: tuple) -> tuple:
             for j, v in zip(js, sc.scores(js, sim, flip)):
                 S[j] = float(v)
 
-    ev(list(range(jb - R, jb + R + 1)))
+    seeded = [lo + i for i, v in enumerate(scores) if np.isfinite(v) and abs(lo + i - jb) <= half]
+    ev(sorted(set(seeded) | set(range(jb - R, jb + R + 1))))
+    fin = sorted(j for j, v in S.items() if np.isfinite(v))
+    if fin and not keep:
+        jm = max(fin, key=lambda j: S[j])
+        if not (S.get(jb, -np.inf) >= S[jm]):         # m == argmax(cand): moved only when strictly better
+            jb = jm
+            ev(list(range(jb - R, jb + R + 1)))
     peak = S.get(jb, float("nan"))
     for direction in (-1, 1):
         d = R
@@ -922,6 +975,7 @@ def _w_final(state: dict, task: tuple) -> tuple:
     lay = state["allowed"].layout_only(k) if hasattr(state["allowed"], "layout_only") else allowed
     am = lay[y0:y0 + h, x0:x0 + w] & vb
     raw_lo = raw_hi = jb
+    blur = float(getattr(cfg, "score_blur", 1.0))
     for direction in (-1, 1):
         for d in range(1, _IDENTICAL_MAX + 1):
             j = jb + direction * d
@@ -934,7 +988,9 @@ def _w_final(state: dict, task: tuple) -> tuple:
             same, _ev = scoring.identical_images(wb, wj, m, cfg.identical_mad, cfg.identical_thresh,
                                                  int(cfg.identical_tiles), float(cfg.identical_contrast_ref),
                                                  float(cfg.identical_contrast_min))
-            if same:
+            if not same and np.isfinite(delta):
+                same = _noise_identical(wb, wj, m, float(peak), delta, int(cfg.identical_tiles), blur)
+            if same:                      # contiguous from m only: a periodic alias further away is never included
                 if direction < 0:
                     raw_lo = j
                 else:
@@ -945,7 +1001,7 @@ def _w_final(state: dict, task: tuple) -> tuple:
     arr = np.full(hi2 - lo2 + 1, np.nan, np.float32)
     for j, v in S.items():
         arr[j - lo2] = v
-    return int(lo2), arr, int(raw_lo), int(raw_hi)
+    return int(lo2), arr, int(raw_lo), int(raw_hi), int(jb)
 
 
 def _w_resid(state: dict, task: tuple) -> np.ndarray:
@@ -2259,10 +2315,17 @@ class _Refiner:
             sim = _sim_at(path, k, self.raw_wh, self.cap)
             j = int(fm.raw[k]) + d
             tasks.append((k, [_key(k, sim)], t.flip, j, j, np.zeros(0, np.float32), R,
-                          2.0 * float(delta.get(t.id, cfg.soft_delta_min))))
+                          2.0 * float(delta.get(t.id, cfg.soft_delta_min)), float(delta.get(t.id, cfg.soft_delta_min)),
+                          True))
             rows.append((t, k, d, j, sim))
         self._measure([(t, k, j, sim) for t, k, d, j, sim in rows])
-        for (t, k, d, j, sim), (lo2, arr, rlo, rhi) in zip(rows, self._map(_w_final, tasks)):
+        for (t, k, d, j, sim), (lo2, arr, rlo, rhi, _jm) in zip(rows, self._map(_w_final, tasks)):
+            fin = np.isfinite(arr)
+            if fin.any() and int(np.argmax(np.where(fin, arr, -np.inf))) + lo2 != j:
+                # the confound decision (m + d strictly better under ITS path by > 3 delta) is kept; a vector whose
+                # argmax lies elsewhere under that path is logged (low-confidence evidence), never silently re-decided
+                self.dlog.record("refine", "confound_reassign_argmax", comp_frame=int(k), track=t.id, raw=int(j),
+                                 argmax=int(np.argmax(np.where(fin, arr, -np.inf))) + lo2)
             old = int(fm.raw[k])
             peak = float(arr[j - lo2]) if 0 <= j - lo2 < len(arr) else float("nan")
             js = np.arange(lo2, lo2 + len(arr))
@@ -2343,17 +2406,27 @@ class _Refiner:
             if np.any(np.isfinite(others)):
                 prov.setdefault(int(self.win_tid[k]), []).append(h.sb - float(np.nanmax(others)))
         cap: dict[int, float] = {}
-        for tid in prov:
+        pdelta: dict[int, float] = {}        # provisional score noise per track (FX-11 identity test)
+        for tid in sorted({int(self.win_tid[k]) for k in match}):
             best = np.array([self.win_s[k] for k in match if int(self.win_tid[k]) == tid], np.float64)
-            cap[tid] = min(_SOFT_CAP_MAX, 2.0 * noise_delta(best, float(cfg.soft_delta_min),
-                                                             float(getattr(cfg, "soft_delta_max", 0.01))))
+            pdelta[tid] = noise_delta(best, float(cfg.soft_delta_min), float(getattr(cfg, "soft_delta_max", 0.01)))
+            if tid in prov:
+                cap[tid] = min(_SOFT_CAP_MAX, 2.0 * pdelta[tid])
         tasks = []
         for k in match:
             t = self.tracks[int(self.win_tid[k])]
             h = self.hyp[k][t.id]
             tasks.append((k, t.keys, t.flip, int(self.win_j[k]), h.lo, h.scores, R,
-                          cap.get(t.id, 2.0 * float(cfg.soft_delta_min))))
+                          cap.get(t.id, 2.0 * float(cfg.soft_delta_min)), pdelta.get(t.id)))
         res = dict(zip(match, self._map(_w_final, tasks)))
+        moved = []
+        for k in match:                      # FX-11: m(k) = argmax of its own re-scored candidate vector
+            lo2, arr, _rlo, _rhi, jm = res[k]
+            if jm != int(self.win_j[k]):
+                moved.append({"k": int(k), "raw": [int(self.win_j[k]), int(jm)],
+                              "score": [round(float(self.win_s[k]), 5), round(float(arr[jm - lo2]), 5)]})
+        if moved:
+            self.dlog.record("refine", "final_rescore_moved", frames=len(moved), evidence=moved[:300])
         status = np.full(self.N, Status.NONE, np.int8)
         raw_a = np.full(self.N, -1, np.int32)
         lo_a = np.full(self.N, -1, np.int32)
@@ -2379,12 +2452,14 @@ class _Refiner:
             sims[k] = (sm.s, sm.theta_deg, sm.tx, sm.ty)
             widened[k] = h.widened
             score[k] = self.win_s[k]
-            if k in res:
-                lo2, arr, rlo, rhi = res[k]
-            else:
-                lo2, arr, rlo, rhi = h.lo, h.scores, int(self.win_j[k]), int(self.win_j[k])
-            vecs[k] = (lo2, arr)
             jb = int(self.win_j[k])
+            if k in res:
+                lo2, arr, rlo, rhi, jb = res[k]
+                if 0 <= jb - lo2 < len(arr) and np.isfinite(arr[jb - lo2]):
+                    score[k] = float(arr[jb - lo2])          # the vector's own peak (FX-11)
+            else:
+                lo2, arr, rlo, rhi = h.lo, h.scores, jb, jb
+            vecs[k] = (lo2, arr)
             j0 = jb - half
             for i in range(CAND_W):
                 p = j0 + i - lo2
@@ -2429,6 +2504,10 @@ class _Refiner:
         for tid in sorted(self.tracks):
             sc = np.asarray(fm.score, np.float64)[(fm.track == tid) & (fm.status == Status.MATCH)]
             delta[tid] = noise_delta(sc, float(cfg.soft_delta_min), float(getattr(cfg, "soft_delta_max", 0.01)))
+        dcol = np.full(self.N, np.nan, np.float32)        # FX-11: the per-frame delta, persisted
+        for k in np.flatnonzero(status == Status.MATCH):
+            dcol[k] = delta.get(int(track[k]), float(cfg.soft_delta_min))
+        fm.delta = dcol
         soft_lo = np.full(self.N, -1, np.int32)
         soft_hi = np.full(self.N, -1, np.int32)
         low = np.zeros(self.N, bool)

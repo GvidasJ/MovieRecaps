@@ -283,8 +283,37 @@ def test_isolated_low_margin_frame_is_overridden_not_cut():
     assert len(segs) == 1 and segs[0].speed == 1.0
     assert int(fm.raw[40]) == int(m[40]) and bool(fm.low_margin[40])
     assert 40 in segs[0].low_margin_frames
-    assert "re-assigned" in segs[0].notes and "[40]" in segs[0].notes
+    # FX-12: the re-assignment has its own column and reason; the note says what happened, not 'low-margin'
+    from match_cuts.model import REASSIGN_REASONS
+    assert int(fm.reassigned[40]) > 0 and REASSIGN_REASONS[int(fm.reassigned[40])] in ("drop", "model")
+    assert int(np.count_nonzero(fm.reassigned)) == 1
+    assert "frames shown from the segment model instead of refine's best measurement" in segs[0].notes
+    assert " 40" in segs[0].notes
     check_model(segs[0], fm)
+
+
+def test_reassigned_frames_are_not_labelled_low_margin():
+    """FX-12: write_back no longer forces low_margin on a frame it re-assigns -- a frame refine measured with a clear
+    margin keeps low_margin False and gets the 'reassigned' reason instead; the segment confidence still counts it."""
+    m = ff_select(90, 1.0, 700)
+    bad = m.copy()
+    bad[40] -= 1
+    fm, bd = build_fm([Spec(m=bad, n=90)])
+    marg = np.full(90, 0.04)
+    marg[40] = 0.003                            # above low_margin_eps: refine did NOT flag it low-margin ...
+    fm.margin = marg
+    fm.low_margin = marg < 0.001
+    slo, shi = np.asarray(fm.soft_lo).copy(), np.asarray(fm.soft_hi).copy()
+    shi[40] = m[40]                             # ... but the model's frame is inside its soft range (within noise)
+    fm.soft_lo, fm.soft_hi = slo, shi
+    segs = run(fm, *proxies(fm.n))
+    assert len(segs) == 1 and int(fm.raw[40]) == int(m[40])
+    from match_cuts.model import REASSIGN_REASONS
+    assert REASSIGN_REASONS[int(fm.reassigned[40])] == "model" and not bool(fm.low_margin[40])
+    assert 40 not in segs[0].low_margin_frames
+    assert "frames shown from the segment model instead of refine's best measurement: model 40" in segs[0].notes
+    assert segs[0].confidence < 0.95 + 1e-9      # still counted in the confidence
+    assert not np.any(fm.reassigned[np.arange(90) != 40])
 
 
 def test_speed_only_cut_has_ambiguity_window():
@@ -657,8 +686,8 @@ def test_noisy_refine_output_keeps_exact_cuts_and_fixes_frames():
     assert [(s.comp_in, s.comp_out) for s in segs] == list(zip(bd[:-1], bd[1:]))
     assert [s.speed for s in segs] == pytest.approx([1.0, 1.0, 1.1, 1.0])
     assert np.array_equal(np.asarray(fm.raw), truth)
-    for k in errs:
-        assert bool(fm.low_margin[k])
+    for k in errs:                     # FX-12: re-assigned (with its reason), not relabelled low-margin
+        assert int(fm.reassigned[k]) > 0, k
     for s in segs:
         check_model(s, fm)
 
@@ -1094,6 +1123,32 @@ def test_genuine_two_frame_stutter_keeps_its_cuts(monkeypatch, tmp_path):
     assert any(r["decision"] == "flash_cut_verified" and r["comp_range"] == [20, 22] for r in rec)
 
 
+def test_short_segment_verdict_is_logged_only_for_final_segments(monkeypatch, tmp_path):
+    """FX-12: merge_tiny's 'flash_cut_verified' / 'flash_cut_unverified' verdict is logged only for short segments that
+    are still segments of the RESULT (the real run logged 26 verified flash cuts, several merged away later). A later
+    step that replaces the short segment (here: a copy, as any merge creates a new segment) drops its verdict."""
+    import copy
+    from match_cuts import segment as seg_mod
+    a = ff_select(20, 1.0, 1000)
+    st = a[18:20].copy()
+    b = ff_select(20, 1.0, int(a[-1]) + 3)
+    m = np.concatenate([a, st, b])
+    fm, bd = build_fm([Spec(m=a, n=20), Spec(m=st, n=2, track=1), Spec(m=b, n=20, track=2)])
+    _stub(monkeypatch, lambda k, j, sim, fl: 0.99 - 0.03 * abs(j - int(m[k])))
+    orig = seg_mod._Builder.merge_continuous
+
+    def replaced(self, work):
+        work = orig(self, work)
+        return [copy.copy(S) if (S.a, S.b) == (20, 22) else S for S in work]
+    monkeypatch.setattr(seg_mod._Builder, "merge_continuous", replaced)
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = run(fm, *proxies(fm.n), dlog=dl)
+    dl.close()
+    assert [(s.comp_in, s.comp_out) for s in segs] == [(0, 20), (20, 22), (22, 42)]
+    rec = records(tmp_path / "d.jsonl")
+    assert not any(r["decision"] in ("flash_cut_verified", "flash_cut_unverified") for r in rec)
+
+
 def test_three_frame_skip_inside_a_pan_stays_a_cut(monkeypatch, tmp_path):
     """FX-04 guard: a +3 RAW frame jump cut inside an editor pan whose own frames clearly win (pixels), with the cut
     on a competitor repeat pair and confounded frames around it (union test triggered): the cut is kept."""
@@ -1412,6 +1467,28 @@ def test_scene_change_with_an_unrepresented_framing_step_is_reported(tmp_path, m
     assert any("framing step not represented" in (s.notes or "") for s in segs)
     miss = {d["cut"]: d["explanation"] for d in rec["cuts_not_detected"]}
     assert 40 in miss and "jump cut" not in miss[40] and "one time line" in miss[40]
+
+
+def test_scene_changes_at_caption_events_are_explained_once_per_segment(tmp_path, monkeypatch):
+    """FX-12: PySceneDetect changes inside a segment at the layout's caption event boundaries are explained
+    specifically ('caption event boundary') in ONE aggregated note per segment, not one generic sentence each."""
+    from match_cuts import segment as seg_mod
+    from match_cuts.model import Layout
+    clip = tmp_path / "comp.mp4"
+    clip.write_bytes(b"\0")
+    monkeypatch.setattr(seg_mod, "scenedetect_changes", lambda path, cfg: [12, 30])
+    fm, _ = build_fm([Spec(m=ff_select(60, 1.0, 300), n=60)])
+    comp, raw = proxies(fm.n, path=str(clip))
+    lay = Layout(comp_w=int(comp.full_size[0]), comp_h=int(comp.full_size[1]),
+                 captions=[{"type": "captions", "comp_in": 12, "comp_out": 30, "x": 10.0, "y": 10.0, "w": 50.0, "h": 10.0}])
+    dl = DecisionLog(tmp_path / "d.jsonl")
+    segs = build_segments(fm, comp, raw, lay, None, cfg_(), dl, None)
+    dl.close()
+    assert len(segs) == 1
+    notes = segs[0].notes
+    assert notes.count("PySceneDetect changes inside") == 1 and "12, 30 caption event boundary" in notes, notes
+    rec = [r for r in records(tmp_path / "d.jsonl") if r["decision"] == "scenedetect_crosscheck"][0]["evidence"]
+    assert [u["category"] for u in rec["unexplained"]] == ["caption event boundary"] * 2
 
 
 def test_placeholder_match_split_across_a_repeat_pair_is_flagged(tmp_path):
