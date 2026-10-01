@@ -19,3 +19,10 @@ python -m match_cuts --competitor input/competitor.mp4 --raw input/raw.mp4 --out
 ```
 
 Then in After Effects: *File → Scripts → Run Script File…* → `output/build_ae_project.jsx`.
+
+While it runs, the console prints a line at least every 30 seconds. At the end, read `output/report.md`:
+the first table says which checks passed. Amber `UNCERTAIN` solids and `MISSING - not in RAW` solids in the AE
+project mark the frames you still have to fill by hand (see *What the layers mean* in the
+[tool README](tools/match_cuts/README.md#running-the-result-in-after-effects)). Windows: use PowerShell, and close
+`cutlist.csv` (Excel) and the preview video before you run the tool again. More help:
+[Troubleshooting](tools/match_cuts/README.md#troubleshooting).

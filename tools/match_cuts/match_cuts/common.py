@@ -584,6 +584,7 @@ def limit_native_threads() -> None:
 
 
 _STAGE: list[str] = [""]
+_STAGE_T0: list[float] = [time.monotonic()]
 _LAST_INFO: list[float] = [time.monotonic()]
 
 
@@ -638,8 +639,11 @@ class Progress:
                 break
 
     def line(self) -> str:
+        """'<stage>: <name>: done/total <unit> done (<stage> running for <elapsed>)' -- the stage's elapsed time
+        (what a user waits for), the counter's own outside a stage."""
+        t0 = _STAGE_T0[0] if current_stage() else self.t0
         return (f"{progress_name(self.name)}: {self.done}/{self.total} {self.unit} done "
-                f"({elapsed_str(time.monotonic() - self.t0)})")
+                f"({elapsed_str(time.monotonic() - t0)})")
 
     def step(self, n: int = 1) -> None:
         self.done += n
@@ -792,8 +796,8 @@ class _Heartbeat:
 def stage_heartbeat(stage: str) -> Iterator[None]:
     """Run the block as pipeline stage ``stage``: progress lines are prefixed with it and a heartbeat thread
     breaks any console silence longer than POOL_WATCHDOG['progress_s']."""
-    prev = _STAGE[0]
-    _STAGE[0] = stage
+    prev, prev_t0 = _STAGE[0], _STAGE_T0[0]
+    _STAGE[0], _STAGE_T0[0] = stage, time.monotonic()
     _LAST_INFO[0] = time.monotonic()
     hb = _Heartbeat(stage)
     hb.th.start()
@@ -802,4 +806,4 @@ def stage_heartbeat(stage: str) -> Iterator[None]:
     finally:
         hb.stop.set()
         hb.th.join(5.0)
-        _STAGE[0] = prev
+        _STAGE[0], _STAGE_T0[0] = prev, prev_t0
