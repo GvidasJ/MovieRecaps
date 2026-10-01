@@ -1993,3 +1993,12 @@ def test_layout_overlay_masks_never_include_residual_masks(tmp_path):
     lay.overlay_mask_file = str(p)
     assert layout_overlay_masks(lay).get(0).all()
     assert layout_overlay_masks(None) is None
+    # the layout's DYNAMIC zones (the caption band over the caption period) cover a word the per-frame text
+    # detection missed (the full synthetic's 'EVERYTHING' at 789-800); static zones are the static mask's job
+    from match_cuts.model import Zone
+    lay.zones = [Zone("captions", 8.0, 18.0, 30.0, 10.0, 5, 9, False), Zone("logo", 0.0, 0.0, 6.0, 6.0)]
+    ov = layout_overlay_masks(lay, (36, 64), (1.0, 1.0))
+    assert ov.get(6)[20, 20] and not ov.get(6)[0, 30] and not ov.get(6)[2, 2]
+    assert ov.get(9) is None and ov.get(4) is None and ov.get(0).all()
+    d = ov.get_dilated(6, 2)
+    assert d[16, 20] and not d[12, 20]

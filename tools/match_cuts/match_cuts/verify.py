@@ -1201,13 +1201,13 @@ def check_temporal(segments: Sequence[Segment], labels: Any, comp_sig: Any, rec_
 def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction,
                 raw_wh: tuple[float, float], n_raw: int | None, scorer: Any, cfg: Any, n: int,
                 box_centre: Sequence[float] | None = None) -> dict:
-    """s9_2c: +-1 RAW frame refit. On every matched frame shown by one raw segment, the shown RAW frame j and
-    its neighbours j-1, j+1 each get their OWN framing by ECC (from the shown model and, for a rotated model,
+    """s9_2c: +-1 RAW frame refit. On every matched frame shown by one raw segment, the neighbours j-1, j+1 of
+    the shown RAW frame j each get their OWN framing by ECC (from the shown model and, for a rotated model,
     from its derotated version); a neighbour that beats the shown (frame, framing) -- and the shown frame's own
-    refit -- by more than max(3 * delta, verify_refit_margin) (delta = scoring.noise_delta of the segment's
-    shown scores) means the recreation shows the wrong RAW frame with a compensating framing (time /
-    translation confound). Such frames count against frame_exact_min; listed otherwise. RAW-identical
-    neighbours never trigger it (they score the same)."""
+    refit, computed when a neighbour comes within verify_refit_margin -- by more than max(3 * delta,
+    verify_refit_margin) (delta = scoring.noise_delta of the segment's shown scores) means the recreation shows
+    the wrong RAW frame with a compensating framing (time / translation confound). Such frames count against
+    frame_exact_min; listed otherwise. RAW-identical neighbours never trigger it (they score the same)."""
     from . import scoring
     exact_min = float(getattr(cfg, "frame_exact_min", 0.99))
     floor_margin = float(getattr(cfg, "verify_refit_margin", 0.01))
@@ -1230,18 +1230,29 @@ def check_refit(segments: Sequence[Segment], fm: FrameMap, comp_fps: Fraction, r
             flip = bool(s.flip_h)
             inits = [derotated(sim, box_centre)] if box_centre is not None and abs(sim.theta_deg) > 1e-9 else []
             fits: dict[int, Sim] = {}
-            for jj in (j - 1, j, j + 1):
+            for jj in (j - 1, j + 1):
                 if jj < 0 or (n_raw is not None and jj >= n_raw):
                     continue
                 r = scorer.refit(k, (jj, sim, flip), inits)
                 if r is not None:
                     fits[jj] = r[0]
-            order = sorted(fits)
-            sc = scorer.score(k, [(j, sim, flip)] + [(jj, fits[jj], flip) for jj in order])
-            z = {jj: float(sc[1 + i]) for i, jj in enumerate(order)}
-            z_shown = float(sc[0])
+
+            def scores() -> tuple[float, dict[int, float]]:
+                order = sorted(fits)
+                sc = scorer.score(k, [(j, sim, flip)] + [(jj, fits[jj], flip) for jj in order])
+                return float(sc[0]), {jj: float(sc[1 + i]) for i, jj in enumerate(order)}
+            z_shown, z = scores()
             if not math.isfinite(z_shown):
                 continue
+            # the shown frame's own refit only matters when a neighbour comes within the smallest possible margin
+            # (it can only raise the bar the neighbour must clear)
+            if any(math.isfinite(v) and v > z_shown + floor_margin for v in z.values()):
+                r = scorer.refit(k, (j, sim, flip), inits)
+                if r is not None:
+                    fits[j] = r[0]
+                    z_shown, z = scores()
+                    if not math.isfinite(z_shown):
+                        continue
             z_self = _nanmax([z_shown, z.get(j, float("nan"))])
             nb = {jj: v for jj, v in z.items() if jj != j and math.isfinite(v)}
             j_nb = max(nb, key=nb.get) if nb else None

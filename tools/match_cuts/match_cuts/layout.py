@@ -394,39 +394,95 @@ def allowed_mask(layout: Layout, overlays: Any, k: int, comp: Proxy, dilate_px: 
     return base & ~ov
 
 
+class LayoutOverlays:
+    """Read-only overlay provider of the LAYOUT stage's own findings (competitor-only), for verification: its
+    per-frame caption / text masks (``OverlayMasks``) united with its DYNAMIC zones (``Zone.static`` False --
+    the caption band over the caption period, stickers, progress bars) on their active frames. The zone
+    rectangles cover words the per-frame text detection missed (a word missed there would otherwise count as a
+    recreation mismatch: overlays are never recreated). ``get`` / ``get_dilated`` like ``OverlayMasks``."""
+
+    def __init__(self, masks: "OverlayMasks | None", rects: list[tuple[int | None, int | None, int, int, int, int]],
+                 shape: tuple[int, int], dilate_px: int = 3):
+        self.masks, self.rects = masks, rects          # rects: (comp_in, comp_out, y0, y1, x0, x1) at proxy res
+        self.shape = (int(shape[0]), int(shape[1]))
+        self.dilate_px = int(getattr(masks, "dilate_px", dilate_px) if masks is not None else dilate_px)
+
+    def _zones(self, k: int) -> np.ndarray | None:
+        out = None
+        for a, b, y0, y1, x0, x1 in self.rects:
+            if (a is None or a <= k) and (b is None or k < b):
+                if out is None:
+                    out = np.zeros(self.shape, bool)
+                out[y0:y1, x0:x1] = True
+        return out
+
+    def get(self, k: int) -> np.ndarray | None:
+        m = self.masks.get(int(k)) if self.masks is not None else None
+        z = self._zones(int(k))
+        if z is None:
+            return m
+        return z if m is None else (m | z)
+
+    def get_dilated(self, k: int, dilate_px: int | None = None) -> np.ndarray | None:
+        d = self.dilate_px if dilate_px is None else int(dilate_px)
+        m = self.masks.get_dilated(int(k), d) if self.masks is not None else None
+        z = self._zones(int(k))
+        if z is not None and d > 0:
+            z = _dilate(z, d)
+        if z is None:
+            return m
+        return z if m is None else (m | z)
+
+    def frames(self) -> list[int]:
+        return self.masks.frames() if self.masks is not None else []
+
+
 def layout_overlay_masks(layout: Layout | None, shape: tuple[int, int] | None = None,
-                         ratio: tuple[float, float] | None = None, dilate_px: int = 3) -> OverlayMasks | None:
-    """The overlay masks the LAYOUT stage found on its own (captions / text overlays, competitor-only:
-    ``layout.overlay_mask_file``), never refine's pass-2 residual masks -- those are computed from the
-    match being judged and would hide its own mismatch (verify's masks, DESIGN §5 verify). Without the
-    file, ``shape`` (h, w) and ``ratio`` (proxy rx, ry) build rectangle masks from ``layout.captions``.
-    None when neither is available."""
+                         ratio: tuple[float, float] | None = None, dilate_px: int = 3) -> LayoutOverlays | None:
+    """The overlays the LAYOUT stage found on its own (competitor-only): the per-frame caption / text masks of
+    ``layout.overlay_mask_file`` (without the file: rectangles of ``layout.captions``) plus the dynamic zones
+    (``LayoutOverlays``) -- never refine's pass-2 residual masks, which are computed from the match being
+    judged and would hide its own mismatch (verify's masks, DESIGN §5 verify). ``shape`` (h, w) and ``ratio``
+    (proxy rx, ry; default ``layout.proxy_ratio``) place the rectangles. None when nothing is available."""
     if layout is None:
         return None
+    masks = None
     p = getattr(layout, "overlay_mask_file", "") or ""
     if p and Path(p).is_file():
         try:
-            return OverlayMasks.load(p)
+            masks = OverlayMasks.load(p)
         except Exception as e:  # noqa: BLE001 - fall back to the caption rectangles
             log.warning("layout overlay masks %s unreadable (%s): using the caption rectangles", p, e)
+    if shape is None and masks is not None:
+        shape = masks.shape
+    ratio = ratio if ratio is not None else getattr(layout, "proxy_ratio", None)
     if shape is None or ratio is None:
-        return None
+        return None if masks is None else LayoutOverlays(masks, [], masks.shape, dilate_px)
     h, w = int(shape[0]), int(shape[1])
     rx, ry = float(ratio[0]), float(ratio[1])
-    ov = OverlayMasks((h, w), dilate_px)
-    for c in getattr(layout, "captions", None) or []:
-        if not isinstance(c, dict) or not all(q in c for q in ("x", "y", "w", "h", "comp_in", "comp_out")):
-            continue
-        x0, y0 = max(0, int(math.floor(float(c["x"]) * rx))), max(0, int(math.floor(float(c["y"]) * ry)))
-        x1 = min(w, int(math.ceil((float(c["x"]) + float(c["w"])) * rx)))
-        y1 = min(h, int(math.ceil((float(c["y"]) + float(c["h"])) * ry)))
-        if x1 <= x0 or y1 <= y0:
-            continue
-        m = np.zeros((h, w), bool)
-        m[y0:y1, x0:x1] = True
-        for k in range(int(c["comp_in"]), int(c["comp_out"])):
-            ov.union(k, m)
-    return ov
+
+    def rect(x: float, y: float, ww: float, hh: float) -> tuple[int, int, int, int] | None:
+        x0, y0 = max(0, int(math.floor(float(x) * rx))), max(0, int(math.floor(float(y) * ry)))
+        x1 = min(w, int(math.ceil((float(x) + float(ww)) * rx)))
+        y1 = min(h, int(math.ceil((float(y) + float(hh)) * ry)))
+        return None if x1 <= x0 or y1 <= y0 else (y0, y1, x0, x1)
+
+    rects: list[tuple[int | None, int | None, int, int, int, int]] = []
+    if masks is None:
+        for c in getattr(layout, "captions", None) or []:
+            if not isinstance(c, dict) or not all(q in c for q in ("x", "y", "w", "h", "comp_in", "comp_out")):
+                continue
+            r = rect(c["x"], c["y"], c["w"], c["h"])
+            if r is not None:
+                rects.append((int(c["comp_in"]), int(c["comp_out"]), *r))
+    for z in getattr(layout, "zones", None) or []:
+        if getattr(z, "static", True):
+            continue                     # static zones are in the static mask already
+        r = rect(z.x, z.y, z.w, z.h)
+        if r is not None:
+            zi, zo = getattr(z, "comp_in", None), getattr(z, "comp_out", None)
+            rects.append((None if zi is None else int(zi), None if zo is None else int(zo), *r))
+    return LayoutOverlays(masks, rects, (h, w), dilate_px)
 
 
 def masks_from_residuals(residuals: dict[int, np.ndarray], base_allowed: np.ndarray, cfg: Any) -> dict[int, np.ndarray]:

@@ -266,9 +266,11 @@ class OverlayMasks:     # per-frame bool masks at comp proxy res (np.packbits pe
 def box_coverage(layout, comp: Proxy) -> np.ndarray   # float [h, w] rounded-box coverage at proxy res
 def allowed_mask(layout, overlays, k, comp: Proxy, dilate_px=None) -> np.ndarray
     # bool [h, w]: coverage >= 0.99 AND NOT static AND NOT dilated overlay(k)
-def layout_overlay_masks(layout, shape=None, ratio=None, dilate_px=3) -> OverlayMasks | None
-    # the layout stage's OWN caption / text-overlay masks (layout.overlay_mask_file; else rectangles of
-    # layout.captions at proxy (h, w) / ratio) -- never refine's pass-2 residual masks. verify's only overlays.
+def layout_overlay_masks(layout, shape=None, ratio=None, dilate_px=3) -> LayoutOverlays | None
+    # the layout stage's OWN findings: per-frame caption / text-overlay masks (layout.overlay_mask_file; else
+    # rectangles of layout.captions) united with its DYNAMIC zones (Zone.static False: the caption band over the
+    # caption period, stickers, ...) on their active frames -- a word the per-frame detection missed is still
+    # covered. Never refine's pass-2 residual masks. verify's only overlays (get / get_dilated like OverlayMasks).
 def masks_from_residuals(residuals: dict[int, np.ndarray], base_allowed, cfg) -> dict[int, np.ndarray]
 ```
 Box semantics: `Box(x, y, w, h, corner_radius)` in competitor full-res CORNER coordinates — the exact
@@ -534,7 +536,7 @@ def verify_all(ctx) -> dict
   #   segment.py / refine.py -- only the scorers, temporal.py and the shared ECC primitive
   #   refine.refine_transform; framing is RE-MEASURED (ECC, incl. a global phase-correlation start), never
   #   the model's key held at its boundary (in a pan it lags v px per frame); scoring masks are the layout's own
-  #   caption / overlay masks (layout.layout_overlay_masks), NEVER ctx.overlays (refine's pass-2 residual
+  #   caption / overlay masks and dynamic zones (layout.layout_overlay_masks), NEVER ctx.overlays (refine's pass-2 residual
   #   masks are computed from the match being judged: a misframed match masks its own mismatch away).
   # c2: NEW independent check per cut: competitor frames comp_out(A)-1 and comp_in(B) scored against
   #      A-model and B-model predicted RAW frames (phase_solve.ae_frame; when the RAW frames differ, each
@@ -561,8 +563,9 @@ def verify_all(ctx) -> dict
   #      with residuals more than temporal_mag_ratio apart after the shot's measured comp/recreation bias.
   #      They count against frame_exact_min over all pairs considered; a recreation hold of >= 4 frames whose
   #      labelled competitor pairs mostly MOVE is a 'motion mismatch' (always a failure).
-  # s9_2c +-1 refit: every matched single-segment frame, RAW j-1 / j / j+1 each with its own ECC framing (from
-  #      the shown framing and its derotated version); a neighbour beating max(shown, refit of j) by more than
+  # s9_2c +-1 refit: every matched single-segment frame, RAW j-1 / j+1 each with its own ECC framing (from
+  #      the shown framing and its derotated version; j's own refit when a neighbour comes within
+  #      verify_refit_margin of the shown score); a neighbour beating max(shown, refit of j) by more than
   #      max(3 delta, verify_refit_margin) (delta = noise_delta of the segment's shown scores) is a frame shown
   #      one RAW frame off with a compensating framing; counted against frame_exact_min, listed otherwise.
   # c4: speed inside [vmin, vmax] ± 0.5 % and snapped where a snap was feasible; framing: per-frame
