@@ -22,6 +22,13 @@ Runs the real CLI on the synthetic RAW + competitor made by tests/synth.py (prof
 
 Failures print precise, actionable tables (which frames / segments differ and how).
 Slow: run with ``--runslow`` or ``MATCH_CUTS_SLOW=1``.
+
+``MATCH_CUTS_PROFILE=film24`` (DESIGN §6.1) runs the same tests on the real-run regimes (RAW 24000/1001 on a
+30 fps grid, editor pans over moving RAW shots, a split 86 ms A/V delay, retimes, gray / lookalike inserts) plus
+the ``test_film24_*`` truth assertions below. Every film24 assertion that the CURRENT pipeline fails is marked
+``xfail(strict=True)`` with the fix that must make it pass (FX-xx of the real-run diagnosis); a fix removes its
+xfail, and a strict XPASS tells whoever lands it to do so. ``MATCH_CUTS_E2E_REUSE=<dir>`` reuses a finished CLI
+run in <dir> (``output/``, ``work/``) instead of running the CLI (test development only).
 """
 from __future__ import annotations
 
@@ -39,6 +46,7 @@ import pytest
 pytestmark = pytest.mark.slow
 
 PROFILE = os.environ.get("MATCH_CUTS_PROFILE", "mini")
+FILM = PROFILE.startswith("film24")         # film24 and its A/V-offset variants (synth.PROFILES)
 TOOL_DIR = Path(__file__).resolve().parents[1]
 CLI_TIMEOUT_S = 3 * 3600 if PROFILE == "full" else 3600
 OK = ("pass", "pass_with_exceptions")
@@ -47,15 +55,25 @@ OK = ("pass", "pass_with_exceptions")
 S_NONE, S_MATCH, S_BLEND, S_UNIFORM = 0, 1, 2, 3
 
 
+def film_xfail(reason: str):
+    """xfail(strict=True) for an assertion the CURRENT pipeline fails on film24 (no mark on mini / full). The
+    A/V-offset variants (film24_av0 / _avm50 / _av150, FX-02) were not calibrated: non-strict there."""
+    return pytest.mark.xfail(FILM, reason=reason, strict=PROFILE == "film24")
+
+
 # ------------------------------------------------------------------------------------------------------
 # fixtures
 # ------------------------------------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def synthetic(request) -> dict:
-    if PROFILE not in ("mini", "full"):
-        raise ValueError(f"MATCH_CUTS_PROFILE must be mini or full, not {PROFILE!r}")
-    return request.getfixturevalue(f"synthetic_{PROFILE}")
+    if PROFILE in ("mini", "full", "film24"):
+        return request.getfixturevalue(f"synthetic_{PROFILE}")
+    import conftest
+    import synth
+    if PROFILE not in synth.PROFILES:
+        raise ValueError(f"MATCH_CUTS_PROFILE must be one of {sorted(synth.PROFILES)}, not {PROFILE!r}")
+    return conftest._synthetic(PROFILE)
 
 
 def _run_cli(py: str, syn: dict, out: Path, work: Path) -> subprocess.CompletedProcess:
@@ -66,10 +84,17 @@ def _run_cli(py: str, syn: dict, out: Path, work: Path) -> subprocess.CompletedP
 
 @pytest.fixture(scope="module")
 def e2e(venv_python, synthetic, tmp_path_factory) -> dict:
-    root = tmp_path_factory.mktemp(f"e2e_{PROFILE}")
+    reuse = os.environ.get("MATCH_CUTS_E2E_REUSE")
+    root = Path(reuse) if reuse else tmp_path_factory.mktemp(f"e2e_{PROFILE}")
     out, work = root / "output", root / "work"
     t0 = time.perf_counter()
-    proc = _run_cli(venv_python, synthetic, out, work)
+    if reuse:
+        log = root / "run.log"
+        text = log.read_text() if log.exists() else ""
+        rc = 0 if "EXIT 0" in text else (1 if "EXIT" in text else 0)
+        proc = subprocess.CompletedProcess([], rc, text, "")
+    else:
+        proc = _run_cli(venv_python, synthetic, out, work)
     elapsed = time.perf_counter() - t0
     truth = json.loads(Path(synthetic["truth"]).read_text())
     return {"proc": proc, "out": out, "work": work, "root": root, "truth": truth, "elapsed": elapsed,
@@ -122,14 +147,26 @@ def _segments(cutlist: dict) -> list[dict]:
     return sorted(cutlist["segments"], key=lambda s: (s["comp_in"], s["comp_out"]))
 
 
+def _truth_cut_range(truth: dict, k: int) -> tuple[int, int]:
+    """Frames where the truth cut at k may sit: [k, k], or a truth ambiguity (film24: the start of a freeze can
+    be any frame that already shows the held RAW frame -- identical output)."""
+    for c in truth["cuts"]:
+        if c["k"] == k and c.get("ambiguity"):
+            return int(c["ambiguity"][0]), int(c["ambiguity"][1])
+    return k, k
+
+
 def _match_segments(truth: dict, cutlist: dict) -> tuple[dict[int, dict], list[dict]]:
-    """truth segment id -> cutlist segment with the same comp_in and type; unmatched truth segments."""
+    """truth segment id -> cutlist segment with the same comp_in (or inside the truth cut's ambiguity) and type;
+    unmatched truth segments."""
     by_in: dict[int, list[dict]] = {}
     for s in cutlist["segments"]:
         by_in.setdefault(int(s["comp_in"]), []).append(s)
     matched, missing = {}, []
     for t in truth["segments"]:
-        cands = [s for s in by_in.get(t["comp_in"], []) if (s["type"] == "not_in_raw") == (t["type"] == "not_in_raw")]
+        lo, hi = _truth_cut_range(truth, t["comp_in"])
+        cands = [s for k in range(lo, hi + 1) for s in by_in.get(k, [])
+                 if (s["type"] == "not_in_raw") == (t["type"] == "not_in_raw")]
         if cands:
             matched[t["id"]] = cands[0]
         else:
@@ -238,6 +275,7 @@ def _inverse_apply(sim: dict, q: tuple[float, float]) -> np.ndarray:
 # tests
 # ------------------------------------------------------------------------------------------------------
 
+@film_xfail("FX-02/FX-03/FX-04/FX-08: the CLI exits 1 on film24 (criteria c2-c5 fail)")
 def test_cli_succeeds(e2e):
     proc = e2e["proc"]
     assert proc.returncode == 0, f"CLI exit code {proc.returncode} after {e2e['elapsed']:.0f}s{_tail(proc)}"
@@ -248,19 +286,22 @@ def test_coverage_and_totals(e2e, cutlist):
     n = truth["competitor"]["frames"]
     assert int(cutlist["competitor"]["frames"]) == n, "cutlist competitor frame count != truth"
     assert int(cutlist["raw"]["frames"]) == truth["raw"]["frames"], "cutlist RAW frame count != truth"
-    assert _fps(cutlist["competitor"]["fps"]) == Fraction(30) and _fps(cutlist["raw"]["fps"]) == Fraction(30000, 1001)
+    assert _fps(cutlist["competitor"]["fps"]) == Fraction(30) and \
+        _fps(cutlist["raw"]["fps"]) == _fps(truth["raw"]["fps"])
     cover = np.zeros(n, np.int32)
     for s in cutlist["segments"]:
         cover[int(s["comp_in"]):int(s["comp_out"])] += 1
-    tr = truth["transitions"][0]
     allowed = np.ones(n, np.int32)
-    allowed[tr["O"]:tr["O"] + tr["D"]] = 2
+    for tr in truth["transitions"]:
+        allowed[tr["O"]:tr["O"] + tr["D"]] = 2
     bad = np.nonzero(cover != allowed)[0]
     rows = [[int(k), int(cover[k]), int(allowed[k])] for k in bad]
     assert not rows, _table("coverage differs from truth (1 layer per frame, 2 in the crossfade overlap):",
                             ["comp_frame", "layers", "expected"], rows)
 
 
+@film_xfail("FX-03/FX-08: refine's m(k) leaves the RAW line in editor pans (time/translation confound), "
+            "pan frames NONE")
 def test_frame_map_equals_truth(e2e, frame_map):
     truth = e2e["truth"]
     status, raw = frame_map["status"], frame_map["raw"]
@@ -282,23 +323,32 @@ def test_frame_map_equals_truth(e2e, frame_map):
             continue
         if fr["alpha_b"] == 0 and st == S_BLEND:                       # frame O (pure A) inside the transition
             continue
+        if fr.get("class") == "gray":         # film24 gray zone: MATCH or uncertain both honest (test_film24_gray)
+            if st == S_MATCH and got != fr["raw_a"]:
+                rows.append([k, fr["seg"], kinds[fr["seg"]], fr["raw_a"], got, st, "gray: wrong frame"])
+            continue
         n_checked += 1
         if st != S_MATCH or got != fr["raw_a"]:
             rows.append([k, fr["seg"], kinds[fr["seg"]], fr["raw_a"], got, st,
                          f"off by {got - fr['raw_a']:+d}" if st == S_MATCH else "not MATCH"])
-    assert n_checked > 0.9 * n
+    assert n_checked > 0.85 * sum(1 for fr in truth["frames"] if fr["raw_a"] is not None)
     assert not rows, _table(f"FrameMap m(k) != truth on {len(rows)} frames (of {n_checked} matchable):",
                             ["k", "seg", "kind", "truth", "m(k)", "status", "note"], rows)
 
 
+@film_xfail("FX-03/FX-04/FX-06: spurious cuts inside editor pans, editor clips merged into placeholders")
 def test_cuts_exact(e2e, cutlist):
     truth = e2e["truth"]
     segs = _segments(cutlist)
     got_cuts = {int(s["comp_in"]): s for s in segs[1:]}
     want = {c["k"]: c for c in truth["cuts"]}
+    explained = set(want)
     rows = []
     for k, c in sorted(want.items()):
-        if k in got_cuts:
+        lo, hi = _truth_cut_range(truth, k)
+        hit = [g for g in got_cuts if lo <= g <= hi]
+        explained.update(hit)
+        if hit:
             continue
         amb = [s.get("cut_ambiguity") for s in segs if s.get("cut_ambiguity")]
         if any(a[0] <= k <= a[1] for a in amb):
@@ -306,14 +356,17 @@ def test_cuts_exact(e2e, cutlist):
         near = sorted(got_cuts, key=lambda x: abs(x - k))[:1]
         rows.append([k, c["type"], c["b_kind"], "missing", f"nearest reported cut {near[0]}" if near else "-"])
     for k, s in sorted(got_cuts.items()):
-        if k not in want:
+        if k not in explained:
             rows.append([k, "-", "-", "spurious", f"cutlist segment {s.get('id')} type {s.get('type')}"])
     assert not rows, _table("cut positions differ from truth (+-0 frames required):",
                             ["comp_frame", "truth type", "truth kind", "problem", "detail"], rows)
     matched, missing = _match_segments(truth, cutlist)
+    def end_ok(t: dict, got: int) -> bool:
+        lo, hi = _truth_cut_range(truth, t["comp_out"])
+        return lo <= got <= hi
     rows = [[t["id"], t["kind"], f"[{t['comp_in']},{t['comp_out']})",
              f"[{matched[t['id']]['comp_in']},{matched[t['id']]['comp_out']})"]
-            for t in truth["segments"] if t["id"] in matched and int(matched[t["id"]]["comp_out"]) != t["comp_out"]]
+            for t in truth["segments"] if t["id"] in matched and not end_ok(t, int(matched[t["id"]]["comp_out"]))]
     rows += [[t["id"], t["kind"], f"[{t['comp_in']},{t['comp_out']})", "no segment"] for t in missing]
     assert not rows, _table("segment ranges differ:", ["truth seg", "kind", "truth", "cutlist"], rows)
 
@@ -330,7 +383,7 @@ def test_ae_simulated_frames_equal_truth(e2e, cutlist):
         sim = _ae_frames(s, comp_fps, raw_fps)
         ties = set(int(x) for x in (s.get("tie_frames") or []))
         for i, k in enumerate(range(t["comp_in"], t["comp_out"])):
-            if k not in sim:
+            if k not in sim or truth["frames"][k].get("class") in ("blend", "gray"):
                 continue
             n_frames += 1
             want = t["raw_frames"][i]
@@ -377,6 +430,8 @@ def test_fullscreen_segment(e2e, cutlist, frame_map):
     canvas (corner radius 0) and region 1, sits in a fullscreen layout period, and shows the exact truth
     frames both in m(k) and in the AE simulation."""
     truth = e2e["truth"]
+    if FILM:
+        pytest.skip("film24 has no fullscreen chain (DESIGN §6.1)")
     fs = [t for t in truth["segments"] if t.get("kind") == "fullscreen"]
     assert len(fs) == 1, f"truth has {len(fs)} fullscreen segments (synthetic data older than SYNTH_VERSION 2?)"
     t = fs[0]
@@ -415,10 +470,13 @@ def test_fullscreen_segment(e2e, cutlist, frame_map):
                             ["field", "truth", "cutlist"], rows)
 
 
+@film_xfail("FX-02: per-segment lags carry the 86 ms A/V offset; short segments unmeasured")
 def test_audio_phase_lag(e2e, cutlist):
     """DESIGN §7 D3/D8: the synthetic audio starts at the NLE in-point (lower bound of the floor interval);
-    after the audio-informed phase every RAW segment's residual audio lag is within +-3 ms."""
+    after the audio-informed phase every RAW segment's residual audio lag is within +-3 ms. film24: the lag is
+    measured against the truth A/V offset (-86 ms: competitor audio late), i.e. |lag - offset| <= 3 ms."""
     truth = e2e["truth"]
+    want = float(((truth["audio"].get("av_offset") or {}).get("lag_ms")) or 0.0)
     matched, _ = _match_segments(truth, cutlist)
     rows = []
     for t in truth["segments"]:
@@ -427,7 +485,7 @@ def test_audio_phase_lag(e2e, cutlist):
             continue
         a = s.get("audio") or {}
         lag = a.get("lag_ms")
-        if lag is None or not math.isfinite(float(lag)) or abs(float(lag)) > 3.0:
+        if lag is None or not math.isfinite(float(lag)) or abs(float(lag) - want) > 3.0:
             rows.append([t["id"], t["kind"], lag, a.get("lag_ms_video"), a.get("phase_source"), a.get("corr"),
                          a.get("exception"), s.get("raw_in_seconds"), t["audio"]["raw_in_seconds"]])
     assert not rows, _table("audio lag after the audio-informed phase must be within +-3 ms per RAW segment:",
@@ -435,6 +493,7 @@ def test_audio_phase_lag(e2e, cutlist):
                              "raw_in_s", "truth audio raw_in_s"], rows)
 
 
+@film_xfail("FX-03/FX-06/FX-08: pan framing tens of px off without keys; blend slow motion fitted as v=0.2536")
 def test_speed_flip_framing(e2e, cutlist):
     truth = e2e["truth"]
     matched, _ = _match_segments(truth, cutlist)
@@ -446,7 +505,10 @@ def test_speed_flip_framing(e2e, cutlist):
             continue
         s = matched[t["id"]]
         v, vt = float(s["speed"]), t["speed"]
-        if abs(v / vt - 1) > 0.005:
+        if vt == 0:                                        # film24 freeze: a hold, v = 0 exactly
+            if v != 0:
+                rows.append([t["id"], t["kind"], "speed (freeze)", vt, v, ""])
+        elif abs(v / vt - 1) > 0.005:
             rows.append([t["id"], t["kind"], "speed", vt, v, f"{100 * (v / vt - 1):+.3f} %"])
         elif abs(v - vt) > 1e-9 * max(1.0, vt):
             rows.append([t["id"], t["kind"], "speed not snapped", vt, v, f"measured {s.get('speed_measured')}"])
@@ -482,6 +544,8 @@ def test_speed_flip_framing(e2e, cutlist):
 
 def test_crossfade(e2e, cutlist):
     truth = e2e["truth"]
+    if not truth["transitions"]:
+        pytest.skip(f"profile {PROFILE} has no crossfade")
     tr = truth["transitions"][0]
     O, D = tr["O"], tr["D"]
     segs = _segments(cutlist)
@@ -503,6 +567,7 @@ def test_crossfade(e2e, cutlist):
             f"crossfade alpha (incoming) {alpha} != truth {tr['alpha']}"
 
 
+@film_xfail("FX-03/FX-08: NOT-IN-RAW placeholders inside the pan, punch and gray chains")
 def test_not_in_raw_placeholder(e2e, cutlist):
     truth = e2e["truth"]
     want = [(r["comp_in"], r["comp_out"]) for r in truth["not_in_raw"]]
@@ -510,6 +575,7 @@ def test_not_in_raw_placeholder(e2e, cutlist):
     assert got == want, f"NOT-IN-RAW placeholders {got} != truth {want}"
 
 
+@film_xfail("FX-01..FX-09: c2-c5 fail on film24")
 def test_verify_criteria(verify):
     crit = verify.get("criteria", {})
     rows = []
@@ -529,6 +595,7 @@ def test_verify_criteria(verify):
                             ["criterion", "status", "details"], rows)
 
 
+@film_xfail("FX-02/FX-09: J/L offsets from the 48 ms switch delay; added music mis-detected under the A/V offset")
 def test_audio_truth(e2e, cutlist):
     truth = e2e["truth"]
     matched, _ = _match_segments(truth, cutlist)
@@ -541,7 +608,7 @@ def test_audio_truth(e2e, cutlist):
         for f in ("in_offset_frames", "out_offset_frames"):
             if int(a.get(f) or 0) != ta[f]:
                 rows.append([t["id"], t["kind"], f, ta[f], a.get(f)])
-        if t["type"] == "raw" and t["speed"] != 1.0 and a.get("pitch_preserved") is not False:
+        if t["type"] == "raw" and ta.get("pitch_preserved") is False and a.get("pitch_preserved") is not False:
             rows.append([t["id"], t["kind"], "pitch_preserved", False, a.get("pitch_preserved")])
         if t["type"] == "not_in_raw" and a.get("exception") != "not_in_raw":
             rows.append([t["id"], t["kind"], "exception", "not_in_raw", a.get("exception")])
@@ -624,3 +691,327 @@ def test_second_run_identical_cutlist(e2e, cutlist):
             diffs.append([path, str(x)[:80], str(y)[:80]])
     walk(a, b, "cutlist")
     assert not diffs, _table("second run produced a different cutlist.json:", ["path", "run 1", "run 2"], diffs)
+
+
+# ======================================================================================================
+# film24 truth assertions (DESIGN §6.1). Judged against truth.json -- never against refine's own FrameMap.
+# ======================================================================================================
+
+# editor-clip groups (truth segment kinds) of the film24 edit
+FILM_GROUPS = {
+    "normal": ("normal",), "short": ("short",), "pan": ("pan",), "pan_accel": ("pan_accel",),
+    "pan_step": ("pan_step_pan", "pan_step_back"), "punch_pan": ("punch_pan_pre", "punch_pan"),
+    "two_clip_pans": ("two_clip_pan_a", "two_clip_pan_b"), "raw_zoom_roll": ("raw_zoom_roll",),
+    "line_across_shots": ("line_a", "line_dark", "line_c"), "freeze": ("freeze_play", "freeze"),
+    "blend_slow": ("blend_slow",), "gray": ("gray",),
+}
+
+# Assertions the CURRENT pipeline fails on film24 -> the fix that must make them pass (strict xfail).
+_PAN = ("FX-03/FX-04 (+FX-08): editor pan over a moving RAW shot -> RAW j+-1 hidden by compensating shifts, "
+        "1-3 frame segments and NOT-IN-RAW placeholders")
+_ACCEL = "FX-03/FX-04: accelerating editor pan -> wrong RAW frames under compensating shift / rotation, slivers"
+_STEP = "FX-03/FX-06 (+FX-08): the slow pan before the framing step becomes a NOT-IN-RAW placeholder"
+_PUNCH = "FX-03/FX-06 (+FX-08): the editor pan after the x1.7 punch-in becomes a NOT-IN-RAW placeholder"
+_TWO = "FX-03/FX-04 (+FX-08): both pan clips on one RAW line become NOT-IN-RAW placeholders / slivers"
+FILM_XFAIL: dict[tuple[str, str], str] = {
+    **{(t, "pan"): _PAN for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    **{(t, "pan_accel"): _ACCEL for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    **{(t, "pan_step"): _STEP for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    **{(t, "punch_pan"): _PUNCH for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    **{(t, "two_clip_pans"): _TWO for t in ("frames_exact", "one_segment_per_clip", "framing")},
+    ("one_segment_per_clip", "gray"): "FX-08: the gray-zone chain becomes a NOT-IN-RAW placeholder",
+    ("speed", "pan_accel"): "FX-03/FX-04: fake 2.0x segments from the time/translation confound",
+    ("speed", "blend_slow"): "FX-08: the frame-blend slow motion is fitted as v=0.2536 instead of 0.25 / frame_blend",
+}
+
+
+def _film_params(test: str, groups=None) -> list:
+    return [pytest.param(g, marks=film_xfail(FILM_XFAIL[(test, g)]) if (test, g) in FILM_XFAIL else ())
+            for g in (groups or FILM_GROUPS)]
+
+
+def _need_film() -> None:
+    if not FILM:
+        pytest.skip("film24 truth assertion (MATCH_CUTS_PROFILE=film24)")
+
+
+def _group_segments(truth: dict, group: str) -> list[dict]:
+    segs = [t for t in truth["segments"] if t["kind"] in FILM_GROUPS[group]]
+    assert segs, f"truth has no {group} segment"
+    return segs
+
+
+def _covering(cutlist: dict, k: int) -> list[dict]:
+    return [s for s in cutlist["segments"] if int(s["comp_in"]) <= k < int(s["comp_out"])]
+
+
+def _ae_frame_at(seg: dict, k: int, comp_fps: Fraction, raw_fps: Fraction) -> int | None:
+    """RAW frame AE shows at comp frame k on a RAW segment (None for placeholders)."""
+    return _ae_frames(seg, comp_fps, raw_fps).get(k) if seg.get("type") == "raw" else None
+
+
+@pytest.mark.parametrize("group", _film_params("frames_exact"))
+def test_film24_frames_exact(e2e, cutlist, group):
+    """Every truth frame of the group (exact / static class) is shown by a RAW cutlist segment whose AE
+    simulation gives exactly the truth RAW frame. Blend weights are not judged here; gray-zone frames (FX-08:
+    matched OR honestly uncertain) only where a RAW segment claims them."""
+    _need_film()
+    truth = e2e["truth"]
+    cf, rf = _fps(cutlist["competitor"]["fps"]), _fps(cutlist["raw"]["fps"])
+    rows, n = [], 0
+    for t in _group_segments(truth, group):
+        for k in range(t["comp_in"], t["comp_out"]):
+            fr = truth["frames"][k]
+            cov = _covering(cutlist, k)
+            if fr["raw_a"] is None or fr["class"] not in ("exact", "static", "gray") or \
+                    (fr["class"] == "gray" and not any(s["type"] == "raw" for s in cov)):
+                continue
+            n += 1
+            got = [_ae_frame_at(s, k, cf, rf) for s in cov]
+            if len(cov) != 1 or got[0] != fr["raw_a"]:
+                rows.append([k, t["kind"], fr["raw_a"], got, [f"S{s.get('id')} {s['type']}" for s in cov]])
+    assert n > 0 or group == "gray"
+    assert not rows, _table(f"{group}: {len(rows)} of {n} frames differ from truth (AE simulation of the cutlist):",
+                            ["k", "clip", "truth", "AE", "segments"], rows)
+
+
+def _clip_core(truth: dict, t: dict) -> tuple[tuple[int, int], tuple[int, int], range]:
+    """(allowed comp_in range, allowed comp_out range, frames that belong to the clip whatever the truth-ambiguous
+    boundary choice) of a truth editor clip."""
+    lo_in, hi_in = _truth_cut_range(truth, t["comp_in"])
+    lo_out, hi_out = _truth_cut_range(truth, t["comp_out"])
+    return (lo_in, hi_in), (lo_out, hi_out), range(hi_in, lo_out)
+
+
+@pytest.mark.parametrize("group", _film_params("one_segment_per_clip"))
+def test_film24_one_segment_per_editor_clip(e2e, cutlist, group):
+    """One cutlist segment per editor clip: the same range (a truth-ambiguous freeze start may sit on any frame
+    that already shows the held RAW frame), no extra cut inside the clip, never a placeholder."""
+    _need_film()
+    truth = e2e["truth"]
+    rows = []
+    for t in _group_segments(truth, group):
+        (lo_in, hi_in), (lo_out, hi_out), core = _clip_core(truth, t)
+        segs = {id(s): s for k in core for s in _covering(cutlist, k)}
+        # FX-08: the gray-zone chain may be ONE honest uncertain segment instead of a match, never a placeholder
+        types = ("raw",) if group != "gray" else tuple({s["type"] for s in segs.values()} - {"not_in_raw"})
+        ok = len(segs) == 1 and all(s["type"] in types and lo_in <= int(s["comp_in"]) <= hi_in and
+                                    lo_out <= int(s["comp_out"]) <= hi_out for s in segs.values())
+        if not ok:
+            rows.append([t["id"], t["kind"], f"[{t['comp_in']},{t['comp_out']})",
+                         " ".join(f"[{s['comp_in']},{s['comp_out']}){'N' if s['type'] != 'raw' else ''}"
+                                  for s in sorted(segs.values(), key=lambda s: s["comp_in"]))[:160]])
+    assert not rows, _table(f"{group}: editor clips not reproduced as single segments:",
+                            ["truth seg", "kind", "truth range", "cutlist segments"], rows)
+
+
+@pytest.mark.parametrize("group", _film_params("framing", [g for g in FILM_GROUPS if g != "gray"]))
+def test_film24_framing_vs_truth(e2e, cutlist, group):
+    """c4 against the TRUTH framing: on every frame the cutlist's (AE-interpolated) framing matches the truth
+    Sim of that frame within 1 % scale / 4 px (RAW point at the box centre) and has no rotation (> 0.2 deg);
+    frames covered by a placeholder fail."""
+    _need_film()
+    truth = e2e["truth"]
+    box = truth["layout"]["box"]
+    centre = (box["x"] + box["w"] / 2, box["y"] + box["h"] / 2)
+    rows = []
+    for t in _group_segments(truth, group):
+        worst, uncovered = (0.0, 0.0, 0.0, None), []
+        for k in range(t["comp_in"], t["comp_out"]):
+            ts = truth["frames"][k]["sim"]
+            cov = [s for s in _covering(cutlist, k) if s["type"] == "raw" and s.get("transform")]
+            if not cov:
+                uncovered.append(k)
+                continue
+            cs = _sim_at(cov[0], k)
+            dp = float(np.linalg.norm(_apply(cs, _inverse_apply(ts, centre)) - np.asarray(centre)))
+            ds = abs(cs["scale"] / ts["scale"] - 1)
+            rot = abs(cs.get("rotation_deg", 0.0) - ts.get("rotation_deg", 0.0))
+            if dp > worst[0] or ds > worst[1] or rot > worst[2]:
+                worst = (max(dp, worst[0]), max(ds, worst[1]), max(rot, worst[2]), k)
+        if worst[0] > 4.0 or worst[1] > 0.01 or worst[2] > 0.2:
+            rows.append([t["id"], t["kind"], worst[3], f"pos {worst[0]:.2f} px, scale {100 * worst[1]:.3f} %, "
+                         f"rot {worst[2]:.3f} deg", "+-4 px / 1 % / 0.2 deg"])
+        if uncovered:
+            rows.append([t["id"], t["kind"], f"{len(uncovered)} frames {uncovered[0]}..{uncovered[-1]}",
+                         "no RAW segment / transform", ""])
+    assert not rows, _table(f"{group}: framing differs from the truth Sim:", ["seg", "kind", "k", "error", "tol"],
+                            rows)
+
+
+@pytest.mark.parametrize("group", _film_params("speed"))
+def test_film24_speed(e2e, cutlist, group):
+    """Every RAW cutlist segment covering the group plays at the truth speed (snapped exactly: 1, 0.25, freeze
+    0) -- no fake 0.667 / 2.0 / freeze from a time-vs-translation confound."""
+    _need_film()
+    truth = e2e["truth"]
+    rows = []
+    for t in _group_segments(truth, group):
+        core = _clip_core(truth, t)[2]
+        for s in {id(s): s for k in core for s in _covering(cutlist, k)}.values():
+            if s["type"] == "raw" and abs(float(s["speed"]) - t["speed"]) > 1e-9:
+                rows.append([t["id"], t["kind"], t["speed"], f"S{s.get('id')} [{s['comp_in']},{s['comp_out']})",
+                             s["speed"]])
+    assert not rows, _table(f"{group}: segment speed differs from the truth:",
+                            ["truth seg", "kind", "truth v", "segment", "v"], rows)
+
+
+def _av_lag_truth(truth: dict) -> float:
+    return float(truth["audio"]["av_offset"]["lag_ms"])
+
+
+def _published_av_offset_ms(cutlist: dict) -> float | None:
+    """The run-level A/V offset the cutlist publishes (FX-02: cutlist.audio.av_offset, xcorr convention lag_ms;
+    a few spellings accepted until the schema settles). None when absent."""
+    au = cutlist.get("audio") or {}
+    off = au.get("av_offset")
+    if isinstance(off, (int, float)):
+        return float(off)
+    if isinstance(off, dict):
+        for key in ("lag_ms", "lag_ms_offset", "centre_ms", "center_ms", "value_ms"):
+            if isinstance(off.get(key), (int, float)):
+                return float(off[key])
+    return None
+
+
+@film_xfail("FX-02: no global A/V offset is estimated or published")
+def test_film24_av_offset_published(e2e, cutlist):
+    """FX-02: the cutlist publishes ONE global A/V offset equal to the truth split delay (content 38 ms + post-edit
+    48 ms = competitor audio 86 ms late: lag -86 ms) within 0.5 ms."""
+    _need_film()
+    want = _av_lag_truth(e2e["truth"])
+    got = _published_av_offset_ms(cutlist)
+    assert got is not None and abs(got - want) <= 0.5, f"published A/V offset {got} ms, truth {want} ms"
+
+
+@film_xfail("FX-02: per-segment lags are not judged against a global A/V offset")
+def test_film24_c5_with_measured_offset(e2e, verify):
+    """c5 passes on the film24 audio once the measured A/V offset is applied (no 'confidently misaligned' segment,
+    no D3 clamp warning 'the audio implies raw_in ... outside the video-feasible interval')."""
+    _need_film()
+    c5 = (verify.get("criteria") or {}).get("c5_audio") or {}
+    assert c5.get("status") in OK, json.dumps(c5.get("details"), default=str)[:800]
+    clamps = [w for w in _warnings(e2e) if "audio implies raw_in" in w]
+    assert not clamps, clamps[:5]
+
+
+def _warnings(e2e: dict) -> list[str]:
+    rep = e2e["out"] / "report.md"
+    text = rep.read_text() if rep.exists() else ""
+    return [ln.strip() for ln in (text + "\n" + e2e["proc"].stdout).splitlines() if "audio implies raw_in" in ln]
+
+
+@film_xfail("FX-02/FX-09: J/L detection has no switch baseline (48 ms post-edit delay -> fake L-cuts)")
+def test_film24_jl_cuts_equal_truth(e2e, cutlist):
+    """FX-09: the detected J/L cuts equal the truth exactly: the one genuine 6-frame L-cut (A.out = B.in = +6)
+    and nothing else -- the uniform 48 ms post-edit switch delay is a baseline, not 1-2 frame L-cuts."""
+    _need_film()
+    truth = e2e["truth"]
+    want = {d["cut"]: d["offset_frames"] for d in truth["audio"]["jl_cuts"]}
+    rows = []
+    for s in _segments(cutlist):
+        a = s.get("audio") or {}
+        out_off, in_off = int(a.get("out_offset_frames") or 0), int(a.get("in_offset_frames") or 0)
+        if out_off != want.get(int(s["comp_out"]), 0):
+            rows.append([f"S{s.get('id')} out", s["comp_out"], want.get(int(s["comp_out"]), 0), out_off])
+        if in_off != want.get(int(s["comp_in"]), 0):
+            rows.append([f"S{s.get('id')} in", s["comp_in"], want.get(int(s["comp_in"]), 0), in_off])
+    assert not rows, _table("J/L offsets differ from truth:", ["segment", "cut", "truth", "cutlist"], rows)
+
+
+def test_film24_dark_shot_matched_on_its_line(e2e, cutlist):
+    """FX-08 guard: the dark low-texture shot inside the v = 1 line is shown by v = 1 RAW segments -- never a
+    NOT-IN-RAW placeholder or a freeze."""
+    _need_film()
+    t = _group_segments(e2e["truth"], "line_across_shots")[1]
+    assert t["kind"] == "line_dark"
+    bad = [(s.get("id"), s["type"], s.get("speed")) for k in range(t["comp_in"], t["comp_out"])
+           for s in _covering(cutlist, k) if s["type"] != "raw" or float(s["speed"]) != 1.0]
+    assert not bad, f"dark shot [{t['comp_in']},{t['comp_out']}) covered by {sorted(set(bad))}"
+
+
+def test_film24_no_fake_freeze(e2e, cutlist):
+    """FX-08 guard: v = 0 only on the true freeze (incl. its ambiguous start); the blend slow motion and every other
+    chain keep moving."""
+    _need_film()
+    truth = e2e["truth"]
+    fz = _group_segments(truth, "freeze")[1]
+    lo, _ = _truth_cut_range(truth, fz["comp_in"])
+    bad = [(s.get("id"), s["comp_in"], s["comp_out"]) for s in cutlist["segments"]
+           if s["type"] == "raw" and float(s["speed"]) == 0.0 and not (lo <= int(s["comp_in"]) and
+                                                                     int(s["comp_out"]) <= fz["comp_out"])]
+    assert not bad, f"v = 0 segments outside the true freeze [{lo},{fz['comp_out']}): {bad}"
+
+
+def test_film24_true_freeze_is_v0(e2e, cutlist):
+    """The true 10-frame freeze (under an animated caption) stays a freeze: its frames are covered by v = 0
+    (or remap-hold) segments showing the held RAW frame."""
+    _need_film()
+    truth = e2e["truth"]
+    fz = _group_segments(truth, "freeze")[1]
+    cf, rf = _fps(cutlist["competitor"]["fps"]), _fps(cutlist["raw"]["fps"])
+    rows = []
+    for k in range(fz["comp_in"], fz["comp_out"]):
+        cov = _covering(cutlist, k)
+        if len(cov) != 1 or (float(cov[0]["speed"]) != 0.0 and not cov[0].get("time_remap_keys")) or \
+                _ae_frame_at(cov[0], k, cf, rf) != truth["frames"][k]["raw_a"]:
+            rows.append([k, [(s.get("id"), s["type"], s.get("speed")) for s in cov]])
+    assert not rows, rows
+
+
+def test_film24_foreign_lookalike_never_matched(e2e, cutlist, frame_map):
+    """The NOT-IN-RAW lookalike (gray-zone ZNCC against its RAW model shot) is a placeholder and never MATCH."""
+    _need_film()
+    truth = e2e["truth"]
+    t = next(s for s in truth["segments"] if s.get("lookalike_shot") is not None)
+    bad = [k for k in range(t["comp_in"], t["comp_out"])
+           if any(s["type"] == "raw" for s in _covering(cutlist, k)) or int(frame_map["status"][k]) == S_MATCH]
+    assert not bad, f"lookalike frames matched to RAW: {bad}"
+
+
+@film_xfail("FX-08: the sharpened gray-zone chain becomes a NOT-IN-RAW placeholder")
+def test_film24_gray_chain_never_not_in_raw(e2e, cutlist):
+    """FX-08: the gray-zone chain (truth ZNCC 0.65-0.90: motion-blurred RAW, sharpened competitor) is never a
+    NOT-IN-RAW placeholder: matched (detail score) or an honest 'uncertain' segment."""
+    _need_film()
+    t = _group_segments(e2e["truth"], "gray")[0]
+    bad = [k for k in range(t["comp_in"], t["comp_out"])
+           if any(s["type"] == "not_in_raw" for s in _covering(cutlist, k))]
+    assert not bad, f"gray chain frames under a NOT-IN-RAW placeholder: {bad}"
+
+
+@film_xfail("FX-07/FX-04: segmentation cuts between the two frames of pulldown repeat pairs")
+def test_film24_no_cut_inside_repeat_pair(e2e, cutlist):
+    """FX-07: no time cut between the two frames of a competitor pulldown repeat pair (24 -> 30 cadence), except
+    where the truth itself cuts (a framing step may sit there)."""
+    _need_film()
+    truth = e2e["truth"]
+    truth_cuts = {c["k"] for c in truth["cuts"]}
+    got = {int(s["comp_in"]) for s in cutlist["segments"]}
+    bad = [p for p in truth["pulldown"]["pairs"] if p[1] in got and p[1] not in truth_cuts]
+    assert not bad, f"{len(bad)} cuts inside repeat pairs: {bad[:20]}"
+
+
+@film_xfail("FX-01: verification compares the recreation with refine's own measurement")
+def test_film24_verify_flags_every_wrong_frame(e2e, cutlist, verify):
+    """FX-01: every RAW-segment frame whose AE frame differs from the truth is reported by verification (s9_3
+    failed frames or s9_2 mismatches) -- a wrong RAW frame hidden behind a compensating shift must not pass."""
+    _need_film()
+    truth = e2e["truth"]
+    cf, rf = _fps(cutlist["competitor"]["fps"]), _fps(cutlist["raw"]["fps"])
+    checks = verify.get("checks") or {}
+    flagged = set(int(k) for k in (checks.get("s9_3_visual") or {}).get("failed_frames") or [])
+    s92 = checks.get("s9_2_ae_sim") or {}
+    for src in ("plan", "mock"):
+        for m in ((s92.get(src) or {}).get("mismatches") or []):
+            if m.get("k") is not None:
+                flagged.add(int(m["k"]))
+    wrong = []
+    for fr in truth["frames"]:
+        if fr["raw_a"] is None or fr["class"] not in ("exact", "static"):
+            continue
+        cov = [s for s in _covering(cutlist, fr["k"]) if s["type"] == "raw"]
+        if cov and _ae_frame_at(cov[0], fr["k"], cf, rf) != fr["raw_a"]:
+            wrong.append(fr["k"])
+    missed = [k for k in wrong if k not in flagged]
+    assert not missed, f"{len(missed)} of {len(wrong)} wrong RAW frames pass verification: {missed[:30]}"
