@@ -553,6 +553,9 @@ def test_audio_truth(e2e, cutlist):
     if covered.mean() < 0.8:
         rows.append(["-", "-", "added_audio music", "0..N (-12 dB)",
                      f"{json.dumps(cutlist.get('added_audio'))[:200]} covers {100 * covered.mean():.0f} %"])
+    av = (cutlist.get("audio") or {}).get("av_offset") or {}
+    if av.get("lag_ms") != 0.0 or av.get("status") != "zero":       # DESIGN §7 D9: no A/V offset -> exactly 0
+        rows.append(["-", "-", "audio.av_offset", "status zero, lag_ms 0.0", f"{av.get('status')} {av.get('lag_ms')}"])
     assert not rows, _table("audio analysis differs from truth:", ["seg", "kind", "field", "truth", "cutlist"], rows)
 
 

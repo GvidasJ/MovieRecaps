@@ -65,7 +65,8 @@ PHASE_TAU = 1e-6            # frame tolerance of the phase LP (DESIGN §2.1)
 DEFAULT_SEG_AUDIO = {"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None,
                      "lag_ms": None, "corr": None, "exception": None,
                      "phase_source": None,      # 'audio' | 'video': what placed raw_in inside its interval (D3)
-                     "lag_ms_video": None}      # lag at the video-only raw_in (lag_ms = residual after D3)
+                     "lag_ms_video": None}      # lag at the video-only raw_in (lag_ms = residual after D3); both
+                                                # relative to the run's A/V offset cutlist.audio.av_offset (D9)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -809,22 +810,26 @@ def _refresh_phase_after_move(seg: Segment, fm: FrameMap, comp_fps: Fraction, ra
 
 def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameMap, comp_y: np.ndarray | None,
                          raw_y: np.ndarray | None, sr: int, comp_fps: Fraction, raw_fps: Fraction, cfg: Config,
-                         dlog: DecisionLog, phase=None, resample: Callable | None = None) -> tuple[list[int], list[str]]:
+                         dlog: DecisionLog, phase=None, resample: Callable | None = None,
+                         av_offset_s: float = 0.0) -> tuple[list[int], list[str]]:
     """DESIGN §7 D3: pick raw_in inside its feasible interval from the sample-precise audio lag.
 
     The video phase solve leaves raw_in at the centre of the floor∩round interval, a quarter RAW frame
     after the frame boundary an NLE in-point sits on (8.3 ms at 30p, 10.4 ms at 24p). For every 'raw'
     stretch segment whose first-pass audio correlation is >= cfg.verify_audio_strong_corr with no audio
-    exception, ``raw_in := raw_in + v * lag`` (lag_ms > 0 = the rebuilt audio is late, i.e. raw_in too
-    small), clamped into raw_in_interval_both (else raw_in_interval) with a margin of
-    max(ae_min_margin_ms, min(5 % of that interval's width, 5 % of a RAW frame)) from each edge
-    (``audio_phase_margin_s``) and into the range that keeps every correctly shown matched frame
-    (refine's measurement) on its RAW frame. Segments whose interval is wider than +-100 ms in
-    competitor time (static / ambiguous-identical shots) also get a wider search, centred on that
-    feasible range and covering all of it (half-width capped at AUDIO_PHASE_WIDE_MAX_S).
-    Sets seg.audio['phase_source'] ('audio'|'video') and seg.audio['lag_ms_video'] (the first-pass lag);
-    the caller re-runs analyze_segments_audio so lag_ms becomes the residual. Returns (ids moved,
-    warnings)."""
+    exception, ``raw_in := raw_in + v * residual`` (lag_ms = the residual lag after the run's A/V offset
+    ``av_offset_s`` (D9); > 0 = the rebuilt audio is late, i.e. raw_in too small), clamped into
+    raw_in_interval_both (else raw_in_interval) with a margin of max(ae_min_margin_ms, min(5 % of that
+    interval's width, 5 % of a RAW frame)) from each edge (``audio_phase_margin_s``) and into the range
+    that keeps every correctly shown matched frame (refine's measurement) on its RAW frame. A target
+    outside that video-feasible range by more than cfg.audio_lag_tol_ms (competitor time) does not move
+    raw_in at all (the audio says nothing usable about the phase); those segments are listed in ONE
+    run-level warning. Segments whose interval is wider than +-100 ms in competitor time (static /
+    ambiguous-identical shots) also get a wider search, centred on that feasible range (+ the offset) and
+    covering all of it (half-width capped at AUDIO_PHASE_WIDE_MAX_S).
+    Sets seg.audio['phase_source'] ('audio' when raw_in moved | 'video') and seg.audio['lag_ms_video'] (the
+    first-pass residual); the caller re-runs analyze_segments_audio so lag_ms becomes the residual at the
+    new raw_in. Returns (ids moved, warnings)."""
     if phase is None:
         from . import phase_solve as phase
     per = (audio_result or {}).get("segments") or {}
@@ -834,6 +839,8 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     raw = np.zeros(0, np.float32) if raw_y is None else np.asarray(raw_y, np.float32).reshape(-1)
     moved: list[int] = []
     warnings: list[str] = []
+    far: list[tuple[int, float]] = []          # (segment, ms outside the feasible range): kept at the video phase
+    tol_ms = float(getattr(cfg, "audio_lag_tol_ms", 10.0))
     for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
         if s.type != "raw":
             continue
@@ -884,9 +891,11 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             # centred on the reachable range (not on raw_in) and covering all of it: an in-point anywhere in
             # a wide ambiguous interval is found even when raw_in sits off-centre
             c_lo, c_hi = (lo_e, hi_e) if hi_e > lo_e else (interval[0], interval[1])
-            centre_lag = (0.5 * (c_lo + c_hi) - old) / v
+            centre_lag = (0.5 * (c_lo + c_hi) - old) / v + float(av_offset_s)
             max_lag = min(0.5 * (c_hi - c_lo) / v + AUDIO_PHASE_WIDE_PAD_S, AUDIO_PHASE_WIDE_MAX_S)
             wide = wide_audio_lag(s, comp, raw, sr, comp_fps, max_lag, resample=resample, centre_lag_s=centre_lag)
+            if wide is not None:
+                wide = (wide[0] - float(av_offset_s), wide[1])           # residual after the run's offset
             ev["wide_search"] = {"max_lag_s": round(max_lag, 6), "centre_lag_ms": round(centre_lag * 1000.0, 3),
                                  "lag_ms": None if wide is None else round(wide[0] * 1000.0, 3),
                                  "corr": None if wide is None else round(wide[1], 4)}
@@ -897,6 +906,14 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             continue
         lag_s, corr, how = cand
         target = old + v * lag_s
+        out_ms = max(lo_e - target, target - hi_e, 0.0) / v * 1000.0
+        ev.update(raw_in_audio_target=round(target, 9), outside_ms=round(out_ms, 3), av_offset_ms=round(float(av_offset_s) * 1000.0, 3))
+        if out_ms > tol_ms:
+            # the audio implies an in-point the picture rules out: keep the video placement (never shrink the
+            # AE margin towards an edge the audio does not actually reach)
+            far.append((int(s.id), out_ms if target > hi_e else -out_ms))
+            skip(f"audio target {out_ms:.1f} ms outside the video-feasible range (> {tol_ms:g} ms)")
+            continue
         if hi_e - lo_e <= 2 * margin:
             skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.3f} ms is not wider than 2 x margin {margin * 1000:.3f} ms")
             continue
@@ -911,7 +928,7 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             continue
         clamped = abs(new - target) > 5e-10
         au["phase_source"] = "audio"
-        rec = dict(ev, raw_in_audio_target=round(target, 9), raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
+        rec = dict(ev, raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
                    lag_ms_used=round(lag_s * 1000.0, 3), corr_used=round(corr, 4), source=how, interval=kind,
                    interval_s=[round(interval[0], 9), round(interval[1], 9)], margin_ms=round(margin * 1000.0, 6),
                    preserved_range_s=[None if not math.isfinite(p_lo) else round(p_lo, 9),
@@ -928,9 +945,13 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
         if how == "xcorr_wide":
             s.notes = _append_note(s.notes, f"raw_in placed by a wide audio search (lag {lag_s * 1000:+.1f} ms "
                                             f"inside a {width * 1000:.0f} ms feasible interval)")
-        if clamped and abs(target - new) * 1000.0 > float(getattr(cfg, "audio_lag_tol_ms", 10.0)):
-            warnings.append(f"S{s.id:02d}: the audio implies raw_in {target:.6f}s, {abs(target - new) * 1000:.1f} ms "
-                            f"outside the video-feasible interval (kept at {new:.6f}s)")
+    if far:
+        shown = ", ".join(f"S{i:02d} {d:+.1f} ms" for i, d in far[:12]) + (f" (+{len(far) - 12} more)" if len(far) > 12 else "")
+        warnings.append(f"audio-informed phase (D3): {len(far)} segment(s) keep their video phase because their audio "
+                        f"in-point lies more than {tol_ms:g} ms outside the video-feasible interval after the run's "
+                        f"A/V offset {float(av_offset_s) * 1000.0:+.1f} ms ({shown})")
+        dlog.record("phase_solve", "audio_phase_far", segments=[i for i, _ in far], outside_ms=[round(d, 3) for _, d in far],
+                    av_offset_ms=round(float(av_offset_s) * 1000.0, 3), tol_ms=tol_ms)
     return moved, warnings
 
 
@@ -1072,8 +1093,10 @@ def build_cutlist(ctx: Context, segments: list[Segment], audio_result: dict, seg
         "fps_mode": cfg.fps_mode, "main_fps": fps_str(main_fps), "fps_source_max_error_s": max_err,
         "ae_time_mode": cfg.ae_time_mode, "ae_min_margin_ms": cfg.ae_min_margin_ms,
         "criteria_exact": bool(main_fps == comp_fps),
+        "audio_sync": str(getattr(cfg, "audio_sync", "raw") or "raw"),     # D9: raw | competitor (export audio)
     }
-    audio_block = {k: v for k, v in (audio_result or {}).items() if k not in ("segments", "added_audio")}
+    audio_block = {k: v for k, v in (audio_result or {}).items()
+                   if k not in ("segments", "added_audio") and not str(k).startswith("_")}
     audio_block.setdefault("status", "ok")
     audio_block.setdefault("notes", [])
     audio_block["analysis_sr"] = int(ctx.audio_sr)
@@ -1135,6 +1158,27 @@ def apply_segment_audio(segments: list[Segment], audio_result: dict) -> None:
             s.audio = {**DEFAULT_SEG_AUDIO, **(s.audio or {}), **upd}
 
 
+def rebase_segment_lags(segments: list[Segment], audio_result: dict, delta_ms: float) -> None:
+    """Per-segment residual lags measured around one offset, re-expressed around another (DESIGN §7 D9):
+    lag_ms += delta_ms (= old offset - new offset, ms) in audio_result and on the segments."""
+    per = (audio_result or {}).get("segments", {}) or {}
+    dicts = {id(d): d for d in list(per.values()) + [s.audio for s in segments if s.audio]}
+    for d in dicts.values():
+        if d.get("lag_ms") is not None:
+            d["lag_ms"] = round(float(d["lag_ms"]) + float(delta_ms), 3)
+
+
+def published_av_offset(offset: dict, audio_result: dict, cfg: Config) -> dict:
+    """cutlist.audio.av_offset (DESIGN §7 D9): the run's measured offset (xcorr convention, ms), its
+    interval and support, the audio switch baseline of the final pass and the export sync mode."""
+    pub = {k: v for k, v in (offset or {}).items() if k != "lag_s"}
+    sw = (audio_result or {}).get("_switch_baseline") or {}
+    pub["switch_baseline_ms"] = sw.get("ms")
+    pub["switch_baseline"] = {k: v for k, v in sw.items() if k != "ms"}
+    pub["sync_mode"] = str(getattr(cfg, "audio_sync", "raw") or "raw")
+    return pub
+
+
 def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debug_dir: Path
                          ) -> tuple[FrameMap, list[Segment], dict, Cutlist]:
     """S5.4 -> S6: segmentation + framing, phase solve, audio per segment, Cutlist.
@@ -1153,22 +1197,37 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
         seg_warn.extend(solve_segment_phase(s, fm, ctx.comp_fps, ctx.raw_fps, cfg, dlog))
     comp_y = ctx.comp_audio if ctx.comp_audio is not None else np.zeros(0, np.float32)
     raw_y = ctx.raw_audio if ctx.raw_audio is not None else np.zeros(0, np.float32)
-    audio_result = audio_align.analyze_segments_audio(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog)
-    audio_result = audio_result or {}
+
+    def analyse(offset_s: float, pass_name: str) -> dict:
+        return audio_align.analyze_segments_audio(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog,
+                                                  av_offset_s=offset_s, pass_name=pass_name) or {}
+    # D9: the competitor's global A/V offset -- a prior from the S5.1 windows centres the first pass, the
+    # precise offset comes from that pass; every later audio consumer works on residuals around it
+    prior = audio_align.av_offset_prior(ctx.hints, segments, ctx.comp_fps, cfg, dlog)
+    g0 = float(prior["lag_s"])
+    audio_result = analyse(g0, "video_phase")
     apply_segment_audio(segments, audio_result)
+    offset = audio_align.av_offset_estimate(segments, audio_result, cfg, dlog, prior=prior)
+    g = float(offset["lag_s"])
+    if abs(g - g0) > 1e-3:
+        # the first pass was centred elsewhere: redo it around g (its exceptions are judged on the residual)
+        audio_result = analyse(g, "video_phase")
+        apply_segment_audio(segments, audio_result)
+    elif g != g0:
+        rebase_segment_lags(segments, audio_result, (g0 - g) * 1000.0)
     # D3: audio-informed phase inside the video-feasible interval, then re-measure (lag_ms = residual)
     moved, warns = audio_informed_phase(segments, audio_result, fm, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps,
-                                        ctx.raw_fps, cfg, dlog)
+                                        ctx.raw_fps, cfg, dlog, av_offset_s=g)
     seg_warn.extend(warns)
-    if moved:
-        audio_result = audio_align.analyze_segments_audio(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps,
-                                                          cfg, dlog) or {}
+    if moved or audio_result.get("_av_offset_s", g) != g:
+        audio_result = analyse(g, "audio_phase")
         apply_segment_audio(segments, audio_result)
         for s in segments:
             if s.id in moved:
                 dlog.record("phase_solve", "audio_phase_residual", segment=s.id,
                             lag_ms_video=(s.audio or {}).get("lag_ms_video"), lag_ms=(s.audio or {}).get("lag_ms"),
                             corr=(s.audio or {}).get("corr"), raw_in_seconds=s.raw_in_seconds)
+    audio_result["av_offset"] = published_av_offset(offset, audio_result, cfg)
     seg_warn.extend(layout_period_warnings(segments, ctx.layout, cfg.layout_mode, dlog))
     seg_warn.extend(segment_warnings(segments, ctx.comp_fps, audio_result))
     cutlist = build_cutlist(ctx, segments, audio_result, seg_warn)

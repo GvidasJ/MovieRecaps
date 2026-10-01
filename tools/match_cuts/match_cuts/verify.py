@@ -44,7 +44,8 @@ CHECKS = ("s9_1_coverage", "s9_2_ae_sim", "s9_3_visual", "s9_4_cut_images", "s9_
           "s9_7_determinism", "s9_8_deliverables")
 STATUSES = ("pass", "pass_with_exceptions", "fail", "not_available")
 AUDIO_EXCEPTION_CODES = frozenset({"too_short", "not_in_raw", "audio_replaced", "pitch_preserved",
-                                   "music_dominated", "no_audio"})
+                                   "music_dominated", "no_audio", "av_offset"})
+AUDIO_RUN_EXCEPTION_CODES = frozenset({"av_offset"})   # run-level only (DESIGN §7 D9), never a segment's own code
 MAIN_COMP_NAME = "Recreated Edit"
 KEY_HOLD = 6614            # KeyframeInterpolationType.HOLD enum value in AE
 MAX_FAILURE_IMAGES = 200
@@ -1796,37 +1797,103 @@ def _overlaps(a0: int, a1: int, ranges: Iterable[dict]) -> bool:
     return False
 
 
+def _slice0(y: np.ndarray, a: int, b: int) -> np.ndarray:
+    """y[a:b] for a possibly negative start (zero-filled before sample 0; truncated at the end like a slice)."""
+    if a >= 0:
+        return y[a:b]
+    head = np.zeros(min(-a, max(0, b - a)), y.dtype)
+    return np.concatenate([head, y[0:max(0, b)]])
+
+
+def audio_offset_expectation(audio_block: dict | None, comp_fps: Fraction) -> dict:
+    """What c5 expects of the recreated audio given the published A/V offset (DESIGN §7 D9).
+
+    g = cutlist.audio.av_offset.lag_ms when measured (xcorr convention: g < 0 = the competitor's audio is
+    late), else 0. The recreation carries g_M = g in competitor sync and 0 in raw sync (RAW lip-sync), so
+    its expected lag against the competitor is E = g - g_M. The competitor switches to a segment's audio at
+    its range + the switch baseline b (published; unknown -> anywhere between 0 and -g), the recreation at
+    its range + b_M (competitor sync: b rounded to whole frames, like the AE twins); after the expected lag
+    the comparison keeps only [a0 + shift_lo, a1 + shift_hi) where both surely play the segment."""
+    av = (audio_block or {}).get("av_offset") or {}
+    measured = av.get("status") == "measured" and av.get("lag_ms") is not None
+    g = float(av["lag_ms"]) / 1000.0 if measured else 0.0
+    mode = str(av.get("sync_mode") or "raw")
+    g_m = g if mode == "competitor" else 0.0
+    e = g - g_m
+    b = av.get("switch_baseline_ms")
+    b = None if b is None else float(b) / 1000.0
+    fps = float(Fraction(comp_fps))
+    b_m = 0.0
+    if mode == "competitor" and b is not None:
+        b_m = math.copysign(math.floor(abs(b * fps) + 0.5), b) / fps
+    b_lo, b_hi = (b, b) if b is not None else (min(0.0, -g), max(0.0, -g))
+    s_m = b_m - e
+    iv = av.get("lag_ms_interval")
+    return {"measured": measured, "g": g, "mode": mode, "g_m": g_m, "expected": e, "baseline": b,
+            "shift_lo": max(b_hi, s_m), "shift_hi": min(b_lo, s_m),
+            "width_ms": (float(iv[1]) - float(iv[0])) if measured and iv else 0.0, "text": av.get("text") or ""}
+
+
 def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarray, sr: int, comp_fps: Fraction,
                 audio_block: dict, added_audio: list[dict], cfg: Any, xcorr: Callable | None = None) -> dict:
     """Per segment, cross-correlation lag of the recreated audio vs the competitor's within ±tol, or an
     explanation from the closed list (too_short, not_in_raw, audio_replaced, pitch_preserved,
-    music_dominated, no_audio) -> pass_with_exceptions. A confident correlation (>= 0.8) with a lag out of
-    tolerance is a failure whatever the code; an unknown code is a failure.
+    music_dominated, no_audio; run-level av_offset) -> pass_with_exceptions. A confident correlation
+    (>= 0.8) with a lag out of tolerance is a failure whatever the code; an unknown code is a failure.
 
     Explanations come from the analysis (the segment's audio_align code, pitch analysis, the run-level
     audio status), never from this check: music_dominated is accepted only as the segment's own code.
     A weak peak is re-searched over ±AUDIO_WIDE_LAG_S; a clearly stronger peak at another lag (>= strong,
     or >= twice the ±100 ms peak and >= min_corr) is a gross misalignment and fails whatever the code.
-    A weak peak on a segment the analysis found aligned (no code) fails."""
+    A weak peak on a segment the analysis found aligned (no code) fails. An inverted audio range
+    (a1 <= a0) fails.
+
+    A/V offset (DESIGN §7 D9): with a measured cutlist.audio.av_offset every lag is searched around the
+    expected lag (``audio_offset_expectation``: the offset in raw sync, 0 in competitor sync) and judged as
+    the residual. This check re-estimates the offset itself -- the median measured lag (+ the offset the
+    recreation already carries) of the confidently correlated segments -- and it must agree with the
+    published value within (its interval width + 1 ms), else 'A/V offset not confirmed' fails; in raw sync a
+    confirmed offset is ONE run-level explained exception 'av_offset'.
+
+    Segments shorter than cfg.verify_audio_min_s are checked as maximal runs of consecutive short pieces
+    whose union is long enough: the run must correlate >= strong with its residual within ±tol (searched
+    within ±cfg.verify_audio_run_search_ms), and a piece that does not follow the run (its own correlation
+    < min_corr while the rest of the run correlates >= strong and both its signals carry >= 1/4 of the
+    run's mean power) fails. A short piece no run covers stays 'too_short' (inconclusive)."""
     if xcorr is None:
         from . import audio_align
         xcorr = audio_align.xcorr_lag
     tol = float(getattr(cfg, "audio_lag_tol_ms", 10.0))
     min_corr = float(getattr(cfg, "verify_audio_min_corr", 0.3))
     strong = float(getattr(cfg, "verify_audio_strong_corr", 0.8))
-    min_dur = 0.5
+    min_dur = float(getattr(cfg, "verify_audio_min_s", 0.5))
+    run_search = float(getattr(cfg, "verify_audio_run_search_ms", 20.0)) / 1000.0
     fps = float(Fraction(comp_fps))
     comp_y = np.asarray(comp_y if comp_y is not None else np.zeros(0), np.float32).reshape(-1)
     rec_y = np.asarray(rec_y if rec_y is not None else np.zeros(0), np.float32).reshape(-1)
     status_run = (audio_block or {}).get("status")
+    ex = audio_offset_expectation(audio_block, comp_fps)
+    E = ex["expected"]
+    e_smp = int(round(E * sr))
+
+    def window(a0: int, a1: int) -> tuple[int, int]:
+        return max(0, int(round((a0 / fps + ex["shift_lo"]) * sr))), int(round((a1 / fps + ex["shift_hi"]) * sr))
+
+    def pair(s0: int, s1: int, extra: int = 0) -> tuple[np.ndarray, np.ndarray]:
+        a, b = comp_y[s0:s1], _slice0(rec_y, s0 + e_smp + extra, s1 + e_smp + extra)
+        n = min(len(a), len(b))
+        return a[:n], b[:n]
+
     rows, failures, exceptions = [], [], []
-    for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
+    shorts: list[tuple[int, Segment, dict]] = []       # (position, segment, row) of short pieces, checked as runs
+    for pos, s in enumerate(sorted(segments, key=lambda s: (s.comp_in, s.id))):
         au = s.audio or {}
         code_in = au.get("exception")
         row: dict[str, Any] = {"id": s.id, "type": s.type}
         name = _seg_name(s)
-        if code_in is not None and code_in not in AUDIO_EXCEPTION_CODES:
-            failures.append(f"{name}: audio exception code {code_in!r} is not in the closed list")
+        if code_in is not None and (code_in not in AUDIO_EXCEPTION_CODES or code_in in AUDIO_RUN_EXCEPTION_CODES):
+            failures.append(f"{name}: audio exception code {code_in!r} is not in the closed list"
+                            + (" of segment codes (run-level code)" if code_in in AUDIO_RUN_EXCEPTION_CODES else ""))
             row.update(result="fail", code=code_in)
             rows.append(row)
             continue
@@ -1842,45 +1909,57 @@ def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarr
         a0 = int(s.comp_in) + int(au.get("in_offset_frames") or 0)
         a1 = int(s.comp_out) + int(au.get("out_offset_frames") or 0)
         dur = (a1 - a0) / fps
-        s0, s1 = max(0, int(round(a0 / fps * sr))), int(round(a1 / fps * sr))
+        s0, s1 = window(a0, a1)
         row.update(audio_range=[a0, a1], duration_s=round(dur, 4))
+        if a1 <= a0:
+            row["result"] = "fail"
+            failures.append(f"{name}: inverted audio range [{a0}, {a1}) (J/L offsets {au.get('in_offset_frames')}/"
+                            f"{au.get('out_offset_frames')})")
+            rows.append(row)
+            continue
         if comp_y.size == 0 or rec_y.size == 0 or status_run == "no_audio":
             row.update(result="exception", code="no_audio")
             exceptions.append(f"{name}: no_audio")
             rows.append(row)
             continue
-        if dur < min_dur:
-            row.update(result="exception", code="too_short")
-            exceptions.append(f"{name}: too_short ({dur:.2f} s)")
+        a, b = pair(s0, s1)
+        n = len(a)
+        if dur < min_dur or n < int(0.25 * sr):
+            if code_in not in (None, "too_short"):
+                # the analysis already explains this piece (pitch / music / replaced audio): not a run member
+                row.update(result="exception", code=code_in, evidence="segment audio analysis")
+                exceptions.append(f"{name}: {code_in} ({dur:.2f} s)")
+            else:
+                shorts.append((pos, s, row))
             rows.append(row)
             continue
-        a, b = comp_y[s0:s1], rec_y[s0:s1]
-        n = min(len(a), len(b))
-        a, b = a[:n], b[:n]
-        if n < int(0.25 * sr) or float(np.sqrt(np.mean(b.astype(np.float64) ** 2))) < 1e-5 \
+        if float(np.sqrt(np.mean(b.astype(np.float64) ** 2))) < 1e-5 \
                 or float(np.sqrt(np.mean(a.astype(np.float64) ** 2))) < 1e-5:
             row.update(result="exception", code="no_audio", reason="silent")
             exceptions.append(f"{name}: no_audio (silent)")
             rows.append(row)
             continue
         lag_s, peak = xcorr(a, b, sr, 0.1)
-        lag_ms, peak = float(lag_s) * 1000.0, float(peak)
-        row.update(lag_ms=round(lag_ms, 3), corr=round(peak, 4))
-        if peak >= min_corr and abs(lag_ms) <= tol:
+        lag_s, peak = float(lag_s) + e_smp / sr, float(peak)
+        res_ms = (lag_s - E) * 1000.0
+        lag_ms = lag_s * 1000.0
+        row.update(lag_ms=round(lag_ms, 3), residual_ms=round(res_ms, 3), corr=round(peak, 4))
+        what = f"lag {lag_ms:+.2f} ms" if not E else f"residual {res_ms:+.2f} ms after the expected {E * 1000.0:+.1f} ms"
+        if peak >= min_corr and abs(res_ms) <= tol:
             row["result"] = "ok"
             rows.append(row)
             continue
-        if peak >= strong and abs(lag_ms) > tol:
-            failures.append(f"{name}: audio confidently misaligned (lag {lag_ms:+.2f} ms, corr {peak:.2f})")
+        if peak >= strong and abs(res_ms) > tol:
+            failures.append(f"{name}: audio confidently misaligned ({what}, corr {peak:.2f})")
             row["result"] = "fail"
             rows.append(row)
             continue
         if peak < strong:
             wlag_s, wpeak = xcorr(a, b, sr, AUDIO_WIDE_LAG_S)
-            wlag_ms, wpeak = float(wlag_s) * 1000.0, float(wpeak)
-            row.update(wide_lag_ms=round(wlag_ms, 3), wide_corr=round(wpeak, 4))
-            if abs(wlag_ms) > tol and (wpeak >= strong or (wpeak >= 2.0 * max(peak, 0.0) and wpeak >= min_corr)):
-                failures.append(f"{name}: audio misaligned by {wlag_ms:+.1f} ms (corr {wpeak:.2f} there vs {peak:.2f} "
+            wres_ms, wpeak = (float(wlag_s) + e_smp / sr - E) * 1000.0, float(wpeak)
+            row.update(wide_lag_ms=round(wres_ms + E * 1000.0, 3), wide_corr=round(wpeak, 4))
+            if abs(wres_ms) > tol and (wpeak >= strong or (wpeak >= 2.0 * max(peak, 0.0) and wpeak >= min_corr)):
+                failures.append(f"{name}: audio misaligned by {wres_ms:+.1f} ms (corr {wpeak:.2f} there vs {peak:.2f} "
                                 f"within ±100 ms)")
                 row["result"] = "fail"
                 rows.append(row)
@@ -1900,20 +1979,124 @@ def check_audio(segments: Sequence[Segment], comp_y: np.ndarray, rec_y: np.ndarr
             continue
         if code in AUDIO_EXCEPTION_CODES:
             row.update(result="exception", code=code, evidence=evidence)
-            exceptions.append(f"{name}: {code} (lag {lag_ms:+.2f} ms, corr {peak:.2f})")
+            exceptions.append(f"{name}: {code} ({what}, corr {peak:.2f})")
         else:
             row["result"] = "fail"
             hint = " (low correlation under detected added audio, but the segment analysis did not report music " \
                    "dominance)" if peak < min_corr and _overlaps(a0, a1, added_audio) else ""
-            failures.append(f"{name}: audio lag {lag_ms:+.2f} ms / corr {peak:.2f} outside ±{tol} ms and unexplained{hint}")
+            failures.append(f"{name}: audio {what} / corr {peak:.2f} outside ±{tol} ms and unexplained{hint}")
         rows.append(row)
+
+    # ---- short pieces: maximal runs of consecutive short segments, checked together -----------------
+    runs: list[list[tuple[int, Segment, dict]]] = []
+    for item in shorts:
+        prev = runs[-1][-1] if runs else None
+        if prev is not None and item[0] == prev[0] + 1 and item[2]["audio_range"][0] <= prev[2]["audio_range"][1]:
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+    for run in runs:
+        names = f"{_seg_name(run[0][1])}-{_seg_name(run[-1][1])}" if len(run) > 1 else _seg_name(run[0][1])
+        union = (run[-1][2]["audio_range"][1] - run[0][2]["audio_range"][0]) / fps
+        res = _check_short_run(run, union, min_dur, pair, window, xcorr, sr, e_smp, E, tol, min_corr, strong, run_search)
+        for (_pos, s, row), piece in zip(run, res["pieces"]):
+            name = _seg_name(s)
+            row.update({k: v for k, v in piece.items() if k != "result"}, run=names)
+            if piece["result"] == "ok":
+                row["result"] = "ok"
+            elif piece["result"] == "fail":
+                row["result"] = "fail"
+                failures.append(f"{name}: {piece['why']}")
+            else:
+                row.update(result="exception", code="too_short")
+                exceptions.append(f"{name}: too_short ({row['duration_s']:.2f} s{'; ' + piece['why'] if piece.get('why') else ''})")
+
+    # ---- the run's A/V offset, re-measured here (DESIGN §7 D9) -------------------------------------
+    off: dict[str, Any] = {"published_ms": round(ex["g"] * 1000.0, 3) if ex["measured"] else None, "mode": ex["mode"],
+                           "expected_lag_ms": round(E * 1000.0, 3)}
+    conf_rows = [r for r in rows if "residual_ms" in r and "run" not in r and r.get("corr", 0.0) >= strong]
+    if conf_rows:
+        own = float(np.median([r["lag_ms"] for r in conf_rows])) + ex["g_m"] * 1000.0
+        off.update(verified_ms=round(own, 3), n=len(conf_rows),
+                   residual_spread_ms=round(float(np.ptp([r["residual_ms"] for r in conf_rows])), 3))
+    if ex["measured"]:
+        lim = ex["width_ms"] + 1.0
+        agree = bool(conf_rows) and abs(off["verified_ms"] - ex["g"] * 1000.0) <= lim
+        off.update(tolerance_ms=round(lim, 3), confirmed=agree)
+        if not agree:
+            failures.append("A/V offset not confirmed: the analysis published "
+                            f"{ex['g'] * 1000.0:+.1f} ms, " + (f"this check measures {off['verified_ms']:+.1f} ms over "
+                                                              f"{off['n']} segment(s) (tolerance ±{lim:.1f} ms)"
+                                                              if conf_rows else "and no segment correlates confidently here"))
+        elif ex["mode"] == "raw":
+            exceptions.append(f"av_offset (run): {ex['text']} (published {ex['g'] * 1000.0:+.1f} ms, measured here "
+                              f"{off['verified_ms']:+.1f} ms over {off['n']} segment(s)); the recreation keeps RAW lip-sync")
     measured = [r for r in rows if "lag_ms" in r]
     status = _status_from(len(failures), len(exceptions))
-    lags = [abs(r["lag_ms"]) for r in measured if r.get("result") == "ok"]
-    summary = (f"{len(measured)} segments measured, max |lag| {max(lags):.2f} ms" if lags else f"{len(measured)} segments measured") \
+    lags = [abs(r["residual_ms"]) for r in measured if r.get("result") == "ok"]
+    word = "residual" if E else "lag"
+    summary = (f"{len(measured)} segments measured, max |{word}| {max(lags):.2f} ms" if lags else f"{len(measured)} segments measured") \
         + f", {len(exceptions)} explained exceptions, {len(failures)} failures"
+    if ex["measured"]:
+        summary += (f"; A/V offset {ex['g'] * 1000.0:+.1f} ms ({ex['mode']} sync) "
+                    + ("confirmed" if off.get("confirmed") else "NOT confirmed"))
     return {"status": status, "summary": summary, "failures": failures, "exceptions": exceptions, "segments": rows,
-            "tolerance_ms": tol}
+            "tolerance_ms": tol, "av_offset": off}
+
+
+def _check_short_run(run: list, union_s: float, min_dur: float, pair: Callable, window: Callable, xcorr: Callable,
+                     sr: int, e_smp: int, E: float, tol: float, min_corr: float, strong: float, search_s: float) -> dict:
+    """c5 for one maximal run of consecutive short pieces (see check_audio): their comparison windows are
+    concatenated and correlated around the expected lag; a confident run then checks every piece at the run's
+    alignment against the rest of the run (leave-one-out). Returns {'pieces': [{result: ok | fail |
+    inconclusive, why, lag_ms, residual_ms, corr, piece_corr, rest_corr}]}."""
+    n_p = len(run)
+    if union_s < min_dur:
+        why = f"run of {n_p} short pieces is only {union_s:.2f} s" if n_p > 1 else ""
+        return {"pieces": [{"result": "inconclusive", "why": why} for _ in range(n_p)]}
+    spans = []
+    for _pos, _s, row in run:
+        s0, s1 = window(*row["audio_range"])
+        spans.append((s0, max(s0, s1)))
+    parts = [pair(s0, s1) for s0, s1 in spans]
+    cat_c = np.concatenate([a for a, _ in parts])
+    cat_r = np.concatenate([b for _, b in parts])
+    if cat_c.size < int(0.25 * sr) or float(np.sqrt(np.mean(cat_c.astype(np.float64) ** 2))) < 1e-5 \
+            or float(np.sqrt(np.mean(cat_r.astype(np.float64) ** 2))) < 1e-5:
+        return {"pieces": [{"result": "inconclusive", "why": "aggregated run has too little audible audio"}
+                           for _ in range(n_p)]}
+    lag_m, peak = xcorr(cat_c, cat_r, sr, search_s)
+    lag_m, peak = float(lag_m), float(peak)
+    lag_s = lag_m + e_smp / sr
+    res_ms = (lag_s - E) * 1000.0
+    base = {"lag_ms": round(lag_s * 1000.0, 3), "residual_ms": round(res_ms, 3), "corr": round(peak, 4)}
+    if peak < strong:
+        return {"pieces": [dict(base, result="inconclusive", why=f"aggregated run corr {peak:.2f} < {strong:g}")
+                           for _ in range(n_p)]}
+    if abs(res_ms) > tol:
+        return {"pieces": [dict(base, result="fail", why=f"audio of the aggregated run confidently misaligned (residual "
+                                                         f"{res_ms:+.2f} ms, corr {peak:.2f})") for _ in range(n_p)]}
+    # leave-one-out: every piece at the run's alignment (b(t) ~ a(t - lag): compare a(t) with b(t + lag))
+    li = int(round(lag_m * sr))
+    st = []
+    for s0, s1 in spans:
+        a, b = pair(s0, s1, li)
+        a, b = a.astype(np.float64), b.astype(np.float64)
+        st.append((float(np.dot(a, b)), float(np.dot(a, a)), float(np.dot(b, b)), len(a)))
+    num, eca, ecb, cnt = (sum(x[i] for x in st) for i in range(4))
+    pa, pb = eca / max(cnt, 1), ecb / max(cnt, 1)
+    pieces = []
+    for nm, ea, eb, n in st:
+        own = nm / math.sqrt(ea * eb) if ea > 0 and eb > 0 else 0.0
+        da, db = eca - ea, ecb - eb
+        rest = (num - nm) / math.sqrt(da * db) if da > 0 and db > 0 else 0.0
+        loud = n > 0 and ea / n >= 0.25 * pa and eb / n >= 0.25 * pb
+        p = dict(base, piece_corr=round(own, 4), rest_corr=round(rest, 4), result="ok", why="")
+        if own < min_corr and rest >= strong and loud:
+            p.update(result="fail", why=f"audio does not follow its aggregated run (piece corr {own:.2f}, the rest of the "
+                                        f"run {rest:.2f} at residual {res_ms:+.2f} ms)")
+        pieces.append(p)
+    return {"pieces": pieces}
 
 
 # ---------------------------------------------------------------------------------------------

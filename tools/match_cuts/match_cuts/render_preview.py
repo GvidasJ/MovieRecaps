@@ -1235,8 +1235,18 @@ def _sample_at(K: int | Fraction, sr: int, fps: Fraction) -> int:
     return math.floor(Fraction(K) * sr / Fraction(fps) + Fraction(1, 2))
 
 
+def _audio_frames(seg: Segment, main_fps: Fraction, comp_fps: Fraction, N: int, shift_k: int) -> tuple[int, int]:
+    """MAIN frames [a0, a1) of a segment's audio: [comp_in + in_offset, comp_out + out_offset) (J/L, DESIGN
+    §3) moved by the export's switch shift (D9 competitor sync), clipped to [0, N]."""
+    au = seg.audio or {}
+    a0 = max(0, _to_main(int(seg.comp_in) + int(au.get("in_offset_frames") or 0), main_fps, comp_fps) + shift_k)
+    a1 = min(N, _to_main(int(seg.comp_out) + int(au.get("out_offset_frames") or 0), main_fps, comp_fps) + shift_k)
+    return a0, a1
+
+
 def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fraction | None = None,
-                n_frames: int | None = None) -> np.ndarray:
+                n_frames: int | None = None, audio_sync: str | None = None, av_offset_lag_s: float | None = None,
+                switch_baseline_s: float | None = None) -> np.ndarray:
     """Sample-accurate RAW audio rebuild of the edit (DESIGN §5 render_preview.build_audio).
 
     raw_audio: (N,) or (N, C) float RAW audio at `sr` (sample 0 = RAW video t = 0). Returns float32 of
@@ -1252,10 +1262,18 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
     1 - alpha_B for A and alpha_B for B at each overlap frame, B back to 0 dB at O + D), interpolated
     linearly in dB between the key times like AE; at every overlap frame boundary the gains are exactly
     the linear 1 - alpha_B / alpha_B. Overlapping audio ranges sum. NOT-IN-RAW / dips / flashes: silent.
+
+    Audio sync (DESIGN §7 D9, mirrors export_ae's audio twins; ``export_ae.audio_sync_params``): 'raw'
+    (cutlist.settings.audio_sync default) keeps RAW lip-sync; 'competitor' plays every segment's audio with
+    the competitor's measured offset -- content tau(n) + v * g (g = cutlist.audio.av_offset.lag_ms, xcorr
+    convention: g < 0 = the competitor's audio is late) over its range moved by round(switch baseline x
+    fps) MAIN frames. Explicit ``av_offset_lag_s`` / ``switch_baseline_s`` override (and imply) the shift.
     """
+    from .export_ae import audio_sync_params
     comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
     main_fps = Fraction(fps) if fps is not None else comp_fps
     N = int(n_frames) if n_frames is not None else _to_main(int(cutlist.competitor["frames"]), main_fps, comp_fps)
+    g_s, shift_k = audio_sync_params(cutlist, main_fps, audio_sync, av_offset_lag_s, switch_baseline_s)
     x = np.asarray(raw_audio, dtype=np.float32)
     total = _sample_at(N, sr, main_fps)
     out = np.zeros((total,) + x.shape[1:], np.float32)
@@ -1276,16 +1294,15 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
         k_in, _k_out = kmap[sid]
         v = float(seg.speed)
         raw_in = _seg_raw_in(seg, raw_fps)
-        au = seg.audio or {}
-        a0 = max(0, _to_main(int(seg.comp_in) + int(au.get("in_offset_frames") or 0), main_fps, comp_fps))
-        a1 = min(N, _to_main(int(seg.comp_out) + int(au.get("out_offset_frames") or 0), main_fps, comp_fps))
+        a0, a1 = _audio_frames(seg, main_fps, comp_fps, N, shift_k)
         n0, n1 = _sample_at(a0, sr, main_fps), _sample_at(a1, sr, main_fps)
         if n1 <= n0:
             continue
         # pieces [(n_start, n_end, RAW seconds at n_start, speed)]
         pieces: list[tuple[int, int, float, float]] = []
         if seg.time_remap_keys:
-            keys = sorted(((_to_main_f(float(d["comp_frame"]), main_fps, comp_fps), float(d["raw_seconds"]))
+            # competitor sync: the remap curve is played g later in comp time (key times - g)
+            keys = sorted(((_to_main_f(float(d["comp_frame"]), main_fps, comp_fps) - g_s * mf, float(d["raw_seconds"]))
                            for d in seg.time_remap_keys), key=lambda t: t[0])
             bounds = [n0] + [min(max(math.ceil(kf * sr / mf - 1e-9), n0), n1) for kf, _ in keys] + [n1]
             bounds = sorted(set(bounds))
@@ -1302,12 +1319,14 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
             err = float(Fraction(k_in) / main_fps - Fraction(int(seg.comp_in)) / comp_fps)
             raw_in_m = raw_in + v * err if err else raw_in
             tau0 = raw_in_m + v * (n0 / sr - k_in / mf)
+            if g_s:
+                tau0 += v * g_s
             pieces.append((n0, n1, tau0, v))
         for sa, sb, tau, vv in pieces:
             y = sample_positions(x, tau * sr, vv, sb - sa)
             keys_db = audio_db.get(sid)
             if keys_db:
-                kt = np.array(sorted(keys_db), np.float64)
+                kt = np.array(sorted(keys_db), np.float64) + shift_k
                 kv = np.array([keys_db[k] for k in sorted(keys_db)], np.float64)
                 frames_pos = np.arange(sa, sb, dtype=np.float64) * mf / sr
                 g = np.power(10.0, np.interp(frames_pos, kt, kv) / 20.0).astype(np.float32)
@@ -1335,8 +1354,9 @@ def _mux(video: Path, audio_src: Path | None, out: Path, audio_codec_args: Seque
 
 
 def _seg_raw_time_span(seg: Segment, a0: int, a1: int, main_fps: Fraction, comp_fps: Fraction,
-                       raw_fps: Fraction) -> tuple[float, float] | None:
-    """RAW seconds spanned by a RAW segment's audio over MAIN frames [a0, a1) (same map as build_audio)."""
+                       raw_fps: Fraction, g_s: float = 0.0) -> tuple[float, float] | None:
+    """RAW seconds spanned by a RAW segment's audio over MAIN frames [a0, a1) (same map as build_audio,
+    g_s = its competitor-sync content offset)."""
     if seg.time_remap_keys:
         vals = [float(d["raw_seconds"]) for d in seg.time_remap_keys]
         return min(vals), max(vals)
@@ -1345,7 +1365,7 @@ def _seg_raw_time_span(seg: Segment, a0: int, a1: int, main_fps: Fraction, comp_
         return None
     k_in = _to_main(int(seg.comp_in), main_fps, comp_fps)
     err = float(Fraction(k_in) / main_fps - Fraction(int(seg.comp_in)) / comp_fps)
-    base = raw_in + float(seg.speed) * err
+    base = raw_in + float(seg.speed) * (err + g_s)
     ends = [base + float(seg.speed) * (a - k_in) / float(main_fps) for a in (a0, a1)]
     return min(ends), max(ends)
 
@@ -1386,14 +1406,14 @@ def load_raw_audio(cutlist: Cutlist, raw_path: str | os.PathLike, *, fps: Fracti
         return extract_audio(raw_path, sr=sr, mono=False), sr, cutlist
     main_fps = Fraction(fps) if fps is not None else comp_fps
     N = int(n_frames) if n_frames is not None else _to_main(int(cutlist.competitor["frames"]), main_fps, comp_fps)
+    from .export_ae import audio_sync_params
+    g_s, shift_k = audio_sync_params(cutlist, main_fps)
     spans: list[tuple[int, int, int]] = []           # (s0, s1, segment id)
     for seg in cutlist.segments:
         if seg.type != "raw":
             continue
-        au = seg.audio or {}
-        a0 = max(0, _to_main(int(seg.comp_in) + int(au.get("in_offset_frames") or 0), main_fps, comp_fps))
-        a1 = min(N, _to_main(int(seg.comp_out) + int(au.get("out_offset_frames") or 0), main_fps, comp_fps))
-        span = _seg_raw_time_span(seg, a0, a1, main_fps, comp_fps, raw_fps) if a1 > a0 else None
+        a0, a1 = _audio_frames(seg, main_fps, comp_fps, N, shift_k)
+        span = _seg_raw_time_span(seg, a0, a1, main_fps, comp_fps, raw_fps, g_s) if a1 > a0 else None
         if span is None:
             continue
         s0 = max(0, math.floor((span[0] - margin_s) * sr))
