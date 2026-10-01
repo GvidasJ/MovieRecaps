@@ -85,6 +85,21 @@ child's GC hangs in avcodec_free_context). Pools that decode video use the 'spaw
   not split segments; frames whose Chebyshev slack is < 1e-4 frame are **timing-tie** frames
   (`Segment.tie_frames`, `FrameMap.tie`), listed like ambiguous frames, and may differ by one frame
   from the AE rule (they are < 1 %).
+* **AE floor-rule slack (FX-10, §7.3).** Frame d of a layer changes its RAW frame where x + u·d crosses an
+  integer: at the BREAKPOINTS x = n − u·d (every integer n), 1-periodic in x; they cut the feasible interval
+  into CELLS (every x of a cell shows the same RAW frame on every frame). The SLACK of a placement = the
+  distance of x to the nearest breakpoint of ANY frame of the layer, binding or not (= min over frames of
+  the distance of x + u·d to an integer), evaluated EXACTLY (`phase_solve.exact_min_slack`, Fractions of the
+  values as written: the 9-decimal raw_in, AE's startTime / stretch / key values). raw_in = the midpoint of
+  the cell with the most slack inside the allowed interval (floor∩round with the round-rule breakpoints
+  too, else floor; `phase_solve.place_in_cells`), never the bare interval centre, which can sit on the
+  breakpoint of a non-binding frame. Rational rates make the breakpoints a lattice: 23.976 in 30
+  (u = 800/1001) has 4/1001-frame cells at every cadence slip (5 comp frames with 3 RAW advances), so exact
+  frames across a slip PIN raw_in to ±2/1001 frame = ±0.083 ms; NTSC-in-integer layers of ≥ 1001 frames
+  (≥ 250 at 23.976 → 30) only have 1/1001–5/1001-frame cells. `Segment.ae_margin_ms` = that exact slack
+  (ms). Below `cfg.ae_slack_tol_frames` (0.01 RAW frame) After Effects' own time resolution decides, which
+  no run has measured yet (no .aep / aerender): `--ae-time-mode auto` exports such a layer frame-exact
+  (HOLD keys at j + 0.25: 0.25 frame of slack), and a cadence-pinned phase is reported as information.
 
 ### 2.2 Coordinates  (`geometry.py`)
 * CORNER convention everywhere outside OpenCV calls: pixel (i, j) covers `[i,i+1)×[j,j+1)`.
@@ -179,7 +194,8 @@ visual verification always uses a match-geometry render at competitor size and f
   `exception` ∈ {too_short, not_in_raw, audio_replaced, pitch_preserved, music_dominated, no_audio} (closed
   list; criterion 5 adds the RUN-level code `av_offset`, never a segment's own code). `retime` ∈ {none,
   frame_blend, optical_flow}, `uncertain`, `unsnapped`, `cut_ambiguity=[a,b]`, `tie_frames`,
-  `low_margin_frames`, `ae_margin_ms`, `region`, `box`.
+  `low_margin_frames`, `ae_margin_ms` (the exact AE floor-rule slack of the written raw_in over EVERY frame
+  of the segment, ms, §2.1 / §7.3 -- no longer the distance to the interval edges), `region`, `box`.
 * **Crossfade convention (matches ffmpeg `xfade=fade` and linear AE opacity keys):** a crossfade of
   `D` frames starting at `O` means `α_B(k) = (k − O)/D` for `O ≤ k < O+D` (frame O is pure A, frame
   O+D is pure B, only D−1 frames are visibly blended). `B.comp_in = O`, `A.comp_out = O + D`,
@@ -363,9 +379,20 @@ def feasible_speed_range(ks, lo, hi, comp_in, comp_fps, raw_fps, v_bounds=(-8, 8
 def is_feasible(ks, lo, hi, comp_in, comp_fps, raw_fps, v=None) -> bool
 def solve_raw_in(ks, lo, hi, comp_in, v, comp_fps, raw_fps) -> dict
     # Chebyshev LP with u fixed: max t s.t. lo_k+t <= x+u·d_k <= hi_k+1-t, -tau <= t <= 0.5.
-    # {'raw_in': seconds (centre; if the round-to-nearest-feasible set overlaps, its centre), 'slack': t*
-    #  (frames), 'interval_floor': [a, b] seconds, 'interval_both': [a, b] | None, 'margin_ms',
-    #  'tie_frames': [k where slack < 1e-4], 'ok': bool}
+    # {'raw_in': seconds (the midpoint of the max-min-slack breakpoint cell of every frame comp_in .. last
+    #  constraint inside floor∩round when it overlaps, else inside the floor interval, §2.1 / FX-10), 'slack':
+    #  t* (frames), 'interval_floor': [a, b] seconds, 'interval_both': [a, b] | None, 'margin_ms' (to the
+    #  interval edges), 'tie_frames': [k where slack < 1e-4], 'ok': bool, 'min_slack' (frames, all those
+    #  frames), 'cell' [a, b] s, 'cell_width', 'best_slack', 'pinned' (no breakpoint inside the interval)}
+def place_in_cells(a, b, u, d, target=None, margin=None, round_rule=False) -> dict    # FX-10 (§2.1, §7.3)
+    # cells of [a, b] (local frames) cut by the floor (+ round) breakpoints of frames d; no target: the
+    # widest cell's midpoint (ties: nearest the centre); target (D3): the cell containing / nearest to it, the
+    # target clamped margin(cell width) inside. 1-periodic breakpoints: a wide interval is searched in a
+    # 4-frame window around the preferred point. place_raw_in(...) = the same in seconds for a whole layer;
+    # layer_cell(raw_in, ...) = the cell around a raw_in; breakpoints_in(a, b, u, d).
+def exact_min_slack(raw_in, v, comp_in, k0, k1, comp_fps, raw_fps) -> tuple[Fraction, int]
+    # exact min over k in [k0, k1) of |raw_fps·(raw_in + v·(t_k − t_in))| to the nearest integer (raw_in / v
+    # as written); exact_line_slack(p0, step, d0, d1) for any p0 + step·d (export_ae.layer_min_slack).
 def ae_frame(raw_in, v, k, comp_in, comp_fps, raw_fps, rule='floor') -> int   # the AE rule (§2.1)
 def snap_speed(v_ols, vrange, cfg, preferred=()) -> tuple[float, bool]
     # candidates = cfg.speed_snap_values ∪ preferred (speeds of already-solved segments) inside the
@@ -416,7 +443,10 @@ def build_segments(fm: FrameMap, comp, raw, layout, overlays, cfg, dlog, debug_d
     #   crossfades marked) and debug/scores.png (score, margin, thresholds, cuts).
 ```
 The pipeline then calls `phase_solve.solve_raw_in` per segment (using the soft ranges) and fills
-`raw_in_seconds`, `raw_in_interval`, `raw_in_interval_both`, `ae_margin_ms`, `tie_frames`.
+`raw_in_seconds`, `raw_in_interval`, `raw_in_interval_both`, `ae_margin_ms`, `tie_frames`. raw_in is
+re-placed over the WHOLE segment [comp_in, comp_out) inside the solved interval (`phase_solve.place_raw_in`;
+segment.py's solve saw only the frames up to its last constraint) and `ae_margin_ms` is its exact slack
+(FX-10, §7.3).
 
 ### export_ae.py  (Stage 7)
 ```python
@@ -431,6 +461,12 @@ def ae_plan(cutlist: Cutlist, cfg, footage_meta) -> dict
     # Per-layer time mode: 'remap' for speed <= 0 / time_remap_keys / |startTime| > 10799 s (AE's ±3 h
     # layer-time limit); else cfg.ae_time_mode ('auto' -> 'stretch'); 'frames' = per-frame HOLD remap keys
     # at (m+0.25)/raw_fps (immune to AE time quantisation; audio from an audio-only stretch duplicate).
+    # FX-10: layer_min_slack(L, mode, F, R) = the exact floor-rule slack of every MAIN frame of the layer from
+    # the values the JSX writes (startTime/stretch, remap key values, HOLD values, as exact binary values);
+    # L['minSlack'] / L['minSlackK']. In 'auto' a stretch / remap layer below cfg.ae_slack_tol_frames is
+    # exported 'frames' (decision time_mode_slack; no warning: a cadence-pinned phase is information, the
+    # pipeline's single aggregated warning covers real razor edges); a forced stretch / remap mode keeps it
+    # and marks aeRuleSensitive (quiet per-layer warning).
 def write_jsx(cutlist, plan, out_path, cfg) -> None
     # ES3 ExtendScript, ASCII only (\uXXXX escapes; assert isascii), data via json.dumps(plan,
     # ensure_ascii=True, allow_nan=False, sort_keys=True) as an object literal. Structure: `#target
@@ -448,7 +484,14 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # transform / opacity / audio keys (keys live in LAYER time; nothing that moves the layer in time may
     # follow a key write). Stretch mode: `L.stretch = s; var vEff = 100 / L.stretch; L.startTime = tIn -
     # rawIn / vEff;` then recompute every expected frame from the READ-BACK startTime/stretch and in/out;
-    # any mismatch -> switch that layer to 'frames' mode + warning. Remap: stretch=100, startTime=tIn,
+    # any mismatch -> switch that layer to 'frames' mode + warning. THEN (FX-10) After Effects' OWN mapping
+    # on every frame of every RAW video layer: ExtendScript has no sourceTime(), so a temporary Slider
+    # Control ('ADBE Slider Control') gets the expression thisLayer.sourceTime(time), valueAtTime(t_k, false)
+    # / footage.frameDuration is the position AE samples; floor(... + 1e-9) != expect -> a stretch layer
+    # switches to 'frames' (+ audio twin, warning), another mode warns; the probe effect is removed. Per
+    # layer: frames, frames off, min slack, max |AE - plan| (the plan's own position) -> note() and
+    # ae_time_check.txt next to the script (tab-separated, parse_time_check; s9_6 reads it after an AE run);
+    # one 'AE time check' line in the alert. Remap: stretch=100, startTime=tIn,
     # in/out, assert canSetTimeRemapEnabled, enable, remove ALL keys, setValuesAtTimes, LINEAR (HOLD in
     # frames mode). Every layer: frameBlendingType NO_FRAME_BLEND, quality BEST, samplingQuality BILINEAR
     # (try), motionBlur false; comp.frameBlending = false. startTime/inPoint/outPoint set explicitly on
@@ -475,9 +518,11 @@ def write_jsx(cutlist, plan, out_path, cfg) -> None
     # Forbidden in the generated text: forEach/map/filter/reduce/some/every/indexOf/lastIndexOf/trim/bind
     # calls, JSON, Object.keys/create/defineProperty, Array.isArray, Date.now, let/const/=>/template
     # strings, NaN/Infinity literals, non-ASCII.
-def simulate_ae(plan, time_mode_override=None) -> dict[int, list[dict]]
+def simulate_ae(plan, time_mode_override=None, start_offset_s=0.0) -> dict[int, list[dict]]
     # per MAIN frame: [{layer, raw_frame, opacity}] from the exact plan values (stretch, startTime,
-    # in/out, remap keys; floor rule on layer time; HOLD/LINEAR remap semantics).
+    # in/out, remap keys; floor rule on layer time; HOLD/LINEAR remap semantics). start_offset_s: every
+    # stretch layer's startTime that much off (remap / frames keys live in layer time: unaffected); with
+    # every stretch layer's slack >= ae_slack_tol_frames, +-1e-6 s changes no frame (tested on mini/film24).
 def run_jsx_in_mock(jsx_path, footage_meta: dict, scenario='default') -> dict
     # node + match_cuts/ae_mock/{ae_mock.js, acorn.js (vendored, MIT)}. ES3 gate: '#' lines -> '//#', acorn
     # {ecmaVersion:3, allowReserved:'never'}, the forbidden-pattern ban, ES5+ APIs deleted inside the vm
@@ -486,7 +531,9 @@ def run_jsx_in_mock(jsx_path, footage_meta: dict, scenario='default') -> dict
     # integer/range checks (addComp/addSolid ints in [4, 30000], 0 < duration <= 10800, 1 <= fps <= 999,
     # layer times in ±10800), clamping of non-remapped footage layers to the source extent, float32
     # frameRate, matchName-only property(), 3-element spatial values, keys stored in LAYER time
-    # (startTime/stretch changes after keys move them), 1-based collections, layers.add at index 1.
+    # (startTime/stretch changes after keys move them), 1-based collections, layers.add at index 1;
+    # expressions: valueAtTime(t, false) knows thisLayer.sourceTime(time) only (else expressionError);
+    # Slider Control effect (removable); text files written by the script land in files_written.
     # footage_meta = {basename: {width, height, fps_num, fps_den, frames, has_audio}} (from probe).
     # Scenarios: default; media_missing (openDialog stub returns null -> clean abort, dialog called);
     # new_project_null; no_marker_property. Returns the recorded project (comps, layers with every value /
@@ -599,6 +646,12 @@ def verify_all(ctx) -> dict
   #      layer per segment with name/startTime/stretch/in/out == plan; media_missing scenario aborts
   #      cleanly and calls openDialog) + s9_6 aerender if available. Linux: 'pass' means mock-verified;
   #      details say 'mock only'. Node missing -> not_available.
+  # s9_6 also carries 'ae_time' (verify.ae_time_calibration, FX-10): the slack tolerance, the layers the plan
+  #      exported frame-exact because of it, the JSX's AE source-time check of THIS run's After Effects run
+  #      (ae_time_check.txt newer than the JSX; frames off the plan, min slack, max |AE - plan|; a layer still
+  #      off in frames / remap mode fails), and with a render the smallest plan slack of a stretch frame AE
+  #      rendered right + render mismatches below 2 x the tolerance: the evidence that may later justify a
+  #      smaller ae_slack_tol_frames.
   # s9_3 visual: masked ZNCC competitor vs match-geometry recreation per frame (reuse preview_recreation.mp4
   #      when mode is match at competitor size, else render_frame in memory); distribution; failures ->
   #      debug/verify_failures/k#####.png. s9_4: debug/cuts/cut_XX.png (k-1, k, k+1, k+2 competitor vs
@@ -632,7 +685,7 @@ def write_report(ctx, path) -> None      # prompt Stage 10 sections: inputs (cod
     # VFR/offset issues, conform + why, fps-source max error), layout (+ layout.png), segment table
     # (# · comp in–out tc+frames · duration · RAW in–out tc · speed · flip · scale/position or 'animated' ·
     # transition · confidence · notes), edit-style breakdown, warnings (low-confidence, ambiguous-identical,
-    # timing-tie, NOT-IN-RAW, AE-rule-sensitive segments, extra regions, anything AE can't reproduce),
+    # timing-tie, NOT-IN-RAW, phase pinned by cadence (information) and AE-rule-sensitive segments (one line, §7.3), extra regions, anything AE can't reproduce),
     # criteria table c1..c6, how to open in AE (+ preference, reference layer), timings.
 def check_env() -> dict                  # pipeline.py
 def run(cfg: Config) -> dict             # pipeline.py: S0..S10; pipeline.Context dataclass holds everything
@@ -643,7 +696,7 @@ def main(argv=None) -> int               # cli.py: python -m match_cuts --compet
 ```
 README.md: setup (venv, `pip install --no-deps scenedetect click platformdirs`), CLI usage and flags,
 outputs, running the JSX in AE (preference, relink, reference layer), troubleshooting (AE scripting
-preference, relink, VFR, fps misread/conformFrameRate, AE-rule-sensitive segments -> `--ae-time-mode
+preference, relink, VFR, fps misread/conformFrameRate, AE-rule-sensitive (razor-edge) segments -> `--ae-time-mode
 frames`, failing-criterion playbook from Stage 9), changed defaults.
 
 ## 6. Synthetic test (Stage 1) — `tests/synth.py` + `tests/test_synthetic.py`
@@ -829,10 +882,17 @@ verification honesty) were fixed under these shared rules:
   S5.2 + S5.3 once.
 * **D3 Audio-informed phase.** After the per-segment audio analysis, `raw_in := raw_in + v·residual` (the
   lag after the run's A/V offset, D9) for
-  confidently correlated stretch segments, clamped into the floor∩round interval (else the floor interval)
-  with a margin of `max(ae_min_margin_ms, min(5 % of its width, 5 % of a RAW frame))` from each edge
-  (`pipeline.audio_phase_margin_s`; a fraction of a FRAME, not of the ambiguity span, so an in-point on
-  the edge of a seconds-wide static interval stays within ~2 ms in audio); the residual lag is
+  confidently correlated stretch segments, placed inside the floor∩round interval (else the floor interval)
+  ∩ the preserved-frames range IN BREAKPOINT CELLS of every frame of the layer (FX-10, §7.3,
+  `phase_solve.place_raw_in`): the cell containing the target (else the nearest), the target clamped to a
+  margin of `min(cell / 2, max(5 % of the cell, ae_slack_tol_frames))` (+1e-6 frame so the 9-decimal
+  rounding cannot take a placement below the tolerance; `pipeline.audio_phase_margin`) from its edges.
+  Never an integer number of milliseconds: 1 ms = 24/1001 frame of a 23.976 source and 30 comp frames
+  advance 24 − 24/1001 frames, so the old 'edge + 1 ms' put the frame 30 comp frames after the binding one
+  1.3 ns from a frame boundary (the real run's S26 k440). A cell is a fraction of a FRAME, never of the
+  ambiguity span, so an in-point on the edge of a seconds-wide static interval stays within ~2 ms in audio;
+  an in-point in a cadence-narrow cell lands at its midpoint (phase pinned by the audio in-point,
+  information + frame-exact export). The residual lag is
   re-measured. A target outside that video-feasible range by more than `audio_lag_tol_ms` never moves
   raw_in (the audio says nothing usable about the phase; clamping would only shrink the AE margin) and
   those segments are listed in ONE run-level warning; `phase_source = 'audio'` only when the audio target
@@ -930,9 +990,9 @@ verification honesty) were fixed under these shared rules:
   (source/abs/rel paths) are ignored.
 * **c6** accepts the JSX's runtime `  [frames]` fallback rename, checks switched layers as frames-mode
   layers and requires their audio-only twin.
-* **D3 margin** = max(ae_min_margin_ms, min(5 % of the interval width, 5 % of a RAW frame)); the wide
-  audio search is centred on the feasible interval (up to ±60 s), so static / ambiguous-identical shots land
-  on their audio in-point.
+* **D3 margin** = (superseded by §7.3: in breakpoint cells, `min(cell / 2, max(5 % of the cell,
+  ae_slack_tol_frames))`, never integer ms); the wide audio search is centred on the feasible interval
+  (up to ±60 s), so static / ambiguous-identical shots land on their audio in-point.
 * **Cache keys**: pass-1 and pass-2 visual/refine keys include the layout geometry, static mask and starting
   overlays; STAGE_VERSION and LAYOUT_ALGO_VERSION were bumped.
 * **Box refinement** never moves an edge inward over pixels the temporal analysis proved dynamic, and grows
@@ -953,3 +1013,53 @@ competitor's own temporal signature (comp-only repeat / move labels) and a +-1 R
 references the model cannot fool; c2 tests the no-cut alternative and repeat pairs; noise floors are measured
 per shot / per segment from the data, never by relaxing a spec tolerance. Segmentation's criterion-2 mover
 keeps a visited set and reports an oscillation instead of stopping wherever its iterations ended.
+
+### 7.3 AE floor-rule safety from the exact per-frame slack (FX-10)
+
+The first real run (23.976 RAW in 30 fps) flagged 9 segments 'AE-rule-sensitive (0.083333 ms)' and missed the
+two frames that really sat on a frame boundary. The old margin measured only the distance of raw_in to the
+edges of the feasible interval, which the BINDING frames define:
+* the 9 are cadence-slip cells: exact frames across a 5-frame window with 3 RAW advances pin raw_in to one
+  4/1001-frame cell (±2/1001 frame = ±0.083 ms) -- maximal information, not weak evidence;
+* S32 k594 sat 8e-9 frame from a boundary (the interval centre = the breakpoint of an ambiguous frame) and
+  S26 k440 1.3 ns from one (D3's 'edge + 1.000 ms': 1 ms = 24/1001 frame realigns 30 comp frames later); the
+  margins were 8.375 and 1.000001 ms.
+
+Rules (§2.1 has the definitions):
+* **Exact slack of every frame.** `phase_solve.exact_min_slack` / `exact_line_slack` (Fractions of the values
+  as written) for segments, `export_ae.layer_min_slack` for AE layers (startTime / stretch, remap key values,
+  HOLD values). `Segment.ae_margin_ms` = the segment's exact slack in ms.
+* **Max-min-slack placement.** `solve_raw_in` (frames up to its last constraint), the pipeline over the
+  whole segment inside the solved interval (`place_raw_in`), and D3 (the target's cell, margin in cells,
+  §7 D3) all place raw_in in breakpoint cells of every frame; never outside interval_floor / floor∩round or
+  the preserved-frames range. A breakpoint frame inside a feasible interval is admissible both ways, so this
+  is a plan-vs-AE risk (s9_6), never a c3 one.
+* **Classes** (`pipeline.phase_slack`, `ae_phase_class`): `ok` = slack ≥ `cfg.ae_slack_tol_frames` (0.01
+  RAW frame); `pinned` = below it because the breakpoint cell raw_in lies in is itself narrower than 2 × the
+  tolerance (pinned by the measured frames, by the audio in-point, or by the lattice of a long NTSC-in-
+  integer layer) and raw_in keeps ≥ half of its slack; `razor` = below it although its cell allows more.
+* **Report.** Pinned phases are one INFORMATION line ('Phase pinned by cadence (information, not a risk):
+  S18 (±0.083 ms, frames), ...'), never a warning or a segment note; razor segments -- and pinned ones whose
+  configured `--ae-time-mode stretch|remap` keeps them out of the frame-exact export -- are the ONE aggregated
+  warning (`pipeline.flag_ae_rule_sensitive`, cutlist.warnings) plus an 'AE-rule-sensitive (slack ...)'
+  note, and the report's 'AE-rule-sensitive segments' line.
+* **Conservative export = frames mode (decided).** After Effects' time representation is unverified (no
+  .aep / aerender yet): footage rates read back as float32 (2^-24 relative = 0.01 frame only at RAW frame
+  ~168,000, 1.9 h at 24p -- the tolerance covers it, 2/1001 frame does not beyond ~33,500 frames = 23 min);
+  startTime / key times may be quantised. A warning would leave a risk the tool can remove; a 1e-6 s
+  tolerance would assume what nobody measured (rejected in the diagnosis). So `--ae-time-mode auto` exports
+  every RAW layer whose exact slack is below the tolerance with frame-exact HOLD keys at (j + 0.25)/raw_fps
+  (0.25 frame of slack against any time representation; audio from the existing audio-only stretch twin).
+  That is what makes 'pinned' honest information. Cost: per-frame keys on those layers (cadence-pinned
+  short layers and NTSC-in-integer layers longer than ~250 / ~1001 frames, whose lattice never offers 0.01
+  frame); a forced `--ae-time-mode stretch|remap` keeps them and says so.
+* **AE's own mapping in the JSX.** Besides the read-back recomputation (which only re-does the plan's floor()
+  in JS), every RAW video layer is checked with After Effects' OWN sourceTime() (an expression on a
+  temporary Slider Control, valueAtTime(t, false)) / footage.frameDuration; a stretch layer it contradicts
+  goes frame-exact; residuals and slacks go to `ae_time_check.txt`. s9_6 reports them (`ae_time`) together
+  with the frames aerender rendered right -- the evidence on which `ae_slack_tol_frames` may later be lowered.
+* Tests: `test_phase_solve` (slip cell n = 12 / 81 pinned at 4/1001; S32 replica ≥ 1/(4·1001) after
+  placement, exact frames kept), `test_phase_slack` (the real run's numbers: 9 pinned -> information, S19 /
+  S26 / S32 razor; the S26 D3 replica), `test_export_ae` (frames export, startTime ±1e-6 s invariance, the
+  mock JSX's sourceTime check catching what the read-back misses), `test_verify` (s9_6 calibration),
+  `test_synthetic` (simulate_ae with startTime ±1e-6 s identical for every layer on mini / film24).

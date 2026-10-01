@@ -1400,3 +1400,168 @@ def test_write_jsx_accepts_a_plan_without_the_new_fields(tmp_path):
     rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
     assert rec["status"] == "ok" and rec["mock_errors"] == [] and rec["saved"], rec.get("error")
     assert "maskPath" not in plan["layers"][0]                            # the caller's plan is not mutated
+
+
+# ---------------------------------------------------------------------------------------------
+# FX-10: exact per-layer slack, frame-exact export below the tolerance, AE's own source-time check
+# ---------------------------------------------------------------------------------------------
+
+def _brute_layer_slack(L: dict, mode: str, F=(30, 1), R=(30000, 1001)) -> Fraction:
+    """Brute-force exact slack of a plan layer (independent re-implementation of the AE mapping)."""
+    rf, fm = Fraction(R[0], R[1]), Fraction(F[0], F[1])
+    best = Fraction(1)
+    for i, K in enumerate(range(L["compIn"], L["compOut"])):
+        if mode == "stretch":
+            src = (Fraction(K) / fm - Fraction(L["startStretch"])) * 100 / Fraction(L["stretch"])
+        elif mode == "frames":
+            src = Fraction((L["expect"][i] + 0.25) * R[1] / R[0])
+        else:
+            ks = sorted(((Fraction(d["k"]), Fraction(d["v"])) for d in L["remap"]), key=lambda t: t[0])
+            if K <= ks[0][0]:
+                src = ks[0][1]
+            elif K >= ks[-1][0]:
+                src = ks[-1][1]
+            else:
+                (ka, va), (kb, vb) = next((a, b) for a, b in zip(ks, ks[1:]) if a[0] <= K < b[0])
+                src = va + (K - ka) / (kb - ka) * (vb - va)
+        p = rf * src
+        fl = p.numerator // p.denominator
+        best = min(best, p - fl, fl + 1 - p)
+    return best
+
+
+def test_layer_min_slack_equals_brute_force_in_every_mode():
+    plan = ea.ae_plan(make_cutlist(), Config(), meta_for(make_cutlist()))
+    seen = set()
+    for L in plan["layers"]:
+        if L["kind"] != "raw":
+            continue
+        for mode in ("stretch", "remap", "frames"):
+            if mode == "stretch" and L["stretch"] is None:
+                continue
+            s, k = ea.layer_min_slack(L, mode, plan["main"]["fps"], plan["rawFps"])
+            assert s == _brute_layer_slack(L, mode), (L["id"], mode)
+            assert L["compIn"] <= k < L["compOut"]
+            seen.add(mode)
+        assert L["minSlack"] == pytest.approx(float(ea.layer_min_slack(L, L["timeMode"], plan["main"]["fps"],
+                                                                        plan["rawFps"])[0]), abs=1e-12)
+    assert seen == {"stretch", "remap", "frames"}
+
+
+R24 = Fraction(24000, 1001)
+
+
+def _slip_raw_in(n: int, j0: int = 3000) -> float:
+    """A 9-decimal raw_in at the midpoint of a 4/1001-frame cadence-slip cell of n frames (23.976 in 30)."""
+    u = R24 / CF
+    bp = sorted({(-u * d) % 1 for d in range(n)})
+    a, b = next((a, b) for a, b in zip(bp, bp[1:]) if b - a == Fraction(4, 1001))
+    return round(float((j0 + (a + b) / 2) / R24), 9)
+
+
+def _fx10_cutlist() -> Cutlist:
+    """23.976 RAW in a 30 fps edit: S1 pinned in a cadence-slip cell (+-2/1001 frame), S2 with ample slack,
+    S3 = the real run's S32 (raw_in 44.102458333, k594 8e-9 frame from a boundary)."""
+    segs = [Segment(id=1, type="raw", comp_in=0, comp_out=12, raw_in_seconds=_slip_raw_in(12), speed=1.0,
+                    transform=dict(SIM1)),
+            Segment(id=2, type="raw", comp_in=12, comp_out=60, raw_in_seconds=raw_time(4000, 0.37) * float(RF / R24),
+                    speed=1.0, transform=dict(SIM1)),
+            Segment(id=3, type="raw", comp_in=60, comp_out=64, raw_in_seconds=44.102458333, speed=1.0,
+                    transform=dict(SIM1))]
+    cl = make_cutlist(segments=segs, comp_frames=64)
+    cl.raw["fps"] = "24000/1001"
+    return cl
+
+
+def test_low_slack_layers_export_frame_exact_and_survive_start_time_error():
+    """FX-10: a layer whose exact slack is below ae_slack_tol_frames (the cadence-pinned S1: 2/1001 frame;
+    the razor S3) is exported with frame-exact HOLD keys in --ae-time-mode auto -- information, not a
+    warning -- so simulate_ae with startTime +-1e-6 s gives identical frames for every layer. Forced stretch
+    keeps them stretched (aeRuleSensitive) and shows the risk: the razor layer flips under +-1e-6 s."""
+    cl = _fx10_cutlist()
+    plan = ea.ae_plan(cl, Config(), meta_for(cl))
+    L1, L2, L3 = (layer(plan, f"seg{i}") for i in (1, 2, 3))
+    assert (L1["timeMode"], L2["timeMode"], L3["timeMode"]) == ("frames", "stretch", "frames")
+    assert L1["minSlack"] == pytest.approx(0.25, abs=1e-6) and L2["minSlack"] >= 0.01
+    assert L1["name"].endswith("[frames]") and "phase slack 0.001998" in L1["note"]
+    slack_dec = [d for d in plan["decisions"] if d["decision"] == "time_mode_slack"]
+    assert [d["segment"] for d in slack_dec] == [1, 3]
+    assert slack_dec[0]["slack_frames"] == pytest.approx(2 / 1001, abs=2e-8)
+    assert slack_dec[1]["slack_frames"] < 1e-7 and slack_dec[1]["frame"] == 62
+    assert not any("seg1" in w or "S01" in w for w in plan["warnings"])               # info, not a warning
+    assert any(A["id"] == "seg1_audio" for A in plan["layers"])                       # the audio twin
+    base = ea.raw_frames_by_layer(ea.simulate_ae(plan))
+    for off in (1e-6, -1e-6):
+        assert ea.raw_frames_by_layer(ea.simulate_ae(plan, start_offset_s=off)) == base
+    want = {f"seg{s.id}": dict(zip(range(s.comp_in, s.comp_out),
+                                   exact_stretch(s.raw_in_seconds, 1.0, s.comp_in, s.comp_out, rf=R24)))
+            for s in cl.segments}
+    assert base == want
+    # forced stretch: the risk stays (one quiet per-layer note each; the pipeline aggregates the warning)
+    plan_s = ea.ae_plan(cl, Config(ae_time_mode="stretch"), meta_for(cl))
+    assert all(layer(plan_s, f"seg{i}")["timeMode"] == "stretch" for i in (1, 2, 3))
+    assert layer(plan_s, "seg1").get("aeRuleSensitive") and layer(plan_s, "seg3").get("aeRuleSensitive")
+    assert not layer(plan_s, "seg2").get("aeRuleSensitive")
+    base_s = ea.raw_frames_by_layer(ea.simulate_ae(plan_s))
+    flips = {off: {lid for lid, fr in ea.raw_frames_by_layer(ea.simulate_ae(plan_s, start_offset_s=off)).items()
+                   if fr != base_s[lid]} for off in (1e-6, -1e-6, 1e-4, -1e-4)}
+    assert flips[1e-6] | flips[-1e-6] == {"seg3"}                                     # the razor edge
+    assert "seg1" in flips[1e-4] | flips[-1e-4]                                       # +-0.083 ms: pinned, not razor
+
+
+@needs_node
+def test_mock_pinned_layer_frames_mode_and_ae_source_time_check(tmp_path):
+    """The JSX builds the pinned layer with HOLD keys and checks every RAW layer with AE's own sourceTime()
+    / frameDuration (here: the mock's float32 frame rate); ae_time_check.txt logs the residuals."""
+    cl = _fx10_cutlist()
+    cl, cfg, plan, jsx = build(tmp_path, cl)
+    # the pipeline's c6 scenarios (a 2-decimal '23.98' display rate IS a real drift for 24000/1001)
+    res = ea.mock_verify(jsx, plan, meta_for(cl), scenarios=("default", "media_missing", "new_project_null",
+                                                            "no_marker_property"))
+    assert res["status"] == "pass", res["failures"]
+    rec = res["records"]["default"]
+    by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+    tr = by["mc:seg1"]["props"]["ADBE Time Remapping"]["keys"]
+    assert by["mc:seg1"]["timeRemapEnabled"] and len(tr) == 12 and all(k["outInterp"] == "HOLD" for k in tr)
+    assert not by["mc:seg2"]["timeRemapEnabled"] and by["mc:seg1_audio"]["audioEnabled"]
+    assert all(not L["effects"] for L in by.values() if str(L["comment"]).startswith("mc:seg"))   # probe removed
+    rows = ea.time_check_from_record(rec, tmp_path)
+    assert set(rows) == {"seg1", "seg2", "seg3"} and all(r["off"] == 0 for r in rows.values())
+    assert rows["seg1"]["mode"] == "frames" and rows["seg1"]["min_slack"] == pytest.approx(0.25, abs=1e-4)
+    assert rows["seg2"]["mode"] == "stretch"
+    # AE's frameDuration comes from a float32 rate in the mock: residual ~ RAW frame x 2.7e-8 (~1e-4 at 4000)
+    assert 0 < rows["seg2"]["max_res"] < 1e-3
+    assert abs(rows["seg2"]["min_slack"] - layer(plan, "seg2")["minSlack"]) <= rows["seg2"]["max_res"] + 1e-9
+    s = res["details"]["time_check"]
+    assert s["layers"] == 3 and s["off"] == 0 and s["unavailable"] == []
+    assert "AE time check: 3 RAW layer(s), 64 frames, 0 off the plan" in rec["alerts"][-1]
+
+
+@needs_node
+def test_mock_ae_source_time_check_catches_what_the_read_back_misses(tmp_path):
+    """Forced --ae-time-mode stretch keeps the razor S3 (8e-9 frame of slack) stretched. The JSX's read-back
+    check recomputes floor() in JS with the plan's exact rate and passes; AE's OWN mapping (sourceTime /
+    frameDuration -- in the mock from a float32 frame rate, +2.9e-5 frame at RAW 1059) shows RAW 1059 on MAIN
+    frame 62: the JSX switches that layer to frame-exact HOLD keys and the result is the planned frames."""
+    cl, cfg, plan, jsx = build(tmp_path, _fx10_cutlist(), ae_time_mode="stretch")
+    assert layer(plan, "seg3")["timeMode"] == "stretch"
+    rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
+    assert rec["status"] == "ok" and rec["mock_errors"] == []
+    by = {L["comment"]: L for c in rec["comps"] for L in c["layers"]}
+    assert by["mc:seg3"]["timeRemapEnabled"] and by["mc:seg3"]["name"].endswith("[frames]")
+    assert not by["mc:seg1"]["timeRemapEnabled"] and not by["mc:seg2"]["timeRemapEnabled"]
+    assert any("own source time shows another RAW frame on 1 frame(s) (first at MAIN frame 62)" in w
+               for w in rec["warnings"])
+    rows = ea.time_check_from_record(rec, tmp_path)
+    assert rows["seg3"]["mode"] == "frames" and all(r["off"] == 0 for r in rows.values())
+    assert ea.raw_frames_by_layer(ea.simulate_ae(rec)) == ea.raw_frames_by_layer(ea.simulate_ae(plan))
+
+
+def test_parse_time_check_rows():
+    text = ("# header\nseg1\tframes\t12\t0\t0.249990000\t1.000e-5\t0.250000000\nseg7\tremap\tunavailable\n")
+    rows = ea.parse_time_check(text)
+    assert rows["seg1"] == {"mode": "frames", "frames": 12, "off": 0, "min_slack": 0.24999, "max_res": 1e-5,
+                            "plan_slack": 0.25}
+    assert rows["seg7"] == {"mode": "remap", "unavailable": True}
+    s = ea.time_check_summary(rows)
+    assert s["layers"] == 1 and s["frames"] == 12 and s["unavailable"] == ["seg7"] and s["layers_off"] == []

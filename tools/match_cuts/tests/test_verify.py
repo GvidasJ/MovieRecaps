@@ -1320,6 +1320,50 @@ def test_ae_render_not_available_without_aerender(tmp_path):
     assert r["status"] == "not_available"
 
 
+def _calib_plan() -> dict:
+    """A 23.976-in-30 plan: one stretch layer (raw_in 100.25 frames) and one layer exported frame-exact
+    because of its slack (FX-10)."""
+    rf = 24000 / 1001
+    return {"main": {"fps": {"num": 30, "den": 1}}, "rawFps": {"num": 24000, "den": 1001},
+            "layers": [{"id": "seg1", "kind": "raw", "timeMode": "stretch", "compIn": 0, "compOut": 10,
+                        "stretch": 100.0, "startStretch": -100.25 / rf},
+                       {"id": "seg2", "kind": "raw", "timeMode": "frames", "compIn": 10, "compOut": 20,
+                        "stretch": 100.0, "startStretch": 0.0}],
+            "decisions": [{"decision": "time_mode_slack", "segment": 2, "slack_frames": 0.001998}]}
+
+
+def test_s9_6_calibrates_ae_time_resolution_from_the_jsx_time_check_and_the_render(tmp_path):
+    """FX-10: s9_6 reports the plan's slack tolerance, the layers exported frame-exact because of it, the
+    JSX's AE source-time check of this run (ae_time_check.txt) and, with a render, the smallest plan slack AE
+    rendered right; a frame-exact layer AE still maps to another RAW frame fails."""
+    plan = _calib_plan()
+    tc = tmp_path / "ae_time_check.txt"
+    rows = [["seg1", "stretch", "10", "0", "0.049900000", "2.000e-9", "0.049900000"],
+            ["seg2", "frames", "10", "0", "0.250000000", "1.000e-9", "0.250000000"]]
+    tc.write_text("# header\n" + "".join("\t".join(r) + "\n" for r in rows))
+    r = verify.check_ae_render({"aerender": None}, None, None, 20, F30, (36, 64), tmp_path, Config(), plan=plan,
+                               time_check_path=tc)
+    assert r["status"] == "not_available"
+    cal = r["ae_time"]
+    assert cal["slack_tol_frames"] == 0.01 and cal["frame_exact_for_slack"] == [2] and cal["stretch_layers"] == 1
+    assert cal["time_check"]["layers"] == 2 and cal["time_check"]["off"] == 0 and cal["rendered"] is None
+    assert "AE source-time check: 2 layer(s), 20 frames, 0 off the plan" in r["summary"]
+    tc.write_text("\t".join(["seg2", "frames", "10", "1", "0.000001000", "2.500e-1", "0.250000000"]) + "\n")
+    r = verify.check_ae_render({"aerender": None}, None, None, 20, F30, (36, 64), tmp_path, Config(), plan=plan,
+                               time_check_path=tc)
+    assert r["status"] == "fail" and any("seg2" in f for f in r["failures"])
+    # with a render: the plan slack of the stretch frames AE rendered right, mismatches at low slack listed
+    cal = verify.ae_time_calibration(plan, None, {"frames_rendered": 20, "mismatches": [{"K": 3}]}, Config())
+    sl = verify._plan_stretch_slack(plan)
+    assert sorted(sl) == list(range(10)) and cal["rendered"]["stretch_frames"] == 10
+    assert cal["rendered"]["min_slack_rendered_ok"] == pytest.approx(min(v for k, v in sl.items() if k != 3))
+    low = [k for k, v in sl.items() if v < 0.02]
+    assert cal["rendered"]["mismatches_low_slack"] == ([3] if 3 in low else [])
+    # no time check of this run: nothing read (a stale file of an earlier run is never used)
+    assert verify._ae_time_check_path(types.SimpleNamespace(paths={"jsx": str(tmp_path / "x.jsx")},
+                                                            ae_run={"status": "not_available"})) is None
+
+
 def _write_video(path: Path, frames: np.ndarray, fps=F30) -> None:
     from match_cuts.media import FFmpegWriter
     h, w = frames.shape[1:3]

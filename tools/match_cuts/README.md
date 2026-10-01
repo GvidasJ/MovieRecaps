@@ -137,14 +137,16 @@ horizontal flip when `flip_h`) to competitor pixels, CORNER convention. `raw_in_
 phase-solved RAW time at `comp_in`: any value inside the feasible interval `raw_in_interval` reproduces
 every measured frame under AE's floor rule (`raw_in_interval_both`: also under round-to-nearest). Inside
 it the phase is chosen from the AUDIO when the segment's audio correlates confidently (`audio.phase_source
-= "audio"`, `audio.lag_ms_video` = the lag the interval centre would have had), otherwise the centre;
-this removes the systematic quarter-frame audio offset of the centre (8.3 ms at 30p, 10.4 ms at 24p).
-The audio-chosen `raw_in` keeps a margin of `max(ae_min_margin_ms, min(5 % of the interval width, 5 % of
-a RAW frame))` from the interval edges (1 ms at 30p for a sub-frame interval, 1.7 ms for a wide one), so
-the frames stay exact while an in-point on the edge — an NLE cut at a RAW shot boundary — stays within
-~2 ms in audio. Static / ambiguous-identical shots, whose interval can span seconds, also get a wide
-audio search centred on the feasible interval and covering all of it (half-width up to 60 s).
-`ae_margin_ms` is the distance to the interval edge. The only wall-clock values are in `provenance.timings`, which the determinism check
+= "audio"`, `audio.lag_ms_video` = the lag the video placement would have had), otherwise the midpoint
+of the breakpoint cell with the most slack (a cell = the raw_in values that show exactly the same RAW frame
+on every frame of the segment; for exact frames the interval centre); this removes the systematic
+quarter-frame audio offset of the centre (8.3 ms at 30p, 10.4 ms at 24p). The audio-chosen `raw_in` stays
+in its cell with a margin of `min(cell / 2, max(5 % of the cell, ae_slack_tol_frames))` — never an integer
+number of milliseconds, which realigns with NTSC frame boundaries — so the frames stay exact while an
+in-point on the edge — an NLE cut at a RAW shot boundary — stays within ~2 ms in audio. Static /
+ambiguous-identical shots, whose interval can span seconds, also get a wide audio search centred on the
+feasible interval and covering all of it (half-width up to 60 s). `ae_margin_ms` is the exact AE floor-rule
+slack of the written `raw_in` over every frame of the segment (ms). The only wall-clock values are in `provenance.timings`, which the determinism check
 ignores; everything else is identical on a re-run.
 
 ## Pipeline
@@ -258,11 +260,16 @@ drift in frames when it is more than cosmetic), and checks the frame count exact
 the comp rate: a 29.97 fps source inside a 30 fps edit plays at speed 1.000. Runtime warnings are listed in
 the final alert and stored in the comment of the `Recreated Edit` comp.
 
-**Off-by-one frames in AE on some segments** — the report lists *AE-rule-sensitive* segments (floor-rule
-phase margin below `ae_min_margin_ms`; a 23.976 source in a 30 fps edit never satisfies the round rule too,
-which is normal and not flagged). The JSX
-already re-checks every stretch-mode layer from the values AE stored and switches mismatching layers to
-frame-exact time remapping; to force it for every layer, re-export with `--ae-time-mode frames`.
+**Off-by-one frames in AE on some segments** — every RAW layer whose exact floor-rule slack (the distance
+of its RAW positions to a frame boundary, over every frame) is below `ae_slack_tol_frames` is exported with
+frame-exact time remapping (HOLD keys) in `--ae-time-mode auto`. *Phase pinned by cadence (±0.083 ms)* in
+the report is information, not a problem: a 23.976 source in a 30 fps edit pins `raw_in` to a 1/6 ms window
+whenever a segment crosses a pulldown slip. *AE-rule-sensitive* segments (a slack below the tolerance although
+more was possible, or such layers kept in a forced `--ae-time-mode stretch|remap`) are one warning. The JSX
+re-checks every RAW layer twice -- from the values AE stored and with After Effects' own `sourceTime()` -- and
+switches mismatching stretch layers to frame-exact time remapping; its per-layer residuals are in
+`ae_time_check.txt` next to the script. To force frame-exact remapping for every layer, re-export with
+`--ae-time-mode frames`.
 
 **A criterion failed** — start with `report.md` (*Warnings*, *Verification details*), then
 `verify.json`, `debug/mapping.png` (every segment should be a straight line, every cut a jump),
@@ -289,7 +296,7 @@ changed, update this table with the reason.
 
 | group | parameter | default | meaning |
 |---|---|---|---|
-| export | `ae_min_margin_ms` | 1.0 | phase margin below which a segment is reported AE-rule-sensitive |
+| export | `ae_slack_tol_frames` | 0.01 | exact AE floor-rule slack (RAW frames, every frame of a layer) below which `--ae-time-mode auto` exports the layer frame-exact (AE's time resolution is unverified; FX-10, replaces `ae_min_margin_ms` = 1 ms, which measured only the interval edges) |
 | export | `large_file_bytes` | 2 GiB | RAW above this is referenced by absolute path instead of copied |
 | proxies | `raw_proxy_width` / `comp_proxy_scale` / `comp_proxy_max_width` | 640 / 0.5 / 640 | analysis proxy sizes |
 | proxies | `proxy_budget_bytes` / `min_proxy_width` / `long_raw_s` | 3 GiB / 256 / 2700 s | long-RAW handling (sparse proxies around audio hints) |

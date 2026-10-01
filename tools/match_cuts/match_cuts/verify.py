@@ -3189,9 +3189,98 @@ def compare_render_to_preview(render: Iterable[tuple[int, np.ndarray]], preview:
             "failures": failures, "mismatches": bad[:200], "ambiguous": amb[:200], "frames_rendered": len(seen)}
 
 
+def _plan_stretch_slack(plan: dict | None) -> dict[int, float]:
+    """MAIN frame -> the smallest floor-rule slack (RAW frames) of the stretch-mode RAW video layers the plan
+    shows there: |raw_fps * (t_K - startTime) * 100 / stretch| to the nearest integer."""
+    out: dict[int, float] = {}
+    if not plan:
+        return out
+    F, R = plan["main"]["fps"], plan["rawFps"]
+    rf = R["num"] / R["den"]
+    for L in plan.get("layers", []):
+        if L.get("kind") != "raw" or L.get("timeMode") != "stretch" or L.get("stretch") is None:
+            continue
+        for K in range(int(L["compIn"]), int(L["compOut"])):
+            p = (K * F["den"] / F["num"] - float(L["startStretch"])) * (100.0 / float(L["stretch"])) * rf
+            s = min(p - math.floor(p), math.floor(p) + 1 - p)
+            out[K] = min(out.get(K, 1.0), s)
+    return out
+
+
+def ae_time_calibration(plan: dict | None, time_check: dict | None, render: dict | None, cfg: Any) -> dict:
+    """s9_6 evidence on After Effects' real time resolution (FX-10): the plan's tolerance and the layers it
+    exported frame-exact because their exact slack was below it; the JSX's AE source-time check
+    (ae_time_check.txt of the After Effects run: frames off the plan, smallest slack AE showed, largest |AE -
+    plan| residual); and, when aerender rendered MAIN, the smallest plan slack of a stretch-layer frame AE
+    rendered right and the render mismatches at frames with less than 2 x the tolerance. That is what may
+    later justify a smaller ae_slack_tol_frames -- never an assumption."""
+    tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
+    summary = None
+    if time_check is not None:
+        from .export_ae import time_check_summary
+        summary = time_check_summary(time_check)
+    out: dict[str, Any] = {
+        "slack_tol_frames": tol,
+        "frame_exact_for_slack": sorted({int(d["segment"]) for d in (plan or {}).get("decisions", [])
+                                         if d.get("decision") == "time_mode_slack"}),
+        "stretch_layers": sum(1 for L in (plan or {}).get("layers", []) if L.get("kind") == "raw"
+                              and L.get("timeMode") == "stretch"),
+        "time_check": summary,
+        "rendered": None,
+    }
+    if render is not None and "mismatches" in render:
+        slack = _plan_stretch_slack(plan)
+        n = int(render.get("frames_rendered") or 0)
+        bad = {int(m["K"]) for m in render.get("mismatches", []) if "K" in m}
+        ok = [s for K, s in slack.items() if K < n and K not in bad]
+        out["rendered"] = {"stretch_frames": sum(1 for K in slack if K < n),
+                           "min_slack_rendered_ok": min(ok) if ok else None,
+                           "mismatches_low_slack": sorted(K for K in bad if slack.get(K, 1.0) < 2 * tol)}
+    return out
+
+
 def check_ae_render(env: dict, aep: str | None, preview: str | None, n_main: int, main_fps: Fraction,
-                    proxy_size: tuple[int, int], out_dir: Path, cfg: Any) -> dict:
-    """Render MAIN with aerender (if installed) and compare every frame with preview_recreation.mp4."""
+                    proxy_size: tuple[int, int], out_dir: Path, cfg: Any, plan: dict | None = None,
+                    time_check_path: str | os.PathLike | None = None) -> dict:
+    """Render MAIN with aerender (if installed) and compare every frame with preview_recreation.mp4; plus
+    ``ae_time`` (``ae_time_calibration``): After Effects' own source-time check of this run's JSX
+    (``time_check_path`` = its ae_time_check.txt, when After Effects ran it) -- a frame-exact or remap layer
+    AE still maps to another RAW frame fails; stretch layers the JSX already switched are recovered."""
+    res = _ae_render_compare(env, aep, preview, n_main, main_fps, proxy_size, out_dir, cfg)
+    rows = None
+    if time_check_path is not None and Path(time_check_path).is_file():
+        from .export_ae import parse_time_check
+        rows = parse_time_check(Path(time_check_path).read_text(encoding="utf-8", errors="replace"))
+    res["ae_time"] = ae_time_calibration(plan, rows, res, cfg)
+    tc = res["ae_time"]["time_check"]
+    if tc is not None:
+        res["summary"] = (res.get("summary", "") + f"; AE source-time check: {tc['layers']} layer(s), {tc['frames']} "
+                          f"frames, {tc['off']} off the plan" + (f", max |AE - plan| {tc['max_res']:.2e} RAW frame"
+                                                                  if tc["max_res"] is not None else ""))
+        if tc["layers_off"]:
+            res.setdefault("failures", []).append(f"After Effects' own source time differs from the plan on "
+                                                  f"{tc['layers_off'][:5]} (ae_time_check.txt)")
+            res["status"] = "fail"
+    return res
+
+
+def _ae_time_check_path(ctx: Any) -> Path | None:
+    """ae_time_check.txt next to this run's JSX when After Effects ran it in this run (written after the
+    JSX; a file left by an earlier run is ignored), else None."""
+    jsx = (getattr(ctx, "paths", None) or {}).get("jsx")
+    if not jsx or (getattr(ctx, "ae_run", None) or {}).get("status") != "ok":
+        return None
+    from .export_ae import TIME_CHECK_FILE
+    p = Path(jsx).parent / TIME_CHECK_FILE
+    try:
+        return p if p.is_file() and p.stat().st_mtime_ns >= Path(jsx).stat().st_mtime_ns else None
+    except OSError:
+        return None
+
+
+def _ae_render_compare(env: dict, aep: str | None, preview: str | None, n_main: int, main_fps: Fraction,
+                       proxy_size: tuple[int, int], out_dir: Path, cfg: Any) -> dict:
+    """check_ae_render's aerender part: render MAIN and compare every frame with preview_recreation.mp4."""
     aerender = (env or {}).get("aerender")
     if not aerender:
         return {"status": "not_available", "summary": "aerender not available on this machine (criterion 6 is mock-only)",
@@ -3818,7 +3907,7 @@ def verify_all(ctx: Any) -> dict:
     small = (360, max(2, int(round(360 * main_h / main_w / 2)) * 2))
     checks["s9_6_ae_render"] = _run_check("s9_6_ae_render", lambda: check_ae_render(
         ctx.env, ctx.paths.get("aep"), ctx.paths.get("preview"), n_main, main_fps, small,
-        Path(cfg.work) / "aerender", cfg))
+        Path(cfg.work) / "aerender", cfg, plan=getattr(ctx, "plan", None), time_check_path=_ae_time_check_path(ctx)))
     checks["s9_7_determinism"] = _run_check("s9_7_determinism", lambda: check_determinism(ctx))
     checks["s9_8_deliverables"] = _run_check("s9_8_deliverables",
                                              lambda: check_deliverables(ctx, n_cuts=len(cut_frames(segs))))

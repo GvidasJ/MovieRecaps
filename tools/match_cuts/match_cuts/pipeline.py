@@ -51,6 +51,7 @@ from typing import Any, Callable, Iterator
 import numpy as np
 
 from . import __version__
+from . import phase_solve as _ps
 from .common import (STAGE_VERSION, Cache, DecisionLog, dump_json, ffmpeg_bin, ffprobe_bin, file_hash, fmt_seconds,
                      fps_str, json_default, load_decisions, log, null_dlog, params_hash, save_decisions, seed_everything,
                      setup_logging, stage_key, timecode)
@@ -525,7 +526,7 @@ def solve_segment_phase(seg: Segment, fm: FrameMap, comp_fps: Fraction, raw_fps:
     dlog.record("phase_solve", "raw_in", segment=seg.id, source="pipeline", speed=v, n_constraints=int(len(ks)),
                 raw_in_seconds=seg.raw_in_seconds, interval_floor=seg.raw_in_interval,
                 interval_both=seg.raw_in_interval_both, margin_ms=seg.ae_margin_ms, slack=res.get("slack"),
-                tie_frames=seg.tie_frames, dropped=dropped, ae_rule_sensitive="AE-rule-sensitive" in (seg.notes or ""))
+                tie_frames=seg.tie_frames, dropped=dropped, **_slack_evidence(seg, comp_fps, raw_fps, cfg))
     return warnings
 
 
@@ -557,59 +558,138 @@ def _adopt_segment_phase(seg: Segment, fm: FrameMap, ks: np.ndarray, lo: np.ndar
     dlog.record("phase_solve", "raw_in", segment=seg.id, source="segment", speed=v, n_constraints=int(len(ks)),
                 raw_in_seconds=seg.raw_in_seconds, interval_floor=seg.raw_in_interval,
                 interval_both=seg.raw_in_interval_both, margin_ms=seg.ae_margin_ms, tie_frames=seg.tie_frames,
-                violations=viol, ae_rule_sensitive="AE-rule-sensitive" in (seg.notes or ""))
+                violations=viol, **_slack_evidence(seg, comp_fps, raw_fps, cfg))
     return warnings
 
 
 def _fill_phase_fields(seg: Segment, fm: FrameMap, res: dict, comp_fps: Fraction, raw_fps: Fraction, cfg: Config,
                        phase) -> list[str]:
     """Write a phase solution into the segment (9-decimal seconds), mark tie frames in the FrameMap,
-    derive raw_in_frame / raw_out_frame with the AE rule and flag AE-rule-sensitive segments."""
+    derive raw_in_frame / raw_out_frame with the AE rule. raw_in is re-placed over the WHOLE layer
+    [comp_in, comp_out) inside the solved interval (floor∩round, else floor): the midpoint of the breakpoint
+    cell with the most slack for every frame (FX-10; the solve only saw the frames up to its last
+    constraint). ae_margin_ms = the exact floor-rule slack of the written raw_in over every frame."""
     warnings: list[str] = []
-    name = f"S{seg.id:02d}"
     v = float(seg.speed)
     raw_in = float(res["raw_in"])
-    seg.raw_in_seconds = fmt_seconds(raw_in)
     fl = res.get("interval_floor")
-    seg.raw_in_interval = [fmt_seconds(fl[0]), fmt_seconds(fl[1])] if fl else None
     both = res.get("interval_both")
+    allowed = both or fl
+    if allowed and v > 0 and float(allowed[1]) > float(allowed[0]) and \
+            float(allowed[0]) - 1e-9 <= raw_in <= float(allowed[1]) + 1e-9:
+        raw_in = float(_ps.place_raw_in(allowed, seg.comp_in, seg.comp_out, v, comp_fps, raw_fps,
+                                        round_rule=bool(both))["raw_in"])
+    seg.raw_in_seconds = fmt_seconds(raw_in)
+    seg.raw_in_interval = [fmt_seconds(fl[0]), fmt_seconds(fl[1])] if fl else None
     seg.raw_in_interval_both = [fmt_seconds(both[0]), fmt_seconds(both[1])] if both else None
-    seg.ae_margin_ms = None if res.get("margin_ms") is None else round(float(res["margin_ms"]), 6)
     ties = sorted({int(k) for k in (res.get("tie_frames") or [])} | {int(k) for k in seg.tie_frames})
     seg.tie_frames = ties
     for k in ties:
         if 0 <= k < fm.n:
             fm.tie[k] = True
-    seg.raw_in_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, comp_fps, raw_fps))
-    seg.raw_out_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_out - 1, seg.comp_in, comp_fps, raw_fps))
-    # AE-rule sensitivity is judged on the FINAL segments (after the audio-informed phase) in
+    _refresh_phase_after_move(seg, fm, comp_fps, raw_fps, phase)
+    if seg.ae_margin_ms is None and res.get("margin_ms") is not None:
+        seg.ae_margin_ms = round(float(res["margin_ms"]), 6)
+    # AE-rule safety is judged on the FINAL segments (after the audio-informed phase) in
     # flag_ae_rule_sensitive(); nothing to report here
     return warnings
 
 
-def ae_rule_sensitive(seg: Segment, cfg: Config) -> bool:
-    """A real AE timing risk: the floor-rule phase margin is below ae_min_margin_ms. (No floor∩round
-    overlap alone is NOT a risk -- AE samples footage with the floor rule, and a 23.976 source in a 30 fps
-    edit never satisfies both rules -- it is only noted.)"""
-    m = seg.ae_margin_ms
-    return seg.type == "raw" and seg.time_mode != "remap" and m is not None and \
-        math.isfinite(float(m)) and float(m) < float(cfg.ae_min_margin_ms) - 1e-6
+def _slack_evidence(seg: Segment, comp_fps: Fraction, raw_fps: Fraction, cfg: Config) -> dict:
+    """Decision-log fields of the AE floor-rule slack of a solved segment (FX-10)."""
+    info = phase_slack(seg, comp_fps, raw_fps)
+    if info is None:
+        return {"ae_phase": "n/a"}
+    return {"ae_phase": ae_phase_class(info, cfg), "ae_slack_frames": round(info["slack_frames"], 12),
+            "ae_slack_k": info["k"], "ae_cell_half_frames": round(info["cell_half"], 12),
+            "ae_best_slack_frames": None if info["best"] is None else round(info["best"], 12),
+            "ae_video_pinned": info["video_pinned"]}
 
 
-def flag_ae_rule_sensitive(segments: list[Segment], cfg: Config) -> list[str]:
-    """Tag AE-rule-sensitive segments in their notes (and only them) and return ONE aggregated warning."""
-    ids = []
+def phase_slack(seg: Segment, comp_fps: Fraction, raw_fps: Fraction) -> dict | None:
+    """AE floor-rule slack of a 'raw' stretch segment as written (DESIGN §2.1, FX-10), or None (no raw_in,
+    remap / freeze / reverse: their keys are judged by the export).
+
+    slack        exact minimum over EVERY frame of [comp_in, comp_out) of the distance of raw_fps·(raw_in +
+                 v·(t_k − t_in)) to the nearest integer (RAW frames, Fraction; raw_in / v as written)
+    k            the frame at that minimum
+    cell_half    half the breakpoint cell (of every frame) around raw_in: the most slack any raw_in showing
+                 exactly the same frames can have; cell_ms its width
+    best         the most slack any raw_in of the solved interval (floor∩round, else floor) can have = half its
+                 widest cell (None without an interval)
+    video_pinned no breakpoint inside that interval: the measured frames pin raw_in to ONE cell"""
+    if seg.type != "raw" or seg.raw_in_seconds is None or segment_time_mode(seg) == "remap" or seg.time_mode == "remap":
+        return None
+    v = float(seg.speed)
+    if not (math.isfinite(v) and v > 0) or seg.comp_out <= seg.comp_in:
+        return None
+    s, k = _ps.exact_min_slack(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, seg.comp_out, comp_fps, raw_fps)
+    lc = _ps.layer_cell(seg.raw_in_seconds, seg.comp_in, seg.comp_out, v, comp_fps, raw_fps)
+    allowed = seg.raw_in_interval_both or seg.raw_in_interval
+    best, video_pinned = None, False
+    if allowed and float(allowed[1]) > float(allowed[0]):
+        p = _ps.place_raw_in(allowed, seg.comp_in, seg.comp_out, v, comp_fps, raw_fps,
+                             round_rule=bool(seg.raw_in_interval_both))
+        best, video_pinned = float(p["best_half"]), bool(p["pinned"])
+    return {"slack": s, "slack_frames": float(s), "slack_ms": float(s / Fraction(raw_fps)) * 1000.0, "k": int(k),
+            "cell_half": float(lc["half"]), "cell_ms": (float(lc["cell"][1]) - float(lc["cell"][0])) * 1000.0,
+            "best": best, "video_pinned": video_pinned}
+
+
+def ae_phase_class(info: dict | None, cfg: Config) -> str:
+    """'ok' (exact slack >= cfg.ae_slack_tol_frames); 'pinned': below it because the breakpoint cell raw_in
+    lies in is itself narrower than 2 x the tolerance -- the frame-rate cadence pins the phase (by the
+    measured frames, or by the audio in-point inside a seconds-wide static interval) and raw_in keeps at
+    least half of that cell's slack: maximal information, not a risk once exported frame-exact; 'razor': below
+    it although its cell allows more (raw_in next to a breakpoint of some frame -- the real run's S32 k594,
+    S26 k440): a real razor-edge risk; 'n/a': no stretch phase."""
+    if info is None:
+        return "n/a"
+    tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
+    s = float(info["slack"])
+    if s >= tol:
+        return "ok"
+    h = float(info["cell_half"])
+    if h < tol and s >= 0.5 * h:
+        return "pinned"
+    return "razor"
+
+
+def ae_rule_sensitive(seg: Segment, cfg: Config, comp_fps: Fraction, raw_fps: Fraction) -> bool:
+    """A real AE timing risk (FX-10): the exact floor-rule slack of the written raw_in is below
+    cfg.ae_slack_tol_frames although the solved interval allows more ('razor'), or the phase is pinned by
+    the cadence but the configured --ae-time-mode keeps the layer in stretch / remap mode (no frame-exact
+    export removes the risk). A pinned phase exported frame-exact is information, not a risk; no
+    floor∩round overlap alone is not a risk either (AE samples with the floor rule)."""
+    cls = ae_phase_class(phase_slack(seg, comp_fps, raw_fps), cfg)
+    if cls == "razor":
+        return True
+    return cls == "pinned" and str(getattr(cfg, "ae_time_mode", "auto") or "auto") in ("stretch", "remap")
+
+
+def flag_ae_rule_sensitive(segments: list[Segment], cfg: Config, comp_fps: Fraction, raw_fps: Fraction) -> list[str]:
+    """Tag the AE-rule-sensitive segments (``ae_rule_sensitive``) in their notes (and only them) and return
+    ONE aggregated warning. Cadence-pinned phases are NOT warnings: the report lists them as information
+    ('phase pinned by cadence (±0.083 ms)') and the export makes those layers frame-exact."""
+    rows = []
+    mode = str(getattr(cfg, "ae_time_mode", "auto") or "auto")
+    tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
     for s in segments:
-        s.notes = "; ".join(p for p in (s.notes or "").split("; ") if p and p != "AE-rule-sensitive")
-        if ae_rule_sensitive(s, cfg):
-            s.notes = _append_note(s.notes, "AE-rule-sensitive")
-            ids.append(s.id)
-    if not ids:
+        s.notes = "; ".join(p for p in (s.notes or "").split("; ")
+                            if p and p != "AE-rule-sensitive" and not p.startswith("AE-rule-sensitive ("))
+        info = phase_slack(s, comp_fps, raw_fps)
+        if ae_rule_sensitive(s, cfg, comp_fps, raw_fps):
+            s.notes = _append_note(s.notes, f"AE-rule-sensitive (slack {info['slack_ms']:.6f} ms at frame {info['k']})")
+            rows.append((s.id, info))
+    if not rows:
         return []
-    shown = ", ".join(f"S{i:02d}" for i in ids[:12]) + (f" (+{len(ids) - 12} more)" if len(ids) > 12 else "")
-    return [f"{len(ids)} segment(s) have a phase margin below {cfg.ae_min_margin_ms:g} ms ({shown}): the JSX re-checks "
-            "them in After Effects and switches to frame-exact remapping if AE stores times differently; "
-            "--ae-time-mode frames forces it"]
+    shown = ", ".join(f"S{i:02d} {inf['slack_ms']:.6f} ms @ {inf['k']}" for i, inf in rows[:12]) + \
+        (f" (+{len(rows) - 12} more)" if len(rows) > 12 else "")
+    how = ("exported frame-exact (time-remap HOLD keys at j + 0.25)" if mode in ("auto", "frames") else
+           f"kept in {mode} mode as requested: After Effects may show a neighbouring RAW frame there "
+           "(--ae-time-mode auto exports them frame-exact)")
+    return [f"{len(rows)} segment(s) have an AE floor-rule slack below {tol:g} RAW frame at the written raw_in "
+            f"({shown}); {how}"]
 
 
 def _append_note(notes: str, extra: str) -> str:
@@ -627,23 +707,22 @@ def _append_note(notes: str, extra: str) -> str:
 AUDIO_PHASE_NARROW_S = 0.1       # analyze_segments_audio searches the per-segment lag within +-100 ms
 AUDIO_PHASE_WIDE_MAX_S = 60.0    # cap of the half-width of the wider search for static / ambiguous segments
 AUDIO_PHASE_WIDE_PAD_S = 0.02    # the wide search reaches this far past the feasible range on both sides
-AUDIO_PHASE_MARGIN_FRAC = 0.05   # D3 edge margin: 5 % of the interval width, at most 5 % of a RAW frame
+AUDIO_PHASE_MARGIN_FRAC = 0.05   # D3 margin: 5 % of the breakpoint cell (at least ae_slack_tol_frames, at most its half)
 AUDIO_PHASE_WIDE_GAIN = 0.02     # a wide-search peak must beat a strong narrow peak by this much
 AUDIO_PHASE_MIN_RANGE_S = 0.25   # shortest audio range the wide search correlates
 _AE_EPS = 1e-9
 
 
-def audio_phase_margin_s(width_s: float, raw_fps: Fraction | float | None = None, min_margin_ms: float = 1.0) -> float:
-    """Edge margin (s) of the audio-informed raw_in inside its feasible interval (DESIGN §7 D3):
-    ``max(ae_min_margin_ms, min(5 % of the width, 5 % of a RAW frame))``. The margin only has to keep
-    the AE floor/round rule off the interval edges; capping it at a fraction of a RAW FRAME (not of the
-    ambiguity span) keeps a static / ambiguous-identical shot whose feasible interval spans seconds on
-    the audio's in-point (an NLE in-point on the RAW shot boundary sits exactly on the interval edge).
-    Without ``raw_fps`` the frame cap is not applied (5 % of the width)."""
-    w = AUDIO_PHASE_MARGIN_FRAC * max(0.0, float(width_s))
-    if raw_fps is not None and float(raw_fps) > 0:
-        w = min(w, AUDIO_PHASE_MARGIN_FRAC / float(raw_fps))
-    return max(max(0.0, float(min_margin_ms)) / 1000.0, w)
+def audio_phase_margin(cell_frames: float, tol_frames: float = 0.01) -> float:
+    """Margin (RAW frames) the audio-informed raw_in keeps from the edges of its breakpoint cell (DESIGN §7
+    D3, FX-10): ``min(cell / 2, max(5 % of the cell, tol_frames))``. Expressed in CELLS -- the pieces of the
+    feasible interval between the floor-rule breakpoints of EVERY frame of the layer -- never in integer
+    milliseconds: 1 ms is 24/1001 frame of a 23.976 source, so a raw_in 1.000 ms from a binding edge puts the
+    frame 30 comp frames later exactly on a frame boundary (the real run's S26 k440). The tolerance gets
+    phase_solve.TAU (1e-6 frame) on top so the 9-decimal rounding of raw_in (<= 3e-8 frame) cannot take the
+    slack below it. A cell narrower than that gets its midpoint (the most slack it has)."""
+    w = max(0.0, float(cell_frames))
+    return min(w / 2.0, max(AUDIO_PHASE_MARGIN_FRAC * w, float(tol_frames) + _ps.TAU))
 
 
 def audio_phase_interval(seg: Segment) -> tuple[list[float] | None, str]:
@@ -786,14 +865,15 @@ def wide_audio_lag(seg: Segment, comp_y: np.ndarray, raw_y: np.ndarray, sr: int,
 
 
 def _refresh_phase_after_move(seg: Segment, fm: FrameMap, comp_fps: Fraction, raw_fps: Fraction, phase) -> None:
-    """Derived phase fields after raw_in moved inside its interval: raw_in/out frames (AE rule), the
-    margin to the floor interval, timing-tie frames at the new raw_in."""
+    """Derived phase fields after raw_in was (re)placed: raw_in/out frames (AE rule), ae_margin_ms = the
+    exact floor-rule slack of the written raw_in over EVERY frame of the segment (ms, FX-10), timing-tie
+    frames at the new raw_in."""
     v = float(seg.speed)
     seg.raw_in_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, comp_fps, raw_fps))
     seg.raw_out_frame = int(phase.ae_frame(seg.raw_in_seconds, v, seg.comp_out - 1, seg.comp_in, comp_fps, raw_fps))
-    if seg.raw_in_interval:
-        a, b = (float(x) for x in seg.raw_in_interval)
-        seg.ae_margin_ms = round(max(0.0, min(float(seg.raw_in_seconds) - a, b - float(seg.raw_in_seconds))) * 1000.0, 6)
+    if math.isfinite(v) and v > 0 and seg.comp_out > seg.comp_in:
+        sl, _k = _ps.exact_min_slack(seg.raw_in_seconds, v, seg.comp_in, seg.comp_in, seg.comp_out, comp_fps, raw_fps)
+        seg.ae_margin_ms = round(float(sl / Fraction(raw_fps)) * 1000.0, 6)
     ks, lo, hi = segment_constraints(seg, fm)
     if len(ks):
         tie_slack = float(getattr(phase, "TIE_SLACK", 1e-4))
@@ -814,14 +894,17 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
                          av_offset_s: float = 0.0) -> tuple[list[int], list[str]]:
     """DESIGN §7 D3: pick raw_in inside its feasible interval from the sample-precise audio lag.
 
-    The video phase solve leaves raw_in at the centre of the floor∩round interval, a quarter RAW frame
-    after the frame boundary an NLE in-point sits on (8.3 ms at 30p, 10.4 ms at 24p). For every 'raw'
-    stretch segment whose first-pass audio correlation is >= cfg.verify_audio_strong_corr with no audio
-    exception, ``raw_in := raw_in + v * residual`` (lag_ms = the residual lag after the run's A/V offset
-    ``av_offset_s`` (D9); > 0 = the rebuilt audio is late, i.e. raw_in too small), clamped into
-    raw_in_interval_both (else raw_in_interval) with a margin of max(ae_min_margin_ms, min(5 % of that
-    interval's width, 5 % of a RAW frame)) from each edge (``audio_phase_margin_s``) and into the range
-    that keeps every correctly shown matched frame (refine's measurement) on its RAW frame. A target
+    The video phase solve leaves raw_in at the midpoint of a breakpoint cell (the centre of the floor∩round
+    interval for exact frames), a quarter RAW frame after the frame boundary an NLE in-point sits on (8.3 ms
+    at 30p, 10.4 ms at 24p). For every 'raw' stretch segment whose first-pass audio correlation is >=
+    cfg.verify_audio_strong_corr with no audio exception, the target ``raw_in + v * residual`` (lag_ms = the
+    residual lag after the run's A/V offset ``av_offset_s`` (D9); > 0 = the rebuilt audio is late, i.e.
+    raw_in too small) is placed inside raw_in_interval_both (else raw_in_interval) ∩ the range that keeps
+    every correctly shown matched frame (refine's measurement) on its RAW frame, in BREAKPOINT CELLS of
+    every frame of the layer (FX-10, ``phase_solve.place_raw_in``): the cell containing the target, or the
+    nearest one whose half-width reaches min(cfg.ae_slack_tol_frames, the best available), and the target
+    clamped to ``audio_phase_margin`` (5 % of that cell, at least the slack tolerance) from its edges --
+    never an integer-millisecond margin, so no frame of the layer lands on a frame boundary. A target
     outside that video-feasible range by more than cfg.audio_lag_tol_ms (competitor time) does not move
     raw_in at all (the audio says nothing usable about the phase); those segments are listed in ONE
     run-level warning. Segments whose interval is wider than +-100 ms in competitor time (static /
@@ -841,6 +924,8 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     warnings: list[str] = []
     far: list[tuple[int, float]] = []          # (segment, ms outside the feasible range): kept at the video phase
     tol_ms = float(getattr(cfg, "audio_lag_tol_ms", 10.0))
+    slack_tol = float(getattr(cfg, "ae_slack_tol_frames", 0.01))
+    rf_f = float(Fraction(raw_fps))
     for s in sorted(segments, key=lambda s: (s.comp_in, s.id)):
         if s.type != "raw":
             continue
@@ -874,8 +959,6 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             skip("no feasible raw_in interval")
             continue
         width = interval[1] - interval[0]
-        # D3 margin; never below the AE-rule-sensitivity threshold (1 ms by default)
-        margin = audio_phase_margin_s(width, raw_fps, float(getattr(cfg, "ae_min_margin_ms", 1.0)))
         exc = au.get("exception")
         if exc in ("not_in_raw", "no_audio", "pitch_preserved"):
             skip(f"audio exception {exc}")
@@ -914,23 +997,27 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
             far.append((int(s.id), out_ms if target > hi_e else -out_ms))
             skip(f"audio target {out_ms:.1f} ms outside the video-feasible range (> {tol_ms:g} ms)")
             continue
-        if hi_e - lo_e <= 2 * margin:
-            skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.3f} ms is not wider than 2 x margin {margin * 1000:.3f} ms")
+        if (hi_e - lo_e) * rf_f <= 2 * _ps.SLACK_MERGE:
+            skip(f"feasible range {max(0.0, hi_e - lo_e) * 1000:.6f} ms leaves no room to move")
             continue
-        new = fmt_seconds(min(max(target, lo_e + margin), hi_e - margin))
-        for _ in range(3):                  # the 9-decimal rounding must not eat into the margin
-            if new - lo_e < margin:
-                new = fmt_seconds(new + 1e-9)
-            elif hi_e - new < margin:
-                new = fmt_seconds(new - 1e-9)
-        if not (lo_e + margin <= new <= hi_e - margin):
-            skip("rounded raw_in outside the feasible range")
+        # FX-10: cells of EVERY frame of the layer; margin in cells (never integer ms)
+        pl = _ps.place_raw_in([lo_e, hi_e], s.comp_in, s.comp_out, v, comp_fps, raw_fps, target_s=target,
+                              margin=lambda w: audio_phase_margin(w, slack_tol),
+                              round_rule=kind == "both")
+        c_lo, c_hi = (float(x) for x in pl["cell"])
+        cell_f = (c_hi - c_lo) * rf_f
+        margin_f = min(pl["half"], audio_phase_margin(cell_f, slack_tol))
+        new = fmt_seconds(pl["raw_in"])
+        if not (c_lo < new < c_hi):          # the 9-decimal rounding left a cell narrower than 1 ns
+            skip(f"rounded raw_in outside its {cell_f:.3g}-frame breakpoint cell")
             continue
         clamped = abs(new - target) > 5e-10
         au["phase_source"] = "audio"
         rec = dict(ev, raw_in=new, shift_ms=round((new - old) * 1000.0, 6),
                    lag_ms_used=round(lag_s * 1000.0, 3), corr_used=round(corr, 4), source=how, interval=kind,
-                   interval_s=[round(interval[0], 9), round(interval[1], 9)], margin_ms=round(margin * 1000.0, 6),
+                   interval_s=[round(interval[0], 9), round(interval[1], 9)],
+                   cell_s=[round(c_lo, 9), round(c_hi, 9)], cell_frames=round(cell_f, 9),
+                   margin_frames=round(margin_f, 9), margin_ms=round(margin_f / rf_f * 1000.0, 6),
                    preserved_range_s=[None if not math.isfinite(p_lo) else round(p_lo, 9),
                                       None if not math.isfinite(p_hi) else round(p_hi, 9)],
                    preserved_frames=n_keep, clamped=clamped, speed=v)
@@ -1091,7 +1178,7 @@ def build_cutlist(ctx: Context, segments: list[Segment], audio_result: dict, seg
     settings = {
         "layout_mode": cfg.layout_mode, "comp_size": cfg.comp_size, "main_size": [int(main_size[0]), int(main_size[1])],
         "fps_mode": cfg.fps_mode, "main_fps": fps_str(main_fps), "fps_source_max_error_s": max_err,
-        "ae_time_mode": cfg.ae_time_mode, "ae_min_margin_ms": cfg.ae_min_margin_ms,
+        "ae_time_mode": cfg.ae_time_mode, "ae_slack_tol_frames": cfg.ae_slack_tol_frames,
         "criteria_exact": bool(main_fps == comp_fps),
         "audio_sync": str(getattr(cfg, "audio_sync", "raw") or "raw"),     # D9: raw | competitor (export audio)
     }
@@ -1106,7 +1193,7 @@ def build_cutlist(ctx: Context, segments: list[Segment], audio_result: dict, seg
         audio_block["hint_windows"] = int(len(ctx.hints.comp_t))
         audio_block["hint_windows_confident"] = int(ctx.hints.confident(cfg.audio_min_conf).sum())
     warnings: list[str] = []
-    seg_warnings = [w for w in seg_warnings if "AE-rule-sensitive" not in w] + flag_ae_rule_sensitive(segments, cfg)
+    seg_warnings = [w for w in seg_warnings if "AE-rule-sensitive" not in w] + flag_ae_rule_sensitive(segments, cfg, comp_fps, raw_fps)
     for w in list(ctx.analysis_warnings) + list(seg_warnings):
         if w not in warnings:
             warnings.append(w)

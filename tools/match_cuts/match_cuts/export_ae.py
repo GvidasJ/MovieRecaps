@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .common import DecisionLog, fps_str, log, null_dlog, parse_fps, timecode
+from . import phase_solve as ps
 from .geometry import AETransform, Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
 
@@ -405,7 +406,7 @@ class _PlanBuilder:
         self.time_mode_cfg = str(getattr(self.cfg, "ae_time_mode", "auto") or "auto")
         if self.time_mode_cfg not in TIME_MODES:
             raise ValueError(f"ae_plan: unknown ae_time_mode {self.time_mode_cfg!r} (expected {TIME_MODES})")
-        self.min_margin_ms = float(getattr(self.cfg, "ae_min_margin_ms", 1.0))
+        self.slack_tol = float(getattr(self.cfg, "ae_slack_tol_frames", 0.01))
 
         self.comp_fps = parse_fps(cutlist.competitor["fps"])
         self.raw_fps = parse_fps(cutlist.raw["fps"])
@@ -715,22 +716,33 @@ class _PlanBuilder:
             else:
                 self.warn(f"S{sid:02d}: the {mode} AE model differs from the expected RAW frame on {len(bad)} "
                           f"frame(s) (first {bad[0]}); re-export with --ae-time-mode frames")
+        # FX-10: the exact floor-rule slack of EVERY frame of the layer, from the values the JSX writes. Below
+        # cfg.ae_slack_tol_frames AE's own time resolution decides (unverified until s9_6): --ae-time-mode auto
+        # exports the layer frame-exact (HOLD keys at j + 0.25: 0.25 frame of slack); a pinned phase is then
+        # information, not a risk (the pipeline's single aggregated warning covers real razor edges)
+        slack, slack_k = layer_min_slack(L, mode, F, self.R)
+        if mode in ("stretch", "remap") and float(slack) < self.slack_tol:
+            if self.time_mode_cfg == "auto":
+                self.decide("time_mode_slack", segment=sid, from_mode=mode, to_mode="frames",
+                            slack_frames=round(float(slack), 12), frame=slack_k, tol_frames=self.slack_tol)
+                reason = (f"{mode} phase slack {float(slack):.6f} RAW frame at MAIN frame {slack_k} < "
+                          f"{self.slack_tol:g}: frame-exact HOLD keys")
+                mode = "frames"
+                L["timeMode"] = mode
+                L["startTime"] = self.T(k_in)
+                slack, slack_k = layer_min_slack(L, mode, F, self.R)
+            else:
+                L["aeRuleSensitive"] = True
+                self.warn(f"S{sid:02d}: AE floor-rule slack {float(slack):.6f} RAW frame at MAIN frame {slack_k} in "
+                          f"{mode} mode (--ae-time-mode {self.time_mode_cfg}); if AE shows a neighbouring frame, "
+                          "re-export with --ae-time-mode auto or frames", quiet=True)
+        L["minSlack"] = round(float(slack), 12)
+        L["minSlackK"] = int(slack_k)
         self.decide("time_mode", segment=sid, mode=mode, natural=natural, reason=reason, speed=v,
-                    start_time=L["startTime"])
+                    start_time=L["startTime"], min_slack_frames=L["minSlack"])
         if forced:
             self.warn(f"S{sid:02d}: exported with {'frame-exact ' if mode == 'frames' else ''}time remapping "
                       f"({forced})")
-
-        # AE-rule-sensitive (small phase margin) -> report
-        margin = getattr(seg, "ae_margin_ms", None)
-        both = getattr(seg, "raw_in_interval_both", None)
-        floor_iv = getattr(seg, "raw_in_interval", None)
-        del both, floor_iv  # no floor/round overlap alone is not a risk (AE uses the floor rule)
-        if mode in ("stretch", "remap") and v > 0 and (
-                margin is not None and math.isfinite(float(margin)) and float(margin) < self.min_margin_ms - 1e-6):
-            L["aeRuleSensitive"] = True
-            self.warn(f"S{sid:02d}: AE-rule-sensitive (phase margin {float(margin):.3f} ms); if AE shows a "
-                      "neighbouring frame, re-export with --ae-time-mode frames", quiet=True)
         oob = [j for j in expect if j < 0 or j >= self.raw_frames]
         if oob:
             self.warn(f"S{sid:02d}: expected RAW frames outside [0, {self.raw_frames}) ({oob[0]}...); AE holds the "
@@ -812,9 +824,11 @@ class _PlanBuilder:
         return out
 
 
-def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict) -> list[int]:
+def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict, start_offset_s: float = 0.0) -> list[int]:
     """RAW frame per MAIN frame [compIn, compOut) of a RAW layer under a time mode, evaluated with the
-    exact float expressions of the JSX and the mock (bit-identical)."""
+    exact float expressions of the JSX and the mock (bit-identical). ``start_offset_s``: AE stores the
+    layer's startTime that much off (FX-10 robustness check; remap / frames keys live in layer time and
+    move with it, so only stretch mode is affected)."""
     rf = R["num"] / R["den"]
     k0, k1 = int(L["compIn"]), int(L["compOut"])
     out: list[int] = []
@@ -822,6 +836,7 @@ def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict) -> list[int]:
         start, st = L["startStretch"], L["stretch"]
         if start is None or st is None:
             raise ValueError(f"layer {L['id']}: stretch mode needs speed > 0")
+        start = start + float(start_offset_s)
         for K in range(k0, k1):
             out.append(math.floor((_t(K, F) - start) * (100.0 / st) * rf + AE_EPS))
         return out
@@ -842,6 +857,58 @@ def _layer_raw_frames(L: dict, mode: str, F: dict, R: dict) -> list[int]:
         val = _interp(times, vals, holds, _layer_time(_t(K, F), start, 100.0))
         out.append(math.floor(val * rf + AE_EPS))
     return out
+
+
+def layer_min_slack(L: dict, mode: str, F: dict, R: dict) -> tuple[Fraction, int]:
+    """Exact AE floor-rule slack of a RAW layer under a time mode (DESIGN §5 export_ae, FX-10): the minimum
+    over its MAIN frames K in [compIn, compOut) of the distance of raw_fps * sourceTime(t_K) to the nearest
+    integer (RAW frames, Fraction) -- with the values the JSX writes, as their exact binary values (startTime /
+    stretch, remap key values, HOLD values (j + 0.25) * den / num) at t_K = K * den / num. Remap / frames keys
+    live in layer time, so the layer's own startTime cancels. Returns (slack, K at the minimum)."""
+    rf = Fraction(int(R["num"]), int(R["den"]))
+    fm = Fraction(int(F["num"]), int(F["den"]))
+    k0, k1 = int(L["compIn"]), int(L["compOut"])
+    if k1 <= k0:
+        return Fraction(1, 2), k0
+    if mode == "stretch":
+        if L.get("startStretch") is None or L.get("stretch") is None:
+            raise ValueError(f"layer {L['id']}: stretch mode needs speed > 0")
+        start, st = Fraction(float(L["startStretch"])), Fraction(float(L["stretch"]))
+        step = rf * 100 / (st * fm)                                  # RAW frames per MAIN frame
+        p0 = rf * (Fraction(k0) / fm - start) * 100 / st
+        sl, d = ps.exact_line_slack(p0, step, 0, k1 - k0)
+        return sl, k0 + d
+    if mode == "frames":
+        best: tuple[Fraction, int] | None = None
+        for i, e in enumerate(L["expect"]):
+            p = rf * Fraction((e + HOLD_PHASE) * R["den"] / R["num"])
+            fl = p.numerator // p.denominator
+            sl = min(p - fl, fl + 1 - p)
+            if best is None or sl < best[0]:
+                best = (sl, k0 + i)
+        return best if best is not None else (Fraction(1, 2), k0)
+    if mode != "remap":
+        raise ValueError(f"unknown time mode {mode!r}")
+    keys = sorted(((Fraction(float(d["k"])), Fraction(float(d["v"]))) for d in L["remap"]), key=lambda kv: kv[0])
+    best = (Fraction(1, 1), k0)
+    pieces = [(None, keys[0][0], None, keys[0][1])] + list(zip([k for k, _ in keys[:-1]], [k for k, _ in keys[1:]],
+                                                               [v for _, v in keys[:-1]], [v for _, v in keys[1:]])) \
+        + [(keys[-1][0], None, keys[-1][1], None)]
+    for ka, kb, va, vb in pieces:
+        lo_k = k0 if ka is None else max(k0, math.ceil(ka))
+        hi_k = k1 if kb is None else min(k1, math.ceil(kb))          # [ka, kb): the next piece takes kb
+        if hi_k <= lo_k:
+            continue
+        if ka is None:
+            sl, d = ps.exact_line_slack(rf * vb, 0, lo_k, hi_k)       # held before the first key
+        elif kb is None or kb == ka:
+            sl, d = ps.exact_line_slack(rf * va, 0, lo_k, hi_k)       # held after the last key
+        else:
+            step = rf * (vb - va) / (kb - ka)
+            sl, d = ps.exact_line_slack(rf * va - step * ka, step, lo_k, hi_k)
+        if sl < best[0]:
+            best = (sl, d)
+    return best
 
 
 def ae_plan(cutlist: Cutlist, cfg: Any, footage_meta: dict | None, *, dlog: DecisionLog | None = None) -> dict:
@@ -1355,7 +1422,8 @@ def _plan_opacity(L: dict, K: int) -> float:
     return _interp(times, vals, [False] * len(keys), float(K), 1e-9) / 100.0
 
 
-def simulate_ae(plan: dict, time_mode_override: str | None = None) -> dict[int, list[dict]]:
+def simulate_ae(plan: dict, time_mode_override: str | None = None,
+                start_offset_s: float = 0.0) -> dict[int, list[dict]]:
     """Which RAW frame AE shows on every MAIN frame.
 
     ``plan`` is an :func:`ae_plan` result, or a mock-run record from :func:`run_jsx_in_mock` (then the
@@ -1367,6 +1435,8 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None) -> dict[int, 
 
     time_mode_override ('stretch' | 'remap' | 'frames') re-simulates every RAW video layer in that mode
     (stretch only where speed > 0; remap uses the layer's remap keys, linear for stretch layers).
+    start_offset_s: every RAW layer's startTime as AE might store it, that much off (FX-10: with the exact
+    slack of every stretch layer >= ae_slack_tol_frames, +-1e-6 s changes no frame).
     """
     if plan.get("record_type") == "ae_mock":
         return _simulate_record(plan)
@@ -1395,7 +1465,7 @@ def simulate_ae(plan: dict, time_mode_override: str | None = None) -> dict[int, 
         elif time_mode_override == "stretch" and L["stretch"] is not None and L["startStretch"] is not None \
                 and abs(L["startStretch"]) <= AE_TIME_SAFE_S:
             mode = "stretch"
-        js = _layer_raw_frames(L, mode, F, R)
+        js = _layer_raw_frames(L, mode, F, R, start_offset_s)
         frames[L["id"]] = {K: j for K, j in zip(range(int(L["compIn"]), int(L["compOut"])), js)}
 
     def walk(st: list[dict], K: int, w_in: float, entries: list[dict], depth: int) -> float:
@@ -1600,7 +1670,7 @@ def write_jsx(cutlist: Cutlist, plan: dict, out_path: str | os.PathLike, cfg: An
     NaN/Infinity or the generated text fails the static ES3 checks."""
     _validate_plan_numbers(plan)
     # plans written by an older version lack the newer optional fields the JSX reads (null / 0 defaults)
-    plan = dict(plan, layers=[dict({"maskPath": None}, **L) for L in plan["layers"]],
+    plan = dict(plan, layers=[dict({"maskPath": None, "minSlack": 0.5, "minSlackK": 0}, **L) for L in plan["layers"]],
                 summary=dict({"audioPlaceholders": 0, "overlayGuides": 0}, **plan["summary"]))
     try:
         data = json.dumps(plan, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
@@ -1798,6 +1868,93 @@ __HEADER__
         L.outPoint = T(s.compOut, C);
     }
 
+    // The plan's own RAW frame position (frames) at MAIN frame k in a time mode (no read-back).
+    function planPos(s, k, mode) {
+        var i, a, b, f;
+        if (mode === "stretch") { return (T(k, C) - s.startStretch) * (100 / s.stretch) * RF; }
+        if (mode === "frames") { return s.expect[k - s.compIn] + 0.25; }
+        if (k <= s.remap[0].k) { return s.remap[0].v * RF; }
+        for (i = 0; i + 1 < s.remap.length; i++) {
+            a = s.remap[i];
+            b = s.remap[i + 1];
+            if (k < b.k) {
+                f = (b.k > a.k) ? (k - a.k) / (b.k - a.k) : 1;
+                return (a.v + f * (b.v - a.v)) * RF;
+            }
+        }
+        return s.remap[s.remap.length - 1].v * RF;
+    }
+
+    // AE's OWN time mapping (FX-10): ExtendScript has no sourceTime(), so After Effects evaluates the
+    // expression sourceTime(time) on a temporary Slider Control at every MAIN frame of the layer; divided by
+    // the footage's frameDuration that is the RAW frame position AE samples. Each frame must floor to the
+    // planned RAW frame; the residuals (AE - plan) and the smallest slack are logged. null = AE could not
+    // evaluate it (then only the read-back check above ran).
+    function aeSourceCheck(L, s, mode) {
+        var fx = null, P, k, st, pos, fd, sl, res, r = { n: 0, bad: 0, first: -1, minSlack: 1, maxRes: 0 };
+        try {
+            fx = L.property("ADBE Effect Parade").addProperty("ADBE Slider Control");
+            P = fx.property(1);
+            P.expression = "thisLayer.sourceTime(time)";
+            fd = L.source.frameDuration;
+            for (k = s.compIn; k < s.compOut && r !== null; k++) {
+                st = P.valueAtTime(T(k, C), false);
+                if (P.expressionError !== "" || !(fd > 0)) { r = null; break; }
+                pos = st / fd;
+                r.n++;
+                if (Math.floor(pos + 1e-9) !== s.expect[k - s.compIn]) {
+                    r.bad++;
+                    if (r.first < 0) { r.first = k; }
+                }
+                sl = Math.min(pos - Math.floor(pos), Math.floor(pos) + 1 - pos);
+                if (sl < r.minSlack) { r.minSlack = sl; }
+                res = Math.abs(pos - planPos(s, k, mode));
+                if (res > r.maxRes) { r.maxRes = res; }
+            }
+        } catch (e) {
+            r = null;
+        }
+        try { if (fx !== null) { fx.remove(); } } catch (e2) { }
+        return r;
+    }
+
+    // Per-layer results of aeSourceCheck, written to ae_time_check.txt next to this script (s9_6 reads it).
+    var TC = { lines: [], layers: 0, frames: 0, bad: 0, minSlack: 1, maxRes: 0, unavailable: 0 };
+    function timeCheck(s, mode, r) {
+        if (r === null) {
+            TC.unavailable++;
+            TC.lines.push(s.id + "\t" + mode + "\tunavailable");
+            return;
+        }
+        TC.layers++;
+        TC.frames += r.n;
+        TC.bad += r.bad;
+        if (r.minSlack < TC.minSlack) { TC.minSlack = r.minSlack; }
+        if (r.maxRes > TC.maxRes) { TC.maxRes = r.maxRes; }
+        TC.lines.push(s.id + "\t" + mode + "\t" + r.n + "\t" + r.bad + "\t" + r.minSlack.toFixed(9) + "\t" +
+                      r.maxRes.toExponential(3) + "\t" + s.minSlack.toFixed(9));
+        note(s.name + ": AE source-time check, " + r.n + " frames, " + r.bad + " off the plan, min slack " +
+             r.minSlack.toFixed(6) + " frame (plan " + s.minSlack.toFixed(6) + "), max |AE - plan| " +
+             r.maxRes.toExponential(2) + " frame");
+    }
+    function writeTimeCheck(dir) {
+        var f, i;
+        if (TC.lines.length === 0) { return; }
+        try {
+            f = new File(dir.fsName + "/ae_time_check.txt");
+            f.encoding = "UTF-8";
+            f.lineFeed = "Unix";
+            if (!f.open("w")) { note("could not write " + f.fsName); return; }
+            f.writeln("# match_cuts AE source-time check (FX-10). Per RAW layer: id, time mode, frames, frames off the " +
+                      "plan, min slack (RAW frames, AE sourceTime / frameDuration), max |AE - plan| (RAW frames), " +
+                      "planned min slack");
+            for (i = 0; i < TC.lines.length; i++) { f.writeln(TC.lines[i]); }
+            f.close();
+        } catch (eF) {
+            note("ae_time_check.txt was not written (" + eF.message + ")");
+        }
+    }
+
     function renderSwitches(L, s) {
         L.quality = LayerQuality.BEST;
         L.motionBlur = false;
@@ -1933,7 +2090,7 @@ __HEADER__
     }
 
     function makeLayer(comps, srcs, s) {
-        var comp = comps[s.comp], L, bad, audioOn = s.audio;
+        var comp = comps[s.comp], L, bad, audioOn = s.audio, mode = s.timeMode, chk;
         if (s.source === "raw") {
             L = comp.layers.add(srcs.raw);
         } else if (s.source === "ref") {
@@ -1957,6 +2114,7 @@ __HEADER__
                 audioOn = false;
                 placeRemap(L, s, true);
                 L.name = s.name + "  [frames]";
+                mode = "frames";
             }
         } else if (s.timeMode === "remap") {
             placeRemap(L, s, false);
@@ -1964,6 +2122,25 @@ __HEADER__
             placeRemap(L, s, true);
         } else {
             placeStill(L, s);
+        }
+        if (s.kind === "raw") {
+            // AE's own sourceTime on every frame (FX-10); a stretch layer it contradicts goes frame-exact
+            chk = aeSourceCheck(L, s, mode);
+            if (chk !== null && chk.bad > 0 && mode === "stretch") {
+                warn(s.name + ": After Effects' own source time shows another RAW frame on " + chk.bad +
+                     " frame(s) (first at MAIN frame " + chk.first + "); switched this layer to frame-exact time remapping");
+                if (L.hasAudio && audioOn) { addAudioTwin(comp, srcs.raw, s); }
+                audioOn = false;
+                placeRemap(L, s, true);
+                L.name = s.name + "  [frames]";
+                mode = "frames";
+                chk = aeSourceCheck(L, s, mode);
+            }
+            if (chk !== null && chk.bad > 0) {
+                warn(s.name + ": After Effects' own source time shows another RAW frame than planned on " + chk.bad +
+                     " frame(s) (first at MAIN frame " + chk.first + ") in " + mode + " mode");
+            }
+            timeCheck(s, mode, chk);
         }
         L.enabled = s.enabled;
         if (L.hasAudio) { L.audioEnabled = audioOn; }
@@ -2031,6 +2208,13 @@ __HEADER__
         lines.push("match_cuts: built \"" + PLAN.main.name + "\"" + (saved ? " and saved recreated_edit.aep" : " (NOT saved)"));
         lines.push(S.raw + " RAW segments, " + S.placeholders + " NOT-IN-RAW placeholders, " + S.cuts + " cuts");
         lines.push("duration " + S.duration + " s = " + PLAN.main.frames + " frames at " + C.num + "/" + C.den + " fps");
+        if (TC.layers > 0) {
+            lines.push("AE time check: " + TC.layers + " RAW layer(s), " + TC.frames + " frames, " + TC.bad +
+                       " off the plan; min slack " + TC.minSlack.toFixed(6) + " RAW frame, max |AE - plan| " +
+                       TC.maxRes.toExponential(2) + " (ae_time_check.txt)");
+        } else if (TC.unavailable > 0) {
+            lines.push("AE time check: not available (After Effects did not evaluate sourceTime())");
+        }
         if (S.audioPlaceholders > 0 || S.overlayGuides > 0) {
             lines.push(S.audioPlaceholders + " audio placeholder(s), " + S.overlayGuides +
                        " overlay guide(s): the competitor's own music / text - add yours there");
@@ -2129,6 +2313,7 @@ __HEADER__
         app.endUndoGroup();
     }
     if (!ok) { return; }
+    writeTimeCheck(here);
     if (WARN.length > 0) { storeWarnings(res.main); }
     // Saved = save() did not throw, the project is now THIS file, and the file on disk is new (a
     // recreated_edit.aep left by an earlier run must not pass for a successful save).
@@ -2335,6 +2520,45 @@ def record_name_matches(PL: dict, RL: dict) -> bool:
             and RL.get("name") == f"{PL.get('name')}  [frames]")
 
 
+TIME_CHECK_FILE = "ae_time_check.txt"     # written next to the JSX by its AE source-time check (FX-10)
+
+
+def parse_time_check(text: str) -> dict[str, dict]:
+    """ae_time_check.txt -> {layer id: {mode, frames, off, min_slack, max_res, plan_slack}} ({mode,
+    unavailable: True} where After Effects could not evaluate sourceTime()). Comment lines start with '#'."""
+    out: dict[str, dict] = {}
+    for line in str(text or "").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        f = line.split("\t")
+        if len(f) >= 3 and f[2] == "unavailable":
+            out[f[0]] = {"mode": f[1], "unavailable": True}
+        elif len(f) >= 7:
+            out[f[0]] = {"mode": f[1], "frames": int(f[2]), "off": int(f[3]), "min_slack": float(f[4]),
+                         "max_res": float(f[5]), "plan_slack": float(f[6])}
+    return out
+
+
+def time_check_from_record(rec: dict, folder: str | os.PathLike) -> dict[str, dict]:
+    """The parsed ae_time_check.txt a mock run wrote into ``folder`` ({} if none)."""
+    want = _norm(Path(folder) / TIME_CHECK_FILE)
+    for p, text in (rec.get("files_written") or {}).items():
+        if _norm(p) == want:
+            return parse_time_check(text)
+    return {}
+
+
+def time_check_summary(rows: dict[str, dict]) -> dict:
+    """Aggregate of parse_time_check rows: layers / frames checked, frames off the plan (and the layers),
+    the smallest slack AE showed, the largest |AE - plan| residual (RAW frames), layers AE could not check."""
+    ok = {k: r for k, r in rows.items() if not r.get("unavailable")}
+    return {"layers": len(ok), "frames": sum(r["frames"] for r in ok.values()),
+            "off": sum(r["off"] for r in ok.values()), "layers_off": sorted(k for k, r in ok.items() if r["off"]),
+            "min_slack": min((r["min_slack"] for r in ok.values()), default=None),
+            "max_res": max((r["max_res"] for r in ok.values()), default=None),
+            "unavailable": sorted(k for k, r in rows.items() if r.get("unavailable"))}
+
+
 def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
                 scenarios: Iterable[str] = MOCK_VERIFY_SCENARIOS, tol: float = 1e-9) -> dict:
     """Criterion-6 mock checks (DESIGN §5 verify c6) for a written JSX against its plan.
@@ -2343,8 +2567,9 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
     main fps and duration == frames * frameDuration (within tol), work area == whole comp, saved to
     <script dir>/recreated_edit.aep, balanced undo group, the RAW (and reference) footage imported from
     <script dir>/<rel> (the mock checks existence on the real file system), every plan layer present with
-    name / startTime / stretch / inPoint / outPoint equal to the plan, and simulate_ae(record) ==
-    simulate_ae(plan). media_missing: openDialog called, clean abort, nothing saved. new_project_null:
+    name / startTime / stretch / inPoint / outPoint equal to the plan, simulate_ae(record) ==
+    simulate_ae(plan), and the JSX's AE source-time check (ae_time_check.txt, FX-10) covered every RAW video
+    layer with no frame off the plan. media_missing: openDialog called, clean abort, nothing saved. new_project_null:
     clean abort. no_marker_property: still builds and saves. fps_display_rounded: conformed without a
     warning. fps_misread_down / fps_misread_up: every
     footage item conformed to its exact rate (warned), simulate_ae(record) == simulate_ae(plan).
@@ -2467,6 +2692,15 @@ def mock_verify(jsx_path: str | os.PathLike, plan: dict, footage_meta: dict,
             details["sim_layers"] = len(plan_sim())
             if diff:
                 failures.append(f"default: simulate_ae(record) != simulate_ae(plan) for {diff[:5]}")
+            # FX-10: the JSX checked every RAW video layer with AE's own sourceTime() and logged it
+            rows = time_check_from_record(rec, jsx.parent)
+            details["time_check"] = time_check_summary(rows)
+            missing = [PL["id"] for PL in plan["layers"] if PL["kind"] == "raw" and PL["id"] not in rows]
+            if missing:
+                failures.append(f"default: the JSX's AE source-time check ({TIME_CHECK_FILE}) misses {missing[:5]}")
+            if details["time_check"]["layers_off"]:
+                failures.append(f"default: AE's own source time differs from the plan on "
+                                f"{details['time_check']['layers_off'][:5]}")
         elif sc == "media_missing":
             if rec.get("calls", {}).get("openDialog", 0) < 1:
                 failures.append("media_missing: File.openDialog was not called")
