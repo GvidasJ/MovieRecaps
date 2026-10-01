@@ -611,3 +611,11 @@ def test_path_line_and_extrapolation_helpers():
     assert refine._label_disagreements(dict(enumerate(want.tolist())), lab) == (0, 29)
     other = np.floor(4.55 + u1 * np.arange(30) + 1e-9).astype(int)
     assert refine._label_disagreements(dict(enumerate(other.tolist())), lab)[0] > 0
+    # repeat cadence as speed evidence (the S74 fake 0.667x): +-1-noisy hints over 12 frames fit the 0.667x slope
+    # as well as 1.0x; the competitor's repeat every 5th pair picks 1.0x, and without labels the order stands
+    K = np.arange(12)
+    alts = [(u1 / 1.5, 4.8, None), (u1, 4.8, None)]
+    lab12 = {k: (1 if want[k] == want[k + 1] else 2) for k in range(11)}
+    best, dis = refine._label_speed_choice(K, alts, lab12)
+    assert best == 1 and dis[1] == 0 < dis[0], dis
+    assert refine._label_speed_choice(K, alts, {k: 0 for k in range(11)}) == (0, [])

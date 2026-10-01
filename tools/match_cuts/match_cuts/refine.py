@@ -12,7 +12,8 @@ RAW time is decided before framing and never by a free per-frame or per-candidat
 1. Anchors (visual_match) are grouped into RUNS by RAW time only: same flip, gaps <= max_gap, within
    +-line_time_tol frames of the run's robust snap-speed line -- never by framing, so a pan or zoom of any
    speed is one run. RANSAC near-misses only join an existing run whose line they continue.
-2. Per track, ``_refit`` (time-line-first framing fit): the track's line through its anchors and won frames;
+2. Per track, ``_refit`` (time-line-first framing fit): the track's line through its anchors and won frames
+   (snap speeds that explain them alike: the repeat / move labels decide);
    candidate lines = floor-phase cells x the snap speed, pruned by the repeat / move labels; the framing is
    measured by coarse-to-fine multi-start ECC (``ecc_measure``) at the central line's RAW frame on EVERY
    frame (and at +-1 every framing_sample_step frames), ONE smooth path per family (``fit_path``:
@@ -633,13 +634,14 @@ def _snap_slopes(u1: float, cfg) -> list[float]:
 
 
 def _robust_line(ks: np.ndarray, js: np.ndarray, slopes: Sequence[float], u1: float, tol: float,
-                 min_frac: float) -> tuple[float, float, np.ndarray] | None:
+                 min_frac: float, alternatives: bool = False):
     """Time line j(k) = floor(x + u k) through hint points (k, j) (FX-03 step 3): for every snap slope u the
     offset x = median(j - u k) + 0.5 (centre of the floor cell), integer residuals r = j - floor(x + u k),
     inliers |r| <= tol. The slope with the most inliers wins; among those within max(1, 5 %) of the most, the
     one with the smallest mean |r|; the 1.0-speed slope u1 is kept unless another is better by > 0.25 frame
     (the dominant speed of an edit, as snap_speed). None when no slope explains ``min_frac`` of the points.
-    Returns (u, x, inlier mask)."""
+    Returns (u, x, inlier mask); ``alternatives``: every slope of that near-best set as [(u, x, inlier mask)],
+    the chosen one first (the competitor's repeat cadence may decide between them, ``_refit``)."""
     ks = np.asarray(ks, np.float64)
     js = np.asarray(js, np.float64)
     if len(ks) == 0:
@@ -663,6 +665,9 @@ def _robust_line(ks: np.ndarray, js: np.ndarray, slopes: Sequence[float], u1: fl
     one = [r for r in good if abs(r[2] - u1) < 1e-9]
     if one and one[0][1] <= best[1] + 0.25:
         best = one[0]
+    if alternatives:
+        rest = sorted((r for r in good if r is not best), key=lambda r: (r[1], abs(r[2] - u1)))
+        return [(r[2], r[3], r[4]) for r in [best] + rest]
     return best[2], best[3], best[4]
 
 
@@ -713,6 +718,17 @@ def _label_disagreements(js_line: dict[int, int], labels: dict[int, int]) -> tup
 
 
 _LAB_UNKNOWN, _LAB_REPEAT, _LAB_MOVE, _LAB_CUT = 0, 1, 2, 3
+
+
+def _label_speed_choice(K: np.ndarray, alts: Sequence[tuple], labels: dict[int, int]) -> tuple[int, list[int]]:
+    """(index into ``alts``, label disagreements per alternative): the snap slope whose best floor-phase cell
+    over the frames K disagrees with the fewest REPEAT / MOVE labels; ties keep the earlier (residual) order.
+    No REPEAT / MOVE label -> (0, [])."""
+    if len(alts) < 2 or not any(v in (_LAB_REPEAT, _LAB_MOVE) for v in labels.values()):
+        return 0, []
+    dis = [min(_label_disagreements(dict(zip(K.tolist(), _line_frames(u, c, K).tolist())), labels)[0]
+               for c in _line_cells(u, x, K)) for u, x, *_ in alts]
+    return int(min(range(len(alts)), key=lambda i: (dis[i], i))), dis
 
 
 def _is_near(a: Anchor) -> bool:
@@ -1498,13 +1514,14 @@ class _Refiner:
             if K.size == 0:
                 continue
             hk, hj = self._hints(t, K)
-            line = (_robust_line(hk, hj, self.slopes, self.u1, tol, float(cfg.line_min_inlier_frac))
+            alts = (_robust_line(hk, hj, self.slopes, self.u1, tol, float(cfg.line_min_inlier_frac), True)
                     if len(np.unique(hk)) >= 2 else None)
-            pre.append((t, K, hk, hj, line))
+            pre.append((t, K, hk, hj, alts))
         # the competitor's repeat cadence where a line can repeat RAW frames at all
-        self._ensure_labels([(int(K[0]), int(K[-1])) for _, K, _, _, line in pre
-                             if line is not None and 0.0 < line[0] <= self.repeat_max_slope])
-        for t, K, hk, hj, line in pre:
+        self._ensure_labels([(int(K[0]), int(K[-1])) for _, K, _, _, alts in pre
+                             if alts and any(0.0 < a[0] <= self.repeat_max_slope for a in alts)])
+        for t, K, hk, hj, alts in pre:
+            line = None if not alts else self._label_speed(t, K, alts)
             init = {int(k): _sim_at(t.keys, int(k), self.raw_wh, self.max_gap) for k in K}
             plan: dict[str, Any] = {"t": t, "K": K, "line": None, "cells": [], "fam": {}, "init": init}
             if line is None:
@@ -1574,6 +1591,18 @@ class _Refiner:
         for plan in plans:
             changed += self._apply_fit(plan)
         return changed
+
+    def _label_speed(self, t: _Track, K: np.ndarray, alts: list) -> tuple:
+        """The time line's speed when several snap slopes explain the time evidence alike (``_robust_line``
+        alternatives): the competitor's repeat / move labels decide (FX-07: repeats give speed and fractional
+        phase) -- the slope whose best floor-phase cell disagrees with the fewest labels, the residual order
+        otherwise. Without labels (no repeat possible, or a static / blended shot) the residual choice stands."""
+        lab = {k: self.labels[k] for k in range(int(K[0]), int(K[-1])) if k in self.labels}
+        best, dis = _label_speed_choice(K, alts, lab)
+        if best != 0:
+            self.dlog.record("refine", "label_speed", track=t.id, slopes=[round(a[0], 6) for a in alts],
+                             disagreements=dis, chosen=round(alts[best][0], 6))
+        return alts[best]
 
     def _choose_line(self, plan: dict) -> dict:
         """The candidate line with the highest summed score under its family's path (see _refit), among the cells
@@ -1884,9 +1913,10 @@ class _Refiner:
         for k in trig + [None]:
             if run and (k is None or k != run[-1] + 1):
                 if len(run) > 2 * self.stride:
-                    sel = run[::self.stride]
-                    if sel[-1] != run[-1]:
-                        sel.append(run[-1])
+                    # every stride-th frame between the sparse search's grid (k % stride == 0, already searched
+                    # with the same masks unless pass 2 masked them) plus both ends of the run
+                    off = (self.stride // 2 + 1) % self.stride
+                    sel = sorted({run[0], run[-1]} | {k for k in run if k % self.stride == off})
                     todo += sel
                 else:
                     todo += run

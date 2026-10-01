@@ -366,7 +366,9 @@ def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cac
     # 2 per track, the time-line-first framing fit (alternating with frame assignment, <= 3 iterations):
     #   a. frames: those it wins + every frame between its first and last anchor no other track explains;
     #      time evidence: anchors + argmax of won frames -> robust snap-speed line (>= line_min_inlier_frac of
-    #      the points within line_time_tol), else (ramp, jump inside) the argmax itself is measured.
+    #      the points within line_time_tol; several slopes alike -> the one whose best floor-phase cell disagrees
+    #      least with the repeat / move labels: the cadence is speed evidence), else (ramp, jump inside) the
+    #      argmax itself is measured.
     #   b. candidate lines = floor-phase cells of x within ±1.5 frames (<= 48), pruned SOFTLY by the repeat /
     #      move labels (cells with the fewest disagreements + 1 stay); central cell c0 = best argmax agreement.
     #   c. framing MEASURED (ecc_measure: pyramid + phase-correlation start + the nearest anchors' Sims as
@@ -391,7 +393,8 @@ def build_frame_map(comp, raw, layout, overlays, anchors, hints, index, cfg, cac
     #   within 2e-3 explain a frame equally: the larger track keeps it.
     # 4 overlay pass 2: residual masks (layout.masks_from_residuals), re-score.
     # 5 rescue: frames with score < match_thresh OR score < rolling track median(±5) - max(rel_drop_min,
-    #   4·MAD) -> search_frame on them (catches 1–2 frame flash cuts, jump cuts inside a track); anchors on an
+    #   4·MAD) -> search_frame on them (catches 1–2 frame flash cuts, jump cuts inside a track; runs longer than
+    #   2 strides: both ends + every stride-th frame BETWEEN the sparse search's grid); anchors on an
     #   existing track's line join it, others start runs; re-score. Remaining: region std < uniform_std ->
     #   UNIFORM; else NONE.
     # 6 raw_lo/raw_hi = visually identical frames (§3); low_margin; soft_lo/soft_hi; conf = f(score, margin).
