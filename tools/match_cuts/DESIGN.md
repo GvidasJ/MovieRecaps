@@ -684,7 +684,8 @@ verification honesty) were fixed under these shared rules:
   the edge of a seconds-wide static interval stays within ~2 ms in audio); the residual lag is
   re-measured. A target outside that video-feasible range by more than `audio_lag_tol_ms` never moves
   raw_in (the audio says nothing usable about the phase; clamping would only shrink the AE margin) and
-  those segments are listed in ONE run-level warning; `phase_source = 'audio'` only when raw_in moved. This removes the systematic quarter-frame audio offset of the interval centre (8.3 ms at
+  those segments are listed in ONE run-level warning; `phase_source = 'audio'` only when the audio target
+  placed raw_in (inside the range or within the tolerance of it). This removes the systematic quarter-frame audio offset of the interval centre (8.3 ms at
   30p, 10.4 ms at 24p) while keeping every frame exact under both sampling rules
   (`Segment.audio.phase_source`, `lag_ms_video`). Segments whose interval is wider than ±100 ms (static /
   ambiguous-identical) also get a wide search centred on the feasible interval and covering all of it

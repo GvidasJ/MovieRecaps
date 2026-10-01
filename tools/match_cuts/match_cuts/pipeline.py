@@ -827,7 +827,7 @@ def audio_informed_phase(segments: list[Segment], audio_result: dict, fm: FrameM
     run-level warning. Segments whose interval is wider than +-100 ms in competitor time (static /
     ambiguous-identical shots) also get a wider search, centred on that feasible range (+ the offset) and
     covering all of it (half-width capped at AUDIO_PHASE_WIDE_MAX_S).
-    Sets seg.audio['phase_source'] ('audio' when raw_in moved | 'video') and seg.audio['lag_ms_video'] (the
+    Sets seg.audio['phase_source'] ('audio' when the audio target placed raw_in | 'video') and seg.audio['lag_ms_video'] (the
     first-pass residual); the caller re-runs analyze_segments_audio so lag_ms becomes the residual at the
     new raw_in. Returns (ids moved, warnings)."""
     if phase is None:
