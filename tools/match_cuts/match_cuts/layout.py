@@ -1960,7 +1960,9 @@ def _spawn_safe() -> bool:
 
 def _spawn_init(npy_path: str, detector: _Detector) -> None:
     import cv2
+    from .common import set_blas_threads
     cv2.setNumThreads(1)
+    set_blas_threads(1)                      # as in the parent (pipeline.run): same arithmetic on every path
     _WORKER["frames"] = np.load(npy_path, mmap_mode="r")
     _WORKER["detect"] = detector
 

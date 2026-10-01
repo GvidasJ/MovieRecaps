@@ -44,7 +44,7 @@ from . import common as _common
 from . import scoring
 from .common import (POOL_WATCHDOG, Cache, DecisionLog, PoolFailure, Progress, close_pool, file_hash, fps_str, log,
                      native_threads, null_dlog, params_hash, pool_workers, progress_name, release_native_threads,
-                     seed_everything, stage_key, watched_results)
+                     seed_everything, single_thread_blas, stage_key, watched_results)
 from .geometry import Sim, from_cv_matrix
 from .model import AudioHints, Layout, Proxy
 
@@ -399,7 +399,7 @@ def _inline(items: list, name: str, done: dict[int, Any] | None = None) -> list[
     """Run the items (those without a result in ``done``) in this process, in input order, with progress."""
     done = {} if done is None else done
     todo = [i for i in range(len(items)) if i not in done]
-    with Progress(name, len(items)) as prog:
+    with Progress(name, len(items)) as prog, single_thread_blas():
         prog.done = len(items) - len(todo)
         for i in todo:
             done[i] = _invoke(items[i])
@@ -419,13 +419,17 @@ def _task_name(fn: Callable) -> str:
 
 def _invoke_chunk(chunk: list[tuple[int, Any]]) -> list[tuple[int, Any]]:
     """Fork-pool entry point: a chunk of (input index, item) -> (input index, result) (results arrive out of
-    order; the pool's own chunking cannot be used -- only chunksize-1 iterators take a timeout)."""
-    return [(i, _invoke(item)) for i, item in chunk]
+    order; the pool's own chunking cannot be used -- only chunksize-1 iterators take a timeout). Every task runs
+    with single-threaded OpenBLAS, as in the parent (``common.single_thread_blas``: same arithmetic on every path
+    and machine)."""
+    with single_thread_blas():
+        return [(i, _invoke(item)) for i, item in chunk]
 
 
 def _spawn_invoke_chunk(chunk: list[tuple[str, str, int, Any]]) -> list[tuple[int, Any]]:
     """Spawn-pool entry point: a chunk of (token, state file, input index, item)."""
-    return [(i, _spawn_invoke((token, path, item))) for token, path, i, item in chunk]
+    with single_thread_blas():
+        return [(i, _spawn_invoke((token, path, item))) for token, path, i, item in chunk]
 
 
 def _collect(pool: Any, func: Callable, tasks: list, cs: int, name: str, kind: str

@@ -583,6 +583,73 @@ def limit_native_threads() -> None:
     os.environ.setdefault("DUCC0_NUM_THREADS", "1")
 
 
+_BLAS_CTL: list = []
+
+
+def blas_lib_paths(d: str) -> list[str]:
+    """numpy's bundled OpenBLAS in its ``numpy.libs`` folder: ``.so`` on Linux, ``.dll`` on Windows (the
+    Windows wheels name it e.g. ``libscipy_openblas64_-<hash>.dll``), ``.dylib`` on macOS builds that bundle it."""
+    import glob
+    out: list[str] = []
+    for pat in ("*openblas*.so*", "*openblas*.dll", "*openblas*.dylib"):
+        out += glob.glob(os.path.join(d, pat))
+    return sorted(set(out))
+
+
+def blas_ctl():
+    """(set_num_threads, get_num_threads) of numpy's bundled OpenBLAS via ctypes, or None (e.g. macOS Accelerate)."""
+    if not _BLAS_CTL:
+        found = None
+        try:
+            import ctypes
+            d = os.path.join(os.path.dirname(np.__file__), os.pardir, "numpy.libs")
+            for path in blas_lib_paths(d):
+                lib = ctypes.CDLL(path)
+                for sn, gn in (("scipy_openblas_set_num_threads64_", "scipy_openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads64_", "openblas_get_num_threads64_"),
+                               ("openblas_set_num_threads", "openblas_get_num_threads")):
+                    if hasattr(lib, sn) and hasattr(lib, gn):
+                        found = (getattr(lib, sn), getattr(lib, gn))
+                        break
+                if found:
+                    break
+        except Exception:          # pragma: no cover - platform specific
+            found = None
+        _BLAS_CTL.append(found)
+    return _BLAS_CTL[0]
+
+
+def set_blas_threads(n: int) -> int | None:
+    """Set numpy's OpenBLAS thread count; returns the previous count (None when not controllable)."""
+    ctl = blas_ctl()
+    if ctl is None:
+        return None
+    setter, getter = ctl
+    try:
+        old = int(getter())
+        setter(max(1, int(n)))
+    except Exception:              # pragma: no cover
+        return None
+    return old
+
+
+@contextlib.contextmanager
+def single_thread_blas() -> Iterator[None]:
+    """Pin OpenBLAS to one thread for the duration (restored afterwards; no-op if not controllable).
+
+    The analysis runs only small and medium products (ZNCC of a few candidates over one box ROI, pixel dot
+    products). A multi-threaded OpenBLAS splits a dot product over >= ~20000 elements between its threads, which
+    (a) is up to 7x slower for these sizes (thread wake-ups; worse with worker processes or a busy machine:
+    zncc_rows 8.4 ms vs 1.2 ms for 7 x 60000, measured) and (b) makes the last bits of every such result depend on
+    the machine's CPU count. ``pipeline.run`` and every ``parallel_map`` task therefore run single-threaded."""
+    old = set_blas_threads(1)
+    try:
+        yield
+    finally:
+        if old is not None:
+            set_blas_threads(old)
+
+
 _STAGE: list[str] = [""]
 _STAGE_T0: list[float] = [time.monotonic()]
 _LAST_INFO: list[float] = [time.monotonic()]

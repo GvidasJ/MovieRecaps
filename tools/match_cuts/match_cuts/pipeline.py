@@ -54,8 +54,8 @@ from . import __version__
 from . import phase_solve as _ps
 from .common import (STAGE_VERSION, Cache, DecisionLog, configure_pools, dump_json, ffmpeg_bin, ffprobe_bin, file_hash,
                      fmt_seconds, fps_str, json_default, limit_native_threads, load_decisions, log, null_dlog,
-                     params_hash, replace_file, save_decisions, seed_everything, setup_logging, stage_heartbeat,
-                     stage_key, timecode)
+                     params_hash, replace_file, save_decisions, seed_everything, set_blas_threads, setup_logging,
+                     stage_heartbeat, stage_key, timecode)
 from .config import Config
 from .geometry import Sim
 from .model import (AudioHints, Cutlist, FrameMap, Layout, Segment, Status, StreamInfo, cutlist_layout)
@@ -2640,6 +2640,7 @@ def run(cfg: Config) -> dict:
     _prepare_dirs(cfg)
     setup_logging(cfg.verbose, log_file=cfg.work / "match_cuts.log")
     limit_native_threads()                 # before the first FFT (DESIGN D7 fork hygiene)
+    prev_blas = set_blas_threads(1)        # small products only: faster and CPU-count independent (DESIGN D7)
     configure_pools(stall_s=cfg.pool_stall_timeout_s, progress_s=cfg.progress_log_s,
                     max_failures=cfg.pool_max_failures)
     log.info("match_cuts %s: competitor=%s raw=%s out=%s work=%s layout=%s comp_size=%s fps=%s", __version__,
@@ -2685,6 +2686,8 @@ def run(cfg: Config) -> dict:
                 log.error("INPUT FILE CHANGED DURING THE RUN: %s", p)
         ctx.dlog.close()
         copy_decision_log(cfg)
+        if prev_blas is not None:
+            set_blas_threads(prev_blas)
     criteria = ctx.verify.get("criteria", {})
     checks = ctx.verify.get("checks", {})
     code = exit_code_for(criteria, checks)
