@@ -28,6 +28,9 @@ pip install -e tools/match_cuts          # the tool + everything it needs (numpy
 pip install --no-deps scenedetect click platformdirs   # PySceneDetect cross-check of the cuts
 pip install -e "tools/match_cuts[exports]"             # OpenTimelineIO re-parse check of XML/EDL
 pip install -e "tools/match_cuts[dev]"                 # pytest, to run the tests
+# captions (output/captions.srt): transcription + OCR, pip only (no system installs, also on Windows)
+pip install -e "tools/match_cuts[captions]"            # faster-whisper + the OCR's own dependencies
+pip install --no-deps rapidocr                          # RapidOCR without its opencv-python dependency
 ```
 
 Check the install with `python -c "import numpy, cv2, av; print('ok')"`. Python 3.11 or 3.12 is the
@@ -42,6 +45,11 @@ must use `backend='opencv'` (its PyAV backend crashes with PyAV ≥ 19).
 
 Installing ffmpeg: Linux `apt install ffmpeg`, macOS `brew install ffmpeg`, Windows
 `winget install Gyan.FFmpeg`.
+
+Captions: RapidOCR is installed with `--no-deps` for the same OpenCV reason (its metadata asks for
+`opencv-python`; it works with the contrib wheel above). faster-whisper downloads its model (`small.en`,
+~0.5 GB) from Hugging Face on the first run and caches it. Without these packages the run still completes
+and the report says why `captions.srt` is missing.
 
 ## Usage
 
@@ -69,6 +77,37 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 
 Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
+
+Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
+`--caption-model NAME` (default `small.en`). Premiere-only export: `--premiere`.
+
+### Captions
+
+`output/captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
+(competitor frame k = sequence frame 2k for a 30 fps competitor), in the style of
+`caption-generator-prompt.md` at the repository root. The mode is chosen per clip:
+
+* **competitor** (auto, when the layout finds burned-in captions): the competitor's captions are copied
+  exactly — same words, splits, first and last frames, capitalisation, punctuation and `*actions*`. The
+  caption band is read on every frame around each caption event with RapidOCR; a word-by-word colour
+  highlight or a pop-in animation stays one caption, only a change of the text starts a new one; the text
+  is the majority of the fully visible frames' readings. Static title / logo / watermark text is ignored.
+  No style rules, no gap filling, no spelling fixes. Speech the competitor left uncaptioned is filled
+  with voice captions (only there). The transcript is used only to list OCR / transcript disagreements.
+* **voice** (auto, when there are no burned-in captions): the cut edit's audio (RAW audio on the edit's
+  cuts, never the raw clip) is transcribed with word timestamps (faster-whisper) and grouped by the
+  prompt's rules: 1–4 words, a new caption after 4 words / 20 characters / a pause > 0.25 s / at a
+  standalone interjection, a word said again gets its own caption, names / number + unit / negation +
+  verb kept together, a weak final word moved to the next caption (once per caption — the prompt's
+  own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
+  `*...*` placeholders for silences over ~1 s. `--voiceover FILE` captions your own narration instead.
+
+The report's *Captions* section lists the mode of each part, the style check, captions at the
+24-character cap, the `*...*` timecodes, possible mis-transcriptions / doubled / missing words and every
+OCR / transcript disagreement — flagged, never corrected. Speaker changes are not detected
+(faster-whisper has no diarisation). faster-whisper is used instead of WhisperX because WhisperX needs
+PyTorch and an alignment model, a heavy and fragile install on Windows; faster-whisper installs with pip
+alone and gives word timestamps.
 
 **A/V offset.** Many short-form edits play their sound a little early or late against the picture (for
 example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`) and the report
@@ -131,6 +170,7 @@ output/
   cutlist.csv              one row per segment (timecodes as in the report: drop-frame for 29.97/59.94)
   recreated_edit.xml       FCP7 XML (Premiere Pro / DaVinci Resolve)
   recreated_edit.edl       CMX3600 EDL (cuts + M2 speed lines)
+  captions.srt             captions on the 60 fps sequence (copied from the competitor or made from the voice-over)
   preview_recreation.mp4   frame-exact render of the recreation from RAW (MAIN size / fps / layout)
   compare.mp4              competitor | recreation | amplified difference; frame number, timecode and segment
                            in a label strip above each panel (never over the picture)
@@ -425,6 +465,12 @@ cd tools/match_cuts
 ../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s
 ../../.venv/bin/python -m pytest -q tests/test_synthetic.py   # Stage 1 end-to-end (slow, minutes)
 ```
+
+`tests/test_captions.py` checks the caption rules against the ten reference SRTs in `srt/` (their style
+statistics, a byte-exact SRT round trip, regrouping their words: ≥ 80 % of the captions come out exactly,
+every rule holds, the 29 weak endings are fixed except 4 that a rule keeps); `tests/test_caption_ocr.py`
+reads a short synthetic clip with burned-in captions (pop-in, colour highlight, the same word twice, static
+text) and checks every caption's text and first / last frame.
 
 `tests/test_synthetic.py` builds a synthetic RAW and a competitor made with ffmpeg filtergraphs (jump
 cuts, an out-of-order hook, a re-used moment, a 1.10× segment, a flipped segment, a push-in, a punch-in,

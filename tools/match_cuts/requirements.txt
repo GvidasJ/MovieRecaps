@@ -10,3 +10,5 @@ matplotlib>=3.8
 #   pip install -e "tools/match_cuts[exports]"        OpenTimelineIO re-parse check of the XML/EDL
 #   pip install -e "tools/match_cuts[dev]"            pytest, to run the test suite
 #   pip install --no-deps scenedetect click platformdirs   PySceneDetect cross-check of the cuts
+#   pip install -e "tools/match_cuts[captions]"       captions.srt: faster-whisper + the OCR's dependencies, then
+#   pip install --no-deps rapidocr                      RapidOCR itself (no opencv-python)

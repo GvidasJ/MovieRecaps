@@ -1104,6 +1104,8 @@ def _how_to_open(ctx: Any) -> list[str]:
             "and captions there.",
             "3. Sequence markers name the UNCERTAIN and NOT-IN-RAW spots (and RETIME spots Premiere's XML cannot carry). "
             "Each clip's comment lists the Motion values to expect (Position, Scale) — check one clip after import.",
+            "4. Captions: **File → Import…** → `captions.srt`, then drag it onto the sequence at 00:00:00:00 (Premiere "
+            "puts it on a caption track). The Captions section of this report lists what to check.",
         ]
     return [
         "1. Copy the whole output folder (the `.jsx` finds `media/` next to itself; keep them together).",
@@ -1121,6 +1123,115 @@ def _how_to_open(ctx: Any) -> list[str]:
     ]
 
 
+def _tc(c: dict) -> str:
+    return f"{c.get('start_tc', '?')} → {c.get('end_tc', '?')}"
+
+
+def _captions(ctx: Any) -> list[str]:
+    """captions.srt (captions.py): the mode of each part, the caption-generator-prompt.md checks (24-character cap,
+    *...* placeholders, possible mis-transcriptions / doubled / missing words) and every OCR / transcript
+    disagreement. Flagged, never corrected."""
+    cap = getattr(ctx, "captions", None) or {}
+    if not cap:
+        return ["Captions were not made in this run."]
+    if cap.get("error"):
+        return [f"captions.srt was not written: {cap['error']}"]
+    fps = cap.get("fps", "60")
+    out = []
+    mode = cap.get("mode")
+    by = cap.get("by_mode") or {}
+    if mode == "competitor":
+        o = cap.get("ocr") or {}
+        out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions copied exactly "
+                   f"from the competitor's burned-in captions ({o.get('engine', 'OCR')}, {o.get('frames_read', 0)} frames "
+                   f"read around {o.get('events', 0)} caption events; text, splits, frames, capitalisation and punctuation "
+                   f"unchanged, no style rules applied), {by.get('fill', 0)} voice captions filling speech the competitor "
+                   "left uncaptioned.")
+    else:
+        out.append(f"- **Mode: voice** ({cap.get('reason')}) — {by.get('voice', 0)} captions made from the voice-over by "
+                   f"caption-generator-prompt.md, {by.get('placeholder', 0)} `*...*` placeholders.")
+    tr = cap.get("transcriber") or {}
+    out.append(f"- Transcript: {cap.get('source', '?')} — {tr.get('engine', 'faster-whisper')} `{tr.get('model', '')}`, "
+               f"{tr.get('words', 0)} words with word timestamps" + (f" (**not available**: {tr['error']})"
+                                                                     if tr.get("error") else "") + ".")
+    if cap.get("path"):
+        out.append(f"- File: `captions.srt` — {cap.get('count', 0)} captions on the {fps} fps sequence "
+                   f"({cap.get('frames', 0)} frames), frame-exact (competitor frame k = sequence frame "
+                   f"{'2k' if str(fps) == '60' else 'k x ratio'} for a 30 fps competitor). Premiere: File → Import → "
+                   "captions.srt, then drag it onto the sequence (a caption track above V2).")
+    for w in cap.get("warnings") or []:
+        out.append(f"- Warning: {w}")
+    for n in cap.get("notes") or []:
+        out.append(f"- Note: {n}")
+    out.append("- Speaker changes are not detected (the transcriber has no speaker diarisation): the "
+               "speaker-change break of the grouping rules is not applied.")
+    parts = cap.get("parts") or []
+    if parts:
+        from .captions import frame_ms, ms_tc
+        from fractions import Fraction
+        f = Fraction(str(fps))
+        out += ["", "**Mode of each part**", "",
+                md_table(["from", "to", "mode", "captions"],
+                         [[ms_tc(frame_ms(p["start"], f)), ms_tc(frame_ms(p["end"], f)),
+                           {"competitor": "competitor (copied)", "fill": "voice (fills uncaptioned speech)",
+                            "voice": "voice"}.get(p["mode"], p["mode"]), p["count"]] for p in parts])]
+    st = cap.get("stats") or {}
+    if st.get("captions"):
+        wp = st.get("words_pct") or {}
+        rows = [["words per caption", "1–4 (1: 23%, 2: 39%, 3: 28%, 4: 9%), never more than 5",
+                 f"1: {wp.get('1', 0)}%, 2: {wp.get('2', 0)}%, 3: {wp.get('3', 0)}%, 4: {wp.get('4', 0)}%, "
+                 f"5+: {wp.get('5+', 0)}%"],
+                ["characters", "median 11, 90th percentile 17, cap 24",
+                 f"median {st.get('chars_median')}, p90 {st.get('chars_p90')}, max {st.get('chars_max')}"],
+                ["on screen", "median 0.57 s", f"median {st.get('duration_median_s')} s"],
+                ["reading rate", "about 18 characters per second", f"median {st.get('cps_median')}"],
+                ["full stops and commas", "none", str(st.get("stops_commas"))],
+                ["lower-case starts", "52%", f"{st.get('lower_start_pct')}%"],
+                ["back to back", "100%", f"{st.get('back_to_back_pct')}%"],
+                ["ending on a weak word", "none", str(st.get("weak_endings"))]]
+        out += ["", "**Style check** (all captions" + (", including the copied competitor ones" if mode == "competitor"
+                                                       else "") + ")", "", md_table(["", "my style", "this file"], rows)]
+    oc = cap.get("over_cap") or []
+    out += ["", f"**Captions at the 24-character cap**: {len(oc) if oc else 'none'}"]
+    out += [f"- {_tc(c)} `{c['text']}` ({len(c['text'])} characters, {c['mode']})" for c in oc]
+    ph = cap.get("placeholders") or []
+    out += ["", f"**`*...*` placeholders** (silences over ~1 s — write the action there): {len(ph) if ph else 'none'}"]
+    out += [f"- {_tc(c)}" for c in ph]
+    wk = cap.get("weak_kept") or []
+    if wk:
+        out += ["", f"**Weak endings kept** ({len(wk)}; the rule could not move the word):"]
+        out += [f"- {_seconds(w['time'])} `{w['text']}` — {w['reason']}" for w in wk]
+    fl = cap.get("flags") or []
+    out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected"
+            + ("; voice captions only" if mode == "competitor" else "") + f"): {len(fl) if fl else 'none'}"]
+    out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
+    if mode == "competitor":
+        dis = cap.get("disagreements") or []
+        out += ["", f"**OCR / transcript disagreements** (every one; the caption text is never changed): "
+                f"{len(dis) if dis else 'none'}"]
+        if dis:
+            out += ["", md_table(["time", "caption (OCR, kept)", "heard in the audio", "kind", "likely OCR mistake"],
+                                 [[_tc(d), d["ocr"], d["heard"] or "—", d["kind"],
+                                   "yes" if d.get("likely_ocr_mistake") else "no"] for d in dis])]
+        ocr = cap.get("ocr") or {}
+        for s_ in (ocr.get("notes") or {}).get("static") or []:
+            out.append(f"- Static text in the caption band ignored: `{s_['text']}` (frames {s_['comp_in']}–{s_['comp_out']})")
+        for u in (ocr.get("notes") or {}).get("unreadable") or []:
+            out.append(f"- Unreadable caption-band text left out: competitor frames {u['comp_in']}–{u['comp_out']}")
+        unsure = [c for c in cap.get("captions") or [] if c.get("mode") == "competitor"
+                  and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
+        if unsure:
+            out += ["", f"**Copied captions the OCR was unsure of** ({len(unsure)}):"]
+            out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
+                    f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
+    return out
+
+
+def _seconds(t: float) -> str:
+    from .captions import ms_tc
+    return ms_tc(int(round(float(t) * 1000)))
+
+
 def _outputs(ctx: Any) -> list[str]:
     out_dir = Path(getattr(ctx.cfg, "out_dir", "."))
     paths = getattr(ctx, "paths", {}) or {}
@@ -1128,7 +1239,8 @@ def _outputs(ctx: Any) -> list[str]:
     desc = {"jsx": "After Effects build script", "aep": "After Effects project", "cutlist": "cut list (source of truth)",
             "csv": "cut list, one row per segment", "xml": "FCP7 XML (Premiere / Resolve)", "edl": "CMX3600 EDL",
             "preview": "frame-exact preview render", "compare": "competitor | recreation | difference",
-            "report": "this report", "verify": "verification results", "media": "AE-imported media",
+            "captions": "captions (SRT) on the 60 fps sequence", "report": "this report",
+            "verify": "verification results", "media": "AE-imported media",
             "debug": "debug plots, cut images, failure thumbnails", "decisions": "decision log (evidence)",
             "log": "run log", "frame_map": "per-frame mapping m(k)"}
     for k, p in paths.items():
@@ -1160,6 +1272,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("How to open in After Effects", _how_to_open),
     ("Outputs", _outputs),
     ("Environment and timings", _environment),
+    ("Captions", _captions),
 ]
 
 

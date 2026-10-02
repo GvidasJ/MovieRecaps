@@ -23,6 +23,10 @@ dependencies = [
 # parsers always run); OTIO may need a C++ compiler on Python versions without prebuilt wheels
 exports = ["opentimelineio>=0.17", "otio-fcp-adapter", "otio-cmx3600-adapter"]
 dev = ["pytest>=8"]
+# optional: output/captions.srt -- faster-whisper (transcription) and RapidOCR's dependencies; RapidOCR itself is
+# installed WITHOUT its dependencies (`pip install --no-deps rapidocr`), its metadata pulls opencv-python
+captions = ["faster-whisper>=1.0", "onnxruntime>=1.14", "pyclipper>=1.2", "shapely>=1.7.1,!=2.0.4", "pyyaml",
+            "pillow", "six", "tqdm", "omegaconf!=2.2.1", "requests", "colorlog"]
 
 [project.scripts]
 match-cuts = "match_cuts.cli:main"

@@ -38,7 +38,7 @@ If the files in `./input/` have other names, the competitor is the portrait one 
 
 **Recreate:** cuts; RAW in/out points; order (including out-of-order and re-used moments); speed changes; framing (scale, position, rotation, horizontal flip, animated zooms/pans); transitions (dissolves, dips, flash frames); and, in `match` mode, the layout geometry.
 
-**Do not copy** the competitor's own creative assets: captions, title text, logos, watermarks, stickers, music, sound effects, voice-over. Detect them, log where and when they appear, mask them out of the matching, and leave labelled placeholders so I can add my own.
+**Do not copy** the competitor's own creative assets: title text, logos, watermarks, stickers, music, sound effects, voice-over. Detect them, log where and when they appear, mask them out of the matching, and leave labelled placeholders so I can add my own. **Captions are the exception** (replaces the earlier rule): burned-in captions are copied exactly into `captions.srt`, and without them captions are made from the voice-over — see `caption-generator-prompt.md`.
 
 ## Definition of done (acceptance criteria)
 

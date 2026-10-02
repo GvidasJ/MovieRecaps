@@ -119,6 +119,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Premiere Pro only: no After Effects export or checks; recreated_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), each clip framed into the template "
                         "window x 42-1039, y 555-1591, RAW audio on A1, markers on UNCERTAIN / NOT-IN-RAW spots, V2+ empty")
+    p.add_argument("--captions", default="auto", choices=["auto", "competitor", "voice"],
+                   help="output/captions.srt (60 fps sequence): auto = copy the competitor's burned-in captions when it "
+                        "has them (OCR; uncaptioned speech filled from the voice-over), else make them from the voice-over "
+                        "by caption-generator-prompt.md; competitor / voice force one mode")
+    p.add_argument("--voiceover", default=None, metavar="FILE",
+                   help="caption this narration (audio or video file, starting at the sequence start) instead of the "
+                        "cut edit's audio")
+    p.add_argument("--caption-model", default="small.en", metavar="NAME",
+                   help="faster-whisper model for the transcription (default small.en; base.en is faster, medium.en "
+                        "more accurate; downloaded once on first use)")
     p.add_argument("--no-ae", action="store_true",
                    help="do not open After Effects automatically (run output/build_ae_project.jsx yourself)")
     p.add_argument("--ae-timeout", default=600.0, type=float, metavar="SECONDS",
@@ -152,6 +162,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
+    cfg.captions = str(getattr(args, "captions", "auto") or "auto")
+    cfg.voiceover = str(getattr(args, "voiceover", None) or "")
+    cfg.caption_model = str(getattr(args, "caption_model", None) or "small.en")
     if args.seed is not None:
         cfg.seed = int(args.seed)
     return cfg
@@ -322,6 +335,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         comp, raw, notes = resolve_inputs(args.competitor, args.raw, args.input_dir, args.no_swap)
     except InputError as e:
         print(f"match_cuts: {e}", file=sys.stderr)
+        return 2
+    if args.voiceover and not Path(args.voiceover).is_file():
+        print(f"match_cuts: voice-over file not found: {args.voiceover}", file=sys.stderr)
         return 2
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)

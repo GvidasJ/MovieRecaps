@@ -117,6 +117,7 @@ class Context:
     ae_run: dict = field(default_factory=dict)        # Stage 7.6 (AE app) result
     exports: dict = field(default_factory=dict)       # export_xml_edl.validate_exports result
     preview: dict = field(default_factory=dict)       # render_preview result
+    captions: dict = field(default_factory=dict)      # captions.run_captions result (captions.srt + report data)
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2551,6 +2552,19 @@ def deliverables_check(ctx: Context) -> dict:
             "skipped": dict(skipped), "failures": fails, "warnings": warns, "source": "pipeline"}
 
 
+def stage_captions(ctx: Context) -> None:
+    """captions.srt (captions.py): never fails the run -- a problem is a warning and a note in the report."""
+    from . import captions
+    try:
+        ctx.captions = captions.run_captions(ctx)
+    except Exception as e:  # noqa: BLE001 - captions are an extra; the edit's deliverables stand on their own
+        log.error("captions failed: %s\n%s", e, traceback.format_exc())
+        ctx.captions = {"error": f"{type(e).__name__}: {e}"}
+        ctx.warn(f"captions.srt not written: {type(e).__name__}: {e}")
+    if ctx.captions.get("path"):
+        ctx.paths["captions"] = ctx.captions["path"]
+
+
 def stage_verify(ctx: Context) -> None:
     from . import verify
     try:
@@ -2588,7 +2602,8 @@ def _collect_paths(ctx: Context) -> None:
     out = ctx.cfg.out
     for key, rel in (("jsx", "build_ae_project.jsx"), ("aep", "recreated_edit.aep"), ("cutlist", "cutlist.json"),
                      ("csv", "cutlist.csv"), ("xml", "recreated_edit.xml"), ("edl", "recreated_edit.edl"),
-                     ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("report", "report.md"),
+                     ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("captions", "captions.srt"),
+                     ("report", "report.md"),
                      ("verify", "verify.json"), ("media", "media"), ("debug", "debug")):
         p = out / rel
         if p.exists():
@@ -2680,6 +2695,8 @@ def run(cfg: Config) -> dict:
             stage_ae(ctx)
         with _stage(ctx, "S8 exports"):
             stage_exports(ctx)
+        with _stage(ctx, "S8 captions"):
+            stage_captions(ctx)
         with _stage(ctx, "S9 verify"):
             stage_verify(ctx)
         ctx.timings["total"] = round(time.perf_counter() - t_all, 3)
