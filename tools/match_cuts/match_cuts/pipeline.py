@@ -118,6 +118,7 @@ class Context:
     exports: dict = field(default_factory=dict)       # export_xml_edl.validate_exports result
     preview: dict = field(default_factory=dict)       # render_preview result
     captions: dict = field(default_factory=dict)      # captions.run_captions result (captions.srt + report data)
+    broll: dict = field(default_factory=dict)         # --no-broll: broll.apply_no_broll result (export cut list + lists)
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2348,6 +2349,35 @@ def stage_segments(ctx: Context) -> None:
     write_cutlist(ctx)
 
 
+def stage_broll(ctx: Context) -> None:
+    """--no-broll (broll.py): the export cut list with the cutaways over continuous RAW audio replaced by the main
+    clip. ctx.cutlist stays faithful (verification, preview, s9_7). A failure only warns: the export is then the
+    faithful edit."""
+    if not getattr(ctx.cfg, "no_broll", False):
+        return
+    from . import broll
+    try:
+        ctx.broll = broll.apply_no_broll(ctx.cutlist, ctx.comp_audio, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg)
+    except Exception as e:  # noqa: BLE001 - the faithful export is still a valid deliverable
+        log.error("--no-broll failed: %s\n%s", e, traceback.format_exc())
+        ctx.broll = {"error": f"{type(e).__name__}: {e}", "replaced": [], "kept": []}
+        ctx.warn(f"--no-broll not applied: {type(e).__name__}: {e}")
+        return
+    ctx.dlog.record("broll", "no_broll", replaced=ctx.broll["replaced"], kept=ctx.broll["kept"])
+    if ctx.broll["replaced"]:
+        p = ctx.cfg.debug_dir / "cutlist_no_broll.json"
+        ctx.broll["cutlist"].save(p)
+        ctx.broll["path"] = ctx.paths["broll"] = str(p)
+    for n in ctx.broll.get("notes") or []:
+        log.info("--no-broll: %s", n)
+
+
+def export_cutlist(ctx: Context) -> Cutlist:
+    """The cut list the XML / EDL / CSV are written from: --no-broll's when it replaced something, else the faithful one."""
+    cl = (ctx.broll or {}).get("cutlist") if isinstance(ctx.broll, dict) else None
+    return cl if cl is not None else ctx.cutlist
+
+
 def write_cutlist(ctx: Context) -> Path:
     ctx.cutlist.provenance["timings"] = dict(ctx.timings)
     p = ctx.cfg.out / "cutlist.json"
@@ -2437,23 +2467,24 @@ DIAGNOSTIC_DELIVERABLES = ("debug_mapping", "debug_scores", "debug_layout")   # 
 def stage_exports(ctx: Context) -> None:
     from . import export_xml_edl, render_preview
     cfg, cl, out = ctx.cfg, ctx.cutlist, ctx.cfg.out
+    ex = export_cutlist(ctx)                  # --no-broll: cutaways replaced (the preview / compare stay faithful)
     csv, xml, edl = out / "cutlist.csv", out / "recreated_edit.xml", out / "recreated_edit.edl"
     produced: dict[str, bool] = {}
-    produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(cl, csv))
+    produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(ex, csv))
     premiere = bool(getattr(cfg, "premiere", False))
     if premiere:
-        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(cl, xml, cfg))
+        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg))
     else:
-        produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(cl, xml, cfg))
-    produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(cl, edl, cfg))
+        produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(ex, xml, cfg))
+    produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(ex, edl, cfg))
     for key, p in (("csv", csv), ("xml", xml), ("edl", edl)):
         if produced[key] and p.exists():
             ctx.paths[key] = str(p)
     validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
     if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
         ok, res = _soft(ctx, "S8 validate exports", lambda: (
-            export_xml_edl.validate_premiere_exports(cl, xml, edl, cfg) if premiere
-            else export_xml_edl.validate_exports(cl, xml, edl)))
+            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg) if premiere
+            else export_xml_edl.validate_exports(ex, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
@@ -2691,6 +2722,8 @@ def run(cfg: Config) -> dict:
         layout_warnings(ctx)
         with _stage(ctx, "S5.4-S6 segments+cutlist"):
             stage_segments(ctx)
+        with _stage(ctx, "S6 no-broll"):
+            stage_broll(ctx)
         with _stage(ctx, "S7 AE project"):
             stage_ae(ctx)
         with _stage(ctx, "S8 exports"):

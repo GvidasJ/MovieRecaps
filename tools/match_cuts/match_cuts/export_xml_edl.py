@@ -1276,6 +1276,13 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
                 warnings.append(f"{ev.seg_name}: dissolve to / from black not exported (Premiere XML import keeps cross "
                                 "dissolves between two clips only)")
             continue
+        for r in ((seg.audio or {}).get("broll") or {}).get("ranges") or []:   # --no-broll (broll.py)
+            lo, hi = max(int(r[0]), ev.rec_in), min(int(r[1]), ev.rec_out)
+            if hi > lo:
+                name = f"S{int(r[2]):02d}" if len(r) > 2 else ev.seg_name
+                markers.append({"name": f"B-ROLL REPLACED {name}", "comment": "the competitor cut away here over the "
+                                "main clip's continuing RAW audio; --no-broll plays the main clip through",
+                                "in": lo * fac, "out": hi * fac})
         tail = nxt.dissolve_in if (nxt is not None and nxt.kind == "clip") else 0
         dis_in = ev.dissolve_in if (prev is not None and prev.kind == "clip") else 0
         retime = None

@@ -1227,6 +1227,60 @@ def _captions(ctx: Any) -> list[str]:
     return out
 
 
+def _broll(ctx: Any) -> list[str]:
+    """--no-broll (broll.py): every replaced cutaway and every cutaway kept because the RAW audio does not continue
+    under it, with competitor and sequence timecodes."""
+    cfg = getattr(ctx, "cfg", None)
+    br = getattr(ctx, "broll", None) or {}
+    if not getattr(cfg, "no_broll", False):
+        return ["Not used: the export shows the competitor's cutaways as they are. Run with `--no-broll` to let the "
+                "main clip play through cutaways over continuous RAW audio."]
+    if br.get("error"):
+        return [f"`--no-broll` was not applied ({br['error']}): the export is the faithful edit."]
+    cl = getattr(ctx, "cutlist", None)
+    fps = cl.comp_fps if cl is not None else Fraction(30)
+    from .export_xml_edl import premiere_settings
+    seq = Fraction(premiere_settings(cfg)["fps"])
+
+    def tcs(a: int, b: int) -> tuple[str, str]:
+        comp = f"{timecode(a, fps)}–{timecode(b, fps)}"
+        sa, sb = int(round(Fraction(a) * seq / fps)), int(round(Fraction(b) * seq / fps))
+        return comp, f"{timecode(sa, seq)}–{timecode(sb, seq)}"
+
+    rep, kept = br.get("replaced") or [], br.get("kept") or []
+    out = [f"- `--no-broll`: **{len(rep)} cutaway(s) replaced** by the main clip, **{len(kept)} kept** as the "
+           "competitor has them.",
+           "- Changed: `recreated_edit.xml` (a `B-ROLL REPLACED` marker on each spot), `recreated_edit.edl` and "
+           "`cutlist.csv`; the A1 audio follows the picture. `cutlist.json`, the preview / compare renders and the "
+           "verification above still describe the competitor's own edit."]
+    for n in br.get("notes") or []:
+        out.append(f"- {n}")
+    if rep:
+        rows = []
+        for r in rep:
+            comp, sq = tcs(r["comp_in"], r["comp_out"])
+            ev = ("too short to hear; between two shots of the same line" if r.get("bridged") else
+                  f"RAW audio continues: corr {r.get('corr')} at {r.get('lag_ms')} ms")
+            rows.append([f"S{int(r['segment']):02d}", f"{r['comp_in']}–{r['comp_out']}", comp, sq, r["showed"],
+                         f"main clip RAW {float(r['raw_in_seconds']):.3f}–{float(r['raw_out_seconds']):.3f}s "
+                         f"({r.get('line')})", ev])
+        out += ["", "**Replaced cutaways**", "",
+                md_table(["segment", "competitor frames", "competitor timecode", "sequence timecode (60 fps)",
+                          "competitor showed", "now shows", "evidence"], rows)]
+    if kept:
+        rows = []
+        for r in kept:
+            comp, sq = tcs(r["comp_in"], r["comp_out"])
+            rows.append([f"S{int(r['segment']):02d}", f"{r['comp_in']}–{r['comp_out']}", comp, sq, r["showed"],
+                         r.get("why", "")])
+        out += ["", "**Kept cutaways** (the RAW audio does not continue under them -- left as the competitor has "
+                "them)", "", md_table(["segment", "competitor frames", "competitor timecode",
+                                       "sequence timecode (60 fps)", "competitor showed", "why kept"], rows)]
+    if not rep and not kept:
+        out.append("- No cutaways found: every piece of the edit shows the clip its audio belongs to.")
+    return out
+
+
 def _seconds(t: float) -> str:
     from .captions import ms_tc
     return ms_tc(int(round(float(t) * 1000)))
@@ -1240,6 +1294,7 @@ def _outputs(ctx: Any) -> list[str]:
             "csv": "cut list, one row per segment", "xml": "FCP7 XML (Premiere / Resolve)", "edl": "CMX3600 EDL",
             "preview": "frame-exact preview render", "compare": "competitor | recreation | difference",
             "captions": "captions (SRT) on the 60 fps sequence", "report": "this report",
+            "broll": "--no-broll export cut list (cutaways replaced)",
             "verify": "verification results", "media": "AE-imported media",
             "debug": "debug plots, cut images, failure thumbnails", "decisions": "decision log (evidence)",
             "log": "run log", "frame_map": "per-frame mapping m(k)"}
@@ -1273,6 +1328,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Outputs", _outputs),
     ("Environment and timings", _environment),
     ("Captions", _captions),
+    ("B-roll cutaways (--no-broll)", _broll),
 ]
 
 

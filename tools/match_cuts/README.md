@@ -81,6 +81,29 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `small.en`). Premiere-only export: `--premiere`.
 
+`--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
+playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
+*B-roll cutaways* below).
+
+### B-roll cutaways (`--no-broll`)
+
+A cutaway is a piece whose picture leaves the main clip — B-roll from another moment of the RAW, a
+NOT-IN-RAW insert or an uncertain piece — right next to a main-clip shot (a RAW shot whose audio follows
+its own picture). The main clip's time line (that shot's RAW time map, extended forward from the shot
+before or backward from the shot after) is tested against the competitor's audio under the cutaway with
+the same check as the continuous audio lines: a strong correlation within ±10 ms that beats every other
+alignment, after calibrating the competitor's A/V offset on the main-clip shot itself. When it passes,
+the cutaway becomes the RAW video of that line, framed like the main-clip shot, and is joined with it into
+one continuous clip when framing and speed continue unchanged; a cutaway too short to measure (≤ 2 frames)
+is replaced only between two shots of the same line. When the RAW audio does not continue (music,
+voice-over, the cutaway's own sound) the cutaway stays as the competitor has it.
+
+Only what you import changes: `recreated_edit.xml` (with a `B-ROLL REPLACED` marker on every spot),
+`recreated_edit.edl` and `cutlist.csv` (`debug/cutlist_no_broll.json` holds the export cut list).
+`cutlist.json`, the preview / compare renders and the verification stay faithful to the competitor, so the
+checks still prove every cut. The report's *B-roll cutaways* section lists every replaced and kept cutaway
+with its competitor and 60 fps sequence timecodes.
+
 ### Captions
 
 `output/captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
@@ -465,6 +488,11 @@ cd tools/match_cuts
 ../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s
 ../../.venv/bin/python -m pytest -q tests/test_synthetic.py   # Stage 1 end-to-end (slow, minutes)
 ```
+
+`tests/test_broll.py` checks `--no-broll` on synthetic audio: three cutaways over the main clip's continuing
+RAW audio (B-roll from the RAW, a NOT-IN-RAW insert, a 2-frame flash) are replaced and joined into the main
+clip, one over music is kept, the faithful cut list is untouched, the Premiere XML validates with a marker
+per replaced spot, and the report lists them with timecodes.
 
 `tests/test_captions.py` checks the caption rules against the ten reference SRTs in `srt/` (their style
 statistics, a byte-exact SRT round trip, regrouping their words: ≥ 80 % of the captions come out exactly,

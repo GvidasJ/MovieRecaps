@@ -119,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Premiere Pro only: no After Effects export or checks; recreated_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), each clip framed into the template "
                         "window x 42-1039, y 555-1591, RAW audio on A1, markers on UNCERTAIN / NOT-IN-RAW spots, V2+ empty")
+    p.add_argument("--no-broll", action="store_true",
+                   help="where the competitor cuts away (B-roll from the RAW or not in it) while the RAW audio keeps "
+                        "playing, the export shows the RAW video that matches the audio instead (the main clip plays "
+                        "through); cutaways over music / voice-over stay as they are. Changes recreated_edit.xml, the "
+                        "EDL and cutlist.csv; report.md lists every replaced and kept cutaway")
     p.add_argument("--captions", default="auto", choices=["auto", "competitor", "voice"],
                    help="output/captions.srt (60 fps sequence): auto = copy the competitor's burned-in captions when it "
                         "has them (OCR; uncaptioned speech filled from the voice-over), else make them from the voice-over "
@@ -162,6 +167,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
+    cfg.no_broll = bool(getattr(args, "no_broll", False))
     cfg.captions = str(getattr(args, "captions", "auto") or "auto")
     cfg.voiceover = str(getattr(args, "voiceover", None) or "")
     cfg.caption_model = str(getattr(args, "caption_model", None) or "small.en")

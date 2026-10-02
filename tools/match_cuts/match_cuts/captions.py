@@ -689,7 +689,9 @@ def run_captions(ctx) -> dict:
                  f"({n_seq / float(fps):.1f} s): captions after the end are left out")
     elif ctx.raw_audio is not None and len(ctx.raw_audio):
         from .render_preview import build_audio
-        y16 = transcribe.resample(build_audio(ctx.cutlist, ctx.raw_audio, int(ctx.audio_sr)), int(ctx.audio_sr))
+        cl = ((getattr(ctx, "broll", None) or {}).get("cutlist") if isinstance(getattr(ctx, "broll", None), dict)
+              else None) or ctx.cutlist        # --no-broll: the audio of the edit you import
+        y16 = transcribe.resample(build_audio(cl, ctx.raw_audio, int(ctx.audio_sr)), int(ctx.audio_sr))
         res["source"] = "the cut edit (RAW audio on the edit's cuts)"
     else:
         res["source"] = "none (the RAW has no audio)"
