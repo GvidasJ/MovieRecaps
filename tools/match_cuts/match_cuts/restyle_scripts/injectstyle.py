@@ -8,12 +8,12 @@ Usage: injectstyle.py <donor.xml> <target.xml> <out.xml>
 import re, sys
 
 DSRC, TSRC, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
-dxml = open(DSRC).read()
-xml  = open(TSRC).read()
+dxml = open(DSRC, encoding='utf-8', newline='').read()
+xml  = open(TSRC, encoding='utf-8', newline='').read()
 
 if '<StyleProjectItem' in xml:
     print("target already has a style item - nothing to do")
-    open(OUT, 'w').write(xml)
+    open(OUT, 'w', encoding='utf-8', newline='').write(xml)
     raise SystemExit
 
 def dspan(oid):
@@ -56,6 +56,6 @@ indent = re.search(r'\n(\s*)<Item Index="0"', rm.group(1))
 pad = indent.group(1) if indent else '\t\t\t\t'
 doc = doc[:rm.start(2)] + f'\n{pad}<Item Index="{nxt}" ObjectURef="{STYLE_UID}"/>' + doc[rm.start(2):]
 
-open(OUT, 'w').write(doc)
+open(OUT, 'w', encoding='utf-8', newline='').write(doc)
 print(f"injected: component {new_comp}, params {pmap[param_oids[0]]}-{pmap[param_oids[-1]]},"
       f" registered as project item {nxt}")

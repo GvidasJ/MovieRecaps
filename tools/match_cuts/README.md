@@ -206,6 +206,39 @@ match_cuts result: PASS
   (PASS* = passed with listed, explained exceptions)
 ```
 
+### Restyle the captions in Premiere (`restyle`)
+
+After a `--premiere` run: import `recreated_edit.xml` and `captions.srt` into Premiere, drag the captions onto
+the sequence, upgrade them to graphics (*Upgrade caption to graphic*) and save the project. Then:
+
+```
+python -m match_cuts restyle "C:\path\to\my edit.prproj"
+```
+
+It writes `my edit_styled.prproj` next to the project (the original is never written to) with every plain
+caption in the POPW style: Verdana Bold 58 white, two strokes and a drop shadow, the same position as the
+reference, the Scale pop 88% → 100% starting on each caption's first frame and lasting exactly as long as the
+donor's (0.1333 s: 8 frames of the 60 fps sequence), and the dots and commas stripped (`Mr.` → `Mr`, `C.I.D.`
+→ `CID`; a dot or comma between two digits stays: `£4.50`, `15,000`).
+
+The work is done by the four scripts in `match_cuts/restyle_scripts/` (see `restyle-prompt.md` at the repo
+root); `match_cuts/restyle.py` only chooses their arguments and checks the result:
+
+1. unpacks the `.prproj` (gzipped XML) with Python's gzip module;
+2. counts plain (text only) and styled (Motion, Graphic Group, Text) caption clips on every video track and
+   restyles the track with the most plain captions;
+3. takes the style from a styled caption on another track of the project (`capfix.py`, or `capfix_xdonor.py`
+   from another sequence) or, when there is none, from `reference/popw_reference.prproj` (`capfix_xdonor.py`,
+   after `injectstyle.py` adds the POPW style item to a project that has none);
+4. runs `capverify.py` and checks that every keyframe keeps the donor's timing to the tick: **when anything is
+   wrong nothing is written**, and the problems are printed (exit code 1);
+5. repacks the project and prints a short report: how many captions were styled, the punctuation cleaned, and
+   text worth a look (doubled words, a caption ending on a weak word, over 24 characters, `*...*` placeholders
+   left in). These are reported, never changed.
+
+`--donor PROJECT.prproj` takes the style from another correctly styled project; `--overwrite` replaces an
+existing `_styled` file (without it the run stops rather than overwrite one you may have worked in).
+
 ## Outputs
 
 ```
@@ -519,6 +552,12 @@ the real competitor's style (pop-in, highlighted word, word-by-word growth, the 
 text rules, and the acceptance run on `input/competitor.mp4` (every caption real words, none under 0.1 s).
 `tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered) and
 `tests/test_broll.py` the B-roll-follows-the-audio default (trimmed audio under a cutaway, music, glitches, dips).
+
+`tests/test_restyle.py` runs the restyle on `reference/plain_captions.prproj` and checks that the result
+matches `reference/popw_reference.prproj` caption for caption, passes `capverify.py`, keeps the donor's pop timing
+to the tick and changes nothing else; also a project without a style item, a donor on another track, a trimmed
+donor, a capverify failure (nothing written), numbers keeping their dots and commas, and the CLI under a locale
+that is not UTF-8 (as on Windows).
 
 `tests/test_broll.py` checks `--no-broll` on synthetic audio: three cutaways over the main clip's continuing
 RAW audio (B-roll from the RAW, a NOT-IN-RAW insert, a 2-frame flash) are replaced and joined into the main

@@ -83,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Exit code: 0 = every acceptance criterion passed (or passed with explained exceptions) and "
                "every deliverable was produced, 1 = something failed, 2 = run error, 3 = nothing failed but a "
                "criterion could not be verified here (e.g. criterion 6 without Node.js / After Effects). "
+               "Restyle the captions of a saved Premiere project: python -m match_cuts restyle PROJECT.prproj. "
                "See tools/match_cuts/README.md.")
     p.add_argument("--competitor", default=None, metavar="X",
                    help=f"the finished edit (default {DEFAULTS['competitor']}; auto-detected in --input-dir)")
@@ -339,6 +340,10 @@ def _tolerant_console() -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     _tolerant_console()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["restyle"]:                  # python -m match_cuts restyle PROJECT.prproj
+        from .restyle import main as restyle_main
+        return restyle_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

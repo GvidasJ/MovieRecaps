@@ -20,6 +20,11 @@ python -m match_cuts --competitor input/competitor.mp4 --raw input/raw.mp4 --out
 
 Then in After Effects: *File → Scripts → Run Script File…* → `output/build_ae_project.jsx`.
 
+With `--premiere`: import `output/recreated_edit.xml` and `output/captions.srt` into Premiere, upgrade the
+captions to graphics, save, then style them all at once with
+`python -m match_cuts restyle "<project>.prproj"` (writes `<project>_styled.prproj`; see
+[Restyle the captions](tools/match_cuts/README.md#restyle-the-captions-in-premiere-restyle)).
+
 While it runs, the console prints a line at least every 30 seconds. At the end, read `output/report.md`:
 the first table says which checks passed. Amber `UNCERTAIN` solids and `MISSING - not in RAW` solids in the AE
 project mark the frames you still have to fill by hand (see *What the layers mean* in the

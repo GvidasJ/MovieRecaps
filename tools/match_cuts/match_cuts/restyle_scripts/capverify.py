@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 
 ORIG, NEW, TG, DIDX, TIDX = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
-doc = open(NEW).read()
+doc = open(NEW, encoding='utf-8', newline='').read()
 fails = []
 
 try:
@@ -85,7 +85,7 @@ for v in (DIDX, TIDX):
             if not kf.split(',')[1].startswith('88'):
                 fails.append(f"{txt!r}: pop does not start at 88%")
 
-        if '.' in txt or ',' in txt:
+        if re.search(r'(?<!\d)[.,]|[.,](?!\d)', txt):       # a dot or comma inside a number (4.50) is kept
             fails.append(f"{txt!r}: still contains . or ,")
 
         # centred on screen, allowing for a wider box on long lines
@@ -103,7 +103,7 @@ dh = set(m.group(1) for m in re.finditer(r'BinaryHash="([0-9a-f-]+)">[^<]+</Star
 orph = [h for h in re.findall(r'<StartKeyframeValue Encoding="base64" BinaryHash="([0-9a-f-]+)"/>', doc) if h not in dh]
 if orph: fails.append(f"{len(orph)} orphaned BinaryHash references")
 
-oc = Counter(re.findall(r'ObjectID="(\d+)"', open(ORIG).read()))
+oc = Counter(re.findall(r'ObjectID="(\d+)"', open(ORIG, encoding='utf-8', newline='').read()))
 nc = Counter(re.findall(r'ObjectID="(\d+)"', doc))
 dups = {k: v for k, v in nc.items() if v > max(1, oc.get(k, 0))}
 if dups: fails.append(f"duplicate ObjectIDs introduced: {dups}")
