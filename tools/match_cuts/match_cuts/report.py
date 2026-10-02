@@ -1140,7 +1140,16 @@ def _captions(ctx: Any) -> list[str]:
     out = []
     mode = cap.get("mode")
     by = cap.get("by_mode") or {}
-    if mode == "competitor":
+    cn = cap.get("competitor_notes")
+    if mode == "competitor" and cn is not None:
+        o = cap.get("ocr") or {}
+        out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions with the "
+                   f"competitor's on-screen timing and splits (caption band read on all {o.get('frames_read', 0)} "
+                   "frames: a caption starts when new text appears and ends when it disappears or changes to different "
+                   "words; blips under 0.15 s merged), their text the words spoken during each caption (transcript); "
+                   f"OCR ({o.get('engine', 'OCR')}) only for the word split, names and non-speech captions; "
+                   f"{by.get('fill', 0)} voice captions fill speech the competitor left uncaptioned.")
+    elif mode == "competitor":
         o = cap.get("ocr") or {}
         out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions copied exactly "
                    f"from the competitor's burned-in captions ({o.get('engine', 'OCR')}, {o.get('frames_read', 0)} frames "
@@ -1205,7 +1214,23 @@ def _captions(ctx: Any) -> list[str]:
     out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected"
             + ("; voice captions only" if mode == "competitor" else "") + f"): {len(fl) if fl else 'none'}"]
     out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
-    if mode == "competitor":
+    if mode == "competitor" and cn is not None:
+        sh = cap.get("short") or []
+        out += ["", f"**Captions shorter than 0.1 s**: {len(sh) if sh else 'none'}"]
+        out += [f"- {_tc(c)} `{c['text']}` (the competitor's own caption is this short)" for c in sh]
+        for title, key, fmt in (
+                ("Names spelt as the competitor writes them (OCR over the transcript)", "names",
+                 lambda r: f"`{r['heard']}` → `{r['written']}`"),
+                ("Non-speech captions (read from the picture)", "non_speech", lambda r: f"`{r['text']}`"),
+                ("Captions with no words heard (text read from the picture)", "from_ocr", lambda r: f"`{r['text']}`"),
+                ("Captions that could not be read and have no words heard: written `*...*`", "unreadable",
+                 lambda r: f"OCR read `{r.get('ocr') or ''}`"),
+                ("Where the competitor's caption reads differently from what is said (the spoken words are used)",
+                 "differs", lambda r: f"caption `{r['ocr']}` · spoken `{r['text']}`")):
+            rows = cn.get(key) or []
+            out += ["", f"**{title}**: {len(rows) if rows else 'none'}"]
+            out += [f"- {r['start_tc']} → {r['end_tc']} {fmt(r)}" for r in rows]
+    elif mode == "competitor":
         dis = cap.get("disagreements") or []
         out += ["", f"**OCR / transcript disagreements** (every one; the caption text is never changed): "
                 f"{len(dis) if dis else 'none'}"]
@@ -1232,7 +1257,8 @@ def _broll(ctx: Any) -> list[str]:
     under it, with competitor and sequence timecodes."""
     cfg = getattr(ctx, "cfg", None)
     br = getattr(ctx, "broll", None) or {}
-    if not getattr(cfg, "no_broll", False):
+    follow = bool(br.get("follow_audio"))
+    if not (getattr(cfg, "no_broll", False) or follow):
         return ["Not used: the export shows the competitor's cutaways as they are. Run with `--no-broll` to let the "
                 "main clip play through cutaways over continuous RAW audio."]
     if br.get("error"):
@@ -1248,8 +1274,11 @@ def _broll(ctx: Any) -> list[str]:
         return comp, f"{timecode(sa, seq)}–{timecode(sb, seq)}"
 
     rep, kept = br.get("replaced") or [], br.get("kept") or []
-    out = [f"- `--no-broll`: **{len(rep)} cutaway(s) replaced** by the main clip, **{len(kept)} kept** as the "
-           "competitor has them.",
+    lead = ("- Premiere default (B-roll follows the audio): every NOT-IN-RAW / uncertain / B-roll spot shows the RAW "
+            "video of the audio playing there; where that audio is not from the RAW (music / voice-over) the previous "
+            "RAW clip keeps playing with no RAW audio under it. V1 is never left empty. "
+            if follow else "- `--no-broll`: ")
+    out = [f"{lead}**{len(rep)} spot(s) replaced**, **{len(kept)} kept** as the competitor has them.",
            "- Changed: `recreated_edit.xml` (a `B-ROLL REPLACED` marker on each spot), `recreated_edit.edl` and "
            "`cutlist.csv`; the A1 audio follows the picture. `cutlist.json`, the preview / compare renders and the "
            "verification above still describe the competitor's own edit."]
@@ -1259,12 +1288,22 @@ def _broll(ctx: Any) -> list[str]:
         rows = []
         for r in rep:
             comp, sq = tcs(r["comp_in"], r["comp_out"])
-            ev = ("too short to hear; between two shots of the same line" if r.get("bridged") else
-                  f"RAW audio continues: corr {r.get('corr')} at {r.get('lag_ms')} ms")
+            parts = r.get("parts") or [{"comp_in": r["comp_in"], "comp_out": r["comp_out"],
+                                         "raw_in_seconds": r["raw_in_seconds"], "how": r.get("how") or "audio",
+                                         "corr": r.get("corr")}]
+            now, evs = [], []
+            for p_ in parts:
+                h = p_.get("how") or "audio"
+                what = ("previous clip keeps playing" if h.startswith("keeps playing") else "RAW of the audio")
+                now.append(f"{p_['comp_in']}–{p_['comp_out']}: {what} from RAW {float(p_['raw_in_seconds']):.3f}s")
+                evs.append("too short to hear; between two shots of the same line" if r.get("bridged") else
+                           "audio not from the RAW (music / voice-over): no RAW audio under it" if h == "keeps playing"
+                           else "a frame or two: too short to check its audio" if h == "keeps playing (short)"
+                           else f"corr {p_.get('corr')}" if p_.get("corr") is not None
+                           else "found by the audio alignment")
             rows.append([f"S{int(r['segment']):02d}", f"{r['comp_in']}–{r['comp_out']}", comp, sq, r["showed"],
-                         f"main clip RAW {float(r['raw_in_seconds']):.3f}–{float(r['raw_out_seconds']):.3f}s "
-                         f"({r.get('line')})", ev])
-        out += ["", "**Replaced cutaways**", "",
+                         "<br>".join(now), "<br>".join(evs)])
+        out += ["", "**Replaced spots** (a `B-ROLL REPLACED` marker on each in the XML)", "",
                 md_table(["segment", "competitor frames", "competitor timecode", "sequence timecode (60 fps)",
                           "competitor showed", "now shows", "evidence"], rows)]
     if kept:
@@ -1328,7 +1367,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Outputs", _outputs),
     ("Environment and timings", _environment),
     ("Captions", _captions),
-    ("B-roll cutaways (--no-broll)", _broll),
+    ("B-roll cutaways", _broll),
 ]
 
 

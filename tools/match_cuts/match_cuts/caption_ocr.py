@@ -623,3 +623,223 @@ def read_competitor_captions(video: str, layout: Any, frame_wh: tuple[int, int],
     return {"captions": caps, "events": len(spans), "frames_read": len(reads),
             "band": {"x": band.x, "y": band.y, "w": band.w, "h": band.h, "glyph_h": band.glyph_h, "keep": band.keep},
             "notes": notes}
+
+
+# ---------------------------------------------------------------------------------------------
+# Caption spans (Premiere competitor mode): WHEN each caption is on screen, read from the picture; the words come
+# from the speech transcript (captions.competitor_text) -- OCR only for names and non-speech captions
+# ---------------------------------------------------------------------------------------------
+#
+# Captions styles differ (white text with a black outline, cream text with a soft drop shadow, a word highlighted in
+# another colour, ...). What they share: bright letters with dark pixels right next to them, in ONE fill colour that
+# repeats over the whole video. The fill colour is learned from the band; a frame's caption layer is the bright
+# pixels of that colour next to dark ones, on the caption's own line. A caption starts when text appears and ends
+# when it disappears or changes to different words: the previous frame's letters are no longer there -- neither in
+# the fill colour nor, inside the caption's box, in any bright colour (a word highlighted in another colour keeps its
+# shape: not a new caption). A pop-in / pop-out (a few frames of text growing or shrinking) gives blips shorter than
+# SPAN_BLIP_S that are merged into the neighbouring caption.
+
+SPAN_BLIP_S = 0.15        # spans shorter than this are merged into the neighbouring caption
+SPAN_IOU = 0.35           # letters overlapping the previous frame's less than this (IoU) ...
+SPAN_SHIFT = 0.75         # ... and the previous letters not found again (even moved sideways) -> a new caption
+SPAN_SHAPE = 0.5          # ... and the bright shapes around them changed too (a highlighted word keeps its shape)
+FILL_TOL = 60.0           # BGR distance of a letter pixel from the learned fill colour
+SPAN_VERSION = 3
+
+
+def _near_dark(crop: np.ndarray, glyph_h: float) -> np.ndarray:
+    """Bright pixels with a dark pixel (outline or shadow) within a quarter glyph height."""
+    import cv2
+    mx = crop.max(axis=2)
+    r = max(2, int(round(0.25 * glyph_h)))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    near = cv2.dilate((mx <= 90).astype(np.uint8), k) > 0
+    return (mx >= 160) & near
+
+
+def learn_fill_colour(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.ndarray | None) -> np.ndarray | None:
+    """The caption fill colour (BGR): the most frequent colour (24-level bins) of the bright-next-to-dark pixels of
+    thin bright strokes in the band over the sampled frames -- the caption is on screen far more than any other such
+    detail."""
+    import cv2
+    hist: Counter = Counter()
+    for c in crops:
+        m = _near_dark(c, glyph_h)
+        if ignore is not None:
+            m &= ~ignore
+        # only thin bright strokes: letters are a few pixels wide; the edge of a wide bright region (a shirt, a colour
+        # bar) next to a shadow is not
+        dist = cv2.distanceTransform((c.max(axis=2) >= 160).astype(np.uint8), cv2.DIST_L2, 3)
+        r = max(2, int(round(0.25 * glyph_h)))
+        widest = cv2.dilate(dist, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        m &= widest <= max(2.5, 0.2 * glyph_h)
+        q = (c[m] // 24).astype(np.int32)
+        if len(q):
+            hist.update(map(tuple, q.tolist()))
+    if not hist:
+        return None
+    top = np.array(hist.most_common(1)[0][0], float) * 24 + 12
+    # refine: the mean of the pixels close to the bin centre
+    return top
+
+
+def caption_layer(crop: np.ndarray, glyph_h: float, fill: np.ndarray, ignore: np.ndarray | None
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """(letters in the fill colour on the caption line, every bright-next-to-dark pixel) of one band crop."""
+    cand = _near_dark(crop, glyph_h)
+    if ignore is not None:
+        cand &= ~ignore
+    d = np.linalg.norm(crop.astype(np.float32) - fill.astype(np.float32), axis=2)
+    return caption_line(cand & (d <= FILL_TOL), glyph_h), cand
+
+
+def iou(a: np.ndarray, b: np.ndarray) -> float:
+    u = int(np.count_nonzero(a | b))
+    return float(np.count_nonzero(a & b)) / u if u else 1.0
+
+
+def shifted_containment(a: np.ndarray, b: np.ndarray, max_dy: int = 2) -> float:
+    """The largest fraction of a's pixels that b shows again after moving a sideways (any shift) and up / down by
+    at most max_dy rows: the old words of a caption that grows word by word and is re-centred."""
+    n = int(np.count_nonzero(a))
+    if not n or not np.count_nonzero(b):
+        return 0.0
+    from scipy.signal import fftconvolve
+    corr = fftconvolve(b.astype(np.float32), a[::-1, ::-1].astype(np.float32), mode="full")
+    cy = a.shape[0] - 1
+    rows = corr[max(0, cy - max_dy):cy + max_dy + 1]
+    return float(rows.max()) / n
+
+
+def _bbox(m: np.ndarray, pad: int) -> tuple[int, int, int, int] | None:
+    ys, xs = np.nonzero(m)
+    if not len(ys):
+        return None
+    return (max(0, ys.min() - pad), ys.max() + pad + 1, max(0, xs.min() - pad), xs.max() + pad + 1)
+
+
+def new_caption(prev_c: np.ndarray, cur_c: np.ndarray, prev_s: np.ndarray, cur_s: np.ndarray,
+                glyph_h: float) -> bool:
+    """Frame k shows different words than frame k-1: its letters barely overlap the previous ones, the previous
+    letters are not there even moved sideways (word-by-word growth re-centres the line), and the bright shapes around
+    the caption changed as well (a word highlighted in another colour keeps its shape)."""
+    if iou(prev_c, cur_c) >= SPAN_IOU:
+        return False
+    if shifted_containment(prev_c, cur_c) >= SPAN_SHIFT:
+        return False
+    near = cv2_dilate_box(prev_c | cur_c, glyph_h)
+    return iou(prev_s & near, cur_s & near) < SPAN_SHAPE
+
+
+def spans_from_signals(area: np.ndarray, change: np.ndarray, fps: Fraction, min_area: float) -> list[list[int]]:
+    """[[comp_in, comp_out)] of the captions from the per-frame signals: the area of the letter layer and whether
+    frame k shows different words than k-1. Blips shorter than SPAN_BLIP_S are merged into the following caption (a
+    pop-in), or the previous one when nothing follows (a pop-out); an isolated blip is dropped."""
+    n = len(area)
+    present = area >= min_area
+    spans: list[list[int]] = []
+    for k in range(n):
+        if not present[k]:
+            continue
+        if k == 0 or not present[k - 1] or bool(change[k]) or not spans:
+            spans.append([k, k + 1])
+        else:
+            spans[-1][1] = k + 1
+    blip = SPAN_BLIP_S * float(fps)
+    changed = True
+    while changed:
+        changed = False
+        for i, (a, b) in enumerate(spans):
+            if b - a >= blip:
+                continue
+            nxt = spans[i + 1] if i + 1 < len(spans) and spans[i + 1][0] == b else None
+            prv = spans[i - 1] if i > 0 and spans[i - 1][1] == a else None
+            if nxt is not None:
+                nxt[0] = a
+            elif prv is not None:
+                prv[1] = b
+            spans.pop(i)
+            changed = True
+            break
+    return spans
+
+
+def caption_band(layout: Any, frame_wh: tuple[int, int]) -> Band | None:
+    """The caption band from the layout's captions ZONE (or its caption events), whole frame width."""
+    lay = layout.to_dict() if hasattr(layout, "to_dict") else dict(layout or {})
+    band, _ = band_from_layout(lay, frame_wh)
+    if band is not None:
+        return band
+    zones = lay.get("zones") or []
+    cz = next((z for z in zones if str(z.get("type")) == "captions" and z.get("x") is not None), None)
+    if cz is None:
+        return None
+    fake = dict(lay, captions=[{"type": "captions", "comp_in": 0, "comp_out": 1, "x": cz["x"], "y": cz["y"],
+                                "w": cz["w"], "h": cz["h"]}])
+    band, _ = band_from_layout(fake, frame_wh)
+    if band is not None:
+        band.events = []
+    return band
+
+
+def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: Fraction, n_frames: int,
+                       eng: Any = None, progress: Any = None) -> dict:
+    """{spans: [{comp_in, comp_out, ocr, score, reads, agreement, variants}], band, fill, frames_read, notes}: every
+    caption the competitor shows (the band of the layout's captions zone, every frame), with an OCR reading of its
+    letters (fill-colour layer, several frames, majority) for names and non-speech captions."""
+    from .media import VideoReader
+    band = caption_band(layout, frame_wh)
+    if band is None:
+        return {"spans": [], "band": None, "fill": None, "frames_read": 0, "notes": {}}
+    ign = _ignore_mask(band)
+    gh = band.glyph_h
+    with VideoReader(video, fps=fps) as vr:                     # pass 1: the fill colour
+        sample = [img[band.y:band.y + band.h].copy() for k, img in vr.frames(0, n_frames) if k % 4 == 0]
+    fill = learn_fill_colour(sample, gh, ign)
+    del sample
+    if fill is None:
+        return {"spans": [], "band": None, "fill": None, "frames_read": 0, "notes": {}}
+    area = np.zeros(n_frames, np.int64)
+    change = np.zeros(n_frames, bool)
+    masks: dict[int, np.ndarray] = {}
+    prev = None
+    count = 0
+    with VideoReader(video, fps=fps) as vr:                     # pass 2: the caption layer of every frame
+        for k, img in vr.frames(0, n_frames):
+            crop = img[band.y:band.y + band.h]
+            lc, ls = caption_layer(crop, gh, fill, ign)
+            area[k] = int(np.count_nonzero(lc))
+            masks[k] = np.packbits(lc, axis=None)
+            if prev is not None and area[k] and np.count_nonzero(prev[0]):
+                change[k] = new_caption(prev[0], lc, prev[1], ls, gh)
+            prev = (lc, ls)
+            count += 1
+            if progress is not None:
+                progress(count, n_frames)
+    shape = (band.h, band.w)
+    min_area = max(6.0, 0.06 * gh * gh)          # about one small letter (a pop-in's first frame included)
+    spans = spans_from_signals(area, change, fps, min_area)
+    eng = eng or engine()
+    out = []
+    for a, b in spans:
+        inner = list(range(min(b - 1, a + 2), b)) or [a]
+        picks = sorted({inner[int(round(i * (len(inner) - 1) / 4.0))] for i in range(5)}) if len(inner) > 1 else inner
+        reads = []
+        for k in picks:
+            m = np.unpackbits(masks[k], count=shape[0] * shape[1]).reshape(shape).astype(bool)
+            text, score = recognise(m, gh, eng)
+            reads.append(FrameRead(k, text, score, int(np.count_nonzero(m)), m))
+        maj = majority(Run(reads))
+        out.append({"comp_in": int(a), "comp_out": int(b), "ocr": maj["text"], "score": maj["score"],
+                    "reads": maj["reads"], "agreement": maj["agreement"], "variants": maj["variants"]})
+    return {"spans": out, "frames_read": count, "fill": [round(float(v), 1) for v in fill],
+            "band": {"x": band.x, "y": band.y, "w": band.w, "h": band.h, "glyph_h": gh, "keep": band.keep},
+            "notes": {}}
+
+
+def cv2_dilate_box(m: np.ndarray, glyph_h: float) -> np.ndarray:
+    """The caption's neighbourhood: its letters dilated by a third of a glyph height (where a highlighted word of
+    another colour sits)."""
+    import cv2
+    r = max(2, int(round(glyph_h / 3.0)))
+    return cv2.dilate(m.astype(np.uint8), np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0

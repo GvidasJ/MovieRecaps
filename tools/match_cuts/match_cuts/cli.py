@@ -117,8 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; recreated_edit.xml is a 1080x1920 sequence "
-                        "at exactly 60.00 fps (every competitor frame = 2 frames), each clip framed into the template "
-                        "window x 42-1039, y 555-1591, RAW audio on A1, markers on UNCERTAIN / NOT-IN-RAW spots, V2+ empty")
+                        "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
+                        "holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing that still "
+                        "covers the template window x 42-1039, y 555-1591. B-roll follows the audio: every NOT-IN-RAW / "
+                        "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
+                        "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
+                        "the spoken words")
     p.add_argument("--no-broll", action="store_true",
                    help="where the competitor cuts away (B-roll from the RAW or not in it) while the RAW audio keeps "
                         "playing, the export shows the RAW video that matches the audio instead (the main clip plays "

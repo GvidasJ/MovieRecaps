@@ -101,7 +101,8 @@ def test_caption_stage_copies_the_competitor_and_fills_uncaptioned_speech(clip, 
     monkeypatch.setattr(transcribe, "available", lambda: None)
     monkeypatch.setattr(transcribe, "transcribe_words", lambda *a, **k: list(words))
     cfg = Config()
-    cfg.out_dir, cfg.work_dir, cfg.premiere = str(tmp_path / "out"), str(tmp_path / "work"), True
+    # without --premiere the competitor's caption text is copied as read (--premiere: tests/test_caption_spans.py)
+    cfg.out_dir, cfg.work_dir, cfg.premiere = str(tmp_path / "out"), str(tmp_path / "work"), False
     import numpy as np
     import soundfile as sf
     vo = tmp_path / "voiceover.wav"                 # any audio: the transcription is replaced above

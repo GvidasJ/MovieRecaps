@@ -577,14 +577,24 @@ def premiere_cutlist() -> Cutlist:
     return Cutlist(1, comp, raw, layout, segs)
 
 
-@pytest.fixture()
-def premiere(tmp_path) -> dict:
+def _premiere_export(tmp_path, **cfg_kw) -> dict:
     cl = premiere_cutlist()
-    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    cfg = Config(out_dir=str(tmp_path), premiere=True, **cfg_kw)
     xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
     res = ex.write_premiere_xml(cl, xml, cfg)
     ex.write_edl(cl, edl, cfg)
     return {"cl": cl, "cfg": cfg, "xml": xml, "edl": edl, "res": res, "x": ex.parse_premiere_xml(xml)}
+
+
+@pytest.fixture()
+def premiere(tmp_path) -> dict:
+    return _premiere_export(tmp_path)
+
+
+@pytest.fixture()
+def premiere_keyframed(tmp_path) -> dict:
+    """The earlier Premiere framing (premiere_static_framing=False): the competitor's pans / zooms as keyframes."""
+    return _premiere_export(tmp_path, premiere_static_framing=False)
 
 
 def _motion_sims(c: dict, raw_wh=(1920.0, 1080.0)) -> list[Sim]:
@@ -638,7 +648,8 @@ def test_premiere_markers_on_uncertain_and_not_in_raw_spots(premiere):
     assert not any(c["name"].startswith(("S06", "S07")) for c in premiere["x"]["clips"])   # V1 empty there
 
 
-def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_at_most_5_percent(premiere):
+def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_at_most_5_percent(premiere_keyframed):
+    premiere = premiere_keyframed
     cl, x = premiere["cl"], premiere["x"]
     clips, _, warnings = ex.premiere_clips(cl, premiere["cfg"])
     box = Box.from_dict(PBOX)
@@ -662,8 +673,8 @@ def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_a
     assert "Premiere Motion (first key): Position" in text
 
 
-def test_premiere_pan_stays_motion_keyframes_at_source_times(premiere):
-    cl, x = premiere["cl"], premiere["x"]
+def test_premiere_pan_stays_motion_keyframes_at_source_times(premiere_keyframed):
+    cl, x = premiere_keyframed["cl"], premiere_keyframed["x"]
     got = next(c for c in x["clips"] if c["name"].startswith("S02"))
     keys = got["motion"]["keys"]
     assert len(keys["scale"]) == len(keys["center"]) == 2
@@ -719,3 +730,54 @@ def test_premiere_flag_skips_after_effects():
     ctx.cfg, ctx.ae_run, ctx.plan = cfg, {}, None
     pipeline.stage_ae(ctx)                                                   # no plan, no JSX, no After Effects
     assert ctx.plan is None and ctx.ae_run["status"] == "not_available" and "--premiere" in ctx.ae_run["reason"]
+
+
+# ---- --premiere default: no camera movement ------------------------------------------------------------------------
+
+def test_premiere_default_one_fixed_framing_per_clip_covering_the_window(premiere):
+    cl, x, cfg = premiere["cl"], premiere["x"], premiere["cfg"]
+    clips, _, _ = ex.premiere_clips(cl, cfg)
+    raw_wh = (1920.0, 1080.0)
+    for c, got in zip(clips, x["clips"]):
+        m = got["motion"]
+        assert not m["keys"], got["name"]                                  # no keyframes at all
+        assert float(m["rotation"]) == 0.0
+        ps = ex._sim_from_motion(m["scale"], m["rotation"], m["center"], 1080, 1920, raw_wh)
+        assert ex._covers(ps, raw_wh, WIN, tol=0.01), got["name"]          # every clip fully covers the window
+        assert c.covered
+    box = Box.from_dict(PBOX)
+    by = {c.seg.id: c for c in clips}
+    # S01 already covers the window: exactly the competitor's framing
+    s01 = by[1].keys[0][1]
+    want = ex._window_map(Sim.from_dict(PAN0), box, WIN)
+    assert abs(s01.s - want.s) < 1e-9 and abs(s01.tx - want.tx) < 1e-6 and abs(s01.ty - want.ty) < 1e-6
+    # S02 pans and zooms: one framing, the average of what the competitor shows over the clip
+    s02 = by[2].keys[0][1]
+    k0 = ex._window_map(Sim.from_dict(PAN0), box, WIN)
+    k1 = ex._window_map(Sim(0.556, 0.0, -300.0, 300.0), box, WIN)
+    assert min(k0.s, k1.s) < s02.s < max(k0.s, k1.s)
+    # S08 is a small shot: scaled up as far as needed to cover (more than 5 %), no more
+    s08 = by[8].keys[0][1]
+    assert abs(s08.s - max(WIN[2] / 1920.0, WIN[3] / 1080.0)) < 1e-6 and by[8].zoom > 1.05
+    v = ex.validate_premiere_exports(cl, premiere["xml"], premiere["edl"], cfg)
+    assert v["ok"], v["errors"]
+
+
+def test_static_framing_moves_the_least_and_zooms_only_when_needed():
+    raw_wh = (1920.0, 1080.0)
+    win = WIN
+    s_min = max(win[2] / 1920.0, win[3] / 1080.0)
+    # big enough but shifted off the window: same scale, moved just enough to cover
+    sim = Sim(1.2, 0.0, win[0] + 10.0, win[1] - 50.0)
+    one, z = ex._static_framing([(0.0, sim)], 0, 10, raw_wh, win)
+    assert abs(one.s - 1.2) < 1e-6 and abs(z - 1.0) < 1e-6
+    assert one.tx == pytest.approx(win[0], abs=1e-6) and one.ty == pytest.approx(win[1] - 50.0, abs=1e-6)
+    assert ex._covers(one, raw_wh, win)
+    # too small: scaled to the smallest cover, the centre as close as possible to the competitor's
+    sim = Sim(0.5, 0.0, 100.0, 700.0)
+    one, z = ex._static_framing([(0.0, sim)], 0, 10, raw_wh, win)
+    assert one.s == pytest.approx(s_min, rel=1e-6) and z == pytest.approx(s_min / 0.5, rel=1e-6)
+    assert ex._covers(one, raw_wh, win) and one.theta_deg == 0.0
+    # a rotated competitor framing is held level
+    one, _ = ex._static_framing([(0.0, Sim(1.2, 3.0, 0.0, 400.0))], 0, 10, raw_wh, win)
+    assert one.theta_deg == 0.0 and ex._covers(one, raw_wh, win)

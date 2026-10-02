@@ -20,7 +20,7 @@ from .common import log
 
 SR = 16000
 _MODELS: dict[str, Any] = {}
-CACHE_VERSION = 1
+CACHE_VERSION = 1      # the cached rows are raw Whisper output (words_from_rows joins them)
 
 
 def available() -> str | None:
@@ -80,11 +80,23 @@ def transcribe_words(y: np.ndarray, sr: int, model: str = "small.en", language: 
         if path is not None:
             from .common import atomic_write_text
             atomic_write_text(path, json.dumps(rows, ensure_ascii=False, indent=0))
-    words = []
+    return words_from_rows(rows)
+
+
+def words_from_rows(rows: list[dict]) -> list[Word]:
+    """Cleaned words. A piece Whisper emits without a leading space that starts with a hyphen, an apostrophe or a
+    separator continues the previous word ("X" + "-Force" -> "X-Force", "15" + ",000" -> "15,000")."""
+    words: list[Word] = []
     for r in rows:
-        text = clean_text(r["word"])
+        piece = str(r["word"])
+        if words and piece and piece[0] in "-'\u2019,.:/" :
+            w = words[-1]
+            raw = w.raw + piece.strip()
+            words[-1] = Word(clean_text(raw), w.start, max(w.end, float(r["end"])), min(w.prob, float(r["prob"])), raw)
+            continue
+        text = clean_text(piece)
         if not any(ch.isalnum() for ch in text):
             continue
         words.append(Word(text, float(r["start"]), max(float(r["end"]), float(r["start"])), float(r["prob"]),
-                          str(r["word"]).strip()))
+                          piece.strip()))
     return words

@@ -1151,8 +1151,10 @@ def premiere_settings(cfg: Any = None) -> dict:
     W, H = (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
     fps = Fraction(str(getattr(cfg, "premiere_fps", None) or "60"))
     win = tuple(float(v) for v in (getattr(cfg, "premiere_window", None) or (42.0, 555.0, 998.0, 1037.0)))
+    static = getattr(cfg, "premiere_static_framing", None)
     return {"size": (W, H), "fps": fps, "window": win,
-            "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05)}
+            "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05),
+            "static": True if static is None else bool(static)}
 
 
 def premiere_factor(comp_fps: Fraction, seq_fps: Fraction) -> int:
@@ -1227,6 +1229,30 @@ def _cover_zoom(sims: list[Sim], raw_wh: tuple[float, float], win: tuple[float, 
     return hi, True
 
 
+def _static_framing(mapped: list[tuple[float, Sim]], k0: int, k1: int, raw_wh: tuple[float, float],
+                    win: tuple[float, float, float, float]) -> tuple[Sim, float]:
+    """One fixed framing for a clip (--premiere default: no camera movement): rotation 0, the competitor's framing
+    (already mapped into the template window) averaged over the clip's frames [k0, k1) -- its Scale and the
+    Position of the RAW centre, keys interpolated as they play -- then scaled up only as much as needed and moved
+    the least to fully cover the window. Returns (Sim RAW -> sequence px, zoom over the average framing)."""
+    import numpy as np
+    W, H = float(raw_wh[0]), float(raw_wh[1])
+    c = np.array([W / 2.0, H / 2.0])
+    keys = sorted(mapped, key=lambda kv: kv[0])
+    ks = np.array([k for k, _ in keys], float)
+    sc = np.array([sm.s for _, sm in keys], float)
+    cen = np.array([sm.linear() @ c + np.array([sm.tx, sm.ty]) for _, sm in keys], float)
+    frames = np.arange(int(k0), max(int(k0) + 1, int(k1)), dtype=float)
+    s_avg = float(np.mean(np.interp(frames, ks, sc)))
+    cx = float(np.mean(np.interp(frames, ks, cen[:, 0])))
+    cy = float(np.mean(np.interp(frames, ks, cen[:, 1])))
+    x0, y0, ww, wh = (float(v) for v in win)
+    s_cov = max(s_avg, ww / W, wh / H) * (1.0 + 1e-9)
+    cx = min(max(cx, x0 + ww - s_cov * W / 2.0), x0 + s_cov * W / 2.0)
+    cy = min(max(cy, y0 + wh - s_cov * H / 2.0), y0 + s_cov * H / 2.0)
+    return Sim(s_cov, 0.0, cx - s_cov * W / 2.0, cy - s_cov * H / 2.0), s_cov / s_avg
+
+
 def _source_seconds(seg: Segment, k: float, comp_fps: Fraction, raw_fps: Fraction) -> float:
     """The plan's exact RAW time at competitor frame k (continuous; remap keys interpolated)."""
     if seg.time_remap_keys:
@@ -1280,8 +1306,14 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
             lo, hi = max(int(r[0]), ev.rec_in), min(int(r[1]), ev.rec_out)
             if hi > lo:
                 name = f"S{int(r[2]):02d}" if len(r) > 2 else ev.seg_name
-                markers.append({"name": f"B-ROLL REPLACED {name}", "comment": "the competitor cut away here over the "
-                                "main clip's continuing RAW audio; --no-broll plays the main clip through",
+                how = r[3] if len(r) > 3 else "audio"
+                comment = ("the competitor's picture here was not the RAW of its audio; this is the RAW video of the "
+                           "audio playing here" if how == "audio" else
+                           "the competitor showed a cutaway for a frame or two here; the previous RAW clip keeps "
+                           "playing" if how == "keeps playing (short)" else
+                           "the competitor showed a cutaway over music / voice-over here; the previous RAW clip keeps "
+                           "playing (no RAW audio under it)")
+                markers.append({"name": f"B-ROLL REPLACED {name}", "comment": comment,
                                 "in": lo * fac, "out": hi * fac})
         tail = nxt.dissolve_in if (nxt is not None and nxt.kind == "clip") else 0
         dis_in = ev.dissolve_in if (prev is not None and prev.kind == "clip") else 0
@@ -1314,12 +1346,18 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
         if not sims:
             warnings.append(f"{ev.seg_name}: no framing in the cutlist; placed at Premiere's default position")
         mapped = [(k, _window_map(s, box, win)) for k, s in sims]
-        z, covered = _cover_zoom([s for _, s in mapped], raw_wh, win, st["max_zoom"]) if mapped else (1.0, False)
-        if mapped and not covered:
-            warnings.append(f"{ev.seg_name}: the RAW does not cover the template window even at {100.0 * z:.0f} % "
-                            "of the competitor's framing (a letterboxed / small shot); check the clip by hand")
-        keys = [(int(round(_source_seconds(seg, k, comp_fps, raw_fps) * float(fps))), _zoomed(s, z, win))
-                for k, s in mapped]
+        if mapped and st["static"]:
+            # no camera movement: one fixed Position / Scale, rotation 0, covering the window
+            one, z = _static_framing(mapped, ev.rec_in, ev.rec_out, raw_wh, win)
+            covered = _covers(one, raw_wh, win, tol=1e-6)
+            keys = [(int(round(_source_seconds(seg, ev.rec_in, comp_fps, raw_fps) * float(fps))), one)]
+        else:
+            z, covered = _cover_zoom([s for _, s in mapped], raw_wh, win, st["max_zoom"]) if mapped else (1.0, False)
+            if mapped and not covered:
+                warnings.append(f"{ev.seg_name}: the RAW does not cover the template window even at {100.0 * z:.0f} % "
+                                "of the competitor's framing (a letterboxed / small shot); check the clip by hand")
+            keys = [(int(round(_source_seconds(seg, k, comp_fps, raw_fps) * float(fps))), _zoomed(s, z, win))
+                    for k, s in mapped]
         clips.append(PremiereClip(seg, ev, -1 if dis_in else ev.rec_in * fac, -1 if tail else ev.rec_out * fac,
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
                                   1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime))
@@ -2002,6 +2040,19 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             errors.append(f"XML {name}: motion key times differ from the source times of the framing keys")
         vals = list(zip(m["keys"]["scale"], m["keys"]["rotation"], m["keys"]["center"])) if m["keys"] else \
             [((0, m["scale"]), (0, m["rotation"]), (0, m["center"]))]
+        if st["static"]:
+            # no camera movement: no keys, rotation 0, the planned fixed framing, the window covered
+            if m["keys"]:
+                errors.append(f"XML {name}: motion keyframes on a clip that must hold one fixed framing")
+            ps = _sim_from_motion(vals[0][0][1], vals[0][1][1], vals[0][2][1], W, H, raw_wh)
+            want = cl.keys[0][1]
+            if abs(float(vals[0][1][1])) > 1e-9:
+                errors.append(f"XML {name}: rotation {vals[0][1][1]} (want 0)")
+            if abs(ps.s / want.s - 1.0) > 1e-4 or math.hypot(ps.tx - want.tx, ps.ty - want.ty) > 0.5:
+                errors.append(f"XML {name}: Motion differs from the planned fixed framing")
+            if not _covers(ps, raw_wh, win, tol=0.01):
+                errors.append(f"XML {name}: the RAW does not cover the template window")
+            continue
         box = _own_box(cl.seg) or (Box.from_dict(cutlist.layout["box"]) if (cutlist.layout or {}).get("box") else
                                    Box(0.0, 0.0, float(cutlist.competitor["width"]), float(cutlist.competitor["height"])))
         items = sorted(cl.seg.transform_keys or [], key=lambda d: float(d["comp_frame"]))

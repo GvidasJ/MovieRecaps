@@ -43,6 +43,10 @@ class Config:
     premiere_fps: str = "60"               #   RAW audio on A1, V2+ empty; every clip framed into the template window
     premiere_window: tuple = (42.0, 555.0, 998.0, 1037.0)   # (x, y, w, h) CORNER px: template pixels 42-1039 x 555-1591
     premiere_max_zoom: float = 1.05        # at most this much bigger than the competitor's framing to cover the window
+    premiere_static_framing: bool = True   # --premiere: one fixed Position / Scale per clip, rotation 0, no keyframes,
+                                           #   the competitor's framing that still covers the window (False: keyframes)
+    premiere_follow_audio: bool = True     # --premiere: every NOT-IN-RAW / B-roll / uncertain spot shows the RAW video
+                                           #   of the audio there, else the previous RAW clip keeps playing (broll.py)
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in
                                            #   captions (OCR) or made from the voice-over (caption-generator-prompt.md)
     voiceover: str = ""                    # caption this narration file instead of the cut edit's audio
@@ -302,6 +306,7 @@ class Config:
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
+                  "premiere_static_framing", "premiere_follow_audio",
                   "captions", "voiceover", "caption_model", "caption_language", "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)

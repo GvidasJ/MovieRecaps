@@ -167,3 +167,106 @@ def test_flag_and_config():
     cfg = cli.config_from_args(args, "c.mp4", "r.mp4")
     assert cfg.no_broll is True and cli.config_from_args(cli.build_parser().parse_args([]), "c", "r").no_broll is False
     assert "no_broll" not in cfg.analysis_params()      # an export option: never recomputes the analysis
+
+
+# ---- --premiere default: B-roll always follows the audio -----------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def follow() -> dict:
+    cl = make_cutlist()
+    res = broll.apply_no_broll(cl, competitor_audio(), RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    res["faithful"] = cl
+    return res
+
+
+def test_follow_audio_fills_every_spot_and_lets_the_previous_clip_play_over_music(follow):
+    segs = follow["cutlist"].segments
+    assert not [s for s in segs if s.type != "raw"]                     # V1 is never left empty
+    rows = {r["segment"]: r for r in follow["replaced"]}
+    assert set(rows) == {2, 4, 6, 8} and not follow["kept"]
+    assert rows[2]["how"] == "audio" and rows[4]["how"] == "audio"      # the RAW of the audio heard there
+    # S06: B-roll over music -> S05 keeps playing (RAW 18.0 s at 8.0 s), with no RAW audio under it
+    s6 = next(s for s in segs if s.comp_in == 240)
+    assert rows[6]["how"] == "keeps playing" and abs(s6.raw_in_seconds - 18.0) < 1e-6 and s6.audio.get("mute")
+    assert s6.comp_out == 285
+
+
+def test_follow_audio_premiere_xml_marks_each_spot_and_a1_is_silent_under_music(follow, tmp_path):
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    ex.write_premiere_xml(follow["cutlist"], xml, cfg)
+    ex.write_edl(follow["cutlist"], edl, cfg)
+    v = ex.validate_premiere_exports(follow["cutlist"], xml, edl, cfg)
+    assert v["ok"], v["errors"]
+    x = ex.parse_premiere_xml(xml)
+    ms = {m["name"]: m for m in x["markers"] if m["name"].startswith("B-ROLL")}
+    assert set(ms) == {"B-ROLL REPLACED S02", "B-ROLL REPLACED S04", "B-ROLL REPLACED S06", "B-ROLL REPLACED S08"}
+    assert "music / voice-over" in ms["B-ROLL REPLACED S06"]["comment"]
+    assert (ms["B-ROLL REPLACED S06"]["in"], ms["B-ROLL REPLACED S06"]["out"]) == (480, 570)
+    assert not [a for a in x["audio"] if a["start"] < 570 and a["end"] > 480]       # A1 silent under the music
+    v1 = sorted((c["start"], c["end"]) for c in x["clips"])
+    assert v1[0][0] == 0 and v1[-1][1] == 720 and all(a[1] == b[0] for a, b in zip(v1, v1[1:]))   # no V1 gap
+
+
+def _hints(spans: list[tuple[float, float, float]]):
+    """AudioHints whose confident windows put competitor time t at RAW t + offset over each (t0, t1, offset)."""
+    from match_cuts.model import AudioHints
+    ct = np.arange(0.5, 12.0, 0.25)
+    rt = np.full(ct.shape, np.nan)
+    for t0, t1, off in spans:
+        m = (ct >= t0) & (ct < t1)
+        rt[m] = ct[m] + off
+    n = ct.size
+    return AudioHints(ct, rt, np.ones(n), np.where(np.isfinite(rt), 2.0, 0.5).astype(np.float32),
+                      np.full(n, 3.0, np.float32), np.full(n, 0.9, np.float32))
+
+
+def test_a_cutaway_over_trimmed_audio_shows_each_raw_moment_heard():
+    # S02 is a NOT-IN-RAW insert over speech the editor cut together from two RAW moments (40.0 s, then 47.0 s)
+    segs = [shot(1, 0, 60, 10.0), Segment(id=2, type="not_in_raw", comp_in=60, comp_out=150, label="MISSING"),
+            shot(3, 150, 240, 15.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    t = np.arange(int(8.0 * SR)) / SR
+    pos = np.where(t < 2.0, 10.0 + t, np.where(t < 3.5, 38.0 + t, np.where(t < 5.0, 43.5 + t, 10.0 + t)))
+    comp = RAW_Y[np.clip((pos * SR).astype(int), 0, RAW_Y.size - 1)]
+    hints = _hints([(0.0, 2.0, 10.0), (2.0, 3.5, 38.0), (3.5, 5.0, 43.5), (5.0, 8.0, 10.0)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True, hints=hints)
+    row = res["replaced"][0]
+    assert row["segment"] == 2 and row["how"] == "audio"
+    parts = [(p["comp_in"], p["comp_out"], round(p["raw_in_seconds"], 2)) for p in row["parts"]]
+    assert parts == [(60, 105, 40.0), (105, 150, 47.0)]                # the audio cut, frame-exact
+    assert all(p["corr"] > 0.9 for p in row["parts"])
+    new = [s for s in res["cutlist"].segments if 60 <= s.comp_in < 150]
+    assert len(new) == 2 and all(s.transform == PAN for s in new)       # framed like the clip before
+
+
+def test_main_clip_shots_with_an_av_shift_and_one_frame_glitches():
+    # S02: the main clip at a different moment whose sound the analysis did not explain (it is 50 ms late in the
+    # competitor) -- not B-roll; S03: a 1-frame uncertain glitch -- the previous clip plays on, with its audio
+    segs = [shot(1, 0, 60, 10.0), broll_shot(2, 60, 150, 20.0), Segment(id=3, type="uncertain", comp_in=150,
+                                                                        comp_out=151), shot(4, 151, 240, 23.0333)]
+    segs[1].transform = dict(PAN)
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    t = np.arange(int(8.0 * SR)) / SR
+    pos = np.where(t < 2.0, 10.0 + t, np.where(t < 5.0, 18.0 + t - 0.05, 18.0 + t))
+    comp = RAW_Y[np.clip((pos * SR).astype(int), 0, RAW_Y.size - 1)]
+    hints = _hints([(0.0, 2.0, 10.0), (2.0, 5.0, 17.95), (5.0, 8.0, 18.0)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True, hints=hints)
+    assert [r["segment"] for r in res["replaced"]] == [3]
+    assert res["replaced"][0]["how"] == "keeps playing (short)"
+    s2 = next(s for s in res["cutlist"].segments if s.comp_in == 60)
+    assert s2.raw_in_seconds == 20.0 and s2.transform == PAN             # S02 untouched ...
+    assert s2.comp_out == 240 and not (s2.audio or {}).get("mute")        # ... and plays on through the glitch into S04
+    assert s2.audio["broll"]["ranges"] == [[150, 151, 3, "keeps playing (short)"]]
+
+
+def test_dips_are_filled_too():
+    segs = [shot(1, 0, 60, 10.0), Segment(id=2, type="dip", comp_in=60, comp_out=66, color="#000000"),
+            shot(3, 66, 120, 12.2)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    res = broll.apply_no_broll(cl, None, None, SR, Config(premiere=True), follow_audio=True)
+    assert all(s.type == "raw" for s in res["cutlist"].segments)
+    assert res["replaced"][0]["segment"] == 2

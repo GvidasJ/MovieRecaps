@@ -85,6 +85,23 @@ Captions (see *Captions* below): `--captions auto|competitor|voice` (default `au
 playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
 *B-roll cutaways* below).
 
+### Premiere (`--premiere`)
+
+`recreated_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
+V2 and above empty. Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
+
+* **No camera movement.** Every clip holds one fixed Position and Scale — no keyframes on Position, Scale or
+  Rotation, rotation 0. It is the competitor's framing for that clip (averaged over the clip when the competitor
+  pans or zooms), scaled up only as much as needed and moved the least so it fully covers the template window
+  (x 42–1039, y 555–1591).
+* **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
+  audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
+  continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
+  trimmed pauses under the cutaway — each checked by correlation. Where the audio there is not from the RAW
+  (music, voice-over) the previous RAW clip keeps playing, with no RAW audio under it. V1 is never left empty; a
+  `B-ROLL REPLACED` marker sits on every replaced spot and report.md lists them with timecodes. A RAW shot whose
+  picture is within 1 s of its own audio (an A/V shift) is the main clip and stays as it is.
+
 ### B-roll cutaways (`--no-broll`)
 
 A cutaway is a piece whose picture leaves the main clip — B-roll from another moment of the RAW, a
@@ -110,7 +127,15 @@ with its competitor and 60 fps sequence timecodes.
 (competitor frame k = sequence frame 2k for a 30 fps competitor), in the style of
 `caption-generator-prompt.md` at the repository root. The mode is chosen per clip:
 
-* **competitor** (auto, when the layout finds burned-in captions): the competitor's captions are copied
+* **competitor, with `--premiere`** (auto, when the layout finds burned-in captions): the TIMING and splits come
+  from the competitor's on-screen captions — every frame of the caption band is read (the caption's fill colour is
+  learned from the video); a caption starts when new text appears and ends when it disappears or changes to
+  different words; a pop-in, a highlighted word or a caption growing word by word is not a new caption; blips
+  under 0.15 s are merged into the neighbouring caption. The TEXT is the words spoken during each caption
+  (transcript). OCR is used only to place a word that falls on a boundary, to correct names the transcript spells
+  differently (X-Force, Vanisher) and for non-speech captions such as `*Laughter*`; a caption with no words heard
+  takes a sure OCR reading, else `*...*` (listed in the report).
+* **competitor** without `--premiere`: the competitor's captions are copied
   exactly — same words, splits, first and last frames, capitalisation, punctuation and `*actions*`. The
   caption band is read on every frame around each caption event with RapidOCR; a word-by-word colour
   highlight or a pop-in animation stays one caption, only a change of the text starts a new one; the text
@@ -488,6 +513,12 @@ cd tools/match_cuts
 ../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s
 ../../.venv/bin/python -m pytest -q tests/test_synthetic.py   # Stage 1 end-to-end (slow, minutes)
 ```
+
+`tests/test_caption_spans.py` checks the Premiere competitor captions: exact caption timing on a synthetic clip in
+the real competitor's style (pop-in, highlighted word, word-by-word growth, the same word twice, `*laughs*`), the
+text rules, and the acceptance run on `input/competitor.mp4` (every caption real words, none under 0.1 s).
+`tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered) and
+`tests/test_broll.py` the B-roll-follows-the-audio default (trimmed audio under a cutaway, music, glitches, dips).
 
 `tests/test_broll.py` checks `--no-broll` on synthetic audio: three cutaways over the main clip's continuing
 RAW audio (B-roll from the RAW, a NOT-IN-RAW insert, a 2-frame flash) are replaced and joined into the main

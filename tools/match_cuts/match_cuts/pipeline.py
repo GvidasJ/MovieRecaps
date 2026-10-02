@@ -2353,11 +2353,14 @@ def stage_broll(ctx: Context) -> None:
     """--no-broll (broll.py): the export cut list with the cutaways over continuous RAW audio replaced by the main
     clip. ctx.cutlist stays faithful (verification, preview, s9_7). A failure only warns: the export is then the
     faithful edit."""
-    if not getattr(ctx.cfg, "no_broll", False):
+    follow = bool(getattr(ctx.cfg, "premiere", False) and getattr(ctx.cfg, "premiere_follow_audio", True))
+    if not (getattr(ctx.cfg, "no_broll", False) or follow):
         return
     from . import broll
     try:
-        ctx.broll = broll.apply_no_broll(ctx.cutlist, ctx.comp_audio, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg)
+        ctx.broll = broll.apply_no_broll(ctx.cutlist, ctx.comp_audio, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg,
+                                         follow_audio=follow, hints=ctx.hints)
+        ctx.broll["follow_audio"] = follow
     except Exception as e:  # noqa: BLE001 - the faithful export is still a valid deliverable
         log.error("--no-broll failed: %s\n%s", e, traceback.format_exc())
         ctx.broll = {"error": f"{type(e).__name__}: {e}", "replaced": [], "kept": []}

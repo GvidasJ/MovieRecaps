@@ -1280,6 +1280,8 @@ def audio_segment(seg: Segment) -> Segment | None:
     audio follows a verified audio line (FX-14, ``seg.audio['line']``: a video-only retime, an uncertain segment
     or a placeholder over continuous audio) -- a stretch view of that line over the same range (raw_in = the
     line's picture-synced RAW time at comp_in, its speed); None when it plays no RAW audio (placeholders, dips)."""
+    if (seg.audio or {}).get("mute"):
+        return None                       # --premiere: a cutaway over music / voice-over filled with picture only
     line = (seg.audio or {}).get("line")
     if line:
         import dataclasses
