@@ -2370,6 +2370,10 @@ def footage_meta(ctx: Context) -> dict:
 def stage_ae(ctx: Context) -> None:
     from . import export_ae
     cfg = ctx.cfg
+    if getattr(cfg, "premiere", False):         # Premiere-only: no AE plan, no JSX, no mock, no After Effects
+        ctx.ae_run = {"status": "not_available", "reason": "Premiere-only run (--premiere): no After Effects export"}
+        log.info("S7: skipped (--premiere: Premiere-only, no After Effects export)")
+        return
     meta = footage_meta(ctx)
     ok, plan = _soft(ctx, "S7 ae_plan", lambda: export_ae.ae_plan(ctx.cutlist, cfg, meta))
     if not ok or plan is None:
@@ -2435,14 +2439,20 @@ def stage_exports(ctx: Context) -> None:
     csv, xml, edl = out / "cutlist.csv", out / "recreated_edit.xml", out / "recreated_edit.edl"
     produced: dict[str, bool] = {}
     produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(cl, csv))
-    produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(cl, xml, cfg))
+    premiere = bool(getattr(cfg, "premiere", False))
+    if premiere:
+        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(cl, xml, cfg))
+    else:
+        produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(cl, xml, cfg))
     produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(cl, edl, cfg))
     for key, p in (("csv", csv), ("xml", xml), ("edl", edl)):
         if produced[key] and p.exists():
             ctx.paths[key] = str(p)
     validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
     if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
-        ok, res = _soft(ctx, "S8 validate exports", lambda: export_xml_edl.validate_exports(cl, xml, edl))
+        ok, res = _soft(ctx, "S8 validate exports", lambda: (
+            export_xml_edl.validate_premiere_exports(cl, xml, edl, cfg) if premiere
+            else export_xml_edl.validate_exports(cl, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")

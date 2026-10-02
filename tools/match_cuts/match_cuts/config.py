@@ -38,6 +38,11 @@ class Config:
                                            # (HOLD keys at j + 0.25) -- AE's time resolution is unverified until s9_6 (FX-10)
     run_ae: bool = True                    # open After Effects (when installed) to run the JSX and save the .aep
     ae_timeout_s: float = 600.0            # how long to wait for After Effects to save recreated_edit.aep
+    premiere: bool = False                 # Premiere-only (--premiere): no AE export / checks; recreated_edit.xml for
+    premiere_size: str = "1080x1920"       #   Premiere: WxH sequence at exactly premiere_fps (ntsc FALSE), the edit on V1,
+    premiere_fps: str = "60"               #   RAW audio on A1, V2+ empty; every clip framed into the template window
+    premiere_window: tuple = (42.0, 555.0, 998.0, 1037.0)   # (x, y, w, h) CORNER px: template pixels 42-1039 x 555-1591
+    premiere_max_zoom: float = 1.05        # at most this much bigger than the competitor's framing to cover the window
     conform_h264_preset: str = "veryfast"  # libx264 preset for raw_ae.mp4 (RAW > 10 min or conform_codec=h264)
     conform_h264_crf: int = 12
     competitor_h264_preset: str = "medium" # competitor_ref.mp4 when the competitor must be transcoded
@@ -289,6 +294,7 @@ class Config:
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
+                  "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
         return d

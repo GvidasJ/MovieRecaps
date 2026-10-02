@@ -529,3 +529,193 @@ def test_raw_sync_exports_unchanged_and_audio_lines_get_their_own_events(tmp_pat
     ex.write_edl(cl, edl, Config(out_dir=str(tmp_path)))
     assert ex.validate_exports(cl, xml, edl)["ok"]
     assert "S06 audio line, nearest RAW frame" in edl.read_text()
+
+
+# ---------------------------------------------------------------------------------------------
+# Premiere-only export (--premiere): 1080x1920 at 60.00 fps, the template window, A1, markers
+# ---------------------------------------------------------------------------------------------
+
+R24 = Fraction(24000, 1001)
+PBOX = {"x": 30.0, "y": 316.0, "w": 548.0, "h": 569.37, "corner_radius": 48.0}      # the real run's video box
+PAN0 = {"scale": 0.546, "rotation_deg": 0.0, "tx": -246.7, "ty": 306.6}
+WIN = (42.0, 555.0, 998.0, 1037.0)
+
+
+def _grid_seg(id_, a, b, n30, **kw) -> Segment:
+    """A RAW segment whose raw_in is on the competitor's n/30 grid (as in the real run) with a 4/1001-frame feasible
+    interval around it (a cadence-pinned phase): the interval holds exactly one 1/60 s tick."""
+    raw_in = float(Fraction(n30, 30))
+    iv = [raw_in - 0.00008, raw_in + 0.00008]
+    kw.setdefault("transform", dict(PAN0))
+    return Segment(id=id_, type="raw", comp_in=a, comp_out=b, raw_in_seconds=raw_in, raw_in_interval=iv,
+                   speed=kw.pop("speed", 1.0), confidence=.97, **kw)
+
+
+def premiere_cutlist() -> Cutlist:
+    segs = [
+        _grid_seg(1, 0, 40, 198),                                            # plain shot
+        _grid_seg(2, 40, 70, 420, transform_keys=[                           # editor pan: 2 keys
+            {"comp_frame": 40, **PAN0}, {"comp_frame": 69, "scale": 0.556, "rotation_deg": 0.0, "tx": -300.0,
+                                          "ty": 300.0}]),
+        _grid_seg(3, 70, 100, 900, transform=dict(PAN0, ty=322.0)),          # top edge 6 px inside the box: zoom < 5 %
+        _grid_seg(4, 100, 130, 1200, speed=1.1, transition_out=dict(XF)),
+        _grid_seg(5, 124, 160, 1500, transition_in=dict(XF)),
+        Segment(id=6, type="uncertain", comp_in=160, comp_out=190, label="UNCERTAIN - best RAW 2000-2024, ZNCC 0.80-0.83",
+                audio={"line": {"id": "L1", "raw_in_seconds": 70.0, "speed": 1.0, "source": "S05 continued"}}),
+        Segment(id=7, type="not_in_raw", comp_in=190, comp_out=220, label="MISSING - not in RAW (00:00:06:10)"),
+        _grid_seg(8, 220, 250, 2100, transform={"scale": 0.40, "rotation_deg": 0.0, "tx": 0.0, "ty": 380.0}),  # small
+        Segment(id=9, type="raw", comp_in=250, comp_out=270, raw_in_seconds=90.0, speed=0.0, time_mode="remap",
+                transform=dict(PAN0), time_remap_keys=[{"comp_frame": 250, "raw_seconds": 90.0},
+                                                       {"comp_frame": 270, "raw_seconds": 90.0}]),
+        _grid_seg(10, 270, 300, 2400),
+    ]
+    comp = {"file": "media/competitor_ref.mp4", "width": 608, "height": 1080, "fps": "30/1", "frames": 300}
+    raw = {"file": "media/raw.mp4", "file_abs": "/abs/media/raw.mp4", "width": 1920, "height": 1080,
+           "fps": "24000/1001", "frames": 3445, "has_audio": True, "audio_sample_rate": 48000, "audio_channels": 2}
+    layout = {"mode": "match", "layout_kind": "boxed", "box": dict(PBOX), "background": "solid",
+              "background_detail": {"type": "solid", "color": "#000000"}, "canvas_bg": "#000000"}
+    return Cutlist(1, comp, raw, layout, segs)
+
+
+@pytest.fixture()
+def premiere(tmp_path) -> dict:
+    cl = premiere_cutlist()
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    res = ex.write_premiere_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    return {"cl": cl, "cfg": cfg, "xml": xml, "edl": edl, "res": res, "x": ex.parse_premiere_xml(xml)}
+
+
+def _motion_sims(c: dict, raw_wh=(1920.0, 1080.0)) -> list[Sim]:
+    m = c["motion"]
+    if m["keys"]:
+        return [ex._sim_from_motion(s[1], r[1], ce[1], 1080, 1920, raw_wh)
+                for s, r, ce in zip(m["keys"]["scale"], m["keys"]["rotation"], m["keys"]["center"])]
+    return [ex._sim_from_motion(m["scale"], m["rotation"], m["center"], 1080, 1920, raw_wh)]
+
+
+def test_premiere_sequence_is_1080x1920_at_exactly_60fps_with_v1_and_a1_only(premiere):
+    x = premiere["x"]
+    assert (x["timebase"], x["ntsc"]) == (60, "FALSE")                      # 60.00, not 59.94
+    assert (x["width"], x["height"]) == (1080, 1920)
+    assert x["duration"] == 600 and x["video_tracks"] == 1 and x["audio_tracks"] == 1
+    assert not x.get("generators") and not x["transitions"] or all(t["end"] > t["start"] for t in x["transitions"])
+    assert all((c["timebase"], c["ntsc"]) == (60, "FALSE") for c in x["clips"])
+    text = premiere["xml"].read_text(encoding="utf-8")
+    assert "<timebase>60</timebase>" in text and "<ntsc>TRUE</ntsc>" not in text.split("<file")[0]
+    v = ex.validate_premiere_exports(premiere["cl"], premiere["xml"], premiere["edl"], premiere["cfg"])
+    assert v["ok"], v["errors"]
+
+
+def test_premiere_cuts_land_on_the_30fps_moments_and_a1_has_the_same_cuts(premiere):
+    cl, x = premiere["cl"], premiere["x"]
+    events = ex.edit_events(cl)
+    clip_events = [ev for ev in events if ev.kind == "clip"]
+    clips, _, _ = ex.premiere_clips(cl, premiere["cfg"])
+    assert [(c.rec_start, c.rec_end) for c in clips] == [(2 * ev.rec_in, 2 * ev.rec_out) for ev in clip_events]
+    # the crossfade S04 -> S05 is a cross dissolve starting at the edit point, 2 x 6 frames
+    assert x["transitions"] == [{"start": 248, "end": 260}]
+    # A1: one item per V1 clip at its record range (the freeze is silent) + the uncertain spot's audio line
+    a = {(i["start"], i["end"]) for i in x["audio"]}
+    v_ranges = {(c.rec_start, c.rec_end) for c in clips if c.seg.id != 9}
+    assert v_ranges <= a and (320, 380) in a and (380, 440) not in a and (500, 540) not in a
+    assert {(i["start"], i["end"]) for i in x["audio"]} <= {(2 * ev.rec_in, 2 * ev.rec_out) for ev in events}
+    pic = {c.rec_start: c for c in clips}
+    for i in x["audio"]:
+        if i["start"] in pic and pic[i["start"]].seg.type == "raw":
+            assert i["in"] == pic[i["start"]].src_in                       # A1 locked to V1's source in-point
+    line = next(i for i in x["audio"] if i["start"] == 320)
+    assert line["in"] == round(70.0 * 60)                                  # the audio line's RAW time, 1/60 s
+
+
+def test_premiere_markers_on_uncertain_and_not_in_raw_spots(premiere):
+    ms = {(m["in"], m["out"]): m for m in premiere["x"]["markers"]}
+    assert ms[(320, 380)]["name"] == "UNCERTAIN S06" and "best RAW 2000-2024" in ms[(320, 380)]["comment"]
+    assert ms[(380, 440)]["name"] == "NOT IN RAW S07"
+    assert ms[(500, 540)]["name"] == "RETIME S09" and "freeze" in ms[(500, 540)]["comment"]
+    assert not any(m["name"].startswith("Cut") for m in premiere["x"]["markers"])
+    assert not any(c["name"].startswith(("S06", "S07")) for c in premiere["x"]["clips"])   # V1 empty there
+
+
+def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_at_most_5_percent(premiere):
+    cl, x = premiere["cl"], premiere["x"]
+    clips, _, warnings = ex.premiere_clips(cl, premiere["cfg"])
+    box = Box.from_dict(PBOX)
+    k = max(WIN[2] / box.w, WIN[3] / box.h)
+    wc, bc = (WIN[0] + WIN[2] / 2, WIN[1] + WIN[3] / 2), (box.x + box.w / 2, box.y + box.h / 2)
+    for c, got in zip(clips, x["clips"]):
+        comp = [Sim.from_dict(t) for t in (c.seg.transform_keys or [c.seg.transform])]
+        for ps, cs in zip(_motion_sims(got), comp):
+            a, b = ex._inv(ps, wc), ex._inv(cs, bc)
+            assert math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05               # same RAW point at the window centre
+            z = ps.s / (cs.s * k)
+            assert 1.0 - 1e-6 <= z <= 1.05 + 1e-6                         # 6-decimal XML values
+            if c.covered:
+                assert ex._covers(ps, (1920.0, 1080.0), WIN, tol=0.01)
+    z = {c.seg.id: c.zoom for c in clips}
+    assert z[1] == 1.0 and 1.0 < z[3] < 1.05                              # S03 needs a small zoom to cover the window
+    assert z[8] == 1.05 and not next(c for c in clips if c.seg.id == 8).covered
+    assert any("S08: the RAW does not cover the template window" in w for w in warnings)
+    # the clip comment states the Premiere Effect Controls values to check after import
+    text = premiere["xml"].read_text(encoding="utf-8")
+    assert "Premiere Motion (first key): Position" in text
+
+
+def test_premiere_pan_stays_motion_keyframes_at_source_times(premiere):
+    cl, x = premiere["cl"], premiere["x"]
+    got = next(c for c in x["clips"] if c["name"].startswith("S02"))
+    keys = got["motion"]["keys"]
+    assert len(keys["scale"]) == len(keys["center"]) == 2
+    whens = [w for w, _ in keys["center"]]
+    assert whens[0] == got["in"] and whens[1] == got["in"] + 58               # comp frames 40 -> 69 = 29 x 2 ticks
+    (_, c0), (_, c1) = keys["center"]
+    assert c0 != c1 and keys["scale"][0][1] != keys["scale"][1][1]
+
+
+def test_premiere_source_in_is_a_60fps_tick_inside_the_frame_exact_interval(premiere):
+    cl = premiere["cl"]
+    clips, _, _ = ex.premiere_clips(cl, premiere["cfg"])
+    for c in clips:
+        if c.seg.time_remap_keys:
+            continue
+        assert c.in_exact, c.seg.id
+        # every competitor frame k shows the plan's RAW frame at its first 60 fps frame (floor sampling)
+        for k in range(c.ev.rec_in, c.ev.rec_out):
+            t = Fraction(c.src_in, 60) + Fraction(2 * (k - c.ev.rec_in), 60) * Fraction(c.speed).limit_denominator(1000)
+            assert math.floor(t * R24) == ex.seg_raw_frame(c.seg, k, Fraction(30), R24), (c.seg.id, k)
+
+
+def test_premiere_validation_catches_a_wrong_rate_an_extra_track_and_a_moved_cut(premiere, tmp_path):
+    cl, cfg = premiere["cl"], premiere["cfg"]
+    text = premiere["xml"].read_text(encoding="utf-8")
+    cases = {
+        "ntsc": text.replace("<ntsc>FALSE</ntsc>", "<ntsc>TRUE</ntsc>", 1),
+        "v2": text.replace("</track>", "</track>\n<track></track>", 1),
+        "cut": text.replace("<end>80</end>", "<end>82</end>", 1),
+    }
+    for name, t in cases.items():
+        p = tmp_path / f"bad_{name}.xml"
+        p.write_text(t, encoding="utf-8")
+        v = ex.validate_premiere_exports(cl, p, premiere["edl"], cfg)
+        assert not v["ok"], name
+
+
+def test_premiere_needs_a_whole_number_of_sequence_frames_per_competitor_frame():
+    assert ex.premiere_factor(Fraction(30), Fraction(60)) == 2
+    with pytest.raises(ValueError, match="cannot be placed frame-exactly"):
+        ex.premiere_factor(Fraction(30000, 1001), Fraction(60))
+
+
+def test_premiere_flag_skips_after_effects():
+    from match_cuts import cli, pipeline
+    cfg = cli.config_from_args(cli.build_parser().parse_args(["--premiere"]))
+    assert cfg.premiere is True and "premiere" not in cfg.analysis_params()
+    assert cli.config_from_args(cli.build_parser().parse_args([])).premiere is False
+
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.cfg, ctx.ae_run, ctx.plan = cfg, {}, None
+    pipeline.stage_ae(ctx)                                                   # no plan, no JSX, no After Effects
+    assert ctx.plan is None and ctx.ae_run["status"] == "not_available" and "--premiere" in ctx.ae_run["reason"]

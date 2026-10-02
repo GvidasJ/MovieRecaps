@@ -115,6 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="folder scanned for the two videos when --competitor/--raw are not given and the "
                         "default names do not exist (default ./input)")
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
+    p.add_argument("--premiere", action="store_true",
+                   help="Premiere Pro only: no After Effects export or checks; recreated_edit.xml is a 1080x1920 sequence "
+                        "at exactly 60.00 fps (every competitor frame = 2 frames), each clip framed into the template "
+                        "window x 42-1039, y 555-1591, RAW audio on A1, markers on UNCERTAIN / NOT-IN-RAW spots, V2+ empty")
     p.add_argument("--no-ae", action="store_true",
                    help="do not open After Effects automatically (run output/build_ae_project.jsx yourself)")
     p.add_argument("--ae-timeout", default=600.0, type=float, metavar="SECONDS",
@@ -145,6 +149,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.verbose = bool(args.verbose)
     cfg.skip_preview = bool(args.skip_preview)
     cfg.run_ae = not bool(getattr(args, "no_ae", False))
+    cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
     if args.seed is not None:

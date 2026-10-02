@@ -4209,8 +4209,14 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
             failed_keys.add(key)
             failures.append(f"{what} missing" + (f" ({path})" if path is not None else ""))
 
-    need("jsx", Path(paths.get("jsx") or out / "build_ae_project.jsx"), "build_ae_project.jsx")
-    if env.get("ae_app"):
+    if getattr(cfg, "premiere", False):
+        skipped["jsx"] = "build_ae_project.jsx (Premiere-only run, --premiere)"
+        skipped["aep"] = "recreated_edit.aep (Premiere-only run, --premiere)"
+    else:
+        need("jsx", Path(paths.get("jsx") or out / "build_ae_project.jsx"), "build_ae_project.jsx")
+    if getattr(cfg, "premiere", False):
+        pass
+    elif env.get("ae_app"):
         need("aep", Path(paths.get("aep") or out / "recreated_edit.aep"), "recreated_edit.aep (After Effects is installed)")
     else:
         skipped["aep"] = "recreated_edit.aep (After Effects not installed)"
@@ -4561,8 +4567,14 @@ def verify_all(ctx: Any) -> dict:
     # s9_2: AE semantics from the plan and from the mock-run record
     cut_main = [pipeline.to_main_frame(k, comp_fps, main_fps) for k in cut_frames(segs)]
 
+    premiere = bool(getattr(cfg, "premiere", False))
+    PREMIERE_NA = {"status": "not_available", "summary": "Premiere-only run (--premiere): no After Effects export",
+                   "failures": []}
+
     def s9_2_plan() -> dict:
         from . import export_ae
+        if premiere:
+            return dict(PREMIERE_NA)
         if ctx.plan is None:
             return {"status": "fail", "summary": "no AE plan", "failures": ["ae_plan missing"]}
         return check_ae_sim(export_ae.simulate_ae(ctx.plan), ctx.fm, comp_fps, main_fps, n_main, cut_main, cfg, "plan",
@@ -4650,12 +4662,13 @@ def verify_all(ctx: Any) -> dict:
 
     extra["framing"] = _run_check("c4_speed_framing", c4)
 
-    extra["mock"] = _run_check("c6_mock", lambda: check_mock(ctx.plan, ctx.mock, main_fps, n_main,
-                                                             Path(ctx.paths.get("jsx", cfg.out)).parent
-                                                             if ctx.paths.get("jsx") else cfg.out, raw_name))
+    extra["mock"] = dict(PREMIERE_NA) if premiere else _run_check(
+        "c6_mock", lambda: check_mock(ctx.plan, ctx.mock, main_fps, n_main,
+                                      Path(ctx.paths.get("jsx", cfg.out)).parent if ctx.paths.get("jsx") else cfg.out,
+                                      raw_name))
     main_w, main_h = ctx.main_size or (int(comp_wh[0]), int(comp_wh[1]))
     small = (360, max(2, int(round(360 * main_h / main_w / 2)) * 2))
-    checks["s9_6_ae_render"] = _run_check("s9_6_ae_render", lambda: check_ae_render(
+    checks["s9_6_ae_render"] = dict(PREMIERE_NA) if premiere else _run_check("s9_6_ae_render", lambda: check_ae_render(
         ctx.env, ctx.paths.get("aep"), ctx.paths.get("preview"), n_main, main_fps, small,
         Path(cfg.work) / "aerender", cfg, plan=getattr(ctx, "plan", None), time_check_path=_ae_time_check_path(ctx)))
     checks["s9_7_determinism"] = _run_check("s9_7_determinism", lambda: check_determinism(ctx))
@@ -4678,8 +4691,9 @@ def verify_all(ctx: Any) -> dict:
     mock_only = checks["s9_6_ae_render"]["status"] == "not_available"
     c6_status = aggregate([extra["mock"]["status"], checks["s9_6_ae_render"]["status"]])
     c6 = {"status": c6_status,
-          "summary": extra["mock"].get("summary", "") + (" (mock only: After Effects not installed)" if mock_only
-                                                          else f"; aerender: {checks['s9_6_ae_render'].get('summary')}"),
+          "summary": PREMIERE_NA["summary"] if premiere else
+          extra["mock"].get("summary", "") + (" (mock only: After Effects not installed)" if mock_only
+                                              else f"; aerender: {checks['s9_6_ae_render'].get('summary')}"),
           "details": {"mock": extra["mock"], "s9_6": checks["s9_6_ae_render"], "mock_only": mock_only}}
     criteria = {
         "c1_coverage": {"status": checks["s9_1_coverage"]["status"], "summary": checks["s9_1_coverage"].get("summary", ""),

@@ -1095,6 +1095,16 @@ def _verification(ctx: Any) -> list[str]:
 def _how_to_open(ctx: Any) -> list[str]:
     cl = getattr(ctx, "cutlist", None)
     raw_file = (cl.raw.get("file") if cl else "") or "media/…"
+    if getattr(getattr(ctx, "cfg", None), "premiere", False):
+        return [
+            "1. Premiere Pro → **File → Import…** → `recreated_edit.xml` (keep the output folder together: the XML "
+            f"points at `{raw_file}`; relink if Premiere asks).",
+            "2. The sequence `Recreated Edit (Premiere)` is 1080×1920 at 60.00 fps: the edit on V1 (each clip framed into "
+            "your template window), the RAW audio on A1 with the same cuts, V2 and above empty — put your overlay template "
+            "and captions there.",
+            "3. Sequence markers name the UNCERTAIN and NOT-IN-RAW spots (and RETIME spots Premiere's XML cannot carry). "
+            "Each clip's comment lists the Motion values to expect (Position, Scale) — check one clip after import.",
+        ]
     return [
         "1. Copy the whole output folder (the `.jsx` finds `media/` next to itself; keep them together).",
         "2. After Effects → **File → Scripts → Run Script File…** → `build_ae_project.jsx`.",
