@@ -10,6 +10,7 @@ import csv
 import math
 import re
 from fractions import Fraction
+from pathlib import Path
 
 import opentimelineio as otio
 import pytest
@@ -871,11 +872,11 @@ def test_min_move_validation_catches_a_small_reframe(tmp_path):
     i = text.index("<name>S03 ")
     j = text.index("<horiz>", i)
     k = text.index("</horiz>", j)
-    bad = text[:j + 7] + f"{float(text[j + 7:k]) + 0.05:.6f}" + text[k:]           # S03 moved 54 px
+    bad = text[:j + 7] + f"{float(text[j + 7:k]) + 0.05:.6f}" + text[k:]   # S03 moved 0.05 x 1920 (source) = 96 px
     p = tmp_path / "bad.xml"
     p.write_text(bad, encoding="utf-8")
     v = ex.validate_premiere_exports(r["cl"], p, r["edl"], r["cfg"])
-    assert any("S03: the framing changes by 54 px after S01+S02 (under --min-move 250)" in e for e in v["errors"])
+    assert any("S03: the framing changes by 96 px after S01+S02 (under --min-move 250)" in e for e in v["errors"])
 
 
 def test_min_move_held_framing_that_would_not_cover_changes_the_least():
@@ -903,3 +904,169 @@ def test_min_move_option():
     assert ex.premiere_settings(cfg)["min_move"] == 120.0 and ex.premiere_settings(None)["min_move"] == 250.0
     with pytest.raises(SystemExit):
         parse(["--min-move", "-5"])
+
+
+# ---- Premiere reads <center> in SOURCE pixels; the hard gap check; face-centred stretches ---------------------------
+
+SEQ, SRC = (1080, 1920), (1920, 1080)
+
+
+def test_premiere_center_is_in_source_pixels_as_premiere_reads_it():
+    # the user's S21: <center> (0.622738, 0.064497) at Scale 135.88 showed at Position 1735.8, 1029.7 in Premiere
+    px, py = ex.premiere_position((0.622738, 0.064497), SEQ, SRC)
+    assert (round(px, 1), round(py, 1)) == (1735.7, 1029.7)
+    assert px - 1.358766 * 1920 / 2 == pytest.approx(431.2, abs=0.1)              # its left edge: x 42-431 black
+    h, v = ex.premiere_center((1083.0, 1029.7), SEQ, SRC)                           # the user's fix, written back
+    assert ex.premiere_position((h, v), SEQ, SRC) == pytest.approx((1083.0, 1029.7))
+    assert h == pytest.approx((1083.0 - 540) / 1920) and v == pytest.approx((1029.7 - 960) / 1080)
+
+
+def test_premiere_xml_positions_are_the_planned_ones_in_premiere_units(premiere):
+    clips, _, _ = ex.premiere_clips(premiere["cl"], premiere["cfg"])
+    for c, got in zip(clips, premiere["x"]["clips"]):
+        want = c.keys[0][1]
+        cx, cy = want.tx + want.s * 1920 / 2, want.ty + want.s * 1080 / 2              # the RAW centre (Position)
+        h, v = got["motion"]["center"]
+        assert ex.premiere_position((h, v), SEQ, SRC) == pytest.approx((cx, cy), abs=0.01)
+        assert h == pytest.approx((cx - 540) / 1920, abs=1e-6) and v == pytest.approx((cy - 960) / 1080, abs=1e-6)
+
+
+def _set_motion(text: str, clip_name: str, horiz: float, vert: float, scale: float) -> str:
+    i = text.index(f"<name>{clip_name} ")
+    j = text.index("<parameterid>scale</parameterid>", i)
+    a, b = text.index("<value>", j) + 7, text.index("</value>", j)
+    text = text[:a] + f"{scale:.6f}" + text[b:]
+    j = text.index("<parameterid>center</parameterid>", i)
+    a, b = text.index("<horiz>", j) + 7, text.index("</horiz>", j)
+    text = text[:a] + f"{horiz:.6f}" + text[b:]
+    a, b = text.index("<vert>", j) + 6, text.index("</vert>", j)
+    return text[:a] + f"{vert:.6f}" + text[b:]
+
+
+def test_gap_check_reads_the_xml_values_and_fails_the_s21_framing(tmp_path, premiere):
+    assert ex.premiere_gaps(premiere["xml"], premiere["cfg"]) == []                  # every clip covers the window
+    v = ex.validate_premiere_exports(premiere["cl"], premiere["xml"], premiere["edl"], premiere["cfg"])
+    assert v["ok"] and v["gaps"] == [], v["errors"]
+    bad = _set_motion(premiere["xml"].read_text(encoding="utf-8"), "S03", 0.622738, 0.064497, 135.8766)
+    p = tmp_path / "s21.xml"
+    p.write_text(bad, encoding="utf-8")
+    gaps = ex.premiere_gaps(p, premiere["cfg"])
+    assert len(gaps) == 1 and gaps[0].startswith("S03 at 00:00:02:20: Position 1735.7, 1029.7 Scale 135.9")
+    assert "the window is uncovered at x 42-431" in gaps[0]
+    v = ex.validate_premiere_exports(premiere["cl"], p, premiere["edl"], premiere["cfg"])
+    assert not v["ok"] and any(e.startswith("XML GAP S03") for e in v["errors"])
+    fixed = _set_motion(premiere["xml"].read_text(encoding="utf-8"), "S03", (1083.0 - 540) / 1920,
+                        (1029.7 - 960) / 1080, 135.8766)                              # the user's hand fix covers
+    p.write_text(fixed, encoding="utf-8")
+    assert ex.premiere_gaps(p, premiere["cfg"]) == []
+    # a picture that sits too low is caught at the window's top edge
+    p.write_text(_set_motion(premiere["xml"].read_text(encoding="utf-8"), "S03", 0.0, 0.2, 100.0), encoding="utf-8")
+    assert ex.premiere_gaps(p, premiere["cfg"])[0].endswith("picture x -420-1500, y 636-1716; the window is "
+                                                              "uncovered at y 555-636")
+
+
+def _broll(seg_id: int, a: int, b: int, what: str = "NOT-IN-RAW insert") -> dict:
+    return {"broll": {"replaced": what, "how": "audio", "ranges": [[a, b, seg_id, "audio"]]}}
+
+
+def test_a_stretch_with_a_replaced_spot_is_face_centred_keeping_its_zoom(tmp_path, monkeypatch):
+    from match_cuts import faces
+    calls = []
+
+    def fake(video, raw_fps, times, view=None):
+        calls.append((len(times), view))
+        return 700.0, len(times)
+    monkeypatch.setattr(faces, "main_face_x", fake)
+    cl = min_move_cutlist()
+    cl.segments[3].audio = _broll(4, 100, 130)                     # S04 is a B-roll replacement (its framing copied)
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    clips, _, _ = ex.premiere_clips(cl, cfg)
+    own = {c.seg.id: c.keys[0][1] for c in ex.premiere_clips(min_move_cutlist(), cfg)[0]}
+    by = {c.label: c for c in clips}
+    assert list(by) == ["S01+S02", "S03", "S04+S05", "S06"]
+    f = by["S04+S05"].keys[0][1]
+    assert f.s == own[4].s and f.ty == own[4].ty                                 # zoom and height kept
+    assert f.tx + f.s * 700.0 == pytest.approx(WIN[0] + WIN[2] / 2)               # the face at the window centre
+    assert "S04 NOT-IN-RAW insert replaced: face-centred" in by["S04+S05"].framing_note
+    assert by["S01+S02"].keys[0][1] is not f and _same(by["S01+S02"].keys[0][1], own[1])   # reliable: untouched
+    assert calls == [(10, calls[0][1])]                                           # 5 frames from each of S04, S05
+    r = _min_move_export(tmp_path)                                                # (unpatched cutlist) still valid
+    assert r["v"]["ok"]
+
+
+def _same(a, b) -> bool:
+    return abs(a.s - b.s) < 1e-9 and abs(a.tx - b.tx) < 1e-6 and abs(a.ty - b.ty) < 1e-6
+
+
+def test_face_centred_stretch_under_min_move_of_the_one_before_keeps_that_framing(tmp_path, monkeypatch):
+    from match_cuts import faces
+    cl = min_move_cutlist()
+    cl.segments[3].audio = _broll(4, 100, 130)
+    s4 = ex.premiere_clips(min_move_cutlist(), Config(premiere=True, premiere_min_move=0))[0][3].keys[0][1]
+    s1 = ex.premiere_clips(min_move_cutlist(), Config(premiere=True, premiere_min_move=0))[0][0].keys[0][1]
+    fx = (WIN[0] + WIN[2] / 2 - s1.tx - 100.0) / s4.s                            # face-centring lands 100 px from S01
+    monkeypatch.setattr(faces, "main_face_x", lambda *a, **k: (fx, 10))
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    ex.write_premiere_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    clips, _, _ = ex.premiere_clips(cl, cfg)
+    # S04's face-centred framing is under 250 px from the framing on screen (S01's): it keeps that one, so the
+    # take S03-S05 is one clip with one framing
+    assert [c.label for c in clips] == ["S01+S02", "S03+S04+S05", "S06"]
+    assert _same(clips[1].keys[0][1], s1)
+    v = ex.validate_premiere_exports(cl, xml, edl, cfg)
+    assert v["ok"] and v["gaps"] == [], v["errors"]
+
+
+def test_no_face_found_keeps_the_framing_and_still_covers(tmp_path, monkeypatch):
+    from match_cuts import faces
+    monkeypatch.setattr(faces, "main_face_x", lambda *a, **k: (None, 0))
+    cl = min_move_cutlist()
+    cl.segments[3].audio = _broll(4, 100, 130)
+    clips, _, _ = ex.premiere_clips(cl, Config(premiere=True))
+    c = next(c for c in clips if c.label == "S04+S05")
+    assert "no face found, framing kept" in c.framing_note and c.covered
+
+
+# ---- S21 on the real RAW: input/raw_test.mp4 with the export cutlist of the run on it --------------------------------
+
+RAW_TEST = Path(__file__).resolve().parents[3] / "input" / "raw_test.mp4"
+RAW_TEST_CUTLIST = Path(__file__).resolve().parent / "data" / "raw_test_export_cutlist.json"
+need_raw_test = pytest.mark.skipif(not RAW_TEST.is_file(), reason="input/raw_test.mp4 not in this checkout")
+
+
+@need_raw_test
+def test_faces_finds_the_guest_in_the_raw():
+    from match_cuts import faces
+    times = [t / 60 for t in range(5926, 6400, 24)]                    # S21-S27 of the run (RAW 98.8-106.7 s)
+    x, n = faces.main_face_x(RAW_TEST, 30000 / 1001, times, (98.0, 833.0))
+    assert n >= 15 and 500 <= x <= 570                                  # the guest (left), not the host (x ~1450)
+
+
+@need_raw_test
+def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(tmp_path):
+    import json
+    d = json.loads(RAW_TEST_CUTLIST.read_text(encoding="utf-8"))
+    d["raw"]["file_abs"] = str(RAW_TEST)
+    cl = Cutlist.from_dict(d)
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    ex.write_premiere_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    v = ex.validate_premiere_exports(cl, xml, edl, cfg)
+    assert v["ok"] and v["gaps"] == [], v["errors"]
+    x = ex.parse_premiere_xml(xml)
+
+    def position(c: dict) -> tuple[float, float]:
+        return ex.premiere_position(c["motion"]["center"], SEQ, SRC)
+    s21 = next(c for c in x["clips"] if c["name"].startswith("S21"))
+    at = next(c for c in x["clips"] if c["start"] <= 1153 < c["end"])   # 00:00:19:13 in the 60 fps sequence
+    for c in (s21, at):
+        px, py = position(c)
+        assert abs(px - 1083.0) <= 50.0, (c["name"], px)                # the user's hand fix: 1083.0
+        assert c["motion"]["scale"] == pytest.approx(135.88, abs=0.05)  # the zoom is kept
+        assert px - 1.3588 * 960 <= 42 and px + 1.3588 * 960 >= 1040    # covers x 42-1039
+        assert py - 1.3588 * 540 <= 555 and py + 1.3588 * 540 >= 1592   # and y 555-1591
+    text = xml.read_text(encoding="utf-8")
+    assert "S26 NOT-IN-RAW replaced" in text and "face-centred -- the main face" in text

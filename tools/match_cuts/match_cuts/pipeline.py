@@ -2489,6 +2489,9 @@ def stage_exports(ctx: Context) -> None:
             export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg) if premiere
             else export_xml_edl.validate_exports(ex, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
+        if validation.get("gaps"):
+            ctx.warn(f"Premiere XML: {len(validation['gaps'])} clip(s) leave part of the template window uncovered -- "
+                     "the run fails: " + "; ".join(validation["gaps"]))
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
     ctx.exports = dict(validation)

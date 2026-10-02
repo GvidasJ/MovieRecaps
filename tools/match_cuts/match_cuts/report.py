@@ -1099,8 +1099,11 @@ def _how_to_open(ctx: Any) -> list[str]:
         xv = ((getattr(ctx, "exports", None) or {}).get("xml") or {})
         framing = (f" {xv['clips']} V1 clips with {xv['framing_changes']} framing changes: the framing changes only "
                    f"where the competitor's moves {xv['min_move']:g} px or more (--min-move); {xv['framing_kept']} "
-                   f"clip(s) keep the framing of the clip before, and {xv['merged']} piece(s) of one continuous RAW "
-                   "take are joined to the clip before (no cut)." if "framing_changes" in xv else "")
+                   f"clip(s) keep the framing of the clip before, {xv.get('face_centred', 0)} clip(s) are face-centred "
+                   "(a replaced B-roll / uncertain spot: the main face at the window centre, zoom kept), and "
+                   f"{xv['merged']} piece(s) of one continuous RAW take are joined to the clip before (no cut). Every "
+                   "clip's picture edges are checked from the XML's own values: none leaves the window uncovered."
+                   if "framing_changes" in xv else "")
         return [
             "1. Premiere Pro → **File → Import…** → `recreated_edit.xml` (keep the output folder together: the XML "
             f"points at `{raw_file}`; relink if Premiere asks).",

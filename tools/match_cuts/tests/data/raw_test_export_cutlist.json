@@ -1,0 +1,3761 @@
+{
+ "version": 1,
+ "competitor": {
+  "file": "media/competitor_ref.mp4",
+  "file_rel": "media/competitor_ref.mp4",
+  "file_abs": null,
+  "source_path": "input/competitor.mp4",
+  "width": 608,
+  "height": 1080,
+  "fps": "30/1",
+  "frames": 700,
+  "duration_s": 23.333333333,
+  "conformed": true,
+  "conform_reason": "conformed: vcodec: av1 is not H.264/ProRes",
+  "container": "mp4",
+  "codec": "h264",
+  "profile": "High",
+  "pix_fmt": "yuv420p",
+  "has_audio": true,
+  "audio_codec": "aac",
+  "audio_sample_rate": 48000,
+  "audio_channels": 2,
+  "hash": "f0fb20e8ffd637efeb6dbe139da07be777f60458",
+  "source_hash": "e441893e34789cb96a7bd8301f7017576711d9a6",
+  "source_issues": [
+   "vcodec: av1 is not H.264/ProRes"
+  ]
+ },
+ "raw": {
+  "file": "media/raw_test.mp4",
+  "file_rel": "media/raw_test.mp4",
+  "file_abs": null,
+  "source_path": "input/raw_test.mp4",
+  "width": 1920,
+  "height": 1080,
+  "fps": "30000/1001",
+  "frames": 6091,
+  "duration_s": 203.236366667,
+  "conformed": false,
+  "conform_reason": "AE-safe: used unchanged",
+  "container": "mp4",
+  "codec": "h264",
+  "profile": "High",
+  "pix_fmt": "yuv420p",
+  "has_audio": true,
+  "audio_codec": "aac",
+  "audio_sample_rate": 48000,
+  "audio_channels": 2,
+  "hash": "834eaa933766b24d2207292946377ce08da795fc",
+  "source_hash": "834eaa933766b24d2207292946377ce08da795fc",
+  "source_issues": []
+ },
+ "layout": {
+  "mode": "match",
+  "layout_kind": "boxed",
+  "canvas_bg": "#000000",
+  "box": {
+   "x": 30.515,
+   "y": 315.691,
+   "w": 546.955,
+   "h": 570.309,
+   "corner_radius": 66.0
+  },
+  "background": "solid",
+  "background_detail": {
+   "color": "#000000",
+   "gray": 0.0,
+   "type": "solid"
+  },
+  "zones": [
+   {
+    "type": "title",
+    "x": 26.0,
+    "y": 76.0,
+    "w": 554.0,
+    "h": 222.0,
+    "comp_in": null,
+    "comp_out": null,
+    "static": true,
+    "text": "",
+    "notes": "multicolour; text block above the box; colours #fcfcfc 30%, #fcf502 16%, #02fefd 11%, #77fe00 9%"
+   },
+   {
+    "type": "other",
+    "x": 246.0,
+    "y": 96.0,
+    "w": 218.0,
+    "h": 54.0,
+    "comp_in": null,
+    "comp_out": null,
+    "static": true,
+    "text": "",
+    "notes": "multicolour; text above the box; colours #fafafa 61%, #8b8b8a 11%, #2c92f4 8%"
+   },
+   {
+    "type": "captions",
+    "x": 32.0,
+    "y": 696.0,
+    "w": 434.0,
+    "h": 64.0,
+    "comp_in": 1,
+    "comp_out": 700,
+    "static": false,
+    "text": "",
+    "notes": "47 caption events; white text with dark outline, median glyph height 26 px"
+   }
+  ],
+  "periods": [
+   {
+    "comp_in": 0,
+    "comp_out": 700,
+    "mode": "boxed",
+    "box": {
+     "x": 30.515,
+     "y": 315.691,
+     "w": 546.955,
+     "h": 570.309,
+     "corner_radius": 66.0
+    }
+   }
+  ],
+  "regions": [],
+  "captions": [
+   {
+    "comp_in": 1,
+    "comp_out": 9,
+    "h": 42.0,
+    "type": "captions",
+    "w": 88.0,
+    "x": 316.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 12,
+    "comp_out": 15,
+    "h": 34.0,
+    "type": "captions",
+    "w": 70.0,
+    "x": 166.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 14,
+    "comp_out": 31,
+    "h": 26.0,
+    "type": "captions",
+    "w": 90.0,
+    "x": 350.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 15,
+    "comp_out": 31,
+    "h": 34.0,
+    "type": "captions",
+    "w": 70.0,
+    "x": 168.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 36,
+    "comp_out": 52,
+    "h": 44.0,
+    "type": "captions",
+    "w": 236.0,
+    "x": 186.0,
+    "y": 696.0
+   },
+   {
+    "comp_in": 68,
+    "comp_out": 74,
+    "h": 34.0,
+    "type": "captions",
+    "w": 110.0,
+    "x": 250.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 78,
+    "comp_out": 113,
+    "h": 54.0,
+    "type": "captions",
+    "w": 392.0,
+    "x": 32.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 115,
+    "comp_out": 122,
+    "h": 34.0,
+    "type": "captions",
+    "w": 42.0,
+    "x": 188.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 124,
+    "comp_out": 129,
+    "h": 26.0,
+    "type": "captions",
+    "w": 60.0,
+    "x": 186.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 124,
+    "comp_out": 129,
+    "h": 26.0,
+    "type": "captions",
+    "w": 60.0,
+    "x": 334.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 132,
+    "comp_out": 140,
+    "h": 32.0,
+    "type": "captions",
+    "w": 42.0,
+    "x": 180.0,
+    "y": 708.0
+   },
+   {
+    "comp_in": 142,
+    "comp_out": 149,
+    "h": 36.0,
+    "type": "captions",
+    "w": 88.0,
+    "x": 342.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 152,
+    "comp_out": 161,
+    "h": 32.0,
+    "type": "captions",
+    "w": 44.0,
+    "x": 374.0,
+    "y": 708.0
+   },
+   {
+    "comp_in": 162,
+    "comp_out": 167,
+    "h": 26.0,
+    "type": "captions",
+    "w": 50.0,
+    "x": 352.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 179,
+    "comp_out": 190,
+    "h": 36.0,
+    "type": "captions",
+    "w": 60.0,
+    "x": 358.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 203,
+    "comp_out": 210,
+    "h": 34.0,
+    "type": "captions",
+    "w": 84.0,
+    "x": 156.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 203,
+    "comp_out": 210,
+    "h": 26.0,
+    "type": "captions",
+    "w": 70.0,
+    "x": 382.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 214,
+    "comp_out": 223,
+    "h": 32.0,
+    "type": "captions",
+    "w": 26.0,
+    "x": 360.0,
+    "y": 708.0
+   },
+   {
+    "comp_in": 240,
+    "comp_out": 254,
+    "h": 34.0,
+    "type": "captions",
+    "w": 52.0,
+    "x": 336.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 256,
+    "comp_out": 270,
+    "h": 34.0,
+    "type": "captions",
+    "w": 102.0,
+    "x": 308.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 304,
+    "comp_out": 315,
+    "h": 34.0,
+    "type": "captions",
+    "w": 82.0,
+    "x": 184.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 304,
+    "comp_out": 315,
+    "h": 36.0,
+    "type": "captions",
+    "w": 60.0,
+    "x": 364.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 349,
+    "comp_out": 357,
+    "h": 34.0,
+    "type": "captions",
+    "w": 50.0,
+    "x": 188.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 401,
+    "comp_out": 406,
+    "h": 34.0,
+    "type": "captions",
+    "w": 56.0,
+    "x": 364.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 413,
+    "comp_out": 425,
+    "h": 26.0,
+    "type": "captions",
+    "w": 48.0,
+    "x": 364.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 434,
+    "comp_out": 439,
+    "h": 26.0,
+    "type": "captions",
+    "w": 50.0,
+    "x": 352.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 440,
+    "comp_out": 446,
+    "h": 34.0,
+    "type": "captions",
+    "w": 16.0,
+    "x": 364.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 448,
+    "comp_out": 455,
+    "h": 32.0,
+    "type": "captions",
+    "w": 50.0,
+    "x": 362.0,
+    "y": 708.0
+   },
+   {
+    "comp_in": 495,
+    "comp_out": 512,
+    "h": 42.0,
+    "type": "captions",
+    "w": 134.0,
+    "x": 142.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 495,
+    "comp_out": 512,
+    "h": 34.0,
+    "type": "captions",
+    "w": 70.0,
+    "x": 396.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 512,
+    "comp_out": 516,
+    "h": 34.0,
+    "type": "captions",
+    "w": 66.0,
+    "x": 204.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 512,
+    "comp_out": 516,
+    "h": 26.0,
+    "type": "captions",
+    "w": 46.0,
+    "x": 358.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 517,
+    "comp_out": 523,
+    "h": 34.0,
+    "type": "captions",
+    "w": 50.0,
+    "x": 216.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 524,
+    "comp_out": 531,
+    "h": 34.0,
+    "type": "captions",
+    "w": 104.0,
+    "x": 172.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 534,
+    "comp_out": 544,
+    "h": 34.0,
+    "type": "captions",
+    "w": 160.0,
+    "x": 224.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 546,
+    "comp_out": 551,
+    "h": 34.0,
+    "type": "captions",
+    "w": 78.0,
+    "x": 188.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 546,
+    "comp_out": 551,
+    "h": 26.0,
+    "type": "captions",
+    "w": 42.0,
+    "x": 378.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 552,
+    "comp_out": 556,
+    "h": 34.0,
+    "type": "captions",
+    "w": 42.0,
+    "x": 272.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 558,
+    "comp_out": 564,
+    "h": 42.0,
+    "type": "captions",
+    "w": 256.0,
+    "x": 176.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 566,
+    "comp_out": 571,
+    "h": 26.0,
+    "type": "captions",
+    "w": 160.0,
+    "x": 224.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 572,
+    "comp_out": 577,
+    "h": 34.0,
+    "type": "captions",
+    "w": 128.0,
+    "x": 240.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 580,
+    "comp_out": 587,
+    "h": 42.0,
+    "type": "captions",
+    "w": 242.0,
+    "x": 182.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 591,
+    "comp_out": 594,
+    "h": 34.0,
+    "type": "captions",
+    "w": 94.0,
+    "x": 172.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 646,
+    "comp_out": 658,
+    "h": 34.0,
+    "type": "captions",
+    "w": 270.0,
+    "x": 168.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 662,
+    "comp_out": 673,
+    "h": 34.0,
+    "type": "captions",
+    "w": 172.0,
+    "x": 206.0,
+    "y": 706.0
+   },
+   {
+    "comp_in": 676,
+    "comp_out": 700,
+    "h": 26.0,
+    "type": "captions",
+    "w": 44.0,
+    "x": 354.0,
+    "y": 714.0
+   },
+   {
+    "comp_in": 677,
+    "comp_out": 700,
+    "h": 34.0,
+    "type": "captions",
+    "w": 46.0,
+    "x": 212.0,
+    "y": 706.0
+   }
+  ],
+  "notes": []
+ },
+ "segments": [
+  {
+   "id": 1,
+   "type": "raw",
+   "comp_in": 0,
+   "comp_out": 24,
+   "raw_in_frame": 2022,
+   "raw_in_seconds": 67.483299166,
+   "raw_out_frame": 2045,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.957478173826087,
+    1.044521826173913
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854952662934382,
+    "rotation_deg": 0.0,
+    "tx": -196.12730381240846,
+    "ty": 290.32627463165284
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 0,
+     "scale": 0.5854952662934382,
+     "rotation_deg": 0.0,
+     "tx": -196.12730381240846,
+     "ty": 290.32627463165284
+    },
+    {
+     "comp_frame": 5,
+     "scale": 0.5855355961449838,
+     "rotation_deg": 0.0,
+     "tx": -182.2414288129758,
+     "ty": 290.2897697097777
+    },
+    {
+     "comp_frame": 9,
+     "scale": 0.5855118827833025,
+     "rotation_deg": 0.0,
+     "tx": -176.3953056528042,
+     "ty": 290.29938242076634
+    },
+    {
+     "comp_frame": 11,
+     "scale": 0.5855251101908813,
+     "rotation_deg": 0.0,
+     "tx": -178.08836810266882,
+     "ty": 290.359644043971
+    },
+    {
+     "comp_frame": 21,
+     "scale": 0.5854675369279632,
+     "rotation_deg": 0.0,
+     "tx": -217.3454994987494,
+     "ty": 290.32528075619615
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 0.048,
+    "corr": 0.9796,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 7.106,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 15.132499,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9915,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    67.4684,
+    67.500766667
+   ],
+   "raw_in_interval_both": [
+    67.4684,
+    67.484083333
+   ],
+   "time_line": 0,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [24,31) (one phase solve); time/translation confounded frames 3-10 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 1 sample(s) off the local trend of their neighbours left out (10); animated framing: 5 keys, scale 0.5853->0.5855, easing ease_in; edge framing not measured on frames 22-23 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 2,
+   "type": "raw",
+   "comp_in": 24,
+   "comp_out": 31,
+   "raw_in_frame": 2046,
+   "raw_in_seconds": 68.283299166,
+   "raw_out_frame": 2052,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.834166333,
+    1.167833667
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.58550439083511,
+    "rotation_deg": 0.0,
+    "tx": -237.1259297757648,
+    "ty": 290.4004901733923
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 25,
+     "scale": 0.58550439083511,
+     "rotation_deg": 0.0,
+     "tx": -237.1259297757648,
+     "ty": 290.4004901733923
+    },
+    {
+     "comp_frame": 30,
+     "scale": 0.5854613951566681,
+     "rotation_deg": 0.0,
+     "tx": -252.1051242658155,
+     "ty": 290.4643003482633
+    }
+   ],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 1,
+    "pitch_preserved": null,
+    "lag_ms": 0.048,
+    "corr": 0.9971,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 7.105,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 14.899166,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9921,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    68.2684,
+    68.300766667
+   ],
+   "raw_in_interval_both": [
+    68.2684,
+    68.284083333
+   ],
+   "time_line": 0,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [0,24) (one phase solve); time/translation confounded frames 24-28 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 1 sample(s) off the local trend of their neighbours left out (24); animated framing: 2 keys, scale 0.5854->0.5855, easing linear",
+   "evidence": []
+  },
+  {
+   "id": 3,
+   "type": "raw",
+   "comp_in": 31,
+   "comp_out": 54,
+   "raw_in_frame": 2058,
+   "raw_in_seconds": 68.679451883,
+   "raw_out_frame": 2080,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854613951566681,
+    "rotation_deg": 0.0,
+    "tx": -252.1051242658155,
+    "ty": 290.4643003482633
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.004,
+    "corr": 0.8678,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "NOT-IN-RAW",
+     "line": "audio found at RAW 68.679s",
+     "ranges": [
+      [
+       31,
+       54,
+       3,
+       "audio"
+      ]
+     ],
+     "how": "audio"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9921,
+   "ambiguous_frames": [],
+   "raw_in_interval": null,
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S03",
+   "notes": "--no-broll: the competitor showed NOT-IN-RAW here over the main clip's continuing RAW audio (audio found at RAW 68.679s); the main clip plays through",
+   "evidence": []
+  },
+  {
+   "id": 28,
+   "type": "raw",
+   "comp_in": 54,
+   "comp_out": 99,
+   "raw_in_frame": 2092,
+   "raw_in_seconds": 69.81276375,
+   "raw_out_frame": 2136,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854613951566681,
+    "rotation_deg": 0.0,
+    "tx": -252.1051242658155,
+    "ty": 290.4643003482633
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.025,
+    "corr": 0.8385,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "NOT-IN-RAW",
+     "line": "audio found at RAW 69.813s",
+     "ranges": [
+      [
+       54,
+       99,
+       3,
+       "audio"
+      ]
+     ],
+     "how": "audio"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9921,
+   "ambiguous_frames": [],
+   "raw_in_interval": null,
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S03",
+   "notes": "--no-broll: the competitor showed NOT-IN-RAW here over the main clip's continuing RAW audio (audio found at RAW 69.813s); the main clip plays through",
+   "evidence": []
+  },
+  {
+   "id": 29,
+   "type": "raw",
+   "comp_in": 99,
+   "comp_out": 114,
+   "raw_in_frame": 2170,
+   "raw_in_seconds": 72.429449752,
+   "raw_out_frame": 2184,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854613951566681,
+    "rotation_deg": 0.0,
+    "tx": -252.1051242658155,
+    "ty": 290.4643003482633
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -4.047,
+    "corr": 0.9942,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "NOT-IN-RAW",
+     "line": "audio found at RAW 72.429s",
+     "ranges": [
+      [
+       99,
+       114,
+       3,
+       "audio"
+      ]
+     ],
+     "how": "audio"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9921,
+   "ambiguous_frames": [],
+   "raw_in_interval": null,
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S03",
+   "notes": "--no-broll: the competitor showed NOT-IN-RAW here over the main clip's continuing RAW audio (audio found at RAW 72.429s); the main clip plays through",
+   "evidence": []
+  },
+  {
+   "id": 4,
+   "type": "raw",
+   "comp_in": 114,
+   "comp_out": 161,
+   "raw_in_frame": 2194,
+   "raw_in_seconds": 73.215575,
+   "raw_out_frame": 2240,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9792390869130434,
+    1.0227609130869564
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854646632375674,
+    "rotation_deg": 0.0,
+    "tx": -209.163490512995,
+    "ty": 290.3796932367043
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 115,
+     "scale": 0.5854646632375674,
+     "rotation_deg": 0.0,
+     "tx": -209.163490512995,
+     "ty": 290.3796932367043
+    },
+    {
+     "comp_frame": 120,
+     "scale": 0.5854811262060329,
+     "rotation_deg": 0.0,
+     "tx": -214.3801067593559,
+     "ty": 290.3649007248684
+    },
+    {
+     "comp_frame": 135,
+     "scale": 0.585569803777139,
+     "rotation_deg": 0.0,
+     "tx": -221.22906656971116,
+     "ty": 290.29408020177874
+    },
+    {
+     "comp_frame": 143,
+     "scale": 0.5854591592472752,
+     "rotation_deg": 0.0,
+     "tx": -221.26839723304636,
+     "ty": 290.29334873524834
+    },
+    {
+     "comp_frame": 147,
+     "scale": 0.5854099094099695,
+     "rotation_deg": 0.0,
+     "tx": -225.9581908696302,
+     "ty": 290.4101781940254
+    },
+    {
+     "comp_frame": 153,
+     "scale": 0.5855300583222391,
+     "rotation_deg": 0.0,
+     "tx": -229.0716762170493,
+     "ty": 290.32004643786024
+    },
+    {
+     "comp_frame": 155,
+     "scale": 0.5855074147735451,
+     "rotation_deg": 0.0,
+     "tx": -231.9908401140687,
+     "ty": 290.40492547069925
+    },
+    {
+     "comp_frame": 158,
+     "scale": 0.5854223289057028,
+     "rotation_deg": 0.0,
+     "tx": -239.59682662105013,
+     "ty": 290.40740953659343
+    }
+   ],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 17.774,
+    "corr": 0.9946,
+    "exception": null,
+    "phase_source": "video",
+    "lag_ms_video": 17.774,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    137
+   ],
+   "ae_margin_ms": 7.575,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9694,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    73.208,
+    73.239833333
+   ],
+   "raw_in_interval_both": [
+    73.208,
+    73.22315
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 131, 136-137, 157-160 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 3 sample(s) off the local trend of their neighbours left out (114, 159-160); animated framing: 8 keys, scale 0.5854->0.5856, easing linear",
+   "evidence": []
+  },
+  {
+   "id": 5,
+   "type": "raw",
+   "comp_in": 161,
+   "comp_out": 169,
+   "raw_in_frame": 2249,
+   "raw_in_seconds": 75.050091667,
+   "raw_out_frame": 2256,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.857999714,
+    1.144000286
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5853719040269795,
+    "rotation_deg": 0.0,
+    "tx": -262.51253874192355,
+    "ty": 290.4285312252275
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 161,
+     "scale": 0.5853719040269795,
+     "rotation_deg": 0.0,
+     "tx": -262.51253874192355,
+     "ty": 290.4285312252275
+    },
+    {
+     "comp_frame": 168,
+     "scale": 0.5853816824044377,
+     "rotation_deg": 0.0,
+     "tx": -258.6574606416303,
+     "ty": 290.363113502836
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 16.591,
+    "corr": 0.9927,
+    "exception": "too_short",
+    "phase_source": "video",
+    "lag_ms_video": 16.591,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 8.225,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9766,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    75.041866667,
+    75.075
+   ],
+   "raw_in_interval_both": [
+    75.041866667,
+    75.05845
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 161-166 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 2 keys, scale 0.5853->0.5854, easing ease_in",
+   "evidence": []
+  },
+  {
+   "id": 6,
+   "type": "raw",
+   "comp_in": 169,
+   "comp_out": 249,
+   "raw_in_frame": 2376,
+   "raw_in_seconds": 79.295190833,
+   "raw_out_frame": 2455,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9883290885822785,
+    1.0136709114177214
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5853443424467367,
+    "rotation_deg": 0.0,
+    "tx": -253.48558412589858,
+    "ty": 290.37122934008926
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 171,
+     "scale": 0.5853443424467367,
+     "rotation_deg": 0.0,
+     "tx": -253.48558412589858,
+     "ty": 290.37122934008926
+    },
+    {
+     "comp_frame": 175,
+     "scale": 0.5854484567836197,
+     "rotation_deg": 0.0,
+     "tx": -265.3033024838708,
+     "ty": 290.3694759124369
+    },
+    {
+     "comp_frame": 178,
+     "scale": 0.5854158505563015,
+     "rotation_deg": 0.0,
+     "tx": -267.43819510655516,
+     "ty": 290.485150439277
+    },
+    {
+     "comp_frame": 182,
+     "scale": 0.5853730431006233,
+     "rotation_deg": 0.0,
+     "tx": -258.4950032740177,
+     "ty": 290.423730361488
+    },
+    {
+     "comp_frame": 191,
+     "scale": 0.5854488942415812,
+     "rotation_deg": 0.0,
+     "tx": -229.18288001621198,
+     "ty": 290.38224746894207
+    },
+    {
+     "comp_frame": 195,
+     "scale": 0.5853760091333994,
+     "rotation_deg": 0.0,
+     "tx": -222.89956143852805,
+     "ty": 290.40732877617796
+    },
+    {
+     "comp_frame": 199,
+     "scale": 0.5854312627446562,
+     "rotation_deg": 0.0,
+     "tx": -223.23233344139464,
+     "ty": 290.4085563482725
+    },
+    {
+     "comp_frame": 210,
+     "scale": 0.5854770913700537,
+     "rotation_deg": 0.0,
+     "tx": -228.62928425094304,
+     "ty": 290.4213689971452
+    },
+    {
+     "comp_frame": 217,
+     "scale": 0.5855642326154793,
+     "rotation_deg": 0.0,
+     "tx": -237.78508617481788,
+     "ty": 290.37470103429587
+    },
+    {
+     "comp_frame": 220,
+     "scale": 0.5854539229548834,
+     "rotation_deg": 0.0,
+     "tx": -235.6374628604915,
+     "ty": 290.42090125747393
+    },
+    {
+     "comp_frame": 226,
+     "scale": 0.5856319539066915,
+     "rotation_deg": 0.0,
+     "tx": -216.96098549308232,
+     "ty": 290.2962714986793
+    },
+    {
+     "comp_frame": 229,
+     "scale": 0.5854508895866668,
+     "rotation_deg": 0.0,
+     "tx": -211.70154828164317,
+     "ty": 290.34776943198074
+    },
+    {
+     "comp_frame": 247,
+     "scale": 0.5854869903490352,
+     "rotation_deg": 0.0,
+     "tx": -233.58397131696495,
+     "ty": 290.3964583980771
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 4.824,
+    "corr": 0.9957,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 11.057,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 13.3575,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9908,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    79.282033333,
+    79.312566667
+   ],
+   "raw_in_interval_both": [
+    79.282033333,
+    79.295883333
+   ],
+   "time_line": 169,
+   "color": null,
+   "label": "",
+   "notes": "cut at 200 removed: no frame changes (confounded, lines_meet); cut at 221 removed: no frame changes (criterion2_oscillation, lines_meet); time line shared with segment(s) [249,255) (one phase solve); time/translation confounded frames 175-178, 187-194, 196-204, 208-211, 229-247 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 3 sample(s) off the local trend of their neighbours left out (169-170, 219); animated framing: 13 keys, scale 0.5853->0.5857, easing ease_out; edge framing not measured on frames 248 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 7,
+   "type": "raw",
+   "comp_in": 249,
+   "comp_out": 255,
+   "raw_in_frame": 2456,
+   "raw_in_seconds": 81.9618575,
+   "raw_out_frame": 2461,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.8007995996,
+    1.2012004003999999
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5855583579705467,
+    "rotation_deg": 0.0,
+    "tx": -243.81400613407732,
+    "ty": 290.40009219268285
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 251,
+     "scale": 0.5855583579705467,
+     "rotation_deg": 0.0,
+     "tx": -243.81400613407732,
+     "ty": 290.40009219268285
+    },
+    {
+     "comp_frame": 254,
+     "scale": 0.5855668771212584,
+     "rotation_deg": 0.0,
+     "tx": -247.78805183032904,
+     "ty": 290.44656787033335
+    }
+   ],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 4.826,
+    "corr": 0.9899,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 11.058,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 13.1575,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9915,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    81.9487,
+    81.979233333
+   ],
+   "raw_in_interval_both": [
+    81.9487,
+    81.96255
+   ],
+   "time_line": 169,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [169,249) (one phase solve); animated framing: 2 keys, scale 0.5855->0.5856, easing linear; edge framing not measured on frames 249-250 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 8,
+   "type": "raw",
+   "comp_in": 255,
+   "comp_out": 271,
+   "raw_in_frame": 2482,
+   "raw_in_seconds": 82.817375834,
+   "raw_out_frame": 2497,
+   "speed": 1.0,
+   "speed_measured": 1.0224500166047408,
+   "speed_range": [
+    0.9342665332,
+    1.072500143
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.585512920718973,
+    "rotation_deg": 0.0,
+    "tx": -250.04894567638536,
+    "ty": 290.37927903959326
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 255,
+     "scale": 0.585512920718973,
+     "rotation_deg": 0.0,
+     "tx": -250.04894567638536,
+     "ty": 290.37927903959326
+    },
+    {
+     "comp_frame": 265,
+     "scale": 0.5854563281339971,
+     "rotation_deg": 0.0,
+     "tx": -202.13178511435189,
+     "ty": 290.34035697531635
+    },
+    {
+     "comp_frame": 270,
+     "scale": 0.5855035200935508,
+     "rotation_deg": 0.0,
+     "tx": -210.32256404737853,
+     "ty": 290.26981298350495
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.693,
+    "corr": 0.9925,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": -7.975,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 0.809167,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9601,
+   "ambiguous_frames": [
+    255
+   ],
+   "raw_in_interval": [
+    82.816566667,
+    82.849433333
+   ],
+   "raw_in_interval_both": [
+    82.816566667,
+    82.832916667
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 255-259 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.5854->0.5855, easing ease_out",
+   "evidence": []
+  },
+  {
+   "id": 9,
+   "type": "raw",
+   "comp_in": 271,
+   "comp_out": 272,
+   "raw_in_frame": 2506,
+   "raw_in_seconds": 83.625208333,
+   "raw_out_frame": 2506,
+   "speed": 1.0,
+   "speed_measured": null,
+   "speed_range": [
+    -8.0,
+    8.0
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5836780597018764,
+    "rotation_deg": 0.0,
+    "tx": -218.30605326507595,
+    "ty": 291.7488498531189
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": "too_short",
+    "phase_source": "video",
+    "lag_ms_video": null,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    271
+   ],
+   "ae_margin_ms": 8.341666,
+   "region": 0,
+   "box": null,
+   "confidence": 0.2402,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    83.616866667,
+    83.650233333
+   ],
+   "raw_in_interval_both": [
+    83.616866667,
+    83.650233333
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 271 (RAW m+-1 with its own framing scores within noise: soft range m+-1)",
+   "evidence": []
+  },
+  {
+   "id": 10,
+   "type": "raw",
+   "comp_in": 272,
+   "comp_out": 303,
+   "raw_in_frame": 2510,
+   "raw_in_seconds": 83.7662325,
+   "raw_out_frame": 2540,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9676332666,
+    1.0343667333999997
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5853891928112621,
+    "rotation_deg": 0.0,
+    "tx": -226.47247478144936,
+    "ty": 290.29701230853874
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 273,
+     "scale": 0.5853891928112621,
+     "rotation_deg": 0.0,
+     "tx": -226.47247478144936,
+     "ty": 290.29701230853874
+    },
+    {
+     "comp_frame": 286,
+     "scale": 0.5854126601528097,
+     "rotation_deg": 0.0,
+     "tx": -218.1271112077784,
+     "ty": 290.41009326815924
+    },
+    {
+     "comp_frame": 290,
+     "scale": 0.5854043579252306,
+     "rotation_deg": 0.0,
+     "tx": -216.58486368162158,
+     "ty": 290.3639416871892
+    },
+    {
+     "comp_frame": 302,
+     "scale": 0.5855311858343671,
+     "rotation_deg": 0.0,
+     "tx": -235.8060909450968,
+     "ty": 290.44627170034494
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 0.449,
+    "corr": 0.9933,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 7.507,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    288
+   ],
+   "ae_margin_ms": 14.899167,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9591,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    83.751333333,
+    83.7837
+   ],
+   "raw_in_interval_both": [
+    83.751333333,
+    83.767016667
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 273-277 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 1 sample(s) off the local trend of their neighbours left out (272); animated framing: 4 keys, scale 0.5852->0.5857, easing ease_in",
+   "evidence": []
+  },
+  {
+   "id": 11,
+   "type": "raw",
+   "comp_in": 303,
+   "comp_out": 382,
+   "raw_in_frame": 2554,
+   "raw_in_seconds": 85.228108333,
+   "raw_out_frame": 2632,
+   "speed": 1.0,
+   "speed_measured": 1.0017500000000295,
+   "speed_range": [
+    0.9881666410000001,
+    1.0138333589999997
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5856069359541847,
+    "rotation_deg": 0.0,
+    "tx": -227.88650078458477,
+    "ty": 290.30448231379506
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 306,
+     "scale": 0.5856069359541847,
+     "rotation_deg": 0.0,
+     "tx": -227.88650078458477,
+     "ty": 290.30448231379506
+    },
+    {
+     "comp_frame": 310,
+     "scale": 0.5855333315851604,
+     "rotation_deg": 0.0,
+     "tx": -213.81111972197533,
+     "ty": 290.3131372579693
+    },
+    {
+     "comp_frame": 319,
+     "scale": 0.5854652408979496,
+     "rotation_deg": 0.0,
+     "tx": -202.08805860140922,
+     "ty": 290.2482972699254
+    },
+    {
+     "comp_frame": 334,
+     "scale": 0.585512081848572,
+     "rotation_deg": 0.0,
+     "tx": -218.8533010266989,
+     "ty": 290.2823852186658
+    },
+    {
+     "comp_frame": 341,
+     "scale": 0.5854606615052061,
+     "rotation_deg": 0.0,
+     "tx": -222.5277759477629,
+     "ty": 290.34258034529444
+    },
+    {
+     "comp_frame": 351,
+     "scale": 0.585610308277863,
+     "rotation_deg": 0.0,
+     "tx": -236.22910322510762,
+     "ty": 290.32300098416823
+    },
+    {
+     "comp_frame": 354,
+     "scale": 0.5854433961863404,
+     "rotation_deg": 0.0,
+     "tx": -233.77388626724223,
+     "ty": 290.3758480250293
+    },
+    {
+     "comp_frame": 359,
+     "scale": 0.5854394552527962,
+     "rotation_deg": 0.0,
+     "tx": -218.9731769815137,
+     "ty": 290.3680442780579
+    },
+    {
+     "comp_frame": 362,
+     "scale": 0.5854833469330011,
+     "rotation_deg": 0.0,
+     "tx": -215.88555944122277,
+     "ty": 290.28855458783596
+    },
+    {
+     "comp_frame": 366,
+     "scale": 0.5854638667552283,
+     "rotation_deg": 0.0,
+     "tx": -218.14574094674725,
+     "ty": 290.36903349062015
+    },
+    {
+     "comp_frame": 374,
+     "scale": 0.5854614744316229,
+     "rotation_deg": 0.0,
+     "tx": -231.06604962960216,
+     "ty": 290.4109017957291
+    },
+    {
+     "comp_frame": 381,
+     "scale": 0.5854684430485207,
+     "rotation_deg": 0.0,
+     "tx": -228.17077244691467,
+     "ty": 290.3922728077768
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 21.907,
+    "corr": 0.9838,
+    "exception": null,
+    "phase_source": "video",
+    "lag_ms_video": 21.907,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    303,
+    380
+   ],
+   "ae_margin_ms": 7.041666,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9661,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    85.221066667,
+    85.251833333
+   ],
+   "raw_in_interval_both": [
+    85.221066667,
+    85.23515
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "cut at 305 removed: no frame changes (lines_meet); cut at 354 removed: no frame changes (confounded, lines_meet); time/translation confounded frames 351-352, 373-378, 380-381 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 2 sample(s) off the local trend of their neighbours left out (303-304); animated framing: 12 keys, scale 0.5854->0.5857, easing ease_out; framing measured again on frames 303 (RAW frame differs from refine's, or after a framing step); frames shown from the segment model instead of refine's best measurement: model 303",
+   "evidence": []
+  },
+  {
+   "id": 12,
+   "type": "raw",
+   "comp_in": 382,
+   "comp_out": 386,
+   "raw_in_frame": 2648,
+   "raw_in_seconds": 88.363525,
+   "raw_out_frame": 2651,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.667332666,
+    1.334667334
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.585445670242335,
+    "rotation_deg": 0.0,
+    "tx": -228.8470759286057,
+    "ty": 290.35450312156485
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": "too_short",
+    "phase_source": "video",
+    "lag_ms_video": null,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 8.491667,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9908,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    88.355433333,
+    88.3883
+   ],
+   "raw_in_interval_both": [
+    88.355433333,
+    88.371616667
+   ],
+   "time_line": 382,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [386,398) (one phase solve)",
+   "evidence": []
+  },
+  {
+   "id": 13,
+   "type": "raw",
+   "comp_in": 386,
+   "comp_out": 398,
+   "raw_in_frame": 2652,
+   "raw_in_seconds": 88.496858334,
+   "raw_out_frame": 2663,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.909999818,
+    1.0920001819999998
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854153418642656,
+    "rotation_deg": 0.0,
+    "tx": -223.0290640358436,
+    "ty": 290.44565009670555
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 388,
+     "scale": 0.5854153418642656,
+     "rotation_deg": 0.0,
+     "tx": -223.0290640358436,
+     "ty": 290.44565009670555
+    },
+    {
+     "comp_frame": 392,
+     "scale": 0.5854093686284167,
+     "rotation_deg": 0.0,
+     "tx": -220.89392970627227,
+     "ty": 290.44052639805017
+    },
+    {
+     "comp_frame": 396,
+     "scale": 0.5855132977549343,
+     "rotation_deg": 0.0,
+     "tx": -227.00715034166916,
+     "ty": 290.3992908505348
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 19.824,
+    "corr": 0.995,
+    "exception": "too_short",
+    "phase_source": "video",
+    "lag_ms_video": 19.824,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    397
+   ],
+   "ae_margin_ms": 8.091667,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9052,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    88.488766667,
+    88.521633333
+   ],
+   "raw_in_interval_both": [
+    88.488766667,
+    88.50495
+   ],
+   "time_line": 382,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [382,386) (one phase solve); time/translation confounded frames 387-395 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.5854->0.5855, easing ease_in; edge framing not measured on frames 386-387, 397 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 14,
+   "type": "raw",
+   "comp_in": 398,
+   "comp_out": 413,
+   "raw_in_frame": 2675,
+   "raw_in_seconds": 89.266683333,
+   "raw_out_frame": 2689,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9294998569999999,
+    1.072500143
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854361764223812,
+    "rotation_deg": 0.0,
+    "tx": -241.99734431401612,
+    "ty": 290.41392354618046
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 398,
+     "scale": 0.5854361764223812,
+     "rotation_deg": 0.0,
+     "tx": -241.99734431401612,
+     "ty": 290.41392354618046
+    },
+    {
+     "comp_frame": 404,
+     "scale": 0.5853352101525834,
+     "rotation_deg": 0.0,
+     "tx": -262.2990343016132,
+     "ty": 290.485910974406
+    },
+    {
+     "comp_frame": 411,
+     "scale": 0.5853997472391385,
+     "rotation_deg": 0.0,
+     "tx": -268.24028073158865,
+     "ty": 290.3988320870432
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.0,
+    "corr": 0.9886,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 2.275,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 10.383333,
+   "region": 0,
+   "box": null,
+   "confidence": 0.99,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    89.2563,
+    89.2892
+   ],
+   "raw_in_interval_both": [
+    89.2563,
+    89.272516667
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 400-408 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.5853->0.5855, easing ease_out; edge framing not measured on frames 412 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 15,
+   "type": "raw",
+   "comp_in": 413,
+   "comp_out": 414,
+   "raw_in_frame": 2697,
+   "raw_in_seconds": 90.000016,
+   "raw_out_frame": 2697,
+   "speed": 1.0,
+   "speed_measured": null,
+   "speed_range": [
+    -8.0,
+    8.0
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5853193030646009,
+    "rotation_deg": 0.0,
+    "tx": -259.98056706184997,
+    "ty": 290.41308978711396
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": "too_short",
+    "phase_source": "audio",
+    "lag_ms_video": null,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 10.116,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9911,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    89.990966667,
+    90.023266667
+   ],
+   "raw_in_interval_both": [
+    89.990966667,
+    90.006583333
+   ],
+   "time_line": 413,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [414,446) (one phase solve); no measured framing inside the segment: frame 413's used",
+   "evidence": []
+  },
+  {
+   "id": 16,
+   "type": "raw",
+   "comp_in": 414,
+   "comp_out": 446,
+   "raw_in_frame": 2698,
+   "raw_in_seconds": 90.033349333,
+   "raw_out_frame": 2729,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9687096128387097,
+    1.0332903871612904
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5853551710861333,
+    "rotation_deg": 0.0,
+    "tx": -255.73787544476818,
+    "ty": 290.39317979698353
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 414,
+     "scale": 0.5853551710861333,
+     "rotation_deg": 0.0,
+     "tx": -255.73787544476818,
+     "ty": 290.39317979698353
+    },
+    {
+     "comp_frame": 419,
+     "scale": 0.5854793785328322,
+     "rotation_deg": 0.0,
+     "tx": -248.86427484570777,
+     "ty": 290.3895943404198
+    },
+    {
+     "comp_frame": 428,
+     "scale": 0.5854791138928948,
+     "rotation_deg": 0.0,
+     "tx": -250.68752402570613,
+     "ty": 290.3792581102553
+    },
+    {
+     "comp_frame": 445,
+     "scale": 0.5854422771783716,
+     "rotation_deg": 0.0,
+     "tx": -265.42827148247136,
+     "ty": 290.4588969023068
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.0,
+    "corr": 0.9905,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": 1.241,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    428,
+    429,
+    433
+   ],
+   "ae_margin_ms": 9.049333,
+   "region": 0,
+   "box": null,
+   "confidence": 0.8144,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    90.0243,
+    90.0566
+   ],
+   "raw_in_interval_both": [
+    90.0243,
+    90.039916667
+   ],
+   "time_line": 413,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [413,414) (one phase solve); time/translation confounded frames 419-423, 426-434 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 4 keys, scale 0.5854->0.5857, easing ease_in",
+   "evidence": []
+  },
+  {
+   "id": 17,
+   "type": "raw",
+   "comp_in": 446,
+   "comp_out": 447,
+   "raw_in_frame": 2747,
+   "raw_in_seconds": 91.666575,
+   "raw_out_frame": 2747,
+   "speed": 1.0,
+   "speed_measured": null,
+   "speed_range": [
+    -8.0,
+    8.0
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.588850431114551,
+    "rotation_deg": 0.0,
+    "tx": -273.7089128604,
+    "ty": 292.85672586389825
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": "too_short",
+    "phase_source": "video",
+    "lag_ms_video": null,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    446
+   ],
+   "ae_margin_ms": 8.341667,
+   "region": 0,
+   "box": null,
+   "confidence": 0.2279,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    91.658233333,
+    91.6916
+   ],
+   "raw_in_interval_both": [
+    91.658233333,
+    91.674916667
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "",
+   "evidence": []
+  },
+  {
+   "id": 18,
+   "type": "raw",
+   "comp_in": 447,
+   "comp_out": 463,
+   "raw_in_frame": 2750,
+   "raw_in_seconds": 91.766681603,
+   "raw_out_frame": 2765,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9342665332,
+    1.0677334667999998
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5854415755798023,
+    "rotation_deg": 0.0,
+    "tx": -262.8995647260665,
+    "ty": 290.4301593095307
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 448,
+     "scale": 0.5854415755798023,
+     "rotation_deg": 0.0,
+     "tx": -262.8995647260665,
+     "ty": 290.4301593095307
+    },
+    {
+     "comp_frame": 452,
+     "scale": 0.5854404578183392,
+     "rotation_deg": 0.0,
+     "tx": -236.79657952548263,
+     "ty": 290.4401955956409
+    },
+    {
+     "comp_frame": 455,
+     "scale": 0.5854141568996921,
+     "rotation_deg": 0.0,
+     "tx": -222.54255446684283,
+     "ty": 290.46797637759926
+    },
+    {
+     "comp_frame": 462,
+     "scale": 0.5854471415309684,
+     "rotation_deg": 0.0,
+     "tx": -227.07582809578838,
+     "ty": 290.3791496694182
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 0.001,
+    "corr": 0.9906,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": -0.692,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 7.84827,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9897,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    91.759733333,
+    91.7917
+   ],
+   "raw_in_interval_both": [
+    91.759733333,
+    91.775016667
+   ],
+   "time_line": 447,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [463,479), [479,490) (one phase solve); time/translation confounded frames 453-454, 457-462 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 1 sample(s) off the local trend of their neighbours left out (447); animated framing: 4 keys, scale 0.5854->0.5855, easing ease_out",
+   "evidence": []
+  },
+  {
+   "id": 19,
+   "type": "raw",
+   "comp_in": 463,
+   "comp_out": 479,
+   "raw_in_frame": 2766,
+   "raw_in_seconds": 92.300014936,
+   "raw_out_frame": 2781,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9342665332,
+    1.0677334667999998
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5855114268302829,
+    "rotation_deg": 0.0,
+    "tx": -236.8446138855562,
+    "ty": 290.4288337576382
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 465,
+     "scale": 0.5855114268302829,
+     "rotation_deg": 0.0,
+     "tx": -236.8446138855562,
+     "ty": 290.4288337576382
+    },
+    {
+     "comp_frame": 472,
+     "scale": 0.5855892043949154,
+     "rotation_deg": 0.0,
+     "tx": -254.16975476556792,
+     "ty": 290.29699601512004
+    },
+    {
+     "comp_frame": 478,
+     "scale": 0.5855543529050693,
+     "rotation_deg": 0.0,
+     "tx": -259.6258329274781,
+     "ty": 290.3393910479766
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.002,
+    "corr": 0.9941,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": -0.695,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 7.314936,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9912,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    92.293066667,
+    92.325033333
+   ],
+   "raw_in_interval_both": [
+    92.293066667,
+    92.30835
+   ],
+   "time_line": 447,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [447,463), [479,490) (one phase solve); time/translation confounded frames 463-465 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.5855->0.5856, easing ease_out; edge framing not measured on frames 463-464 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 20,
+   "type": "raw",
+   "comp_in": 479,
+   "comp_out": 490,
+   "raw_in_frame": 2782,
+   "raw_in_seconds": 92.833348269,
+   "raw_out_frame": 2792,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9008997998,
+    1.1011002001999999
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.5855444898507862,
+    "rotation_deg": 0.0,
+    "tx": -256.68382668831407,
+    "ty": 290.3295774986544
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 481,
+     "scale": 0.5855444898507862,
+     "rotation_deg": 0.0,
+     "tx": -256.68382668831407,
+     "ty": 290.3295774986544
+    },
+    {
+     "comp_frame": 484,
+     "scale": 0.5854357798324998,
+     "rotation_deg": 0.0,
+     "tx": -257.25335434745415,
+     "ty": 290.4466717381545
+    },
+    {
+     "comp_frame": 489,
+     "scale": 0.5855173662881856,
+     "rotation_deg": 0.0,
+     "tx": -263.47299232542485,
+     "ty": 290.4239886730242
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.0,
+    "corr": 0.907,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": -0.693,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 6.948269,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9907,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    92.8264,
+    92.858366667
+   ],
+   "raw_in_interval_both": [
+    92.8264,
+    92.841683333
+   ],
+   "time_line": 447,
+   "color": null,
+   "label": "",
+   "notes": "time line shared with segment(s) [447,463), [463,479) (one phase solve); time/translation confounded frames 480-481, 483-486 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.5854->0.5856, easing ease_in; edge framing not measured on frames 479-480 (the edge key is held there)",
+   "evidence": []
+  },
+  {
+   "id": 21,
+   "type": "raw",
+   "comp_in": 490,
+   "comp_out": 515,
+   "raw_in_frame": 2960,
+   "raw_in_seconds": 98.766116667,
+   "raw_out_frame": 2983,
+   "speed": 1.0,
+   "speed_measured": 0.9843159557001091,
+   "speed_range": [
+    0.957478173826087,
+    1.0010000834166666
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.744777034951172,
+    "rotation_deg": 0.0,
+    "tx": -18.48526004009892,
+    "ty": 204.42398837003213
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 490,
+     "scale": 0.744777034951172,
+     "rotation_deg": 0.0,
+     "tx": -18.48526004009892,
+     "ty": 204.42398837003213
+    },
+    {
+     "comp_frame": 496,
+     "scale": 0.7447857120077037,
+     "rotation_deg": 0.0,
+     "tx": -25.89631036440403,
+     "ty": 204.3873380011517
+    },
+    {
+     "comp_frame": 506,
+     "scale": 0.7445956955964839,
+     "rotation_deg": 0.0,
+     "tx": -57.05476672968206,
+     "ty": 204.3695190123804
+    },
+    {
+     "comp_frame": 512,
+     "scale": 0.7445557604756188,
+     "rotation_deg": 0.0,
+     "tx": -62.33667207407569,
+     "ty": 204.38043351368185
+    }
+   ],
+   "easing": "ease_in_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": 17.232,
+    "corr": 0.9911,
+    "exception": null,
+    "phase_source": "video",
+    "lag_ms_video": 17.232,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    490,
+    491,
+    510,
+    511,
+    512
+   ],
+   "ae_margin_ms": 0.016666,
+   "region": 0,
+   "box": null,
+   "confidence": 0.7916,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    98.7661,
+    98.766133333
+   ],
+   "raw_in_interval_both": [
+    98.7661,
+    98.766133333
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 490-497, 499-501, 507-514 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 2 sample(s) off the local trend of their neighbours left out (513-514); animated framing: 4 keys, scale 0.7445->0.7448, easing ease_in_out; framing measured again on frames 491 (RAW frame differs from refine's, or after a framing step); frames shown from the segment model instead of refine's best measurement: model 491",
+   "evidence": []
+  },
+  {
+   "id": 22,
+   "type": "raw",
+   "comp_in": 515,
+   "comp_out": 516,
+   "raw_in_frame": 2984,
+   "raw_in_seconds": 99.59945,
+   "raw_out_frame": 2984,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.7445557604756188,
+    "rotation_deg": 0.0,
+    "tx": -62.33667207407569,
+    "ty": 204.38043351368185
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "an uncertain match",
+     "line": "S21 keeps playing",
+     "ranges": [
+      [
+       515,
+       516,
+       22,
+       "keeps playing (short)"
+      ]
+     ],
+     "how": "keeps playing (short)"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.7916,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    99.59943333333332,
+    99.59946666633333
+   ],
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S22",
+   "notes": "--premiere: the competitor showed an uncertain match here for 1 frame(s), too short to check its audio; S21 keeps playing",
+   "evidence": []
+  },
+  {
+   "id": 23,
+   "type": "raw",
+   "comp_in": 516,
+   "comp_out": 542,
+   "raw_in_frame": 2997,
+   "raw_in_seconds": 100.000016667,
+   "raw_out_frame": 3021,
+   "speed": 1.0,
+   "speed_measured": 0.9761675003738635,
+   "speed_range": [
+    0.953333238,
+    1.0010000800799999
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.7447237158935112,
+    "rotation_deg": 0.0,
+    "tx": -32.92034727977449,
+    "ty": 204.3906896025557
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 518,
+     "scale": 0.7447237158935112,
+     "rotation_deg": 0.0,
+     "tx": -32.92034727977449,
+     "ty": 204.3906896025557
+    },
+    {
+     "comp_frame": 521,
+     "scale": 0.7446877900944929,
+     "rotation_deg": 0.0,
+     "tx": -31.159577774838624,
+     "ty": 204.4601274730856
+    },
+    {
+     "comp_frame": 524,
+     "scale": 0.7447108815527788,
+     "rotation_deg": 0.0,
+     "tx": -37.12546134234026,
+     "ty": 204.42180725901477
+    },
+    {
+     "comp_frame": 540,
+     "scale": 0.7444376882803073,
+     "rotation_deg": 0.0,
+     "tx": -87.26115848320671,
+     "ty": 204.40556427686016
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.0,
+    "corr": 0.9757,
+    "exception": null,
+    "phase_source": "audio",
+    "lag_ms_video": -0.0,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": 0.016666,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9547,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    100.0,
+    100.000033333
+   ],
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 516-520 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 3 sample(s) off the local trend of their neighbours left out (516-517, 541); animated framing: 4 keys, scale 0.7445->0.7448, easing ease_in; framing measured again on frames 541 (RAW frame differs from refine's, or after a framing step); frames shown from the segment model instead of refine's best measurement: tiny_segment_merged 541",
+   "evidence": []
+  },
+  {
+   "id": 24,
+   "type": "raw",
+   "comp_in": 542,
+   "comp_out": 544,
+   "raw_in_frame": 3022,
+   "raw_in_seconds": 100.866683334,
+   "raw_out_frame": 3023,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.7444376882803073,
+    "rotation_deg": 0.0,
+    "tx": -87.26115848320671,
+    "ty": 204.40556427686016
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": null,
+    "corr": null,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "an uncertain match",
+     "line": "S23 keeps playing",
+     "ranges": [
+      [
+       542,
+       544,
+       24,
+       "keeps playing (short)"
+      ]
+     ],
+     "how": "keeps playing (short)"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9547,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    100.86666666666666,
+    100.86669999966666
+   ],
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S24",
+   "notes": "--premiere: the competitor showed an uncertain match here for 2 frame(s), too short to check its audio; S23 keeps playing",
+   "evidence": []
+  },
+  {
+   "id": 25,
+   "type": "raw",
+   "comp_in": 544,
+   "comp_out": 596,
+   "raw_in_frame": 3046,
+   "raw_in_seconds": 101.634916667,
+   "raw_out_frame": 3096,
+   "speed": 1.0,
+   "speed_measured": 0.9972507563020914,
+   "speed_range": [
+    0.9805713877142856,
+    1.0010000392549019
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.7446323842054956,
+    "rotation_deg": 0.0,
+    "tx": -59.18111864842405,
+    "ty": 204.4605425548387
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 546,
+     "scale": 0.7446323842054956,
+     "rotation_deg": 0.0,
+     "tx": -59.18111864842405,
+     "ty": 204.4605425548387
+    },
+    {
+     "comp_frame": 550,
+     "scale": 0.7446791497791961,
+     "rotation_deg": 0.0,
+     "tx": -58.19077721332087,
+     "ty": 204.3830825552206
+    },
+    {
+     "comp_frame": 555,
+     "scale": 0.7445965642286965,
+     "rotation_deg": 0.0,
+     "tx": -59.2768081630083,
+     "ty": 204.4328768318377
+    },
+    {
+     "comp_frame": 558,
+     "scale": 0.7445564200366546,
+     "rotation_deg": 0.0,
+     "tx": -63.120696656098175,
+     "ty": 204.41259509579862
+    },
+    {
+     "comp_frame": 565,
+     "scale": 0.7445569998548591,
+     "rotation_deg": 0.0,
+     "tx": -77.54857201176463,
+     "ty": 204.36171354207
+    },
+    {
+     "comp_frame": 569,
+     "scale": 0.7445764012425607,
+     "rotation_deg": 0.0,
+     "tx": -80.53372715819773,
+     "ty": 204.39822266372892
+    },
+    {
+     "comp_frame": 573,
+     "scale": 0.7445309654438423,
+     "rotation_deg": 0.0,
+     "tx": -77.86984326558093,
+     "ty": 204.3794594991823
+    },
+    {
+     "comp_frame": 583,
+     "scale": 0.7445489308205542,
+     "rotation_deg": 0.0,
+     "tx": -65.90329592004423,
+     "ty": 204.40261105504624
+    },
+    {
+     "comp_frame": 595,
+     "scale": 0.7446193802583109,
+     "rotation_deg": 0.0,
+     "tx": -63.673223532588395,
+     "ty": 204.4238852450394
+    }
+   ],
+   "easing": "ease_out",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -39.567,
+    "corr": 0.9776,
+    "exception": null,
+    "phase_source": "video",
+    "lag_ms_video": -39.567,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    544,
+    545
+   ],
+   "ae_margin_ms": 0.016666,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9541,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    101.6349,
+    101.634933333
+   ],
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 544-545, 547-553 (RAW m+-1 with its own framing scores within noise: soft range m+-1); framing: 2 sample(s) off the local trend of their neighbours left out (544-545); animated framing: 9 keys, scale 0.7445->0.7447, easing ease_out; framing measured again on frames 544-545 (RAW frame differs from refine's, or after a framing step); frames shown from the segment model instead of refine's best measurement: tiny_segment_merged 544, model 545",
+   "evidence": []
+  },
+  {
+   "id": 26,
+   "type": "raw",
+   "comp_in": 596,
+   "comp_out": 669,
+   "raw_in_frame": 3095,
+   "raw_in_seconds": 103.274781098,
+   "raw_out_frame": 3167,
+   "speed": 1.0,
+   "speed_measured": 1.0,
+   "speed_range": null,
+   "flip_h": false,
+   "transform": {
+    "scale": 0.7446193802583109,
+    "rotation_deg": 0.0,
+    "tx": -63.673223532588395,
+    "ty": 204.4238852450394
+   },
+   "transform_keys": [],
+   "easing": "linear",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -0.006,
+    "corr": 0.9796,
+    "exception": null,
+    "line": null,
+    "broll": {
+     "replaced": "NOT-IN-RAW",
+     "line": "audio found at RAW 103.275s",
+     "ranges": [
+      [
+       596,
+       669,
+       26,
+       "audio"
+      ]
+     ],
+     "how": "audio"
+    }
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [],
+   "ae_margin_ms": null,
+   "region": 0,
+   "box": null,
+   "confidence": 0.9541,
+   "ambiguous_frames": [],
+   "raw_in_interval": null,
+   "raw_in_interval_both": null,
+   "time_line": null,
+   "color": null,
+   "label": "B-ROLL REPLACED S26",
+   "notes": "--no-broll: the competitor showed NOT-IN-RAW here over the main clip's continuing RAW audio (audio found at RAW 103.275s); the main clip plays through",
+   "evidence": []
+  },
+  {
+   "id": 27,
+   "type": "raw",
+   "comp_in": 669,
+   "comp_out": 700,
+   "raw_in_frame": 3170,
+   "raw_in_seconds": 105.781175,
+   "raw_out_frame": 3200,
+   "speed": 1.0,
+   "speed_measured": 1.001,
+   "speed_range": [
+    0.9676332666,
+    1.0343667333999997
+   ],
+   "flip_h": false,
+   "transform": {
+    "scale": 0.744622344518066,
+    "rotation_deg": 0.0,
+    "tx": -64.82704397133455,
+    "ty": 204.44337645914737
+   },
+   "transform_keys": [
+    {
+     "comp_frame": 669,
+     "scale": 0.744622344518066,
+     "rotation_deg": 0.0,
+     "tx": -64.82704397133455,
+     "ty": 204.44337645914737
+    },
+    {
+     "comp_frame": 682,
+     "scale": 0.7446033854971454,
+     "rotation_deg": 0.0,
+     "tx": -64.38971619951911,
+     "ty": 204.45153842463526
+    },
+    {
+     "comp_frame": 699,
+     "scale": 0.7445241860971191,
+     "rotation_deg": 0.0,
+     "tx": -68.55649252674675,
+     "ty": 204.4520406507819
+    }
+   ],
+   "easing": "ease_in",
+   "time_remap_keys": [],
+   "transition_in": null,
+   "transition_out": null,
+   "audio": {
+    "in_offset_frames": 0,
+    "out_offset_frames": 0,
+    "pitch_preserved": null,
+    "lag_ms": -19.16,
+    "corr": 0.982,
+    "exception": null,
+    "phase_source": "video",
+    "lag_ms_video": -19.16,
+    "line": null
+   },
+   "time_mode": "stretch",
+   "retime": "none",
+   "uncertain": false,
+   "unsnapped": false,
+   "cut_ambiguity": null,
+   "tie_frames": [],
+   "low_margin_frames": [
+    670,
+    671,
+    672,
+    673,
+    674,
+    675,
+    676,
+    677,
+    678,
+    679,
+    680,
+    681,
+    682,
+    686,
+    692,
+    693,
+    694,
+    695,
+    696,
+    697,
+    698,
+    699
+   ],
+   "ae_margin_ms": 7.841667,
+   "region": 0,
+   "box": null,
+   "confidence": 0.2792,
+   "ambiguous_frames": [],
+   "raw_in_interval": [
+    105.773333333,
+    105.8057
+   ],
+   "raw_in_interval_both": [
+    105.773333333,
+    105.789016667
+   ],
+   "time_line": null,
+   "color": null,
+   "label": "",
+   "notes": "time/translation confounded frames 670-682, 692-699 (RAW m+-1 with its own framing scores within noise: soft range m+-1); animated framing: 3 keys, scale 0.7445->0.7447, easing ease_in",
+   "evidence": []
+  }
+ ],
+ "overlays_detected": [
+  {
+   "type": "other",
+   "comp_in": 0,
+   "comp_out": 700,
+   "x": 246.0,
+   "y": 96.0,
+   "w": 218.0,
+   "h": 54.0,
+   "static": true,
+   "text": "",
+   "notes": "multicolour; text above the box; colours #fafafa 61%, #8b8b8a 11%, #2c92f4 8%"
+  },
+  {
+   "type": "title",
+   "comp_in": 0,
+   "comp_out": 700,
+   "x": 26.0,
+   "y": 76.0,
+   "w": 554.0,
+   "h": 222.0,
+   "static": true,
+   "text": "",
+   "notes": "multicolour; text block above the box; colours #fcfcfc 30%, #fcf502 16%, #02fefd 11%, #77fe00 9%"
+  },
+  {
+   "type": "captions",
+   "comp_in": 1,
+   "comp_out": 700,
+   "x": 32.0,
+   "y": 696.0,
+   "w": 434.0,
+   "h": 64.0,
+   "static": false,
+   "text": "",
+   "notes": "47 caption events; white text with dark outline, median glyph height 26 px"
+  },
+  {
+   "type": "captions",
+   "comp_in": 1,
+   "comp_out": 9,
+   "x": 316.0,
+   "y": 706.0,
+   "w": 88.0,
+   "h": 42.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 12,
+   "comp_out": 15,
+   "x": 166.0,
+   "y": 706.0,
+   "w": 70.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 14,
+   "comp_out": 31,
+   "x": 350.0,
+   "y": 714.0,
+   "w": 90.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 15,
+   "comp_out": 31,
+   "x": 168.0,
+   "y": 706.0,
+   "w": 70.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 36,
+   "comp_out": 52,
+   "x": 186.0,
+   "y": 696.0,
+   "w": 236.0,
+   "h": 44.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 68,
+   "comp_out": 74,
+   "x": 250.0,
+   "y": 706.0,
+   "w": 110.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 78,
+   "comp_out": 113,
+   "x": 32.0,
+   "y": 706.0,
+   "w": 392.0,
+   "h": 54.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 115,
+   "comp_out": 122,
+   "x": 188.0,
+   "y": 706.0,
+   "w": 42.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 124,
+   "comp_out": 129,
+   "x": 186.0,
+   "y": 714.0,
+   "w": 60.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 124,
+   "comp_out": 129,
+   "x": 334.0,
+   "y": 714.0,
+   "w": 60.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 132,
+   "comp_out": 140,
+   "x": 180.0,
+   "y": 708.0,
+   "w": 42.0,
+   "h": 32.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 142,
+   "comp_out": 149,
+   "x": 342.0,
+   "y": 714.0,
+   "w": 88.0,
+   "h": 36.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 152,
+   "comp_out": 161,
+   "x": 374.0,
+   "y": 708.0,
+   "w": 44.0,
+   "h": 32.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 162,
+   "comp_out": 167,
+   "x": 352.0,
+   "y": 714.0,
+   "w": 50.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 179,
+   "comp_out": 190,
+   "x": 358.0,
+   "y": 714.0,
+   "w": 60.0,
+   "h": 36.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 203,
+   "comp_out": 210,
+   "x": 156.0,
+   "y": 706.0,
+   "w": 84.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 203,
+   "comp_out": 210,
+   "x": 382.0,
+   "y": 714.0,
+   "w": 70.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 214,
+   "comp_out": 223,
+   "x": 360.0,
+   "y": 708.0,
+   "w": 26.0,
+   "h": 32.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 240,
+   "comp_out": 254,
+   "x": 336.0,
+   "y": 714.0,
+   "w": 52.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 256,
+   "comp_out": 270,
+   "x": 308.0,
+   "y": 706.0,
+   "w": 102.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 304,
+   "comp_out": 315,
+   "x": 184.0,
+   "y": 706.0,
+   "w": 82.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 304,
+   "comp_out": 315,
+   "x": 364.0,
+   "y": 714.0,
+   "w": 60.0,
+   "h": 36.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 349,
+   "comp_out": 357,
+   "x": 188.0,
+   "y": 706.0,
+   "w": 50.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 401,
+   "comp_out": 406,
+   "x": 364.0,
+   "y": 706.0,
+   "w": 56.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 413,
+   "comp_out": 425,
+   "x": 364.0,
+   "y": 714.0,
+   "w": 48.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 434,
+   "comp_out": 439,
+   "x": 352.0,
+   "y": 714.0,
+   "w": 50.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 440,
+   "comp_out": 446,
+   "x": 364.0,
+   "y": 706.0,
+   "w": 16.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 448,
+   "comp_out": 455,
+   "x": 362.0,
+   "y": 708.0,
+   "w": 50.0,
+   "h": 32.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 495,
+   "comp_out": 512,
+   "x": 142.0,
+   "y": 706.0,
+   "w": 134.0,
+   "h": 42.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 495,
+   "comp_out": 512,
+   "x": 396.0,
+   "y": 706.0,
+   "w": 70.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 512,
+   "comp_out": 516,
+   "x": 204.0,
+   "y": 706.0,
+   "w": 66.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 512,
+   "comp_out": 516,
+   "x": 358.0,
+   "y": 714.0,
+   "w": 46.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 517,
+   "comp_out": 523,
+   "x": 216.0,
+   "y": 706.0,
+   "w": 50.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 524,
+   "comp_out": 531,
+   "x": 172.0,
+   "y": 706.0,
+   "w": 104.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 534,
+   "comp_out": 544,
+   "x": 224.0,
+   "y": 706.0,
+   "w": 160.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 546,
+   "comp_out": 551,
+   "x": 188.0,
+   "y": 706.0,
+   "w": 78.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 546,
+   "comp_out": 551,
+   "x": 378.0,
+   "y": 714.0,
+   "w": 42.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 552,
+   "comp_out": 556,
+   "x": 272.0,
+   "y": 706.0,
+   "w": 42.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 558,
+   "comp_out": 564,
+   "x": 176.0,
+   "y": 706.0,
+   "w": 256.0,
+   "h": 42.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 566,
+   "comp_out": 571,
+   "x": 224.0,
+   "y": 714.0,
+   "w": 160.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 572,
+   "comp_out": 577,
+   "x": 240.0,
+   "y": 706.0,
+   "w": 128.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 580,
+   "comp_out": 587,
+   "x": 182.0,
+   "y": 706.0,
+   "w": 242.0,
+   "h": 42.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 591,
+   "comp_out": 594,
+   "x": 172.0,
+   "y": 706.0,
+   "w": 94.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 646,
+   "comp_out": 658,
+   "x": 168.0,
+   "y": 706.0,
+   "w": 270.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 662,
+   "comp_out": 673,
+   "x": 206.0,
+   "y": 706.0,
+   "w": 172.0,
+   "h": 34.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 676,
+   "comp_out": 700,
+   "x": 354.0,
+   "y": 714.0,
+   "w": 44.0,
+   "h": 26.0
+  },
+  {
+   "type": "captions",
+   "comp_in": 677,
+   "comp_out": 700,
+   "x": 212.0,
+   "y": 706.0,
+   "w": 46.0,
+   "h": 34.0
+  }
+ ],
+ "added_audio": [
+  {
+   "type": "music",
+   "comp_in": 0,
+   "comp_out": 143,
+   "level_db": -18.2,
+   "level_dbfs": -35.2
+  },
+  {
+   "type": "sfx",
+   "comp_in": 171,
+   "comp_out": 194,
+   "level_db": -17.7,
+   "level_dbfs": -35.1
+  },
+  {
+   "type": "sfx",
+   "comp_in": 238,
+   "comp_out": 268,
+   "level_db": -17.6,
+   "level_dbfs": -32.9
+  },
+  {
+   "type": "sfx",
+   "comp_in": 285,
+   "comp_out": 303,
+   "level_db": -15.0,
+   "level_dbfs": -32.7
+  },
+  {
+   "type": "music",
+   "comp_in": 322,
+   "comp_out": 382,
+   "level_db": -12.7,
+   "level_dbfs": -33.5
+  },
+  {
+   "type": "music",
+   "comp_in": 400,
+   "comp_out": 463,
+   "level_db": -16.9,
+   "level_dbfs": -35.1
+  },
+  {
+   "type": "music",
+   "comp_in": 481,
+   "comp_out": 534,
+   "level_db": -13.9,
+   "level_dbfs": -33.9
+  },
+  {
+   "type": "music",
+   "comp_in": 562,
+   "comp_out": 700,
+   "level_db": -12.7,
+   "level_dbfs": -31.7
+  }
+ ],
+ "audio": {
+  "status": "ok",
+  "notes": [
+   "L-cut at comp frame 31 (S02|S03): audio trails by 1 frames",
+   "J-cut at comp frame 542 (S23|S24): audio leads by 8 frames",
+   "added music comp frames 0-142 (-18.2 dB re original, -35.2 dBFS)",
+   "added sfx comp frames 171-193 (-17.7 dB re original, -35.1 dBFS)",
+   "added sfx comp frames 238-267 (-17.6 dB re original, -32.9 dBFS)",
+   "added sfx comp frames 285-302 (-15.0 dB re original, -32.7 dBFS)",
+   "added music comp frames 322-381 (-12.7 dB re original, -33.5 dBFS)",
+   "added music comp frames 400-462 (-16.9 dB re original, -35.1 dBFS)",
+   "added music comp frames 481-533 (-13.9 dB re original, -33.9 dBFS)",
+   "added music comp frames 562-699 (-12.7 dB re original, -31.7 dBFS)"
+  ],
+  "cuts": [
+   {
+    "cut": 31,
+    "a": 2,
+    "b": 3,
+    "switch_ms": 78.441,
+    "baseline_ms": null,
+    "switch_frame": 32,
+    "offset_frames": 1,
+    "measured_offset": 1,
+    "mean_margin": 0.3128,
+    "decisive": 0.4821,
+    "sides": [
+     5,
+     5
+    ],
+    "gain": 0.938,
+    "a_model": true,
+    "b_model": false
+   },
+   {
+    "cut": 542,
+    "a": 23,
+    "b": 24,
+    "switch_ms": -276.747,
+    "baseline_ms": null,
+    "switch_frame": 534,
+    "offset_frames": -8,
+    "measured_offset": -8,
+    "mean_margin": 0.3203,
+    "decisive": 0.3681,
+    "sides": [
+     5,
+     5
+    ],
+    "gain": 8.969,
+    "a_model": true,
+    "b_model": false
+   }
+  ],
+  "av_offset": {
+   "status": "measured",
+   "lag_ms": -53.896,
+   "lag_ms_interval": [
+    -54.413,
+    -53.379
+   ],
+   "centre_ms": -53.896,
+   "n_segments": 16,
+   "coverage": 0.787,
+   "coverage_zero": 0.0,
+   "spread_ms": 0.852,
+   "loo_distance_ms": 0.0,
+   "audio_s": 16.1,
+   "reason": "accepted",
+   "text": "competitor audio is 53.9 ms later than its picture, relative to RAW's own A/V sync",
+   "prior": {
+    "accepted": true,
+    "n_windows": 18,
+    "median_ms": -42.838,
+    "mad_ms": 8.781,
+    "interval_ms": [
+     -56.212,
+     -35.414
+    ],
+    "reason": "accepted",
+    "lag_ms": -45.813
+   },
+   "segments": [
+    1,
+    4,
+    6,
+    8,
+    10,
+    11,
+    13,
+    14,
+    16,
+    18,
+    19,
+    20,
+    21,
+    23,
+    25,
+    27
+   ],
+   "switch_baseline_ms": null,
+   "switch_baseline": {
+    "n": 2,
+    "spread_ms": null,
+    "threshold_ms": 16.667,
+    "range_ms": [
+     0.0,
+     53.896
+    ],
+    "tier": null
+   },
+   "sync_mode": "raw"
+  },
+  "analysis_sr": 16000,
+  "competitor_has_audio": true,
+  "raw_has_audio": true,
+  "hint_windows": 90,
+  "hint_windows_confident": 80
+ },
+ "settings": {
+  "layout_mode": "match",
+  "comp_size": "competitor",
+  "main_size": [
+   608,
+   1080
+  ],
+  "fps_mode": "competitor",
+  "main_fps": "30/1",
+  "fps_source_max_error_s": 0.0,
+  "ae_time_mode": "auto",
+  "ae_slack_tol_frames": 0.01,
+  "criteria_exact": true,
+  "audio_sync": "raw"
+ },
+ "warnings": [
+  "audio-informed phase (D3): 5 segment(s) keep their video phase because their audio in-point lies more than 10 ms outside the video-feasible interval after the run's A/V offset -53.9 ms (S04 +10.2 ms, S11 +14.9 ms, S21 +17.2 ms, S25 -39.6 ms, S27 -11.3 ms)",
+  "NOT-IN-RAW: comp frames 31-113 (00:00:01:01-00:00:03:24) - placeholder 'MISSING - not in RAW (00:00:01:01-00:00:03:24)'",
+  "UNCERTAIN: comp frames 515-515 (00:00:17:05-00:00:17:06) - 'UNCERTAIN - best RAW 3004-3004, ZNCC 0.87-0.87 (00:00:17:05-00:00:17:06)' (neither matched nor NOT-IN-RAW: rebuild by hand from the guide layer)",
+  "UNCERTAIN: comp frames 542-543 (00:00:18:02-00:00:18:04) - 'UNCERTAIN - best RAW 3025-3036, ZNCC 0.86-0.94 (00:00:18:02-00:00:18:04)' (neither matched nor NOT-IN-RAW: rebuild by hand from the guide layer)",
+  "NOT-IN-RAW: comp frames 596-668 (00:00:19:26-00:00:22:09) - placeholder 'MISSING - not in RAW (00:00:19:26-00:00:22:09)'"
+ ],
+ "provenance": {
+  "note": "the export cutlist (B-roll follows the audio) of the --premiere run on input/competitor.mp4 + input/raw_test.mp4"
+ }
+}

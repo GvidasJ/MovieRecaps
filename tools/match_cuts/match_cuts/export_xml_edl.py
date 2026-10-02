@@ -1151,6 +1151,21 @@ class PremiereClip:
         return "+".join(_seg_label(e.seg) for e in evs) if len(evs) > 1 else _seg_label(self.seg)
 
 
+def premiere_center(position: tuple[float, float], seq_wh: tuple[float, float], src_wh: tuple[float, float]
+                    ) -> tuple[float, float]:
+    """The Basic Motion <center> value for a Premiere Position (sequence px). Premiere reads <center> as the offset
+    from the sequence centre in units of the SOURCE clip's frame size, not the sequence's: a 1920x1080 RAW in the
+    1080x1920 sequence with <center> (0.622738, 0.064497) shows at Position 540 + 0.622738 x 1920 = 1735.7,
+    960 + 0.064497 x 1080 = 1029.7 (the S21 gap the user measured; dividing by the sequence size had put it there)."""
+    return ((position[0] - seq_wh[0] / 2.0) / float(src_wh[0]), (position[1] - seq_wh[1] / 2.0) / float(src_wh[1]))
+
+
+def premiere_position(center: tuple[float, float], seq_wh: tuple[float, float], src_wh: tuple[float, float]
+                      ) -> tuple[float, float]:
+    """The Position (sequence px) Premiere shows for a Basic Motion <center> value (inverse of premiere_center)."""
+    return (seq_wh[0] / 2.0 + float(center[0]) * float(src_wh[0]), seq_wh[1] / 2.0 + float(center[1]) * float(src_wh[1]))
+
+
 def premiere_settings(cfg: Any = None) -> dict:
     """{'size': (W, H), 'fps': Fraction, 'window': (x, y, w, h) CORNER px, 'max_zoom'} of the Premiere export."""
     size = str(getattr(cfg, "premiere_size", None) or "1080x1920")
@@ -1300,30 +1315,99 @@ def _least_cover(sim: Sim, raw_wh: tuple[float, float], win: tuple[float, float,
 
 
 def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
-                  min_move: float) -> None:
+                  min_move: float, subject: str = "the competitor's") -> list[list[PremiereClip]]:
     """--min-move (after the fixed framing): a clip takes its own framing only when it is at least min_move px from
     the framing on screen (framing_move); otherwise it keeps that framing exactly -- across real cuts too -- changed
-    only as little as needed if it would not cover the window. A clip with no framing keeps the one on screen."""
+    only as little as needed if it would not cover the window. A clip with no framing keeps the one on screen.
+    Returns the stretches of clips that show one framing."""
+    runs: list[list[PremiereClip]] = []
     held: Sim | None = None
     held_from = ""
     for cl in clips:
         when = cl.keys[0][0] if cl.keys else cl.src_in
         own = cl.keys[0][1] if cl.keys else None
+        if own is not None and held is not None and _same_framing(own, held):
+            runs[-1].append(cl)                          # already showing it
+            continue
         move = framing_move(held, own, raw_wh) if (held is not None and own is not None) else None
         if held is None or (move is not None and move >= min_move):
             if own is not None:
                 held, held_from = own, cl.label
+            runs.append([cl])
             continue
         keep = held if _covers(held, raw_wh, win, tol=1e-6) else _least_cover(held, raw_wh, win)
         cl.framing_note = (f"framing kept from {held_from}: " +
-                           (f"the competitor's moves {move:.0f} px here, under --min-move {min_move:g}" if move is not None
+                           (f"{subject} moves {move:.0f} px here, under --min-move {min_move:g}" if move is not None
                             else "no framing measured here") +
                            ("" if keep is held else "; changed the least to cover the window"))
         if own is not None and cl.zoom > 0:
             cl.zoom = keep.s / (own.s / cl.zoom)          # relative to this clip's own (average) framing
         cl.keys = [(when, keep)]
         cl.covered = _covers(keep, raw_wh, win, tol=1e-6)
+        if keep is held:
+            runs[-1].append(cl)
+        else:
+            runs.append([cl])
         held = keep
+    return runs
+
+
+def _unreliable(cl: PremiereClip) -> str | None:
+    """Why the clip's framing cannot be copied from the competitor: it plays a B-roll / NOT-IN-RAW / uncertain spot
+    replaced by the RAW (broll.py; the framing there is a neighbour's), else None."""
+    for e in cl.events or [cl.ev]:
+        seg = e.seg
+        b = (seg.audio or {}).get("broll") or {}
+        hit = [r for r in b.get("ranges") or [] if max(int(r[0]), e.rec_in) < min(int(r[1]), e.rec_out)]
+        if hit or seg.type in ("uncertain", "not_in_raw"):
+            return f"{_seg_label(seg)} {b.get('replaced') or seg.type.replace('_', '-')} replaced"
+    return None
+
+
+def _face_centred(fr: Sim, face_x: float, raw_wh: tuple[float, float], win: tuple[float, float, float, float]) -> Sim:
+    """The same zoom and height, moved sideways so RAW x face_x sits at the window's centre (then the least move that
+    still covers the window)."""
+    return _least_cover(Sim(fr.s, 0.0, win[0] + win[2] / 2.0 - fr.s * float(face_x), fr.ty), raw_wh, win)
+
+
+def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[float, float],
+                    win: tuple[float, float, float, float], min_move: float, fps: Fraction) -> None:
+    """The final fixed framings: --min-move on the competitor's framings, then every stretch that shows one framing
+    and cannot take it from the competitor -- it holds a replaced B-roll / NOT-IN-RAW / uncertain spot, or the framing
+    would leave part of the window uncovered -- keeps its zoom and height with the main person's face at the window's
+    centre (faces.main_face_x over the stretch's frames), and --min-move again between the final framings."""
+    from . import faces
+    runs = _hold_framing(clips, raw_wh, win, min_move)
+    video = str(cutlist.raw.get("file_abs") or cutlist.raw.get("file") or "")
+    raw_fps = float(cutlist.raw_fps)
+    face_run = False
+    for run in runs:
+        fr = run[0].keys[0][1] if run[0].keys else None
+        if fr is None:
+            continue
+        why = [w for w in (_unreliable(c) for c in run) if w]
+        if not why and _covers(fr, raw_wh, win, tol=1e-6):
+            continue
+        times = [t for c in run for t in
+                 ((c.src_in + (c.src_out - c.src_in) * (i + 0.5) / 5.0) / float(fps) for i in range(5))]
+        view = ((win[0] - fr.tx) / fr.s, (win[0] + win[2] - fr.tx) / fr.s)
+        fx, n = faces.main_face_x(video, raw_fps, times, view)
+        reason = "; ".join(why) if why else "the framing would leave part of the window uncovered"
+        if fx is None:
+            new = _least_cover(fr, raw_wh, win)
+            note = f"{reason}: no face found, framing kept" + ("" if new is fr else " (moved the least to cover)")
+        else:
+            new = _face_centred(fr, fx, raw_wh, win)
+            note = (f"{reason}: face-centred -- the main face (RAW x {fx:.0f}, {n} frames) at the window centre, "
+                    f"zoom kept")
+        span = run[0].label + (f"..{run[-1].label}" if len(run) > 1 else "")
+        for c in run:
+            c.keys = [(c.keys[0][0] if c.keys else c.src_in, new)]
+            c.covered = _covers(new, raw_wh, win, tol=1e-6)
+            c.framing_note = f"{span}: {note}"
+        face_run = True
+    if face_run:                     # a moved stretch may now sit under min_move from its neighbour: hold again
+        _hold_framing(clips, raw_wh, win, min_move, subject="its framing")
 
 
 def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
@@ -1453,8 +1537,9 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
                                   1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime, [ev]))
     if st["static"]:
-        # fewer reframes and cuts: hold the framing under min_move px, then join the pieces of one take it leaves alike
-        _hold_framing(clips, raw_wh, win, st["min_move"])
+        # fewer reframes and cuts: hold the framing under min_move px, face-centre what the competitor cannot frame,
+        # then join the pieces of one take that are left alike
+        _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps)
         clips = _merge_continuous(clips)
     return clips, markers, warnings
 
@@ -1465,8 +1550,7 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
 
     def motion(sim: Sim) -> tuple[float, float, tuple[float, float], tuple[float, float]]:
         ae = sim_to_ae(sim, flip, raw_wh[0], raw_wh[1], r=1.0)
-        return 100.0 * sim.s, sim.theta_deg, ((ae.position[0] - W / 2.0) / W, (ae.position[1] - H / 2.0) / H), \
-            ae.position
+        return 100.0 * sim.s, sim.theta_deg, premiere_center(ae.position, (W, H), raw_wh), ae.position
     if not clip.keys:
         return "no framing"
     f = _sub(parent, "filter")
@@ -2056,7 +2140,7 @@ def _sim_from_motion(scale: float, rot: float, center: tuple[float, float], W: i
                      raw_wh: tuple[float, float]) -> Sim:
     """Inverse of the Basic Motion convention: RAW -> sequence px Sim (unflipped RAW frame; flip keeps the centre)."""
     s = scale / 100.0
-    px, py = center[0] * W + W / 2.0, center[1] * H + H / 2.0
+    px, py = premiere_position(center, (W, H), raw_wh)
     r = math.radians(rot)
     cx, cy = raw_wh[0] / 2.0, raw_wh[1] / 2.0
     return Sim(s, rot, px - s * (math.cos(r) * cx - math.sin(r) * cy), py - s * (math.sin(r) * cx + math.cos(r) * cy))
@@ -2066,6 +2150,83 @@ def _inv(sim: Sim, q: tuple[float, float]) -> tuple[float, float]:
     th = math.radians(sim.theta_deg)
     dx, dy = (q[0] - sim.tx) / sim.s, (q[1] - sim.ty) / sim.s
     return math.cos(th) * dx + math.sin(th) * dy, -math.sin(th) * dx + math.cos(th) * dy
+
+
+GAP_TOL_PX = 0.01                    # premiere_gaps: less than this uncovered is rounding of the written values
+
+
+def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
+    """The hard coverage check of the final XML, on its own numbers only: every V1 clip's picture edges in the
+    sequence as Premiere computes them -- Position = sequence centre + <center> x the clip's SOURCE size (its <file>
+    width / height), half size = Scale x source size / 2, turned by Rotation -- at every Motion key, against the
+    template window. Returns one line per clip that leaves any of the window uncovered (none: [])."""
+    st = premiere_settings(cfg)
+    W, H = st["size"]
+    x0, y0, ww, wh = (float(v) for v in st["window"])
+    x1, y1 = x0 + ww, y0 + wh
+    root = ET.parse(str(xml_path)).getroot()
+    sizes: dict[str, tuple[float, float]] = {}
+    for f in root.iter("file"):
+        w, h = f.findtext("media/video/samplecharacteristics/width"), f.findtext("media/video/samplecharacteristics/height")
+        if w and h:
+            sizes[f.get("id") or ""] = (float(w), float(h))
+    seq = root.find("sequence")
+    rate = int(seq.findtext("rate/timebase") or 60) if seq is not None else 60
+    track = seq.find("media/video/track") if seq is not None else None
+    out: list[str] = []
+    for ci in (track.findall("clipitem") if track is not None else []):
+        name = (ci.findtext("name") or "?").split(" ")[0]
+        f = ci.find("file")
+        src = sizes.get(f.get("id") if f is not None else "", None)
+        if src is None:
+            out.append(f"{name}: no source size in the XML, its picture edges cannot be checked")
+            continue
+        vals: dict[str, list] = {"scale": [100.0], "rotation": [0.0], "center": [(0.0, 0.0)]}
+        for eff in ci.findall("filter/effect"):
+            if eff.findtext("effectid") != "basic":
+                continue
+            for prm in eff.findall("parameter"):
+                pid = prm.findtext("parameterid")
+                if pid not in vals:
+                    continue
+                els = [k.find("value") for k in prm.findall("keyframe")] or [prm.find("value")]
+                got = []
+                for v in els:
+                    if v is None:
+                        continue
+                    got.append((float(v.findtext("horiz")), float(v.findtext("vert"))) if v.find("horiz") is not None
+                               else float(v.text))
+                if got:
+                    vals[pid] = got
+        n = max(len(v) for v in vals.values())
+        start = int(ci.findtext("start") or -1)
+        start = start if start >= 0 else int(ci.findtext("end") or 0)
+        tc = f"{start // (3600 * rate):02d}:{start // (60 * rate) % 60:02d}:{start // rate % 60:02d}:{start % rate:02d}"
+        worst = None
+        for k in range(n):
+            sc = float(vals["scale"][min(k, len(vals["scale"]) - 1)]) / 100.0
+            rot = math.radians(float(vals["rotation"][min(k, len(vals["rotation"]) - 1)]))
+            ch, cv = vals["center"][min(k, len(vals["center"]) - 1)]
+            px, py = W / 2.0 + ch * src[0], H / 2.0 + cv * src[1]        # Premiere's Position
+            hw, hh = sc * src[0] / 2.0, sc * src[1] / 2.0
+            c, si = math.cos(rot), math.sin(rot)
+            # how far each window corner lies outside the picture, measured along the picture's own axes
+            over = 0.0
+            for qx, qy in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)):
+                u, v = c * (qx - px) + si * (qy - py), -si * (qx - px) + c * (qy - py)
+                over = max(over, abs(u) - hw, abs(v) - hh)
+            if over > GAP_TOL_PX and (worst is None or over > worst[0]):
+                worst = (over, px, py, sc, (px - hw, px + hw, py - hh, py + hh))
+        if worst is not None:
+            over, px, py, sc, (l, r, t, b) = worst
+            sides = [f"x {x0:.0f}-{min(l, x1):.0f}" if l > x0 + GAP_TOL_PX else "",
+                     f"x {max(r, x0):.0f}-{x1:.0f}" if r < x1 - GAP_TOL_PX else "",
+                     f"y {y0:.0f}-{min(t, y1):.0f}" if t > y0 + GAP_TOL_PX else "",
+                     f"y {max(b, y0):.0f}-{y1:.0f}" if b < y1 - GAP_TOL_PX else ""]
+            out.append(f"{name} at {tc}: Position {px:.1f}, {py:.1f} Scale {100.0 * sc:.1f} -- picture x {l:.0f}-{r:.0f}, "
+                       f"y {t:.0f}-{b:.0f}; the window is uncovered at " +
+                       (", ".join(x for x in sides if x) or f"its corners (by {over:.1f} px)"))
+    return out
 
 
 def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl_path: str | os.PathLike | None,
@@ -2202,6 +2363,13 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                   and ga["flip"] == gb["flip"] and not ca.retime and not cb.retime):
                 errors.append(f"XML {ca.label} / {cb.label}: one continuous RAW take with the same framing, "
                               "but two clips")
+    # the hard check: every clip's picture edges from the XML's own numbers, as Premiere reads them
+    try:
+        gaps = premiere_gaps(xml_path, cfg)
+    except Exception as e:  # noqa: BLE001 - an unreadable XML cannot be shown to cover the window
+        gaps = [f"the coverage check could not read the XML: {type(e).__name__}: {e}"]
+    errors += [f"XML GAP {g}" for g in gaps]
+    out["gaps"] = gaps
     # A1: same cuts as V1
     want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     if len(x["audio"]) != len(want_a):
@@ -2227,7 +2395,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                   "in_exact": sum(1 for c in clips if c.in_exact), "zoomed": sum(1 for c in clips if c.zoom > 1.0),
                   "not_covered": [c.label for c in clips if not c.covered],
                   "framing_changes": changes, "merged": sum(len(c.events) - 1 for c in clips if c.events),
-                  "framing_kept": sum(1 for c in clips if c.framing_note), "min_move": st["min_move"]}
+                  "framing_kept": sum(1 for c in clips if c.framing_note.startswith("framing kept")),
+                  "face_centred": sum(1 for c in clips if "face-centred" in c.framing_note), "min_move": st["min_move"]}
     out["warnings"] = list(warnings) + [f"{ev.seg_name}: {w}" for ev in events for w in ev.warnings]
     out["errors"] = errors
     out["ok"] = not errors

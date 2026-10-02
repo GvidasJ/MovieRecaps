@@ -102,6 +102,18 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
   clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
+* **Face-centred where the competitor's framing cannot be used.** A stretch of clips sharing one framing that holds
+  a replaced B-roll / NOT-IN-RAW / uncertain spot (its framing was only copied from a neighbour), or whose framing
+  would leave part of the window uncovered, keeps its zoom and height but is moved sideways so the main person's
+  face sits at the centre of the window: OpenCV's face detector (the cascades are in `match_cuts/face_models/`) on
+  frames from the whole stretch, the main face being the largest one inside the view, the median of its position
+  used. No face found: the framing is kept, moved only as needed to cover. `--min-move` applies again afterwards.
+* **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
+  of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
+  size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
+  writing, every clip's picture edges are computed from the XML's own Scale / Rotation / Center values and the
+  source size in it; a clip that leaves any of x 42–1039, y 555–1591 uncovered fails the run (`XML GAP` in the
+  report and the console).
 * **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
@@ -560,7 +572,9 @@ the real competitor's style (pop-in, highlighted word, word-by-word growth, the 
 text rules, and the acceptance run on `input/competitor.mp4` (every caption real words, none under 0.1 s).
 `tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered), the
 `--min-move` rule (a 100 px pan in one take joins the clips, a 150 px reframe across a real cut keeps the
-framing, 300 px and a 30 % zoom reframe, coverage kept with the least change) and
+framing, 300 px and a 30 % zoom reframe, coverage kept with the least change), the Premiere `<center>` units,
+the hard gap check (it fails S21's old values: x 42–431 uncovered), face-centred stretches, and S21 on
+`input/raw_test.mp4` (within 50 px of the hand-fixed Position 1083, no clip leaving a gap) and
 `tests/test_broll.py` the B-roll-follows-the-audio default (trimmed audio under a cutaway, music, glitches, dips).
 
 `tests/test_restyle.py` runs the restyle on `reference/plain_captions.prproj` and checks that the result
