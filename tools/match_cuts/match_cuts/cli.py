@@ -74,6 +74,16 @@ def _workers(value: str) -> int:
     return n
 
 
+def _min_move(value: str) -> float:
+    try:
+        v = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--min-move must be a number of pixels, got {value!r}") from None
+    if v < 0 or v != v:
+        raise argparse.ArgumentTypeError("--min-move must be >= 0")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="match_cuts",
@@ -123,7 +133,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "covers the template window x 42-1039, y 555-1591. B-roll follows the audio: every NOT-IN-RAW / "
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
-                        "the spoken words")
+                        "the spoken words. The framing changes only where the competitor's moves --min-move px or more")
+    p.add_argument("--min-move", type=_min_move, default=250.0, metavar="PX",
+                   help="--premiere: change a clip's framing only when the competitor's framing moves this many px or "
+                        "more in the 1080x1920 sequence (the biggest movement of the picture's centre or edges, so zooms "
+                        "count); below it the clip keeps the previous clip's framing exactly, and neighbouring pieces of "
+                        "one continuous RAW take that end up with the same framing become one clip (default 250; 0 = "
+                        "every clip its own framing)")
     p.add_argument("--no-broll", action="store_true",
                    help="where the competitor cuts away (B-roll from the RAW or not in it) while the RAW audio keeps "
                         "playing, the export shows the RAW video that matches the audio instead (the main clip plays "
@@ -170,6 +186,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.skip_preview = bool(args.skip_preview)
     cfg.run_ae = not bool(getattr(args, "no_ae", False))
     cfg.premiere = bool(getattr(args, "premiere", False))
+    cfg.premiere_min_move = float(getattr(args, "min_move", 250.0))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
     cfg.no_broll = bool(getattr(args, "no_broll", False))

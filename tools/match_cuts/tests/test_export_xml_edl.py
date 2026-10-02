@@ -734,7 +734,8 @@ def test_premiere_flag_skips_after_effects():
 
 # ---- --premiere default: no camera movement ------------------------------------------------------------------------
 
-def test_premiere_default_one_fixed_framing_per_clip_covering_the_window(premiere):
+def test_premiere_default_one_fixed_framing_per_clip_covering_the_window(tmp_path):
+    premiere = _premiere_export(tmp_path, premiere_min_move=0)       # each clip's own framing (no --min-move hold)
     cl, x, cfg = premiere["cl"], premiere["x"], premiere["cfg"]
     clips, _, _ = ex.premiere_clips(cl, cfg)
     raw_wh = (1920.0, 1080.0)
@@ -781,3 +782,124 @@ def test_static_framing_moves_the_least_and_zooms_only_when_needed():
     # a rotated competitor framing is held level
     one, _ = ex._static_framing([(0.0, Sim(1.2, 3.0, 0.0, 400.0))], 0, 10, raw_wh, win)
     assert one.theta_deg == 0.0 and ex._covers(one, raw_wh, win)
+
+
+# ---- --min-move: reframe only for a move of 250 px or more, one clip per take and framing -----------------------------
+
+K_BOX = max(WIN[2] / PBOX["w"], WIN[3] / PBOX["h"])                   # competitor px -> sequence px (the box -> window)
+C0 = (-246.7 + 0.546 * 960, 306.6 + 0.546 * 540)                       # PAN0's RAW centre in competitor px
+
+
+def _framed(dx: float = 0.0, zoom: float = 1.0) -> dict:
+    """PAN0 moved dx SEQUENCE px sideways and zoomed about its centre."""
+    s = 0.546 * zoom
+    cx, cy = C0[0] + dx / K_BOX, C0[1]
+    return {"scale": s, "rotation_deg": 0.0, "tx": cx - s * 960, "ty": cy - s * 540}
+
+
+def min_move_cutlist() -> Cutlist:
+    segs = [
+        _grid_seg(1, 0, 40, 300, transform=_framed(0)),                    # framing A
+        _grid_seg(2, 40, 70, 340, transform=_framed(100)),                 # same take, 100 px: keeps A -> one clip
+        _grid_seg(3, 70, 100, 900, transform=_framed(-150)),               # real cut, 150 px from A: keeps A, a cut
+        _grid_seg(4, 100, 130, 930, transform=_framed(300)),               # same take, 300 px: reframes
+        _grid_seg(5, 130, 160, 960, transform=_framed(400)),               # same take, 100 px from S04: one clip
+        _grid_seg(6, 160, 200, 990, transform=_framed(300, zoom=1.3)),     # same take, a 30 % zoom: edges move 286 px
+    ]
+    base = premiere_cutlist()
+    return Cutlist(1, dict(base.competitor, frames=200), base.raw, base.layout, segs)
+
+
+def _min_move_export(tmp_path, **cfg_kw) -> dict:
+    cl = min_move_cutlist()
+    cfg = Config(out_dir=str(tmp_path), premiere=True, **cfg_kw)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    ex.write_premiere_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    return {"cl": cl, "cfg": cfg, "xml": xml, "edl": edl, "x": ex.parse_premiere_xml(xml),
+            "v": ex.validate_premiere_exports(cl, xml, edl, cfg)}
+
+
+def test_framing_move_is_the_biggest_movement_of_the_centre_or_an_edge():
+    raw_wh = (1920.0, 1080.0)
+    a = Sim(1.0, 0.0, -400.0, 400.0)
+    assert ex.framing_move(a, Sim(1.0, 0.0, -300.0, 400.0), raw_wh) == pytest.approx(100.0)       # a pan
+    assert ex.framing_move(a, Sim(1.0, 0.0, -200.0, 600.0), raw_wh) == pytest.approx(math.hypot(200, 200))  # diagonal
+    z = Sim(1.2, 0.0, -400.0 - 0.1 * 1920, 400.0 - 0.1 * 1080)        # 20 % zoom about the centre: centre still
+    assert ex.framing_move(a, z, raw_wh) == pytest.approx(0.1 * 1920)                               # edges 192 px
+    assert ex.framing_move(a, a, raw_wh) == 0.0
+
+
+def test_min_move_keeps_the_framing_under_250_px_and_merges_one_take(tmp_path):
+    r = _min_move_export(tmp_path)
+    assert r["v"]["ok"], r["v"]["errors"]
+    clips, _, _ = ex.premiere_clips(r["cl"], r["cfg"])
+    assert [c.label for c in clips] == ["S01+S02", "S03", "S04+S05", "S06"]
+    assert [(c.rec_start, c.rec_end) for c in clips] == [(0, 140), (140, 200), (200, 320), (320, 400)]
+    x = r["x"]
+    assert [(c["start"], c["end"], c["in"], c["out"]) for c in x["clips"]] == [
+        (0, 140, 600, 740), (140, 200, 1800, 1860), (200, 320, 1860, 1980), (320, 400, 1980, 2060)]
+    own = {c.seg.id: c.keys[0][1] for c in ex.premiere_clips(r["cl"], Config(premiere=True, premiere_min_move=0))[0]}
+    f = [_motion_sims(c)[0] for c in x["clips"]]
+    same = lambda a, b: abs(a.s - b.s) < 1e-6 and abs(a.tx - b.tx) < 0.01 and abs(a.ty - b.ty) < 0.01  # noqa: E731
+    assert same(f[0], own[1])                        # S01's own framing for the whole take S01+S02
+    assert same(f[1], own[1])                        # a real cut stays a cut but keeps the framing (150 px < 250)
+    assert same(f[2], own[4]) and same(f[3], own[6])  # reframed at 300 px and at a 30 % zoom
+    raw_wh = (1920.0, 1080.0)
+    assert ex.framing_move(own[1], own[2], raw_wh) == pytest.approx(100.0, abs=0.5)
+    assert ex.framing_move(own[4], own[6], raw_wh) == pytest.approx(0.3 * 0.546 * K_BOX * 960, abs=0.5)
+    assert all(ex._covers(s, raw_wh, WIN, tol=0.01) and not c["motion"]["keys"] for s, c in zip(f, x["clips"]))
+    xv = r["v"]["xml"]
+    assert (xv["clips"], xv["framing_changes"], xv["merged"], xv["min_move"]) == (4, 2, 2, 250.0)
+    # A1: one clip per V1 clip, the same cuts and source in-points
+    assert [(a["start"], a["end"], a["in"]) for a in x["audio"]] == [(c["start"], c["end"], c["in"]) for c in x["clips"]]
+    text = r["xml"].read_text(encoding="utf-8")
+    assert "framing kept from S01: the competitor's moves 150 px here, under --min-move 250" in text
+    assert "one clip for S01+S02 (one continuous RAW take, same framing)" in text
+
+
+def test_min_move_zero_gives_every_piece_its_own_framing(tmp_path):
+    r = _min_move_export(tmp_path, premiere_min_move=0)
+    assert r["v"]["ok"], r["v"]["errors"]
+    assert [c["name"].split()[0] for c in r["x"]["clips"]] == ["S01", "S02", "S03", "S04", "S05", "S06"]
+    assert (r["v"]["xml"]["framing_changes"], r["v"]["xml"]["merged"]) == (5, 0)
+
+
+def test_min_move_validation_catches_a_small_reframe(tmp_path):
+    r = _min_move_export(tmp_path)
+    text = r["xml"].read_text(encoding="utf-8")
+    i = text.index("<name>S03 ")
+    j = text.index("<horiz>", i)
+    k = text.index("</horiz>", j)
+    bad = text[:j + 7] + f"{float(text[j + 7:k]) + 0.05:.6f}" + text[k:]           # S03 moved 54 px
+    p = tmp_path / "bad.xml"
+    p.write_text(bad, encoding="utf-8")
+    v = ex.validate_premiere_exports(r["cl"], p, r["edl"], r["cfg"])
+    assert any("S03: the framing changes by 54 px after S01+S02 (under --min-move 250)" in e for e in v["errors"])
+
+
+def test_min_move_held_framing_that_would_not_cover_changes_the_least():
+    raw_wh = (1920.0, 1080.0)
+    seg1, seg2 = Segment(id=1, type="raw", comp_in=0, comp_out=10), Segment(id=2, type="raw", comp_in=10, comp_out=20)
+    gap = Sim(1.0, 0.0, 100.0, 530.0)                       # leaves the window's left edge (x 42-100) empty
+    near = Sim(1.0, 0.0, 30.0, 530.0)                       # this clip's own framing, 70 px away: under 250
+    a = ex.PremiereClip(seg1, None, 0, 20, 0, 20, 0, 20, 1.0, True, 0.0, 1.0, False, [(0, gap)], None)
+    b = ex.PremiereClip(seg2, None, 20, 40, 20, 40, 100, 120, 1.0, True, 0.0, 1.0, True, [(100, near)], None)
+    ex._hold_framing([a, b], raw_wh, WIN, 250.0)
+    got = b.keys[0][1]
+    assert got.s == gap.s and got.ty == gap.ty and got.tx == pytest.approx(WIN[0])   # moved just to the window edge
+    assert b.covered and "changed the least to cover the window" in b.framing_note
+    small = Sim(0.5, 0.0, 300.0, 800.0)                     # too small to cover at all: scaled to the least cover
+    fixed = ex._least_cover(small, raw_wh, WIN)
+    assert fixed.s == pytest.approx(max(WIN[2] / 1920.0, WIN[3] / 1080.0), rel=1e-6) and ex._covers(fixed, raw_wh, WIN)
+
+
+def test_min_move_option():
+    from match_cuts import cli
+    parse = cli.build_parser().parse_args
+    assert cli.config_from_args(parse(["--premiere"])).premiere_min_move == 250.0
+    cfg = cli.config_from_args(parse(["--premiere", "--min-move", "120"]))
+    assert cfg.premiere_min_move == 120.0 and "premiere_min_move" not in cfg.analysis_params()
+    assert ex.premiere_settings(cfg)["min_move"] == 120.0 and ex.premiere_settings(None)["min_move"] == 250.0
+    with pytest.raises(SystemExit):
+        parse(["--min-move", "-5"])

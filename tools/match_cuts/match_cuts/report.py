@@ -1096,12 +1096,17 @@ def _how_to_open(ctx: Any) -> list[str]:
     cl = getattr(ctx, "cutlist", None)
     raw_file = (cl.raw.get("file") if cl else "") or "media/…"
     if getattr(getattr(ctx, "cfg", None), "premiere", False):
+        xv = ((getattr(ctx, "exports", None) or {}).get("xml") or {})
+        framing = (f" {xv['clips']} V1 clips with {xv['framing_changes']} framing changes: the framing changes only "
+                   f"where the competitor's moves {xv['min_move']:g} px or more (--min-move); {xv['framing_kept']} "
+                   f"clip(s) keep the framing of the clip before, and {xv['merged']} piece(s) of one continuous RAW "
+                   "take are joined to the clip before (no cut)." if "framing_changes" in xv else "")
         return [
             "1. Premiere Pro → **File → Import…** → `recreated_edit.xml` (keep the output folder together: the XML "
             f"points at `{raw_file}`; relink if Premiere asks).",
             "2. The sequence `Recreated Edit (Premiere)` is 1080×1920 at 60.00 fps: the edit on V1 (each clip framed into "
             "your template window), the RAW audio on A1 with the same cuts, V2 and above empty — put your overlay template "
-            "and captions there.",
+            "and captions there." + framing,
             "3. Sequence markers name the UNCERTAIN and NOT-IN-RAW spots (and RETIME spots Premiere's XML cannot carry). "
             "Each clip's comment lists the Motion values to expect (Position, Scale) — check one clip after import.",
             "4. Captions: **File → Import…** → `captions.srt`, then drag it onto the sequence at 00:00:00:00 (Premiere "

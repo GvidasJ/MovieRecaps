@@ -94,6 +94,14 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   Rotation, rotation 0. It is the competitor's framing for that clip (averaged over the clip when the competitor
   pans or zooms), scaled up only as much as needed and moved the least so it fully covers the template window
   (x 42–1039, y 555–1591).
+* **Fewer reframes and cuts (`--min-move`, default 250).** After the fixed framing, a clip takes its own framing
+  only when it is 250 px or more from the framing on screen, measured in the 1080×1920 sequence as the biggest
+  movement of the picture's centre or of one of its edges (so a zoom counts by how far the edges move). Below
+  that it keeps the previous clip's framing exactly — across real cuts too — changed only as little as needed if it
+  would leave part of the window uncovered. Neighbouring pieces of one continuous RAW take (the next starts on the
+  very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
+  clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
+  kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
 * **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
@@ -550,7 +558,9 @@ cd tools/match_cuts
 `tests/test_caption_spans.py` checks the Premiere competitor captions: exact caption timing on a synthetic clip in
 the real competitor's style (pop-in, highlighted word, word-by-word growth, the same word twice, `*laughs*`), the
 text rules, and the acceptance run on `input/competitor.mp4` (every caption real words, none under 0.1 s).
-`tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered) and
+`tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered), the
+`--min-move` rule (a 100 px pan in one take joins the clips, a 150 px reframe across a real cut keeps the
+framing, 300 px and a 30 % zoom reframe, coverage kept with the least change) and
 `tests/test_broll.py` the B-roll-follows-the-audio default (trimmed audio under a cutaway, music, glitches, dips).
 
 `tests/test_restyle.py` runs the restyle on `reference/plain_captions.prproj` and checks that the result

@@ -1142,6 +1142,13 @@ class PremiereClip:
     covered: bool                    # the RAW covers the template window on every key and between keys
     keys: list[tuple[int, Sim]]      # (<when> in source sequence-rate frames, Sim RAW -> sequence px)
     retime: str | None               # why the clip's speed is not the segment's real time map (marker text)
+    events: list[EditEvent] = field(default_factory=list)   # the edit events it plays (several: merged, --min-move)
+    framing_note: str = ""           # --min-move: why the framing is not this clip's own (kept from the clip before)
+
+    @property
+    def label(self) -> str:
+        evs = self.events or [self.ev]
+        return "+".join(_seg_label(e.seg) for e in evs) if len(evs) > 1 else _seg_label(self.seg)
 
 
 def premiere_settings(cfg: Any = None) -> dict:
@@ -1152,9 +1159,11 @@ def premiere_settings(cfg: Any = None) -> dict:
     fps = Fraction(str(getattr(cfg, "premiere_fps", None) or "60"))
     win = tuple(float(v) for v in (getattr(cfg, "premiere_window", None) or (42.0, 555.0, 998.0, 1037.0)))
     static = getattr(cfg, "premiere_static_framing", None)
+    move = getattr(cfg, "premiere_min_move", None)
     return {"size": (W, H), "fps": fps, "window": win,
             "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05),
-            "static": True if static is None else bool(static)}
+            "static": True if static is None else bool(static),
+            "min_move": 250.0 if move is None else max(0.0, float(move))}
 
 
 def premiere_factor(comp_fps: Fraction, seq_fps: Fraction) -> int:
@@ -1251,6 +1260,88 @@ def _static_framing(mapped: list[tuple[float, Sim]], k0: int, k1: int, raw_wh: t
     cx = min(max(cx, x0 + ww - s_cov * W / 2.0), x0 + s_cov * W / 2.0)
     cy = min(max(cy, y0 + wh - s_cov * H / 2.0), y0 + s_cov * H / 2.0)
     return Sim(s_cov, 0.0, cx - s_cov * W / 2.0, cy - s_cov * H / 2.0), s_cov / s_avg
+
+
+def _picture_box(sim: Sim, raw_wh: tuple[float, float]) -> tuple[float, float, float, float]:
+    """(left, right, top, bottom) of the RAW picture in sequence px."""
+    th = math.radians(sim.theta_deg)
+    c, s = math.cos(th), math.sin(th)
+    xs, ys = [], []
+    for x, y in ((0.0, 0.0), (raw_wh[0], 0.0), (0.0, raw_wh[1]), (raw_wh[0], raw_wh[1])):
+        xs.append(sim.s * (c * x - s * y) + sim.tx)
+        ys.append(sim.s * (s * x + c * y) + sim.ty)
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def framing_move(a: Sim, b: Sim, raw_wh: tuple[float, float]) -> float:
+    """How far the picture moves from framing a to framing b, in sequence px: the biggest movement of its centre or
+    of one of its edges (a zoom moves the edges, so it counts too)."""
+    la, ra, ta, ba = _picture_box(a, raw_wh)
+    lb, rb, tb, bb = _picture_box(b, raw_wh)
+    centre = math.hypot((lb + rb - la - ra) / 2.0, (tb + bb - ta - ba) / 2.0)
+    return max(centre, abs(lb - la), abs(rb - ra), abs(tb - ta), abs(bb - ba))
+
+
+def _same_framing(a: Sim, b: Sim) -> bool:
+    return max(abs(a.s - b.s), abs(a.theta_deg - b.theta_deg), abs(a.tx - b.tx), abs(a.ty - b.ty)) < 1e-9
+
+
+def _least_cover(sim: Sim, raw_wh: tuple[float, float], win: tuple[float, float, float, float]) -> Sim:
+    """The smallest change of a fixed framing (rotation 0) that covers the window: scaled up about its centre only as
+    much as needed, then moved the least."""
+    W, H = float(raw_wh[0]), float(raw_wh[1])
+    cx, cy = sim.tx + sim.s * W / 2.0, sim.ty + sim.s * H / 2.0
+    x0, y0, ww, wh = (float(v) for v in win)
+    need = max(ww / W, wh / H)
+    s = sim.s if sim.s >= need * (1.0 + 1e-12) else need * (1.0 + 1e-9)
+    cx = min(max(cx, x0 + ww - s * W / 2.0), x0 + s * W / 2.0)
+    cy = min(max(cy, y0 + wh - s * H / 2.0), y0 + s * H / 2.0)
+    return Sim(s, 0.0, cx - s * W / 2.0, cy - s * H / 2.0)
+
+
+def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
+                  min_move: float) -> None:
+    """--min-move (after the fixed framing): a clip takes its own framing only when it is at least min_move px from
+    the framing on screen (framing_move); otherwise it keeps that framing exactly -- across real cuts too -- changed
+    only as little as needed if it would not cover the window. A clip with no framing keeps the one on screen."""
+    held: Sim | None = None
+    held_from = ""
+    for cl in clips:
+        when = cl.keys[0][0] if cl.keys else cl.src_in
+        own = cl.keys[0][1] if cl.keys else None
+        move = framing_move(held, own, raw_wh) if (held is not None and own is not None) else None
+        if held is None or (move is not None and move >= min_move):
+            if own is not None:
+                held, held_from = own, cl.label
+            continue
+        keep = held if _covers(held, raw_wh, win, tol=1e-6) else _least_cover(held, raw_wh, win)
+        cl.framing_note = (f"framing kept from {held_from}: " +
+                           (f"the competitor's moves {move:.0f} px here, under --min-move {min_move:g}" if move is not None
+                            else "no framing measured here") +
+                           ("" if keep is held else "; changed the least to cover the window"))
+        if own is not None and cl.zoom > 0:
+            cl.zoom = keep.s / (own.s / cl.zoom)          # relative to this clip's own (average) framing
+        cl.keys = [(when, keep)]
+        cl.covered = _covers(keep, raw_wh, win, tol=1e-6)
+        held = keep
+
+
+def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
+    """--min-move: neighbouring clips that play one continuous RAW take (the next one starts on the very source frame
+    the previous one ends on, same speed, same flip, no transition, no retime) with the same fixed framing become one
+    clip -- no cut there. Real cuts (a jump in RAW time) stay."""
+    out: list[PremiereClip] = []
+    for cl in clips:
+        p = out[-1] if out else None
+        if (p is not None and p.end != -1 and cl.start != -1 and p.rec_end == cl.rec_start and cl.src_in == p.src_out
+                and abs(cl.speed - p.speed) < 1e-9 and not p.retime and not cl.retime
+                and bool(p.seg.flip_h) == bool(cl.seg.flip_h) and len(p.keys) == 1 and len(cl.keys) == 1
+                and _same_framing(p.keys[0][1], cl.keys[0][1])):
+            p.end, p.rec_end, p.src_out = cl.end, cl.rec_end, cl.src_out
+            p.events = (p.events or [p.ev]) + (cl.events or [cl.ev])
+            continue
+        out.append(cl)
+    return out
 
 
 def _source_seconds(seg: Segment, k: float, comp_fps: Fraction, raw_fps: Fraction) -> float:
@@ -1360,7 +1451,11 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
                     for k, s in mapped]
         clips.append(PremiereClip(seg, ev, -1 if dis_in else ev.rec_in * fac, -1 if tail else ev.rec_out * fac,
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
-                                  1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime))
+                                  1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime, [ev]))
+    if st["static"]:
+        # fewer reframes and cuts: hold the framing under min_move px, then join the pieces of one take it leaves alike
+        _hold_framing(clips, raw_wh, win, st["min_move"])
+        clips = _merge_continuous(clips)
     return clips, markers, warnings
 
 
@@ -1393,7 +1488,9 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
     return (f"Premiere Motion (first key): Position {pos[0]:.1f}, {pos[1]:.1f} px; Scale {sc:.2f} %; "
             f"Rotation {rot:.2f} deg" + ("; Horizontal Flip" if flip else "") +
             (f"; {len(clip.keys)} keys" if len(clip.keys) > 1 else "") +
-            ("" if abs(clip.zoom - 1.0) < 1e-9 else f"; zoomed {100.0 * (clip.zoom - 1.0):.2f} % to cover the window"))
+            (f"; {clip.framing_note}" if clip.framing_note else
+             "" if abs(clip.zoom - 1.0) < 1e-6 else f"; zoomed {100.0 * (clip.zoom - 1.0):.2f} % to cover the window") +
+            (f"; one clip for {clip.label} (one continuous RAW take, same framing)" if len(clip.events) > 1 else ""))
 
 
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> dict:
@@ -1456,7 +1553,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(e, "endratio", 1)
             _sub(e, "reverse", "FALSE")
         ci = _sub(vtrack, "clipitem", id=f"clipitem-{n}")
-        _sub(ci, "name", f"{_seg_label(cl.seg)} {raw_name}")
+        _sub(ci, "name", f"{cl.label} {raw_name}")
         _sub(ci, "enabled", "TRUE")
         _sub(ci, "duration", src_dur)
         _rate_el(ci, fps)
@@ -1478,7 +1575,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(stv, "mediatype", "video")
         _sub(stv, "trackindex", 1)
         cm = _sub(ci, "comments")
-        _sub(cm, "mastercomment1", f"{_seg_label(cl.seg)} speed {cl.speed:.6f} conf {float(cl.seg.confidence or 0):.2f}")
+        _sub(cm, "mastercomment1", f"{cl.label} speed {cl.speed:.6f} conf {float(cl.seg.confidence or 0):.2f}")
         _sub(cm, "mastercomment2", note)
         _sub(cm, "mastercomment3", ("source in inside the frame-exact interval" if cl.in_exact else
                                     "source in = nearest 1/60 s (outside the frame-exact interval)")
@@ -1533,7 +1630,7 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
     st = premiere_settings(cfg)
     comp_fps, raw_fps, fps = cutlist.comp_fps, cutlist.raw_fps, st["fps"]
     fac = premiere_factor(comp_fps, fps)
-    by_seg = {cl.seg.id: cl for cl in clips}
+    by_seg = {e.seg.id: cl for cl in clips for e in (cl.events or [cl.ev])}
     out: list[dict] = []
     for ev in edit_events(cutlist):
         seg = ev.seg
@@ -1548,8 +1645,15 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
         if cl is not None and not line:
             if cl.seg.time_remap_keys and abs(seg_speed(cl.seg, comp_fps)) < 1e-9:
                 continue                                      # frozen picture: silent
-            out.append({"seg": seg, "start": start, "end": end, "in": cl.src_in,
-                        "out": cl.src_in + int(round((end - start) * cl.speed)), "speed": cl.speed, "what": "picture"})
+            prev = out[-1] if out else None
+            if prev is not None and prev.get("clip") is cl and prev["end"] == start:
+                prev["end"] = end                             # one V1 clip (merged pieces): one A1 clip, no cut
+                prev["out"] = prev["in"] + int(round((end - prev["start"]) * cl.speed))
+                continue
+            n_in = cl.src_in + int(round((start - cl.rec_start) * cl.speed))
+            out.append({"seg": seg, "start": start, "end": end, "in": n_in,
+                        "out": n_in + int(round((end - start) * cl.speed)), "speed": cl.speed, "what": "picture",
+                        "clip": cl})
             continue
         v = float(a.speed)
         tau = _raw_in_seconds(a, raw_fps) + v * float(Fraction(ev.rec_in - int(seg.comp_in)) / comp_fps)
@@ -2012,9 +2116,10 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         errors.append(f"XML: {len(x['clips'])} V1 clips, expected {len(clips)}")
     trans = {t["start"]: t for t in x["transitions"]}
     for got, cl in zip(x["clips"], clips):
-        name = _seg_label(cl.seg)
-        ev = cl.ev
-        if (cl.rec_start, cl.rec_end) != (ev.rec_in * fac, ev.rec_out * fac):
+        name = cl.label
+        evs = cl.events or [cl.ev]
+        if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
+                any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
             errors.append(f"XML {name}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
         s0 = got["start"] if got["start"] != -1 else (cl.rec_start if cl.rec_start in trans else None)
         if s0 != cl.rec_start or (got["start"] == -1) != (cl.start == -1):
@@ -2074,20 +2179,43 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                               f"(allowed 0 .. {100.0 * (st['max_zoom'] - 1.0):.0f} %)")
             if cl.covered and not _covers(ps, raw_wh, win, tol=0.01):
                 errors.append(f"XML {name} key {i}: the RAW does not cover the template window")
+    # --min-move: the framing changes only by min_move px or more (or to cover the window), and one continuous RAW
+    # take with one framing is one clip
+    changes = 0
+    if st["static"] and len(x["clips"]) == len(clips):
+        def fixed(c: dict) -> Sim | None:
+            m = c["motion"]
+            return _sim_from_motion(m["scale"], m["rotation"], m["center"], W, H, raw_wh) \
+                if all(k in m for k in ("scale", "rotation", "center")) and not m["keys"] else None
+        for (ga, ca), (gb, cb) in zip(zip(x["clips"], clips), zip(x["clips"][1:], clips[1:])):
+            fa, fb = fixed(ga), fixed(gb)
+            if fa is None or fb is None:
+                continue
+            mv = framing_move(fa, fb, raw_wh)
+            if mv > 0.5:
+                changes += 1
+                if mv < st["min_move"] - 0.5 and "changed the least to cover" not in cb.framing_note:
+                    errors.append(f"XML {cb.label}: the framing changes by {mv:.0f} px after {ca.label} "
+                                  f"(under --min-move {st['min_move']:g})")
+            elif (ga["end"] != -1 and ga["end"] == gb["start"] and gb["in"] == ga["out"]
+                  and _speed_ok(gb["speed"], ga["speed"])
+                  and ga["flip"] == gb["flip"] and not ca.retime and not cb.retime):
+                errors.append(f"XML {ca.label} / {cb.label}: one continuous RAW take with the same framing, "
+                              "but two clips")
     # A1: same cuts as V1
     want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     if len(x["audio"]) != len(want_a):
         errors.append(f"XML: {len(x['audio'])} A1 clips, expected {len(want_a)}")
-    v_ranges = {(cl.rec_start, cl.rec_end): cl for cl in clips}
-    ev_ranges = {(ev.rec_in * fac, ev.rec_out * fac) for ev in events}
+    ev_ranges = {(ev.rec_in * fac, ev.rec_out * fac) for ev in events} | {(cl.rec_start, cl.rec_end) for cl in clips}
     for got, it in zip(x["audio"], want_a):
         if (got["start"], got["end"], got["in"], got["out"]) != (it["start"], it["end"], it["in"], it["out"]):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: {got} (want {it['start']}-{it['end']} in {it['in']})")
         if (got["start"], got["end"]) not in ev_ranges:
             errors.append(f"XML A1 {_seg_label(it['seg'])}: range {got['start']}-{got['end']} is not a V1 cut range")
-        cl = v_ranges.get((got["start"], got["end"]))
-        if it["what"] == "picture" and cl is not None and got["in"] != cl.src_in:
-            errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} differs from V1's {cl.src_in}")
+        cl = next((c for c in clips if c.rec_start <= got["start"] and got["end"] <= c.rec_end), None)
+        if it["what"] == "picture" and cl is not None and \
+                got["in"] != cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)):
+            errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
     # markers: every UNCERTAIN / NOT-IN-RAW spot
     have = {(m["in"], m["out"]) for m in x["markers"]}
     for ev in events:
@@ -2097,7 +2225,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     out["xml"] = {"clips": len(x["clips"]), "audio": len(x["audio"]), "markers": len(x["markers"]),
                   "rate": f"{x['timebase']} ntsc {x['ntsc']}", "size": f"{x['width']}x{x['height']}",
                   "in_exact": sum(1 for c in clips if c.in_exact), "zoomed": sum(1 for c in clips if c.zoom > 1.0),
-                  "not_covered": [_seg_label(c.seg) for c in clips if not c.covered]}
+                  "not_covered": [c.label for c in clips if not c.covered],
+                  "framing_changes": changes, "merged": sum(len(c.events) - 1 for c in clips if c.events),
+                  "framing_kept": sum(1 for c in clips if c.framing_note), "min_move": st["min_move"]}
     out["warnings"] = list(warnings) + [f"{ev.seg_name}: {w}" for ev in events for w in ev.warnings]
     out["errors"] = errors
     out["ok"] = not errors
