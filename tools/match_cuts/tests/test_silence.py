@@ -162,7 +162,9 @@ def test_raw_only_run_cuts_the_silences_of_the_raw(tmp_path, monkeypatch, capsys
     run = tmp_path / "out" / "001"
     x = ex.parse_premiere_xml(run / "1_edit.xml")
     assert (x["width"], x["height"], x["timebase"]) == (1080, 1920, 60)
-    assert 220 <= x["duration"] <= 232                       # 6 s minus about 2.2 s of silence (the 0.3 s pause kept)
+    # 6 s minus about 2 s of silence (the 0.3 s pause kept; 0.15 s kept after each stretch of speech, 0.05 s before
+    # it, and the soft edges the AAC encoding gives each burst count as sound)
+    assert 232 <= x["duration"] <= 246
     assert len(x["clips"]) == 2 and not ex.premiere_gaps(run / "1_edit.xml")    # two pieces, the window covered
     assert "Silences: 3 removed" in out and "length 00:06.00 -> " in out
     assert out.count(" s  (cut at ") == 3 and "RAW-only edit" in out
@@ -249,7 +251,7 @@ def test_cuts_only_fall_between_words_and_keep_the_padding_around_each_word():
     for c in cuts:                                          # never inside a word, the padding kept around each
         for a, b in cores:
             assert c.b / 60 <= a - 0.02 + 1e-9 or c.a / 60 >= b + 0.06 - 1e-9, (c, a, b)
-    assert [(c.a, c.b) for c in cuts] == [(0, 27), (163, 178), (197, 213), (305, 360)]
+    assert [(c.a, c.b) for c in cuts] == [(0, 27), (163, 177), (197, 213), (305, 360)]   # the soft start of "uh" kept
     no_words, _ = S.removal_ranges(y, SR, FPS, 360, TIGHT)
     assert (161, 213) in [(c.a, c.b) for c in no_words]     # by loudness alone the soft "uh" would have gone
 
