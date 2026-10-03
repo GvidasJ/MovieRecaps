@@ -241,3 +241,13 @@ def test_competitor_mode_rechecks_only_the_words_of_captions_it_could_not_read(t
     rc = res["recheck"]
     assert rc["unsure"] == 1 and rc["changed"] == 1 and rc["changes"][0]["from"] == "sad"   # not "so" / "back"
     assert res["competitor_notes"]["from_transcript"][0]["text"] == "SAT"
+
+
+def test_overlapping_raw_windows_of_different_pieces_are_transcribed_once():
+    pieces = [R.Piece(0.0, 2.0, 10.0), R.Piece(2.0, 4.0, 12.5)]    # two shots half a second apart in the RAW
+    words = [W("I", 0.5, 0.6), W("sad", 0.7, 1.0, 0.3), W("then", 2.6, 2.9, 0.3), W("went", 3.0, 3.3)]
+    src = Source([("I", 10.5, 10.6, 0.99), ("sat", 10.7, 11.0, 0.95), ("then", 13.1, 13.4, 0.9),
+                  ("went", 13.5, 13.8, 0.99)])
+    out, rep = R.recheck(words, None, pieces, src.get, src.transcribe)
+    assert src.windows == [(10.7 - R.CONTEXT_S, 13.4 + R.CONTEXT_S)]                # one transcription for both
+    assert [w.text for w in out] == ["I", "sat", "then", "went"] and rep["rechecked"] == 2 and rep["changed"] == 1

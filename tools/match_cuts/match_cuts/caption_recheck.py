@@ -175,34 +175,45 @@ def recheck(words: Sequence[Word], y16: np.ndarray | None, pieces: Sequence[Piec
     probs = {i: w.prob for i, w in enumerate(words)}
     swaps: list[tuple[list[int], list[Word]]] = []                 # (edit word indices replaced, the words used)
     done: set[int] = set()
+    jobs: list[tuple[Piece, float, float, list[int]]] = []         # (piece, source window, its unsure words)
     for pi, idx in sorted(by_piece.items()):
         p = pieces[pi]
-        wins: list[list[float]] = []                               # source seconds, merged
         for i in idx:
-            a, b = p.src(words[i].start) - CONTEXT_S, p.src(words[i].end) + CONTEXT_S
-            if wins and a <= wins[-1][1]:
-                wins[-1][1] = max(wins[-1][1], b)
+            a, b = max(0.0, p.src(words[i].start) - CONTEXT_S), p.src(words[i].end) + CONTEXT_S
+            if jobs and jobs[-1][0] is p and a <= jobs[-1][2]:
+                jobs[-1] = (p, jobs[-1][1], max(jobs[-1][2], b), jobs[-1][3] + [i])
             else:
-                wins.append([a, b])
-        for s0, s1 in wins:
-            y, at = source(max(0.0, s0), s1)
-            if y is None or len(y) < SR // 10:
-                lost += [i for i in idx if s0 <= p.src(words[i].start) <= s1]
+                jobs.append((p, a, b, [i]))
+    spans: list[list[float]] = []          # the source transcribed: overlapping windows (any pieces) heard once
+    for _, a, b, _ in sorted(jobs, key=lambda j: j[1]):
+        if spans and a <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    said: list[list[Word] | None] = []     # each span's words, in source seconds
+    for a, b in spans:
+        y, at = source(a, b)
+        said.append(None if y is None or len(y) < SR // 10 else
+                    [replace(w, start=w.start + at, end=w.end + at) for w in transcribe(y)])
+    for p, s0, s1, idx in jobs:
+        k = next(k for k, (a, b) in enumerate(spans) if a <= s0 and s1 <= b)
+        if said[k] is None:
+            lost += idx
+            continue
+        lo_s, hi_s = p.src_range
+        heard = []
+        for b in said[k]:
+            bs, be = b.start, b.end
+            ov = min(be, hi_s) - max(bs, lo_s)
+            if ov <= 0 or not (ov >= MIN_OVERLAP * max(be - bs, 1e-3) or lo_s <= 0.5 * (bs + be) < hi_s):
                 continue
-            lo_s, hi_s = p.src_range
-            heard = []
-            for b in transcribe(y):
-                bs, be = b.start + at, b.end + at
-                ov = min(be, hi_s) - max(bs, lo_s)
-                if ov <= 0 or not (ov >= MIN_OVERLAP * max(be - bs, 1e-3) or lo_s <= 0.5 * (bs + be) < hi_s):
-                    continue
-                heard.append(replace(b, start=p.edit(max(bs, lo_s)), end=p.edit(min(be, hi_s))))
-            e0, e1 = max(p.t0, p.edit(max(0.0, s0))), min(p.t1, p.edit(s1))
-            A = [i for i, w in enumerate(words) if e0 <= 0.5 * (w.start + w.end) < e1
-                 and piece_at(pieces, 0.5 * (w.start + w.end)) is p]
-            B = [b for b in heard if e0 <= 0.5 * (b.start + b.end) < e1]
-            done.update(i for i in A if i in unsure)
-            _decide(words, A, B, unsure, probs, swaps, rep, captions, source_name, edit_model, model)
+            heard.append(replace(b, start=p.edit(max(bs, lo_s)), end=p.edit(min(be, hi_s))))
+        e0, e1 = max(p.t0, p.edit(s0)), min(p.t1, p.edit(s1))
+        A = [i for i, w in enumerate(words) if e0 <= 0.5 * (w.start + w.end) < e1
+             and piece_at(pieces, 0.5 * (w.start + w.end)) is p]
+        B = [b for b in heard if e0 <= 0.5 * (b.start + b.end) < e1]
+        done.update(i for i in A if i in unsure)
+        _decide(words, A, B, unsure, probs, swaps, rep, captions, source_name, edit_model, model)
     rep["rechecked"] = len(done)
     for i in sorted(set(lost) - done):
         w = words[i]
