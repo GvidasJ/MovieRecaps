@@ -192,8 +192,8 @@ def test_the_caption_stage_moves_copied_captions_with_the_cuts(tmp_path, monkeyp
     res = C.run_captions(ctx)
     got = [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000))
            for b in C.read_srt(res["path"])]
-    # the copies move with the cuts; my rules on the text (sentence case, the weak "a" moved to the next caption)
-    assert got == [("So as", 0, 24), ("a joke", 24, 96)]
+    # the copies move with the cuts; my rules on the text ("SO AS A" | "JOKE" regrouped: never end on "a")
+    assert got == [("So as a joke", 0, 96)]
     assert res["frames"] == 96 and [d["text"] for d in res["silence_dropped"]] == ["*PAUSE*"]
     ctx.captions = res
     rows = pipeline.hand_checks(ctx)

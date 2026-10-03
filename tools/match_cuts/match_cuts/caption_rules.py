@@ -34,12 +34,12 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Sequence
 
-from .captions import (HARD_CAP, INTERJECTION_RE, MAX_CHARS, MAX_WORDS, PLACEHOLDER, SILENCE_S, Caption, Word,
-                       clean_text, compute_bonds, frame_ms, is_action_text, is_weak, ms_tc, norm, sentence_end,
-                       to_frame)
+from .captions import (HARD_CAP, INTERJECTION_RE, MAX_CHARS, MAX_WORDS, NAME_STOP, PAUSE_S, PLACEHOLDER, SILENCE_S,
+                       WEAK, Caption, Word, clean_text, compute_bonds, frame_ms, group_words, is_action_text, is_weak,
+                       ms_tc, norm, sentence_end, to_frame)
 
-RULES = {1: "one sentence", 2: "one speaker", 3: "casing inside a word", 4: "all caps", 5: "real words",
-         6: "length", 7: "weak last word", 8: "no gaps"}
+RULES = {1: "one sentence", 2: "one speaker", 3: "casing inside a word", 4: "capitals", 5: "real words",
+         6: "length", 7: "weak words", 8: "no gaps", 9: "kept together"}
 MAX_SPOKEN_WORDS = 5          # rule 6: spoken captions top out at 20 characters (MAX_CHARS) and 5 words
 CLEAR_PROB = 0.6              # a transcript word heard at least this sure is "clearly heard"
 CLEAR_SCORE = 0.9             # a screen reading (OCR) at least this sure ...
@@ -49,6 +49,7 @@ SAME_WORDS = 0.75             # ... a reading with a real word in it ("We wre" ~
 FLICKER_S = 0.15              # a garbled screen reading on screen less than this: a flicker of noise, not a caption
 TOUCH_FRAMES = 2              # competitor captions this close (sequence frames) are back to back
 ALIGN_TOL_S = 0.15            # transcript words up to this far outside a caption may belong to it
+PAUSE_CAP_S = 0.5             # capitals: the first word after a pause in speech longer than this
 
 ALLOWLIST_FILE = Path(__file__).resolve().parents[1] / "caption_allowlist.txt"
 WORDS_FILE = Path(__file__).resolve().parent / "wordlist" / "words_en.txt.gz"
@@ -83,14 +84,15 @@ _LEX: dict[str, Lexicon] = {}
 
 
 def read_allowlist(path: str | Path | None = None) -> list[str]:
-    """The words of caption_allowlist.txt (one or more per line, ``#`` notes); the defaults when it is missing."""
+    """The entries of caption_allowlist.txt: one word or phrase per line ("Bronx High School of Science"; commas
+    also separate entries), ``#`` notes; the defaults when it is missing."""
     p = Path(path) if path else ALLOWLIST_FILE
     if not p.is_file():
         return list(DEFAULT_ALLOW)
     out = []
     for line in p.read_text(encoding="utf-8-sig").splitlines():
         line = line.split("#", 1)[0]
-        out += [w.strip() for w in re.split(r"[\s,;]+", line) if w.strip()]
+        out += [" ".join(w.split()) for w in re.split(r"[,;]", line) if w.strip()]
     return out
 
 
@@ -110,7 +112,7 @@ def lexicon(allowlist: str | Path | None = None) -> Lexicon:
                     base.forms.setdefault(lw, set()).add(w)
             _LEX[""] = base
         base = _LEX[""]
-        words = read_allowlist(allowlist)
+        words = [w for e in read_allowlist(allowlist) for w in e.split()]     # a phrase's words as written too
         _LEX[key] = Lexicon(base.lower, base.forms, {w.lower().replace("’", "'"): w for w in words}, key)
     return _LEX[key]
 
@@ -217,30 +219,9 @@ def case_ok(c: str, lex: Lexicon) -> bool:
     return True
 
 
-def fix_case(c: str, heard: Word | None, sentence_start: bool, lex: Lexicon) -> str:
-    """Rules 3 / 4: a word written as spoken, in sentence case. The allowlist's form; else the transcript's casing
-    where it heard this word (when that casing is allowed); else the word list's (WAS -> was, PETER -> Peter, yoU ->
-    you), a capital at a sentence start, and "I" always."""
-    c = c.replace("’", "'")
-    lw = c.lower()
-    if lw in lex.allow and not (c == lw and lex.known(lw)):
-        return lex.allow[lw]
-    hc = core(heard.text).replace("’", "'") if heard is not None else ""
-    mixed = [f for f in sorted(lex.forms.get(lw, ())) if not _letters(f).isupper()]
-    if hc.lower() == lw and case_ok(hc, lex):
-        out = hc                                          # as the transcript wrote it
-    elif lw in lex.lower:
-        out = lw
-    elif mixed:
-        out = mixed[0]                                    # Peter, McDonald
-    else:
-        out = "".join(p[:1] + p[1:].lower() if not _letters(p).isupper() else p.lower()
-                      for p in re.split(r"([-'])", c))     # yoU -> you, HOw -> How, GOJO -> gojo
-    if lw == "i" or lw.startswith("i'"):
-        out = "I" + out[1:]
-    if sentence_start and out[:1].islower():
-        out = out[:1].upper() + out[1:]
-    return out
+def _title(w: str) -> str:
+    """Spider-Man, O'Brien: each part with a capital."""
+    return "".join(p[:1].upper() + p[1:].lower() for p in re.split(r"([-'])", w))
 
 
 def _artefact(tok: str) -> bool:
@@ -260,6 +241,7 @@ class Tok:
     text: str                    # as written
     raw: str                     # as read / heard (sentence punctuation kept)
     word: Word | None = None     # the transcript word it stands for (timing, casing, sentence end)
+    sent: bool = False           # the screen started a sentence here (a capital on an ordinary word, mixed case)
 
 
 @dataclass
@@ -526,11 +508,15 @@ def _too_long(c: Cap) -> bool:
     return len(c.text) > MAX_CHARS or len(c.toks) > MAX_SPOKEN_WORDS
 
 
-def _bonded(toks: Sequence[Tok]) -> bool:
-    """The last of these tokens is kept together with the one before it ("didn't get it": a negation, its verb, "it";
-    captions.compute_bonds)."""
+def _weak_tail(toks: Sequence[Tok]) -> int:
+    """Where the words kept together with the last token start (captions.compute_bonds: "of the", "it was", "didn't
+    get it"): a weak last word moves to the next caption with them."""
     ws = [Word(t.text, 0.1 * i, 0.1 * i + 0.1, 1.0, t.raw) for i, t in enumerate(toks)]
-    return len(ws) > 1 and bool(compute_bonds(ws)[-1])
+    bonds = compute_bonds(ws)
+    j = len(toks) - 1
+    while j > 0 and bonds[j - 1]:
+        j -= 1
+    return j
 
 
 def weak_reason(caps: Sequence[Cap], i: int, fps: Fraction, mode: str) -> str | None:
@@ -555,14 +541,15 @@ def weak_reason(caps: Sequence[Cap], i: int, fps: Fraction, mode: str) -> str | 
         return "the next caption is an interjection"
     if norm(core(nxt.toks[0].text)) == norm(core(last.text)):
         return "the next word repeats it"
-    if _bonded(c.toks[-3:]):
+    tail = _weak_tail(c.toks)
+    if tail == 0:
         return "kept together with the previous word"
     if c.gave:
         return "it already gave one weak word to the next caption"
-    first = core(nxt.toks[0].text)
-    if first[:1].isupper() and first != "I" and not first.startswith("I'") and lex_starts_sentence(first):
+    if nxt.toks[0].sent:
         return "the next caption starts a new sentence"
-    if len(nxt.text) + 1 + len(last.text) > MAX_CHARS or len(nxt.toks) + 1 > MAX_SPOKEN_WORDS:
+    moved = " ".join(t.text for t in c.toks[tail:])
+    if len(nxt.text) + 1 + len(moved) > MAX_CHARS or len(nxt.toks) + len(c.toks) - tail > MAX_SPOKEN_WORDS:
         return "the next caption would be too long"
     return None
 
@@ -575,68 +562,329 @@ def lex_starts_sentence(w: str) -> bool:
 
 
 def _move_weak(caps: list[Cap], fps: Fraction, mode: str, rep: Report) -> None:
-    """Rule 7: a caption's weak last word goes to the front of the next caption (at most one word per caption); the
-    boundary moves to where that word is said."""
+    """Rule 7: a caption's weak last word goes to the front of the next caption with the words kept together with it
+    (at most once per caption); the boundary moves to where they are said."""
     for i in range(len(caps) - 1):
         if weak_reason(caps, i, fps, mode) is not None:
             continue
         c, nxt = caps[i], caps[i + 1]
-        f = _split_frame(c, len(c.toks) - 1, fps, hi=c.end)
+        tail = _weak_tail(c.toks)
+        f = _split_frame(c, tail, fps, hi=c.end)
         if f is None:
             continue
-        nxt.toks.insert(0, c.toks.pop())
+        nxt.toks[:0] = c.toks[tail:]
+        del c.toks[tail:]
         if f < c.end:                                 # the boundary moves to where the word is said
             c.end = nxt.start = f
         c.gave = True
         rep.change(c, 7)
 
 
-def _sentence_start(caps: Sequence[Cap], i: int) -> bool:
-    prev = next((caps[j] for j in range(i - 1, -1, -1) if caps[j].spoken and caps[j].toks), None)
-    if prev is None:
-        return True
-    t = prev.toks[-1]
-    return sentence_end(t.raw) or (t.word is not None and sentence_end(t.word.raw))
+def _prev_spoken(caps: Sequence[Cap], i: int) -> Cap | None:
+    return next((caps[j] for j in range(i - 1, -1, -1) if caps[j].spoken and caps[j].toks), None)
 
 
-def _recase(caps: list[Cap], lex: Lexicon, rep: Report) -> None:
-    """Rules 3 and 4 on every token (``*actions*`` too); in a caption -- or a video -- written in capitals a lone "A"
-    too (not at a sentence start)."""
+def _after_pause(caps: Sequence[Cap], i: int, k: int, pos: dict[int, int], words: Sequence[Word], fps: Fraction
+                 ) -> bool:
+    """Token k of caption i comes after a real pause in speech (> PAUSE_CAP_S): the transcript's gap before its word,
+    else the gap before its caption (a first token), or nothing said before it."""
+    c, t = caps[i], caps[i].toks[k]
+    if t.word is not None and id(t.word) in pos:
+        if k > 0 and c.toks[k - 1].word is t.word:
+            return False
+        j = pos[id(t.word)]
+        return j == 0 or t.word.start - words[j - 1].end > PAUSE_CAP_S
+    if k > 0:
+        return False
+    prev = next((caps[j] for j in range(i - 1, -1, -1) if caps[j].toks), None)
+    return prev is None or not prev.spoken or (c.start - prev.end) / float(fps) > PAUSE_CAP_S
+
+
+def _name_signal(c: Cap, k: int, pos: dict[int, int], words: Sequence[Word], all_caps: bool, lex: Lexicon
+                 ) -> str | None:
+    """The form a name takes when token k is one -- else None. A name: on the allowlist, a word the word list only
+    writes with a capital (Bronx, Parker), or written with a capital (by the transcript, or by a competitor that
+    does not write in capitals) where that is no sentence start (School, Science, Marvel in mid-sentence), an
+    unknown word (Keanu, Spider-Man), or a word the list also writes as a name (Peter); never a word like "and",
+    "the", "you", "so"."""
+    t = c.toks[k]
+    cw = core(t.text).replace("’", "'")
+    lw = cw.lower()
+    hc = core(t.word.text).replace("’", "'") if t.word is not None else ""
+    heard_cap = hc.lower() == lw and hc[:1].isupper()
+    wrote_cap = not all_caps and cw[:1].isupper()
+    titles = sorted(f for f in lex.forms.get(lw, ()) if f[:1].isupper() and not _letters(f).isupper())
+    form = hc if heard_cap and case_ok(hc, lex) else (titles[0] if titles else _title(cw))
+    if _name_only(cw, lex):
+        return form
+    if not (heard_cap or wrote_cap) or lw in NAME_STOP or lw in WEAK or is_interjection_word(lw):
+        return None
+    if not lex.known(lw) and not any(lex.known(x) for x in _stretched(lw)):
+        return form                                                      # Keanu, Firestar, Spider-Man
+    if heard_cap and id(t.word) in pos:
+        j = pos[id(t.word)]
+        if j > 0 and not sentence_end(words[j - 1].raw or words[j - 1].text):
+            return form                                                  # a capital in mid-sentence
+    if wrote_cap and k > 0 and not sentence_end(c.toks[k - 1].raw):
+        return form
+    return form if titles else None
+
+
+def _recase(caps: list[Cap], words: Sequence[Word] | None, lex: Lexicon, rep: Report, fps: Fraction) -> None:
+    """Capitals as spoken (rules 3 and 4): "I", names and acronyms start with a capital; every other word is lower
+    case -- never a capital only because the transcript or the screen starts a new sentence there (WAS -> was,
+    yoU -> you, "joke. And Marvel" -> "and Marvel"); _pause_capitals then gives the first word of a caption after a
+    real pause its capital. A capitalised word next to a name is part of it ("Bronx School"). ``*actions*`` too."""
     letters = "".join(_letters(t.text) for c in caps if c.spoken for t in c.toks)
     all_caps = len(letters) >= 12 and sum(ch.isupper() for ch in letters) >= 0.9 * len(letters)
+    words = list(words or [])
+    pos = {id(w): j for j, w in enumerate(words)}
     for i, c in enumerate(caps):
         if c.mode == "placeholder":
             continue
-        shouting = all_caps or any(len(_letters(core(t.text))) > 1 and _letters(core(t.text)).isupper()
-                                   and not case_ok(core(t.text), lex) for t in c.toks)
-        for k, t in enumerate(c.toks):
-            if core(t.text) == "A" and (shouting or (t.word is not None and core(t.word.text) == "a")) \
-                    and not (k == 0 and _sentence_start(caps, i)):
-                t.text = t.text.replace("A", "a", 1)
-                rep.change(c, 4)
+        cores = [core(t.text).replace("’", "'") for t in c.toks]
+        if c.toks and not all_caps and cores[0][:1].isupper() and cores[0] != "I" and lex_starts_sentence(cores[0]):
+            c.toks[0].sent = True                       # the screen started a sentence here
+        names = [(_name_signal(c, k, pos, words, all_caps, lex) if cw and _letters(cw) else None)
+                 for k, cw in enumerate(cores)]
+        for k, cw in enumerate(cores):                  # a capitalised word next to a name: part of it
+            t = c.toks[k]
+            capital = ((not all_caps and cw[:1].isupper()) or (t.word is not None and core(t.word.text)[:1].isupper())
+                       or (all_caps and t.word is None and any(f[:1].isupper() and not _letters(f).isupper()
+                                                               for f in lex.forms.get(cw.lower(), ()))))
+            if names[k] is None and capital and cw.lower() not in NAME_STOP and cw.lower() not in WEAK and any(
+                    names[j] is not None for j in (k - 1, k + 1) if 0 <= j < len(cores)):
+                names[k] = _title(cw) if _letters(cw).isupper() else cw
+        for k, (t, cw) in enumerate(zip(c.toks, cores)):
+            if not cw or not _letters(cw) or is_number(cw):
                 continue
-            cw = core(t.text)
-            if cw == "i" or cw.startswith("i'"):                 # "I" is always a capital
-                t.text = t.text.replace(cw, "I" + cw[1:], 1)
-                rep.change(c, 3)
-                continue
-            if not cw or is_number(cw) or case_ok(cw, lex):
-                continue
-            rule = 4 if _letters(cw).isupper() else 3
-            new = fix_case(cw, t.word, k == 0 and _sentence_start(caps, i), lex)
-            titles = [f for f in lex.forms.get(new.lower(), ()) if f[:1].isupper() and f[1:] == f[1:].lower()]
-            if new.islower() and titles and t.word is None and any(
-                    _name_only(core(c.toks[j].text), lex) for j in (k - 1, k + 1) if 0 <= j < len(c.toks)):
-                new = titles[0]                           # PETER PARKER -> Peter Parker, not "peter Parker"
+            lw = cw.lower()
+            if lw == "i" or lw.startswith("i'"):
+                new = "I" + lw[1:]
+            elif lw in lex.allow and not (cw == lw and lex.known(lw)):
+                new = lex.allow[lw]
+            elif len(_letters(cw)) > 1 and _letters(cw).isupper() and is_acronym(cw, lex):
+                new = cw
+            elif names[k] is not None:
+                new = names[k]
+            else:
+                mixed = sorted(f for f in lex.forms.get(lw, ()) if not _letters(f).isupper() and not f[:1].isupper())
+                new = mixed[0] if mixed else lw                                  # iPhone-like forms the list knows
             if new != cw:
+                rule = 3 if not _letters(cw).isupper() and not case_ok(cw, lex) else 4
                 t.text = t.text.replace(cw, new, 1) if cw in t.text else t.text.replace("’", "'").replace(cw, new, 1)
                 rep.change(c, rule)
+
+
+def _pause_capitals(caps: list[Cap], words: Sequence[Word] | None, rep: Report, fps: Fraction) -> None:
+    """The first word of a caption after a real pause in speech (> PAUSE_CAP_S: the transcript's gap before it, else
+    the gap before the caption) starts with a capital -- the only capital besides "I", names and acronyms."""
+    words = list(words or [])
+    pos = {id(w): j for j, w in enumerate(words)}
+    for i, c in enumerate(caps):
+        if not c.spoken or not c.toks:
+            continue
+        t = c.toks[0]
+        cw = core(t.text)
+        if cw[:1].islower() and _after_pause(caps, i, 0, pos, words, fps):
+            t.text = t.text.replace(cw, cw[:1].upper() + cw[1:], 1)
+            c.info["pause_capital"] = True              # not a name: rule 5 reads it in lower case
+            rep.change(c, 4)
 
 
 def _name_only(w: str, lex: Lexicon) -> bool:
     """A name the word list writes only with a capital (Parker), never as an ordinary word."""
     lw = w.lower()
     return lw not in lex.lower and any(f[:1].isupper() and not _letters(f).isupper() for f in lex.forms.get(lw, ()))
+
+
+def _run_words(run: Sequence[Cap], fps: Fraction) -> tuple[list[Word], list[tuple[int, int]]]:
+    """The words of consecutive competitor captions on the competitor's timing: a caption's first word from the frame
+    it appeared, the others at their transcript time (else shared out by characters); each until the next word, the
+    last until the caption ends. The sentence ends: the screen's punctuation, the transcript's, and a capital the
+    screen starts a sentence with. Returns (words, [(caption, token)])."""
+    words: list[Word] = []
+    where: list[tuple[int, int]] = []
+    for ci, c in enumerate(run):
+        a, b = c.start / float(fps), c.end / float(fps)
+        total = max(1, len(c.text))
+        starts: list[float] = []
+        for k, t in enumerate(c.toks):
+            if k == 0:
+                starts.append(a)
+                continue
+            f = t.word.start if t.word is not None and t.word is not c.toks[k - 1].word else None
+            if f is None or not starts[-1] < f < b:
+                f = a + (b - a) * (len(" ".join(x.text for x in c.toks[:k])) + 1) / total
+            starts.append(max(f, starts[-1] + 1e-3))
+        for k, t in enumerate(c.toks):
+            last_of_word = t.word is not None and (k + 1 == len(c.toks) or c.toks[k + 1].word is not t.word)
+            raw = t.raw if sentence_end(t.raw) or not last_of_word else (t.word.raw or t.raw)
+            nxt = c.toks[k + 1] if k + 1 < len(c.toks) else (run[ci + 1].toks[0] if ci + 1 < len(run) else None)
+            if nxt is not None and nxt.sent and not sentence_end(raw):
+                raw = raw + "."                          # the screen starts a new sentence after it
+            elif len(c.toks) == 1 and is_interjection_word(norm(core(t.text))) and not re.search(r"[,.!?]$", raw):
+                raw = raw + ","                          # an interjection the competitor shows alone stays alone
+            words.append(Word(t.text, starts[k], starts[k + 1] if k + 1 < len(c.toks) else b,
+                              float(t.word.prob) if t.word is not None else 1.0, raw))
+            where.append((ci, k))
+    return words, where
+
+
+def _regroup(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+    """Competitor mode: the competitor's captions as one stream of words, regrouped by the voice-mode walk
+    (captions.group_words: 4 words / 20 characters, keep-together pairs, no lone weak word, weak last words moved, a
+    new caption after a pause or a sentence end) on the competitor's timing -- each caption starts on the frame its
+    first word appeared on their screen. The competitor's own captions of 2+ words that pass these rules stay as
+    they are (a lone weak word just before one may join it)."""
+    out: list[Cap] = []
+    run: list[Cap] = []
+    for c in list(cs) + [None]:
+        if c is not None and c.spoken and c.toks:
+            run.append(c)
+            continue
+        if run:
+            out += _regroup_run(run, fps, rep)
+            run = []
+        if c is not None:
+            out.append(c)
+    return out
+
+
+def _regroup_run(run: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+    from .captions import _fits
+    words, where = _run_words(run, fps)
+    bonds = compute_bonds(words, adjectives=False)     # the competitor's own boundary wins over "adjective + noun"
+    first = {}
+    for j, (ci, k) in enumerate(where):
+        first.setdefault(ci, j)
+    fixed = []
+    for ci, c in enumerate(run):
+        a = first[ci]
+        b = a + len(c.toks)
+        if b - a < 2 or not _fits(words, range(a, b)):
+            continue
+        if is_weak(words[b - 1].text) and not sentence_end(words[b - 1].raw):
+            continue                                     # ends on a weak word
+        if any(sentence_end(words[j].raw) for j in range(a, b - 1)):
+            continue
+        if (a > 0 and bonds[a - 1]) or (b < len(words) and bonds[b - 1]):
+            continue                                     # it splits a pair kept together
+        fixed.append((a, b))
+    gave: set[int] = set()
+    groups = _join_singles(words, group_words(words, None, gave, fixed))
+    caps: list[Cap] = []
+    for g in groups:
+        (c0, k0), (c1, k1) = where[g[0]], where[g[-1]]
+        start = run[c0].start if k0 == 0 else to_frame(words[g[0]].start, fps)
+        end = run[c1].end if k1 == len(run[c1].toks) - 1 else None
+        info = dict(run[c0].info)
+        ch = set().union(*(run[c].changed for c in {where[j][0] for j in g}))
+        cap = Cap(start, end, [run[where[j][0]].toks[where[j][1]] for j in g], "competitor", info, ch,
+                  gave=g[0] in gave)
+        if not (k0 == 0 and k1 == len(run[c1].toks) - 1 and c0 == c1):
+            rep.change(cap, 9)                           # not the competitor's own caption
+        caps.append(cap)
+    for c in caps:
+        _merge_quotes(c)
+    for i, c in enumerate(caps):
+        if c.end is None:
+            c.end = caps[i + 1].start if i + 1 < len(caps) else run[-1].end
+    for i in range(1, len(caps)):                        # starts strictly increasing, at least a frame each
+        caps[i].start = max(caps[i].start, caps[i - 1].start + 1)
+        caps[i - 1].end = min(caps[i - 1].end, caps[i].start) if caps[i - 1].end > caps[i].start else caps[i - 1].end
+    own = {tuple(map(id, c.toks)) for c in caps}         # captions still exactly the competitor's
+    rep.notes["regrouped"] = rep.notes.get("regrouped", 0) + sum(1 for c in run if tuple(map(id, c.toks)) not in own)
+    return [c for c in caps if c.end > c.start]
+
+
+def _lone_target(cs: Sequence[Cap], i: int, fps: Fraction) -> str | None:
+    """Where caption i -- a single weak word -- can join: "next", "prev", or None (nowhere / not a lone weak word)."""
+    c = cs[i]
+    if not (c.spoken and len(c.toks) == 1 and is_weak(c.toks[0].text)):
+        return None
+    t = c.toks[0]
+    nxt = cs[i + 1] if i + 1 < len(cs) else None
+    prv = cs[i - 1] if i > 0 else None
+    gap = int(round(PAUSE_S * float(fps)))
+
+    def fits(toks):
+        return len(" ".join(x.text for x in toks)) <= MAX_CHARS and len(toks) <= MAX_SPOKEN_WORDS
+    if (nxt is not None and nxt.spoken and nxt.start - c.end <= gap and not sentence_end(t.raw)
+            and not (t.word is not None and sentence_end(t.word.raw)) and fits([t] + nxt.toks)):
+        return "next"
+    pt = prv.toks[-1] if prv is not None and prv.toks else None
+    if (pt is not None and prv.spoken and c.start - prv.end <= gap and not sentence_end(pt.raw)
+            and not (pt.word is not None and sentence_end(pt.word.raw)) and fits(prv.toks + [t])):
+        return "prev"
+    return None
+
+
+def _join_singles(words: Sequence[Word], groups: list[list[int]]) -> list[list[int]]:
+    """Competitor mode: a one-word caption left between two others ("bring" | "me up") joins a neighbour when the
+    two fit one caption with no pause or sentence end between them: the next one, or the previous one when a
+    comma or a sentence end follows the word ("what dya" | "think," -> "what dya think"). Interjections and a word
+    said again stay alone."""
+    from .captions import _fits, _repeat, standalone_interjections
+    alone = standalone_interjections(words)
+    i = 0
+    while i < len(groups):
+        g = groups[i]
+        w = g[0]
+        if len(g) != 1 or alone[w]:
+            i += 1
+            continue
+        raw = (words[w].raw or words[w].text).strip().rstrip("\"”’'")
+        ends = sentence_end(raw) or raw.endswith((",", ";", ":"))
+
+        def ok(a: list[int], b: list[int]) -> bool:
+            x, y = a[-1], b[0]
+            return (_fits(words, a + b) and words[y].start - words[x].end <= PAUSE_S and not alone[x] and not alone[y]
+                    and not sentence_end(words[x].raw or words[x].text) and not _repeat(words, x, y))
+        if not ends and i + 1 < len(groups) and ok(g, groups[i + 1]):
+            groups[i:i + 2] = [g + groups[i + 1]]
+        elif i > 0 and ok(groups[i - 1], g):
+            groups[i - 1:i + 1] = [groups[i - 1] + g]
+            i -= 1
+        i += 1
+    return groups
+
+
+def _merge_quotes(c: Cap) -> None:
+    """Quoted words shown one by one, now one caption: one pair of quotes ('“so” “dude”' -> '“so dude”')."""
+    for k in range(len(c.toks) - 1):
+        a, b = c.toks[k], c.toks[k + 1]
+        if a.text[-1:] in "”\"" and b.text[:1] in "“\"" and len(a.text) > 1 and len(b.text) > 1:
+            a.text, b.text = a.text[:-1], b.text[1:]
+
+
+def _join_lone(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+    """Rule 7: a caption of a single weak word ("a", "I", "the") joins the caption after it -- or, when a sentence
+    end, a pause or a too-long caption is in the way, the one before it; else it is listed."""
+    i = 0
+    while i < len(cs):
+        c = cs[i]
+        if not (c.spoken and len(c.toks) == 1 and is_weak(c.toks[0].text)):
+            i += 1
+            continue
+        where = _lone_target(cs, i, fps)
+        if where == "next":
+            cs[i + 1].toks.insert(0, c.toks[0])
+            cs[i + 1].start = c.start
+            rep.change(cs[i + 1], 7)
+            del cs[i]
+            continue
+        if where == "prev":
+            cs[i - 1].toks.append(c.toks[0])
+            cs[i - 1].end = c.end
+            rep.change(cs[i - 1], 7)
+            del cs[i]
+            continue
+        rep.flagged[7] += 1
+        rep.row(7, "flagged", c.start, c.end, c.text, "a lone weak word: nothing it can join (a pause or a sentence "
+                                                      "end on both sides)")
+        i += 1
+    return cs
 
 
 def _strip_stops(caps: list[Cap], rep: Report) -> None:
@@ -659,6 +907,14 @@ def _strip_stops(caps: list[Cap], rep: Report) -> None:
 # The final check
 # ---------------------------------------------------------------------------------------------
 
+def _cores5(c: Cap) -> list[str]:
+    """The words as rule 5 reads them: a capital given after a pause is no sign of a name ("Dont" is "dont")."""
+    out = [core(t.text) for t in c.toks]
+    if out and c.info.get("pause_capital"):
+        out[0] = out[0][:1].lower() + out[0][1:]
+    return out
+
+
 def _caps_in(caps: Sequence[Caption], words: Sequence[Word] | None, mode: str) -> list[Cap]:
     out = []
     for c in caps:
@@ -671,6 +927,8 @@ def _caps_in(caps: Sequence[Caption], words: Sequence[Word] | None, mode: str) -
         else:
             out.append(Cap(c.start, c.end, [Tok(t, t) for t in " ".join(str(c.text).split()).split(" ") if t],
                            c.mode, info, gave=bool(info.get("gave"))))
+        if out[-1].toks and info.get("starts_sentence"):
+            out[-1].toks[0].sent = True
     return out
 
 
@@ -686,6 +944,8 @@ def _caps_out(caps: Sequence[Cap]) -> list[Caption]:
             info["rules"] = sorted(c.changed)
         if c.gave:
             info["gave"] = True
+        if c.toks and c.toks[0].sent:
+            info["starts_sentence"] = True              # the screen started a sentence here
         out.append(Caption(c.text, c.start, c.end, c.mode, ws, info))
     return out
 
@@ -774,7 +1034,9 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     cs = out
     _strip_stops(cs, rep)
     cs = [c for c in cs if c.toks]
-    _recase(cs, lex, rep)
+    _recase(cs, words, lex, rep, fps)
+    if mode == "competitor":
+        cs = _regroup(cs, fps, rep)
     # rule 6: length
     out = []
     for c in cs:
@@ -789,8 +1051,10 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                                                           "cannot be split at a word")
         out += pieces
     cs = out
-    # rule 7: weak last words
+    # rule 7: weak last words, lone weak words
     _move_weak(cs, fps, mode, rep)
+    cs = _join_lone(cs, fps, rep)
+    _pause_capitals(cs, words, rep, fps)
     for i, c in enumerate(cs):
         why = weak_reason(cs, i, fps, mode)
         if why not in (None, "not a weak ending"):
@@ -807,8 +1071,7 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                 rep.change(a, 8)
     # rule 5: what is still not a word
     for c in cs:
-        bad = [core(t.text) for t in c.toks if c.mode != "placeholder" and core(t.text)
-               and not is_real(core(t.text), lex) and not is_name(core(t.text))]
+        bad = [x for x in _cores5(c) if c.mode != "placeholder" and x and not is_real(x, lex) and not is_name(x)]
         if bad:
             rep.flagged[5] += 1
             heard = " ".join(t.word.text for t in c.toks if t.word is not None)
@@ -817,6 +1080,9 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                     "acronym or deliberate spelling: add it to caption_allowlist.txt)")
     res = _caps_out(cs)
     left = check(res, fps, mode, lex)
+    for a, b in _split_pairs(_caps_in(res, None, mode), fps, adjectives=mode != "competitor"):
+        rep.flagged[9] += 1                              # rule 9: what could not be kept together
+        rep.row(9, "flagged", a.start, b.end, f"{a.text} | {b.text}", "a pair kept together is split here")
     d = rep.to_dict()
     d["left"] = {r: len(v) for r, v in left.items()}
     d["left_rows"] = {r: v[:20] for r, v in left.items() if v}
@@ -825,8 +1091,10 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
 
 def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: Lexicon | None = None,
           rules: Sequence[int] = tuple(RULES)) -> dict[int, list[str]]:
-    """The eight checks on finished captions: {rule: [what breaks it]}. Rule 7 counts a weak last word only where it
-    could move (weak_reason); rule 8 only in voice mode (the competitor's gaps are kept)."""
+    """The checks on finished captions: {rule: [what breaks it]}. Rule 7 counts a weak last word only where it could
+    move (weak_reason) and a caption of a single weak word where it could join a neighbour; rule 8 only in voice
+    mode (the competitor's gaps are kept); rule 9 a pair kept together (captions.compute_bonds) split between two
+    captions where the caps allowed one caption."""
     lex = lex or lexicon()
     fps = Fraction(fps)
     out: dict[int, list[str]] = {r: [] for r in rules}
@@ -856,15 +1124,55 @@ def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: 
         if 4 in out and any(x and len(_letters(x)) > 1 and _letters(x).isupper() and not case_ok(x, lex)
                             for x in cores):
             out[4].append(tc)
-        if 5 in out and any(x and not is_real(x, lex) and not is_name(x) for x in cores):
+        if 5 in out and any(x and not is_real(x, lex) and not is_name(x) for x in _cores5(c)):
             out[5].append(tc)
         if 6 in out and _too_long(c):
             out[6].append(tc)
-        if 7 in out and weak_reason(cs, i, fps, mode or "voice") is None:
+        if 7 in out and (weak_reason(cs, i, fps, mode or "voice") is None or _lone_target(cs, i, fps) is not None):
             out[7].append(tc)
+    if 9 in out:
+        out[9] = [f"{_tc(a.start, fps)} '{a.text}' | '{b.text}'"
+                  for a, b in _split_pairs(cs, fps, adjectives=(mode or "voice") != "competitor")]
     if 8 in out and (mode or "voice") != "competitor":
         out[8] = [f"{_tc(a.start, fps)} '{a.text}' ends at {_tc(a.end, fps)}, the next starts at {_tc(b.start, fps)}"
                   for a, b in zip(caps, caps[1:]) if a.end != b.start]
+    return out
+
+
+def _split_pairs(cs: Sequence[Cap], fps: Fraction, adjectives: bool = True) -> list[tuple[Cap, Cap]]:
+    """Rule 9: boundaries between two spoken captions (no pause between them) that split a pair kept together, where
+    the words bonded across the boundary would fit one caption (competitor mode: its own boundary wins over
+    "adjective + noun", ``adjectives`` False)."""
+    from .captions import _fits
+    out = []
+    gap = int(round(PAUSE_S * float(fps)))
+    for a, b in zip(cs, cs[1:]):
+        if not (a.spoken and b.spoken and a.toks and b.toks) or b.start - a.end > gap:
+            continue
+        ws: list[Word] = []
+        for c in (a, b):
+            n = len(c.toks)
+            for k, t in enumerate(c.toks):
+                if t.word is not None and all(x.word is not None for x in c.toks):
+                    s0, s1 = t.word.start, t.word.end
+                else:
+                    s0 = (c.start + (c.end - c.start) * k / n) / float(fps)
+                    s1 = (c.start + (c.end - c.start) * (k + 1) / n) / float(fps)
+                raw = t.raw if sentence_end(t.raw) or t.word is None else (t.word.raw or t.raw)
+                ws.append(Word(t.text, s0, s1, 1.0, raw))
+        bonds = compute_bonds(ws, adjectives=adjectives)
+        j = len(a.toks) - 1
+        if not bonds[j]:
+            continue
+        lo, hi = j, j + 1
+        while lo > 0 and bonds[lo - 1]:
+            lo -= 1
+        while hi < len(ws) - 1 and bonds[hi]:
+            hi += 1
+        while lo > 0 and is_weak(ws[lo - 1].text):
+            lo -= 1                                      # "And my" + "favorite thing": weak words go with it
+        if _fits(ws, range(lo, hi + 1)):
+            out.append((a, b))
     return out
 
 
@@ -874,11 +1182,15 @@ def summary_line(rep: dict) -> str:
 
     def n(d: dict, r: int) -> int:
         return int(d.get(r, d.get(str(r), 0)) or 0)
-    verbs = {1: "split", 2: "split", 3: "recased", 4: "recased", 6: "split", 7: "moved", 8: "closed"}
+    verbs = {1: "split", 2: "split", 3: "recased", 4: "recased", 6: "split", 7: "moved or joined", 8: "closed",
+             9: "regrouped"}
     parts = []
     for r, name in RULES.items():
         if r == 8 and rep.get("mode") == "competitor":
             parts.append(f"8 {name}: the competitor's timing kept, gaps included")
+            continue
+        if r == 9 and rep.get("mode") != "competitor":
+            parts.append(f"9 {name}: {n(fl, 9)} flagged")
             continue
         if r == 5:
             bits = []
@@ -893,6 +1205,8 @@ def summary_line(rep: dict) -> str:
             parts.append(f"5 {name}: " + ", ".join(bits))
             continue
         bits = [f"{n(ch, r)} {verbs[r]}"]
+        if r == 9 and notes.get("regrouped"):
+            bits = [f"{notes['regrouped']} of the competitor's captions regrouped into {n(ch, 9)}"]
         if n(fl, r) or r == 7:
             bits.append(f"{n(fl, r)} {'kept (listed)' if r == 7 else 'flagged'}")
         parts.append(f"{r} {name}: " + ", ".join(bits))

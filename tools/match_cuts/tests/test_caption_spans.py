@@ -7,8 +7,10 @@
 * the rules on hand-made data: the video's writing conventions, joining runs, a lone bar, the transcript fallback;
 * the acceptance test on input/competitor.mp4 against tests/fixtures/competitor_captions_truth.srt, the answer key
   written by eye from contact sheets of every frame: every caption READ with its text identical and its first and last
-  frame within one frame; the file WRITTEN keeps the competitor's words, timing and gaps, in sentence case (the video is
-  in ALL CAPS) with the weak last words moved, and breaks none of the hard rules 1-4.
+  frame within one frame; the file WRITTEN keeps the competitor's words and timing (each caption starts on the frame
+  its first word appeared), regrouped into 2-4 word captions where it shows one word at a time, in lower case but
+  for "I", names and the first word after a pause (the video is in ALL CAPS), and breaks none of the hard rules
+  1-4.
 """
 from __future__ import annotations
 
@@ -174,22 +176,21 @@ def test_real_competitor_captions_match_the_answer_key(tmp_path, monkeypatch):
     exact = [g for g, k in zip(read, key) if g[0] == k[0] and abs(g[1] - k[1]) <= 1 and abs(g[2] - k[2]) <= 1]
     assert len(read) == len(key) and len(exact) == len(key), [(g, k) for g, k in zip(read, key) if g not in exact]
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
-    # written: the same words in the same order, the competitor's timing and gaps, sentence case, rules 1-4 kept
+    # written: the same words in the same order, regrouped on the competitor's timing, rules 1-4 kept
     got = frames(C.parse_srt(Path(res["path"]).read_text(encoding="utf-8")))
-    assert len(got) == len(key)
+    assert len(got) == 56 and res["rules"]["notes"]["regrouped"] == 97
 
     def words(rows):
         return [w for t, _, _ in rows for w in re.sub(r"[^a-z0-9' -]", "", t.lower().replace("’", "'")).split()]
     assert words(got) == words(key)
     covered = {f for _, a, b in key for f in range(a, b)}
-    assert {f for _, a, b in got for f in range(a, b)} == covered                    # the gaps kept
-    starts = {a for _, a, _ in key}
-    moved = [(g, k) for g, k in zip(got, key) if g[1] != k[1]]
-    assert len(moved) == res["rules"]["changed"][7] == 11                          # only where a weak word moved
-    assert all(g[0].split()[0].lower() in C.WEAK for g, _ in moved) and not {a for _, a, _ in got} & (
-        {k[1] for _, k in moved} - starts - {g[1] for g, _ in moved})
+    assert {f for _, a, b in got for f in range(a, b)} == covered                    # the competitor's captions touch
+    assert {a for _, a, _ in got} <= {a for _, a, _ in key}                         # each starts where theirs does
+    assert not [t for t, _, _ in got if len(t.split()) == 1 and C.is_weak(t)]       # never a lone weak word
+    assert all(len(t) <= 20 and len(t.split()) <= 4 for t, _, _ in got if not C.is_action_text(t))
     assert not [t for t, _, _ in got if re.search(r"\b[A-Z]{2,}\b", t)]               # no ALL CAPS left
-    assert got[0][0] == "So as" and got[1][0] == "a joke" and ("I had", 524, 545) in got
+    assert ("So as a joke", 0, 48) in got and ("I know", 509, 524) in got and ("a backpack", 545, 576) in got
+    assert ("the school", 744, 788) in got and ("of science", 704, 744) in got   # no transcript: "science"
     from match_cuts.caption_rules import check
     caps = [C.Caption(t, a, b, "competitor") for t, a, b in got]
     assert not any(check(caps, Fraction(60), "competitor", rules=(1, 2, 3, 4)).values())

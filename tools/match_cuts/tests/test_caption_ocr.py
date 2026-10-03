@@ -101,9 +101,10 @@ def test_caption_stage_keeps_the_competitors_timing_and_applies_my_rules(clip, t
     res = C.run_captions(ctx)
     assert res["mode"] == "competitor" and warnings == ["captions: no transcription: not installed in this test"]
     blocks = C.parse_srt(Path(res["path"]).read_text(encoding="utf-8"))
-    # 30 fps frame k = 2k at 60; "whoa!! x2" split after the sentence end (rule 1), the rest as on screen
+    # 30 fps frame k = 2k at 60; "whoa!! x2" split after the sentence end (rule 1), "Audi" a name, "Whoa!!" the
+    # first word after an action caption; "no" | "no" (interjections the competitor shows alone) stay apart
     assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == \
-        [("I got a Parker Peter", 20, 60), ("*automatic audi braking*", 60, 110), ("whoa!!", 110, 157),
+        [("I got a Parker Peter", 20, 60), ("*automatic Audi braking*", 60, 110), ("Whoa!!", 110, 157),
          ("x2", 157, 170), ("no", 170, 200), ("no", 200, 230), ("Spider-Man is", 236, 282)]
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
     assert res["rules"]["changed"][1] == 1 and res["weak_kept"][0]["reason"] == "last caption"

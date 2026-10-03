@@ -148,8 +148,15 @@ def test_regrouped_captions_follow_every_rule(name):
         for a, b in zip(g, g[1:]):
             assert not alone[a] and not alone[b], f"interjection not alone in {text!r}"
             assert C.norm(ws[a].text) != C.norm(ws[b].text), f"repetition in one caption: {text!r}"
-        if gi + 1 < len(groups):
-            assert not bonds[g[-1]], f"bond split after {text!r}"
+        if gi + 1 < len(groups) and bonds[g[-1]]:          # split only where the caps leave no choice
+            lo, hi = g[-1], g[-1] + 1
+            while lo > 0 and bonds[lo - 1]:
+                lo -= 1
+            while hi < len(ws) - 1 and bonds[hi]:
+                hi += 1
+            while lo > g[0] and C.is_weak(ws[lo - 1].text):
+                lo -= 1                                    # "And my" + "favorite thing": weak words go with it
+            assert not C._fits(ws, range(lo, hi + 1)), f"bond split after {text!r}"
 
 
 def test_the_29_weak_endings_are_fixed_except_where_a_rule_keeps_them():

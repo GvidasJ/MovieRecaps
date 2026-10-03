@@ -198,14 +198,19 @@ with its competitor and 60 fps sequence timecodes.
 (competitor frame k = sequence frame 2k for a 30 fps competitor). The mode is chosen per clip:
 
 * **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): the competitor
-  decides the **timing** (each caption starts and ends on the competitor's frames, its gaps kept) and **where
-  captions split**; my rules decide **how the text looks** (the hard rules below). The caption band is read on
+  decides the **timing** (each caption starts on the frame its first word appeared on their screen; their silences
+  kept) and **where captions split** where they already show 2+ words that pass my rules; my rules decide **how the
+  text looks** (the hard rules below). Where the competitor shows **one word at a time**, the words are regrouped
+  into 2–4 word captions by the voice-mode rules below (20 characters, pairs kept together, never a lone weak word)
+  on the competitor's timing: `a` | `joke` → `a joke`, `Bronx` | `School` → `Bronx School`; a word left between
+  two kept captions joins one of them, an interjection the competitor shows alone stays alone, and quoted words
+  shown one by one get one pair of quotes (`“so dude what's”`). The caption band is read on
   every frame (the caption's fill colour is learned from the video, static title / logo / watermark text is
   masked): a new caption starts on the frame different words appear; a pop-in (the text growing over its first
   frames) or a word highlighted in another colour is not a new caption, the same text popping in again is. The
   text read is the majority of RapidOCR's readings of the caption's fully grown frames. The cut edit is also
   transcribed (word timings): a caption is split where a sentence ends or the speaker changes, at the word's own
-  time; casing follows the transcript (`SPIDER-MAN` → `Spider-Man`, `WAS` → `was`); full stops and commas go; a
+  time; names follow the transcript (`SPIDER-MAN` → `Spider-Man`, `WAS` → `was`); full stops and commas go; a
   garbled reading (`We wre`) takes the word the transcript clearly heard (`We're`) and is listed. Speech the
   competitor left uncaptioned stays uncaptioned; a caption the OCR cannot read takes the words heard while it is on
   screen (listed).
@@ -218,6 +223,24 @@ with its competitor and 60 fps sequence timecodes.
   `*...*` placeholders for silences over ~1 s, a new caption after every sentence end. `--voiceover FILE` captions
   your own narration instead.
 
+**Grouping, both modes** (`captions.py`):
+
+* **Never a single weak word** (`a`, `the`, `to`, `of`, `I`, … — the weak-word list): it joins the word(s) after it
+  (`I` | `know` → `I know`); before a silence, a sentence end or an interjection it joins the caption before it.
+  A caption of nothing but function words (`without the`) joins the next words whole.
+* **Never split** (unless the 20-character / 4-word cap leaves no choice): `a` / `an` / `the` / `this` / `my` /
+  `your` + the word after it (`a joke`, `the school`; after an adjective the noun too: `a high school`), a pronoun
+  + its verb (`I know`, `we went`, `you are`), a preposition + its object (`of Science`, `to the front`), names of
+  two or more capitalised words (`Bronx School`, `Bronx High School of Science`), a name, number + unit, negation +
+  verb, and every phrase in `caption_allowlist.txt`. No pair reaches across a pause over 0.25 s, a comma or a
+  sentence end. A weak last word moves to the next caption with the words kept together with it (`to one of
+  the` | `songs` → `to one` | `of the songs`).
+* **Capitals**: only `I`, names, acronyms and the first word of a caption after a real pause in speech (over
+  0.5 s: the transcript's gap, else the gap before the caption). A sentence the transcript starts with no pause
+  before it stays lower case (`joke` | `And` | `Marvel` → `and Marvel`). Names: the transcript's capitals in
+  mid-sentence (`School`, `Science`), words the word list only writes capitalised (`Bronx`, `Parker`), unknown
+  capitalised words (`Keanu`), and a capitalised word next to a name.
+
 **The hard rules** (`caption-generator-prompt.md`, *Hard rules*) are a final check on every caption file before it
 is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4 is never written:
 
@@ -226,16 +249,17 @@ is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4
 | 1 one sentence | no `?` / `!` / `.` with more text after it | split there | — |
 | 2 one speaker | no sentence end the transcript heard inside a caption (no speaker labels: a reply starts a new sentence) | split there, at the word's time | — |
 | 3 casing inside a word | no `yoU` | `you` (the transcript's casing, else the word list's) | — |
-| 4 all caps | no ALL-CAPS word but acronyms | sentence case (`WAS` → `was`, `PETER PARKER` → `Peter Parker`) | — |
+| 4 capitals | no ALL-CAPS word but acronyms; capitals only for `I`, names, acronyms, after a pause | lower case (`WAS` → `was`, `PETER PARKER` → `Peter Parker`) | — |
 | 5 real words | every token in the word list, a name, a number or an interjection | competitor mode: a reading that is not a word and was not read clearly takes the word the transcript clearly heard; screen noise (`1`, `V`, `_`) is left out | listed, never guessed (deliberate misspellings stay) |
 | 6 length | spoken: 20 characters / 5 words; `*actions*`: 24 | split at a word (no weak ending) | one word over 20 characters |
-| 7 weak last word | not on *a, the, to, of, …* where the word can move | moved to the next caption (competitor mode: only between touching captions) | kept where it ends a sentence, a gap / silence / interjection follows, or the caption already gave one |
-| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed | competitor mode keeps the competitor's gaps |
+| 7 weak words | no caption of a single weak word; no weak last word where it can move | joined / moved to the next words | kept where it ends a sentence, a silence / interjection follows, it is kept together with the word before it, or the caption already gave one |
+| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed | competitor mode keeps the competitor's silences |
+| 9 kept together | no pair kept together split between two captions | competitor mode: regrouped (one word at a time) | split only where the cap forces it |
 
-**Acronyms** (`caption_allowlist.txt` next to this README; one word per line, extend it): `AI`, `MJ`, `MCU`, plus
+**Acronyms** (`caption_allowlist.txt` next to this README; one word or phrase per line, extend it): `AI`, `MJ`, `MCU`, plus
 the acronyms the word list writes in capitals (`FBI`, `NASA`, `TV`); never a word that is also an ordinary word
 (`AS`, `WAS`, `IT`). Words listed there are written exactly as listed (also `iPhone`, a name or a deliberate
-misspelling the word list does not know). The word list is SCOWL (`match_cuts/wordlist/`, see its licence file).
+misspelling the word list does not know); a phrase there is never split across captions. The word list is SCOWL (`match_cuts/wordlist/`, see its licence file).
 The end summary says how many captions each rule changed or flagged (*Caption rules*), and *Captions worth a look*
 lists every flag, every word taken from the transcript and every piece of screen noise left out.
 

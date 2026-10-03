@@ -49,6 +49,49 @@ UNITS = frozenset("""am pm year years yr yrs month months week weeks day days ho
     foot feet ft inch inches kg kilo kilos lb lbs mph degrees o'clock times""".split())
 AGE_UNITS = frozenset("year years month months week weeks day days".split())
 NEGATIONS = frozenset(["cannot"])
+# keep together (never split across captions): a determiner and the word after it, a pronoun and its verb, a
+# preposition and its object
+DETERMINERS = frozenset("a an the this my your".split())
+PRONOUNS = frozenset("i you we they he she it".split())
+PREPOSITIONS = frozenset("""of to in on at for with from by about into onto over under after before through without
+    across behind between around""".split())
+NOT_OBJECT = frozenset("and but or nor so because then if when while though although than as".split())
+NAME_LINKS = frozenset("of the de da di von van".split())      # inside a name: "Bronx High School of Science"
+# words that follow a noun rather than finish it ("a classroom next to", "the class again")
+AFTER_NOUN = frozenset("""next too again now here there back up down out off away ago anymore already yet together
+    first last right left even still just also only""".split())
+_VERB_BASES = """be have do say get make go know take see come think look want give use find tell ask work seem feel
+    try leave call need mean keep let begin help talk turn start show hear play run move like live believe hold bring
+    happen write provide sit stand lose pay meet include continue set learn change lead understand watch follow stop
+    create speak read allow add spend grow open walk win offer remember love consider appear buy wait serve die send
+    expect build stay fall cut reach kill remain suggest raise pass sell require report decide pull guess hope wish
+    finish put eat drink sleep drive ride fly swim sing dance laugh cry wear choose forget break catch throw hit hate
+    wonder agree mind care check miss bet go pretend"""
+_VERB_IRREGULAR = """am is are was were been being has had having does did done doing said got gotten made went gone
+    knew known took taken saw seen came thought gave given told found felt left kept let began begun heard ran held
+    brought wrote written sat stood lost paid met led understood spent grew grown won bought fell cut sold put ate
+    eaten drank slept drove driven rode ridden flew flown swam sang laughed wore worn chose chosen forgot forgotten
+    broke broken caught threw thrown hit shot can could will would shall should may might must 's 're 've 'd 'll
+    gonna wanna gotta"""
+
+
+def _verb_forms() -> frozenset[str]:
+    """The bases with their -s, -ed and -ing forms, and the irregular forms."""
+    out = set(_VERB_IRREGULAR.split())
+    for b in _VERB_BASES.split():
+        if b.endswith("y") and b[-2] not in "aeiou":
+            out |= {b, b[:-1] + "ies", b[:-1] + "ied", b + "ing"}                # try, tries, tried, trying
+            continue
+        s3 = b + "es" if b.endswith(("s", "sh", "ch", "x", "z", "o")) else b + "s"
+        ed = b + "d" if b.endswith("e") else b + "ed"
+        ing = (b[:-1] if b.endswith("e") and not b.endswith("ee") else b) + "ing"
+        out |= {b, s3, ed, ing}
+        if re.fullmatch(r"[^aeiou]*[aeiou][^aeiouwxy]", b):                # stop -> stopped, sit -> sitting
+            out |= {b + b[-1] + "ed", b + b[-1] + "ing"}
+    return frozenset(out)
+
+
+VERBS = _verb_forms()
 # capitalised words that start sentences rather than names (a full name is never one of these)
 NAME_STOP = WEAK | frozenset("""oh yeah yea hey no whoa okay ok sorry um amm what why how when where who whose which this
     these those there here then well just we you he she they his her its their them me him us please thanks thank do
@@ -155,20 +198,70 @@ def _is_negation(n: str) -> bool:
     return n.endswith("n't") or n in NEGATIONS
 
 
-def compute_bonds(words: Sequence[Word]) -> list[bool]:
-    """bonds[i]: words i and i+1 are never split across captions (prompt "Keep together"): a full name (two
+def is_verb(n: str) -> bool:
+    """A verb form (a rough list of the common ones: a pronoun is kept together with it -- "I know", "we went")."""
+    return n in VERBS or _is_negation(n) or any(n.endswith(x) for x in ("'m", "'re", "'ve", "'ll", "'d"))
+
+
+def _phrase_bond(words: Sequence[Word], i: int, adjectives: bool = True) -> bool:
+    """Words i and i+1 make a phrase never split: a determiner + the word after it ("a joke", "the school"), a
+    pronoun + its verb ("I know"), a preposition + its object ("of Science"), a link inside a name ("School of
+    Science")."""
+    a, b = words[i], words[i + 1]
+    na, nb = norm(a.text), norm(b.text)
+    if nb in NOT_OBJECT or is_interjection(b.text) or not nb:
+        return False
+    if na in DETERMINERS:
+        return nb not in DETERMINERS and nb not in PREPOSITIONS
+    if adjectives and i > 0 and norm(words[i - 1].text) in DETERMINERS and _noun_after(na, nb):
+        return True                                    # "a high school", "a pretty girl": the noun after an adjective
+    if na in PRONOUNS:
+        return is_verb(nb)
+    if na in PREPOSITIONS:
+        return nb not in PREPOSITIONS and nb not in PRONOUNS - {"you", "it"} or nb in ("me", "us", "him", "her", "them")
+    if na in NAME_LINKS and _is_name_part(b.text) and i > 0 and _is_name_part(words[i - 1].text):
+        return True
+    return nb in NAME_LINKS and _is_name_part(a.text) and i + 2 < len(words) and _is_name_part(words[i + 2].text)
+
+
+def _noun_after(adj: str, noun: str) -> bool:
+    """After a determiner, "adj noun" is one phrase when neither is a function word, a verb or an adverb (a rough
+    test: "a high school", "the next thing"; not "a classroom next", "the teachers didn't")."""
+    stop = WEAK | NOT_OBJECT | PREPOSITIONS | DETERMINERS | PRONOUNS | NAME_STOP | AFTER_NOUN
+    return all(w and w not in stop and not is_verb(w) and not w.endswith("ly") and not is_interjection(w)
+               for w in (adj, noun))
+
+
+def _allowlist_phrases() -> list[list[str]]:
+    """The allowlist's entries of two or more words (caption_allowlist.txt), as normalised word lists."""
+    try:
+        from .caption_rules import read_allowlist
+        return [[norm(x) for x in e.split()] for e in read_allowlist() if len(e.split()) > 1]
+    except Exception:  # noqa: BLE001 - no allowlist: no phrases
+        return []
+
+
+def compute_bonds(words: Sequence[Word], phrases: bool = True, adjectives: bool = True) -> list[bool]:
+    """bonds[i]: words i and i+1 are never split across captions (prompt "Keep together"): a full name (two or more
     capitalised words that are not sentence starters), a number and its unit (``6 am``, ``50 quid``, ``10 year
-    old``) and a negation and its verb (``don't move``, ``didn't get it``). Never across a pause > 0.25 s."""
+    old``) and a negation and its verb (``don't move``, ``didn't get it``); with ``phrases`` also a determiner and
+    the word after it, a pronoun and its verb, a preposition and its object (_phrase_bond) and every phrase of
+    caption_allowlist.txt (``adjectives``: also "a high school" -- the noun after an adjective). Never across a pause
+    > 0.25 s or a sentence end."""
     n = len(words)
     bonds = [False] * max(0, n - 1)
     for i in range(n - 1):
         a, b = words[i], words[i + 1]
         if b.start - a.end > PAUSE_S:
             continue                                   # the speaker split it: a pause always may
+        if re.search(r"[,;:]['\"’”]?$", (a.raw or "").strip()):
+            continue                                   # a comma ends the phrase: "a joke, Marvel"
         na, nb = norm(a.text), norm(b.text)
         if na == nb:
             continue                                   # a repetition is never bonded
-        if _is_name_part(a.text) and _is_name_part(b.text) and not _ends_sentence(a.raw or a.text):
+        if phrases and not sentence_end(a.raw or a.text) and _phrase_bond(words, i, adjectives):
+            bonds[i] = True
+        elif _is_name_part(a.text) and _is_name_part(b.text) and not _ends_sentence(a.raw or a.text):
             bonds[i] = True
         elif _is_number(na) and nb in UNITS:
             bonds[i] = True
@@ -178,6 +271,13 @@ def compute_bonds(words: Sequence[Word]) -> list[bool]:
             bonds[i] = True
             if i + 2 < n and norm(words[i + 2].text) == "it" and words[i + 2].start - b.end <= PAUSE_S:
                 bonds[i + 1] = True                    # "didn't get it"
+    if phrases and n > 1:
+        keys = [norm(w.text) for w in words]
+        for ph in _allowlist_phrases():
+            for i in range(n - len(ph) + 1):
+                if keys[i:i + len(ph)] == ph:
+                    for j in range(i, i + len(ph) - 1):
+                        bonds[j] = True
     return bonds
 
 
@@ -209,9 +309,45 @@ def _repeat(words: Sequence[Word], i: int, j: int) -> bool:
     return bool(a) and a == norm(words[j].text)
 
 
-def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list[list[int]]:
+def _fits(words: Sequence[Word], u: Sequence[int]) -> bool:
+    """One caption's worth: 4 words and 20 characters (5 words when it starts with a weak word: "for a 15 year
+    old")."""
+    if _chars(words, u) > MAX_CHARS:
+        return False
+    return len(u) <= MAX_WORDS or (len(u) == MAX_WORDS + 1 and is_weak(words[u[0]].text))
+
+
+def _cut_unit(words: Sequence[Word], u: list[int], core: Sequence[bool] | None) -> list[list[int]]:
+    """A run of bonded words too long for one caption, cut where it breaks the fewest names / numbers + units /
+    negations (``core`` bonds), leaves no weak word alone, then into the fewest pieces, the fewest ending on a weak
+    word, the most even."""
+    import itertools
+    n = len(u)
+    if n > 12:
+        return []
+    best = None
+    for parts in range(2, n + 1):
+        for cuts in itertools.combinations(range(1, n), parts - 1):
+            bounds = (0,) + cuts + (n,)
+            pieces = [u[a:b] for a, b in zip(bounds, bounds[1:])]
+            if not all(_fits(words, p) for p in pieces):
+                continue
+            lens = [_chars(words, p) for p in pieces]
+            score = (sum(1 for c in cuts if core is not None and core[u[c - 1]]),
+                     sum(1 for p in pieces if len(p) == 1 and is_weak(words[p[0]].text)), parts,
+                     sum(1 for p in pieces[:-1] if len(p) > 1 and is_weak(words[p[-1]].text)), max(lens) - min(lens))
+            if best is None or score < best[0]:
+                best = (score, pieces)
+        if best is not None and best[0][0] == 0:
+            break
+    return best[1] if best else []
+
+
+def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int],
+           core: Sequence[bool] | None = None) -> list[list[int]]:
     """Runs of words that stay together (bonds + moved weak words glued to their next word); a run longer than the
-    caps (4 words, 20 characters: hard rule 6) is cut greedily (the word / character caps win over a bond)."""
+    caps (4 words, 20 characters: hard rule 6) is cut where it breaks the fewest ``core`` bonds (_cut_unit; the caps
+    win over a bond)."""
     units: list[list[int]] = []
     cur: list[int] = []
     for i in range(len(words)):
@@ -221,8 +357,12 @@ def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list
             cur = []
     out: list[list[int]] = []
     for u in units:
-        if len(u) <= MAX_WORDS and _chars(words, u) <= MAX_CHARS:
+        if _fits(words, u):
             out.append(u)
+            continue
+        pieces = _cut_unit(words, u, core)
+        if pieces:
+            out += pieces
             continue
         part: list[int] = []
         for i in u:
@@ -235,14 +375,14 @@ def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list
 
 
 def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], forced: set[int],
-          glue: set[int]) -> list[list[int]]:
+          glue: set[int], core: Sequence[bool] | None = None) -> list[list[int]]:
     """The grouping walk: a new caption starts before a unit when the caption already has 4 words or would exceed
     20 characters, after a pause > 0.25 s, after a sentence end (hard rules 1 and 2: the transcriber has no speaker
     labels, but a reply starts a new sentence), at a standalone interjection (before and after it), at a word said
     again straight away (repetition: one caption each), or where the weak-word fix forced it."""
     groups: list[list[int]] = []
     cur: list[int] = []
-    for u in _units(words, bonds, glue):
+    for u in _units(words, bonds, glue, core):
         if cur:
             prev, first = cur[-1], u[0]
             # a caption of nothing but weak words ("for a") may take one word more (never more than 5) rather
@@ -261,21 +401,38 @@ def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], f
     return groups
 
 
-def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out: set[int] | None = None
-                ) -> list[list[int]]:
+def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out: set[int] | None = None,
+                fixed: Sequence[tuple[int, int]] = ()) -> list[list[int]]:
     """Word-index groups, one per caption: the walk, then the weak-word fix -- a caption of more than one word that
     ends on a weak word gives that word to the front of the next caption (which is re-split if it now breaks the
     caps). Each caption gives away at most one word (the prompt's own example keeps "there is" after giving away
-    "a"). Kept, and listed in ``notes``: a weak word that ends a sentence, bonded to the previous one ("didn't get
-    it"), before a silence placeholder, before a standalone interjection, or at the very end. ``gave_out`` gets the
-    first word of each caption that gave its weak last word away."""
+    "a"), together with the words kept together with it ("to one of the" -> "to one" | "of the songs"); a caption
+    of nothing but function words ("without the") joins the next words whole. Kept, and listed in ``notes``: a
+    weak word that ends a sentence, bonded to the previous one ("didn't get it"), before a silence placeholder,
+    before a standalone interjection, or at the very end. ``gave_out`` gets the first word of each caption that gave
+    its weak last word away.
+
+    A caption is never a single weak word: it joins the word(s) after it (or, when a silence, a sentence end or
+    nothing follows, the caption before it). ``fixed``: word ranges [a, b) that stay one caption (competitor mode:
+    the competitor's own captions of 2+ words that pass these rules); a lone weak word just before one may join
+    it."""
     if not words:
         return []
     bonds = compute_bonds(words)
+    core_bonds = compute_bonds(words, phrases=False)
     alone = standalone_interjections(words)
     forced: set[int] = set()
     glue: set[int] = set()
-    groups = _walk(words, bonds, alone, forced, glue)
+    for a, b in fixed:
+        for i in range(a, b - 1):
+            bonds[i] = True
+        for i in (a - 1, b - 1):                       # nothing reaches across its edges
+            if 0 <= i < len(bonds):
+                bonds[i] = core_bonds[i] = False
+        forced.add(a)
+        if b < len(words):
+            forced.add(b)
+    groups = _walk(words, bonds, alone, forced, glue, core_bonds)
     gave: set[int] = set()
     gi = 0
     while gi < len(groups):
@@ -283,13 +440,16 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
         last = g[-1]
         if len(g) > 1 and is_weak(words[last].text):
             reason = None if g[0] not in gave else "it already gave one weak word to the next caption"
+            tail = last                                # the weak word moves with the words kept together with it
+            while tail - 1 >= g[0] and bonds[tail - 1]:
+                tail -= 1
             if reason is not None:
                 pass
             elif last + 1 >= len(words):
                 reason = "last word of the captions"
             elif sentence_end(words[last].raw or words[last].text):
                 reason = "it ends a sentence"
-            elif bonds[last - 1]:
+            elif tail == g[0] and (last in glue or not all(_function_word(words[k].text) for k in g)):
                 reason = "kept together with the previous word"
             elif last - 1 in glue:
                 reason = "it follows a weak word moved here; moving it too would strand that one"
@@ -300,17 +460,58 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
             elif alone[last + 1]:
                 reason = "the next caption is an interjection"
             if reason is None:
-                forced.add(last)
+                forced.add(tail)                         # "to one of the" -> "to one" | "of the songs"
                 glue.add(last)
                 gave.add(g[0])
-                groups = _walk(words, bonds, alone, forced, glue)
+                groups = _walk(words, bonds, alone, forced, glue, core_bonds)
                 continue                                 # look at the shortened caption again (for the notes)
             if notes is not None:
                 notes.append({"word": last, "reason": reason})
         gi += 1
+    groups = _join_lone_weak(words, groups, bonds, alone, forced, glue, notes, core_bonds)
     if gave_out is not None:
         gave_out.update(g[0] for g in groups if g[0] in gave)
     return groups
+
+
+def _function_word(w: str) -> bool:
+    n = norm(w)
+    return n in WEAK or n in PREPOSITIONS or n in DETERMINERS or n in NOT_OBJECT
+
+
+def _join_lone_weak(words: Sequence[Word], groups: list[list[int]], bonds: Sequence[bool], alone: Sequence[bool],
+                    forced: set[int], glue: set[int], notes: list[dict] | None, core_bonds: Sequence[bool]
+                    ) -> list[list[int]]:
+    """A caption of one weak word ("a", "I", "the") joins the word(s) after it; when a silence (> 1 s), a sentence
+    end, a standalone interjection or nothing follows, the caption before it; else it stays, listed."""
+    tried: set[int] = set()
+    while True:
+        lone = next((g[0] for g in groups if len(g) == 1 and is_weak(words[g[0]].text) and g[0] not in tried), None)
+        if lone is None:
+            return groups
+        tried.add(lone)
+        i, n = lone, len(words)
+        nxt_ok = (i + 1 < n and not sentence_end(words[i].raw or words[i].text) and not alone[i + 1]
+                  and words[i + 1].start - words[i].end <= SILENCE_S and not _repeat(words, i, i + 1))
+        prv_ok = (i > 0 and not sentence_end(words[i - 1].raw or words[i - 1].text) and not alone[i - 1]
+                  and words[i].start - words[i - 1].end <= SILENCE_S and not _repeat(words, i - 1, i))
+        if nxt_ok:
+            glue.add(i)
+            forced.discard(i + 1)
+        elif prv_ok:
+            glue.add(i - 1)
+            forced.discard(i)
+            why = ("nothing follows" if i + 1 >= n
+                   else "it ends a sentence" if sentence_end(words[i].raw or words[i].text)
+                   else "the next caption is an interjection" if alone[i + 1]
+                   else "the next word repeats it" if _repeat(words, i, i + 1) else "a silence follows")
+            if notes is not None:
+                notes.append({"word": i, "reason": f"a lone weak word, joined to the caption before ({why})"})
+        else:
+            if notes is not None:
+                notes.append({"word": i, "reason": "a lone weak word with nothing to join"})
+            continue
+        groups = _walk(words, bonds, alone, forced, glue, core_bonds)
 
 
 # ---------------------------------------------------------------------------------------------

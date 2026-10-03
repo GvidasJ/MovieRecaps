@@ -1158,11 +1158,12 @@ def _captions(ctx: Any) -> list[str]:
         o = cap.get("ocr") or {}
         out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions from the "
                    f"competitor's burned-in captions: the caption band read on all {o.get('frames_read', 0)} frames "
-                   f"({o.get('engine', 'OCR')}); the competitor decides the timing (each caption from the frame its "
-                   "words appear to the last frame before other words, or none, show; its gaps kept) and where "
-                   "captions split, my rules how the text looks (the hard rules below: split at a sentence / speaker "
-                   "boundary, casing, no full stops or commas, garbled readings). Speech the competitor left "
-                   "uncaptioned stays uncaptioned.")
+                   f"({o.get('engine', 'OCR')}); the competitor decides the timing (each caption starts on the frame "
+                   "its first word appears on their screen; their silences kept) and where captions split where they "
+                   "show 2+ words that pass my rules; words shown one at a time are regrouped into 2-4 word captions "
+                   "by the voice-mode rules; my rules decide how the text looks (the hard rules below: split at a "
+                   "sentence / speaker boundary, capitals, no full stops or commas, garbled readings). Speech the "
+                   "competitor left uncaptioned stays uncaptioned.")
         cv = o.get("conventions") or {}
         if cv:
             out.append("- The competitor writes " + ", ".join(
