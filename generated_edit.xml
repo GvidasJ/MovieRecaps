@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <sequence id="sequence-1">
+    <name>Recreated Edit (Premiere)</name>
+    <duration>4018</duration>
+    <rate>
+      <timebase>60</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <timecode>
+      <rate>
+        <timebase>60</timebase>
+        <ntsc>FALSE</ntsc>
+      </rate>
+      <string>00:00:00:00</string>
+      <frame>0</frame>
+      <displayformat>NDF</displayformat>
+    </timecode>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <width>1080</width>
+            <height>1920</height>
+            <anamorphic>FALSE</anamorphic>
+            <pixelaspectratio>square</pixelaspectratio>
+            <fielddominance>none</fielddominance>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="clipitem-1">
+            <name>S01 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>34538</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>1098</end>
+            <in>15607</in>
+            <out>16705</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw">
+              <name>raw.mp4</name>
+              <pathurl>file://localhost/C%3A/Users/gvida/Desktop/bh/MovieRecaps/output/002/extras/media/raw.mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+              <duration>17252</duration>
+              <timecode>
+                <rate>
+                  <timebase>30</timebase>
+                  <ntsc>TRUE</ntsc>
+                </rate>
+                <string>00:00:00:00</string>
+                <frame>0</frame>
+                <displayformat>NDF</displayformat>
+              </timecode>
+              <media>
+                <video>
+                  <samplecharacteristics>
+                    <rate>
+                      <timebase>30</timebase>
+                      <ntsc>TRUE</ntsc>
+                    </rate>
+                    <width>1920</width>
+                    <height>1080</height>
+                    <anamorphic>FALSE</anamorphic>
+                    <pixelaspectratio>square</pixelaspectratio>
+                    <fielddominance>none</fielddominance>
+                  </samplecharacteristics>
+                </video>
+                <audio>
+                  <samplecharacteristics>
+                    <depth>16</depth>
+                    <samplerate>48000</samplerate>
+                  </samplecharacteristics>
+                  <channelcount>2</channelcount>
+                </audio>
+              </media>
+            </file>
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>96.018519</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.0190352</horiz>
+                    <vert>0.1050926</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S01 speed 1.000000 conf 0.27</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 503.5, 1073.5 px; Scale 96.02 %; Rotation 0.00 deg; zoomed 0.38 % to cover the window</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+6.12 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-2">
+            <name>S02 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>34538</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>1098</start>
+            <end>4018</end>
+            <in>16703</in>
+            <out>19626</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Time Remap</name>
+                <effectid>timeremap</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>variablespeed</parameterid>
+                  <name>variablespeed</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>speed</parameterid>
+                  <name>speed</name>
+                  <valuemin>-100000</valuemin>
+                  <valuemax>100000</valuemax>
+                  <value>100.1</value>
+                </parameter>
+                <parameter>
+                  <parameterid>reverse</parameterid>
+                  <name>reverse</name>
+                  <value>FALSE</value>
+                </parameter>
+                <parameter>
+                  <parameterid>frameblending</parameterid>
+                  <name>frameblending</name>
+                  <value>FALSE</value>
+                </parameter>
+              </effect>
+            </filter>
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>96.018519</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.0190352</horiz>
+                    <vert>0.1050926</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S02 speed 1.001000 conf 0.21</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 503.5, 1073.5 px; Scale 96.02 %; Rotation 0.00 deg; framing kept from S01: the competitor's moves 0 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+5.23 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+        </track>
+      </video>
+      <audio>
+        <numOutputChannels>2</numOutputChannels>
+        <format>
+          <samplecharacteristics>
+            <depth>16</depth>
+            <samplerate>48000</samplerate>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="clipitem-a1">
+            <name>S01 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>34538</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>1098</end>
+            <in>15607</in>
+            <out>16705</out>
+            <file id="file-raw" />
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S01 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a2">
+            <name>S02 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>34538</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>1098</start>
+            <end>4018</end>
+            <in>16703</in>
+            <out>19623</out>
+            <file id="file-raw" />
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S02 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+  </sequence>
+</xmeml>

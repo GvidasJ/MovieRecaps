@@ -1,0 +1,2451 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="4">
+	<project>
+		<name>my_fixed_edit</name>
+		<children>
+			<clip id="masterclip-1" explodedTracks="true">
+				<uuid>21840337-0309-4344-beaa-c89c629a0e4d</uuid>
+				<masterclipid>masterclip-1</masterclipid>
+				<ismasterclip>TRUE</ismasterclip>
+				<duration>2722</duration>
+				<rate>
+					<timebase>30</timebase>
+					<ntsc>FALSE</ntsc>
+				</rate>
+				<name>S01 raw.mp4</name>
+				<media>
+					<video>
+						<track>
+							<clipitem id="clipitem-1">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<alphatype>none</alphatype>
+								<pixelaspectratio>square</pixelaspectratio>
+								<anamorphic>FALSE</anamorphic>
+								<file id="file-1">
+									<name>raw.mp4</name>
+									<pathurl>file://localhost/C%3a/Users/gvida/Desktop/bh/MovieRecaps/output/011/extras/media/raw.mp4</pathurl>
+									<rate>
+										<timebase>30</timebase>
+										<ntsc>FALSE</ntsc>
+									</rate>
+									<duration>2722</duration>
+									<timecode>
+										<rate>
+											<timebase>30</timebase>
+											<ntsc>FALSE</ntsc>
+										</rate>
+										<string>00:00:00:00</string>
+										<frame>0</frame>
+										<displayformat>NDF</displayformat>
+									</timecode>
+									<media>
+										<video>
+											<samplecharacteristics>
+												<rate>
+													<timebase>30</timebase>
+													<ntsc>FALSE</ntsc>
+												</rate>
+												<width>1280</width>
+												<height>720</height>
+												<anamorphic>FALSE</anamorphic>
+												<pixelaspectratio>square</pixelaspectratio>
+												<fielddominance>none</fielddominance>
+											</samplecharacteristics>
+										</video>
+										<audio>
+											<samplecharacteristics>
+												<depth>16</depth>
+												<samplerate>48000</samplerate>
+											</samplecharacteristics>
+											<channelcount>1</channelcount>
+											<layout>stereo</layout>
+											<audiochannel>
+												<sourcechannel>1</sourcechannel>
+												<channellabel>left</channellabel>
+											</audiochannel>
+										</audio>
+										<audio>
+											<samplecharacteristics>
+												<depth>16</depth>
+												<samplerate>48000</samplerate>
+											</samplecharacteristics>
+											<channelcount>1</channelcount>
+											<layout>stereo</layout>
+											<audiochannel>
+												<sourcechannel>2</sourcechannel>
+												<channellabel>right</channellabel>
+											</audiochannel>
+										</audio>
+									</media>
+								</file>
+								<link>
+									<linkclipref>clipitem-1</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-2</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-3</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+							</clipitem>
+						</track>
+					</video>
+					<audio>
+						<track>
+							<clipitem id="clipitem-2">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<link>
+									<linkclipref>clipitem-1</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-2</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-3</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+							</clipitem>
+						</track>
+						<track>
+							<clipitem id="clipitem-3">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+								</sourcetrack>
+								<link>
+									<linkclipref>clipitem-1</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-2</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-3</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+							</clipitem>
+						</track>
+					</audio>
+				</media>
+				<logginginfo>
+					<description></description>
+					<scene></scene>
+					<shottake></shottake>
+					<lognote></lognote>
+					<good></good>
+					<originalvideofilename></originalvideofilename>
+					<originalaudiofilename></originalaudiofilename>
+				</logginginfo>
+				<colorinfo>
+					<lut></lut>
+					<lut1></lut1>
+					<asc_sop></asc_sop>
+					<asc_sat></asc_sat>
+					<lut2></lut2>
+				</colorinfo>
+				<comments>
+					<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+					<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+					<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+					<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+				</comments>
+				<labels>
+					<label2>Iris</label2>
+				</labels>
+			</clip>
+			<sequence id="sequence-1" TL.SQAudioVisibleBase="0" TL.SQVideoVisibleBase="0" TL.SQVisibleBaseTime="0" TL.SQAVDividerPosition="0.5" TL.SQHideShyTracks="0" TL.SQHeaderWidth="236" TL.SQDataTrackViewControlState="1" Monitor.ProgramZoomOut="3276806400000" Monitor.ProgramZoomIn="0" TL.SQTimePerPixel="0.063780415514015767" MZ.EditLine="3213302400000" MZ.Sequence.PreviewFrameSizeHeight="1920" MZ.Sequence.PreviewFrameSizeWidth="1080" MZ.Sequence.AudioTimeDisplayFormat="200" MZ.Sequence.PreviewRenderingClassID="1061109567" MZ.Sequence.PreviewRenderingPresetCodec="1919706400" MZ.Sequence.PreviewRenderingPresetPath="EncoderPresets\SequencePreview\9678af98-a7b7-4bdb-b477-7ac9c8df4a4e\QuickTime.epr" MZ.Sequence.PreviewUseMaxBitDepth="false" MZ.Sequence.EditingModeGUID="9678af98-a7b7-4bdb-b477-7ac9c8df4a4e" MZ.Sequence.VideoTimeDisplayFormat="108" MZ.ZeroPoint="0" explodedTracks="true">
+				<uuid>cbc226d3-e53b-4ad6-80e7-337b540745fa</uuid>
+				<duration>774</duration>
+				<rate>
+					<timebase>60</timebase>
+					<ntsc>FALSE</ntsc>
+				</rate>
+				<name>Recreated Edit (Premiere)</name>
+				<media>
+					<video>
+						<format>
+							<samplecharacteristics>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<codec>
+									<name>Apple ProRes 422</name>
+									<appspecificdata>
+										<appname>Final Cut Pro</appname>
+										<appmanufacturer>Apple Inc.</appmanufacturer>
+										<appversion>7.0</appversion>
+										<data>
+											<qtcodec>
+												<codecname>Apple ProRes 422</codecname>
+												<codectypename>Apple ProRes 422</codectypename>
+												<codectypecode>apcn</codectypecode>
+												<codecvendorcode>appl</codecvendorcode>
+												<spatialquality>1024</spatialquality>
+												<temporalquality>0</temporalquality>
+												<keyframerate>0</keyframerate>
+												<datarate>0</datarate>
+											</qtcodec>
+										</data>
+									</appspecificdata>
+								</codec>
+								<width>1080</width>
+								<height>1920</height>
+								<anamorphic>FALSE</anamorphic>
+								<pixelaspectratio>square</pixelaspectratio>
+								<fielddominance>none</fielddominance>
+								<colordepth>24</colordepth>
+							</samplecharacteristics>
+						</format>
+						<track TL.SQTrackShy="0" TL.SQTrackExpandedHeight="55" TL.SQTrackExpanded="0" MZ.TrackTargeted="0">
+							<clipitem id="clipitem-4">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>0</start>
+								<end>91</end>
+								<in>458</in>
+								<out>549</out>
+								<pproTicksIn>1938988800000</pproTicksIn>
+								<pproTicksOut>2324246400000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>205.251</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>0.636609</horiz>
+												<vert>0.327627</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-5">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>91</start>
+								<end>262</end>
+								<in>600</in>
+								<out>771</out>
+								<pproTicksIn>2540160000000</pproTicksIn>
+								<pproTicksOut>3264105600000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>205.251</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>0.636609</horiz>
+												<vert>0.327627</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-6">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S02 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>262</start>
+								<end>301</end>
+								<in>813</in>
+								<out>852</out>
+								<pproTicksIn>3441916800000</pproTicksIn>
+								<pproTicksOut>3607027200000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-7">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S04 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>301</start>
+								<end>346</end>
+								<in>854</in>
+								<out>899</out>
+								<pproTicksIn>3615494400000</pproTicksIn>
+								<pproTicksOut>3806006400000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-8">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S06 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>346</start>
+								<end>384</end>
+								<in>914</in>
+								<out>952</out>
+								<pproTicksIn>3869510400000</pproTicksIn>
+								<pproTicksOut>4030387200000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-9">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S08 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>384</start>
+								<end>436</end>
+								<in>1169</in>
+								<out>1221</out>
+								<pproTicksIn>4949078400000</pproTicksIn>
+								<pproTicksOut>5169225600000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-10">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S08 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>436</start>
+								<end>512</end>
+								<in>1279</in>
+								<out>1355</out>
+								<pproTicksIn>5414774400000</pproTicksIn>
+								<pproTicksOut>5736528000000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-11">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S11 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>512</start>
+								<end>580</end>
+								<in>1389</in>
+								<out>1457</out>
+								<pproTicksIn>5880470400000</pproTicksIn>
+								<pproTicksOut>6168355200000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-12">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S14 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>580</start>
+								<end>614</end>
+								<in>1487</in>
+								<out>1521</out>
+								<pproTicksIn>6295363200000</pproTicksIn>
+								<pproTicksOut>6439305600000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>195.482</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>-0.503195</horiz>
+												<vert>0.3344</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-13">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S15 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>614</start>
+								<end>763</end>
+								<in>1736</in>
+								<out>1885</out>
+								<pproTicksIn>7349529600000</pproTicksIn>
+								<pproTicksOut>7980336000000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>213.018</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>0.675785</horiz>
+												<vert>0.330389</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-14">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S15 raw.mp4</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>763</start>
+								<end>774</end>
+								<in>1904</in>
+								<out>1915</out>
+								<pproTicksIn>8060774400000</pproTicksIn>
+								<pproTicksOut>8107344000000</pproTicksOut>
+								<alphatype>none</alphatype>
+								<file id="file-1"/>
+								<filter>
+									<effect>
+										<name>Basic Motion</name>
+										<effectid>basic</effectid>
+										<effectcategory>motion</effectcategory>
+										<effecttype>motion</effecttype>
+										<mediatype>video</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>scale</parameterid>
+											<name>Scale</name>
+											<valuemin>0</valuemin>
+											<valuemax>1000</valuemax>
+											<value>213.018</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>rotation</parameterid>
+											<name>Rotation</name>
+											<valuemin>-8640</valuemin>
+											<valuemax>8640</valuemax>
+											<value>0</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>center</parameterid>
+											<name>Center</name>
+											<value>
+												<horiz>0.675785</horiz>
+												<vert>0.330389</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>centerOffset</parameterid>
+											<name>Anchor Point</name>
+											<value>
+												<horiz>0</horiz>
+												<vert>0</vert>
+											</value>
+										</parameter>
+										<parameter authoringApp="PremierePro">
+											<parameterid>antiflicker</parameterid>
+											<name>Anti-flicker Filter</name>
+											<valuemin>0.0</valuemin>
+											<valuemax>1.0</valuemax>
+											<value>0</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<enabled>TRUE</enabled>
+							<locked>FALSE</locked>
+						</track>
+						<track TL.SQTrackShy="0" TL.SQTrackExpandedHeight="55" TL.SQTrackExpanded="0" MZ.TrackTargeted="0">
+							<enabled>TRUE</enabled>
+							<locked>FALSE</locked>
+						</track>
+					</video>
+					<audio>
+						<numOutputChannels>2</numOutputChannels>
+						<format>
+							<samplecharacteristics>
+								<depth>16</depth>
+								<samplerate>48000</samplerate>
+							</samplecharacteristics>
+						</format>
+						<outputs>
+							<group>
+								<index>1</index>
+								<numchannels>1</numchannels>
+								<downmix>0</downmix>
+								<channel>
+									<index>1</index>
+								</channel>
+							</group>
+							<group>
+								<index>2</index>
+								<numchannels>1</numchannels>
+								<downmix>0</downmix>
+								<channel>
+									<index>2</index>
+								</channel>
+							</group>
+						</outputs>
+						<track TL.SQTrackAudioKeyframeStyle="0" TL.SQTrackShy="0" TL.SQTrackExpandedHeight="95" TL.SQTrackExpanded="0" MZ.TrackTargeted="1" PannerCurrentValue="0.5" PannerStartKeyframe="-91445760000000000,0.5,0,0,0,0,0,0" PannerName="Balance" currentExplodedTrackIndex="0" totalExplodedTrackCount="1" premiereTrackType="Stereo">
+							<clipitem id="clipitem-15" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>0</start>
+								<end>91</end>
+								<in>458</in>
+								<out>549</out>
+								<pproTicksIn>1938988800000</pproTicksIn>
+								<pproTicksOut>2324246400000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>543</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-16" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S01 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>91</start>
+								<end>262</end>
+								<in>600</in>
+								<out>771</out>
+								<pproTicksIn>2540160000000</pproTicksIn>
+								<pproTicksOut>3264105600000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>567</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>568</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>763</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-17" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S02 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>262</start>
+								<end>301</end>
+								<in>813</in>
+								<out>852</out>
+								<pproTicksIn>3441916800000</pproTicksIn>
+								<pproTicksOut>3607027200000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>777</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>778</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>837</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-18" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S04 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>301</start>
+								<end>346</end>
+								<in>854</in>
+								<out>899</out>
+								<pproTicksIn>3615494400000</pproTicksIn>
+								<pproTicksOut>3806006400000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>850</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>851</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>885</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-19" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S06 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>346</start>
+								<end>384</end>
+								<in>914</in>
+								<out>952</out>
+								<pproTicksIn>3869510400000</pproTicksIn>
+								<pproTicksOut>4030387200000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>894</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>895</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-20" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S08 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>384</start>
+								<end>436</end>
+								<in>1169</in>
+								<out>1221</out>
+								<pproTicksIn>4949078400000</pproTicksIn>
+								<pproTicksOut>5169225600000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>0</value>
+											<keyframe>
+												<when>1220</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>1221</when>
+												<value>0</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-21" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S08 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>436</start>
+								<end>512</end>
+								<in>1279</in>
+								<out>1355</out>
+								<pproTicksIn>5414774400000</pproTicksIn>
+								<pproTicksOut>5736528000000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>1260</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>1261</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>1318</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-22" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S11 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>512</start>
+								<end>580</end>
+								<in>1389</in>
+								<out>1457</out>
+								<pproTicksIn>5880470400000</pproTicksIn>
+								<pproTicksOut>6168355200000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>1330</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>1331</when>
+												<value>1</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-23" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S14 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>580</start>
+								<end>614</end>
+								<in>1487</in>
+								<out>1521</out>
+								<pproTicksIn>6295363200000</pproTicksIn>
+								<pproTicksOut>6439305600000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-24" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S15 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>614</start>
+								<end>763</end>
+								<in>1736</in>
+								<out>1885</out>
+								<pproTicksIn>7349529600000</pproTicksIn>
+								<pproTicksOut>7980336000000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>1884</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>1885</when>
+												<value>0</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<clipitem id="clipitem-25" premiereChannelType="mono">
+								<masterclipid>masterclip-1</masterclipid>
+								<name>S15 raw.mp4 audio</name>
+								<enabled>TRUE</enabled>
+								<duration>5444</duration>
+								<rate>
+									<timebase>60</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<start>763</start>
+								<end>774</end>
+								<in>1904</in>
+								<out>1915</out>
+								<pproTicksIn>8060774400000</pproTicksIn>
+								<pproTicksOut>8107344000000</pproTicksOut>
+								<file id="file-1"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<filter>
+									<effect>
+										<name>Gain</name>
+										<effectid>{61756678, 4761696e, 4b657947}</effectid>
+										<effecttype>filter</effecttype>
+										<mediatype>audio</mediatype>
+										<parameter authoringApp="PremierePro">
+											<parameterid>Gain(dB)</parameterid>
+											<name>Gain(dB)</name>
+											<valuemin>-96</valuemin>
+											<valuemax>96</valuemax>
+											<value>8</value>
+										</parameter>
+									</effect>
+								</filter>
+								<filter>
+									<effect>
+										<name>Audio Levels</name>
+										<effectid>audiolevels</effectid>
+										<effectcategory>audiolevels</effectcategory>
+										<effecttype>audiolevels</effecttype>
+										<mediatype>audio</mediatype>
+										<pproBypass>false</pproBypass>
+										<parameter authoringApp="PremierePro">
+											<parameterid>level</parameterid>
+											<name>Level</name>
+											<valuemin>0</valuemin>
+											<valuemax>3.98109</valuemax>
+											<value>1</value>
+											<keyframe>
+												<when>1904</when>
+												<value>0</value>
+											</keyframe>
+											<keyframe>
+												<when>1905</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>1914</when>
+												<value>1</value>
+											</keyframe>
+											<keyframe>
+												<when>1915</when>
+												<value>0</value>
+											</keyframe>
+										</parameter>
+									</effect>
+								</filter>
+								<logginginfo>
+									<description></description>
+									<scene></scene>
+									<shottake></shottake>
+									<lognote></lognote>
+									<good></good>
+									<originalvideofilename></originalvideofilename>
+									<originalaudiofilename></originalaudiofilename>
+								</logginginfo>
+								<colorinfo>
+									<lut></lut>
+									<lut1></lut1>
+									<asc_sop></asc_sop>
+									<asc_sat></asc_sat>
+									<lut2></lut2>
+								</colorinfo>
+								<comments>
+									<premierecomment>S01 speed 1.000000 conf 0.42</premierecomment>
+									<mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+									<mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+									<mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+								</comments>
+								<labels>
+									<label2>Iris</label2>
+								</labels>
+							</clipitem>
+							<enabled>TRUE</enabled>
+							<locked>FALSE</locked>
+							<outputchannelindex>1</outputchannelindex>
+						</track>
+						<track TL.SQTrackAudioKeyframeStyle="0" TL.SQTrackShy="0" TL.SQTrackExpandedHeight="75" TL.SQTrackExpanded="0" MZ.TrackTargeted="0" PannerCurrentValue="0.5" PannerIsInverted="true" PannerStartKeyframe="-91445760000000000,0.5,0,0,0,0,0,0" PannerName="Balance" currentExplodedTrackIndex="0" totalExplodedTrackCount="2" premiereTrackType="Stereo">
+							<enabled>TRUE</enabled>
+							<locked>FALSE</locked>
+							<outputchannelindex>2</outputchannelindex>
+						</track>
+						<track TL.SQTrackAudioKeyframeStyle="0" TL.SQTrackShy="0" TL.SQTrackExpandedHeight="75" TL.SQTrackExpanded="0" MZ.TrackTargeted="0" PannerCurrentValue="0.5" PannerIsInverted="true" PannerStartKeyframe="-91445760000000000,0.5,0,0,0,0,0,0" PannerName="Balance" currentExplodedTrackIndex="1" totalExplodedTrackCount="2" premiereTrackType="Stereo">
+							<enabled>TRUE</enabled>
+							<locked>FALSE</locked>
+							<outputchannelindex>2</outputchannelindex>
+						</track>
+					</audio>
+				</media>
+				<timecode>
+					<rate>
+						<timebase>60</timebase>
+						<ntsc>FALSE</ntsc>
+					</rate>
+					<string>00:00:00:00</string>
+					<frame>0</frame>
+					<displayformat>NDF</displayformat>
+				</timecode>
+					<marker>
+						<comment>the competitor's picture here was not the RAW of its audio; this is the RAW video of the audio playing here</comment>
+						<name>B-ROLL REPLACED S09</name>
+						<in>528</in>
+						<out>534</out>
+					</marker>
+					<marker>
+						<comment>the competitor's picture here was not the RAW of its audio; this is the RAW video of the audio playing here</comment>
+						<name>B-ROLL REPLACED S13</name>
+						<in>648</in>
+						<out>660</out>
+					</marker>
+					<marker>
+						<comment>RETIME S10: variable speed -- Premiere's XML import keeps one constant speed per clip; placed at its first source frame at -100.00 %, redo the variable speed by hand</comment>
+						<name>RETIME S10</name>
+						<in>534</in>
+						<out>-1</out>
+					</marker>
+				<labels>
+					<label2>Forest</label2>
+				</labels>
+				<logginginfo>
+					<description></description>
+					<scene></scene>
+					<shottake></shottake>
+					<lognote></lognote>
+					<good></good>
+					<originalvideofilename></originalvideofilename>
+					<originalaudiofilename></originalaudiofilename>
+				</logginginfo>
+			</sequence>
+			<clip id="masterclip-2" explodedTracks="true">
+				<uuid>77da8346-e0ed-4164-b363-53d5dbf3d7db</uuid>
+				<masterclipid>masterclip-2</masterclipid>
+				<ismasterclip>TRUE</ismasterclip>
+				<duration>569</duration>
+				<rate>
+					<timebase>30</timebase>
+					<ntsc>FALSE</ntsc>
+				</rate>
+				<name>competitor.mp4</name>
+				<media>
+					<video>
+						<track>
+							<clipitem id="clipitem-26">
+								<masterclipid>masterclip-2</masterclipid>
+								<name>competitor.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<alphatype>none</alphatype>
+								<pixelaspectratio>square</pixelaspectratio>
+								<anamorphic>FALSE</anamorphic>
+								<file id="file-2">
+									<name>competitor.mp4</name>
+									<pathurl>file://localhost/C%3a/Users/gvida/Desktop/bh/MovieRecaps/input/competitor.mp4</pathurl>
+									<rate>
+										<timebase>30</timebase>
+										<ntsc>FALSE</ntsc>
+									</rate>
+									<duration>569</duration>
+									<timecode>
+										<rate>
+											<timebase>30</timebase>
+											<ntsc>FALSE</ntsc>
+										</rate>
+										<string>00:00:00:00</string>
+										<frame>0</frame>
+										<displayformat>NDF</displayformat>
+									</timecode>
+									<media>
+										<video>
+											<samplecharacteristics>
+												<rate>
+													<timebase>30</timebase>
+													<ntsc>FALSE</ntsc>
+												</rate>
+												<width>1080</width>
+												<height>1920</height>
+												<anamorphic>FALSE</anamorphic>
+												<pixelaspectratio>square</pixelaspectratio>
+												<fielddominance>none</fielddominance>
+											</samplecharacteristics>
+										</video>
+										<audio>
+											<samplecharacteristics>
+												<depth>16</depth>
+												<samplerate>48000</samplerate>
+											</samplecharacteristics>
+											<channelcount>2</channelcount>
+										</audio>
+									</media>
+								</file>
+								<link>
+									<linkclipref>clipitem-26</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-27</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-28</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+							</clipitem>
+						</track>
+					</video>
+					<audio>
+						<track>
+							<clipitem id="clipitem-27">
+								<masterclipid>masterclip-2</masterclipid>
+								<name>competitor.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<file id="file-2"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+								</sourcetrack>
+								<link>
+									<linkclipref>clipitem-26</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-27</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-28</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+							</clipitem>
+						</track>
+						<track>
+							<clipitem id="clipitem-28">
+								<masterclipid>masterclip-2</masterclipid>
+								<name>competitor.mp4</name>
+								<rate>
+									<timebase>30</timebase>
+									<ntsc>FALSE</ntsc>
+								</rate>
+								<file id="file-2"/>
+								<sourcetrack>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+								</sourcetrack>
+								<link>
+									<linkclipref>clipitem-26</linkclipref>
+									<mediatype>video</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-27</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>1</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+								<link>
+									<linkclipref>clipitem-28</linkclipref>
+									<mediatype>audio</mediatype>
+									<trackindex>2</trackindex>
+									<clipindex>1</clipindex>
+									<groupindex>1</groupindex>
+								</link>
+							</clipitem>
+						</track>
+					</audio>
+				</media>
+				<logginginfo>
+					<description></description>
+					<scene></scene>
+					<shottake></shottake>
+					<lognote></lognote>
+					<good></good>
+					<originalvideofilename></originalvideofilename>
+					<originalaudiofilename></originalaudiofilename>
+				</logginginfo>
+				<colorinfo>
+					<lut></lut>
+					<lut1></lut1>
+					<asc_sop></asc_sop>
+					<asc_sat></asc_sat>
+					<lut2></lut2>
+				</colorinfo>
+				<labels>
+					<label2>Iris</label2>
+				</labels>
+			</clip>
+		</children>
+	</project>
+</xmeml>
