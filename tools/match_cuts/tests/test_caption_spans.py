@@ -124,14 +124,14 @@ def test_runs_join_into_captions():
 
 
 def test_only_unreadable_captions_take_the_words_heard_and_they_are_listed():
-    spans = [{"comp_in": 0, "comp_out": 30, "ocr": "\u201cWHAT DO YOU\u201d", "score": 0.97},
+    spans = [{"comp_in": 0, "comp_out": 30, "ocr": "\u201cWHAT DO YOU SAY\u201d", "score": 0.97},
              {"comp_in": 30, "comp_out": 60, "ocr": "", "score": 0.1},
              {"comp_in": 60, "comp_out": 90, "ocr": "I'M", "score": 0.95},
              {"comp_in": 90, "comp_out": 120, "ocr": "", "score": 0.0}]
     words = [C.Word("what", 0.1, 0.3, 0.9, "what"), C.Word("think", 0.6, 0.8, 0.9, "think,"),
              C.Word("im", 1.1, 1.3, 0.9, "I'm")]
     caps, notes = C.competitor_copy(spans, words, Fraction(60), lambda k: k, Fraction(60))
-    assert [(c.text, c.start, c.end) for c in caps] == [("\u201cWHAT DO YOU\u201d", 0, 30), ("THINK", 30, 60),
+    assert [(c.text, c.start, c.end) for c in caps] == [("\u201cWHAT DO YOU SAY\u201d", 0, 30), ("THINK", 30, 60),
                                                          ("I'M", 60, 90)]
     assert notes == {"from_transcript": [{"start_tc": "00:00:00,500", "end_tc": "00:00:01,000", "text": "THINK"}],
                      "unreadable": [{"start_tc": "00:00:01,500", "end_tc": "00:00:02,000"}]}
