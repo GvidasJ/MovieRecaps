@@ -53,6 +53,11 @@ class Config:
     premiere_min_move: float = 250.0       # --premiere (--min-move): a clip changes the framing only when the competitor's
                                            #   moves this many sequence px or more (centre or an edge); otherwise it keeps
                                            #   the previous clip's, and one continuous RAW take with one framing = one clip
+    keep_silence: bool = False             # --premiere: keep the silences of my edit (False: cut them out, silence.py)
+    silence_db: float = -20.0              # silence: this many dB below the edit's speech level (short-window loudness)
+    min_silence: float = 0.35              # ... for longer than this (s)
+    pad_before: float = 0.08               # kept before the speech after a removed silence (s)
+    pad_after: float = 0.12                # kept after the speech before a removed silence (s)
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in
                                            #   captions (OCR) or made from the voice-over (caption-generator-prompt.md)
     voiceover: str = ""                    # caption this narration file instead of the cut edit's audio
@@ -314,7 +319,8 @@ class Config:
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
-                  "premiere_static_framing", "premiere_follow_audio", "premiere_min_move",
+                  "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
+                  "silence_db", "min_silence", "pad_before", "pad_after",
                   "captions", "voiceover", "caption_model", "caption_recheck_model", "caption_language",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):

@@ -1366,6 +1366,36 @@ def _environment(ctx: Any) -> list[str]:
     return out
 
 
+def _silence(ctx: Any) -> list[str]:
+    """silence.py: every silence of the RAW audio under my clips cut out of 1_edit.xml (or why none was)."""
+    plan = getattr(ctx, "silence", None) or {}
+    if not plan:
+        return ["Not used: only the Premiere export (--premiere) cuts out silences."]
+    if plan.get("off"):
+        return [f"Kept: {plan['off']}."]
+    if plan.get("error"):
+        return [f"Not removed ({plan['error']}): 1_edit.xml keeps every silence."]
+    st = plan.get("settings") or {}
+    out = [f"- Measured on the RAW audio under my clips (A1), never the competitor's: silence = the 50 ms loudness "
+           f"{st.get('db', -20):g} dB under the edit's speech level (below {plan['threshold_db']:.1f} dBFS) for longer "
+           f"than {st.get('min_s', 0.35):g} s; {st.get('pad_after', 0.12):g} s kept after the speech before it and "
+           f"{st.get('pad_before', 0.08):g} s before the speech after it; cut points on whole frames, never inside a "
+           "cross dissolve; A1 fades over one frame on both sides of every cut (no click).",
+           f"- {len(plan.get('rows') or [])} silences removed, {plan['removed_s']:.2f} s in all: "
+           f"{plan['old_s']:.2f} s -> {plan['new_s']:.2f} s."]
+    rows = plan.get("rows") or []
+    if rows:
+        from .silence import tc
+        out += ["", md_table(["removed (edit before removal)", "length", "cut in the new edit at"],
+                             [[f"{tc(r['start_s'])}-{tc(r['end_s'])}", f"{r['len_s']:.2f} s", tc(r["new_at_s"])]
+                              for r in rows])]
+    cap = getattr(ctx, "captions", None) or {}
+    gone = cap.get("silence_dropped") or []
+    out += ["", f"**Copied captions dropped** (completely inside a removed silence): {len(gone) if gone else 'none'}"]
+    out += [f"- {_tc(r)} `{r['text']}`" for r in gone]
+    return out
+
+
 SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Summary", _summary),
     ("Acceptance criteria", _criteria),
@@ -1380,6 +1410,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Environment and timings", _environment),
     ("Captions", _captions),
     ("B-roll cutaways", _broll),
+    ("Silence removal", _silence),
 ]
 
 

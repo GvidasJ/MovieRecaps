@@ -580,6 +580,10 @@ def run_captions(ctx) -> dict:
     comp_fps = Fraction(ctx.comp_fps)
     to_seq = seq_frame_of(comp_fps, fps)
     n_seq = to_seq(ctx.n_comp)
+    rp = (getattr(ctx, "silence", None) or {}).get("ripple")      # silences cut out of the Premiere export
+    rp = rp if rp is not None and rp.cuts else None
+    if rp is not None:
+        n_seq = rp.new_frames
     res: dict = {"requested": requested, "fps": str(fps), "frames": n_seq, "notes": [], "warnings": [],
                  "weak_kept": [], "flags": [], "disagreements": [], "placeholders": [], "over_cap": []}
 
@@ -615,6 +619,12 @@ def run_captions(ctx) -> dict:
                           "engine": caption_ocr.engine_name(), "notes": {}}
             if n_events and not spans:
                 warn(f"{n_events} caption events detected but no caption could be read")
+    span_fps, span_seq = comp_fps, to_seq          # the spans' frames -> sequence frames
+    if rp is not None and spans:                    # the silences cut out: the copies move with the cuts
+        spans, gone = move_spans(spans, to_seq, rp)
+        span_fps, span_seq = fps, int
+        res["silence_dropped"] = [{"text": d.get("ocr") or "", "start_tc": ms_tc(frame_ms(d["seq_in"], fps)),
+                                   "end_tc": ms_tc(frame_ms(d["seq_out"], fps))} for d in gone]
     mode = "competitor" if spans else "voice"
     if requested == "competitor" and not spans:
         warn("--captions competitor: no competitor captions to copy -- made from the voice-over instead")
@@ -647,6 +657,10 @@ def run_captions(ctx) -> dict:
               else None) or ctx.cutlist        # --no-broll: the audio of the edit you import
         y16 = transcribe.resample(build_audio(cl, ctx.raw_audio, int(ctx.audio_sr)), int(ctx.audio_sr))
         res["source"] = "the cut edit (RAW audio on the edit's cuts)"
+        if rp is not None:                          # the edit as exported: its silences cut out
+            from .silence import cut_audio
+            y16 = cut_audio(y16, transcribe.SR, fps, rp)
+            res["source"] += ", its silences cut out"
     else:
         res["source"] = "none (the RAW has no audio)"
     if y16 is not None and len(y16):
@@ -663,7 +677,7 @@ def run_captions(ctx) -> dict:
 
     # ---- unclear words double-checked against the source (caption_recheck.py) ----
     rmodel = str(getattr(cfg, "caption_recheck_model", "") or "")
-    unread = ([(int(d["comp_in"]) / float(comp_fps), int(d["comp_out"]) / float(comp_fps)) for d in spans
+    unread = ([(int(d["comp_in"]) / float(span_fps), int(d["comp_out"]) / float(span_fps)) for d in spans
                if not d.get("ocr")] if mode == "competitor" else None)
     if words and rmodel.lower() not in ("", "none") and (mode == "voice" or unread):
         from . import caption_recheck as R
@@ -672,8 +686,12 @@ def run_captions(ctx) -> dict:
                                      R.audio_source(y16, transcribe.SR), "voice-over")
         else:
             pieces, source, sname = R.pieces_from_cutlist(cl), R.audio_source(ctx.raw_audio, int(ctx.audio_sr)), "RAW"
-        opinion = (R.clear_captions(spans, comp_fps) if spans else
-                   _lazy_opinion(ctx, layout, comp_fps) if requested == "voice" and not voiceover else None)
+            if rp is not None:
+                from .silence import ripple_pieces
+                pieces = ripple_pieces(pieces, rp, fps)
+        opinion = (R.clear_captions(spans, span_fps) if spans else
+                   _lazy_opinion(ctx, layout, comp_fps, rp, to_seq, fps) if requested == "voice" and not voiceover
+                   else None)
         try:
             words, res["recheck"] = R.recheck(
                 words, y16, pieces, source,
@@ -689,7 +707,7 @@ def run_captions(ctx) -> dict:
     # ---- captions ----
     weak: list[dict] = []
     if mode == "competitor":
-        caps, cnotes = competitor_copy(spans, words, comp_fps, to_seq, fps)
+        caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
@@ -726,9 +744,24 @@ def _read_spans(ctx, layout: dict, comp_fps: Fraction) -> dict:
         info.path, layout, wh, comp_fps, ctx.n_comp))
 
 
-def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction):
+def move_spans(spans: Sequence[dict], to_seq, rp) -> tuple[list[dict], list[dict]]:
+    """Caption spans (competitor frames) after the silences were cut out of the sequence (a silence.Ripple): (the
+    spans moved with the cuts, in sequence frames -- text and splits unchanged, a caption partly in a removed
+    silence shorter by that much -- the spans completely inside a removed silence, with their sequence frames)."""
+    moved, gone = [], []
+    for d in spans:
+        a, b = to_seq(int(d["comp_in"])), to_seq(int(d["comp_out"]))
+        if not rp.keep(a, b):
+            gone.append(dict(d, seq_in=a, seq_out=b))
+        else:
+            moved.append(dict(d, comp_in=rp.map(a), comp_out=rp.map(b)))
+    return moved, gone
+
+
+def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction, rp=None, to_seq=None, seq_fps: Fraction | None = None):
     """The competitor's clearly read captions as the recheck's third opinion in forced voice mode: read (OCR) only
-    when the recheck first asks, and only when the layout has a caption band."""
+    when the recheck first asks, and only when the layout has a caption band (moved with the cuts when silences were
+    cut out: ``rp`` / ``to_seq`` / ``seq_fps``)."""
     box: dict = {}
 
     def get(t0: float, t1: float) -> str | None:
@@ -740,7 +773,9 @@ def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction):
                 info = ctx.comp_info
                 wh = (int(info.display_width or info.width), int(info.display_height or info.height))
                 if caption_ocr.available() is None and caption_ocr.caption_band(layout, wh) is not None:
-                    box["get"] = clear_captions(_read_spans(ctx, layout, comp_fps).get("spans") or [], comp_fps)
+                    got = _read_spans(ctx, layout, comp_fps).get("spans") or []
+                    box["get"] = (clear_captions(move_spans(got, to_seq, rp)[0], seq_fps) if rp is not None else
+                                  clear_captions(got, comp_fps))
             except Exception as e:  # noqa: BLE001 - no third opinion: the two transcriptions decide
                 from .common import log
                 log.info("captions: no competitor captions as a third opinion: %s: %s", type(e).__name__, e)

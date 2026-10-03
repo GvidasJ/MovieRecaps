@@ -80,7 +80,9 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
-Premiere-only export: `--premiere`.
+Premiere-only export: `--premiere`. Silence removal (Premiere export and RAW-only runs): `--keep-silence`,
+`--silence-db DB` (default -20, under the speech level), `--min-silence S` (0.35), `--pad-before S` (0.08),
+`--pad-after S` (0.12). No `--competitor`: the edit from the RAW alone (see *Without a competitor* below).
 
 `--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
 playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
@@ -122,6 +124,43 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   (music, voice-over) the previous RAW clip keeps playing, with no RAW audio under it. V1 is never left empty; a
   `B-ROLL REPLACED` marker sits on every replaced spot and report.md lists them with timecodes. A RAW shot whose
   picture is within 1 s of its own audio (an A/V shift) is the main clip and stays as it is.
+
+### Silence removal (`--keep-silence` turns it off)
+
+Every silence of **my** edit's audio is cut out of `1_edit.xml` — measured on the RAW audio under my clips (A1),
+never on the competitor's, so music it added does not count as speech. In competitor mode this happens after the
+competitor's cuts are recreated (also where the competitor kept the pause); without a competitor (below) the RAW
+alone is cut this way.
+
+* **Silence** = the short-window loudness (50 ms RMS, every 10 ms; a louder blip under 0.08 s is a click, not
+  speech — single peaks never count) below `--silence-db` (default `-20`) **dB under the edit's own speech level**
+  (the loudness of its loudest 5% of windows), for longer than `--min-silence` (default 0.35 s). The level is
+  relative so one setting works for loud and quiet recordings alike: on `input/raw_test.mp4` (speech at about
+  -16 dBFS) an absolute -20 dBFS would have called half the speech silence (85 of 203 s cut, 216 words clipped).
+* `--pad-after` (0.12 s) is kept after the speech before a silence and `--pad-before` (0.08 s) before the speech
+  after it, so words are not clipped (at the very start and end of the edit there is no speech to protect). Cut
+  points land on whole 60 fps frames, rounded inwards (never more than the silence), and never inside a cross
+  dissolve.
+* No clicks: A1 fades out over the last frame before every cut and in over the first frame after it (Audio Levels
+  keyframes); the cuts lie inside silences, so only the room tone is touched.
+* Everything after a removed silence moves earlier: clips spanning one are split around it (each piece keeps its
+  clip's fixed framing, so every clip still covers the window and `--min-move` still holds), markers move, the
+  sequence gets shorter. The XML check validates the cut sequence against the plan.
+* Captions: copied competitor captions keep their exact text and splits — only their times move with the cuts; a
+  copied caption completely inside a removed silence is dropped and listed. Voice captions are transcribed from the
+  cut edit.
+* The end summary lists every removed silence (its time in the edit before removal, its length, where the cut is
+  now), the total removed and the new length; `extras/report.md` has the same table.
+
+### Without a competitor (`--raw` only)
+
+`python -m match_cuts --raw RAW.mp4 --out ..\..\output` (no `--competitor`) makes the edit from the RAW alone: its
+speech kept, its silences cut out as above, in the usual numbered run folder (`1_edit.xml`, `2_captions.srt`,
+`extras/`; the `restyle` command works the same). Every stretch of speech shows the RAW scaled to cover the template
+window with the main person's face at the window's centre (the largest face, then the same person while they stay
+in view), one fixed framing per clip, and `--min-move` holds the framing until it would move 250 px. Captions: voice
+mode with the RAW recheck, transcribed from the cut edit. (Before, `--raw` without `--competitor` looked for the
+competitor in `--input-dir`; now it means "no competitor".)
 
 ### B-roll cutaways (`--no-broll`)
 

@@ -85,6 +85,28 @@ def _min_move(value: str) -> float:
     return v
 
 
+def _seconds_arg(name: str):
+    def parse(value: str) -> float:
+        try:
+            v = float(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{name} must be a number of seconds, got {value!r}") from None
+        if v < 0 or v != v:
+            raise argparse.ArgumentTypeError(f"{name} must be >= 0")
+        return v
+    return parse
+
+
+def _db_arg(value: str) -> float:
+    try:
+        v = float(str(value).lower().removesuffix("db"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--silence-db must be a number of dB, got {value!r}") from None
+    if v > 0 or v != v:
+        raise argparse.ArgumentTypeError("--silence-db must be <= 0 (dB below the speech level)")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="match_cuts",
@@ -137,6 +159,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
                         "the spoken words. The framing changes only where the competitor's moves --min-move px or more")
+    p.add_argument("--keep-silence", action="store_true",
+                   help="keep the silences of my edit (default: cut out every silence of the RAW audio under my clips, "
+                        "after the competitor's cuts are recreated; without --competitor the RAW alone is cut this way)")
+    p.add_argument("--silence-db", type=_db_arg, default=-20.0, metavar="DB",
+                   help="silence = the short-window loudness (50 ms RMS) this many dB below the edit's speech level "
+                        "(the loudness of its loudest 5%% of windows; default -20)")
+    p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.35, metavar="S",
+                   help="cut only silences longer than this (seconds, default 0.35)")
+    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.08, metavar="S",
+                   help="keep this much of a silence before the speech that follows it (seconds, default 0.08)")
+    p.add_argument("--pad-after", type=_seconds_arg("--pad-after"), default=0.12, metavar="S",
+                   help="keep this much of a silence after the speech before it (seconds, default 0.12)")
     p.add_argument("--min-move", type=_min_move, default=250.0, metavar="PX",
                    help="--premiere: change a clip's framing only when the competitor's framing moves this many px or "
                         "more in the 1080x1920 sequence (the biggest movement of the picture's centre or edges, so zooms "
@@ -194,6 +228,11 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.run_ae = not bool(getattr(args, "no_ae", False))
     cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.premiere_min_move = float(getattr(args, "min_move", 250.0))
+    cfg.keep_silence = bool(getattr(args, "keep_silence", False))
+    cfg.silence_db = float(getattr(args, "silence_db", -20.0))
+    cfg.min_silence = float(getattr(args, "min_silence", 0.35))
+    cfg.pad_before = float(getattr(args, "pad_before", 0.08))
+    cfg.pad_after = float(getattr(args, "pad_after", 0.12))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
     cfg.no_broll = bool(getattr(args, "no_broll", False))
@@ -331,7 +370,7 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
     checks = result.get("checks") or {}
     lines = []
     lines.append(f"match_cuts result: {headline(result)}")
-    for key, label in CRITERIA_LABELS:
+    for key, label in [] if result.get("raw_only") else CRITERIA_LABELS:
         c = crit.get(key) or {}
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
         lines.append(f"  {label:<30} {st:<6} {c.get('summary', '')}")
@@ -340,7 +379,14 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
         if chk:
             st = STATUS_TEXT.get(chk.get("status"), str(chk.get("status") or "not run").upper())
             lines.append(f"  {label:<30} {st:<6} {chk.get('summary', '')}")
-    lines.append("  (PASS* = passed with listed, explained exceptions; N/A = could not be verified on this machine)")
+    if result.get("raw_only"):
+        ex = getattr(result.get("context"), "exports", None) or {}
+        x = ex.get("xml") or {}
+        lines.append(f"  {'1_edit.xml check':<30} {'PASS' if ex.get('ok') else 'FAIL':<6} {x.get('clips', 0)} clips, "
+                     f"every clip covers the window with one fixed framing, {x.get('framing_changes', 0)} framing "
+                     "changes" + ("" if ex.get("ok") else f"; {'; '.join((ex.get('errors') or [])[:3])}"))
+    else:
+        lines.append("  (PASS* = passed with listed, explained exceptions; N/A = could not be verified on this machine)")
     run = Path(str(result.get("run_dir") or out_dir))
     paths = result.get("paths") or {}
     ctx = result.get("context")
@@ -368,6 +414,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
                 lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
+        sil = list(hc.get("silence") or [])
+        if sil:
+            lines.append(f"Silences: {sil[0]}")
+            lines += [f"  {r}" for r in sil[1:]]
     warns = list(result.get("warnings") or [])
     if warns:
         lines.append(f"Warnings: {len(warns)}" + (f" (the first {max_warnings}; all in {run_folders.EXTRAS}/report.md)"
@@ -396,8 +446,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return restyle_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
+    raw_only = args.competitor is None and args.raw is not None        # no competitor: the edit from the RAW alone
     try:
-        comp, raw, notes = resolve_inputs(args.competitor, args.raw, args.input_dir, args.no_swap)
+        if raw_only:
+            if not Path(args.raw).is_file():
+                raise InputError(f"raw file not found: {args.raw}")
+            comp, raw, notes = "", str(args.raw), []
+        else:
+            comp, raw, notes = resolve_inputs(args.competitor, args.raw, args.input_dir, args.no_swap)
     except InputError as e:
         print(f"match_cuts: {e}", file=sys.stderr)
         return 2
@@ -407,6 +463,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)
     cfg = config_from_args(args, comp, raw)
+    if raw_only:
+        cfg.competitor, cfg.premiere = "", True          # the RAW-only edit is the Premiere sequence
     # each run its own numbered folder in --out: 1_edit.xml / 2_captions.srt there, everything else in its extras/
     base = Path(cfg.out_dir)
     prev = run_folders.newest_run_dir(base)
@@ -416,7 +474,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         cfg.previous_out_dir = str(prev / run_folders.EXTRAS)          # s9_7: compared with the previous run
     from . import pipeline
     try:
-        result = pipeline.run(cfg)
+        if raw_only:
+            from .raw_only import run_raw_only
+            result = run_raw_only(cfg)
+        else:
+            result = pipeline.run(cfg)
     except KeyboardInterrupt:
         print("match_cuts: interrupted", file=sys.stderr)
         print(f"Run folder: {run_dir}", file=sys.stderr)

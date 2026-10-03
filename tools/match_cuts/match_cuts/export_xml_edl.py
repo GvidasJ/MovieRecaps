@@ -1577,11 +1577,14 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
             (f"; one clip for {clip.label} (one continuous RAW take, same framing)" if len(clip.events) > 1 else ""))
 
 
-def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -> dict:
+def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
-    line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. Returns
-    {'clips', 'markers', 'warnings', 'factor'}."""
+    line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
+    silence.Ripple): those ranges are cut out -- everything after them moves earlier, and A1 fades over
+    silence.FADE_FRAMES on both sides of every such cut (Audio Levels keyframes: no click). Returns {'clips',
+    'markers', 'warnings', 'factor'}."""
+    from . import silence as sil
     st = premiere_settings(cfg)
     comp_fps, raw_fps, fps = cutlist.comp_fps, cutlist.raw_fps, st["fps"]
     fac = premiere_factor(comp_fps, fps)
@@ -1595,6 +1598,10 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     audio_info = {"sample_rate": cutlist.raw.get("audio_sample_rate") or 48000,
                   "channels": cutlist.raw.get("audio_channels") or 2} if has_audio else None
     clips, markers, warnings = premiere_clips(cutlist, cfg)
+    audio_items = premiere_audio(cutlist, clips, cfg) if has_audio else []
+    if silence is not None and silence.cuts:
+        clips, audio_items, markers = sil.apply_premiere(clips, audio_items, markers, silence)
+        N = silence.new_frames
     if str((cutlist.settings or {}).get("audio_sync") or "raw") == "competitor":
         warnings.append("--audio-sync competitor is not used by the Premiere export: A1 keeps the RAW lip-sync at the "
                         "same cuts as V1")
@@ -1627,8 +1634,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         if cl.start == -1 and prev_clip is not None:
             ti = _sub(vtrack, "transitionitem")
             _rate_el(ti, fps)
-            _sub(ti, "start", ev.rec_in * fac)
-            _sub(ti, "end", (ev.rec_in + ev.dissolve_in) * fac)
+            _sub(ti, "start", cl.rec_start)
+            _sub(ti, "end", cl.rec_start + ev.dissolve_in * fac)
             _sub(ti, "alignment", "start")
             e = _effect(ti, "Cross Dissolve", "Cross Dissolve", "Dissolve", "transition")
             _sub(e, "wipecode", 0)
@@ -1673,7 +1680,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(asc, "depth", 16)
         _sub(asc, "samplerate", int(audio_info["sample_rate"]))
         atrack = _sub(audio, "track")
-        for n_a, it in enumerate(premiere_audio(cutlist, clips, cfg), start=1):
+        for n_a, it in enumerate(audio_items, start=1):
             ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
             _sub(ai, "name", f"{_seg_label(it['seg'])} {raw_name} audio")
             _sub(ai, "enabled", "TRUE")
@@ -1686,6 +1693,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(it["speed"] - 1.0) > 1e-9:
                 _time_remap(ai, it["speed"], "audio")
+            if it.get("fade_in") or it.get("fade_out"):
+                _audio_fades(ai, it, sil.FADE_FRAMES)
             sta = _sub(ai, "sourcetrack")
             _sub(sta, "mediatype", "audio")
             _sub(sta, "trackindex", 1)
@@ -1703,6 +1712,19 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     for w in warnings:
         log.info("premiere export: %s", w)
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac}
+
+
+def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
+    """Audio Levels keyframes (media time, like <in> / <out>) fading A1 in over its first n frames and / or out
+    over its last n frames, where a silence was cut out (silence.py): the cut cannot click."""
+    keys: list[tuple[int, str]] = []
+    if it.get("fade_in"):
+        keys += [(it["in"], "0"), (it["in"] + n, "1")]
+    if it.get("fade_out"):
+        keys += [(it["out"] - n, "1"), (it["out"], "0")]
+    f = _sub(parent, "filter")
+    e = _effect(f, "Audio Levels", "audiolevels", "audiolevels", "audiolevels", "audio")
+    _param(e, "level", "Level", None, 0, "3.98109", sorted(keys))
 
 
 def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None) -> list[dict]:
@@ -2128,8 +2150,10 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
             out.setdefault("generators", []).append(_text(el, "name"))
     at = seq.find("media/audio/track")
     for el in (at.findall("clipitem") if at is not None else []):
+        levels = [(int(_text(k, "when")), float(_text(k, "value"))) for eff in el.findall("filter/effect")
+                  if _text(eff, "effectid") == "audiolevels" for k in eff.findall("parameter/keyframe")]
         out["audio"].append({"name": _text(el, "name"), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
-                             "in": int(_text(el, "in")), "out": int(_text(el, "out"))})
+                             "in": int(_text(el, "in")), "out": int(_text(el, "out")), "levels": levels})
     for mk in seq.findall("marker"):
         out["markers"].append({"name": _text(mk, "name"), "comment": _text(mk, "comment"),
                                "in": int(_text(mk, "in")), "out": int(_text(mk, "out"))})
@@ -2230,13 +2254,16 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
 
 
 def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl_path: str | os.PathLike | None,
-                              cfg: Any = None) -> dict:
+                              cfg: Any = None, silence: Any = None) -> dict:
     """Re-parse the Premiere XML (and the EDL, which stays at the competitor rate) and check: the sequence is exactly
     W x H at the Premiere rate (ntsc FALSE); V1 only (V2+ empty), every clip's record range = its event's range x
     the rate factor (cuts on the competitor's moments), source in / out / speed as planned; A1 cut exactly like V1
     (same record ranges, the same source in-point as the picture unless an audio line plays); Basic Motion covers
     the template window, keeps the competitor's framing (the window centre shows the RAW point the competitor's box
-    centre shows) and zooms at most premiere_max_zoom; one marker per UNCERTAIN / NOT-IN-RAW spot.
+    centre shows) and zooms at most premiere_max_zoom; one marker per UNCERTAIN / NOT-IN-RAW spot. ``silence`` (the
+    silence.Ripple write_premiere_xml cut out): the competitor's cuts are checked on the plan, the XML against the plan
+    with those ranges removed (the sequence that much shorter, clips split and moved, A1 faded on both sides of every
+    such cut, markers moved).
     Returns {'ok', 'errors', 'warnings', 'xml', 'edl', 'total_frames', 'events'}."""
     errors: list[str] = []
     st = premiere_settings(cfg)
@@ -2253,6 +2280,12 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 errors.append(f"EDL: validation crashed: {type(e).__name__}: {e}")
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg)
+        plan_clips = clips
+        want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
+        cut = silence is not None and bool(silence.cuts)
+        if cut:
+            from .silence import apply_premiere
+            clips, want_a, markers = apply_premiere(clips, want_a, markers, silence)
         x = parse_premiere_xml(xml_path)
     except Exception as e:  # noqa: BLE001
         errors.append(f"XML: validation crashed: {type(e).__name__}: {e}")
@@ -2265,8 +2298,14 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         errors.append(f"XML: sequence rate timebase {x['timebase']} ntsc {x['ntsc']} (want {fps_str(fps)} exactly, ntsc FALSE)")
     if (x["width"], x["height"]) != (W, H):
         errors.append(f"XML: sequence {x['width']}x{x['height']} (want {W}x{H})")
-    if x["duration"] != out["total_frames"] * fac:
-        errors.append(f"XML: sequence duration {x['duration']} (want {out['total_frames'] * fac})")
+    want_n = silence.new_frames if cut else out["total_frames"] * fac
+    if x["duration"] != want_n:
+        errors.append(f"XML: sequence duration {x['duration']} (want {want_n})")
+    for cl in plan_clips if cut else []:                 # the competitor's cuts, before the silences go
+        evs = cl.events or [cl.ev]
+        if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
+                any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
+            errors.append(f"XML {cl.label}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
     if x["video_tracks"] != 1:
         errors.append(f"XML: {x['video_tracks']} video tracks (V1 only; V2+ must stay empty)")
     if x["audio_tracks"] > 1:
@@ -2279,8 +2318,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     for got, cl in zip(x["clips"], clips):
         name = cl.label
         evs = cl.events or [cl.ev]
-        if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
-                any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
+        if not cut and ((cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or
+                        any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:]))):
             errors.append(f"XML {name}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
         s0 = got["start"] if got["start"] != -1 else (cl.rec_start if cl.rec_start in trans else None)
         if s0 != cl.rec_start or (got["start"] == -1) != (cl.start == -1):
@@ -2371,10 +2410,10 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     errors += [f"XML GAP {g}" for g in gaps]
     out["gaps"] = gaps
     # A1: same cuts as V1
-    want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     if len(x["audio"]) != len(want_a):
         errors.append(f"XML: {len(x['audio'])} A1 clips, expected {len(want_a)}")
-    ev_ranges = {(ev.rec_in * fac, ev.rec_out * fac) for ev in events} | {(cl.rec_start, cl.rec_end) for cl in clips}
+    ev_ranges = ({(it["start"], it["end"]) for it in want_a} if cut else
+                 {(ev.rec_in * fac, ev.rec_out * fac) for ev in events}) | {(cl.rec_start, cl.rec_end) for cl in clips}
     for got, it in zip(x["audio"], want_a):
         if (got["start"], got["end"], got["in"], got["out"]) != (it["start"], it["end"], it["in"], it["out"]):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: {got} (want {it['start']}-{it['end']} in {it['in']})")
@@ -2384,12 +2423,21 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if it["what"] == "picture" and cl is not None and \
                 got["in"] != cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
+        from .silence import FADE_FRAMES
+        fade = ([(it["in"], 0.0), (it["in"] + FADE_FRAMES, 1.0)] if it.get("fade_in") else []) + \
+            ([(it["out"] - FADE_FRAMES, 1.0), (it["out"], 0.0)] if it.get("fade_out") else [])
+        if sorted(got.get("levels") or []) != sorted(fade):
+            errors.append(f"XML A1 {_seg_label(it['seg'])} at {got['start']}: audio fades {got.get('levels')} "
+                          f"(want {sorted(fade)} where a silence was cut out)")
     # markers: every UNCERTAIN / NOT-IN-RAW spot
     have = {(m["in"], m["out"]) for m in x["markers"]}
     for ev in events:
         if ev.seg is not None and ev.kind != "clip" and ev.seg.type in ("uncertain", "not_in_raw"):
-            if (ev.rec_in * fac, ev.rec_out * fac) not in have:
-                errors.append(f"XML: no marker on {ev.seg_name} ({ev.seg.type}, {ev.rec_in * fac}-{ev.rec_out * fac})")
+            want_m = (ev.rec_in * fac, ev.rec_out * fac)
+            if cut:
+                want_m = (silence.map(want_m[0]), max(silence.map(want_m[0]), silence.map(want_m[1])))
+            if want_m not in have:
+                errors.append(f"XML: no marker on {ev.seg_name} ({ev.seg.type}, {want_m[0]}-{want_m[1]})")
     out["xml"] = {"clips": len(x["clips"]), "audio": len(x["audio"]), "markers": len(x["markers"]),
                   "rate": f"{x['timebase']} ntsc {x['ntsc']}", "size": f"{x['width']}x{x['height']}",
                   "in_exact": sum(1 for c in clips if c.in_exact), "zoomed": sum(1 for c in clips if c.zoom > 1.0),

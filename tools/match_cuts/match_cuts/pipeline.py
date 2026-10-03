@@ -120,6 +120,7 @@ class Context:
     preview: dict = field(default_factory=dict)       # render_preview result
     captions: dict = field(default_factory=dict)      # captions.run_captions result (captions.srt + report data)
     broll: dict = field(default_factory=dict)         # --no-broll: broll.apply_no_broll result (export cut list + lists)
+    silence: dict = field(default_factory=dict)       # silence.plan_premiere: the silences cut out of the Premiere export
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2477,8 +2478,11 @@ def stage_exports(ctx: Context) -> None:
     produced: dict[str, bool] = {}
     produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(ex, csv))
     premiere = bool(getattr(cfg, "premiere", False))
+    rp = None
     if premiere:
-        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg))
+        ctx.silence = silence_plan(ctx, ex)
+        rp = ctx.silence.get("ripple")
+        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
     else:
         produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(ex, xml, cfg))
     produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(ex, edl, cfg))
@@ -2488,7 +2492,7 @@ def stage_exports(ctx: Context) -> None:
     validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
     if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
         ok, res = _soft(ctx, "S8 validate exports", lambda: (
-            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg) if premiere
+            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg, rp) if premiere
             else export_xml_edl.validate_exports(ex, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
         if validation.get("gaps"):
@@ -2520,6 +2524,43 @@ def stage_exports(ctx: Context) -> None:
         if produced["compare"] and cmp_path.exists():
             ctx.paths["compare"] = str(cmp_path)
     ctx.exports.update(collect_deliverables(ctx, produced))
+
+
+def silence_lines(plan: dict) -> list[str]:
+    """The end summary's silence lines: the totals, then every removed silence (its time in the edit before the
+    removal, its length, where the cut now is)."""
+    from .silence import tc
+    if not plan:
+        return []
+    if plan.get("off"):
+        return [f"kept ({plan['off']})"]
+    if plan.get("error"):
+        return [f"not removed ({plan['error']})"]
+    rows = plan.get("rows") or []
+    head = (f"{len(rows)} removed, {plan['removed_s']:.2f} s in all; length {tc(plan['old_s'])} -> {tc(plan['new_s'])}"
+            f" (below {plan['threshold_db']:.1f} dBFS = {plan['settings']['db']:g} dB under the speech level, "
+            f"longer than {plan['settings']['min_s']:g} s)") if rows else "none found"
+    return [head] + [f"{tc(r['start_s'])}-{tc(r['end_s'])}  {r['len_s']:.2f} s  (cut at {tc(r['new_at_s'])} in the new "
+                     f"edit)" for r in rows]
+
+
+def silence_plan(ctx: Context, cl: Cutlist) -> dict:
+    """silence.plan_premiere of the Premiere export (the silences of the RAW audio under my clips), {} with
+    --keep-silence; a failure warns and keeps every silence."""
+    from . import silence
+    if getattr(ctx.cfg, "keep_silence", False):
+        return {"off": "--keep-silence"}
+    try:
+        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg)
+    except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
+        log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"silences not removed: {type(e).__name__}: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
+    log.info("silence removal: %d silences cut (%.2f s; %.2f s -> %.2f s; below %.1f dBFS)", len(plan["rows"]),
+             plan["removed_s"], plan["old_s"], plan["new_s"], plan["threshold_db"])
+    ctx.dlog.record("silence", "removed", rows=plan["rows"], threshold_db=plan["threshold_db"],
+                    settings=plan["settings"])
+    return plan
 
 
 def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) -> dict:
@@ -2696,6 +2737,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
              for r in cn.get("from_transcript") or []]
     rows += [f"{tc(r)}  the competitor's caption could not be read and no words were heard: left out"
              for r in cn.get("unreadable") or []]
+    rows += [f"{tc(r)}  '{r['text']}': completely inside a removed silence -- dropped"
+             for r in cap.get("silence_dropped") or []]
     rows += [f"{tc(c)}  '{c['text']}': the OCR was unsure (readings {c.get('variants')})"
              for c in cap.get("captions") or [] if c.get("mode") == "competitor" and c.get("reads")
              and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
@@ -2718,6 +2761,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows
+    out["silence"] = silence_lines(getattr(ctx, "silence", None) or {})
     return out
 
 
