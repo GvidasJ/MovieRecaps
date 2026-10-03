@@ -32,6 +32,8 @@ import numpy as np
 # ---- the caption style (caption-generator-prompt.md) ----------------------------------------------------------
 MAX_WORDS = 4              # a caption already holding 4 words starts a new one (never more than 5)
 MAX_CHARS = 20             # ... or one that would exceed 20 characters
+CUT_TIE_S = 0.1            # a video cut about as near two word boundaries goes to the one outside a pair kept together
+SHORT_CHARS = 16           # prefer short captions: one over 16 characters splits at a natural break (median 11)
 HARD_CAP = 24              # hard cap (only *...* placeholders / single unbreakable units may reach it)
 PAUSE_S = 0.25             # a pause longer than this before the next word starts a new caption
 SILENCE_S = 1.0            # more than this with no speech: a *...* placeholder
@@ -57,6 +59,9 @@ PREPOSITIONS = frozenset("""of to in on at for with from by about into onto over
     across behind between around""".split())
 NOT_OBJECT = frozenset("and but or nor so because then if when while though although than as".split())
 NAME_LINKS = frozenset("of the de da di von van".split())      # inside a name: "Bronx High School of Science"
+THEN_STARTS = frozenset("and so but".split())               # "and then" / "so then" / "but then": a caption's start
+AUX = frozenset("""am is are was were be been being have has had do does did can could will would shall should may
+    might must gonna wanna gotta""".split())                   # helping verbs: "they would" | "bring me up"
 # words that follow a noun rather than finish it ("a classroom next to", "the class again")
 AFTER_NOUN = frozenset("""next too again now here there back up down out off away ago anymore already yet together
     first last right left even still just also only""".split())
@@ -203,20 +208,33 @@ def is_verb(n: str) -> bool:
     return n in VERBS or _is_negation(n) or any(n.endswith(x) for x in ("'m", "'re", "'ve", "'ll", "'d"))
 
 
+def _main_verb(n: str) -> bool:
+    return is_verb(n) and n not in AUX and not _is_negation(n) and "'" not in n
+
+
 def _phrase_bond(words: Sequence[Word], i: int, adjectives: bool = True) -> bool:
-    """Words i and i+1 make a phrase never split: a determiner + the word after it ("a joke", "the school"), a
-    pronoun + its verb ("I know"), a preposition + its object ("of Science"), a link inside a name ("School of
-    Science")."""
+    """Words i and i+1 make a phrase never split: a determiner + the word after it ("a joke", "the school") and,
+    after adjectives, the noun ("a pretty girl"), a pronoun + its verb ("I know"), a verb + its preposition
+    ("talking about", "looking at"), a preposition + its object ("of Science"), "and then" / "so then" / "but
+    then", a link inside a name ("School of Science")."""
     a, b = words[i], words[i + 1]
     na, nb = norm(a.text), norm(b.text)
+    if na in THEN_STARTS and nb == "then":
+        return True
     if nb in NOT_OBJECT or is_interjection(b.text) or not nb:
         return False
     if na in DETERMINERS:
         return nb not in DETERMINERS and nb not in PREPOSITIONS
-    if adjectives and i > 0 and norm(words[i - 1].text) in DETERMINERS and _noun_after(na, nb):
-        return True                                    # "a high school", "a pretty girl": the noun after an adjective
+    if adjectives and _content(nb):                    # "a pretty girl", "a big red car": det, adjectives, noun
+        j = i
+        while j > max(0, i - 2) and _content(norm(words[j].text)):
+            j -= 1
+        if j < i and norm(words[j].text) in DETERMINERS and all(_content(norm(words[k].text)) for k in range(j + 1, i + 1)):
+            return True
     if na in PRONOUNS:
         return is_verb(nb)
+    if nb in PREPOSITIONS and nb != "to" and _main_verb(na):
+        return True                                    # "talking about", "looking at" (not "want to": "to see")
     if na in PREPOSITIONS:
         return nb not in PREPOSITIONS and nb not in PRONOUNS - {"you", "it"} or nb in ("me", "us", "him", "her", "them")
     if na in NAME_LINKS and _is_name_part(b.text) and i > 0 and _is_name_part(words[i - 1].text):
@@ -224,12 +242,47 @@ def _phrase_bond(words: Sequence[Word], i: int, adjectives: bool = True) -> bool
     return nb in NAME_LINKS and _is_name_part(a.text) and i + 2 < len(words) and _is_name_part(words[i + 2].text)
 
 
+def _content(w: str) -> bool:
+    """An adjective or a noun, roughly: not a function word, a verb or an adverb ("high", "school", "pretty";
+    not "next", "didn't", "really")."""
+    stop = WEAK | NOT_OBJECT | PREPOSITIONS | DETERMINERS | PRONOUNS | NAME_STOP | AFTER_NOUN
+    return bool(w) and w not in stop and not is_verb(w) and not w.endswith("ly") and not is_interjection(w)
+
+
 def _noun_after(adj: str, noun: str) -> bool:
     """After a determiner, "adj noun" is one phrase when neither is a function word, a verb or an adverb (a rough
     test: "a high school", "the next thing"; not "a classroom next", "the teachers didn't")."""
-    stop = WEAK | NOT_OBJECT | PREPOSITIONS | DETERMINERS | PRONOUNS | NAME_STOP | AFTER_NOUN
-    return all(w and w not in stop and not is_verb(w) and not w.endswith("ly") and not is_interjection(w)
-               for w in (adj, noun))
+    return _content(adj) and _content(noun)
+
+
+def _lonely(w: str) -> bool:
+    """A word that never makes a caption alone: a weak word ("a", "I", "the") or a preposition ("about", "with") --
+    except right before a video cut."""
+    return is_weak(w) or norm(w) in PREPOSITIONS
+
+
+def cut_breaks(words: Sequence[Word], cuts: Sequence[int], fps: Fraction,
+               bonds: Sequence[bool] | None = None) -> dict[int, int]:
+    """{word index i: cut frame} for each video cut of the edit (sequence frames) that falls inside the speech: it
+    falls on the word boundary nearest it (between words i-1 and i), where a new caption starts -- exactly on the
+    cut. A near tie keeps a pair together: a boundary inside one (``bonds``, "my" | "secret") counts CUT_TIE_S
+    farther. A cut nearer the first word's start or the last word's end than to any boundary between two words is
+    left out: the caption there starts or ends on it (caption_rules._cut_split)."""
+    out: dict[int, int] = {}
+    n = len(words)
+    if n < 2:
+        return out
+    if bonds is None:
+        bonds = compute_bonds(words)
+    at = [words[0].start] + [0.5 * (words[k - 1].end + words[k].start) for k in range(1, n)] + [words[-1].end]
+    for f in sorted(int(c) for c in cuts):
+        t = f / float(fps)
+        if not words[0].start < t < words[-1].end:
+            continue
+        i = min(range(n + 1), key=lambda k: abs(at[k] - t) + (CUT_TIE_S if 0 < k < n and bonds[k - 1] else 0.0))
+        if 0 < i < n:
+            out.setdefault(i, f)
+    return out
 
 
 def _allowlist_phrases() -> list[list[str]]:
@@ -334,7 +387,7 @@ def _cut_unit(words: Sequence[Word], u: list[int], core: Sequence[bool] | None) 
                 continue
             lens = [_chars(words, p) for p in pieces]
             score = (sum(1 for c in cuts if core is not None and core[u[c - 1]]),
-                     sum(1 for p in pieces if len(p) == 1 and is_weak(words[p[0]].text)), parts,
+                     sum(1 for p in pieces if len(p) == 1 and _lonely(words[p[0]].text)), parts,
                      sum(1 for p in pieces[:-1] if len(p) > 1 and is_weak(words[p[-1]].text)), max(lens) - min(lens))
             if best is None or score < best[0]:
                 best = (score, pieces)
@@ -402,7 +455,8 @@ def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], f
 
 
 def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out: set[int] | None = None,
-                fixed: Sequence[tuple[int, int]] = ()) -> list[list[int]]:
+                fixed: Sequence[tuple[int, int]] = (), cuts: Iterable[int] = (), pauses: Iterable[int] = ()
+                ) -> list[list[int]]:
     """Word-index groups, one per caption: the walk, then the weak-word fix -- a caption of more than one word that
     ends on a weak word gives that word to the front of the next caption (which is re-split if it now breaks the
     caps). Each caption gives away at most one word (the prompt's own example keeps "there is" after giving away
@@ -415,14 +469,25 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
     A caption is never a single weak word: it joins the word(s) after it (or, when a silence, a sentence end or
     nothing follows, the caption before it). ``fixed``: word ranges [a, b) that stay one caption (competitor mode:
     the competitor's own captions of 2+ words that pass these rules); a lone weak word just before one may join
-    it."""
+    it. ``cuts``: word indices a video cut of the edit falls before (cut_breaks): a caption never runs across one,
+    nothing is joined or moved across one, and a weak word may stand alone right before one. "and then" / "so
+    then" / "but then" start a caption, and a caption over 16 characters splits at a natural break (_short).
+    ``pauses``: word indices a pause in speech comes before when the word times do not show it (competitor mode:
+    the words are on the competitor's timing, the pauses from the transcript)."""
     if not words:
         return []
     bonds = compute_bonds(words)
     core_bonds = compute_bonds(words, phrases=False)
     alone = standalone_interjections(words)
-    forced: set[int] = set()
+    cuts = {int(i) for i in cuts if 0 < int(i) < len(words)}
+    forced: set[int] = set(cuts) | {int(i) for i in pauses if 0 < int(i) < len(words)}
     glue: set[int] = set()
+    for i in range(1, len(words) - 1):                 # "and then" / "so then" / "but then" start their own caption
+        if norm(words[i].text) in THEN_STARTS and norm(words[i + 1].text) == "then":
+            forced.add(i)
+    torn = {i - 1 for i in cuts if bonds[i - 1]}        # the word before a cut that splits a pair ("for" | "genius")
+    for i in forced:
+        bonds[i - 1] = core_bonds[i - 1] = False
     for a, b in fixed:
         for i in range(a, b - 1):
             bonds[i] = True
@@ -447,6 +512,14 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
                 pass
             elif last + 1 >= len(words):
                 reason = "last word of the captions"
+            elif last in torn and tail == last:
+                forced.add(last)                         # cut off from its phrase: it stands alone, on the cut
+                groups = _walk(words, bonds, alone, forced, glue, core_bonds)
+                if notes is not None:
+                    notes.append({"word": last, "reason": "a lone weak word right before a video cut"})
+                continue
+            elif last + 1 in cuts:
+                reason = "a video cut follows"
             elif sentence_end(words[last].raw or words[last].text):
                 reason = "it ends a sentence"
             elif tail == g[0] and (last in glue or not all(_function_word(words[k].text) for k in g)):
@@ -468,7 +541,8 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
             if notes is not None:
                 notes.append({"word": last, "reason": reason})
         gi += 1
-    groups = _join_lone_weak(words, groups, bonds, alone, forced, glue, notes, core_bonds)
+    groups = _join_lone_weak(words, groups, bonds, alone, forced, glue, notes, core_bonds, cuts)
+    groups = _short(words, groups, bonds)
     if gave_out is not None:
         gave_out.update(g[0] for g in groups if g[0] in gave)
     return groups
@@ -480,21 +554,24 @@ def _function_word(w: str) -> bool:
 
 
 def _join_lone_weak(words: Sequence[Word], groups: list[list[int]], bonds: Sequence[bool], alone: Sequence[bool],
-                    forced: set[int], glue: set[int], notes: list[dict] | None, core_bonds: Sequence[bool]
-                    ) -> list[list[int]]:
-    """A caption of one weak word ("a", "I", "the") joins the word(s) after it; when a silence (> 1 s), a sentence
-    end, a standalone interjection or nothing follows, the caption before it; else it stays, listed."""
+                    forced: set[int], glue: set[int], notes: list[dict] | None, core_bonds: Sequence[bool],
+                    cuts: set[int] = frozenset()) -> list[list[int]]:
+    """A caption of one weak word ("a", "I", "the") or preposition ("about") joins the word(s) after it; when a
+    silence (> 1 s), a sentence end, a standalone interjection or nothing follows, the caption before it; never
+    across a video cut, and right before one it stands alone ("for" | cut | "genius kids"); else it stays, listed."""
     tried: set[int] = set()
     while True:
-        lone = next((g[0] for g in groups if len(g) == 1 and is_weak(words[g[0]].text) and g[0] not in tried), None)
+        lone = next((g[0] for g in groups if len(g) == 1 and _lonely(words[g[0]].text) and g[0] not in tried), None)
         if lone is None:
             return groups
         tried.add(lone)
         i, n = lone, len(words)
-        nxt_ok = (i + 1 < n and not sentence_end(words[i].raw or words[i].text) and not alone[i + 1]
-                  and words[i + 1].start - words[i].end <= SILENCE_S and not _repeat(words, i, i + 1))
-        prv_ok = (i > 0 and not sentence_end(words[i - 1].raw or words[i - 1].text) and not alone[i - 1]
-                  and words[i].start - words[i - 1].end <= SILENCE_S and not _repeat(words, i - 1, i))
+        nxt_ok = (i + 1 < n and i + 1 not in cuts and not sentence_end(words[i].raw or words[i].text)
+                  and not alone[i + 1] and words[i + 1].start - words[i].end <= SILENCE_S
+                  and not _repeat(words, i, i + 1))
+        prv_ok = (i > 0 and i not in cuts and i + 1 not in cuts and not sentence_end(words[i - 1].raw or words[i - 1].text)
+                  and not alone[i - 1] and words[i].start - words[i - 1].end <= SILENCE_S
+                  and not _repeat(words, i - 1, i))
         if nxt_ok:
             glue.add(i)
             forced.discard(i + 1)
@@ -509,9 +586,68 @@ def _join_lone_weak(words: Sequence[Word], groups: list[list[int]], bonds: Seque
                 notes.append({"word": i, "reason": f"a lone weak word, joined to the caption before ({why})"})
         else:
             if notes is not None:
-                notes.append({"word": i, "reason": "a lone weak word with nothing to join"})
+                notes.append({"word": i, "reason": "a lone weak word right before a video cut" if i + 1 in cuts
+                              else "a lone weak word with nothing to join"})
             continue
         groups = _walk(words, bonds, alone, forced, glue, core_bonds)
+
+
+_SUBJECT = re.compile(r"^(?:i|you|we|they|he|she|it|that|there|who|what)'(?:re|m|s|ve|ll|d)$")   # you're, I'm
+
+
+def _subject(w: str) -> bool:
+    """A subject that cannot make a caption alone: a pronoun or its contraction (I, you're, I've, let's)."""
+    n = norm(w)
+    return n in PRONOUNS or _SUBJECT.match(n) is not None or n == "let's"
+
+
+def _natural_breaks(words: Sequence[Word], g: Sequence[int], bonds: Sequence[bool]) -> list[tuple[int, str]]:
+    """Where caption g may split to get shorter (never inside a pair kept together), as (index, kind): before a verb
+    phrase -- after a subject with its helping verb ("what you're" | "talking about") or after a helping verb,
+    before the main verb ("they would" | "bring me up"; not "I've been" | "waiting") --, before a preposition's
+    phrase ("suggested" | "to Marvel"; never before "of", which belongs to the noun before it: "lost track of
+    time") and before and after "and then" / "so then" / "but then" ("and then" | "she's like")."""
+    out = []
+    for k in range(1, len(g)):
+        i = g[k]
+        if bonds[i - 1]:
+            continue
+        a, b = norm(words[i - 1].text), norm(words[i].text)
+        if (b in THEN_STARTS and k + 1 < len(g) and norm(words[g[k + 1]].text) == "then") \
+                or (a == "then" and k >= 2 and norm(words[g[k - 2]].text) in THEN_STARTS):
+            out.append((k, "then"))
+        elif ((_SUBJECT.match(a) is not None and (is_verb(b) or b in AUX))
+              or (a in AUX and a not in ("be", "been", "being") and _main_verb(b))):
+            out.append((k, "verb"))
+        elif b in PREPOSITIONS and b != "of" and k + 1 < len(g) and bonds[i] and a not in PREPOSITIONS:
+            out.append((k, "prep"))
+    return out
+
+
+def _short(words: Sequence[Word], groups: list[list[int]], bonds: Sequence[bool]) -> list[list[int]]:
+    """Prefer short captions (hard rule B): a caption over SHORT_CHARS splits at a natural break (_natural_breaks)
+    when neither piece is a lone weak word / preposition / subject or ends on a weak word, and a verb phrase break
+    leaves two words on each side ("You're gonna lose", "what I am saying?" stay whole); the most even split."""
+    out: list[list[int]] = []
+    todo = list(groups)
+    while todo:
+        g = todo.pop(0)
+        best = None
+        if _chars(words, g) > SHORT_CHARS:
+            for k, kind in _natural_breaks(words, g, bonds):
+                a, b = g[:k], g[k:]
+                if (kind == "verb" and min(len(a), len(b)) < 2) or is_weak(words[a[-1]].text) \
+                        or any(len(p) == 1 and (_lonely(words[p[0]].text) or _subject(words[p[0]].text))
+                               for p in (a, b)):
+                    continue
+                score = max(_chars(words, a), _chars(words, b))
+                if best is None or score < best[0]:
+                    best = (score, a, b)
+        if best is None:
+            out.append(g)
+        else:
+            todo[:0] = [best[1], best[2]]
+    return out
 
 
 # ---------------------------------------------------------------------------------------------
@@ -538,11 +674,13 @@ def _monotonic(caps: list[Caption], lo: int, hi: int) -> list[Caption]:
 
 
 def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: int = 0, hi: int | None = None,
-                   placeholders: bool = True, mode: str = "voice", notes: list[dict] | None = None) -> list[Caption]:
+                   placeholders: bool = True, mode: str = "voice", notes: list[dict] | None = None,
+                   cuts: Sequence[int] = ()) -> list[Caption]:
     """Captions of a word list on the sequence (frames at ``fps``; ``n_frames`` = timeline length). Back to back:
     each caption ends where the next starts; the last one at its own last word's end. With ``placeholders``,
     every stretch of more than ~1 s without speech (also before the first / after the last word) becomes a
-    ``*...*`` caption. ``lo`` / ``hi`` clamp the captions (a gap between two competitor captions)."""
+    ``*...*`` caption. ``lo`` / ``hi`` clamp the captions (a gap between two competitor captions). ``cuts``: the
+    edit's video cuts (sequence frames): a caption never runs across one, it changes exactly on the cut."""
     hi = int(n_frames if hi is None else hi)
     words = [w for w in words if w.text]
     if not words:
@@ -551,7 +689,8 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
         return []
     weak_notes: list[dict] = []
     gave: set[int] = set()
-    groups = group_words(words, weak_notes, gave)
+    at_cut = cut_breaks(words, cuts, fps)
+    groups = group_words(words, weak_notes, gave, cuts=at_cut)
     if notes is not None:
         for wn in weak_notes:
             notes.append({"text": words[wn["word"]].text, "time": words[wn["word"]].start, "reason": wn["reason"]})
@@ -561,7 +700,8 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
         caps.append(Caption(PLACEHOLDER, lo, to_frame(words[0].start, fps), "placeholder"))
     for gi, g in enumerate(groups):
         ws = [words[i] for i in g]
-        caps.append(Caption(" ".join(w.text for w in ws), to_frame(ws[0].start, fps), to_frame(ws[-1].end, fps),
+        start = at_cut.get(g[0], to_frame(ws[0].start, fps))          # on the cut, exactly
+        caps.append(Caption(" ".join(w.text for w in ws), start, max(start + 1, to_frame(ws[-1].end, fps)),
                             mode, ws, {"gave": True} if g[0] in gave else {}))
         nxt = words[groups[gi + 1][0]].start if gi + 1 < len(groups) else timeline_end
         if placeholders and nxt - ws[-1].end > SILENCE_S:
@@ -785,6 +925,25 @@ def mode_parts(caps: Sequence[Caption]) -> list[dict]:
 # The pipeline stage (pipeline.stage_captions)
 # ---------------------------------------------------------------------------------------------
 
+def edit_cuts(xml: str | Path, fps: Fraction) -> list[int]:
+    """The video cuts of the edit (rule 10): the frames on the ``fps`` caption sequence where one V1 clip of
+    1_edit.xml gives way to the next -- not where the same take simply runs on (same clip, framing and speed, the
+    source continuing)."""
+    from .export_xml_edl import parse_premiere_xml
+    x = parse_premiere_xml(xml)
+    rate = Fraction(int(x["timebase"] or 0)) * (Fraction(1000, 1001) if str(x.get("ntsc")).upper() == "TRUE" else 1)
+    if rate <= 0:
+        return []
+    clips = sorted(x["clips"], key=lambda c: c["start"])
+    out = []
+    for a, b in zip(clips, clips[1:]):
+        same = (a["name"] == b["name"] and a["out"] == b["in"] and a["motion"] == b["motion"]
+                and a["speed"] == b["speed"] and a["flip"] == b["flip"])
+        if not same:
+            out.append(int(np.floor(float(Fraction(b["start"]) * Fraction(fps) / rate) + 0.5)))
+    return sorted(set(out))
+
+
 def seq_frame_of(comp_fps: Fraction, seq_fps: Fraction):
     """Competitor frame k -> sequence frame (k x 2 for 30 -> 60 fps; time-rounded for other rates)."""
     r = Fraction(seq_fps) / Fraction(comp_fps)
@@ -944,12 +1103,22 @@ def run_captions(ctx) -> dict:
 
     # ---- captions ----
     from . import caption_rules
+    from .run_folders import EDIT_XML
+    cuts: list[int] = []                            # the edit's video cuts: no caption runs across one
+    xml = cfg.deliver / EDIT_XML
+    if xml.exists():
+        try:
+            cuts = edit_cuts(xml, fps)
+        except Exception as e:  # noqa: BLE001 - captions without the cut rule rather than none
+            warn(f"the video cuts of {EDIT_XML} could not be read ({type(e).__name__}: {e}): captions may run "
+                 "across a cut")
+    res["cuts"] = len(cuts)
     if mode == "competitor":
         caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
-        caps = voice_captions(words, fps, n_seq)
+        caps = voice_captions(words, fps, n_seq, cuts=cuts)
         rechecked = "rechecked" in (res.get("recheck") or {})        # low-confidence words: listed by the recheck
         res["flags"] = transcript_flags(words, y16, transcribe.SR, min_prob=0.0 if rechecked else 0.5)
     else:
@@ -958,7 +1127,7 @@ def run_captions(ctx) -> dict:
     # ---- the hard rules: the final check before the file is written ----
     if caps:
         lex = caption_rules.lexicon()
-        caps, res["rules"] = caption_rules.enforce(caps, fps, mode, words if heard_ok else None, lex)
+        caps, res["rules"] = caption_rules.enforce(caps, fps, mode, words if heard_ok else None, lex, cuts=cuts)
         res["rules"]["allowlist"] = lex.allow_file
         if mode == "competitor" and not heard_ok:
             res["notes"].append("no transcript: competitor captions are split only where their own text ends a "

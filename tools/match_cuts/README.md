@@ -225,12 +225,29 @@ with its competitor and 60 fps sequence timecodes.
 
 **Grouping, both modes** (`captions.py`):
 
-* **Never a single weak word** (`a`, `the`, `to`, `of`, `I`, … — the weak-word list): it joins the word(s) after it
-  (`I` | `know` → `I know`); before a silence, a sentence end or an interjection it joins the caption before it.
+* **Never across a video cut**: the cuts are the V1 clip boundaries of the run's `1_edit.xml` (not where the same
+  take simply runs on). A cut inside a caption splits it at the word boundary nearest the cut and the caption
+  changes exactly on the cut's frame (`I` | `suggested`, `that I was` | `not a real student`); when two boundaries
+  are about as near (within 0.1 s), the one outside a pair kept together wins (`my secret` ends on the cut rather
+  than `my` | `secret`). This beats the lone-weak-word rule: a weak word or preposition cut off from its phrase
+  stands alone right before the cut (`the school` | `for` | `genius kids`). A short clip with no speech between
+  two cuts stays uncaptioned (no caption may stretch over it). In competitor mode a pause the transcript hears
+  (over 0.25 s) also starts a caption (`next` | `to quite`).
+* **Never a single weak word** (`a`, `the`, `to`, `of`, `I`, … — the weak-word list) **or preposition** (`about`,
+  `at`, `from`, `into`, `with`): it joins the word(s) after it (`I` | `know` → `I know`); before a silence, a
+  sentence end or an interjection it joins the caption before it; right before a video cut it stays alone.
   A caption of nothing but function words (`without the`) joins the next words whole.
+* **Short captions**: a caption over 16 characters (my SRTs: median 11, 90% at 17 or less) splits at a natural
+  break, the most even one: before a verb phrase (`what you're` | `talking about`, `they would` | `bring me up`;
+  only with two words on each side, so `You're gonna lose` stays), before a preposition's phrase (`suggested` |
+  `to Marvel`; never before `of`: `lost track of time` stays), and around `and then` / `so then` / `but then`,
+  which start their own caption (`a pretty girl` | `and then` | `she's like`). Never a split that leaves a lone weak
+  word, preposition or subject.
 * **Never split** (unless the 20-character / 4-word cap leaves no choice): `a` / `an` / `the` / `this` / `my` /
-  `your` + the word after it (`a joke`, `the school`; after an adjective the noun too: `a high school`), a pronoun
-  + its verb (`I know`, `we went`, `you are`), a preposition + its object (`of Science`, `to the front`), names of
+  `your` + the word after it (`a joke`, `the school`; the adjectives and the noun too: `a pretty girl`, `a high
+  school`), a pronoun + its verb (`I know`, `we went`, `you are`), a verb + its preposition (`talking about`,
+  `looking at`; not `to`), `and then` / `so then` / `but then`, a preposition + its object (`of Science`, `to the
+  front`), names of
   two or more capitalised words (`Bronx School`, `Bronx High School of Science`), a name, number + unit, negation +
   verb, and every phrase in `caption_allowlist.txt`. No pair reaches across a pause over 0.25 s, a comma or a
   sentence end. A weak last word moves to the next caption with the words kept together with it (`to one of
@@ -253,8 +270,9 @@ is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4
 | 5 real words | every token in the word list, a name, a number or an interjection | competitor mode: a reading that is not a word and was not read clearly takes the word the transcript clearly heard; screen noise (`1`, `V`, `_`) is left out | listed, never guessed (deliberate misspellings stay) |
 | 6 length | spoken: 20 characters / 5 words; `*actions*`: 24 | split at a word (no weak ending) | one word over 20 characters |
 | 7 weak words | no caption of a single weak word; no weak last word where it can move | joined / moved to the next words | kept where it ends a sentence, a silence / interjection follows, it is kept together with the word before it, or the caption already gave one |
-| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed | competitor mode keeps the competitor's silences |
-| 9 kept together | no pair kept together split between two captions | competitor mode: regrouped (one word at a time) | split only where the cap forces it |
+| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed (on the cut when a video cut falls in the gap) | competitor mode keeps the competitor's silences; a clip with no speech between two cuts stays uncaptioned |
+| 9 kept together | no pair kept together split between two captions | competitor mode: regrouped (one word at a time) | split only where the cap or a video cut forces it |
+| 10 video cuts | no caption across a cut of `1_edit.xml` (V1 clip boundaries) | split on the cut / its edge moved onto the cut | — |
 
 **Acronyms** (`caption_allowlist.txt` next to this README; one word or phrase per line, extend it): `AI`, `MJ`, `MCU`, plus
 the acronyms the word list writes in capitals (`FBI`, `NASA`, `TV`); never a word that is also an ordinary word

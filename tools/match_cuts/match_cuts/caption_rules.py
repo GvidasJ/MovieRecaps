@@ -35,11 +35,11 @@ from pathlib import Path
 from typing import Sequence
 
 from .captions import (HARD_CAP, INTERJECTION_RE, MAX_CHARS, MAX_WORDS, NAME_STOP, PAUSE_S, PLACEHOLDER, SILENCE_S,
-                       WEAK, Caption, Word, clean_text, compute_bonds, frame_ms, group_words, is_action_text, is_weak,
-                       ms_tc, norm, sentence_end, to_frame)
+                       WEAK, Caption, Word, _lonely, _short, clean_text, compute_bonds, cut_breaks, frame_ms, group_words,
+                       is_action_text, is_weak, ms_tc, norm, sentence_end, to_frame)
 
 RULES = {1: "one sentence", 2: "one speaker", 3: "casing inside a word", 4: "capitals", 5: "real words",
-         6: "length", 7: "weak words", 8: "no gaps", 9: "kept together"}
+         6: "length", 7: "weak words", 8: "no gaps", 9: "kept together", 10: "video cuts"}
 MAX_SPOKEN_WORDS = 5          # rule 6: spoken captions top out at 20 characters (MAX_CHARS) and 5 words
 CLEAR_PROB = 0.6              # a transcript word heard at least this sure is "clearly heard"
 CLEAR_SCORE = 0.9             # a screen reading (OCR) at least this sure ...
@@ -519,7 +519,7 @@ def _weak_tail(toks: Sequence[Tok]) -> int:
     return j
 
 
-def weak_reason(caps: Sequence[Cap], i: int, fps: Fraction, mode: str) -> str | None:
+def weak_reason(caps: Sequence[Cap], i: int, fps: Fraction, mode: str, cuts: Sequence[int] = ()) -> str | None:
     """Why caption i keeps its weak last word, or None when the word can move to the front of the next caption."""
     c = caps[i]
     if not c.spoken or len(c.toks) < 2 or not is_weak(c.toks[-1].text):
@@ -544,6 +544,8 @@ def weak_reason(caps: Sequence[Cap], i: int, fps: Fraction, mode: str) -> str | 
     tail = _weak_tail(c.toks)
     if tail == 0:
         return "kept together with the previous word"
+    if any(c.start < f <= nxt.start for f in cuts):
+        return "a video cut follows"
     if c.gave:
         return "it already gave one weak word to the next caption"
     if nxt.toks[0].sent:
@@ -561,11 +563,11 @@ def lex_starts_sentence(w: str) -> bool:
     return lw in lex.lower and not any(f[:1].isupper() and not _letters(f).isupper() for f in lex.forms.get(lw, ()))
 
 
-def _move_weak(caps: list[Cap], fps: Fraction, mode: str, rep: Report) -> None:
+def _move_weak(caps: list[Cap], fps: Fraction, mode: str, rep: Report, cuts: Sequence[int] = ()) -> None:
     """Rule 7: a caption's weak last word goes to the front of the next caption with the words kept together with it
     (at most once per caption); the boundary moves to where they are said."""
     for i in range(len(caps) - 1):
-        if weak_reason(caps, i, fps, mode) is not None:
+        if weak_reason(caps, i, fps, mode, cuts) is not None:
             continue
         c, nxt = caps[i], caps[i + 1]
         tail = _weak_tail(c.toks)
@@ -731,12 +733,13 @@ def _run_words(run: Sequence[Cap], fps: Fraction) -> tuple[list[Word], list[tupl
     return words, where
 
 
-def _regroup(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+def _regroup(cs: list[Cap], fps: Fraction, rep: Report, cuts: Sequence[int] = ()) -> list[Cap]:
     """Competitor mode: the competitor's captions as one stream of words, regrouped by the voice-mode walk
     (captions.group_words: 4 words / 20 characters, keep-together pairs, no lone weak word, weak last words moved, a
     new caption after a pause or a sentence end) on the competitor's timing -- each caption starts on the frame its
     first word appeared on their screen. The competitor's own captions of 2+ words that pass these rules stay as
-    they are (a lone weak word just before one may join it)."""
+    they are (a lone weak word just before one may join it). A video cut of the edit (``cuts``) and a pause the
+    transcript hears (> 0.25 s) start a new caption; one starting on a cut starts exactly on it."""
     out: list[Cap] = []
     run: list[Cap] = []
     for c in list(cs) + [None]:
@@ -744,17 +747,32 @@ def _regroup(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
             run.append(c)
             continue
         if run:
-            out += _regroup_run(run, fps, rep)
+            out += _regroup_run(run, fps, rep, cuts)
             run = []
         if c is not None:
             out.append(c)
     return out
 
 
-def _regroup_run(run: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+def _speech_pauses(run: Sequence[Cap], where: Sequence[tuple[int, int]]) -> set[int]:
+    """Word indices the transcript hears a pause (> 0.25 s) before: the speaker split the phrase there."""
+    out = set()
+    toks = [run[ci].toks[k] for ci, k in where]
+    for j in range(1, len(toks)):
+        a, b = toks[j - 1].word, toks[j].word
+        if a is not None and b is not None and a is not b and b.start - a.end > PAUSE_S:
+            out.add(j)
+    return out
+
+
+def _regroup_run(run: list[Cap], fps: Fraction, rep: Report, cuts: Sequence[int] = ()) -> list[Cap]:
     from .captions import _fits
     words, where = _run_words(run, fps)
     bonds = compute_bonds(words, adjectives=False)     # the competitor's own boundary wins over "adjective + noun"
+    at_cut = cut_breaks(words, [f for f in cuts if run[0].start < f < run[-1].end], fps, bonds)
+    breaks = set(at_cut) | _speech_pauses(run, where)
+    for j in breaks:
+        bonds[j - 1] = False
     first = {}
     for j, (ci, k) in enumerate(where):
         first.setdefault(ci, j)
@@ -770,13 +788,18 @@ def _regroup_run(run: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
             continue
         if (a > 0 and bonds[a - 1]) or (b < len(words) and bonds[b - 1]):
             continue                                     # it splits a pair kept together
+        if any(a < j < b for j in breaks):
+            continue                                     # a cut or a pause inside it
         fixed.append((a, b))
     gave: set[int] = set()
-    groups = _join_singles(words, group_words(words, None, gave, fixed))
+    groups = _short(words, _join_singles(words, group_words(words, None, gave, fixed, cuts=at_cut,
+                                                            pauses=breaks - set(at_cut)), breaks, set(at_cut)), bonds)
     caps: list[Cap] = []
     for g in groups:
         (c0, k0), (c1, k1) = where[g[0]], where[g[-1]]
-        start = run[c0].start if k0 == 0 else to_frame(words[g[0]].start, fps)
+        start = at_cut.get(g[0], run[c0].start if k0 == 0 else to_frame(words[g[0]].start, fps))
+        if g[0] in at_cut and caps and caps[-1].end is not None and caps[-1].end >= run[c0].start:
+            caps[-1].end = start                         # back to back: the caption changes exactly on the cut
         end = run[c1].end if k1 == len(run[c1].toks) - 1 else None
         info = dict(run[c0].info)
         ch = set().union(*(run[c].changed for c in {where[j][0] for j in g}))
@@ -798,10 +821,11 @@ def _regroup_run(run: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
     return [c for c in caps if c.end > c.start]
 
 
-def _lone_target(cs: Sequence[Cap], i: int, fps: Fraction) -> str | None:
-    """Where caption i -- a single weak word -- can join: "next", "prev", or None (nowhere / not a lone weak word)."""
+def _lone_target(cs: Sequence[Cap], i: int, fps: Fraction, cuts: Sequence[int] = ()) -> str | None:
+    """Where caption i -- a single weak word or preposition -- can join: "next", "prev", or None (nowhere: a sentence
+    end, a pause or a video cut in the way; or not a lone weak word)."""
     c = cs[i]
-    if not (c.spoken and len(c.toks) == 1 and is_weak(c.toks[0].text)):
+    if not (c.spoken and len(c.toks) == 1 and _lonely(c.toks[0].text)):
         return None
     t = c.toks[0]
     nxt = cs[i + 1] if i + 1 < len(cs) else None
@@ -811,27 +835,31 @@ def _lone_target(cs: Sequence[Cap], i: int, fps: Fraction) -> str | None:
     def fits(toks):
         return len(" ".join(x.text for x in toks)) <= MAX_CHARS and len(toks) <= MAX_SPOKEN_WORDS
     if (nxt is not None and nxt.spoken and nxt.start - c.end <= gap and not sentence_end(t.raw)
-            and not (t.word is not None and sentence_end(t.word.raw)) and fits([t] + nxt.toks)):
+            and not (t.word is not None and sentence_end(t.word.raw)) and fits([t] + nxt.toks)
+            and not any(c.start < f < nxt.end for f in cuts)):
         return "next"
     pt = prv.toks[-1] if prv is not None and prv.toks else None
     if (pt is not None and prv.spoken and c.start - prv.end <= gap and not sentence_end(pt.raw)
-            and not (pt.word is not None and sentence_end(pt.word.raw)) and fits(prv.toks + [t])):
+            and not (pt.word is not None and sentence_end(pt.word.raw)) and fits(prv.toks + [t])
+            and not any(prv.start < f <= c.end + gap for f in cuts)):        # right before a cut: it stands alone
         return "prev"
     return None
 
 
-def _join_singles(words: Sequence[Word], groups: list[list[int]]) -> list[list[int]]:
+def _join_singles(words: Sequence[Word], groups: list[list[int]], breaks: set[int] = frozenset(),
+                  cuts: set[int] = frozenset()) -> list[list[int]]:
     """Competitor mode: a one-word caption left between two others ("bring" | "me up") joins a neighbour when the
     two fit one caption with no pause or sentence end between them: the next one, or the previous one when a
     comma or a sentence end follows the word ("what dya" | "think," -> "what dya think"). Interjections and a word
-    said again stay alone."""
+    said again stay alone; never across a video cut or a pause (``breaks``), and a weak word or preposition right
+    before a cut (``cuts``: word indices a cut falls before) stands alone ("for" | cut | "genius kids")."""
     from .captions import _fits, _repeat, standalone_interjections
     alone = standalone_interjections(words)
     i = 0
     while i < len(groups):
         g = groups[i]
         w = g[0]
-        if len(g) != 1 or alone[w]:
+        if len(g) != 1 or alone[w] or (w + 1 in cuts and _lonely(words[w].text)):
             i += 1
             continue
         raw = (words[w].raw or words[w].text).strip().rstrip("\"”’'")
@@ -840,7 +868,7 @@ def _join_singles(words: Sequence[Word], groups: list[list[int]]) -> list[list[i
         def ok(a: list[int], b: list[int]) -> bool:
             x, y = a[-1], b[0]
             return (_fits(words, a + b) and words[y].start - words[x].end <= PAUSE_S and not alone[x] and not alone[y]
-                    and not sentence_end(words[x].raw or words[x].text) and not _repeat(words, x, y))
+                    and y not in breaks and not sentence_end(words[x].raw or words[x].text) and not _repeat(words, x, y))
         if not ends and i + 1 < len(groups) and ok(g, groups[i + 1]):
             groups[i:i + 2] = [g + groups[i + 1]]
         elif i > 0 and ok(groups[i - 1], g):
@@ -858,16 +886,16 @@ def _merge_quotes(c: Cap) -> None:
             a.text, b.text = a.text[:-1], b.text[1:]
 
 
-def _join_lone(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
+def _join_lone(cs: list[Cap], fps: Fraction, rep: Report, cuts: Sequence[int] = ()) -> list[Cap]:
     """Rule 7: a caption of a single weak word ("a", "I", "the") joins the caption after it -- or, when a sentence
     end, a pause or a too-long caption is in the way, the one before it; else it is listed."""
     i = 0
     while i < len(cs):
         c = cs[i]
-        if not (c.spoken and len(c.toks) == 1 and is_weak(c.toks[0].text)):
+        if not (c.spoken and len(c.toks) == 1 and _lonely(c.toks[0].text)):
             i += 1
             continue
-        where = _lone_target(cs, i, fps)
+        where = _lone_target(cs, i, fps, cuts)
         if where == "next":
             cs[i + 1].toks.insert(0, c.toks[0])
             cs[i + 1].start = c.start
@@ -880,11 +908,67 @@ def _join_lone(cs: list[Cap], fps: Fraction, rep: Report) -> list[Cap]:
             rep.change(cs[i - 1], 7)
             del cs[i]
             continue
+        if any(c.end <= f <= c.end + int(round(PAUSE_S * float(fps))) for f in cuts):
+            i += 1                                       # alone right before a video cut: allowed (rule A)
+            continue
         rep.flagged[7] += 1
         rep.row(7, "flagged", c.start, c.end, c.text, "a lone weak word: nothing it can join (a pause or a sentence "
                                                       "end on both sides)")
         i += 1
     return cs
+
+
+def _token_frames(c: Cap, fps: Fraction) -> list[int]:
+    """The frame each token of caption c starts on: its transcript word's start when that lies inside the caption,
+    else the caption's time shared out by characters."""
+    out: list[int] = []
+    total = max(1, len(c.text))
+    for k, t in enumerate(c.toks):
+        f = to_frame(t.word.start, fps) if t.word is not None and (k == 0 or c.toks[k - 1].word is not t.word) else None
+        if f is None or not c.start <= f < c.end or (out and f <= out[-1]):
+            before = len(" ".join(x.text for x in c.toks[:k])) + (1 if k else 0)
+            f = c.start + int(round((c.end - c.start) * before / total))
+        out.append(max(f, out[-1] + 1) if out else f)
+    return out
+
+
+def _cut_split(cs: list[Cap], cuts: Sequence[int], fps: Fraction, rep: Report) -> list[Cap]:
+    """Rule 10 (A): a caption never runs across a video cut of the edit. A cut inside a caption splits it at the word
+    boundary nearest the cut -- or, when the cut is nearer the caption's first word's start or its last word's end,
+    moves that edge -- so the caption changes exactly on the cut (a placeholder is split in two). This beats the
+    lone-weak-word rule: "I" or "for" may stand alone right before a cut."""
+    out = list(cs)
+    i = 0
+    while i < len(out):
+        c = out[i]
+        inside = [f for f in cuts if c.start < f < c.end]
+        if not inside:
+            i += 1
+            continue
+        f = inside[0]
+        rep.change(c, 10)
+        if not c.spoken or not c.toks:
+            out[i:i + 1] = [Cap(c.start, f, c.toks, c.mode, dict(c.info), set(c.changed)),
+                            Cap(f, c.end, [Tok(t.text, t.raw, t.word) for t in c.toks], c.mode, dict(c.info),
+                                set(c.changed))]
+            continue
+        ts = _token_frames(c, fps)
+        last = c.toks[-1].word
+        te = to_frame(last.end, fps) if last is not None and ts[-1] < to_frame(last.end, fps) <= c.end else c.end
+        marks = [(0, ts[0])] + [(k, ts[k]) for k in range(1, len(ts))] + [(len(ts), te)]
+        k = min(marks, key=lambda m: (abs(m[1] - f), -m[0] if m[1] > f else m[0]))[0]
+        if 0 < k < len(c.toks):
+            out[i:i + 1] = [Cap(c.start, f, c.toks[:k], c.mode, dict(c.info), set(c.changed), c.gave),
+                            Cap(f, c.end, c.toks[k:], c.mode, dict(c.info), set(c.changed))]
+        elif k == 0:                                     # the words start after the cut: the caption starts on it
+            if i > 0 and out[i - 1].end == c.start and not any(c.start <= g < f for g in cuts):
+                out[i - 1].end = f                       # (never across another cut: a clip with no speech)
+            c.start = f
+        else:                                            # the words end before the cut: the caption ends on it
+            if i + 1 < len(out) and out[i + 1].start == c.end and not any(f < g <= c.end for g in cuts):
+                out[i + 1].start = f
+            c.end = f
+    return out
 
 
 def _strip_stops(caps: list[Cap], rep: Report) -> None:
@@ -951,12 +1035,14 @@ def _caps_out(caps: Sequence[Cap]) -> list[Caption]:
 
 
 def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[Word] | None = None,
-            lex: Lexicon | None = None) -> tuple[list[Caption], dict]:
+            lex: Lexicon | None = None, cuts: Sequence[int] = ()) -> tuple[list[Caption], dict]:
     """The final check and its fixes (module docstring). ``mode``: "voice" (back to back, rule 8) or "competitor"
     (the competitor's timing kept: its start / end / gaps; only the boundaries inside a caption it split, and a
     weak word moving between two touching captions, are re-timed). ``words``: the transcript on the same timeline
-    (seconds), None when there is none. Returns (captions, report)."""
+    (seconds), None when there is none. ``cuts``: the edit's video cuts (sequence frames: where one V1 clip gives way
+    to the next) -- a caption never runs across one. Returns (captions, report)."""
     fps = Fraction(fps)
+    cuts = sorted({int(f) for f in cuts})
     lex = lex or lexicon()
     rep = Report(fps, mode)
     cs = _caps_in(caps, words, mode)
@@ -1036,7 +1122,7 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     cs = [c for c in cs if c.toks]
     _recase(cs, words, lex, rep, fps)
     if mode == "competitor":
-        cs = _regroup(cs, fps, rep)
+        cs = _regroup(cs, fps, rep, cuts)
     # rule 6: length
     out = []
     for c in cs:
@@ -1051,24 +1137,28 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                                                           "cannot be split at a word")
         out += pieces
     cs = out
-    # rule 7: weak last words, lone weak words
-    _move_weak(cs, fps, mode, rep)
-    cs = _join_lone(cs, fps, rep)
+    # rule 7: weak last words, lone weak words; rule 10: never across a video cut
+    _move_weak(cs, fps, mode, rep, cuts)
+    cs = _join_lone(cs, fps, rep, cuts)
+    cs = _cut_split(cs, cuts, fps, rep)
     _pause_capitals(cs, words, rep, fps)
     for i, c in enumerate(cs):
-        why = weak_reason(cs, i, fps, mode)
+        why = weak_reason(cs, i, fps, mode, cuts)
         if why not in (None, "not a weak ending"):
             t = c.toks[-1]
             rep.kept_weak.append({"time": (t.word.start if t.word is not None else c.start / float(fps)),
                                   "text": t.text, "reason": why, "caption": c.text,
                                   "start_tc": _tc(c.start, fps), "end_tc": _tc(c.end, fps)})
             rep.flagged[7] += 1
-    # rule 8: no gaps (voice mode)
+    # rule 8: no gaps (voice mode). A gap with a video cut in it closes on the cut (rule 10); with two or more, the
+    # clip between the first and the last has no speech and stays uncaptioned
     if mode != "competitor":
         for a, b in zip(cs, cs[1:]):
             if a.end != b.start:
-                a.end = b.start
-                rep.change(a, 8)
+                inside = [f for f in cuts if a.end <= f <= b.start]
+                a.end, b.start = (inside[0], inside[-1]) if inside else (b.start, b.start)
+                if a.end == b.start:
+                    rep.change(a, 8)
     # rule 5: what is still not a word
     for c in cs:
         bad = [x for x in _cores5(c) if c.mode != "placeholder" and x and not is_real(x, lex) and not is_name(x)]
@@ -1079,8 +1169,10 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                     (f" (heard: '{heard}')" if heard and mode == "competitor" else "") + " -- check the audio (a name, "
                     "acronym or deliberate spelling: add it to caption_allowlist.txt)")
     res = _caps_out(cs)
-    left = check(res, fps, mode, lex)
-    for a, b in _split_pairs(_caps_in(res, None, mode), fps, adjectives=mode != "competitor"):
+    said = [c for c in res if c.mode != "placeholder" and not is_action_text(c.text)]
+    rep.notes["cuts_in_speech"] = sum(1 for f in cuts if said and said[0].start < f < said[-1].end)
+    left = check(res, fps, mode, lex, cuts=cuts)
+    for a, b in _split_pairs(_caps_in(res, None, mode), fps, adjectives=mode != "competitor", cuts=cuts):
         rep.flagged[9] += 1                              # rule 9: what could not be kept together
         rep.row(9, "flagged", a.start, b.end, f"{a.text} | {b.text}", "a pair kept together is split here")
     d = rep.to_dict()
@@ -1090,11 +1182,12 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
 
 
 def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: Lexicon | None = None,
-          rules: Sequence[int] = tuple(RULES)) -> dict[int, list[str]]:
+          rules: Sequence[int] = tuple(RULES), cuts: Sequence[int] = ()) -> dict[int, list[str]]:
     """The checks on finished captions: {rule: [what breaks it]}. Rule 7 counts a weak last word only where it could
     move (weak_reason) and a caption of a single weak word where it could join a neighbour; rule 8 only in voice
     mode (the competitor's gaps are kept); rule 9 a pair kept together (captions.compute_bonds) split between two
-    captions where the caps allowed one caption."""
+    captions where the caps allowed one caption and no video cut falls there; rule 10 a caption across a video cut
+    of the edit (``cuts``, sequence frames)."""
     lex = lex or lexicon()
     fps = Fraction(fps)
     out: dict[int, list[str]] = {r: [] for r in rules}
@@ -1128,18 +1221,23 @@ def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: 
             out[5].append(tc)
         if 6 in out and _too_long(c):
             out[6].append(tc)
-        if 7 in out and (weak_reason(cs, i, fps, mode or "voice") is None or _lone_target(cs, i, fps) is not None):
+        if 7 in out and (weak_reason(cs, i, fps, mode or "voice", cuts) is None
+                         or _lone_target(cs, i, fps, cuts) is not None):
             out[7].append(tc)
+        if 10 in out and any(c.start < f < c.end for f in cuts):
+            out[10].append(tc)
     if 9 in out:
         out[9] = [f"{_tc(a.start, fps)} '{a.text}' | '{b.text}'"
-                  for a, b in _split_pairs(cs, fps, adjectives=(mode or "voice") != "competitor")]
+                  for a, b in _split_pairs(cs, fps, adjectives=(mode or "voice") != "competitor", cuts=cuts)]
     if 8 in out and (mode or "voice") != "competitor":
+        cut = set(cuts)                                  # a clip with no speech between two cuts stays uncaptioned
         out[8] = [f"{_tc(a.start, fps)} '{a.text}' ends at {_tc(a.end, fps)}, the next starts at {_tc(b.start, fps)}"
-                  for a, b in zip(caps, caps[1:]) if a.end != b.start]
+                  for a, b in zip(caps, caps[1:]) if a.end != b.start and not (a.end in cut and b.start in cut)]
     return out
 
 
-def _split_pairs(cs: Sequence[Cap], fps: Fraction, adjectives: bool = True) -> list[tuple[Cap, Cap]]:
+def _split_pairs(cs: Sequence[Cap], fps: Fraction, adjectives: bool = True, cuts: Sequence[int] = ()
+                 ) -> list[tuple[Cap, Cap]]:
     """Rule 9: boundaries between two spoken captions (no pause between them) that split a pair kept together, where
     the words bonded across the boundary would fit one caption (competitor mode: its own boundary wins over
     "adjective + noun", ``adjectives`` False)."""
@@ -1149,6 +1247,8 @@ def _split_pairs(cs: Sequence[Cap], fps: Fraction, adjectives: bool = True) -> l
     for a, b in zip(cs, cs[1:]):
         if not (a.spoken and b.spoken and a.toks and b.toks) or b.start - a.end > gap:
             continue
+        if any(a.end - gap <= f <= b.start + gap for f in cuts):
+            continue                                     # split on a video cut: rule 10 wins
         ws: list[Word] = []
         for c in (a, b):
             n = len(c.toks)
@@ -1183,7 +1283,7 @@ def summary_line(rep: dict) -> str:
     def n(d: dict, r: int) -> int:
         return int(d.get(r, d.get(str(r), 0)) or 0)
     verbs = {1: "split", 2: "split", 3: "recased", 4: "recased", 6: "split", 7: "moved or joined", 8: "closed",
-             9: "regrouped"}
+             9: "regrouped", 10: "split on a cut"}
     parts = []
     for r, name in RULES.items():
         if r == 8 and rep.get("mode") == "competitor":
@@ -1205,6 +1305,15 @@ def summary_line(rep: dict) -> str:
             parts.append(f"5 {name}: " + ", ".join(bits))
             continue
         bits = [f"{n(ch, r)} {verbs[r]}"]
+        if r == 10:
+            k = int(notes.get("cuts_in_speech") or 0)
+            across = int((rep.get("left") or {}).get(10, 0) or 0)
+            bits = ([f"{k} in the speech, a caption starts on each" if not across else f"{k} in the speech"]
+                    if k else ["none in the speech"])
+            if n(ch, 10):
+                bits.append(f"{n(ch, 10)} {verbs[10]}")
+            if across:
+                bits.append(f"{across} still inside a caption")
         if r == 9 and notes.get("regrouped"):
             bits = [f"{notes['regrouped']} of the competitor's captions regrouped into {n(ch, 9)}"]
         if n(fl, r) or r == 7:

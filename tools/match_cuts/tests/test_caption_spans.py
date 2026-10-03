@@ -178,7 +178,7 @@ def test_real_competitor_captions_match_the_answer_key(tmp_path, monkeypatch):
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
     # written: the same words in the same order, regrouped on the competitor's timing, rules 1-4 kept
     got = frames(C.parse_srt(Path(res["path"]).read_text(encoding="utf-8")))
-    assert len(got) == 56 and res["rules"]["notes"]["regrouped"] == 97
+    assert len(got) == 56 and res["rules"]["notes"]["regrouped"] == 98                 # "talking" | "about" too
 
     def words(rows):
         return [w for t, _, _ in rows for w in re.sub(r"[^a-z0-9' -]", "", t.lower().replace("’", "'")).split()]

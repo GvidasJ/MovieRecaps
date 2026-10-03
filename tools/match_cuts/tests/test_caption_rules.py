@@ -7,7 +7,11 @@
 * voice mode: the words of the ten reference SRTs come out passing all the checks;
 * grouping: a caption is never a single weak word, the pairs kept together are never split, a competitor showing one
   word at a time is regrouped on its own timing, and capitals only for "I", names, acronyms and after a pause (the
-  examples from a real run: "a" | "joke", "I" | "know", "Bronx" | "School", "joke" | "And" | "Marvel").
+  examples from a real run: "a" | "joke", "I" | "know", "Bronx" | "School", "joke" | "And" | "Marvel");
+* splitting: a caption never runs across a video cut of the edit, a caption over 16 characters splits at a natural
+  break, a verb keeps its preposition and an article its adjectives and noun (the examples from a real run: "I" |
+  "suggested", "for" | "genius kids", "that I was" | "not a real student", "what you're" | "talking about", "of a
+  classroom" | "next" | "to quite" | "a pretty girl" | "and then").
 """
 from __future__ import annotations
 
@@ -80,7 +84,7 @@ def test_bad_captions_without_a_transcript_come_out_right():
     assert all(rep["left"][r] == 0 for r in (1, 2, 3, 4, 6, 7, 8, 9))
     assert not any(re.search(r"(?<!\d)[.,]|[.,](?!\d)", t) for t in got)          # no full stops / commas
     # regrouped: weak words with the next words, names and pronoun + verb kept together
-    for a, b in [("You play", "the films main"), ("Mayday Parker", "the daughter"), ("the daughter", "of Peter and MJ"),
+    for a, b in [("You play the films", "main villain"), ("Mayday Parker", "the daughter"), ("the daughter", "of Peter and MJ"),
                  ("bring a new era", "of X-Men mutants"), ("Sadie Sink", "you are"), ("you are", "in the film")]:
         i = got.index(a)
         assert got[i + 1] == b and out[i].end == out[i + 1].start
@@ -148,7 +152,7 @@ def test_a_garbled_reading_takes_the_word_heard_but_a_clearly_read_misspelling_s
     caps = [cap("We wre", 2.0, 2.3, score=0.78), cap("going to the shop", 2.3, 3.4),
             cap("my new compluter", 4.0, 4.9), cap("I dont know", 6.0, 6.9)]
     out, rep = R.enforce(caps, FPS, "competitor", words)
-    assert texts(out) == ["We're", "going to the shop", "My new compluter", "I dont know"]   # 0.56 s pause: "My"
+    assert texts(out) == ["We're", "going", "to the shop", "My new compluter", "I dont know"]   # 0.56 s pause: "My"
     assert [r["detail"].split(":")[0] for r in rep["rows"] if r["kind"] == "changed"] == ["'We wre' -> 'We're'"]
     flagged = {r["text"]: r["detail"] for r in rep["rows"] if r["kind"] == "flagged"}
     assert "compluter" in flagged["My new compluter"] and "heard: 'my new computer'" in flagged["My new compluter"]
@@ -225,10 +229,10 @@ def test_the_summary_says_how_many_captions_each_rule_changed_or_flagged():
     assert line == ("1 one sentence: 1 split; 2 one speaker: 0 split; 3 casing inside a word: 1 recased; "
                     "4 capitals: 3 recased; 5 real words: 1 flagged; 6 length: 0 split; 7 weak words: 0 moved or "
                     "joined, 1 kept (listed); 8 no gaps: the competitor's timing kept, gaps included; 9 kept together: "
-                    "2 of the competitor's captions regrouped into 2"), line
+                    "2 of the competitor's captions regrouped into 2; 10 video cuts: none in the speech"), line
     _, rep = R.enforce([C.Caption("hello there", 0, 30, "voice", heard("hello there", 0.0, 0.2)),
                         C.Caption("friend", 40, 60, "voice", heard("friend", 0.66, 0.2))], FPS, "voice", None)
-    assert R.summary_line(rep).endswith("8 no gaps: 1 closed; 9 kept together: 0 flagged")
+    assert R.summary_line(rep).endswith("8 no gaps: 1 closed; 9 kept together: 0 flagged; 10 video cuts: none in the speech")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -311,7 +315,8 @@ def test_one_word_competitor_captions_are_regrouped_on_the_competitors_timing():
     assert not [t for t in got if t.split()[0] in ("And", "The", "You")]
     # never a single weak word; 2-4 words but where nothing could join
     assert not [t for t in got if len(t.split()) == 1 and C.is_weak(t)]
-    assert sorted(t for t in got if len(t.split()) == 1) == ["*laughs*", "Spider-Man", "about", "seriously"]
+    assert sorted(t for t in got if len(t.split()) == 1) == ["*laughs*", "Spider-Man", "seriously"]
+    assert got[got.index("what you're") + 1] == "talking about"            # a verb and its preposition together
     assert all(len(t) <= 20 and len(t.split()) <= 4 for t in got if not C.is_action_text(t))
     # the competitor's timing: each caption starts on the frame its first word appeared on their screen
     starts = {c.start for c in caps}
@@ -322,7 +327,7 @@ def test_one_word_competitor_captions_are_regrouped_on_the_competitors_timing():
         assert kept in got, kept
     assert "“so dude what's”" in got                     # quoted words shown one at a time: one pair of quotes
     assert not any(v for r, v in rep["left"].items() if r != 5)
-    assert rep["notes"]["regrouped"] == 97 and len(out) == 56
+    assert rep["notes"]["regrouped"] == 98 and len(out) == 56
 
 
 def test_a_caption_is_never_a_single_weak_word():
@@ -378,3 +383,172 @@ def test_capitals_only_for_I_names_acronyms_and_after_a_pause():
     words = heard("So we went. And the guy said Peter Parker is in the MCU. The end", 0.0, 0.25)
     out, _ = R.enforce(C.voice_captions(words, FPS, n_frames=C.to_frame(words[-1].end, FPS)), FPS, "voice", words)
     assert " ".join(texts(out)) == "So we went and the guy said Peter Parker is in the MCU the end"
+
+
+# ---------------------------------------------------------------------------------------------
+# Splitting: video cuts, short captions, pairs kept together (the examples from a real run)
+# ---------------------------------------------------------------------------------------------
+
+# the video cuts of that edit on the 60 fps sequence, measured on input/competitor.mp4: hard cuts and small jump cuts
+# (none at 1596, before "to": "next" | "to quite" comes from a pause in speech, not a cut)
+CUTS = [75, 471, 744, 808, 867, 1127, 1500, 1578, 1654, 1845, 1923]
+
+
+def in_a_row(out, *want):
+    """(text, start, end) of the captions ``want``, which must follow one another in ``out``."""
+    got = texts(out)
+    assert want[0] in got, (want[0], got)
+    i = got.index(want[0])
+    assert got[i:i + len(want)] == list(want), got[max(0, i - 1):i + len(want) + 1]
+    return [(c.text, c.start, c.end) for c in out[i:i + len(want)]]
+
+
+@pytest.mark.skipif(not TRUTH_SRT.is_file(), reason="the competitor answer key is not in this checkout")
+def test_a_caption_changes_exactly_on_each_video_cut():
+    caps, words = competitor_run()
+    out, rep = R.enforce(caps, FPS, "competitor", words, cuts=CUTS)
+    # 1. "I suggested" -> "I" | "suggested": the cut between the two words; "I" stands alone right before it
+    assert in_a_row(out, "So as a joke", "I", "suggested", "to Marvel") == [
+        ("So as a joke", 0, 48), ("I", 48, 75), ("suggested", 75, 118), ("to Marvel", 118, 149)]
+    # 2. "for genius kids" -> "for" | "genius kids": the cut after "for"
+    assert in_a_row(out, "the school", "for", "genius kids") == [
+        ("the school", 744, 788), ("for", 788, 808), ("genius kids", 808, 867)]
+    # 3. "that I was not" | "a real student" -> "that I was" | "not a real student": the cut right before "not"
+    assert in_a_row(out, "that I was", "not a real student") == [
+        ("that I was", 1095, 1127), ("not a real student", 1127, 1176)]
+    # 4. "what you're talking" | "about" -> "what you're" | "talking about": before the verb phrase, the verb with
+    #    its preposition
+    assert in_a_row(out, "I have no idea", "what you're", "talking about") == [
+        ("I have no idea", 1371, 1440), ("what you're", 1440, 1464), ("talking about", 1464, 1500)]
+    # 5. "of a classroom next" | "to quite a pretty" | "girl and then": the cut before "next"; "a pretty girl"
+    #    kept together, "and then" on its own (the hard cut at 1654 falls inside it: it ends there)
+    assert in_a_row(out, "of a classroom", "next to quite", "a pretty girl", "and then", "she's like") == [
+        ("of a classroom", 1541, 1578), ("next to quite", 1578, 1618), ("a pretty girl", 1618, 1646),
+        ("and then", 1646, 1654), ("she's like", 1654, 1680)]
+    # no caption runs across a cut, and a caption starts on every one
+    assert not [(c.text, f) for c in out for f in CUTS if c.start < f < c.end]
+    assert set(CUTS) <= {c.start for c in out}
+    # a near tie keeps a pair together: the cut at 1845 ends "my secret" rather than splitting "my" | "secret"
+    assert in_a_row(out, "my secret", "I'm actually") == [("my secret", 1815, 1845), ("I'm actually", 1845, 1896)]
+    assert all(a.end == b.start for a, b in zip(out, out[1:]))
+    assert not any(v for r, v in rep["left"].items() if r != 5)
+    assert not R.check(out, FPS, "competitor", cuts=CUTS)[10]
+    assert R.summary_line(rep).endswith("10 video cuts: 10 in the speech, a caption starts on each")   # 1923: *laughs*
+    # short captions: over 16 characters only where there is no natural break (the median is 11, as in my SRTs)
+    assert sorted(t for t in texts(out) if len(t) > 16) == [
+        "and a fake accent", "completely a joke", "even the teachers", "not a real student", "so the next thing",
+        "with a pencil case"]
+
+
+@pytest.mark.skipif(not TRUTH_SRT.is_file(), reason="the competitor answer key is not in this checkout")
+def test_next_stands_alone_when_the_speaker_pauses_after_it():
+    # example 5 in full: "of a classroom" | "next" | "to quite" | "a pretty girl" | "and then". The competitor's
+    # video has no cut before "to", so "next" stands alone only where the transcript hears a pause after it
+    caps, words = competitor_run()
+    i = max(k for k, w in enumerate(words) if w.text == "next")
+    words[i] = C.Word("next", words[i].start, words[i].start + 0.1, 0.95, "next")
+    words[i + 1] = C.Word("to", 1602 / 60, words[i + 1].end, 0.95, "to")        # 0.3 s later
+    out, _ = R.enforce(caps, FPS, "competitor", words, cuts=CUTS)
+    assert in_a_row(out, "of a classroom", "next", "to quite", "a pretty girl", "and then") == [
+        ("of a classroom", 1541, 1578), ("next", 1578, 1596), ("to quite", 1596, 1618), ("a pretty girl", 1618, 1646),
+        ("and then", 1646, 1654)]
+
+
+def test_voice_mode_splits_on_the_cuts_and_keeps_captions_short():
+    words = (heard("So as a joke, I suggested to Marvel", 0.0) + heard("the school for genius kids.", 3.0)
+             + heard("Even the teachers didn't know that I was not a real student.", 5.0)
+             + heard("I have no idea what you're talking about.", 9.0)
+             + heard("So I was sat at the back of a classroom next", 12.0)
+             + heard("to quite a pretty girl and then she's like", 15.6))          # a pause after "next"
+
+    def cut_before(text):                               # a cut in the gap before the word
+        return C.to_frame(next(w for w in words if w.text == text).start - 0.03, FPS)
+    cuts = [cut_before("suggested"), cut_before("genius"), cut_before("not"), cut_before("next")]
+    caps = C.voice_captions(words, FPS, n_frames=C.to_frame(words[-1].end, FPS) + 60, cuts=cuts)
+    out, rep = R.enforce(caps, FPS, "voice", words, cuts=cuts)
+    assert texts(out) == [
+        "So as a joke", "I", "suggested", "to Marvel", "The school", "for", "genius kids", "Even the teachers",
+        "didn't know", "that I was", "not a real student", "I have no idea", "what you're", "talking about",
+        "So I was sat", "at the back", "of a classroom", "next", "to quite", "a pretty girl", "and then", "she's like"]
+    assert {c.start for c in out} >= set(cuts)            # each cut starts a caption, exactly on its frame
+    assert not [(c.text, f) for c in out for f in cuts if c.start < f < c.end]
+    assert not any(R.check(out, FPS, "voice", cuts=cuts).values())
+
+
+def test_short_captions_split_at_a_natural_break_and_keep_pairs_together():
+    def groups(text):
+        ws = [C.Word(C.clean_text(t), 0.2 * i, 0.2 * i + 0.18, 1.0, t) for i, t in enumerate(text.split())]
+        return [" ".join(ws[i].text for i in g) for g in C.group_words(ws)]
+
+    def bonds(text):
+        ws = [C.Word(C.clean_text(t), 0.2 * i, 0.2 * i + 0.2, 1.0, t) for i, t in enumerate(text.split())]
+        return [f"{ws[i].text} {ws[i + 1].text}" for i, b in enumerate(C.compute_bonds(ws)) if b]
+    # over 16 characters: split before the verb phrase, before a preposition's phrase, around "and then"
+    assert groups("I have no idea what you're talking about") == ["I have no idea", "what you're", "talking about"]
+    assert groups("she was a pretty girl and then she left") == ["she was", "a pretty girl", "and then", "she left"]
+    assert groups("so then we went") == ["so then we went"]                # 15 characters: short enough
+    # never a break that leaves a verb alone after its helping verb, or splits "track of time"
+    assert groups("You're gonna lose") == ["You're gonna lose"]
+    assert groups("what I am saying?") == ["what I am saying?"]
+    assert groups("lost track of time") == ["lost track of time"]
+    # kept together: a verb and its preposition, an article with its adjectives and noun, "and then" / "so then"
+    assert bonds("what you're talking about") == ["talking about"]
+    assert bonds("looking at a pretty girl") == ["looking at", "at a", "a pretty", "pretty girl"]
+    assert bonds("and then she said") == ["and then", "she said"]
+    assert bonds("so then we went") == ["so then", "we went"]
+    # a preposition never stands alone: "about" joins the words before it ("talking" | "about" in competitor mode)
+    caps = [cap("WHAT YOU'RE TALKING", 0.0, 0.8), cap("ABOUT", 0.8, 1.2)]
+    words = heard("what you're talking about.", 0.0, 0.25)
+    out, _ = R.enforce(caps, FPS, "competitor", words)
+    assert texts(out) == ["What you're", "talking about"]
+
+
+def test_cut_breaks_put_the_cut_on_the_nearest_word_boundary():
+    ws = heard("I suggested to my secret friend", 0.0, 0.5)       # word k from 0.5 k s to 0.5 k + 0.4 s
+    at = lambda s: C.to_frame(s, FPS)                    # noqa: E731
+    assert C.cut_breaks(ws, [at(0.46)], FPS) == {1: at(0.46)}          # between "I" and "suggested"
+    assert C.cut_breaks(ws, [at(0.55)], FPS) == {1: at(0.55)}          # just after "suggested" starts: still there
+    assert C.cut_breaks(ws, [at(-0.5), at(3.5)], FPS) == {}             # before / after the speech: nothing
+    # half way between "my" | "secret" (a pair kept together) and "secret" | "friend": the pair stays whole
+    assert C.cut_breaks(ws, [at(1.95 + 0.25)], FPS) == {5: at(2.2)}
+    # nearer the last word's end than any boundary: left to the caption's own end (caption_rules._cut_split)
+    assert C.cut_breaks(ws[:2], [at(0.88)], FPS) == {}
+
+
+def test_a_caption_across_a_cut_is_split_on_the_cut_without_a_transcript():
+    caps = [cap("THE SCHOOL FOR GENIUS KIDS", 0.0, 2.0), cap("SO THEY WOULD", 2.0, 3.0)]
+    out, rep = R.enforce(caps, FPS, "competitor", None, cuts=[61, 150])
+    # the time shared out by characters: 61 is a little nearer "for" | "genius" (69) than "school" | "for" (51), a
+    # near tie that keeps "for genius" together; 150 falls on "they" | "would"
+    assert [(c.text, c.start, c.end) for c in out] == [
+        ("The school", 0, 61), ("for genius kids", 61, 120), ("so they", 120, 150), ("would", 150, 180)]
+    assert rep["left"][10] == 0 and rep["notes"]["cuts_in_speech"] == 2
+    # the final pass: a caption still across a cut (a placeholder of silence here) is split on it
+    out, rep = R.enforce([C.Caption(C.PLACEHOLDER, 0, 120, "placeholder")], FPS, "voice", None, cuts=[60])
+    assert [(c.text, c.start, c.end) for c in out] == [(C.PLACEHOLDER, 0, 60), (C.PLACEHOLDER, 60, 120)]
+    assert rep["changed"][10] == 1 and R.summary_line(rep).endswith("10 video cuts: none in the speech, 1 split on a cut")
+
+
+def test_a_clip_with_no_speech_between_two_cuts_stays_uncaptioned():
+    # raw_test: "check this out" | cut | 0.3 s with no speech | cut | "you know". Neither caption may stretch over the
+    # short clip (it would run across one of the cuts): it stays uncaptioned, the one gap voice mode allows
+    words = heard("check this out", 0.0, 0.2) + heard("you know", 1.0, 0.2)
+    caps = C.voice_captions(words, FPS, n_frames=C.to_frame(words[-1].end, FPS) + 30, cuts=[36, 54])
+    out, rep = R.enforce(caps, FPS, "voice", words, cuts=[36, 54])
+    assert [(c.text, c.start, c.end) for c in out] == [("Check this out", 0, 36), ("you know", 54, 82)]
+    assert not any(rep["left"].values()) and rep["changed"][8] == 0
+
+
+def test_the_cuts_come_from_the_v1_clips_of_the_edit(monkeypatch):
+    from match_cuts import export_xml_edl as ex
+
+    def clip(name, start, end, a, b, motion=(0.0, 0.0, 100.0)):
+        return {"name": name, "start": start, "end": end, "in": a, "out": b, "speed": 1.0, "motion": motion,
+                "flip": False}
+    x = {"timebase": 30, "ntsc": "FALSE", "clips": [
+        clip("raw.mp4", 0, 40, 100, 140), clip("raw.mp4", 40, 90, 140, 190),      # the same take runs on: no cut
+        clip("raw.mp4", 90, 120, 400, 430),                                       # a jump in the source: a cut
+        clip("raw.mp4", 120, 150, 430, 460, motion=(10.0, 0.0, 120.0)),           # the framing changes: a cut
+        clip("broll.mp4", 150, 200, 0, 50)]}                                      # another clip: a cut
+    monkeypatch.setattr(ex, "parse_premiere_xml", lambda path: x)
+    assert C.edit_cuts("1_edit.xml", FPS) == [180, 240, 300]                      # 30 fps edit -> 60 fps frames
