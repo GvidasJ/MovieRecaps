@@ -2692,20 +2692,18 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         return f"{c.get('start_tc', '?')}-{c.get('end_tc', '?')}"
     rows = [f"{tc(c)}  *...* placeholder: write the action there" for c in cap.get("placeholders") or []]
     cn = cap.get("competitor_notes") or {}
-    rows += [f"{tc(r)}  *...*: the competitor's caption could not be read (OCR: '{r.get('ocr') or ''}')"
+    rows += [f"{tc(r)}  '{r['text']}': the competitor's caption could not be read, written from the words heard"
+             for r in cn.get("from_transcript") or []]
+    rows += [f"{tc(r)}  the competitor's caption could not be read and no words were heard: left out"
              for r in cn.get("unreadable") or []]
-    rows += [f"{tc(r)}  caption '{r['ocr']}' / spoken '{r['text']}' (the spoken words are used)"
-             for r in cn.get("differs") or []]
-    rows += [f"{tc(r)}  '{r['text']}': no words heard, text read from the picture" for r in cn.get("from_ocr") or []]
-    rows += [f"{tc(r)}  '{r['written']}' spelt as the competitor writes it (heard '{r['heard']}')"
-             for r in cn.get("names") or []]
-    rows += [f"{tc(r)}  '{r['text']}': shorter than 0.1 s (as the competitor's)" for r in cap.get("short") or []]
+    rows += [f"{tc(c)}  '{c['text']}': the OCR was unsure (readings {c.get('variants')})"
+             for c in cap.get("captions") or [] if c.get("mode") == "competitor" and c.get("reads")
+             and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
     rows += [f"{tc(c)}  '{c['text']}': {len(c['text'])} characters (the 24-character cap)"
-             for c in cap.get("over_cap") or []]
+             for c in cap.get("over_cap") or [] if c.get("mode") != "competitor"]
     rows += [f"{float(w['time']):.2f}s  '{w['text']}': ends on a weak word ({w['reason']})"
              for w in cap.get("weak_kept") or []]
     rows += [f"{float(x['time']):.2f}s  {x['kind']}: {x['detail']}" for x in cap.get("flags") or []]
-    rows += [f"{tc(d)}  caption '{d['ocr']}' / heard '{d.get('heard') or '-'}'" for d in cap.get("disagreements") or []]
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows

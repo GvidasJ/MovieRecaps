@@ -1,7 +1,7 @@
-"""caption_ocr.py on a short synthetic clip with burned-in captions (ffmpeg drawtext over a colourful moving test
-pattern): exact text and exact first / last frame of every caption, a pop-in animation and a word-by-word colour
-highlight that stay one caption, the same word shown twice in a row (two captions), static text ignored. Then the
-whole caption stage (captions.run_captions) in competitor mode, with the transcription replaced by a fixed word list.
+"""caption_ocr.read_caption_spans on a short synthetic clip with burned-in captions (white text, black outline, over a
+colourful moving test pattern): exact text and exact first / last frame of every caption, a pop-in animation and a
+word highlighted in another colour that stay one caption, the same word shown twice in a row (two captions), static
+text ignored. Then the whole caption stage (captions.run_captions) in competitor mode: an exact copy, no transcript.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import types
 from fractions import Fraction
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from match_cuts import caption_ocr, captions as C
@@ -74,58 +75,38 @@ def clip(tmp_path_factory) -> Path:
 
 
 def test_ocr_reads_every_caption_exactly_with_exact_frames(clip):
-    res = caption_ocr.read_competitor_captions(str(clip), LAYOUT, (W, H), Fraction(30), N)
-    got = [(c["text"], c["comp_in"], c["comp_out"]) for c in res["captions"]]
-    assert got == TRUTH
-    for c in res["captions"]:
-        assert c["reads"] >= 10 and c["agreement"] >= 0.9           # many frames read, majority agrees
-    assert res["events"] == 6 and not res["notes"]["static"] and not res["notes"]["unreadable"]
+    res = caption_ocr.read_caption_spans(str(clip), LAYOUT, (W, H), Fraction(30), N)
+    got = [(c["ocr"], c["comp_in"], c["comp_out"]) for c in res["spans"]]
+    assert got == TRUTH                            # the static title and the "@chan" watermark are never a caption
+    for c in res["spans"]:
+        assert c["reads"] >= 1 and c["agreement"] >= 0.9 and c["score"] >= 0.9
+    assert res["frames_read"] == N and res["conventions"]["all_caps"] is False
 
 
-def test_text_mask_ignores_the_static_zones(clip):
-    band, spans = caption_ocr.band_from_layout(LAYOUT, (W, H))
-    assert spans == [(a, b) for a, b, _, _ in EVENTS] and band.y < 850 and band.y + band.h > 910
-    reads = caption_ocr.read_frames(str(clip), [5, 20], band, Fraction(30))
-    assert reads[0].area == 0                                        # only the static watermark there: nothing
-    assert reads[1].text == "I got a Parker Peter" and "@" not in reads[1].text
-
-
-def test_caption_stage_copies_the_competitor_and_fills_uncaptioned_speech(clip, tmp_path, monkeypatch):
+def test_caption_stage_copies_the_competitor_exactly(clip, tmp_path, monkeypatch):
     from match_cuts import report, transcribe
     from match_cuts.common import Cache
     from match_cuts.config import Config
-    heard = [("I", .35), ("got", .5), ("a", .65), ("Peter", .8), ("Parker", .95),          # differs from the OCR
-             ("whoa", 2.0), ("x2", 2.3), ("no", 2.95), ("no", 3.45), ("Spider-Man", 4.0), ("is", 4.3),
-             ("back", 6.0), ("to", 6.2), ("the", 6.4), ("test", 6.6)]                     # no caption there
-    words = [C.Word(w, t, t + 0.15, 0.99, w) for w, t in heard]
+
+    def no_transcript(*a, **k):
+        raise AssertionError("every caption was read: no transcript needed")
     monkeypatch.setattr(transcribe, "available", lambda: None)
-    monkeypatch.setattr(transcribe, "transcribe_words", lambda *a, **k: list(words))
+    monkeypatch.setattr(transcribe, "transcribe_words", no_transcript)
     cfg = Config()
-    # without --premiere the competitor's caption text is copied as read (--premiere: tests/test_caption_spans.py)
     cfg.out_dir, cfg.work_dir, cfg.premiere = str(tmp_path / "out"), str(tmp_path / "work"), False
-    import numpy as np
-    import soundfile as sf
-    vo = tmp_path / "voiceover.wav"                 # any audio: the transcription is replaced above
-    sf.write(str(vo), (0.2 * np.sin(np.arange(16000 * 8) * 2 * np.pi * 220 / 16000)).astype(np.float32), 16000)
-    cfg.voiceover = str(vo)
     cfg.captions = "competitor"
     info = types.SimpleNamespace(path=str(clip), file_hash="synthetic", width=W, height=H, display_width=W,
                                  display_height=H)
     warnings: list[str] = []
-    ctx = types.SimpleNamespace(cfg=cfg, comp_info=info, comp_fps=Fraction(30), n_comp=240,
-                                cutlist=types.SimpleNamespace(layout=LAYOUT), cache=Cache(cfg.work), raw_audio=None,
-                                audio_sr=16000, warn=warnings.append)
+    ctx = types.SimpleNamespace(cfg=cfg, comp_info=info, comp_fps=Fraction(30), n_comp=N,
+                                cutlist=types.SimpleNamespace(layout=LAYOUT), cache=Cache(cfg.work),
+                                raw_audio=np.zeros(16000 * 5, np.float32), audio_sr=16000, warn=warnings.append)
     res = C.run_captions(ctx)
     assert res["mode"] == "competitor" and not warnings
-    srt = Path(res["path"]).read_text(encoding="utf-8")
-    blocks = C.parse_srt(srt)
-    comp = [b for b in blocks if b["text"] != "back to the test"]
-    assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in comp] == \
-        [(t, 2 * a, 2 * b) for t, a, b in TRUTH]                                       # 30 fps frame k = 2k at 60
-    assert blocks[-1]["text"] == "back to the test" and blocks[-1]["start_ms"] >= 141 * 1000 // 30
-    dis = res["disagreements"]
-    assert [d["ocr"] for d in dis] == ["I got a Parker Peter"] and "Peter Parker" in dis[0]["heard"]
+    blocks = C.parse_srt(Path(res["path"]).read_text(encoding="utf-8"))
+    assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == \
+        [(t, 2 * a, 2 * b) for t, a, b in TRUTH]                  # 30 fps frame k = 2k at 60; nothing added
+    assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
     ctx.captions = res
     md = "\n".join(report._captions(ctx))
-    assert "Mode: competitor" in md and "OCR / transcript disagreements" in md and "I got a Parker Peter" in md
-    assert "*automatic audi braking*" in md                       # 24 characters: at the cap, listed
+    assert "copied exactly" in md and "no style rules applied" in md and "24-character cap" not in md

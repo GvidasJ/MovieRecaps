@@ -247,19 +247,17 @@ def test_voice_captions_are_back_to_back_with_placeholders_for_silences():
     assert srt.startswith("1\n00:00:00,000 --> ") and srt.endswith("\n") and not srt.endswith("\n\n")
 
 
-def test_competitor_captions_are_kept_and_only_uncaptioned_speech_is_filled():
-    comp = [C.Caption("I got a Parker Peter", 0, 60, "competitor"), C.Caption("*brakes*", 60, 120, "competitor"),
-            C.Caption("Spider-Man is", 120, 180, "competitor")]
+def test_competitor_captions_are_copied_untouched_and_uncaptioned_speech_is_not_filled():
+    # none of the voice rules: past the 24-character cap, more than five words, a weak last word, the capitals as
+    # written; the words heard after the last caption ("back to the test") get no caption of their own
+    texts = ["And I got a Parker Peter and the", "*brakes*", "Spider-Man IS"]
+    spans = [{"comp_in": 30 * i, "comp_out": 30 * (i + 1), "ocr": t, "score": 0.99} for i, t in enumerate(texts)]
     ws = W("I got a Peter Parker", word_s=0.2) + \
-        [C.Word(w, 2.0 + 0.2 * i, 2.2 + 0.2 * i, 1.0, w) for i, w in enumerate(["Spider-Man", "is"])] + \
         [C.Word(w, 5.0 + 0.2 * i, 5.2 + 0.2 * i, 1.0, w) for i, w in enumerate(["back", "to", "the", "test"])]
-    caps = C.merge_competitor(comp, ws, FPS, n_frames=600)
-    assert [c for c in caps if c.mode == "competitor"] == comp                # untouched
-    fill = [c for c in caps if c.mode == "fill"]
-    assert [c.text for c in fill] == ["back to the test"] and fill[0].start >= 180
-    dis = C.ocr_transcript_disagreements(comp, ws, FPS)
-    assert [d["ocr"] for d in dis] == ["I got a Parker Peter"] and dis[0]["heard"] == "I got a Peter Parker"
-    assert dis[0]["kind"] == "different words"
+    caps, notes = C.competitor_copy(spans, ws, Fraction(30), lambda k: 2 * k, FPS)
+    assert [(c.text, c.start, c.end, c.mode) for c in caps] == [(t, 60 * i, 60 * (i + 1), "competitor")
+                                                                 for i, t in enumerate(texts)]
+    assert notes == {"from_transcript": [], "unreadable": []}
 
 
 def test_transcript_flags_low_confidence_doubled_and_missing_words():

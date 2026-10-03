@@ -1139,9 +1139,10 @@ def _tc(c: dict) -> str:
 
 
 def _captions(ctx: Any) -> list[str]:
-    """2_captions.srt (captions.py): the mode of each part, the caption-generator-prompt.md checks (24-character cap,
-    *...* placeholders, possible mis-transcriptions / doubled / missing words) and every OCR / transcript
-    disagreement. Flagged, never corrected."""
+    """2_captions.srt (captions.py). Competitor mode: how the copy was read, the competitor's writing conventions, the
+    captions written from the transcript because they could not be read, and the readings the OCR was unsure of.
+    Voice mode: the caption-generator-prompt.md checks (24-character cap, *...* placeholders, possible
+    mis-transcriptions / doubled / missing words). Flagged, never corrected."""
     cap = getattr(ctx, "captions", None) or {}
     if not cap:
         return ["Captions were not made in this run."]
@@ -1151,22 +1152,21 @@ def _captions(ctx: Any) -> list[str]:
     out = []
     mode = cap.get("mode")
     by = cap.get("by_mode") or {}
-    cn = cap.get("competitor_notes")
-    if mode == "competitor" and cn is not None:
-        o = cap.get("ocr") or {}
-        out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions with the "
-                   f"competitor's on-screen timing and splits (caption band read on all {o.get('frames_read', 0)} "
-                   "frames: a caption starts when new text appears and ends when it disappears or changes to different "
-                   "words; blips under 0.15 s merged), their text the words spoken during each caption (transcript); "
-                   f"OCR ({o.get('engine', 'OCR')}) only for the word split, names and non-speech captions; "
-                   f"{by.get('fill', 0)} voice captions fill speech the competitor left uncaptioned.")
-    elif mode == "competitor":
+    cn = cap.get("competitor_notes") or {}
+    if mode == "competitor":
         o = cap.get("ocr") or {}
         out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions copied exactly "
-                   f"from the competitor's burned-in captions ({o.get('engine', 'OCR')}, {o.get('frames_read', 0)} frames "
-                   f"read around {o.get('events', 0)} caption events; text, splits, frames, capitalisation and punctuation "
-                   f"unchanged, no style rules applied), {by.get('fill', 0)} voice captions filling speech the competitor "
-                   "left uncaptioned.")
+                   f"from the competitor's burned-in captions: the caption band read on all {o.get('frames_read', 0)} "
+                   "frames, each caption from the frame its words appear to the last frame before other words (or "
+                   f"none) show, its text as written on screen ({o.get('engine', 'OCR')}; words, capitals and "
+                   "punctuation unchanged, no style rules applied). Speech the competitor left uncaptioned stays "
+                   "uncaptioned.")
+        cv = o.get("conventions") or {}
+        if cv:
+            out.append("- The competitor writes " + ", ".join(
+                (["ALL CAPS"] if cv.get("all_caps") else []) + (["curly quotes “ ”"] if cv.get("curly_quotes") else [])
+                + [f"apostrophes `{cv.get('apostrophe', chr(39))}`"]) + "; single-frame misreadings are written the "
+                "same way (e.g. `sO` → `SO`, a straight `\"` → `”`, a lone bar read as `1` → `I`).")
     else:
         out.append(f"- **Mode: voice** ({cap.get('reason')}) — {by.get('voice', 0)} captions made from the voice-over by "
                    f"caption-generator-prompt.md, {by.get('placeholder', 0)} `*...*` placeholders.")
@@ -1183,18 +1183,25 @@ def _captions(ctx: Any) -> list[str]:
         out.append(f"- Warning: {w}")
     for n in cap.get("notes") or []:
         out.append(f"- Note: {n}")
+    if mode == "competitor":
+        sh = cap.get("short") or []
+        out += ["", f"**Captions shorter than 0.1 s**: {len(sh) if sh else 'none'}"]
+        out += [f"- {_tc(c)} `{c['text']}` (the competitor's own caption is this short)" for c in sh]
+        for title, key, fmt in (
+                ("Captions the OCR could not read, written from the words heard while they are on screen",
+                 "from_transcript", lambda r: f"`{r['text']}`"),
+                ("Captions the OCR could not read and with no words heard: left out", "unreadable", lambda r: "")):
+            rows = cn.get(key) or []
+            out += ["", f"**{title}**: {len(rows) if rows else 'none'}"]
+            out += [f"- {r['start_tc']} → {r['end_tc']} {fmt(r)}".rstrip() for r in rows]
+        unsure = [c for c in cap.get("captions") or [] if c.get("mode") == "competitor" and c.get("reads")
+                  and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
+        out += ["", f"**Copied captions the OCR was unsure of** (check the text): {len(unsure) if unsure else 'none'}"]
+        out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
+                f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
+        return out
     out.append("- Speaker changes are not detected (the transcriber has no speaker diarisation): the "
                "speaker-change break of the grouping rules is not applied.")
-    parts = cap.get("parts") or []
-    if parts:
-        from .captions import frame_ms, ms_tc
-        from fractions import Fraction
-        f = Fraction(str(fps))
-        out += ["", "**Mode of each part**", "",
-                md_table(["from", "to", "mode", "captions"],
-                         [[ms_tc(frame_ms(p["start"], f)), ms_tc(frame_ms(p["end"], f)),
-                           {"competitor": "competitor (copied)", "fill": "voice (fills uncaptioned speech)",
-                            "voice": "voice"}.get(p["mode"], p["mode"]), p["count"]] for p in parts])]
     st = cap.get("stats") or {}
     if st.get("captions"):
         wp = st.get("words_pct") or {}
@@ -1209,8 +1216,7 @@ def _captions(ctx: Any) -> list[str]:
                 ["lower-case starts", "52%", f"{st.get('lower_start_pct')}%"],
                 ["back to back", "100%", f"{st.get('back_to_back_pct')}%"],
                 ["ending on a weak word", "none", str(st.get("weak_endings"))]]
-        out += ["", "**Style check** (all captions" + (", including the copied competitor ones" if mode == "competitor"
-                                                       else "") + ")", "", md_table(["", "my style", "this file"], rows)]
+        out += ["", "**Style check**", "", md_table(["", "my style", "this file"], rows)]
     oc = cap.get("over_cap") or []
     out += ["", f"**Captions at the 24-character cap**: {len(oc) if oc else 'none'}"]
     out += [f"- {_tc(c)} `{c['text']}` ({len(c['text'])} characters, {c['mode']})" for c in oc]
@@ -1222,44 +1228,9 @@ def _captions(ctx: Any) -> list[str]:
         out += ["", f"**Weak endings kept** ({len(wk)}; the rule could not move the word):"]
         out += [f"- {_seconds(w['time'])} `{w['text']}` — {w['reason']}" for w in wk]
     fl = cap.get("flags") or []
-    out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected"
-            + ("; voice captions only" if mode == "competitor" else "") + f"): {len(fl) if fl else 'none'}"]
+    out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
+            f"{len(fl) if fl else 'none'}"]
     out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
-    if mode == "competitor" and cn is not None:
-        sh = cap.get("short") or []
-        out += ["", f"**Captions shorter than 0.1 s**: {len(sh) if sh else 'none'}"]
-        out += [f"- {_tc(c)} `{c['text']}` (the competitor's own caption is this short)" for c in sh]
-        for title, key, fmt in (
-                ("Names spelt as the competitor writes them (OCR over the transcript)", "names",
-                 lambda r: f"`{r['heard']}` → `{r['written']}`"),
-                ("Non-speech captions (read from the picture)", "non_speech", lambda r: f"`{r['text']}`"),
-                ("Captions with no words heard (text read from the picture)", "from_ocr", lambda r: f"`{r['text']}`"),
-                ("Captions that could not be read and have no words heard: written `*...*`", "unreadable",
-                 lambda r: f"OCR read `{r.get('ocr') or ''}`"),
-                ("Where the competitor's caption reads differently from what is said (the spoken words are used)",
-                 "differs", lambda r: f"caption `{r['ocr']}` · spoken `{r['text']}`")):
-            rows = cn.get(key) or []
-            out += ["", f"**{title}**: {len(rows) if rows else 'none'}"]
-            out += [f"- {r['start_tc']} → {r['end_tc']} {fmt(r)}" for r in rows]
-    elif mode == "competitor":
-        dis = cap.get("disagreements") or []
-        out += ["", f"**OCR / transcript disagreements** (every one; the caption text is never changed): "
-                f"{len(dis) if dis else 'none'}"]
-        if dis:
-            out += ["", md_table(["time", "caption (OCR, kept)", "heard in the audio", "kind", "likely OCR mistake"],
-                                 [[_tc(d), d["ocr"], d["heard"] or "—", d["kind"],
-                                   "yes" if d.get("likely_ocr_mistake") else "no"] for d in dis])]
-        ocr = cap.get("ocr") or {}
-        for s_ in (ocr.get("notes") or {}).get("static") or []:
-            out.append(f"- Static text in the caption band ignored: `{s_['text']}` (frames {s_['comp_in']}–{s_['comp_out']})")
-        for u in (ocr.get("notes") or {}).get("unreadable") or []:
-            out.append(f"- Unreadable caption-band text left out: competitor frames {u['comp_in']}–{u['comp_out']}")
-        unsure = [c for c in cap.get("captions") or [] if c.get("mode") == "competitor"
-                  and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
-        if unsure:
-            out += ["", f"**Copied captions the OCR was unsure of** ({len(unsure)}):"]
-            out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
-                    f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
     return out
 
 

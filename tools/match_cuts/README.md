@@ -144,35 +144,31 @@ with its competitor and 60 fps sequence timecodes.
 ### Captions
 
 `2_captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
-(competitor frame k = sequence frame 2k for a 30 fps competitor), in the style of
-`caption-generator-prompt.md` at the repository root. The mode is chosen per clip:
+(competitor frame k = sequence frame 2k for a 30 fps competitor). The mode is chosen per clip:
 
-* **competitor, with `--premiere`** (auto, when the layout finds burned-in captions): the TIMING and splits come
-  from the competitor's on-screen captions — every frame of the caption band is read (the caption's fill colour is
-  learned from the video); a caption starts when new text appears and ends when it disappears or changes to
-  different words; a pop-in, a highlighted word or a caption growing word by word is not a new caption; blips
-  under 0.15 s are merged into the neighbouring caption. The TEXT is the words spoken during each caption
-  (transcript). OCR is used only to place a word that falls on a boundary, to correct names the transcript spells
-  differently (X-Force, Vanisher) and for non-speech captions such as `*Laughter*`; a caption with no words heard
-  takes a sure OCR reading, else `*...*` (listed in the report).
-* **competitor** without `--premiere`: the competitor's captions are copied
-  exactly — same words, splits, first and last frames, capitalisation, punctuation and `*actions*`. The
-  caption band is read on every frame around each caption event with RapidOCR; a word-by-word colour
-  highlight or a pop-in animation stays one caption, only a change of the text starts a new one; the text
-  is the majority of the fully visible frames' readings. Static title / logo / watermark text is ignored.
-  No style rules, no gap filling, no spelling fixes. Speech the competitor left uncaptioned is filled
-  with voice captions (only there). The transcript is used only to list OCR / transcript disagreements.
-* **voice** (auto, when there are no burned-in captions): the cut edit's audio (RAW audio on the edit's
-  cuts, never the raw clip) is transcribed with word timestamps (faster-whisper) and grouped by the
-  prompt's rules: 1–4 words, a new caption after 4 words / 20 characters / a pause > 0.25 s / at a
+* **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): an exact copy
+  of the competitor's captions — the same words in each caption, the same capitals and punctuation (`“…”`,
+  `DIDN'T`, `SPIDER-MAN`, `*LAUGHS*`), each starting and ending on the same frames. The caption band is read on
+  every frame (the caption's fill colour is learned from the video, static title / logo / watermark text is
+  masked): a new caption starts on the frame different words appear; a pop-in (the text growing over its first
+  frames) or a word highlighted in another colour is not a new caption, the same text popping in again is. The
+  text is the majority of RapidOCR's readings of the caption's fully grown frames, written the way the video writes
+  (an ALL-CAPS video stays all caps when one frame reads `sO`, straight quotes become the video's curly ones, a
+  lone bar is `I`). None of the voice-mode style rules apply: no lower-casing, regrouping, weak-word moves or length
+  limits, and speech the competitor left uncaptioned stays uncaptioned. Only a caption the OCR cannot read takes the
+  words heard while it is on screen (listed in the report); the transcript is not used otherwise.
+* **voice** (only when the competitor has no burned-in captions): the cut edit's audio (RAW audio on the edit's
+  cuts, never the raw clip) is transcribed with word timestamps (faster-whisper) and grouped by the rules of
+  `caption-generator-prompt.md` at the repository root: 1–4 words, a new caption after 4 words / 20 characters / a pause > 0.25 s / at a
   standalone interjection, a word said again gets its own caption, names / number + unit / negation +
   verb kept together, a weak final word moved to the next caption (once per caption — the prompt's
   own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
   `*...*` placeholders for silences over ~1 s. `--voiceover FILE` captions your own narration instead.
 
-The report's *Captions* section lists the mode of each part, the style check, captions at the
-24-character cap, the `*...*` timecodes, possible mis-transcriptions / doubled / missing words and every
-OCR / transcript disagreement — flagged, never corrected. Speaker changes are not detected
+The report's *Captions* section lists, in competitor mode, the competitor's writing conventions, the captions
+written from the transcript because they could not be read and the readings the OCR was unsure of; in voice mode,
+the style check, captions at the 24-character cap, the `*...*` timecodes and possible mis-transcriptions / doubled /
+missing words — flagged, never corrected. Speaker changes are not detected
 (faster-whisper has no diarisation). faster-whisper is used instead of WhisperX because WhisperX needs
 PyTorch and an alignment model, a heavy and fragile install on Windows; faster-whisper installs with pip
 alone and gives word timestamps.

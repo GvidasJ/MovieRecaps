@@ -1,30 +1,18 @@
-"""The competitor's burned-in captions, read by OCR (captions mode ``competitor``, see captions.py).
+"""The competitor's burned-in captions, copied exactly (captions mode ``competitor``, see captions.py): every
+caption's first and last frame and its text as written on screen (words, capitals, punctuation), all read from the
+picture.
 
 Engine: RapidOCR (``rapidocr`` 3.x, or the older ``rapidocr-onnxruntime``: ONNX models inside the wheel, pip-only
 on Windows, no system installs).
-Only its recogniser runs, on a clean image this module builds per text line, which is fast (~15 ms) and much more
-reliable on video than detection on the raw picture.
+Only its recogniser runs, on a clean image this module builds per text line (the caption's letters drawn black on
+white), which is fast (~15 ms) and much more reliable on video than detection on the raw picture.
 
-Where to look: the caption band of the layout (the ``captions`` zone layout.py measured; static title / logo /
-watermark zones are masked), on every competitor frame within ``margin`` frames of a detected caption event.
-
-Per frame: the caption text is white (or a highlight colour) with a dark outline over arbitrary video. Pixels the
-crop border reaches without crossing a dark pixel are background; the bright pixels it cannot reach and that touch
-an outline that does touch the background are the letters (letter counters -- the video inside an "o" -- touch only
-an inner outline and are dropped). Picture detail that looks like that is dropped when it is not ringed by a
-near-black outline, lies outside the boxes of the layout's caption events around that frame, or is not on the
-caption's own line of letters. The letters are drawn black on white per text line and recognised.
-
-Captions: consecutive frames showing the same text are one caption, from the first frame it shows to the last. A
-colour change (word-by-word highlight) does not change the letters' shape and a pop-in / pop-out (the text growing
-or shrinking for a few frames) is joined to the caption it belongs to; only a change of the text -- or the same text
-popping in again -- starts a new caption; a frame or two misread inside a caption stays in it. Each caption's text
-is the majority of its fully visible frames' readings; frames at either end that are not the caption (picture
-detail before it appears / after it goes) are trimmed, and text outside every caption event is left out.
+Where to look: the caption band of the layout (the ``captions`` zone layout.py measured, the whole frame width;
+static title / logo / watermark zones are masked), on every frame. How: read_caption_spans and the section comment
+above it.
 """
 from __future__ import annotations
 
-import difflib
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -35,13 +23,7 @@ import numpy as np
 
 from .common import log
 
-DARK_THR = 100          # max(B, G, R) at or below this: outline / dark background
-BRIGHT_THR = 150        # letters are brighter than this (white or a highlight colour)
-OUTLINE_MAX = 70        # the outline right around a letter is at most this bright ...
-OUTLINE_FRAC = 0.3      # ... on at least this fraction of the pixels 1-2 px around it
 MIN_SCORE = 0.5         # a frame's reading counts when the recogniser is at least this sure
-SAME_TEXT = 0.8         # two readings are the same caption at this similarity (OCR noise on one frame)
-OCR_VERSION = 2         # bump when the reading changes (cache key)
 _ENGINE: list = []
 
 
@@ -97,55 +79,6 @@ def recognise_line(img: np.ndarray, eng: Any = None) -> tuple[str, float]:
 # ---------------------------------------------------------------------------------------------
 # One frame
 # ---------------------------------------------------------------------------------------------
-
-def text_mask(crop: np.ndarray, glyph_h: float, ignore: np.ndarray | None = None,
-              allow: np.ndarray | None = None) -> np.ndarray:
-    """Boolean mask of the outlined caption letters in a BGR crop (see the module docstring); ``allow`` = where
-    the layout saw caption text around this frame."""
-    import cv2
-    mx = crop.max(axis=2)
-    dark = mx <= DARK_THR
-    nd = (~dark).astype(np.uint8)
-    _, lab = cv2.connectedComponents(nd, connectivity=4)
-    border = np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
-    outside = np.isin(lab, border[border > 0])
-    k3 = np.ones((3, 3), np.uint8)
-    _, dlab = cv2.connectedComponents(dark.astype(np.uint8), connectivity=8)
-    touch = cv2.dilate(outside.astype(np.uint8), k3).astype(bool) & dark
-    outline = np.isin(dlab, np.unique(dlab[touch]))
-    inner = (nd > 0) & ~outside
-    n, ilab, stats, _ = cv2.connectedComponentsWithStats(inner.astype(np.uint8), connectivity=4)
-    adj = cv2.dilate(outline.astype(np.uint8), k3).astype(bool) & inner
-    keep = np.zeros(n, bool)
-    keep[np.unique(ilab[adj])] = True
-    keep[0] = False
-    keep &= stats[:, cv2.CC_STAT_HEIGHT] <= 3.0 * max(4.0, glyph_h)
-    keep &= stats[:, cv2.CC_STAT_AREA] >= 3
-    mask = keep[ilab] & (mx >= BRIGHT_THR)
-    if ignore is not None:
-        mask &= ~ignore
-    if allow is not None:
-        mask &= allow
-    return caption_line(outlined(mask, mx), glyph_h)
-
-
-def outlined(mask: np.ndarray, mx: np.ndarray) -> np.ndarray:
-    """Only the letters ringed by a near-black outline: most pixels 1-2 px around each component are at most
-    OUTLINE_MAX (a bright blob of the video on a merely dark patch is not a caption letter)."""
-    import cv2
-    n, lab = cv2.connectedComponents(mask.astype(np.uint8), connectivity=8)
-    if n <= 1:
-        return mask
-    labf = lab.astype(np.float32)
-    near = cv2.dilate(labf, np.ones((5, 5), np.uint8))
-    ring = (near > 0) & (lab == 0) & (cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8)) == 0)
-    rl = near[ring].astype(np.int64)
-    tot = np.bincount(rl, minlength=n).astype(float)
-    dark = np.bincount(rl, weights=(mx[ring] <= OUTLINE_MAX).astype(float), minlength=n)
-    ok = dark >= OUTLINE_FRAC * np.maximum(tot, 1)
-    ok[0] = False
-    return ok[lab]
-
 
 def caption_line(mask: np.ndarray, glyph_h: float) -> np.ndarray:
     """The caption's own line(s) of text: letter-sized components grouped by height and chained left to right
@@ -237,8 +170,6 @@ class FrameRead:
     text: str = ""
     score: float = 0.0
     area: int = 0
-    mask: np.ndarray | None = field(default=None, repr=False)
-    color: tuple[float, float, float] | None = None      # mean BGR of the letter pixels
 
     @property
     def readable(self) -> bool:
@@ -258,7 +189,7 @@ def recognise(mask: np.ndarray, glyph_h: float, eng: Any = None) -> tuple[str, f
 
 
 # ---------------------------------------------------------------------------------------------
-# Frames -> captions
+# The caption band
 # ---------------------------------------------------------------------------------------------
 
 def norm_text(t: str) -> str:
@@ -266,153 +197,6 @@ def norm_text(t: str) -> str:
     import unicodedata
     t = "".join(ch for ch in unicodedata.normalize("NFKD", str(t)) if not unicodedata.combining(ch))
     return re.sub(r"[^a-z0-9]", "", t.lower())
-
-
-def similar(a: str, b: str) -> float:
-    a, b = norm_text(a), norm_text(b)
-    if not a or not b:
-        return 0.0
-    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
-
-
-def _iou(a: np.ndarray | None, b: np.ndarray | None) -> float:
-    if a is None or b is None or a.shape != b.shape:
-        return 0.0
-    u = np.count_nonzero(a | b)
-    return float(np.count_nonzero(a & b)) / u if u else 0.0
-
-
-@dataclass
-class Run:
-    frames: list[FrameRead]
-    restart: bool = False          # started by the same text popping in again (a new caption, never merged back)
-
-    @property
-    def first(self) -> int:
-        return self.frames[0].k
-
-    @property
-    def last(self) -> int:
-        return self.frames[-1].k
-
-    def ref(self) -> str:
-        c = Counter(norm_text(f.text) for f in self.frames if f.readable)
-        return c.most_common(1)[0][0] if c else ""
-
-    def median_area(self) -> float:
-        return float(np.median([f.area for f in self.frames]))
-
-
-def split_runs(reads: Sequence[FrameRead]) -> list[Run]:
-    """Consecutive present frames, split where the text changes (a sure reading clearly different from the run's,
-    or a different reading together with a different letter shape: "THEN" -> "THE") or where the letters shrink
-    suddenly to a different shape (the same text popping in again)."""
-    runs: list[Run] = []
-    cur: Run | None = None
-    for f in reads:
-        if f.area <= 0:
-            cur = None
-            continue
-        if cur is None or f.k != cur.last + 1:
-            cur = Run([f])
-            runs.append(cur)
-            continue
-        prev = cur.frames[-1]
-        ref = cur.ref()
-        changed = bool(f.readable and ref and (similar(f.text, ref) < SAME_TEXT or (
-            norm_text(f.text) != ref and _iou(prev.mask, f.mask) < 0.4)))
-        restart = f.area < 0.6 * prev.area and _iou(prev.mask, f.mask) < 0.5
-        if changed or restart:
-            cur = Run([f], restart=restart)
-            runs.append(cur)
-        else:
-            cur.frames.append(f)
-    return runs
-
-
-def _popish(r: Run, s: Run) -> bool:
-    """Run r looks like run s's text drawn smaller (part of its pop-in / pop-out animation)."""
-    ra, sa = r.median_area(), s.median_area()
-    if ra >= 0.95 * sa:
-        return False
-    a, b = r.ref(), s.ref()
-    return not a or similar(a, b) >= 0.5 or a in norm_text(b) or ra < 0.7 * sa
-
-
-def merge_pops(runs: list[Run], pop_frames: int) -> list[Run]:
-    """Join a pop-in (a short run of growing, partly read text right before its caption) to the caption after it,
-    and a pop-out (a short shrinking tail) to the caption before it. A short run between two captions goes forward
-    (pop-in) unless it reads as the previous text and not the next one, or it shrinks."""
-    out = list(runs)
-    merged = True
-    while merged:
-        merged = False
-        for i, r in enumerate(out):
-            if len(r.frames) > pop_frames:
-                continue
-            nxt = out[i + 1] if i + 1 < len(out) and out[i + 1].first == r.last + 1 else None
-            prv = out[i - 1] if i > 0 and out[i - 1].last + 1 == r.first else None
-            a0, a1 = r.frames[0].area, r.frames[-1].area
-            ref = r.ref()
-            if prv is not None and nxt is not None and not nxt.restart and not r.restart \
-                    and similar(prv.ref(), nxt.ref()) >= SAME_TEXT \
-                    and _iou(prv.frames[-1].mask, nxt.frames[0].mask) >= 0.6:   # the same letters both sides
-                prv.frames += r.frames + nxt.frames      # a misread blip inside one caption: KEEP | KEEË | KEEP
-                del out[i:i + 2]
-                merged = True
-                break
-            same_n = nxt is not None and bool(ref) and similar(ref, nxt.ref()) >= SAME_TEXT
-            same_p = prv is not None and bool(ref) and similar(ref, prv.ref()) >= SAME_TEXT
-            if same_n or same_p:                 # a frame or two read differently (picture detail next to the text)
-                tgt = nxt if same_n and (not same_p or similar(ref, nxt.ref()) >= similar(ref, prv.ref())) else prv
-                if tgt is nxt:
-                    nxt.frames = r.frames + nxt.frames
-                else:
-                    prv.frames += r.frames
-                out.pop(i)
-                merged = True
-                break
-            fwd = nxt is not None and a1 <= nxt.frames[0].area and _popish(r, nxt)
-            bwd = prv is not None and a0 <= prv.frames[-1].area and _popish(r, prv)
-            if fwd and bwd:
-                ref = r.ref()
-                if ref and similar(ref, prv.ref()) >= SAME_TEXT > similar(ref, nxt.ref()):
-                    fwd = False
-                elif a1 >= a0:
-                    bwd = False
-                else:
-                    fwd = False
-            if fwd:
-                nxt.frames = r.frames + nxt.frames
-            elif bwd:
-                prv.frames += r.frames
-            else:
-                continue
-            out.pop(i)
-            merged = True
-            break
-    return out
-
-
-def majority(run: Run) -> dict:
-    """The caption text: the majority reading of the fully visible, readable frames -- the reading closest to all
-    of them (the sum of its character similarity to every reading: identical readings count fully, so the most
-    frequent one wins unless it is an outlier). Also how many frames agreed exactly and the mean score."""
-    readable = [f for f in run.frames if f.readable]
-    full_area = float(np.median([f.area for f in readable])) if readable else 0.0
-    pool = [f for f in readable if f.area >= 0.9 * full_area] or readable      # not the pop-in / pop-out frames
-    if not pool:
-        return {"text": "", "agreement": 0.0, "score": 0.0, "reads": 0, "variants": {}}
-    votes: dict[str, list[float]] = {}
-    for f in pool:
-        votes.setdefault(f.text, []).append(f.score)
-    def support(t: str) -> tuple[float, int, float]:
-        sim = sum(len(sc) * difflib.SequenceMatcher(None, t, u, autojunk=False).ratio() for u, sc in votes.items())
-        return round(sim, 6), len(votes[t]), sum(votes[t])
-    best = max(votes.items(), key=lambda kv: support(kv[0]))
-    return {"text": best[0], "agreement": round(len(best[1]) / len(pool), 3),
-            "score": round(float(np.mean(best[1])), 3), "reads": len(pool),
-            "variants": {t: len(s) for t, s in sorted(votes.items(), key=lambda kv: -len(kv[1]))}}
 
 
 @dataclass
@@ -474,177 +258,39 @@ def _ignore_mask(band: Band) -> np.ndarray | None:
     return m if m.any() else None
 
 
-def allowed_region(band: Band, k: int, margin: int) -> np.ndarray | None:
-    """Where caption letters may be on frame k (band coordinates): the boxes of the layout's caption events within
-    ``margin`` frames of k, padded by 2.5 glyph heights sideways (a word the layout missed next to the ones it
-    found) and 0.6 up / down. None = anywhere."""
-    if not band.events:
-        return None
-    m = np.zeros((band.h, band.w), bool)
-    px, py = 2.5 * band.glyph_h, 0.6 * band.glyph_h
-    for a, b, x, y, w, h in band.events:
-        if a - margin <= k < b + margin:
-            x0, x1 = int(max(0, np.floor(x - px - band.x))), int(min(band.w, np.ceil(x + w + px - band.x)))
-            y0, y1 = int(max(0, np.floor(y - py - band.y))), int(min(band.h, np.ceil(y + h + py - band.y)))
-            if x1 > x0 and y1 > y0:
-                m[y0:y1, x0:x1] = True
-    return m
-
-
-def frames_to_read(spans: Sequence[tuple[int, int]], n_frames: int, margin: int) -> list[int]:
-    ks: set[int] = set()
-    for a, b in spans:
-        ks.update(range(max(0, a - margin), min(n_frames, b + margin)))
-    return sorted(ks)
-
-
-def read_frames(video: str, ks: Sequence[int], band: Band, fps: Fraction | None = None, eng: Any = None,
-                progress: Any = None, margin: int = 6) -> list[FrameRead]:
-    """Every listed frame read: letter mask inside the band, its area and (when letters are there) the text. A
-    frame whose letters are the same pixels as the previous frame's reuses that reading."""
-    from .media import VideoReader
-    eng = eng or engine()
-    ign = _ignore_mask(band)
-    min_area = max(6, int(0.08 * band.glyph_h ** 2))
-    reads: list[FrameRead] = []
-    prev: FrameRead | None = None
-    ks = list(ks)
-    if not ks:
-        return reads
-    want = set(ks)
-    with VideoReader(video, fps=fps) as vr:
-        for k, img in vr.frames(ks[0], ks[-1] + 1, fmt="bgr24"):
-            if k not in want:
-                continue
-            crop = img[band.y:band.y + band.h, band.x:band.x + band.w]
-            mask = text_mask(crop, band.glyph_h, ign, allowed_region(band, k, margin))
-            area = int(np.count_nonzero(mask))
-            if area < min_area:
-                f = FrameRead(k)
-            else:
-                color = tuple(float(v) for v in crop[mask].mean(axis=0))
-                if prev is not None and prev.k == k - 1 and prev.area and _iou(prev.mask, mask) >= 0.97:
-                    f = FrameRead(k, prev.text, prev.score, area, mask, color)
-                else:
-                    text, score = recognise(mask, band.glyph_h, eng)
-                    f = FrameRead(k, text, score, area, mask, color)
-            reads.append(f)
-            prev = f
-            if progress is not None:
-                progress(len(reads), len(ks))
-    return reads
-
-
-def trim_edges(run: Run, text: str, glyph_h: float) -> Run | None:
-    """Drop leading / trailing frames that are not this caption: frames whose letters do not read as its text and
-    lie mostly outside the box its fully visible frames cover (picture detail next to the caption before it
-    appears or after it goes). A pop-in / pop-out (smaller text inside that box) stays."""
-    full = [f for f in run.frames if f.readable and similar(f.text, text) >= SAME_TEXT and f.mask is not None]
-    if not full:
-        return run
-    ys, xs = np.nonzero(np.logical_or.reduce([f.mask for f in full]))
-    pad = int(round(0.3 * glyph_h))
-    y0, y1, x0, x1 = ys.min() - pad, ys.max() + pad + 1, xs.min() - pad, xs.max() + pad + 1
-
-    cx, cy = 0.5 * (xs.min() + xs.max()), 0.5 * (ys.min() + ys.max())
-    width = float(xs.max() - xs.min() + 1)
-    aspect = width / float(ys.max() - ys.min() + 1)
-    n_lines = max(1, text.count("\n") + 1)
-    colors = np.array([f.color for f in full if f.color is not None], float).reshape(-1, 3)
-
-    def belongs(f: FrameRead) -> bool:
-        if f.readable and similar(f.text, text) >= 0.5:
-            return True
-        if f.mask is None or not f.area:
-            return False
-        inside = np.count_nonzero(f.mask[max(0, y0):max(0, y1), max(0, x0):max(0, x1)])
-        fy, fx = np.nonzero(f.mask)
-        centred = (abs(0.5 * (fx.min() + fx.max()) - cx) <= 0.15 * width + 0.5 * glyph_h
-                   and abs(0.5 * (fy.min() + fy.max()) - cy) <= 0.35 * glyph_h)
-        # a pop-in / pop-out is the caption scaled: the same shape (aspect ratio) around the same centre
-        same_shape = abs(np.log((fx.max() - fx.min() + 1) / float(fy.max() - fy.min() + 1) / aspect)) <= np.log(1.4)
-        # ... and the caption's colours (picture detail around the caption rarely has them)
-        tinted = (f.color is None or not len(colors)
-                  or float(np.min(np.linalg.norm(colors - np.asarray(f.color, float), axis=1))) <= 60.0)
-        centred = centred and same_shape and tinted
-        return (inside >= 0.85 * f.area and centred and f.text.count("\n") + 1 <= n_lines)
-    frames = list(run.frames)
-    while frames and not belongs(frames[0]):
-        frames.pop(0)
-    while frames and not belongs(frames[-1]):
-        frames.pop()
-    return Run(frames) if frames else None
-
-
-def captions_from_reads(reads: Sequence[FrameRead], fps: Fraction, n_frames: int, glyph_h: float = 20.0,
-                        spans: Sequence[tuple[int, int]] | None = None) -> tuple[list[dict], dict]:
-    """Caption list [{text, comp_in, comp_out (exclusive), agreement, score, reads, variants}] and notes (static
-    text, unreadable runs and runs outside every caption event that were left out)."""
-    pop = max(2, int(round(0.15 * float(fps))))
-    runs = merge_pops(split_runs(reads), pop)
-    caps, notes = [], {"static": [], "unreadable": [], "outside_events": []}
-    analysed = max(1, len(reads))
-    covered = np.zeros(max(n_frames, max((f.k for f in reads), default=0) + 1), bool)
-    for a, b in spans or [(0, len(covered))]:
-        covered[max(0, a):max(0, b)] = True
-    for r in runs:
-        maj = majority(r)
-        if not maj["text"]:
-            notes["unreadable"].append({"comp_in": r.first, "comp_out": r.last + 1})
-            continue
-        r = trim_edges(r, maj["text"], glyph_h)
-        if r is None:
-            continue
-        span = (r.first, r.last + 1)
-        if covered[span[0]:span[1]].sum() < 0.5 * (span[1] - span[0]):
-            notes["outside_events"].append({"comp_in": span[0], "comp_out": span[1], "text": maj["text"]})
-            continue
-        if len(r.frames) >= 0.9 * analysed and (r.last + 1 - r.first) >= 10 * float(fps):
-            notes["static"].append({"comp_in": span[0], "comp_out": span[1], "text": maj["text"]})
-            continue
-        caps.append({"text": maj["text"], "comp_in": span[0], "comp_out": span[1], **{k: maj[k] for k in
-                     ("agreement", "score", "reads", "variants")}})
-    return caps, notes
-
-
-def read_competitor_captions(video: str, layout: Any, frame_wh: tuple[int, int], fps: Fraction, n_frames: int,
-                             margin: int | None = None, progress: Any = None) -> dict:
-    """Everything competitor mode needs: {captions, band, frames_read, events, notes}. ``captions`` is empty when
-    the layout found no caption events."""
-    band, spans = band_from_layout(layout, frame_wh)
-    if band is None:
-        return {"captions": [], "events": 0, "frames_read": 0, "band": None, "notes": {}}
-    margin = int(round(0.2 * float(fps))) if margin is None else int(margin)
-    ks = frames_to_read(spans, n_frames, margin)
-    log.info("captions OCR: %d caption events, band x %d y %d %dx%d (glyph %.0f px), %d frames", len(spans), band.x,
-             band.y, band.w, band.h, band.glyph_h, len(ks))
-    reads = read_frames(video, ks, band, fps, progress=progress, margin=margin)
-    caps, notes = captions_from_reads(reads, fps, n_frames, band.glyph_h, spans)
-    return {"captions": caps, "events": len(spans), "frames_read": len(reads),
-            "band": {"x": band.x, "y": band.y, "w": band.w, "h": band.h, "glyph_h": band.glyph_h, "keep": band.keep},
-            "notes": notes}
-
-
 # ---------------------------------------------------------------------------------------------
-# Caption spans (Premiere competitor mode): WHEN each caption is on screen, read from the picture; the words come
-# from the speech transcript (captions.competitor_text) -- OCR only for names and non-speech captions
+# Caption spans (competitor mode): an exact copy of the competitor's captions -- WHEN each one is on screen (to the
+# frame) and WHAT it says (as written: words, capitals, punctuation), both read from the picture
 # ---------------------------------------------------------------------------------------------
 #
-# Captions styles differ (white text with a black outline, cream text with a soft drop shadow, a word highlighted in
-# another colour, ...). What they share: bright letters with dark pixels right next to them, in ONE fill colour that
-# repeats over the whole video. The fill colour is learned from the band; a frame's caption layer is the bright
-# pixels of that colour next to dark ones, on the caption's own line. A caption starts when text appears and ends
-# when it disappears or changes to different words: the previous frame's letters are no longer there -- neither in
-# the fill colour nor, inside the caption's box, in any bright colour (a word highlighted in another colour keeps its
-# shape: not a new caption). A pop-in / pop-out (a few frames of text growing or shrinking) gives blips shorter than
-# SPAN_BLIP_S that are merged into the neighbouring caption.
+# Caption styles differ (white text with a black outline or a soft shadow, cream text, a word highlighted in another
+# colour, a pop-in that grows the text over its first frames, ...). What they share: bright letters with dark pixels
+# right next to them, in ONE fill colour that repeats over the whole video. The fill colour is learned from the band;
+# a frame's caption layer is the bright pixels of that colour next to dark ones, on the caption's own line.
+#
+# Timing: captions switch on whole frames, so every frame is compared with the one before it. Where the letters
+# overlap the previous frame's less than CAND_IOU -- and, around the caption, the bright shapes in any colour changed
+# too (a word highlighted in another colour keeps its shape) -- a new caption MAY start; the frames between two such
+# points are one run. Every run is read (OCR, a few frames) and touching runs that read the same are one caption (a
+# pop-in's growing frames, a frame of noise), unless the same text pops in again (its letters shrink, then grow
+# back). So a caption starts on the frame its words appear and ends on the frame before other words (or none) show.
+#
+# Text: the majority reading of the caption's fully grown frames, as written. Then the video's own conventions,
+# learned from all its readings, fix what a recogniser misreads on single frames: in an ALL-CAPS video every letter
+# is upper case ("sO" -> "SO"), a lone solid bar is "I" (not "1"), straight double quotes are curly where the video
+# writes curly ones, and apostrophes follow the video's majority style. A caption that cannot be read gets no text
+# here (captions.py falls back to the transcript and lists it). No other rule touches the text.
 
-SPAN_BLIP_S = 0.15        # spans shorter than this are merged into the neighbouring caption
-SPAN_IOU = 0.35           # letters overlapping the previous frame's less than this (IoU) ...
-SPAN_SHIFT = 0.75         # ... and the previous letters not found again (even moved sideways) -> a new caption
-SPAN_SHAPE = 0.5          # ... and the bright shapes around them changed too (a highlighted word keeps its shape)
+CAND_IOU = 0.8            # letters overlapping the previous frame's less than this (IoU): a new caption may start ...
+SHAPE_SAME = 0.8          # ... unless the bright shapes around them (any colour) still overlap at least this much
+READS_PER_RUN = 3         # frames read (OCR) per run, spread over it
+RESTART_SHRINK = 0.97     # the same text, its letters this much narrower than the frame before and growing back ...
+POP_S = 0.25              # ... within this time: it popped in again (a new caption); also the longest pop-in / pop-out
+POP_SHAPE = 0.5           # a pop-in / pop-out frame looks like its caption (scale-free IoU) at least this much ...
+POP_TEXT = 0.8            # ... and reads like it at least this much (small text misread), or cannot be read at all
 FILL_TOL = 60.0           # BGR distance of a letter pixel from the learned fill colour
-SPAN_VERSION = 3
+SPAN_VERSION = 4
+BAR_READS = frozenset(["1", "l", "|", "ı", "i", "I", "/"])     # a lone bar may be read as any of these
 
 
 def _near_dark(crop: np.ndarray, glyph_h: float) -> np.ndarray:
@@ -698,70 +344,137 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.count_nonzero(a & b)) / u if u else 1.0
 
 
-def shifted_containment(a: np.ndarray, b: np.ndarray, max_dy: int = 2) -> float:
-    """The largest fraction of a's pixels that b shows again after moving a sideways (any shift) and up / down by
-    at most max_dy rows: the old words of a caption that grows word by word and is re-centred."""
-    n = int(np.count_nonzero(a))
-    if not n or not np.count_nonzero(b):
-        return 0.0
-    from scipy.signal import fftconvolve
-    corr = fftconvolve(b.astype(np.float32), a[::-1, ::-1].astype(np.float32), mode="full")
-    cy = a.shape[0] - 1
-    rows = corr[max(0, cy - max_dy):cy + max_dy + 1]
-    return float(rows.max()) / n
-
-
-def _bbox(m: np.ndarray, pad: int) -> tuple[int, int, int, int] | None:
+def _box(m: np.ndarray) -> tuple[int, int, int, int]:
+    """(y0, y1, x0, x1) of the letters (a mask with at least one pixel)."""
     ys, xs = np.nonzero(m)
-    if not len(ys):
-        return None
-    return (max(0, ys.min() - pad), ys.max() + pad + 1, max(0, xs.min() - pad), xs.max() + pad + 1)
+    return int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
 
 
-def new_caption(prev_c: np.ndarray, cur_c: np.ndarray, prev_s: np.ndarray, cur_s: np.ndarray,
-                glyph_h: float) -> bool:
-    """Frame k shows different words than frame k-1: its letters barely overlap the previous ones, the previous
-    letters are not there even moved sideways (word-by-word growth re-centres the line), and the bright shapes around
-    the caption changed as well (a word highlighted in another colour keeps its shape)."""
-    if iou(prev_c, cur_c) >= SPAN_IOU:
+def scaled_iou(a: np.ndarray, b: np.ndarray) -> float:
+    """IoU of two letter masks after scaling b's letters onto a's box: the same text at another size (a pop-in's
+    growing frames) scores high, other words low."""
+    import cv2
+    if not a.any() or not b.any():
+        return 0.0
+    y0, y1, x0, x1 = _box(a)
+    v0, v1, u0, u1 = _box(b)
+    bs = cv2.resize(b[v0:v1, u0:u1].astype(np.float32), (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA) >= 0.5
+    return iou(a[y0:y1, x0:x1], bs)
+
+
+def lone_bar(m: np.ndarray, glyph_h: float) -> bool:
+    """The letters are one solid upright bar and nothing else: a capital I in a caption font (a 1 has a flag, an
+    i / ! a dot)."""
+    import cv2
+    n, _, st, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+    if n != 2:
         return False
-    if shifted_containment(prev_c, cur_c) >= SPAN_SHIFT:
-        return False
-    near = cv2_dilate_box(prev_c | cur_c, glyph_h)
-    return iou(prev_s & near, cur_s & near) < SPAN_SHAPE
+    w, h, a = (int(st[1, c]) for c in (cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT, cv2.CC_STAT_AREA))
+    return h >= 0.5 * glyph_h and h >= 2 * w and a >= 0.8 * w * h
 
 
-def spans_from_signals(area: np.ndarray, change: np.ndarray, fps: Fraction, min_area: float) -> list[list[int]]:
-    """[[comp_in, comp_out)] of the captions from the per-frame signals: the area of the letter layer and whether
-    frame k shows different words than k-1. Blips shorter than SPAN_BLIP_S are merged into the following caption (a
-    pop-in), or the previous one when nothing follows (a pop-out); an isolated blip is dropped."""
-    n = len(area)
-    present = area >= min_area
-    spans: list[list[int]] = []
-    for k in range(n):
+_IN_WORD_APOSTROPHE = re.compile(r"(?<=\w)['’‘](?=\w)")
+
+
+def screen_conventions(texts: Sequence[str]) -> dict:
+    """How the video writes its captions, from all its readings: ALL CAPS (at least 90% of 12 or more letters upper
+    case), curly double quotes (any “ or ” read) and the apostrophe style (the majority of ' and ’ inside words)."""
+    letters = [ch for t in texts for ch in t if ch.isalpha()]
+    caps = len(letters) >= 12 and sum(ch.isupper() for ch in letters) >= 0.9 * len(letters)
+    curly = any("“" in t or "”" in t for t in texts)
+    aps = Counter(m.group(0) for t in texts for m in _IN_WORD_APOSTROPHE.finditer(t))
+    ap = "’" if aps["’"] + aps["‘"] > aps["'"] else "'"
+    return {"all_caps": caps, "curly_quotes": curly, "apostrophe": ap}
+
+
+def apply_conventions(text: str, conv: dict) -> str:
+    """One reading written the video's way (screen_conventions): "sO" -> "SO" in an all-caps video, a straight " ->
+    “ / ” where the video writes curly quotes, an apostrophe in the video's style. Nothing else changes."""
+    t = str(text)
+    if conv.get("all_caps"):
+        t = t.upper()
+    if conv.get("curly_quotes"):
+        t = re.sub(r'(?:^|(?<=\s))"', "“", t).replace('"', "”")
+    return _IN_WORD_APOSTROPHE.sub(conv.get("apostrophe") or "'", t)
+
+
+def runs_from_signals(present: np.ndarray, change: np.ndarray) -> list[list[int]]:
+    """[[a, b)] of the runs: consecutive frames with caption letters and no possible new caption inside."""
+    runs: list[list[int]] = []
+    for k in range(len(present)):
         if not present[k]:
             continue
-        if k == 0 or not present[k - 1] or bool(change[k]) or not spans:
-            spans.append([k, k + 1])
+        if k == 0 or not present[k - 1] or bool(change[k]) or not runs:
+            runs.append([k, k + 1])
         else:
-            spans[-1][1] = k + 1
-    blip = SPAN_BLIP_S * float(fps)
-    changed = True
-    while changed:
+            runs[-1][1] = k + 1
+    return runs
+
+
+def join_runs(runs: Sequence[Sequence[int]], texts: Sequence[str], widths: np.ndarray, fps: Fraction,
+              alike: Any = None) -> list[list[int]]:
+    """The captions, as lists of run indices. Touching runs that read the same (letters and digits) are one caption
+    -- a pop-in's growing frames, a frame of noise -- unless the same text popped in again: at the join its letters
+    are RESTART_SHRINK narrower than the frame before and grow back within POP_S. A run no longer than POP_S that
+    cannot be read, or reads almost like a touching neighbour (>= POP_TEXT), joins the neighbour its letters look
+    like at another size (``alike(i, j)`` for i < j, scale-free, >= POP_SHAPE): a pop-in / pop-out frame whose small
+    text is misread. Any other unreadable run is a caption of its own."""
+    import difflib
+    pop = max(1, int(round(POP_S * float(fps))))
+    keys = [norm_text(t) for t in texts]
+    n = len(runs)
+    touch = [i > 0 and runs[i - 1][1] == runs[i][0] for i in range(n)]
+    for _ in range(n if alike is not None else 0):        # until stable: a pop-in of several misread frames
         changed = False
-        for i, (a, b) in enumerate(spans):
-            if b - a >= blip:
+        for i in range(n):
+            if runs[i][1] - runs[i][0] > pop:
                 continue
-            nxt = spans[i + 1] if i + 1 < len(spans) and spans[i + 1][0] == b else None
-            prv = spans[i - 1] if i > 0 and spans[i - 1][1] == a else None
-            if nxt is not None:
-                nxt[0] = a
-            elif prv is not None:
-                prv[1] = b
-            spans.pop(i)
-            changed = True
+            best, top = None, POP_SHAPE
+            for j, ok in ((i - 1, touch[i]), (i + 1, i + 1 < n and touch[i + 1])):
+                if not ok or not keys[j] or keys[j] == keys[i] or (keys[i] and difflib.SequenceMatcher(
+                        None, keys[i], keys[j], autojunk=False).ratio() < POP_TEXT):
+                    continue
+                s = alike(min(i, j), max(i, j))
+                if s >= top:
+                    best, top = j, s
+            if best is not None:
+                keys[i], changed = keys[best], True
+        if not changed:
             break
-    return spans
+
+    def restart(i: int) -> bool:
+        """Run i's letters start narrower than the frame before and grow back while the text stays the same."""
+        a, j = runs[i][0], i
+        while j + 1 < n and touch[j + 1] and keys[j + 1] == keys[i]:
+            j += 1
+        w0 = float(widths[a - 1])
+        return widths[a] < RESTART_SHRINK * w0 and float(np.max(widths[a:min(runs[j][1], a + pop)])) >= \
+            RESTART_SHRINK * w0
+
+    groups: list[list[int]] = []
+    for i in range(n):
+        g = groups[-1] if groups else None
+        if g is not None and touch[i] and keys[i] and keys[i] == keys[g[0]] and not restart(i):
+            g.append(i)
+        else:
+            groups.append([i])
+    return groups
+
+
+def vote(reads: Sequence[FrameRead]) -> dict:
+    """A caption's text: the most frequent reading of its fully grown readable frames (letter area at least 90% of
+    the largest: not the pop-in / pop-out frames), ties to the higher total score."""
+    readable = [f for f in reads if f.readable]
+    if not readable:
+        return {"text": "", "agreement": 0.0, "score": 0.0, "reads": 0, "variants": {}}
+    top = max(f.area for f in readable)
+    pool = [f for f in readable if f.area >= 0.9 * top]
+    votes: dict[str, list[float]] = {}
+    for f in pool:
+        votes.setdefault(f.text, []).append(f.score)
+    best, sc = max(votes.items(), key=lambda kv: (len(kv[1]), sum(kv[1])))
+    return {"text": best, "agreement": round(len(sc) / len(pool), 3), "score": round(float(np.mean(sc)), 3),
+            "reads": len(pool), "variants": {t: len(s) for t, s in sorted(votes.items(), key=lambda kv: -len(kv[1]))}}
 
 
 def caption_band(layout: Any, frame_wh: tuple[int, int]) -> Band | None:
@@ -784,13 +497,15 @@ def caption_band(layout: Any, frame_wh: tuple[int, int]) -> Band | None:
 
 def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: Fraction, n_frames: int,
                        eng: Any = None, progress: Any = None) -> dict:
-    """{spans: [{comp_in, comp_out, ocr, score, reads, agreement, variants}], band, fill, frames_read, notes}: every
-    caption the competitor shows (the band of the layout's captions zone, every frame), with an OCR reading of its
-    letters (fill-colour layer, several frames, majority) for names and non-speech captions."""
+    """{spans: [{comp_in, comp_out, ocr, score, reads, agreement, variants}], band, fill, frames_read, runs,
+    conventions, notes}: every caption the competitor shows (the band of the layout's captions zone, every frame),
+    from its first frame to its last (``comp_out`` exclusive), with its text as written on screen (``ocr``; "" when
+    it cannot be read). See the section comment above."""
     from .media import VideoReader
+    empty = {"spans": [], "band": None, "fill": None, "frames_read": 0, "notes": {}}
     band = caption_band(layout, frame_wh)
     if band is None:
-        return {"spans": [], "band": None, "fill": None, "frames_read": 0, "notes": {}}
+        return empty
     ign = _ignore_mask(band)
     gh = band.glyph_h
     with VideoReader(video, fps=fps) as vr:                     # pass 1: the fill colour
@@ -798,41 +513,69 @@ def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: 
     fill = learn_fill_colour(sample, gh, ign)
     del sample
     if fill is None:
-        return {"spans": [], "band": None, "fill": None, "frames_read": 0, "notes": {}}
-    area = np.zeros(n_frames, np.int64)
+        return empty
+    min_area = max(6.0, 0.06 * gh * gh)          # about one small letter (a pop-in's first frame included)
+    present = np.zeros(n_frames, bool)
     change = np.zeros(n_frames, bool)
-    masks: dict[int, np.ndarray] = {}
+    widths = np.zeros(n_frames, np.int64)
+    areas = np.zeros(n_frames, np.int64)
+    masks: dict[int, tuple] = {}                 # the letters' box and its bits: (y0, y1, x0, x1, packed)
     prev = None
     count = 0
     with VideoReader(video, fps=fps) as vr:                     # pass 2: the caption layer of every frame
         for k, img in vr.frames(0, n_frames):
-            crop = img[band.y:band.y + band.h]
-            lc, ls = caption_layer(crop, gh, fill, ign)
-            area[k] = int(np.count_nonzero(lc))
-            masks[k] = np.packbits(lc, axis=None)
-            if prev is not None and area[k] and np.count_nonzero(prev[0]):
-                change[k] = new_caption(prev[0], lc, prev[1], ls, gh)
-            prev = (lc, ls)
+            lc, ls = caption_layer(img[band.y:band.y + band.h], gh, fill, ign)
+            areas[k] = int(np.count_nonzero(lc))
+            present[k] = areas[k] >= min_area
+            if present[k]:
+                y0, y1, x0, x1 = _box(lc)
+                masks[k] = (y0, y1, x0, x1, np.packbits(lc[y0:y1, x0:x1], axis=None))
+                widths[k] = x1 - x0
+                if prev is not None and iou(prev[0], lc) < CAND_IOU:
+                    near = cv2_dilate_box(prev[0] | lc, gh)
+                    change[k] = iou(prev[1] & near, ls & near) < SHAPE_SAME
+            prev = (lc, ls) if present[k] else None
             count += 1
             if progress is not None:
                 progress(count, n_frames)
     shape = (band.h, band.w)
-    min_area = max(6.0, 0.06 * gh * gh)          # about one small letter (a pop-in's first frame included)
-    spans = spans_from_signals(area, change, fps, min_area)
+
+    def mask(k: int) -> np.ndarray:
+        y0, y1, x0, x1, bits = masks[k]
+        m = np.zeros(shape, bool)
+        m[y0:y1, x0:x1] = np.unpackbits(bits, count=(y1 - y0) * (x1 - x0)).reshape(y1 - y0, x1 - x0).astype(bool)
+        return m
+
+    runs = runs_from_signals(present, change)
     eng = eng or engine()
-    out = []
-    for a, b in spans:
-        inner = list(range(min(b - 1, a + 2), b)) or [a]
-        picks = sorted({inner[int(round(i * (len(inner) - 1) / 4.0))] for i in range(5)}) if len(inner) > 1 else inner
-        reads = []
-        for k in picks:
-            m = np.unpackbits(masks[k], count=shape[0] * shape[1]).reshape(shape).astype(bool)
+    reads: list[list[FrameRead]] = []
+    for a, b in runs:
+        rr = []
+        for k in sorted({a + (b - 1 - a) * i // max(1, READS_PER_RUN - 1) for i in range(READS_PER_RUN)}):
+            m = mask(k)
             text, score = recognise(m, gh, eng)
-            reads.append(FrameRead(k, text, score, int(np.count_nonzero(m)), m))
-        maj = majority(Run(reads))
-        out.append({"comp_in": int(a), "comp_out": int(b), "ocr": maj["text"], "score": maj["score"],
-                    "reads": maj["reads"], "agreement": maj["agreement"], "variants": maj["variants"]})
-    return {"spans": out, "frames_read": count, "fill": [round(float(v), 1) for v in fill],
+            if text.strip() in BAR_READS and lone_bar(m, gh):
+                text = "I"
+            rr.append(FrameRead(k, text, score, int(areas[k])))
+        reads.append(rr)
+    conv = screen_conventions([f.text for rr in reads for f in rr if f.readable])
+    for rr in reads:
+        for f in rr:
+            f.text = apply_conventions(f.text, conv)
+    texts = [vote(rr)["text"] for rr in reads]
+    groups = join_runs(runs, texts, widths, fps,
+                       alike=lambda i, j: scaled_iou(mask(runs[i][1] - 1), mask(runs[j][0])))
+    out = []
+    for g in groups:
+        maj = vote([f for i in g for f in reads[i]])
+        out.append({"comp_in": int(runs[g[0]][0]), "comp_out": int(runs[g[-1]][1]), "ocr": maj["text"],
+                    "score": maj["score"], "reads": maj["reads"], "agreement": maj["agreement"],
+                    "variants": maj["variants"]})
+    log.info("captions OCR: %d captions (%d runs), band x %d y %d %dx%d (glyph %.0f px), %d frames, %s", len(out),
+             len(runs), band.x, band.y, band.w, band.h, gh, count,
+             ", ".join(k for k, v in conv.items() if v is True) or "no case / quote convention")
+    return {"spans": out, "frames_read": count, "runs": len(runs), "conventions": conv,
+            "fill": [round(float(v), 1) for v in fill],
             "band": {"x": band.x, "y": band.y, "w": band.w, "h": band.h, "glyph_h": gh, "keep": band.keep},
             "notes": {}}
 

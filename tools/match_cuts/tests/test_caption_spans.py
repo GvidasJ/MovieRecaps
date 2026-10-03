@@ -1,21 +1,22 @@
-"""Premiere competitor captions: the competitor's on-screen TIMING and splits (caption_ocr.read_caption_spans), the
-transcript's WORDS (captions.competitor_text), OCR only for the word split, names and non-speech captions.
+"""Competitor mode: an exact copy of the competitor's captions (caption_ocr.read_caption_spans + captions.run_captions).
 
-* a synthetic clip in the style of the real competitor (cream text with a soft drop shadow over a moving test
-  pattern): exact first / last frames; a pop-in, a highlighted word and a caption that grows word by word stay one
-  caption; the same word twice is two captions; *laughs* is read from the picture;
-* the text rules on hand-made spans and words;
-* the acceptance test on input/competitor.mp4 (the clip whose captions came out as "buiIam" / "es Avenge s"): every
-  caption is real words and none is shorter than 0.1 s.
+* a synthetic clip in a soft-shadow style (cream text with a soft drop shadow over a moving test pattern): exact first
+  / last frames and text; a pop-in whose first frame is misread and a highlighted word stay one caption; a caption
+  that grows word by word is a new caption at each new word; the same word twice is two captions;
+* the rules on hand-made data: the video's writing conventions, joining runs, a lone bar, the transcript fallback;
+* the acceptance test on input/competitor.mp4 against tests/fixtures/competitor_captions_truth.srt, the answer key
+  written by eye from contact sheets of every frame: every caption's text identical and its first and last frame
+  within one frame.
 """
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
+import types
 from fractions import Fraction
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from match_cuts import caption_ocr, captions as C
@@ -24,14 +25,17 @@ FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fon
          "/Library/Fonts/Arial Bold.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"]
 FONT = next((f for f in FONTS if Path(f).is_file()), None)
 REAL = Path(__file__).resolve().parents[3] / "input" / "competitor.mp4"
-# the caption zone layout.py measured on input/competitor.mp4 (output/report.md of that run)
-REAL_LAYOUT = {"zones": [{"type": "title", "x": 26, "y": 76, "w": 554, "h": 222},
-                         {"type": "other", "x": 246, "y": 96, "w": 218, "h": 54},
-                         {"type": "captions", "x": 32, "y": 696, "w": 434, "h": 64,
-                          "notes": "47 caption events; white text with dark outline, median glyph height 26 px"}]}
+TRUTH_SRT = Path(__file__).resolve().parent / "fixtures" / "competitor_captions_truth.srt"
+# the zones layout.py measures on input/competitor.mp4 (1080x1920, 60 fps, 1965 frames)
+REAL_LAYOUT = {"zones": [{"type": "logo", "x": 310, "y": 222, "w": 116, "h": 118},
+                         {"type": "channel_name", "x": 450, "y": 250, "w": 298, "h": 84},
+                         {"type": "title", "x": 168, "y": 400, "w": 742, "h": 118},
+                         {"type": "captions", "x": 306, "y": 1090, "w": 468, "h": 50,
+                          "notes": "110 caption events; white text with dark outline, median glyph height 42 px"}]}
 
 W, H, N = 720, 1280, 150
-TRUTH = [(0, 10), (10, 35), (35, 60), (60, 90), (90, 105), (105, 120), (125, 150)]
+TRUTH = [("Deadpool", 0, 10), ("builds a team", 10, 35), ("the X-Force", 35, 60), ("you see", 60, 70),
+         ("you see him", 70, 90), ("no", 90, 105), ("no", 105, 120), ("*laughs*", 125, 150)]
 LAYOUT = {"zones": [{"type": "title", "x": 150, "y": 70, "w": 420, "h": 90},
                     {"type": "captions", "x": 60, "y": 860, "w": 600, "h": 50,
                      "notes": "7 caption events; median glyph height 32 px"}]}
@@ -59,8 +63,8 @@ def clip(tmp_path_factory) -> Path:
         f"drawtext={st}:text='builds a team':fontsize='{pop.format(a=10)}':{ctr}:enable='between(n,10,34)'",
         f"drawtext={st}:text='the X-Force':fontsize=44:x=200:y=860:enable='between(n,35,59)'",
         f"drawtext={hi}:text='the':fontsize=44:x=200:y=860:enable='between(n,47,59)'",          # highlighted word
-        f"drawtext={st}:text='you see':fontsize=44:{ctr}:enable='between(n,60,69)'",            # grows word by word
-        f"drawtext={st}:text='you see him':fontsize=44:{ctr}:enable='between(n,70,89)'",
+        f"drawtext={st}:text='you see':fontsize=44:{ctr}:enable='between(n,60,69)'",            # grows word by word:
+        f"drawtext={st}:text='you see him':fontsize=44:{ctr}:enable='between(n,70,89)'",        # two captions
         f"drawtext={st}:text='no':fontsize=44:{ctr}:enable='between(n,90,104)'",
         f"drawtext={st}:text='no':fontsize='{pop.format(a=105)}':{ctr}:enable='between(n,105,119)'",
         f"drawtext={st}:text='*laughs*':fontsize=44:{ctr}:enable='between(n,125,149)'",
@@ -71,136 +75,97 @@ def clip(tmp_path_factory) -> Path:
 
 
 @need_ocr
-def test_spans_follow_the_on_screen_captions_exactly(clip):
+def test_spans_and_text_are_the_on_screen_captions_exactly(clip):
     res = caption_ocr.read_caption_spans(str(clip), LAYOUT, (W, H), Fraction(30), N)
-    got = [(d["comp_in"], d["comp_out"]) for d in res["spans"]]
-    assert got == TRUTH                        # pop-in / highlight / word-by-word growth: one caption; "no" twice: two
-    ocr = [d["ocr"] for d in res["spans"]]
-    assert ocr[0] == "Deadpool" and ocr[-1] == "*laughs*" and "X-Force" in ocr[2]
-    assert all(b - a >= 0.15 * 30 for a, b in got)
-
-
-@need_ocr
-def test_caption_stage_writes_the_spoken_words_with_the_competitor_timing(clip, tmp_path, monkeypatch):
-    import types
-
-    import numpy as np
-    import soundfile as sf
-
-    from match_cuts import transcribe
-    from match_cuts.common import Cache
-    from match_cuts.config import Config
-    heard = [("Deadpool", .05), ("builds", .4), ("a", .7), ("team", .85), ("the", 1.25), ("x", 1.4), ("force", 1.6),
-             ("you", 2.1), ("see", 2.4), ("him", 2.7), ("no", 3.1), ("no", 3.6)]
-    words = [C.Word(w, t, t + 0.12, 0.99, w) for w, t in heard]
-    monkeypatch.setattr(transcribe, "available", lambda: None)
-    monkeypatch.setattr(transcribe, "transcribe_words", lambda *a, **k: list(words))
-    vo = tmp_path / "vo.wav"
-    sf.write(str(vo), (0.2 * np.sin(np.arange(16000 * 5) * 0.1)).astype(np.float32), 16000)
-    cfg = Config(out_dir=str(tmp_path / "out"), work_dir=str(tmp_path / "work"), premiere=True, captions="competitor")
-    cfg.voiceover = str(vo)
-    info = types.SimpleNamespace(path=str(clip), file_hash="spans", width=W, height=H, display_width=W, display_height=H)
-    ctx = types.SimpleNamespace(cfg=cfg, comp_info=info, comp_fps=Fraction(30), n_comp=N,
-                                cutlist=types.SimpleNamespace(layout=LAYOUT), cache=Cache(cfg.work), raw_audio=None,
-                                audio_sr=16000, warn=lambda m: None)
-    res = C.run_captions(ctx)
-    blocks = C.parse_srt(Path(res["path"]).read_text(encoding="utf-8"))
-    assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == [
-        ("Deadpool", 0, 20), ("builds a team", 20, 70), ("the X-Force", 70, 120), ("you see him", 120, 180),
-        ("no", 180, 210), ("no", 210, 240), ("*laughs*", 250, 300)]
-    assert res["competitor_notes"]["names"] == [{"start_tc": "00:00:01,167", "end_tc": "00:00:02,000",
-                                                 "heard": "x force", "written": "X-Force"}]
-    assert [r["text"] for r in res["competitor_notes"]["non_speech"]] == ["*laughs*"]
-    from match_cuts import report
-    ctx.captions = res
-    md = "\n".join(report._captions(ctx))
-    assert "competitor's on-screen timing" in md and "Captions shorter than 0.1 s**: none" in md
+    assert [(d["ocr"], d["comp_in"], d["comp_out"]) for d in res["spans"]] == TRUTH
 
 
 # ---------------------------------------------------------------------------------------------
-# the text rules
+# the rules
 # ---------------------------------------------------------------------------------------------
 
-def W_(text: str, t: float) -> C.Word:
-    return C.Word(C.clean_text(text), t, t + 0.1, 0.99, text)
+CAPS_VIDEO = ["SO AS A", "JOKE", "\u201cWHAT DYA\u201d", "DIDN'T", "SPIDER-MAN", "*LAUGHS*", "I HAVE NO IDEA"]
 
 
-def _caps(spans, words):
-    return C.competitor_text(spans, words, Fraction(30), lambda k: 2 * k, Fraction(60))
+def test_the_videos_conventions_fix_single_frame_misreadings():
+    conv = caption_ocr.screen_conventions(CAPS_VIDEO + ["\u201cTHINK\"", "sO"])
+    assert conv == {"all_caps": True, "curly_quotes": True, "apostrophe": "'"}
+    fix = lambda t: caption_ocr.apply_conventions(t, conv)                       # noqa: E731
+    assert fix("sO") == "SO" and fix("\u0131") == "I"                            # lower-case misreads
+    assert fix("\u201cTHINK\"") == "\u201cTHINK\u201d"                        # a closing quote read straight
+    assert fix("\"WHAT\u2019S\"") == "\u201cWHAT'S\u201d"                    # both quotes, the apostrophe style
+    assert fix("\u201cMAN?\u201d") == "\u201cMAN?\u201d" and fix("SPIDER-MAN") == "SPIDER-MAN"
+    mixed = caption_ocr.screen_conventions(["I got a Parker Peter", "whoa!! x2", "Spider-Man is", "no"])
+    assert mixed["all_caps"] is False and caption_ocr.apply_conventions("sO", mixed) == "sO"
 
 
-def test_words_go_to_the_caption_on_screen_and_ocr_moves_a_boundary_word():
-    spans = [{"comp_in": 0, "comp_out": 9, "ocr": "that's what", "score": 0.99},
-             {"comp_in": 9, "comp_out": 16, "ocr": "we're going", "score": 0.98}]
-    words = [W_("that's", 0.05), W_("what", 0.26), W_("we're", 0.35), W_("going", 0.45)]   # "what" ends after 0.3 s
-    caps, loose, _ = _caps(spans, words)
-    assert [c.text for c in caps] == ["that's what", "we're going"] and not loose
+def test_a_lone_bar_is_a_capital_i_and_a_one_is_not():
+    bar = np.zeros((60, 40), bool)
+    bar[10:50, 15:25] = True
+    one = bar.copy()
+    one[10:18, 7:15] = True                                                      # the flag of a 1
+    assert caption_ocr.lone_bar(bar, 40.0) and not caption_ocr.lone_bar(one, 40.0)
 
 
-def test_a_sentence_end_goes_back_to_its_sentence_and_spoken_words_stay():
-    spans = [{"comp_in": 0, "comp_out": 11, "ocr": "to get out of", "score": 0.99},
-             {"comp_in": 11, "comp_out": 20, "ocr": "This is going", "score": 0.99}]
-    words = [W_("to", 0.0), W_("get", 0.1), W_("out", 0.2), W_("of", 0.28), W_("this.", 0.37), W_("This", 0.45),
-             W_("is", 0.5), W_("going", 0.55)]
-    caps, _, notes = _caps(spans, words)
-    assert [c.text for c in caps] == ["to get out of this", "This is going"]
+def test_runs_join_into_captions():
+    fps = Fraction(60)
+    widths = np.array([60, 80] + [100] * 20 + [70, 90] + [100] * 10)
+    runs = [[0, 1], [1, 2], [2, 12], [12, 22], [22, 23], [23, 24], [24, 34]]
+    # pop-in frames misread ("SCH0OL") or unreadable, a run broken by noise, then the same word popping in again
+    texts = ["SCH0OL", "", "SCHOOL", "SCHOOL", "", "SCHOOL", "SCHOOL"]
+    alike = lambda i, j: 0.9                                                     # noqa: E731
+    assert caption_ocr.join_runs(runs, texts, widths, fps, alike) == [[0, 1, 2, 3], [4, 5, 6]]
+    # a short run of other words is its own caption, however alike
+    assert caption_ocr.join_runs([[0, 10], [10, 14], [14, 30]], ["I", "I SHOULD", "GO"], np.full(30, 100), fps,
+                                 alike) == [[0], [1], [2]]
+    # an unreadable run that looks like neither neighbour stays a caption of its own
+    assert caption_ocr.join_runs([[0, 10], [10, 14], [14, 30]], ["A", "", "B"], np.full(30, 100), fps,
+                                 lambda i, j: 0.2) == [[0], [1], [2]]
 
 
-def test_names_from_ocr_spacing_slips_and_caption_start_capitals_ignored():
-    fix = C.fix_names
-    assert fix(["he's", "going", "to", "play", "vanisher"], "he's going to play Vanisher")[0][-1] == "Vanisher"
-    assert fix(["the", "x", "force"], "the X-Force")[0] == ["the", "X-Force"]
-    assert fix(["And", "I", "was"], "AndI was")[0] == ["And", "I", "was"]              # OCR spacing slip
-    assert fix(["back", "up"], "Back up")[0] == ["back", "up"]                         # the caption's first capital
-    assert fix(["Brad", "Pitt's", "going"], "Brad Pitt's going")[1] == []
-
-
-def test_non_speech_and_unreadable_captions():
-    spans = [{"comp_in": 0, "comp_out": 15, "ocr": "*Laughter*", "score": 0.99},
-             {"comp_in": 15, "comp_out": 30, "ocr": "e r", "score": 0.4},
-             {"comp_in": 30, "comp_out": 45, "ocr": "Wow", "score": 0.95}]
-    words = [W_("ha", 0.2)]
-    caps, _, notes = _caps(spans, words)
-    assert [c.text for c in caps] == ["*Laughter*", "*...*", "Wow"]
-    assert [n["start_tc"] for n in notes["unreadable"]] == ["00:00:00,500"]           # listed in the report
-    assert notes["from_ocr"][0]["text"] == "Wow"
-
-
-def test_words_outside_every_caption_are_left_for_the_voice_fill():
-    spans = [{"comp_in": 0, "comp_out": 15, "ocr": "hello there", "score": 0.99}]
-    caps, loose, _ = _caps(spans, [W_("hello", 0.1), W_("there", 0.3), W_("later", 2.0)])
-    assert caps[0].text == "hello there" and [w.text for w in loose] == ["later"]
+def test_only_unreadable_captions_take_the_words_heard_and_they_are_listed():
+    spans = [{"comp_in": 0, "comp_out": 30, "ocr": "\u201cWHAT DO YOU\u201d", "score": 0.97},
+             {"comp_in": 30, "comp_out": 60, "ocr": "", "score": 0.1},
+             {"comp_in": 60, "comp_out": 90, "ocr": "I'M", "score": 0.95},
+             {"comp_in": 90, "comp_out": 120, "ocr": "", "score": 0.0}]
+    words = [C.Word("what", 0.1, 0.3, 0.9, "what"), C.Word("think", 0.6, 0.8, 0.9, "think,"),
+             C.Word("im", 1.1, 1.3, 0.9, "I'm")]
+    caps, notes = C.competitor_copy(spans, words, Fraction(60), lambda k: k, Fraction(60))
+    assert [(c.text, c.start, c.end) for c in caps] == [("\u201cWHAT DO YOU\u201d", 0, 30), ("THINK", 30, 60),
+                                                         ("I'M", 60, 90)]
+    assert notes == {"from_transcript": [{"start_tc": "00:00:00,500", "end_tc": "00:00:01,000", "text": "THINK"}],
+                     "unreadable": [{"start_tc": "00:00:01,500", "end_tc": "00:00:02,000"}]}
 
 
 # ---------------------------------------------------------------------------------------------
-# acceptance: input/competitor.mp4
+# acceptance: input/competitor.mp4 against the answer key
 # ---------------------------------------------------------------------------------------------
-
-REAL_WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'\u2019\-]*[?!]*$")
-
 
 @need_ocr
 @pytest.mark.skipif(not REAL.is_file(), reason="input/competitor.mp4 not in this checkout")
-def test_real_competitor_captions_are_real_words_with_the_competitor_timing(tmp_path):
+def test_real_competitor_captions_match_the_answer_key(tmp_path, monkeypatch):
     from match_cuts import transcribe
     from match_cuts.common import Cache
-    from match_cuts.media import extract_audio
-    if transcribe.available() is not None:
-        pytest.skip("faster-whisper not installed")
-    res = caption_ocr.read_caption_spans(str(REAL), REAL_LAYOUT, (608, 1080), Fraction(30), 700)
-    y = extract_audio(str(REAL), sr=16000, mono=True)
-    words = transcribe.transcribe_words(y, 16000, "small.en", "en", Cache(tmp_path))
-    caps, loose, notes = C.competitor_text(res["spans"], words, Fraction(30), lambda k: 2 * k, Fraction(60))
-    assert len(caps) >= 50
-    spoken = {C._key(w.text) for w in words}
-    read = {C._key(t) for d in res["spans"] for t in str(d.get("ocr") or "").split()}
-    for c in caps:
-        assert (c.end - c.start) / 60.0 >= 0.1, c
-        if C.NON_SPEECH_RE.match(c.text):
-            continue
-        for tok in c.text.split():
-            assert REAL_WORD.match(tok), (c.text, tok)
-            assert C._key(tok) in spoken or C._key(tok) in read, (c.text, tok)
-    texts = [c.text for c in caps]
-    for want in ("Deadpool", "builds a team", "the X-Force", "yes Avengers", "*Laughter*"):
-        assert want in texts, want
+    from match_cuts.config import Config
+
+    def no_transcript(*a, **k):
+        raise AssertionError("every caption is readable: no transcript needed")
+    monkeypatch.setattr(transcribe, "transcribe_words", no_transcript)
+    cfg = Config(out_dir=str(tmp_path / "out"), work_dir=str(tmp_path / "work"), premiere=True, captions="auto")
+    info = types.SimpleNamespace(path=str(REAL), file_hash="competitor", width=1080, height=1920,
+                                 display_width=1080, display_height=1920)
+    warnings: list[str] = []
+    ctx = types.SimpleNamespace(cfg=cfg, comp_info=info, comp_fps=Fraction(60), n_comp=1965,
+                                cutlist=types.SimpleNamespace(layout=REAL_LAYOUT), cache=Cache(cfg.work),
+                                raw_audio=None, audio_sr=16000, warn=warnings.append)
+    res = C.run_captions(ctx)
+    assert res["mode"] == "competitor" and not warnings
+
+    def frames(blocks):
+        return [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks]
+    got = frames(C.parse_srt(Path(res["path"]).read_text(encoding="utf-8")))
+    key = frames(C.read_srt(TRUTH_SRT))
+    assert len(key) == 112 and len(got) == len(key)
+    exact = [g for g, k in zip(got, key) if g[0] == k[0] and abs(g[1] - k[1]) <= 1 and abs(g[2] - k[2]) <= 1]
+    assert len(exact) == len(key), [(g, k) for g, k in zip(got, key) if g not in exact]
+    assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}

@@ -2,18 +2,20 @@
 
 Two modes, chosen per clip (``--captions auto|competitor|voice``, pipeline.stage_captions):
 
-* **competitor** -- the competitor has burned-in captions: they are copied exactly (caption_ocr.py reads the caption
-  band frame by frame; words, splits, frames, capitalisation, punctuation and ``*actions*`` are never changed). Speech
-  the competitor left uncaptioned is filled with voice captions; the transcript only flags likely OCR mistakes.
-* **voice** -- captions made from the voice-over: word timestamps of the CUT edit's audio (or ``--voiceover FILE``),
-  the grouping walk, the weak-word fix, back-to-back timing and ``*...*`` placeholders for silences.
+* **competitor** -- the competitor has burned-in captions: an exact copy (caption_ocr.read_caption_spans reads the
+  caption band on every frame): each caption's words, capitals and punctuation as written on screen (``*actions*``
+  included), from its first frame to its last. None of the style rules below apply. Only a caption the OCR cannot
+  read takes the words heard while it is on screen (listed in the report); speech the competitor left uncaptioned
+  stays uncaptioned.
+* **voice** -- only when the competitor has no captions: captions made from the voice-over (word timestamps of the
+  CUT edit's audio, or ``--voiceover FILE``), the grouping walk, the weak-word fix, back-to-back timing and ``*...*``
+  placeholders for silences.
 
 This module holds the text rules, grouping, timing, SRT I/O and the report data (no heavy imports); transcribe.py
 (faster-whisper) and caption_ocr.py (RapidOCR) hold the optional engines.
 """
 from __future__ import annotations
 
-import difflib
 import re
 import statistics
 from collections import Counter
@@ -69,7 +71,7 @@ class Caption:
     text: str
     start: int
     end: int
-    mode: str = "voice"            # voice | competitor | fill (voice inside a competitor gap) | placeholder
+    mode: str = "voice"            # voice | competitor | placeholder
     words: list[Word] = field(default_factory=list)
     info: dict = field(default_factory=dict)
 
@@ -343,235 +345,40 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
 
 
 # ---------------------------------------------------------------------------------------------
-# Competitor mode: copied captions + voice fill where the competitor left speech uncaptioned
+# Competitor mode: an exact copy of the competitor's captions
 # ---------------------------------------------------------------------------------------------
 
-COVER_TOL_S = 0.25        # a word counts as captioned when its midpoint is this close to a competitor caption
-
-
-def uncaptioned_runs(words: Sequence[Word], comp: Sequence[Caption], fps: Fraction) -> list[list[Word]]:
-    """Runs of consecutive words the competitor's captions do not cover (midpoint outside every caption +-0.25 s)."""
-    spans = [(c.start / float(fps) - COVER_TOL_S, c.end / float(fps) + COVER_TOL_S) for c in comp]
-    runs: list[list[Word]] = []
-    cur: list[Word] = []
-    for w in words:
-        mid = 0.5 * (w.start + w.end)
-        if any(a <= mid <= b for a, b in spans):
-            if cur:
-                runs.append(cur)
-                cur = []
-        else:
-            cur.append(w)
-    if cur:
-        runs.append(cur)
-    return runs
-
-
-def merge_competitor(comp: Sequence[Caption], words: Sequence[Word], fps: Fraction, n_frames: int,
-                     notes: list[dict] | None = None) -> list[Caption]:
-    """The competitor's captions unchanged, plus voice captions ("fill") for speech none of them covers, placed
-    only inside the gaps between competitor captions (never overlapping one)."""
-    comp = sorted(comp, key=lambda c: c.start)
-    out = list(comp)
-    for run in uncaptioned_runs(words, comp, fps):
-        s = to_frame(run[0].start, fps)
-        lo = max([c.end for c in comp if c.end <= s + to_frame(COVER_TOL_S, fps) and c.start < s] + [0])
-        hi = min([c.start for c in comp if c.start >= s] + [n_frames])
-        if hi <= lo:
-            continue
-        out += voice_captions(run, fps, n_frames, lo=lo, hi=hi, placeholders=False, mode="fill", notes=notes)
-    out.sort(key=lambda c: (c.start, c.end))
-    return out
-
-
-# ---------------------------------------------------------------------------------------------
-# Competitor mode (Premiere): the competitor's caption TIMING, the transcript's WORDS
-# ---------------------------------------------------------------------------------------------
-
-ASSIGN_TOL_S = COVER_TOL_S       # a word belongs to a caption when its midpoint is within this of it
-MOVE_TOL_S = 0.4                 # OCR may move a word across a boundary only when it is this close to the other caption
-OCR_SURE = 0.8                   # an OCR reading used for the word split / names / non-speech captions
-NON_SPEECH_RE = re.compile(r"^\s*[\*\(\[].*[\*\)\]]\s*$")
-_SENTENCE_STARTERS = NAME_STOP
-
-
-def _key(t: str) -> str:
-    import unicodedata
-    t = "".join(ch for ch in unicodedata.normalize("NFKD", str(t)) if not unicodedata.combining(ch))
-    return re.sub(r"[^a-z0-9]", "", t.lower())
-
-
-def _ratio(a: str, b: str) -> float:
-    if not a and not b:
-        return 1.0
-    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
-
-
-def assign_words(spans_s: Sequence[tuple[float, float]], ocr: Sequence[str | None], words: Sequence[Word]
-                 ) -> tuple[list[list[int]], list[int]]:
-    """Word indices per caption, and the words no caption takes. A word goes to the caption its midpoint falls in
-    (or the nearer one within ASSIGN_TOL_S); then each boundary between two neighbouring captions may move up to 3
-    words (each within MOVE_TOL_S of the caption it moves to) when that makes both captions read more like their
-    sure OCR readings ("that's what" | "we're going" rather than "that's" | "what we're going")."""
-    groups: list[list[int]] = [[] for _ in spans_s]
-    loose: list[int] = []
-    starts = [a for a, _ in spans_s]
-    import bisect
-    for wi, w in enumerate(words):
-        m = 0.5 * (w.start + w.end)
-        i = bisect.bisect_right(starts, m) - 1
-        cands = [j for j in (i, i + 1) if 0 <= j < len(spans_s)]
-        best, dist = None, None
-        for j in cands:
-            a, b = spans_s[j]
-            d = 0.0 if a <= m < b else min(abs(m - a), abs(m - b))
-            if dist is None or d < dist:
-                best, dist = j, d
-        if best is not None and dist <= ASSIGN_TOL_S:
-            groups[best].append(wi)
-        else:
-            loose.append(wi)
-    keys = [_key(o) if o else None for o in ocr]
-
-    def fit(c: int, ws: list[int]) -> float:
-        """Characters the words share with the OCR reading, minus what either side has alone (a word the
-        competitor left off its captions scores the same on both sides, so it stays where its time puts it)."""
-        if not keys[c]:
-            return 0.0
-        wk = "".join(_key(words[i].text) for i in ws)
-        m = sum(b.size for b in difflib.SequenceMatcher(None, keys[c], wk, autojunk=False).get_matching_blocks())
-        return float(2 * m - len(wk) - len(keys[c]))
-
-    def near(wi: int, c: int) -> bool:
-        m = 0.5 * (words[wi].start + words[wi].end)
-        a, b = spans_s[c]
-        return a - MOVE_TOL_S <= m <= b + MOVE_TOL_S
-
-    for _ in range(2):
-        for c in range(len(spans_s) - 1):
-            if not (keys[c] or keys[c + 1]):
-                continue
-            comb = groups[c] + groups[c + 1]
-            p0 = len(groups[c])
-            best_p, best = p0, fit(c, comb[:p0]) + fit(c + 1, comb[p0:])
-            for p in range(max(0, p0 - 3), min(len(comb), p0 + 3) + 1):
-                if p == p0:
-                    continue
-                moved, tgt = (comb[p:p0], c + 1) if p < p0 else (comb[p0:p], c)
-                if not all(near(wi, tgt) for wi in moved):
-                    continue
-                sc = fit(c, comb[:p]) + fit(c + 1, comb[p:])
-                if sc > best + 0.5:
-                    best_p, best = p, sc
-            groups[c], groups[c + 1] = comb[:best_p], comb[best_p:]
-    # a word that ends a sentence opens the next caption only by timing ("this. | This is going"): it goes back to
-    # the caption before, which its sentence belongs to, unless the OCR shows it opening the next caption ("yes
-    # Avengers" for a heard "yes! Like, Avengers")
-    for c in range(len(spans_s) - 1):
-        g = groups[c + 1]
-        if len(g) > 1 and _ends_sentence(words[g[0]].raw or words[g[0]].text) and near(g[0], c) \
-                and (not groups[c] or groups[c][-1] == g[0] - 1) \
-                and fit(c, groups[c] + g[:1]) + fit(c + 1, g[1:]) >= fit(c, groups[c]) + fit(c + 1, g):
-            groups[c].append(g.pop(0))
-    return groups, loose
-
-
-def _name_like(tok: str, idx: int) -> bool:
-    """A name as the competitor spells it: mixed case inside the word (X-Force, McDonald) or a capital letter that
-    does not start the caption (a caption's first word is often capitalised anyway)."""
-    core = tok.strip("'\u2019\"?!*.,:;()[]")
-    if len(core) < 2 or not re.search(r"[A-Za-z]", core):
-        return False
-    if re.search(r"[a-z][A-Z]|-[A-Z]|^[A-Z]-", core) and not re.search(r"[a-z][A-Z][a-z]", core):
-        return True                                   # X-Force, McDonald (not "AndI" / "Iwas" spacing slips)
-    if re.search(r"^[A-Z][a-z]+[A-Z][a-z]+$", core) and core[:2] == "Mc":
-        return True
-    return core[0].isupper() and idx > 0
-
-
-def _with_tail(new: str, old: str) -> str:
-    core = new.strip("'\u2019\"?!.,:;")
-    tail = re.search(r"[?!]+$", old)
-    return core + (tail.group(0) if tail else "")
-
-
-def fix_names(texts: list[str], ocr: str) -> tuple[list[str], list[tuple[str, str]]]:
-    """The transcript's words with the names the OCR spells differently: every name-like word of the OCR reading
-    (mixed case such as X-Force, or a capital that does not start the caption) replaces the 1-3 heard words that
-    match it closely ("the vanisher" -> "the Vanisher", "x force" -> "X-Force"). An OCR reading that only joins
-    heard words ("AndI" for "And I") changes nothing; everything else stays as heard. Returns (words,
-    [(heard, written)])."""
-    o = [t for t in str(ocr).split() if _key(t)]
-    wk = [_key(t) for t in texts]
-    taken: set[int] = set()
-    repl: list[tuple[int, int, str]] = []
-    for j, t in enumerate(o):
-        if not _name_like(t, j):
-            continue
-        kt = _key(t)
-        best = None
-        for n in (1, 2, 3):
-            for i in range(0, len(texts) - n + 1):
-                if taken & set(range(i, i + n)):
-                    continue
-                kw = "".join(wk[i:i + n])
-                r = 1.0 if kw == kt else _ratio(kw, kt)
-                if r >= 0.75 and (best is None or r > best[0] + 1e-9):
-                    best = (r, i, n)
-        if best is None:
-            continue
-        _, i, n = best
-        if n > 1 and "".join(wk[i:i + n]) == kt and "-" not in t:
-            continue                                  # only the spacing differs: an OCR slip, not a name
-        new = _with_tail(t, texts[i + n - 1])
-        if " ".join(texts[i:i + n]) == new:
-            continue
-        taken |= set(range(i, i + n))
-        repl.append((i, n, new))
-    out, fixes = list(texts), []
-    for i, n, new in sorted(repl, reverse=True):
-        fixes.append((" ".join(out[i:i + n]), new))
-        out[i:i + n] = [new]
-    fixes.reverse()
-    return out, fixes
-
-
-def competitor_text(spans: Sequence[dict], words: Sequence[Word], comp_fps: Fraction, to_seq, seq_fps: Fraction
-                    ) -> tuple[list[Caption], list[Word], dict]:
-    """Captions with the competitor's timing and splits (``spans``: [{comp_in, comp_out, ocr, score, ...}] from
-    caption_ocr.read_caption_spans) and the words spoken during each (transcript); the OCR only moves a word across
-    a boundary, corrects names, and gives non-speech captions (*laughs*). A caption with no words heard takes a
-    sure OCR reading, else ``*...*``. Returns (captions, the words no caption took, notes)."""
+def competitor_copy(spans: Sequence[dict], words: Sequence[Word], comp_fps: Fraction, to_seq, seq_fps: Fraction
+                    ) -> tuple[list[Caption], dict]:
+    """The competitor's captions exactly as on screen (``spans`` from caption_ocr.read_caption_spans: first and last
+    frame, the text as written); no style rule touches them. A caption the OCR could not read takes the words heard
+    while it is on screen, written the competitor's way (caption_ocr.apply_conventions; punctuation the competitor
+    never uses dropped), listed in ``notes["from_transcript"]``; one with no words heard either is left out
+    (``notes["unreadable"]``). Returns (captions, notes)."""
+    from .caption_ocr import apply_conventions, screen_conventions
     spans = sorted(spans, key=lambda d: int(d["comp_in"]))
-    secs = [(float(Fraction(int(d["comp_in"])) / comp_fps), float(Fraction(int(d["comp_out"])) / comp_fps)) for d in spans]
-    sure = [str(d.get("ocr") or "") if float(d.get("score") or 0.0) >= OCR_SURE and _key(d.get("ocr") or "")
-            else None for d in spans]
-    groups, loose = assign_words(secs, sure, words)
-    notes: dict = {"names": [], "non_speech": [], "unreadable": [], "from_ocr": [], "differs": []}
+    read = [str(d.get("ocr") or "") for d in spans if d.get("ocr")]
+    conv = screen_conventions(read)
+    unused = str.maketrans("", "", "".join(ch for ch in ",.;:!?" if not any(ch in t for t in read)))
+    notes: dict = {"from_transcript": [], "unreadable": []}
     caps: list[Caption] = []
-    for d, g, o in zip(spans, groups, sure):
+    for d in spans:
         a, b = to_seq(int(d["comp_in"])), to_seq(int(d["comp_out"]))
-        info = {k: d.get(k) for k in ("ocr", "score", "agreement", "reads", "variants", "comp_in", "comp_out")}
+        info = {k: d.get(k) for k in ("score", "agreement", "reads", "variants", "comp_in", "comp_out")}
         tc = (ms_tc(frame_ms(a, seq_fps)), ms_tc(frame_ms(b, seq_fps)))
-        if o and NON_SPEECH_RE.match(o):
-            text, src = o.strip(), "ocr (non-speech)"
-            notes["non_speech"].append({"start_tc": tc[0], "end_tc": tc[1], "text": text})
-        elif g:
-            texts, fixes = fix_names([words[i].text for i in g], o) if o else ([words[i].text for i in g], [])
-            text, src = " ".join(texts), "transcript"
-            for old, new in fixes:
-                notes["names"].append({"start_tc": tc[0], "end_tc": tc[1], "heard": old, "written": new})
-            if o and _ratio(_key(o), _key(text)) < 0.8:
-                notes["differs"].append({"start_tc": tc[0], "end_tc": tc[1], "ocr": o, "text": text})
-        elif o:
-            text, src = o.strip(), "ocr (no words heard)"
-            notes["from_ocr"].append({"start_tc": tc[0], "end_tc": tc[1], "text": text})
+        text = str(d.get("ocr") or "").strip()
+        if text:
+            caps.append(Caption(text, a, b, "competitor", info=dict(info, source="screen")))
+            continue
+        t0, t1 = float(Fraction(int(d["comp_in"])) / comp_fps), float(Fraction(int(d["comp_out"])) / comp_fps)
+        heard = [w for w in words if t0 <= 0.5 * (w.start + w.end) < t1]
+        text = " ".join(apply_conventions(" ".join(w.raw or w.text for w in heard).translate(unused), conv).split())
+        if text:
+            caps.append(Caption(text, a, b, "competitor", heard, dict(info, source="transcript")))
+            notes["from_transcript"].append({"start_tc": tc[0], "end_tc": tc[1], "text": text})
         else:
-            text, src = PLACEHOLDER, "unreadable"
-            notes["unreadable"].append({"start_tc": tc[0], "end_tc": tc[1], "ocr": d.get("ocr") or ""})
-        info["source"] = src
-        caps.append(Caption(text, a, b, "competitor", [words[i] for i in g], info))
-    return caps, [words[i] for i in loose], notes
+            notes["unreadable"].append({"start_tc": tc[0], "end_tc": tc[1]})
+    return caps, notes
 
 
 # ---------------------------------------------------------------------------------------------
@@ -726,53 +533,6 @@ def transcript_flags(words: Sequence[Word], audio: np.ndarray | None = None, sr:
     return flags
 
 
-def _tokens(s: str) -> list[str]:
-    return [t for t in (norm(x).replace("'", "") for x in str(s).split()) if t]
-
-
-def ocr_transcript_disagreements(comp: Sequence[Caption], words: Sequence[Word], fps: Fraction) -> list[dict]:
-    """Every place where a copied competitor caption and the transcript of the edit's audio disagree (one global
-    word alignment, so a word heard a little before or after its caption is no disagreement): caption words not
-    heard, heard words a caption lacks (only words heard while that caption is on screen -- speech outside every
-    caption is filled with voice captions instead) and different words. ``likely_ocr_mistake`` marks the captions
-    the OCR itself was unsure of. The caption text is never changed."""
-    spans = [(c.start / float(fps) - COVER_TOL_S, c.end / float(fps) + COVER_TOL_S) for c in comp]
-
-    def covering(wi: int) -> int | None:
-        mid = 0.5 * (words[wi].start + words[wi].end)
-        hits = [ci for ci, (a, b) in enumerate(spans) if a <= mid <= b and not comp[ci].is_action]
-        return min(hits, key=lambda ci: abs(0.5 * (spans[ci][0] + spans[ci][1]) - mid)) if hits else None
-
-    cap_tok = [(t, ci) for ci, c in enumerate(comp) if not c.is_action for t in _tokens(c.text)]
-    wtok = [(t, wi) for wi, w in enumerate(words) for t in _tokens(w.text)]
-    if not cap_tok:
-        return []
-    sm = difflib.SequenceMatcher(None, [t for t, _ in cap_tok], [t for t, _ in wtok], autojunk=False)
-    rows: dict[int, set] = {}
-    for op, i1, i2, j1, j2 in sm.get_opcodes():
-        if op == "equal":
-            continue
-        for i in range(i1, i2):
-            rows.setdefault(cap_tok[i][1], set()).add("missing" if op == "delete" else "replace")
-        for j in range(j1, j2):
-            ci = covering(wtok[j][1])
-            if ci is not None:
-                rows.setdefault(ci, set()).add("extra" if op == "insert" else "replace")
-    out = []
-    for ci, ops in sorted(rows.items()):
-        c = comp[ci]
-        info = c.info or {}
-        t0, t1 = spans[ci]
-        heard = " ".join(w.text for w in words if t0 <= 0.5 * (w.start + w.end) <= t1)
-        kind = ("different words" if "replace" in ops or ops == {"missing", "extra"} else
-                "words heard but not in the caption" if ops == {"extra"} else "caption words not heard")
-        out.append({"start": c.start, "end": c.end, "start_tc": ms_tc(frame_ms(c.start, fps)),
-                    "end_tc": ms_tc(frame_ms(c.end, fps)), "ocr": c.text, "heard": heard, "kind": kind,
-                    "likely_ocr_mistake": bool(float(info.get("agreement", 1.0)) < 0.6
-                                               or float(info.get("score", 1.0)) < 0.8)})
-    return out
-
-
 def mode_parts(caps: Sequence[Caption]) -> list[dict]:
     """Consecutive captions of the same mode as parts: [{mode, start, end, count}] (placeholders join voice)."""
     parts: list[dict] = []
@@ -832,24 +592,21 @@ def run_captions(ctx) -> dict:
     if stale.exists():
         stale.unlink()
 
-    # ---- the competitor's burned-in captions (OCR) ----
-    comp_caps: list[Caption] = []
+    # ---- the competitor's burned-in captions: an exact copy, read from the picture ----
     want_ocr = requested == "competitor" or (requested == "auto" and not voiceover)
     layout = getattr(ctx.cutlist, "layout", None) or {}
     n_events = sum(1 for c in (layout.get("captions") or []) if str(c.get("type", "captions")) == "captions")
     res["caption_events"] = n_events
-    premiere = bool(getattr(cfg, "premiere", False))
     spans: list[dict] = []
-    if premiere and want_ocr:
-        # Premiere: the competitor's caption TIMING (every frame of the caption band), the transcript's WORDS
+    if want_ocr:
         from . import caption_ocr
         info = ctx.comp_info
         wh = (int(info.display_width or info.width), int(info.display_height or info.height))
         err = caption_ocr.available()
         if caption_ocr.caption_band(layout, wh) is None:
-            pass
+            pass                                   # no caption zone: the competitor has no burned-in captions
         elif err:
-            warn(f"the competitor has burned-in captions but their timing cannot be read: {err}")
+            warn(f"the competitor has burned-in captions but they cannot be read: {err}")
         else:
             from .common import stage_key
             key = stage_key("captions_spans", info.file_hash, json_key(layout), caption_ocr.SPAN_VERSION)
@@ -857,49 +614,35 @@ def run_captions(ctx) -> dict:
                 info.path, layout, wh, comp_fps, ctx.n_comp))
             spans = list(got.get("spans") or [])
             res["ocr"] = {"frames_read": got.get("frames_read"), "band": got.get("band"), "fill": got.get("fill"),
-                          "events": len(spans), "engine": caption_ocr.engine_name(), "notes": {}}
-            comp_caps = [Caption(str(d.get("ocr") or ""), to_seq(d["comp_in"]), to_seq(d["comp_out"]), "competitor",
-                                 info=dict(d)) for d in spans]
-    elif want_ocr and n_events:
-        from . import caption_ocr
-        err = caption_ocr.available()
-        if err:
-            warn(f"the competitor has {n_events} caption events but they cannot be read: {err}")
-        else:
-            from .common import stage_key
-            info = ctx.comp_info
-            key = stage_key("captions_ocr", info.file_hash, json_key(layout), caption_ocr.OCR_VERSION)
-            wh = (int(info.display_width or info.width), int(info.display_height or info.height))
-            ocr = ctx.cache.json("captions_ocr", key, lambda: caption_ocr.read_competitor_captions(
-                info.path, layout, wh, comp_fps, ctx.n_comp))
-            res["ocr"] = {k: ocr.get(k) for k in ("events", "frames_read", "band", "notes")}
-            res["ocr"]["engine"] = caption_ocr.engine_name()
-            for c in ocr.get("captions") or []:
-                comp_caps.append(Caption(c["text"], to_seq(c["comp_in"]), to_seq(c["comp_out"]), "competitor",
-                                         info={k: c.get(k) for k in ("agreement", "score", "reads", "variants",
-                                                                       "comp_in", "comp_out")}))
-            if not comp_caps:
-                warn(f"{n_events} caption events detected but no caption text could be read")
-    mode = "competitor" if comp_caps else "voice"
-    if requested == "competitor" and not comp_caps:
+                          "events": len(spans), "runs": got.get("runs"), "conventions": got.get("conventions"),
+                          "engine": caption_ocr.engine_name(), "notes": {}}
+            if n_events and not spans:
+                warn(f"{n_events} caption events detected but no caption could be read")
+    mode = "competitor" if spans else "voice"
+    if requested == "competitor" and not spans:
         warn("--captions competitor: no competitor captions to copy -- made from the voice-over instead")
     res["mode"] = mode
     res["reason"] = ("--captions " + requested if requested != "auto" else
                      "auto: --voiceover given" if voiceover else
-                     f"auto: the competitor has burned-in captions ({len(comp_caps)} on screen)" if comp_caps else
+                     f"auto: the competitor has burned-in captions ({len(spans)} on screen)" if spans else
                      "auto: no burned-in captions found on the competitor")
 
-    # ---- the words (the cut edit's audio, or the voice-over) ----
+    # ---- the words (the cut edit's audio, or the voice-over): voice mode, and captions that cannot be read ----
     from . import transcribe
     words: list[Word] = []
     y16 = None
-    if voiceover:
+    err = None
+    if mode == "competitor" and all(d.get("ocr") for d in spans):
+        res["source"] = "not needed (every caption was read from the screen)"
+    elif voiceover:
         from .media import extract_audio
         y16 = extract_audio(voiceover, sr=transcribe.SR, mono=True)
         res["source"] = f"voice-over {Path(voiceover).name}"
         if len(y16) > n_seq / float(fps) * transcribe.SR + transcribe.SR // 2:
             warn(f"the voice-over ({len(y16) / transcribe.SR:.1f} s) is longer than the sequence "
                  f"({n_seq / float(fps):.1f} s): captions after the end are left out")
+        if not len(y16):
+            warn(f"the voice-over {Path(voiceover).name} has no audio")
     elif ctx.raw_audio is not None and len(ctx.raw_audio):
         from .render_preview import build_audio
         cl = ((getattr(ctx, "broll", None) or {}).get("cutlist") if isinstance(getattr(ctx, "broll", None), dict)
@@ -908,10 +651,8 @@ def run_captions(ctx) -> dict:
         res["source"] = "the cut edit (RAW audio on the edit's cuts)"
     else:
         res["source"] = "none (the RAW has no audio)"
-    err = transcribe.available()
-    if voiceover and (y16 is None or not len(y16)):
-        warn(f"the voice-over {Path(voiceover).name} has no audio")
     if y16 is not None and len(y16):
+        err = transcribe.available()
         if err:
             warn(f"no transcription: {err}")
         else:
@@ -924,32 +665,17 @@ def run_captions(ctx) -> dict:
 
     # ---- captions ----
     weak: list[dict] = []
-    if mode == "competitor" and spans:
-        comp_caps, loose, cnotes = competitor_text(spans, words, comp_fps, to_seq, fps)
+    if mode == "competitor":
+        caps, cnotes = competitor_copy(spans, words, comp_fps, to_seq, fps)
         res["competitor_notes"] = cnotes
-        caps = merge_competitor(comp_caps, loose, fps, n_seq, weak) if loose else list(comp_caps)
-        if not words:
-            res["notes"].append("no transcript: the captions' text is the OCR reading (or *...* where it could not "
-                                "be read) and uncaptioned speech is not filled")
-        short = [c for c in comp_caps if (c.end - c.start) / float(fps) < 0.1]
-        res["short"] = [_caption_dict(c, fps) for c in short]
-    elif mode == "competitor":
-        caps = merge_competitor(comp_caps, words, fps, n_seq, weak) if words else list(comp_caps)
-        if words:
-            res["disagreements"] = ocr_transcript_disagreements(comp_caps, words, fps)
-        else:
-            res["notes"].append("no transcript: speech the competitor left uncaptioned is not filled and the OCR "
-                                "is not compared with the audio")
+        res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
         caps = voice_captions(words, fps, n_seq, notes=weak)
+        res["flags"] = transcript_flags(words, y16, transcribe.SR)
     else:
         caps = []
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
     res["weak_kept"] = [{"time": w["time"], "text": w["text"], "reason": w["reason"]} for w in weak]
-    if words:
-        fill_words = (words if mode == "voice" else loose if spans else
-                      [w for run in uncaptioned_runs(words, comp_caps, fps) for w in run])
-        res["flags"] = transcript_flags(fill_words, y16, transcribe.SR)
     res["captions"] = [_caption_dict(c, fps) for c in caps]
     res["count"] = len(caps)
     res["by_mode"] = dict(Counter(c.mode for c in caps))
