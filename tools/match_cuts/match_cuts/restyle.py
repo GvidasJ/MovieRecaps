@@ -1,5 +1,6 @@
 """``python -m match_cuts restyle PROJECT.prproj``: give every plain caption of a Premiere project the POPW style, its
-position and its pop animation (restyle-prompt.md), and write ``<name>_styled.prproj`` next to it.
+position and its pop animation (restyle-prompt.md), and write ``3_captions_styled.prproj`` into the newest
+numbered run folder (``--out`` for another).
 
 The work is done by the four scripts in ``restyle_scripts/`` (capfix.py, capfix_xdonor.py, injectstyle.py,
 capverify.py), each run as its own Python process on the unpacked project XML; this module only chooses their
@@ -307,27 +308,44 @@ def _tc(ticks: int, frame_ticks: int | None) -> str:
 
 # ---- the entry point -----------------------------------------------------------------------------------------------
 
-def styled_path(project: Path) -> Path:
-    return project.with_name(project.stem + "_styled" + project.suffix)
+def styled_path(out_dir: str | os.PathLike | None = None) -> Path:
+    """Where the styled project goes: ``<folder>/3_captions_styled.prproj`` -- the given folder, else the newest
+    numbered run folder (in ./output, else the repository's output/)."""
+    from .run_folders import STYLED_PRPROJ, default_output_bases, newest_run_dir
+    if out_dir:
+        d = Path(out_dir)
+        if not d.is_dir():
+            raise RestyleError(f"--out folder not found: {d}")
+        return d / STYLED_PRPROJ
+    for base in default_output_bases():
+        d = newest_run_dir(base)
+        if d is not None:
+            return d / STYLED_PRPROJ
+    raise RestyleError("no numbered run folder found (" + ", ".join(str(b) for b in default_output_bases()) +
+                       "): pass --out with the folder to write 3_captions_styled.prproj into")
 
 
 def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, overwrite: bool = False,
-            echo: Callable[[str], None] = print) -> Path:
-    """Restyle the plain captions of ``project`` and write ``<name>_styled.prproj`` next to it; returns that path.
-    Raises RestyleError (and writes nothing) when anything is wrong, capverify's problems included."""
+            echo: Callable[[str], None] = print, out_dir: str | os.PathLike | None = None) -> Path:
+    """Restyle the plain captions of ``project`` and write ``3_captions_styled.prproj`` into ``out_dir`` (default: the
+    newest numbered run folder); returns that path. The project itself is never written to. Raises RestyleError (and
+    writes nothing) when anything is wrong, capverify's problems included."""
     src = Path(project)
     if not src.is_file():
         raise RestyleError(f"project not found: {src}")
-    dst = styled_path(src)
+    dst = styled_path(out_dir)
+    if dst.resolve() == src.resolve():
+        raise RestyleError(f"{src} is the styled copy itself: restyle the project you saved in Premiere (it is never "
+                           "overwritten)")
     if dst.exists() and not overwrite:
-        raise RestyleError(f"{dst.name} already exists next to the project: rename or delete it, or add --overwrite")
+        raise RestyleError(f"{dst} already exists: rename or delete it, or add --overwrite")
     ref = Path(donor) if donor else DEFAULT_DONOR
     data, gz = _unpack(src)
     px = ProjectXml(data.decode("utf-8"))
     tracks = scan(px)
     target = max(tracks, key=lambda t: len(t.plain), default=None)
     if target is None or not target.plain:
-        raise RestyleError("no plain caption clips found: import captions.srt, drag it onto the sequence, upgrade the "
+        raise RestyleError("no plain caption clips found: import 2_captions.srt, drag it onto the sequence, upgrade the "
                            "captions to graphics and save the project first" +
                            (" (the captions here are already styled)" if any(t.styled for t in tracks) else ""))
     if target.styled or target.other or target.odd:
@@ -437,16 +455,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m match_cuts restyle",
         description="Give every plain caption of a Premiere project (captions upgraded to graphics) the POPW style, "
-                    "position and pop animation, and write <name>_styled.prproj next to it. The original is never "
-                    "changed; when capverify finds a problem nothing is written.")
+                    "position and pop animation, and write 3_captions_styled.prproj into the newest numbered run "
+                    "folder (or --out). The original is never changed; when capverify finds a problem nothing is "
+                    "written.")
     p.add_argument("project", help="the saved .prproj")
     p.add_argument("--donor", default=None, metavar="PRPROJ",
                    help="a correctly styled project to take the style from when this one has no styled caption "
                         f"(default {DEFAULT_DONOR})")
-    p.add_argument("--overwrite", action="store_true", help="replace an existing <name>_styled.prproj")
+    p.add_argument("--out", default=None, metavar="FOLDER",
+                   help="the folder to write 3_captions_styled.prproj into (default: the newest numbered run folder, "
+                        "e.g. output\\003)")
+    p.add_argument("--overwrite", action="store_true", help="replace an existing 3_captions_styled.prproj")
     args = p.parse_args(argv)
     try:
-        restyle(args.project, donor=args.donor, overwrite=args.overwrite)
+        restyle(args.project, donor=args.donor, overwrite=args.overwrite, out_dir=args.out)
     except RestyleError as e:
         print(f"match_cuts restyle: {e}", file=sys.stderr)
         print("match_cuts restyle: nothing was written", file=sys.stderr)

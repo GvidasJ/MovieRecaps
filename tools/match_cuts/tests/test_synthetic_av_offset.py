@@ -72,7 +72,8 @@ def runs(venv_python, synthetic_mini, delayed, tmp_path_factory) -> dict:
     work = root / "work"
     raw = _run(venv_python, delayed, synthetic_mini["raw"], root / "raw", work)
     comp = _run(venv_python, delayed, synthetic_mini["raw"], root / "competitor", work, "--audio-sync", "competitor")
-    return {"raw": (raw, root / "raw"), "competitor": (comp, root / "competitor")}
+    # each run writes <--out>/001: 1_edit.xml / 2_captions.srt there, everything else in its extras/
+    return {"raw": (raw, root / "raw" / "001" / "extras"), "competitor": (comp, root / "competitor" / "001" / "extras")}
 
 
 def _load(runs: dict, mode: str) -> tuple[subprocess.CompletedProcess, dict, dict, dict]:
@@ -138,7 +139,7 @@ def test_competitor_sync_reproduces_the_offset(runs):
     edl = (out / "recreated_edit.edl").read_text()
     a_events = [ln for ln in edl.splitlines() if ln[:3].isdigit() and ln.split()[2] == "A"]
     assert len(a_events) == n_raw and edl.count("* AUDIO: ") == n_raw and "AUDIO SYNC competitor" in edl
-    assert "Audio sync" in (out / "recreated_edit.xml").read_text()
+    assert "Audio sync" in (out.parent / "1_edit.xml").read_text()
     assert "exports validated" in ver["checks"]["s9_8_deliverables"]["summary"], ver["checks"]["s9_8_deliverables"]
     assert all(c["status"] in OK + ("not_available",) for c in ver["criteria"].values())
     # the analysis is identical in both modes (only export settings differ)

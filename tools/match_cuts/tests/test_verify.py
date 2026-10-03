@@ -1598,7 +1598,7 @@ def _deliverables_ctx(tmp_path: Path, **over):
     cfg = Config()
     cfg.out_dir, cfg.work_dir = str(tmp_path / "out"), str(tmp_path / "work")
     out = Path(cfg.out_dir)
-    files = ["build_ae_project.jsx", "cutlist.json", "cutlist.csv", "recreated_edit.xml", "recreated_edit.edl",
+    files = ["build_ae_project.jsx", "cutlist.json", "cutlist.csv", "1_edit.xml", "recreated_edit.edl",
              "preview_recreation.mp4", "compare.mp4", "media/raw.mp4", "media/competitor_ref.mp4",
              "debug/mapping.png", "debug/scores.png", "debug/layout.png", "debug/cuts/cut_01.png"]
     for f in files:
@@ -1621,9 +1621,9 @@ def test_deliverables_check(tmp_path):
     r = verify.check_deliverables(ctx, n_cuts=1)
     assert r["status"] == "pass", r["failures"]
     assert r["skipped"] == ["recreated_edit.aep (After Effects not installed)"]
-    (out / "recreated_edit.xml").unlink()
+    (out / "1_edit.xml").unlink()                  # the Premiere sequence, in the run folder (= out here)
     r = verify.check_deliverables(ctx, n_cuts=1)
-    assert r["status"] == "fail" and any("recreated_edit.xml missing" in f for f in r["failures"])
+    assert r["status"] == "fail" and any("1_edit.xml missing" in f for f in r["failures"])
     ctx, out = _deliverables_ctx(tmp_path / "b", exports={"ok": False, "errors": ["duration 299 != 300"]})
     assert "validation did not pass" in verify.check_deliverables(ctx)["failures"][0]
     ctx, out = _deliverables_ctx(tmp_path / "c", errors=[{"stage": "S8 compare.mp4", "error": "OSError: disk full"}])

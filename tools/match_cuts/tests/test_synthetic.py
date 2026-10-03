@@ -100,8 +100,15 @@ def e2e(venv_python, synthetic, tmp_path_factory) -> dict:
         proc = _run_cli(venv_python, synthetic, out, work)
     elapsed = time.perf_counter() - t0
     truth = json.loads(Path(synthetic["truth"]).read_text())
-    return {"proc": proc, "out": out, "work": work, "root": root, "truth": truth, "elapsed": elapsed,
-            "synthetic": synthetic, "python": venv_python}
+    return {"proc": proc, "out": _extras(out), "base": out, "work": work, "root": root, "truth": truth,
+            "elapsed": elapsed, "synthetic": synthetic, "python": venv_python}
+
+
+def _extras(base: Path) -> Path:
+    """The extras folder of the newest numbered run folder (<--out>/<NNN>/extras: everything but 1_edit.xml and
+    2_captions.srt, which sit in <NNN>)."""
+    runs = sorted((int(p.name), p) for p in base.iterdir() if p.is_dir() and p.name.isdigit()) if base.is_dir() else []
+    return runs[-1][1] / "extras" if runs else base / "001" / "extras"
 
 
 def _tail(proc: subprocess.CompletedProcess, n: int = 60) -> str:
@@ -812,18 +819,19 @@ def test_layout_truth(e2e, cutlist):
 
 def test_second_run_identical_cutlist(e2e, cutlist):
     """Criterion 9.7: a second CLI run with the SAME arguments (same inputs, same --out, same --work ->
-    caches) writes an identical cutlist.json. Wall-clock provenance.timings is the only field allowed to
-    differ (DESIGN §1). (A different --out legitimately changes the absolute media paths the JSX falls
-    back to, so the rerun must use the same output directory.)"""
+    caches) writes an identical cutlist.json into the next numbered run folder. Wall-clock provenance.timings and
+    the location-only media fields (the run folder's absolute media paths) are the only fields allowed to differ
+    (DESIGN §1)."""
+    from match_cuts.verify import previous_run_canonical
     first = _need(e2e, "cutlist.json").read_bytes()
-    out2 = e2e["out"]
-    proc = _run_cli(e2e["python"], e2e["synthetic"], out2, e2e["work"])
-    p2 = out2 / "cutlist.json"
+    proc = _run_cli(e2e["python"], e2e["synthetic"], e2e["base"], e2e["work"])
+    p2 = _extras(e2e["base"]) / "cutlist.json"
+    assert p2 != e2e["out"] / "cutlist.json", "the second run must get its own numbered folder"
     assert p2.exists(), f"second run wrote no cutlist.json (exit {proc.returncode}){_tail(proc)}"
     second = p2.read_bytes()
     if first == second:
         return
-    a, b = json.loads(first), json.loads(second)
+    a, b = previous_run_canonical(json.loads(first)), previous_run_canonical(json.loads(second))
     for d in (a, b):
         d.get("provenance", {}).pop("timings", None)
     diffs: list[list] = []

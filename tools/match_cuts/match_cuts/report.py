@@ -1105,15 +1105,18 @@ def _how_to_open(ctx: Any) -> list[str]:
                    "clip's picture edges are checked from the XML's own values: none leaves the window uncovered."
                    if "framing_changes" in xv else "")
         return [
-            "1. Premiere Pro → **File → Import…** → `recreated_edit.xml` (keep the output folder together: the XML "
-            f"points at `{raw_file}`; relink if Premiere asks).",
+            "1. Premiere Pro → **File → Import…** → `1_edit.xml` in the run folder (this report sits in its `extras/`; "
+            f"the XML points at `extras/{raw_file}` by its full path — keep the run folder together; relink if Premiere "
+            "asks).",
             "2. The sequence `Recreated Edit (Premiere)` is 1080×1920 at 60.00 fps: the edit on V1 (each clip framed into "
             "your template window), the RAW audio on A1 with the same cuts, V2 and above empty — put your overlay template "
             "and captions there." + framing,
             "3. Sequence markers name the UNCERTAIN and NOT-IN-RAW spots (and RETIME spots Premiere's XML cannot carry). "
             "Each clip's comment lists the Motion values to expect (Position, Scale) — check one clip after import.",
-            "4. Captions: **File → Import…** → `captions.srt`, then drag it onto the sequence at 00:00:00:00 (Premiere "
+            "4. Captions: **File → Import…** → `2_captions.srt`, then drag it onto the sequence at 00:00:00:00 (Premiere "
             "puts it on a caption track). The Captions section of this report lists what to check.",
+            "5. Upgrade the captions to graphics, save the project, then `python -m match_cuts restyle \"<project>.prproj\"` "
+            "writes `3_captions_styled.prproj` into the run folder (your project is never changed).",
         ]
     return [
         "1. Copy the whole output folder (the `.jsx` finds `media/` next to itself; keep them together).",
@@ -1127,7 +1130,7 @@ def _how_to_open(ctx: Any) -> list[str]:
         "Turn its video switch on: black means the recreation matches the competitor exactly. Guide layers never render.",
         "6. Guide layers outline the header / title / caption / watermark zones — drop your own assets there. "
         "`MISSING – not in RAW` solids mark the ranges that have to be filled with your own footage.",
-        "7. Alternative route: import `recreated_edit.xml` (FCP7 XML) in Premiere Pro or DaVinci Resolve.",
+        "7. Alternative route: import `1_edit.xml` (FCP7 XML, in the run folder) in Premiere Pro or DaVinci Resolve.",
     ]
 
 
@@ -1136,14 +1139,14 @@ def _tc(c: dict) -> str:
 
 
 def _captions(ctx: Any) -> list[str]:
-    """captions.srt (captions.py): the mode of each part, the caption-generator-prompt.md checks (24-character cap,
+    """2_captions.srt (captions.py): the mode of each part, the caption-generator-prompt.md checks (24-character cap,
     *...* placeholders, possible mis-transcriptions / doubled / missing words) and every OCR / transcript
     disagreement. Flagged, never corrected."""
     cap = getattr(ctx, "captions", None) or {}
     if not cap:
         return ["Captions were not made in this run."]
     if cap.get("error"):
-        return [f"captions.srt was not written: {cap['error']}"]
+        return [f"2_captions.srt was not written: {cap['error']}"]
     fps = cap.get("fps", "60")
     out = []
     mode = cap.get("mode")
@@ -1172,10 +1175,10 @@ def _captions(ctx: Any) -> list[str]:
                f"{tr.get('words', 0)} words with word timestamps" + (f" (**not available**: {tr['error']})"
                                                                      if tr.get("error") else "") + ".")
     if cap.get("path"):
-        out.append(f"- File: `captions.srt` — {cap.get('count', 0)} captions on the {fps} fps sequence "
+        out.append(f"- File: `2_captions.srt` (run folder) — {cap.get('count', 0)} captions on the {fps} fps sequence "
                    f"({cap.get('frames', 0)} frames), frame-exact (competitor frame k = sequence frame "
                    f"{'2k' if str(fps) == '60' else 'k x ratio'} for a 30 fps competitor). Premiere: File → Import → "
-                   "captions.srt, then drag it onto the sequence (a caption track above V2).")
+                   "2_captions.srt, then drag it onto the sequence (a caption track above V2).")
     for w in cap.get("warnings") or []:
         out.append(f"- Warning: {w}")
     for n in cap.get("notes") or []:
@@ -1287,7 +1290,7 @@ def _broll(ctx: Any) -> list[str]:
             "RAW clip keeps playing with no RAW audio under it. V1 is never left empty. "
             if follow else "- `--no-broll`: ")
     out = [f"{lead}**{len(rep)} spot(s) replaced**, **{len(kept)} kept** as the competitor has them.",
-           "- Changed: `recreated_edit.xml` (a `B-ROLL REPLACED` marker on each spot), `recreated_edit.edl` and "
+           "- Changed: `1_edit.xml` (a `B-ROLL REPLACED` marker on each spot), `recreated_edit.edl` and "
            "`cutlist.csv`; the A1 audio follows the picture. `cutlist.json`, the preview / compare renders and the "
            "verification above still describe the competitor's own edit."]
     for n in br.get("notes") or []:
@@ -1334,7 +1337,7 @@ def _seconds(t: float) -> str:
 
 
 def _outputs(ctx: Any) -> list[str]:
-    out_dir = Path(getattr(ctx.cfg, "out_dir", "."))
+    out_dir = Path(getattr(ctx.cfg, "deliver", None) or getattr(ctx.cfg, "out_dir", "."))    # paths from the run folder
     paths = getattr(ctx, "paths", {}) or {}
     rows = []
     desc = {"jsx": "After Effects build script", "aep": "After Effects project", "cutlist": "cut list (source of truth)",

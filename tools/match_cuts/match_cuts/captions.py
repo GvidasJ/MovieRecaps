@@ -1,4 +1,4 @@
-"""Captions: ``output/captions.srt`` on the Premiere sequence (60.00 fps), by the rules of caption-generator-prompt.md.
+"""Captions: ``<run folder>/2_captions.srt`` on the Premiere sequence (60.00 fps), by the rules of caption-generator-prompt.md.
 
 Two modes, chosen per clip (``--captions auto|competitor|voice``, pipeline.stage_captions):
 
@@ -808,7 +808,7 @@ def _caption_dict(c: Caption, fps: Fraction) -> dict:
 
 
 def run_captions(ctx) -> dict:
-    """Write ``<out>/captions.srt`` for a pipeline.Context (after the exports) and return the report data."""
+    """Write ``<run folder>/2_captions.srt`` for a pipeline.Context (after the exports); returns the report data."""
     from .common import dump_json, log
     from .export_xml_edl import premiere_settings
     cfg = ctx.cfg
@@ -827,7 +827,8 @@ def run_captions(ctx) -> dict:
         res["warnings"].append(msg)
         ctx.warn(f"captions: {msg}")
 
-    stale = cfg.out / "captions.srt"              # this run's captions only (an older file never survives)
+    from .run_folders import CAPTIONS_SRT
+    stale = cfg.deliver / CAPTIONS_SRT            # this run's captions only (an older file never survives)
     if stale.exists():
         stale.unlink()
 
@@ -943,7 +944,7 @@ def run_captions(ctx) -> dict:
         caps = voice_captions(words, fps, n_seq, notes=weak)
     else:
         caps = []
-        warn("captions.srt not written: no competitor captions and no transcribed speech")
+        warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
     res["weak_kept"] = [{"time": w["time"], "text": w["text"], "reason": w["reason"]} for w in weak]
     if words:
         fill_words = (words if mode == "voice" else loose if spans else
@@ -957,7 +958,7 @@ def run_captions(ctx) -> dict:
     res["over_cap"] = [_caption_dict(c, fps) for c in caps if len(c.text.replace("\n", " ")) >= HARD_CAP]
     res["stats"] = caption_stats(caps, fps) if caps else {}
     if caps:
-        p = write_srt(caps, cfg.out / "captions.srt", fps)
+        p = write_srt(caps, cfg.deliver / CAPTIONS_SRT, fps)
         res["path"] = str(p)
         dump_json(res, cfg.debug_dir / "captions.json")
         log.info("captions: %d captions (%s) -> %s", len(caps), mode, p)

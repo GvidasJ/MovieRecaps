@@ -175,21 +175,41 @@ def set_caption_text(text: str, item: str, words: str) -> str:
 @pytest.fixture(scope="module")
 def plain_run(tmp_path_factory):
     d = tmp_path_factory.mktemp("plain")
-    src = d / "plain_captions.prproj"
+    (d / "project").mkdir()
+    src = d / "project" / "plain_captions.prproj"                     # the user's project, saved anywhere
     shutil.copy(PLAIN, src)
+    run = d / "output" / "001"                                          # the run folder (python -m match_cuts ...)
+    run.mkdir(parents=True)
     lines: list[str] = []
-    out = restyle.restyle(src, echo=lines.append)
+    out = restyle.restyle(src, echo=lines.append, out_dir=run)
     return src, out, lines
 
 
-def test_writes_name_styled_next_to_the_original_and_never_touches_it(plain_run):
+def test_writes_3_captions_styled_into_the_run_folder_and_never_touches_the_project(plain_run):
     src, out, _ = plain_run
-    assert out == src.with_name("plain_captions_styled.prproj")
+    assert out == src.parents[1] / "output" / "001" / "3_captions_styled.prproj"
     assert src.read_bytes() == PLAIN.read_bytes()
     assert out.read_bytes()[:2] == b"\x1f\x8b"                         # a gzipped project, as Premiere saves it
-    assert sorted(p.name for p in src.parent.iterdir()) == ["plain_captions.prproj", "plain_captions_styled.prproj"]
+    assert sorted(p.name for p in src.parent.iterdir()) == ["plain_captions.prproj"]
+    assert sorted(p.name for p in out.parent.iterdir()) == ["3_captions_styled.prproj"]
     with pytest.raises(restyle.RestyleError, match="already exists"):  # a second run never replaces it silently
-        restyle.restyle(src, echo=lambda s: None)
+        restyle.restyle(src, echo=lambda s: None, out_dir=out.parent)
+    with pytest.raises(restyle.RestyleError, match="is the styled copy itself"):
+        restyle.restyle(out, echo=lambda s: None, out_dir=out.parent, overwrite=True)
+
+
+def test_default_target_is_the_newest_run_folder(tmp_path, monkeypatch):
+    from match_cuts import run_folders
+    base = tmp_path / "output"
+    monkeypatch.setattr(run_folders, "default_output_bases", lambda: [tmp_path / "nothing_here", base])
+    with pytest.raises(restyle.RestyleError, match="no numbered run folder found.*pass --out"):
+        restyle.styled_path()
+    for n in ("001", "002", "010", "notes"):
+        (base / n).mkdir(parents=True)
+    assert restyle.styled_path() == base / "010" / "3_captions_styled.prproj"
+    assert restyle.styled_path(base / "002") == base / "002" / "3_captions_styled.prproj"      # --out
+    with pytest.raises(restyle.RestyleError, match="--out folder not found"):
+        restyle.styled_path(base / "099")
 
 
 def test_restyled_plain_reference_is_popw_reference(plain_run, tmp_path):
@@ -260,7 +280,7 @@ def test_project_without_a_style_item_gets_popw_injected(tmp_path):
     x = re.sub(rf'\n\s*<Item Index="\d+" ObjectURef="{POPW_UID}"/>', "", x, count=1)
     assert "<StyleProjectItem" not in x and f'ObjectURef="{POPW_UID}"' not in x
     lines: list[str] = []
-    out = restyle.restyle(pack(x, tmp_path / "no_style.prproj"), echo=lines.append)
+    out = restyle.restyle(pack(x, tmp_path / "no_style.prproj"), echo=lines.append, out_dir=tmp_path)
     y = Doc(unpack(out))
     style = re.findall(r'\n\t<StyleProjectItem ObjectUID="([^"]+)".*?<Name>([^<]*)</Name>', y.x, re.S)
     assert style == [(POPW_UID, "POPW")]
@@ -299,7 +319,8 @@ def test_styled_caption_on_another_track_is_the_donor(tmp_path):
     assert code == 0, log
     mixed = pack((tmp_path / "mixed.xml").read_text(encoding="utf-8"), tmp_path / "mixed.prproj")
     lines: list[str] = []
-    out = restyle.restyle(mixed, donor=tmp_path / "no_such_reference.prproj", echo=lines.append)  # not needed
+    out = restyle.restyle(mixed, donor=tmp_path / "no_such_reference.prproj", echo=lines.append,  # not needed
+                          out_dir=tmp_path)
     assert lines[0].startswith("Restyled 17 captions on V8")
     assert 'copied from V7 of "FOCUS SCENE 1" of this project' in lines[1]
     y, ref = Doc(unpack(out)), POPW_DOC.items(POPW_TG, CAPTIONS)
@@ -317,7 +338,7 @@ def test_trimmed_donor_anchors_the_pop_on_its_keyframes(tmp_path):
     src = tmp_path / "plain_captions.prproj"
     shutil.copy(PLAIN, src)
     lines: list[str] = []
-    out = restyle.restyle(src, donor=pack(d, tmp_path / "trimmed.prproj"), echo=lines.append)
+    out = restyle.restyle(src, donor=pack(d, tmp_path / "trimmed.prproj"), echo=lines.append, out_dir=tmp_path)
     assert any(f"note: donor keyframes sit {-4 * FRAME:+d} ticks from its in-point" in ln for ln in lines)
     y = Doc(unpack(out))                                     # every pop still starts on its caption's first frame
     assert differences(y, y.items(PLAIN_TG, CAPTIONS), POPW_DOC, POPW_DOC.items(POPW_TG, CAPTIONS)) == []
@@ -333,7 +354,7 @@ def test_capverify_problem_writes_nothing_and_prints_the_problems(tmp_path, caps
     bad = pack(d, tmp_path / "bad.prproj")
     src = tmp_path / "plain_captions.prproj"
     shutil.copy(PLAIN, src)
-    assert cli.main(["restyle", str(src), "--donor", str(bad)]) == 1
+    assert cli.main(["restyle", str(src), "--donor", str(bad), "--out", str(tmp_path)]) == 1
     err = capsys.readouterr().err
     assert "capverify found problems" in err and "18 PROBLEM(S)" in err and "pop does not start at 88%" in err
     assert "nothing was written" in err
@@ -345,7 +366,7 @@ def test_already_styled_or_missing_projects_are_refused(tmp_path):
     src = tmp_path / "popw.prproj"
     shutil.copy(POPW, src)
     with pytest.raises(restyle.RestyleError, match="no plain caption clips found.*already styled"):
-        restyle.restyle(src, echo=lambda s: None)
+        restyle.restyle(src, echo=lambda s: None, out_dir=tmp_path)
     with pytest.raises(restyle.RestyleError, match="project not found"):
         restyle.restyle(tmp_path / "nope.prproj", echo=lambda s: None)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["popw.prproj"]
@@ -374,16 +395,18 @@ def test_cli_under_a_non_utf8_locale_keeps_numbers(tmp_path, venv_python):
     x = set_caption_text(x, items[1], "15,000 fans at 6 a.m.")
     x = set_caption_text(x, items[2], "the C.I.D. said 3.5, then 4,")
     src = pack(x, tmp_path / "my edit.prproj")
-    (tmp_path / "my edit_styled.prproj").write_bytes(b"an earlier result")
+    run = tmp_path / "out put" / "001"
+    run.mkdir(parents=True)
+    (run / "3_captions_styled.prproj").write_bytes(b"an earlier result")
     env = dict(os.environ, LC_ALL="C", LANG="C", PYTHONCOERCECLOCALE="0", PYTHONUTF8="0")
     env.pop("PYTHONIOENCODING", None)
-    cmd = [venv_python, "-m", "match_cuts", "restyle", str(src)]
+    cmd = [venv_python, "-m", "match_cuts", "restyle", str(src), "--out", str(run)]
     r = subprocess.run(cmd, cwd=TOOL_DIR, env=env, capture_output=True)
     assert r.returncode == 1 and b"already exists" in r.stderr and b"nothing was written" in r.stderr
-    assert (tmp_path / "my edit_styled.prproj").read_bytes() == b"an earlier result"
+    assert (run / "3_captions_styled.prproj").read_bytes() == b"an earlier result"
     r = subprocess.run(cmd + ["--overwrite"], cwd=TOOL_DIR, env=env, capture_output=True)
     assert r.returncode == 0, (r.stdout + r.stderr).decode("utf-8", "replace")
-    y = Doc(unpack(tmp_path / "my edit_styled.prproj"))
+    y = Doc(unpack(run / "3_captions_styled.prproj"))
     out = y.items(PLAIN_TG, CAPTIONS)
     assert [y.text(it) for it in out[:3]] == ["it cost £4.50 Mr Smith", "15,000 fans at 6 am",
                                                "the CID said 3.5 then 4"]

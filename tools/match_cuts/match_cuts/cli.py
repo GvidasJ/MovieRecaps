@@ -27,6 +27,7 @@ from typing import Sequence
 
 from . import __version__
 from .common import ffprobe_bin
+from . import run_folders
 from .config import Config
 
 DEFAULTS = {  # the prompt's Configuration block
@@ -99,7 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"the finished edit (default {DEFAULTS['competitor']}; auto-detected in --input-dir)")
     p.add_argument("--raw", default=None, metavar="Y",
                    help=f"the RAW source video (default {DEFAULTS['raw']}; auto-detected in --input-dir)")
-    p.add_argument("--out", default=DEFAULTS["out"], metavar="Z", help=f"output folder (default {DEFAULTS['out']})")
+    p.add_argument("--out", default=DEFAULTS["out"], metavar="Z",
+                   help=f"output folder (default {DEFAULTS['out']}): each run gets its own numbered folder in it (001, "
+                        "002, ...) with 1_edit.xml, 2_captions.srt and everything else in extras/")
     p.add_argument("--layout", default=DEFAULTS["layout"], choices=["match", "fill", "source"],
                    help="match = recreate the competitor layout (box, corners, background, per-shot framing); "
                         "fill = full-screen 9:16 keeping the per-shot framing; source = cuts only at RAW size "
@@ -127,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "default names do not exist (default ./input)")
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
     p.add_argument("--premiere", action="store_true",
-                   help="Premiere Pro only: no After Effects export or checks; recreated_edit.xml is a 1080x1920 sequence "
+                   help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
                         "holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing that still "
                         "covers the template window x 42-1039, y 555-1591. B-roll follows the audio: every NOT-IN-RAW / "
@@ -143,10 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-broll", action="store_true",
                    help="where the competitor cuts away (B-roll from the RAW or not in it) while the RAW audio keeps "
                         "playing, the export shows the RAW video that matches the audio instead (the main clip plays "
-                        "through); cutaways over music / voice-over stay as they are. Changes recreated_edit.xml, the "
+                        "through); cutaways over music / voice-over stay as they are. Changes 1_edit.xml, the "
                         "EDL and cutlist.csv; report.md lists every replaced and kept cutaway")
     p.add_argument("--captions", default="auto", choices=["auto", "competitor", "voice"],
-                   help="output/captions.srt (60 fps sequence): auto = copy the competitor's burned-in captions when it "
+                   help="2_captions.srt (60 fps sequence): auto = copy the competitor's burned-in captions when it "
                         "has them (OCR; uncaptioned speech filled from the voice-over), else make them from the voice-over "
                         "by caption-generator-prompt.md; competitor / voice force one mode")
     p.add_argument("--voiceover", default=None, metavar="FILE",
@@ -314,8 +317,11 @@ def headline(result: dict) -> str:
         return {0: "PASS", 2: "ERROR", 3: "PASS (some criterion not verified)"}.get(int(code), "FAIL")
 
 
-def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 20) -> str:
-    """The final chat summary: overall headline, pass/fail per criterion, output paths, warnings."""
+def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max_rows: int = 12) -> str:
+    """The end-of-run summary: overall headline, pass/fail per criterion, the files to use (the run folder's
+    1_edit.xml and 2_captions.srt; 3_captions_styled.prproj comes from the restyle command; everything else in
+    extras/), what to check by hand (B-ROLL REPLACED spots, uncertain / NOT-IN-RAW spots, captions worth a look),
+    the first warnings, and the run folder."""
     crit = result.get("criteria") or {}
     checks = result.get("checks") or {}
     lines = []
@@ -330,18 +336,38 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 20) ->
             st = STATUS_TEXT.get(chk.get("status"), str(chk.get("status") or "not run").upper())
             lines.append(f"  {label:<30} {st:<6} {chk.get('summary', '')}")
     lines.append("  (PASS* = passed with listed, explained exceptions; N/A = could not be verified on this machine)")
+    run = Path(str(result.get("run_dir") or out_dir))
     paths = result.get("paths") or {}
-    if paths:
-        lines.append(f"Outputs ({out_dir}):")
-        for k, p in paths.items():
-            lines.append(f"  {k:<10} {p}")
+    ctx = result.get("context")
+    premiere = bool(getattr(getattr(ctx, "cfg", None), "premiere", False))
+    lines.append("Files:")
+    lines.append(f"  {run_folders.EDIT_XML:<26} {paths.get('xml') or 'not written'}")
+    lines.append(f"  {run_folders.CAPTIONS_SRT:<26} {paths.get('captions') or 'not written'}")
+    if premiere:
+        lines.append(f"  {run_folders.STYLED_PRPROJ:<26} import both into Premiere, upgrade the captions to graphics, "
+                     'save, then: python -m match_cuts restyle "<project>.prproj"')
+    if paths.get("jsx"):
+        lines.append(f"  {'build_ae_project.jsx':<26} {paths['jsx']}")
+    extras = Path(paths["report"]).parent if paths.get("report") else run / run_folders.EXTRAS
+    lines.append(f"  {run_folders.EXTRAS:<26} {extras} (report.md, cutlist, EDL, verify.json, preview, compare, debug, "
+                 "media, log)")
+    hc = result.get("checklist")
+    if hc is not None:
+        lines.append("Check by hand:")
+        for key, title in (("broll", "B-ROLL REPLACED spots"), ("spots", "Uncertain / NOT-IN-RAW / retimed spots"),
+                           ("captions", "Captions worth a look")):
+            rows = list(hc.get(key) or [])
+            lines.append(f"  {title}: {len(rows) if rows else 'none'}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
+            if len(rows) > max_rows:
+                lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
     warns = list(result.get("warnings") or [])
     if warns:
-        lines.append(f"Warnings ({len(warns)}):")
+        lines.append(f"Warnings: {len(warns)}" + (f" (the first {max_warnings}; all in {run_folders.EXTRAS}/report.md)"
+                                                  if len(warns) > max_warnings else ""))
         for w in warns[:max_warnings]:
             lines.append(f"  - {w}")
-        if len(warns) > max_warnings:
-            lines.append(f"  ... {len(warns) - max_warnings} more in report.md")
+    lines.append(f"Run folder: {run}")
     return "\n".join(lines)
 
 
@@ -374,22 +400,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)
     cfg = config_from_args(args, comp, raw)
+    # each run its own numbered folder in --out: 1_edit.xml / 2_captions.srt there, everything else in its extras/
+    base = Path(cfg.out_dir)
+    prev = run_folders.newest_run_dir(base)
+    run_dir = run_folders.new_run_dir(base)
+    cfg.deliver_dir, cfg.out_dir = str(run_dir), str(run_dir / run_folders.EXTRAS)
+    if prev is not None and (prev / run_folders.EXTRAS / "cutlist.json").is_file():
+        cfg.previous_out_dir = str(prev / run_folders.EXTRAS)          # s9_7: compared with the previous run
     from . import pipeline
     try:
         result = pipeline.run(cfg)
     except KeyboardInterrupt:
         print("match_cuts: interrupted", file=sys.stderr)
+        print(f"Run folder: {run_dir}", file=sys.stderr)
         return 130
     except Exception as e:  # noqa: BLE001 - reported to the user with the log location
         print(f"match_cuts: ERROR: {type(e).__name__}: {e}", file=sys.stderr)
         if cfg.verbose:
             traceback.print_exc()
-        print(f"match_cuts: details in {Path(cfg.work_dir) / 'match_cuts.log'}", file=sys.stderr)
+        print(f"match_cuts: details in {Path(cfg.out_dir) / 'match_cuts.log'}", file=sys.stderr)
+        print(f"Run folder: {run_dir}", file=sys.stderr)
         return 2
     if notes:
         result.setdefault("warnings", [])
         result["warnings"] = notes + [w for w in result["warnings"] if w not in notes]
-    print(format_summary(result, cfg.out_dir))
+    result.setdefault("run_dir", str(run_dir))
+    print(format_summary(result, run_dir))
     return int(result.get("exit_code", 1))
 
 

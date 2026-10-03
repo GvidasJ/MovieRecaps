@@ -21,6 +21,7 @@ import pytest
 
 import match_cuts
 from match_cuts import cli, pipeline
+from match_cuts.verify import previous_run_canonical
 from match_cuts.common import file_hash, null_dlog
 from match_cuts.config import Config
 from match_cuts.geometry import Sim
@@ -154,10 +155,19 @@ def test_main_reports_input_errors(tmp_path, capsys):
 # summary + exit codes (pipeline.run stubbed)
 # ---------------------------------------------------------------------------------------------
 
+def _x(out: Path) -> Path:
+    """The extras folder of the newest numbered run folder in --out."""
+    runs = sorted((int(p.name), p) for p in Path(out).iterdir() if p.is_dir() and p.name.isdigit())
+    return runs[-1][1] / "extras"
+
+
 def _fake_result(statuses: dict[str, str], det: str = "pass") -> dict:
     crit = {k: {"status": v, "summary": f"{k} summary"} for k, v in statuses.items()}
     checks = {"s9_7_determinism": {"status": det, "summary": "det"}}
-    return {"criteria": crit, "checks": checks, "warnings": ["w1"], "paths": {"cutlist": "out/cutlist.json"},
+    return {"criteria": crit, "checks": checks, "warnings": ["w1"],
+            "paths": {"xml": "out/001/1_edit.xml", "report": "out/001/extras/report.md"},
+            "checklist": {"broll": ["00:00:01:02-00:00:03:48  B-ROLL REPLACED S03: the RAW of the audio there"],
+                          "spots": [], "captions": ["00:00:04,067-00:00:04,300  caption 'a' / spoken 'b'"]},
             "exit_code": pipeline.exit_code_for(crit, checks)}
 
 
@@ -205,13 +215,18 @@ def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys
                   "c5 audio", "c6 After Effects"):
         assert sum(1 for ln in lines if ln.strip().startswith(label)) == 1
     assert "match_cuts result: PASS" in out.out and "PASS*" in out.out
-    assert "out/cutlist.json" in out.out and "w1" in out.out and "swapped" in out.out
+    assert "out/001/1_edit.xml" in out.out and "w1" in out.out and "swapped" in out.out
+    assert "B-ROLL REPLACED spots: 1" in out.out and "Uncertain / NOT-IN-RAW / retimed spots: none" in out.out
+    assert "Captions worth a look: 1" in out.out and "caption 'a' / spoken 'b'" in out.out
+    assert out.out.rstrip().endswith(f"Run folder: {tmp_path / '001'}")                # printed at the end
+    assert seen["cfg"].deliver_dir == str(tmp_path / "001") and seen["cfg"].out_dir == str(tmp_path / "001" / "extras")
+    o = ["--out", str(tmp_path)]
     monkeypatch.setattr(pipeline, "run", lambda cfg: _fake_result({**ALL_PASS, "c3_source_frames": "fail"}))
-    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 1
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])] + o) == 1
     assert "match_cuts result: FAIL" in capsys.readouterr().out
     # criterion 6 never checked (no Node, no AE): not a plain PASS and not exit 0 (verification-honesty F10)
     monkeypatch.setattr(pipeline, "run", lambda cfg: _fake_result({**ALL_PASS, "c6_after_effects": "not_available"}))
-    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 3
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])] + o) == 3
     out = capsys.readouterr().out
     assert "match_cuts result: PASS (criterion 6 not verified: c6_after_effects summary)" in out
     assert "match_cuts result: PASS\n" not in out
@@ -220,14 +235,14 @@ def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys
     res["checks"]["s9_8_deliverables"] = {"status": "fail", "summary": "1 problem(s): deliverable missing: xml"}
     res["exit_code"] = pipeline.exit_code_for(res["criteria"], res["checks"])
     monkeypatch.setattr(pipeline, "run", lambda cfg: res)
-    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 1
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])] + o) == 1
     out = capsys.readouterr().out
     assert "match_cuts result: FAIL" in out and "9.8 deliverables" in out and "deliverable missing: xml" in out
 
     def boom(cfg):
         raise RuntimeError("kaputt")
     monkeypatch.setattr(pipeline, "run", boom)
-    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])]) == 2
+    assert cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"])] + o) == 2
     assert "kaputt" in capsys.readouterr().err
 
 
@@ -659,7 +674,7 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     code = cli.main(argv)
     printed = capsys.readouterr().out
     assert code == 0, printed
-    verify = json.loads((out / "verify.json").read_text())
+    verify = json.loads((_x(out) / "verify.json").read_text())
     st = {k: v["status"] for k, v in verify["criteria"].items()}
     # the stub world has 64x36 frames: verify's own measurements may list explained exceptions there
     assert set(st) == {"c1_coverage", "c2_cuts", "c3_source_frames", "c4_speed_framing", "c5_audio",
@@ -672,13 +687,18 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     assert verify["checks"]["s9_3_visual"]["distribution"]["min"] > 0.99
     assert calls["mock"] == list(pipeline.MOCK_SCENARIOS) and calls["compare_src"].endswith("preview_recreation.mp4")
     # deliverables
-    for rel in ("cutlist.json", "cutlist.csv", "recreated_edit.xml", "recreated_edit.edl", "build_ae_project.jsx",
-                "preview_recreation.mp4", "compare.mp4", "report.md", "verify.json", "media/competitor_ref.mp4",
-                f"media/{clips['landscape'].name}", "debug/cuts/cut_01.png", "debug/cuts/cut_03.png"):
-        assert (out / rel).exists(), rel
-    for rel in ("frame_map.npz", "decisions.jsonl", "match_cuts.log", "layout.json", "ae_plan.json"):
+    run = out / "001"                               # each run its own numbered folder; the files used at the top
+    assert sorted(p_.name for p_ in run.iterdir()) == ["1_edit.xml", "2_captions.srt", "extras"] or \
+        sorted(p_.name for p_ in run.iterdir()) == ["1_edit.xml", "extras"]
+    for rel in ("cutlist.json", "cutlist.csv", "recreated_edit.edl", "build_ae_project.jsx",
+                "preview_recreation.mp4", "compare.mp4", "report.md", "verify.json", "match_cuts.log",
+                "media/competitor_ref.mp4", f"media/{clips['landscape'].name}", "debug/cuts/cut_01.png",
+                "debug/cuts/cut_03.png"):
+        assert (run / "extras" / rel).exists(), rel
+    for rel in ("frame_map.npz", "decisions.jsonl", "layout.json", "ae_plan.json"):
         assert (work / rel).exists(), rel
-    cl = json.loads((out / "cutlist.json").read_text())
+    assert f"Run folder: {run}" in printed and str(run / "1_edit.xml") in printed
+    cl = json.loads((_x(out) / "cutlist.json").read_text())
     assert cl["competitor"]["file"] == "media/competitor_ref.mp4" and cl["competitor"]["fps"] == "30/1"
     assert cl["raw"]["frames"] == RAW_N and cl["raw"]["conformed"] is False and cl["raw"]["source_path"]
     assert cl["layout"]["mode"] == "match" and cl["settings"]["main_fps"] == "30/1"
@@ -695,7 +715,7 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     assert np.array_equal(fm.raw, truth)
     decisions = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
     assert any(d["stage"] == "phase_solve" and d["decision"] == "raw_in" for d in decisions)
-    report = (out / "report.md").read_text()
+    report = (_x(out) / "report.md").read_text()
     assert report.index("## 1. Summary") < report.index("## 2. Acceptance criteria")   # plain-language summary first
     assert "Section could not be rendered" not in report
     for line in ("c1 coverage", "c6 After Effects", "9.7 determinism"):
@@ -703,15 +723,16 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     assert calls["refine"] == 1 and calls["index"] == 1
 
     # second run: FrameMap cache hit (no search / refine), identical cutlist apart from timings
-    first = json.loads((out / "cutlist.json").read_text())
+    first = json.loads((_x(out) / "cutlist.json").read_text())
     assert cli.main(argv) == 0
     capsys.readouterr()
     assert calls["refine"] == 1 and calls["index"] == 1
-    second = json.loads((out / "cutlist.json").read_text())
+    second = json.loads((_x(out) / "cutlist.json").read_text())
     first["provenance"].pop("timings")
     second["provenance"].pop("timings")
-    assert first == second
-    det = json.loads((out / "verify.json").read_text())["checks"]["s9_7_determinism"]
+    assert previous_run_canonical(first) == previous_run_canonical(second)      # same apart from the run folder
+    assert _x(out) == out / "002" / "extras"           # a new folder: the previous run is never overwritten
+    det = json.loads((_x(out) / "verify.json").read_text())["checks"]["s9_7_determinism"]
     assert det["previous_run"] == {"compared": True, "identical": True, "differences": []}
     assert "identical to the previous run" in det["summary"]
     assert second["raw"]["conform_reason"] == "AE-safe: used unchanged"
@@ -728,8 +749,8 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     assert not any(d.get("cached") for d in decisions)                  # the first run computed everything
     assert (work / "cache" / "decisions").is_dir() and any((work / "cache" / "decisions").glob("frame_map-*.jsonl"))
     # each report links its own evidence: <out>/debug/decisions.jsonl is this run's complete log
-    assert (out / "debug" / "decisions.jsonl").read_text() == (work / "decisions.jsonl").read_text()
-    assert json.loads((out / "verify.json").read_text())["checks"]["s9_8_deliverables"]["status"] == "pass"
+    assert (_x(out) / "debug" / "decisions.jsonl").read_text() == (work / "decisions.jsonl").read_text()
+    assert json.loads((_x(out) / "verify.json").read_text())["checks"]["s9_8_deliverables"]["status"] == "pass"
 
 
 def test_end_to_end_non_match_layout_uses_in_memory_render(monkeypatch, clips, tmp_path, capsys):
@@ -739,7 +760,7 @@ def test_end_to_end_non_match_layout_uses_in_memory_render(monkeypatch, clips, t
     code = cli.main(["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out),
                      "--work", str(tmp_path / "w"), "--layout", "fill", "--skip-preview"])
     capsys.readouterr()
-    verify = json.loads((out / "verify.json").read_text())
+    verify = json.loads((_x(out) / "verify.json").read_text())
     assert verify["checks"]["s9_3_visual"]["source"] == "in-memory match render"
     assert verify["checks"]["s9_3_visual"]["status"] == "pass"
     assert isinstance(calls["compare_src"], dict)          # match-geometry RenderContext, not the fill preview
@@ -1220,7 +1241,7 @@ def test_long_raw_proxy_windows_survive_the_frame_map_cache(monkeypatch, clips, 
     argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work",
             str(work), "--skip-compare"]
     cli.main(argv)
-    first = json.loads((out / "cutlist.json").read_text())
+    first = json.loads((_x(out) / "cutlist.json").read_text())
     n_ext_first = len(calls["extend"])
     cli.main(argv)
     capsys.readouterr()
@@ -1230,10 +1251,10 @@ def test_long_raw_proxy_windows_survive_the_frame_map_cache(monkeypatch, clips, 
     # each run segments once and verify s9_7 re-assembles once: all four see the same RAW frames
     assert len(runs) == 4 and all(r == runs[0] for r in runs)
     assert set(range(5, 77)) <= set(runs[0]) and len(runs[0]) > len(range(0, RAW_N, 8))
-    second = json.loads((out / "cutlist.json").read_text())
+    second = json.loads((_x(out) / "cutlist.json").read_text())
     first["provenance"].pop("timings")
     second["provenance"].pop("timings")
-    assert first == second
+    assert previous_run_canonical(first) == previous_run_canonical(second)      # same apart from the run folder
     decisions = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
     assert any(d["decision"] == "frame_map_windows" and d["n"] >= 1 for d in decisions)
 
@@ -1268,7 +1289,7 @@ def test_box_refined_against_raw_reruns_visual_stages(monkeypatch, clips, tmp_pa
     printed = capsys.readouterr().out
     assert calls["refine"] == 2 and calls["refine_boxes"] == [Box(0, 0, W, H).to_dict(), grown.to_dict()]
     assert any(p.endswith("refined_overlays.npz") for p in calls["ov_load"])   # pass 2 starts from its masks
-    cl = json.loads((out / "cutlist.json").read_text())
+    cl = json.loads((_x(out) / "cutlist.json").read_text())
     assert cl["layout"]["box"] == grown.to_dict()
     assert any("truncated/partial file" in w and w.startswith("raw input") for w in cl["warnings"])
     assert "truncated/partial file" in printed
@@ -1279,10 +1300,10 @@ def test_box_refined_against_raw_reruns_visual_stages(monkeypatch, clips, tmp_pa
     assert cli.main(argv) == 0
     capsys.readouterr()
     assert calls["refine"] == 2
-    cl2 = json.loads((out / "cutlist.json").read_text())
+    cl2 = json.loads((_x(out) / "cutlist.json").read_text())
     cl["provenance"].pop("timings")
     cl2["provenance"].pop("timings")
-    assert cl == cl2
+    assert previous_run_canonical(cl) == previous_run_canonical(cl2)
     again = [json.loads(ln) for ln in (work / "decisions.jsonl").read_text().splitlines()]
     assert sum(1 for d in again if d["stage"] == "refine" and d["decision"] == "cache_hit") == 2
     assert any(d["decision"] == "track" and d.get("cached") for d in again)
@@ -1300,7 +1321,7 @@ def test_box_refinement_missing_or_failing_is_not_fatal(monkeypatch, clips, tmp_
                      "--work", str(tmp_path / "w"), "--skip-compare"]) == 0
     capsys.readouterr()
     assert calls["refine"] == 1
-    cl = json.loads((out / "cutlist.json").read_text())
+    cl = json.loads((_x(out) / "cutlist.json").read_text())
     assert any("box refinement against RAW failed" in w for w in cl["warnings"])
 
 
@@ -1483,7 +1504,7 @@ def test_pass1_visual_cache_keys_depend_on_the_layout(monkeypatch, clips, tmp_pa
         calls.clear()
         cli.main(base)
         capsys.readouterr()
-        decs = [json.loads(x) for x in (out / "debug" / "decisions.jsonl").read_text().splitlines() if x.strip()]
+        decs = [json.loads(x) for x in (_x(out) / "debug" / "decisions.jsonl").read_text().splitlines() if x.strip()]
         hit = any(d.get("stage") == "refine" and d.get("decision") == "cache_hit" for d in decs)
         return {p_.name for p_ in fm_dir.glob("*.npz")}, hit
     files_a, hit = run()
@@ -1518,7 +1539,7 @@ def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_pa
     assert cli.main(base + ["--out", str(out)]) == 1
     printed = capsys.readouterr().out
     assert "match_cuts result: FAIL" in printed and "9.8 deliverables" in printed
-    v = json.loads((out / "verify.json").read_text())
+    v = json.loads((_x(out) / "verify.json").read_text())
     chk = v["checks"]["s9_8_deliverables"]
     assert chk["status"] == "fail" and "edl" in json.dumps(chk)
     # validation failure alone also fails; skipped renders are listed as skipped, not missing
@@ -1527,13 +1548,13 @@ def test_missing_or_invalid_deliverable_fails_the_run(monkeypatch, clips, tmp_pa
     out2 = tmp_path / "o2"
     assert cli.main(base + ["--out", str(out2), "--skip-preview", "--skip-compare"]) == 1
     capsys.readouterr()
-    chk = json.loads((out2 / "verify.json").read_text())["checks"]["s9_8_deliverables"]
+    chk = json.loads((_x(out2) / "verify.json").read_text())["checks"]["s9_8_deliverables"]
     assert chk["status"] == "fail" and "39 frames != 40" in json.dumps(chk)
     monkeypatch.setattr(xe, "validate_exports", lambda cl, x, e: {"ok": True, "errors": []})
     out3 = tmp_path / "o3"
     assert cli.main(base + ["--out", str(out3), "--skip-preview", "--skip-compare"]) == 0
     capsys.readouterr()
-    chk = json.loads((out3 / "verify.json").read_text())["checks"]["s9_8_deliverables"]
+    chk = json.loads((_x(out3) / "verify.json").read_text())["checks"]["s9_8_deliverables"]
     assert chk["status"] == "pass"
 
 
@@ -1543,7 +1564,7 @@ def test_collect_deliverables_records_files_skips_and_errors(tmp_path):
     cfg.skip_compare = True
     ctx = pipeline.Context(cfg=cfg)
     (tmp_path / "o" / "debug").mkdir(parents=True)
-    for rel in ("build_ae_project.jsx", "cutlist.json", "cutlist.csv", "recreated_edit.xml", "preview_recreation.mp4",
+    for rel in ("build_ae_project.jsx", "cutlist.json", "cutlist.csv", "1_edit.xml", "preview_recreation.mp4",
                 "debug/mapping.png", "debug/scores.png", "debug/layout.png"):
         (tmp_path / "o" / rel).write_text("x")
     ctx.paths["jsx"] = str(tmp_path / "o" / "build_ae_project.jsx")
@@ -1558,7 +1579,7 @@ def test_collect_deliverables_records_files_skips_and_errors(tmp_path):
     d = pipeline.collect_deliverables(ctx, {"csv": True, "xml": True, "edl": False, "preview": True})
     assert set(d["files"]) >= {"jsx", "aep", "cutlist", "csv", "xml", "edl", "preview", "compare", "debug_mapping",
                                "debug_scores", "debug_layout", "media_raw", "media_competitor"}
-    assert d["files"]["xml"].endswith("recreated_edit.xml") and d["files"]["edl"] is None
+    assert d["files"]["xml"].endswith("1_edit.xml") and d["files"]["edl"] is None
     assert d["skipped"] == {"aep": "After Effects not installed on this machine (Linux)", "compare": "--skip-compare"}
     assert d["missing"] == ["edl", "media_competitor"] and d["ok"] is False
     assert d["errors"] == ["EDL: does not exist"]
