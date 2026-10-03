@@ -24,6 +24,7 @@ SR = 16000
 FPS = Fraction(60)
 SPEECH = ((0.5, 1.5), (1.8, 2.6), (3.6, 5.0))          # the 0.3 s pause at 1.5-1.8 is too short to cut (LOOSE)
 LOOSE = S.Settings(db=-20.0, min_s=0.35, pad_before=0.08, pad_after=0.12)   # explicit, loose settings: the mechanics
+TIGHT = S.Settings(pad_before=0.02, pad_after=0.06)    # the adaptive threshold with the pads these frames were set for
 
 
 def speech(dur: float = 6.0, gain: float = 1.0, bursts=SPEECH, seed: int = 0) -> np.ndarray:
@@ -205,13 +206,14 @@ def test_the_caption_stage_moves_copied_captions_with_the_cuts(tmp_path, monkeyp
 def test_the_defaults_are_tight_and_can_be_overridden():
     from match_cuts import cli
     from match_cuts.config import Config
-    # only pauses longer than 0.3 s are cut, keeping one frame (0.02 s) before the speech that follows
+    # only pauses longer than 0.3 s are cut, keeping 0.05 s before the speech that follows and 0.15 s after the speech
+    # before (as in my own edit of run 011)
     assert (S.Settings().db, S.Settings().min_s, S.Settings().pad_before, S.Settings().pad_after) == \
-        (None, 0.3, 0.02, 0.06)
+        (None, 0.3, 0.05, 0.15)
     c = Config()
-    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.3, 0.02, 0.06)
+    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.3, 0.05, 0.15)
     a = cli.build_parser().parse_args([])
-    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.3, 0.02, 0.06)
+    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.3, 0.05, 0.15)
     assert not a.allow_repeats and cli.build_parser().parse_args(["--allow-repeats"]).allow_repeats
     a = cli.build_parser().parse_args(["--silence-db", "-25", "--min-silence", "0.3", "--pad-before", "0.1",
                                        "--pad-after", "0.2"])
@@ -224,7 +226,7 @@ def test_the_threshold_adapts_so_a_noisy_videos_pauses_are_cut():
     y = speech()
     y += (0.03 * rng.standard_normal(len(y))).astype(np.float32)          # loud background noise, about -30 dBFS
     assert S.removal_ranges(y, SR, FPS, 360, LOOSE)[0] == []                # 20 dB under the speech: nothing cut
-    cuts, lv = S.removal_ranges(y, SR, FPS, 360, S.Settings())
+    cuts, lv = S.removal_ranges(y, SR, FPS, 360, TIGHT)
     assert lv["how"] == "set from the speech level and the background noise"
     assert lv["noise_db"] + 3 <= lv["threshold_db"] <= lv["speech_db"] - 6 and -32 < lv["noise_db"] < -29
     assert [(c.a, c.b) for c in cuts] == [(0, 27), (161, 213), (305, 360)]   # every pause over 0.3 s (not 1.5-1.8)
@@ -238,7 +240,7 @@ def test_cuts_only_fall_between_words_and_keep_the_padding_around_each_word():
     y[int(3.0 * SR):int(3.2 * SR)] += (0.01 * np.sin(np.arange(int(0.2 * SR)) * 0.3)).astype(np.float32)  # soft "uh"
     words = [W("so", 0.5, 1.0), W("what", 1.05, 1.5), W("about", 1.8, 2.95),         # "about" timed into the pause
              W("uh", 3.0, 3.2), W("then", 3.6, 5.0)]
-    cuts, lv = S.removal_ranges(y, SR, FPS, 360, S.Settings(), words=words)
+    cuts, lv = S.removal_ranges(y, SR, FPS, 360, TIGHT, words=words)
     assert lv["words"] == 5
     t, db = S.loudness(y, SR)
     cores = S.word_cores(words, t, db, lv["noise_db"])
@@ -248,7 +250,7 @@ def test_cuts_only_fall_between_words_and_keep_the_padding_around_each_word():
         for a, b in cores:
             assert c.b / 60 <= a - 0.02 + 1e-9 or c.a / 60 >= b + 0.06 - 1e-9, (c, a, b)
     assert [(c.a, c.b) for c in cuts] == [(0, 27), (163, 178), (197, 213), (305, 360)]
-    no_words, _ = S.removal_ranges(y, SR, FPS, 360, S.Settings())
+    no_words, _ = S.removal_ranges(y, SR, FPS, 360, TIGHT)
     assert (161, 213) in [(c.a, c.b) for c in no_words]     # by loudness alone the soft "uh" would have gone
 
 
@@ -260,8 +262,8 @@ def test_the_summary_shows_the_settings_used_and_the_time_removed():
     lines = pipeline.silence_lines(plan)
     assert lines[0] == "1 removed, 0.50 s in all; length 00:10.00 -> 00:09.50"
     assert lines[1] == ("settings for this video: speech -16.2 dBFS, background -42.2 dBFS -> silence below -33.1 dBFS "
-                        "(set from the speech level and the background noise), longer than 0.3 s; kept 0.02 s before "
-                        "/ 0.06 s after each word; cuts only between words (632 words timed)")
+                        "(set from the speech level and the background noise), longer than 0.3 s; kept 0.05 s before "
+                        "/ 0.15 s after each word; cuts only between words (632 words timed)")
     plan = S.summarize([], 600, FPS, S.Settings(), dict(lv, words=None))
     assert pipeline.silence_lines(plan)[0] == "none found; length 00:10.00"
     assert "word timings not available: cuts from loudness alone" in pipeline.silence_lines(plan)[1]

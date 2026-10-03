@@ -1403,10 +1403,15 @@ def _silence(ctx: Any) -> list[str]:
     plan = getattr(ctx, "silence", None) or {}
     if not plan:
         return ["Not used: only the Premiere export (--premiere) cuts out silences."]
-    if plan.get("off"):
-        return [f"Kept: {plan['off']}."]
     if plan.get("error"):
         return [f"Not removed ({plan['error']}): 1_edit.xml keeps every silence."]
+    from .pipeline import speech_lines
+    talk = speech_lines(plan)
+    pre = ([f"**Cuts moved off speech** (speech.py: every audio cut lands in the quiet between words -- a clip ends "
+            f"--pad-after after its last speech and starts --pad-before before its first; a breath at a clip's edge "
+            f"may be left out): {talk[0]}"] + [f"- {r}" for r in talk[1:]] + [""]) if talk else []
+    if plan.get("off"):
+        return pre + [f"Silences kept: {plan['off']}."]
     from .silence import settings_line
     out = ["- Measured on the RAW audio under my clips (A1), never the competitor's: silence = the 50 ms loudness under "
            "this video's threshold (by default a third of the way from its background noise up to its speech level), "
@@ -1415,6 +1420,7 @@ def _silence(ctx: Any) -> list[str]:
            f"- {settings_line(plan)}.",
            f"- {len(plan.get('rows') or [])} silences removed, {plan['removed_s']:.2f} s in all: "
            f"{plan['old_s']:.2f} s -> {plan['new_s']:.2f} s."]
+    out = pre + out
     rows = plan.get("rows") or []
     if rows:
         from .silence import tc

@@ -1019,7 +1019,7 @@ def run_captions(ctx) -> dict:
     to_seq = seq_frame_of(comp_fps, fps)
     n_seq = to_seq(ctx.n_comp)
     rp = (getattr(ctx, "silence", None) or {}).get("ripple")      # silences cut out of the Premiere export
-    rp = rp if rp is not None and rp.cuts else None
+    rp = rp if rp is not None and rp.active else None
     if rp is not None:
         n_seq = rp.new_frames
     res: dict = {"requested": requested, "fps": str(fps), "frames": n_seq, "notes": [], "warnings": [],
@@ -1099,7 +1099,7 @@ def run_captions(ctx) -> dict:
         res["source"] = "the cut edit (RAW audio on the edit's cuts)"
         if rp is not None:                          # the edit as exported: its silences cut out
             from .silence import cut_audio
-            y16 = cut_audio(y16, transcribe.SR, fps, rp)
+            y16 = cut_audio(y16, transcribe.SR, fps, rp, (ctx.raw_audio, int(ctx.audio_sr)))
             res["source"] += ", its silences cut out"
     else:
         res["source"] = "none (the RAW has no audio)"
@@ -1210,16 +1210,21 @@ def _read_spans(ctx, layout: dict, comp_fps: Fraction) -> dict:
 
 
 def move_spans(spans: Sequence[dict], to_seq, rp) -> tuple[list[dict], list[dict]]:
-    """Caption spans (competitor frames) after the silences were cut out of the sequence (a silence.Ripple): (the
-    spans moved with the cuts, in sequence frames -- text and splits unchanged, a caption partly in a removed
-    silence shorter by that much -- the spans completely inside a removed silence, with their sequence frames)."""
+    """Caption spans (competitor frames) after the cuts of the Premiere export (a silence.Ripple: the speech-safe cuts,
+    the silences and repeats): (the spans moved with the cuts, in sequence frames -- text and splits unchanged, a
+    caption partly in a removed range shorter by that much -- the spans completely inside a removed range, with their
+    sequence frames)."""
     moved, gone = [], []
     for d in spans:
-        a, b = to_seq(int(d["comp_in"])), to_seq(int(d["comp_out"]))
-        if not rp.keep(a, b):
-            gone.append(dict(d, seq_in=a, seq_out=b))
+        a0, b0 = to_seq(int(d["comp_in"])), to_seq(int(d["comp_out"]))
+        a, b = a0, b0
+        for st in rp.stages():
+            if not st.keep(a, b):
+                gone.append(dict(d, seq_in=a0, seq_out=b0))
+                break
+            a, b = st.map1(a), st.map1(b)
         else:
-            moved.append(dict(d, comp_in=rp.map(a), comp_out=rp.map(b)))
+            moved.append(dict(d, comp_in=a, comp_out=b))
     return moved, gone
 
 

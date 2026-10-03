@@ -1599,8 +1599,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
-    silence.Ripple): those ranges are cut out -- everything after them moves earlier, and A1 fades over
-    silence.FADE_FRAMES on both sides of every such cut (Audio Levels keyframes: no click). Returns {'clips',
+    silence.Ripple: the speech-safe cuts, then the silences and repeats): its ranges are cut out -- everything after
+    them moves earlier --, clips are extended where their speech must finish, and A1 fades over
+    silence.FADE_FRAMES on both sides of every removed range (Audio Levels keyframes: no click). Returns {'clips',
     'markers', 'warnings', 'factor'}."""
     from . import silence as sil
     st = premiere_settings(cfg)
@@ -1617,7 +1618,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                   "channels": cutlist.raw.get("audio_channels") or 2} if has_audio else None
     clips, markers, warnings = premiere_clips(cutlist, cfg)
     audio_items = premiere_audio(cutlist, clips, cfg) if has_audio else []
-    if silence is not None and silence.cuts:
+    if silence is not None and silence.active:
         clips, audio_items, markers = sil.apply_premiere(clips, audio_items, markers, silence)
         N = silence.new_frames
     if str((cutlist.settings or {}).get("audio_sync") or "raw") == "competitor":
@@ -2310,6 +2311,22 @@ def _overlaps(spans: list[tuple[int, int, str]], tc: Any, what: str) -> list[str
     return out
 
 
+def premiere_speech_problems(xml_path: str | os.PathLike, speech: Any) -> list[str]:
+    """The hard speech check of the final XML, on its own numbers only (speech.py): no audio cut of A1 -- the start
+    or end of an item where the RAW does not play on -- lands inside speech of ``speech`` (the RAW's
+    speech.SpeechMap). One line per cut, with what is said there."""
+    from .speech import audio_cuts, check
+    x = parse_premiere_xml(xml_path)
+    fps = Fraction(int(x["timebase"] or 60) * 1000, 1001) if str(x["ntsc"]).upper() == "TRUE" else \
+        Fraction(int(x["timebase"] or 60))
+    items = [dict(it, name=str(it.get("name") or "?").split(" ")[0]) for it in x["audio"] if it["start"] >= 0]
+    out = []
+    for r in check(audio_cuts(items, fps, int(x["duration"])), speech, fps):
+        out.append(f"A1 {r['clip']} {r['edge']}s at {_tc(int(r['at']), fps)} inside speech: RAW {r['raw_s']:.2f} s, "
+                   f"sound {r['speech'][0]:.2f}-{r['speech'][1]:.2f} s ('{r['said']}')")
+    return out
+
+
 def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = False) -> list[str]:
     """The hard repeat check of the final XML, on its own numbers only (repeats.py): no RAW frames / audio play twice
     -- no stutter at a cut, and (unless ``allow_repeats``) no RAW moment over repeats.REPEAT_S twice anywhere. A V1 /
@@ -2432,7 +2449,7 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
 
 
 def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl_path: str | os.PathLike | None,
-                              cfg: Any = None, silence: Any = None) -> dict:
+                              cfg: Any = None, silence: Any = None, speech: Any = None) -> dict:
     """Re-parse the Premiere XML (and the EDL, which stays at the competitor rate) and check: the sequence is exactly
     W x H at the Premiere rate (ntsc FALSE); V1 only (V2+ empty), every clip's record range = its event's range x
     the rate factor (cuts on the competitor's moments), source in / out / speed as planned; A1 cut exactly like V1
@@ -2467,13 +2484,19 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         reps = premiere_repeat_problems(xml_path, bool(getattr(cfg, "allow_repeats", False))) if not bad_items else []
     except Exception as e:  # noqa: BLE001
         reps = [f"the repeat check could not read the XML: {type(e).__name__}: {e}"]
-    errors += [f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps]
-    out["item_problems"], out["repeat_problems"] = bad_items, reps
+    try:
+        talk = premiere_speech_problems(xml_path, speech) if speech is not None and not bad_items else []
+    except Exception as e:  # noqa: BLE001
+        talk = [f"the speech check could not read the XML: {type(e).__name__}: {e}"]
+    errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
+               [f"XML SPEECH {t}" for t in talk])
+    out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
+    out["speech_checked"] = speech is not None
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg)
         plan_clips = clips
         want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
-        cut = silence is not None and bool(silence.cuts)
+        cut = silence is not None and silence.active
         if cut:
             from .silence import apply_premiere
             clips, want_a, markers = apply_premiere(clips, want_a, markers, silence)

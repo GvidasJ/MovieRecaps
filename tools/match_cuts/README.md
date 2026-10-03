@@ -80,8 +80,9 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
-Premiere-only export: `--premiere`. Silence removal (Premiere export and RAW-only runs): `--keep-silence`,
-`--min-silence S` (default 0.3), `--pad-before S` (0.02: one frame), `--pad-after S` (0.06), `--silence-db DB` (default: set
+Premiere-only export: `--premiere`. Cuts never inside speech, silence removal (Premiere export and RAW-only runs):
+`--pad-before S` (default 0.05: a clip starts this long before its first word), `--pad-after S` (default 0.15: a clip
+ends this long after its last word), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
 per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
 or audio (see *Premiere* below): `--allow-repeats` keeps a moment over 0.5 s that plays twice. No `--competitor`: the
 edit from the RAW alone (see *Without a competitor* below).
@@ -146,12 +147,47 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   `B-ROLL REPLACED` marker sits on every replaced spot and report.md lists them with timecodes. A RAW shot whose
   picture is within 1 s of its own audio (an A/V shift) is the main clip and stays as it is.
 
+### Cuts never inside speech (every Premiere export and RAW-only run)
+
+A cut must never interrupt speech, whatever the competitor did (`match_cuts/speech.py`). Before the silences are cut,
+every audio cut of the edit is placed by the speech of the RAW, not by the competitor:
+
+* **Speech map of the RAW.** A sound is the 50 ms loudness at or above this video's silence threshold, with its soft
+  start and end (the windows next to it still 3 dB over the background, at most 0.2 s: the soft "s" or "-ty five"
+  a word starts or ends with). The words come from the RAW where the edit plays it (±3 s), transcribed with the
+  recheck model (`--caption-recheck-model`, default `medium.en`; its timings are much closer than `small.en`'s), and
+  the captions' model (`small.en`) as a second opinion. A dip in the loudness inside a word (the closure of a "t")
+  is part of the word; the dip nearest each boundary between two words (within 0.25 s — the timings are often that
+  far off) is the gap between them, however short. A sound either transcript heard a word in, or with a clear pitch
+  for 0.05 s, is speech — "okay", "uh" and every other filler included; a sound with neither (a breath, a lip
+  smack) is not speech, so a clip's start or end may leave it out, but no cut lands inside it either. Without
+  faster-whisper every sound counts as speech.
+* **A clip ends `--pad-after` (0.15 s) after its last word has completely finished and starts `--pad-before`
+  (0.05 s) before its first** — inside the quiet there: a pause shorter than both pads is split between them, a
+  breath right after the word stops the clip at the breath. A competitor cut that falls inside speech moves to the
+  nearer end of that sound: the clip plays on to the end of it (it is extended, and everything after it moves
+  later) or stops before it. A clip never shows again what the clip before it now shows: it starts after it, and a
+  clip left with nothing new to play goes. Two pieces that end up playing one continuous take become one clip, with
+  no cut. Both sides of a cross dissolve stay as they are. Where A1 jumps a few frames (at most 0.1 s) inside
+  speech but the picture does not cut (an audio line), the audio line moves by those frames so A1 plays on.
+* **The hard check, on the final XML**: every audio cut of A1 (an item's start or end where the RAW does not play on)
+  must land outside speech; one that lands inside fails the run (`XML SPEECH` in the report and the console, with
+  the words there). On run 011 the competitor-placed cuts fail it 10 times; the new export passes.
+* The end summary lists every cut that was moved (*Cuts moved off speech*: the clip, which edge, by how many frames,
+  RAW before → after, the words there) and every clip removed because the clip before it now plays it;
+  `extras/report.md` has the same list.
+
+On run 011 (the files at the repo root), 9 of the 12 cut edges I moved by hand (leaving out where I dropped
+"Okay", "Uh", "to" and the 1.5 s before "I have a daughter") come out within 2 frames of mine. The other three: I
+kept 0.39 s after "age." and 0.04 s after "am" where the tool keeps `--pad-after` 0.15 s, and I ended S08b just
+before "to" to drop it, where the tool keeps "a son to a married couple" playing.
+
 ### Silence removal (`--keep-silence` turns it off)
 
 Every silence of **my** edit's audio is cut out of `1_edit.xml` — measured on the RAW audio under my clips (A1),
 never on the competitor's, so music it added does not count as speech. In competitor mode this happens after the
-competitor's cuts are recreated (also where the competitor kept the pause); without a competitor (below) the RAW
-alone is cut this way.
+competitor's cuts are recreated and moved off speech (above; also where the competitor kept the pause), with the
+recheck model's word timings of the RAW; without a competitor (below) the RAW alone is cut this way.
 
 * **Silence** = the short-window loudness (50 ms RMS, every 10 ms; a louder blip under 0.08 s is a click, not
   speech — single peaks never count) below this video's silence threshold for longer than `--min-silence`
@@ -165,9 +201,10 @@ alone is cut this way.
 * **Never inside a word**: the edit's audio is transcribed (word timings, the same `small.en` model as the captions,
   cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
   over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
-  `--pad-after` (0.06 s) after the word before it and `--pad-before` (0.02 s, one frame) before the word after it
-  are kept (at the very start and end of the edit there is no word to protect). On `input/raw_test.mp4` the defaults
-  make 33 cuts (26.9 s: 3:23 → 2:56), all between words. Without
+  `--pad-after` (0.15 s) after the word before it and `--pad-before` (0.05 s) before the word after it
+  are kept (at the very start and end of the edit there is no word to protect). The soft end of a word that trails
+  off under the threshold (still 3 dB over the background, at most 0.2 s) belongs to the word, so the pads are kept
+  after it. Without
   faster-whisper the cuts come from loudness alone and the summary says so. Cut points land on whole 60 fps frames,
   rounded inwards (never more than the silence), and never inside a cross dissolve.
 * No clicks: A1 fades out over the last frame before every cut and in over the first frame after it (Audio Levels

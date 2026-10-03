@@ -197,18 +197,24 @@ def _merge(cuts: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
 
 
 def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
-    """The silence plan (silence.plan_premiere / summarize, or {"off": ...}) with the repeats removed too: the repeat
-    ranges join its ripple (one Ripple for the XML, A1, the markers and the captions); ``sil['repeats']`` = {rows,
-    left, removed_s, allow}. The silence rows' 'cut in the new edit' times are those of the final edit."""
+    """The silence plan (silence.plan_premiere / summarize) with the repeats removed too: the repeat ranges join its
+    ripple's removals (one Ripple for the XML, A1, the markers and the captions; frames of the edit after the
+    speech-safe cuts, its ``before``); ``sil['repeats']`` = {rows, left, removed_s, allow}. The silence rows' 'cut in
+    the new edit' times are those of the final edit."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
-    from .silence import Cut, Ripple
+    from .silence import Cut, Ripple, apply_premiere
     fps = premiere_settings(cfg)["fps"]
     fac = premiere_factor(cutlist.comp_fps, fps)
     n_frames = int(cutlist.competitor["frames"]) * fac
     clips, _, _ = premiere_clips(cutlist, cfg)
     audio = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
-    protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
     old = sil.get("ripple")
+    snap = old.before if old is not None else None
+    if snap is not None:
+        if snap.active:
+            clips, audio, _ = apply_premiere(clips, audio, [], snap)
+        n_frames = snap.new_frames
+    protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
     sil_cuts = list(old.cuts) if old is not None else []
     allow = bool(getattr(cfg, "allow_repeats", False))
     done, left = plan(spans_of_plan(clips, audio, cutlist.comp_fps), [(c.a, c.b) for c in sil_cuts], fps, allow,
@@ -218,12 +224,12 @@ def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
     if done:
         merged = _merge([(c.a, c.b) for c in sil_cuts] + [d["remove"] for d in done])
         by_a = {(c.a, c.b): c for c in sil_cuts}
-        rp = Ripple([by_a.get((a, b)) or Cut(a, b, a / f, b / f) for a, b in merged], n_frames)
+        rp = Ripple([by_a.get((a, b)) or Cut(a, b, a / f, b / f) for a, b in merged], n_frames, before=snap)
         out["ripple"] = rp
         out["cuts"] = [(c.a, c.b) for c in rp.cuts]
         out["final_s"] = round(rp.new_frames / f, 3)
         for r in out.get("rows") or []:
-            r["new_at_s"] = round(rp.map(int(r["a"])) / f, 3)
+            r["new_at_s"] = round(rp.map1(int(r["a"])) / f, 3)
     else:
         rp = old
     rows = []
@@ -232,7 +238,7 @@ def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
         rows.append({"kind": d["kind"], "track": d["track"], "removed": d["removed"], "kept": d["kept"],
                      "a": a, "b": b, "copy": list(d["copy"]), "len_s": round((b - a) / f, 3),
                      "raw_s": [round(d["raw"][0] / f, 3), round(d["raw"][1] / f, 3)], "why": d["why"],
-                     "new_at": rp.map(a) if rp is not None else a})
+                     "new_at": rp.map1(a) if rp is not None else a})
     out["repeats"] = {"rows": rows, "left": [dict(d, remove=None) for d in left], "allow": allow,
                       "removed_s": round(sum(r["b"] - r["a"] for r in rows) / f, 3), "fps": str(fps)}
     return out

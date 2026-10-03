@@ -85,7 +85,7 @@ def build_cutlist(raw_block: dict, n_frames: int, cuts: list[tuple[int, int]], w
 
 def run_raw_only(cfg: Any) -> dict:
     """The RAW-only run (see the module docstring). Returns the dict cli.format_summary prints."""
-    from . import conform, export_xml_edl, faces, pipeline, probe, proxies, silence
+    from . import conform, export_xml_edl, faces, pipeline, probe, proxies, silence, speech
     from .run_folders import CAPTIONS_SRT, EDIT_XML
     pipeline._prepare_dirs(cfg)
     setup_logging(cfg.verbose, log_file=cfg.out / "match_cuts.log")
@@ -114,12 +114,15 @@ def run_raw_only(cfg: Any) -> dict:
         n_frames = int(ctx.raw_info.nb_frames / float(Fraction(ctx.raw_info.fps)) * float(SEQ_FPS))
         with pipeline._stage(ctx, "R3 silences"):
             sst = silence.Settings.from_cfg(cfg)
+            words = None
+            if ctx.raw_audio is not None and len(ctx.raw_audio):
+                words_of = pipeline.words_reader(ctx)
+                words = words_of(ctx.raw_audio) if words_of else None
+                ctx.speech = speech.speech_map(ctx.raw_audio, ctx.audio_sr, sst, words)   # the hard speech check
             if getattr(cfg, "keep_silence", False):
                 cuts, lv = [], {"how": "--keep-silence"}
             elif ctx.raw_audio is not None and len(ctx.raw_audio):
-                words_of = pipeline.words_reader(ctx)
-                found, lv = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst,
-                                                   words=words_of(ctx.raw_audio) if words_of else None)
+                found, lv = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst, words=words)
                 cuts = [(c.a, c.b) for c in found]
             else:
                 cuts, lv = [], {"how": "the RAW has no audio"}
@@ -147,7 +150,7 @@ def run_raw_only(cfg: Any) -> dict:
         with pipeline._stage(ctx, "R5 Premiere XML"):
             res = export_xml_edl.write_premiere_xml(ctx.cutlist, xml, cfg, rp)
             ctx.paths["xml"] = str(xml)
-            ctx.exports = export_xml_edl.validate_premiere_exports(ctx.cutlist, xml, None, cfg, rp)
+            ctx.exports = export_xml_edl.validate_premiere_exports(ctx.cutlist, xml, None, cfg, rp, ctx.speech)
             ctx.exports["clips"], ctx.exports["framing"] = res["clips"], framing_notes
             if ctx.exports.get("gaps"):
                 ctx.warn("Premiere XML: clip(s) leave part of the template window uncovered: "
@@ -158,6 +161,9 @@ def run_raw_only(cfg: Any) -> dict:
             if ctx.exports.get("item_problems"):
                 ctx.warn("Premiere XML: item(s) Premiere would skip or misplace on import -- the run fails: "
                          + "; ".join(ctx.exports["item_problems"]))
+            if ctx.exports.get("speech_problems"):
+                ctx.warn("Premiere XML: audio cut(s) inside speech -- the run fails: "
+                         + "; ".join(ctx.exports["speech_problems"]))
             if ctx.exports.get("ok") is not True:
                 ctx.warn(f"Premiere XML check failed: {'; '.join(ctx.exports.get('errors') or [])[:500]}")
         with pipeline._stage(ctx, "R6 captions"):

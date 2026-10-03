@@ -57,8 +57,8 @@ class Config:
     silence_db: float | None = None        # silence threshold this many dB under the speech level (None: set per video
                                            #   from its speech level and background noise, silence.levels)
     min_silence: float = 0.3               # cut silences longer than this (s), only between words
-    pad_before: float = 0.02               # kept before each word after a removed silence (s): one frame at 60 fps
-    pad_after: float = 0.06                # kept after each word before a removed silence (s)
+    pad_before: float = 0.05               # kept before each word: a clip's start, after a removed silence (s)
+    pad_after: float = 0.15                # kept after each word: a clip's end, before a removed silence (s)
     allow_repeats: bool = False            # --premiere: keep a RAW moment over 0.5 s that plays twice (repeats.py);
                                            #   a stutter at a cut is trimmed either way
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in

@@ -1,7 +1,8 @@
 """Silence removal (Premiere export; ``--keep-silence`` turns it off): the silences of MY edit's audio -- the RAW audio
 under my clips, never the competitor's, so music it added does not count as speech -- are cut out of the sequence.
-In competitor mode this runs after the competitor's cuts are recreated (pipeline.stage_exports); without a
-competitor the RAW alone is cut this way (raw_only.run_raw_only).
+In competitor mode this runs after the competitor's cuts are recreated and moved off speech (speech.py: every clip
+ends ``--pad-after`` after its last word and starts ``--pad-before`` before its first; pipeline.stage_exports);
+without a competitor the RAW alone is cut this way (raw_only.run_raw_only).
 
 Silence: the short-window loudness (RMS over WIN_S, every HOP_S; a louder blip under BLIP_S is a click, not
 speech -- single peaks never count) stays below this video's silence threshold for longer than ``--min-silence``
@@ -10,13 +11,15 @@ of its loudest 5% of windows) and its background noise (its quietest 10%) are me
 third of the way from the noise up to the speech, so the pauses of a noisy video are cut too (``--silence-db`` sets
 it that many dB under the speech level instead). Words: the edit's audio is transcribed (word timings) and a cut
 only ever falls in a gap between words -- each word's timing trimmed to its audible part, so a timing that runs on
-into the pause does not keep the pause. Of each gap, ``--pad-after`` (0.06 s) after the word before it and
-``--pad-before`` (0.02 s, one frame) before the word after it are kept; at the very start and end of the edit there is no
+into the pause does not keep the pause -- and the soft end or start of a sound (the windows next to it still SOFT_DB
+above the noise, at most SOFT_MAX_S) belongs to it. Of each gap, ``--pad-after`` (0.15 s) after the word before it
+and ``--pad-before`` (0.05 s) before the word after it are kept; at the very start and end of the edit there is no
 word to protect. The cut points land on whole sequence frames (rounded inwards: never more
 is removed than the silence), and never inside a cross dissolve.
 
 The cuts: every clip, audio clip and marker after a removed range moves earlier by the time removed before it
-(Ripple); a clip that spans a removed range is split around it. No click: the audio on both sides of every cut
+(Ripple: the speech-safe cuts first, then the silences and repeats); a clip that spans a removed range is split
+around it; a clip extended so its speech can finish moves everything after it later. No click: the audio on both sides of every cut
 fades over FADE_FRAMES (Audio Levels keyframes in the XML; the same fades in the audio the captions are made from),
 and as the cuts lie inside silences the fades only touch the quiet room tone.
 """
@@ -31,8 +34,8 @@ from typing import Any, Sequence
 import numpy as np
 
 MIN_SILENCE_S = 0.3       # cut silences longer than this ...
-PAD_BEFORE_S = 0.02       # ... keeping this much (one frame) before each word (or other sound) that follows
-PAD_AFTER_S = 0.06        # ... and this much after each word (or other sound) that precedes
+PAD_BEFORE_S = 0.05       # ... keeping this much before each word (or other sound) that follows
+PAD_AFTER_S = 0.15        # ... and this much after each word (or other sound) that precedes
 WIN_S = 0.05              # loudness window (RMS) ...
 HOP_S = 0.01              # ... every HOP_S
 SPEECH_PCT = 95           # the speech level: this percentile of the windows' loudness
@@ -43,6 +46,9 @@ MIN_ABOVE_NOISE_DB = 3.0  # ... at least this far above the noise ...
 MIN_BELOW_SPEECH_DB = 6.0  # ... and at least this far below the speech
 WORD_SOUND_DB = 6.0       # a word's audible part: its windows at least this far above the noise
 BLIP_S = 0.08             # a louder stretch shorter than this inside a silence is a click / peak, not speech
+MAX_IN_WORD_QUIET_S = 0.25  # a word's timing holding a quiet stretch this long is two sounds (a misplaced timing)
+SOFT_DB = 3.0             # a sound's soft start / end: the windows next to it still this far above the noise ...
+SOFT_MAX_S = 0.2          # ... for at most this long (the soft "s", "f", "-ty five" a word starts or ends with)
 FADE_FRAMES = 1           # audio fade on each side of a cut (sequence frames)
 
 
@@ -97,47 +103,87 @@ def levels(db: np.ndarray, st: Settings) -> dict:
 
 def word_cores(words: Sequence[Any], t: np.ndarray, db: np.ndarray, noise: float) -> list[tuple[float, float]]:
     """Each transcribed word's audible part: its timing trimmed to its windows at least WORD_SOUND_DB above the
-    noise (a timing that runs on into the pause after the word does not keep that pause), else its whole timing."""
+    noise (a timing that runs on into the pause after the word does not keep that pause), else its whole timing. A
+    timing that holds a quiet stretch of MAX_IN_WORD_QUIET_S or more gives one part per sound (a word timed across
+    a pause -- "daughter" over 3 s -- does not hide that pause)."""
     out = []
     loud = db >= noise + WORD_SOUND_DB
+    split = int(round(MAX_IN_WORD_QUIET_S / HOP_S))
     for w in words:
         s0, s1 = float(w.start), float(w.end)
-        inside = np.flatnonzero((t >= s0) & (t <= s1) & loud)
-        if len(inside):
-            s0, s1 = max(s0, float(t[inside[0]]) - WIN_S / 2.0), min(s1, float(t[inside[-1]]) + WIN_S / 2.0)
-        if s1 > s0:
-            out.append((s0, s1))
+        i0, i1 = int(np.searchsorted(t, s0, "left")), int(np.searchsorted(t, s1, "right"))
+        inside = i0 + np.flatnonzero(loud[i0:i1])
+        if not len(inside):
+            if s1 > s0:
+                out.append((s0, s1))
+            continue
+        for part in np.split(inside, np.flatnonzero(np.diff(inside) > split) + 1):
+            a = max(s0, float(t[part[0]]) - WIN_S / 2.0)
+            b = min(s1, float(t[part[-1]]) + WIN_S / 2.0)
+            if b > a:
+                out.append((a, b))
     return out
 
 
-def silent_runs(y: np.ndarray, sr: int, st: Settings, words: Sequence[Any] | None = None
-                ) -> tuple[list[tuple[float, float]], dict]:
-    """([(start s, end s)] of every stretch below this video's silence threshold (levels) for longer than st.min_s
-    -- and, with ``words`` (the transcript, timed on this audio), outside every word's audible part: a cut never
-    falls inside a word --, the levels)."""
-    t, db = loudness(y, sr)
-    dur = len(y) / float(sr)
-    if not len(db):
-        return [], {"speech_db": 0.0, "noise_db": 0.0, "threshold_db": 0.0, "how": "no audio", "words": None}
-    lv = levels(db, st)
+def quiet_windows(db: np.ndarray, lv: dict) -> np.ndarray:
+    """The loudness windows below this video's silence threshold (levels); a louder stretch shorter than BLIP_S
+    between two quiet ones is a click / peak, not a sound: quiet too."""
     q = db < lv["threshold_db"]
     blip = int(round(BLIP_S / HOP_S))
     edges = np.flatnonzero(np.diff(np.concatenate([[True], q, [True]]).astype(np.int8)))
     for i0, i1 in zip(edges[::2], edges[1::2]):        # louder stretches i0 .. i1 - 1 between quiet ones
         if i1 - i0 < blip and i0 > 0 and i1 < len(q):
             q[i0:i1] = True
+    return q
+
+
+def quiet_runs(q: np.ndarray, t: np.ndarray, db: np.ndarray, noise: float, dur: float, min_s: float = 0.0
+               ) -> list[tuple[float, float]]:
+    """[(start s, end s)] of the quiet stretches of q (quiet_windows) without the soft start / end of the sounds
+    around them -- the windows next to a sound still SOFT_DB above the noise, at most SOFT_MAX_S: the soft end of
+    a word is part of the word. A stretch that never falls that low (words run together) is quiet as a whole.
+    Only the stretches of at least ``min_s`` are listed."""
+    quiet = np.concatenate([[False], q, [False]])
+    edges = np.flatnonzero(np.diff(quiet.astype(np.int8)))
+    soft = db >= noise + SOFT_DB
+    n_max = int(round(SOFT_MAX_S / HOP_S))
+    out = []
+    for i0, i1 in zip(edges[::2], edges[1::2]):        # windows i0 .. i1 - 1 are quiet
+        j0, j1 = i0, i1
+        deep = np.flatnonzero(~soft[i0:i1])
+        if len(deep):
+            if i0 > 0:                                  # a sound before it: its soft end is not quiet
+                j0 = i0 + min(int(deep[0]), n_max)
+            if i1 < len(db):                            # a sound after it: its soft start is not quiet
+                j1 = i1 - min(i1 - i0 - 1 - int(deep[-1]), n_max)
+            if j1 <= j0:
+                j0, j1 = i0, i1
+        a = 0.0 if j0 == 0 else float(t[j0]) - HOP_S / 2.0          # (the first / last window reaches the edge)
+        b = dur if j1 == len(db) else min(dur, float(t[j1 - 1]) + HOP_S / 2.0)
+        if b - a < min_s - 1e-9 and (j0, j1) != (i0, i1):          # too little left: the whole stretch
+            a = 0.0 if i0 == 0 else float(t[i0]) - HOP_S / 2.0
+            b = dur if i1 == len(db) else min(dur, float(t[i1 - 1]) + HOP_S / 2.0)
+        if b - a >= min_s - 1e-9 and b > a:
+            out.append((a, b))
+    return out
+
+
+def silent_runs(y: np.ndarray, sr: int, st: Settings, words: Sequence[Any] | None = None
+                ) -> tuple[list[tuple[float, float]], dict]:
+    """([(start s, end s)] of every stretch below this video's silence threshold (levels) for longer than st.min_s
+    -- without the soft start / end of the sounds around it (quiet_runs), and, with ``words`` (the transcript,
+    timed on this audio), outside every word's audible part: a cut never falls inside a word --, the levels)."""
+    t, db = loudness(y, sr)
+    dur = len(y) / float(sr)
+    if not len(db):
+        return [], {"speech_db": 0.0, "noise_db": 0.0, "threshold_db": 0.0, "how": "no audio", "words": None}
+    lv = levels(db, st)
+    q = quiet_windows(db, lv)
     lv["words"] = None if words is None else len(words)
     if words:
         for s0, s1 in word_cores(words, t, db, lv["noise_db"]):
-            q[(t >= s0 - HOP_S / 2.0) & (t <= s1 + HOP_S / 2.0)] = False
-    quiet = np.concatenate([[False], q, [False]])
-    edges = np.flatnonzero(np.diff(quiet.astype(np.int8)))
-    out = []
-    for i0, i1 in zip(edges[::2], edges[1::2]):        # windows i0 .. i1 - 1 are quiet
-        a = 0.0 if i0 == 0 else float(t[i0]) - HOP_S / 2.0          # (the first / last window reaches the edge)
-        b = dur if i1 == len(db) else min(dur, float(t[i1 - 1]) + HOP_S / 2.0)
-        if b - a > st.min_s:
-            out.append((a, b))
+            q[np.searchsorted(t, s0 - HOP_S / 2.0, "left"):np.searchsorted(t, s1 + HOP_S / 2.0, "right")] = False
+    out = [(a, b) for a, b in quiet_runs(q, t, db, lv["noise_db"], dur) if b - a > st.min_s]
     return out, lv
 
 
@@ -179,40 +225,89 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
 
 
 @dataclass
+class Insert:
+    """Frames added at a cut (``at``, a frame of the edit before): the clip ending there plays ``frames`` more of
+    its source (side "end"), or the clip starting there starts that much earlier in its source (side "start");
+    ``src``: the RAW frame (sequence rate) the added frames start at -- a clip extended to let its speech finish."""
+    at: int
+    frames: int
+    side: str
+    src: float = 0.0
+
+
+@dataclass
 class Ripple:
-    """The timeline after removing ``cuts`` (sorted, disjoint [a, b) sequence frames) from n_frames."""
+    """The timeline after removing ``cuts`` (sorted, disjoint [a, b) sequence frames) from n_frames, adding
+    ``inserts`` (clips extended at their cuts), moving the audio lines of ``shifts`` [(first frame, frames)] in
+    their source and sliding the A1 cuts of ``slides`` [(frame, frames)] under a cross dissolve (A1 only: the clip
+    before plays on, the one after starts later). ``before``: a ripple applied first (its new timeline is this one's old one): the speech-safe cuts
+    (speech.py), then the silences and repeats."""
     cuts: list[Cut] = field(default_factory=list)
     n_frames: int = 0
+    inserts: list[Insert] = field(default_factory=list)
+    shifts: list[tuple[int, int]] = field(default_factory=list)
+    slides: list[tuple[int, int]] = field(default_factory=list)
+    before: "Ripple | None" = None
 
     def __post_init__(self) -> None:
         self.cuts = sorted(self.cuts, key=lambda c: c.a)
+        self.inserts = sorted(self.inserts, key=lambda i: (i.at, i.side != "end"))
+
+    def stages(self) -> list["Ripple"]:
+        """The ripples applied in turn: ``before``'s first."""
+        return (self.before.stages() if self.before is not None else []) + [self]
+
+    @property
+    def active(self) -> bool:
+        """Anything changes the edit (in any stage)."""
+        return any(r.cuts or r.inserts or r.shifts or r.slides for r in self.stages())
+
+    @property
+    def first_frames(self) -> int:
+        """The length of the edit before any stage."""
+        return self.stages()[0].n_frames
 
     @property
     def removed(self) -> int:
         return sum(c.frames for c in self.cuts)
 
     @property
+    def added(self) -> int:
+        return sum(i.frames for i in self.inserts)
+
+    @property
     def new_frames(self) -> int:
-        return self.n_frames - self.removed
+        return self.n_frames - self.removed + self.added
 
     def map(self, f: int) -> int:
-        """New frame of old frame f (a frame inside a removed range maps to where that range was)."""
-        shift = 0
+        """New frame of old frame f (of the edit before every stage; a frame inside a removed range maps to where
+        that range was)."""
+        if self.before is not None:
+            f = self.before.map(f)
+        return self.map1(f)
+
+    def map1(self, f: int) -> int:
+        """map() of this stage alone: frames removed before f out, frames inserted at or before f in."""
+        shift = sum(i.frames for i in self.inserts if i.at <= f)
         for c in self.cuts:
             if f >= c.b:
-                shift += c.frames
+                shift -= c.frames
             elif f > c.a:
-                return c.a - shift
+                return c.a + shift
             else:
                 break
-        return f - shift
+        return f + shift
 
     def keep(self, a: int, b: int) -> list[tuple[int, int]]:
-        """The parts of old range [a, b) that are kept."""
+        """The parts of old range [a, b) that are kept (this stage)."""
         out = [(a, b)]
         for c in self.cuts:
             out = [q for x0, x1 in out for q in ((x0, min(x1, c.a)), (max(x0, c.b), x1)) if q[1] > q[0]]
         return out
+
+    def ext(self, at: int, side: str) -> int:
+        """Frames inserted at old frame ``at`` on ``side`` (this stage)."""
+        return sum(i.frames for i in self.inserts if i.at == at and i.side == side)
 
     def joins(self) -> set[int]:
         """Old frames where a cut was made: the start and the end of every removed range."""
@@ -227,55 +322,121 @@ def fade_samples(sr: int, fps: Fraction) -> int:
     return max(1, int(round(FADE_FRAMES * sr / float(fps))))
 
 
-def cut_audio(y: np.ndarray, sr: int, fps: Fraction, rp: Ripple) -> np.ndarray:
-    """The edit's audio with the removed ranges taken out, faded over FADE_FRAMES on both sides of every cut
-    (exactly what A1 plays with the XML's Audio Levels keys)."""
+def cut_audio(y: np.ndarray, sr: int, fps: Fraction, rp: Ripple, raw: Any = None) -> np.ndarray:
+    """The edit's audio with every stage of ``rp`` applied: the removed ranges taken out, faded over FADE_FRAMES on
+    both sides of every such cut (exactly what A1 plays with the XML's Audio Levels keys), the extensions played from
+    ``raw`` = (RAW audio, its rate) (silent without it)."""
     y = np.asarray(y, np.float32)
-    if not rp.cuts:
+    for st in rp.stages():
+        y = _cut_audio1(y, sr, fps, st, raw)
+    return y
+
+
+def _cut_audio1(y: np.ndarray, sr: int, fps: Fraction, rp: Ripple, raw: Any) -> np.ndarray:
+    if not (rp.cuts or rp.inserts):
         return y.copy()
     f = float(fps)
     nf = fade_samples(sr, fps)
-    parts = []
-    for a, b in rp.keep(0, rp.n_frames):
+    joins = rp.joins()
+    parts = []                                           # (old frame, order, samples): order 0 / 1 inserts, 2 kept
+    for a, b in _split_at(rp.keep(0, rp.n_frames), [i.at for i in rp.inserts]):
         s0, s1 = int(round(a * sr / f)), min(len(y), int(round(b * sr / f)))
         seg = y[s0:s1].copy()
         if len(seg):
             ramp = np.linspace(0.0, 1.0, min(nf, len(seg)), endpoint=False, dtype=np.float32)
-            if a in rp.joins() and a > 0:
+            if a in joins and a > 0:
                 seg[:len(ramp)] *= ramp[(slice(None),) + (None,) * (seg.ndim - 1)]
-            if b in rp.joins() and b < rp.n_frames:
+            if b in joins and b < rp.n_frames:
                 seg[len(seg) - len(ramp):] *= ramp[::-1][(slice(None),) + (None,) * (seg.ndim - 1)]
-        parts.append(seg)
-    return np.concatenate(parts) if parts else y[:0].copy()
+        parts.append((a, 2, seg))
+    for ins in rp.inserts:
+        n = int(round(ins.frames * sr / f))
+        seg = np.zeros((n,) + y.shape[1:], np.float32)
+        if raw is not None and raw[0] is not None and len(raw[0]):
+            x, xsr = raw
+            r0 = int(round(ins.src / f * xsr))
+            piece = np.asarray(x[max(0, r0):max(0, r0) + int(round(ins.frames / f * xsr))], np.float32)
+            if piece.ndim > 1:
+                piece = piece.mean(axis=1)
+            if int(xsr) != int(sr) and len(piece):
+                from math import gcd
+                from scipy.signal import resample_poly
+                g = gcd(int(sr), int(xsr))
+                piece = resample_poly(piece, int(sr) // g, int(xsr) // g).astype(np.float32)
+            got = piece[:n]
+            if seg.ndim == 1:
+                seg[:len(got)] = got
+            else:
+                seg[:len(got)] = got[:, None]
+        parts.append((ins.at, 0 if ins.side == "end" else 1, seg))
+    parts.sort(key=lambda p: (p[0], p[1]))
+    return np.concatenate([p[2] for p in parts]) if parts else y[:0].copy()
+
+
+def _split_at(ranges: Sequence[tuple[int, int]], at: Sequence[int]) -> list[tuple[int, int]]:
+    """The ranges split at the frames ``at`` inside them."""
+    out = []
+    for a, b in ranges:
+        for x in sorted(set(at)):
+            if a < x < b:
+                out.append((a, x))
+                a = x
+        out.append((a, b))
+    return out
 
 
 def apply_premiere(clips: list, audio: list[dict], markers: list[dict], rp: Ripple) -> tuple[list, list[dict], list[dict]]:
-    """(V1 clips, A1 items, markers) of the Premiere export after the removal: every piece that is kept, moved
-    earlier by the time removed before it; a clip spanning a removed range becomes two clips (the same source
-    continuing from where the removed time ends). A1 pieces carry ``fade_in`` / ``fade_out`` where a cut was made;
-    pieces the removal leaves playing one continuous RAW take (a trimmed repeat) become one clip again."""
-    if not rp.cuts:
-        return clips, audio, markers
+    """(V1 clips, A1 items, markers) of the Premiere export after every stage of ``rp``: every piece that is kept,
+    moved by the time removed / added before it; a clip spanning a removed range becomes two clips (the same source
+    continuing from where the removed time ends); a clip extended at a cut plays more of its source there. A1
+    pieces carry ``fade_in`` / ``fade_out`` where a cut was made; pieces the removal leaves playing one continuous
+    RAW take (a trimmed repeat, a clip that went between two pieces of one take) become one clip again."""
+    for st in rp.stages():
+        if st.cuts or st.inserts or st.shifts or st.slides:
+            clips, audio, markers = _apply1(clips, audio, markers, st)
+    return clips, audio, markers
+
+
+def _apply1(clips: list, audio: list[dict], markers: list[dict], rp: Ripple) -> tuple[list, list[dict], list[dict]]:
     joins = rp.joins()
+    at_ins = [i.at for i in rp.inserts]
     out_c = []
     for cl in clips:
         lo = cl.rec_start if cl.start == -1 else cl.start
         hi = cl.rec_end if cl.end == -1 else cl.end
-        for a, b in rp.keep(lo, hi):
+        for a, b in _split_at(rp.keep(lo, hi), at_ins):
+            e0, e1 = rp.ext(a, "start"), rp.ext(b, "end")              # the clip extended at its cut
             n_in = cl.src_in if a == lo else cl.src_in + int(round((a - lo) * cl.speed))
+            n_out = cl.src_out if b == hi else n_in + int(round((b - a) * cl.speed))
+            n_in, n_out = n_in - int(round(e0 * cl.speed)), n_out + int(round(e1 * cl.speed))
+            r0 = rp.map1(a) - e0
             out_c.append(dataclasses.replace(
-                cl, start=-1 if (cl.start == -1 and a == lo) else rp.map(a),
-                end=-1 if (cl.end == -1 and b == hi) else rp.map(a) + (b - a),
-                rec_start=rp.map(a), rec_end=rp.map(a) + (b - a), src_in=n_in,
-                src_out=cl.src_out if b == hi else n_in + int(round((b - a) * cl.speed))))
+                cl, start=-1 if (cl.start == -1 and a == lo) else r0,
+                end=-1 if (cl.end == -1 and b == hi) else r0 + (b - a) + e0 + e1,
+                rec_start=r0, rec_end=r0 + (b - a) + e0 + e1, src_in=n_in, src_out=n_out))
+    shift, slide = dict(rp.shifts), dict(rp.slides)
     out_a = []
     for it in audio:
-        for a, b in rp.keep(it["start"], it["end"]):
+        d = shift.get(it["start"], 0)
+        if d:                                                         # an audio line moved to play on (speech.py)
+            it = dict(it, **{"in": it["in"] + d, "out": it["out"] + d})
+        d0, d1 = slide.get(it["start"], 0), slide.get(it["end"], 0)    # an A1 cut slid under a cross dissolve
+        if d0 or d1:
+            v = it["speed"]
+            it = dict(it, start=it["start"] + d0, end=it["end"] + d1, **{"in": it["in"] + int(round(d0 * v))},
+                      out=it["out"] + int(round(d1 * v)))
+        for a, b in _split_at(rp.keep(it["start"], it["end"]), at_ins):
+            e0, e1 = rp.ext(a, "start"), rp.ext(b, "end")
             n_in = it["in"] if a == it["start"] else it["in"] + int(round((a - it["start"]) * it["speed"]))
-            out_a.append(dict(it, start=rp.map(a), end=rp.map(a) + (b - a), **{"in": n_in},
-                              out=it["out"] if b == it["end"] else n_in + int(round((b - a) * it["speed"])),
-                              fade_in=a in joins and a > 0, fade_out=b in joins and b < rp.n_frames))
-    out_m = [dict(m, **{"in": rp.map(m["in"]), "out": max(rp.map(m["in"]), rp.map(m["out"]))}) for m in markers]
+            n_out = it["out"] if b == it["end"] else n_in + int(round((b - a) * it["speed"]))
+            n_in, n_out = n_in - int(round(e0 * it["speed"])), n_out + int(round(e1 * it["speed"]))
+            r0 = rp.map1(a) - e0
+            out_a.append(dict(it, start=r0, end=r0 + (b - a) + e0 + e1, **{"in": n_in}, out=n_out,
+                              fade_in=(bool(it.get("fade_in")) and a == it["start"] and not e0) or
+                              (a in joins and a > 0),
+                              fade_out=(bool(it.get("fade_out")) and b == it["end"] and not e1) or
+                              (b in joins and b < rp.n_frames)))
+    out_m = [dict(m, **{"in": rp.map1(m["in"]), "out": max(rp.map1(m["in"]), rp.map1(m["out"]))}) for m in markers]
     # a removed repeat (repeats.py) can leave the two sides playing one continuous RAW take: one clip, no fade there
     from .export_xml_edl import _merge_continuous
     out_c = _merge_continuous(out_c)
@@ -305,35 +466,80 @@ def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n
 
 
 def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None,
-                  words_of: Any = None) -> dict:
-    """The silence removal of the Premiere export of ``cutlist``: {cuts, ripple, threshold_db, levels, rows,
-    removed_s, old_s, new_s, settings}. Measured on A1 (the RAW audio under the clips), never inside a cross
-    dissolve; ``words_of(y)`` -> the words heard in that audio (timed on it), or None: then the cuts follow the
-    loudness alone."""
+                  words_of: Any = None, speech: Any = None, remove: bool = True) -> dict:
+    """The cuts of the Premiere export of ``cutlist`` before it is written: {cuts, ripple, threshold_db, levels,
+    rows, removed_s, old_s, new_s, settings, speech}. First the speech-safe cuts (``speech``: the RAW's
+    speech.SpeechMap -- every audio cut moved into the quiet, clips trimmed or extended: speech.plan_cuts), then
+    (``remove``; --keep-silence: not) the silences of A1 (the RAW audio under the clips, after those cuts), never
+    inside a cross dissolve. The words that keep a silence cut out of a word: the speech map's (mapped onto A1),
+    else ``words_of(y)`` -> the words heard in that audio, or None: then the cuts follow the loudness alone."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
     st = Settings.from_cfg(cfg)
-    fps = premiere_settings(cfg)["fps"]
+    pst = premiere_settings(cfg)
+    fps = pst["fps"]
     fac = premiere_factor(cutlist.comp_fps, fps)
     n_frames = int(cutlist.competitor["frames"]) * fac
     clips, _, _ = premiere_clips(cutlist, cfg)
     audio = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
+    snap, snap_rows = None, []
+    if speech is not None and audio:
+        from .speech import plan_cuts
+        src_max = int(math.floor(int(cutlist.raw["frames"]) * float(fps) / float(cutlist.raw_fps)))
+        snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac)
+        if snap.active:
+            clips, audio, _ = apply_premiere(clips, audio, [], snap)
+        n_frames = snap.new_frames
     protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
-    if raw_audio is None or not len(raw_audio) or not audio:
+    if not remove:
+        cuts, lv = [], {"how": "--keep-silence"}
+    elif raw_audio is None or not len(raw_audio) or not audio:
         cuts, lv = [], {"how": "no RAW audio under the clips"}
     else:
         y = a1_audio(audio, raw_audio, sr, fps, n_frames)
-        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words_of(y) if words_of is not None else None)
-    return summarize(cuts, n_frames, fps, st, lv)
+        if speech is not None and (speech.levels or {}).get("words") is not None:
+            words = words_on_a1(speech.words, audio, fps)
+        else:
+            words = words_of(y) if words_of is not None else None
+        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words)
+    out = summarize(cuts, n_frames, fps, st, lv, before=snap)
+    out["speech"] = {"rows": snap_rows, "levels": dict((speech.levels or {}) if speech is not None else {}),
+                     "on": speech is not None, "fps": str(fps)}
+    if not remove:
+        out["off"] = "--keep-silence"
+    return out
 
 
-def summarize(cuts: list[Cut], n_frames: int, fps: Fraction, st: Settings, lv: dict) -> dict:
-    """The plan as the pipeline / report / summary use it (``lv``: removal_ranges' levels)."""
-    rp = Ripple(list(cuts), n_frames)
+def words_on_a1(words: Sequence[tuple[str, float, float]], audio: Sequence[dict], fps: Fraction) -> list[Any]:
+    """The RAW's words (text, start s, end s) where A1 plays them: their times in the sequence (seconds), cut to the
+    items they are heard in."""
+    from types import SimpleNamespace
+    f = float(fps)
+    out = []
+    for it in sorted(audio, key=lambda d: d["start"]):
+        v = float(it["speed"])
+        if v <= 0:
+            continue
+        r0, r1 = it["in"] / f, it["in"] / f + (it["end"] - it["start"]) * v / f
+        for text, s0, s1 in words:
+            if s1 <= r0 or s0 >= r1:
+                continue
+            a = it["start"] / f + (max(s0, r0) - r0) / v
+            b = it["start"] / f + (min(s1, r1) - r0) / v
+            out.append(SimpleNamespace(text=text, raw=text, start=a, end=max(a, b)))
+    return out
+
+
+def summarize(cuts: list[Cut], n_frames: int, fps: Fraction, st: Settings, lv: dict, before: Ripple | None = None
+              ) -> dict:
+    """The plan as the pipeline / report / summary use it (``lv``: removal_ranges' levels; ``before``: the
+    speech-safe cuts made first -- the silences' frames are of the edit after them)."""
+    rp = Ripple(list(cuts), n_frames, before=before)
     f = float(fps)
     rows = [{"start_s": round(c.a / f, 3), "end_s": round(c.b / f, 3), "len_s": round(c.frames / f, 3),
-             "new_at_s": round(rp.map(c.a) / f, 3), "a": c.a, "b": c.b} for c in rp.cuts]
+             "new_at_s": round(rp.map1(c.a) / f, 3), "a": c.a, "b": c.b} for c in rp.cuts]
     return {"cuts": [(c.a, c.b) for c in rp.cuts], "ripple": rp, "threshold_db": lv.get("threshold_db"),
-            "levels": dict(lv), "rows": rows, "removed_s": round(rp.removed / f, 3), "old_s": round(n_frames / f, 3),
+            "levels": dict(lv), "rows": rows, "removed_s": round(rp.removed / f, 3),
+            "old_s": round(rp.first_frames / f, 3), "speech_s": round(n_frames / f, 3),
             "new_s": round(rp.new_frames / f, 3), "fps": str(fps), "settings": dataclasses.asdict(st)}
 
 
@@ -352,15 +558,22 @@ def settings_line(plan: dict) -> str:
 
 
 def ripple_pieces(pieces: Sequence[Any], rp: Ripple, fps: Fraction) -> list[Any]:
-    """caption_recheck.Piece maps of the edit before removal -> of the edit after it (split and moved)."""
+    """caption_recheck.Piece maps of the edit before every stage of ``rp`` -> of the edit after them (split, moved,
+    extended at a cut)."""
     f = float(fps)
-    out = []
-    for p in pieces:
-        a0, b0 = int(round(p.t0 * f)), int(round(p.t1 * f))
-        for a, b in rp.keep(a0, b0):
-            t0 = rp.map(a) / f
-            out.append(dataclasses.replace(p, t0=t0, t1=t0 + (b - a) / f, src0=p.src(a / f)))
-    return out
+    for st in rp.stages():
+        out = []
+        shift = dict(st.shifts)
+        for p in pieces:
+            a0, b0 = int(round(p.t0 * f)), int(round(p.t1 * f))
+            if shift.get(a0):
+                p = dataclasses.replace(p, src0=p.src0 + shift[a0] / f)
+            for a, b in _split_at(st.keep(a0, b0), [i.at for i in st.inserts]):
+                e0, e1 = st.ext(a, "start"), st.ext(b, "end")
+                t0 = (st.map1(a) - e0) / f
+                out.append(dataclasses.replace(p, t0=t0, t1=t0 + (b - a + e0 + e1) / f, src0=p.src((a - e0) / f)))
+        pieces = out
+    return list(pieces)
 
 
 def tc(seconds: float) -> str:

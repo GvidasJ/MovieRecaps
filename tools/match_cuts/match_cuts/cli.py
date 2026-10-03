@@ -168,11 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "level and its background noise")
     p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.3, metavar="S",
                    help="cut only silences longer than this, in the gaps between words (seconds, default 0.3)")
-    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.02, metavar="S",
-                   help="keep this much of a silence before the word that follows it (seconds, default 0.02: one "
-                        "frame)")
-    p.add_argument("--pad-after", type=_seconds_arg("--pad-after"), default=0.06, metavar="S",
-                   help="keep this much of a silence after the word before it (seconds, default 0.06)")
+    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.05, metavar="S",
+                   help="a clip starts this long before its first word, and a removed silence keeps this much before "
+                        "the word that follows it (seconds, default 0.05)")
+    p.add_argument("--pad-after", type=_seconds_arg("--pad-after"), default=0.15, metavar="S",
+                   help="a clip ends this long after its last word has finished, and a removed silence keeps this much "
+                        "after the word before it (seconds, default 0.15)")
     p.add_argument("--allow-repeats", action="store_true",
                    help="--premiere: keep a RAW moment over 0.5 s that plays twice in my edit (default: the copy out of "
                         "chronological order, else the later one, is cut out; a stutter at a cut is trimmed either way)")
@@ -238,9 +239,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     db = getattr(args, "silence_db", None)
     cfg.silence_db = None if db is None else float(db)
     cfg.min_silence = float(getattr(args, "min_silence", 0.3))
-    cfg.pad_before = float(getattr(args, "pad_before", 0.02))
+    cfg.pad_before = float(getattr(args, "pad_before", 0.05))
     cfg.allow_repeats = bool(getattr(args, "allow_repeats", False))
-    cfg.pad_after = float(getattr(args, "pad_after", 0.06))
+    cfg.pad_after = float(getattr(args, "pad_after", 0.15))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
     cfg.no_broll = bool(getattr(args, "no_broll", False))
@@ -428,6 +429,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines.append(f"  Unclear caption words: {r}")
         for r in hc.get("caption_rules") or []:
             lines.append(f"  Caption rules (captions changed / flagged per rule): {r}")
+        talk = list(hc.get("speech") or [])
+        if talk:
+            lines.append(f"Cuts moved off speech: {talk[0]}")
+            lines += [f"  {r}" for r in talk[1:]]
         sil = list(hc.get("silence") or [])
         if sil:
             lines.append(f"Silences: {sil[0]}")

@@ -121,6 +121,7 @@ class Context:
     captions: dict = field(default_factory=dict)      # captions.run_captions result (captions.srt + report data)
     broll: dict = field(default_factory=dict)         # --no-broll: broll.apply_no_broll result (export cut list + lists)
     silence: dict = field(default_factory=dict)       # silence.plan_premiere: the silences cut out of the Premiere export
+    speech: Any = None                                # speech.SpeechMap of the RAW: no cut lands inside speech
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2480,6 +2481,7 @@ def stage_exports(ctx: Context) -> None:
     premiere = bool(getattr(cfg, "premiere", False))
     rp = None
     if premiere:
+        ctx.speech = speech_of(ctx, ex)
         ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
         rp = ctx.silence.get("ripple")
         produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
@@ -2492,7 +2494,7 @@ def stage_exports(ctx: Context) -> None:
     validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
     if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
         ok, res = _soft(ctx, "S8 validate exports", lambda: (
-            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg, rp) if premiere
+            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg, rp, ctx.speech) if premiere
             else export_xml_edl.validate_exports(ex, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
         if validation.get("gaps"):
@@ -2504,6 +2506,9 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("item_problems"):
             ctx.warn(f"Premiere XML: {len(validation['item_problems'])} item(s) Premiere would skip or misplace on "
                      "import -- the run fails: " + "; ".join(validation["item_problems"]))
+        if validation.get("speech_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['speech_problems'])} audio cut(s) inside speech -- the run "
+                     "fails: " + "; ".join(validation["speech_problems"]))
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
     ctx.exports = dict(validation)
@@ -2590,21 +2595,134 @@ def repeat_lines(plan: dict) -> list[str]:
 
 
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
-    """silence.plan_premiere of the Premiere export (the silences of the RAW audio under my clips), {} with
-    --keep-silence; a failure warns and keeps every silence."""
+    """silence.plan_premiere of the Premiere export: the speech-safe cuts (ctx.speech), then the silences of the RAW
+    audio under my clips (not with --keep-silence: {'off': ...} plus the speech-safe cuts); a failure warns and keeps
+    every silence (and every cut where the plan put it: the speech check then decides)."""
     from . import silence
-    if getattr(ctx.cfg, "keep_silence", False):
-        return {"off": "--keep-silence"}
+    keep = bool(getattr(ctx.cfg, "keep_silence", False))
     try:
-        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx))
+        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx), ctx.speech,
+                                     remove=not keep)
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"silences not removed: {type(e).__name__}: {e}")
         return {"error": f"{type(e).__name__}: {e}"}
-    log.info("silence removal: %d silences cut (%.2f s; %.2f s -> %.2f s); %s", len(plan["rows"]), plan["removed_s"],
-             plan["old_s"], plan["new_s"], silence.settings_line(plan))
-    ctx.dlog.record("silence", "removed", rows=plan["rows"], levels=plan["levels"], settings=plan["settings"])
+    moved = (plan.get("speech") or {}).get("rows") or []
+    log.info("speech-safe cuts: %d cut(s) moved; silence removal: %d silences cut (%.2f s; %.2f s -> %.2f s); %s",
+             len(moved), len(plan["rows"]), plan["removed_s"], plan["old_s"], plan["new_s"],
+             silence.settings_line(plan))
+    ctx.dlog.record("silence", "removed", rows=plan["rows"], levels=plan["levels"], settings=plan["settings"],
+                    moved=moved)
     return plan
+
+
+def speech_of(ctx: Context, cl: Cutlist) -> Any:
+    """The RAW's speech map (speech.py) for the speech-safe cuts and the hard speech check, or None (no RAW audio /
+    it failed: warned): the RAW's loudness everywhere, its words where the edit plays it (+- SPEECH_MARGIN_S) --
+    transcribed with the recheck model (medium.en; the captions' model with --caption-recheck-model none) and,
+    as a second opinion on what was said, the captions' model."""
+    from . import silence, speech, transcribe
+    from .export_xml_edl import premiere_audio, premiere_clips, premiere_settings
+    if ctx.raw_audio is None or not len(ctx.raw_audio) or not bool(cl.raw.get("has_audio", True)):
+        return None
+    try:
+        sr = int(ctx.audio_sr)
+        dur = len(ctx.raw_audio) / float(sr)
+        f = float(premiere_settings(ctx.cfg)["fps"])
+        clips, _, _ = premiere_clips(cl, ctx.cfg)
+        heard = []
+        for it in premiere_audio(cl, clips, ctx.cfg):
+            a, b = sorted((it["in"] / f, it["out"] / f))
+            heard.append((max(0.0, a - SPEECH_MARGIN_S), min(dur, b + SPEECH_MARGIN_S)))
+        heard = _merge_ranges(heard)
+        words = also = None
+        models = []
+        if transcribe.available() is None and heard:
+            cfg = ctx.cfg
+            cap = str(getattr(cfg, "caption_model", "small.en") or "small.en")
+            rec = str(getattr(cfg, "caption_recheck_model", "") or "")
+            main = rec if rec.lower() not in ("", "none") else cap
+            language = str(getattr(cfg, "caption_language", "en") or "") or None
+            words = raw_words(ctx, heard, main, language)
+            models.append(main)
+            if cap != main and words is not None:
+                also = raw_words(ctx, heard, cap, language)
+                models.append(cap)
+        else:
+            ctx.warn("speech-safe cuts: no transcription here -- speech told from silence by loudness alone")
+        sm = speech.speech_map(ctx.raw_audio, sr, silence.Settings.from_cfg(ctx.cfg), words, also,
+                               heard if words is not None else None)
+        sm.levels["models"] = models
+        n_breath = sum(1 for s in sm.sounds if not s.speech)
+        log.info("speech map of the RAW: %d sounds (%d breaths / noises), %s words (%s)", len(sm.sounds), n_breath,
+                 "no" if words is None else len(words), ", ".join(models) or "no transcript")
+        return sm
+    except Exception as e:  # noqa: BLE001 - the plan's cuts stay; the run cannot be checked for cuts inside speech
+        log.error("speech map failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"speech map failed ({type(e).__name__}: {e}): cuts not moved off speech, not checked")
+        return None
+
+
+SPEECH_MARGIN_S = 3.0      # the RAW transcribed this far around what the edit plays (a cut may move that far)
+
+
+def _merge_ranges(rs: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    out: list[list[float]] = []
+    for a, b in sorted(rs):
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def raw_words(ctx: Context, ranges: list[tuple[float, float]], model: str, language: str | None) -> list | None:
+    """The words of the RAW in ``ranges`` (s), timed on the RAW (each range transcribed on its own, cached by
+    content), or None when the transcription failed (warned)."""
+    from . import transcribe
+    sr = int(ctx.audio_sr)
+    out = []
+    try:
+        for a, b in ranges:
+            i0, i1 = int(round(a * sr)), int(round(b * sr))
+            for w in transcribe.transcribe_words(ctx.raw_audio[i0:i1], sr, model, language, ctx.cache):
+                out.append(dataclasses.replace(w, start=w.start + i0 / sr, end=w.end + i0 / sr))
+    except Exception as e:  # noqa: BLE001 - e.g. the model download failed
+        ctx.warn(f"speech-safe cuts: no word timings from {model} ({type(e).__name__}: {e}); loudness alone")
+        return None
+    return out
+
+
+def speech_lines(plan: dict) -> list[str]:
+    """The end summary's lines on the speech-safe cuts: how many cuts were moved off speech (and how), then each."""
+    sp = (plan or {}).get("speech")
+    if not sp:
+        return []
+    if not sp.get("on"):
+        return ["not checked (no speech map of the RAW)"]
+    rows = sp.get("rows") or []
+    lv = sp.get("levels") or {}
+    models = ", ".join(lv.get("models") or []) or "loudness alone"
+    head = (f"{sum(1 for r in rows if r['edge'] in ('start', 'end'))} clip edge(s) moved, "
+            f"{sum(1 for r in rows if r['edge'] == 'whole')} clip(s) left with nothing to play removed "
+            f"(words: {models})" if rows else f"no cut needed moving (words: {models})")
+    out = [head]
+    for r in rows:
+        if r["edge"] == "whole":
+            out.append(f"{r['clip']}: removed -- the clip before it now plays all it had (RAW {r['from_s']:.2f}-"
+                       f"{r['to_s']:.2f} s)")
+        elif r["edge"] == "audio line":
+            out.append(f"{r['clip']}: its audio line moved {r['frames']:+d} frame(s) so A1 plays on where the picture "
+                       "does not cut")
+        elif r["edge"] == "dissolve":
+            out.append(f"{r['clip']}: the A1 cut under its cross dissolve slid {r['frames']:+d} frame(s) out of speech")
+        else:
+            how = ("plays on" if r["frames"] > 0 else "ends earlier") if r["edge"] == "end" else \
+                ("starts later" if r["frames"] > 0 else "starts earlier")
+            out.append(f"{r['clip']} {how} by {abs(r['frames'])} frame(s): RAW {r['from_s']:.2f} -> "
+                       f"{r['to_s']:.2f} s{' (was inside speech)' if r.get('inside') else ''}"
+                       f"{(' -- ' + repr(r['said'])) if r.get('said') else ''}")
+    return out
 
 
 def words_reader(ctx: Context):
@@ -2838,6 +2956,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     if rules:
         from .caption_rules import summary_line
         out["caption_rules"] = [summary_line(rules)]
+    out["speech"] = speech_lines(getattr(ctx, "silence", None) or {})
     out["silence"] = silence_lines(getattr(ctx, "silence", None) or {})
     out["repeats"] = repeat_lines(getattr(ctx, "silence", None) or {})
     return out
