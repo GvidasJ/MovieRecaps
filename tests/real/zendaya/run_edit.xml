@@ -1,0 +1,1604 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <sequence id="sequence-1">
+    <name>Recreated Edit (Premiere)</name>
+    <duration>1091</duration>
+    <rate>
+      <timebase>60</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <timecode>
+      <rate>
+        <timebase>60</timebase>
+        <ntsc>FALSE</ntsc>
+      </rate>
+      <string>00:00:00:00</string>
+      <frame>0</frame>
+      <displayformat>NDF</displayformat>
+    </timecode>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <width>1080</width>
+            <height>1920</height>
+            <anamorphic>FALSE</anamorphic>
+            <pixelaspectratio>square</pixelaspectratio>
+            <fielddominance>none</fielddominance>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="clipitem-1">
+            <name>S01+S02 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>192</end>
+            <in>9257</in>
+            <out>9449</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw">
+              <name>competitor.mp4</name>
+              <pathurl>file://localhost/C%3A/Users/gvida/Desktop/bh/MovieRecaps/output/012/extras/media/competitor.mp4</pathurl>
+              <rate>
+                <timebase>25</timebase>
+                <ntsc>FALSE</ntsc>
+              </rate>
+              <duration>6939</duration>
+              <timecode>
+                <rate>
+                  <timebase>25</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <string>00:00:00:00</string>
+                <frame>0</frame>
+                <displayformat>NDF</displayformat>
+              </timecode>
+              <media>
+                <video>
+                  <samplecharacteristics>
+                    <rate>
+                      <timebase>25</timebase>
+                      <ntsc>FALSE</ntsc>
+                    </rate>
+                    <width>1920</width>
+                    <height>1080</height>
+                    <anamorphic>FALSE</anamorphic>
+                    <pixelaspectratio>square</pixelaspectratio>
+                    <fielddominance>none</fielddominance>
+                  </samplecharacteristics>
+                </video>
+                <audio>
+                  <samplecharacteristics>
+                    <depth>16</depth>
+                    <samplerate>48000</samplerate>
+                  </samplecharacteristics>
+                  <channelcount>2</channelcount>
+                </audio>
+              </media>
+            </file>
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S01+S02 speed 1.000000 conf 0.46</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; one clip for S01+S02 (one continuous RAW take, same framing)</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-2">
+            <name>S05 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>192</start>
+            <end>293</end>
+            <in>9466</in>
+            <out>9567</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S05 speed 1.000000 conf 0.96</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 49 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-3">
+            <name>S10 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>293</start>
+            <end>359</end>
+            <in>9748</in>
+            <out>9814</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S10 speed 1.000000 conf 0.25</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (-6.67 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-4">
+            <name>S11 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>359</start>
+            <end>415</end>
+            <in>171</in>
+            <out>227</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S11 speed 1.000000 conf 0.24</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (-1.97 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-5">
+            <name>S12 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>415</start>
+            <end>483</end>
+            <in>9893</in>
+            <out>9961</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S12 speed 1.000000 conf 0.27</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (-6.67 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-6">
+            <name>S13 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>483</start>
+            <end>497</end>
+            <in>9962</in>
+            <out>9976</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S13 speed 1.000000 conf 0.72</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (-3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-7">
+            <name>S14 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>497</start>
+            <end>511</end>
+            <in>9978</in>
+            <out>9989</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Time Remap</name>
+                <effectid>timeremap</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>variablespeed</parameterid>
+                  <name>variablespeed</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>speed</parameterid>
+                  <name>speed</name>
+                  <valuemin>-100000</valuemin>
+                  <valuemax>100000</valuemax>
+                  <value>80</value>
+                </parameter>
+                <parameter>
+                  <parameterid>reverse</parameterid>
+                  <name>reverse</name>
+                  <value>FALSE</value>
+                </parameter>
+                <parameter>
+                  <parameterid>frameblending</parameterid>
+                  <name>frameblending</name>
+                  <value>FALSE</value>
+                </parameter>
+              </effect>
+            </filter>
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 speed 0.800000 conf 0.96</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+6.67 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-8">
+            <name>S15 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>511</start>
+            <end>523</end>
+            <in>9990</in>
+            <out>10002</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S15 speed 1.000000 conf 0.80</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (-3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-9">
+            <name>S16 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>523</start>
+            <end>534</end>
+            <in>10002</in>
+            <out>10015</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Time Remap</name>
+                <effectid>timeremap</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>variablespeed</parameterid>
+                  <name>variablespeed</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>speed</parameterid>
+                  <name>speed</name>
+                  <valuemin>-100000</valuemin>
+                  <valuemax>100000</valuemax>
+                  <value>120</value>
+                </parameter>
+                <parameter>
+                  <parameterid>reverse</parameterid>
+                  <name>reverse</name>
+                  <value>FALSE</value>
+                </parameter>
+                <parameter>
+                  <parameterid>frameblending</parameterid>
+                  <name>frameblending</name>
+                  <value>FALSE</value>
+                </parameter>
+              </effect>
+            </filter>
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S16 speed 1.200000 conf 0.96</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-10">
+            <name>S17 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>534</start>
+            <end>543</end>
+            <in>10015</in>
+            <out>10024</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S17 speed 1.000000 conf 0.57</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (-3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-11">
+            <name>S18+S19 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>543</start>
+            <end>557</end>
+            <in>10025</in>
+            <out>10039</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S18+S19 speed 1.000000 conf 0.96</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250; one clip for S18+S19 (one continuous RAW take, same framing)</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-12">
+            <name>S20 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>557</start>
+            <end>573</end>
+            <in>10041</in>
+            <out>10057</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.004677</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2852134</horiz>
+                    <vert>0.059753</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S20 speed 1.000000 conf 0.94</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -7.6, 1024.5 px; Scale 116.00 %; Rotation 0.00 deg; framing kept from S01: its framing moves 9 px here, under --min-move 250</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (+2.59 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-13">
+            <name>S21+S22+S23 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>573</start>
+            <end>845</end>
+            <in>10057</in>
+            <out>10329</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>115.950659</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>0.2675304</horiz>
+                    <vert>0.0597461</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S21+S22+S23 speed 1.000000 conf 0.39</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 1053.7, 1024.5 px; Scale 115.95 %; Rotation 0.00 deg; one clip for S21+S22+S23 (one continuous RAW take, same framing)</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-14">
+            <name>S24 competitor.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>845</start>
+            <end>1091</end>
+            <in>10329</in>
+            <out>10575</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>116.144206</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.2679614</horiz>
+                    <vert>0.0589399</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S24 speed 1.000000 conf 0.95</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 25.5, 1023.7 px; Scale 116.14 %; Rotation 0.00 deg</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+3.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+        </track>
+      </video>
+      <audio>
+        <numOutputChannels>2</numOutputChannels>
+        <format>
+          <samplecharacteristics>
+            <depth>16</depth>
+            <samplerate>48000</samplerate>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="clipitem-a1">
+            <name>S01 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>0</start>
+            <end>192</end>
+            <in>9257</in>
+            <out>9449</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>9448</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9449</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S01 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a2">
+            <name>S05 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>192</start>
+            <end>293</end>
+            <in>9466</in>
+            <out>9567</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>9466</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9467</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9566</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9567</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S05 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a3">
+            <name>S10 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>293</start>
+            <end>359</end>
+            <in>9748</in>
+            <out>9814</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>9748</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9749</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9813</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9814</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S10 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a4">
+            <name>S11 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>359</start>
+            <end>415</end>
+            <in>171</in>
+            <out>227</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>171</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>172</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>226</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>227</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S11 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a5">
+            <name>S12 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>415</start>
+            <end>483</end>
+            <in>9893</in>
+            <out>9961</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>9893</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9894</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9960</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9961</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S12 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a6">
+            <name>S13 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>483</start>
+            <end>497</end>
+            <in>9962</in>
+            <out>9976</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>9962</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>9963</when>
+                    <value>1</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S13 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a7">
+            <name>S14 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>497</start>
+            <end>523</end>
+            <in>9977</in>
+            <out>10003</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>10002</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10003</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a8">
+            <name>S14 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>523</start>
+            <end>534</end>
+            <in>10004</in>
+            <out>10015</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>10004</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10005</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10014</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10015</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a9">
+            <name>S14 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>534</start>
+            <end>555</end>
+            <in>10016</in>
+            <out>10037</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>10016</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10017</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10036</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10037</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a10">
+            <name>S14 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>555</start>
+            <end>557</end>
+            <in>10039</in>
+            <out>10041</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>10039</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10040</when>
+                    <value>1</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a11">
+            <name>S20 competitor.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>16653</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>557</start>
+            <end>1091</end>
+            <in>10041</in>
+            <out>10575</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>10574</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>10575</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S20 picture</mastercomment1>
+            </comments>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+    <marker>
+      <name>B-ROLL REPLACED S09</name>
+      <comment>the competitor showed a cutaway over music / voice-over here; the previous RAW clip keeps playing (no RAW audio under it)</comment>
+      <in>293</in>
+      <out>293</out>
+    </marker>
+  </sequence>
+</xmeml>
