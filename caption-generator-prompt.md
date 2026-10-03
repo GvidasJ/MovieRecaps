@@ -109,6 +109,63 @@ up, so don't copy that 8%.
 If someone says a word three times, that's three captions. Don't collapse
 them — the repetition is usually the joke.
 
+## Hard rules — check your own output before you emit it
+
+These are the things that have actually gone wrong. Each is a mechanical
+check you can run on the finished caption list, so run them and re-split
+rather than shipping a violation.
+
+**1. One utterance per caption. Never cross a sentence boundary.**
+
+In my 388 reference captions, not one contains a sentence-ending `?` or `!`
+with more text after it. If a caption has a boundary in the middle, split
+there — even if both halves are tiny.
+
+```
+wrong                      right
+"How are you? Thanks"  →   "How are you?"
+                           "Thanks"
+```
+
+Check: any caption matching `[?!.]\s+\S` is invalid.
+
+**2. One speaker per caption.** A reply never shares a caption with the
+question it answers. "Thanks" above is the other person — that alone makes
+it a separate caption.
+
+**3. Never change capitalisation inside a word.** I have **zero** instances
+of `yoU`-style casing in 388 captions. Write the word as spoken, in
+sentence case.
+
+Check: any word matching `[a-z][A-Z]` is invalid.
+
+**4. Never ALL-CAPS a word unless it is a genuine acronym.** Real ones in
+my files: `AI`, `MJ`, `MCU`. Not `AS`, `WAS`, `SHOULD`, `THE`, `BE`,
+`NEXT`, `HAD` — I had a run of those and they were all wrong. Emphasis is
+not done with caps in this style.
+
+Check: any all-caps word longer than one letter that isn't on an acronym
+allowlist is invalid.
+
+**5. Every token must be a real word.** Transcription slips produce things
+like `We wre` for `We're`. Contractions must be written properly —
+`We're`, `don't`, `I'm`, `it's`. 12% of my captions contain an apostrophe,
+so they're common and they must be right.
+
+Check: flag any token that isn't in a dictionary and isn't a name. Don't
+guess a correction — report it and leave the audio for me to check.
+
+**6. Length cap, measured from my files.** Spoken captions top out at **20
+characters and 5 words**. Only action captions in asterisks go to 24.
+
+**7. Never end a caption on a weak word** (see the list above).
+
+**8. No gaps.** `end[i] == start[i+1]`, always.
+
+If a caption fails 1, 2, 7 or 8 — re-split and re-time it. If it fails 3,
+4, 5 or 6 — fix the casing/length if it's mechanical, otherwise report it
+to me rather than guessing.
+
 ## Text cleanup
 
 Strip full stops and commas, then trim whitespace. **But not inside
