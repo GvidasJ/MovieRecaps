@@ -1199,7 +1199,7 @@ def _captions(ctx: Any) -> list[str]:
         out += ["", f"**Copied captions the OCR was unsure of** (check the text): {len(unsure) if unsure else 'none'}"]
         out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
                 f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
-        return out
+        return out + _recheck(cap)
     out.append("- Speaker changes are not detected (the transcriber has no speaker diarisation): the "
                "speaker-change break of the grouping rules is not applied.")
     st = cap.get("stats") or {}
@@ -1231,6 +1231,36 @@ def _captions(ctx: Any) -> list[str]:
     out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
             f"{len(fl) if fl else 'none'}"]
     out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
+    return out + _recheck(cap)
+
+
+def heard(r: dict) -> str:
+    """The alternatives a still-unclear spot was heard as: ``edit (small.en) 'x' 0.42 · RAW (medium.en) 'y' 0.38``."""
+    return " · ".join(f"{a['source']} '{a['text'] or '-'}'" + (f" {a['conf']:.2f}" if a.get("conf") is not None else "")
+                      for a in r.get("alternatives") or [])
+
+
+def _recheck(cap: dict) -> list[str]:
+    """caption_recheck.py: the words the transcription was unsure of, transcribed again from the source."""
+    rc = cap.get("recheck") or {}
+    if not rc:
+        return []
+    src, model = rc.get("source", "RAW"), rc.get("model", "")
+    if rc.get("error"):
+        return ["", f"**Unclear words rechecked against the {src}**: not done ({rc['error']}); the first transcript "
+                "is used and its low-confidence words are listed above."]
+    out = ["", f"**Unclear words rechecked against the {src}** ({model}, the whole sentence around each): "
+           f"{rc.get('unsure', 0)} words the transcription was unsure of (low confidence, music / noise under them, "
+           f"or cut at an edit point), {rc.get('rechecked', 0)} rechecked, {rc.get('changed', 0)} changed."]
+    ch = rc.get("changes") or []
+    if ch:
+        out += ["", md_table(["time", "heard in the edit", "now", "why", "confidence (edit → " + src + ")"],
+                             [[_seconds(c["time"]), c["from"] or "—", c["to"], c["why"],
+                               f"{c['conf'][0]:.2f} → {c['conf'][1]:.2f}"] for c in ch])]
+    uc = rc.get("unclear") or []
+    out += ["", f"**Still unclear after the recheck** (the best version kept, nothing guessed — check by ear): "
+            f"{len(uc) if uc else 'none'}"]
+    out += [f"- {_seconds(r['time'])} `{r['text'] or '(nothing)'}` — {r['why']}; heard: {heard(r)}" for r in uc]
     return out
 
 

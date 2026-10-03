@@ -167,7 +167,8 @@ def _fake_result(statuses: dict[str, str], det: str = "pass") -> dict:
     return {"criteria": crit, "checks": checks, "warnings": ["w1"],
             "paths": {"xml": "out/001/1_edit.xml", "report": "out/001/extras/report.md"},
             "checklist": {"broll": ["00:00:01:02-00:00:03:48  B-ROLL REPLACED S03: the RAW of the audio there"],
-                          "spots": [], "captions": ["00:00:04,067-00:00:04,300  caption 'a' / spoken 'b'"]},
+                          "spots": [], "captions": ["00:00:04,067-00:00:04,300  caption 'a' / spoken 'b'"],
+                          "caption_recheck": ["12 words rechecked against the RAW (medium.en), 3 changed"]},
             "exit_code": pipeline.exit_code_for(crit, checks)}
 
 
@@ -218,6 +219,7 @@ def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys
     assert "out/001/1_edit.xml" in out.out and "w1" in out.out and "swapped" in out.out
     assert "B-ROLL REPLACED spots: 1" in out.out and "Uncertain / NOT-IN-RAW / retimed spots: none" in out.out
     assert "Captions worth a look: 1" in out.out and "caption 'a' / spoken 'b'" in out.out
+    assert "  Unclear caption words: 12 words rechecked against the RAW (medium.en), 3 changed" in out.out
     assert out.out.rstrip().endswith(f"Run folder: {tmp_path / '001'}")                # printed at the end
     assert seen["cfg"].deliver_dir == str(tmp_path / "001") and seen["cfg"].out_dir == str(tmp_path / "001" / "extras")
     o = ["--out", str(tmp_path)]

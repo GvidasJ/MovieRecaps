@@ -149,15 +149,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "through); cutaways over music / voice-over stay as they are. Changes 1_edit.xml, the "
                         "EDL and cutlist.csv; report.md lists every replaced and kept cutaway")
     p.add_argument("--captions", default="auto", choices=["auto", "competitor", "voice"],
-                   help="2_captions.srt (60 fps sequence): auto = copy the competitor's burned-in captions when it "
-                        "has them (OCR; uncaptioned speech filled from the voice-over), else make them from the voice-over "
-                        "by caption-generator-prompt.md; competitor / voice force one mode")
+                   help="2_captions.srt (60 fps sequence): auto = an exact copy of the competitor's burned-in "
+                        "captions when it has them (OCR), else made from the voice-over by caption-generator-prompt.md; "
+                        "competitor / voice force one mode")
     p.add_argument("--voiceover", default=None, metavar="FILE",
                    help="caption this narration (audio or video file, starting at the sequence start) instead of the "
                         "cut edit's audio")
     p.add_argument("--caption-model", default="small.en", metavar="NAME",
                    help="faster-whisper model for the transcription (default small.en; base.en is faster, medium.en "
                         "more accurate; downloaded once on first use)")
+    p.add_argument("--caption-recheck-model", default="medium.en", metavar="NAME",
+                   help="words the transcription is unsure of (low confidence, music / noise under them, cut at an "
+                        "edit point) are transcribed again from the RAW with this bigger model, the whole sentence "
+                        "around them (default medium.en, downloaded once on first use; none = off)")
     p.add_argument("--no-ae", action="store_true",
                    help="do not open After Effects automatically (run output/build_ae_project.jsx yourself)")
     p.add_argument("--ae-timeout", default=600.0, type=float, metavar="SECONDS",
@@ -196,6 +200,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.captions = str(getattr(args, "captions", "auto") or "auto")
     cfg.voiceover = str(getattr(args, "voiceover", None) or "")
     cfg.caption_model = str(getattr(args, "caption_model", None) or "small.en")
+    cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "medium.en")
     if args.seed is not None:
         cfg.seed = int(args.seed)
     return cfg
@@ -361,6 +366,8 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines += [f"    {r}" for r in rows[:max_rows]]
             if len(rows) > max_rows:
                 lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
+        for r in hc.get("caption_recheck") or []:
+            lines.append(f"  Unclear caption words: {r}")
     warns = list(result.get("warnings") or [])
     if warns:
         lines.append(f"Warnings: {len(warns)}" + (f" (the first {max_warnings}; all in {run_folders.EXTRAS}/report.md)"

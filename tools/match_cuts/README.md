@@ -79,7 +79,8 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
-`--caption-model NAME` (default `small.en`). Premiere-only export: `--premiere`.
+`--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
+Premiere-only export: `--premiere`.
 
 `--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
 playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
@@ -164,6 +165,20 @@ with its competitor and 60 fps sequence timecodes.
   verb kept together, a weak final word moved to the next caption (once per caption — the prompt's
   own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
   `*...*` placeholders for silences over ~1 s. `--voiceover FILE` captions your own narration instead.
+
+**Unclear speech is double-checked against the RAW** (voice mode, and the transcript fallbacks of competitor mode).
+A word the transcription of the edit is unsure about — heard with low confidence (mumbling), with music or noise
+under it (less than 12 dB above the sound bed around it), or with an edit point cutting into it — is transcribed
+again from the RAW footage the edit plays there (the edit's own audio map: J/L cuts, speed changes and audio lines
+are followed), with 3 s of context on each side so the model hears the whole sentence rather than the cut piece, by
+a bigger model (`--caption-recheck-model`, default `medium.en`, downloaded once; `none` turns it off) for these
+spots only. The RAW's words are mapped back onto the edit's timeline (a word cut off at an edit point keeps the part
+the edit plays) and the two versions are compared word by word: where they agree the word is confirmed; where they
+differ the more confident one is used, and a competitor caption read clearly at that spot is a third opinion that
+decides when it agrees with one of them. Nothing is guessed: a spot still unsure after that keeps the best version
+and is listed under *Captions worth a look* with its time and the alternatives heard (edit, RAW, caption). The end
+summary says how many words were rechecked and how many changed; the report lists every change. With
+`--voiceover`, the voice-over file itself is the source.
 
 The report's *Captions* section lists, in competitor mode, the competitor's writing conventions, the captions
 written from the transcript because they could not be read and the readings the OCR was unsure of; in voice mode,

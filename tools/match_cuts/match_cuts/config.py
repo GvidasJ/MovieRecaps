@@ -57,6 +57,7 @@ class Config:
                                            #   captions (OCR) or made from the voice-over (caption-generator-prompt.md)
     voiceover: str = ""                    # caption this narration file instead of the cut edit's audio
     caption_model: str = "small.en"        # faster-whisper model (tiny.en / base.en faster, medium.en more accurate)
+    caption_recheck_model: str = "medium.en"   # unclear words transcribed again from the RAW with this ("none": off)
     caption_language: str = "en"
     no_broll: bool = False                 # --no-broll: cutaways over continuous RAW audio -> the main clip plays through
                                            #   (XML / EDL / cutlist.csv only; cutlist.json + verification stay faithful)
@@ -314,7 +315,8 @@ class Config:
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move",
-                  "captions", "voiceover", "caption_model", "caption_language", "no_broll",
+                  "captions", "voiceover", "caption_model", "caption_recheck_model", "caption_language",
+                  "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
         return d

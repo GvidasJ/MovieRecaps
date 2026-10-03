@@ -608,10 +608,7 @@ def run_captions(ctx) -> dict:
         elif err:
             warn(f"the competitor has burned-in captions but they cannot be read: {err}")
         else:
-            from .common import stage_key
-            key = stage_key("captions_spans", info.file_hash, json_key(layout), caption_ocr.SPAN_VERSION)
-            got = ctx.cache.json("captions_spans", key, lambda: caption_ocr.read_caption_spans(
-                info.path, layout, wh, comp_fps, ctx.n_comp))
+            got = _read_spans(ctx, layout, comp_fps)
             spans = list(got.get("spans") or [])
             res["ocr"] = {"frames_read": got.get("frames_read"), "band": got.get("band"), "fill": got.get("fill"),
                           "events": len(spans), "runs": got.get("runs"), "conventions": got.get("conventions"),
@@ -632,6 +629,7 @@ def run_captions(ctx) -> dict:
     words: list[Word] = []
     y16 = None
     err = None
+    cl = None
     if mode == "competitor" and all(d.get("ocr") for d in spans):
         res["source"] = "not needed (every caption was read from the screen)"
     elif voiceover:
@@ -663,6 +661,31 @@ def run_captions(ctx) -> dict:
                 warn(f"transcription failed: {err}")
     res["transcriber"] = {"engine": "faster-whisper", "model": model, "words": len(words), "error": err}
 
+    # ---- unclear words double-checked against the source (caption_recheck.py) ----
+    rmodel = str(getattr(cfg, "caption_recheck_model", "") or "")
+    unread = ([(int(d["comp_in"]) / float(comp_fps), int(d["comp_out"]) / float(comp_fps)) for d in spans
+               if not d.get("ocr")] if mode == "competitor" else None)
+    if words and rmodel.lower() not in ("", "none") and (mode == "voice" or unread):
+        from . import caption_recheck as R
+        if voiceover:
+            pieces, source, sname = ([R.Piece(0.0, len(y16) / transcribe.SR, 0.0, 1.0)],
+                                     R.audio_source(y16, transcribe.SR), "voice-over")
+        else:
+            pieces, source, sname = R.pieces_from_cutlist(cl), R.audio_source(ctx.raw_audio, int(ctx.audio_sr)), "RAW"
+        opinion = (R.clear_captions(spans, comp_fps) if spans else
+                   _lazy_opinion(ctx, layout, comp_fps) if requested == "voice" and not voiceover else None)
+        try:
+            words, res["recheck"] = R.recheck(
+                words, y16, pieces, source,
+                lambda y: transcribe.transcribe_words(y, transcribe.SR, rmodel, language, ctx.cache),
+                captions=opinion, only=unread, source_name=sname, edit_model=model, model=rmodel)
+            log.info("captions: %d unclear words rechecked against the %s (%s), %d changed, %d still unclear",
+                     res["recheck"]["rechecked"], sname, rmodel, res["recheck"]["changed"],
+                     len(res["recheck"]["unclear"]))
+        except Exception as e:  # noqa: BLE001 - e.g. the bigger model could not be downloaded: the first transcript
+            res["recheck"] = {"error": f"{type(e).__name__}: {e}", "model": rmodel, "source": sname}
+            warn(f"unclear words not rechecked with {rmodel}: {type(e).__name__}: {e}")
+
     # ---- captions ----
     weak: list[dict] = []
     if mode == "competitor":
@@ -671,7 +694,8 @@ def run_captions(ctx) -> dict:
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
         caps = voice_captions(words, fps, n_seq, notes=weak)
-        res["flags"] = transcript_flags(words, y16, transcribe.SR)
+        rechecked = "rechecked" in (res.get("recheck") or {})        # low-confidence words: listed by the recheck
+        res["flags"] = transcript_flags(words, y16, transcribe.SR, min_prob=0.0 if rechecked else 0.5)
     else:
         caps = []
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
@@ -689,6 +713,39 @@ def run_captions(ctx) -> dict:
         dump_json(res, cfg.debug_dir / "captions.json")
         log.info("captions: %d captions (%s) -> %s", len(caps), mode, p)
     return res
+
+
+def _read_spans(ctx, layout: dict, comp_fps: Fraction) -> dict:
+    """caption_ocr.read_caption_spans of the competitor, cached in WORK_DIR."""
+    from . import caption_ocr
+    from .common import stage_key
+    info = ctx.comp_info
+    wh = (int(info.display_width or info.width), int(info.display_height or info.height))
+    key = stage_key("captions_spans", info.file_hash, json_key(layout), caption_ocr.SPAN_VERSION)
+    return ctx.cache.json("captions_spans", key, lambda: caption_ocr.read_caption_spans(
+        info.path, layout, wh, comp_fps, ctx.n_comp))
+
+
+def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction):
+    """The competitor's clearly read captions as the recheck's third opinion in forced voice mode: read (OCR) only
+    when the recheck first asks, and only when the layout has a caption band."""
+    box: dict = {}
+
+    def get(t0: float, t1: float) -> str | None:
+        if "get" not in box:
+            box["get"] = None
+            try:
+                from . import caption_ocr
+                from .caption_recheck import clear_captions
+                info = ctx.comp_info
+                wh = (int(info.display_width or info.width), int(info.display_height or info.height))
+                if caption_ocr.available() is None and caption_ocr.caption_band(layout, wh) is not None:
+                    box["get"] = clear_captions(_read_spans(ctx, layout, comp_fps).get("spans") or [], comp_fps)
+            except Exception as e:  # noqa: BLE001 - no third opinion: the two transcriptions decide
+                from .common import log
+                log.info("captions: no competitor captions as a third opinion: %s: %s", type(e).__name__, e)
+        return box["get"](t0, t1) if box["get"] else None
+    return get
 
 
 def json_key(layout: dict) -> str:

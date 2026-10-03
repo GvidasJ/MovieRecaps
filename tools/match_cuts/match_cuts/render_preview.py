@@ -1326,16 +1326,44 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
     convention: g < 0 = the competitor's audio is late) over its range moved by round(switch baseline x
     fps) MAIN frames. Explicit ``av_offset_lag_s`` / ``switch_baseline_s`` override (and imply) the shift.
     """
+    total, pieces, audio_db, shift_k, mf = _audio_plan(cutlist, sr, fps, n_frames, audio_sync, av_offset_lag_s,
+                                                       switch_baseline_s)
+    x = np.asarray(raw_audio, dtype=np.float32)
+    out = np.zeros((total,) + x.shape[1:], np.float32)
+    if x.shape[0] == 0 or total == 0:
+        return out
+    for sid, sa, sb, tau, vv in pieces:
+        y = sample_positions(x, tau * sr, vv, sb - sa)
+        keys_db = audio_db.get(sid)
+        if keys_db:
+            kt = np.array(sorted(keys_db), np.float64) + shift_k
+            kv = np.array([keys_db[k] for k in sorted(keys_db)], np.float64)
+            frames_pos = np.arange(sa, sb, dtype=np.float64) * mf / sr
+            g = np.power(10.0, np.interp(frames_pos, kt, kv) / 20.0).astype(np.float32)
+            y = y * (g[:, None] if y.ndim == 2 else g)
+        out[sa:sb] += y
+    return out
+
+
+def audio_pieces(cutlist: Cutlist, sr: int, *, fps: Fraction | None = None, n_frames: int | None = None,
+                 audio_sync: str | None = None) -> list[tuple[int, int, int, float, float]]:
+    """Where the edit's audio comes from, build_audio's own map: [(segment id, first output sample, end sample, RAW
+    seconds at the first sample, speed)] -- output sample n plays RAW second tau + speed x (n - first) / sr.
+    Crossfade overlaps give two pieces over the same samples."""
+    return _audio_plan(cutlist, sr, fps, n_frames, audio_sync, None, None)[1]
+
+
+def _audio_plan(cutlist: Cutlist, sr: int, fps: Fraction | None, n_frames: int | None, audio_sync: str | None,
+                av_offset_lag_s: float | None, switch_baseline_s: float | None
+                ) -> tuple[int, list[tuple[int, int, int, float, float]], dict, int, float]:
+    """build_audio's map: (output samples, the pieces of audio_pieces, the crossfade Audio Levels keys (dB) per
+    segment id, the switch shift in MAIN frames, the MAIN fps)."""
     from .export_ae import audio_sync_params
     comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
     main_fps = Fraction(fps) if fps is not None else comp_fps
     N = int(n_frames) if n_frames is not None else _to_main(int(cutlist.competitor["frames"]), main_fps, comp_fps)
     g_s, shift_k = audio_sync_params(cutlist, main_fps, audio_sync, av_offset_lag_s, switch_baseline_s)
-    x = np.asarray(raw_audio, dtype=np.float32)
     total = _sample_at(N, sr, main_fps)
-    out = np.zeros((total,) + x.shape[1:], np.float32)
-    if x.shape[0] == 0 or total == 0:
-        return out
     mf = float(main_fps)
     segs = sorted(cutlist.segments, key=lambda s: (int(s.comp_in), int(s.comp_out), int(s.id)))
     kmap = {}
@@ -1344,6 +1372,7 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
         if b > a:
             kmap[int(s.id)] = (a, b)
     _, audio_db = _transition_keys(segs, kmap, main_fps, comp_fps)
+    pieces: list[tuple[int, int, int, float, float]] = []      # (id, n_start, n_end, RAW seconds at n_start, speed)
     for seg0 in segs:
         sid = int(seg0.id)
         seg = audio_segment(seg0)               # its own map, or the audio line it follows (FX-14)
@@ -1356,8 +1385,6 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
         n0, n1 = _sample_at(a0, sr, main_fps), _sample_at(a1, sr, main_fps)
         if n1 <= n0:
             continue
-        # pieces [(n_start, n_end, RAW seconds at n_start, speed)]
-        pieces: list[tuple[int, int, float, float]] = []
         if seg.time_remap_keys:
             # competitor sync: the remap curve is played g later in comp time (key times - g)
             keys = sorted(((_to_main_f(float(d["comp_frame"]), main_fps, comp_fps) - g_s * mf, float(d["raw_seconds"]))
@@ -1370,7 +1397,7 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
                 ka, kb = sa * mf / sr, sb * mf / sr
                 ta, tb = _interp_keys(keys, ka), _interp_keys(keys, kb)
                 vv = (tb - ta) / ((sb - sa) / sr)
-                pieces.append((sa, sb, ta, vv))
+                pieces.append((sid, sa, sb, ta, vv))
         else:
             if raw_in is None:
                 continue
@@ -1379,18 +1406,8 @@ def build_audio(cutlist: Cutlist, raw_audio: np.ndarray, sr: int, *, fps: Fracti
             tau0 = raw_in_m + v * (n0 / sr - k_in / mf)
             if g_s:
                 tau0 += v * g_s
-            pieces.append((n0, n1, tau0, v))
-        for sa, sb, tau, vv in pieces:
-            y = sample_positions(x, tau * sr, vv, sb - sa)
-            keys_db = audio_db.get(sid)
-            if keys_db:
-                kt = np.array(sorted(keys_db), np.float64) + shift_k
-                kv = np.array([keys_db[k] for k in sorted(keys_db)], np.float64)
-                frames_pos = np.arange(sa, sb, dtype=np.float64) * mf / sr
-                g = np.power(10.0, np.interp(frames_pos, kt, kv) / 20.0).astype(np.float32)
-                y = y * (g[:, None] if y.ndim == 2 else g)
-            out[sa:sb] += y
-    return out
+            pieces.append((sid, n0, n1, tau0, v))
+    return total, pieces, audio_db, shift_k, mf
 
 
 def _write_wav(path: Path, y: np.ndarray, sr: int) -> None:

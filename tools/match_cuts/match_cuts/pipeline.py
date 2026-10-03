@@ -2656,8 +2656,8 @@ def _collect_paths(ctx: Context) -> None:
 
 def hand_checks(ctx: Context) -> dict[str, list[str]]:
     """What to check by hand (the end-of-run summary, since report.md sits in extras/): the B-ROLL REPLACED spots and
-    the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), and the captions worth
-    a look (the lists of the report's Captions section)."""
+    the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), the captions worth
+    a look (the lists of the report's Captions section) and how many unclear caption words were rechecked."""
     cfg = ctx.cfg
     out: dict[str, list[str]] = {"broll": [], "spots": [], "captions": []}
     xml = ctx.paths.get("xml")
@@ -2704,6 +2704,17 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     rows += [f"{float(w['time']):.2f}s  '{w['text']}': ends on a weak word ({w['reason']})"
              for w in cap.get("weak_kept") or []]
     rows += [f"{float(x['time']):.2f}s  {x['kind']}: {x['detail']}" for x in cap.get("flags") or []]
+    rc = cap.get("recheck") or {}
+    if rc:
+        from .captions import ms_tc
+        from .report import heard
+        rows += [f"{ms_tc(int(round(r['time'] * 1000)))}-{ms_tc(int(round(r['end'] * 1000)))}  "
+                 f"'{r['text'] or '(nothing)'}': still unclear after the {rc.get('source', 'RAW')} recheck "
+                 f"({r['why']}); heard: {heard(r)}" for r in rc.get("unclear") or []]
+        out["caption_recheck"] = ([f"not done: {rc['error']}"] if rc.get("error") else
+                                  [f"{rc.get('rechecked', 0)} word{'' if rc.get('rechecked') == 1 else 's'} "
+                                   f"rechecked against the {rc.get('source', 'RAW')} ({rc.get('model')}), "
+                                   f"{rc.get('changed', 0)} changed"])
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows
