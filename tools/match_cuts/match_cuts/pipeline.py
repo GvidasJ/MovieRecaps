@@ -2536,12 +2536,12 @@ def silence_lines(plan: dict) -> list[str]:
         return [f"kept ({plan['off']})"]
     if plan.get("error"):
         return [f"not removed ({plan['error']})"]
+    from .silence import settings_line
     rows = plan.get("rows") or []
     head = (f"{len(rows)} removed, {plan['removed_s']:.2f} s in all; length {tc(plan['old_s'])} -> {tc(plan['new_s'])}"
-            f" (below {plan['threshold_db']:.1f} dBFS = {plan['settings']['db']:g} dB under the speech level, "
-            f"longer than {plan['settings']['min_s']:g} s)") if rows else "none found"
-    return [head] + [f"{tc(r['start_s'])}-{tc(r['end_s'])}  {r['len_s']:.2f} s  (cut at {tc(r['new_at_s'])} in the new "
-                     f"edit)" for r in rows]
+            if rows else f"none found; length {tc(plan.get('old_s', 0))}")
+    return [head, settings_line(plan)] + [f"{tc(r['start_s'])}-{tc(r['end_s'])}  {r['len_s']:.2f} s  (cut at "
+                                          f"{tc(r['new_at_s'])} in the new edit)" for r in rows]
 
 
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
@@ -2551,16 +2551,35 @@ def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     if getattr(ctx.cfg, "keep_silence", False):
         return {"off": "--keep-silence"}
     try:
-        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg)
+        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx))
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"silences not removed: {type(e).__name__}: {e}")
         return {"error": f"{type(e).__name__}: {e}"}
-    log.info("silence removal: %d silences cut (%.2f s; %.2f s -> %.2f s; below %.1f dBFS)", len(plan["rows"]),
-             plan["removed_s"], plan["old_s"], plan["new_s"], plan["threshold_db"])
-    ctx.dlog.record("silence", "removed", rows=plan["rows"], threshold_db=plan["threshold_db"],
-                    settings=plan["settings"])
+    log.info("silence removal: %d silences cut (%.2f s; %.2f s -> %.2f s); %s", len(plan["rows"]), plan["removed_s"],
+             plan["old_s"], plan["new_s"], silence.settings_line(plan))
+    ctx.dlog.record("silence", "removed", rows=plan["rows"], levels=plan["levels"], settings=plan["settings"])
     return plan
+
+
+def words_reader(ctx: Context):
+    """``words_of(y)`` for the silence removal: the words heard in 16 kHz audio y (faster-whisper, the captions'
+    model, cached by audio content), or None when transcription is not available here -- the cuts then follow the
+    loudness alone (said in the summary)."""
+    from . import transcribe
+    if transcribe.available() is not None:
+        return None
+    cfg = ctx.cfg
+    model = str(getattr(cfg, "caption_model", "small.en") or "small.en")
+    language = str(getattr(cfg, "caption_language", "en") or "") or None
+
+    def words_of(y):
+        try:
+            return transcribe.transcribe_words(y, int(ctx.audio_sr), model, language, ctx.cache)
+        except Exception as e:  # noqa: BLE001 - e.g. the model download failed: loudness alone
+            ctx.warn(f"silence removal: no word timings ({type(e).__name__}: {e}); cuts from loudness alone")
+            return None
+    return words_of
 
 
 def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) -> dict:

@@ -81,8 +81,9 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
 Premiere-only export: `--premiere`. Silence removal (Premiere export and RAW-only runs): `--keep-silence`,
-`--silence-db DB` (default -20, under the speech level), `--min-silence S` (0.35), `--pad-before S` (0.08),
-`--pad-after S` (0.12). No `--competitor`: the edit from the RAW alone (see *Without a competitor* below).
+`--min-silence S` (default 0.15), `--pad-before S` (0.04), `--pad-after S` (0.06), `--silence-db DB` (default: set
+per video from its speech level and background noise; DB under the speech level overrides it). No `--competitor`: the
+edit from the RAW alone (see *Without a competitor* below).
 
 `--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
 playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
@@ -133,14 +134,22 @@ competitor's cuts are recreated (also where the competitor kept the pause); with
 alone is cut this way.
 
 * **Silence** = the short-window loudness (50 ms RMS, every 10 ms; a louder blip under 0.08 s is a click, not
-  speech — single peaks never count) below `--silence-db` (default `-20`) **dB under the edit's own speech level**
-  (the loudness of its loudest 5% of windows), for longer than `--min-silence` (default 0.35 s). The level is
-  relative so one setting works for loud and quiet recordings alike: on `input/raw_test.mp4` (speech at about
-  -16 dBFS) an absolute -20 dBFS would have called half the speech silence (85 of 203 s cut, 216 words clipped).
-* `--pad-after` (0.12 s) is kept after the speech before a silence and `--pad-before` (0.08 s) before the speech
-  after it, so words are not clipped (at the very start and end of the edit there is no speech to protect). Cut
-  points land on whole 60 fps frames, rounded inwards (never more than the silence), and never inside a cross
-  dissolve.
+  speech — single peaks never count) below this video's silence threshold for longer than `--min-silence`
+  (default 0.15 s), outside every transcribed word.
+* **The threshold adapts to each video**: its speech level (the loudness of its loudest 5% of 50 ms windows) and its
+  background noise (its quietest 10%, digital silence ignored) are measured, and the threshold sits a third of the
+  way from the noise up to the speech (at least 3 dB above the noise, at least 6 dB under the speech). A noisy
+  video's pauses are cut too, and loud and quiet recordings need no setting: on `input/raw_test.mp4` (speech
+  -16.2 dBFS, background -42.2 dBFS) it is -33.1 dBFS. `--silence-db DB` replaces it with DB under the speech level
+  (e.g. `--silence-db -20`).
+* **Never inside a word**: the edit's audio is transcribed (word timings, the same `small.en` model as the captions,
+  cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
+  over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
+  `--pad-after` (0.06 s) after the word before it and `--pad-before` (0.04 s) before the word after it are kept (at
+  the very start and end of the edit there is no word to protect). On `input/raw_test.mp4` loudness alone would make
+  97 cuts, 50 of them touching a word; between words it makes 54 cuts (28.1 s) touching none. Without
+  faster-whisper the cuts come from loudness alone and the summary says so. Cut points land on whole 60 fps frames,
+  rounded inwards (never more than the silence), and never inside a cross dissolve.
 * No clicks: A1 fades out over the last frame before every cut and in over the first frame after it (Audio Levels
   keyframes); the cuts lie inside silences, so only the room tone is touched.
 * Everything after a removed silence moves earlier: clips spanning one are split around it (each piece keeps its
@@ -149,8 +158,10 @@ alone is cut this way.
 * Captions: copied competitor captions keep their exact text and splits — only their times move with the cuts; a
   copied caption completely inside a removed silence is dropped and listed. Voice captions are transcribed from the
   cut edit.
-* The end summary lists every removed silence (its time in the edit before removal, its length, where the cut is
-  now), the total removed and the new length; `extras/report.md` has the same table.
+* The end summary shows the settings used for this video (speech level, background noise, threshold and how it
+  was set, minimum length, padding, how many words were timed), the total removed, the new length and every
+  removed silence (its time in the edit before removal, its length, where the cut is now); `extras/report.md` has
+  the same table.
 
 ### Without a competitor (`--raw` only)
 

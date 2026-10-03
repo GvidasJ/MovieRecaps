@@ -115,12 +115,14 @@ def run_raw_only(cfg: Any) -> dict:
         with pipeline._stage(ctx, "R3 silences"):
             sst = silence.Settings.from_cfg(cfg)
             if getattr(cfg, "keep_silence", False):
-                cuts, thr = [], 0.0
+                cuts, lv = [], {"how": "--keep-silence"}
             elif ctx.raw_audio is not None and len(ctx.raw_audio):
-                found, thr = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst)
+                words_of = pipeline.words_reader(ctx)
+                found, lv = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst,
+                                                   words=words_of(ctx.raw_audio) if words_of else None)
                 cuts = [(c.a, c.b) for c in found]
             else:
-                cuts, thr = [], 0.0
+                cuts, lv = [], {"how": "the RAW has no audio"}
         with pipeline._stage(ctx, "R4 framing"):
             video, raw_fps = str(raw_block.get("file_abs") or ctx.raw_info.path), float(Fraction(ctx.raw_info.fps))
 
@@ -132,7 +134,7 @@ def run_raw_only(cfg: Any) -> dict:
             ctx.silence = {"off": "--keep-silence"}
         else:
             plan = silence.summarize([silence.Cut(a, b, a / 60.0, b / 60.0) for a, b in cuts], n_frames, SEQ_FPS,
-                                     sst, thr)
+                                     sst, lv)
             ctx.silence = plan
         rp = ctx.silence.get("ripple")
         # the "competitor" of this run is the RAW itself on the 60 fps grid (captions: voice mode, no OCR)

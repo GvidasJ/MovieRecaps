@@ -1375,12 +1375,12 @@ def _silence(ctx: Any) -> list[str]:
         return [f"Kept: {plan['off']}."]
     if plan.get("error"):
         return [f"Not removed ({plan['error']}): 1_edit.xml keeps every silence."]
-    st = plan.get("settings") or {}
-    out = [f"- Measured on the RAW audio under my clips (A1), never the competitor's: silence = the 50 ms loudness "
-           f"{st.get('db', -20):g} dB under the edit's speech level (below {plan['threshold_db']:.1f} dBFS) for longer "
-           f"than {st.get('min_s', 0.35):g} s; {st.get('pad_after', 0.12):g} s kept after the speech before it and "
-           f"{st.get('pad_before', 0.08):g} s before the speech after it; cut points on whole frames, never inside a "
+    from .silence import settings_line
+    out = ["- Measured on the RAW audio under my clips (A1), never the competitor's: silence = the 50 ms loudness under "
+           "this video's threshold (by default a third of the way from its background noise up to its speech level), "
+           "outside every transcribed word; the padding kept around each word; cut points on whole frames, never inside a "
            "cross dissolve; A1 fades over one frame on both sides of every cut (no click).",
+           f"- {settings_line(plan)}.",
            f"- {len(plan.get('rows') or [])} silences removed, {plan['removed_s']:.2f} s in all: "
            f"{plan['old_s']:.2f} s -> {plan['new_s']:.2f} s."]
     rows = plan.get("rows") or []

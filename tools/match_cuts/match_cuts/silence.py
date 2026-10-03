@@ -1,16 +1,18 @@
 """Silence removal (Premiere export; ``--keep-silence`` turns it off): the silences of MY edit's audio -- the RAW audio
 under my clips, never the competitor's, so music it added does not count as speech -- are cut out of the sequence.
 In competitor mode this runs after the competitor's cuts are recreated (pipeline.stage_exports); without a
-competitor the RAW alone is cut this way (pipeline.run_raw_only).
+competitor the RAW alone is cut this way (raw_only.run_raw_only).
 
 Silence: the short-window loudness (RMS over WIN_S, every HOP_S; a louder blip under BLIP_S is a click, not
-speech -- single peaks never count) stays below ``--silence-db``
-(default -20 dB) for longer than ``--min-silence`` (default 0.35 s). The dB are relative to the edit's own speech
-level, the loudness of its loudest 5% of windows (SPEECH_PCT), so the same setting works whatever the recording
-gain: on input/raw_test.mp4 (speech at about -16 dBFS, half its windows below -26 dBFS) an absolute -20 dBFS would
-have called half the speech silence. Of each silence, ``--pad-after`` (0.12 s) after the speech before it and
-``--pad-before`` (0.08 s) before the speech after it are kept, so words are never clipped; at the very start and end
-of the edit there is no speech to protect. The cut points land on whole sequence frames (rounded inwards: never more
+speech -- single peaks never count) stays below this video's silence threshold for longer than ``--min-silence``
+(default 0.15 s), outside every transcribed word. The threshold adapts to each video: its speech level (the loudness
+of its loudest 5% of windows) and its background noise (its quietest 10%) are measured, and the threshold sits a
+third of the way from the noise up to the speech, so the pauses of a noisy video are cut too (``--silence-db`` sets
+it that many dB under the speech level instead). Words: the edit's audio is transcribed (word timings) and a cut
+only ever falls in a gap between words -- each word's timing trimmed to its audible part, so a timing that runs on
+into the pause does not keep the pause. Of each gap, ``--pad-after`` (0.06 s) after the word before it and
+``--pad-before`` (0.04 s) before the word after it are kept; at the very start and end of the edit there is no
+word to protect. The cut points land on whole sequence frames (rounded inwards: never more
 is removed than the silence), and never inside a cross dissolve.
 
 The cuts: every clip, audio clip and marker after a removed range moves earlier by the time removed before it
@@ -28,21 +30,26 @@ from typing import Any, Sequence
 
 import numpy as np
 
-SILENCE_DB = -20.0        # silence: this far below the speech level ...
-MIN_SILENCE_S = 0.35      # ... for longer than this
-PAD_BEFORE_S = 0.08       # kept before the speech that follows a silence
-PAD_AFTER_S = 0.12        # kept after the speech that precedes a silence
+MIN_SILENCE_S = 0.15      # cut silences longer than this ...
+PAD_BEFORE_S = 0.04       # ... keeping this much before each word (or other sound) that follows
+PAD_AFTER_S = 0.06        # ... and this much after each word (or other sound) that precedes
 WIN_S = 0.05              # loudness window (RMS) ...
 HOP_S = 0.01              # ... every HOP_S
 SPEECH_PCT = 95           # the speech level: this percentile of the windows' loudness
+NOISE_PCT = 10            # the background noise: this percentile (digital silence below FLOOR_DB ignored)
+FLOOR_DB = -90.0
+THRESHOLD_FRAC = 0.35     # silence threshold: this fraction of the way from the noise up to the speech level ...
+MIN_ABOVE_NOISE_DB = 3.0  # ... at least this far above the noise ...
+MIN_BELOW_SPEECH_DB = 6.0  # ... and at least this far below the speech
+WORD_SOUND_DB = 6.0       # a word's audible part: its windows at least this far above the noise
 BLIP_S = 0.08             # a louder stretch shorter than this inside a silence is a click / peak, not speech
 FADE_FRAMES = 1           # audio fade on each side of a cut (sequence frames)
 
 
 @dataclass
 class Settings:
-    db: float = SILENCE_DB
-    min_s: float = MIN_SILENCE_S
+    db: float | None = None          # --silence-db: the threshold this many dB under the speech level (None: set
+    min_s: float = MIN_SILENCE_S     # from the video's speech level and background noise)
     pad_before: float = PAD_BEFORE_S
     pad_after: float = PAD_AFTER_S
 
@@ -51,7 +58,8 @@ class Settings:
         def get(name: str, default: float) -> float:
             v = getattr(cfg, name, None)
             return float(default if v is None else v)
-        return cls(get("silence_db", SILENCE_DB), get("min_silence", MIN_SILENCE_S),
+        db = getattr(cfg, "silence_db", None)
+        return cls(None if db is None else float(db), get("min_silence", MIN_SILENCE_S),
                    get("pad_before", PAD_BEFORE_S), get("pad_after", PAD_AFTER_S))
 
 
@@ -70,20 +78,58 @@ def loudness(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     return (starts + w / 2.0) / sr, 10.0 * np.log10(ms + 1e-12)
 
 
-def silent_runs(y: np.ndarray, sr: int, st: Settings) -> tuple[list[tuple[float, float]], float]:
-    """([(start s, end s)] of every stretch whose loudness stays below the speech level + st.db for longer than
-    st.min_s, the threshold in dBFS)."""
+def levels(db: np.ndarray, st: Settings) -> dict:
+    """This video's speech level, background noise and silence threshold (dBFS). The threshold sits THRESHOLD_FRAC
+    of the way from the noise up to the speech (at least MIN_ABOVE_NOISE_DB above the one, MIN_BELOW_SPEECH_DB under
+    the other), so the pauses of a noisy video are cut too; --silence-db sets it under the speech level instead."""
+    speech = float(np.percentile(db, SPEECH_PCT))
+    live = db[db > FLOOR_DB]
+    noise = float(np.percentile(live, NOISE_PCT)) if len(live) else FLOOR_DB
+    noise = min(noise, speech)
+    if st.db is not None:
+        thr, how = speech + st.db, f"--silence-db {st.db:g}"
+    else:
+        thr = noise + THRESHOLD_FRAC * (speech - noise)
+        thr = min(max(thr, noise + MIN_ABOVE_NOISE_DB), speech - MIN_BELOW_SPEECH_DB)
+        how = "set from the speech level and the background noise"
+    return {"speech_db": round(speech, 1), "noise_db": round(noise, 1), "threshold_db": round(thr, 1), "how": how}
+
+
+def word_cores(words: Sequence[Any], t: np.ndarray, db: np.ndarray, noise: float) -> list[tuple[float, float]]:
+    """Each transcribed word's audible part: its timing trimmed to its windows at least WORD_SOUND_DB above the
+    noise (a timing that runs on into the pause after the word does not keep that pause), else its whole timing."""
+    out = []
+    loud = db >= noise + WORD_SOUND_DB
+    for w in words:
+        s0, s1 = float(w.start), float(w.end)
+        inside = np.flatnonzero((t >= s0) & (t <= s1) & loud)
+        if len(inside):
+            s0, s1 = max(s0, float(t[inside[0]]) - WIN_S / 2.0), min(s1, float(t[inside[-1]]) + WIN_S / 2.0)
+        if s1 > s0:
+            out.append((s0, s1))
+    return out
+
+
+def silent_runs(y: np.ndarray, sr: int, st: Settings, words: Sequence[Any] | None = None
+                ) -> tuple[list[tuple[float, float]], dict]:
+    """([(start s, end s)] of every stretch below this video's silence threshold (levels) for longer than st.min_s
+    -- and, with ``words`` (the transcript, timed on this audio), outside every word's audible part: a cut never
+    falls inside a word --, the levels)."""
     t, db = loudness(y, sr)
     dur = len(y) / float(sr)
     if not len(db):
-        return [], 0.0
-    thr = float(np.percentile(db, SPEECH_PCT)) + st.db
-    q = db < thr
+        return [], {"speech_db": 0.0, "noise_db": 0.0, "threshold_db": 0.0, "how": "no audio", "words": None}
+    lv = levels(db, st)
+    q = db < lv["threshold_db"]
     blip = int(round(BLIP_S / HOP_S))
     edges = np.flatnonzero(np.diff(np.concatenate([[True], q, [True]]).astype(np.int8)))
     for i0, i1 in zip(edges[::2], edges[1::2]):        # louder stretches i0 .. i1 - 1 between quiet ones
         if i1 - i0 < blip and i0 > 0 and i1 < len(q):
             q[i0:i1] = True
+    lv["words"] = None if words is None else len(words)
+    if words:
+        for s0, s1 in word_cores(words, t, db, lv["noise_db"]):
+            q[(t >= s0 - HOP_S / 2.0) & (t <= s1 + HOP_S / 2.0)] = False
     quiet = np.concatenate([[False], q, [False]])
     edges = np.flatnonzero(np.diff(quiet.astype(np.int8)))
     out = []
@@ -92,7 +138,7 @@ def silent_runs(y: np.ndarray, sr: int, st: Settings) -> tuple[list[tuple[float,
         b = dur if i1 == len(db) else min(dur, float(t[i1 - 1]) + HOP_S / 2.0)
         if b - a > st.min_s:
             out.append((a, b))
-    return out, thr
+    return out, lv
 
 
 @dataclass
@@ -109,12 +155,13 @@ class Cut:
 
 
 def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Settings,
-                   protect: Sequence[tuple[int, int]] = ()) -> tuple[list[Cut], float]:
-    """(the ranges to remove, in sequence frames, the silence threshold in dBFS): each silence minus the pads
-    (none at the edit's start / end), rounded inwards to whole frames, and never inside a protected range (a cross
-    dissolve)."""
+                   protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None
+                   ) -> tuple[list[Cut], dict]:
+    """(the ranges to remove, in sequence frames, the levels used): each silence (silent_runs; between words when
+    ``words`` are given) minus the pads around the word or sound on either side (none at the edit's start / end),
+    rounded inwards to whole frames, and never inside a protected range (a cross dissolve)."""
     f = float(fps)
-    runs, thr = silent_runs(y, sr, st)
+    runs, lv = silent_runs(y, sr, st, words)
     dur = n_frames / f
     cuts: list[Cut] = []
     for s0, s1 in runs:
@@ -128,7 +175,7 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
         cuts += [Cut(x0, x1, s0, s1) for x0, x1 in pieces if x1 > x0]
     if cuts and sum(c.frames for c in cuts) >= n_frames:        # all silent: keep the edit rather than nothing
         cuts = []
-    return cuts, thr
+    return cuts, lv
 
 
 @dataclass
@@ -245,9 +292,12 @@ def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n
     return out
 
 
-def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None) -> dict:
-    """The silence removal of the Premiere export of ``cutlist``: {cuts, ripple, threshold_db, rows, removed_s,
-    old_s, new_s, settings}. Measured on A1 (the RAW audio under the clips), never inside a cross dissolve."""
+def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None,
+                  words_of: Any = None) -> dict:
+    """The silence removal of the Premiere export of ``cutlist``: {cuts, ripple, threshold_db, levels, rows,
+    removed_s, old_s, new_s, settings}. Measured on A1 (the RAW audio under the clips), never inside a cross
+    dissolve; ``words_of(y)`` -> the words heard in that audio (timed on it), or None: then the cuts follow the
+    loudness alone."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
     st = Settings.from_cfg(cfg)
     fps = premiere_settings(cfg)["fps"]
@@ -257,22 +307,36 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     audio = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
     if raw_audio is None or not len(raw_audio) or not audio:
-        cuts, thr = [], 0.0
+        cuts, lv = [], {"how": "no RAW audio under the clips"}
     else:
         y = a1_audio(audio, raw_audio, sr, fps, n_frames)
-        cuts, thr = removal_ranges(y, sr, fps, n_frames, st, protect)
-    return summarize(cuts, n_frames, fps, st, thr)
+        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words_of(y) if words_of is not None else None)
+    return summarize(cuts, n_frames, fps, st, lv)
 
 
-def summarize(cuts: list[Cut], n_frames: int, fps: Fraction, st: Settings, thr: float) -> dict:
-    """The plan as the pipeline / report / summary use it."""
+def summarize(cuts: list[Cut], n_frames: int, fps: Fraction, st: Settings, lv: dict) -> dict:
+    """The plan as the pipeline / report / summary use it (``lv``: removal_ranges' levels)."""
     rp = Ripple(list(cuts), n_frames)
     f = float(fps)
     rows = [{"start_s": round(c.a / f, 3), "end_s": round(c.b / f, 3), "len_s": round(c.frames / f, 3),
              "new_at_s": round(rp.map(c.a) / f, 3), "a": c.a, "b": c.b} for c in rp.cuts]
-    return {"cuts": [(c.a, c.b) for c in rp.cuts], "ripple": rp, "threshold_db": round(thr, 1),
-            "rows": rows, "removed_s": round(rp.removed / f, 3), "old_s": round(n_frames / f, 3),
+    return {"cuts": [(c.a, c.b) for c in rp.cuts], "ripple": rp, "threshold_db": lv.get("threshold_db"),
+            "levels": dict(lv), "rows": rows, "removed_s": round(rp.removed / f, 3), "old_s": round(n_frames / f, 3),
             "new_s": round(rp.new_frames / f, 3), "fps": str(fps), "settings": dataclasses.asdict(st)}
+
+
+def settings_line(plan: dict) -> str:
+    """The settings one video got, for the end summary / report: its levels, the threshold, the minimum, the pads,
+    and whether the cuts kept to the gaps between words."""
+    lv, st = plan.get("levels") or {}, plan.get("settings") or {}
+    if lv.get("speech_db") is None:
+        return f"settings: {lv.get('how', 'no audio')}"
+    n = lv.get("words")
+    words = (f"cuts only between words ({n} words timed)" if n else
+             "word timings not available: cuts from loudness alone" if n is None else "no words heard")
+    return (f"settings for this video: speech {lv['speech_db']:.1f} dBFS, background {lv['noise_db']:.1f} dBFS -> "
+            f"silence below {lv['threshold_db']:.1f} dBFS ({lv['how']}), longer than {st.get('min_s', 0):g} s; "
+            f"kept {st.get('pad_before', 0):g} s before / {st.get('pad_after', 0):g} s after each word; {words}")
 
 
 def ripple_pieces(pieces: Sequence[Any], rp: Ripple, fps: Fraction) -> list[Any]:
