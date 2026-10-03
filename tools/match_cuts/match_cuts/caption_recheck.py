@@ -14,8 +14,10 @@ model``, default medium.en) for these spots only. The source's words are mapped 
 through the same map; a word cut off at an edit point keeps the part the edit plays.
 
 The two versions are aligned word by word around the spot. Where they agree, the word is confirmed. Where they
-differ, the more confident version is used (mean word confidence); a competitor caption on screen there that was
-read clearly is a third opinion, and it decides when it agrees with exactly one version. A word only the source
+differ, the source's version is used when it is clearly more confident (mean word confidence, MARGIN), and the
+same words written two ways ("gonna" / "going to") are no difference; a competitor caption on screen there that was
+read clearly is a third opinion, and it decides when exactly one version agrees with it -- the version and the words
+kept on either side of it, in that order, so one common word cannot agree on its own. A word only the source
 heard is added when it is clear (CLEAR_PROB) or the caption has it; a word only the edit's transcript heard is never
 dropped. Nothing is guessed: when the version kept is still unsure (a word below LOW_PROB that no second opinion
 backs), it is kept and listed with the alternatives heard. Unsure words that cannot be rechecked (no source audio
@@ -35,6 +37,7 @@ from .captions import Word, norm
 SR = 16000
 LOW_PROB = 0.5            # a word heard with less confidence than this is unsure
 CLEAR_PROB = 0.7          # a word only the source heard is added when it is at least this sure
+MARGIN = 0.1              # the source's version replaces the edit's when it is at least this much more confident
 NOISY_DB = 12.0           # a word less than this above the sound bed around it has music / noise under it
 BED_S = 1.5               # the sound bed: the quietest tenth of the 20 ms frames this far on each side of the word
 CUT_TOL_S = 0.05          # an edit point this close to a word (or inside it) may cut it off
@@ -141,12 +144,29 @@ def _conf(ws: Sequence[Word]) -> float:
     return float(np.mean([w.prob for w in ws])) if ws else 0.0
 
 
-def _agrees(ws: Sequence[Word], caption: str | None) -> bool:
-    """The caption says these words, in this order (letters, digits and apostrophes; any case)."""
+# the same words said, written two ways
+_SPOKEN = {"gonna": "going to", "wanna": "want to", "gotta": "got to", "kinda": "kind of", "sorta": "sort of",
+           "lemme": "let me", "gimme": "give me", "dunno": "don't know", "outta": "out of", "lotta": "lot of",
+           "cause": "because", "cuz": "because", "ok": "okay"}
+
+
+def _tokens(texts: Sequence[str]) -> list[str]:
+    """Words for comparing versions: letters, digits and apostrophes, any case; "gonna" = "going to" etc."""
+    out: list[str] = []
+    for t in texts:
+        for x in str(t).split():
+            n = norm(x).strip("'")
+            out += _SPOKEN.get(n, n).replace("'", "").split() if n else []
+    return out
+
+
+def _agrees(ws: Sequence[Word], caption: str | None, left: Word | None = None, right: Word | None = None) -> bool:
+    """The caption says these words, in this order, between the words kept on either side of them (so one common
+    word cannot agree on its own, and a version missing a word does not)."""
     if not ws or not caption:
         return False
-    have = [t for t in (norm(x).replace("'", "") for x in caption.split()) if t]
-    want = [norm(w.text).replace("'", "") for w in ws]
+    have = _tokens([caption])
+    want = _tokens([w.text for w in ([left] if left else []) + list(ws) + ([right] if right else [])])
     return any(have[k:k + len(want)] == want for k in range(len(have) - len(want) + 1))
 
 
@@ -268,11 +288,19 @@ def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int
         if not any(i in unsure for i in near):
             continue
         a_ws = [words[i] for i in a_idx]
+        conf_a, conf_b = _conf(a_ws), _conf(b_ws)
+        if a_ws and b_ws and _tokens([w.text for w in a_ws]) == _tokens([b.text for b in b_ws]):
+            for ai in a_idx:                              # the same words written two ways ("gonna" / "going to")
+                probs[ai] = max(probs[ai], conf_b)
+            continue
+        left = words[A[i1 - 1]] if i1 > 0 else None
+        right = words[A[i2]] if i2 < len(A) else None
+        t0 = min([w.start for w in a_ws] + [b.start for b in b_ws] + ([left.start] if left else []))
+        t1 = max([w.end for w in a_ws] + [b.end for b in b_ws] + ([right.end] if right else []))
+        cap = captions(t0, t1) if captions is not None else None
+        agree_a, agree_b = _agrees(a_ws, cap, left, right), _agrees(b_ws, cap, left, right)
         t0 = min([w.start for w in a_ws] + [b.start for b in b_ws])
         t1 = max([w.end for w in a_ws] + [b.end for b in b_ws])
-        cap = captions(t0, t1) if captions is not None else None
-        agree_a, agree_b = _agrees(a_ws, cap), _agrees(b_ws, cap)
-        conf_a, conf_b = _conf(a_ws), _conf(b_ws)
         if not b_ws:                                      # only the edit's transcript heard it: never dropped
             use_b, why = False, "kept: the source did not hear it"
         elif not a_ws:                                    # only the source heard it
@@ -281,15 +309,15 @@ def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int
         elif agree_a != agree_b:
             use_b, why = agree_b, "the competitor's caption agrees"
         else:
-            use_b, why = conf_b > conf_a, "more confident"
+            use_b, why = conf_b >= conf_a + MARGIN, "more confident"
         kept = b_ws if use_b else a_ws
         backed = agree_b if use_b else agree_a
         if use_b:
-            left = words[A[i1 - 1]].end if i1 > 0 else -math.inf          # between the words kept around them
-            right = words[A[i2]].start if i2 < len(A) else math.inf
+            lo = left.end if left else -math.inf                          # between the words kept around them
+            hi = right.start if right else math.inf
 
             def fit(t: float) -> float:
-                return min(max(t, left), right)
+                return min(max(t, lo), hi)
             swaps.append((list(a_idx), [replace(b, start=fit(b.start), end=max(fit(b.end), fit(b.start)))
                                         for b in b_ws]))
             if norm(_text(a_ws)) != norm(_text(b_ws)):

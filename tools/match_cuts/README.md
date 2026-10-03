@@ -173,9 +173,10 @@ again from the RAW footage the edit plays there (the edit's own audio map: J/L c
 are followed), with 3 s of context on each side so the model hears the whole sentence rather than the cut piece, by
 a bigger model (`--caption-recheck-model`, default `medium.en`, downloaded once; `none` turns it off) for these
 spots only. The RAW's words are mapped back onto the edit's timeline (a word cut off at an edit point keeps the part
-the edit plays) and the two versions are compared word by word: where they agree the word is confirmed; where they
-differ the more confident one is used, and a competitor caption read clearly at that spot is a third opinion that
-decides when it agrees with one of them. Nothing is guessed: a spot still unsure after that keeps the best version
+the edit plays) and the two versions are compared word by word: where they agree (or say the same words two ways,
+"gonna" / "going to") the word is confirmed; where they differ the RAW's version is used when it is clearly more
+confident, and a competitor caption read clearly at that spot is a third opinion that decides when exactly one
+version agrees with it, together with the words on either side. RAW windows that overlap are transcribed once. Nothing is guessed: a spot still unsure after that keeps the best version
 and is listed under *Captions worth a look* with its time and the alternatives heard (edit, RAW, caption). The end
 summary says how many words were rechecked and how many changed; the report lists every change. With
 `--voiceover`, the voice-over file itself is the source.

@@ -251,3 +251,26 @@ def test_overlapping_raw_windows_of_different_pieces_are_transcribed_once():
     out, rep = R.recheck(words, None, pieces, src.get, src.transcribe)
     assert src.windows == [(10.7 - R.CONTEXT_S, 13.4 + R.CONTEXT_S)]                # one transcription for both
     assert [w.text for w in out] == ["I", "sat", "then", "went"] and rep["rechecked"] == 2 and rep["changed"] == 1
+
+
+def test_a_source_version_missing_a_word_never_wins_on_a_common_word_or_a_small_margin():
+    """Seen on a real clip: the RAW piece ends inside 'going', so the RAW's version lacks it ('Brad Pitt's to do
+    this'); the caption agrees only with the edit's version in context. And 'gonna' / 'going to' are the same."""
+    cap = R.clear_captions([{"comp_in": 0, "comp_out": 60, "ocr": "BACK UP BRAD PITT'S GOING TO DO THIS?",
+                             "score": 0.97, "agreement": 1.0},
+                            {"comp_in": 60, "comp_out": 120, "ocr": "HE'S GOING TO PLAY VANISHER", "score": 0.97,
+                             "agreement": 1.0}], Fraction(30))
+    words = [W("Brad", 0.2, 0.4), W("Pitt's", 0.45, 0.7), W("gonna", 0.75, 0.95, 0.45), W("do", 1.0, 1.1),
+             W("this", 1.15, 1.4), W("he's", 2.1, 2.3), W("gonna", 2.35, 2.5, 0.45), W("play", 2.55, 2.8, 0.45),
+             W("Vanisher", 2.85, 3.4)]
+    src = Source([("Brad", 10.2, 10.4, 0.99), ("Pitt's", 10.45, 10.7, 0.99), ("to", 10.85, 10.95, 0.99),
+                  ("do", 11.0, 11.1, 0.99), ("this", 11.15, 11.4, 0.99),
+                  ("he's", 40.1, 40.3, 0.99), ("going", 40.35, 40.42, 0.99), ("to", 40.43, 40.5, 0.99),
+                  ("Vanisher", 40.85, 41.4, 0.99)])
+    out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe, captions=cap)
+    assert [w.text for w in out] == [w.text for w in words] and rep["changed"] == 0
+    src = Source([("Brad", 10.2, 10.4, 0.9), ("Pitt's", 10.45, 10.7, 0.9), ("going", 10.75, 10.85, 0.9),
+                  ("to", 10.86, 10.95, 0.9), ("do", 11.0, 11.1, 0.9), ("this", 11.15, 11.4, 0.9)])
+    out, rep = R.recheck(words[:5], None, PIECES, src.get, src.transcribe)
+    assert [w.text for w in out] == ["Brad", "Pitt's", "gonna", "do", "this"] and rep["changed"] == 0
+    assert out[2].prob == 0.9 and not rep["unclear"]                 # the same words: confirmed
