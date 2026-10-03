@@ -3,7 +3,7 @@
 <xmeml version="5">
   <sequence id="sequence-1">
     <name>Recreated Edit (Premiere)</name>
-    <duration>4018</duration>
+    <duration>974</duration>
     <rate>
       <timebase>60</timebase>
       <ntsc>FALSE</ntsc>
@@ -36,30 +36,30 @@
           <clipitem id="clipitem-1">
             <name>S01 raw.mp4</name>
             <enabled>TRUE</enabled>
-            <duration>34538</duration>
+            <duration>5444</duration>
             <rate>
               <timebase>60</timebase>
               <ntsc>FALSE</ntsc>
             </rate>
             <start>0</start>
-            <end>1098</end>
-            <in>15607</in>
-            <out>16705</out>
+            <end>71</end>
+            <in>458</in>
+            <out>529</out>
             <alphatype>none</alphatype>
             <pixelaspectratio>square</pixelaspectratio>
             <anamorphic>FALSE</anamorphic>
             <file id="file-raw">
               <name>raw.mp4</name>
-              <pathurl>file://localhost/C%3A/Users/gvida/Desktop/bh/MovieRecaps/output/002/extras/media/raw.mp4</pathurl>
+              <pathurl>file://localhost/C%3A/Users/gvida/Desktop/bh/MovieRecaps/output/011/extras/media/raw.mp4</pathurl>
               <rate>
                 <timebase>30</timebase>
-                <ntsc>TRUE</ntsc>
+                <ntsc>FALSE</ntsc>
               </rate>
-              <duration>17252</duration>
+              <duration>2722</duration>
               <timecode>
                 <rate>
                   <timebase>30</timebase>
-                  <ntsc>TRUE</ntsc>
+                  <ntsc>FALSE</ntsc>
                 </rate>
                 <string>00:00:00:00</string>
                 <frame>0</frame>
@@ -70,10 +70,10 @@
                   <samplecharacteristics>
                     <rate>
                       <timebase>30</timebase>
-                      <ntsc>TRUE</ntsc>
+                      <ntsc>FALSE</ntsc>
                     </rate>
-                    <width>1920</width>
-                    <height>1080</height>
+                    <width>1280</width>
+                    <height>720</height>
                     <anamorphic>FALSE</anamorphic>
                     <pixelaspectratio>square</pixelaspectratio>
                     <fielddominance>none</fielddominance>
@@ -100,7 +100,7 @@
                   <name>Scale</name>
                   <valuemin>0</valuemin>
                   <valuemax>1000</valuemax>
-                  <value>96.018519</value>
+                  <value>205.25058</value>
                 </parameter>
                 <parameter>
                   <parameterid>rotation</parameterid>
@@ -113,8 +113,8 @@
                   <parameterid>center</parameterid>
                   <name>Center</name>
                   <value>
-                    <horiz>-0.0190352</horiz>
-                    <vert>0.1050926</vert>
+                    <horiz>0.6366096</horiz>
+                    <vert>0.3276279</vert>
                   </value>
                 </parameter>
                 <parameter>
@@ -132,60 +132,27 @@
               <trackindex>1</trackindex>
             </sourcetrack>
             <comments>
-              <mastercomment1>S01 speed 1.000000 conf 0.27</mastercomment1>
-              <mastercomment2>Premiere Motion (first key): Position 503.5, 1073.5 px; Scale 96.02 %; Rotation 0.00 deg; zoomed 0.38 % to cover the window</mastercomment2>
-              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+6.12 ms from the plan)</mastercomment3>
+              <mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
             </comments>
           </clipitem>
           <clipitem id="clipitem-2">
-            <name>S02 raw.mp4</name>
+            <name>S01 raw.mp4</name>
             <enabled>TRUE</enabled>
-            <duration>34538</duration>
+            <duration>5444</duration>
             <rate>
               <timebase>60</timebase>
               <ntsc>FALSE</ntsc>
             </rate>
-            <start>1098</start>
-            <end>4018</end>
-            <in>16703</in>
-            <out>19626</out>
+            <start>71</start>
+            <end>268</end>
+            <in>567</in>
+            <out>764</out>
             <alphatype>none</alphatype>
             <pixelaspectratio>square</pixelaspectratio>
             <anamorphic>FALSE</anamorphic>
             <file id="file-raw" />
-            <filter>
-              <effect>
-                <name>Time Remap</name>
-                <effectid>timeremap</effectid>
-                <effectcategory>motion</effectcategory>
-                <effecttype>motion</effecttype>
-                <mediatype>video</mediatype>
-                <parameter>
-                  <parameterid>variablespeed</parameterid>
-                  <name>variablespeed</name>
-                  <valuemin>0</valuemin>
-                  <valuemax>1</valuemax>
-                  <value>0</value>
-                </parameter>
-                <parameter>
-                  <parameterid>speed</parameterid>
-                  <name>speed</name>
-                  <valuemin>-100000</valuemin>
-                  <valuemax>100000</valuemax>
-                  <value>100.1</value>
-                </parameter>
-                <parameter>
-                  <parameterid>reverse</parameterid>
-                  <name>reverse</name>
-                  <value>FALSE</value>
-                </parameter>
-                <parameter>
-                  <parameterid>frameblending</parameterid>
-                  <name>frameblending</name>
-                  <value>FALSE</value>
-                </parameter>
-              </effect>
-            </filter>
             <filter>
               <effect>
                 <name>Basic Motion</name>
@@ -198,7 +165,7 @@
                   <name>Scale</name>
                   <valuemin>0</valuemin>
                   <valuemax>1000</valuemax>
-                  <value>96.018519</value>
+                  <value>205.25058</value>
                 </parameter>
                 <parameter>
                   <parameterid>rotation</parameterid>
@@ -211,8 +178,8 @@
                   <parameterid>center</parameterid>
                   <name>Center</name>
                   <value>
-                    <horiz>-0.0190352</horiz>
-                    <vert>0.1050926</vert>
+                    <horiz>0.6366096</horiz>
+                    <vert>0.3276279</vert>
                   </value>
                 </parameter>
                 <parameter>
@@ -230,9 +197,724 @@
               <trackindex>1</trackindex>
             </sourcetrack>
             <comments>
-              <mastercomment1>S02 speed 1.001000 conf 0.21</mastercomment1>
-              <mastercomment2>Premiere Motion (first key): Position 503.5, 1073.5 px; Scale 96.02 %; Rotation 0.00 deg; framing kept from S01: the competitor's moves 0 px here, under --min-move 250</mastercomment2>
-              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+5.23 ms from the plan)</mastercomment3>
+              <mastercomment1>S01 speed 1.000000 conf 0.42</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 1354.9, 1195.9 px; Scale 205.25 %; Rotation 0.00 deg</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-3">
+            <name>S02 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>268</start>
+            <end>329</end>
+            <in>777</in>
+            <out>838</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S02 speed 1.000000 conf 0.92</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-4">
+            <name>S04 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>329</start>
+            <end>365</end>
+            <in>850</in>
+            <out>886</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S04 speed 1.000000 conf 0.32</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (-0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-5">
+            <name>S06 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>365</start>
+            <end>403</end>
+            <in>894</in>
+            <out>932</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S06 speed 1.000000 conf 0.37</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-6">
+            <name>S07 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>403</start>
+            <end>423</end>
+            <in>967</in>
+            <out>987</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S07 speed 1.000000 conf 0.15</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (-8.33 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-7">
+            <name>S08 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>423</start>
+            <end>475</end>
+            <in>1169</in>
+            <out>1221</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S08 speed 1.000000 conf 0.25</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (+15.83 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-8">
+            <name>S08 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>475</start>
+            <end>534</end>
+            <in>1260</in>
+            <out>1319</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S08 speed 1.000000 conf 0.25</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in inside the frame-exact interval (+15.83 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-9">
+            <name>S11 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>534</start>
+            <end>638</end>
+            <in>1330</in>
+            <out>1434</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S11 speed 1.000000 conf 0.26</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (-0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-10">
+            <name>S12+S13 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>638</start>
+            <end>670</end>
+            <in>1436</in>
+            <out>1468</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S12+S13 speed 1.000000 conf 0.36</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept; one clip for S12+S13 (one continuous RAW take, same framing)</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-11">
+            <name>S14 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>670</start>
+            <end>722</end>
+            <in>1470</in>
+            <out>1522</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>195.48156</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>-0.5031946</horiz>
+                    <vert>0.3344001</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 speed 1.000000 conf 0.27</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position -104.1, 1200.8 px; Scale 195.48 %; Rotation 0.00 deg; S02..S14: S08 raw replaced; S13 RAW 24.475s replaced: face-centred -- the main face (RAW x 970, 51 frames) at the window centre, zoom kept</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-12">
+            <name>S15 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>722</start>
+            <end>963</end>
+            <in>1644</in>
+            <out>1885</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>213.017997</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>0.6757875</horiz>
+                    <vert>0.3303881</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S15 speed 1.000000 conf 0.82</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 1405.0, 1197.9 px; Scale 213.02 %; Rotation 0.00 deg</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-13">
+            <name>S15 raw.mp4</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>963</start>
+            <end>974</end>
+            <in>1904</in>
+            <out>1915</out>
+            <alphatype>none</alphatype>
+            <pixelaspectratio>square</pixelaspectratio>
+            <anamorphic>FALSE</anamorphic>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter>
+                  <parameterid>scale</parameterid>
+                  <name>Scale</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>1000</valuemax>
+                  <value>213.017997</value>
+                </parameter>
+                <parameter>
+                  <parameterid>rotation</parameterid>
+                  <name>Rotation</name>
+                  <valuemin>-8640</valuemin>
+                  <valuemax>8640</valuemax>
+                  <value>0</value>
+                </parameter>
+                <parameter>
+                  <parameterid>center</parameterid>
+                  <name>Center</name>
+                  <value>
+                    <horiz>0.6757875</horiz>
+                    <vert>0.3303881</vert>
+                  </value>
+                </parameter>
+                <parameter>
+                  <parameterid>centerOffset</parameterid>
+                  <name>Anchor Point</name>
+                  <value>
+                    <horiz>0</horiz>
+                    <vert>0</vert>
+                  </value>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>video</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S15 speed 1.000000 conf 0.82</mastercomment1>
+              <mastercomment2>Premiere Motion (first key): Position 1405.0, 1197.9 px; Scale 213.02 %; Rotation 0.00 deg</mastercomment2>
+              <mastercomment3>source in = nearest 1/60 s (outside the frame-exact interval) (+0.00 ms from the plan)</mastercomment3>
             </comments>
           </clipitem>
         </track>
@@ -249,16 +931,39 @@
           <clipitem id="clipitem-a1">
             <name>S01 raw.mp4 audio</name>
             <enabled>TRUE</enabled>
-            <duration>34538</duration>
+            <duration>5444</duration>
             <rate>
               <timebase>60</timebase>
               <ntsc>FALSE</ntsc>
             </rate>
             <start>0</start>
-            <end>1098</end>
-            <in>15607</in>
-            <out>16705</out>
+            <end>71</end>
+            <in>458</in>
+            <out>529</out>
             <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>528</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>529</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
             <sourcetrack>
               <mediatype>audio</mediatype>
               <trackindex>1</trackindex>
@@ -268,28 +973,591 @@
             </comments>
           </clipitem>
           <clipitem id="clipitem-a2">
-            <name>S02 raw.mp4 audio</name>
+            <name>S01 raw.mp4 audio</name>
             <enabled>TRUE</enabled>
-            <duration>34538</duration>
+            <duration>5444</duration>
             <rate>
               <timebase>60</timebase>
               <ntsc>FALSE</ntsc>
             </rate>
-            <start>1098</start>
-            <end>4018</end>
-            <in>16703</in>
-            <out>19623</out>
+            <start>71</start>
+            <end>268</end>
+            <in>567</in>
+            <out>764</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>567</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>568</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>763</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>764</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S01 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a3">
+            <name>S02 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>268</start>
+            <end>329</end>
+            <in>777</in>
+            <out>838</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>777</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>778</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>837</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>838</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S02 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a4">
+            <name>S04 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>329</start>
+            <end>365</end>
+            <in>850</in>
+            <out>886</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>850</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>851</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>885</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>886</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S04 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a5">
+            <name>S06 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>365</start>
+            <end>403</end>
+            <in>894</in>
+            <out>932</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>894</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>895</when>
+                    <value>1</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S06 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a6">
+            <name>S07 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>403</start>
+            <end>423</end>
+            <in>967</in>
+            <out>987</out>
             <file id="file-raw" />
             <sourcetrack>
               <mediatype>audio</mediatype>
               <trackindex>1</trackindex>
             </sourcetrack>
             <comments>
-              <mastercomment1>S02 audio line</mastercomment1>
+              <mastercomment1>S07 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a7">
+            <name>S08 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>423</start>
+            <end>475</end>
+            <in>1169</in>
+            <out>1221</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1220</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1221</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S08 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a8">
+            <name>S08 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>475</start>
+            <end>534</end>
+            <in>1260</in>
+            <out>1319</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1260</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1261</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1318</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1319</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S08 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a9">
+            <name>S11 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>534</start>
+            <end>638</end>
+            <in>1330</in>
+            <out>1434</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1330</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1331</when>
+                    <value>1</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S11 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a10">
+            <name>S12 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>638</start>
+            <end>648</end>
+            <in>1434</in>
+            <out>1444</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1443</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1444</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S12 audio line</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a11">
+            <name>S13 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>648</start>
+            <end>670</end>
+            <in>1446</in>
+            <out>1468</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1446</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1447</when>
+                    <value>1</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S13 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a12">
+            <name>S14 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>670</start>
+            <end>722</end>
+            <in>1470</in>
+            <out>1522</out>
+            <file id="file-raw" />
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S14 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a13">
+            <name>S15 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>722</start>
+            <end>963</end>
+            <in>1644</in>
+            <out>1885</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1884</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1885</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S15 picture</mastercomment1>
+            </comments>
+          </clipitem>
+          <clipitem id="clipitem-a14">
+            <name>S15 raw.mp4 audio</name>
+            <enabled>TRUE</enabled>
+            <duration>5444</duration>
+            <rate>
+              <timebase>60</timebase>
+              <ntsc>FALSE</ntsc>
+            </rate>
+            <start>963</start>
+            <end>974</end>
+            <in>1904</in>
+            <out>1915</out>
+            <file id="file-raw" />
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <keyframe>
+                    <when>1904</when>
+                    <value>0</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1905</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1914</when>
+                    <value>1</value>
+                  </keyframe>
+                  <keyframe>
+                    <when>1915</when>
+                    <value>0</value>
+                  </keyframe>
+                </parameter>
+              </effect>
+            </filter>
+            <sourcetrack>
+              <mediatype>audio</mediatype>
+              <trackindex>1</trackindex>
+            </sourcetrack>
+            <comments>
+              <mastercomment1>S15 picture</mastercomment1>
             </comments>
           </clipitem>
         </track>
       </audio>
     </media>
+    <marker>
+      <name>B-ROLL REPLACED S09</name>
+      <comment>the competitor's picture here was not the RAW of its audio; this is the RAW video of the audio playing here</comment>
+      <in>528</in>
+      <out>534</out>
+    </marker>
+    <marker>
+      <name>RETIME S10</name>
+      <comment>RETIME S10: variable speed -- Premiere's XML import keeps one constant speed per clip; placed at its first source frame at -100.00 %, redo the variable speed by hand</comment>
+      <in>534</in>
+      <out>534</out>
+    </marker>
+    <marker>
+      <name>B-ROLL REPLACED S13</name>
+      <comment>the competitor's picture here was not the RAW of its audio; this is the RAW video of the audio playing here</comment>
+      <in>648</in>
+      <out>670</out>
+    </marker>
   </sequence>
 </xmeml>
