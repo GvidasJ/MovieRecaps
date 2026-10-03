@@ -28,7 +28,7 @@ pip install -e tools/match_cuts          # the tool + everything it needs (numpy
 pip install --no-deps scenedetect click platformdirs   # PySceneDetect cross-check of the cuts
 pip install -e "tools/match_cuts[exports]"             # OpenTimelineIO re-parse check of XML/EDL
 pip install -e "tools/match_cuts[dev]"                 # pytest, to run the tests
-# captions (output/captions.srt): transcription + OCR, pip only (no system installs, also on Windows)
+# captions (2_captions.srt): transcription + OCR, pip only (no system installs, also on Windows)
 pip install -e "tools/match_cuts[captions]"            # faster-whisper + the OCR's own dependencies
 pip install --no-deps rapidocr                          # RapidOCR without its opencv-python dependency
 ```
@@ -49,7 +49,7 @@ Installing ffmpeg: Linux `apt install ffmpeg`, macOS `brew install ffmpeg`, Wind
 Captions: RapidOCR is installed with `--no-deps` for the same OpenCV reason (its metadata asks for
 `opencv-python`; it works with the contrib wheel above). faster-whisper downloads its model (`small.en`,
 ~0.5 GB) from Hugging Face on the first run and caches it. Without these packages the run still completes
-and the report says why `captions.srt` is missing.
+and the report says why `2_captions.srt` is missing.
 
 ## Usage
 
@@ -87,7 +87,7 @@ playing, the export shows the RAW video that matches the audio instead, so the m
 
 ### Premiere (`--premiere`)
 
-`recreated_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
+`1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
 V2 and above empty. Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
 
 * **No camera movement.** Every clip holds one fixed Position and Scale — no keyframes on Position, Scale or
@@ -135,7 +135,7 @@ one continuous clip when framing and speed continue unchanged; a cutaway too sho
 is replaced only between two shots of the same line. When the RAW audio does not continue (music,
 voice-over, the cutaway's own sound) the cutaway stays as the competitor has it.
 
-Only what you import changes: `recreated_edit.xml` (with a `B-ROLL REPLACED` marker on every spot),
+Only what you import changes: `1_edit.xml` (with a `B-ROLL REPLACED` marker on every spot),
 `recreated_edit.edl` and `cutlist.csv` (`debug/cutlist_no_broll.json` holds the export cut list).
 `cutlist.json`, the preview / compare renders and the verification stay faithful to the competitor, so the
 checks still prove every cut. The report's *B-roll cutaways* section lists every replaced and kept cutaway
@@ -143,7 +143,7 @@ with its competitor and 60 fps sequence timecodes.
 
 ### Captions
 
-`output/captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
+`2_captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
 (competitor frame k = sequence frame 2k for a 30 fps competitor), in the style of
 `caption-generator-prompt.md` at the repository root. The mode is chosen per clip:
 
@@ -206,7 +206,7 @@ flags.
 |---|---|---|
 | `0` | every acceptance criterion is `pass` / `pass_with_exceptions` and no Stage 9 check failed | `PASS` |
 | `1` | an acceptance criterion or a Stage 9 check (incl. `9.8 deliverables`) failed | `FAIL` |
-| `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `work/match_cuts.log`) | none (`match_cuts: ERROR: …` on stderr) |
+| `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `extras/match_cuts.log` in the run folder) | none (`match_cuts: ERROR: …` on stderr) |
 | `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock) | `PASS (criterion 6 not verified: …)` |
 
 A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked"
@@ -228,14 +228,16 @@ match_cuts result: PASS
 
 ### Restyle the captions in Premiere (`restyle`)
 
-After a `--premiere` run: import `recreated_edit.xml` and `captions.srt` into Premiere, drag the captions onto
-the sequence, upgrade them to graphics (*Upgrade caption to graphic*) and save the project. Then:
+After a `--premiere` run: import `1_edit.xml` and `2_captions.srt` from the run folder into Premiere, drag the
+captions onto the sequence, upgrade them to graphics (*Upgrade caption to graphic*) and save the project. Then:
 
 ```
 python -m match_cuts restyle "C:\path\to\my edit.prproj"
 ```
 
-It writes `my edit_styled.prproj` next to the project (the original is never written to) with every plain
+It writes `3_captions_styled.prproj` into the newest numbered run folder (`--out output\003` for another one;
+the original project is never written to; Premiere finds the media by the full paths the project already holds)
+with every plain
 caption in the POPW style: Verdana Bold 58 white, two strokes and a drop shadow, the same position as the
 reference, the Scale pop 88% → 100% starting on each caption's first frame and lasting exactly as long as the
 donor's (0.1333 s: 8 frames of the 60 fps sequence), and the dots and commas stripped (`Mr.` → `Mr`, `C.I.D.`
@@ -257,21 +259,29 @@ root); `match_cuts/restyle.py` only chooses their arguments and checks the resul
    left in). These are reported, never changed.
 
 `--donor PROJECT.prproj` takes the style from another correctly styled project; `--overwrite` replaces an
-existing `_styled` file (without it the run stops rather than overwrite one you may have worked in).
+existing `3_captions_styled.prproj` (without it the run stops rather than overwrite one you may have worked in).
 
 ## Outputs
 
+Each run gets its own numbered folder in `--out` (`output\001`, `output\002`, ...: the next free number, so a
+new video never overwrites the previous one). At its top only the files you use, numbered in the order you use
+them; everything else in `extras\`. The console ends with a short summary: these paths, what to check by hand
+(the `B-ROLL REPLACED` spots, the uncertain / NOT-IN-RAW / retimed spots with their sequence timecodes, the
+captions worth a look) and the run folder.
+
 ```
-output/
+output/001/
+  1_edit.xml               the Premiere sequence (FCP7 XML; points at extras/media/ by full path)
+  2_captions.srt           captions on the 60 fps sequence (copied from the competitor or made from the voice-over)
+  3_captions_styled.prproj written by `python -m match_cuts restyle` (see above)
+output/001/extras/
   build_ae_project.jsx     run in After Effects -> builds and saves recreated_edit.aep next to itself
   recreated_edit.aep       only when After Effects is installed on this machine (Stage 7.6)
   ae_time_check.txt        written by the .jsx in After Effects: per RAW layer, AE's own sourceTime() vs the plan
   media/                   RAW (or its AE-safe conformed copy raw_ae.mov / raw_ae.mp4) + competitor_ref.mp4
   cutlist.json             the single source of truth (prompt Stage 6 schema + extras)
   cutlist.csv              one row per segment (timecodes as in the report: drop-frame for 29.97/59.94)
-  recreated_edit.xml       FCP7 XML (Premiere Pro / DaVinci Resolve)
   recreated_edit.edl       CMX3600 EDL (cuts + M2 speed lines)
-  captions.srt             captions on the 60 fps sequence (copied from the competitor or made from the voice-over)
   preview_recreation.mp4   frame-exact render of the recreation from RAW (MAIN size / fps / layout)
   compare.mp4              competitor | recreation | amplified difference; frame number, timecode and segment
                            in a label strip above each panel (never over the picture)
@@ -282,12 +292,12 @@ output/
   debug/                   mapping.png, scores.png, layout.png, layout_refine.png, cuts/cut_XX.png,
                            low_confidence/k#####.png, verify_failures/k#####.png,
                            decisions.jsonl (this run's evidence, cached stages replayed with cached=true)
+  match_cuts.log           this run's full debug log
 work/
   cache/<stage>/<key>.*    content-addressed caches (key = input file hashes + analysis parameters; the
                            anchors / FrameMap also the layout geometry + overlay masks they were matched with)
   decisions.jsonl          every decision with its evidence (truncated at the start of each run; cached
-                           stages replay their stored records; copied to <out>/debug/)
-  match_cuts.log           full debug log (appended)
+                           stages replay their stored records; copied to extras/debug/)
   frame_map.npz            m(k): the RAW frame, scores, ranges and transform of every competitor frame
   layout.json, ae_plan.json, ae_mock_runs.json, verify_zncc.npy, verify_rerun/
 ```
@@ -407,7 +417,7 @@ S7.6: After Effects opens, runs the script and saves `recreated_edit.aep`; the c
 to `--ae-timeout` seconds, default 600) and `aerender` renders the comp for check 9.6. If After Effects
 shows a dialog (*save the current project?*, or the scripting-permission alert below), answer it there.
 **Ctrl+C** during that wait skips only this step and the run continues; `--no-ae` turns it off — then run
-`output/build_ae_project.jsx` yourself.
+`extras/build_ae_project.jsx` (in the run folder) yourself.
 
 ## Troubleshooting
 
@@ -473,7 +483,7 @@ with `--workers 2` (fewer processes, less memory). `--workers 1` never starts wo
   (well under 260 characters), e.g. `C:\work\MovieRecaps`, because some Windows tools still fail on long
   paths.
 - A RAW on another drive than the output folder is fine: it is copied (or referenced by its absolute path when
-  it is larger than 2 GB) into `output\media\`.
+  it is larger than 2 GB) into the run folder's `extras\media\`.
 
 **AE shows a different frame rate than expected** — AE sometimes misreads the rate of a file; the JSX
 compares the imported `frameRate` with the exact rate from the cut list and sets

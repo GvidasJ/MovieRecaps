@@ -52,6 +52,7 @@ import numpy as np
 
 from . import __version__
 from . import phase_solve as _ps
+from . import run_folders
 from .common import (STAGE_VERSION, Cache, DecisionLog, configure_pools, dump_json, ffmpeg_bin, ffprobe_bin, file_hash,
                      fmt_seconds, fps_str, json_default, limit_native_threads, load_decisions, log, null_dlog,
                      params_hash, replace_file, save_decisions, seed_everything, set_blas_threads, setup_logging,
@@ -2011,7 +2012,7 @@ def run_after_effects(env: dict, jsx_path: str | Path, timeout: float = 3600.0, 
 # ---------------------------------------------------------------------------------------------
 
 def _prepare_dirs(cfg: Config) -> None:
-    for d in (cfg.out, cfg.work, cfg.debug_dir, cfg.media_dir, cfg.debug_dir / "cuts"):
+    for d in (cfg.deliver, cfg.out, cfg.work, cfg.debug_dir, cfg.media_dir, cfg.debug_dir / "cuts"):
         Path(d).mkdir(parents=True, exist_ok=True)
 
 
@@ -2034,8 +2035,9 @@ def _guard_paths(cfg: Config) -> None:
             if rp.is_relative_to(d):
                 raise ValueError(f"input {p} lives inside {d}, where outputs are written; move it first")
         if rp.parent == Path(cfg.out_dir).resolve() and rp.name in (
-                "cutlist.json", "cutlist.csv", "preview_recreation.mp4", "compare.mp4", "recreated_edit.xml",
-                "recreated_edit.edl", "build_ae_project.jsx", "report.md", "verify.json"):
+                "cutlist.json", "cutlist.csv", "preview_recreation.mp4", "compare.mp4", "recreated_edit.edl",
+                "build_ae_project.jsx", "report.md", "verify.json", "match_cuts.log") or \
+                rp.parent == cfg.deliver.resolve() and rp.name in (run_folders.EDIT_XML, run_folders.CAPTIONS_SRT):
             raise ValueError(f"input {p} would be overwritten by an output of the same name")
 
 
@@ -2332,7 +2334,7 @@ def initial_overlays(layout: Layout, fallback: Any) -> Any:
 
 def stage_segments(ctx: Context) -> None:
     cfg = ctx.cfg
-    prev = cfg.out / "cutlist.json"
+    prev = Path(cfg.previous_out_dir or cfg.out) / "cutlist.json"     # the previous run's (s9_7 compares them)
     if prev.exists():
         try:
             ctx.previous_cutlist = json.loads(prev.read_text(encoding="utf-8"))
@@ -2459,9 +2461,9 @@ def match_render_context(ctx: Context) -> Any:
                                        fps=ctx.comp_fps)
 
 
-DELIVERABLES = (   # (name, path under OUTPUT_DIR): the prompt's Deliverables tree, checked by s9_8
+DELIVERABLES = (   # (name, path under the run's extras folder; the xml in the run folder): checked by s9_8
     ("jsx", "build_ae_project.jsx"), ("aep", "recreated_edit.aep"), ("cutlist", "cutlist.json"),
-    ("csv", "cutlist.csv"), ("xml", "recreated_edit.xml"), ("edl", "recreated_edit.edl"),
+    ("csv", "cutlist.csv"), ("xml", run_folders.EDIT_XML), ("edl", "recreated_edit.edl"),
     ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("debug_mapping", "debug/mapping.png"),
     ("debug_scores", "debug/scores.png"), ("debug_layout", "debug/layout.png"))
 DIAGNOSTIC_DELIVERABLES = ("debug_mapping", "debug_scores", "debug_layout")   # missing -> listed, never a failure
@@ -2471,7 +2473,7 @@ def stage_exports(ctx: Context) -> None:
     from . import export_xml_edl, render_preview
     cfg, cl, out = ctx.cfg, ctx.cutlist, ctx.cfg.out
     ex = export_cutlist(ctx)                  # --no-broll: cutaways replaced (the preview / compare stay faithful)
-    csv, xml, edl = out / "cutlist.csv", out / "recreated_edit.xml", out / "recreated_edit.edl"
+    csv, xml, edl = out / "cutlist.csv", cfg.deliver / run_folders.EDIT_XML, out / "recreated_edit.edl"
     produced: dict[str, bool] = {}
     produced["csv"], _ = _soft(ctx, "S8 cutlist.csv", lambda: export_xml_edl.write_csv(ex, csv))
     premiere = bool(getattr(cfg, "premiere", False))
@@ -2532,7 +2534,7 @@ def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) 
     files: dict[str, str | None] = {}
     skipped: dict[str, str] = {}
     for name, rel in DELIVERABLES:
-        p = out / rel
+        p = (cfg.deliver if name == "xml" else out) / rel
         ok = produced.get(name, True)
         if name == "jsx":
             ok = bool(ctx.paths.get("jsx"))
@@ -2636,20 +2638,78 @@ def stage_report(ctx: Context) -> None:
 
 
 def _collect_paths(ctx: Context) -> None:
-    out = ctx.cfg.out
-    for key, rel in (("jsx", "build_ae_project.jsx"), ("aep", "recreated_edit.aep"), ("cutlist", "cutlist.json"),
-                     ("csv", "cutlist.csv"), ("xml", "recreated_edit.xml"), ("edl", "recreated_edit.edl"),
-                     ("preview", "preview_recreation.mp4"), ("compare", "compare.mp4"), ("captions", "captions.srt"),
-                     ("report", "report.md"),
-                     ("verify", "verify.json"), ("media", "media"), ("debug", "debug")):
-        p = out / rel
+    out, top = ctx.cfg.out, ctx.cfg.deliver
+    for key, p in (("xml", top / run_folders.EDIT_XML), ("captions", top / run_folders.CAPTIONS_SRT),
+                   ("jsx", out / "build_ae_project.jsx"), ("aep", out / "recreated_edit.aep"),
+                   ("cutlist", out / "cutlist.json"), ("csv", out / "cutlist.csv"), ("edl", out / "recreated_edit.edl"),
+                   ("preview", out / "preview_recreation.mp4"), ("compare", out / "compare.mp4"),
+                   ("report", out / "report.md"), ("verify", out / "verify.json"), ("media", out / "media"),
+                   ("debug", out / "debug")):
         if p.exists():
             ctx.paths[key] = str(p)
     # this run's decision log is copied next to its report (debug/decisions.jsonl) when the run ends, so
     # every report links its own evidence even when WORK_DIR is shared by several clip pairs
     ctx.paths["decisions"] = str(ctx.cfg.debug_dir / "decisions.jsonl")
-    ctx.paths["log"] = str(ctx.cfg.work / "match_cuts.log")
+    ctx.paths["log"] = str(ctx.cfg.out / "match_cuts.log")
     ctx.paths["frame_map"] = str(ctx.cfg.work / "frame_map.npz")
+
+
+def hand_checks(ctx: Context) -> dict[str, list[str]]:
+    """What to check by hand (the end-of-run summary, since report.md sits in extras/): the B-ROLL REPLACED spots and
+    the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), and the captions worth
+    a look (the lists of the report's Captions section)."""
+    cfg = ctx.cfg
+    out: dict[str, list[str]] = {"broll": [], "spots": [], "captions": []}
+    xml = ctx.paths.get("xml")
+    if getattr(cfg, "premiere", False) and xml and Path(xml).exists():
+        from .export_xml_edl import parse_premiere_xml, premiere_settings
+        fps = Fraction(premiere_settings(cfg)["fps"])
+        try:
+            markers = parse_premiere_xml(xml)["markers"]
+        except Exception as e:  # noqa: BLE001 - the summary lists what it can
+            markers = []
+            out["spots"].append(f"(the markers of {Path(xml).name} could not be read: {type(e).__name__}: {e})")
+        for m in markers:
+            span = f"{timecode(int(m['in']), fps)}-{timecode(int(m['out']), fps)}"
+            name, comment = str(m.get("name") or ""), str(m.get("comment") or "")
+            if name.startswith("B-ROLL REPLACED"):
+                what = "the previous clip keeps playing" if "keeps playing" in comment else "the RAW of the audio there"
+                out["broll"].append(f"{span}  {name}: {what}")
+            else:
+                out["spots"].append(f"{span}  {name}: {comment[:90]}")
+    elif ctx.cutlist is not None:
+        fps = Fraction(ctx.comp_fps)
+        for sg in ctx.cutlist.segments:
+            if sg.type in ("uncertain", "not_in_raw"):
+                out["spots"].append(f"{timecode(int(sg.comp_in), fps)}-{timecode(int(sg.comp_out), fps)}  "
+                                    f"S{int(sg.id):02d}: {str(sg.label or sg.type)[:90]}")
+        for r in (ctx.broll or {}).get("replaced") or []:
+            out["broll"].append(f"{timecode(int(r['comp_in']), fps)}-{timecode(int(r['comp_out']), fps)}  "
+                                f"B-ROLL REPLACED S{int(r['segment']):02d}: {r.get('showed', '')} replaced")
+    cap = ctx.captions or {}
+
+    def tc(c: dict) -> str:
+        return f"{c.get('start_tc', '?')}-{c.get('end_tc', '?')}"
+    rows = [f"{tc(c)}  *...* placeholder: write the action there" for c in cap.get("placeholders") or []]
+    cn = cap.get("competitor_notes") or {}
+    rows += [f"{tc(r)}  *...*: the competitor's caption could not be read (OCR: '{r.get('ocr') or ''}')"
+             for r in cn.get("unreadable") or []]
+    rows += [f"{tc(r)}  caption '{r['ocr']}' / spoken '{r['text']}' (the spoken words are used)"
+             for r in cn.get("differs") or []]
+    rows += [f"{tc(r)}  '{r['text']}': no words heard, text read from the picture" for r in cn.get("from_ocr") or []]
+    rows += [f"{tc(r)}  '{r['written']}' spelt as the competitor writes it (heard '{r['heard']}')"
+             for r in cn.get("names") or []]
+    rows += [f"{tc(r)}  '{r['text']}': shorter than 0.1 s (as the competitor's)" for r in cap.get("short") or []]
+    rows += [f"{tc(c)}  '{c['text']}': {len(c['text'])} characters (the 24-character cap)"
+             for c in cap.get("over_cap") or []]
+    rows += [f"{float(w['time']):.2f}s  '{w['text']}': ends on a weak word ({w['reason']})"
+             for w in cap.get("weak_kept") or []]
+    rows += [f"{float(x['time']):.2f}s  {x['kind']}: {x['detail']}" for x in cap.get("flags") or []]
+    rows += [f"{tc(d)}  caption '{d['ocr']}' / heard '{d.get('heard') or '-'}'" for d in cap.get("disagreements") or []]
+    if cap.get("error"):
+        rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
+    out["captions"] = rows
+    return out
 
 
 EXIT_PASS, EXIT_FAIL, EXIT_ERROR, EXIT_NOT_VERIFIED = 0, 1, 2, 3
@@ -2700,7 +2760,7 @@ def run(cfg: Config) -> dict:
     """Run S0..S10. Returns {criteria, checks, failures, warnings, paths, timings, exit_code, context}."""
     _guard_paths(cfg)
     _prepare_dirs(cfg)
-    setup_logging(cfg.verbose, log_file=cfg.work / "match_cuts.log")
+    setup_logging(cfg.verbose, log_file=cfg.out / "match_cuts.log")       # this run's log, in its extras folder
     limit_native_threads()                 # before the first FFT (DESIGN D7 fork hygiene)
     prev_blas = set_blas_threads(1)        # small products only: faster and CPU-count independent (DESIGN D7)
     configure_pools(stall_s=cfg.pool_stall_timeout_s, progress_s=cfg.progress_log_s,
@@ -2757,9 +2817,14 @@ def run(cfg: Config) -> dict:
     criteria = ctx.verify.get("criteria", {})
     checks = ctx.verify.get("checks", {})
     code = exit_code_for(criteria, checks)
+    try:
+        checklist = hand_checks(ctx)
+    except Exception as e:  # noqa: BLE001 - the summary must not fail the run
+        checklist = {"broll": [], "spots": [], "captions": [f"(could not list: {type(e).__name__}: {e})"]}
     return {"criteria": criteria, "checks": checks, "failures": ctx.verify.get("failures", []),
             "warnings": list(ctx.warnings), "paths": dict(ctx.paths), "timings": dict(ctx.timings),
-            "exit_code": code, "headline": headline_for(criteria, checks, code), "context": ctx}
+            "exit_code": code, "headline": headline_for(criteria, checks, code), "context": ctx,
+            "run_dir": str(cfg.deliver), "checklist": checklist}
 
 
 def copy_decision_log(cfg: Config) -> Path | None:

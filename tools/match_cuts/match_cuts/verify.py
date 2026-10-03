@@ -4225,7 +4225,8 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
         need("media_competitor", _media_file(cl.competitor, out), "competitor reference media")
     need("cutlist", Path(paths.get("cutlist") or out / "cutlist.json"), "cutlist.json")
     need("csv", Path(paths.get("csv") or out / "cutlist.csv"), "cutlist.csv")
-    need("xml", Path(paths.get("xml") or out / "recreated_edit.xml"), "recreated_edit.xml")
+    from .run_folders import EDIT_XML
+    need("xml", Path(paths.get("xml") or Path(getattr(cfg, "deliver", out)) / EDIT_XML), EDIT_XML)
     need("edl", Path(paths.get("edl") or out / "recreated_edit.edl"), "recreated_edit.edl")
     val_ok = exports.get("validation_ok", exports.get("ok"))
     if val_ok is not True:

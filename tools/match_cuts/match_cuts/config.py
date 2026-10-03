@@ -27,6 +27,9 @@ class Config:
     raw: str = "./input/raw.mp4"
     out_dir: str = "./output"
     work_dir: str = "./work"
+    deliver_dir: str = ""                  # the run folder for 1_edit.xml / 2_captions.srt (cli: <--out>/<NNN>, with
+                                           #   out_dir = <NNN>/extras for everything else); "" = out_dir
+    previous_out_dir: str = ""             # the previous run's extras folder (s9_7 compares its cutlist.json)
     layout_mode: str = "match"             # match | fill | source
     comp_size: str = "competitor"          # 'competitor' or 'WxH'
     fps_mode: str = "competitor"           # competitor | source
@@ -301,7 +304,8 @@ class Config:
         export-only settings (layout_mode, comp_size, fps_mode, ae_*), and conform settings (those go
         only into the conform key), so changing --layout never recomputes the analysis."""
         d = self.to_dict()
-        for k in ("competitor", "raw", "out_dir", "work_dir", "verbose", "workers", "skip_preview", "skip_compare",
+        for k in ("competitor", "raw", "out_dir", "work_dir", "deliver_dir", "previous_out_dir", "verbose", "workers",
+                  "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
                   "ae_time_mode", "ae_slack_tol_frames", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
@@ -318,6 +322,11 @@ class Config:
     @property
     def out(self) -> Path:
         return Path(self.out_dir)
+
+    @property
+    def deliver(self) -> Path:
+        """The folder of the files used in Premiere (1_edit.xml, 2_captions.srt): the numbered run folder."""
+        return Path(self.deliver_dir or self.out_dir)
 
     @property
     def work(self) -> Path:
