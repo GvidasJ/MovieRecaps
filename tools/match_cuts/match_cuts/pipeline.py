@@ -2751,6 +2751,12 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     def tc(c: dict) -> str:
         return f"{c.get('start_tc', '?')}-{c.get('end_tc', '?')}"
     rows = [f"{tc(c)}  *...* placeholder: write the action there" for c in cap.get("placeholders") or []]
+    rules = cap.get("rules") or {}
+    if rules:
+        from .caption_rules import RULES
+        order = {"flagged": 0, "changed": 1}
+        rows += [f"{tc(r)}  '{r['text']}': rule {r['rule']} ({RULES[int(r['rule'])]}) -- {r['detail']}"
+                 for r in sorted(rules.get("rows") or [], key=lambda r: (order.get(r["kind"], 2), r["start"]))]
     cn = cap.get("competitor_notes") or {}
     rows += [f"{tc(r)}  '{r['text']}': the competitor's caption could not be read, written from the words heard"
              for r in cn.get("from_transcript") or []]
@@ -2763,8 +2769,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
              and (float(c.get("agreement") or 1) < 0.6 or float(c.get("score") or 1) < 0.8)]
     rows += [f"{tc(c)}  '{c['text']}': {len(c['text'])} characters (the 24-character cap)"
              for c in cap.get("over_cap") or [] if c.get("mode") != "competitor"]
-    rows += [f"{float(w['time']):.2f}s  '{w['text']}': ends on a weak word ({w['reason']})"
-             for w in cap.get("weak_kept") or []]
+    rows += [(f"{tc(w)}  '{w['caption']}'" if w.get("caption") else f"{float(w['time']):.2f}s  '{w['text']}'")
+             + f": rule 7 (weak last word) -- '{w['text']}' kept ({w['reason']})" for w in cap.get("weak_kept") or []]
     rows += [f"{float(x['time']):.2f}s  {x['kind']}: {x['detail']}" for x in cap.get("flags") or []]
     rc = cap.get("recheck") or {}
     if rc:
@@ -2780,6 +2786,9 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows
+    if rules:
+        from .caption_rules import summary_line
+        out["caption_rules"] = [summary_line(rules)]
     out["silence"] = silence_lines(getattr(ctx, "silence", None) or {})
     return out
 

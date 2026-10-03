@@ -1139,10 +1139,11 @@ def _tc(c: dict) -> str:
 
 
 def _captions(ctx: Any) -> list[str]:
-    """2_captions.srt (captions.py). Competitor mode: how the copy was read, the competitor's writing conventions, the
-    captions written from the transcript because they could not be read, and the readings the OCR was unsure of.
+    """2_captions.srt (captions.py). Competitor mode: how the captions were read, the competitor's writing conventions,
+    the captions written from the transcript because they could not be read, and the readings the OCR was unsure of.
     Voice mode: the caption-generator-prompt.md checks (24-character cap, *...* placeholders, possible
-    mis-transcriptions / doubled / missing words). Flagged, never corrected."""
+    mis-transcriptions / doubled / missing words). Both: the hard rules (caption_rules.py) -- what each rule changed
+    and what it flagged."""
     cap = getattr(ctx, "captions", None) or {}
     if not cap:
         return ["Captions were not made in this run."]
@@ -1155,18 +1156,20 @@ def _captions(ctx: Any) -> list[str]:
     cn = cap.get("competitor_notes") or {}
     if mode == "competitor":
         o = cap.get("ocr") or {}
-        out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions copied exactly "
-                   f"from the competitor's burned-in captions: the caption band read on all {o.get('frames_read', 0)} "
-                   "frames, each caption from the frame its words appear to the last frame before other words (or "
-                   f"none) show, its text as written on screen ({o.get('engine', 'OCR')}; words, capitals and "
-                   "punctuation unchanged, no style rules applied). Speech the competitor left uncaptioned stays "
-                   "uncaptioned.")
+        out.append(f"- **Mode: competitor** ({cap.get('reason')}) — {by.get('competitor', 0)} captions from the "
+                   f"competitor's burned-in captions: the caption band read on all {o.get('frames_read', 0)} frames "
+                   f"({o.get('engine', 'OCR')}); the competitor decides the timing (each caption from the frame its "
+                   "words appear to the last frame before other words, or none, show; its gaps kept) and where "
+                   "captions split, my rules how the text looks (the hard rules below: split at a sentence / speaker "
+                   "boundary, casing, no full stops or commas, garbled readings). Speech the competitor left "
+                   "uncaptioned stays uncaptioned.")
         cv = o.get("conventions") or {}
         if cv:
             out.append("- The competitor writes " + ", ".join(
                 (["ALL CAPS"] if cv.get("all_caps") else []) + (["curly quotes “ ”"] if cv.get("curly_quotes") else [])
-                + [f"apostrophes `{cv.get('apostrophe', chr(39))}`"]) + "; single-frame misreadings are written the "
-                "same way (e.g. `sO` → `SO`, a straight `\"` → `”`, a lone bar read as `1` → `I`).")
+                + [f"apostrophes `{cv.get('apostrophe', chr(39))}`"]) + "; single-frame misreadings are read the "
+                "same way (e.g. `sO` → `SO`, a straight `\"` → `”`, a lone bar read as `1` → `I`)" +
+                (", then written in sentence case (hard rule 4)." if cv.get("all_caps") else "."))
     else:
         out.append(f"- **Mode: voice** ({cap.get('reason')}) — {by.get('voice', 0)} captions made from the voice-over by "
                    f"caption-generator-prompt.md, {by.get('placeholder', 0)} `*...*` placeholders.")
@@ -1199,9 +1202,9 @@ def _captions(ctx: Any) -> list[str]:
         out += ["", f"**Copied captions the OCR was unsure of** (check the text): {len(unsure) if unsure else 'none'}"]
         out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
                 f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
-        return out + _recheck(cap)
-    out.append("- Speaker changes are not detected (the transcriber has no speaker diarisation): the "
-               "speaker-change break of the grouping rules is not applied.")
+        return out + _rules(cap) + _recheck(cap)
+    out.append("- Speaker changes: the transcriber has no speaker labels, but a reply starts a new sentence, so a new "
+               "caption starts after every sentence end the transcript heard (hard rules 1 and 2).")
     st = cap.get("stats") or {}
     if st.get("captions"):
         wp = st.get("words_pct") or {}
@@ -1223,15 +1226,43 @@ def _captions(ctx: Any) -> list[str]:
     ph = cap.get("placeholders") or []
     out += ["", f"**`*...*` placeholders** (silences over ~1 s — write the action there): {len(ph) if ph else 'none'}"]
     out += [f"- {_tc(c)}" for c in ph]
-    wk = cap.get("weak_kept") or []
-    if wk:
-        out += ["", f"**Weak endings kept** ({len(wk)}; the rule could not move the word):"]
-        out += [f"- {_seconds(w['time'])} `{w['text']}` — {w['reason']}" for w in wk]
     fl = cap.get("flags") or []
     out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
             f"{len(fl) if fl else 'none'}"]
     out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
-    return out + _recheck(cap)
+    return out + _rules(cap) + _recheck(cap)
+
+
+def _rules(cap: dict) -> list[str]:
+    """caption_rules.py: the hard rules of caption-generator-prompt.md, checked on the file before it was written."""
+    rr = cap.get("rules") or {}
+    if not rr:
+        return []
+    from .caption_rules import RULES, summary_line
+    ch, fl, left = rr.get("changed") or {}, rr.get("flagged") or {}, rr.get("left") or {}
+
+    def n(d: dict, r: int) -> int:
+        return int(d.get(r, d.get(str(r), 0)) or 0)
+    competitor = rr.get("mode") == "competitor"
+    rows = [[str(r), name, str(n(ch, r)), str(n(fl, r)),
+             "kept: the competitor's timing" if r == 8 and competitor else str(n(left, r))]
+            for r, name in RULES.items()]
+    out = ["", "**Hard rules** (caption-generator-prompt.md, checked before the file was written; captions changed / "
+           "flagged per rule; rules 1–4 are never left broken):", "", md_table(["rule", "", "changed", "flagged",
+                                                                                "left"], rows),
+           "", f"- {summary_line(rr)}.", f"- Acronyms and other words allowed as written: `{rr.get('allowlist', '')}`."]
+    notes = rr.get("notes") or {}
+    if notes.get("stops_commas"):
+        out.append(f"- Full stops and commas taken out of {notes['stops_commas']} captions (not inside numbers).")
+    rows = sorted(rr.get("rows") or [], key=lambda r: (r["kind"] != "flagged", r["start"]))
+    out += ["", f"**Listed by the hard rules**: {len(rows) if rows else 'none'}"]
+    out += [f"- {r['start_tc']} → {r['end_tc']} `{r['text']}` — rule {r['rule']} ({RULES[int(r['rule'])]}, "
+            f"{r['kind']}): {r['detail']}" for r in rows]
+    wk = rr.get("kept_weak") or []
+    if wk:
+        out += ["", f"**Weak endings kept** ({len(wk)}; the word could not move):"]
+        out += [f"- {w['start_tc']} → {w['end_tc']} `{w['caption']}` — `{w['text']}`: {w['reason']}" for w in wk]
+    return out
 
 
 def heard(r: dict) -> str:

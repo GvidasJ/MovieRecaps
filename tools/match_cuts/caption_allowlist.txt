@@ -1,0 +1,14 @@
+# Caption allowlist: words the caption checks accept exactly as written here (caption-generator-prompt.md,
+# "Hard rules"). One word per line (several on a line are fine, separated by spaces); lines starting with # are notes.
+#
+# * ALL-CAPS acronyms (rule 4): a word in capitals is kept in capitals only when it is listed here, or when the
+#   built-in word list writes it that way (FBI, NASA, TV). Anything else in capitals (AS, WAS, SHOULD) is written
+#   in sentence case.
+# * Words with a capital inside (rule 3), e.g. iPhone: written as listed here.
+# * Names and deliberate misspellings the word list does not know (rule 5): listed here, they are not flagged.
+#
+# Matching ignores case: "mcu" or "Mcu" on screen becomes "MCU".
+
+AI
+MJ
+MCU

@@ -36,7 +36,7 @@ packages = ["match_cuts"]
 
 [tool.setuptools.package-data]
 match_cuts = ["ae_mock/*.js", "ae_mock/ACORN_LICENSE", "restyle_scripts/*.py", "face_models/*.xml",
-              "face_models/README.md"]
+              "face_models/README.md", "wordlist/words_en.txt.gz", "wordlist/SCOWL_LICENSE.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

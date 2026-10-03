@@ -1,7 +1,8 @@
 """caption_ocr.read_caption_spans on a short synthetic clip with burned-in captions (white text, black outline, over a
 colourful moving test pattern): exact text and exact first / last frame of every caption, a pop-in animation and a
 word highlighted in another colour that stay one caption, the same word shown twice in a row (two captions), static
-text ignored. Then the whole caption stage (captions.run_captions) in competitor mode: an exact copy, no transcript.
+text ignored. Then the whole caption stage (captions.run_captions) in competitor mode without a transcript: the
+competitor's timing and splits, my hard rules on the text (caption_rules.py).
 """
 from __future__ import annotations
 
@@ -83,15 +84,11 @@ def test_ocr_reads_every_caption_exactly_with_exact_frames(clip):
     assert res["frames_read"] == N and res["conventions"]["all_caps"] is False
 
 
-def test_caption_stage_copies_the_competitor_exactly(clip, tmp_path, monkeypatch):
+def test_caption_stage_keeps_the_competitors_timing_and_applies_my_rules(clip, tmp_path, monkeypatch):
     from match_cuts import report, transcribe
     from match_cuts.common import Cache
     from match_cuts.config import Config
-
-    def no_transcript(*a, **k):
-        raise AssertionError("every caption was read: no transcript needed")
-    monkeypatch.setattr(transcribe, "available", lambda: None)
-    monkeypatch.setattr(transcribe, "transcribe_words", no_transcript)
+    monkeypatch.setattr(transcribe, "available", lambda: "not installed in this test")
     cfg = Config()
     cfg.out_dir, cfg.work_dir, cfg.premiere = str(tmp_path / "out"), str(tmp_path / "work"), False
     cfg.captions = "competitor"
@@ -102,11 +99,16 @@ def test_caption_stage_copies_the_competitor_exactly(clip, tmp_path, monkeypatch
                                 cutlist=types.SimpleNamespace(layout=LAYOUT), cache=Cache(cfg.work),
                                 raw_audio=np.zeros(16000 * 5, np.float32), audio_sr=16000, warn=warnings.append)
     res = C.run_captions(ctx)
-    assert res["mode"] == "competitor" and not warnings
+    assert res["mode"] == "competitor" and warnings == ["captions: no transcription: not installed in this test"]
     blocks = C.parse_srt(Path(res["path"]).read_text(encoding="utf-8"))
+    # 30 fps frame k = 2k at 60; "whoa!! x2" split after the sentence end (rule 1), the rest as on screen
     assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == \
-        [(t, 2 * a, 2 * b) for t, a, b in TRUTH]                  # 30 fps frame k = 2k at 60; nothing added
+        [("I got a Parker Peter", 20, 60), ("*automatic audi braking*", 60, 110), ("whoa!!", 110, 157),
+         ("x2", 157, 170), ("no", 170, 200), ("no", 200, 230), ("Spider-Man is", 236, 282)]
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
+    assert res["rules"]["changed"][1] == 1 and res["weak_kept"][0]["reason"] == "last caption"
     ctx.captions = res
     md = "\n".join(report._captions(ctx))
-    assert "copied exactly" in md and "no style rules applied" in md and "24-character cap" not in md
+    assert "the competitor decides the timing" in md and "**Hard rules**" in md and "24-character cap" not in md
+    from match_cuts.caption_rules import summary_line
+    assert summary_line(res["rules"]).startswith("1 one sentence: 1 split; 2 one speaker: 0 split")

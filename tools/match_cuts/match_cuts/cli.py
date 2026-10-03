@@ -184,9 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "through); cutaways over music / voice-over stay as they are. Changes 1_edit.xml, the "
                         "EDL and cutlist.csv; report.md lists every replaced and kept cutaway")
     p.add_argument("--captions", default="auto", choices=["auto", "competitor", "voice"],
-                   help="2_captions.srt (60 fps sequence): auto = an exact copy of the competitor's burned-in "
-                        "captions when it has them (OCR), else made from the voice-over by caption-generator-prompt.md; "
-                        "competitor / voice force one mode")
+                   help="2_captions.srt (60 fps sequence): auto = the competitor's burned-in captions when it has "
+                        "them (OCR: its timing and splits, my text rules), else made from the voice-over by "
+                        "caption-generator-prompt.md; competitor / voice force one mode; both end with the prompt's "
+                        "hard rules (acronyms: caption_allowlist.txt)")
     p.add_argument("--voiceover", default=None, metavar="FILE",
                    help="caption this narration (audio or video file, starting at the sequence start) instead of the "
                         "cut edit's audio")
@@ -416,6 +417,8 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
                 lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
+        for r in hc.get("caption_rules") or []:
+            lines.append(f"  Caption rules (captions changed / flagged per rule): {r}")
         sil = list(hc.get("silence") or [])
         if sil:
             lines.append(f"Silences: {sil[0]}")

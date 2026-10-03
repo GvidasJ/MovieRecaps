@@ -237,7 +237,8 @@ def test_competitor_mode_rechecks_only_the_words_of_captions_it_could_not_read(t
                                 cutlist=types.SimpleNamespace(layout={}), cache=Cache(cfg.work), raw_audio=None,
                                 audio_sr=SR, warn=lambda m: None)
     res = C.run_captions(ctx)
-    assert [b["text"] for b in C.read_srt(res["path"])] == ["SO I WAS", "SAT", "BACK THERE"]
+    # the competitor's splits and timing, my rules on the text: sentence case, the weak "was" moved to the next caption
+    assert [b["text"] for b in C.read_srt(res["path"])] == ["So I", "was sat", "back there"]
     rc = res["recheck"]
     assert rc["unsure"] == 1 and rc["changed"] == 1 and rc["changes"][0]["from"] == "sad"   # not "so" / "back"
     assert res["competitor_notes"]["from_transcript"][0]["text"] == "SAT"

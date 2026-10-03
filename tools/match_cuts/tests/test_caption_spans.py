@@ -1,15 +1,18 @@
-"""Competitor mode: an exact copy of the competitor's captions (caption_ocr.read_caption_spans + captions.run_captions).
+"""Competitor mode: the competitor's captions read exactly (caption_ocr.read_caption_spans), then written by my rules
+(captions.run_captions + caption_rules.py).
 
 * a synthetic clip in a soft-shadow style (cream text with a soft drop shadow over a moving test pattern): exact first
   / last frames and text; a pop-in whose first frame is misread and a highlighted word stay one caption; a caption
   that grows word by word is a new caption at each new word; the same word twice is two captions;
 * the rules on hand-made data: the video's writing conventions, joining runs, a lone bar, the transcript fallback;
 * the acceptance test on input/competitor.mp4 against tests/fixtures/competitor_captions_truth.srt, the answer key
-  written by eye from contact sheets of every frame: every caption's text identical and its first and last frame
-  within one frame.
+  written by eye from contact sheets of every frame: every caption READ with its text identical and its first and last
+  frame within one frame; the file WRITTEN keeps the competitor's words, timing and gaps, in sentence case (the video is
+  in ALL CAPS) with the weak last words moved, and breaks none of the hard rules 1-4.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import types
@@ -163,9 +166,30 @@ def test_real_competitor_captions_match_the_answer_key(tmp_path, monkeypatch):
 
     def frames(blocks):
         return [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks]
-    got = frames(C.parse_srt(Path(res["path"]).read_text(encoding="utf-8")))
     key = frames(C.read_srt(TRUTH_SRT))
-    assert len(key) == 112 and len(got) == len(key)
-    exact = [g for g, k in zip(got, key) if g[0] == k[0] and abs(g[1] - k[1]) <= 1 and abs(g[2] - k[2]) <= 1]
-    assert len(exact) == len(key), [(g, k) for g, k in zip(got, key) if g not in exact]
+    assert len(key) == 112
+    # read: every caption's text as written and its first / last frame (within one frame)
+    spans = C._read_spans(ctx, REAL_LAYOUT, Fraction(60))["spans"]
+    read = [(d["ocr"], d["comp_in"], d["comp_out"]) for d in spans]
+    exact = [g for g, k in zip(read, key) if g[0] == k[0] and abs(g[1] - k[1]) <= 1 and abs(g[2] - k[2]) <= 1]
+    assert len(read) == len(key) and len(exact) == len(key), [(g, k) for g, k in zip(read, key) if g not in exact]
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
+    # written: the same words in the same order, the competitor's timing and gaps, sentence case, rules 1-4 kept
+    got = frames(C.parse_srt(Path(res["path"]).read_text(encoding="utf-8")))
+    assert len(got) == len(key)
+
+    def words(rows):
+        return [w for t, _, _ in rows for w in re.sub(r"[^a-z0-9' -]", "", t.lower().replace("’", "'")).split()]
+    assert words(got) == words(key)
+    covered = {f for _, a, b in key for f in range(a, b)}
+    assert {f for _, a, b in got for f in range(a, b)} == covered                    # the gaps kept
+    starts = {a for _, a, _ in key}
+    moved = [(g, k) for g, k in zip(got, key) if g[1] != k[1]]
+    assert len(moved) == res["rules"]["changed"][7] == 11                          # only where a weak word moved
+    assert all(g[0].split()[0].lower() in C.WEAK for g, _ in moved) and not {a for _, a, _ in got} & (
+        {k[1] for _, k in moved} - starts - {g[1] for g, _ in moved})
+    assert not [t for t, _, _ in got if re.search(r"\b[A-Z]{2,}\b", t)]               # no ALL CAPS left
+    assert got[0][0] == "So as" and got[1][0] == "a joke" and ("I had", 524, 545) in got
+    from match_cuts.caption_rules import check
+    caps = [C.Caption(t, a, b, "competitor") for t, a, b in got]
+    assert not any(check(caps, Fraction(60), "competitor", rules=(1, 2, 3, 4)).values())

@@ -1,6 +1,6 @@
-"""The competitor's burned-in captions, copied exactly (captions mode ``competitor``, see captions.py): every
-caption's first and last frame and its text as written on screen (words, capitals, punctuation), all read from the
-picture.
+"""The competitor's burned-in captions, read exactly (captions mode ``competitor``, see captions.py): every caption's
+first and last frame and its text as written on screen (words, capitals, punctuation), all read from the picture.
+captions.py then writes them by my rules (caption_rules.py).
 
 Engine: RapidOCR (``rapidocr`` 3.x, or the older ``rapidocr-onnxruntime``: ONNX models inside the wheel, pip-only
 on Windows, no system installs).
@@ -259,7 +259,7 @@ def _ignore_mask(band: Band) -> np.ndarray | None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Caption spans (competitor mode): an exact copy of the competitor's captions -- WHEN each one is on screen (to the
+# Caption spans (competitor mode): the competitor's captions read exactly -- WHEN each one is on screen (to the
 # frame) and WHAT it says (as written: words, capitals, punctuation), both read from the picture
 # ---------------------------------------------------------------------------------------------
 #
@@ -279,7 +279,8 @@ def _ignore_mask(band: Band) -> np.ndarray | None:
 # learned from all its readings, fix what a recogniser misreads on single frames: in an ALL-CAPS video every letter
 # is upper case ("sO" -> "SO"), a lone solid bar is "I" (not "1"), straight double quotes are curly where the video
 # writes curly ones, and apostrophes follow the video's majority style. A caption that cannot be read gets no text
-# here (captions.py falls back to the transcript and lists it). No other rule touches the text.
+# here (captions.py falls back to the transcript and lists it). No other rule touches the text here; the hard rules
+# (caption_rules.py) write it my way afterwards.
 
 CAND_IOU = 0.8            # letters overlapping the previous frame's less than this (IoU): a new caption may start ...
 SHAPE_SAME = 0.8          # ... unless the bright shapes around them (any colour) still overlap at least this much

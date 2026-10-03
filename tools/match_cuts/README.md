@@ -155,8 +155,8 @@ alone is cut this way.
 * Everything after a removed silence moves earlier: clips spanning one are split around it (each piece keeps its
   clip's fixed framing, so every clip still covers the window and `--min-move` still holds), markers move, the
   sequence gets shorter. The XML check validates the cut sequence against the plan.
-* Captions: copied competitor captions keep their exact text and splits — only their times move with the cuts; a
-  copied caption completely inside a removed silence is dropped and listed. Voice captions are transcribed from the
+* Captions: competitor captions keep their splits (the hard rules aside, see *Captions*) — their times move with
+  the cuts; a caption completely inside a removed silence is dropped and listed. Voice captions are transcribed from the
   cut edit.
 * The end summary shows the settings used for this video (speech level, background noise, threshold and how it
   was set, minimum length, padding, how many words were timed), the total removed, the new length and every
@@ -197,24 +197,47 @@ with its competitor and 60 fps sequence timecodes.
 `2_captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
 (competitor frame k = sequence frame 2k for a 30 fps competitor). The mode is chosen per clip:
 
-* **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): an exact copy
-  of the competitor's captions — the same words in each caption, the same capitals and punctuation (`“…”`,
-  `DIDN'T`, `SPIDER-MAN`, `*LAUGHS*`), each starting and ending on the same frames. The caption band is read on
+* **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): the competitor
+  decides the **timing** (each caption starts and ends on the competitor's frames, its gaps kept) and **where
+  captions split**; my rules decide **how the text looks** (the hard rules below). The caption band is read on
   every frame (the caption's fill colour is learned from the video, static title / logo / watermark text is
   masked): a new caption starts on the frame different words appear; a pop-in (the text growing over its first
   frames) or a word highlighted in another colour is not a new caption, the same text popping in again is. The
-  text is the majority of RapidOCR's readings of the caption's fully grown frames, written the way the video writes
-  (an ALL-CAPS video stays all caps when one frame reads `sO`, straight quotes become the video's curly ones, a
-  lone bar is `I`). None of the voice-mode style rules apply: no lower-casing, regrouping, weak-word moves or length
-  limits, and speech the competitor left uncaptioned stays uncaptioned. Only a caption the OCR cannot read takes the
-  words heard while it is on screen (listed in the report); the transcript is not used otherwise.
+  text read is the majority of RapidOCR's readings of the caption's fully grown frames. The cut edit is also
+  transcribed (word timings): a caption is split where a sentence ends or the speaker changes, at the word's own
+  time; casing follows the transcript (`SPIDER-MAN` → `Spider-Man`, `WAS` → `was`); full stops and commas go; a
+  garbled reading (`We wre`) takes the word the transcript clearly heard (`We're`) and is listed. Speech the
+  competitor left uncaptioned stays uncaptioned; a caption the OCR cannot read takes the words heard while it is on
+  screen (listed).
 * **voice** (only when the competitor has no burned-in captions): the cut edit's audio (RAW audio on the edit's
   cuts, never the raw clip) is transcribed with word timestamps (faster-whisper) and grouped by the rules of
   `caption-generator-prompt.md` at the repository root: 1–4 words, a new caption after 4 words / 20 characters / a pause > 0.25 s / at a
   standalone interjection, a word said again gets its own caption, names / number + unit / negation +
   verb kept together, a weak final word moved to the next caption (once per caption — the prompt's
   own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
-  `*...*` placeholders for silences over ~1 s. `--voiceover FILE` captions your own narration instead.
+  `*...*` placeholders for silences over ~1 s, a new caption after every sentence end. `--voiceover FILE` captions
+  your own narration instead.
+
+**The hard rules** (`caption-generator-prompt.md`, *Hard rules*) are a final check on every caption file before it
+is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4 is never written:
+
+| rule | check | fixed (counted as *changed*) | otherwise (counted as *flagged*, listed) |
+|---|---|---|---|
+| 1 one sentence | no `?` / `!` / `.` with more text after it | split there | — |
+| 2 one speaker | no sentence end the transcript heard inside a caption (no speaker labels: a reply starts a new sentence) | split there, at the word's time | — |
+| 3 casing inside a word | no `yoU` | `you` (the transcript's casing, else the word list's) | — |
+| 4 all caps | no ALL-CAPS word but acronyms | sentence case (`WAS` → `was`, `PETER PARKER` → `Peter Parker`) | — |
+| 5 real words | every token in the word list, a name, a number or an interjection | competitor mode: a reading that is not a word and was not read clearly takes the word the transcript clearly heard; screen noise (`1`, `V`, `_`) is left out | listed, never guessed (deliberate misspellings stay) |
+| 6 length | spoken: 20 characters / 5 words; `*actions*`: 24 | split at a word (no weak ending) | one word over 20 characters |
+| 7 weak last word | not on *a, the, to, of, …* where the word can move | moved to the next caption (competitor mode: only between touching captions) | kept where it ends a sentence, a gap / silence / interjection follows, or the caption already gave one |
+| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed | competitor mode keeps the competitor's gaps |
+
+**Acronyms** (`caption_allowlist.txt` next to this README; one word per line, extend it): `AI`, `MJ`, `MCU`, plus
+the acronyms the word list writes in capitals (`FBI`, `NASA`, `TV`); never a word that is also an ordinary word
+(`AS`, `WAS`, `IT`). Words listed there are written exactly as listed (also `iPhone`, a name or a deliberate
+misspelling the word list does not know). The word list is SCOWL (`match_cuts/wordlist/`, see its licence file).
+The end summary says how many captions each rule changed or flagged (*Caption rules*), and *Captions worth a look*
+lists every flag, every word taken from the transcript and every piece of screen noise left out.
 
 **Unclear speech is double-checked against the RAW** (voice mode, and the transcript fallbacks of competitor mode).
 A word the transcription of the edit is unsure about — heard with low confidence (mumbling), with music or noise
@@ -234,8 +257,9 @@ summary says how many words were rechecked and how many changed; the report list
 The report's *Captions* section lists, in competitor mode, the competitor's writing conventions, the captions
 written from the transcript because they could not be read and the readings the OCR was unsure of; in voice mode,
 the style check, captions at the 24-character cap, the `*...*` timecodes and possible mis-transcriptions / doubled /
-missing words — flagged, never corrected. Speaker changes are not detected
-(faster-whisper has no diarisation). faster-whisper is used instead of WhisperX because WhisperX needs
+missing words — flagged, never corrected; in both, the hard-rules table (changed / flagged per rule) and every row
+the rules listed. Speakers are not told apart by voice (faster-whisper has no diarisation): rule 2 relies on the
+sentence ends the transcript hears. faster-whisper is used instead of WhisperX because WhisperX needs
 PyTorch and an alignment model, a heavy and fragile install on Windows; faster-whisper installs with pip
 alone and gives word timestamps.
 

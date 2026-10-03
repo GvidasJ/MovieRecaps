@@ -2,17 +2,20 @@
 
 Two modes, chosen per clip (``--captions auto|competitor|voice``, pipeline.stage_captions):
 
-* **competitor** -- the competitor has burned-in captions: an exact copy (caption_ocr.read_caption_spans reads the
-  caption band on every frame): each caption's words, capitals and punctuation as written on screen (``*actions*``
-  included), from its first frame to its last. None of the style rules below apply. Only a caption the OCR cannot
-  read takes the words heard while it is on screen (listed in the report); speech the competitor left uncaptioned
-  stays uncaptioned.
+* **competitor** -- the competitor has burned-in captions: the competitor decides the timing (each caption from its
+  first frame to its last, gaps included) and where captions split (caption_ocr.read_caption_spans reads the caption
+  band on every frame); my rules decide how the text looks (caption_rules.py: a caption split at a sentence or
+  speaker boundary, casing, no full stops / commas, a garbled reading replaced by the word the transcript clearly
+  heard). A caption the OCR cannot read takes the words heard while it is on screen (listed in the report); speech
+  the competitor left uncaptioned stays uncaptioned.
 * **voice** -- only when the competitor has no captions: captions made from the voice-over (word timestamps of the
   CUT edit's audio, or ``--voiceover FILE``), the grouping walk, the weak-word fix, back-to-back timing and ``*...*``
   placeholders for silences.
 
-This module holds the text rules, grouping, timing, SRT I/O and the report data (no heavy imports); transcribe.py
-(faster-whisper) and caption_ocr.py (RapidOCR) hold the optional engines.
+Both end with caption_rules.enforce (the prompt's "Hard rules": fixed where mechanical, else listed), and write_srt
+refuses a file that still breaks rules 1-4. This module holds the text rules, grouping, timing, SRT I/O and the
+report data (no heavy imports); transcribe.py (faster-whisper) and caption_ocr.py (RapidOCR) hold the optional
+engines.
 """
 from __future__ import annotations
 
@@ -133,6 +136,21 @@ def _ends_sentence(raw: str) -> bool:
     return bool(re.search(r"[.!?…]['\"’]?$", str(raw).strip()))
 
 
+ABBREVIATIONS = frozenset("mr mrs ms dr st jr sr vs etc prof mt".split())   # "Mr." does not end a sentence
+
+
+def sentence_end(raw: str) -> bool:
+    """A word that ends a sentence (hard rule 1): ``?``, ``!`` or a full stop -- not an abbreviation (Mr., a.m.,
+    C.I.D.) and not an ellipsis, which trails off rather than ends."""
+    t = str(raw or "").strip().rstrip("\"'”’)*")
+    if t.endswith(("?", "!")):
+        return True
+    if not t.endswith(".") or t.endswith(("..", "…")):
+        return False
+    w = t[:-1].lower().lstrip("\"'“‘(*")
+    return not (w in ABBREVIATIONS or re.fullmatch(r"(?:[a-z]\.)*[a-z]", w) is not None)
+
+
 def _is_negation(n: str) -> bool:
     return n.endswith("n't") or n in NEGATIONS
 
@@ -193,7 +211,7 @@ def _repeat(words: Sequence[Word], i: int, j: int) -> bool:
 
 def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list[list[int]]:
     """Runs of words that stay together (bonds + moved weak words glued to their next word); a run longer than the
-    caps is cut greedily (the word / character caps win over a bond)."""
+    caps (4 words, 20 characters: hard rule 6) is cut greedily (the word / character caps win over a bond)."""
     units: list[list[int]] = []
     cur: list[int] = []
     for i in range(len(words)):
@@ -203,7 +221,7 @@ def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list
             cur = []
     out: list[list[int]] = []
     for u in units:
-        if len(u) <= MAX_WORDS and _chars(words, u) <= HARD_CAP:
+        if len(u) <= MAX_WORDS and _chars(words, u) <= MAX_CHARS:
             out.append(u)
             continue
         part: list[int] = []
@@ -219,9 +237,9 @@ def _units(words: Sequence[Word], bonds: Sequence[bool], glue: set[int]) -> list
 def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], forced: set[int],
           glue: set[int]) -> list[list[int]]:
     """The grouping walk: a new caption starts before a unit when the caption already has 4 words or would exceed
-    20 characters, after a pause > 0.25 s, at a standalone interjection (before and after it), at a word said
-    again straight away (repetition: one caption each), or where the weak-word fix forced it. The speaker-change
-    rule needs diarisation, which the transcriber does not provide."""
+    20 characters, after a pause > 0.25 s, after a sentence end (hard rules 1 and 2: the transcriber has no speaker
+    labels, but a reply starts a new sentence), at a standalone interjection (before and after it), at a word said
+    again straight away (repetition: one caption each), or where the weak-word fix forced it."""
     groups: list[list[int]] = []
     cur: list[int] = []
     for u in _units(words, bonds, glue):
@@ -231,6 +249,7 @@ def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], f
             # than end on a weak word: "for a 15 year old"
             max_words = MAX_WORDS + 1 if all(is_weak(words[i].text) for i in cur) else MAX_WORDS
             brk = (first in forced or words[first].start - words[prev].end > PAUSE_S or alone[prev] or alone[first]
+                   or sentence_end(words[prev].raw or words[prev].text)
                    or _repeat(words, prev, first) or len(cur) + len(u) > max_words
                    or _chars(words, cur + u) > MAX_CHARS)
             if brk:
@@ -242,12 +261,14 @@ def _walk(words: Sequence[Word], bonds: Sequence[bool], alone: Sequence[bool], f
     return groups
 
 
-def group_words(words: Sequence[Word], notes: list[dict] | None = None) -> list[list[int]]:
+def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out: set[int] | None = None
+                ) -> list[list[int]]:
     """Word-index groups, one per caption: the walk, then the weak-word fix -- a caption of more than one word that
     ends on a weak word gives that word to the front of the next caption (which is re-split if it now breaks the
     caps). Each caption gives away at most one word (the prompt's own example keeps "there is" after giving away
-    "a"). Kept, and listed in ``notes``: a weak word bonded to the previous one ("didn't get it"), before a silence
-    placeholder, before a standalone interjection, or at the very end."""
+    "a"). Kept, and listed in ``notes``: a weak word that ends a sentence, bonded to the previous one ("didn't get
+    it"), before a silence placeholder, before a standalone interjection, or at the very end. ``gave_out`` gets the
+    first word of each caption that gave its weak last word away."""
     if not words:
         return []
     bonds = compute_bonds(words)
@@ -266,6 +287,8 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None) -> list[
                 pass
             elif last + 1 >= len(words):
                 reason = "last word of the captions"
+            elif sentence_end(words[last].raw or words[last].text):
+                reason = "it ends a sentence"
             elif bonds[last - 1]:
                 reason = "kept together with the previous word"
             elif last - 1 in glue:
@@ -285,6 +308,8 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None) -> list[
             if notes is not None:
                 notes.append({"word": last, "reason": reason})
         gi += 1
+    if gave_out is not None:
+        gave_out.update(g[0] for g in groups if g[0] in gave)
     return groups
 
 
@@ -324,7 +349,8 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
             return [Caption(PLACEHOLDER, lo, hi, "placeholder")]
         return []
     weak_notes: list[dict] = []
-    groups = group_words(words, weak_notes)
+    gave: set[int] = set()
+    groups = group_words(words, weak_notes, gave)
     if notes is not None:
         for wn in weak_notes:
             notes.append({"text": words[wn["word"]].text, "time": words[wn["word"]].start, "reason": wn["reason"]})
@@ -335,7 +361,7 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
     for gi, g in enumerate(groups):
         ws = [words[i] for i in g]
         caps.append(Caption(" ".join(w.text for w in ws), to_frame(ws[0].start, fps), to_frame(ws[-1].end, fps),
-                            mode, ws))
+                            mode, ws, {"gave": True} if g[0] in gave else {}))
         nxt = words[groups[gi + 1][0]].start if gi + 1 < len(groups) else timeline_end
         if placeholders and nxt - ws[-1].end > SILENCE_S:
             caps.append(Caption(PLACEHOLDER, to_frame(ws[-1].end, fps), to_frame(nxt, fps), "placeholder"))
@@ -345,16 +371,17 @@ def voice_captions(words: Sequence[Word], fps: Fraction, n_frames: int, *, lo: i
 
 
 # ---------------------------------------------------------------------------------------------
-# Competitor mode: an exact copy of the competitor's captions
+# Competitor mode: the competitor's captions as read (caption_rules.enforce writes them my way)
 # ---------------------------------------------------------------------------------------------
 
 def competitor_copy(spans: Sequence[dict], words: Sequence[Word], comp_fps: Fraction, to_seq, seq_fps: Fraction
                     ) -> tuple[list[Caption], dict]:
     """The competitor's captions exactly as on screen (``spans`` from caption_ocr.read_caption_spans: first and last
-    frame, the text as written); no style rule touches them. A caption the OCR could not read takes the words heard
-    while it is on screen, written the competitor's way (caption_ocr.apply_conventions; punctuation the competitor
-    never uses dropped), listed in ``notes["from_transcript"]``; one with no words heard either is left out
-    (``notes["unreadable"]``). Returns (captions, notes)."""
+    frame, the text as written), before the hard rules (caption_rules.enforce, in run_captions). A caption the OCR
+    could not read takes the words heard while it is on screen, written the competitor's way
+    (caption_ocr.apply_conventions; punctuation the competitor never uses dropped), listed in
+    ``notes["from_transcript"]``; one with no words heard either is left out (``notes["unreadable"]``). Returns
+    (captions, notes)."""
     from .caption_ocr import apply_conventions, screen_conventions
     spans = sorted(spans, key=lambda d: int(d["comp_in"]))
     read = [str(d.get("ocr") or "") for d in spans if d.get("ocr")]
@@ -410,7 +437,14 @@ def srt_text(caps: Sequence[Caption], fps: Fraction) -> str:
 
 
 def write_srt(caps: Sequence[Caption], path: str | Path, fps: Fraction) -> Path:
+    """Write the SRT -- never one that still breaks hard rules 1-4 (one sentence, one speaker, no capital inside a
+    word, no ALL CAPS but acronyms: caption_rules.check); ValueError then."""
+    from .caption_rules import RULES, check
     from .common import replace_file
+    bad = {r: v for r, v in check(caps, fps, rules=(1, 2, 3, 4)).items() if v}
+    if bad:
+        raise ValueError("captions still break " + "; ".join(f"rule {r} ({RULES[r]}): {', '.join(v[:3])}"
+                                                             for r, v in bad.items()))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
@@ -596,7 +630,7 @@ def run_captions(ctx) -> dict:
     if stale.exists():
         stale.unlink()
 
-    # ---- the competitor's burned-in captions: an exact copy, read from the picture ----
+    # ---- the competitor's burned-in captions, read from the picture ----
     want_ocr = requested == "competitor" or (requested == "auto" and not voiceover)
     layout = getattr(ctx.cutlist, "layout", None) or {}
     n_events = sum(1 for c in (layout.get("captions") or []) if str(c.get("type", "captions")) == "captions")
@@ -640,8 +674,10 @@ def run_captions(ctx) -> dict:
     y16 = None
     err = None
     cl = None
-    if mode == "competitor" and all(d.get("ocr") for d in spans):
-        res["source"] = "not needed (every caption was read from the screen)"
+    if transcribe.available() is not None and not voiceover:
+        err = transcribe.available()
+        res["source"] = "none (transcription not available)"
+        warn(f"no transcription: {err}")
     elif voiceover:
         from .media import extract_audio
         y16 = extract_audio(voiceover, sr=transcribe.SR, mono=True)
@@ -663,7 +699,7 @@ def run_captions(ctx) -> dict:
             res["source"] += ", its silences cut out"
     else:
         res["source"] = "none (the RAW has no audio)"
-    if y16 is not None and len(y16):
+    if y16 is not None and len(y16) and err is None:
         err = transcribe.available()
         if err:
             warn(f"no transcription: {err}")
@@ -674,6 +710,7 @@ def run_captions(ctx) -> dict:
                 err = f"{type(e).__name__}: {e}"
                 warn(f"transcription failed: {err}")
     res["transcriber"] = {"engine": "faster-whisper", "model": model, "words": len(words), "error": err}
+    heard_ok = y16 is not None and len(y16) > 0 and err is None      # the transcript ran (words may be none)
 
     # ---- unclear words double-checked against the source (caption_recheck.py) ----
     rmodel = str(getattr(cfg, "caption_recheck_model", "") or "")
@@ -705,19 +742,27 @@ def run_captions(ctx) -> dict:
             warn(f"unclear words not rechecked with {rmodel}: {type(e).__name__}: {e}")
 
     # ---- captions ----
-    weak: list[dict] = []
+    from . import caption_rules
     if mode == "competitor":
         caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
-        caps = voice_captions(words, fps, n_seq, notes=weak)
+        caps = voice_captions(words, fps, n_seq)
         rechecked = "rechecked" in (res.get("recheck") or {})        # low-confidence words: listed by the recheck
         res["flags"] = transcript_flags(words, y16, transcribe.SR, min_prob=0.0 if rechecked else 0.5)
     else:
         caps = []
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
-    res["weak_kept"] = [{"time": w["time"], "text": w["text"], "reason": w["reason"]} for w in weak]
+    # ---- the hard rules: the final check before the file is written ----
+    if caps:
+        lex = caption_rules.lexicon()
+        caps, res["rules"] = caption_rules.enforce(caps, fps, mode, words if heard_ok else None, lex)
+        res["rules"]["allowlist"] = lex.allow_file
+        if mode == "competitor" and not heard_ok:
+            res["notes"].append("no transcript: competitor captions are split only where their own text ends a "
+                                "sentence, and garbled readings are listed rather than replaced")
+    res["weak_kept"] = list((res.get("rules") or {}).get("kept_weak") or [])
     res["captions"] = [_caption_dict(c, fps) for c in caps]
     res["count"] = len(caps)
     res["by_mode"] = dict(Counter(c.mode for c in caps))
@@ -726,10 +771,16 @@ def run_captions(ctx) -> dict:
     res["over_cap"] = [_caption_dict(c, fps) for c in caps if len(c.text.replace("\n", " ")) >= HARD_CAP]
     res["stats"] = caption_stats(caps, fps) if caps else {}
     if caps:
-        p = write_srt(caps, cfg.deliver / CAPTIONS_SRT, fps)
+        try:
+            p = write_srt(caps, cfg.deliver / CAPTIONS_SRT, fps)
+        except ValueError as e:                     # a hard rule 1-4 still broken: no file rather than a wrong one
+            warn(f"{CAPTIONS_SRT} not written: {e}")
+            dump_json(res, cfg.debug_dir / "captions.json")
+            return res
         res["path"] = str(p)
         dump_json(res, cfg.debug_dir / "captions.json")
-        log.info("captions: %d captions (%s) -> %s", len(caps), mode, p)
+        log.info("captions: %d captions (%s) -> %s; %s", len(caps), mode, p,
+                 caption_rules.summary_line(res.get("rules") or {}))
     return res
 
 
