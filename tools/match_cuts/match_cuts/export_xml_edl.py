@@ -159,6 +159,19 @@ def _src_advance(speed: float, n_rec: int, raw_fps: Fraction, comp_fps: Fraction
     return int(round(float(speed) * n_rec * float(raw_fps) / float(comp_fps)))
 
 
+def xml_in_out(src_in: int, src_out: int) -> tuple[int, int]:
+    """<in> / <out> of a clip item from the plan's source frames. The plan counts a reversed clip from the frame it
+    shows first (``src_in``) down to one before the last (``src_out`` < ``src_in``); FCP7 XML and Premiere want the
+    source range ascending, in < out, and play it backwards from out - 1 for the Time Remap ``reverse`` flag -- the
+    same frames. An item written with in > out is skipped by Premiere ("invalid start/end")."""
+    return (int(src_out) + 1, int(src_in) + 1) if src_out < src_in else (int(src_in), int(src_out))
+
+
+def plan_in_out(xml_in: int, xml_out: int, reverse: bool) -> tuple[int, int]:
+    """The inverse of :func:`xml_in_out`: the plan's (src_in, src_out) of an item read from the XML."""
+    return (int(xml_out) - 1, int(xml_in) - 1) if reverse else (int(xml_in), int(xml_out))
+
+
 def _tc_to_frames(tc: str, nominal: int) -> int:
     """HH:MM:SS:FF (NDF, ':' or ';' separators) -> frame count at an integer nominal rate."""
     m = re.fullmatch(r"(-?)(\d+):(\d\d):(\d\d)[:;.](\d\d)", tc.strip())
@@ -965,8 +978,9 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             _sub(ci, "start", start)
             _sub(ci, "end", end)
             src_out = int(ev.src_in) + _src_advance(ev.speed, ev.n_rec + tail, raw_fps, comp_fps)
-            _sub(ci, "in", int(ev.src_in))
-            _sub(ci, "out", src_out)
+            x_in, x_out = xml_in_out(int(ev.src_in), src_out)
+            _sub(ci, "in", x_in)
+            _sub(ci, "out", x_out)
             _sub(ci, "alphatype", "none")
             _sub(ci, "pixelaspectratio", "square")
             _sub(ci, "anamorphic", "FALSE")
@@ -1020,8 +1034,10 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             _rate_el(ai, raw_fps)
             _sub(ai, "start", it.rec_in)
             _sub(ai, "end", it.rec_out)
-            _sub(ai, "in", int(it.src_in))
-            _sub(ai, "out", int(it.src_in) + _src_advance(it.speed, it.n_rec, raw_fps, comp_fps))
+            x_in, x_out = xml_in_out(int(it.src_in), int(it.src_in) + _src_advance(it.speed, it.n_rec, raw_fps,
+                                                                                   comp_fps))
+            _sub(ai, "in", x_in)
+            _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(it.speed - 1.0) > 1e-9:
                 _time_remap(ai, it.speed, "audio")
@@ -1056,8 +1072,10 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             _rate_el(ai, raw_fps)
             _sub(ai, "start", ev.rec_in)
             _sub(ai, "end", ev.rec_out)
-            _sub(ai, "in", int(ev.src_in))
-            _sub(ai, "out", int(ev.src_in) + _src_advance(ev.speed, ev.n_rec, raw_fps, comp_fps))
+            x_in, x_out = xml_in_out(int(ev.src_in), int(ev.src_in) + _src_advance(ev.speed, ev.n_rec, raw_fps,
+                                                                                   comp_fps))
+            _sub(ai, "in", x_in)
+            _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(ev.speed - 1.0) > 1e-9:
                 _time_remap(ai, ev.speed, "audio")
@@ -1493,7 +1511,7 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
         tail = nxt.dissolve_in if (nxt is not None and nxt.kind == "clip") else 0
         dis_in = ev.dissolve_in if (prev is not None and prev.kind == "clip") else 0
         retime = None
-        if seg.time_remap_keys:
+        if seg.time_remap_keys or abs(float(seg.speed)) < 1e-9:      # a freeze is placed at 100 %, marked RETIME
             v = seg_speed(seg, comp_fps)
             what = "freeze" if abs(v) < 1e-9 else ("frame blend" if seg.frame_mix else "variable speed")
             if abs(v) < 1e-9:
@@ -1650,8 +1668,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _rate_el(ci, fps)
         _sub(ci, "start", cl.start)
         _sub(ci, "end", cl.end)
-        _sub(ci, "in", cl.src_in)
-        _sub(ci, "out", cl.src_out)
+        x_in, x_out = xml_in_out(cl.src_in, cl.src_out)
+        _sub(ci, "in", x_in)
+        _sub(ci, "out", x_out)
         _sub(ci, "alphatype", "none")
         _sub(ci, "pixelaspectratio", "square")
         _sub(ci, "anamorphic", "FALSE")
@@ -1688,8 +1707,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _rate_el(ai, fps)
             _sub(ai, "start", it["start"])
             _sub(ai, "end", it["end"])
-            _sub(ai, "in", it["in"])
-            _sub(ai, "out", it["out"])
+            x_in, x_out = xml_in_out(it["in"], it["out"])
+            _sub(ai, "in", x_in)
+            _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(it["speed"] - 1.0) > 1e-9:
                 _time_remap(ai, it["speed"], "audio")
@@ -1727,6 +1747,20 @@ def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
     _param(e, "level", "Level", None, 0, "3.98109", sorted(keys))
 
 
+def no_audio_reason(cl: PremiereClip, comp_fps: Fraction) -> str | None:
+    """Why V1 clip ``cl`` plays no audio on A1 on purpose (premiere_audio), or None: a freeze (a frozen picture is
+    silent, as in the preview) or a cutaway the competitor showed over music / voice-over (picture only)."""
+    for e in cl.events or [cl.ev]:
+        seg = e.seg
+        if seg is None:
+            continue
+        if (seg.audio or {}).get("mute"):
+            return "muted on purpose: the competitor showed a cutaway over music / voice-over here (picture only)"
+        if abs(seg_speed(seg, comp_fps)) < 1e-9:
+            return "a freeze: a frozen picture plays no audio"
+    return None
+
+
 def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None) -> list[dict]:
     """A1 items [{seg, start, end, in, out, speed, what}] (sequence-rate frames): every V1 clip's RAW audio over the
     clip's record range (the same source in-point as the picture, so A1 and V1 stay locked), or the segment's audio
@@ -1749,7 +1783,7 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
         cl = by_seg.get(seg.id)
         start, end = ev.rec_in * fac, ev.rec_out * fac
         if cl is not None and not line:
-            if cl.seg.time_remap_keys and abs(seg_speed(cl.seg, comp_fps)) < 1e-9:
+            if abs(seg_speed(cl.seg, comp_fps)) < 1e-9:
                 continue                                      # frozen picture: silent
             prev = out[-1] if out else None
             if prev is not None and prev.get("clip") is cl and prev["end"] == start:
@@ -1786,8 +1820,9 @@ def _xml_rate(el: ET.Element) -> Fraction | None:
 
 def parse_fcp7_xml(path: str | os.PathLike) -> dict:
     """Own FCP7 XML parser (the OTIO fcp adapter ignores time remapping): {'rate', 'duration', 'width',
-    'height', 'items': [{tag, name, start, end (resolved through transitions), in, out, speed, reverse,
-    flip, rate, generator}], 'transitions': [{start, end, alignment}], 'audio_items': [...], 'markers'}."""
+    'height', 'items': [{tag, name, start, end (resolved through transitions), in, out (the plan's source frames:
+    plan_in_out), speed (negative: reverse), flip, rate, generator}], 'transitions': [{start, end, alignment}],
+    'audio_items': [...], 'markers'}."""
     root = ET.parse(str(path)).getroot()
     if root.tag != "xmeml":
         raise ValueError(f"{path}: root element is {root.tag!r}, expected xmeml")
@@ -1835,10 +1870,10 @@ def parse_fcp7_xml(path: str | os.PathLike) -> dict:
                             reverse = str(_text(p, "value")).upper() == "TRUE"
                 elif eid in ("Horizontal Flip", "flop", "Flop"):
                     flip = True
+            s_in, s_out = plan_in_out(int(float(_text(e, "in", 0))), int(float(_text(e, "out", 0))), reverse)
             items.append({"tag": e.tag, "id": e.get("id"), "name": _text(e, "name", ""), "start": start, "end": end,
-                          "in": int(float(_text(e, "in", 0))), "out": int(float(_text(e, "out", 0))),
-                          "speed": -speed if reverse else speed, "flip": flip, "rate": _xml_rate(e),
-                          "generator": e.tag == "generatoritem"})
+                          "in": s_in, "out": s_out, "speed": -speed if reverse else speed, "flip": flip,
+                          "rate": _xml_rate(e), "generator": e.tag == "generatoritem"})
         return items, trans
 
     vtracks = seq.findall("media/video/track")
@@ -2046,11 +2081,14 @@ def _validate_xml(cutlist: Cutlist, xml_path: Path, events: list[EditEvent], err
     if total != N:
         otio_errors.append(f"XML(otio): total duration {total} != competitor frames {N}")
     _check_items("XML(otio)", otio_items, events, N, otio_errors)
-    for c, ev in zip(clips, events):
+    for i, (c, ev) in enumerate(zip(clips, events)):
         if ev.kind == "clip":
             src = int(round(c.source_range.start_time.rescaled_to(float(raw_fps)).value))
-            if src != ev.src_in:
-                otio_errors.append(f"XML(otio) {ev.seg_name}: source start {src} != {ev.src_in}")
+            tail = events[i + 1].dissolve_in if i + 1 < len(events) else 0
+            want = xml_in_out(int(ev.src_in), int(ev.src_in) + _src_advance(ev.speed, ev.n_rec + tail, raw_fps,
+                                                                             comp_fps))[0]
+            if src != want:                              # a reversed clip: its source range starts at the low end
+                otio_errors.append(f"XML(otio) {ev.seg_name}: source start {src} != {want}")
     errors.extend(otio_errors)
     res["otio"] = {"status": "ok" if not otio_errors else "mismatch", "clips": len(clips), "total_frames": total,
                    "transitions": sum(1 for c in track if isinstance(c, otio.schema.Transition))}
@@ -2114,8 +2152,23 @@ def _motion_of(ci: ET.Element) -> dict:
     return out
 
 
+def _remap_speed(el: ET.Element) -> float:
+    """A clip item's Time Remap speed (1.0 without one), negative when its ``reverse`` flag is set."""
+    speed, reverse = 1.0, False
+    for eff in el.findall("filter/effect"):
+        if _text(eff, "effectid") == "timeremap":
+            for p in eff.findall("parameter"):
+                if _text(p, "parameterid") == "speed":
+                    speed = float(_text(p, "value")) / 100.0
+                elif _text(p, "parameterid") == "reverse":
+                    reverse = str(_text(p, "value")).upper() == "TRUE"
+    return -abs(speed) if reverse else speed
+
+
 def parse_premiere_xml(path: str | os.PathLike) -> dict:
-    """Own re-parse of write_premiere_xml's file: sequence rate / size, tracks, clipitems, transitions, markers."""
+    """Own re-parse of write_premiere_xml's file: sequence rate / size, tracks, clipitems, transitions, markers.
+    Clip and A1 items carry the plan's source frames (``in`` / ``out``: plan_in_out) and their speed (negative:
+    reverse)."""
     root = ET.parse(str(path)).getroot()
     seq = root.find("sequence")
     if seq is None:
@@ -2133,16 +2186,10 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
         if el.tag == "transitionitem":
             out["transitions"].append({"start": int(_text(el, "start")), "end": int(_text(el, "end"))})
         elif el.tag == "clipitem":
-            speed = 1.0
-            for eff in el.findall("filter/effect"):
-                if _text(eff, "effectid") == "timeremap":
-                    for p in eff.findall("parameter"):
-                        if _text(p, "parameterid") == "speed":
-                            speed = float(_text(p, "value")) / 100.0
-                        if _text(p, "parameterid") == "reverse" and _text(p, "value") == "TRUE":
-                            speed = -abs(speed)
+            speed = _remap_speed(el)
+            s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
             out["clips"].append({"name": _text(el, "name"), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
-                                 "in": int(_text(el, "in")), "out": int(_text(el, "out")),
+                                 "in": s_in, "out": s_out,
                                  "timebase": int(_text(el, "rate/timebase", 0)), "ntsc": _text(el, "rate/ntsc"),
                                  "speed": speed, "motion": _motion_of(el),
                                  "flip": any(_text(e, "effectid") == "Horizontal Flip" for e in el.findall("filter/effect"))})
@@ -2152,8 +2199,10 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
     for el in (at.findall("clipitem") if at is not None else []):
         levels = [(int(_text(k, "when")), float(_text(k, "value"))) for eff in el.findall("filter/effect")
                   if _text(eff, "effectid") == "audiolevels" for k in eff.findall("parameter/keyframe")]
+        speed = _remap_speed(el)
+        s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
         out["audio"].append({"name": _text(el, "name"), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
-                             "in": int(_text(el, "in")), "out": int(_text(el, "out")), "levels": levels})
+                             "in": s_in, "out": s_out, "speed": speed, "levels": levels})
     for mk in seq.findall("marker"):
         out["markers"].append({"name": _text(mk, "name"), "comment": _text(mk, "comment"),
                                "in": int(_text(mk, "in")), "out": int(_text(mk, "out"))})
@@ -2174,6 +2223,135 @@ def _inv(sim: Sim, q: tuple[float, float]) -> tuple[float, float]:
     th = math.radians(sim.theta_deg)
     dx, dy = (q[0] - sim.tx) / sim.s, (q[1] - sim.ty) / sim.s
     return math.cos(th) * dx + math.sin(th) * dy, -math.sin(th) * dx + math.cos(th) * dy
+
+
+_WHOLE = re.compile(r"-?\d+")
+
+
+def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
+    """The hard item check of the final XML, on its own numbers only (what Premiere's FCP translation reads): on
+    every video and audio track, every clip item has whole-frame start / end / in / out, start < end and in < out,
+    out - in equal to its length on the sequence x its speed (exactly at 100 %, within a frame otherwise), in / out
+    inside its media's length (its <duration>), and no overlap with the items next to it. An item joined by a
+    transition (start or end -1) runs from / to the transition's edge for its media and to its cut point on the
+    track. Returns one line per broken item (none: []); Premiere skips such an item ("invalid start/end")."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    if seq is None:
+        return ["no <sequence> in the XML"]
+    seq_rate = _xml_rate(seq) or Fraction(60)
+    out: list[str] = []
+
+    def tc(f: int) -> str:
+        r = int(round(float(seq_rate)))
+        return f"{f // (3600 * r):02d}:{f // (60 * r) % 60:02d}:{f // r % 60:02d}:{f % r:02d}"
+    heard: list[tuple[int, int, str]] = []           # every audio item: two never play at the same moment
+    for kind in ("video", "audio"):
+        for n, track in enumerate(seq.findall(f"media/{kind}/track"), start=1):
+            label = f"{kind[0].upper()}{n}"
+            els = [e for e in track if e.tag in ("clipitem", "generatoritem", "transitionitem")]
+            spans: list[tuple[int, int, str]] = heard if kind == "audio" else []
+            for idx, e in enumerate(els):
+                if e.tag == "transitionitem":
+                    continue
+                name = _text(e, "name", e.get("id") or "?")
+                raw = {k: _text(e, k) for k in ("start", "end", "in", "out")}
+                bad = [k for k, v in raw.items() if v is None or not _WHOLE.fullmatch(v)]
+                if bad:
+                    out.append(f"{label} {name}: {', '.join(f'{k} {raw[k]!r}' for k in bad)} not a whole frame")
+                    continue
+                start, end, a, b = (int(raw[k]) for k in ("start", "end", "in", "out"))
+                prv = els[idx - 1] if idx > 0 and els[idx - 1].tag == "transitionitem" else None
+                nxt = els[idx + 1] if idx + 1 < len(els) and els[idx + 1].tag == "transitionitem" else None
+                if (start == -1 and prv is None) or (end == -1 and nxt is None):
+                    out.append(f"{label} {name}: start / end -1 without a transition next to it")
+                    continue
+
+                def cut(t: ET.Element) -> int:
+                    s0, e0, al = int(_text(t, "start")), int(_text(t, "end")), _text(t, "alignment", "center")
+                    return s0 if al in ("start", "start-black") else e0 if al in ("end", "end-black") else (s0 + e0) // 2
+                s_cut = cut(prv) if start == -1 else start
+                e_cut = cut(nxt) if end == -1 else end
+                s_media = int(_text(prv, "start")) if start == -1 else start
+                e_media = int(_text(nxt, "end")) if end == -1 else end
+                where = f"{label} {name} at {tc(max(0, s_cut))}"
+                if not s_cut < e_cut:
+                    out.append(f"{where}: start {s_cut} is not before end {e_cut}")
+                    continue
+                spans.append((s_cut, e_cut, where))
+                if e.tag == "generatoritem":
+                    continue
+                if not a < b:
+                    out.append(f"{where}: in {a} is not before out {b}")
+                    continue
+                speed = abs(_remap_speed(e))
+                rate = _xml_rate(e) or seq_rate
+                want = (e_media - s_media) * speed * float(rate) / float(seq_rate)
+                tol = 0 if abs(speed - 1.0) < 1e-9 and rate == seq_rate else 1
+                if abs((b - a) - want) > tol + 1e-6:
+                    out.append(f"{where}: out - in = {b - a} source frames, but it lasts {e_media - s_media} sequence "
+                               f"frames at {100.0 * speed:g} % (want {want:g})")
+                dur = _text(e, "duration")
+                if dur is not None and _WHOLE.fullmatch(dur) and (a < 0 or b > int(dur)):
+                    out.append(f"{where}: in / out {a}-{b} outside its media (0-{int(dur)})")
+                elif a < 0:
+                    out.append(f"{where}: in {a} before the start of its media")
+            if kind == "video":
+                out += _overlaps(spans, tc, "")
+    return out + _overlaps(heard, tc, " (doubled audio: two audio clips at the same moment)")
+
+
+def _overlaps(spans: list[tuple[int, int, str]], tc: Any, what: str) -> list[str]:
+    out = []
+    spans.sort()
+    for (s0, e0, w0), (s1, e1, w1) in zip(spans, spans[1:]):
+        if s1 < e0:
+            out.append(f"{w1}: overlaps {w0.split(' at ')[0]}, which ends at {tc(e0)}{what}")
+    return out
+
+
+def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = False) -> list[str]:
+    """The hard repeat check of the final XML, on its own numbers only (repeats.py): no RAW frames / audio play twice
+    -- no stutter at a cut, and (unless ``allow_repeats``) no RAW moment over repeats.REPEAT_S twice anywhere. A V1 /
+    A1 item under a RETIME freeze marker is left out (placed at 100 % to be redone by hand). One line per repeat."""
+    from .repeats import REPEAT_S, Span, check
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    if seq is None:
+        return ["no <sequence> in the XML"]
+    seq_rate = _xml_rate(seq) or Fraction(60)
+    freezes = [(int(_text(m, "in")), int(_text(m, "out"))) for m in seq.findall("marker")
+               if str(_text(m, "name", "")).startswith("RETIME") and "freeze" in str(_text(m, "comment", ""))]
+    spans: list[Span] = []
+    for kind in ("video", "audio"):
+        tr = seq.find(f"media/{kind}/track")
+        els = [e for e in (list(tr) if tr is not None else []) if e.tag in ("clipitem", "transitionitem")]
+        for idx, e in enumerate(els):
+            if e.tag != "clipitem":
+                continue
+            start, end, a, b = (int(float(_text(e, k, 0))) for k in ("start", "end", "in", "out"))
+            dis = start == -1
+            if start == -1 and idx > 0 and els[idx - 1].tag == "transitionitem":
+                start = int(_text(els[idx - 1], "start"))
+            if end == -1 and idx + 1 < len(els) and els[idx + 1].tag == "transitionitem":
+                end = int(_text(els[idx + 1], "start"))
+            if start < 0 or end <= start or b <= a or any(f0 < end and start < f1 for f0, f1 in freezes):
+                continue
+            v = _remap_speed(e) * float(_xml_rate(e) or seq_rate) / float(seq_rate)
+            if abs(v) < 1e-9:
+                continue
+            name = str(_text(e, "name", "?")).split(" ")[0]
+            spans.append(Span("V1" if kind == "video" else "A1", name, start, end, float(a if v > 0 else b), v, dis))
+    out = []
+    for d in check(spans, seq_rate, allow_repeats):
+        f = float(seq_rate)
+        lo, hi = d["raw"]
+        what = ("a stutter at a cut" if d["kind"] == "stutter" else
+                f"the same moment over {REPEAT_S:g} s twice (--allow-repeats keeps it)")
+        first, second = sorted([(d["copy"][0], d["kept"]), ((d["remove"] or d["copy"])[0], d["removed"])])
+        out.append(f"{d['track']} {first[1]} at {_tc(first[0], seq_rate)} and {second[1]} at "
+                   f"{_tc(second[0], seq_rate)} both play RAW {lo / f:.2f}-{hi / f:.2f} s: {what}")
+    return out
 
 
 GAP_TOL_PX = 0.01                    # premiere_gaps: less than this uncovered is rounding of the written values
@@ -2278,6 +2456,19 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 out["edl"] = _validate_edl(cutlist, p, events, errors)
             except Exception as e:  # noqa: BLE001 - a parse crash is a validation failure, reported
                 errors.append(f"EDL: validation crashed: {type(e).__name__}: {e}")
+    # the hard item check: every item as Premiere's FCP translation reads it (whole frames, start < end, in < out,
+    # lengths, inside its media, no overlap, never two audio clips at once); the hard repeat check: no RAW frames /
+    # audio play twice (repeats.py). Both on the XML's own numbers, before anything else reads it
+    try:
+        bad_items = premiere_item_problems(xml_path)
+    except Exception as e:  # noqa: BLE001 - an unreadable XML cannot be shown to be importable
+        bad_items = [f"the item check could not read the XML: {type(e).__name__}: {e}"]
+    try:
+        reps = premiere_repeat_problems(xml_path, bool(getattr(cfg, "allow_repeats", False))) if not bad_items else []
+    except Exception as e:  # noqa: BLE001
+        reps = [f"the repeat check could not read the XML: {type(e).__name__}: {e}"]
+    errors += [f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps]
+    out["item_problems"], out["repeat_problems"] = bad_items, reps
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg)
         plan_clips = clips
@@ -2429,6 +2620,30 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if sorted(got.get("levels") or []) != sorted(fade):
             errors.append(f"XML A1 {_seg_label(it['seg'])} at {got['start']}: audio fades {got.get('levels')} "
                           f"(want {sorted(fade)} where a silence was cut out)")
+    # every V1 clip has its audio on A1 (the XML's own A1 items), unless it was removed on purpose: listed
+    out["audio_exceptions"] = []
+    if not bool(cutlist.raw.get("has_audio", True)):
+        out["audio_exceptions"].append("the RAW has no audio track: A1 is empty")
+    else:
+        heard = sorted((a["start"], a["end"]) for a in x["audio"])
+        for cl in clips:
+            holes, at = [], cl.rec_start
+            for a0, a1 in heard:
+                if a1 <= at or a0 >= cl.rec_end:
+                    continue
+                if a0 > at:
+                    holes.append((at, a0))
+                at = max(at, a1)
+            if at < cl.rec_end:
+                holes.append((at, cl.rec_end))
+            if not holes:
+                continue
+            span = ", ".join(f"{_tc(a, fps)}-{_tc(b, fps)}" for a, b in holes)
+            why = no_audio_reason(cl, cutlist.comp_fps)
+            if why:
+                out["audio_exceptions"].append(f"{cl.label} {span}: {why}")
+            else:
+                errors.append(f"XML A1: V1 clip {cl.label} has no audio on A1 at {span}")
     # markers: every UNCERTAIN / NOT-IN-RAW spot
     have = {(m["in"], m["out"]) for m in x["markers"]}
     for ev in events:

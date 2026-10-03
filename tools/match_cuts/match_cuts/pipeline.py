@@ -2480,7 +2480,7 @@ def stage_exports(ctx: Context) -> None:
     premiere = bool(getattr(cfg, "premiere", False))
     rp = None
     if premiere:
-        ctx.silence = silence_plan(ctx, ex)
+        ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
         rp = ctx.silence.get("ripple")
         produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
     else:
@@ -2498,6 +2498,12 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("gaps"):
             ctx.warn(f"Premiere XML: {len(validation['gaps'])} clip(s) leave part of the template window uncovered -- "
                      "the run fails: " + "; ".join(validation["gaps"]))
+        if validation.get("repeat_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['repeat_problems'])} repeat(s) of RAW footage / audio left -- the "
+                     "run fails: " + "; ".join(validation["repeat_problems"]))
+        if validation.get("item_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['item_problems'])} item(s) Premiere would skip or misplace on "
+                     "import -- the run fails: " + "; ".join(validation["item_problems"]))
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
     ctx.exports = dict(validation)
@@ -2542,6 +2548,45 @@ def silence_lines(plan: dict) -> list[str]:
             if rows else f"none found; length {tc(plan.get('old_s', 0))}")
     return [head, settings_line(plan)] + [f"{tc(r['start_s'])}-{tc(r['end_s'])}  {r['len_s']:.2f} s  (cut at "
                                           f"{tc(r['new_at_s'])} in the new edit)" for r in rows]
+
+
+def repeat_plan(ctx: Context, cl: Cutlist, plan: dict) -> dict:
+    """repeats.add_to_plan: the repeats of RAW footage / audio cut out of the Premiere export with the silences (one
+    ripple); a failure warns and leaves them (the XML's repeat check then fails the run)."""
+    from . import repeats
+    try:
+        out = repeats.add_to_plan(plan, cl, ctx.cfg)
+    except Exception as e:  # noqa: BLE001 - reported; the hard check decides
+        log.error("repeat removal failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"repeats not removed: {type(e).__name__}: {e}")
+        return plan
+    rows = out["repeats"]["rows"]
+    log.info("repeat removal: %d repeats cut (%.2f s)", len(rows), out["repeats"]["removed_s"])
+    ctx.dlog.record("repeats", "removed", rows=rows, left=len(out["repeats"]["left"]))
+    return out
+
+
+def repeat_lines(plan: dict) -> list[str]:
+    """The end summary's repeat lines: how many were removed, then each with both times (the edit before the
+    removal, sequence timecode), the RAW it repeats and where the cut now is."""
+    rep = (plan or {}).get("repeats")
+    if rep is None:
+        return []
+    fps = Fraction(rep.get("fps") or "60")
+    rows = rep.get("rows") or []
+    head = (f"{len(rows)} removed, {rep['removed_s']:.2f} s in all" if rows else "none found") + \
+        ("; repeats over 0.5 s kept (--allow-repeats)" if rep.get("allow") else "")
+    out = [head]
+    for r in rows:
+        what = "a stutter at a cut" if r["kind"] == "stutter" else "the same moment twice"
+        out.append(f"{timecode(int(r['a']), fps)}-{timecode(int(r['b']), fps)} {r['track']} {r['removed']} repeated "
+                   f"{timecode(int(r['copy'][0]), fps)}-{timecode(int(r['copy'][1]), fps)} {r['kept']} (RAW "
+                   f"{r['raw_s'][0]:.2f}-{r['raw_s'][1]:.2f} s, {r['len_s']:.2f} s): {what}, removed {r['why']}; cut "
+                   f"at {timecode(int(r['new_at']), fps)} in the new edit")
+    for d in rep.get("left") or []:
+        out.append(f"{d['track']} {d['removed']} / {d['kept']} RAW {d['raw'][0] / float(fps):.2f}-"
+                   f"{d['raw'][1] / float(fps):.2f} s: not removed (inside a cross dissolve)")
+    return out
 
 
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
@@ -2716,8 +2761,9 @@ def _collect_paths(ctx: Context) -> None:
 
 def hand_checks(ctx: Context) -> dict[str, list[str]]:
     """What to check by hand (the end-of-run summary, since report.md sits in extras/): the B-ROLL REPLACED spots and
-    the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), the captions worth
-    a look (the lists of the report's Captions section) and how many unclear caption words were rechecked."""
+    the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), the V1 clips with no
+    audio on A1 on purpose ("audio"), the captions worth a look (the lists of the report's Captions section) and how
+    many unclear caption words were rechecked."""
     cfg = ctx.cfg
     out: dict[str, list[str]] = {"broll": [], "spots": [], "captions": []}
     xml = ctx.paths.get("xml")
@@ -2746,6 +2792,9 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         for r in (ctx.broll or {}).get("replaced") or []:
             out["broll"].append(f"{timecode(int(r['comp_in']), fps)}-{timecode(int(r['comp_out']), fps)}  "
                                 f"B-ROLL REPLACED S{int(r['segment']):02d}: {r.get('showed', '')} replaced")
+    exports = getattr(ctx, "exports", None)
+    if getattr(cfg, "premiere", False) and isinstance(exports, dict) and "audio_exceptions" in exports:
+        out["audio"] = list(exports.get("audio_exceptions") or [])
     cap = ctx.captions or {}
 
     def tc(c: dict) -> str:
@@ -2790,6 +2839,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         from .caption_rules import summary_line
         out["caption_rules"] = [summary_line(rules)]
     out["silence"] = silence_lines(getattr(ctx, "silence", None) or {})
+    out["repeats"] = repeat_lines(getattr(ctx, "silence", None) or {})
     return out
 
 

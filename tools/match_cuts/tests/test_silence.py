@@ -161,10 +161,11 @@ def test_raw_only_run_cuts_the_silences_of_the_raw(tmp_path, monkeypatch, capsys
     run = tmp_path / "out" / "001"
     x = ex.parse_premiere_xml(run / "1_edit.xml")
     assert (x["width"], x["height"], x["timebase"]) == (1080, 1920, 60)
-    assert 210 <= x["duration"] <= 228                       # 6 s minus about 2.35 s of silence (tight defaults)
-    assert len(x["clips"]) == 3 and not ex.premiere_gaps(run / "1_edit.xml")    # three pieces, the window covered
-    assert "Silences: 4 removed" in out and "length 00:06.00 -> " in out
-    assert out.count(" s  (cut at ") == 4 and "RAW-only edit" in out
+    assert 220 <= x["duration"] <= 232                       # 6 s minus about 2.2 s of silence (the 0.3 s pause kept)
+    assert len(x["clips"]) == 2 and not ex.premiere_gaps(run / "1_edit.xml")    # two pieces, the window covered
+    assert "Silences: 3 removed" in out and "length 00:06.00 -> " in out
+    assert out.count(" s  (cut at ") == 3 and "RAW-only edit" in out
+    assert "Repeats: none found" in out and "V1 clips without their audio on A1 (on purpose): none" in out
     assert "settings for this video:" in out and "word timings not available" in out
     assert (run / "extras" / "report.md").read_text(encoding="utf-8").count("Silence removal") == 1
 
@@ -204,12 +205,14 @@ def test_the_caption_stage_moves_copied_captions_with_the_cuts(tmp_path, monkeyp
 def test_the_defaults_are_tight_and_can_be_overridden():
     from match_cuts import cli
     from match_cuts.config import Config
+    # only pauses longer than 0.3 s are cut, keeping one frame (0.02 s) before the speech that follows
     assert (S.Settings().db, S.Settings().min_s, S.Settings().pad_before, S.Settings().pad_after) == \
-        (None, 0.15, 0.04, 0.06)
+        (None, 0.3, 0.02, 0.06)
     c = Config()
-    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.15, 0.04, 0.06)
+    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.3, 0.02, 0.06)
     a = cli.build_parser().parse_args([])
-    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.15, 0.04, 0.06)
+    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.3, 0.02, 0.06)
+    assert not a.allow_repeats and cli.build_parser().parse_args(["--allow-repeats"]).allow_repeats
     a = cli.build_parser().parse_args(["--silence-db", "-25", "--min-silence", "0.3", "--pad-before", "0.1",
                                        "--pad-after", "0.2"])
     cfg = cli.config_from_args(a, "c.mp4", "r.mp4")
@@ -224,9 +227,9 @@ def test_the_threshold_adapts_so_a_noisy_videos_pauses_are_cut():
     cuts, lv = S.removal_ranges(y, SR, FPS, 360, S.Settings())
     assert lv["how"] == "set from the speech level and the background noise"
     assert lv["noise_db"] + 3 <= lv["threshold_db"] <= lv["speech_db"] - 6 and -32 < lv["noise_db"] < -29
-    assert [(c.a, c.b) for c in cuts] == [(0, 26), (95, 104), (161, 212), (305, 360)]   # all four pauses
+    assert [(c.a, c.b) for c in cuts] == [(0, 27), (161, 213), (305, 360)]   # every pause over 0.3 s (not 1.5-1.8)
     quiet, lv_q = S.removal_ranges(speech(), SR, FPS, 360, S.Settings())  # the same speech, quiet background
-    assert lv_q["threshold_db"] < lv["threshold_db"] - 10 and len(quiet) == 4
+    assert lv_q["threshold_db"] < lv["threshold_db"] - 10 and len(quiet) == 3
 
 
 def test_cuts_only_fall_between_words_and_keep_the_padding_around_each_word():
@@ -243,10 +246,10 @@ def test_cuts_only_fall_between_words_and_keep_the_padding_around_each_word():
     assert abs(cores[3][0] - 3.0) < 0.03 and abs(cores[3][1] - 3.2) < 0.03          # the soft word is a word
     for c in cuts:                                          # never inside a word, the padding kept around each
         for a, b in cores:
-            assert c.b / 60 <= a - 0.04 + 1e-9 or c.a / 60 >= b + 0.06 - 1e-9, (c, a, b)
-    assert [(c.a, c.b) for c in cuts] == [(0, 26), (95, 104), (163, 177), (197, 212), (305, 360)]
+            assert c.b / 60 <= a - 0.02 + 1e-9 or c.a / 60 >= b + 0.06 - 1e-9, (c, a, b)
+    assert [(c.a, c.b) for c in cuts] == [(0, 27), (163, 178), (197, 213), (305, 360)]
     no_words, _ = S.removal_ranges(y, SR, FPS, 360, S.Settings())
-    assert (161, 212) in [(c.a, c.b) for c in no_words]     # by loudness alone the soft "uh" would have gone
+    assert (161, 213) in [(c.a, c.b) for c in no_words]     # by loudness alone the soft "uh" would have gone
 
 
 def test_the_summary_shows_the_settings_used_and_the_time_removed():
@@ -257,7 +260,7 @@ def test_the_summary_shows_the_settings_used_and_the_time_removed():
     lines = pipeline.silence_lines(plan)
     assert lines[0] == "1 removed, 0.50 s in all; length 00:10.00 -> 00:09.50"
     assert lines[1] == ("settings for this video: speech -16.2 dBFS, background -42.2 dBFS -> silence below -33.1 dBFS "
-                        "(set from the speech level and the background noise), longer than 0.15 s; kept 0.04 s before "
+                        "(set from the speech level and the background noise), longer than 0.3 s; kept 0.02 s before "
                         "/ 0.06 s after each word; cuts only between words (632 words timed)")
     plan = S.summarize([], 600, FPS, S.Settings(), dict(lv, words=None))
     assert pipeline.silence_lines(plan)[0] == "none found; length 00:10.00"

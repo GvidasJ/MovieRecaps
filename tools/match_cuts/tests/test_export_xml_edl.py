@@ -562,7 +562,7 @@ def premiere_cutlist() -> Cutlist:
         _grid_seg(4, 100, 130, 1200, speed=1.1, transition_out=dict(XF)),
         _grid_seg(5, 124, 160, 1500, transition_in=dict(XF)),
         Segment(id=6, type="uncertain", comp_in=160, comp_out=190, label="UNCERTAIN - best RAW 2000-2024, ZNCC 0.80-0.83",
-                audio={"line": {"id": "L1", "raw_in_seconds": 70.0, "speed": 1.0, "source": "S05 continued"}}),
+                audio={"line": {"id": "L1", "raw_in_seconds": 51.2, "speed": 1.0, "source": "S05 continued"}}),
         Segment(id=7, type="not_in_raw", comp_in=190, comp_out=220, label="MISSING - not in RAW (00:00:06:10)"),
         _grid_seg(8, 220, 250, 2100, transform={"scale": 0.40, "rotation_deg": 0.0, "tx": 0.0, "ty": 380.0}),  # small
         Segment(id=9, type="raw", comp_in=250, comp_out=270, raw_in_seconds=90.0, speed=0.0, time_mode="remap",
@@ -637,7 +637,7 @@ def test_premiere_cuts_land_on_the_30fps_moments_and_a1_has_the_same_cuts(premie
         if i["start"] in pic and pic[i["start"]].seg.type == "raw":
             assert i["in"] == pic[i["start"]].src_in                       # A1 locked to V1's source in-point
     line = next(i for i in x["audio"] if i["start"] == 320)
-    assert line["in"] == round(70.0 * 60)                                  # the audio line's RAW time, 1/60 s
+    assert line["in"] == round(51.2 * 60)                                  # the audio line's RAW time, 1/60 s
 
 
 def test_premiere_markers_on_uncertain_and_not_in_raw_spots(premiere):
@@ -1052,10 +1052,17 @@ def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(
     cl = Cutlist.from_dict(d)
     cfg = Config(out_dir=str(tmp_path), premiere=True)
     xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
-    ex.write_premiere_xml(cl, xml, cfg)
+    from match_cuts import repeats
+    plan = repeats.add_to_plan({}, cl, cfg)          # as the pipeline: S26 starts on S25's last 6 RAW frames (a stutter)
+    assert [(r["removed"], r["kept"], r["a"], r["b"], r["kind"]) for r in plan["repeats"]["rows"]] == [
+        ("S26", "S25", 1192, 1198, "stutter")]
+    ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])
     ex.write_edl(cl, edl, cfg)
-    v = ex.validate_premiere_exports(cl, xml, edl, cfg)
-    assert v["ok"] and v["gaps"] == [], v["errors"]
+    v = ex.validate_premiere_exports(cl, xml, edl, cfg, plan["ripple"])
+    assert v["ok"] and v["gaps"] == [] and v["repeat_problems"] == [] and v["item_problems"] == [], v["errors"]
+    ex.write_premiere_xml(cl, tmp_path / "uncut.xml", cfg)             # without the trim: the hard check fails
+    assert ex.premiere_repeat_problems(tmp_path / "uncut.xml") == [
+        "V1 S25 at 00:00:19:46 and S26 at 00:00:19:52 both play RAW 103.27-103.37 s: a stutter at a cut"]
     x = ex.parse_premiere_xml(xml)
 
     def position(c: dict) -> tuple[float, float]:

@@ -166,12 +166,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="silence = the short-window loudness (50 ms RMS) this many dB below the edit's speech level "
                         "(the loudness of its loudest 5%% of windows); default: set for each video from its speech "
                         "level and its background noise")
-    p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.15, metavar="S",
-                   help="cut only silences longer than this, in the gaps between words (seconds, default 0.15)")
-    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.04, metavar="S",
-                   help="keep this much of a silence before the word that follows it (seconds, default 0.04)")
+    p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.3, metavar="S",
+                   help="cut only silences longer than this, in the gaps between words (seconds, default 0.3)")
+    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.02, metavar="S",
+                   help="keep this much of a silence before the word that follows it (seconds, default 0.02: one "
+                        "frame)")
     p.add_argument("--pad-after", type=_seconds_arg("--pad-after"), default=0.06, metavar="S",
                    help="keep this much of a silence after the word before it (seconds, default 0.06)")
+    p.add_argument("--allow-repeats", action="store_true",
+                   help="--premiere: keep a RAW moment over 0.5 s that plays twice in my edit (default: the copy out of "
+                        "chronological order, else the later one, is cut out; a stutter at a cut is trimmed either way)")
     p.add_argument("--min-move", type=_min_move, default=250.0, metavar="PX",
                    help="--premiere: change a clip's framing only when the competitor's framing moves this many px or "
                         "more in the 1080x1920 sequence (the biggest movement of the picture's centre or edges, so zooms "
@@ -233,8 +237,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.keep_silence = bool(getattr(args, "keep_silence", False))
     db = getattr(args, "silence_db", None)
     cfg.silence_db = None if db is None else float(db)
-    cfg.min_silence = float(getattr(args, "min_silence", 0.15))
-    cfg.pad_before = float(getattr(args, "pad_before", 0.04))
+    cfg.min_silence = float(getattr(args, "min_silence", 0.3))
+    cfg.pad_before = float(getattr(args, "pad_before", 0.02))
+    cfg.allow_repeats = bool(getattr(args, "allow_repeats", False))
     cfg.pad_after = float(getattr(args, "pad_after", 0.06))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))
     cfg.skip_compare = bool(args.skip_compare)
@@ -415,6 +420,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines += [f"    {r}" for r in rows[:max_rows]]
             if len(rows) > max_rows:
                 lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
+        if "audio" in hc:
+            rows = list(hc.get("audio") or [])
+            lines.append(f"  V1 clips without their audio on A1 (on purpose): {len(rows) if rows else 'none'}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
         for r in hc.get("caption_rules") or []:
@@ -423,6 +432,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
         if sil:
             lines.append(f"Silences: {sil[0]}")
             lines += [f"  {r}" for r in sil[1:]]
+        rep = list(hc.get("repeats") or [])
+        if rep:
+            lines.append(f"Repeats: {rep[0]}")
+            lines += [f"  {r}" for r in rep[1:]]
     warns = list(result.get("warnings") or [])
     if warns:
         lines.append(f"Warnings: {len(warns)}" + (f" (the first {max_warnings}; all in {run_folders.EXTRAS}/report.md)"

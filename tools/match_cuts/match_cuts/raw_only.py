@@ -136,6 +136,7 @@ def run_raw_only(cfg: Any) -> dict:
             plan = silence.summarize([silence.Cut(a, b, a / 60.0, b / 60.0) for a, b in cuts], n_frames, SEQ_FPS,
                                      sst, lv)
             ctx.silence = plan
+        ctx.silence = pipeline.repeat_plan(ctx, ctx.cutlist, ctx.silence)
         rp = ctx.silence.get("ripple")
         # the "competitor" of this run is the RAW itself on the 60 fps grid (captions: voice mode, no OCR)
         import dataclasses
@@ -151,6 +152,12 @@ def run_raw_only(cfg: Any) -> dict:
             if ctx.exports.get("gaps"):
                 ctx.warn("Premiere XML: clip(s) leave part of the template window uncovered: "
                          + "; ".join(ctx.exports["gaps"]))
+            if ctx.exports.get("repeat_problems"):
+                ctx.warn("Premiere XML: repeat(s) of RAW footage / audio left -- the run fails: "
+                         + "; ".join(ctx.exports["repeat_problems"]))
+            if ctx.exports.get("item_problems"):
+                ctx.warn("Premiere XML: item(s) Premiere would skip or misplace on import -- the run fails: "
+                         + "; ".join(ctx.exports["item_problems"]))
             if ctx.exports.get("ok") is not True:
                 ctx.warn(f"Premiere XML check failed: {'; '.join(ctx.exports.get('errors') or [])[:500]}")
         with pipeline._stage(ctx, "R6 captions"):

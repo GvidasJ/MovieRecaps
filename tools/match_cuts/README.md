@@ -81,8 +81,9 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
 Premiere-only export: `--premiere`. Silence removal (Premiere export and RAW-only runs): `--keep-silence`,
-`--min-silence S` (default 0.15), `--pad-before S` (0.04), `--pad-after S` (0.06), `--silence-db DB` (default: set
-per video from its speech level and background noise; DB under the speech level overrides it). No `--competitor`: the
+`--min-silence S` (default 0.3), `--pad-before S` (0.02: one frame), `--pad-after S` (0.06), `--silence-db DB` (default: set
+per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
+or audio (see *Premiere* below): `--allow-repeats` keeps a moment over 0.5 s that plays twice. No `--competitor`: the
 edit from the RAW alone (see *Without a competitor* below).
 
 `--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
@@ -118,6 +119,25 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   writing, every clip's picture edges are computed from the XML's own Scale / Rotation / Center values and the
   source size in it; a clip that leaves any of x 42–1039, y 555–1591 uncovered fails the run (`XML GAP` in the
   report and the console).
+* **Every item imports — checked on the final XML.** Every V1 and A1 item must have whole-frame start / end / in /
+  out, start < end and in < out, out − in equal to its length at its speed, in / out inside its media's length, and
+  no overlap with the items next to it; two audio clips never play at the same moment. Any item that breaks this
+  fails the run (`XML ITEM` in the report and the console) — Premiere would skip it ("invalid start/end"). A
+  reversed clip is written the way Premiere reads it: the source range ascending (in < out) with the Time Remap
+  `reverse` flag (an earlier version wrote in > out, and Premiere dropped S10's audio).
+* **Every V1 clip has its audio on A1**, unless it was removed on purpose — a freeze (a frozen picture plays no
+  audio) or a cutaway the competitor showed over music / voice-over (picture only). Those are listed in the end
+  summary (*V1 clips without their audio on A1*); any other V1 clip without audio fails the run.
+* **No RAW footage or audio plays twice** (`match_cuts/repeats.py`). A stutter at a cut — the end of one clip and
+  the start of the next showing the same RAW frames or playing the same RAW audio, up to 0.5 s — is always
+  trimmed so nothing plays twice: from the start of the next clip when the repeat is there, else from the end of the
+  clip before (a clip that only repeats goes). The same RAW moment over 0.5 s twice anywhere loses one copy: the one
+  out of chronological order compared with the rest of the edit (a hook at the start), else the later one;
+  `--allow-repeats` keeps those. The removed ranges are cut out like silences: the sequence closes up, A1 fades
+  over the cut, markers and captions move with it, and two sides left playing one continuous take become one clip.
+  The end summary lists every removed repeat with both times (*Repeats*); a repeat left in the final XML that is
+  not allowed fails the run (`XML REPEAT`). A freeze placed at 100 % (marked RETIME, to redo by hand) is not
+  counted.
 * **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
@@ -135,7 +155,7 @@ alone is cut this way.
 
 * **Silence** = the short-window loudness (50 ms RMS, every 10 ms; a louder blip under 0.08 s is a click, not
   speech — single peaks never count) below this video's silence threshold for longer than `--min-silence`
-  (default 0.15 s), outside every transcribed word.
+  (default 0.3 s), outside every transcribed word.
 * **The threshold adapts to each video**: its speech level (the loudness of its loudest 5% of 50 ms windows) and its
   background noise (its quietest 10%, digital silence ignored) are measured, and the threshold sits a third of the
   way from the noise up to the speech (at least 3 dB above the noise, at least 6 dB under the speech). A noisy
@@ -145,9 +165,9 @@ alone is cut this way.
 * **Never inside a word**: the edit's audio is transcribed (word timings, the same `small.en` model as the captions,
   cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
   over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
-  `--pad-after` (0.06 s) after the word before it and `--pad-before` (0.04 s) before the word after it are kept (at
-  the very start and end of the edit there is no word to protect). On `input/raw_test.mp4` loudness alone would make
-  97 cuts, 50 of them touching a word; between words it makes 54 cuts (28.1 s) touching none. Without
+  `--pad-after` (0.06 s) after the word before it and `--pad-before` (0.02 s, one frame) before the word after it
+  are kept (at the very start and end of the edit there is no word to protect). On `input/raw_test.mp4` the defaults
+  make 33 cuts (26.9 s: 3:23 → 2:56), all between words. Without
   faster-whisper the cuts come from loudness alone and the summary says so. Cut points land on whole 60 fps frames,
   rounded inwards (never more than the silence), and never inside a cross dissolve.
 * No clicks: A1 fades out over the last frame before every cut and in over the first frame after it (Audio Levels

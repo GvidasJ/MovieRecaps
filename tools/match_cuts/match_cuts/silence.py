@@ -5,13 +5,13 @@ competitor the RAW alone is cut this way (raw_only.run_raw_only).
 
 Silence: the short-window loudness (RMS over WIN_S, every HOP_S; a louder blip under BLIP_S is a click, not
 speech -- single peaks never count) stays below this video's silence threshold for longer than ``--min-silence``
-(default 0.15 s), outside every transcribed word. The threshold adapts to each video: its speech level (the loudness
+(default 0.3 s), outside every transcribed word. The threshold adapts to each video: its speech level (the loudness
 of its loudest 5% of windows) and its background noise (its quietest 10%) are measured, and the threshold sits a
 third of the way from the noise up to the speech, so the pauses of a noisy video are cut too (``--silence-db`` sets
 it that many dB under the speech level instead). Words: the edit's audio is transcribed (word timings) and a cut
 only ever falls in a gap between words -- each word's timing trimmed to its audible part, so a timing that runs on
 into the pause does not keep the pause. Of each gap, ``--pad-after`` (0.06 s) after the word before it and
-``--pad-before`` (0.04 s) before the word after it are kept; at the very start and end of the edit there is no
+``--pad-before`` (0.02 s, one frame) before the word after it are kept; at the very start and end of the edit there is no
 word to protect. The cut points land on whole sequence frames (rounded inwards: never more
 is removed than the silence), and never inside a cross dissolve.
 
@@ -30,8 +30,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
-MIN_SILENCE_S = 0.15      # cut silences longer than this ...
-PAD_BEFORE_S = 0.04       # ... keeping this much before each word (or other sound) that follows
+MIN_SILENCE_S = 0.3       # cut silences longer than this ...
+PAD_BEFORE_S = 0.02       # ... keeping this much (one frame) before each word (or other sound) that follows
 PAD_AFTER_S = 0.06        # ... and this much after each word (or other sound) that precedes
 WIN_S = 0.05              # loudness window (RMS) ...
 HOP_S = 0.01              # ... every HOP_S
@@ -252,7 +252,8 @@ def cut_audio(y: np.ndarray, sr: int, fps: Fraction, rp: Ripple) -> np.ndarray:
 def apply_premiere(clips: list, audio: list[dict], markers: list[dict], rp: Ripple) -> tuple[list, list[dict], list[dict]]:
     """(V1 clips, A1 items, markers) of the Premiere export after the removal: every piece that is kept, moved
     earlier by the time removed before it; a clip spanning a removed range becomes two clips (the same source
-    continuing from where the removed time ends). A1 pieces carry ``fade_in`` / ``fade_out`` where a cut was made."""
+    continuing from where the removed time ends). A1 pieces carry ``fade_in`` / ``fade_out`` where a cut was made;
+    pieces the removal leaves playing one continuous RAW take (a trimmed repeat) become one clip again."""
     if not rp.cuts:
         return clips, audio, markers
     joins = rp.joins()
@@ -275,7 +276,18 @@ def apply_premiere(clips: list, audio: list[dict], markers: list[dict], rp: Ripp
                               out=it["out"] if b == it["end"] else n_in + int(round((b - a) * it["speed"])),
                               fade_in=a in joins and a > 0, fade_out=b in joins and b < rp.n_frames))
     out_m = [dict(m, **{"in": rp.map(m["in"]), "out": max(rp.map(m["in"]), rp.map(m["out"]))}) for m in markers]
-    return out_c, out_a, out_m
+    # a removed repeat (repeats.py) can leave the two sides playing one continuous RAW take: one clip, no fade there
+    from .export_xml_edl import _merge_continuous
+    out_c = _merge_continuous(out_c)
+    merged_a: list[dict] = []
+    for it in out_a:
+        p = merged_a[-1] if merged_a else None
+        if (p is not None and p["end"] == it["start"] and p["out"] == it["in"] and abs(p["speed"] - it["speed"]) < 1e-9
+                and p.get("what") == it.get("what")):
+            merged_a[-1] = dict(p, end=it["end"], out=it["out"], fade_out=it["fade_out"])
+            continue
+        merged_a.append(it)
+    return out_c, merged_a, out_m
 
 
 def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n_frames: int) -> np.ndarray:

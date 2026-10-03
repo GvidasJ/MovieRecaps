@@ -56,9 +56,11 @@ class Config:
     keep_silence: bool = False             # --premiere: keep the silences of my edit (False: cut them out, silence.py)
     silence_db: float | None = None        # silence threshold this many dB under the speech level (None: set per video
                                            #   from its speech level and background noise, silence.levels)
-    min_silence: float = 0.15              # cut silences longer than this (s), only between words
-    pad_before: float = 0.04               # kept before each word after a removed silence (s)
+    min_silence: float = 0.3               # cut silences longer than this (s), only between words
+    pad_before: float = 0.02               # kept before each word after a removed silence (s): one frame at 60 fps
     pad_after: float = 0.06                # kept after each word before a removed silence (s)
+    allow_repeats: bool = False            # --premiere: keep a RAW moment over 0.5 s that plays twice (repeats.py);
+                                           #   a stutter at a cut is trimmed either way
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in
                                            #   captions (OCR) or made from the voice-over (caption-generator-prompt.md)
     voiceover: str = ""                    # caption this narration file instead of the cut edit's audio
@@ -321,7 +323,7 @@ class Config:
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
-                  "silence_db", "min_silence", "pad_before", "pad_after",
+                  "silence_db", "min_silence", "pad_before", "pad_after", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_recheck_model", "caption_language",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):

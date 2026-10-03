@@ -1421,6 +1421,11 @@ def _silence(ctx: Any) -> list[str]:
         out += ["", md_table(["removed (edit before removal)", "length", "cut in the new edit at"],
                              [[f"{tc(r['start_s'])}-{tc(r['end_s'])}", f"{r['len_s']:.2f} s", tc(r["new_at_s"])]
                               for r in rows])]
+    from .pipeline import repeat_lines
+    rep = repeat_lines(plan)
+    if rep:
+        out += ["", f"**Repeats of RAW footage / audio** (repeats.py: a stutter at a cut is always trimmed, the same "
+                f"moment over 0.5 s twice is cut unless --allow-repeats): {rep[0]}"] + [f"- {r}" for r in rep[1:]]
     cap = getattr(ctx, "captions", None) or {}
     gone = cap.get("silence_dropped") or []
     out += ["", f"**Copied captions dropped** (completely inside a removed silence): {len(gone) if gone else 'none'}"]
