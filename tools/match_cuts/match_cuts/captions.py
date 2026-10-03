@@ -60,6 +60,9 @@ PREPOSITIONS = frozenset("""of to in on at for with from by about into onto over
 NOT_OBJECT = frozenset("and but or nor so because then if when while though although than as".split())
 NAME_LINKS = frozenset("of the de da di von van".split())      # inside a name: "Bronx High School of Science"
 THEN_STARTS = frozenset("and so but".split())               # "and then" / "so then" / "but then": a caption's start
+CLAUSE_STARTS = frozenset("what when where why how who because if".split())   # (and "that" + a subject): a new clause
+SET_PHRASES = frozenset({("no", "idea"), ("i", "know"), ("you", "know"), ("i", "mean"), ("of", "course"),
+                         ("thank", "you")})                  # short set phrases, never split
 AUX = frozenset("""am is are was were be been being have has had do does did can could will would shall should may
     might must gonna wanna gotta""".split())                   # helping verbs: "they would" | "bring me up"
 # words that follow a noun rather than finish it ("a classroom next to", "the class again")
@@ -216,10 +219,10 @@ def _phrase_bond(words: Sequence[Word], i: int, adjectives: bool = True) -> bool
     """Words i and i+1 make a phrase never split: a determiner + the word after it ("a joke", "the school") and,
     after adjectives, the noun ("a pretty girl"), a pronoun + its verb ("I know"), a verb + its preposition
     ("talking about", "looking at"), a preposition + its object ("of Science"), "and then" / "so then" / "but
-    then", a link inside a name ("School of Science")."""
+    then", a short set phrase ("no idea", "you know"), a link inside a name ("School of Science")."""
     a, b = words[i], words[i + 1]
     na, nb = norm(a.text), norm(b.text)
-    if na in THEN_STARTS and nb == "then":
+    if (na in THEN_STARTS and nb == "then") or (na, nb) in SET_PHRASES:
         return True
     if nb in NOT_OBJECT or is_interjection(b.text) or not nb:
         return False
@@ -497,6 +500,7 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
         forced.add(a)
         if b < len(words):
             forced.add(b)
+    hard = set(forced)                                 # cuts, pauses, "and then", the competitor's kept captions
     groups = _walk(words, bonds, alone, forced, glue, core_bonds)
     gave: set[int] = set()
     gi = 0
@@ -542,6 +546,7 @@ def group_words(words: Sequence[Word], notes: list[dict] | None = None, gave_out
                 notes.append({"word": last, "reason": reason})
         gi += 1
     groups = _join_lone_weak(words, groups, bonds, alone, forced, glue, notes, core_bonds, cuts)
+    groups = _clause_shift(words, groups, bonds, hard)
     groups = _short(words, groups, bonds)
     if gave_out is not None:
         gave_out.update(g[0] for g in groups if g[0] in gave)
@@ -595,6 +600,18 @@ def _join_lone_weak(words: Sequence[Word], groups: list[list[int]], bonds: Seque
 _SUBJECT = re.compile(r"^(?:i|you|we|they|he|she|it|that|there|who|what)'(?:re|m|s|ve|ll|d)$")   # you're, I'm
 
 
+def _clause_start(words: Sequence[Word], i: int) -> bool:
+    """Word i starts a new clause: what, when, where, why, how, who, because, if -- or "that" before a subject ("know
+    that I was", "said that the school"; not "that place", "that is")."""
+    n = norm(words[i].text)
+    if n in CLAUSE_STARTS:
+        return True
+    if n != "that" or i + 1 >= len(words):
+        return False
+    nb = norm(words[i + 1].text)
+    return nb in PRONOUNS or nb in DETERMINERS or _SUBJECT.match(nb) is not None
+
+
 def _subject(w: str) -> bool:
     """A subject that cannot make a caption alone: a pronoun or its contraction (I, you're, I've, let's)."""
     n = norm(w)
@@ -606,7 +623,8 @@ def _natural_breaks(words: Sequence[Word], g: Sequence[int], bonds: Sequence[boo
     phrase -- after a subject with its helping verb ("what you're" | "talking about") or after a helping verb,
     before the main verb ("they would" | "bring me up"; not "I've been" | "waiting") --, before a preposition's
     phrase ("suggested" | "to Marvel"; never before "of", which belongs to the noun before it: "lost track of
-    time") and before and after "and then" / "so then" / "but then" ("and then" | "she's like")."""
+    time"), before a new clause ("no idea" | "what you're"; _clause_start) and before and after "and then" / "so
+    then" / "but then" ("and then" | "she's like")."""
     out = []
     for k in range(1, len(g)):
         i = g[k]
@@ -619,8 +637,34 @@ def _natural_breaks(words: Sequence[Word], g: Sequence[int], bonds: Sequence[boo
         elif ((_SUBJECT.match(a) is not None and (is_verb(b) or b in AUX))
               or (a in AUX and a not in ("be", "been", "being") and _main_verb(b))):
             out.append((k, "verb"))
+        elif _clause_start(words, i) and k + 1 < len(g):
+            out.append((k, "clause"))
         elif b in PREPOSITIONS and b != "of" and k + 1 < len(g) and bonds[i] and a not in PREPOSITIONS:
             out.append((k, "prep"))
+    return out
+
+
+def _clause_shift(words: Sequence[Word], groups: list[list[int]], bonds: Sequence[bool], hard: set[int]
+                  ) -> list[list[int]]:
+    """A caption ending on the first words of a new clause gives them to the next caption when they fit it there
+    ("I don't know if" | "he is coming" -> "I don't know" | "if he is coming", "you know what I'm" | "saying" ->
+    "you know" | "what I'm saying"): the break goes before the clause. Never across a ``hard`` break (a video cut,
+    a pause, "and then", a competitor caption kept as it was) or a sentence end, and never leaving a lone weak word
+    or subject, or a caption ending on a weak word."""
+    out = [list(g) for g in groups]
+    for gi in range(len(out) - 1):
+        a, b = out[gi], out[gi + 1]
+        if len(a) < 2 or b[0] in hard or sentence_end(words[a[-1]].raw or words[a[-1]].text) \
+                or words[b[0]].start - words[a[-1]].end > PAUSE_S:
+            continue
+        for k in range(len(a) - 1, 0, -1):             # the last clause start in the caption
+            if not _clause_start(words, a[k]) or bonds[a[k] - 1]:
+                continue
+            head, tail = a[:k], a[k:] + b
+            if _fits(words, tail) and not is_weak(words[head[-1]].text) and not (
+                    len(head) == 1 and (_lonely(words[head[0]].text) or _subject(words[head[0]].text))):
+                out[gi], out[gi + 1] = head, tail
+            break
     return out
 
 
@@ -636,7 +680,7 @@ def _short(words: Sequence[Word], groups: list[list[int]], bonds: Sequence[bool]
         if _chars(words, g) > SHORT_CHARS:
             for k, kind in _natural_breaks(words, g, bonds):
                 a, b = g[:k], g[k:]
-                if (kind == "verb" and min(len(a), len(b)) < 2) or is_weak(words[a[-1]].text) \
+                if (kind in ("verb", "clause") and min(len(a), len(b)) < 2) or is_weak(words[a[-1]].text) \
                         or any(len(p) == 1 and (_lonely(words[p[0]].text) or _subject(words[p[0]].text))
                                for p in (a, b)):
                     continue

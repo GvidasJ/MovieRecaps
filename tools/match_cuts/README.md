@@ -240,14 +240,17 @@ with its competitor and 60 fps sequence timecodes.
 * **Short captions**: a caption over 16 characters (my SRTs: median 11, 90% at 17 or less) splits at a natural
   break, the most even one: before a verb phrase (`what you're` | `talking about`, `they would` | `bring me up`;
   only with two words on each side, so `You're gonna lose` stays), before a preposition's phrase (`suggested` |
-  `to Marvel`; never before `of`: `lost track of time` stays), and around `and then` / `so then` / `but then`,
-  which start their own caption (`a pretty girl` | `and then` | `she's like`). Never a split that leaves a lone weak
-  word, preposition or subject.
+  `to Marvel`; never before `of`: `lost track of time` stays), before a new clause — `what`, `when`, `where`,
+  `why`, `how`, `who`, `because`, `if`, and `that` when a clause follows it (`no idea` | `what you're`; not `that
+  place`) — and around `and then` / `so then` / `but then`, which start their own caption (`a pretty girl` | `and
+  then` | `she's like`). Never a split that leaves a lone weak word, preposition or subject. A caption that would
+  end on a new clause's first words gives them to the next caption when they fit there (`I don't know if` | `he is
+  coming` → `I don't know` | `if he is coming`).
 * **Never split** (unless the 20-character / 4-word cap leaves no choice): `a` / `an` / `the` / `this` / `my` /
   `your` + the word after it (`a joke`, `the school`; the adjectives and the noun too: `a pretty girl`, `a high
   school`), a pronoun + its verb (`I know`, `we went`, `you are`), a verb + its preposition (`talking about`,
   `looking at`; not `to`), `and then` / `so then` / `but then`, a preposition + its object (`of Science`, `to the
-  front`), names of
+  front`), short set phrases (`no idea`, `I know`, `you know`, `I mean`, `of course`, `thank you`), names of
   two or more capitalised words (`Bronx School`, `Bronx High School of Science`), a name, number + unit, negation +
   verb, and every phrase in `caption_allowlist.txt`. No pair reaches across a pause over 0.25 s, a comma or a
   sentence end. A weak last word moves to the next caption with the words kept together with it (`to one of

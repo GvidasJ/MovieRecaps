@@ -11,7 +11,8 @@
 * splitting: a caption never runs across a video cut of the edit, a caption over 16 characters splits at a natural
   break, a verb keeps its preposition and an article its adjectives and noun (the examples from a real run: "I" |
   "suggested", "for" | "genius kids", "that I was" | "not a real student", "what you're" | "talking about", "of a
-  classroom" | "next" | "to quite" | "a pretty girl" | "and then").
+  classroom" | "next" | "to quite" | "a pretty girl" | "and then"), and a new clause starts a caption ("I have" |
+  "no idea" | "what you're" | "talking about").
 """
 from __future__ import annotations
 
@@ -501,6 +502,53 @@ def test_short_captions_split_at_a_natural_break_and_keep_pairs_together():
     words = heard("what you're talking about.", 0.0, 0.25)
     out, _ = R.enforce(caps, FPS, "competitor", words)
     assert texts(out) == ["What you're", "talking about"]
+
+
+def test_a_new_clause_starts_a_caption():
+    # from a real run: "I have" | "no idea what you're" | "talking about" -> "I have" | "no idea" | "what you're" |
+    # "talking about" (19 characters, a new clause at "what"; "no idea" kept together)
+    caps = [cap("I'M LIKE", 0.0, 0.4), cap("I HAVE", 0.4, 0.8), cap("NO IDEA WHAT YOU'RE", 0.8, 1.6),
+            cap("TALKING ABOUT", 1.6, 2.2)]
+    words = heard("I'm like, I have no idea what you're talking about.", 0.0, 0.2)
+    out, rep = R.enforce(caps, FPS, "competitor", words)
+    assert [(c.text, c.start, c.end) for c in out] == [
+        ("I'm like", 0, 24), ("I have", 24, 48), ("no idea", 48, 72), ("what you're", 72, 96),
+        ("talking about", 96, 132)]                     # "what" on screen when it is said (1.2 s)
+    assert not any(rep["left"].values())
+    out, _ = R.enforce(caps, FPS, "competitor", None)   # no transcript: the same split, timed by characters
+    assert texts(out) == ["I'm like", "I have", "no idea", "what you're", "talking about"]
+    # voice mode, a pause after "have"
+    words = heard("I'm like, I have", 0.0, 0.25) + heard("no idea what you're talking about.", 1.3, 0.22)
+    out, _ = R.enforce(C.voice_captions(words, FPS, n_frames=C.to_frame(words[-1].end, FPS) + 30), FPS, "voice",
+                       words)
+    assert texts(out) == ["I'm like I have", "no idea", "what you're", "talking about"]
+
+    def groups(text):
+        ws = [C.Word(C.clean_text(t), 0.2 * i, 0.2 * i + 0.18, 1.0, t) for i, t in enumerate(text.split())]
+        return [" ".join(ws[i].text for i in g) for g in C.group_words(ws)]
+
+    def bonds(text):
+        ws = [C.Word(C.clean_text(t), 0.2 * i, 0.2 * i + 0.2, 1.0, t) for i, t in enumerate(text.split())]
+        return [f"{ws[i].text} {ws[i + 1].text}" for i, b in enumerate(C.compute_bonds(ws)) if b]
+    # before what, when, where, why, how, who, because, if -- and "that" when a clause follows it
+    assert groups("I have no idea what you're talking about") == ["I have no idea", "what you're", "talking about"]
+    assert groups("no idea where he went") == ["no idea", "where he went"]
+    assert groups("the moment when I saw it") == ["the moment", "when I saw it"]
+    assert groups("tell me how you did it") == ["tell me", "how you did it"]
+    assert groups("this is the guy who did it") == ["this is the guy", "who did it"]
+    assert groups("I went home because I was tired") == ["I went home", "because I was tired"]
+    assert groups("I don't know if he is coming") == ["I don't know", "if he is coming"]
+    assert groups("the teachers didn't know that I was not a real student") == [
+        "the teachers", "didn't know", "that I was not", "a real student"]
+    assert groups("I love that place") == ["I love that place"]          # "that place": no clause
+    # a caption that would end on the clause's first words gives them to the next one
+    assert groups("I know what you mean") == ["I know", "what you mean"]
+    assert groups("you know what I'm saying") == ["you know", "what I'm saying"]
+    assert groups("I mean what are you doing") == ["I mean", "what are you doing"]
+    # short set phrases kept together
+    assert bonds("no idea what you're") == ["no idea"]
+    assert bonds("you know what I mean") == ["you know", "I mean"]
+    assert bonds("of course not") == ["of course"] and bonds("thank you so much") == ["thank you"]
 
 
 def test_cut_breaks_put_the_cut_on_the_nearest_word_boundary():
