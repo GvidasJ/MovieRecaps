@@ -427,6 +427,20 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines += [f"    {r}" for r in rows[:max_rows]]
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
+        if "caption_stutters" in hc:
+            rows = list(hc.get("caption_stutters") or [])
+            lines.append(f"  Caption stutters kept once: {len(rows) if rows else 'none'}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
+        if "caption_timing" in hc:
+            rows = list(hc.get("caption_timing") or [])
+            off = [r for r in rows if "frames late" in r or "frames early" in r]
+            unheard = [r for r in rows if "not heard" in r]
+            lines.append(f"  Captions off their first word: {len(off) if off else 'none'}"
+                         + ("" if off or unheard else f" ({rows[0]})" if rows else ""))
+            lines += [f"    {r}" for r in off[:max_rows]]
+            if unheard:
+                lines.append(f"  Captions whose words my edit does not play: {len(unheard)}")
+                lines += [f"    {r}" for r in unheard[:max_rows]]
         for r in hc.get("caption_rules") or []:
             lines.append(f"  Caption rules (captions changed / flagged per rule): {r}")
         talk = list(hc.get("speech") or [])

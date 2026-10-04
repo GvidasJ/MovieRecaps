@@ -168,22 +168,24 @@ def quiet_runs(q: np.ndarray, t: np.ndarray, db: np.ndarray, noise: float, dur: 
     return out
 
 
-def silent_runs(y: np.ndarray, sr: int, st: Settings, words: Sequence[Any] | None = None
-                ) -> tuple[list[tuple[float, float]], dict]:
+def silent_runs(y: np.ndarray, sr: int, st: Settings, words: Sequence[Any] | None = None,
+                min_s: float | None = None, lv: dict | None = None) -> tuple[list[tuple[float, float]], dict]:
     """([(start s, end s)] of every stretch below this video's silence threshold (levels) for longer than st.min_s
-    -- without the soft start / end of the sounds around it (quiet_runs), and, with ``words`` (the transcript,
-    timed on this audio), outside every word's audible part: a cut never falls inside a word --, the levels)."""
+    (or ``min_s``) -- without the soft start / end of the sounds around it (quiet_runs), and, with ``words`` (the
+    transcript, timed on this audio), outside every word's audible part: a cut never falls inside a word --, the
+    levels). ``lv``: the levels to use (the speech map's, so silence and speech agree), else measured on y."""
     t, db = loudness(y, sr)
     dur = len(y) / float(sr)
     if not len(db):
         return [], {"speech_db": 0.0, "noise_db": 0.0, "threshold_db": 0.0, "how": "no audio", "words": None}
-    lv = levels(db, st)
+    lv = dict(lv) if lv is not None and lv.get("threshold_db") is not None else levels(db, st)
     q = quiet_windows(db, lv)
     lv["words"] = None if words is None else len(words)
     if words:
         for s0, s1 in word_cores(words, t, db, lv["noise_db"]):
             q[np.searchsorted(t, s0 - HOP_S / 2.0, "left"):np.searchsorted(t, s1 + HOP_S / 2.0, "right")] = False
-    out = [(a, b) for a, b in quiet_runs(q, t, db, lv["noise_db"], dur) if b - a > st.min_s]
+    least = st.min_s if min_s is None else float(min_s)
+    out = [(a, b) for a, b in quiet_runs(q, t, db, lv["noise_db"], dur) if b - a > least]
     return out, lv
 
 
@@ -201,20 +203,38 @@ class Cut:
 
 
 def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Settings,
-                   protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None
-                   ) -> tuple[list[Cut], dict]:
+                   protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None,
+                   cuts_at: Sequence[int] = (), guard: Any = None, lv: dict | None = None,
+                   quiet: Sequence[tuple[float, float]] | None = None) -> tuple[list[Cut], dict]:
     """(the ranges to remove, in sequence frames, the levels used): each silence (silent_runs; between words when
     ``words`` are given) minus the pads around the word or sound on either side (none at the edit's start / end),
-    rounded inwards to whole frames, and never inside a protected range (a cross dissolve)."""
+    rounded inwards to whole frames, and never inside a protected range (a cross dissolve). ``cuts_at``: the
+    sequence frames where the edit cuts -- the end of one clip and the start of the next never keep more silence
+    than --pad-after + --pad-before together, however short (--min-silence is for pauses inside a clip).
+    ``guard(a, b)`` -> (a, b): the range moved so no sliver of a RAW shot is left at the cut (shot_guard_frames).
+    ``quiet``: the quiet stretches of y (s) already known (a1_quiet: the RAW's speech map on A1), else measured."""
     f = float(fps)
-    runs, lv = silent_runs(y, sr, st, words)
+    at_cut = sorted(int(c) for c in cuts_at)
+    joined = st.pad_after + st.pad_before
+    if quiet is not None:
+        least = min(st.min_s, joined) if at_cut else st.min_s
+        runs = [(a, b) for a, b in quiet if b - a > least]
+        lv = dict(lv or {})
+        lv["words"] = None if words is None else len(words)
+    else:
+        runs, lv = silent_runs(y, sr, st, words, min(st.min_s, joined) if at_cut else None, lv)
     dur = n_frames / f
     cuts: list[Cut] = []
     for s0, s1 in runs:
+        across = any(s0 - 1e-6 <= c / f <= s1 + 1e-6 for c in at_cut)
+        if s1 - s0 <= st.min_s and not (across and s1 - s0 > joined + 1e-9):
+            continue
         lo = s0 + (st.pad_after if s0 > 1e-6 else 0.0)
         hi = s1 - (st.pad_before if s1 < dur - 1e-6 else 0.0)
         a = 0 if s0 <= 1e-6 else int(math.ceil(lo * f - 1e-9))
         b = n_frames if s1 >= dur - 1e-6 else int(math.floor(hi * f + 1e-9))
+        if guard is not None and b > a:
+            a, b = guard(a, b)
         pieces = [(max(0, a), min(n_frames, b))]
         for p0, p1 in protect:
             pieces = [q for x0, x1 in pieces for q in ((x0, min(x1, p0)), (max(x0, p1), x1)) if q[1] > q[0]]
@@ -222,6 +242,76 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
     if cuts and sum(c.frames for c in cuts) >= n_frames:        # all silent: keep the edit rather than nothing
         cuts = []
     return cuts, lv
+
+
+def shot_guard_frames(clips: Sequence[Any] | None, sm: Any, changes_s: Sequence[float], fps: Fraction,
+                      min_s: float | None = None) -> Any:
+    """``guard(a, b)`` for removal_ranges: a removed range [a, b) (sequence frames) moved so the picture kept on
+    either side of the cut does not end / start with a sliver of a RAW shot shorter than shots.MIN_SHOT_S -- a
+    sliver with no speech in it (``sm``: the RAW's speech map) is cut away with the silence, one the speech runs into
+    is kept that long. ``clips``: the V1 clips (rec_start / rec_end / src_in at the sequence rate, speed); None: the
+    sequence is the RAW itself (RAW-only)."""
+    from .shots import MIN_SHOT_S
+    m = MIN_SHOT_S if min_s is None else float(min_s)
+    f = float(fps)
+    cs = sorted(float(c) for c in changes_s)
+
+    def clip_at(fr: int) -> tuple[float, float, float] | None:
+        """(RAW time at frame fr, the clip's first / end RAW time) of the V1 clip showing frame fr at 100 %."""
+        if clips is None:
+            return fr / f, 0.0, float("inf")
+        for cl in clips:
+            if cl.rec_start <= fr < cl.rec_end and abs(float(cl.speed) - 1.0) < 1e-6:
+                t0 = cl.src_in / f
+                return t0 + (fr - cl.rec_start) / f, t0, t0 + (cl.rec_end - cl.rec_start) / f
+        return None
+
+    def said(t0: float, t1: float) -> bool:
+        return sm is not None and any(s.speech and s.s1 > t0 + 1e-3 and s.s0 < t1 - 1e-3 for s in sm.sounds)
+
+    def hole(fr: int) -> tuple[int, int] | None:
+        """The stretch of the sequence around frame fr no clip covers (V1 would be black there), or None."""
+        if clips is None or any(cl.rec_start <= fr < cl.rec_end for cl in clips):
+            return None
+        lo = max([cl.rec_end for cl in clips if cl.rec_end <= fr] or [0])
+        hi = min([cl.rec_start for cl in clips if cl.rec_start > fr] or [fr + 1])
+        return lo, hi
+
+    def guard(a: int, b: int) -> tuple[int, int]:
+        h = hole(a - 1)                              # never keep a frame of an empty V1 (a black frame) at a cut
+        if h is not None:
+            a = h[0]
+        h = hole(b)
+        if h is not None:
+            b = h[1]
+        got = clip_at(a - 1)
+        if got is not None:
+            t_end, lo, _ = got[0] + 1.0 / f, got[1], got[2]
+            near = [c for c in cs if max(lo, t_end - m) < c < t_end - 1e-6]
+            if near:
+                c = near[-1]
+                a = (a - int(round((t_end - c) * f)) if not said(c, t_end) else
+                     a + int(math.ceil((c + m - t_end) * f - 1e-9)))
+        got = clip_at(b)
+        if got is not None:
+            t0, _, hi = got
+            near = [c for c in cs if t0 + 1e-6 < c < min(hi, t0 + m)]
+            if near:
+                c = near[0]
+                b = (b + int(round((c - t0) * f)) if not said(t0, c) else
+                     b - int(math.ceil((t0 - (c - m)) * f - 1e-9)))
+        # nor a sliver of a V1 clip (another framing) shorter than that, with no speech in it, on either side
+        n = int(math.ceil(m * f - 1e-9))
+        for cl in clips or []:
+            if abs(float(cl.speed) - 1.0) > 1e-6:
+                continue
+            t = lambda fr: (cl.src_in + (fr - cl.rec_start)) / f                  # noqa: E731
+            if cl.rec_start < a < cl.rec_end and a - cl.rec_start < n and not said(t(cl.rec_start), t(a)):
+                a = cl.rec_start
+            if cl.rec_start < b < cl.rec_end and cl.rec_end - b < n and not said(t(b), t(cl.rec_end)):
+                b = cl.rec_end
+        return (a, b) if b > a else (a, a)
+    return guard
 
 
 @dataclass
@@ -466,13 +556,16 @@ def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n
 
 
 def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None,
-                  words_of: Any = None, speech: Any = None, remove: bool = True) -> dict:
+                  words_of: Any = None, speech: Any = None, remove: bool = True,
+                  shots: Sequence[float] | None = None) -> dict:
     """The cuts of the Premiere export of ``cutlist`` before it is written: {cuts, ripple, threshold_db, levels,
     rows, removed_s, old_s, new_s, settings, speech}. First the speech-safe cuts (``speech``: the RAW's
     speech.SpeechMap -- every audio cut moved into the quiet, clips trimmed or extended: speech.plan_cuts), then
     (``remove``; --keep-silence: not) the silences of A1 (the RAW audio under the clips, after those cuts), never
-    inside a cross dissolve. The words that keep a silence cut out of a word: the speech map's (mapped onto A1),
-    else ``words_of(y)`` -> the words heard in that audio, or None: then the cuts follow the loudness alone."""
+    inside a cross dissolve; at every cut, the end of one clip and the start of the next keep at most --pad-after +
+    --pad-before of silence together. The words that keep a silence cut out of a word: the speech map's (mapped onto
+    A1), else ``words_of(y)`` -> the words heard in that audio, or None: then the cuts follow the loudness alone.
+    ``shots``: the RAW's shot changes (s) -- no cut leaves a sliver of a shot (shots.py)."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
     st = Settings.from_cfg(cfg)
     pst = premiere_settings(cfg)
@@ -485,7 +578,7 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     if speech is not None and audio:
         from .speech import plan_cuts
         src_max = int(math.floor(int(cutlist.raw["frames"]) * float(fps) / float(cutlist.raw_fps)))
-        snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac)
+        snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac, shots)
         if snap.active:
             clips, audio, _ = apply_premiere(clips, audio, [], snap)
         n_frames = snap.new_frames
@@ -500,13 +593,54 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
             words = words_on_a1(speech.words, audio, fps)
         else:
             words = words_of(y) if words_of is not None else None
-        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words)
+        from .speech import audio_cuts
+        at = sorted({c[3] for c in audio_cuts([dict(it, name="") for it in audio], fps, n_frames)})
+        guard = shot_guard_frames(clips, speech, shots or [], fps)
+        fixed = {k: (speech.levels or {}).get(k) for k in ("speech_db", "noise_db", "threshold_db", "how")} \
+            if speech is not None else None
+        quiet = a1_quiet(audio, speech, fps, n_frames) if speech is not None else None
+        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet)
     out = summarize(cuts, n_frames, fps, st, lv, before=snap)
     out["speech"] = {"rows": snap_rows, "levels": dict((speech.levels or {}) if speech is not None else {}),
                      "on": speech is not None, "fps": str(fps)}
     if not remove:
         out["off"] = "--keep-silence"
     return out
+
+
+def a1_quiet(audio: Sequence[dict], sm: Any, fps: Fraction, n_frames: int) -> list[tuple[float, float]]:
+    """The quiet stretches of A1 (sequence seconds): inside every item at 100 % the gaps of the RAW's speech map
+    ``sm`` (the same quiet the speech check knows: a breath or other sound is not quiet), and wherever A1 plays
+    nothing; an item at another speed counts as sound. Stretches that meet at a cut are one."""
+    f = float(fps)
+    spans: list[tuple[float, float]] = []
+    covered: list[tuple[float, float]] = []
+    gaps = sm.gaps
+    for it in sorted(audio, key=lambda d: d["start"]):
+        t0, t1 = it["start"] / f, it["end"] / f
+        covered.append((t0, t1))
+        if abs(float(it["speed"]) - 1.0) > 1e-6:
+            continue
+        r0 = it["in"] / f
+        r1 = r0 + (t1 - t0)
+        for g0, g1 in gaps:
+            a, b = max(g0, r0), min(g1, r1)
+            if b > a:
+                spans.append((t0 + a - r0, t0 + b - r0))
+    at = 0.0
+    for a, b in sorted(covered):
+        if a > at + 1e-9:
+            spans.append((at, a))
+        at = max(at, b)
+    if n_frames / f > at + 1e-9:
+        spans.append((at, n_frames / f))
+    out: list[list[float]] = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1] + 1e-6:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
 
 
 def words_on_a1(words: Sequence[tuple[str, float, float]], audio: Sequence[dict], fps: Fraction) -> list[Any]:

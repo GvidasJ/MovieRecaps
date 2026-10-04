@@ -122,6 +122,7 @@ class Context:
     broll: dict = field(default_factory=dict)         # --no-broll: broll.apply_no_broll result (export cut list + lists)
     silence: dict = field(default_factory=dict)       # silence.plan_premiere: the silences cut out of the Premiere export
     speech: Any = None                                # speech.SpeechMap of the RAW: no cut lands inside speech
+    shots: Any = None                                 # the RAW's shot changes (s; shots.py): no flash frame
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2482,6 +2483,7 @@ def stage_exports(ctx: Context) -> None:
     rp = None
     if premiere:
         ctx.speech = speech_of(ctx, ex)
+        ctx.shots = shots_of(ctx, ex)
         ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
         rp = ctx.silence.get("ripple")
         produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
@@ -2494,7 +2496,7 @@ def stage_exports(ctx: Context) -> None:
     validation: dict = {"ok": False, "errors": ["XML/EDL not written: validation not run"]}
     if produced["xml"] and produced["edl"] and xml.exists() and edl.exists():
         ok, res = _soft(ctx, "S8 validate exports", lambda: (
-            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg, rp, ctx.speech) if premiere
+            export_xml_edl.validate_premiere_exports(ex, xml, edl, cfg, rp, ctx.speech, ctx.shots) if premiere
             else export_xml_edl.validate_exports(ex, xml, edl)))
         validation = res if ok and isinstance(res, dict) else {"ok": False, "errors": ["validation raised"]}
         if validation.get("gaps"):
@@ -2509,6 +2511,7 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("speech_problems"):
             ctx.warn(f"Premiere XML: {len(validation['speech_problems'])} audio cut(s) inside speech -- the run "
                      "fails: " + "; ".join(validation["speech_problems"]))
+        warn_flash_silence(ctx, validation)
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
     ctx.exports = dict(validation)
@@ -2602,7 +2605,7 @@ def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     keep = bool(getattr(ctx.cfg, "keep_silence", False))
     try:
         plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx), ctx.speech,
-                                     remove=not keep)
+                                     remove=not keep, shots=ctx.shots)
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"silences not removed: {type(e).__name__}: {e}")
@@ -2664,6 +2667,39 @@ def speech_of(ctx: Context, cl: Cutlist) -> Any:
 
 
 SPEECH_MARGIN_S = 3.0      # the RAW transcribed this far around what the edit plays (a cut may move that far)
+
+
+def shots_of(ctx: Context, cl: Cutlist | None = None) -> list[float] | None:
+    """The RAW's shot changes (RAW seconds; shots.py) where the edit plays it (``cl``; None: the whole RAW), for the
+    flash-frame rules and check; None when they could not be found (warned: the run is not checked for flashes)."""
+    from . import shots
+    from .export_xml_edl import premiere_clips, premiere_settings
+    try:
+        info = ctx.raw_info
+        ranges = None
+        if cl is not None:
+            f = float(premiere_settings(ctx.cfg)["fps"])
+            clips, _, _ = premiere_clips(cl, ctx.cfg)
+            ranges = [tuple(sorted((c.src_in / f, c.src_out / f))) for c in clips]
+        ks = shots.raw_shot_changes(info, ranges, ctx.cache, getattr(ctx, "raw_proxy", None))
+        out = shots.seconds(ks, Fraction(info.fps))
+        log.info("RAW shot changes: %d where the edit plays it%s", len(out),
+                 (": " + ", ".join(f"{t:.2f} s" for t in out[:12])) if out else "")
+        return out
+    except Exception as e:  # noqa: BLE001 - the edit is still made; flashes are then not guarded / checked
+        log.error("RAW shot changes failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"RAW shot changes not found ({type(e).__name__}: {e}): flash frames not guarded or checked")
+        return None
+
+
+def warn_flash_silence(ctx: Context, v: dict) -> None:
+    """The run warnings of the flash and silence-across-cut checks (both fail the run)."""
+    if v.get("flash_problems"):
+        ctx.warn(f"Premiere XML: {len(v['flash_problems'])} flash frame(s) -- a piece of a RAW shot under "
+                 "0.25 s at a cut; the run fails: " + "; ".join(v["flash_problems"]))
+    if v.get("silence_problems"):
+        ctx.warn(f"Premiere XML: {len(v['silence_problems'])} cut(s) with more silence than --pad-after + "
+                 "--pad-before -- the run fails: " + "; ".join(v["silence_problems"]))
 
 
 def _merge_ranges(rs: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -2953,6 +2989,24 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows
+    if cap.get("stutters") is not None:
+        out["caption_stutters"] = [f"{r['start_tc']}-{r['end_tc']}  '{r['was']}' -> '{r['now']}'"
+                                   for r in cap.get("stutters") or []]
+    if cap.get("timing_off") is not None:
+        rows_t = cap["timing_off"]
+        out["caption_timing"] = ([f"{r['start_tc']} '{r['text']}': starts {abs(r['off'])} frames "
+                                  f"{'late' if r['off'] > 0 else 'early'} (spoken at {r['spoken_tc']})"
+                                  for r in rows_t if r["off"] is not None] +
+                                 [f"{r['start_tc']} '{r['text']}': its first word is not heard in my edit (the "
+                                  "competitor's audio) -- timing left as copied" for r in rows_t if r["off"] is None])
+        if not rows_t:
+            out["caption_timing"] = [f"every caption starts within 2 frames of its first word "
+                                     f"({cap.get('timed', 0)} moved to the speech)"]
+        out["caption_timing"] += [f"{r['start_tc']}-{r['end_tc']} '{r['text']}': not heard in my edit (the "
+                                  "competitor's audio there is not mine) -- left out"
+                                  for r in cap.get("unheard_dropped") or []]
+        out["caption_timing"] += [f"{r['start_tc']}-{r['end_tc']} '{r['text']}': speech of my edit with no "
+                                  "competitor caption -- written from the transcript" for r in cap.get("filled") or []]
     if rules:
         from .caption_rules import summary_line
         out["caption_rules"] = [summary_line(rules)]

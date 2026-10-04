@@ -119,10 +119,13 @@ def run_raw_only(cfg: Any) -> dict:
                 words_of = pipeline.words_reader(ctx)
                 words = words_of(ctx.raw_audio) if words_of else None
                 ctx.speech = speech.speech_map(ctx.raw_audio, ctx.audio_sr, sst, words)   # the hard speech check
+            ctx.shots = pipeline.shots_of(ctx)                                             # no flash frame
             if getattr(cfg, "keep_silence", False):
                 cuts, lv = [], {"how": "--keep-silence"}
             elif ctx.raw_audio is not None and len(ctx.raw_audio):
-                found, lv = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst, words=words)
+                guard = (silence.shot_guard_frames(None, ctx.speech, ctx.shots, SEQ_FPS) if ctx.shots else None)
+                found, lv = silence.removal_ranges(ctx.raw_audio, ctx.audio_sr, SEQ_FPS, n_frames, sst, words=words,
+                                                   guard=guard)
                 cuts = [(c.a, c.b) for c in found]
             else:
                 cuts, lv = [], {"how": "the RAW has no audio"}
@@ -150,7 +153,8 @@ def run_raw_only(cfg: Any) -> dict:
         with pipeline._stage(ctx, "R5 Premiere XML"):
             res = export_xml_edl.write_premiere_xml(ctx.cutlist, xml, cfg, rp)
             ctx.paths["xml"] = str(xml)
-            ctx.exports = export_xml_edl.validate_premiere_exports(ctx.cutlist, xml, None, cfg, rp, ctx.speech)
+            ctx.exports = export_xml_edl.validate_premiere_exports(ctx.cutlist, xml, None, cfg, rp, ctx.speech,
+                                                                   ctx.shots)
             ctx.exports["clips"], ctx.exports["framing"] = res["clips"], framing_notes
             if ctx.exports.get("gaps"):
                 ctx.warn("Premiere XML: clip(s) leave part of the template window uncovered: "
@@ -164,6 +168,7 @@ def run_raw_only(cfg: Any) -> dict:
             if ctx.exports.get("speech_problems"):
                 ctx.warn("Premiere XML: audio cut(s) inside speech -- the run fails: "
                          + "; ".join(ctx.exports["speech_problems"]))
+            pipeline.warn_flash_silence(ctx, ctx.exports)
             if ctx.exports.get("ok") is not True:
                 ctx.warn(f"Premiere XML check failed: {'; '.join(ctx.exports.get('errors') or [])[:500]}")
         with pipeline._stage(ctx, "R6 captions"):

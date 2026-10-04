@@ -689,10 +689,9 @@ def _link_or_copy(src: Path, dst: Path) -> str:
 
 
 def _media_name_for_raw(src: Path) -> str:
-    name = src.name
-    if name in ("competitor_ref.mp4", CONFORM_JSON) or name.startswith("raw_ae."):
-        name = "raw_" + name
-    return name
+    """The RAW's copy is always raw.<ext>, whatever the input file is called (an input named competitor.mp4 would
+    otherwise put "competitor.mp4" into the Premiere project as the RAW)."""
+    return "raw" + (src.suffix.lower() or ".mp4")
 
 
 # ----------------------------------------------------------------------------------------------

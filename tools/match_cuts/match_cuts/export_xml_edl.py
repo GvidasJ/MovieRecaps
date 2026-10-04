@@ -61,7 +61,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .common import atomic_write_text, fps_str, log, replace_file, timecode
 from .geometry import Sim, sim_to_ae
@@ -1595,6 +1595,9 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
             (f"; one clip for {clip.label} (one continuous RAW take, same framing)" if len(clip.events) > 1 else ""))
 
 
+PREMIERE_MASTERCLIP = "masterclip-raw"
+
+
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
@@ -1663,7 +1666,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(e, "endratio", 1)
             _sub(e, "reverse", "FALSE")
         ci = _sub(vtrack, "clipitem", id=f"clipitem-{n}")
-        _sub(ci, "name", f"{cl.label} {raw_name}")
+        _sub(ci, "masterclipid", PREMIERE_MASTERCLIP)         # one master clip: the Project panel shows one RAW
+        _sub(ci, "name", raw_name)                            # the segment ids are in the comments
         _sub(ci, "enabled", "TRUE")
         _sub(ci, "duration", src_dur)
         _rate_el(ci, fps)
@@ -1702,7 +1706,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         atrack = _sub(audio, "track")
         for n_a, it in enumerate(audio_items, start=1):
             ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
-            _sub(ai, "name", f"{_seg_label(it['seg'])} {raw_name} audio")
+            _sub(ai, "masterclipid", PREMIERE_MASTERCLIP)
+            _sub(ai, "name", raw_name)
             _sub(ai, "enabled", "TRUE")
             _sub(ai, "duration", src_dur)
             _rate_el(ai, fps)
@@ -1802,6 +1807,13 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
         out.append({"seg": seg, "start": start, "end": end, "in": n_in, "out": n_in + int(round((end - start) * v)),
                     "speed": v, "what": "audio line"})
     return out
+
+
+def item_label(el: ET.Element) -> str:
+    """A clip item's segment label for messages ("S01+S02"): the first word of its first comment (the clips
+    themselves are all named after the RAW), else the first word of its name."""
+    c = _text(el, "comments/mastercomment1", "") or ""
+    return (c.split() or str(_text(el, "name", "?") or "?").split() or ["?"])[0]
 
 
 def _text(el: ET.Element | None, path: str, default: Any = None) -> Any:
@@ -2189,7 +2201,7 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
         elif el.tag == "clipitem":
             speed = _remap_speed(el)
             s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
-            out["clips"].append({"name": _text(el, "name"), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
+            out["clips"].append({"name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                                  "in": s_in, "out": s_out,
                                  "timebase": int(_text(el, "rate/timebase", 0)), "ntsc": _text(el, "rate/ntsc"),
                                  "speed": speed, "motion": _motion_of(el),
@@ -2202,7 +2214,7 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
                   if _text(eff, "effectid") == "audiolevels" for k in eff.findall("parameter/keyframe")]
         speed = _remap_speed(el)
         s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
-        out["audio"].append({"name": _text(el, "name"), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
+        out["audio"].append({"name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                              "in": s_in, "out": s_out, "speed": speed, "levels": levels})
     for mk in seq.findall("marker"):
         out["markers"].append({"name": _text(mk, "name"), "comment": _text(mk, "comment"),
@@ -2255,7 +2267,7 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
             for idx, e in enumerate(els):
                 if e.tag == "transitionitem":
                     continue
-                name = _text(e, "name", e.get("id") or "?")
+                name = f"{item_label(e)} {_text(e, 'name', e.get('id') or '?')}"
                 raw = {k: _text(e, k) for k in ("start", "end", "in", "out")}
                 bad = [k for k, v in raw.items() if v is None or not _WHOLE.fullmatch(v)]
                 if bad:
@@ -2317,14 +2329,74 @@ def premiere_speech_problems(xml_path: str | os.PathLike, speech: Any) -> list[s
     speech.SpeechMap). One line per cut, with what is said there."""
     from .speech import audio_cuts, check
     x = parse_premiere_xml(xml_path)
-    fps = Fraction(int(x["timebase"] or 60) * 1000, 1001) if str(x["ntsc"]).upper() == "TRUE" else \
-        Fraction(int(x["timebase"] or 60))
-    items = [dict(it, name=str(it.get("name") or "?").split(" ")[0]) for it in x["audio"] if it["start"] >= 0]
+    fps = _seq_rate(x)
+    items = [dict(it, name=it.get("label") or "?") for it in x["audio"] if it["start"] >= 0]
     out = []
     for r in check(audio_cuts(items, fps, int(x["duration"])), speech, fps):
         out.append(f"A1 {r['clip']} {r['edge']}s at {_tc(int(r['at']), fps)} inside speech: RAW {r['raw_s']:.2f} s, "
                    f"sound {r['speech'][0]:.2f}-{r['speech'][1]:.2f} s ('{r['said']}')")
     return out
+
+
+def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[float]) -> list[str]:
+    """The hard flash check of the final XML (shots.py): every run of V1 frames showing one RAW shot (``changes_s``:
+    the RAW's shot changes, s), across cuts that stay in that shot, lasts shots.MIN_SHOT_S. One line per flash."""
+    from .shots import flash_problems
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    items = []
+    for c in x["clips"]:
+        s0 = c["start"] if c["start"] != -1 else None
+        e0 = c["end"] if c["end"] != -1 else None
+        if s0 is None or e0 is None:
+            continue                                          # inside a cross dissolve: both shots show, no flash
+        sp = float(c["speed"])
+        items.append({"label": c.get("label"), "start": s0, "end": e0, "speed": sp,
+                      "in": (c["in"] + (1 if sp < 0 else 0)) if sp else c["in"]})
+    return flash_problems(items, fps, changes_s)
+
+
+def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_after: float, pad_before: float,
+                              changes_s: Sequence[float] = ()) -> list[str]:
+    """The silence check at the cuts of the final XML: at every audio cut of A1 (speech.audio_cuts), the silence at
+    the end of the item before it plus the silence at the start of the item after it (the quiet between the RAW's
+    sounds, ``speech``: its speech.SpeechMap) is at most ``pad_after`` + ``pad_before`` (+ two frames of rounding:
+    cut points land on whole frames). An edge held
+    shots.MIN_SHOT_S from a RAW shot change (``changes_s``: no flash frame) may keep more. One line per cut."""
+    from .shots import MIN_SHOT_S
+    from .speech import audio_cuts
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    f = float(fps)
+    its = sorted([dict(it, name=it.get("label") or "?") for it in x["audio"] if it["start"] >= 0],
+                 key=lambda d: d["start"])
+    edges = {(e[1], e[3]): e for e in audio_cuts(its, fps, int(x["duration"]))}
+    near_shot = lambda t: any(abs(abs(t - c) - MIN_SHOT_S) <= 1.5 / f for c in changes_s)   # noqa: E731
+    out = []
+    for a, b in zip(its, its[1:]):
+        if a["end"] != b["start"] or ("end", a["end"]) not in edges or ("start", b["start"]) not in edges:
+            continue
+        e_raw, s_raw = a["out"] / f, b["in"] / f
+        a0, b1 = a["in"] / f, b["out"] / f
+        last = max((s.s1 for s in speech.sounds if s.s0 < e_raw - 1e-6 and s.s1 > a0), default=a0)
+        first = min((s.s0 for s in speech.sounds if s.s1 > s_raw + 1e-6 and s.s0 < b1), default=b1)
+        quiet = max(0.0, e_raw - min(last, e_raw)) + max(0.0, max(first, s_raw) - s_raw)
+        if quiet > pad_after + pad_before + 2.0 / f + 1e-6 and not (near_shot(e_raw) or near_shot(s_raw)):
+            out.append(f"{a.get('label')} / {b.get('label')} at {_tc(int(a['end']), fps)}: {quiet:.2f} s of silence "
+                       f"across the cut ({max(0.0, e_raw - min(last, e_raw)):.2f} s + "
+                       f"{max(0.0, max(first, s_raw) - s_raw):.2f} s; at most {pad_after:g} + {pad_before:g} s)")
+    return out
+
+
+def _pads(cfg: Any) -> tuple[float, float]:
+    from .silence import Settings
+    st = Settings.from_cfg(cfg)
+    return st.pad_after, st.pad_before
+
+
+def _seq_rate(x: dict) -> Fraction:
+    return (Fraction(int(x["timebase"] or 60) * 1000, 1001) if str(x["ntsc"]).upper() == "TRUE"
+            else Fraction(int(x["timebase"] or 60)))
 
 
 def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = False) -> list[str]:
@@ -2340,6 +2412,7 @@ def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = 
     freezes = [(int(_text(m, "in")), int(_text(m, "out"))) for m in seq.findall("marker")
                if str(_text(m, "name", "")).startswith("RETIME") and "freeze" in str(_text(m, "comment", ""))]
     spans: list[Span] = []
+    file_rate = {f.get("id"): float(_xml_rate(f) or 0) for f in root.iter("file") if f.find("rate") is not None}
     for kind in ("video", "audio"):
         tr = seq.find(f"media/{kind}/track")
         els = [e for e in (list(tr) if tr is not None else []) if e.tag in ("clipitem", "transitionitem")]
@@ -2357,8 +2430,11 @@ def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = 
             v = _remap_speed(e) * float(_xml_rate(e) or seq_rate) / float(seq_rate)
             if abs(v) < 1e-9:
                 continue
-            name = str(_text(e, "name", "?")).split(" ")[0]
-            spans.append(Span("V1" if kind == "video" else "A1", name, start, end, float(a if v > 0 else b), v, dis))
+            name = item_label(e)
+            fe = e.find("file")
+            spans.append(Span("V1" if kind == "video" else "A1", name, start, end, float(a if v > 0 else b), v, dis,
+                              file_rate.get(fe.get("id") if fe is not None else None, 0.0) if kind == "video" else 0.0,
+                              seq_fps=float(seq_rate)))
     out = []
     for d in check(spans, seq_rate, allow_repeats):
         f = float(seq_rate)
@@ -2394,7 +2470,7 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
     track = seq.find("media/video/track") if seq is not None else None
     out: list[str] = []
     for ci in (track.findall("clipitem") if track is not None else []):
-        name = (ci.findtext("name") or "?").split(" ")[0]
+        name = item_label(ci)
         f = ci.find("file")
         src = sizes.get(f.get("id") if f is not None else "", None)
         if src is None:
@@ -2449,7 +2525,8 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
 
 
 def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl_path: str | os.PathLike | None,
-                              cfg: Any = None, silence: Any = None, speech: Any = None) -> dict:
+                              cfg: Any = None, silence: Any = None, speech: Any = None,
+                              shots: Sequence[float] | None = None) -> dict:
     """Re-parse the Premiere XML (and the EDL, which stays at the competitor rate) and check: the sequence is exactly
     W x H at the Premiere rate (ntsc FALSE); V1 only (V2+ empty), every clip's record range = its event's range x
     the rate factor (cuts on the competitor's moments), source in / out / speed as planned; A1 cut exactly like V1
@@ -2488,10 +2565,21 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         talk = premiere_speech_problems(xml_path, speech) if speech is not None and not bad_items else []
     except Exception as e:  # noqa: BLE001
         talk = [f"the speech check could not read the XML: {type(e).__name__}: {e}"]
+    try:
+        flash = premiere_flash_problems(xml_path, shots) if shots is not None and not bad_items else []
+    except Exception as e:  # noqa: BLE001
+        flash = [f"the flash check could not read the XML: {type(e).__name__}: {e}"]
+    try:
+        hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or ())
+                if speech is not None and not bad_items and not getattr(cfg, "keep_silence", False) else [])
+    except Exception as e:  # noqa: BLE001
+        hush = [f"the silence check could not read the XML: {type(e).__name__}: {e}"]
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
-               [f"XML SPEECH {t}" for t in talk])
+               [f"XML SPEECH {t}" for t in talk] + [f"XML FLASH {t}" for t in flash] +
+               [f"XML SILENCE {t}" for t in hush])
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
-    out["speech_checked"] = speech is not None
+    out["flash_problems"], out["silence_problems"] = flash, hush
+    out["speech_checked"], out["flash_checked"] = speech is not None, shots is not None
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg)
         plan_clips = clips

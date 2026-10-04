@@ -13,6 +13,7 @@ fades over the cut (no click), markers and captions move with it. ``check`` find
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Sequence
@@ -33,6 +34,13 @@ class Span:
     p0: float
     v: float
     dissolve_in: bool = False         # joined to the piece before it by a cross dissolve (both show: not a repeat)
+    raw_fps: float = 0.0              # V1: the RAW's own frame rate (a stutter is a RAW frame shown again); 0: unknown
+
+    def raw_frame(self, t: int) -> int:
+        """The RAW frame V1 shows at sequence frame t (the RAW's own frame grid)."""
+        return int(math.floor(self.p(t) * self.raw_fps / self.seq_fps + 1e-6))
+
+    seq_fps: float = 60.0
 
     def p(self, t: float) -> float:
         return self.p0 + (t - self.r0) * self.v
@@ -51,7 +59,8 @@ class Span:
         return dataclasses.replace(self, r0=a, r1=b, p0=self.p(a), dissolve_in=self.dissolve_in and a == self.r0)
 
 
-def spans_of_plan(clips: Sequence[Any], audio: Sequence[dict], comp_fps: Fraction) -> list[Span]:
+def spans_of_plan(clips: Sequence[Any], audio: Sequence[dict], comp_fps: Fraction, raw_fps: float = 0.0,
+                  seq_fps: float = 60.0) -> list[Span]:
     """The V1 clips (export_xml_edl.PremiereClip) and A1 items of the plan as spans; a freeze (placed at 100 % with a
     RETIME marker, to redo by hand) is left out: what it will show is not what the XML says."""
     from .export_xml_edl import seg_speed
@@ -60,7 +69,8 @@ def spans_of_plan(clips: Sequence[Any], audio: Sequence[dict], comp_fps: Fractio
         if any(e.seg is not None and abs(seg_speed(e.seg, comp_fps)) < 1e-9 for e in (cl.events or [cl.ev])):
             continue
         p0 = cl.src_in + (1 if cl.speed < 0 else 0)
-        out.append(Span("V1", cl.label, cl.rec_start, cl.rec_end, float(p0), float(cl.speed), cl.start == -1))
+        out.append(Span("V1", cl.label, cl.rec_start, cl.rec_end, float(p0), float(cl.speed), cl.start == -1,
+                        float(raw_fps), seq_fps=float(seq_fps)))
     for it in audio:
         if abs(float(it["speed"])) < 1e-9:
             continue
@@ -139,6 +149,9 @@ def find(spans: Sequence[Span], cuts: Sequence[tuple[int, int]], fps: Fraction, 
                     continue
                 n_s = (hi - lo) / f
                 at_cut = j == i + 1 and _adjacent(p, q, cuts) and not q.dissolve_in
+                if (at_cut and track == "V1" and p.raw_fps and q.raw_fps and p.v > 0 and q.v > 0
+                        and q.raw_frame(q.r0) >= p.raw_frame(p.r1 - 1)):
+                    continue                 # the same RAW frame held a moment longer (60 fps over a 25 fps RAW)
                 if at_cut and n_s <= REPEAT_S + 1e-9 and (dq[0] <= q.r0 or dp[1] >= p.r1):
                     if dq[0] <= q.r0:
                         found.append((0, dq[0], dict(kind="stutter", track=track, remove=dq, copy=dp, removed=q.label,
@@ -217,8 +230,8 @@ def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
     protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
     sil_cuts = list(old.cuts) if old is not None else []
     allow = bool(getattr(cfg, "allow_repeats", False))
-    done, left = plan(spans_of_plan(clips, audio, cutlist.comp_fps), [(c.a, c.b) for c in sil_cuts], fps, allow,
-                      protect)
+    done, left = plan(spans_of_plan(clips, audio, cutlist.comp_fps, float(cutlist.raw_fps), float(fps)),
+                      [(c.a, c.b) for c in sil_cuts], fps, allow, protect)
     out = dict(sil)
     f = float(fps)
     if done:
