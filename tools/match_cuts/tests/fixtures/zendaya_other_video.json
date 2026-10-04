@@ -1,0 +1,8 @@
+{
+  "source": "tests/real/zendaya/competitor.mp4: its NOT-IN-RAW stretch (competitor frames 151-316 at 30 fps) shows another interview; the words its audio says there (small.en on the whole competitor audio: as said, start s, end s, probability), and what Whisper made of a 6.5 s cut-out of that audio once (a hallucination, unsure)",
+  "stretch": [151, 316],
+  "fps": 30,
+  "words": [["I", 5.34, 5.34, 0.593], ["can't", 5.34, 5.92, 0.93], ["really", 5.92, 6.26, 0.995], ["explain", 6.26, 6.86, 0.996], ["it.", 6.86, 7.34, 0.967], ["I", 7.94, 8.06, 0.99], ["haven't", 8.06, 8.68, 0.995], ["got", 8.68, 8.9, 0.996], ["the", 8.9, 9.18, 0.997], ["words.", 9.18, 9.62, 0.994]],
+  "hallucination": [["See", 5.03, 5.13, 0.06], ["you", 5.13, 5.19, 0.55], ["next", 5.19, 5.43, 0.2], ["time!", 5.43, 5.83, 0.86]],
+  "captions": [["I can't really explain it", 161, 224], ["I haven't got the words", 240, 300]]
+}

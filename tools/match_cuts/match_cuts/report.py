@@ -1317,10 +1317,11 @@ def _broll(ctx: Any) -> list[str]:
         sa, sb = int(round(Fraction(a) * seq / fps)), int(round(Fraction(b) * seq / fps))
         return comp, f"{timecode(sa, seq)}–{timecode(sb, seq)}"
 
-    rep, kept = br.get("replaced") or [], br.get("kept") or []
+    rep, kept, other = br.get("replaced") or [], br.get("kept") or [], br.get("other_video") or []
     lead = ("- Premiere default (B-roll follows the audio): every NOT-IN-RAW / uncertain / B-roll spot shows the RAW "
             "video of the audio playing there; where that audio is not from the RAW (music / voice-over) the previous "
-            "RAW clip keeps playing with no RAW audio under it. V1 is never left empty. "
+            "RAW clip keeps playing with no RAW audio under it. V1 is left empty only where the competitor shows "
+            "another video (a NOT-IN-RAW stretch whose audio has speech that is not in the RAW). "
             if follow else "- `--no-broll`: ")
     out = [f"{lead}**{len(rep)} spot(s) replaced**, **{len(kept)} kept** as the competitor has them.",
            "- Changed: `1_edit.xml` (a `B-ROLL REPLACED` marker on each spot), `recreated_edit.edl` and "
@@ -1350,6 +1351,17 @@ def _broll(ctx: Any) -> list[str]:
         out += ["", "**Replaced spots** (a `B-ROLL REPLACED` marker on each in the XML)", "",
                 md_table(["segment", "competitor frames", "competitor timecode", "sequence timecode (60 fps)",
                           "competitor showed", "now shows", "evidence"], rows)]
+    if other:
+        rows = []
+        for r in other:
+            comp, sq = tcs(r["comp_in"], r["comp_out"])
+            rows.append([f"S{int(r['segment']):02d}", f"{r['comp_in']}–{r['comp_out']}", comp, sq,
+                         f"\"{r.get('words', '')}\""])
+        out += ["", "**Another video** (not in the RAW: V1 and A1 left empty for exactly its length, an `OTHER VIDEO "
+                "– not in RAW` marker on each; its captions are the competitor's, or transcribed from its audio, "
+                "timed to it)", "",
+                md_table(["segment", "competitor frames", "competitor timecode", "sequence timecode (60 fps)",
+                          "the competitor's audio says"], rows)]
     if kept:
         rows = []
         for r in kept:
@@ -1359,7 +1371,7 @@ def _broll(ctx: Any) -> list[str]:
         out += ["", "**Kept cutaways** (the RAW audio does not continue under them -- left as the competitor has "
                 "them)", "", md_table(["segment", "competitor frames", "competitor timecode",
                                        "sequence timecode (60 fps)", "competitor showed", "why kept"], rows)]
-    if not rep and not kept:
+    if not rep and not kept and not other:
         out.append("- No cutaways found: every piece of the edit shows the clip its audio belongs to.")
     return out
 

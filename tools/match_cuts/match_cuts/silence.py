@@ -205,14 +205,17 @@ class Cut:
 def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Settings,
                    protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None,
                    cuts_at: Sequence[int] = (), guard: Any = None, lv: dict | None = None,
-                   quiet: Sequence[tuple[float, float]] | None = None) -> tuple[list[Cut], dict]:
+                   quiet: Sequence[tuple[float, float]] | None = None,
+                   sound: Sequence[tuple[int, int]] = ()) -> tuple[list[Cut], dict]:
     """(the ranges to remove, in sequence frames, the levels used): each silence (silent_runs; between words when
     ``words`` are given) minus the pads around the word or sound on either side (none at the edit's start / end),
     rounded inwards to whole frames, and never inside a protected range (a cross dissolve). ``cuts_at``: the
     sequence frames where the edit cuts -- the end of one clip and the start of the next never keep more silence
     than --pad-after + --pad-before together, however short (--min-silence is for pauses inside a clip).
     ``guard(a, b)`` -> (a, b): the range moved so no sliver of a RAW shot is left at the cut (shot_guard_frames).
-    ``quiet``: the quiet stretches of y (s) already known (a1_quiet: the RAW's speech map on A1), else measured."""
+    ``quiet``: the quiet stretches of y (s) already known (a1_quiet: the RAW's speech map on A1), else measured.
+    ``sound``: ranges (sequence frames) that count as sound however quiet A1 is there -- another video's stretch
+    (broll.py), left empty to be filled by hand: no silence inside it, the pads kept around it."""
     f = float(fps)
     at_cut = sorted(int(c) for c in cuts_at)
     joined = st.pad_after + st.pad_before
@@ -223,6 +226,8 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
         lv["words"] = None if words is None else len(words)
     else:
         runs, lv = silent_runs(y, sr, st, words, min(st.min_s, joined) if at_cut else None, lv)
+    for p0, p1 in sound:
+        runs = [q for x0, x1 in runs for q in ((x0, min(x1, p0 / f)), (max(x0, p1 / f), x1)) if q[1] > q[0]]
     dur = n_frames / f
     cuts: list[Cut] = []
     for s0, s1 in runs:
@@ -393,6 +398,18 @@ class Ripple:
                 break
         return f + shift
 
+    def map_hole1(self, a: int, b: int) -> tuple[int, int]:
+        """map1() of an empty stretch [a, b) of V1 / A1 (another video's, broll.py): the clip before it playing on
+        and the clip after it starting earlier both stay out of it."""
+        a, b = self.map1(a) - self.ext(a, "start"), self.map1(b) - self.ext(b, "start")
+        return a, max(a, b)
+
+    def map_hole(self, a: int, b: int) -> tuple[int, int]:
+        """map_hole1() through every stage."""
+        for st in self.stages():
+            a, b = st.map_hole1(a, b)
+        return a, b
+
     def keep(self, a: int, b: int) -> list[tuple[int, int]]:
         """The parts of old range [a, b) that are kept (this stage)."""
         out = [(a, b)]
@@ -531,7 +548,8 @@ def _apply1(clips: list, audio: list[dict], markers: list[dict], rp: Ripple) -> 
                               (a in joins and a > 0),
                               fade_out=(bool(it.get("fade_out")) and b == it["end"] and not e1) or
                               (b in joins and b < rp.n_frames)))
-    out_m = [dict(m, **{"in": rp.map1(m["in"]), "out": max(rp.map1(m["in"]), rp.map1(m["out"]))}) for m in markers]
+    out_m = [dict(m, **dict(zip(("in", "out"), rp.map_hole1(m["in"], m["out"])))) if m.get("other_video") else
+             dict(m, **{"in": rp.map1(m["in"]), "out": max(rp.map1(m["in"]), rp.map1(m["out"]))}) for m in markers]
     # a removed repeat (repeats.py) can leave the two sides playing one continuous RAW take: one clip, no fade there
     from .export_xml_edl import _merge_continuous
     out_c = _merge_continuous(out_c)
@@ -577,7 +595,8 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     fps = pst["fps"]
     fac = premiere_factor(cutlist.comp_fps, fps)
     n_frames = int(cutlist.competitor["frames"]) * fac
-    clips, _, _ = premiere_clips(cutlist, cfg)
+    clips, markers, _ = premiere_clips(cutlist, cfg)
+    other = [(int(m["in"]), int(m["out"])) for m in markers if m.get("other_video")]     # another video's stretches
     audio = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     snap, snap_rows = None, []
     if speech is not None and audio:
@@ -586,8 +605,10 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac, shots)
         if snap.active:
             clips, audio, _ = apply_premiere(clips, audio, [], snap)
+            other = [snap.map_hole1(a, b) for a, b in other]
         n_frames = snap.new_frames
     protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
+    protect += other                       # another video plays there (filled by hand): never cut, it is no silence
     if not remove:
         cuts, lv = [], {"how": "--keep-silence"}
     elif raw_audio is None or not len(raw_audio) or not audio:
@@ -604,7 +625,7 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         fixed = {k: (speech.levels or {}).get(k) for k in ("speech_db", "noise_db", "threshold_db", "how")} \
             if speech is not None else None
         quiet = a1_quiet(audio, speech, fps, n_frames) if speech is not None else None
-        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet)
+        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
     out = summarize(cuts, n_frames, fps, st, lv, before=snap)
     out["speech"] = {"rows": snap_rows, "levels": dict((speech.levels or {}) if speech is not None else {}),
                      "on": speech is not None, "fps": str(fps)}

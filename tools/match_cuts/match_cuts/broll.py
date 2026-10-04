@@ -202,10 +202,15 @@ def join(segs: list[Segment], replaced_ids: set[int], fps: Fraction) -> list[Seg
 
 
 def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarray | None, sr: int,
-                   cfg: Any = None, follow_audio: bool = False, hints: Any = None) -> dict:
+                   cfg: Any = None, follow_audio: bool = False, hints: Any = None, speech_of: Any = None) -> dict:
     """{cutlist: the export cut list with the verified cutaways replaced (a copy; the input is untouched),
-    replaced: [...], kept: [...], notes: [...]}. Every listed cutaway carries its competitor frames [comp_in,
-    comp_out), what the competitor showed and the audio evidence.
+    replaced: [...], kept: [...], other_video: [...], notes: [...]}. Every listed cutaway carries its competitor
+    frames [comp_in, comp_out), what the competitor showed and the audio evidence.
+
+    ``speech_of(t0, t1)`` -> the words [(text, start s, end s, prob)] the competitor's audio says in [t0, t1)
+    (competitor seconds), or None when it cannot be transcribed. With ``follow_audio``, a NOT-IN-RAW stretch with no
+    RAW audio under it whose competitor audio has speech (is_speech) comes from another video I was not given: OTHER
+    VIDEO -- left a NOT-IN-RAW piece (V1 and A1 stay empty there, marked), never filled with the clip before.
 
     ``follow_audio`` (the --premiere default): every NOT-IN-RAW / uncertain / dip / flash spot and every B-roll piece
     inside one continuous main-clip shot is filled -- V1 is never left empty: with the RAW video of the audio playing
@@ -218,7 +223,7 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
     search_s = _cfg(cfg, "audio_residual_search_s", 0.1)
     out_cl = copy.deepcopy(cutlist)
     segs = sorted(out_cl.segments, key=lambda s: int(s.comp_in))
-    res: dict = {"cutlist": out_cl, "replaced": [], "kept": [], "notes": []}
+    res: dict = {"cutlist": out_cl, "replaced": [], "kept": [], "other_video": [], "notes": []}
     have_audio = comp_y is not None and raw_y is not None and len(comp_y) and len(raw_y)
     if not have_audio:
         res["notes"].append("no competitor or RAW audio: cutaways cannot be checked, nothing replaced")
@@ -300,7 +305,7 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
         i = j + 1
     if follow_audio:
         _follow_audio(segs, pending, replaced, res, comp_y, raw_y, sr, fps, raw_fps, strong, hints, have_audio,
-                      by_comp_in, cutlist)
+                      by_comp_in, cutlist, speech_of)
     if replaced:
         new_segs = [x for s in segs for x in replaced.get(int(s.id), [s])]
         new_ids = {int(x.id) for v in replaced.values() for x in v}
@@ -308,6 +313,9 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
         out_cl.segments = join(new_segs, new_ids, fps)
         res["notes"].append(f"{len(replaced)} cutaway(s) replaced by the main clip; {len(out_cl.segments)} segments "
                             f"in the export (was {len(segs)})")
+    if res["other_video"]:
+        res["notes"].append(f"{len(res['other_video'])} stretch(es) of another video (NOT-IN-RAW, speech not in the "
+                            "RAW): left empty and marked")
     return res
 
 
@@ -430,6 +438,37 @@ BROLL_GAP_S = 1.0         # follow_audio: a RAW piece is B-roll only when its pi
 RUN_CORR = 0.6            # a found audio run is kept when the competitor's audio follows it this well (music may lie under)
 RUN_CONF = 1.3            # audio-alignment windows used to find the runs under a cutaway
 MUTE_MIN_S = 0.5          # a spot this long with no RAW audio found has music / voice-over: no RAW audio under it
+OTHER_MIN_S = 0.25        # a NOT-IN-RAW stretch this long or longer can be another video (shots.MIN_SHOT_S)
+OTHER_MIN_WORDS = 2       # ... when the competitor's audio says at least this many words there ...
+OTHER_MIN_SPEECH_S = 0.3  # ... spoken over at least this long
+OTHER_MIN_PROB = 0.4      # ... heard this surely (median word probability: lyrics / noise read as words are unsure)
+
+
+def is_speech(words: Any) -> bool:
+    """Do these words [(text, start, end, prob)] make speech (not a word or two misheard in music / noise)?"""
+    ws = [w for w in words or [] if any(ch.isalnum() for ch in str(w[0]))]
+    if len(ws) < OTHER_MIN_WORDS or sum(max(0.0, float(w[2]) - float(w[1])) for w in ws) < OTHER_MIN_SPEECH_S:
+        return False
+    return float(np.median([float(w[3]) if len(w) > 3 else 1.0 for w in ws])) >= OTHER_MIN_PROB
+
+
+def other_video_label(comp_in: int, comp_out: int, fps: Fraction) -> str:
+    from .common import timecode
+    return f"OTHER VIDEO \u2013 not in RAW ({timecode(comp_in, fps)}\u2013{timecode(comp_out, fps)})"
+
+
+def other_video_piece(s: Segment, ka: int, kb: int, words: Any, fps: Fraction, seg_id: int) -> Segment:
+    """The NOT-IN-RAW piece [ka, kb) of s that shows another video: no picture, no RAW audio (V1 / A1 stay empty)."""
+    ws = [[str(w[0]), round(float(w[1]), 3), round(float(w[2]), 3), round(float(w[3]) if len(w) > 3 else 1.0, 3)]
+          for w in words or []]
+    return Segment(id=seg_id, type="not_in_raw", comp_in=ka, comp_out=kb, confidence=float(s.confidence or 0.0),
+                   region=int(s.region), box=copy.deepcopy(s.box),
+                   audio={"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None, "lag_ms": None,
+                          "corr": None, "exception": None, "line": None,
+                          "other_video": {"comp_in": ka, "comp_out": kb, "words": ws, "segment": int(s.id)}},
+                   label=other_video_label(ka, kb, fps),
+                   notes=(f"the competitor shows another video here: its speech (\"{' '.join(w[0] for w in ws)}\") is "
+                          "not in the RAW -- V1 and A1 left empty for exactly its length"))
 
 
 def audio_runs(s: Segment, hints: Any, fps: Fraction, comp_y: np.ndarray, raw_y: np.ndarray, sr: int
@@ -507,7 +546,7 @@ def _check_run(k0: int, k1: int, off: float, fps: Fraction, comp_y, raw_y, sr: i
 
 def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[Segment]], res: dict, comp_y, raw_y,
                   sr: int, fps: Fraction, raw_fps: Fraction, strong: float, hints: Any, have_audio: bool,
-                  by_comp_in: dict, cutlist: Cutlist) -> None:
+                  by_comp_in: dict, cutlist: Cutlist, speech_of: Any = None) -> None:
     raw_len = None
     try:
         raw_len = float(cutlist.raw.get("frames")) / float(raw_fps)
@@ -557,13 +596,19 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
             ln = _keeps_playing(prev, None, s, fps, raw_len)
             if ln is None or s.raw_in_seconds is None or abs(ln.at(t0) - float(s.raw_in_seconds)) <= BROLL_GAP_S:
                 continue                        # the picture already continues (or nearly) the clip before: no cutaway
-        # what the found runs leave uncovered: the previous RAW clip keeps playing (no RAW audio under it)
+        # what the found runs leave uncovered: another video when the competitor's audio there has speech (a
+        # NOT-IN-RAW stretch only), else the previous RAW clip keeps playing (no RAW audio under it)
         filled: list[tuple[int, int, Line, dict, str]] = []
         cursor = int(s.comp_in)
         for ka, kb, ln, ev, how in sorted(pieces, key=lambda p: p[0]) + [(int(s.comp_out), int(s.comp_out), None, {},
                                                                            "")]:
-            if ka > cursor:
-                prev_segs = flat_before(k) + [_as_seg(p, s, fps, raw_fps) for p in filled]
+            said = (speech_of(float(Fraction(cursor) / fps), float(Fraction(ka) / fps))
+                    if (ka > cursor and s.type == "not_in_raw" and speech_of is not None and have_audio
+                        and (ka - cursor) / float(fps) >= OTHER_MIN_S - 1e-9) else None)
+            if said is not None and is_speech(said):
+                filled.append((cursor, ka, None, {"words": said}, "other video"))
+            elif ka > cursor:
+                prev_segs = flat_before(k) + [_as_seg(p, s, fps, raw_fps) for p in filled if p[2] is not None]
                 prev = next((x for x in reversed(prev_segs) if x.type == "raw"), None)
                 nxt = next((x for x in flat_after(k) if x.type == "raw"), None)
                 gap = Segment(id=int(s.id), type=s.type, comp_in=cursor, comp_out=ka)
@@ -578,6 +623,14 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
             continue
         news: list[Segment] = []
         for n, (ka, kb, ln, ev, how) in enumerate(filled):
+            if how == "other video":
+                new = other_video_piece(s, ka, kb, ev.get("words"), fps, int(s.id) if not n else next_id)
+                if n:
+                    next_id += 1
+                news.append(new)
+                res["other_video"].append(dict(_row(s, fps, None, None), comp_in=ka, comp_out=kb, label=new.label,
+                                               words=" ".join(w[0] for w in new.audio["other_video"]["words"])))
+                continue
             part = Segment(id=int(s.id), type=s.type, comp_in=ka, comp_out=kb, raw_in_seconds=s.raw_in_seconds,
                            speed=s.speed, transition_in=s.transition_in if ka == int(s.comp_in) else None,
                            transition_out=s.transition_out if kb == int(s.comp_out) else None)
@@ -599,13 +652,17 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
             filled[n] = (ka, kb, ln, ev, how)
             news.append(new)
         replaced[int(s.id)] = news
-        hows = sorted({f[4] for f in filled})
-        row = dict(_row(s, fps, None, filled[0][3]), line="; ".join(f[2].source for f in filled),
-                   raw_in_seconds=news[0].raw_in_seconds,
-                   raw_out_seconds=round(filled[-1][2].at(float(Fraction(int(filled[-1][1])) / fps)), 6),
+        shown = [(f, x) for f, x in zip(filled, news) if f[4] != "other video"]      # the pieces the RAW fills
+        if not shown:
+            continue
+        hows = sorted({f[4] for f, _ in shown})
+        row = dict(_row(s, fps, None, shown[0][0][3]), line="; ".join(f[2].source for f, _ in shown),
+                   raw_in_seconds=shown[0][1].raw_in_seconds,
+                   raw_out_seconds=round(shown[-1][0][2].at(float(Fraction(int(shown[-1][0][1])) / fps)), 6),
                    bridged=False, how=hows[0] if len(hows) == 1 else "audio + keeps playing",
-                   parts=[{"comp_in": f[0], "comp_out": f[1], "raw_in_seconds": round(f[2].at(float(Fraction(f[0]) / fps)), 6),
-                           "how": f[4], "corr": f[3].get("corr")} for f in filled])
+                   parts=[{"comp_in": f[0], "comp_out": f[1], "how": f[4], "corr": f[3].get("corr"),
+                           "raw_in_seconds": round(f[2].at(float(Fraction(f[0]) / fps)), 6) if f[2] else None}
+                          for f in filled])
         res["replaced"].append(row)
     res["replaced"].sort(key=lambda r: r["comp_in"])
 

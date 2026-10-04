@@ -1469,6 +1469,31 @@ def _pick_in_tick(seg: Segment, rec_in: int, tau0: float, comp_fps: Fraction, fp
     return int(round(tau0 * f)), False
 
 
+OTHER_VIDEO = "OTHER VIDEO \u2013 not in RAW"     # the marker on a stretch of another video (broll.py)
+
+
+def other_video_of(seg: Segment | None) -> dict | None:
+    """The other-video record of a NOT-IN-RAW piece broll.py found to show another video, else None."""
+    if seg is None or seg.type != "not_in_raw":
+        return None
+    ov = (seg.audio or {}).get("other_video")
+    return ov if isinstance(ov, dict) else None
+
+
+def other_video_comment(ov: dict, ev: Any, comp_fps: Fraction) -> str:
+    said = " ".join(str(w[0]) for w in ov.get("words") or [])
+    n = int(ev.rec_out) - int(ev.rec_in)
+    return (f"the competitor shows another video here (not in the RAW: its speech is not in the RAW audio) -- V1 and "
+            f"A1 are left empty for exactly its length, {n / float(comp_fps):.2f} s: put that video here. Competitor "
+            f"{_tc(int(ev.rec_in), comp_fps)}-{_tc(int(ev.rec_out), comp_fps)}" + (f"; it says: \"{said}\"" if said
+                                                                                    else ""))
+
+
+def other_video_name(a: int, b: int, fps: Fraction) -> str:
+    """The marker's name: OTHER VIDEO \u2013 not in RAW (start\u2013end), the stretch's timecodes in the edit."""
+    return f"{OTHER_VIDEO} ({_tc(a, fps)}\u2013{_tc(b, fps)})"
+
+
 def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip], list[dict], list[str]]:
     """(V1 clips, markers [{name, comment, in, out}], warnings) of the Premiere export (sequence-rate frames)."""
     st = premiere_settings(cfg)
@@ -1487,7 +1512,11 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
         prev = events[i - 1] if i > 0 else None
         seg = ev.seg
         if ev.kind != "clip":
-            if seg is not None and seg.type in ("uncertain", "not_in_raw"):
+            ov = other_video_of(seg)
+            if ov is not None:                   # another video (broll.py): V1 and A1 stay empty, exactly this long
+                markers.append({"name": OTHER_VIDEO, "comment": other_video_comment(ov, ev, comp_fps),
+                                "in": ev.rec_in * fac, "out": ev.rec_out * fac, "other_video": ev.seg_name})
+            elif seg is not None and seg.type in ("uncertain", "not_in_raw"):
                 kind = "UNCERTAIN" if seg.type == "uncertain" else "NOT IN RAW"
                 markers.append({"name": f"{kind} {ev.seg_name}", "comment": ev.label or kind,
                                 "in": ev.rec_in * fac, "out": ev.rec_out * fac})
@@ -1728,7 +1757,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(cm, "mastercomment1", f"{_seg_label(it['seg'])} {it['what']}")
     for m in markers:
         mk = _sub(seq, "marker")
-        _sub(mk, "name", m["name"])
+        _sub(mk, "name", other_video_name(m["in"], m["out"], fps) if m.get("other_video") else m["name"])
         _sub(mk, "comment", m["comment"])
         _sub(mk, "in", m["in"])
         _sub(mk, "out", m["out"])
@@ -1737,7 +1766,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     atomic_write_text(path, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + body + "\n")
     for w in warnings:
         log.info("premiere export: %s", w)
-    return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac}
+    return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac,
+            "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
+                             "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
 
 
 def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
@@ -2354,7 +2385,39 @@ def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[flo
         sp = float(c["speed"])
         items.append({"label": c.get("label"), "start": s0, "end": e0, "speed": sp,
                       "in": (c["in"] + (1 if sp < 0 else 0)) if sp else c["in"]})
+    items += [{"label": "OTHER VIDEO", "start": a, "end": b, "speed": None, "allowed": True}   # filled by hand
+              for a, b in other_video_ranges(x)]
     return flash_problems(items, fps, changes_s)
+
+
+def premiere_other_video_problems(xml_path: str | os.PathLike, want: Sequence[tuple[str, int]]) -> list[str]:
+    """The check of another video's stretches in the final XML (broll.py): one OTHER VIDEO marker per stretch, in
+    order, exactly as long as the competitor's (``want``: [(segment, sequence frames)]), and nothing on V1 or A1
+    inside it (left empty, to be filled by hand). One line per problem."""
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    got = other_video_ranges(x)
+    out = []
+    if len(got) != len(want):
+        out.append(f"{len(got)} OTHER VIDEO marker(s), {len(want)} stretch(es) of another video in the plan")
+    for (name, n), (a, b) in zip(want, got):
+        if b - a != int(n):
+            out.append(f"{name} at {_tc(a, fps)}: {b - a} frame(s) left for the other video, the competitor's stretch "
+                       f"is {int(n)}")
+        for kind, items in (("V1", x["clips"]), ("A1", x["audio"])):
+            for it in items:
+                s0 = it["start"] if it["start"] != -1 else it["end"] - 1
+                e0 = it["end"] if it["end"] != -1 else it["start"] + 1
+                if s0 < b and e0 > a:
+                    out.append(f"{name} at {_tc(a, fps)}: {kind} {it.get('label')} plays inside the other video's "
+                               f"stretch ({_tc(max(a, s0), fps)}-{_tc(min(b, e0), fps)}); it must stay empty")
+    return out
+
+
+def other_video_ranges(x: dict) -> list[tuple[int, int]]:
+    """The stretches of another video in a parsed XML (parse_premiere_xml): its OTHER VIDEO markers' [in, out)."""
+    return sorted((int(m["in"]), int(m["out"])) for m in x.get("markers") or []
+                  if str(m.get("name") or "").startswith(OTHER_VIDEO) and int(m["out"]) > int(m["in"]))
 
 
 def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_after: float, pad_before: float,
@@ -2575,9 +2638,20 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 if speech is not None and not bad_items and not getattr(cfg, "keep_silence", False) else [])
     except Exception as e:  # noqa: BLE001
         hush = [f"the silence check could not read the XML: {type(e).__name__}: {e}"]
+    fac0 = premiere_factor(cutlist.comp_fps, st["fps"])
+    want_ov = [(ev.seg_name, (ev.rec_out - ev.rec_in) * fac0) for ev in events
+               if ev.kind != "clip" and other_video_of(ev.seg) is not None]
+    try:
+        ov = premiere_other_video_problems(xml_path, want_ov) if not bad_items else []
+        x0 = parse_premiere_xml(xml_path)
+        out["other_video"] = [{"segment": name, "in": a, "out": b, "name": other_video_name(a, b, _seq_rate(x0))}
+                              for (name, _), (a, b) in zip(want_ov, other_video_ranges(x0))]
+    except Exception as e:  # noqa: BLE001
+        ov = [f"the other-video check could not read the XML: {type(e).__name__}: {e}"]
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
                [f"XML SPEECH {t}" for t in talk] + [f"XML FLASH {t}" for t in flash] +
-               [f"XML SILENCE {t}" for t in hush])
+               [f"XML SILENCE {t}" for t in hush] + [f"XML OTHER VIDEO {t}" for t in ov])
+    out["other_video_problems"] = ov
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
     out["flash_problems"], out["silence_problems"] = flash, hush
     out["speech_checked"], out["flash_checked"] = speech is not None, shots is not None
@@ -2762,7 +2836,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if ev.seg is not None and ev.kind != "clip" and ev.seg.type in ("uncertain", "not_in_raw"):
             want_m = (ev.rec_in * fac, ev.rec_out * fac)
             if cut:
-                want_m = (silence.map(want_m[0]), max(silence.map(want_m[0]), silence.map(want_m[1])))
+                want_m = (silence.map_hole(*want_m) if other_video_of(ev.seg) is not None else
+                          (silence.map(want_m[0]), max(silence.map(want_m[0]), silence.map(want_m[1]))))
             if want_m not in have:
                 errors.append(f"XML: no marker on {ev.seg_name} ({ev.seg.type}, {want_m[0]}-{want_m[1]})")
     out["xml"] = {"clips": len(x["clips"]), "audio": len(x["audio"]), "markers": len(x["markers"]),

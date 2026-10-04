@@ -154,9 +154,21 @@ segment ids (`S01+S02`) are in each clip's comments and in the markers. Two defa
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
   trimmed pauses under the cutaway — each checked by correlation. Where the audio there is not from the RAW
-  (music, voice-over) the previous RAW clip keeps playing, with no RAW audio under it. V1 is never left empty; a
-  `B-ROLL REPLACED` marker sits on every replaced spot and report.md lists them with timecodes. A RAW shot whose
-  picture is within 1 s of its own audio (an A/V shift) is the main clip and stays as it is.
+  (music, voice-over) the previous RAW clip keeps playing, with no RAW audio under it. V1 is left empty only for
+  another video (below); a `B-ROLL REPLACED` marker sits on every replaced spot and report.md lists them with
+  timecodes. A RAW shot whose picture is within 1 s of its own audio (an A/V shift) is the main clip and stays as it is.
+* **Another video (rare).** Sometimes the competitor uses footage of a second video you did not give (an interview
+  clip, say). A NOT-IN-RAW stretch with no RAW audio under it whose competitor audio has **speech** (two or more
+  words Whisper hears surely: music or a word or two misheard in noise is not speech) comes from that other video —
+  it is not B-roll. V1 **and** A1 stay empty for exactly its length, in its place, with an
+  `OTHER VIDEO – not in RAW (start–end)` marker (the edit's timecodes; the comment gives the competitor's and what it
+  says). The previous clip never plays over it and no silence is removed inside it (it counts as sound: the pads
+  around it are kept). Its captions are the competitor's own when it has them, else transcribed from the
+  competitor's audio there, and timed to that audio (my edit's own audio is transcribed with the stretch taken out).
+  The checks allow the stretch (`XML OTHER VIDEO` only fails a stretch cut shorter or played over) and the end summary
+  lists it (*Other video (not in RAW), left empty on purpose*). The competitor's audio is transcribed once, whole, to
+  look for that speech (a short cut-out piece can make Whisper miss speech or invent some). The Zendaya clip is such
+  a case: its 5.5 s "I can't really explain it. I haven't got the words." (competitor 00:00:05:01–00:00:10:16).
 
 ### Cuts never inside speech (every Premiere export and RAW-only run)
 
@@ -310,8 +322,11 @@ with the edit's own transcript; the first word's start moves to where its sound 
 0.2 s; past an audio cut a word cannot straddle). A caption moved past its own end keeps its length, and
 captions that were back to back stay back to back. Competitor mode keeps the competitor's words and splits on this
 timing. A competitor caption whose words my edit does not play (the competitor's own audio, e.g. under a cutaway)
-is left out, and speech of my edit no competitor caption covers is captioned from the transcript; both are listed.
-The end summary lists every caption that is still off (*Captions off their first word*).
+is left out — heard means half its words, and half its content words when it has two or more (`it I haven't got`
+over "it, I just" is not heard: "it" and "I" are said everywhere) —, and speech of my edit no competitor caption
+covers is captioned from the transcript; both are listed. In another video's stretch (above) the speech is the
+competitor's audio there: its captions are timed to that. The end summary lists every caption that is still off
+(*Captions off their first word*).
 
 **Stutters**: the same short word said twice in a row inside one caption (`The the one that's`, `I I`, `a a`,
 `to to`) is kept once (`The one that's`) and listed (*Caption stutters kept once*); a word repeated as separate
@@ -491,8 +506,8 @@ existing `3_captions_styled.prproj` (without it the run stops rather than overwr
 Each run gets its own numbered folder in `--out` (`output\001`, `output\002`, ...: the next free number, so a
 new video never overwrites the previous one). At its top only the files you use, numbered in the order you use
 them; everything else in `extras\`. The console ends with a short summary: these paths, what to check by hand
-(the `B-ROLL REPLACED` spots, the uncertain / NOT-IN-RAW / retimed spots with their sequence timecodes, the
-captions worth a look) and the run folder.
+(the `B-ROLL REPLACED` spots, the uncertain / NOT-IN-RAW / retimed spots with their sequence timecodes, another
+video's stretches left empty, the captions worth a look) and the run folder.
 
 ```
 output/001/

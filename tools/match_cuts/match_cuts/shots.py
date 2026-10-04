@@ -114,7 +114,8 @@ def shot_of(t: float, changes_s: Sequence[float]) -> int:
 def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[float], n_frames: int | None = None,
                    min_s: float = MIN_SHOT_S) -> list[str]:
     """The hard flash check of an edit's V1 items [{label, start, end, in, out, speed}] (sequence frames at ``fps``,
-    ``in`` the source position at the sequence rate; an item with speed None is not the RAW): every run of
+    ``in`` the source position at the sequence rate; an item with speed None is not the RAW; one with ``allowed``
+    is a stretch left empty on purpose -- another video's, filled by hand -- of any length): every run of
     consecutive frames showing one RAW shot -- across cuts that stay in the same shot -- lasts at least ``min_s``.
     One line per shorter run (a flash frame), unless the run is the whole edit."""
     f = float(Fraction(fps))
@@ -126,7 +127,9 @@ def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[flo
         if runs and runs[-1][2] < s:      # nothing on V1 in between: black frames
             runs.append([("black", s), runs[-1][2], s, ["(empty)"]])
         v = it.get("speed")
-        if v is None:
+        if it.get("allowed"):                 # a stretch left empty on purpose (another video): any length
+            keys = [(("allowed", it.get("label")), s, e)]
+        elif v is None:
             keys = [(("other", it.get("label")), s, e)]
         else:
             keys = []
@@ -149,7 +152,7 @@ def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[flo
     out = []
     need = int(math.ceil(min_s * f - 1e-9))
     for k, a, b, labels in runs:
-        if b - a < need:
+        if b - a < need and k[0] != "allowed":
             h = int(round(f))
             tc = f"{a // (3600 * h):02d}:{a // (60 * h) % 60:02d}:{a // h % 60:02d}:{a % h:02d}"
             what = {"raw": "a different RAW shot", "black": "nothing (black)"}.get(k[0], "a clip")

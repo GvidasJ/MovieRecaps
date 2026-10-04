@@ -2364,7 +2364,7 @@ def stage_broll(ctx: Context) -> None:
     from . import broll
     try:
         ctx.broll = broll.apply_no_broll(ctx.cutlist, ctx.comp_audio, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg,
-                                         follow_audio=follow, hints=ctx.hints)
+                                         follow_audio=follow, hints=ctx.hints, speech_of=competitor_speech(ctx))
         ctx.broll["follow_audio"] = follow
     except Exception as e:  # noqa: BLE001 - the faithful export is still a valid deliverable
         log.error("--no-broll failed: %s\n%s", e, traceback.format_exc())
@@ -2372,12 +2372,66 @@ def stage_broll(ctx: Context) -> None:
         ctx.warn(f"--no-broll not applied: {type(e).__name__}: {e}")
         return
     ctx.dlog.record("broll", "no_broll", replaced=ctx.broll["replaced"], kept=ctx.broll["kept"])
-    if ctx.broll["replaced"]:
+    if ctx.broll["replaced"] or ctx.broll.get("other_video"):
         p = ctx.cfg.debug_dir / "cutlist_no_broll.json"
         ctx.broll["cutlist"].save(p)
         ctx.broll["path"] = ctx.paths["broll"] = str(p)
     for n in ctx.broll.get("notes") or []:
         log.info("--no-broll: %s", n)
+
+
+OTHER_MARGIN_S = 1.0       # the second opinion on a stretch: its own audio, this far around it
+
+
+def competitor_speech(ctx: Context) -> Any:
+    """``speech_of(t0, t1)`` for broll.apply_no_broll: the words [(as said, start s, end s, prob)] the competitor's
+    audio says in [t0, t1) (competitor seconds; a word counts where its middle is), transcribed with the captions'
+    model (cached) -- from the whole competitor audio (Whisper on a short cut-out piece can miss its speech, or
+    invent some, by a sample's difference), and when that hears no speech there, from the stretch's own audio as a
+    second opinion: the surer of the two. None when there is nothing to transcribe with (no other-video detection
+    then: warned once)."""
+    from . import broll, transcribe
+    y = ctx.comp_audio
+    if y is None or not len(y):
+        return None
+    err = transcribe.available()
+    sr = int(ctx.audio_sr)
+    model = str(getattr(ctx.cfg, "caption_model", "small.en") or "small.en")
+    language = str(getattr(ctx.cfg, "caption_language", "en") or "") or None
+    told: list[bool] = []
+    whole: list[Any] = []
+
+    def words_in(a: int, b: int) -> list[Any]:
+        return transcribe.transcribe_words(y[a:b], sr, model, language, ctx.cache)
+
+    def sure(ws: list[tuple]) -> int:
+        return sum(1 for w in ws if w[3] >= broll.OTHER_MIN_PROB)
+
+    def speech_of(t0: float, t1: float) -> list[tuple[str, float, float, float]] | None:
+        if err:
+            if not told:
+                told.append(True)
+                ctx.warn(f"NOT-IN-RAW stretches not checked for another video's speech: {err}")
+            return None
+        try:
+            if not whole:
+                log.info("other video: transcribing the competitor's audio (%.1f s) to look for speech that is not "
+                         "in the RAW under the NOT-IN-RAW stretches", len(y) / float(sr))
+                whole.append(words_in(0, len(y)))
+            best = [(w.raw or w.text, float(w.start), float(w.end), float(w.prob)) for w in whole[0]
+                    if t0 <= 0.5 * (float(w.start) + float(w.end)) < t1]
+            if not broll.is_speech(best):
+                a, b = max(0, int((t0 - OTHER_MARGIN_S) * sr)), min(len(y), int(math.ceil((t1 + OTHER_MARGIN_S) * sr)))
+                off = a / float(sr)
+                own = [(w.raw or w.text, off + float(w.start), off + float(w.end), float(w.prob)) for w in words_in(a, b)
+                       if t0 <= off + 0.5 * (float(w.start) + float(w.end)) < t1]
+                best = own if sure(own) > sure(best) else best
+        except Exception as e:  # noqa: BLE001 - e.g. no model download: the stretch is handled as before
+            ctx.warn(f"the competitor's audio at {t0:.2f}-{t1:.2f} s could not be transcribed ({type(e).__name__}: "
+                     f"{e}): not checked for another video's speech")
+            return None
+        return best
+    return speech_of
 
 
 def export_cutlist(ctx: Context) -> Cutlist:
@@ -2913,6 +2967,19 @@ def _collect_paths(ctx: Context) -> None:
     ctx.paths["frame_map"] = str(ctx.cfg.work / "frame_map.npz")
 
 
+def other_video_row(ctx: Context, m: dict, fps: Fraction) -> str:
+    """One stretch of another video for the end summary: where it is, how long, where the competitor shows it, and
+    how its captions were made."""
+    a, b = int(m["in"]), int(m["out"])
+    cap = next((r for r in (ctx.captions or {}).get("other_video") or [] if r.get("a") == a and r.get("b") == b), None)
+    where = (f"; competitor {timecode(int(round(cap['t0'] * float(ctx.comp_fps))), Fraction(ctx.comp_fps))}-"
+             f"{timecode(int(round(cap['t1'] * float(ctx.comp_fps))), Fraction(ctx.comp_fps))}" if cap else "")
+    how = ("; captions: " + ", ".join(f"{n} {k}" for k, n in sorted(cap["how"].items())) if cap and cap.get("how") else
+           "; no captions (no speech heard there)" if cap else "")
+    return (f"{m['name']}: {(b - a) / float(fps):.2f} s{where} -- V1 and A1 left empty, put the other video "
+            f"there{how}")
+
+
 def hand_checks(ctx: Context) -> dict[str, list[str]]:
     """What to check by hand (the end-of-run summary, since report.md sits in extras/): the B-ROLL REPLACED spots and
     the uncertain / NOT-IN-RAW / retimed spots as 1_edit.xml marks them (sequence timecodes), the V1 clips with no
@@ -2922,7 +2989,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {"broll": [], "spots": [], "captions": []}
     xml = ctx.paths.get("xml")
     if getattr(cfg, "premiere", False) and xml and Path(xml).exists():
-        from .export_xml_edl import parse_premiere_xml, premiere_settings
+        from .export_xml_edl import OTHER_VIDEO, parse_premiere_xml, premiere_settings
         fps = Fraction(premiere_settings(cfg)["fps"])
         try:
             markers = parse_premiere_xml(xml)["markers"]
@@ -2935,6 +3002,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
             if name.startswith("B-ROLL REPLACED"):
                 what = "the previous clip keeps playing" if "keeps playing" in comment else "the RAW of the audio there"
                 out["broll"].append(f"{span}  {name}: {what}")
+            elif name.startswith(OTHER_VIDEO):
+                out.setdefault("other_video", []).append(other_video_row(ctx, m, fps))
             else:
                 out["spots"].append(f"{span}  {name}: {comment[:90]}")
     elif ctx.cutlist is not None:

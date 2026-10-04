@@ -421,6 +421,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines += [f"    {r}" for r in rows[:max_rows]]
             if len(rows) > max_rows:
                 lines.append(f"    ... {len(rows) - max_rows} more in {run_folders.EXTRAS}/report.md")
+        if hc.get("other_video"):
+            rows = list(hc["other_video"])
+            lines.append(f"  Other video (not in RAW), left empty on purpose: {len(rows)}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
         if "audio" in hc:
             rows = list(hc.get("audio") or [])
             lines.append(f"  V1 clips without their audio on A1 (on purpose): {len(rows) if rows else 'none'}")

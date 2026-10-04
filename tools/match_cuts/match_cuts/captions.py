@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
-
+import math
 import re
 import statistics
 from collections import Counter
@@ -1023,24 +1023,28 @@ def spoken_starts(caps: Sequence[Caption], onsets: Sequence[float], refs: Sequen
                   fps: Fraction, cuts_s: Sequence[float] = (), far_s: float = 2.0
                   ) -> tuple[list[float | None], list[bool]]:
     """(when the first word of each caption is spoken in the final edit (seconds), or None; whether the caption is
-    heard there at all -- at least half its words). The captions' text is aligned, as one stream, with each
+    heard there at all -- at least half its words, and half its content words when it has two or more: "it I
+    haven't got" over "it, I just" is not). The captions' text is aligned, as one stream, with each
     transcript of the final edit in turn (``refs``: the RAW's words where A1 plays them first, then the edit's own
     transcript); the first word's start is moved to where its sound starts (``onsets``) when that is within
     ONSET_S, never back into the word before it -- and past an audio cut (``cuts_s``) a word cannot straddle."""
     f = float(fps)
     starts: list[float | None] = [None] * len(caps)
-    heard_n = [0] * len(caps)
-    total = [len(c.text.split()) if not (c.mode == "placeholder" or is_action_text(c.text)) else 0 for c in caps]
-    best_heard = [0] * len(caps)
+    spoken = [not (c.mode == "placeholder" or is_action_text(c.text)) for c in caps]
+    total = [len(c.text.split()) if sp else 0 for c, sp in zip(caps, spoken)]
+    content = [sum(1 for t in c.text.split() if not is_weak(t)) if sp else 0 for c, sp in zip(caps, spoken)]
+    best_heard, best_content = [0] * len(caps), [0] * len(caps)
     for ref in refs:
         if not ref:
             continue
         toks, match = _matches(caps, ref)
-        heard_n = [0] * len(caps)
-        for k, (ci, ti, _) in enumerate(toks):
+        heard_n, heard_c = [0] * len(caps), [0] * len(caps)
+        for k, (ci, ti, t) in enumerate(toks):
             if k in match and abs(ref[match[k]][1] - caps[ci].start / f) <= far_s:
                 heard_n[ci] += 1
+                heard_c[ci] += 0 if is_weak(t) else 1
         best_heard = [max(x, y) for x, y in zip(best_heard, heard_n)]
+        best_content = [max(x, y) for x, y in zip(best_content, heard_c)]
         for k, (ci, ti, _) in enumerate(toks):
             if ti != 0 or k not in match or starts[ci] is not None:
                 continue
@@ -1056,7 +1060,10 @@ def spoken_starts(caps: Sequence[Caption], onsets: Sequence[float], refs: Sequen
                 t = across[-1]
             cand = [o for o in onsets if lo <= o <= hi]
             starts[ci] = min(cand, key=lambda o: abs(o - t)) if cand else t
-    heard = [n > 0 and 2 * b >= n for n, b in zip(total, best_heard)]
+    # heard: at least half its words -- and half its content words when it has two or more (a weak word -- "I",
+    # "it", "the" -- is said everywhere: it alone is no sign the caption's words are)
+    heard = [n > 0 and b > 0 and 2 * b >= n and (nc < 2 or 2 * bc >= nc)
+             for n, b, nc, bc in zip(total, best_heard, content, best_content)]
     # a caption no transcript has words for, over speech the better transcript has no other words for: its words
     # were said (the transcripts missed them) -- timed to where that speech starts
     every = sorted(w[1] for w in (refs[0] if refs else []))         # the better transcript's words
@@ -1162,6 +1169,85 @@ def fill_from_transcript(caps: list[Caption], words: Sequence[Word], fps: Fracti
             made, _ = caption_rules.enforce(made, fps, "voice", list(words), cuts=cuts)
             new += [dataclasses.replace(c, info=dict(c.info, source="transcript")) for c in made]
     return sorted(caps + new, key=lambda c: c.start), new
+
+
+def other_video_stretches(ctx: Any, xml: str | Path, fps: Fraction) -> list[dict]:
+    """Another video's stretches in the final edit (broll.py; V1 and A1 left empty, OTHER VIDEO markers):
+    [{name, segment, a, b (sequence frames), t0, t1 (competitor s), words [(text, start, end, prob)] and onsets
+    (sequence s: the competitor's speech there, its sounds' starts)}] -- what the captions there are made from and
+    timed to (the competitor's audio, not my edit's)."""
+    from types import SimpleNamespace
+    from .export_xml_edl import other_video_name, other_video_of, other_video_ranges, parse_premiere_xml
+    x = parse_premiere_xml(xml)
+    ranges = other_video_ranges(x)
+    if not ranges:
+        return []
+    br = getattr(ctx, "broll", None)
+    cl = (br.get("cutlist") if isinstance(br, dict) else None) or ctx.cutlist
+    segs = sorted((s for s in cl.segments if other_video_of(s) is not None), key=lambda s: int(s.comp_in))
+    comp_fps, f = Fraction(ctx.comp_fps), float(fps)
+    y, sr = getattr(ctx, "comp_audio", None), int(getattr(ctx, "audio_sr", 0) or 0)
+    out = []
+    for (a, b), sg in zip(ranges, segs):
+        t0, t1 = float(Fraction(int(sg.comp_in)) / comp_fps), float(Fraction(int(sg.comp_out)) / comp_fps)
+        base, end = a / f, b / f
+        ws = []
+        for w in other_video_of(sg).get("words") or []:
+            s0, s1 = base + float(w[1]) - t0, base + float(w[2]) - t0
+            if s1 > base and s0 < end:
+                ws.append((str(w[0]), max(base, s0), min(end, max(s0, s1)), float(w[3]) if len(w) > 3 else 1.0))
+        onsets: list[float] = []
+        if y is not None and sr and len(y) and ws:
+            from . import silence, speech
+            piece = np.asarray(y[int(t0 * sr):int(math.ceil(t1 * sr))], np.float32)
+            sm = speech.speech_map(piece, sr, silence.Settings.from_cfg(ctx.cfg),
+                                   [SimpleNamespace(text=w[0], start=w[1] - base, end=w[2] - base) for w in ws])
+            onsets = [base + snd.s0 for snd in sm.sounds if snd.speech and snd.s0 < end - base]
+        out.append({"name": other_video_name(a, b, Fraction(fps)), "segment": int(sg.id), "a": a, "b": b,
+                    "t0": t0, "t1": t1, "words": ws, "onsets": onsets})
+    return out
+
+
+def without_stretches(y16: np.ndarray, ov: Sequence[dict], fps: Fraction) -> tuple[np.ndarray, list[tuple[float, float]]]:
+    """(the edit's audio, 16 kHz, with another video's stretches taken out -- my audio alone, transcribed as it was
+    before they were kept --, [(where each was taken out in the shortened audio, its length)] in seconds)."""
+    from .transcribe import SR
+    f = float(fps)
+    keep, held, at, gone = [], [], 0, 0
+    for st in sorted(ov, key=lambda d: d["a"]):
+        n0, n1 = min(len(y16), int(round(st["a"] / f * SR))), min(len(y16), int(round(st["b"] / f * SR)))
+        if n1 <= n0 or n0 < at:
+            continue
+        keep.append(y16[at:n0])
+        held.append(((n0 - gone) / float(SR), (n1 - n0) / float(SR)))
+        gone += n1 - n0
+        at = n1
+    keep.append(y16[at:])
+    return np.concatenate(keep).astype(np.float32), held
+
+
+def restore_times(words: Sequence[Word], held: Sequence[tuple[float, float]]) -> list[Word]:
+    """Words of the shortened audio (without_stretches) back on the edit's timeline."""
+    out = []
+    for w in words:
+        sh = sum(n for at, n in held if at <= 0.5 * (w.start + w.end) + 1e-9)
+        out.append(dataclasses.replace(w, start=w.start + sh, end=w.end + sh))
+    return out
+
+
+def clip_to_stretches(caps: Sequence[Caption], ov: Sequence[dict]) -> int:
+    """A competitor caption running a little over the edge of another video's stretch (its screen lagged the cut)
+    belongs to the side it is mostly on: it ends / starts on the edge. Returns how many moved."""
+    n = 0
+    for c in caps:
+        for e in sorted({st["a"] for st in ov} | {st["b"] for st in ov}):
+            if c.start < e < c.end:
+                if e - c.start >= c.end - e:
+                    c.end = e
+                else:
+                    c.start = e
+                n += 1
+    return n
 
 
 def unheard(caps: Sequence[Caption], fps: Fraction, onsets: Sequence[float],
@@ -1295,6 +1381,18 @@ def run_captions(ctx) -> dict:
                      f"auto: the competitor has burned-in captions ({len(spans)} on screen)" if spans else
                      "auto: no burned-in captions found on the competitor")
 
+    # ---- another video's stretches (broll.py): left empty in the edit; the competitor's audio there is what will
+    # play once it is filled -- transcribed with the edit, it captions them and times them ----
+    from .run_folders import EDIT_XML
+    xml = cfg.deliver / EDIT_XML
+    ov: list[dict] = []
+    if xml.exists() and not voiceover:
+        try:
+            ov = other_video_stretches(ctx, xml, fps)
+        except Exception as e:  # noqa: BLE001 - the captions there keep the competitor's timing
+            warn(f"another video's stretches could not be read ({type(e).__name__}: {e})")
+    in_ov = lambda t: any(st["a"] <= t * float(fps) < st["b"] for st in ov)      # noqa: E731 - t: sequence s
+
     # ---- the words (the cut edit's audio, or the voice-over): voice mode, and captions that cannot be read ----
     from . import transcribe
     words: list[Word] = []
@@ -1324,6 +1422,8 @@ def run_captions(ctx) -> dict:
             from .silence import cut_audio
             y16 = cut_audio(y16, transcribe.SR, fps, rp, (ctx.raw_audio, int(ctx.audio_sr)))
             res["source"] += ", its silences cut out"
+        if ov:
+            res["source"] += "; another video's stretches: the competitor's audio there"
     else:
         res["source"] = "none (the RAW has no audio)"
     if y16 is not None and len(y16) and err is None:
@@ -1332,11 +1432,17 @@ def run_captions(ctx) -> dict:
             warn(f"no transcription: {err}")
         else:
             try:
-                words = transcribe.transcribe_words(y16, transcribe.SR, model, language, ctx.cache)
+                if ov:                                   # my audio alone, the other video's stretches taken out
+                    y_mine, held = without_stretches(y16, ov, fps)
+                    words = restore_times(transcribe.transcribe_words(y_mine, transcribe.SR, model, language,
+                                                                      ctx.cache), held)
+                else:
+                    words = transcribe.transcribe_words(y16, transcribe.SR, model, language, ctx.cache)
             except Exception as e:  # noqa: BLE001 - e.g. the model download failed: captions without a transcript
                 err = f"{type(e).__name__}: {e}"
                 warn(f"transcription failed: {err}")
     res["transcriber"] = {"engine": "faster-whisper", "model": model, "words": len(words), "error": err}
+    res["transcript"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]
     heard_ok = y16 is not None and len(y16) > 0 and err is None      # the transcript ran (words may be none)
 
     # ---- unclear words double-checked against the source (caption_recheck.py) ----
@@ -1368,11 +1474,15 @@ def run_captions(ctx) -> dict:
             res["recheck"] = {"error": f"{type(e).__name__}: {e}", "model": rmodel, "source": sname}
             warn(f"unclear words not rechecked with {rmodel}: {type(e).__name__}: {e}")
 
-    # ---- captions ----
+    # another video's stretches: the words the competitor's audio says there (as said, with their punctuation)
     from . import caption_rules
-    from .run_folders import EDIT_XML
+    if ov:
+        words = sorted([w for w in words if not in_ov(0.5 * (w.start + w.end))] +
+                       [Word(clean_text(t), s0, s1, pr, t) for st in ov for t, s0, s1, pr in st["words"]
+                        if clean_text(t)], key=lambda w: w.start)
+
+    # ---- captions ----
     cuts: list[int] = []                            # the edit's video cuts: no caption runs across one
-    xml = cfg.deliver / EDIT_XML
     if xml.exists():
         try:
             cuts = edit_cuts(xml, fps)
@@ -1380,14 +1490,19 @@ def run_captions(ctx) -> dict:
             warn(f"the video cuts of {EDIT_XML} could not be read ({type(e).__name__}: {e}): captions may run "
                  "across a cut")
     res["cuts"] = len(cuts)
+    if mode != "competitor":               # another video starts / ends there (a competitor caption is clipped to it)
+        cuts = sorted(set(cuts) | {st["a"] for st in ov} | {st["b"] for st in ov})
     if mode == "competitor":
         caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
+        clip_to_stretches(caps, ov)
+        res["copied"] = [_caption_dict(c, fps) for c in caps]        # before the hard rules (debug)
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
         caps = voice_captions(words, fps, n_seq, cuts=cuts)
         rechecked = "rechecked" in (res.get("recheck") or {})        # low-confidence words: listed by the recheck
-        res["flags"] = transcript_flags(words, y16, transcribe.SR, min_prob=0.0 if rechecked else 0.5)
+        res["flags"] = transcript_flags([w for w in words if not in_ov(w.start)], y16, transcribe.SR,
+                                        min_prob=0.0 if rechecked else 0.5)
     else:
         caps = []
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
@@ -1408,11 +1523,14 @@ def run_captions(ctx) -> dict:
             from .speech import audio_cuts
             x = parse_premiere_xml(xml)
             onsets, ref = speech_starts(x["audio"], sm, fps)
+            onsets = sorted(onsets + [o for st in ov for o in st["onsets"]])     # another video: the competitor's
+            ref = sorted(ref + [(t, s0, s1) for st in ov for t, s0, s1, _ in st["words"]], key=lambda w: w[1])
             own = [(w.raw or w.text, float(w.start), float(w.end)) for w in words] if heard_ok else []
             refs = [ref, own]
             a_cuts = sorted({e[3] for e in audio_cuts([dict(it, name="") for it in x["audio"] if it["start"] >= 0],
                                                       fps, int(x["duration"]))})
             gone = unheard(caps, fps, onsets, refs) if mode == "competitor" else []
+            gone = [i for i in gone if not in_ov(0.5 * (caps[i].start + caps[i].end) / float(fps))]
             res["unheard_dropped"] = [_caption_dict(caps[i], fps) for i in gone]
             caps = [c for i, c in enumerate(caps) if i not in set(gone)]
             res["timed"] = time_to_speech(caps, fps, onsets, refs, a_cuts)
@@ -1428,6 +1546,14 @@ def run_captions(ctx) -> dict:
                      + "; ".join(f"{r['start_tc']} '{r['text']}' ({r['off']:+d} frames)" for r in late[:10]))
         except Exception as e:  # noqa: BLE001 - the captions keep their own timing
             warn(f"captions not timed to the final edit's speech ({type(e).__name__}: {e})")
+    res["other_video"] = []
+    for st in ov:                                   # the end summary: each stretch, and how its captions were made
+        mine = [c for c in caps if st["a"] <= (c.start + c.end) // 2 < st["b"]]
+        how = Counter("copied from the competitor" if c.mode == "competitor" else
+                      "transcribed from the competitor's audio" for c in mine)
+        res["other_video"].append({"name": st["name"], "a": st["a"], "b": st["b"], "t0": st["t0"], "t1": st["t1"],
+                                   "captions": len(mine), "how": dict(how), "words": len(st["words"]),
+                                   "text": " ".join(c.text.replace("\n", " ") for c in mine)})
     res["weak_kept"] = list((res.get("rules") or {}).get("kept_weak") or [])
     res["captions"] = [_caption_dict(c, fps) for c in caps]
     res["count"] = len(caps)
