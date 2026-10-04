@@ -1189,8 +1189,11 @@ class _Refiner:
         else:
             self.center = np.array([comp.full_size[0] / 2.0, comp.full_size[1] / 2.0])
         self.stride = max(1, int(cfg.comp_search_stride))
-        self.ext = 2 * self.stride + 1
-        self.max_gap = 3 * self.stride + 1
+        # how far anchors link into one track and a track reaches past its anchors: never less than for every 3rd
+        # frame searched -- searching every frame (the thorough default) gives more anchors, not a smaller tolerance
+        link = max(self.stride, 3)
+        self.ext = 2 * link + 1
+        self.max_gap = 3 * link + 1
         self.scale_tol = float(cfg.link_scale_tol)
         self.pos_tol = max(float(cfg.link_pos_tol), 1.0 / float(comp.ratio[0]))
         self.workers = cfg.resolved_workers()

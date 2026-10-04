@@ -86,6 +86,15 @@ __all__ = ["build_segments", "segment_constraints", "scenedetect_changes", "plot
 
 _TIE = ps.TIE_SLACK
 _TAU = ps.TAU
+# a free run shorter than this proves no speed of its own: the phase breaks of the dominant speed / 1.0 inside it
+# stay DP candidates (a 1.0 stretch and a 2-frame freeze after it -- three identical competitor frames -- are one
+# exact 0.6x free run of 7 frames; where the greedy tiling happens to start decides whether it shows)
+SHORT_FREE_RUN = 10
+# the thorough default (a full-resolution scorer): the framing of every matched frame of a segment measured at full
+# resolution (FULL_CHUNK frames decoded at a time); a measurement whose refined ZNCC stays under FULL_SAMPLE_MIN
+# (motion blur, a dissolve) is no sample -- the proxy's stays
+FULL_SAMPLE_MIN = 0.95
+FULL_CHUNK = 200
 _AUTO = object()     # sentinel: "compute it here"
 _PRUNED = object()   # fit(): feasible, but no explanation can cost <= bound
 
@@ -946,6 +955,8 @@ class _Seg:
 # =================================================================================================
 
 class _Builder:
+    full: Any = None    # criterion 2's scorer at full resolution (fullres.SideScorer; the thorough default) or None
+
     def __init__(self, fm: FrameMap, comp: Any, raw: Any, layout: Any, overlays: Any, cfg: Any,
                  dlog: DecisionLog | None, debug_dir: Any, hints: Any, src: FrameMap | None = None):
         self.fm = fm                      # write target
@@ -1489,7 +1500,8 @@ class _Builder:
         * phase breaks at the dominant speed and at 1.0 (+-1) and increment anomalies -- only inside free
           runs whose speed range lies within 15 % of that speed, where a jump cut could masquerade as a
           slightly different speed (a 1-frame skip at 1.0 looks like 1.02-1.05x); far from it (e.g. a
-          1.337x run) they would put a candidate on every frame and explain nothing;
+          1.337x run) they would put a candidate on every frame and explain nothing; and inside free runs
+          shorter than SHORT_FREE_RUN frames, whose own speed proves nothing;
         * phase breaks at the snap speed nearest to a free run's speed range (within 3 %);
         * track changes and audio lag steps.
         The consecutive forward free-run boundaries always form a feasible segmentation."""
@@ -1503,6 +1515,8 @@ class _Builder:
 
         def near(run, u: float, tol: float) -> bool:
             _a, _b, u0, u1 = run
+            if _b - _a < SHORT_FREE_RUN:
+                return True
             return u0 <= u * (1 + tol) and u1 >= u * (1 - tol) if u >= 0 else u0 <= u * (1 - tol) and u1 >= u * (1 + tol)
 
         def run_at(runs, k: int):
@@ -1867,7 +1881,60 @@ class _Builder:
                 z = self.P.zncc_set(k, [(int(F.raw[k]), F.measured(k) or F.sim(k), seg.flip)])
                 if z is not None and math.isfinite(float(z[0])) and float(z[0]) > r[1] + 3.0 * F.delta[k]:
                     info["conflict"].append(k)
+        if self.full is not None:
+            out = self._full_res_samples(seg, out, info, has)
         return out, info
+
+    def _full_res_samples(self, seg: _Seg, out: list[tuple[int, Sim, int]], info: dict, has: bool
+                          ) -> list[tuple[int, Sim, int]]:
+        """The thorough default: every matched frame's framing sample measured at full resolution
+        (fullres.SideScorer.measure: the proxy's sample -- or, for a frame without one, the samples around it --
+        refined by Gauss-Newton), the transition frames of a fast pan included (left out on the proxy: their edge
+        key was held). Sub-pixel samples let the keys follow a pan up to the cut (the thorough Deadpool: S05 / S07 /
+        S08 held their edge keys 6-9 px off) and through its curves. A measurement under FULL_SAMPLE_MIN is no
+        sample (the proxy's stays)."""
+        F = self.F
+        have = {k: (sim, j) for k, sim, j in out}
+        todo = [k for k in range(seg.a, seg.b) if F.status[k] == Status.MATCH and bool(F.flip[k]) == seg.flip]
+        if not todo:
+            return out
+        ks = sorted(have)
+
+        def start(k: int) -> Sim | None:
+            if k in have:
+                return have[k][0]
+            i = int(np.searchsorted(ks, k))
+            lo, hi = (ks[i - 1] if i > 0 else None), (ks[i] if i < len(ks) else None)
+            if lo is not None and hi is not None:
+                u = (k - lo) / float(hi - lo)
+                a, b = have[lo][0], have[hi][0]
+                return Sim(a.s + u * (b.s - a.s), a.theta_deg + u * (b.theta_deg - a.theta_deg),
+                           a.tx + u * (b.tx - a.tx), a.ty + u * (b.ty - a.ty))
+            if lo is not None or hi is not None:
+                return have[lo if lo is not None else hi][0]
+            return F.measured(k) or F.sim(k)
+
+        js = {k: (int(self.shown(seg, k)) if has else int(F.raw[k])) for k in todo}
+        new = dict(have)
+        measured = added = 0
+        for c0 in range(0, len(todo), FULL_CHUNK):
+            chunk = todo[c0:c0 + FULL_CHUNK]
+            self.full.comp.prefetch(chunk[0], chunk[-1] + 1)
+            jv = [js[k] for k in chunk if js[k] >= 0]
+            if jv:
+                self.full.raw.prefetch(min(jv), max(jv) + 1)
+            for k in chunk:
+                s0, j = start(k), js[k]
+                if s0 is None or j < 0:
+                    continue
+                r = self.full.measure(k, j, s0, seg.flip)
+                if r is not None and r[1] >= FULL_SAMPLE_MIN:
+                    added += k not in have
+                    measured += 1
+                    new[k] = (r[0], j)
+        info["full_res"] = measured
+        info["full_res_added"] = added
+        return [(k, new[k][0], new[k][1]) for k in sorted(new)]
 
     @staticmethod
     def _lsq_keys(t: np.ndarray, V: np.ndarray, knots: Sequence[int]) -> np.ndarray:
@@ -2041,6 +2108,10 @@ class _Builder:
                          "refine's, or after a framing step)")
         if info["dropped"]:
             notes.append(f"framing not measurable on frames {_rng(info['dropped'])} (left out)")
+        if info.get("full_res"):
+            notes.append(f"framing measured at full resolution on {info['full_res']} frame(s)"
+                         + (f", {info['full_res_added']} of them without a proxy sample" if info.get("full_res_added")
+                            else ""))
         if info["conflict"]:
             notes.append(f"frames {_rng(info['conflict'])}: refine's own RAW frame still matches better than the "
                          "segment's (re-measured) -- time model questionable there")
@@ -2816,9 +2887,16 @@ class _Builder:
     # criterion 2
     # ---------------------------------------------------------------------------------------------
     def _side_scores(self, A: _Seg, B: _Seg, k: int) -> tuple[float, float] | None:
-        """(score of frame k under A's model, under B's model)."""
+        """(score of frame k under A's model, under B's model): at full resolution when there is a full scorer --
+        two RAW frames (or flips): which one the competitor shows, each with its framing refined (the segment's
+        framing is fitted to its frames afterwards); one RAW frame: its framing as the models give it."""
         F = self.F
         ja, jb = int(self.pred(A, k)), int(self.pred(B, k))
+        if self.full is not None:
+            sc = self.full(k, [(ja, self.sim_at(A, k), A.flip), (jb, self.sim_at(B, k), B.flip)],
+                           refine=ja != jb or A.flip != B.flip)
+            if sc is not None and np.all(np.isfinite(sc)):
+                return float(sc[0]), float(sc[1])
         if self.P.ok:
             sc = self.P.zncc_set(k, [(ja, self.sim_at(A, k), A.flip), (jb, self.sim_at(B, k), B.flip)])
             if sc is not None and np.all(np.isfinite(sc)):
@@ -2925,7 +3003,8 @@ class _Builder:
                     break
                 s1 = self._side_scores(A, B, c - 1)
                 s2 = self._side_scores(A, B, c)
-                ev = {"cut": c, "last_A": s1, "first_B": s2, "iteration": moves}
+                ev = {"cut": c, "last_A": s1, "first_B": s2, "iteration": moves,
+                      "scored": "full resolution" if self.full is not None else "proxy"}
                 if s1 is None or s2 is None:
                     self.log("criterion2_unchecked", comp_frame=int(c), evidence=ev)
                     break
@@ -2982,9 +3061,14 @@ class _Builder:
             self.F.touched.pop(k, None)
         self.F.touched.update(st[6])
 
-    def _frame_score(self, S: _Seg, k: int) -> float:
-        """Score of comp frame k under segment S's model (pixels; the candidate vector without them)."""
+    def _frame_score(self, S: _Seg, k: int, refine: bool = False) -> float:
+        """Score of comp frame k under segment S's model (pixels -- at full resolution when there is a full scorer,
+        the framing refined with ``refine``; the candidate vector without them)."""
         j = int(self.pred(S, k))
+        if self.full is not None:
+            sc = self.full(k, [(j, self.sim_at(S, k), S.flip)], refine=refine)
+            if sc is not None and math.isfinite(float(sc[0])):
+                return float(sc[0])
         if self.P.ok:
             sc = self.P.zncc_set(k, [(j, self.sim_at(S, k), S.flip)])
             if sc is not None and math.isfinite(float(sc[0])):
@@ -3009,7 +3093,8 @@ class _Builder:
             self._c2_restore(A, B, visited[p])
             tot = 0.0
             for k in range(w0, w1):
-                v = self._frame_score(A if k < p else B, k)
+                two = int(self.pred(A, k)) != int(self.pred(B, k)) or A.flip != B.flip
+                v = self._frame_score(A if k < p else B, k, refine=two)
                 tot += v if math.isfinite(v) else 0.0
             sums[p] = tot
         best = max(order, key=lambda p: (round(sums[p], 9), -order.index(p)))
@@ -4509,7 +4594,7 @@ def _pristine(fm: FrameMap) -> FrameMap:
 
 def build_segments(fm: FrameMap, comp: Any, raw: Any, layout: Any, overlays: Any, cfg: Any,
                    dlog: DecisionLog | None, debug_dir: Any, hints: Any = None,
-                   union_cuts: Iterable[int] = ()) -> list[Segment]:
+                   union_cuts: Iterable[int] = (), full_scorer: Any = None) -> list[Segment]:
     """Stage 5.4-5.5: cut the competitor timeline into segments (DESIGN §5 segment.py).
 
     fm        FrameMap from refine (mutated in place: m(k) corrected to the segment model where the soft
@@ -4529,6 +4614,7 @@ def build_segments(fm: FrameMap, comp: Any, raw: Any, layout: Any, overlays: Any
     """
     b = _Builder(fm, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints, src=_pristine(fm))
     b.union_cuts = {int(c) for c in union_cuts}
+    b.full = full_scorer
     segs = b.run()
     b.crosscheck = _crosscheck(b, segs)
     if b.debug_dir is not None:

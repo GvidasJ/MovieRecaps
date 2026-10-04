@@ -404,3 +404,20 @@ def test_words_that_run_together_get_a_gap_at_their_boundary():
     # a clip starting inside "and" (a quarter of it left) starts after it; inside its first half, before it
     assert SP.start_at(sm, 2.12, 3.0, PA, PB) >= 2.2 - TOL
     assert SP.start_at(sm, 1.9, 3.0, PA, PB) <= 1.8 + TOL
+
+
+def test_an_audio_line_jumping_far_inside_speech_where_the_picture_runs_on_takes_its_own_sound():
+    """Task 5 (the thorough Deadpool S09): the picture runs on through frame 100, but A1 jumps there from inside
+    "there" to another take 1 s on (the competitor's J cut: its sound switches before its picture) -- too far to
+    shift. The audio line takes its picture's own sound, so A1 plays on in one take and cuts where V1 cuts (140),
+    in the quiet."""
+    _, sm = three()
+    a = SP.Piece("A", 0, 100, 2.5 * 60 - 100, 1.0, v_off=0.0)                 # ends at RAW 2.5, inside "there"
+    b = SP.Piece("B", 100, 140, 3.5 * 60, 1.0, shiftable=True, v_off=-1.0)     # its picture: RAW 2.5 on
+    c = SP.Piece("C", 140, 200, 4.6 * 60, 1.0, v_off=0.0)
+    _, _, rows, shifts = SP.snap_edits([a, b, c], sm, FPS, PA, PB, v1_cuts={0, 140, 200})
+    assert (100, -60) in shifts and any(r["edge"] == "audio line" and r["at"] == 100 for r in rows)
+    assert not any(r["at"] == 100 and r["edge"] in ("start", "end") for r in rows)     # no cut at 100 any more
+    near = SP.Piece("B", 100, 140, 2.5 * 60 + 3, 1.0, shiftable=True, v_off=-0.05)  # a little: _shift_jumps
+    _, _, _, shifts = SP.snap_edits([a, near, c], sm, FPS, PA, PB, v1_cuts={0, 140, 200})
+    assert (100, -60) not in shifts and len(shifts) == 1

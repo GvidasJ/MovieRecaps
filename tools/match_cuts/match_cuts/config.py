@@ -20,6 +20,18 @@ VERIFY_ONLY_PARAMS = ("temporal_mag_ratio", "verify_refit_margin",
                       "verify_overlay_min_px")
 
 
+def physical_cores() -> int | None:
+    """The CPU's physical cores (psutil; None when it cannot tell): the worker pools' default size. A second process on
+    a core's other hardware thread makes the matching slower, not faster -- measured on a 15-core / 30-thread Ryzen:
+    the same 120 searches take 32-34 s with 12-15 workers and 47-50 s with 16-30."""
+    try:
+        import psutil
+        n = psutil.cpu_count(logical=False)
+        return int(n) if n else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @dataclass
 class Config:
     # ---- I/O -----------------------------------------------------------------------------
@@ -83,7 +95,7 @@ class Config:
     compare_crf: int = 18
     compare_preset: str = "veryfast"
     large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
-    workers: int = 0                       # 0 = os.cpu_count()
+    workers: int = 0                       # 0 = one per physical core (physical_cores(); else os.cpu_count())
     pool_stall_timeout_s: float = 300.0    # hang protection (DESIGN D7): a worker pool that delivers no result for this
                                            # long (or loses a worker process) is stopped and its remaining tasks run in
                                            # this process -- identical results, only slower
@@ -155,12 +167,28 @@ class Config:
     audio_jl_large_frames: int = 4         # a J/L this large next to a retimed segment / on a continuous line is evidence, not exported
     audio_sync: str = "raw"                # raw | competitor: export audio keeps RAW lip-sync, or reproduces the competitor's offset
 
+    # ---- quality (Task 5): the most thorough matching by default, --fast for quick runs ---------------------------
+    fast: bool = False                     # --fast: the sampled RAW index, every 3rd competitor frame searched, no
+                                           #   full-resolution pass, the faster speech model for the speech map
+                                           #   (apply_fast() sets these; the default is the thorough setting of each)
+    gpu: bool = True                       # the GPU where it helps (exact RAW-index search, full-resolution checks);
+                                           #   resolved at the start of a run to whether one can be used (gpu.py)
+    full_res: bool = True                  # every matched frame and every cut verified at full resolution, slightly
+                                           #   uncertain frames re-checked there before the cuts are decided (fullres.py)
+    compare_fast: bool = True              # thorough runs also make the --fast analysis (cached) and the end summary
+                                           #   says what the thoroughness changed
+    speech_map_model: str = ""             # the speech map's model ("": caption_recheck_model, the most accurate;
+                                           #   --fast: large-v3-turbo)
+
     # ---- visual search (Stage 5.2) ------------------------------------------------------
     sift_nfeatures: int = 500
-    raw_index_fps_short: float = 10.0      # RAW index sampling rate for RAW <= 10 min
+    raw_index_every_frame: bool = True     # the RAW index holds every RAW frame (needs the GPU search; --fast or no GPU:
+                                           #   sampled at raw_index_fps_short / raw_index_fps_long)
+    raw_index_fps_short: float = 10.0      # RAW index sampling rate for RAW <= 10 min (sampled index)
     raw_index_fps_long: float = 3.0        # for longer RAWs
-    index_max_descriptors: int = 2_000_000 # cap (uint8 storage); nfeatures per sample lowered to fit
-    comp_search_stride: int = 3            # sparse competitor frames searched globally
+    index_max_descriptors: int = 12_000_000  # cap (uint8 storage); nfeatures per frame lowered to fit (every-frame
+                                           #   index on the GPU: 12 M descriptors = 6 GB; --fast / CPU: 2 M)
+    comp_search_stride: int = 1            # competitor frames searched globally: every one (--fast: every 3rd)
     index_knn: int = 24                    # k-NN per query descriptor in the multi-frame index
     index_ratio: float = 0.8               # cluster-aware ratio: vs first NN > index_far_s away
     index_far_s: float = 2.0
@@ -305,7 +333,7 @@ class Config:
 
     def resolved_workers(self) -> int:
         import os
-        return self.workers or max(1, (os.cpu_count() or 2))
+        return self.workers or max(1, physical_cores() or os.cpu_count() or 2)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -327,11 +355,26 @@ class Config:
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
                   "silence_db", "min_silence", "pad_before", "pad_after", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
-                  "caption_language",
+                  "caption_language", "fast", "compare_fast", "speech_map_model",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
         return d
+
+    def apply_fast(self) -> "Config":
+        """--fast: the quick settings of every thorough default (this config, changed in place; returned)."""
+        self.fast = True
+        self.raw_index_every_frame = False
+        self.index_max_descriptors = 2_000_000
+        self.comp_search_stride = 3
+        self.full_res = False
+        self.compare_fast = False
+        self.speech_map_model = "large-v3-turbo"
+        return self
+
+    def fast_twin(self) -> "Config":
+        """A copy of this config with the --fast settings (the analysis a --fast run would make)."""
+        return dataclasses.replace(self).apply_fast()
 
     @property
     def out(self) -> Path:

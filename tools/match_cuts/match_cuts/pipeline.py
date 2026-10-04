@@ -46,7 +46,7 @@ import traceback
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 
 import numpy as np
 
@@ -106,6 +106,9 @@ class Context:
     anchors: list = field(default_factory=list)
     fm_pre: FrameMap | None = None            # refine output, as cached (input of S5.4)
     fm: FrameMap | None = None                # after segmentation (saved to <work>/frame_map.npz)
+    full_res: dict = field(default_factory=dict)      # fullres.py: the re-check (S5.5) and the verification (S9)
+    fast_compare: dict = field(default_factory=dict)  # what the thorough default changed against --fast (S6)
+    full_frames: Any = None                   # (competitor, RAW) fullres.FrameStore, decoded once for both
     # --- S5.4..S6 ---
     segments: list[Segment] = field(default_factory=list)
     audio_result: dict = field(default_factory=dict)
@@ -1539,6 +1542,21 @@ def published_av_offset(offset: dict, audio_result: dict, cfg: Config) -> dict:
     return pub
 
 
+def side_scorer(ctx: Context) -> Any:
+    """fullres.SideScorer -- criterion 2 of segment.py at full resolution -- in the thorough default with a GPU,
+    else None (the proxy decides, as in --fast)."""
+    from . import fullres, visual_match
+    if fullres.available(ctx.cfg) or ctx.comp_info is None or ctx.raw_info is None or ctx.raw_proxy is None:
+        return None
+    try:
+        allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, ctx.cfg)
+        return fullres.SideScorer(ctx.comp_info, ctx.raw_info, allowed, tuple(ctx.raw_proxy.full_size),
+                                  int(ctx.raw_info.nb_frames))
+    except Exception as e:  # noqa: BLE001 - the proxy decides then
+        log.warning("criterion 2 at full resolution not available (%s: %s): the proxy decides", type(e).__name__, e)
+        return None
+
+
 def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debug_dir: Path
                          ) -> tuple[FrameMap, list[Segment], dict, Cutlist]:
     """S5.4 -> S6: segmentation + framing, phase solve, audio per segment, Cutlist.
@@ -1549,8 +1567,13 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
     cfg = ctx.cfg
     fm = fm_pre.copy()
     Path(debug_dir).mkdir(parents=True, exist_ok=True)
-    segments = segment.build_segments(fm, ctx.comp_proxy, ctx.raw_proxy, ctx.layout, ctx.overlays, cfg, dlog,
-                                      debug_dir, hints=ctx.hints)
+    full = side_scorer(ctx)
+    try:
+        segments = segment.build_segments(fm, ctx.comp_proxy, ctx.raw_proxy, ctx.layout, ctx.overlays, cfg, dlog,
+                                          debug_dir, hints=ctx.hints, full_scorer=full)
+    finally:
+        if full is not None:
+            full.close()
     segments = _normalise_segments(list(segments), ctx.comp_fps, dlog)
     seg_warn: list[str] = []
     for s in segments:
@@ -2253,6 +2276,8 @@ def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str
                                             ctx.hints, ctx.index, cfg, ctx.cache, ctx.dlog, cfg.debug_dir)
                 if fm.n != ctx.n_comp:
                     raise RuntimeError(f"FrameMap has {fm.n} rows for {ctx.n_comp} competitor frames")
+                if ctx.index is not None and hasattr(ctx.index, "close_gpu"):
+                    ctx.index.close_gpu()           # the searches are done: the GPU's memory for the next stages
         store_decisions(ctx, "frame_map", key, list(cap))
         save_frame_map_cache(fm, overlays, fm_path, ov_path)
     # always continue from the cache files (first run == cached re-run, bit for bit)
@@ -2341,6 +2366,54 @@ def initial_overlays(layout: Layout, fallback: Any) -> Any:
     return copy.deepcopy(fallback)
 
 
+def _full_frames(ctx: Context) -> tuple[Any, Any]:
+    from . import fullres
+    if ctx.full_frames is None:
+        ctx.full_frames = (fullres.FrameStore(ctx.comp_info), fullres.FrameStore(ctx.raw_info))
+    return ctx.full_frames
+
+
+def stage_full_res(ctx: Context) -> None:
+    """S5.5 (the thorough default, fullres.recheck): the slightly uncertain matched frames re-checked at full
+    resolution on the GPU before the cuts are decided. The re-checked FrameMap is cached under a key of its own and
+    becomes THE frame map (ctx.keys['frame_map']), so s9_7's re-run from the caches reads exactly the same one."""
+    from . import fullres, visual_match
+    from .model import Status
+    cfg = ctx.cfg
+    why = fullres.available(cfg)
+    ctx.full_res = {"why_not": why}
+    if why or ctx.fm_pre is None:
+        return
+    key = stage_key("fullres_recheck", ctx.keys.get("frame_map"), fullres.VERSION, fullres.NEIGHBOURS,
+                    fullres.MAX_CANDS, fullres.DECIDE, fullres.BLUR_PX, fullres.REFINE_ITERS)
+    fm_path = ctx.cache.path("frame_map", key, ".npz")
+    ov_path = ctx.cache.path("frame_map", key, ".overlays.npz")
+    js_path = ctx.cache.path("frame_map", key, ".fullres.json")
+    if fm_path.exists() and ov_path.exists() and js_path.exists():
+        res = json.loads(js_path.read_text(encoding="utf-8"))
+        log.info("full-resolution re-check: cache hit %s", fm_path.name)
+    else:
+        try:
+            comp_st, raw_st = _full_frames(ctx)
+            allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, cfg)
+            fm, res = fullres.recheck(ctx.fm_pre, comp_st, raw_st, allowed, tuple(ctx.raw_proxy.full_size),
+                                      int(ctx.raw_info.nb_frames), int(Status.MATCH), ctx.dlog)
+        except Exception as e:  # noqa: BLE001 - the proxy analysis stands; said in the summary
+            log.error("full-resolution re-check failed: %s\n%s", e, traceback.format_exc())
+            ctx.full_res["why_not"] = f"the re-check failed ({type(e).__name__}: {e})"
+            ctx.warn(f"full-resolution re-check failed ({type(e).__name__}: {e}): the proxy analysis is used as it is")
+            return
+        save_frame_map_cache(fm, ctx.overlays, fm_path, ov_path)
+        dump_json(res, js_path)
+    ctx.fm_pre = FrameMap.load(fm_path)
+    ctx.overlays = load_overlays(ov_path)
+    ctx.keys["frame_map"] = key
+    ctx.full_res["recheck"] = res
+    log.info("full-resolution re-check: %d uncertain frame(s): %d narrowed (%d decided), %d within noise, "
+             "%d outside the soft range (kept), %.1f s", res["frames"], res["narrowed"], res["decided"], res["kept"],
+             res["outside"], res.get("seconds", 0.0))
+
+
 def stage_segments(ctx: Context) -> None:
     cfg = ctx.cfg
     prev = Path(cfg.previous_out_dir or cfg.out) / "cutlist.json"     # the previous run's (s9_7 compares them)
@@ -2358,6 +2431,113 @@ def stage_segments(ctx: Context) -> None:
         if w not in ctx.warnings:
             ctx.warnings.append(w)
     write_cutlist(ctx)
+
+
+def analysis_start(ctx: Context) -> dict:
+    """What S5.2 starts from (the layout and overlays before refine adds to them, the RAW proxy, the cache keys so
+    far): the --fast comparison (stage_fast_compare) starts from the same point."""
+    return {"layout": copy.deepcopy(ctx.layout), "overlays": copy.deepcopy(ctx.overlays), "raw_proxy": ctx.raw_proxy,
+            "keys": dict(ctx.keys), "analysis_warnings": list(ctx.analysis_warnings)}
+
+
+def stage_fast_compare(ctx: Context, start: dict) -> None:
+    """S6 (thorough runs, cfg.compare_fast): the analysis a --fast run would make of the same video -- S5.2 + S5.3 +
+    S5.4-S6 with the --fast settings (the shared stage caches; its own work sub-folder for the files a stage writes
+    directly) -- and what the thorough analysis changed against it (compare_cutlists): the end summary's
+    'Thoroughness' line. Never changes this run's results."""
+    cfg = ctx.cfg
+    fcfg = cfg.fast_twin()
+    fcfg.gpu = cfg.gpu
+    fcfg.out_dir = str(Path(cfg.out_dir) / "fast_compare")
+    fcfg.work_dir = str(Path(cfg.work_dir) / "fast_compare")
+    fcfg.deliver_dir = fcfg.out_dir
+    fcfg.previous_out_dir = ""
+    for d in (fcfg.out_dir, fcfg.work_dir):
+        Path(d).mkdir(parents=True, exist_ok=True)
+    f = dataclasses.replace(ctx, cfg=fcfg, dlog=DecisionLog(Path(fcfg.work_dir) / "decisions.jsonl", truncate=True),
+                            layout=start["layout"], overlays=start["overlays"], raw_proxy=start["raw_proxy"],
+                            keys=dict(start["keys"]), analysis_warnings=list(start["analysis_warnings"]), warnings=[],
+                            timings={}, errors=[], index=None, anchors=[], fm_pre=None, fm=None, segments=[],
+                            audio_result={}, cutlist=None, full_res={}, full_frames=None, fast_compare={})
+    t = time.perf_counter()
+    try:
+        stage_visual_refine(f)
+        f.fm, f.segments, f.audio_result, f.cutlist = segment_and_assemble(f, f.fm_pre, f.dlog, fcfg.debug_dir)
+    except Exception as e:  # noqa: BLE001 - the comparison is information; this run's results stand
+        log.error("the --fast comparison failed: %s\n%s", e, traceback.format_exc())
+        ctx.fast_compare = {"error": f"{type(e).__name__}: {e}"}
+        return
+    finally:
+        f.dlog.close()
+    ctx.fast_compare = compare_cutlists(ctx.segments, f.segments, ctx.n_comp, ctx.comp_fps, ctx.raw_fps,
+                                        int(ctx.raw_info.nb_frames))
+    ctx.fast_compare["fast_seconds"] = round(time.perf_counter() - t, 1)
+    ctx.fast_compare["thorough_seconds"] = round(sum(v for k, v in ctx.timings.items()
+                                                     if k.startswith(("S5.2", "S5.3", "S5.5", "S5.4-S6"))), 1)
+    log.info("the --fast analysis of this video: %s", ctx.fast_compare.get("summary"))
+
+
+def shown_frames(segments: Sequence[Segment], n: int, comp_fps: Fraction, raw_fps: Fraction, n_raw: int
+                 ) -> dict[int, tuple[str, int | None]]:
+    """Per competitor frame: (segment type, the RAW frame shown -- None but for a RAW segment)."""
+    from .verify import seg_shown
+    out: dict[int, tuple[str, int | None]] = {}
+    for sg in segments:
+        for k in range(max(0, int(sg.comp_in)), min(int(n), int(sg.comp_out))):
+            if sg.type == "raw":
+                sh = seg_shown(sg, k, comp_fps, raw_fps, n_raw)
+                out[k] = ("raw", int(sh[0]) if sh is not None else None)
+            else:
+                out[k] = (str(sg.type), None)
+    return out
+
+
+def compare_cutlists(thorough: Sequence[Segment], fast: Sequence[Segment], n: int, comp_fps: Fraction,
+                     raw_fps: Fraction, n_raw: int) -> dict:
+    """What the thorough analysis changed against the --fast one: cuts placed differently (matched within 3
+    frames), cuts only one of them has, frames showing another RAW frame (by one frame / more), frames of another
+    kind (matched vs NOT-IN-RAW / uncertain), uncertain segments. {..., summary, examples}."""
+    T = shown_frames(thorough, n, comp_fps, raw_fps, n_raw)
+    F = shown_frames(fast, n, comp_fps, raw_fps, n_raw)
+    other_raw = [(k, F[k][1], T[k][1]) for k in sorted(set(T) & set(F)) if T[k][0] == F[k][0] == "raw"
+                 and T[k][1] is not None and F[k][1] is not None and T[k][1] != F[k][1]]
+    by_one = sum(1 for _k, a, b in other_raw if abs(a - b) == 1)
+    other_kind = [(k, F[k][0], T[k][0]) for k in sorted(set(T) & set(F)) if T[k][0] != F[k][0]]
+    ct = sorted({int(sg.comp_in) for sg in thorough if int(sg.comp_in) > 0})
+    cf = sorted({int(sg.comp_in) for sg in fast if int(sg.comp_in) > 0})
+    only_t, only_f = [c for c in ct if c not in cf], [c for c in cf if c not in ct]
+    moved = []
+    for c in list(only_t):
+        near = [d for d in only_f if abs(d - c) <= 3]
+        if near:
+            d = min(near, key=lambda x: (abs(x - c), x))
+            moved.append((d, c))
+            only_t.remove(c)
+            only_f.remove(d)
+
+    def unc(segs: Sequence[Segment]) -> int:
+        return sum(1 for sg in segs if sg.type == "uncertain" or getattr(sg, "uncertain", False))
+    out = {"cuts_thorough": len(ct), "cuts_fast": len(cf), "cuts_moved": len(moved), "cuts_added": len(only_t),
+           "cuts_dropped": len(only_f), "frames_other_raw": len(other_raw), "frames_other_raw_by_one": by_one,
+           "frames_other_kind": len(other_kind), "uncertain_thorough": unc(thorough), "uncertain_fast": unc(fast),
+           "examples": {"moved": moved[:10], "added": only_t[:10], "dropped": only_f[:10],
+                        "other_raw": other_raw[:10], "other_kind": other_kind[:10]}}
+    parts = []
+    if moved:
+        by = ", ".join(sorted({f"{c - d:+d}" for d, c in moved}))
+        parts.append(f"{len(moved)} cut(s) placed differently (by {by} frame(s))")
+    if only_t:
+        parts.append(f"{len(only_t)} cut(s) only the thorough matching finds")
+    if only_f:
+        parts.append(f"{len(only_f)} --fast cut(s) gone")
+    if other_raw:
+        parts.append(f"{len(other_raw)} frame(s) showing another RAW frame ({by_one} of them by one frame)")
+    if other_kind:
+        parts.append(f"{len(other_kind)} frame(s) of another kind (matched / NOT-IN-RAW / uncertain)")
+    if out["uncertain_thorough"] != out["uncertain_fast"]:
+        parts.append(f"uncertain segments {out['uncertain_fast']} -> {out['uncertain_thorough']}")
+    out["summary"] = "; ".join(parts) if parts else "the same cut list"
+    return out
 
 
 def stage_broll(ctx: Context) -> None:
@@ -2742,11 +2922,11 @@ def speech_of(ctx: Context, cl: Cutlist) -> Any:
             cfg = ctx.cfg
             cap = str(getattr(cfg, "caption_model", "large-v3") or "large-v3")
             rec = str(getattr(cfg, "caption_recheck_model", "") or "")
-            main = rec if rec.lower() not in ("", "none") else cap
+            main = str(getattr(cfg, "speech_map_model", "") or "") or (rec if rec.lower() not in ("", "none") else cap)
             language = str(getattr(cfg, "caption_language", "en") or "") or None
             words = raw_words(ctx, heard, main, language)
             models.append(main)
-            if cap != main and words is not None:
+            if cap != main and words is not None and not getattr(cfg, "fast", False):
                 also = raw_words(ctx, heard, cap, language)
                 models.append(cap)
         else:
@@ -2999,6 +3179,30 @@ def stage_captions(ctx: Context) -> None:
         ctx.paths["captions"] = ctx.captions["path"]
 
 
+def full_res_check(ctx: Context) -> dict | None:
+    """s9_9 (the thorough default, fullres.verify): every frame and every cut of the cut list at full resolution
+    on the GPU, with verification's own layout masks. None when the pass does not run (--fast / no GPU)."""
+    from . import fullres
+    from . import verify as verify_mod
+    if fullres.available(ctx.cfg) or not ctx.segments:
+        return None
+    try:
+        comp_st, raw_st = _full_frames(ctx)
+        fm = ctx.fm if ctx.fm is not None else ctx.fm_pre
+        res = fullres.verify(ctx.segments, ctx.n_comp, comp_st, raw_st, verify_mod._allowed_fn(ctx),
+                             tuple(ctx.raw_proxy.full_size), ctx.comp_fps, ctx.raw_fps, int(ctx.raw_info.nb_frames),
+                             pair_label=None if fm is None else np.asarray(fm.pair_label))
+    except Exception as e:  # noqa: BLE001 - an extra check that could not run: said, c1-c6 still decide
+        log.error("full-resolution verification could not run: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"full-resolution verification could not run ({type(e).__name__}: {e})")
+        res = {"status": "not_available", "summary": f"could not run: {type(e).__name__}: {e}", "failures": []}
+    finally:
+        ctx.full_frames = None                       # the decoded frames are not needed after this
+    ctx.full_res["verify"] = {k: v for k, v in res.items() if k != "rows"}
+    log.info("verify s9_9_full_res: %s (%s)", res["status"], res["summary"])
+    return res
+
+
 def stage_verify(ctx: Context) -> None:
     from . import verify
     try:
@@ -3007,6 +3211,11 @@ def stage_verify(ctx: Context) -> None:
         log.error("verification crashed: %s\n%s", e, traceback.format_exc())
         ctx.verify = verify.crashed_result(f"{type(e).__name__}: {e}")
     checks = ctx.verify.setdefault("checks", {})
+    full = full_res_check(ctx)
+    if full is not None:
+        checks["s9_9_full_res"] = full
+        if full["status"] == "fail":
+            ctx.verify.setdefault("failures", []).extend(f"s9_9 full resolution: {f}" for f in full["failures"])
     if "s9_8_deliverables" not in checks:           # D5: deliverables count like every other check
         chk = deliverables_check(ctx)
         checks["s9_8_deliverables"] = chk
@@ -3230,6 +3439,24 @@ def headline_for(criteria: dict, checks: dict | None = None, code: int | None = 
     return "FAIL"
 
 
+def resolve_gpu(cfg: Config) -> list[str]:
+    """cfg.gpu becomes whether the GPU is really used (so the cache keys say what was computed); without one, the
+    every-frame RAW index (it needs the exact GPU search) falls back to the sampled one. Returns notes for the
+    summary."""
+    from . import gpu
+    notes = []
+    why = gpu.available() if cfg.gpu else "turned off"
+    if cfg.gpu and why:
+        notes.append(f"no GPU for the cut matching ({why}): the RAW index is searched with FLANN on the CPU")
+    cfg.gpu = bool(cfg.gpu and not why)
+    if not cfg.gpu and cfg.raw_index_every_frame:
+        cfg.raw_index_every_frame = False
+        cfg.index_max_descriptors = min(int(cfg.index_max_descriptors), 2_000_000)
+        if not cfg.fast:
+            notes.append("the RAW index samples the RAW (every frame needs the GPU search)")
+    return notes
+
+
 def run(cfg: Config) -> dict:
     """Run S0..S10. Returns {criteria, checks, failures, warnings, paths, timings, exit_code, context}."""
     _guard_paths(cfg)
@@ -3242,6 +3469,8 @@ def run(cfg: Config) -> dict:
     log.info("match_cuts %s: competitor=%s raw=%s out=%s work=%s layout=%s comp_size=%s fps=%s", __version__,
              cfg.competitor, cfg.raw, cfg.out_dir, cfg.work_dir, cfg.layout_mode, cfg.comp_size, cfg.fps_mode)
     ctx = Context(cfg=cfg, dlog=DecisionLog(cfg.work / "decisions.jsonl", truncate=True), cache=Cache(cfg.work))
+    for note in resolve_gpu(cfg):
+        ctx.warn(note)
     stats = {p: _input_stat(p) for p in (cfg.competitor, cfg.raw)}
     seed_everything(cfg.seed)
     t_all = time.perf_counter()
@@ -3258,10 +3487,16 @@ def run(cfg: Config) -> dict:
             stage_proxies(ctx)
         with _stage(ctx, "S4 layout"):
             stage_layout(ctx)
+        start = analysis_start(ctx)
         stage_visual_refine(ctx)
         layout_warnings(ctx)
+        with _stage(ctx, "S5.5 full-res re-check"):
+            stage_full_res(ctx)
         with _stage(ctx, "S5.4-S6 segments+cutlist"):
             stage_segments(ctx)
+        if cfg.compare_fast and not cfg.fast:
+            with _stage(ctx, "S6 --fast comparison"):
+                stage_fast_compare(ctx, start)
         with _stage(ctx, "S6 no-broll"):
             stage_broll(ctx)
         with _stage(ctx, "S7 AE project"):

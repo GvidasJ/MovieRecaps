@@ -210,3 +210,25 @@ def test_light_asd_finds_who_speaks_in_the_zendaya_interview():
     cx = lambda v: float(np.median((v["track"].box[:, 0] + v["track"].box[:, 2]) / 2))   # noqa: E731
     assert tom["how"] == "speaker" and cx(tom) < 800, (tom["how"], cx(tom))
     assert zen["how"] == "speaker" and cx(zen) > 1100, (zen["how"], cx(zen))
+
+
+def test_once_the_takes_are_joined_a_clip_holds_the_framing_that_shows_its_person():
+    """Task 5 (the thorough zendaya edit): a clip took its own framing, 61 px from the one before, because the framing
+    before would not show the person of its own short piece; joined with the rest of its take, the framing before
+    does show the take's person -- so --min-move holds it, as the XML check reads the joined clip."""
+    from match_cuts import export_xml_edl as ex
+
+    def clips():
+        cs = [_pclip("S01", 0, 60, 600, sim_showing(780)), _pclip("S02", 60, 300, 660, sim_showing(980))]
+        cs[1].framing_note = "its own framing: the framing before would not show its person"
+        return cs
+    shown = SP.Faces("speaker", True, (700.0, 180.0, 900.0, 420.0), [(700.0, 180.0, 900.0, 420.0)])
+    cs = clips()
+    assert ex._hold_after_merge(cs, _Ctx([], [((0.0, 100.0), shown)]), RAW, WIN, Fraction(60), 250.0) == 1
+    assert ex._same_framing(cs[1].keys[0][1], sim_showing(780)) and "kept from S01" in cs[1].framing_note
+    hidden = SP.Faces("speaker", True, (1100.0, 180.0, 1300.0, 420.0), [(1100.0, 180.0, 1300.0, 420.0)])
+    cs = clips()                                         # the take's person is hidden by it: its own framing stays
+    assert ex._hold_after_merge(cs, _Ctx([], [((0.0, 100.0), hidden)]), RAW, WIN, Fraction(60), 250.0) == 0
+    assert ex._same_framing(cs[1].keys[0][1], sim_showing(980))
+    cs = clips()                                         # a new shot of the RAW: chosen fresh, never held
+    assert ex._hold_after_merge(cs, _Ctx([11.0], [((0.0, 100.0), shown)]), RAW, WIN, Fraction(60), 250.0) == 0

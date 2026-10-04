@@ -936,7 +936,7 @@ def test_criterion2_oscillation_gets_an_honest_verdict(tmp_path, monkeypatch):
             return (0.9, 0.5)
         return (0.9, 0.5) if k < c else (0.5, 0.9)
 
-    def frame_score(self, S, k):      # the pixels: the true cut is at 30
+    def frame_score(self, S, k, refine=False):      # the pixels: the true cut is at 30
         return 1.0 if (S.a == 0) == (k < 30) else 0.4
 
     monkeypatch.setattr(seg_mod._Builder, "_side_scores", side_scores)
@@ -966,7 +966,7 @@ def test_criterion2_moves_exhausted_keeps_the_best_position(tmp_path, monkeypatc
     fm, _ = build_fm([Spec(m=a, n=30), Spec(m=b, n=30, track=1)])
     comp, raw = proxies(fm.n)
     monkeypatch.setattr(seg_mod._Builder, "_side_scores", lambda self, A, B, k: (0.5, 0.9))   # always 'move earlier'
-    monkeypatch.setattr(seg_mod._Builder, "_frame_score", lambda self, S, k: 1.0 if (S.a == 0) == (k < 29) else 0.4)
+    monkeypatch.setattr(seg_mod._Builder, "_frame_score", lambda self, S, k, refine=False: 1.0 if (S.a == 0) == (k < 29) else 0.4)
     dl = DecisionLog(tmp_path / "d.jsonl")
     segs = run(fm, comp, raw, dlog=dl)
     dl.close()
@@ -1708,3 +1708,71 @@ def test_frame_blend_slow_motion_snaps_to_025_with_a_verified_path():
         assert abs(val * float(R2997) - pk) < 0.05
         if pk - math.floor(pk + 1e-9) < 0.9:      # (f > 0.9: Frame Mix shows ~j + 1 either way)
             assert math.floor(val * float(R2997) + 1e-9) == math.floor(pk + 1e-9), (k, pk)
+
+
+def test_a_short_free_run_keeps_the_phase_breaks_of_speed_one():
+    """Task 5 (thorough zendaya run): competitor frames 133-139 show RAW 3968 3969 3969 3970 3971 3971 3971 -- a 1.0
+    stretch at 30 fps of 25 fps footage, then two repeats of its last frame (a cut at 138 to RAW 3971 again). The
+    seven frames are also ONE exact 0.6x line, and where the greedy free-run tiling happened to start (the soft ranges
+    40 frames earlier) decided whether the 1.0 phase break at 138 was a DP candidate; without it the edit got a
+    0.6x slow-motion segment showing other RAW frames than the competitor on 2 of its 7 frames."""
+    from match_cuts import segment as seg_mod
+    m = np.array([58, 59, 59, 60, 61, 61, 62, 64, 64, 65, 66, 66, 68, 69, 69, 70, 71, 71, 71, 74, 74, 75, 76, 76,
+                  78, 78, 79, 80, 81, 81])                  # competitor frames 121-150 (RAW 3958-3981, minus 3900)
+    n = len(m)
+    fm, _ = build_fm([Spec(m=m, n=n)])
+    comp = Proxy("competitor", "", None, (720, 1280), (0.5, 0.5), C30, np.arange(n) / 30.0, n)
+    raw = Proxy("raw", "", None, (1920, 1080), (1 / 3, 1 / 3), F(25), np.zeros(1), 200000)
+    b = seg_mod._Builder(fm, comp, raw, None, None, cfg_(), None, None, None)
+    runs = b._free_runs(0, n, True)
+    assert (12, 19) in [(a, e) for a, e, _u0, _u1 in runs]          # 133-139 as one free run (exactly 0.6x) ...
+    assert 17 in b.candidates(0, n)                                   # ... still holds the 1.0 cut at 138
+    segs = raws(run(fm, comp, raw))
+    assert (12, 17) in [(s.comp_in, s.comp_out) for s in segs] and all(abs(s.speed - 1.0) < 1e-6 for s in segs)
+
+
+def test_criterion_two_asks_the_full_resolution_scorer_the_right_question():
+    """The thorough default: two RAW frames at a cut -- which one the competitor shows, each with its framing refined
+    (the Deadpool 271 / 412 cuts: the models' framings were off in a fast pan); one RAW frame -- the framing as given.
+    The full scorer's answer is the one used."""
+    from types import SimpleNamespace as NS
+    from match_cuts import segment as seg_mod
+    fm, _ = build_fm([Spec(m=ff_select(20, 1.0, 100), n=20)])
+    b = seg_mod._Builder(fm, *proxies(20), None, None, cfg_(), None, None, None)
+    calls = []
+
+    def full(k, items, refine=False):
+        calls.append((k, [j for j, _s, _f in items], refine))
+        return np.array([0.9, 0.95])
+    b.full = full
+    A, B = NS(flip=False), NS(flip=False)
+    b.sim_at = lambda S, k: Sim(1.0, 0.0, 0.0, 0.0)
+    b.pred = lambda S, k: 100 + k if S is A else 200 + k
+    assert b._side_scores(A, B, 5) == (0.9, 0.95) and calls[-1] == (5, [105, 205], True)
+    b.pred = lambda S, k: 100 + k                                    # one time line: a framing cut
+    b._side_scores(A, B, 6)
+    assert calls[-1] == (6, [106, 106], False)
+
+
+def test_the_thorough_framing_samples_are_measured_at_full_resolution():
+    """Every matched frame's framing re-measured at full resolution (the proxy's sample, or the samples around a
+    frame without one, refined): the measurement replaces the proxy's sample when it fits (>= FULL_SAMPLE_MIN), and a
+    frame the proxy gave none (a pan's transition frame, held before) gets one."""
+    from types import SimpleNamespace as NS
+    from match_cuts import segment as seg_mod
+    fm, _ = build_fm([Spec(m=ff_select(10, 1.0, 100), n=10)])
+    b = seg_mod._Builder(fm, *proxies(10), None, None, cfg_(), None, None, None)
+    measured = Sim(1.0, 0.0, 5.0, 0.0)
+
+    class Full:
+        comp = raw = NS(prefetch=lambda a, b: None)
+
+        def measure(self, k, j, sim, flip):
+            return (measured, 0.80 if k == 2 else 0.99, 0.9)       # frame 2: a blur -- no sample
+    b.full = Full()
+    proxy = Sim(1.0, 0.0, 0.0, 0.0)
+    out = [(k, proxy, int(fm.raw[k])) for k in range(10) if k != 7]  # the proxy gave frame 7 no sample
+    info: dict = {}
+    got = {k: s for k, s, _j in b._full_res_samples(NS(a=0, b=10, flip=False), out, info, False)}
+    assert got[2] is proxy and got[7] is measured and got[0] is measured
+    assert info["full_res"] == 9 and info["full_res_added"] == 1

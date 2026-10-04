@@ -199,6 +199,28 @@ def plan(spans: Sequence[Span], cuts: Sequence[tuple[int, int]], fps: Fraction, 
     return removed, left
 
 
+MIN_PIECE = 3               # sequence frames: a piece of a clip a removal would leave shorter than this goes too
+
+
+def absorb_slivers(cuts: Sequence[tuple[int, int]], clips: Sequence[Any], n: int = MIN_PIECE) -> list[tuple[int, int]]:
+    """The removals (sequence frames) widened over every piece of a clip they would leave shorter than ``n`` frames
+    next to them: such a piece is a flash frame -- and in Premiere a source range that rounds to nothing (an item
+    whose in is its out). A clip that is that short of its own is left alone."""
+    cur = _merge(cuts)
+    for _ in range(8):
+        add = []
+        for cl in clips:
+            lo, hi = int(cl.rec_start), int(cl.rec_end)
+            parts = [(lo, hi)]
+            for a, b in cur:
+                parts = [q for x0, x1 in parts for q in ((x0, min(x1, a)), (max(x0, b), x1)) if q[1] > q[0]]
+            add += [(a, b) for a, b in parts if b - a < n and (a > lo or b < hi)]
+        if not add:
+            break
+        cur = _merge(cur + add)
+    return cur
+
+
 def _merge(cuts: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
     out: list[list[int]] = []
     for a, b in sorted(cuts):
@@ -234,8 +256,8 @@ def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
                       [(c.a, c.b) for c in sil_cuts], fps, allow, protect)
     out = dict(sil)
     f = float(fps)
-    if done:
-        merged = _merge([(c.a, c.b) for c in sil_cuts] + [d["remove"] for d in done])
+    merged = absorb_slivers([(c.a, c.b) for c in sil_cuts] + [d["remove"] for d in done], clips)
+    if done or merged != [(c.a, c.b) for c in sil_cuts]:
         by_a = {(c.a, c.b): c for c in sil_cuts}
         rp = Ripple([by_a.get((a, b)) or Cut(a, b, a / f, b / f) for a, b in merged], n_frames, before=snap)
         out["ripple"] = rp

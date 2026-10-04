@@ -1501,6 +1501,34 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
     return moved
 
 
+def _hold_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                      win: tuple[float, float, float, float], fps: Fraction, min_move: float) -> int:
+    """--min-move once more on the joined clips: a clip that took its own framing (under min_move px from the one
+    before, inside one RAW shot) because the framing before would not show its person -- judged on the piece it was
+    then -- keeps the framing before when that does show its person over the whole joined take (as the XML check
+    reads it). Returns how many changed."""
+    from . import speakers
+    held = 0
+    for ca, cb in zip(clips, clips[1:]):
+        if len(ca.keys) != 1 or len(cb.keys) != 1 or "would not show its person" not in (cb.framing_note or ""):
+            continue
+        fa, own = ca.keys[0][1], cb.keys[0][1]
+        mv = framing_move(fa, own, raw_wh)
+        if not (0.5 < mv < min_move) or not sp.same_shot(_last_raw_s(ca, fps), _clip_raw_s(cb, fps)[0]):
+            continue
+        if not _covers(fa, raw_wh, win, tol=1e-6) or not speakers.passes(fa, _person_of(cb, sp, fps), raw_wh[0],
+                                                                        bool(cb.seg.flip_h), win):
+            continue
+        if cb.zoom > 0:
+            cb.zoom = fa.s / (own.s / cb.zoom)
+        cb.keys = [(cb.keys[0][0], fa)]
+        cb.covered = True
+        cb.framing_note = (f"framing kept from {ca.label}: its own framing moves {mv:.0f} px, under --min-move "
+                           f"{min_move:g}, and the framing before shows its person over the whole take")
+        held += 1
+    return held
+
+
 def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
                   min_move: float, subject: str = "the competitor's", sp: Any = None,
                   fps: Fraction | None = None) -> list[list[PremiereClip]]:
@@ -1806,6 +1834,8 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
         clips = _merge_continuous(clips)
         if sp is not None:
             _person_after_merge(clips, sp, raw_wh, win, fps)
+            if _hold_after_merge(clips, sp, raw_wh, win, fps, st["min_move"]):
+                clips = _merge_continuous(clips)
     return clips, markers, warnings
 
 

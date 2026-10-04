@@ -151,6 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="folder scanned for the two videos when --competitor/--raw are not given and the "
                         "default names do not exist (default ./input)")
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
+    p.add_argument("--fast", action="store_true",
+                   help="a quick run: the RAW index samples the RAW (10 frames a second) instead of holding every "
+                        "frame, every 3rd competitor frame is searched instead of every one, no full-resolution check "
+                        "or re-check of uncertain frames, the faster speech model for the speech-safe cuts and faces "
+                        "found at 960 px. Default: the most thorough matching (the end summary says what it changed "
+                        "against --fast)")
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
@@ -259,6 +265,8 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "large-v3")
     if args.seed is not None:
         cfg.seed = int(args.seed)
+    if getattr(args, "fast", False):
+        cfg.apply_fast()
     return cfg
 
 
@@ -378,6 +386,46 @@ def headline(result: dict) -> str:
         return {0: "PASS", 2: "ERROR", 3: "PASS (some criterion not verified)"}.get(int(code), "FAIL")
 
 
+def _fmt_time(s: float | None) -> str:
+    if s is None:
+        return "-"
+    s = float(s)
+    return f"{int(s // 60)}m{int(round(s % 60)) % 60:02d}s" if s >= 60 else f"{s:.0f}s"
+
+
+def quality_lines(result: dict) -> list[str]:
+    """The run time, how thorough the matching was (the full-resolution pass) and what that changed against
+    --fast (Task 5)."""
+    ctx = result.get("context")
+    cfg = getattr(ctx, "cfg", None)
+    if cfg is None:
+        return []
+    from . import gpu
+    total = (result.get("timings") or {}).get("total")
+    where = f"the GPU: {gpu.device_name()}" if getattr(cfg, "gpu", False) else "no GPU"
+    out = [f"Run time: {_fmt_time(total)} ({'--fast' if cfg.fast else 'thorough, the default'}; {where})"]
+    if cfg.fast:
+        return out
+    fr = getattr(ctx, "full_res", None) or {}
+    if fr.get("why_not"):
+        out.append(f"  Full resolution: not run ({fr['why_not']})")
+    rc = fr.get("recheck")
+    if rc:
+        out.append(f"  Uncertain frames re-checked at full resolution: {rc['frames']}: {rc['narrowed']} narrowed "
+                   f"({rc['decided']} decided), {rc.get('overruled', 0)} decided against the proxy (full resolution "
+                   f"clearly sure), {rc['kept']} still within noise, {rc['outside']} left to the proxy")
+    vf = fr.get("verify")
+    if vf:
+        out.append(f"  Every frame and cut at full resolution: {vf.get('summary')}")
+    fc = getattr(ctx, "fast_compare", None) or {}
+    if fc.get("error"):
+        out.append(f"  Against --fast: not compared ({fc['error']})")
+    elif fc:
+        out.append(f"  Against --fast: {fc.get('summary')}; the --fast analysis of this video takes "
+                   f"{_fmt_time(fc.get('fast_seconds'))}, the thorough one took {_fmt_time(fc.get('thorough_seconds'))}")
+    return out
+
+
 def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max_rows: int = 12) -> str:
     """The end-of-run summary: overall headline, pass/fail per criterion, the files to use (the run folder's
     1_edit.xml and 2_captions.srt; 3_captions_styled.prproj comes from the restyle command; everything else in
@@ -391,7 +439,8 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
         c = crit.get(key) or {}
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
         lines.append(f"  {label:<30} {st:<6} {c.get('summary', '')}")
-    for key, label in (("s9_7_determinism", "9.7 determinism"), ("s9_8_deliverables", "9.8 deliverables")):
+    for key, label in (("s9_7_determinism", "9.7 determinism"), ("s9_8_deliverables", "9.8 deliverables"),
+                       ("s9_9_full_res", "9.9 full resolution")):
         chk = checks.get(key) or {}
         if chk:
             st = STATUS_TEXT.get(chk.get("status"), str(chk.get("status") or "not run").upper())
@@ -486,6 +535,7 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
         if rep:
             lines.append(f"Repeats: {rep[0]}")
             lines += [f"  {r}" for r in rep[1:]]
+    lines += quality_lines(result)
     warns = list(result.get("warnings") or [])
     if warns:
         lines.append(f"Warnings: {len(warns)}" + (f" (the first {max_warnings}; all in {run_folders.EXTRAS}/report.md)"

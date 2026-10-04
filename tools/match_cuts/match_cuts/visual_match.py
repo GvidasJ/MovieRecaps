@@ -304,16 +304,17 @@ def _spawn_mem_cap(workers: int, state: dict) -> int:
     avail = _available_ram()
     if avail is not None and (idx is None or n_desc > 0):
         avail += _pool_private_bytes()
-        if idx is not None:
+        tree = idx is not None and not getattr(idx, "flann_free", False)
+        if tree:
             per_worker = SPAWN_TREE_BYTES_PER_DESC * n_desc + SPAWN_WORKER_BASE_BYTES
             shared = n_desc * 128 * (1 + 4)              # uint8 + float32 descriptor memmaps (page cache)
-        else:
-            per_worker, shared = SPAWN_WORKER_EST_BYTES, 0
+        else:                                            # no index, or a GPU-searched one: no tree in the workers
+            per_worker, shared = SPAWN_WORKER_EST_BYTES, n_desc * 128
         margin = max(SPAWN_MEM_MARGIN_BYTES, avail // 10)
         cap = int(max(1, min(int(workers), (avail - margin - shared) // per_worker)))
         if cap < workers:
             POOL_STATS["spawn_mem_capped"] += 1
-            if idx is not None:
+            if tree:
                 log.warning("spawn workers: %d instead of %d for the RAW index search - each spawn worker loads "
                             "its own FLANN tree (%.2f GB for %d descriptors + %.2f GB base) and %.1f GB RAM is "
                             "available%s", cap, workers, SPAWN_TREE_BYTES_PER_DESC * n_desc / 1e9, n_desc,
@@ -924,12 +925,15 @@ class RawIndex:
         self.ratio = float(getattr(cfg, "index_ratio", 0.8))
         self.far = float(getattr(cfg, "index_far_s", 2.0)) * float(raw_fps)
         self.seed = int(getattr(cfg, "seed", 12345))
+        self.flann_free = False                             # the GPU searches it (exact, gpu.KnnIndex in this process):
+                                                            #   no FLANN tree anywhere, the workers get the neighbours
         self._flann = None
+        self._gpu = None                                    # gpu.KnnIndex (this process only, never pickled)
         self._data32: np.ndarray | None = None
         self._spawn_files: dict[str, str] | None = None     # set by prepare_spawn (cached index only)
 
     # -- pickling for spawn workers (DESIGN D7) ---------------------------------------------------
-    _SCALARS = ("fps", "step", "key", "npz_path", "knn", "ratio", "far", "seed")
+    _SCALARS = ("fps", "step", "key", "npz_path", "knn", "ratio", "far", "seed", "flann_free")
 
     def prepare_spawn(self) -> None:
         """Called by :func:`parallel_map` before pickling for spawn workers. Trains FLANN here (once) and,
@@ -937,9 +941,11 @@ class RawIndex:
         ``.desc32.npy``, kept: content-addressed by the index key, re-checked against a strided sample)
         and this process's trained tree (``.flann``), so every worker memmaps the descriptors (one copy in
         the page cache instead of one per worker) and loads the identical tree instead of re-training it
-        (without a usable ``.flann`` the worker re-trains with the index seed: the same tree, slower)."""
+        (without a usable ``.flann`` the worker re-trains with the index seed: the same tree, slower).
+        A GPU-searched index (``flann_free``) writes only the uint8 descriptors: no tree is trained or loaded."""
         import cv2
-        self.ensure_built()
+        if not self.flann_free:
+            self.ensure_built()
         if self._spawn_files is not None or not self.npz_path or not Path(self.npz_path).is_file():
             return
         base = Path(self.npz_path)
@@ -947,8 +953,9 @@ class RawIndex:
         paths = {"desc": base.with_name(stem + ".desc.npy"), "desc32": base.with_name(stem + ".desc32.npy"),
                  "flann": base.with_name(stem + ".flann")}
         step = max(1, len(self.desc) // 1024)
+        sides = (("desc", self.desc),) if self.flann_free else (("desc", self.desc), ("desc32", self._data32))
         try:
-            for name, arr in (("desc", self.desc), ("desc32", self._data32)):
+            for name, arr in sides:
                 p = paths[name]
                 ok = False
                 if p.is_file():
@@ -965,6 +972,9 @@ class RawIndex:
                     os.replace(tmp, p)
         except OSError as e:
             log.warning("RAW index: spawn side files not written (%s) - workers receive the descriptors", e)
+            return
+        if self.flann_free:
+            self._spawn_files = {"desc": str(paths["desc"])}
             return
         files = {"desc": str(paths["desc"]), "desc32": str(paths["desc32"])}
         # the tree is re-saved once per process: workers must load exactly the tree trained here
@@ -994,13 +1004,17 @@ class RawIndex:
     # -- construction ---------------------------------------------------------------------------
     @staticmethod
     def build(raw: Proxy, cfg, cache: Cache | None) -> "RawIndex":
-        """SIFT every round(raw_fps / index_fps) RAW proxy frames (index_fps = raw_index_fps_short for
-        RAW <= 10 min, else raw_index_fps_long); nfeatures per frame lowered so the total stays below
-        cfg.index_max_descriptors. Cached (stage 'raw_index', npz) by proxy identity + parameters."""
+        """SIFT every RAW proxy frame (cfg.raw_index_every_frame, with the GPU search) or every round(raw_fps /
+        index_fps) frames (index_fps = raw_index_fps_short for RAW <= 10 min, else raw_index_fps_long); nfeatures per
+        frame lowered so the total stays below cfg.index_max_descriptors. Cached (stage 'raw_index', npz) by proxy
+        identity + parameters. With cfg.gpu (and a usable GPU) it is searched exactly on the GPU (:meth:`neighbours`)."""
+        from . import gpu
         fps = float(raw.fps)
         duration = raw.n / fps if fps > 0 else 0.0
         index_fps = cfg.raw_index_fps_short if duration <= 600.0 else cfg.raw_index_fps_long
-        step = max(1, int(round(fps / float(index_fps))))
+        on_gpu = bool(getattr(cfg, "gpu", False)) and gpu.available() is None
+        every = bool(getattr(cfg, "raw_index_every_frame", False)) and on_gpu
+        step = 1 if every else max(1, int(round(fps / float(index_fps))))
         frames = [j for j in range(0, raw.n, step) if raw.has(j)]
         if not frames:
             raise ValueError("RawIndex.build: the RAW proxy holds no index frames")
@@ -1031,9 +1045,26 @@ class RawIndex:
         npz_path = str(cache.path("raw_index", key, ".npz")) if cache is not None else ""
         idx = RawIndex(data["frames"], data["desc"], data["owner"], data["pts"], data["offsets"], raw.fps,
                        int(data["step"]), cfg, key, npz_path=npz_path)
-        log.info("RAW index: %d frames (step %d), %d descriptors (%.1f MB uint8)", len(idx.frames), idx.step,
-                 len(idx.desc), idx.desc.nbytes / 1e6)
+        idx.flann_free = on_gpu
+        log.info("RAW index: %d frames (step %d), %d descriptors (%.1f MB uint8), searched %s", len(idx.frames),
+                 idx.step, len(idx.desc), idx.desc.nbytes / 1e6,
+                 f"exactly on the GPU ({gpu.device_name()})" if on_gpu else "with FLANN kd-trees (approximate, CPU)")
         return idx
+
+    # -- GPU search (exact) -------------------------------------------------------------------------
+    def neighbours(self, queries: Sequence[np.ndarray]) -> list[tuple[np.ndarray, np.ndarray]]:
+        """The exact index_knn nearest neighbours of each query set on the GPU: [(indices [m, k], squared distances
+        [m, k])] (gpu.KnnIndex, uploaded once per process)."""
+        from . import gpu
+        if self._gpu is None:
+            self._gpu = gpu.KnnIndex(np.asarray(self.desc))
+        return self._gpu.search(queries, int(min(self.knn, len(self.desc))))
+
+    def close_gpu(self) -> None:
+        """Free the GPU copy (after the searches of S5.2 / S5.3)."""
+        if self._gpu is not None:
+            self._gpu.close()
+            self._gpu = None
 
     # -- FLANN ----------------------------------------------------------------------------------
     def ensure_built(self) -> None:
@@ -1056,22 +1087,30 @@ class RawIndex:
         return self.pts[a:b], self.desc[a:b]
 
     # -- voting ---------------------------------------------------------------------------------
-    def votes(self, desc: np.ndarray, window: tuple[int, int] | None = None) -> np.ndarray:
+    def votes(self, desc: np.ndarray, window: tuple[int, int] | None = None,
+              nn: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
         """Cluster-aware vote vector over index frames (smoothed over +-1 index frame).
 
         For each query descriptor: k = index_knn nearest neighbours; f0 = frame of the first one; the
         ratio denominator is the first neighbour whose frame is > index_far_s away from f0 (NOT the
         second neighbour, which is usually a near-duplicate from an adjacent index frame). If
         d1 < index_ratio * d_far (or no far neighbour exists), every neighbour within index_far_s of f0
-        with distance <= 1.1 d1 votes with weight 1 / cluster size."""
+        with distance <= 1.1 d1 votes with weight 1 / cluster size. ``nn``: the neighbours of ``desc``
+        already found (:meth:`neighbours`, exact on the GPU); else FLANN finds them (approximate)."""
         F = len(self.frames)
         v = np.zeros(F, np.float64)
         if desc is None or len(desc) == 0 or len(self.desc) == 0:
             return v
-        self.ensure_built()
-        k = int(min(self.knn, len(self.desc)))
         q = np.ascontiguousarray(desc, dtype=np.float32)
-        ind, d2 = self._flann.knnSearch(q, k, params=dict(checks=64))
+        if nn is None and self.flann_free:
+            nn = self.neighbours([q])[0]                    # a direct call: the GPU search here, one query set
+        if nn is not None:
+            ind, d2 = nn
+            k = int(np.asarray(ind).shape[1]) if np.asarray(ind).ndim == 2 else int(min(self.knn, len(self.desc)))
+        else:
+            self.ensure_built()
+            k = int(min(self.knn, len(self.desc)))
+            ind, d2 = self._flann.knnSearch(q, k, params=dict(checks=64))
         ind = np.asarray(ind, np.int64).reshape(len(q), k)
         dist = np.sqrt(np.maximum(np.asarray(d2, np.float64).reshape(len(q), k), 0.0))
         valid = ind >= 0
@@ -1100,12 +1139,13 @@ class RawIndex:
             sm[outside] = 0.0
         return sm
 
-    def query(self, desc: np.ndarray, top: int, window: tuple[int, int] | None = None) -> list[tuple[int, float]]:
+    def query(self, desc: np.ndarray, top: int, window: tuple[int, int] | None = None,
+              nn: tuple[np.ndarray, np.ndarray] | None = None) -> list[tuple[int, float]]:
         """Candidate RAW frames for one set of query descriptors: [(raw frame, votes)], best first.
 
         Peaks (local maxima) of the smoothed cluster-aware vote vector, restricted to RAW frames in
-        ``window`` = [j0, j1) when given. Deterministic ordering (votes desc, frame asc)."""
-        sm = self.votes(desc, window)
+        ``window`` = [j0, j1) when given. Deterministic ordering (votes desc, frame asc). ``nn``: see :meth:`votes`."""
+        sm = self.votes(desc, window, nn)
         if not np.any(sm > 0):
             return []
         left = np.concatenate([[-np.inf], sm[:-1]])
@@ -1125,11 +1165,12 @@ def _restore_index(st: dict) -> RawIndex:
     persistent pool loads each tree once per worker, not once per call."""
     import cv2
     files = st.get("files")
-    ident = (str(st["key"]), (files.get("flann") or files["desc32"]) if files else "")
+    free = bool(st.get("flann_free"))       # GPU-searched: the neighbours come with the tasks, no tree here
+    ident = (str(st["key"]), (files.get("flann") or files.get("desc32") or files["desc"]) if files else "", free)
     idx = _INDEX_CACHE.get(ident) if st["key"] else None
     if idx is None:
         idx = RawIndex.__new__(RawIndex)
-        idx._flann, idx._data32, idx._spawn_files = None, None, None
+        idx._flann, idx._data32, idx._spawn_files, idx._gpu = None, None, None, None
         if files:
             with np.load(st["npz_path"], allow_pickle=False) as z:
                 idx.frames = np.asarray(z["frames"], np.int32)
@@ -1137,20 +1178,21 @@ def _restore_index(st: dict) -> RawIndex:
                 idx.pts = np.asarray(z["pts"], np.float32)
                 idx.offsets = np.asarray(z["offsets"], np.int64)
             idx.desc = np.load(files["desc"], mmap_mode="r")
-            idx._data32 = np.load(files["desc32"], mmap_mode="r")
-            if files.get("flann") and len(idx._data32):
-                try:
-                    fl = cv2.flann_Index()
-                    if fl.load(idx._data32, files["flann"]):
-                        idx._flann = fl
-                except cv2.error:                      # unreadable tree file: re-train (same seed, same tree)
-                    idx._flann = None
+            if not free:
+                idx._data32 = np.load(files["desc32"], mmap_mode="r")
+                if files.get("flann") and len(idx._data32):
+                    try:
+                        fl = cv2.flann_Index()
+                        if fl.load(idx._data32, files["flann"]):
+                            idx._flann = fl
+                    except cv2.error:                  # unreadable tree file: re-train (same seed, same tree)
+                        idx._flann = None
         else:
             idx.frames, idx.desc, idx.owner = st["frames"], st["desc"], st["owner"]
             idx.pts, idx.offsets = st["pts"], st["offsets"]
         for k in RawIndex._SCALARS:
-            setattr(idx, k, st[k])
-        if len(idx.desc):
+            setattr(idx, k, st.get(k, False) if k == "flann_free" else st[k])
+        if len(idx.desc) and not free:
             idx.ensure_built()                  # no-op when the tree was loaded
         if st["key"]:
             _INDEX_CACHE[ident] = idx
@@ -1158,7 +1200,7 @@ def _restore_index(st: dict) -> RawIndex:
                 _INDEX_CACHE.popitem(last=False)
     else:
         for k in RawIndex._SCALARS:            # query parameters travel with every call
-            setattr(idx, k, st[k])
+            setattr(idx, k, st.get(k, False) if k == "flann_free" else st[k])
     return idx
 
 
@@ -1461,8 +1503,10 @@ def run_line_searches(comp: Proxy, raw: Proxy, allowed: Callable[[int], np.ndarr
 def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.ndarray | None, cfg,
                  window: tuple[int, int] | None = None, source: str = "global",
                  roi: tuple[int, int, int, int] | None = None,
-                 report: list | None = None, near_miss: bool = False) -> list[Anchor]:
-    """Find verified RAW matches (normal and flipped) of competitor frame k (DESIGN §5).
+                 report: list | None = None, near_miss: bool = False, pre: dict | None = None) -> list[Anchor]:
+    """Find verified RAW matches (normal and flipped) of competitor frame k (DESIGN §5). ``pre``: this frame's
+    SIFT features (``cpts``, ``cdesc``) and the index neighbours of them and of their mirror (``nn``, ``nn_f``),
+    found beforehand (:func:`run_searches`, the GPU search) -- the same values this function would find.
 
     ``near_miss``: when no candidate passes, RANSAC near-misses (near_miss_inliers <= inliers < min_inliers,
     ratio >= min_inlier_ratio) that pass the same re-estimation and ZNCC test are returned with source
@@ -1487,7 +1531,7 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
     h, w = img.shape[:2]
     if roi is None:
         roi = mask_bbox(allowed, (h, w))
-    cpts, cdesc = detect_sift(img, allowed, cfg.sift_nfeatures, roi)
+    cpts, cdesc = (pre["cpts"], pre["cdesc"]) if pre is not None else detect_sift(img, allowed, cfg.sift_nfeatures, roi)
     near_min = int(getattr(cfg, "near_miss_inliers", 0) or 0) if near_miss else 0
     if len(cdesc) < max(3, min(cfg.min_inliers, near_min) if near_min else cfg.min_inliers):
         if report is not None:
@@ -1495,8 +1539,8 @@ def search_frame(k: int, comp: Proxy, raw: Proxy, index: RawIndex, allowed: np.n
         return []
     cdesc_f = cdesc[:, _MIRROR_IDX]          # = SIFT of the mirrored frame (votes for the flip hypothesis)
     top = int(cfg.vote_top_candidates)
-    cands = [(j, False, v) for j, v in index.query(cdesc, top, window)]
-    cands += [(j, True, v) for j, v in index.query(cdesc_f, top, window)]
+    cands = [(j, False, v) for j, v in index.query(cdesc, top, window, nn=pre.get("nn") if pre else None)]
+    cands += [(j, True, v) for j, v in index.query(cdesc_f, top, window, nn=pre.get("nn_f") if pre else None)]
     if not cands:
         if report is not None:
             report.append({"k": int(k), "reason": "no_votes"})
@@ -1577,8 +1621,9 @@ def audio_window(hints: AudioHints | None, k: int, comp_fps, raw_fps, cfg, raw_n
     return (j0, j1) if j1 > j0 else None
 
 
-def _search_worker(state: dict, task: tuple[int, tuple[int, int] | None, str]) -> tuple[int, list[dict], list]:
-    k, window, source = task
+def _search_worker(state: dict, task: tuple) -> tuple[int, list[dict], list]:
+    k, window, source = task[:3]
+    pre = task[3] if len(task) > 3 else None          # SIFT + GPU neighbours found beforehand (run_searches)
     comp, raw, index, cfg = state["comp"], state["raw"], state["index"], state["cfg"]
     allowed = state["allowed"](k)
     roi = state["roi"]
@@ -1586,11 +1631,11 @@ def _search_worker(state: dict, task: tuple[int, tuple[int, int] | None, str]) -
     anchors: list[Anchor] = []
     if window is not None:
         anchors = search_frame(k, comp, raw, index, allowed, cfg, window=window, source="audio", roi=roi, report=rep,
-                               near_miss=True)
+                               near_miss=True, pre=pre)
     weak = ("_near", "_gray")
     if not anchors or all(a.source.endswith(weak) for a in anchors):
         glob = search_frame(k, comp, raw, index, allowed, cfg, window=None, source=source, roi=roi, report=rep,
-                            near_miss=True)
+                            near_miss=True, pre=pre)
         rank = lambda aa: 0 if not aa else (2 if not all(a.source.endswith(weak) for a in aa) else  # noqa: E731
                                             (1 if any(a.source.endswith("_near") for a in aa) else 0.5))
         if glob and rank(glob) > rank(anchors):
@@ -1599,14 +1644,35 @@ def _search_worker(state: dict, task: tuple[int, tuple[int, int] | None, str]) -
     return int(k), [a.to_dict() for a in anchors[:keep]], rep[:12]
 
 
+def _sift_worker(state: dict, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """search_frame's SIFT of competitor frame k (the same call, the same values)."""
+    cfg = state["cfg"]
+    return detect_sift(np.asarray(state["comp"].get(int(k))), state["allowed"](int(k)), cfg.sift_nfeatures,
+                       state["roi"])
+
+
 def run_searches(comp: Proxy, raw: Proxy, index: RawIndex, allowed: Callable[[int], np.ndarray],
                  roi: tuple[int, int, int, int], hints: AudioHints | None, frames: Iterable[int], cfg,
                  source: str = "global") -> list[tuple[int, list[Anchor], list]]:
-    """search_frame on many frames in a worker pool (audio window first, then global). Input order kept."""
-    index.ensure_built()
-    tasks = [(int(k), audio_window(hints, k, comp.fps, raw.fps, cfg, raw.n), source) for k in frames]
+    """search_frame on many frames in a worker pool (audio window first, then global). Input order kept.
+
+    A GPU-searched index (``index.flann_free``): the frames' SIFT features first (worker pool), then the exact
+    neighbours of all of them and of their mirrors on the GPU in this process (one batch), then the searches with
+    those -- the workers never hold a kd-tree (an every-frame index would need ~800 B per descriptor in each)."""
+    workers = cfg.resolved_workers()
+    tasks: list[tuple] = [(int(k), audio_window(hints, k, comp.fps, raw.fps, cfg, raw.n), source) for k in frames]
+    if index.flann_free and tasks:
+        feats = parallel_map(_sift_worker, [t[0] for t in tasks], workers,
+                             {"comp": comp, "cfg": cfg, "allowed": allowed, "roi": roi}, cfg.seed, min_items=4,
+                             label="search features")
+        nn = index.neighbours([d for _p, d in feats] + [np.ascontiguousarray(d[:, _MIRROR_IDX]) for _p, d in feats])
+        n = len(feats)
+        tasks = [(k, w, s, {"cpts": feats[i][0], "cdesc": feats[i][1], "nn": nn[i], "nn_f": nn[n + i]})
+                 for i, (k, w, s) in enumerate(tasks)]
+    else:
+        index.ensure_built()
     state = {"comp": comp, "raw": raw, "index": index, "cfg": cfg, "allowed": allowed, "roi": roi}
-    res = parallel_map(_search_worker, tasks, cfg.resolved_workers(), state, cfg.seed, min_items=4)
+    res = parallel_map(_search_worker, tasks, workers, state, cfg.seed, min_items=4)
     return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
 
 

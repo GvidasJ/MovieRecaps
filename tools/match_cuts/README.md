@@ -80,7 +80,7 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 | `--audio-sync` | `raw` | which audio timing the export uses when the competitor's sound is shifted against its picture (see *A/V offset* below): `raw` keeps the RAW's own lip-sync; `competitor` copies the competitor's shift exactly |
 | `-v` | off | debug logging on the console |
 
-Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
+Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
@@ -96,6 +96,30 @@ edit from the RAW alone (see *Without a competitor* below).
 `--no-broll`: where the competitor cuts away (B-roll from your RAW or not in it) while the RAW audio keeps
 playing, the export shows the RAW video that matches the audio instead, so the main clip plays through (see
 *B-roll cutaways* below).
+
+### Thorough by default (`--fast` for quick runs)
+
+A run matches the cuts as thoroughly as this PC allows: the GPU where it makes the matching faster or more exact, one
+worker process per physical CPU core everywhere else (a second process on a core's other hardware thread makes the
+matching slower, not faster: the same 120 searches take 32-34 s with 12-15 workers, 47-50 s with 16-30, on a
+15-core / 30-thread CPU). `--fast` is the quick run.
+
+| | the default (thorough) | `--fast` |
+|---|---|---|
+| RAW index | every RAW frame (SIFT, 500 features each, up to 12 M in all), searched **exactly** on the GPU (the FLANN kd-trees on the CPU find the true nearest neighbour only ~60 % of the time) | 10 frames a second (3 for a RAW over 10 min), 2 M features in all (searched on the GPU too when there is one) |
+| competitor frames searched | every one | every 3rd (refine fills in the rest) |
+| slightly uncertain frames | re-checked at full resolution on the GPU before the cuts are decided: refine's low-margin / confounded / tied frames and the 2 frames on each side of every RAW jump (the first frames after a jump cut in a fast pan are blurred on the proxy); each candidate RAW frame with its own framing refined at full size, following a score still rising past the candidates' edge. The re-check narrows which RAW frames a frame may show, and decides against the proxy only when full resolution is clearly sure (better by more than 0.01 ZNCC, at least 0.9) | -- |
+| where a cut goes (criterion 2) | at full resolution: two RAW frames on the two sides -- which one the competitor shows, each with its framing refined (in a fast pan both models' framings are off at a cut); one RAW frame -- its framing as delivered | on the proxy |
+| each clip's framing (keys) | every matched frame's framing measured at full resolution (sub-pixel, the transition frames of a fast pan included), the keys fitted to those | refine's per-frame measurements on the proxy |
+| verification | also every frame and every cut at full resolution (9.9): each frame as delivered, the framing error the refinement finds, a neighbouring RAW frame that fits better (a failure beyond 0.01, unless it is the repeat cadence one constant-speed clip cannot follow: the competitor shows one picture on two frames where the time line steps, or the time line shows one RAW frame twice where the competitor moves on), and each cut (a failure when a frame next to it fits the other side's model better by 0.01, unless the competitor repeats a picture across the cut) | the proxy checks |
+| speech-safe cuts (speech map) | large-v3 | large-v3-turbo |
+| framing check (who speaks) | YuNet faces and Light-ASD on every RAW frame the edit plays, at 25 fps (Light-ASD's own rate), faces found at 960 px wide (full width was tried on tests/real/zendaya: the same person found speaking on 688 of 699 frames -- the other 11 an overlap where both speak -- and only two more tracks, a 34 px background face and an 11-frame fragment, for 4x the pixels to search) | the same |
+| end summary | `Run time`, what the full-resolution pass changed, and `Against --fast`: what the thorough analysis changed against the one a --fast run makes of the same video (it is made too, from the same caches) and how long each takes | `Run time` |
+
+Without a CUDA GPU the default samples the RAW like `--fast` (an every-frame index needs the exact GPU search), skips
+the full-resolution pass, and says so.
+
+Measured on an RTX 5080 with 15 cores, from empty caches: tests/real/deadpool (a 203 s 1080p RAW, 700 competitor frames) takes 9m01s on a free GPU; tests/real/zendaya (278 s, 740 frames) 16m21s thorough, 6m16s with `--fast` and 4m11s thorough again from its caches, and tests/real/spiderman-school (a 284 s RAW at 59.94 fps, 1,965 frames) 82 minutes -- the last three while a Media Encoder render shared the GPU. The exact search of every RAW frame grows with the RAW's length times the competitor's frames (33 minutes of Spider-Man's run).
 
 ### Premiere (`--premiere`)
 

@@ -456,6 +456,9 @@ def _world():
 def install_stub_world(monkeypatch, calls: dict):
     raw_frames, comp_frames, truth = _world()
     phase = install(monkeypatch, "phase_solve", **_stub_phase())
+    # these tests count the visual stages of ONE analysis: the thorough default's --fast comparison (a second
+    # analysis, tested on its own in test_quality.py) stays out
+    monkeypatch.setattr(pipeline, "stage_fast_compare", lambda ctx, start: None)
 
     def probe(path, role, work_dir, decode=True):
         n = COMP_N if role == "competitor" else RAW_N
@@ -560,7 +563,7 @@ def install_stub_world(monkeypatch, calls: dict):
         return fm
     install(monkeypatch, "refine", build_frame_map=build_frame_map)
 
-    def build_segments(fm, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints=None):
+    def build_segments(fm, comp, raw, layout, overlays, cfg, dlog, debug_dir, hints=None, full_scorer=None):
         (Path(debug_dir) / "mapping.png").write_bytes(b"png")
         (Path(debug_dir) / "scores.png").write_bytes(b"png")
         out = []

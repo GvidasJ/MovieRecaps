@@ -285,3 +285,16 @@ def test_a_freeze_placeholder_is_not_a_repeat(tmp_path):
     cl.segments[9] = T._grid_seg(10, 270, 300, 2700)                     # S10 starts on the freeze's RAW (90 s)
     plan, xml, v, x = export(tmp_path, cl)
     assert plan["repeats"]["rows"] == [] and v["ok"] and v["repeat_problems"] == [], v["errors"]
+
+
+def test_a_removal_never_leaves_a_sliver_of_a_clip():
+    """Task 5 (seen on the thorough zendaya edit): a stutter removed at a cut left one sequence frame of the next clip,
+    whose source range rounded to nothing (XML 'in 9534 is not before out 9534'). A piece shorter than MIN_PIECE
+    next to a removal goes with it; a clip that short of its own stays."""
+    from types import SimpleNamespace as C
+    clips = [C(rec_start=0, rec_end=100), C(rec_start=100, rec_end=140), C(rec_start=140, rec_end=142),
+             C(rec_start=142, rec_end=200)]
+    assert repeats.absorb_slivers([(110, 139)], clips) == [(110, 140)]
+    assert repeats.absorb_slivers([(101, 139)], clips) == [(100, 140)]     # 1 frame of it left on both sides
+    assert repeats.absorb_slivers([(150, 160)], clips) == [(150, 160)]     # the 2-frame clip 140-142 is its own
+    assert repeats.absorb_slivers([(141, 150)], clips) == [(140, 150)]     # ... but 1 frame of it left goes

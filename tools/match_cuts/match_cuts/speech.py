@@ -371,6 +371,36 @@ def _shift_jumps(ps: list[Piece], sm: SpeechMap, f: float, v1_cuts: set[int] | N
     return [(r, d) for r, d in sorted(moved.items()) if d]
 
 
+def _own_sound(ps: list[Piece], sm: SpeechMap, f: float, v1_cuts: set[int] | None, done: set[int]
+               ) -> list[tuple[int, int]]:
+    """Audio-line jumps inside speech too far to shift (_shift_jumps: MAX_SHIFT_S) where V1 does not cut: the audio
+    line takes its picture's own sound (its source moves by its v_off), so A1 plays on in one take and cuts where the
+    picture cuts -- where snap_edits puts the cut into the quiet. The competitor's J or L cut inside speech: the
+    thorough Deadpool S09, whose sound switches to the next take 4 frames before its picture, 0.38 s on inside
+    "Pitt's going". ``done``: the pieces _shift_jumps moved. [(the moved piece's first sequence frame, frames)] --
+    ``ps`` changed in place."""
+    if v1_cuts is None:
+        return []
+    cap = MAX_SHIFT_S * f + 1e-9
+    moved: list[tuple[int, int]] = []
+    for p, q in zip(ps, ps[1:]):
+        if p.r1 != q.r0 or p.r1 in v1_cuts or abs(p.speed - 1) > 1e-6 or abs(q.speed - 1) > 1e-6:
+            continue
+        end = p.src + (p.r1 - p.r0)
+        if abs(q.src - end) <= cap or not (_inside(sm, end / f) or _inside(sm, q.src / f)):
+            continue
+        for x in (q, p):                 # the audio line after the jump first: the sound before it is its own
+            if not x.shiftable or x.v_off is None or x.r0 in done:
+                continue
+            d = int(round(x.v_off * f))
+            if d:
+                x.src += d
+                x.v_off, x.shiftable = 0.0, False
+                moved.append((x.r0, d))
+            break
+    return moved
+
+
 def _slide_dissolves(ps: list[Piece], sm: SpeechMap, f: float) -> list[tuple[int, int]]:
     """A1 cuts under a cross dissolve (both sides locked: the picture mixes there, A1 cuts hard) that land inside
     speech: the cut slides inside the dissolve to the nearest frame where both sides are quiet -- the clip before
@@ -479,13 +509,15 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
     every audio cut of ``pieces`` into the quiet of ``sm`` (module docstring). Only clips at 100 % move; a piece
     running on in the very next RAW frame is one take (no cut there). ``v1_cuts``: the sequence frames where V1
     cuts -- an A1 edge elsewhere moves only when the pieces between it and V1's last cut went (the picture cuts there
-    then); an audio line jumping a little inside speech there plays on instead (_shift_jumps). ``shots``: the RAW's
+    then); an audio line jumping a little inside speech there plays on instead (_shift_jumps), one jumping further
+    takes its picture's own sound, so A1 cuts where V1 cuts (_own_sound). ``shots``: the RAW's
     shot changes (s): no clip starts or ends with a sliver of another shot (shot_guard). A clip left with nothing to
     play goes."""
     f = float(fps)
     hi_s = sm.dur if src_max is None else min(sm.dur, float(src_max) / f)
     ps = [Piece(**vars(p)) for p in sorted(pieces, key=lambda p: p.r0)]
     shifts = _shift_jumps(ps, sm, f, v1_cuts)
+    shifts += _own_sound(ps, sm, f, v1_cuts, {r for r, _ in shifts})
     slides = _slide_dissolves(ps, sm, f)
     trims: list[tuple[int, int]] = []
     inserts: list[tuple[int, int, str, float]] = []

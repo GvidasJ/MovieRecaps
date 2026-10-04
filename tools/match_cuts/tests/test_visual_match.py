@@ -180,7 +180,9 @@ def make_scene(seed: int = 0) -> dict:
 
 
 def make_config(tmp_path, workers: int = 2) -> Config:
-    cfg = Config(work_dir=str(tmp_path / "work"), out_dir=str(tmp_path / "out"))
+    """The CPU path: the sampled index searched with FLANN (the tests of the GPU path build their own config)."""
+    cfg = Config(work_dir=str(tmp_path / "work"), out_dir=str(tmp_path / "out")).apply_fast()
+    cfg.gpu = False
     cfg.workers = workers
     return cfg
 
@@ -839,3 +841,89 @@ def test_spawn_workers_drop_index_trees_for_states_without_index(scene, built, m
     assert all(r[2] == 0 for r in r2)                           # S5.3 state: the trees were dropped
     r3 = vm.parallel_map(_index_probe, items, 3, {"index": idx}, seed=1)
     assert all(r[2] >= 1 for r in r3) and [r[3] for r in r3] == [r[3] for r in r1]   # reloaded, same votes
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# the GPU path (the thorough default): every RAW frame indexed, searched exactly on the GPU
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _gpu_ok():
+    from match_cuts import gpu
+    return gpu.available() is None
+
+
+@pytest.fixture(scope="module")
+def built_gpu(scene, tmp_path_factory):
+    if not _gpu_ok():
+        pytest.skip("no GPU")
+    tmp = tmp_path_factory.mktemp("vm_gpu")
+    cfg = Config(work_dir=str(tmp / "work"), out_dir=str(tmp / "out"))
+    cfg.workers = 2
+    cache = Cache(tmp / "work")
+    return dict(cfg=cfg, cache=cache, index=vm.RawIndex.build(scene["raw"], cfg, cache))
+
+
+def _brute_nn(idx, q):
+    """The exact neighbours (index order breaking ties), numpy."""
+    X = idx.desc.astype(np.int64)
+    k = int(min(idx.knn, len(X)))
+    out_i, out_d = [], []
+    for row in np.asarray(q, np.int64):
+        d2 = ((X - row) ** 2).sum(1)
+        order = np.lexsort((np.arange(len(d2)), d2))[:k]
+        out_i.append(order)
+        out_d.append(d2[order].astype(np.float32))
+    return np.array(out_i), np.array(out_d)
+
+
+def test_every_raw_frame_is_indexed_and_searched_exactly_on_the_gpu(scene, built_gpu):
+    idx = built_gpu["index"]
+    raw = scene["raw"]
+    assert idx.step == 1 and list(idx.frames) == list(range(raw.n)) and idx.flann_free
+    q = np.ascontiguousarray(idx.desc[::41][:200])
+    nn = idx.neighbours([q])[0]
+    bi, bd = _brute_nn(idx, q)
+    assert np.array_equal(nn[0], bi) and np.array_equal(nn[1], bd)        # the true neighbours, exactly
+    assert np.array_equal(idx.votes(q), idx.votes(q, nn=(bi, bd)))
+
+
+def test_a_gpu_searched_index_reaches_the_workers_without_a_kd_tree(scene, built_gpu):
+    idx = built_gpu["index"]
+    idx.prepare_spawn()
+    assert set(idx._spawn_files) == {"desc"}                             # no float32 copy, no tree file
+    vm._INDEX_CACHE.clear()
+    back = pickle.loads(pickle.dumps(idx, protocol=pickle.HIGHEST_PROTOCOL))
+    assert back.flann_free and back._flann is None and isinstance(back.desc, np.memmap)
+    q = np.ascontiguousarray(idx.desc[::53][:100])
+    nn = idx.neighbours([q])[0]
+    assert np.array_equal(back.votes(q, nn=nn), idx.votes(q, nn=nn))       # the neighbours come with the task
+    pts, desc = back.frame_features(31)                                  # every frame's features are there
+    assert len(desc) and np.array_equal(desc, idx.frame_features(31)[1])
+
+
+def test_the_gpu_searches_give_the_anchors_of_direct_searches(scene, built_gpu):
+    idx, cfg = built_gpu["index"], built_gpu["cfg"]
+    comp = scene["comp"]
+    am = _allowed(scene, cfg)
+    roi = vm.box_roi(scene["layout"], comp)
+    frames = [3, 33, 64, 100]
+    got = vm.run_searches(comp, scene["raw"], idx, am, roi, None, frames, cfg)
+    for k, anchors, _rep in got:
+        direct = vm.search_frame(k, comp, scene["raw"], idx, am(k), cfg, window=None, source="global", roi=roi,
+                                 near_miss=True)
+        assert [(a.raw, a.flip, round(a.zncc, 6)) for a in anchors] == \
+               [(a.raw, a.flip, round(a.zncc, 6)) for a in direct[:len(anchors)]], k
+        assert anchors and abs(anchors[0].raw - scene["truth"][k]["raw"]) <= 1, k
+    vm.shutdown_workers()
+
+
+def test_a_gpu_searched_index_does_not_shrink_the_pool_for_trees_it_never_loads(built_gpu, monkeypatch):
+    idx = built_gpu["index"]
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_pool_private_bytes", lambda: 0)
+    # room for 2.5 kd-tree workers -- but no worker of a GPU-searched index loads one: a plain worker each
+    monkeypatch.setattr(vm, "_available_ram", lambda: _ram_for_workers(idx, 2.5))
+    per_tree = vm.SPAWN_TREE_BYTES_PER_DESC * len(idx.desc) + vm.SPAWN_WORKER_BASE_BYTES
+    plain = (_ram_for_workers(idx, 2.5) - vm.SPAWN_MEM_MARGIN_BYTES - len(idx.desc) * 128) // vm.SPAWN_WORKER_EST_BYTES
+    assert vm._spawn_mem_cap(4, {"index": idx}) == min(4, max(1, int(plain)))
+    assert per_tree > 0 and idx.flann_free

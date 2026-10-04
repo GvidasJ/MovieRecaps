@@ -16,6 +16,7 @@ dependencies = [
     "av>=12",
     "soundfile>=0.12",
     "matplotlib>=3.8",
+    "psutil>=5.9",             # the physical core count: one worker process per core (config.physical_cores)
 ]
 
 [project.optional-dependencies]

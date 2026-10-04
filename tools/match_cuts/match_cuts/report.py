@@ -334,6 +334,9 @@ def _criteria(ctx: Any) -> list[str]:
     dlv = checks.get("s9_8_deliverables", {})
     if dlv or crit:
         rows.append(["9.8 Deliverables", _status(dlv.get("status")), dlv.get("summary", "not run")])
+    full = checks.get("s9_9_full_res", {})
+    if full:
+        rows.append(["9.9 Full resolution", _status(full.get("status")), full.get("summary", "not run")])
     out = [f"**Overall: {headline(ver)}**", "", md_table(["Criterion", "Status", "Evidence"], rows)]
     settings = (ctx.cutlist.settings if getattr(ctx, "cutlist", None) else {}) or {}
     if settings and not settings.get("criteria_exact", True):
@@ -1494,6 +1497,68 @@ def _silence(ctx: Any) -> list[str]:
     return out
 
 
+def _thoroughness(ctx: Any) -> list[str]:
+    """Task 5: how thorough the matching was, what ran on the GPU, the full-resolution pass and what the thorough
+    default changed against --fast."""
+    cfg = ctx.cfg
+    tm = getattr(ctx, "timings", None) or {}
+    gpu_used = bool(getattr(cfg, "gpu", False))
+    try:
+        from . import gpu
+        dev = gpu.device_name() if gpu_used else ""
+    except Exception:  # noqa: BLE001
+        dev = ""
+    every = bool(getattr(cfg, "raw_index_every_frame", False))
+    rows = [["profile", "--fast" if getattr(cfg, "fast", False) else "thorough (the default)"],
+            ["run time", f"{float(tm.get('total') or 0.0):.0f} s"],
+            ["RAW index", ("every RAW frame" if every else "sampled (10 frames a second; 3 over 10 min)")
+             + (f", searched exactly on the GPU ({dev})" if gpu_used else ", FLANN kd-trees on the CPU (approximate)")],
+            ["competitor frames searched", "every one" if int(getattr(cfg, "comp_search_stride", 3)) <= 1
+             else f"every {int(getattr(cfg, 'comp_search_stride', 3))}th"],
+            ["worker processes", str(cfg.resolved_workers()) + " (one per physical core)"],
+            ["speech map model", str(getattr(cfg, "speech_map_model", "") or getattr(cfg, "caption_recheck_model", ""))],
+            ["framing check (who speaks)", "YuNet faces and Light-ASD on every RAW frame it plays, at 25 fps"]]
+    out = [md_table(["", ""], rows)]
+    fr = getattr(ctx, "full_res", None) or {}
+    if getattr(cfg, "fast", False):
+        return out
+    if fr.get("why_not"):
+        out += ["", f"Full resolution: not run ({fr['why_not']})."]
+    rc = fr.get("recheck")
+    if rc:
+        out += ["", f"**Uncertain frames re-checked at full resolution** (before the cuts were decided): {rc['frames']} "
+                    f"-- {rc['narrowed']} narrowed to fewer RAW frames ({rc['decided']} to one), "
+                    f"{rc.get('overruled', 0)} where full resolution was clearly sure of a RAW frame the proxy ruled out "
+                    f"(by more than 0.01 ZNCC: full resolution decides), {rc['kept']} still within the noise there, "
+                    f"{rc['outside']} where it disagreed less clearly (the proxy's decision kept), "
+                    f"{rc.get('seconds', 0)} s."]
+        changed = [r for r in rc.get("rows") or [] if str(r.get("result", "")).startswith(("soft range", "full res"))]
+        if changed:
+            out += ["", md_table(["frame", "RAW frames before", "after", "best at full resolution"],
+                             [[r["k"], f"{r['soft'][0]}-{r['soft'][1]}",
+                               r["result"].split("-> ")[-1] if "-> " in r["result"] else f"{r['best']} (full resolution)",
+                               r["best"]]
+                              for r in changed[:40]])]
+    vf = fr.get("verify")
+    if vf:
+        out += ["", f"**Every frame and cut at full resolution** (s9_9): {vf.get('summary')}."]
+    fc = getattr(ctx, "fast_compare", None) or {}
+    if fc.get("error"):
+        out += ["", f"**Against --fast**: not compared ({fc['error']})."]
+    elif fc:
+        ex = fc.get("examples") or {}
+        out += ["", f"**Against --fast** (the analysis a --fast run makes of this video, {fc.get('fast_seconds')} s; "
+                    f"the thorough one {fc.get('thorough_seconds')} s): {fc.get('summary')}."]
+        rows2 = ([["cut moved", f"frame {d} -> {c}"] for d, c in ex.get("moved") or []]
+                 + [["cut only the thorough matching finds", f"frame {c}"] for c in ex.get("added") or []]
+                 + [["--fast cut gone", f"frame {c}"] for c in ex.get("dropped") or []]
+                 + [["another RAW frame", f"frame {k}: RAW {a} -> {b}"] for k, a, b in ex.get("other_raw") or []]
+                 + [["another kind", f"frame {k}: {a} -> {b}"] for k, a, b in ex.get("other_kind") or []])
+        if rows2:
+            out += ["", md_table(["what changed (--fast -> thorough)", "where"], rows2)]
+    return out
+
+
 SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Summary", _summary),
     ("Acceptance criteria", _criteria),
@@ -1510,6 +1575,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("B-roll cutaways", _broll),
     ("Silence removal", _silence),
     ("Premiere XML checks", _premiere_checks),
+    ("Thoroughness", _thoroughness),
 ]
 
 
