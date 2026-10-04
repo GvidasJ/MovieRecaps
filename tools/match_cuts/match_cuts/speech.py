@@ -32,6 +32,8 @@ from typing import Any, Sequence
 import numpy as np
 
 MIN_GAP_S = 0.02          # a gap: the quiet between two sounds at least this long (a dip between two words counts)
+WORD_GAP_S = 0.04         # words run together: the gap is the quietest MIN_GAP_S this near where the two words meet
+KEEP_FRAC = 0.25          # a cut inside a sound (a word) keeps it whole when the clip plays this much of it or more
 BOUNDARY_S = 0.25         # the dip nearest a boundary between two transcribed words, this close, is the gap there
 VOICED = 0.8              # a clear pitch: the normalised autocorrelation peak (70-400 Hz, 40 ms) at least this ...
 VOICED_S = 0.05           # ... for this long makes an untranscribed sound speech (less: a breath, a smack, a click)
@@ -145,6 +147,7 @@ def speech_map(y: np.ndarray, sr: int, st: Any = None, words: Sequence[Any] | No
     ws = sorted((w for w in (words or []) if float(w.end) >= float(w.start)), key=lambda w: float(w.start))
     if ws:
         q = _block_word_dips(q, t, db, lv["noise_db"], ws)
+        q = _word_gaps(q, t, db, ws)
     runs = silence.quiet_runs(q, t, db, lv["noise_db"], dur, MIN_GAP_S)
     sounds: list[Sound] = []
     at = 0.0
@@ -221,6 +224,25 @@ def _block_word_dips(q: np.ndarray, t: np.ndarray, db: np.ndarray, noise: float,
     return q
 
 
+def _word_gaps(q: np.ndarray, t: np.ndarray, db: np.ndarray, ws: Sequence[Any]) -> np.ndarray:
+    """q with a gap at every boundary between two transcribed words that has no quiet of its own (words run
+    together): the quietest MIN_GAP_S around it (within WORD_GAP_S of the two words' meeting point, word timings
+    from forced alignment). A sound is then one word, or the words said with no boundary heard between them -- a
+    cut inside speech moves to the nearest end of a WORD, not past a whole run of words."""
+    from . import silence
+    q = q.copy()
+    n = max(1, int(round(MIN_GAP_S / silence.HOP_S)))
+    for w, nxt in zip(ws, ws[1:]):
+        b0, b1 = sorted((float(w.end), float(nxt.start)))
+        i0 = int(np.searchsorted(t, b0 - WORD_GAP_S, "left"))
+        i1 = int(np.searchsorted(t, b1 + WORD_GAP_S, "right"))
+        if i1 - i0 < n or q[i0:i1].any():
+            continue                                     # a quiet gap there already (or nothing to search)
+        k = i0 + int(np.argmin([db[j:j + n].mean() for j in range(i0, i1 - n + 1)]))
+        q[k:k + n] = True
+    return q
+
+
 def _end_in(g: tuple[float, float], pa: float, pb: float) -> float:
     return g[0] + pa if g[1] - g[0] >= pa + pb else g[0] + (g[1] - g[0]) * pa / (pa + pb)
 
@@ -254,13 +276,14 @@ def start_before(sm: SpeechMap, k: int, pa: float, pb: float) -> float:
 
 def end_at(sm: SpeechMap, x: float, lo: float, pa: float, pb: float) -> float:
     """Where a clip playing the RAW from ``lo`` ends when the plan ends it at ``x`` (seconds): ``pa`` after its last
-    speech (end_after). Inside speech, the nearer end of that sound: the clip plays on to its end, or stops before
-    it when it has played speech before it. A clip with no speech before ``x`` keeps ``x`` (out of a breath)."""
+    speech (end_after). Inside speech (a word, or words heard as one sound): the clip plays on to its end -- the
+    competitor played part of it -- or, when it has played less than KEEP_FRAC of it and speech before it, stops
+    before it. A clip with no speech before ``x`` keeps ``x`` (out of a breath)."""
     k = sm.sound_at(x)
     if k is not None and sm.sounds[k].speech:
         s = sm.sounds[k]
         j = sm.speech_before(s.s0)
-        if j is not None and sm.sounds[j].s1 > lo + EPS and (x - s.s0) < (s.s1 - x):
+        if j is not None and sm.sounds[j].s1 > lo + EPS and (x - s.s0) < KEEP_FRAC * (s.s1 - s.s0):
             return end_after(sm, j, pa, pb)
         return end_after(sm, k, pa, pb)
     j = sm.speech_before(x)
@@ -271,13 +294,14 @@ def end_at(sm: SpeechMap, x: float, lo: float, pa: float, pb: float) -> float:
 
 def start_at(sm: SpeechMap, x: float, hi: float, pa: float, pb: float) -> float:
     """Where a clip ending in the RAW at ``hi`` starts when the plan starts it at ``x``: ``pb`` before its first
-    speech (start_before). Inside speech, the nearer end of that sound: the clip starts before it, or after it when
-    speech follows in the clip. A clip with no speech after ``x`` keeps ``x`` (out of a breath)."""
+    speech (start_before). Inside speech (a word, or words heard as one sound): the clip starts before it -- the
+    competitor played part of it -- or, when less than KEEP_FRAC of it is left to play and speech follows in the
+    clip, after it. A clip with no speech after ``x`` keeps ``x`` (out of a breath)."""
     k = sm.sound_at(x)
     if k is not None and sm.sounds[k].speech:
         s = sm.sounds[k]
         j = sm.speech_after(s.s1)
-        if j is not None and sm.sounds[j].s0 < hi - EPS and (s.s1 - x) < (x - s.s0):
+        if j is not None and sm.sounds[j].s0 < hi - EPS and (s.s1 - x) < KEEP_FRAC * (s.s1 - s.s0):
             return start_before(sm, j, pa, pb)
         return start_before(sm, k, pa, pb)
     j = sm.speech_after(x)

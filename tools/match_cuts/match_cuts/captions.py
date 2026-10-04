@@ -1128,11 +1128,26 @@ def time_to_speech(caps: list[Caption], fps: Fraction, onsets: Sequence[float],
     return moved
 
 
+def no_overlaps(caps: Sequence[Caption]) -> list[Caption]:
+    """Captions in order, none running into the next: a caption that does ends where the next starts (one left
+    with no frame is dropped) -- e.g. a ``*...*`` placeholder over words captioned from the transcript later."""
+    out: list[Caption] = []
+    srt = sorted(caps, key=lambda c: (c.start, c.end))
+    for i, c in enumerate(srt):
+        nxt = srt[i + 1].start if i + 1 < len(srt) else None
+        if nxt is not None and c.end > nxt:
+            if nxt <= c.start:
+                continue
+            c = dataclasses.replace(c, end=nxt)
+        out.append(c)
+    return out
+
+
 def fill_from_transcript(caps: list[Caption], words: Sequence[Word], fps: Fraction, n_frames: int,
-                         cuts: Sequence[int] = ()) -> tuple[list[Caption], list[Caption]]:
+                         cuts: Sequence[int] = (), styled: bool = False) -> tuple[list[Caption], list[Caption]]:
     """Speech of my edit no caption covers (the competitor's captions there were of its own audio): captions made
-    from the edit's transcript (voice_captions, the hard rules applied), between the captions around it. Returns
-    (all captions in order, the new ones)."""
+    from the edit's transcript (voice_captions -- ``styled``: the user's style, caption_style.style_captions -- the
+    hard rules applied), between the captions around it. Returns (all captions in order, the new ones)."""
     from . import caption_rules
     caps = sorted(caps, key=lambda c: c.start)
     starts = [c.start for c in caps]
@@ -1164,9 +1179,13 @@ def fill_from_transcript(caps: list[Caption], words: Sequence[Word], fps: Fracti
         hi = min([c.start for c in caps if c.start >= b - 1] or [n_frames])
         if hi - lo < 2:
             continue
-        made = voice_captions(g, fps, n_frames, lo=lo, hi=hi, placeholders=False, cuts=cuts)
+        if styled:
+            from .caption_style import style_captions
+            made = style_captions(g, fps, n_frames, lo=lo, hi=hi, placeholders=False, cuts=cuts)
+        else:
+            made = voice_captions(g, fps, n_frames, lo=lo, hi=hi, placeholders=False, cuts=cuts)
         if made:
-            made, _ = caption_rules.enforce(made, fps, "voice", list(words), cuts=cuts)
+            made, _ = caption_rules.enforce(made, fps, "voice", list(words), cuts=cuts, keep_groups=styled)
             new += [dataclasses.replace(c, info=dict(c.info, source="transcript")) for c in made]
     return sorted(caps + new, key=lambda c: c.start), new
 
@@ -1314,6 +1333,55 @@ def _caption_dict(c: Caption, fps: Fraction) -> dict:
     return d
 
 
+def _raw_source(ctx: Any, cl: Any, rp: Any, fps: Fraction) -> tuple[list, Any]:
+    """(the edit's pieces of the RAW, the RAW's audio): where each stretch of the edit's audio comes from."""
+    from . import caption_recheck as R
+    pieces = R.pieces_from_cutlist(cl)
+    if rp is not None:
+        from .silence import ripple_pieces
+        pieces = ripple_pieces(pieces, rp, fps)
+    return pieces, R.audio_source(ctx.raw_audio, int(ctx.audio_sr))
+
+
+def _judge(model: str, cache: Any) -> Any:
+    """caption_recheck.screen_readings' judge: speech model ``model`` scoring readings of audio windows."""
+    def run(jobs: list) -> list:
+        from . import transcribe
+        return [transcribe.score_texts(y, texts, model, cache) for y, texts in jobs]
+    return run
+
+
+def _said_as(w: Word) -> tuple:
+    """A word and its times: the same word from the same transcript (whatever else was changed on it)."""
+    return w.text, round(w.start, 4), round(w.end, 4)
+
+
+def _time_new_words(y16: np.ndarray, words: list[Word], mine: set[tuple]) -> list[Word]:
+    """The words another model or the recheck gave (rough times: spread over the words they replace) timed by
+    forced alignment, each between the words around it; the main model's own words keep their times (aligned once
+    already -- aligning the whole transcript again only moves them)."""
+    new = [k for k, w in enumerate(words) if _said_as(w) not in mine]
+    if not new:
+        return words
+    from . import align
+    if align.available() is not None:
+        return words
+    try:
+        timed = align.refine_onsets(y16, align.align(y16, words)[0])
+    except Exception as e:  # noqa: BLE001 - the rough times
+        warn(f"the replaced words could not be timed ({type(e).__name__}: {e})")
+        return words
+    if len(timed) != len(words):
+        return words
+    out = list(words)
+    for k in new:
+        lo = out[k - 1].end if k > 0 else 0.0
+        hi = next((out[j].start for j in range(k + 1, len(out)) if _said_as(out[j]) in mine), math.inf)
+        a = min(max(timed[k].start, lo), hi)
+        out[k] = dataclasses.replace(words[k], start=a, end=min(max(timed[k].end, a), hi))
+    return out
+
+
 def run_captions(ctx) -> dict:
     """Write ``<run folder>/2_captions.srt`` for a pipeline.Context (after the exports); returns the report data."""
     from .common import dump_json, log
@@ -1321,7 +1389,7 @@ def run_captions(ctx) -> dict:
     cfg = ctx.cfg
     requested = str(getattr(cfg, "captions", "auto") or "auto")
     voiceover = str(getattr(cfg, "voiceover", "") or "")
-    model = str(getattr(cfg, "caption_model", "small.en") or "small.en")
+    model = str(getattr(cfg, "caption_model", "large-v3") or "large-v3")
     language = str(getattr(cfg, "caption_language", "en") or "") or None
     fps = Fraction(premiere_settings(cfg)["fps"])
     comp_fps = Fraction(ctx.comp_fps)
@@ -1367,6 +1435,7 @@ def run_captions(ctx) -> dict:
             if n_events and not spans:
                 warn(f"{n_events} caption events detected but no caption could be read")
     span_fps, span_seq = comp_fps, to_seq          # the spans' frames -> sequence frames
+    comp_spans = list(spans)                         # as read, on the competitor's own frames
     if rp is not None and spans:                    # the silences cut out: the copies move with the cuts
         spans, gone = move_spans(spans, to_seq, rp)
         span_fps, span_seq = fps, int
@@ -1426,53 +1495,78 @@ def run_captions(ctx) -> dict:
             res["source"] += "; another video's stretches: the competitor's audio there"
     else:
         res["source"] = "none (the RAW has no audio)"
+    hints = caption_hints()
+    extra: dict[int, list[str]] = {}               # words the second model heard otherwise: rechecked below
+    check_model = str(getattr(cfg, "caption_check_model", "") or "")
+    mine: set[tuple] = set()
     if y16 is not None and len(y16) and err is None:
         err = transcribe.available()
         if err:
             warn(f"no transcription: {err}")
         else:
-            try:
-                if ov:                                   # my audio alone, the other video's stretches taken out
-                    y_mine, held = without_stretches(y16, ov, fps)
-                    words = restore_times(transcribe.transcribe_words(y_mine, transcribe.SR, model, language,
-                                                                      ctx.cache), held)
-                else:
-                    words = transcribe.transcribe_words(y16, transcribe.SR, model, language, ctx.cache)
+            y_in, held = without_stretches(y16, ov, fps) if ov else (y16, [])    # my audio alone (another video's
+            try:                                                                  # stretches taken out)
+                words = restore_times(transcribe.transcribe_words(y_in, transcribe.SR, model, language, ctx.cache,
+                                                                  hints), held)
             except Exception as e:  # noqa: BLE001 - e.g. the model download failed: captions without a transcript
                 err = f"{type(e).__name__}: {e}"
                 warn(f"transcription failed: {err}")
-    res["transcriber"] = {"engine": "faster-whisper", "model": model, "words": len(words), "error": err}
+            mine = {_said_as(w) for w in words}          # the main model's own words (aligned already)
+            if words and check_model.lower() not in ("", "none") and check_model != model:
+                try:                                 # the second-best model: where it hears otherwise, decided
+                    from . import caption_recheck as R2
+                    other = restore_times(transcribe.transcribe_words(y_in, transcribe.SR, check_model, language,
+                                                                      ctx.cache, hints, aligned=False), held)
+                    words, two, extra = R2.resolve_two(words, other, model, check_model,
+                                                       R2.clear_captions(spans, span_fps) if spans else None)
+                    res["second_opinion"] = dict(two, words=len(other),
+                                                 text=" ".join(w.raw or w.text for w in other))
+                    if spans:                    # "want to" heard, "WANNA" on screen: what was said
+                        words, res["spoken_forms"] = R2.screen_spoken_forms(words, R2.clear_captions(spans,
+                                                                                                    span_fps))
+                        try:                     # the screen's own words, where both models find them likelier
+                            pieces, source = (_raw_source(ctx, cl, rp, fps) if not voiceover else (None, None))
+                            words, res["screen_readings"] = R2.screen_readings(
+                                words, R2.screen_words(spans, span_fps), y16,
+                                [_judge(m, ctx.cache) for m in (check_model, model)],
+                                avoid=lambda a, b: any(st["a"] < b * float(fps) and st["b"] > a * float(fps)
+                                                       for st in ov), pieces=pieces, source=source)
+                        except Exception as e:  # noqa: BLE001 - the words as heard
+                            warn(f"the screen's readings could not be scored ({type(e).__name__}: {e})")
+                except Exception as e:  # noqa: BLE001 - the main transcript alone
+                    warn(f"the second speech model ({check_model}) could not run: {type(e).__name__}: {e}")
+    res["transcriber"] = {"engine": "asr.py", "model": model, "words": len(words), "error": err, "hints": hints,
+                          "runs": list(transcribe.LOG)}
     res["transcript"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]
     heard_ok = y16 is not None and len(y16) > 0 and err is None      # the transcript ran (words may be none)
 
     # ---- unclear words double-checked against the source (caption_recheck.py) ----
     rmodel = str(getattr(cfg, "caption_recheck_model", "") or "")
-    unread = ([(int(d["comp_in"]) / float(span_fps), int(d["comp_out"]) / float(span_fps)) for d in spans
-               if not d.get("ocr")] if mode == "competitor" else None)
-    if words and rmodel.lower() not in ("", "none") and (mode == "voice" or unread):
+    if words and rmodel.lower() not in ("", "none"):
         from . import caption_recheck as R
         if voiceover:
             pieces, source, sname = ([R.Piece(0.0, len(y16) / transcribe.SR, 0.0, 1.0)],
                                      R.audio_source(y16, transcribe.SR), "voice-over")
         else:
-            pieces, source, sname = R.pieces_from_cutlist(cl), R.audio_source(ctx.raw_audio, int(ctx.audio_sr)), "RAW"
-            if rp is not None:
-                from .silence import ripple_pieces
-                pieces = ripple_pieces(pieces, rp, fps)
+            (pieces, source), sname = _raw_source(ctx, cl, rp, fps), "RAW"
         opinion = (R.clear_captions(spans, span_fps) if spans else
                    _lazy_opinion(ctx, layout, comp_fps, rp, to_seq, fps) if requested == "voice" and not voiceover
                    else None)
         try:
             words, res["recheck"] = R.recheck(
                 words, y16, pieces, source,
-                lambda y: transcribe.transcribe_words(y, transcribe.SR, rmodel, language, ctx.cache),
-                captions=opinion, only=unread, source_name=sname, edit_model=model, model=rmodel)
+                lambda y: transcribe.transcribe_words(y, transcribe.SR, rmodel, language, ctx.cache, hints),
+                captions=opinion, source_name=sname, edit_model=model, model=rmodel, extra=extra)
             log.info("captions: %d unclear words rechecked against the %s (%s), %d changed, %d still unclear",
                      res["recheck"]["rechecked"], sname, rmodel, res["recheck"]["changed"],
                      len(res["recheck"]["unclear"]))
         except Exception as e:  # noqa: BLE001 - e.g. the bigger model could not be downloaded: the first transcript
             res["recheck"] = {"error": f"{type(e).__name__}: {e}", "model": rmodel, "source": sname}
             warn(f"unclear words not rechecked with {rmodel}: {type(e).__name__}: {e}")
+
+    if mine and y16 is not None and len(y16):
+        words = _time_new_words(y16, words, mine)
+    res["words_final"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]    # (debug)
 
     # another video's stretches: the words the competitor's audio says there (as said, with their punctuation)
     from . import caption_rules
@@ -1492,24 +1586,55 @@ def run_captions(ctx) -> dict:
     res["cuts"] = len(cuts)
     if mode != "competitor":               # another video starts / ends there (a competitor caption is clipped to it)
         cuts = sorted(set(cuts) | {st["a"] for st in ov} | {st["b"] for st in ov})
+    from . import caption_style
+    styled = False                                  # grouped in the user's style (caption_style.py)
     if mode == "competitor":
+        res["competitor_style"] = caption_style.competitor_style(spans)
+    follow_tls = None
+    if mode == "competitor" and words and xml.exists():
+        try:                                         # both edits, matched by what they play (the RAW)
+            from .caption_score import Timeline, competitor_timeline
+            bcl = ((getattr(ctx, "broll", None) or {}).get("cutlist") if isinstance(getattr(ctx, "broll", None),
+                                                                                       dict) else None) or ctx.cutlist
+            follow_tls = (competitor_timeline(bcl),
+                          Timeline.from_xml(xml, [{"a": st["a"], "b": st["b"], "t0": st["t0"]} for st in ov]))
+        except Exception as e:  # noqa: BLE001 - the competitor's captions copied the earlier way then
+            warn(f"the competitor's captions could not be matched to my edit ({type(e).__name__}: {e})")
+    if follow_tls is not None and res["competitor_style"]["follow"]:
+        caps, res["competitor_notes"] = caption_style.follow_competitor(comp_spans, words, follow_tls[0],
+                                                                        follow_tls[1], comp_fps, fps)
+        clip_to_stretches(caps, ov)
+        styled = True
+        res["copied"] = [_caption_dict(c, fps) for c in caps]        # before the hard rules (debug)
+    elif mode == "competitor" and (not words or (res["competitor_style"]["follow"] and follow_tls is None)):
         caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
         clip_to_stretches(caps, ov)
         res["copied"] = [_caption_dict(c, fps) for c in caps]        # before the hard rules (debug)
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
-        caps = voice_captions(words, fps, n_seq, cuts=cuts)
+        breaks = (caption_style.competitor_breaks(comp_spans, words, follow_tls[0], follow_tls[1], comp_fps)
+                  if mode == "competitor" and follow_tls is not None else set())
+        caps = caption_style.style_captions(words, fps, n_seq,
+                                            cuts=sorted(set(cuts) | {st["a"] for st in ov} | {st["b"] for st in ov}),
+                                            mode="competitor" if mode == "competitor" else "voice",
+                                            comp_breaks=breaks)
+        styled = True
         rechecked = "rechecked" in (res.get("recheck") or {})        # low-confidence words: listed by the recheck
         res["flags"] = transcript_flags([w for w in words if not in_ov(w.start)], y16, transcribe.SR,
                                         min_prob=0.0 if rechecked else 0.5)
     else:
         caps = []
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
+    res["styled"] = styled
     # ---- the hard rules: the final check before the file is written ----
     if caps:
         lex = caption_rules.lexicon()
-        caps, res["rules"] = caption_rules.enforce(caps, fps, mode, words if heard_ok else None, lex, cuts=cuts)
+        follow = mode == "competitor" and any(c.info.get("style") == "follow" for c in caps)
+        caps, res["rules"] = caption_rules.enforce(
+            caps, fps, "competitor" if (mode == "competitor" and (follow or not styled)) else "voice",
+            words if heard_ok else None, lex, cuts=cuts, keep_groups=styled,
+            open_gaps=[(st["a"], st["b"]) for st in ov])
         res["rules"]["allowlist"] = lex.allow_file
         if mode == "competitor" and not heard_ok:
             res["notes"].append("no transcript: competitor captions are split only where their own text ends a "
@@ -1529,15 +1654,15 @@ def run_captions(ctx) -> dict:
             refs = [ref, own]
             a_cuts = sorted({e[3] for e in audio_cuts([dict(it, name="") for it in x["audio"] if it["start"] >= 0],
                                                       fps, int(x["duration"]))})
-            gone = unheard(caps, fps, onsets, refs) if mode == "competitor" else []
+            gone = unheard(caps, fps, onsets, refs) if mode == "competitor" and not styled else []
             gone = [i for i in gone if not in_ov(0.5 * (caps[i].start + caps[i].end) / float(fps))]
             res["unheard_dropped"] = [_caption_dict(caps[i], fps) for i in gone]
             caps = [c for i, c in enumerate(caps) if i not in set(gone)]
-            res["timed"] = time_to_speech(caps, fps, onsets, refs, a_cuts)
+            res["timed"] = time_to_speech(caps, fps, onsets, refs, a_cuts) if not styled else 0
             if mode == "competitor" and heard_ok:
-                caps, filled = fill_from_transcript(caps, words, fps, n_seq, cuts)
+                caps, filled = fill_from_transcript(caps, words, fps, n_seq, cuts, styled=styled)
                 res["filled"] = [_caption_dict(c, fps) for c in filled]
-                if filled:
+                if filled and not styled:
                     res["timed"] += time_to_speech(caps, fps, onsets, refs, a_cuts)
             res["timing_off"] = timing_off(caps, fps, onsets, refs, a_cuts)
             late = [r for r in res["timing_off"] if r["off"] is not None]
@@ -1554,6 +1679,7 @@ def run_captions(ctx) -> dict:
         res["other_video"].append({"name": st["name"], "a": st["a"], "b": st["b"], "t0": st["t0"], "t1": st["t1"],
                                    "captions": len(mine), "how": dict(how), "words": len(st["words"]),
                                    "text": " ".join(c.text.replace("\n", " ") for c in mine)})
+    caps = no_overlaps(caps)                         # whatever was added late: never two captions at once
     res["weak_kept"] = list((res.get("rules") or {}).get("kept_weak") or [])
     res["captions"] = [_caption_dict(c, fps) for c in caps]
     res["count"] = len(caps)
@@ -1574,6 +1700,20 @@ def run_captions(ctx) -> dict:
         log.info("captions: %d captions (%s) -> %s; %s", len(caps), mode, p,
                  caption_rules.summary_line(res.get("rules") or {}))
     return res
+
+
+def caption_hints() -> list[str]:
+    """Words the speech model is told to expect (hot words): caption_allowlist.txt and the learned glossary
+    (glossary.txt next to it, written by ``match_cuts learn``: the words the user corrected)."""
+    from .caption_rules import ALLOWLIST_FILE, read_allowlist
+    out = list(read_allowlist())
+    gl = ALLOWLIST_FILE.with_name("caption_glossary.txt")
+    if gl.is_file():
+        for line in gl.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                out.append(line.split("\t")[0].split(" -> ")[-1].strip())
+    return [h for h in dict.fromkeys(out) if h]
 
 
 def _read_spans(ctx, layout: dict, comp_fps: Fraction) -> dict:

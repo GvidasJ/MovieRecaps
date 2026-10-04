@@ -31,6 +31,10 @@ pip install -e "tools/match_cuts[dev]"                 # pytest, to run the test
 # captions (2_captions.srt): transcription + OCR, pip only (no system installs, also on Windows)
 pip install -e "tools/match_cuts[captions]"            # faster-whisper + the OCR's own dependencies
 pip install --no-deps rapidocr                          # RapidOCR without its opencv-python dependency
+# captions on an NVIDIA GPU: the CUDA 12 libraries faster-whisper (CTranslate2) loads, and a CUDA build of
+# PyTorch for the forced alignment (an RTX 50 series card needs CUDA 12.8 or newer: cu130 here)
+pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
 ```
 
 Check the install with `python -c "import numpy, cv2, av; print('ok')"`. Python 3.11 or 3.12 is the
@@ -47,9 +51,10 @@ Installing ffmpeg: Linux `apt install ffmpeg`, macOS `brew install ffmpeg`, Wind
 `winget install Gyan.FFmpeg`.
 
 Captions: RapidOCR is installed with `--no-deps` for the same OpenCV reason (its metadata asks for
-`opencv-python`; it works with the contrib wheel above). faster-whisper downloads its model (`small.en`,
-~0.5 GB) from Hugging Face on the first run and caches it. Without these packages the run still completes
-and the report says why `2_captions.srt` is missing.
+`opencv-python`; it works with the contrib wheel above). faster-whisper downloads its models (large-v3, ~3 GB, and
+large-v3-turbo, ~1.6 GB) from Hugging Face on the first run and caches them (`HF_HOME`); the aligner (~1.2 GB) comes
+the same way (`TORCH_HOME`). Without a GPU everything runs on the CPU, more slowly. Without these packages the run
+still completes and the report says why `2_captions.srt` is missing.
 
 ## Usage
 
@@ -79,7 +84,8 @@ Extra flags: `--input-dir DIR` (auto-detection folder, default `./input`), `--se
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
-`--caption-model NAME` (default `small.en`), `--caption-recheck-model NAME` (default `medium.en`, `none` = off).
+`--caption-model NAME` (default `large-v3`), `--caption-check-model NAME` (default `large-v3-turbo`, `none` = off),
+`--caption-recheck-model NAME` (default `large-v3`, `none` = off).
 Premiere-only export: `--premiere`. Cuts never inside speech, silence removal (Premiere export and RAW-only runs):
 `--pad-before S` (default 0.05: a clip starts this long before its first word), `--pad-after S` (default 0.15: a clip
 ends this long after its last word), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
@@ -210,8 +216,8 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
 * **Speech map of the RAW.** A sound is the 50 ms loudness at or above this video's silence threshold, with its soft
   start and end (the windows next to it still 3 dB over the background, at most 0.2 s: the soft "s" or "-ty five"
   a word starts or ends with). The words come from the RAW where the edit plays it (±3 s), transcribed with the
-  recheck model (`--caption-recheck-model`, default `medium.en`; its timings are much closer than `small.en`'s), and
-  the captions' model (`small.en`) as a second opinion. A dip in the loudness inside a word (the closure of a "t")
+  recheck model (`--caption-recheck-model`, default `large-v3`, its words timed by forced alignment), and the
+  captions' model as a second opinion when it is another one. A dip in the loudness inside a word (the closure of a "t")
   is part of the word; the dip nearest each boundary between two words (within 0.25 s — the timings are often that
   far off) is the gap between them, however short. A sound either transcript heard a word in, or with a clear pitch
   for 0.05 s, is speech — "okay", "uh" and every other filler included; a sound with neither (a breath, a lip
@@ -271,8 +277,7 @@ recheck model's word timings of the RAW; without a competitor (below) the RAW al
   video's pauses are cut too, and loud and quiet recordings need no setting: on the Deadpool RAW `tests/real/deadpool/raw.mp4` (speech
   -16.2 dBFS, background -42.2 dBFS) it is -33.1 dBFS. `--silence-db DB` replaces it with DB under the speech level
   (e.g. `--silence-db -20`).
-* **Never inside a word**: the edit's audio is transcribed (word timings, the same `small.en` model as the captions,
-  cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
+* **Never inside a word**: the edit's audio is transcribed (word timings, the captions' model, cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
   over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
   `--pad-after` (0.15 s) after the word before it and `--pad-before` (0.05 s) before the word after it
   are kept (at the very start and end of the edit there is no word to protect). The soft end of a word that trails
@@ -325,88 +330,63 @@ with its competitor and 60 fps sequence timecodes.
 ### Captions
 
 `2_captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
-(competitor frame k = sequence frame 2k for a 30 fps competitor). The mode is chosen per clip:
+(competitor frame k = sequence frame 2k for a 30 fps competitor), **in your caption style**, learned from your own
+SRTs in `srt/` (`match_cuts/caption_style.json`; after adding SRTs, rebuild it with `python -m match_cuts.caption_style`;
+the SRTs of the answer-key videos are left out of it, so check-all scores videos the style has not seen). Your style
+(618 captions in 15 SRTs): 1 word 24 %, 2 words 41 %, 3 words 27 %, 4 words 8 %; median 10 characters, 90 % at 16 or
+fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start lower case; back to back.
 
-* **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): the competitor
-  decides the **words** and **where captions split** where they already show 2+ words that pass my rules (the
-  timing: see *Timed to the speech* below); my rules decide **how the
-  text looks** (the hard rules below). Where the competitor shows **one word at a time**, the words are regrouped
-  into 2–4 word captions by the voice-mode rules below (20 characters, pairs kept together, never a lone weak word)
-  on the competitor's timing: `a` | `joke` → `a joke`, `Bronx` | `School` → `Bronx School`; a word left between
-  two kept captions joins one of them, an interjection the competitor shows alone stays alone, and quoted words
-  shown one by one get one pair of quotes (`“so dude what's”`). The caption band is read on
-  every frame (the caption's fill colour is learned from the video, static title / logo / watermark text is
-  masked): a new caption starts on the frame different words appear; a pop-in (the text growing over its first
-  frames) or a word highlighted in another colour is not a new caption, the same text popping in again is. The
-  text read is the majority of RapidOCR's readings of the caption's fully grown frames. The cut edit is also
-  transcribed (word timings): a caption is split where a sentence ends or the speaker changes, at the word's own
-  time; names follow the transcript (`SPIDER-MAN` → `Spider-Man`, `WAS` → `was`); full stops and commas go; a
-  garbled reading (`We wre`) takes the word the transcript clearly heard (`We're`) and is listed. Speech the
-  competitor left uncaptioned stays uncaptioned; a caption the OCR cannot read takes the words heard while it is on
-  screen (listed).
-* **voice** (only when the competitor has no burned-in captions): the cut edit's audio (RAW audio on the edit's
-  cuts, never the raw clip) is transcribed with word timestamps (faster-whisper) and grouped by the rules of
-  `caption-generator-prompt.md` at the repository root: 1–4 words, a new caption after 4 words / 20 characters / a pause > 0.25 s / at a
-  standalone interjection, a word said again gets its own caption, names / number + unit / negation +
-  verb kept together, a weak final word moved to the next caption (once per caption — the prompt's
-  own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
-  `*...*` placeholders for silences over ~1 s, a new caption after every sentence end. `--voiceover FILE` captions
-  your own narration instead.
+**The words** are what is said in the cut edit (its audio: the RAW audio on the edit's cuts, never the raw clip):
 
-**Timed to the speech of the final edit, both modes** (`captions.py`). Every caption starts within 2 frames of
-its first word being spoken in the final edit — after every cut change (speech-safe cuts, padding, silences,
-repeats). The captions' text is aligned, as one stream, with the RAW's words (medium.en) where A1 plays them, then
-with the edit's own transcript; the first word's start moves to where its sound starts in the loudness (within
-0.2 s; past an audio cut a word cannot straddle). A caption moved past its own end keeps its length, and
-captions that were back to back stay back to back. Competitor mode keeps the competitor's words and splits on this
-timing. A competitor caption whose words my edit does not play (the competitor's own audio, e.g. under a cutaway)
-is left out — heard means half its words, and half its content words when it has two or more (`it I haven't got`
-over "it, I just" is not heard: "it" and "I" are said everywhere) —, and speech of my edit no competitor caption
-covers is captioned from the transcript; both are listed. In another video's stretch (above) the speech is the
-competitor's audio there: its captions are timed to that. The end summary lists every caption that is still off
-(*Captions off their first word*).
+* **Speech recognition** (`asr.py`; see *Speech recognition* below): Whisper **large-v3** on the GPU
+  (`--caption-model`), with the words of `caption_allowlist.txt` (and of `caption_glossary.txt`, when there is one)
+  as vocabulary hints. Every word is then timed by **forced alignment** (`align.py`: torchaudio's MMS_FA wav2vec2
+  model, on the GPU, 20 ms steps; a word after a pause starts on its first sound), within a frame.
+* **A second model** (`--caption-check-model`, default `large-v3-turbo`; `none` turns it off) transcribes the same
+  audio. Where the two disagree: the same words written two ways, the reduced form wins ("gonna": a model writes it
+  only when it heard it); otherwise the competitor's caption read clearly there decides when it agrees with exactly
+  one version (with the words on either side); otherwise the best model's version stays, marked unsure for the
+  recheck below. A stock phrase only one model heard (Whisper's well-known inventions over laughter or music:
+  "Thanks for watching", "Thanks for joining us") is dropped.
+* **What the screen says** (competitor captions): where a caption read clearly on screen has other words than the
+  models heard ("SO AS A JOKE" for "There was a joke", "the X-Force" for "X-Force"), both readings of the phrase (the
+  same words heard on either side) are scored by **both** speech models against the audio (the likelihood of each
+  text, teacher-forced; the RAW's audio where the edit plays the phrase in order). The screen's reading replaces the
+  heard one only when both models find it the more likely, so a misread screen, or a word the competitor wrote that
+  nobody said, stays out. Where the screen writes the spoken form ("WANNA") and the transcript the full one ("want
+  to"), the screen's form is used.
+* **Unclear words are rechecked against the RAW** (below).
+* **Another video's stretch** (see *B-roll*): the competitor's audio there is transcribed and captioned; the stretch
+  is the only gap the captions keep.
 
-**Stutters**: the same short word said twice in a row inside one caption (`The the one that's`, `I I`, `a a`,
-`to to`) is kept once (`The one that's`) and listed (*Caption stutters kept once*); a word repeated as separate
-captions (`no` | `no` | `no`) is deliberate and stays.
+**The captions**, one of three ways (chosen per clip, the end summary says which):
 
-**Grouping, both modes** (`captions.py`):
+* **follow**: the competitor's captions are already in your style (mixed case, 2–4 words). Its caption breaks and
+  timing are kept, with the words heard in place of the words read: a word goes with the caption on screen when it
+  is said (where the competitor switches captions in mid-word, the words around the switch go where the two
+  captions' text says).
+* **regroup**: the competitor writes in capitals or one word at a time. The words heard are grouped in your style by
+  a model of where you break between two words (learned from your SRTs by word and by kind of word, plus the pause
+  between them, and the caption lengths you use), the best grouping by dynamic programming; never across a sentence
+  end or a video cut. Where the competitor's caption changes between two words (matched by the moment of the RAW
+  both edits play), a break there is likelier: on the answer keys you break there 44 % of the time, inside one of
+  its captions 26 %. A caption starts on the frame its first word begins in, or on the cut when its first word
+  comes at most 0.5 s after a video cut.
+* **voice**: no burned-in captions, or `--voiceover FILE`; the same grouping as regroup.
 
-* **Never across a video cut**: the cuts are the V1 clip boundaries of the run's `1_edit.xml` (not where the same
-  take simply runs on). A cut inside a caption splits it at the word boundary nearest the cut and the caption
-  changes exactly on the cut's frame (`I` | `suggested`, `that I was` | `not a real student`); when two boundaries
-  are about as near (within 0.1 s), the one outside a pair kept together wins (`my secret` ends on the cut rather
-  than `my` | `secret`). This beats the lone-weak-word rule: a weak word or preposition cut off from its phrase
-  stands alone right before the cut (`the school` | `for` | `genius kids`). A short clip with no speech between
-  two cuts stays uncaptioned (no caption may stretch over it). In competitor mode a pause the transcript hears
-  (over 0.25 s) also starts a caption (`next` | `to quite`).
-* **Never a single weak word** (`a`, `the`, `to`, `of`, `I`, … — the weak-word list) **or preposition** (`about`,
-  `at`, `from`, `into`, `with`): it joins the word(s) after it (`I` | `know` → `I know`); before a silence, a
-  sentence end or an interjection it joins the caption before it; right before a video cut it stays alone.
-  A caption of nothing but function words (`without the`) joins the next words whole.
-* **Short captions**: a caption over 16 characters (my SRTs: median 11, 90% at 17 or less) splits at a natural
-  break, the most even one: before a verb phrase (`what you're` | `talking about`, `they would` | `bring me up`;
-  only with two words on each side, so `You're gonna lose` stays), before a preposition's phrase (`suggested` |
-  `to Marvel`; never before `of`: `lost track of time` stays), before a new clause — `what`, `when`, `where`,
-  `why`, `how`, `who`, `because`, `if`, and `that` when a clause follows it (`no idea` | `what you're`; not `that
-  place`) — and around `and then` / `so then` / `but then`, which start their own caption (`a pretty girl` | `and
-  then` | `she's like`). Never a split that leaves a lone weak word, preposition or subject. A caption that would
-  end on a new clause's first words gives them to the next caption when they fit there (`I don't know if` | `he is
-  coming` → `I don't know` | `if he is coming`).
-* **Never split** (unless the 20-character / 4-word cap leaves no choice): `a` / `an` / `the` / `this` / `my` /
-  `your` + the word after it (`a joke`, `the school`; the adjectives and the noun too: `a pretty girl`, `a high
-  school`), a pronoun + its verb (`I know`, `we went`, `you are`), a verb + its preposition (`talking about`,
-  `looking at`; not `to`), `and then` / `so then` / `but then`, a preposition + its object (`of Science`, `to the
-  front`), short set phrases (`no idea`, `I know`, `you know`, `I mean`, `of course`, `thank you`), names of
-  two or more capitalised words (`Bronx School`, `Bronx High School of Science`), a name, number + unit, negation +
-  verb, and every phrase in `caption_allowlist.txt`. No pair reaches across a pause over 0.25 s, a comma or a
-  sentence end. A weak last word moves to the next caption with the words kept together with it (`to one of
-  the` | `songs` → `to one` | `of the songs`).
-* **Capitals**: only `I`, names, acronyms and the first word of a caption after a real pause in speech (over
-  0.5 s: the transcript's gap, else the gap before the caption). A sentence the transcript starts with no pause
-  before it stays lower case (`joke` | `And` | `Marvel` → `and Marvel`). Names: the transcript's capitals in
-  mid-sentence (`School`, `Science`), words the word list only writes capitalised (`Bronx`, `Parker`), unknown
-  capitalised words (`Keanu`), and a capitalised word next to a name.
+In every mode the captions are **back to back**: a caption ends where the next one starts, a pause over 1 s gets a
+`*...*` placeholder (the action goes there), and no caption ever overlaps the next. With no transcript at all (no
+speech model can run here), the competitor's captions are copied as read and the older rules apply (a caption split
+at a sentence end and on every video cut, never a lone weak word, pairs like `a joke` / `of Science` kept together,
+captions over 16 characters split at a natural break).
+
+**Capitals**: only `I`, names, acronyms and the first word of a caption after a real pause in speech (over 0.5 s:
+the transcript's gap, else the gap before the caption); in follow mode the competitor's capital on a caption's first
+word is kept. Names: the transcript's capitals in mid-sentence (`School`, `Science`), words the word list only writes
+capitalised (`Bronx`, `Parker`), unknown capitalised words (`Keanu`), and a capitalised word next to a name.
+
+**Stutters**: the same short word said twice in a row inside one caption (`The the one that's`, `I I`) is kept once
+and listed (*Caption stutters kept once*); a word repeated as separate captions (`no` | `no` | `no`) stays.
 
 **The hard rules** (`caption-generator-prompt.md`, *Hard rules*) are a final check on every caption file before it
 is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4 is never written:
@@ -420,8 +400,8 @@ is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4
 | 5 real words | every token in the word list, a name, a number or an interjection | competitor mode: a reading that is not a word and was not read clearly takes the word the transcript clearly heard; screen noise (`1`, `V`, `_`) is left out | listed, never guessed (deliberate misspellings stay) |
 | 6 length | spoken: 20 characters / 5 words; `*actions*`: 24 | split at a word (no weak ending) | one word over 20 characters |
 | 7 weak words | no caption of a single weak word; no weak last word where it can move | joined / moved to the next words | kept where it ends a sentence, a silence / interjection follows, it is kept together with the word before it, or the caption already gave one |
-| 8 no gaps | `end[i] == start[i+1]` | voice mode: closed (on the cut when a video cut falls in the gap) | competitor mode keeps the competitor's silences; a clip with no speech between two cuts stays uncaptioned |
-| 9 kept together | no pair kept together split between two captions | competitor mode: regrouped (one word at a time) | split only where the cap or a video cut forces it |
+| 8 no gaps | `end[i] == start[i+1]`, no overlap | closed in every mode (a pause over 1 s: a `*...*` placeholder) | another video's stretch stays a gap |
+| 9 kept together | no pair kept together split between two captions (copied captions; the style grouping decides its own breaks) | regrouped (copied one-word captions) | split only where the cap or a video cut forces it |
 | 10 video cuts | no caption across a cut of `1_edit.xml` (V1 clip boundaries) | split on the cut / its edge moved onto the cut | — |
 
 **Acronyms** (`caption_allowlist.txt` next to this README; one word or phrase per line, extend it): `AI`, `MJ`, `MCU`, plus
@@ -431,29 +411,57 @@ misspelling the word list does not know); a phrase there is never split across c
 The end summary says how many captions each rule changed or flagged (*Caption rules*), and *Captions worth a look*
 lists every flag, every word taken from the transcript and every piece of screen noise left out.
 
-**Unclear speech is double-checked against the RAW** (voice mode, and the transcript fallbacks of competitor mode).
-A word the transcription of the edit is unsure about — heard with low confidence (mumbling), with music or noise
-under it (less than 12 dB above the sound bed around it), or with an edit point cutting into it — is transcribed
-again from the RAW footage the edit plays there (the edit's own audio map: J/L cuts, speed changes and audio lines
-are followed), with 3 s of context on each side so the model hears the whole sentence rather than the cut piece, by
-a bigger model (`--caption-recheck-model`, default `medium.en`, downloaded once; `none` turns it off) for these
-spots only. The RAW's words are mapped back onto the edit's timeline (a word cut off at an edit point keeps the part
-the edit plays) and the two versions are compared word by word: where they agree (or say the same words two ways,
-"gonna" / "going to") the word is confirmed; where they differ the RAW's version is used when it is clearly more
-confident, and a competitor caption read clearly at that spot is a third opinion that decides when exactly one
-version agrees with it, together with the words on either side. RAW windows that overlap are transcribed once. Nothing is guessed: a spot still unsure after that keeps the best version
-and is listed under *Captions worth a look* with its time and the alternatives heard (edit, RAW, caption). The end
-summary says how many words were rechecked and how many changed; the report lists every change. With
-`--voiceover`, the voice-over file itself is the source.
+**Unclear speech is double-checked against the RAW** (every mode). A word the transcription of the edit is unsure
+about (heard with low confidence, with music or noise under it, less than 12 dB above the sound bed around it, with an
+edit point cutting into it, or where the second model heard something else) is transcribed again from the RAW
+footage the edit plays there (the edit's own audio map: J/L cuts, speed changes and audio lines are followed), with
+3 s of context on each side so the model hears the whole sentence rather than the cut piece
+(`--caption-recheck-model`, default `large-v3`; `none` turns it off). The RAW's words are mapped back onto the edit's
+timeline and the versions are compared word by word: where they agree (or say the same words two ways, "gonna" /
+"going to") the word is confirmed; where they differ the RAW's version is used when it is clearly more confident, and
+a competitor caption read clearly at that spot decides when exactly one version agrees with it, together with the
+words on either side. A word the RAW repeats at the edge of its window (the same word the edit's transcript has right
+there) is not added twice. Nothing is guessed: a spot still unsure after that keeps the best version and is listed
+under *Captions worth a look* with its time and the alternatives heard (edit, RAW, caption). The end summary says how
+many words were rechecked and how many changed; the report lists every change, every second-model decision and every
+reading of the screen that was scored. With `--voiceover`, the voice-over file itself is the source.
 
 The report's *Captions* section lists, in competitor mode, the competitor's writing conventions, the captions
 written from the transcript because they could not be read and the readings the OCR was unsure of; in voice mode,
 the style check, captions at the 24-character cap, the `*...*` timecodes and possible mis-transcriptions / doubled /
 missing words — flagged, never corrected; in both, the hard-rules table (changed / flagged per rule) and every row
 the rules listed. Speakers are not told apart by voice (faster-whisper has no diarisation): rule 2 relies on the
-sentence ends the transcript hears. faster-whisper is used instead of WhisperX because WhisperX needs
-PyTorch and an alignment model, a heavy and fragile install on Windows; faster-whisper installs with pip
-alone and gives word timestamps.
+sentence ends the transcript hears.
+
+### Speech recognition
+
+The speech models run on the GPU when there is one (`asr.py`: faster-whisper / CTranslate2 for Whisper, PyTorch for
+the forced alignment and the other engines), else on the CPU, and the end summary says which, e.g. *Speech
+recognition: large-v3 on the GPU (NVIDIA GeForce RTX 5080) ... words timed by forced alignment (cuda)*. A model that
+fails on the GPU runs again on the CPU, and a model that cannot run at all falls back to `small.en`; both are said in
+the summary. Measured on the three answer-key videos with `python -m match_cuts.asr_bench` (word errors against your
+SRTs; the full table with timing is `reports/task-4/asr_bench.md`):
+
+| model | word errors | Deadpool / Spider-Man / Zendaya-age | word starts: own timing → aligned | speed (RTX 5080) |
+|---|---|---|---|---|
+| Whisper large-v3 (default) | **4.2 %** | 1.6 / 4.1 / 12.8 % | 87 → 40 ms | 8× real time |
+| Whisper large-v3-turbo (second model) | 6.5 % | 8.9 / 2.7 / 12.8 % | 43 → 39 ms | 27× |
+| Whisper medium.en | 7.1 % | 7.3 / 4.8 / 15.4 % | 43 → 35 ms | 9× |
+| Whisper small.en (fallback, the old default) | 8.1 % | 6.5 / 6.8 / 17.9 % | 40 → 36 ms | 13× |
+| NVIDIA Parakeet TDT 0.6B v2 | 7.4 % | 7.3 / 4.8 / 17.9 % | 50 → 34 ms | 214× |
+| NVIDIA Parakeet TDT 0.6B v3 | 8.1 % | 6.5 / 4.1 / 28.2 % | 62 → 34 ms | 20× |
+| NVIDIA Canary-Qwen 2.5B | 8.7 % | 4.0 / 9.5 / 20.5 % | no timing → 37 ms | 1× |
+| Cohere Transcribe | not run (gated on Hugging Face) | | | |
+
+Word starts: the average distance from each word that opens one of your captions to that caption's start. The clips
+are short (18–39 s), so the speeds include each model's per-call overhead; a long video runs faster.
+
+Whisper large-v3 is the most accurate here and is the default (`--caption-model`); large-v3-turbo is the second
+model (`--caption-check-model`); `small.en` (the previous default) is the fallback. Forced alignment brings
+large-v3's word starts from 87 ms to 40 ms off your caption starts on average (MMS_FA; the English-only wav2vec2
+aligner was no better). The allowlist's words are passed as hints. NVIDIA Parakeet and Canary-Qwen run through
+NeMo / transformers (`pip install "nemo_toolkit[asr]" transformers`), only for the benchmark; Cohere Transcribe is
+gated on Hugging Face (accept its terms, `hf auth login`, then it runs too).
 
 **A/V offset.** Many short-form edits play their sound a little early or late against the picture (for
 example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`) and the report
@@ -857,6 +865,25 @@ cd tools/match_cuts
 ../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s   (Windows: ..\..\.venv\Scripts\python)
 ../../.venv/bin/python -m pytest -q -m slow --runslow  # end to end on synthetic video (slow, minutes each)
 ```
+
+**check-all** runs every test video in `tests/real/` through the whole tool and prints a scorecard (also saved as
+`work/check-all/scorecard.json`, and appended to `history.jsonl` there, so each row shows the change since the last
+run):
+
+```bash
+cd tools/match_cuts
+../../.venv/bin/python -m match_cuts check-all                    # every case (Windows: ..\..\.venv\Scripts\python)
+../../.venv/bin/python -m match_cuts check-all --cases deadpool   # some of them
+../../.venv/bin/python -m match_cuts check-all --rescore          # score the newest runs again, no new run
+```
+
+A case is a folder with the competitor and RAW (or `case.json` naming them) and, for a video you corrected, the
+answer key: your `answer.srt` and your edit's timeline (`answer_edit.xml`, or `answer_edit.json` pieces). Each row
+shows the run's time, the hard checks (the run's own exit code and deliverables) and the **caption score** against
+your SRT: captions reproduced exactly (the same text, starting within 2 frames of where your caption's first moment
+plays in the tool's edit), word errors (where both edits play the same moment) and breaks of your caption style (over
+20 characters / 4 words, a full stop or comma, a gap or overlap), with the differences by kind. The end summary of a
+normal run shows the same caption score when the competitor is one of these videos.
 
 The real clips the tests use live in `tests/real/` at the repository root (`zendaya/`, `deadpool/` -- the Deadpool clip
 and its RAW, once `input/competitor.mp4` + `input/raw_test.mp4` --, `spiderman-school/competitor.mp4`), never in

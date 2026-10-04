@@ -64,8 +64,10 @@ class Config:
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in
                                            #   captions (OCR) or made from the voice-over (caption-generator-prompt.md)
     voiceover: str = ""                    # caption this narration file instead of the cut edit's audio
-    caption_model: str = "small.en"        # faster-whisper model (tiny.en / base.en faster, medium.en more accurate)
-    caption_recheck_model: str = "medium.en"   # unclear words transcribed again from the RAW with this ("none": off)
+    caption_model: str = "large-v3"        # speech model (asr.py; the GPU when there is one): the most accurate of the
+                                           #   comparison (reports/task-4.md); small.en (the earlier default) = fallback
+    caption_check_model: str = "large-v3-turbo"   # the second model: where it hears otherwise, the word is rechecked
+    caption_recheck_model: str = "large-v3"    # unclear words transcribed again from the RAW with this ("none": off)
     caption_language: str = "en"
     no_broll: bool = False                 # --no-broll: cutaways over continuous RAW audio -> the main clip plays through
                                            #   (XML / EDL / cutlist.csv only; cutlist.json + verification stay faithful)
@@ -324,7 +326,8 @@ class Config:
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
                   "silence_db", "min_silence", "pad_before", "pad_after", "allow_repeats",
-                  "captions", "voiceover", "caption_model", "caption_recheck_model", "caption_language",
+                  "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
+                  "caption_language",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)

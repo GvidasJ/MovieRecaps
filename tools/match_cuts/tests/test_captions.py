@@ -278,3 +278,31 @@ def test_transcript_flags_low_confidence_doubled_and_missing_words():
         y[int(a * sr):int(b * sr)] = voice[int(a * sr):int(b * sr)]
     kinds = [f["kind"] for f in C.transcript_flags(ws, y, sr)]
     assert kinds == ["doubled word", "possible mis-transcription", "possible missing word"]
+
+
+def test_only_the_words_taken_from_elsewhere_are_timed_again(monkeypatch):
+    import dataclasses
+    from match_cuts import align as A
+    mine = [C.Word("a", 0.0, 0.2, 0.9, "a"), C.Word("c", 0.4, 0.6, 0.9, "c")]
+    rough = C.Word("b", 0.25, 0.3, 0.9, "b")                 # from the second model, spread over what it replaced
+    late = C.Word("d", 0.6, 0.7, 0.9, "d")
+    monkeypatch.setattr(A, "available", lambda: None)
+    monkeypatch.setattr(A, "align", lambda y, ws, **k: ([dataclasses.replace(w, start=w.start + 0.05,
+                                                                              end=w.end + 0.2) for w in ws], {}))
+    monkeypatch.setattr(A, "refine_onsets", lambda y, ws, **k: ws)
+    import dataclasses as dc
+    rechecked = dc.replace(mine[1], prob=0.99)                 # the recheck confirmed it: still the main model's word
+    out = C._time_new_words(np.zeros(16000, np.float32), [mine[0], rough, rechecked, late],
+                            {C._said_as(w) for w in mine})
+    assert out[0] is mine[0] and out[2] is rechecked                         # aligned once already: kept
+    assert (out[1].start, out[1].end) == pytest.approx((0.30, 0.40))        # timed, up to the next kept word
+    assert (out[3].start, out[3].end) == pytest.approx((0.65, 0.90))
+
+
+def test_no_caption_runs_into_the_next():
+    caps = [C.Caption("to death", 0, 60, "competitor"), C.Caption("*...*", 60, 160, "placeholder"),
+            C.Caption("us", 157, 160, "transcript"), C.Caption("for", 160, 161, "transcript")]
+    out = C.no_overlaps(caps)
+    assert [(c.start, c.end, c.text) for c in out] == [(0, 60, "to death"), (60, 157, "*...*"), (157, 160, "us"),
+                                                       (160, 161, "for")]
+    assert [c.text for c in C.no_overlaps([C.Caption("a b", 10, 20), C.Caption("c", 10, 30)])] == ["c"]

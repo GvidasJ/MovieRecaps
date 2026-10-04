@@ -219,9 +219,14 @@ def case_ok(c: str, lex: Lexicon) -> bool:
     return True
 
 
+_CONTRACTED = frozenset({"s", "re", "ll", "ve", "d", "t", "m"})
+
+
 def _title(w: str) -> str:
-    """Spider-Man, O'Brien: each part with a capital."""
-    return "".join(p[:1].upper() + p[1:].lower() for p in re.split(r"([-'])", w))
+    """Spider-Man, O'Brien: each part with a capital -- not a contraction's ending (They're, Vanisher's)."""
+    parts = re.split(r"([-'])", w)
+    return "".join(p.lower() if k >= 2 and parts[k - 1] == "'" and p.lower() in _CONTRACTED
+                   else p[:1].upper() + p[1:].lower() for k, p in enumerate(parts))
 
 
 def _artefact(tok: str) -> bool:
@@ -643,7 +648,8 @@ def _recase(caps: list[Cap], words: Sequence[Word] | None, lex: Lexicon, rep: Re
     words = list(words or [])
     pos = {id(w): j for j, w in enumerate(words)}
     for i, c in enumerate(caps):
-        if c.mode == "placeholder":
+        follow = c.info.get("style") == "follow"        # the competitor's own captions, followed
+        if c.mode == "placeholder" or (follow and is_action_text(c.text)):
             continue
         cores = [core(t.text).replace("’", "'") for t in c.toks]
         if c.toks and not all_caps and cores[0][:1].isupper() and cores[0] != "I" and lex_starts_sentence(cores[0]):
@@ -673,6 +679,8 @@ def _recase(caps: list[Cap], words: Sequence[Word] | None, lex: Lexicon, rep: Re
             else:
                 mixed = sorted(f for f in lex.forms.get(lw, ()) if not _letters(f).isupper() and not f[:1].isupper())
                 new = mixed[0] if mixed else lw                                  # iPhone-like forms the list knows
+                if k == 0 and follow and cw[:1].isupper() and cw[1:] == cw[1:].lower():
+                    new = cw                     # the competitor's capital on its first word: the user keeps it
             if new != cw:
                 rule = 3 if not _letters(cw).isupper() and not case_ok(cw, lex) else 4
                 t.text = t.text.replace(cw, new, 1) if cw in t.text else t.text.replace("’", "'").replace(cw, new, 1)
@@ -1036,12 +1044,16 @@ def _caps_out(caps: Sequence[Cap]) -> list[Caption]:
 
 
 def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[Word] | None = None,
-            lex: Lexicon | None = None, cuts: Sequence[int] = ()) -> tuple[list[Caption], dict]:
+            lex: Lexicon | None = None, cuts: Sequence[int] = (), keep_groups: bool = False,
+            open_gaps: Sequence[tuple[int, int]] = ()) -> tuple[list[Caption], dict]:
     """The final check and its fixes (module docstring). ``mode``: "voice" (back to back, rule 8) or "competitor"
     (the competitor's timing kept: its start / end / gaps; only the boundaries inside a caption it split, and a
     weak word moving between two touching captions, are re-timed). ``words``: the transcript on the same timeline
     (seconds), None when there is none. ``cuts``: the edit's video cuts (sequence frames: where one V1 clip gives way
-    to the next) -- a caption never runs across one. Returns (captions, report)."""
+    to the next) -- a caption never runs across one. ``keep_groups``: the captions were grouped in the user's style
+    already (caption_style.py): no regrouping, no weak word moved, no lone word joined -- and back to back in every
+    mode (rule 8), except across ``open_gaps`` (sequence frames: another video's stretches). Returns (captions,
+    report)."""
     fps = Fraction(fps)
     cuts = sorted({int(f) for f in cuts})
     lex = lex or lexicon()
@@ -1099,10 +1111,11 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
                 used.update(id(t.word) for t in c.toks if t.word is not None)
             kept.append(c)
         cs = kept
-    # rules 1 and 2: one sentence, one speaker per caption
+    # rules 1 and 2: one sentence, one speaker per caption (not where the competitor's own caption breaks are
+    # followed: the user keeps them, "Vanisher And")
     out: list[Cap] = []
     for c in cs:
-        if not c.spoken or len(c.toks) < 2:
+        if not c.spoken or len(c.toks) < 2 or (keep_groups and mode == "competitor"):
             out.append(c)
             continue
         r1, r2 = _sentence_cuts(c)
@@ -1122,7 +1135,7 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     _strip_stops(cs, rep)
     cs = [c for c in cs if c.toks]
     _recase(cs, words, lex, rep, fps)
-    if mode == "competitor":
+    if mode == "competitor" and not keep_groups:
         cs = _regroup(cs, fps, rep, cuts)
     # rule 6: length
     out = []
@@ -1139,28 +1152,42 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
         out += pieces
     cs = out
     # rule 7: weak last words, lone weak words; rule 10: never across a video cut
-    _move_weak(cs, fps, mode, rep, cuts)
-    cs = _join_lone(cs, fps, rep, cuts)
-    cs = _cut_split(cs, cuts, fps, rep)
+    if not keep_groups:
+        _move_weak(cs, fps, mode, rep, cuts)
+        cs = _join_lone(cs, fps, rep, cuts)
+    if not (keep_groups and mode == "competitor"):       # the competitor's own caption breaks, followed: kept as they are
+        cs = _cut_split(cs, cuts, fps, rep)
     _collapse_stutters(cs, rep)                          # after the regrouping: two captions may have met
     _pause_capitals(cs, words, rep, fps)
     for i, c in enumerate(cs):
-        why = weak_reason(cs, i, fps, mode, cuts)
+        why = weak_reason(cs, i, fps, mode, cuts) if not keep_groups else None
         if why not in (None, "not a weak ending"):
             t = c.toks[-1]
             rep.kept_weak.append({"time": (t.word.start if t.word is not None else c.start / float(fps)),
                                   "text": t.text, "reason": why, "caption": c.text,
                                   "start_tc": _tc(c.start, fps), "end_tc": _tc(c.end, fps)})
             rep.flagged[7] += 1
-    # rule 8: no gaps (voice mode). A gap with a video cut in it closes on the cut (rule 10); with two or more, the
-    # clip between the first and the last has no speech and stays uncaptioned
-    if mode != "competitor":
-        for a, b in zip(cs, cs[1:]):
-            if a.end != b.start:
-                inside = [f for f in cuts if a.end <= f <= b.start]
-                a.end, b.start = (inside[0], inside[-1]) if inside else (b.start, b.start)
-                if a.end == b.start:
-                    rep.change(a, 8)
+    # rule 8: no gaps, in every mode -- the user's captions are back to back: a caption stays until the next one
+    # starts. The gaps of another video's stretches (``open_gaps``) stay. The earlier voice grouping (not
+    # ``keep_groups``): a gap with a video cut in it closes on the cut (rule 10); with two or more, the clip between
+    # the first and the last has no speech and stays uncaptioned
+    silence = int(round(SILENCE_S * float(fps)))
+    filled: list[Cap] = []
+    for a, b in zip(cs, cs[1:] + [None]):
+        filled.append(a)
+        if b is None or a.end == b.start or any(x < b.start + 1 and a.end - 1 < y for x, y in open_gaps):
+            continue
+        if (keep_groups or mode == "competitor") and b.start - a.end > silence and a.mode != "placeholder"                 and b.mode != "placeholder":       # a silence: the action goes there, as the user writes it
+            filled.append(Cap(a.end, b.start, [Tok(PLACEHOLDER, PLACEHOLDER)], "placeholder", {}))
+            rep.change(a, 8)
+            continue
+        inside = [f for f in cuts if a.end <= f <= b.start] if not keep_groups and mode != "competitor" else []
+        if b.start > a.end:
+            b.info["gap_before"] = b.start - a.end            # the pause it closes (rule 9 still sees it)
+        a.end, b.start = (inside[0], inside[-1]) if inside else (b.start, b.start)
+        if a.end == b.start:
+            rep.change(a, 8)
+    cs = filled
     # rule 5: what is still not a word
     for c in cs:
         bad = [x for x in _cores5(c) if c.mode != "placeholder" and x and not is_real(x, lex) and not is_name(x)]
@@ -1241,9 +1268,10 @@ def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: 
         tc = f"{_tc(c.start, fps)} '{c.text}'"
         if c.mode == "placeholder":
             continue
-        if 1 in out and re.search(r"[?!.]\s+\S", c.text):
+        follow = orig.info.get("style") == "follow"     # the competitor's own caption breaks, kept
+        if 1 in out and not follow and re.search(r"[?!.]\s+\S", c.text):
             out[1].append(tc)
-        if 2 in out:
+        if 2 in out and not follow:
             ws = [t.word for t in c.toks if t.word is not None] or c.info.get("_words") or []
             if any(sentence_end(w.raw) for w in ws[:-1]):
                 out[2].append(tc)
@@ -1282,7 +1310,7 @@ def _split_pairs(cs: Sequence[Cap], fps: Fraction, adjectives: bool = True, cuts
     out = []
     gap = int(round(PAUSE_S * float(fps)))
     for a, b in zip(cs, cs[1:]):
-        if not (a.spoken and b.spoken and a.toks and b.toks) or b.start - a.end > gap:
+        if not (a.spoken and b.spoken and a.toks and b.toks) or                 max(b.start - a.end, int(b.info.get("gap_before") or 0)) > gap:
             continue
         if any(a.end - gap <= f <= b.start + gap for f in cuts):
             continue                                     # split on a video cut: rule 10 wins

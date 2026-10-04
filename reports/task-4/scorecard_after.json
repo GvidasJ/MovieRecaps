@@ -1,0 +1,1254 @@
+{
+ "when": "2026-10-04T16:19:45",
+ "git": "4eca0c0",
+ "seconds": 961.8,
+ "extra": [],
+ "rows": [
+  {
+   "case": "deadpool",
+   "exit": 1,
+   "seconds": 93.6,
+   "run_dir": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\work\\check-all\\runs\\deadpool\\016",
+   "deliverables": {
+    "status": "pass",
+    "summary": "8/8 deliverables present, 2 skipped (build_ae_project.jsx (Premiere-only run, --premiere); recreated_edit.aep (Premiere-only run, --premiere)), exports validated, 0 stage errors",
+    "failures": []
+   },
+   "determinism": {
+    "status": "pass",
+    "summary": "cutlist re-assembled from caches is byte-identical; previous run not compared (code_hash changed)",
+    "failures": []
+   },
+   "coverage": {
+    "status": "pass",
+    "summary": "25 segments (2 NOT-IN-RAW), 700/700 frames covered, 0 gaps, 0 overlaps (0 transitions)"
+   },
+   "captions_mode": "competitor",
+   "captions_count": 63,
+   "transcriber": {
+    "engine": "asr.py",
+    "model": "large-v3",
+    "words": 125,
+    "error": null,
+    "hints": [
+     "AI",
+     "MJ",
+     "MCU"
+    ],
+    "runs": [
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 45.33,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 26.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3-turbo",
+      "asked": "large-v3-turbo",
+      "device": "cache",
+      "note": "",
+      "audio_s": 26.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     }
+    ]
+   },
+   "score": {
+    "name": "deadpool",
+    "key": 60,
+    "exact": 47,
+    "exact_pct": 78.3,
+    "words": 125,
+    "subs": 1,
+    "ins": 1,
+    "dels": 0,
+    "wer": 1.6,
+    "rule_breaks": [],
+    "by_type": {
+     "split": 5,
+     "timing": 3,
+     "words": 3,
+     "casing": 2
+    },
+    "diffs": [
+     {
+      "key": "yes! Avengers!",
+      "key_start": 2.467,
+      "got": "yes Avengers!",
+      "got_start": 2.95,
+      "off_frames": 0.2,
+      "got_over": [
+       "yes Avengers!"
+      ],
+      "type": "casing"
+     },
+     {
+      "key": "That's what",
+      "key_start": 3.767,
+      "got": "That's what",
+      "got_start": 4.617,
+      "off_frames": -5.9,
+      "type": "timing"
+     },
+     {
+      "key": "get out of this",
+      "key_start": 4.3,
+      "got": "get out of",
+      "got_start": 5.217,
+      "off_frames": 0.1,
+      "got_over": [
+       "get out of"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "This is gonna",
+      "key_start": 4.667,
+      "got": "This this is gonna",
+      "got_start": 5.583,
+      "off_frames": 0.0,
+      "got_over": [
+       "This this is gonna"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Brad Pitt's",
+      "key_start": 8.467,
+      "got": "Brad Pitt's",
+      "got_start": 9.7,
+      "off_frames": -17.1,
+      "type": "timing"
+     },
+     {
+      "key": "gonna",
+      "key_start": 9.0,
+      "got": "do this?",
+      "got_start": 10.917,
+      "off_frames": 10.0,
+      "got_over": [
+       "gonna"
+      ],
+      "type": "timing"
+     },
+     {
+      "key": "the characters",
+      "key_start": 10.667,
+      "got": "the",
+      "got_start": 12.55,
+      "off_frames": 0.3,
+      "got_over": [
+       "the",
+       "characters"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "I was like he's",
+      "key_start": 11.9,
+      "got": "I was",
+      "got_start": 13.783,
+      "off_frames": 0.3,
+      "got_over": [
+       "I was",
+       "like he's"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Vanisher And",
+      "key_start": 12.717,
+      "got": "Vanisher",
+      "got_start": 14.85,
+      "off_frames": 0.2,
+      "got_over": [
+       "Vanisher"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "they're like",
+      "key_start": 13.3,
+      "got": "And they're like",
+      "got_start": 15.533,
+      "off_frames": -0.1,
+      "got_over": [
+       "And they're like"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Why is Brad Pitt on?",
+      "key_start": 16.3,
+      "got": "Why is Brad Pitt",
+      "got_start": 18.717,
+      "off_frames": -8.0,
+      "got_over": [
+       "Why is Brad Pitt",
+       "Doing it?"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "I was like",
+      "key_start": 17.067,
+      "got": "Doing it?",
+      "got_start": 19.583,
+      "off_frames": 0.0,
+      "got_over": [
+       "Doing it?",
+       "I was like"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "And they're",
+      "key_start": 18.117,
+      "got": "and they're",
+      "got_start": 20.683,
+      "off_frames": 1.0,
+      "got_over": [
+       "and they're"
+      ],
+      "type": "casing"
+     }
+    ]
+   }
+  },
+  {
+   "case": "spiderman-school",
+   "exit": 1,
+   "seconds": 506.4,
+   "run_dir": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\work\\check-all\\runs\\spiderman-school\\015",
+   "deliverables": {
+    "status": "pass",
+    "summary": "8/8 deliverables present, 2 skipped (build_ae_project.jsx (Premiere-only run, --premiere); recreated_edit.aep (Premiere-only run, --premiere)), exports validated, 0 stage errors",
+    "failures": []
+   },
+   "determinism": {
+    "status": "pass",
+    "summary": "cutlist re-assembled from caches is byte-identical; previous run not compared (code_hash changed)",
+    "failures": []
+   },
+   "coverage": {
+    "status": "pass",
+    "summary": "35 segments (0 NOT-IN-RAW), 1965/1965 frames covered, 0 gaps, 0 overlaps (0 transitions)"
+   },
+   "captions_mode": "competitor",
+   "captions_count": 80,
+   "transcriber": {
+    "engine": "asr.py",
+    "model": "large-v3",
+    "words": 154,
+    "error": null,
+    "hints": [
+     "AI",
+     "MJ",
+     "MCU"
+    ],
+    "runs": [
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 30.28,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 21.22,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 20.1,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 38.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3-turbo",
+      "asked": "large-v3-turbo",
+      "device": "cache",
+      "note": "",
+      "audio_s": 38.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     }
+    ]
+   },
+   "score": {
+    "name": "spiderman-school",
+    "key": 64,
+    "exact": 14,
+    "exact_pct": 21.9,
+    "words": 147,
+    "subs": 2,
+    "ins": 4,
+    "dels": 3,
+    "wer": 6.12,
+    "rule_breaks": [],
+    "by_type": {
+     "split": 34,
+     "timing": 9,
+     "words": 7
+    },
+    "diffs": [
+     {
+      "key": "So as",
+      "key_start": 0.0,
+      "got": "So as",
+      "got_start": 0.083,
+      "off_frames": 5.0,
+      "type": "timing"
+     },
+     {
+      "key": "I",
+      "key_start": 0.8,
+      "got": "I suggested",
+      "got_start": 0.783,
+      "off_frames": -8.0,
+      "got_over": [
+       "I suggested"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "suggested",
+      "key_start": 1.25,
+      "got": "to",
+      "got_start": 1.6,
+      "off_frames": -6.0,
+      "got_over": [
+       "to"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "to Marvel that",
+      "key_start": 1.867,
+      "got": "marvel that",
+      "got_start": 2.517,
+      "off_frames": 12.0,
+      "got_over": [
+       "to",
+       "marvel that"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "I should",
+      "key_start": 2.467,
+      "got": "I should go",
+      "got_start": 3.05,
+      "off_frames": 8.0,
+      "got_over": [
+       "marvel that",
+       "I should go"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "go to",
+      "key_start": 2.917,
+      "got": "to a high",
+      "got_start": 3.533,
+      "off_frames": 10.0,
+      "got_over": [
+       "I should go",
+       "to a high"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "a high school",
+      "key_start": 3.183,
+      "got": "to a high",
+      "got_start": 3.533,
+      "off_frames": -6.0,
+      "got_over": [
+       "to a high",
+       "school"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "right",
+      "key_start": 4.567,
+      "got": "it was",
+      "got_start": 5.217,
+      "off_frames": -6.0,
+      "got_over": [
+       "it was"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "and it was",
+      "key_start": 4.817,
+      "got": "it was",
+      "got_start": 5.217,
+      "off_frames": -20.0,
+      "got_over": [
+       "it was"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "and Marvel took it",
+      "key_start": 6.1,
+      "got": "and Marvel",
+      "got_start": 6.867,
+      "off_frames": 2.0,
+      "got_over": [
+       "a joke",
+       "and Marvel",
+       "took it completely"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "completely seriously",
+      "key_start": 6.8,
+      "got": "took it completely",
+      "got_start": 7.317,
+      "off_frames": -13.0,
+      "got_over": [
+       "took it completely",
+       "seriously"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "So the next thing",
+      "key_start": 7.867,
+      "got": "so",
+      "got_start": 8.6,
+      "off_frames": 0.0,
+      "got_over": [
+       "so",
+       "the next thing"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "I know",
+      "key_start": 8.4,
+      "got": "I know",
+      "got_start": 9.183,
+      "off_frames": 4.0,
+      "type": "timing"
+     },
+     {
+      "key": "I had",
+      "key_start": 8.717,
+      "got": "I",
+      "got_start": 9.467,
+      "off_frames": 2.0,
+      "got_over": [
+       "I know",
+       "I",
+       "had a"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "a backpack",
+      "key_start": 9.0,
+      "got": "backpack",
+      "got_start": 9.8,
+      "off_frames": 7.0,
+      "got_over": [
+       "had a",
+       "backpack"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "with a pencil case",
+      "key_start": 9.583,
+      "got": "with a pencil",
+      "got_start": 10.267,
+      "off_frames": 0.0,
+      "got_over": [
+       "with a pencil",
+       "case on my"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "on my way",
+      "key_start": 10.267,
+      "got": "case on my",
+      "got_start": 10.767,
+      "off_frames": -11.0,
+      "got_over": [
+       "case on my",
+       "way to"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "to",
+      "key_start": 10.867,
+      "got": "way to",
+      "got_start": 11.3,
+      "off_frames": -15.0,
+      "got_over": [
+       "way to"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Bronx School",
+      "key_start": 11.117,
+      "got": "Bronx",
+      "got_start": 11.883,
+      "off_frames": -3.0,
+      "got_over": [
+       "Bronx",
+       "school of Science"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "of Science",
+      "key_start": 11.717,
+      "got": "school of Science",
+      "got_start": 12.233,
+      "off_frames": -18.0,
+      "got_over": [
+       "school of Science",
+       "the"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "the school",
+      "key_start": 12.4,
+      "got": "the",
+      "got_start": 13.15,
+      "off_frames": -2.0,
+      "got_over": [
+       "the",
+       "school for genius"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "for",
+      "key_start": 13.117,
+      "got": "school for genius",
+      "got_start": 13.367,
+      "off_frames": -32.0,
+      "got_over": [
+       "school for genius"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "genius kids",
+      "key_start": 13.467,
+      "got": "kids",
+      "got_start": 14.783,
+      "off_frames": 11.0,
+      "got_over": [
+       "school for genius",
+       "kids",
+       "genius",
+       "kids right"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "I went to",
+      "key_start": 14.383,
+      "got": "I went",
+      "got_start": 16.9,
+      "off_frames": 3.0,
+      "got_over": [
+       "yes yeah",
+       "I went",
+       "to school"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "school",
+      "key_start": 14.767,
+      "got": "to school",
+      "got_start": 17.15,
+      "off_frames": -5.0,
+      "got_over": [
+       "to school"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "name",
+      "key_start": 15.6,
+      "got": "name",
+      "got_start": 18.117,
+      "off_frames": 3.0,
+      "type": "timing"
+     },
+     {
+      "key": "even the teachers",
+      "key_start": 16.933,
+      "got": "the teachers",
+      "got_start": 20.333,
+      "off_frames": 9.0,
+      "got_over": [
+       "no even",
+       "the teachers"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "that I was",
+      "key_start": 17.983,
+      "got": "that",
+      "got_start": 21.283,
+      "off_frames": 3.0,
+      "got_over": [
+       "didn't know",
+       "that",
+       "I was",
+       "not"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "not a real student",
+      "key_start": 18.567,
+      "got": "not",
+      "got_start": 21.767,
+      "off_frames": -8.0,
+      "got_over": [
+       "not",
+       "a real student"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "so they would",
+      "key_start": 19.333,
+      "got": "so they would",
+      "got_start": 22.717,
+      "off_frames": 3.0,
+      "type": "timing"
+     },
+     {
+      "key": "bring me up",
+      "key_start": 19.783,
+      "got": "bring me",
+      "got_start": 23.1,
+      "off_frames": -1.0,
+      "got_over": [
+       "bring me",
+       "up to"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "to the front",
+      "key_start": 20.25,
+      "got": "the front of",
+      "got_start": 23.683,
+      "off_frames": 6.0,
+      "got_over": [
+       "up to",
+       "the front of"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "of the class",
+      "key_start": 20.517,
+      "got": "the class",
+      "got_start": 24.017,
+      "off_frames": 10.0,
+      "got_over": [
+       "the front of",
+       "the class",
+       "and be like"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "and be like",
+      "key_start": 21.133,
+      "got": "and be like",
+      "got_start": 24.367,
+      "off_frames": -6.0,
+      "type": "timing"
+     },
+     {
+      "key": "I'm like",
+      "key_start": 22.217,
+      "got": "like",
+      "got_start": 25.717,
+      "off_frames": 0.0,
+      "got_over": [
+       "like",
+       "I have no"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "I have",
+      "key_start": 22.633,
+      "got": "I have no",
+      "got_start": 25.883,
+      "off_frames": -28.0,
+      "got_over": [
+       "I have no"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "no idea",
+      "key_start": 23.133,
+      "got": "idea",
+      "got_start": 27.133,
+      "off_frames": 17.0,
+      "got_over": [
+       "I have no",
+       "idea",
+       "what you're"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "what you're talking",
+      "key_start": 23.817,
+      "got": "what you're",
+      "got_start": 27.5,
+      "off_frames": -2.0,
+      "got_over": [
+       "what you're",
+       "talking about"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "about",
+      "key_start": 24.367,
+      "got": "talking about",
+      "got_start": 27.833,
+      "off_frames": -15.0,
+      "got_over": [
+       "talking about"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "at the back",
+      "key_start": 25.15,
+      "got": "at the back",
+      "got_start": 29.433,
+      "off_frames": -5.0,
+      "type": "timing"
+     },
+     {
+      "key": "of a classroom",
+      "key_start": 25.35,
+      "got": "of a",
+      "got_start": 29.75,
+      "off_frames": 2.0,
+      "got_over": [
+       "of a",
+       "classroom"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "next to",
+      "key_start": 26.083,
+      "got": "next",
+      "got_start": 30.567,
+      "off_frames": -4.0,
+      "got_over": [
+       "next",
+       "to quite"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "quite a pretty",
+      "key_start": 26.383,
+      "got": "to quite",
+      "got_start": 30.883,
+      "off_frames": -3.0,
+      "got_over": [
+       "to quite",
+       "a pretty"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "and",
+      "key_start": 27.217,
+      "got": "eventually",
+      "got_start": 31.883,
+      "off_frames": -0.0,
+      "got_over": [
+       "eventually"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "then she's like",
+      "key_start": 27.5,
+      "got": "eventually",
+      "got_start": 31.883,
+      "off_frames": -8.0,
+      "got_over": [
+       "eventually",
+       "she's like"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "what's your deal",
+      "key_start": 28.4,
+      "got": "what's your deal",
+      "got_start": 32.85,
+      "off_frames": -4.0,
+      "type": "timing"
+     },
+     {
+      "key": "man?",
+      "key_start": 29.2,
+      "got": "man?",
+      "got_start": 33.517,
+      "off_frames": -12.0,
+      "type": "timing"
+     },
+     {
+      "key": "do you wanna know",
+      "key_start": 29.3,
+      "got": "do you",
+      "got_start": 34.717,
+      "off_frames": -5.0,
+      "got_over": [
+       "do you",
+       "want to know"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "I'm actually",
+      "key_start": 30.15,
+      "got": "my secret?",
+      "got_start": 35.183,
+      "off_frames": -27.0,
+      "got_over": [
+       "my secret?",
+       "I'm actually"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Spider man",
+      "key_start": 31.05,
+      "got": "Spider-Man",
+      "got_start": 37.367,
+      "off_frames": -4.0,
+      "got_over": [
+       "Spider-Man"
+      ],
+      "type": "timing"
+     }
+    ]
+   }
+  },
+  {
+   "case": "zendaya",
+   "exit": 1,
+   "seconds": 137.4,
+   "run_dir": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\work\\check-all\\runs\\zendaya\\018",
+   "deliverables": {
+    "status": "pass",
+    "summary": "8/8 deliverables present, 2 skipped (build_ae_project.jsx (Premiere-only run, --premiere); recreated_edit.aep (Premiere-only run, --premiere)), exports validated, 0 stage errors",
+    "failures": []
+   },
+   "determinism": {
+    "status": "pass",
+    "summary": "cutlist re-assembled from caches is byte-identical; previous run not compared (code_hash changed)",
+    "failures": []
+   },
+   "coverage": {
+    "status": "pass",
+    "summary": "26 segments (1 NOT-IN-RAW), 740/740 frames covered, 0 gaps, 0 overlaps (0 transitions)"
+   },
+   "captions_mode": "competitor",
+   "captions_count": 41,
+   "transcriber": {
+    "engine": "asr.py",
+    "model": "large-v3",
+    "words": 71,
+    "error": null,
+    "hints": [
+     "AI",
+     "MJ",
+     "MCU"
+    ],
+    "runs": [
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 24.75,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 28.1,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 18.5,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3-turbo",
+      "asked": "large-v3-turbo",
+      "device": "cache",
+      "note": "",
+      "audio_s": 18.5,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     }
+    ]
+   }
+  },
+  {
+   "case": "zendaya-age",
+   "exit": 1,
+   "seconds": 224.2,
+   "run_dir": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\work\\check-all\\runs\\zendaya-age\\016",
+   "deliverables": {
+    "status": "pass",
+    "summary": "8/8 deliverables present, 2 skipped (build_ae_project.jsx (Premiere-only run, --premiere); recreated_edit.aep (Premiere-only run, --premiere)), exports validated, 0 stage errors",
+    "failures": []
+   },
+   "determinism": {
+    "status": "pass",
+    "summary": "cutlist re-assembled from caches is byte-identical; previous run not compared (code_hash changed)",
+    "failures": []
+   },
+   "coverage": {
+    "status": "pass",
+    "summary": "15 segments (0 NOT-IN-RAW), 569/569 frames covered, 0 gaps, 0 overlaps (0 transitions)"
+   },
+   "captions_mode": "competitor",
+   "captions_count": 24,
+   "transcriber": {
+    "engine": "asr.py",
+    "model": "large-v3",
+    "words": 35,
+    "error": null,
+    "hints": [
+     "AI",
+     "MJ",
+     "MCU"
+    ],
+    "runs": [
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 30.6,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3",
+      "asked": "large-v3",
+      "device": "cache",
+      "note": "",
+      "audio_s": 17.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     },
+     {
+      "model": "large-v3-turbo",
+      "asked": "large-v3-turbo",
+      "device": "cache",
+      "note": "",
+      "audio_s": 17.68,
+      "load_s": 0.0,
+      "seconds": 0.0,
+      "aligned": null,
+      "align_error": null
+     }
+    ]
+   },
+   "score": {
+    "name": "zendaya-age",
+    "key": 19,
+    "exact": 3,
+    "exact_pct": 15.8,
+    "words": 40,
+    "subs": 0,
+    "ins": 0,
+    "dels": 9,
+    "wer": 22.5,
+    "rule_breaks": [],
+    "by_type": {
+     "split": 8,
+     "words": 5,
+     "timing": 3
+    },
+    "diffs": [
+     {
+      "key": "Name",
+      "key_start": 0.0,
+      "got": "Name surname",
+      "got_start": 0.017,
+      "off_frames": 1.0,
+      "got_over": [
+       "Name surname"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "surname",
+      "key_start": 0.517,
+      "got": "and age",
+      "got_start": 0.85,
+      "off_frames": 20.0,
+      "got_over": [
+       "Name surname"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Zendaya",
+      "key_start": 1.517,
+      "got": "Zendaya Coleman",
+      "got_start": 2.05,
+      "off_frames": 9.0,
+      "got_over": [
+       "*...*",
+       "Zendaya Coleman"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Coleman",
+      "key_start": 2.35,
+      "got": "and I am",
+      "got_start": 2.933,
+      "off_frames": 12.0,
+      "got_over": [
+       "Zendaya Coleman",
+       "and I am"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "And I am 25",
+      "key_start": 3.283,
+      "got": "25",
+      "got_start": 4.15,
+      "off_frames": 29.0,
+      "got_over": [
+       "and I am",
+       "25"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "Tom Holland",
+      "key_start": 4.367,
+      "got": "Tom Holland",
+      "got_start": 4.767,
+      "off_frames": -36.0,
+      "type": "timing"
+     },
+     {
+      "key": "and I am",
+      "key_start": 5.017,
+      "got": "and",
+      "got_start": 6.117,
+      "off_frames": 4.0,
+      "got_over": [
+       "Tom Holland",
+       "and",
+       "I am"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "a family situation",
+      "key_start": 6.4,
+      "got": "family situation",
+      "got_start": 7.85,
+      "off_frames": 0.0,
+      "got_over": [
+       "family situation"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "I am",
+      "key_start": 7.267,
+      "got": "am",
+      "got_start": 8.75,
+      "off_frames": -21.0,
+      "got_over": [
+       "am"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "a son",
+      "key_start": 7.7,
+      "got": "a son",
+      "got_start": 9.617,
+      "off_frames": 5.0,
+      "type": "timing"
+     },
+     {
+      "key": "to a married",
+      "key_start": 8.533,
+      "got": "married",
+      "got_start": 11.017,
+      "off_frames": 5.0,
+      "got_over": [
+       "to a",
+       "married"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "couple",
+      "key_start": 9.217,
+      "got": "couple",
+      "got_start": 11.85,
+      "off_frames": 14.0,
+      "type": "timing"
+     },
+     {
+      "key": "Same with you",
+      "key_start": 9.667,
+      "got": "and",
+      "got_start": 12.75,
+      "off_frames": 11.0,
+      "got_over": [
+       "couple",
+       "and"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "And I have",
+      "key_start": 10.233,
+      "got": "a daughter",
+      "got_start": 14.85,
+      "off_frames": 25.0,
+      "got_over": [
+       "I have"
+      ],
+      "type": "words"
+     },
+     {
+      "key": "to a divorced one",
+      "key_start": 10.933,
+      "got": "to a divorced",
+      "got_start": 15.283,
+      "off_frames": 9.0,
+      "got_over": [
+       "a daughter",
+       "to a divorced",
+       "one"
+      ],
+      "type": "split"
+     },
+     {
+      "key": "*laughs*",
+      "key_start": 12.167,
+      "got": "*...*",
+      "got_start": 16.383,
+      "off_frames": 1.0,
+      "got_over": [
+       "*...*"
+      ],
+      "type": "words"
+     }
+    ]
+   }
+  }
+ ]
+}

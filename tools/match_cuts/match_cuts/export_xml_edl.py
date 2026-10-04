@@ -1165,6 +1165,8 @@ class PremiereClip:
     framing_note: str = ""           # --min-move: why the framing is not this clip's own (kept from the clip before)
     link_split: bool = False         # a piece of one take split so each V1 clip links to one A1 clip (link_pairs)
     person_note: str = ""            # re-framed to show the person speaking (speakers.py): what moved and why
+    person_span: tuple[int, int] | None = None   # the source range it plays in the final edit (sequence-rate frames):
+                                                 # the speech-safe cuts may extend it (premiere_clips(silence=))
 
     @property
     def label(self) -> str:
@@ -1439,11 +1441,64 @@ def _people_of(cfg: Any) -> Any:
 
 
 def _person_of(cl: PremiereClip, sp: Any, fps: Fraction) -> Any:
-    """What clip ``cl`` has to show (speakers.Faces), or None (nothing analysed / no check)."""
+    """What clip ``cl`` has to show (speakers.Faces), or None (nothing analysed / no check) -- over the source it
+    plays in the final edit (``person_span``: extended where its speech is finished) when that is known."""
     if sp is None:
         return None
-    a, b = _clip_raw_s(cl, fps)
+    if cl.person_span is not None:
+        a, b = cl.person_span[0] / float(fps), cl.person_span[1] / float(fps)
+    else:
+        a, b = _clip_raw_s(cl, fps)
     return sp.faces(min(a, b), max(a, b))
+
+
+def _final_spans(clips: list[PremiereClip], silence: Any) -> None:
+    """Each clip's ``person_span``: the source range it plays once the speech-safe cuts and the silence removal are
+    applied -- its own range, widened by what is added at its own two edges (silence.Ripple.ext, stage by stage: a
+    clip may play on to finish its words, or start earlier) -- so its framing is chosen for, and checked on, the
+    same stretch. (Removed frames inside it only shorten it: the span is the outer bound.)"""
+    stages = list(silence.stages()) if silence is not None else []
+    for c in clips:
+        r0, r1 = int(c.rec_start), int(c.rec_end)
+        e0 = e1 = 0
+        for st in stages:
+            e0 += int(st.ext(r0, "start"))
+            e1 += int(st.ext(r1, "end"))
+            r0, r1 = st.map1(r0), st.map1(r1)
+        lo, hi = sorted((int(c.src_in), int(c.src_out)))
+        v = abs(float(c.speed)) or 1.0
+        c.person_span = (lo - int(round(e0 * v)), hi + int(round(e1 * v)))
+
+
+def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                        win: tuple[float, float, float, float], fps: Fraction) -> int:
+    """Once the pieces of one take are joined into one clip (_merge_continuous), the joined clip is checked again on
+    its whole stretch -- as the XML's person check reads it -- and moved sideways to show its person when it does not
+    (speakers.frame_run, zoom kept). Returns how many moved."""
+    from . import speakers
+    moved = 0
+    for c in clips:
+        if len(c.keys) != 1 or len(c.events or [c.ev]) < 2 or abs(float(c.keys[0][1].theta_deg)) > 1e-9:
+            continue
+        old = c.keys[0][1]
+        f = _person_of(c, sp, fps)
+        flip = bool(c.seg.flip_h)
+        if f is None or f.how == "nobody" or speakers.passes(old, f, raw_wh[0], flip, win):
+            continue
+        new = speakers.frame_run(old, [(c, f, flip)], raw_wh, win)[0]
+        if new is None:
+            continue
+        c.keys = [(c.keys[0][0], new)]
+        c.covered = _covers(new, raw_wh, win, tol=1e-6)
+        b = speakers.target(new, f, raw_wh[0], flip, win)
+        who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
+               "a person": "a person (nobody speaks)"}.get(f.how, f.how)
+        cx = (b[0] + b[2]) / 2.0 if b else float("nan")
+        dx = (new.tx + new.s * raw_wh[0] / 2.0) - (old.tx + old.s * raw_wh[0] / 2.0)
+        c.person_note = (f"re-framed to show {who} (RAW x {cx:.0f}) over the whole take its pieces play -- the "
+                         f"picture moved {dx:+.0f} px sideways, zoom kept")
+        moved += 1
+    return moved
 
 
 def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
@@ -1589,6 +1644,10 @@ def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
             p.end, p.rec_end, p.src_out = cl.end, cl.rec_end, cl.src_out
             p.events = (p.events or [p.ev]) + (cl.events or [cl.ev])
             p.person_note = p.person_note or cl.person_note
+            if p.person_span is not None or cl.person_span is not None:
+                sa = p.person_span or (min(p.src_in, p.src_out), max(p.src_in, p.src_out))
+                sb = cl.person_span or (min(cl.src_in, cl.src_out), max(cl.src_in, cl.src_out))
+                p.person_span = (min(sa[0], sb[0]), max(sa[1], sb[1]))
             continue
         out.append(cl)
     return out
@@ -1642,8 +1701,11 @@ def other_video_name(a: int, b: int, fps: Fraction) -> str:
     return f"{OTHER_VIDEO} ({_tc(a, fps)}\u2013{_tc(b, fps)})"
 
 
-def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip], list[dict], list[str]]:
-    """(V1 clips, markers [{name, comment, in, out}], warnings) of the Premiere export (sequence-rate frames)."""
+def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
+                   ) -> tuple[list[PremiereClip], list[dict], list[str]]:
+    """(V1 clips, markers [{name, comment, in, out}], warnings) of the Premiere export (sequence-rate frames).
+    ``silence``: the edit's silence.Ripple -- each clip's person framing is then chosen for the source it plays in the
+    final edit (_final_spans), as the XML's person check reads it."""
     st = premiere_settings(cfg)
     comp_fps, raw_fps, fps = cutlist.comp_fps, cutlist.raw_fps, st["fps"]
     fac = premiere_factor(comp_fps, fps)
@@ -1735,11 +1797,15 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
         # fewer reframes and cuts: hold the framing under min_move px (inside one RAW shot), frame on the person speaking
         # what the competitor cannot frame or does not show them, then join the pieces of one take that are left alike
         sp = _people_of(cfg)
+        if sp is not None and silence is not None and getattr(silence, "active", False):
+            _final_spans(clips, silence)
         competitor = {id(c): (c.keys[0][1] if c.keys else None) for c in clips}
         _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps, sp)
         if sp is not None:
             _person_notes(clips, competitor, sp, raw_wh, win, fps)
         clips = _merge_continuous(clips)
+        if sp is not None:
+            _person_after_merge(clips, sp, raw_wh, win, fps)
     return clips, markers, warnings
 
 
@@ -1828,7 +1894,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     has_audio = bool(cutlist.raw.get("has_audio", True))
     audio_info = {"sample_rate": cutlist.raw.get("audio_sample_rate") or 48000,
                   "channels": cutlist.raw.get("audio_channels") or 2} if has_audio else None
-    clips, markers, warnings = premiere_clips(cutlist, cfg)
+    clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
     audio_items = premiere_audio(cutlist, clips, cfg) if has_audio else []
     if silence is not None and silence.active:
         clips, audio_items, markers = sil.apply_premiere(clips, audio_items, markers, silence)
@@ -2865,8 +2931,8 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
     return out
 
 
-def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = None
-                             ) -> tuple[list[str], list[str], dict]:
+def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = None,
+                             spans: Sequence[tuple[float, float]] | None = None) -> tuple[list[str], list[str], dict]:
     """The hard person check of the final XML, on its own numbers: every V1 clip's framing as Premiere shows it
     (Position = sequence centre + <center> x the clip's source size, Scale, Horizontal Flip) shows, fully inside the
     template window, the person speaking in it -- or, when nobody speaks there, at least one person (speakers.py on
@@ -2888,6 +2954,7 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
     items = seq.find("media/video/track").findall("clipitem") if seq is not None else []
     problems, exceptions = [], []
     counts = {"clips": 0, "speaker": 0, "biggest face": 0, "a person": 0, "nobody": 0, "not analysed": 0}
+    tol = 1.5 / f
     for el, c in zip(items, x["clips"]):
         counts["clips"] += 1
         fe = el.find("file")
@@ -2895,6 +2962,9 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
         s0 = int(c["start"]) if int(c["start"]) >= 0 else int(c["end"])
         where = f"{c.get('label')} at {_tc(s0, fps)}"
         a, b = sorted((c["in"] / f, c["out"] / f))
+        home = [sp_ for sp_ in spans or [] if sp_[0] - tol <= a and b <= sp_[1] + tol]
+        if home:                         # a piece of a planned clip (a silence cut split it): judged as that clip
+            a, b = min(home, key=lambda sp_: sp_[1] - sp_[0])
         need = sp.faces(a, b) if sp is not None else None
         if need is None:
             counts["not analysed"] += 1
@@ -2923,7 +2993,8 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
                "a person": "any person (nobody speaks)"}.get(need.how, need.how)
         problems.append(f"{where}: {who} is not fully inside the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
                         f"{win[1]:.0f}-{win[1] + win[3]:.0f})" +
-                        (f": face at x {r[0]:.0f}-{r[2]:.0f}, y {r[1]:.0f}-{r[3]:.0f}" if r else ""))
+                        (f": face at x {r[0]:.0f}-{r[2]:.0f}, y {r[1]:.0f}-{r[3]:.0f}" if r else "") +
+                        f" (who is there: RAW {a:.2f}-{b:.2f} s)")
     for a_, b_ in other_video_ranges(x):
         exceptions.append(f"OTHER VIDEO {_tc(a_, fps)}-{_tc(b_, fps)}: another video's stretch, no clip -- not checked")
     return problems, exceptions, counts
@@ -3000,7 +3071,19 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     persons: list[str] = []
     if sp is not None and not bad_items:
         try:
-            persons, out["person_exceptions"], out["person_counts"] = premiere_person_problems(xml_path, sp, cfg)
+            plan_spans = None
+            try:                             # each planned clip's whole stretch (the pieces of one are judged on it)
+                pc, _, _ = premiere_clips(cutlist, cfg, silence)
+                f_ = float(premiere_settings(cfg)["fps"])
+                plan_spans = [(min(c.person_span or (c.src_in, c.src_out)) / f_,
+                               max(c.person_span or (c.src_in, c.src_out)) / f_) for c in pc]
+            except Exception:  # noqa: BLE001 - each clip on its own then
+                plan_spans = None
+            persons, out["person_exceptions"], out["person_counts"] = premiere_person_problems(xml_path, sp, cfg,
+                                                                                               plan_spans)
+            if persons:
+                log.info("premiere person check: the planned clips' stretches %s",
+                         [(round(a_, 2), round(b_, 2)) for a_, b_ in plan_spans or []])
         except Exception as e:  # noqa: BLE001
             persons = [f"the person check could not read the XML: {type(e).__name__}: {e}"]
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
@@ -3013,7 +3096,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     out["flash_problems"], out["silence_problems"] = flash, hush
     out["speech_checked"], out["flash_checked"] = speech is not None, shots is not None
     try:
-        clips, markers, warnings = premiere_clips(cutlist, cfg)
+        clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
         plan_clips = clips
         want_a = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
         cut = silence is not None and silence.active

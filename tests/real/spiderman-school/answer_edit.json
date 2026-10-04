@@ -1,0 +1,174 @@
+{
+ "what": "the user's finished Spider-Man edit (its Premiere project, A1: the RAW audio under the clips) -- the timeline answer.srt is timed on",
+ "fps": 60.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 0.8,
+   "kind": "raw",
+   "src_in": 170.4,
+   "speed": 1.0
+  },
+  {
+   "start": 0.8,
+   "end": 1.25,
+   "kind": "raw",
+   "src_in": 171.333333,
+   "speed": 1.0
+  },
+  {
+   "start": 1.25,
+   "end": 3.933333,
+   "kind": "raw",
+   "src_in": 172.583333,
+   "speed": 1.0
+  },
+  {
+   "start": 3.933333,
+   "end": 4.583333,
+   "kind": "raw",
+   "src_in": 175.316667,
+   "speed": 1.0
+  },
+  {
+   "start": 4.583333,
+   "end": 7.85,
+   "kind": "raw",
+   "src_in": 176.316667,
+   "speed": 1.0
+  },
+  {
+   "start": 7.85,
+   "end": 8.833333,
+   "kind": "raw",
+   "src_in": 183.266667,
+   "speed": 1.0
+  },
+  {
+   "start": 8.833333,
+   "end": 11.116667,
+   "kind": "raw",
+   "src_in": 184.933333,
+   "speed": 1.0
+  },
+  {
+   "start": 11.116667,
+   "end": 12.4,
+   "kind": "raw",
+   "src_in": 187.35,
+   "speed": 1.0
+  },
+  {
+   "start": 12.4,
+   "end": 13.466667,
+   "kind": "raw",
+   "src_in": 206.5,
+   "speed": 1.0
+  },
+  {
+   "start": 13.466667,
+   "end": 14.383333,
+   "kind": "raw",
+   "src_in": 207.916667,
+   "speed": 1.0
+  },
+  {
+   "start": 14.383333,
+   "end": 16.933333,
+   "kind": "raw",
+   "src_in": 192.1,
+   "speed": 1.0
+  },
+  {
+   "start": 16.933333,
+   "end": 18.566667,
+   "kind": "raw",
+   "src_in": 212.616667,
+   "speed": 1.0
+  },
+  {
+   "start": 18.566667,
+   "end": 22.216667,
+   "kind": "raw",
+   "src_in": 214.816667,
+   "speed": 1.0
+  },
+  {
+   "start": 22.216667,
+   "end": 22.633333,
+   "kind": "raw",
+   "src_in": 218.866667,
+   "speed": 1.0
+  },
+  {
+   "start": 22.633333,
+   "end": 24.783333,
+   "kind": "raw",
+   "src_in": 219.55,
+   "speed": 1.0
+  },
+  {
+   "start": 24.783333,
+   "end": 26.083333,
+   "kind": "raw",
+   "src_in": 237.35,
+   "speed": 1.0
+  },
+  {
+   "start": 26.083333,
+   "end": 27.216667,
+   "kind": "raw",
+   "src_in": 238.95,
+   "speed": 1.0
+  },
+  {
+   "start": 27.216667,
+   "end": 27.5,
+   "kind": "raw",
+   "src_in": 240.233333,
+   "speed": 1.0
+  },
+  {
+   "start": 27.5,
+   "end": 27.9,
+   "kind": "raw",
+   "src_in": 241.416667,
+   "speed": 1.0
+  },
+  {
+   "start": 27.9,
+   "end": 29.3,
+   "kind": "raw",
+   "src_in": 241.816667,
+   "speed": 1.0
+  },
+  {
+   "start": 29.3,
+   "end": 30.15,
+   "kind": "raw",
+   "src_in": 245.316667,
+   "speed": 1.0
+  },
+  {
+   "start": 30.15,
+   "end": 30.283333,
+   "kind": "raw",
+   "src_in": 246.15,
+   "speed": 1.0
+  },
+  {
+   "start": 30.283333,
+   "end": 31.05,
+   "kind": "raw",
+   "src_in": 249.616667,
+   "speed": 1.0
+  },
+  {
+   "start": 31.05,
+   "end": 32.383333,
+   "kind": "raw",
+   "src_in": 250.9,
+   "speed": 1.0
+  }
+ ]
+}

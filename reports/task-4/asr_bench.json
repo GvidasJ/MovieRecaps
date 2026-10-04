@@ -1,0 +1,1554 @@
+{
+ "cases": {
+  "deadpool": {
+   "seconds": 23.33,
+   "captions": 59,
+   "words": 124
+  },
+  "spiderman-school": {
+   "seconds": 32.38,
+   "captions": 64,
+   "words": 147
+  },
+  "zendaya-age": {
+   "seconds": 12.9,
+   "captions": 18,
+   "words": 39
+  }
+ },
+ "engines": {
+  "small.en": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 2.787,
+     "plain": {
+      "wer": 6.45,
+      "sub": 2,
+      "ins": 2,
+      "del": 4,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 5.59,
+      "sub": 2,
+      "ins": 2,
+      "del": 4,
+      "n": 143
+     },
+     "text": "The X-Force. The studio is like, Yes! Like, senders! That's what we're gonna get out of this. This is gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on. Back up. Brad Pitt's gonna do this? I was like, yeah. He's playing one of the characters. They're like, which character? I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak, and he's invisible. Why is Brad Pitt on? I was like, because you see him. And they're like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death. Hahaha",
+     "timing_engine": {
+      "n": 51,
+      "median_ms": 33.0,
+      "p90_ms": 103.0,
+      "bias_ms": 13.0,
+      "within_1f": 19.6,
+      "within_2f": 51.0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 35.9,
+      "p90_ms": 94.4,
+      "bias_ms": 35.9,
+      "within_1f": 40.0,
+      "within_2f": 40.0
+     },
+     "timing_aligned": {
+      "n": 51,
+      "median_ms": 36.3,
+      "p90_ms": 134.5,
+      "bias_ms": 34.2,
+      "within_1f": 27.5,
+      "within_2f": 45.1
+     },
+     "timing_onsets": {
+      "n": 51,
+      "median_ms": 36.3,
+      "p90_ms": 134.5,
+      "bias_ms": 34.2,
+      "within_1f": 27.5,
+      "within_2f": 45.1
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 121,
+      "kept": 0,
+      "windows": 2
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.824,
+     "plain": {
+      "wer": 6.8,
+      "sub": 5,
+      "ins": 3,
+      "del": 2,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 7.14,
+      "sub": 8,
+      "ins": 1,
+      "del": 2,
+      "n": 154
+     },
+     "text": "So as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke. And Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Bronx School of Science, a school for genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have no idea what you're talking about. I sat at the back of a classroom next to quite a pretty girl. And eventually she's like, so dude, what's your deal, man? Do you want to know my secret? If I match the Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 57.0,
+      "p90_ms": 153.0,
+      "bias_ms": -43.0,
+      "within_1f": 6.7,
+      "within_2f": 35.6
+     },
+     "timing_at_cuts": {
+      "n": 14,
+      "median_ms": 30.2,
+      "p90_ms": 63.2,
+      "bias_ms": 22.4,
+      "within_1f": 35.7,
+      "within_2f": 50.0
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 36.3,
+      "p90_ms": 98.6,
+      "bias_ms": 18.3,
+      "within_1f": 22.2,
+      "within_2f": 46.7
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 37.6,
+      "p90_ms": 98.6,
+      "bias_ms": 18.3,
+      "within_1f": 20.0,
+      "within_2f": 42.2
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 147,
+      "kept": 0,
+      "windows": 4
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.607,
+     "plain": {
+      "wer": 17.95,
+      "sub": 2,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 17.95,
+      "sub": 2,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname, and age. Zendaya Coleman, and I am 25. Tom Holland, and I am 25. Found the situation. I am a son, married couple. And I have a daughter to a divorced one.",
+     "timing_engine": {
+      "n": 10,
+      "median_ms": 38.0,
+      "p90_ms": 337.0,
+      "bias_ms": -1.5,
+      "within_1f": 40.0,
+      "within_2f": 50.0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 58.0,
+      "p90_ms": 158.0,
+      "bias_ms": 58.0,
+      "within_1f": 0.0,
+      "within_2f": 0.0
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 50.4,
+      "p90_ms": 146.6,
+      "bias_ms": 40.2,
+      "within_1f": 10.0,
+      "within_2f": 40.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 40.2,
+      "p90_ms": 146.6,
+      "bias_ms": 24.1,
+      "within_1f": 20.0,
+      "within_2f": 50.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 27,
+      "kept": 7,
+      "windows": 7
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 13.2,
+   "plain": {
+    "wer": 8.06,
+    "sub": 9,
+    "ins": 5,
+    "del": 11,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 7.74,
+    "sub": 12,
+    "ins": 3,
+    "del": 11,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 106,
+    "median_ms": 40.0,
+    "p90_ms": 143.0,
+    "bias_ms": -12.0,
+    "within_1f": 16.0,
+    "within_2f": 44.3
+   },
+   "timing_aligned": {
+    "n": 106,
+    "median_ms": 36.3,
+    "p90_ms": 114.2,
+    "bias_ms": 26.3,
+    "within_1f": 23.6,
+    "within_2f": 45.3
+   },
+   "timing_onsets": {
+    "n": 106,
+    "median_ms": 36.6,
+    "p90_ms": 125.6,
+    "bias_ms": 25.5,
+    "within_1f": 23.6,
+    "within_2f": 44.3
+   }
+  },
+  "medium.en": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 3.24,
+     "plain": {
+      "wer": 7.26,
+      "sub": 3,
+      "ins": 5,
+      "del": 1,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 5.59,
+      "sub": 3,
+      "ins": 5,
+      "del": 0,
+      "n": 143
+     },
+     "text": "Deadpool builds a team. The X-Force, the studio is like, yes, like, Avengers, that's what we're gonna get out of this. It's gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on, back up. Brad Pitt's gonna do this? I was like, yeah, he's playing one of the characters. They're like, which character? I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitt doing it? I was like, because you see him. And they're like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death. Ha-ha-ha!",
+     "timing_engine": {
+      "n": 52,
+      "median_ms": 41.5,
+      "p90_ms": 100.0,
+      "bias_ms": 33.0,
+      "within_1f": 13.5,
+      "within_2f": 42.3
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 19.6,
+      "p90_ms": 84.4,
+      "bias_ms": 19.6,
+      "within_1f": 40.0,
+      "within_2f": 60.0
+     },
+     "timing_aligned": {
+      "n": 52,
+      "median_ms": 34.2,
+      "p90_ms": 134.4,
+      "bias_ms": 32.7,
+      "within_1f": 28.8,
+      "within_2f": 48.1
+     },
+     "timing_onsets": {
+      "n": 52,
+      "median_ms": 34.2,
+      "p90_ms": 134.4,
+      "bias_ms": 32.7,
+      "within_1f": 30.8,
+      "within_2f": 48.1
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 125,
+      "kept": 0,
+      "windows": 2
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 3.302,
+     "plain": {
+      "wer": 4.76,
+      "sub": 4,
+      "ins": 2,
+      "del": 1,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 5.19,
+      "sub": 7,
+      "ins": 0,
+      "del": 1,
+      "n": 154
+     },
+     "text": "So as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke. And Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Bronx School of Science, a school for genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have no idea what you're talking about. So I sat at the back of a classroom next to quite a pretty girl. And then she's like, so dude, what's your deal, man? Do you want to know my secret? I match the Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 50.0,
+      "p90_ms": 103.0,
+      "bias_ms": -23.0,
+      "within_1f": 17.8,
+      "within_2f": 37.8
+     },
+     "timing_at_cuts": {
+      "n": 16,
+      "median_ms": 21.0,
+      "p90_ms": 72.8,
+      "bias_ms": 16.6,
+      "within_1f": 31.2,
+      "within_2f": 62.5
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 33.5,
+      "p90_ms": 97.6,
+      "bias_ms": 19.7,
+      "within_1f": 22.2,
+      "within_2f": 46.7
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 34.0,
+      "p90_ms": 97.6,
+      "bias_ms": 19.7,
+      "within_1f": 20.0,
+      "within_2f": 44.4
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 147,
+      "kept": 0,
+      "windows": 3
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.124,
+     "plain": {
+      "wer": 15.38,
+      "sub": 0,
+      "ins": 1,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 15.38,
+      "sub": 0,
+      "ins": 1,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname, and age. Zendaya Coleman, and I am 25. Tom Holland, and I am 25. Family situation. I am a son, a married couple. And I have a daughter to a divorced one. Yeah.",
+     "timing_engine": {
+      "n": 10,
+      "median_ms": 55.0,
+      "p90_ms": 177.0,
+      "bias_ms": 3.5,
+      "within_1f": 20.0,
+      "within_2f": 30.0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 108.2,
+      "p90_ms": 236.2,
+      "bias_ms": 108.2,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 66.2,
+      "p90_ms": 226.3,
+      "bias_ms": 50.8,
+      "within_1f": 10.0,
+      "within_2f": 20.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 66.2,
+      "p90_ms": 226.3,
+      "bias_ms": 31.3,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 34,
+      "kept": 1,
+      "windows": 4
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 8.9,
+   "plain": {
+    "wer": 7.1,
+    "sub": 7,
+    "ins": 8,
+    "del": 7,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 6.55,
+    "sub": 10,
+    "ins": 6,
+    "del": 6,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 107,
+    "median_ms": 43.0,
+    "p90_ms": 110.0,
+    "bias_ms": 7.0,
+    "within_1f": 15.9,
+    "within_2f": 39.3
+   },
+   "timing_aligned": {
+    "n": 107,
+    "median_ms": 35.0,
+    "p90_ms": 112.2,
+    "bias_ms": 24.1,
+    "within_1f": 24.3,
+    "within_2f": 44.9
+   },
+   "timing_onsets": {
+    "n": 107,
+    "median_ms": 35.5,
+    "p90_ms": 134.4,
+    "bias_ms": 24.7,
+    "within_1f": 23.4,
+    "within_2f": 43.9
+   }
+  },
+  "large-v3": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 4.122,
+     "plain": {
+      "wer": 1.61,
+      "sub": 1,
+      "ins": 1,
+      "del": 0,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 1.4,
+      "sub": 0,
+      "ins": 2,
+      "del": 0,
+      "n": 143
+     },
+     "text": "Deadpool builds a team, the X-Force. The studio was like, yes, like, Avengers, that's what we're gonna get out of this. This is gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on, back up. Brad Pitt's gonna do this? I was like, yeah, he's playing one of the characters. They're like, which character? I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitt's on? I was like, because you see him. And they're like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death.",
+     "timing_engine": {
+      "n": 54,
+      "median_ms": 67.0,
+      "p90_ms": 120.0,
+      "bias_ms": -57.0,
+      "within_1f": 9.3,
+      "within_2f": 24.1
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 15.4,
+      "p90_ms": 83.5,
+      "bias_ms": 15.4,
+      "within_1f": 60.0,
+      "within_2f": 80.0
+     },
+     "timing_aligned": {
+      "n": 54,
+      "median_ms": 31.4,
+      "p90_ms": 115.1,
+      "bias_ms": 27.2,
+      "within_1f": 29.6,
+      "within_2f": 50.0
+     },
+     "timing_onsets": {
+      "n": 54,
+      "median_ms": 31.4,
+      "p90_ms": 115.1,
+      "bias_ms": 27.2,
+      "within_1f": 31.5,
+      "within_2f": 50.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 123,
+      "kept": 1,
+      "windows": 1
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 3.897,
+     "plain": {
+      "wer": 4.08,
+      "sub": 3,
+      "ins": 1,
+      "del": 2,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 5.84,
+      "sub": 7,
+      "ins": 0,
+      "del": 2,
+      "n": 154
+     },
+     "text": "So as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke. And Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Bronx School of Science, a school for genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have no idea what you're talking about. I sat at the back of a classroom next to quite a pretty girl. And eventually she's like, so dude, what's your deal, man? Do you want to know my secret? I'm actually Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 130.0,
+      "p90_ms": 280.0,
+      "bias_ms": -130.0,
+      "within_1f": 4.4,
+      "within_2f": 11.1
+     },
+     "timing_at_cuts": {
+      "n": 15,
+      "median_ms": 39.7,
+      "p90_ms": 297.4,
+      "bias_ms": -8.2,
+      "within_1f": 26.7,
+      "within_2f": 40.0
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 43.6,
+      "p90_ms": 115.1,
+      "bias_ms": 10.0,
+      "within_1f": 24.4,
+      "within_2f": 46.7
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 43.6,
+      "p90_ms": 154.0,
+      "bias_ms": 10.0,
+      "within_1f": 26.7,
+      "within_2f": 46.7
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 137,
+      "kept": 8,
+      "windows": 2
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.098,
+     "plain": {
+      "wer": 12.82,
+      "sub": 0,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 12.82,
+      "sub": 0,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname, and age. Zendaya Coleman, and I am 25. Tom Holland, and I am 25. Family situation. I am a son, a married couple. And I have a daughter to a divorced one.",
+     "timing_engine": {
+      "n": 10,
+      "median_ms": 138.5,
+      "p90_ms": 443.0,
+      "bias_ms": -138.5,
+      "within_1f": 10.0,
+      "within_2f": 20.0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 94.9,
+      "p90_ms": 122.2,
+      "bias_ms": 35.7,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 78.9,
+      "p90_ms": 443.0,
+      "bias_ms": 36.8,
+      "within_1f": 10.0,
+      "within_2f": 20.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 72.6,
+      "p90_ms": 443.0,
+      "bias_ms": 24.8,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 27,
+      "kept": 7,
+      "windows": 4
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 7.5,
+   "plain": {
+    "wer": 4.19,
+    "sub": 4,
+    "ins": 2,
+    "del": 7,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 4.76,
+    "sub": 7,
+    "ins": 2,
+    "del": 7,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 109,
+    "median_ms": 87.0,
+    "p90_ms": 220.0,
+    "bias_ms": -83.0,
+    "within_1f": 7.3,
+    "within_2f": 18.3
+   },
+   "timing_aligned": {
+    "n": 109,
+    "median_ms": 39.7,
+    "p90_ms": 145.9,
+    "bias_ms": 22.4,
+    "within_1f": 25.7,
+    "within_2f": 45.9
+   },
+   "timing_onsets": {
+    "n": 109,
+    "median_ms": 39.7,
+    "p90_ms": 154.0,
+    "bias_ms": 22.4,
+    "within_1f": 26.6,
+    "within_2f": 45.9
+   }
+  },
+  "large-v3-turbo": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.02,
+     "plain": {
+      "wer": 8.87,
+      "sub": 3,
+      "ins": 3,
+      "del": 5,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 6.29,
+      "sub": 3,
+      "ins": 2,
+      "del": 4,
+      "n": 143
+     },
+     "text": "The X-Force, the studio, was like, yes! Like, Avengers, that's what we're gonna get out of this. It's gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on, back up. Brad Pitt's gonna do this? I was like, yeah, he's playing one of the characters. They're like, which character? And I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitt one? I was like, because you see him. And they were like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death.",
+     "timing_engine": {
+      "n": 51,
+      "median_ms": 40.0,
+      "p90_ms": 77.0,
+      "bias_ms": 3.0,
+      "within_1f": 17.6,
+      "within_2f": 39.2
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 27.3,
+      "p90_ms": 93.4,
+      "bias_ms": 27.3,
+      "within_1f": 20.0,
+      "within_2f": 60.0
+     },
+     "timing_aligned": {
+      "n": 51,
+      "median_ms": 38.5,
+      "p90_ms": 132.4,
+      "bias_ms": 36.2,
+      "within_1f": 25.5,
+      "within_2f": 45.1
+     },
+     "timing_onsets": {
+      "n": 51,
+      "median_ms": 38.5,
+      "p90_ms": 132.4,
+      "bias_ms": 36.2,
+      "within_1f": 25.5,
+      "within_2f": 45.1
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 120,
+      "kept": 1,
+      "windows": 1
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.145,
+     "plain": {
+      "wer": 2.72,
+      "sub": 2,
+      "ins": 1,
+      "del": 1,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 4.55,
+      "sub": 6,
+      "ins": 0,
+      "del": 1,
+      "n": 154
+     },
+     "text": "So as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke, and Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Bronx School of Science, a school for genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have no idea what you're talking about. So I sat at the back of a classroom next to quite a pretty girl. And then she's like, so dude, what's your deal, man? Do you want to know my secret? I'm actually Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 70.0,
+      "p90_ms": 153.0,
+      "bias_ms": -70.0,
+      "within_1f": 11.1,
+      "within_2f": 28.9
+     },
+     "timing_at_cuts": {
+      "n": 17,
+      "median_ms": 38.0,
+      "p90_ms": 300.4,
+      "bias_ms": 33.0,
+      "within_1f": 29.4,
+      "within_2f": 47.1
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 35.9,
+      "p90_ms": 104.7,
+      "bias_ms": 13.3,
+      "within_1f": 24.4,
+      "within_2f": 46.7
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 35.9,
+      "p90_ms": 104.7,
+      "bias_ms": 13.3,
+      "within_1f": 26.7,
+      "within_2f": 46.7
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 145,
+      "kept": 1,
+      "windows": 2
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.367,
+     "plain": {
+      "wer": 12.82,
+      "sub": 0,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 12.82,
+      "sub": 0,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname, and age. Zendaya Coleman, and I am 25. Tom Holland, and I am 25. Family situation. I am a son, a married couple. And I have a daughter to a divorced one.",
+     "timing_engine": {
+      "n": 10,
+      "median_ms": 60.0,
+      "p90_ms": 197.0,
+      "bias_ms": -38.5,
+      "within_1f": 20.0,
+      "within_2f": 40.0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 158.0,
+      "p90_ms": 253.0,
+      "bias_ms": 43.0,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 59.2,
+      "p90_ms": 147.6,
+      "bias_ms": 40.1,
+      "within_1f": 10.0,
+      "within_2f": 30.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 59.2,
+      "p90_ms": 147.6,
+      "bias_ms": 28.5,
+      "within_1f": 0.0,
+      "within_2f": 30.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 33,
+      "kept": 1,
+      "windows": 4
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 27.1,
+   "plain": {
+    "wer": 6.45,
+    "sub": 5,
+    "ins": 4,
+    "del": 11,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 6.25,
+    "sub": 9,
+    "ins": 2,
+    "del": 10,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 106,
+    "median_ms": 43.0,
+    "p90_ms": 133.0,
+    "bias_ms": -27.0,
+    "within_1f": 15.1,
+    "within_2f": 34.9
+   },
+   "timing_aligned": {
+    "n": 106,
+    "median_ms": 38.8,
+    "p90_ms": 111.2,
+    "bias_ms": 24.6,
+    "within_1f": 23.6,
+    "within_2f": 44.3
+   },
+   "timing_onsets": {
+    "n": 106,
+    "median_ms": 38.8,
+    "p90_ms": 128.0,
+    "bias_ms": 24.6,
+    "within_1f": 23.6,
+    "within_2f": 44.3
+   }
+  },
+  "parakeet-tdt-0.6b-v2": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.105,
+     "plain": {
+      "wer": 7.26,
+      "sub": 5,
+      "ins": 3,
+      "del": 1,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 4.9,
+      "sub": 5,
+      "ins": 2,
+      "del": 0,
+      "n": 143
+     },
+     "text": "Deadpool builds a team, the X-Force, the studio is like, yes, like Svengers, that's what we're gonna get out of this. It's gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on, back up. Brad Pitt's gonna do this? I was like, yeah. He's playing one of the characters. They're like, which character? And I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitts on? I was like, because you see him. And they were like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death.",
+     "timing_engine": {
+      "n": 52,
+      "median_ms": 50.0,
+      "p90_ms": 163.0,
+      "bias_ms": 43.0,
+      "within_1f": 19.2,
+      "within_2f": 38.5
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 15.3,
+      "p90_ms": 83.5,
+      "bias_ms": 15.3,
+      "within_1f": 60.0,
+      "within_2f": 80.0
+     },
+     "timing_aligned": {
+      "n": 52,
+      "median_ms": 28.9,
+      "p90_ms": 112.5,
+      "bias_ms": 26.1,
+      "within_1f": 28.8,
+      "within_2f": 51.9
+     },
+     "timing_onsets": {
+      "n": 52,
+      "median_ms": 28.9,
+      "p90_ms": 112.5,
+      "bias_ms": 26.1,
+      "within_1f": 30.8,
+      "within_2f": 51.9
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 125,
+      "kept": 0,
+      "windows": 1
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.151,
+     "plain": {
+      "wer": 4.76,
+      "sub": 4,
+      "ins": 1,
+      "del": 2,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 6.49,
+      "sub": 8,
+      "ins": 0,
+      "del": 2,
+      "n": 154
+     },
+     "text": "So, as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke, and Marvel took it completely seriously. So, the next thing I know, I had a backpack with a pencil case on my way to Ronk School of Science, a school for genius. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student, so they would bring me up to the front of the class and be like, What do you think, new kid? I'm like, I have no idea what you're talking about. So, I sat at the back of a classroom next to quite a pretty girl, and eventually she's like, So, dude, what's your deal, man? Do you want to know my secret? I'm actually Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 40.0,
+      "p90_ms": 157.0,
+      "bias_ms": 10.0,
+      "within_1f": 20.0,
+      "within_2f": 46.7
+     },
+     "timing_at_cuts": {
+      "n": 15,
+      "median_ms": 30.0,
+      "p90_ms": 292.0,
+      "bias_ms": 21.6,
+      "within_1f": 20.0,
+      "within_2f": 53.3
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 33.8,
+      "p90_ms": 95.7,
+      "bias_ms": 15.8,
+      "within_1f": 26.7,
+      "within_2f": 48.9
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 34.1,
+      "p90_ms": 95.7,
+      "bias_ms": 15.8,
+      "within_1f": 24.4,
+      "within_2f": 46.7
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 145,
+      "kept": 0,
+      "windows": 6
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.066,
+     "plain": {
+      "wer": 17.95,
+      "sub": 1,
+      "ins": 0,
+      "del": 6,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 15.38,
+      "sub": 1,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname, and age? Zendaya Coleman and I am 25. Tom Holland and I am 25. Family situation. I am a son to married couple. And I'm a daughter to a divorced one.",
+     "timing_engine": {
+      "n": 10,
+      "median_ms": 78.5,
+      "p90_ms": 187.0,
+      "bias_ms": 28.5,
+      "within_1f": 10.0,
+      "within_2f": 20.0
+     },
+     "timing_at_cuts": {
+      "n": 6,
+      "median_ms": 44.7,
+      "p90_ms": 260.7,
+      "bias_ms": 44.7,
+      "within_1f": 16.7,
+      "within_2f": 33.3
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 68.0,
+      "p90_ms": 160.0,
+      "bias_ms": 46.2,
+      "within_1f": 0.0,
+      "within_2f": 30.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 74.0,
+      "p90_ms": 146.3,
+      "bias_ms": 46.2,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 22,
+      "kept": 11,
+      "windows": 2
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 213.5,
+   "plain": {
+    "wer": 7.42,
+    "sub": 10,
+    "ins": 4,
+    "del": 9,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 6.85,
+    "sub": 14,
+    "ins": 2,
+    "del": 7,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 107,
+    "median_ms": 50.0,
+    "p90_ms": 163.0,
+    "bias_ms": 20.0,
+    "within_1f": 18.7,
+    "within_2f": 40.2
+   },
+   "timing_aligned": {
+    "n": 107,
+    "median_ms": 33.8,
+    "p90_ms": 126.0,
+    "bias_ms": 24.6,
+    "within_1f": 25.2,
+    "within_2f": 48.6
+   },
+   "timing_onsets": {
+    "n": 107,
+    "median_ms": 34.2,
+    "p90_ms": 130.0,
+    "bias_ms": 25.0,
+    "within_1f": 25.2,
+    "within_2f": 46.7
+   }
+  },
+  "parakeet-tdt-0.6b-v3": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.351,
+     "plain": {
+      "wer": 6.45,
+      "sub": 3,
+      "ins": 4,
+      "del": 1,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 4.2,
+      "sub": 3,
+      "ins": 3,
+      "del": 0,
+      "n": 143
+     },
+     "text": "Deadpool builds a team, the X-Force, the studio is like, yes, like Avengers, that's what we're gonna get out of this, it's gonna be great. And I was like, Brad Pitt's gonna do it. And they were like, wait, hold on, back up. Brad Pitt's gonna do this? I was like, yeah. He's playing one of the characters. They're like, which character? And I was like, he's gonna play Vanisher. And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitt on him? I was like, because you see him. And they were like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death.",
+     "timing_engine": {
+      "n": 52,
+      "median_ms": 60.0,
+      "p90_ms": 163.0,
+      "bias_ms": 28.0,
+      "within_1f": 17.3,
+      "within_2f": 34.6
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 15.3,
+      "p90_ms": 83.5,
+      "bias_ms": 15.3,
+      "within_1f": 60.0,
+      "within_2f": 80.0
+     },
+     "timing_aligned": {
+      "n": 52,
+      "median_ms": 29.0,
+      "p90_ms": 112.6,
+      "bias_ms": 26.1,
+      "within_1f": 28.8,
+      "within_2f": 51.9
+     },
+     "timing_onsets": {
+      "n": 52,
+      "median_ms": 29.0,
+      "p90_ms": 112.6,
+      "bias_ms": 26.1,
+      "within_1f": 30.8,
+      "within_2f": 51.9
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 126,
+      "kept": 0,
+      "windows": 1
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 1.581,
+     "plain": {
+      "wer": 4.08,
+      "sub": 3,
+      "ins": 2,
+      "del": 1,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 7.14,
+      "sub": 8,
+      "ins": 2,
+      "del": 1,
+      "n": 154
+     },
+     "text": "So, as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke, and Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Bronk School of Science, a school for genius kids. Genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have no idea what you're talking about. So I sat at the back of a classroom next to quite a pretty girl. And eventually she's like, So, dude, what's your deal, man? Do you wanna know my secret? I'm actually Spider-Man.",
+     "timing_engine": {
+      "n": 45,
+      "median_ms": 70.0,
+      "p90_ms": 157.0,
+      "bias_ms": 10.0,
+      "within_1f": 13.3,
+      "within_2f": 28.9
+     },
+     "timing_at_cuts": {
+      "n": 15,
+      "median_ms": 42.2,
+      "p90_ms": 302.3,
+      "bias_ms": 39.2,
+      "within_1f": 20.0,
+      "within_2f": 40.0
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 36.6,
+      "p90_ms": 96.8,
+      "bias_ms": 16.2,
+      "within_1f": 26.7,
+      "within_2f": 44.4
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 36.9,
+      "p90_ms": 96.8,
+      "bias_ms": 16.2,
+      "within_1f": 24.4,
+      "within_2f": 42.2
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 146,
+      "kept": 1,
+      "windows": 3
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 0.539,
+     "plain": {
+      "wer": 28.21,
+      "sub": 5,
+      "ins": 1,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 20.51,
+      "sub": 2,
+      "ins": 0,
+      "del": 6,
+      "n": 39
+     },
+     "text": "Name, surname, and age. Zindea Coleman and I am twenty-five. Tom Holland and I am twenty-five. Family situation. I am a son married couple. Can I have a daughter to a divorced one?",
+     "timing_engine": {
+      "n": 9,
+      "median_ms": 87.0,
+      "p90_ms": 143.0,
+      "bias_ms": 50.0,
+      "within_1f": 11.1,
+      "within_2f": 11.1
+     },
+     "timing_at_cuts": {
+      "n": 3,
+      "median_ms": 38.1,
+      "p90_ms": 113.0,
+      "bias_ms": 38.1,
+      "within_1f": 0.0,
+      "within_2f": 33.3
+     },
+     "timing_aligned": {
+      "n": 9,
+      "median_ms": 37.0,
+      "p90_ms": 469.5,
+      "bias_ms": 23.0,
+      "within_1f": 22.2,
+      "within_2f": 44.4
+     },
+     "timing_onsets": {
+      "n": 9,
+      "median_ms": 72.0,
+      "p90_ms": 469.5,
+      "bias_ms": 23.0,
+      "within_1f": 11.1,
+      "within_2f": 33.3
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 24,
+      "kept": 9,
+      "windows": 3
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 19.8,
+   "plain": {
+    "wer": 8.06,
+    "sub": 11,
+    "ins": 7,
+    "del": 7,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 7.44,
+    "sub": 13,
+    "ins": 5,
+    "del": 7,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 106,
+    "median_ms": 61.5,
+    "p90_ms": 157.0,
+    "bias_ms": 21.5,
+    "within_1f": 15.1,
+    "within_2f": 30.2
+   },
+   "timing_aligned": {
+    "n": 106,
+    "median_ms": 34.4,
+    "p90_ms": 126.0,
+    "bias_ms": 23.9,
+    "within_1f": 27.4,
+    "within_2f": 48.1
+   },
+   "timing_onsets": {
+    "n": 106,
+    "median_ms": 34.9,
+    "p90_ms": 143.0,
+    "bias_ms": 24.1,
+    "within_1f": 26.4,
+    "within_2f": 46.2
+   }
+  },
+  "canary-qwen-2.5b": {
+   "available": true,
+   "why": null,
+   "cases": {
+    "deadpool": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 46.85,
+     "plain": {
+      "wer": 4.03,
+      "sub": 2,
+      "ins": 2,
+      "del": 1,
+      "n": 124
+     },
+     "normalised": {
+      "wer": 2.8,
+      "sub": 2,
+      "ins": 2,
+      "del": 0,
+      "n": 143
+     },
+     "text": "Deadpool builds a team, the X-Force, the studio was like, yes, like Stengers! That's what we're gonna get out of this, it's gonna be great! And I was like, Brad Pitt's gonna do it? And they were like, wait, hold on, back up! Brad Pitt's gonna do this? I was like, yeah, he's playing one of the characters, they're like, which character? And I was like, he's gonna play Vanisher! And they're like, what's Vanisher's power? And I was like, well, he doesn't speak and he's invisible. Why is Brad Pitt on? I was like, because you see him! And they're like, when do you see him? I was like, you see him for a quarter of a second when he's electrocuted to death.",
+     "timing_engine": {
+      "n": 0
+     },
+     "timing_at_cuts": {
+      "n": 5,
+      "median_ms": 18.7,
+      "p90_ms": 84.2,
+      "bias_ms": 18.7,
+      "within_1f": 40.0,
+      "within_2f": 60.0
+     },
+     "timing_aligned": {
+      "n": 53,
+      "median_ms": 35.3,
+      "p90_ms": 121.0,
+      "bias_ms": 35.1,
+      "within_1f": 28.3,
+      "within_2f": 45.3
+     },
+     "timing_onsets": {
+      "n": 53,
+      "median_ms": 35.3,
+      "p90_ms": 121.0,
+      "bias_ms": 35.1,
+      "within_1f": 30.2,
+      "within_2f": 45.3
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 124,
+      "kept": 0,
+      "windows": 3
+     }
+    },
+    "spiderman-school": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 38.272,
+     "plain": {
+      "wer": 9.52,
+      "sub": 7,
+      "ins": 6,
+      "del": 1,
+      "n": 147
+     },
+     "normalised": {
+      "wer": 9.09,
+      "sub": 10,
+      "ins": 3,
+      "del": 1,
+      "n": 154
+     },
+     "text": "So as a joke, I suggested to Marvel that I should go to a high school undercover. And it was completely a joke and Marvel took it completely seriously. So the next thing I know, I had a backpack with a pencil case on my way to Ronk School of Science, a school for genius kids. I went to school with a fake name and a fake accent. Even the teachers didn't know that I was not a real student. So they would bring me up to the front of the class and be like, what do you think, new kid? I'm like, I have... I have no idea what you were talking about so I sat at the back of a classroom next to quite a pretty girl and eventually she's like so dude what's your deal man do you want to know my secret because I match the Spider-Man",
+     "timing_engine": {
+      "n": 0
+     },
+     "timing_at_cuts": {
+      "n": 14,
+      "median_ms": 40.9,
+      "p90_ms": 164.9,
+      "bias_ms": 40.9,
+      "within_1f": 28.6,
+      "within_2f": 42.9
+     },
+     "timing_aligned": {
+      "n": 45,
+      "median_ms": 36.1,
+      "p90_ms": 106.3,
+      "bias_ms": 12.1,
+      "within_1f": 22.2,
+      "within_2f": 46.7
+     },
+     "timing_onsets": {
+      "n": 45,
+      "median_ms": 33.6,
+      "p90_ms": 106.3,
+      "bias_ms": 12.1,
+      "within_1f": 24.4,
+      "within_2f": 48.9
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 151,
+      "kept": 0,
+      "windows": 3
+     }
+    },
+    "zendaya-age": {
+     "device": "cuda",
+     "note": "",
+     "seconds": 5.661,
+     "plain": {
+      "wer": 20.51,
+      "sub": 3,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "normalised": {
+      "wer": 20.51,
+      "sub": 3,
+      "ins": 0,
+      "del": 5,
+      "n": 39
+     },
+     "text": "Name, surname and age. Zendaya Coleman and I am 25. Tom Holland and I am 25. Found the situation. I am a son married couple. Can I have a daughter to a divorced one?",
+     "timing_engine": {
+      "n": 0
+     },
+     "timing_at_cuts": {
+      "n": 4,
+      "median_ms": 138.8,
+      "p90_ms": 496.5,
+      "bias_ms": 138.8,
+      "within_1f": 0.0,
+      "within_2f": 25.0
+     },
+     "timing_aligned": {
+      "n": 10,
+      "median_ms": 68.4,
+      "p90_ms": 1372.6,
+      "bias_ms": 65.5,
+      "within_1f": 10.0,
+      "within_2f": 30.0
+     },
+     "timing_onsets": {
+      "n": 10,
+      "median_ms": 100.0,
+      "p90_ms": 1372.6,
+      "bias_ms": 65.5,
+      "within_1f": 0.0,
+      "within_2f": 20.0
+     },
+     "align": {
+      "device": "cuda",
+      "aligned": 33,
+      "kept": 1,
+      "windows": 2
+     }
+    }
+   },
+   "device": "cuda",
+   "load_s": 0.0,
+   "speed_x": 0.8,
+   "plain": {
+    "wer": 8.71,
+    "sub": 12,
+    "ins": 8,
+    "del": 7,
+    "n": 310
+   },
+   "normalised": {
+    "wer": 7.74,
+    "sub": 15,
+    "ins": 5,
+    "del": 6,
+    "n": 336
+   },
+   "timing_engine": {
+    "n": 0
+   },
+   "timing_aligned": {
+    "n": 108,
+    "median_ms": 37.2,
+    "p90_ms": 149.9,
+    "bias_ms": 29.9,
+    "within_1f": 24.1,
+    "within_2f": 44.4
+   },
+   "timing_onsets": {
+    "n": 108,
+    "median_ms": 37.2,
+    "p90_ms": 153.8,
+    "bias_ms": 28.8,
+    "within_1f": 25.0,
+    "within_2f": 44.4
+   }
+  },
+  "cohere-transcribe": {
+   "available": false,
+   "why": "gated on Hugging Face: accept its terms at https://huggingface.co/CohereLabs/cohere-transcribe-03-2026 and log in with `hf auth login`, then run again",
+   "cases": {}
+  }
+ },
+ "gpu": "NVIDIA GeForce RTX 5080"
+}

@@ -250,6 +250,10 @@ def band_from_layout(layout: Any, frame_wh: tuple[int, int]) -> tuple[Band | Non
     for z in zones:
         if str(z.get("type")) == "captions" or z.get("x") is None:
             continue
+        zx, zy, zw, zh = float(z["x"]), float(z["y"]), float(z["w"]), float(z["h"])
+        if any(zx <= float(e["x"]) + float(e["w"]) / 2 <= zx + zw and zy <= float(e["y"]) + float(e["h"]) / 2 <= zy + zh
+               for e in events):
+            continue                 # a zone over the caption events themselves (a misread overlay): not ignored
         ignore.append((int(z["x"]), int(z["y"]), int(z["w"]), int(z["h"])))
     spans = sorted((int(e["comp_in"]), int(e["comp_out"])) for e in events)
     boxes = sorted((int(e["comp_in"]), int(e["comp_out"]), float(e["x"]), float(e["y"]), float(e["w"]), float(e["h"]))
@@ -302,7 +306,8 @@ POP_S = 0.25              # ... within this time: it popped in again (a new capt
 POP_SHAPE = 0.5           # a pop-in / pop-out frame looks like its caption (scale-free IoU) at least this much ...
 POP_TEXT = 0.8            # ... and reads like it at least this much (small text misread), or cannot be read at all
 FILL_TOL = 60.0           # BGR distance of a letter pixel from the learned fill colour
-SPAN_VERSION = 5          # 5: pop-in frames compared with OCR look-alike letters (ocr_key)
+SPAN_VERSION = 6          # 5: pop-in frames compared with OCR look-alike letters (ocr_key); 6: a zone over the
+                          #   caption events is not ignored
 BAR_READS = frozenset(["1", "l", "|", "ı", "i", "I", "/"])     # a lone bar may be read as any of these
 
 

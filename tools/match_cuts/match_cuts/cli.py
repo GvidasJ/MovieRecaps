@@ -196,13 +196,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--voiceover", default=None, metavar="FILE",
                    help="caption this narration (audio or video file, starting at the sequence start) instead of the "
                         "cut edit's audio")
-    p.add_argument("--caption-model", default="small.en", metavar="NAME",
-                   help="faster-whisper model for the transcription (default small.en; base.en is faster, medium.en "
-                        "more accurate; downloaded once on first use)")
-    p.add_argument("--caption-recheck-model", default="medium.en", metavar="NAME",
+    p.add_argument("--caption-model", default="large-v3", metavar="NAME",
+                   help="speech model for the transcription, on the GPU when there is one (default large-v3: OpenAI "
+                        "Whisper large-v3, the most accurate on the answer-key videos; also large-v3-turbo, medium.en, "
+                        "small.en (the earlier default, also the fallback when the default cannot run), "
+                        "parakeet-tdt-0.6b-v2 / -v3, canary-qwen-2.5b, cohere-transcribe; downloaded once on first "
+                        "use). Word timings come from forced alignment")
+    p.add_argument("--caption-check-model", default="large-v3-turbo", metavar="NAME",
+                   help="the second speech model: where it hears a word differently from --caption-model, the word "
+                        "is rechecked from the RAW (and against the competitor's caption) and listed if still unclear "
+                        "(default large-v3-turbo, the second most accurate; none = off)")
+    p.add_argument("--caption-recheck-model", default="large-v3", metavar="NAME",
                    help="words the transcription is unsure of (low confidence, music / noise under them, cut at an "
-                        "edit point) are transcribed again from the RAW with this bigger model, the whole sentence "
-                        "around them (default medium.en, downloaded once on first use; none = off)")
+                        "edit point, heard otherwise by --caption-check-model) are transcribed again from the RAW with "
+                        "this model, the whole sentence around them (default large-v3; none = off)")
     p.add_argument("--no-ae", action="store_true",
                    help="do not open After Effects automatically (run output/build_ae_project.jsx yourself)")
     p.add_argument("--ae-timeout", default=600.0, type=float, metavar="SECONDS",
@@ -247,8 +254,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.no_broll = bool(getattr(args, "no_broll", False))
     cfg.captions = str(getattr(args, "captions", "auto") or "auto")
     cfg.voiceover = str(getattr(args, "voiceover", None) or "")
-    cfg.caption_model = str(getattr(args, "caption_model", None) or "small.en")
-    cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "medium.en")
+    cfg.caption_model = str(getattr(args, "caption_model", None) or "large-v3")
+    cfg.caption_check_model = str(getattr(args, "caption_check_model", None) or "large-v3-turbo")
+    cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "large-v3")
     if args.seed is not None:
         cfg.seed = int(args.seed)
     return cfg
@@ -460,6 +468,12 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
                 lines += [f"    {r}" for r in unheard[:max_rows]]
         for r in hc.get("caption_rules") or []:
             lines.append(f"  Caption rules (captions changed / flagged per rule): {r}")
+        for r in hc.get("asr") or []:
+            lines.append(f"  Speech recognition: {r}")
+        if hc.get("caption_score"):
+            rows = list(hc["caption_score"])
+            lines.append(f"  Caption score: {rows[0]}")
+            lines += [f"    {r}" for r in rows[1:]]
         talk = list(hc.get("speech") or [])
         if talk:
             lines.append(f"Cuts moved off speech: {talk[0]}")
@@ -498,6 +512,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if argv[:1] == ["restyle"]:                  # python -m match_cuts restyle PROJECT.prproj
         from .restyle import main as restyle_main
         return restyle_main(argv[1:])
+    if argv[:1] == ["check-all"]:                # python -m match_cuts check-all: every test video, one scorecard
+        from .check_all import main as check_all_main
+        return check_all_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     raw_only = args.competitor is None and args.raw is not None        # no competitor: the edit from the RAW alone

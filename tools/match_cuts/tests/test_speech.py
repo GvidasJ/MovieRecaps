@@ -318,8 +318,9 @@ def test_run_011_no_cut_inside_speech_and_my_cuts_matched(tmp_path):
     cl = run011_cutlist()
     cfg = Config(out_dir=str(tmp_path), premiere=True)
     assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)
-    # the generated edit cut inside speech 10 times (the hard check finds them)
-    assert len(ex.premiere_speech_problems(ROOT / "generated_edit.xml", sm)) == 10
+    # the generated edit cut inside speech 9 times (the hard check finds them; a 10th lands on the boundary between
+    # two words that run together -- a cut may fall there)
+    assert len(ex.premiere_speech_problems(ROOT / "generated_edit.xml", sm)) == 9
     plan = repeats.add_to_plan(S.plan_premiere(cl, y, 48000, cfg, None, sm), cl, cfg)
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])
@@ -377,3 +378,29 @@ def test_an_audio_edge_next_to_a_muted_piece_plays_on_into_the_silence_or_stops_
     slides = [(at, d) for at, d, *kind in shifts if kind]
     assert len(slides) == 1 and slides[0][0] == 150 and slides[0][1] < 0    # stops before "there": after "hello"
     assert (150 + slides[0][1]) / f + 0.5 == pytest.approx(1.6 + PA, abs=TOL)
+
+
+# ---------------------------------------------------------------------------------------------
+# words that run together (task 4): a cut moves to the nearest end of a WORD, never past a run of words
+# ---------------------------------------------------------------------------------------------
+
+def test_words_that_run_together_get_a_gap_at_their_boundary():
+    """One continuous sound, four words said with no pause: the speech map has a gap at each boundary between the
+    (aligned) words, the quietest point there -- so a cut inside it moves at most to the end of one word."""
+    y = room()
+    tone(y, 1.0, 2.6)                                      # "kids right and I" -- no quiet between the words
+    for c in (1.4, 1.8, 2.2):                              # each boundary a little softer
+        n = int(c * SR)
+        y[n - 160:n + 160] *= 0.35
+    ws = words(("kids", 1.0, 1.4), ("right", 1.4, 1.8), ("and", 1.8, 2.2), ("I", 2.2, 2.6))
+    sm = SP.speech_map(y, SR, S.Settings(), ws)
+    starts = [round(s.s0, 2) for s in sm.sounds if s.speech]
+    assert starts == pytest.approx([1.0, 1.4, 1.8, 2.2], abs=0.03)
+    # a clip the competitor ended inside "right" (it played 3/4 of it) plays on to its end -- not to "I"
+    end = SP.end_at(sm, 1.7, 0.5, PA, PB)
+    assert 1.8 <= end <= 1.8 + PA + TOL
+    # ... and one ended just after "right" began (a tenth of it) stops before it: "kids" was its last word
+    assert SP.end_at(sm, 1.44, 0.5, PA, PB) <= 1.4 + TOL
+    # a clip starting inside "and" (a quarter of it left) starts after it; inside its first half, before it
+    assert SP.start_at(sm, 2.12, 3.0, PA, PB) >= 2.2 - TOL
+    assert SP.start_at(sm, 1.9, 3.0, PA, PB) <= 1.8 + TOL

@@ -59,12 +59,16 @@ def assert_rules_1_to_4(caps, mode="competitor"):
 
 
 def assert_timing_kept(out, orig):
-    """Every caption starts where a competitor caption starts (or inside one, where it was split), and every gap of
-    the competitor's longer than a second (a silence) is still a gap."""
-    assert all(any(o.start <= c.start < o.end for o in orig) for c in out)
+    """Every caption starts where a competitor caption starts (or inside one, where it was split) -- a ``*...*``
+    placeholder fills each gap of the competitor's longer than a second (a silence), no spoken caption runs over
+    one, and the captions are back to back."""
+    said = [c for c in out if c.text != C.PLACEHOLDER]
+    assert all(any(o.start <= c.start < o.end for o in orig) for c in said)
     for a, b in zip(orig, orig[1:]):
         if b.start - a.end > 60:
-            assert not any(c.start < b.start and c.end > a.end for c in out)
+            assert not any(c.start < b.start and c.end > a.end for c in said)
+            assert any(c.text == C.PLACEHOLDER and c.start < b.start and c.end > a.end for c in out)
+    assert all(x.end == y.start for x, y in zip(out, out[1:]))
     assert not [c.text for c in out if len(c.text.split()) == 1 and C.is_weak(c.text)]     # no lone weak word
 
 
@@ -83,7 +87,7 @@ def test_bad_captions_without_a_transcript_come_out_right():
     assert_rules_1_to_4(out)
     assert_timing_kept(out, orig)
     assert all(rep["left"][r] == 0 for r in (1, 2, 3, 4, 6, 7, 8, 9))
-    assert not any(re.search(r"(?<!\d)[.,]|[.,](?!\d)", t) for t in got)          # no full stops / commas
+    assert not any(re.search(r"(?<!\d)[.,]|[.,](?!\d)", t) for t in got if t != C.PLACEHOLDER)   # no full stops
     # regrouped: weak words with the next words, names and pronoun + verb kept together
     for a, b in [("You play the films", "main villain"), ("Mayday Parker", "the daughter"), ("the daughter", "of Peter and MJ"),
                  ("bring a new era", "of X-Men mutants"), ("Sadie Sink", "you are"), ("you are", "in the film")]:
@@ -95,7 +99,7 @@ def test_bad_captions_without_a_transcript_come_out_right():
     assert got[i + 1] == "you do it" and out[i].start == 3836 and out[i + 1].end == 3910
     assert "into the MCU" in got and "of Peter and MJ" in got                     # acronyms stay
     # screen noise ("1", "V", "_", "二", flickers of a garbled reading) left out, and listed
-    assert not [t for t in got if not re.search(r"[A-Za-z]{2}|^I$", t)]
+    assert not [t for t in got if not re.search(r"[A-Za-z]{2}|^I$", t) and t != C.PLACEHOLDER]
     noise = [r for r in rep["rows"] if r["rule"] == 5 and "screen noise" in r["detail"]]
     assert len(noise) == rep["notes"]["noise_dropped"] >= 50
     assert {"V", "VI", "V1", "1i", "1"} <= {r["text"] for r in noise}
@@ -153,7 +157,8 @@ def test_a_garbled_reading_takes_the_word_heard_but_a_clearly_read_misspelling_s
     caps = [cap("We wre", 2.0, 2.3, score=0.78), cap("going to the shop", 2.3, 3.4),
             cap("my new compluter", 4.0, 4.9), cap("I dont know", 6.0, 6.9)]
     out, rep = R.enforce(caps, FPS, "competitor", words)
-    assert texts(out) == ["We're", "going", "to the shop", "My new compluter", "I dont know"]   # 0.56 s pause: "My"
+    assert texts(out) == ["We're", "going", "to the shop", "My new compluter", C.PLACEHOLDER,   # 0.56 s pause: "My";
+                          "I dont know"]                                                        # 1.1 s: a silence
     assert [r["detail"].split(":")[0] for r in rep["rows"] if r["kind"] == "changed"] == ["'We wre' -> 'We're'"]
     flagged = {r["text"]: r["detail"] for r in rep["rows"] if r["kind"] == "flagged"}
     assert "compluter" in flagged["My new compluter"] and "heard: 'my new computer'" in flagged["My new compluter"]
@@ -207,7 +212,7 @@ def test_weak_words_move_to_the_next_words_but_never_across_a_sentence_end():
             cap("you do it", 4.0, 4.6), cap("That is a pro", 4.6, 5.2)]             # the screen starts a sentence
     out, rep = R.enforce(caps, FPS, "competitor", None)
     assert texts(out) == ["I bought", "a beanie hat", "We went", "to the shop", "you do it", "that is a pro"]
-    assert [(c.start, c.end) for c in out] == [(0, 32), (32, 72), (120, 149), (149, 216), (240, 276), (276, 312)]
+    assert [(c.start, c.end) for c in out] == [(0, 32), (32, 120), (120, 149), (149, 240), (240, 276), (276, 312)]
     assert {w["caption"]: w["reason"] for w in rep["kept_weak"]} == {
         "you do it": "the next caption starts a new sentence"}
     assert rep["flagged"][7] == 1 and rep["left"][7] == 0
@@ -336,8 +341,9 @@ def test_a_caption_is_never_a_single_weak_word():
     caps = [cap("SO AS", 0.0, 0.4), cap("A", 0.4, 0.5), cap("JOKE", 0.5, 0.8), cap("I", 3.0, 3.1),
             cap("KNOW", 3.1, 3.3), cap("THE", 5.0, 5.3), cap("SCHOOL", 5.3, 5.8)]
     out, _ = R.enforce(caps, FPS, "competitor", None)
-    assert texts(out) == ["So as a joke", "I know", "The school"]          # each after a pause: a capital
-    assert [(c.start, c.end) for c in out] == [(0, 48), (180, 198), (300, 348)]
+    assert texts(out) == ["So as a joke", C.PLACEHOLDER, "I know", C.PLACEHOLDER, "The school"]   # each after a
+    assert [(c.start, c.end) for c in out] == [(0, 48), (48, 180), (180, 198), (198, 300), (300, 348)]  # pause: a
+                                                                                             # capital
     # voice mode: a lone weak word joins the words after it, or -- before a silence -- the caption before it
     words = heard("I", 0.0) + heard("know what", 0.6) + heard("we went to", 3.0) + heard("the", 3.95)
     caps = C.voice_captions(words, FPS, n_frames=C.to_frame(words[-1].end, FPS) + 120)
@@ -600,3 +606,8 @@ def test_the_cuts_come_from_the_v1_clips_of_the_edit(monkeypatch):
         clip("broll.mp4", 150, 200, 0, 50)]}                                      # another clip: a cut
     monkeypatch.setattr(ex, "parse_premiere_xml", lambda path: x)
     assert C.edit_cuts("1_edit.xml", FPS) == [180, 240, 300]                      # 30 fps edit -> 60 fps frames
+
+
+def test_title_case_keeps_a_contractions_ending_small():
+    assert R._title("THEY'RE") == "They're" and R._title("vanisher's") == "Vanisher's"
+    assert R._title("o'brien") == "O'Brien" and R._title("spider-man") == "Spider-Man"

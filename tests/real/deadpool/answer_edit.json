@@ -1,0 +1,195 @@
+{
+ "what": "the competitor's own edit as heard (answer.srt keeps the competitor's caption timing): each piece of its audio and the RAW second it plays -- from the cut list with the two cutaways over RAW speech replaced (broll.py), RAW lip sync",
+ "fps": 30,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 0.8,
+   "kind": "raw",
+   "src_in": 67.483299,
+   "speed": 1.0
+  },
+  {
+   "start": 0.8,
+   "end": 1.066667,
+   "kind": "raw",
+   "src_in": 68.283299,
+   "speed": 1.0
+  },
+  {
+   "start": 1.033333,
+   "end": 1.8,
+   "kind": "raw",
+   "src_in": 68.679452,
+   "speed": 1.0
+  },
+  {
+   "start": 1.8,
+   "end": 3.3,
+   "kind": "raw",
+   "src_in": 69.812764,
+   "speed": 1.0
+  },
+  {
+   "start": 3.3,
+   "end": 3.8,
+   "kind": "raw",
+   "src_in": 72.42945,
+   "speed": 1.0
+  },
+  {
+   "start": 3.8,
+   "end": 5.366667,
+   "kind": "raw",
+   "src_in": 73.215575,
+   "speed": 1.0
+  },
+  {
+   "start": 5.366667,
+   "end": 5.633333,
+   "kind": "raw",
+   "src_in": 75.050092,
+   "speed": 1.0
+  },
+  {
+   "start": 5.633333,
+   "end": 8.3,
+   "kind": "raw",
+   "src_in": 79.295191,
+   "speed": 1.0
+  },
+  {
+   "start": 8.3,
+   "end": 8.5,
+   "kind": "raw",
+   "src_in": 81.961857,
+   "speed": 1.0
+  },
+  {
+   "start": 8.5,
+   "end": 9.033333,
+   "kind": "raw",
+   "src_in": 82.817534,
+   "speed": 1.0
+  },
+  {
+   "start": 9.033333,
+   "end": 9.066667,
+   "kind": "raw",
+   "src_in": 83.732867,
+   "speed": 1.0
+  },
+  {
+   "start": 9.066667,
+   "end": 10.1,
+   "kind": "raw",
+   "src_in": 83.766201,
+   "speed": 1.0
+  },
+  {
+   "start": 10.1,
+   "end": 12.733333,
+   "kind": "raw",
+   "src_in": 85.228108,
+   "speed": 1.0
+  },
+  {
+   "start": 12.733333,
+   "end": 12.866667,
+   "kind": "raw",
+   "src_in": 88.363525,
+   "speed": 1.0
+  },
+  {
+   "start": 12.866667,
+   "end": 13.266667,
+   "kind": "raw",
+   "src_in": 88.496858,
+   "speed": 1.0
+  },
+  {
+   "start": 13.266667,
+   "end": 13.766667,
+   "kind": "raw",
+   "src_in": 89.267534,
+   "speed": 1.0
+  },
+  {
+   "start": 13.766667,
+   "end": 13.8,
+   "kind": "raw",
+   "src_in": 90.000867,
+   "speed": 1.0
+  },
+  {
+   "start": 13.8,
+   "end": 14.866667,
+   "kind": "raw",
+   "src_in": 90.0342,
+   "speed": 1.0
+  },
+  {
+   "start": 14.866667,
+   "end": 14.9,
+   "kind": "raw",
+   "src_in": 91.666575,
+   "speed": 1.0
+  },
+  {
+   "start": 14.9,
+   "end": 16.333333,
+   "kind": "raw",
+   "src_in": 91.767534,
+   "speed": 1.0
+  },
+  {
+   "start": 16.333333,
+   "end": 17.166667,
+   "kind": "raw",
+   "src_in": 98.766117,
+   "speed": 1.0
+  },
+  {
+   "start": 17.166667,
+   "end": 17.233333,
+   "kind": "raw",
+   "src_in": 99.59945,
+   "speed": 1.0
+  },
+  {
+   "start": 17.233333,
+   "end": 18.1,
+   "kind": "raw",
+   "src_in": 100.03335,
+   "speed": 1.0
+  },
+  {
+   "start": 18.1,
+   "end": 18.166667,
+   "kind": "raw",
+   "src_in": 100.900017,
+   "speed": 1.0
+  },
+  {
+   "start": 18.166667,
+   "end": 19.866667,
+   "kind": "raw",
+   "src_in": 101.66825,
+   "speed": 1.0
+  },
+  {
+   "start": 19.866667,
+   "end": 22.3,
+   "kind": "raw",
+   "src_in": 103.274781,
+   "speed": 1.0
+  },
+  {
+   "start": 22.3,
+   "end": 23.333333,
+   "kind": "raw",
+   "src_in": 105.781175,
+   "speed": 1.0
+  }
+ ]
+}

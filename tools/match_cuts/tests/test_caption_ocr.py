@@ -106,7 +106,7 @@ def test_caption_stage_keeps_the_competitors_timing_and_applies_my_rules(clip, t
     # first word after an action caption; "no" | "no" (interjections the competitor shows alone) stay apart
     assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == \
         [("I got a Parker Peter", 20, 60), ("*automatic Audi braking*", 60, 110), ("Whoa!!", 110, 157),
-         ("x2", 157, 170), ("no", 170, 200), ("no", 200, 230), ("Spider-Man is", 236, 282)]
+         ("x2", 157, 170), ("no", 170, 200), ("no", 200, 236), ("Spider-Man is", 236, 282)]   # back to back
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
     assert res["rules"]["changed"][1] == 1 and res["weak_kept"][0]["reason"] == "last caption"
     ctx.captions = res
@@ -114,3 +114,16 @@ def test_caption_stage_keeps_the_competitors_timing_and_applies_my_rules(clip, t
     assert "the competitor decides the timing" in md and "**Hard rules**" in md and "24-character cap" not in md
     from match_cuts.caption_rules import summary_line
     assert summary_line(res["rules"]).startswith("1 one sentence: 1 split; 2 one speaker: 0 split")
+
+
+def test_a_zone_over_the_caption_events_is_not_ignored():
+    """The Zendaya-age competitor (run 011): the layout found a 'channel name' zone over most of the frame, the
+    caption band included -- ignoring it left nothing to read. A zone holding the caption events is not ignored;
+    a small logo next to them still is."""
+    from match_cuts.caption_ocr import band_from_layout
+    lay = {"captions": [{"type": "captions", "comp_in": 73, "comp_out": 93, "x": 380, "y": 1508, "w": 296, "h": 70}],
+           "zones": [{"type": "channel_name", "x": 0, "y": 170, "w": 984, "h": 1452},
+                     {"type": "watermark", "x": 900, "y": 1500, "w": 100, "h": 80}]}
+    band, spans = band_from_layout(lay, (1080, 1920))
+    assert spans == [(73, 93)]
+    assert band.ignore == [(900, 1500, 100, 80)]

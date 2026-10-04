@@ -2402,7 +2402,7 @@ def competitor_speech(ctx: Context) -> Any:
         return None
     err = transcribe.available()
     sr = int(ctx.audio_sr)
-    model = str(getattr(ctx.cfg, "caption_model", "small.en") or "small.en")
+    model = str(getattr(ctx.cfg, "caption_model", "large-v3") or "large-v3")
     language = str(getattr(ctx.cfg, "caption_language", "en") or "") or None
     told: list[bool] = []
     whole: list[Any] = []
@@ -2740,7 +2740,7 @@ def speech_of(ctx: Context, cl: Cutlist) -> Any:
         models = []
         if transcribe.available() is None and heard:
             cfg = ctx.cfg
-            cap = str(getattr(cfg, "caption_model", "small.en") or "small.en")
+            cap = str(getattr(cfg, "caption_model", "large-v3") or "large-v3")
             rec = str(getattr(cfg, "caption_recheck_model", "") or "")
             main = rec if rec.lower() not in ("", "none") else cap
             language = str(getattr(cfg, "caption_language", "en") or "") or None
@@ -2905,7 +2905,7 @@ def words_reader(ctx: Context):
     if transcribe.available() is not None:
         return None
     cfg = ctx.cfg
-    model = str(getattr(cfg, "caption_model", "small.en") or "small.en")
+    model = str(getattr(cfg, "caption_model", "large-v3") or "large-v3")
     language = str(getattr(cfg, "caption_language", "en") or "") or None
 
     def words_of(y):
@@ -3104,6 +3104,21 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         out["links"] = link_lines(exports)
     if getattr(cfg, "premiere", False) and getattr(ctx, "people", None) is not None:
         out["people"] = person_lines(ctx)
+    try:                                         # which speech model ran where (the GPU, or the CPU and why)
+        from .transcribe import summary as asr_summary
+        out["asr"] = asr_summary()
+    except Exception:  # noqa: BLE001 - the summary must not fail the run
+        pass
+    comp = str(getattr(cfg, "competitor", "") or "")
+    if (ctx.captions or {}).get("path") and comp and Path(comp).is_file():
+        try:                                     # a test video with an answer key: how close my captions come
+            from .caption_score import for_run, summary_lines
+            from .common import file_hash
+            got = for_run(comp, file_hash(comp), cfg.deliver)
+            if got is not None:
+                out["caption_score"] = summary_lines(*got)
+        except Exception as e:  # noqa: BLE001 - the summary must not fail the run
+            out["caption_score"] = [f"(could not be scored: {type(e).__name__}: {e})"]
     cap = ctx.captions or {}
 
     def tc(c: dict) -> str:

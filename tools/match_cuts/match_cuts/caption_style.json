@@ -1,0 +1,8051 @@
+{
+"captions": 436,
+"files": [
+"beanie-hats.srt",
+"billy-elliot.srt",
+"central-park-dog.srt",
+"giolitti.srt",
+"instagram-casting.srt",
+"keanu-marvel.srt",
+"lyrics-quiz.srt",
+"own-stunts.srt",
+"sadie-sink.srt",
+"spiderman-driving-test.srt",
+"spiderman-interview.srt",
+"thor-hammer.srt"
+],
+"held_out": [
+"deadpool-brad-pitt.srt",
+"spiderman-undercover-school.srt",
+"zendaya-tom-holland.srt"
+],
+"lengths": {
+"1": 0.23623853211009174,
+"2": 0.4059633027522936,
+"3": 0.26605504587155965,
+"4": 0.08486238532110092,
+"5": 0.006880733944954129
+},
+"pairs": {
+"*|*": [
+907,
+375
+],
+"*|k:ADV": [
+24,
+11
+],
+"*|k:AUX": [
+92,
+26
+],
+"*|k:CONJ": [
+32,
+26
+],
+"*|k:DET": [
+77,
+35
+],
+"*|k:INTJ": [
+24,
+15
+],
+"*|k:LONG": [
+53,
+22
+],
+"*|k:NUM": [
+14,
+4
+],
+"*|k:PREP": [
+72,
+33
+],
+"*|k:PRON": [
+118,
+65
+],
+"*|k:WH": [
+11,
+8
+],
+"*|k:WORD": [
+390,
+130
+],
+"k:ADV|*": [
+23,
+10
+],
+"k:ADV|k:ADV": [
+2,
+1
+],
+"k:ADV|k:AUX": [
+2,
+0
+],
+"k:ADV|k:CONJ": [
+1,
+1
+],
+"k:ADV|k:DET": [
+1,
+1
+],
+"k:ADV|k:PREP": [
+1,
+0
+],
+"k:ADV|k:PRON": [
+3,
+1
+],
+"k:ADV|k:WORD": [
+13,
+6
+],
+"k:ADV|w:again": [
+1,
+0
+],
+"k:ADV|w:always": [
+1,
+1
+],
+"k:ADV|w:at": [
+1,
+0
+],
+"k:ADV|w:british": [
+1,
+0
+],
+"k:ADV|w:do": [
+1,
+0
+],
+"k:ADV|w:ever": [
+1,
+0
+],
+"k:ADV|w:explain": [
+2,
+1
+],
+"k:ADV|w:give": [
+1,
+1
+],
+"k:ADV|w:go": [
+1,
+1
+],
+"k:ADV|w:going": [
+1,
+0
+],
+"k:ADV|w:i": [
+1,
+1
+],
+"k:ADV|w:is": [
+1,
+0
+],
+"k:ADV|w:it's": [
+1,
+0
+],
+"k:ADV|w:keep": [
+2,
+1
+],
+"k:ADV|w:me": [
+1,
+0
+],
+"k:ADV|w:much": [
+1,
+0
+],
+"k:ADV|w:my": [
+1,
+1
+],
+"k:ADV|w:so": [
+1,
+1
+],
+"k:ADV|w:started": [
+1,
+0
+],
+"k:ADV|w:thor": [
+1,
+1
+],
+"k:ADV|w:wield": [
+1,
+1
+],
+"k:AUX|*": [
+93,
+32
+],
+"k:AUX|k:ADV": [
+7,
+4
+],
+"k:AUX|k:AUX": [
+9,
+2
+],
+"k:AUX|k:CONJ": [
+2,
+2
+],
+"k:AUX|k:DET": [
+9,
+5
+],
+"k:AUX|k:INTJ": [
+5,
+1
+],
+"k:AUX|k:LONG": [
+4,
+3
+],
+"k:AUX|k:NUM": [
+3,
+2
+],
+"k:AUX|k:PREP": [
+3,
+2
+],
+"k:AUX|k:PRON": [
+14,
+1
+],
+"k:AUX|k:WH": [
+1,
+1
+],
+"k:AUX|k:WORD": [
+36,
+9
+],
+"k:AUX|w:10": [
+3,
+2
+],
+"k:AUX|w:a": [
+6,
+3
+],
+"k:AUX|w:able": [
+1,
+0
+],
+"k:AUX|w:all": [
+1,
+1
+],
+"k:AUX|w:also": [
+1,
+0
+],
+"k:AUX|w:and": [
+1,
+1
+],
+"k:AUX|w:be": [
+4,
+0
+],
+"k:AUX|w:bring": [
+1,
+0
+],
+"k:AUX|w:called": [
+1,
+0
+],
+"k:AUX|w:do": [
+2,
+0
+],
+"k:AUX|w:don't": [
+1,
+1
+],
+"k:AUX|w:get": [
+1,
+0
+],
+"k:AUX|w:ghost": [
+1,
+1
+],
+"k:AUX|w:glorious": [
+1,
+1
+],
+"k:AUX|w:got": [
+2,
+1
+],
+"k:AUX|w:have": [
+2,
+1
+],
+"k:AUX|w:i": [
+2,
+1
+],
+"k:AUX|w:in": [
+1,
+1
+],
+"k:AUX|w:know": [
+3,
+0
+],
+"k:AUX|w:like": [
+3,
+0
+],
+"k:AUX|w:loads": [
+1,
+0
+],
+"k:AUX|w:lose": [
+1,
+0
+],
+"k:AUX|w:lost": [
+1,
+1
+],
+"k:AUX|w:most": [
+1,
+0
+],
+"k:AUX|w:move": [
+1,
+0
+],
+"k:AUX|w:my": [
+1,
+1
+],
+"k:AUX|w:no": [
+1,
+0
+],
+"k:AUX|w:not": [
+2,
+1
+],
+"k:AUX|w:now": [
+1,
+1
+],
+"k:AUX|w:oh": [
+1,
+1
+],
+"k:AUX|w:on": [
+1,
+1
+],
+"k:AUX|w:one": [
+1,
+0
+],
+"k:AUX|w:ordered": [
+1,
+1
+],
+"k:AUX|w:posted": [
+1,
+0
+],
+"k:AUX|w:prince": [
+1,
+1
+],
+"k:AUX|w:really": [
+2,
+1
+],
+"k:AUX|w:said": [
+1,
+0
+],
+"k:AUX|w:saying": [
+1,
+0
+],
+"k:AUX|w:silver": [
+1,
+1
+],
+"k:AUX|w:so": [
+1,
+1
+],
+"k:AUX|w:spiderman's": [
+1,
+1
+],
+"k:AUX|w:stop": [
+1,
+0
+],
+"k:AUX|w:that": [
+5,
+0
+],
+"k:AUX|w:the": [
+2,
+1
+],
+"k:AUX|w:there": [
+1,
+1
+],
+"k:AUX|w:to": [
+1,
+0
+],
+"k:AUX|w:tom": [
+1,
+0
+],
+"k:AUX|w:try": [
+1,
+0
+],
+"k:AUX|w:trying": [
+1,
+1
+],
+"k:AUX|w:understand": [
+2,
+1
+],
+"k:AUX|w:waiting": [
+1,
+0
+],
+"k:AUX|w:walk": [
+1,
+0
+],
+"k:AUX|w:walking": [
+1,
+1
+],
+"k:AUX|w:we": [
+1,
+0
+],
+"k:AUX|w:when": [
+1,
+1
+],
+"k:AUX|w:ya": [
+1,
+0
+],
+"k:AUX|w:you": [
+11,
+0
+],
+"k:CONJ|*": [
+36,
+6
+],
+"k:CONJ|k:ADV": [
+1,
+0
+],
+"k:CONJ|k:AUX": [
+2,
+0
+],
+"k:CONJ|k:CONJ": [
+2,
+0
+],
+"k:CONJ|k:DET": [
+3,
+2
+],
+"k:CONJ|k:LONG": [
+3,
+0
+],
+"k:CONJ|k:NUM": [
+5,
+0
+],
+"k:CONJ|k:PRON": [
+13,
+2
+],
+"k:CONJ|k:WORD": [
+7,
+2
+],
+"k:CONJ|w:2": [
+2,
+0
+],
+"k:CONJ|w:3": [
+2,
+0
+],
+"k:CONJ|w:9": [
+1,
+0
+],
+"k:CONJ|w:all": [
+1,
+0
+],
+"k:CONJ|w:cheap": [
+1,
+0
+],
+"k:CONJ|w:cute": [
+1,
+1
+],
+"k:CONJ|w:delicious": [
+1,
+0
+],
+"k:CONJ|w:did": [
+2,
+0
+],
+"k:CONJ|w:gave": [
+1,
+0
+],
+"k:CONJ|w:he": [
+2,
+0
+],
+"k:CONJ|w:i": [
+4,
+2
+],
+"k:CONJ|w:if": [
+1,
+0
+],
+"k:CONJ|w:insulted": [
+1,
+0
+],
+"k:CONJ|w:it": [
+3,
+0
+],
+"k:CONJ|w:it's": [
+1,
+0
+],
+"k:CONJ|w:mj": [
+1,
+0
+],
+"k:CONJ|w:my": [
+1,
+0
+],
+"k:CONJ|w:now": [
+1,
+0
+],
+"k:CONJ|w:obviously": [
+1,
+0
+],
+"k:CONJ|w:see": [
+1,
+0
+],
+"k:CONJ|w:thanks": [
+1,
+1
+],
+"k:CONJ|w:that's": [
+1,
+0
+],
+"k:CONJ|w:the": [
+2,
+2
+],
+"k:CONJ|w:then": [
+1,
+0
+],
+"k:CONJ|w:they": [
+1,
+0
+],
+"k:CONJ|w:we": [
+1,
+0
+],
+"k:DET|*": [
+79,
+11
+],
+"k:DET|k:AUX": [
+2,
+0
+],
+"k:DET|k:CONJ": [
+1,
+1
+],
+"k:DET|k:DET": [
+2,
+1
+],
+"k:DET|k:LONG": [
+9,
+3
+],
+"k:DET|k:NUM": [
+1,
+0
+],
+"k:DET|k:WORD": [
+64,
+6
+],
+"k:DET|w:15": [
+1,
+0
+],
+"k:DET|w:and": [
+1,
+1
+],
+"k:DET|w:are": [
+1,
+0
+],
+"k:DET|w:beanie": [
+1,
+1
+],
+"k:DET|w:billy": [
+1,
+0
+],
+"k:DET|w:brain": [
+1,
+0
+],
+"k:DET|w:break": [
+1,
+0
+],
+"k:DET|w:character": [
+1,
+0
+],
+"k:DET|w:characters": [
+1,
+0
+],
+"k:DET|w:cheek": [
+1,
+0
+],
+"k:DET|w:chips": [
+1,
+1
+],
+"k:DET|w:couple": [
+1,
+0
+],
+"k:DET|w:daughter": [
+1,
+0
+],
+"k:DET|w:delicious": [
+1,
+1
+],
+"k:DET|w:dog": [
+2,
+0
+],
+"k:DET|w:favorite": [
+2,
+1
+],
+"k:DET|w:film": [
+2,
+0
+],
+"k:DET|w:film's": [
+1,
+0
+],
+"k:DET|w:friend": [
+2,
+0
+],
+"k:DET|w:grand": [
+1,
+0
+],
+"k:DET|w:hammer": [
+1,
+0
+],
+"k:DET|w:hands": [
+1,
+0
+],
+"k:DET|w:hat": [
+1,
+0
+],
+"k:DET|w:hero": [
+1,
+0
+],
+"k:DET|w:is": [
+1,
+0
+],
+"k:DET|w:kid": [
+1,
+0
+],
+"k:DET|w:leash": [
+2,
+0
+],
+"k:DET|w:legendary": [
+1,
+1
+],
+"k:DET|w:life": [
+1,
+0
+],
+"k:DET|w:little": [
+3,
+0
+],
+"k:DET|w:lyrics": [
+2,
+0
+],
+"k:DET|w:mcu": [
+1,
+0
+],
+"k:DET|w:minute": [
+1,
+0
+],
+"k:DET|w:more": [
+1,
+0
+],
+"k:DET|w:most": [
+3,
+1
+],
+"k:DET|w:movie": [
+1,
+0
+],
+"k:DET|w:musical": [
+1,
+0
+],
+"k:DET|w:my": [
+1,
+0
+],
+"k:DET|w:name": [
+3,
+0
+],
+"k:DET|w:new": [
+2,
+1
+],
+"k:DET|w:news": [
+1,
+0
+],
+"k:DET|w:next": [
+2,
+0
+],
+"k:DET|w:one": [
+1,
+0
+],
+"k:DET|w:own": [
+3,
+1
+],
+"k:DET|w:parker": [
+1,
+0
+],
+"k:DET|w:picture": [
+1,
+0
+],
+"k:DET|w:point": [
+1,
+0
+],
+"k:DET|w:president": [
+1,
+0
+],
+"k:DET|w:prototype": [
+1,
+0
+],
+"k:DET|w:rest": [
+1,
+0
+],
+"k:DET|w:same": [
+1,
+0
+],
+"k:DET|w:similar": [
+1,
+0
+],
+"k:DET|w:song": [
+1,
+0
+],
+"k:DET|w:studio": [
+2,
+0
+],
+"k:DET|w:the": [
+1,
+1
+],
+"k:DET|w:tiny": [
+1,
+0
+],
+"k:DET|w:web": [
+1,
+0
+],
+"k:DET|w:website": [
+1,
+0
+],
+"k:DET|w:wheel": [
+1,
+0
+],
+"k:DET|w:whoop": [
+1,
+1
+],
+"k:DET|w:words": [
+2,
+0
+],
+"k:INTJ|*": [
+27,
+20
+],
+"k:INTJ|k:AUX": [
+1,
+1
+],
+"k:INTJ|k:CONJ": [
+1,
+1
+],
+"k:INTJ|k:DET": [
+2,
+2
+],
+"k:INTJ|k:INTJ": [
+4,
+2
+],
+"k:INTJ|k:LONG": [
+3,
+2
+],
+"k:INTJ|k:PREP": [
+1,
+1
+],
+"k:INTJ|k:PRON": [
+5,
+4
+],
+"k:INTJ|k:WH": [
+1,
+1
+],
+"k:INTJ|k:WORD": [
+9,
+6
+],
+"k:INTJ|w:but": [
+1,
+1
+],
+"k:INTJ|w:can": [
+1,
+1
+],
+"k:INTJ|w:give": [
+1,
+1
+],
+"k:INTJ|w:go": [
+1,
+1
+],
+"k:INTJ|w:hands": [
+1,
+0
+],
+"k:INTJ|w:hey": [
+4,
+2
+],
+"k:INTJ|w:i": [
+2,
+2
+],
+"k:INTJ|w:i'm": [
+1,
+1
+],
+"k:INTJ|w:i've": [
+1,
+1
+],
+"k:INTJ|w:idea": [
+1,
+0
+],
+"k:INTJ|w:it's": [
+1,
+0
+],
+"k:INTJ|w:keanu": [
+1,
+1
+],
+"k:INTJ|w:let's": [
+1,
+1
+],
+"k:INTJ|w:literally": [
+1,
+1
+],
+"k:INTJ|w:loki": [
+1,
+0
+],
+"k:INTJ|w:peter": [
+1,
+1
+],
+"k:INTJ|w:sorry": [
+1,
+1
+],
+"k:INTJ|w:spiderman": [
+1,
+1
+],
+"k:INTJ|w:squeezing": [
+1,
+0
+],
+"k:INTJ|w:the": [
+1,
+1
+],
+"k:INTJ|w:those": [
+1,
+1
+],
+"k:INTJ|w:to": [
+1,
+1
+],
+"k:INTJ|w:why": [
+1,
+1
+],
+"k:LONG|*": [
+48,
+39
+],
+"k:LONG|k:AUX": [
+5,
+3
+],
+"k:LONG|k:CONJ": [
+4,
+4
+],
+"k:LONG|k:DET": [
+3,
+3
+],
+"k:LONG|k:INTJ": [
+2,
+1
+],
+"k:LONG|k:LONG": [
+1,
+1
+],
+"k:LONG|k:PREP": [
+4,
+3
+],
+"k:LONG|k:PRON": [
+6,
+6
+],
+"k:LONG|k:WH": [
+4,
+4
+],
+"k:LONG|k:WORD": [
+19,
+14
+],
+"k:LONG|w:and": [
+4,
+4
+],
+"k:LONG|w:at": [
+1,
+1
+],
+"k:LONG|w:becomes": [
+1,
+1
+],
+"k:LONG|w:been": [
+1,
+0
+],
+"k:LONG|w:brand": [
+1,
+1
+],
+"k:LONG|w:burrito": [
+1,
+1
+],
+"k:LONG|w:day": [
+1,
+0
+],
+"k:LONG|w:doesn't": [
+1,
+1
+],
+"k:LONG|w:else": [
+1,
+1
+],
+"k:LONG|w:first": [
+1,
+1
+],
+"k:LONG|w:gwen": [
+1,
+1
+],
+"k:LONG|w:his": [
+1,
+1
+],
+"k:LONG|w:huh": [
+1,
+0
+],
+"k:LONG|w:i": [
+2,
+2
+],
+"k:LONG|w:in": [
+1,
+1
+],
+"k:LONG|w:is": [
+3,
+2
+],
+"k:LONG|w:it's": [
+1,
+1
+],
+"k:LONG|w:like": [
+2,
+1
+],
+"k:LONG|w:love": [
+1,
+1
+],
+"k:LONG|w:marvel": [
+1,
+1
+],
+"k:LONG|w:of": [
+2,
+1
+],
+"k:LONG|w:other": [
+1,
+1
+],
+"k:LONG|w:parking": [
+1,
+0
+],
+"k:LONG|w:rachel": [
+1,
+1
+],
+"k:LONG|w:sidekick": [
+1,
+1
+],
+"k:LONG|w:sound": [
+1,
+0
+],
+"k:LONG|w:that": [
+1,
+1
+],
+"k:LONG|w:the": [
+1,
+1
+],
+"k:LONG|w:these": [
+1,
+1
+],
+"k:LONG|w:they": [
+1,
+1
+],
+"k:LONG|w:thing": [
+1,
+0
+],
+"k:LONG|w:tom": [
+1,
+1
+],
+"k:LONG|w:want": [
+1,
+1
+],
+"k:LONG|w:what": [
+1,
+1
+],
+"k:LONG|w:who": [
+3,
+3
+],
+"k:LONG|w:yea": [
+1,
+1
+],
+"k:LONG|w:you": [
+2,
+2
+],
+"k:NUM|*": [
+13,
+5
+],
+"k:NUM|k:AUX": [
+2,
+0
+],
+"k:NUM|k:CONJ": [
+5,
+3
+],
+"k:NUM|k:PRON": [
+2,
+2
+],
+"k:NUM|k:WORD": [
+4,
+0
+],
+"k:NUM|w:am": [
+2,
+0
+],
+"k:NUM|w:and": [
+4,
+2
+],
+"k:NUM|w:but": [
+1,
+1
+],
+"k:NUM|w:it": [
+1,
+1
+],
+"k:NUM|w:points": [
+1,
+0
+],
+"k:NUM|w:year": [
+3,
+0
+],
+"k:NUM|w:you're": [
+1,
+1
+],
+"k:PREP|*": [
+71,
+16
+],
+"k:PREP|k:AUX": [
+3,
+1
+],
+"k:PREP|k:CONJ": [
+2,
+2
+],
+"k:PREP|k:DET": [
+18,
+3
+],
+"k:PREP|k:LONG": [
+6,
+0
+],
+"k:PREP|k:NUM": [
+2,
+0
+],
+"k:PREP|k:PREP": [
+4,
+2
+],
+"k:PREP|k:PRON": [
+4,
+1
+],
+"k:PREP|k:WH": [
+1,
+0
+],
+"k:PREP|k:WORD": [
+31,
+7
+],
+"k:PREP|w:6": [
+1,
+0
+],
+"k:PREP|w:9": [
+1,
+0
+],
+"k:PREP|w:a": [
+2,
+0
+],
+"k:PREP|w:accident": [
+1,
+0
+],
+"k:PREP|w:all": [
+2,
+0
+],
+"k:PREP|w:and": [
+2,
+2
+],
+"k:PREP|w:announce": [
+1,
+0
+],
+"k:PREP|w:be": [
+3,
+1
+],
+"k:PREP|w:central": [
+2,
+1
+],
+"k:PREP|w:drive": [
+1,
+0
+],
+"k:PREP|w:find": [
+2,
+0
+],
+"k:PREP|w:finish": [
+1,
+0
+],
+"k:PREP|w:get": [
+1,
+0
+],
+"k:PREP|w:in": [
+1,
+0
+],
+"k:PREP|w:instagram": [
+1,
+0
+],
+"k:PREP|w:know": [
+1,
+0
+],
+"k:PREP|w:lie": [
+1,
+0
+],
+"k:PREP|w:me": [
+1,
+0
+],
+"k:PREP|w:my": [
+2,
+0
+],
+"k:PREP|w:new": [
+1,
+1
+],
+"k:PREP|w:nine": [
+1,
+0
+],
+"k:PREP|w:nowhere": [
+1,
+0
+],
+"k:PREP|w:of": [
+1,
+1
+],
+"k:PREP|w:on": [
+1,
+1
+],
+"k:PREP|w:one": [
+1,
+0
+],
+"k:PREP|w:our": [
+2,
+0
+],
+"k:PREP|w:peter": [
+1,
+0
+],
+"k:PREP|w:play": [
+2,
+0
+],
+"k:PREP|w:respect": [
+1,
+0
+],
+"k:PREP|w:see": [
+1,
+1
+],
+"k:PREP|w:slow": [
+1,
+1
+],
+"k:PREP|w:spiderman": [
+1,
+0
+],
+"k:PREP|w:television": [
+1,
+0
+],
+"k:PREP|w:that": [
+5,
+0
+],
+"k:PREP|w:the": [
+7,
+2
+],
+"k:PREP|w:theaters": [
+1,
+0
+],
+"k:PREP|w:their": [
+1,
+0
+],
+"k:PREP|w:these": [
+1,
+1
+],
+"k:PREP|w:this": [
+3,
+0
+],
+"k:PREP|w:time": [
+1,
+0
+],
+"k:PREP|w:to": [
+1,
+0
+],
+"k:PREP|w:wait": [
+1,
+0
+],
+"k:PREP|w:whether": [
+1,
+1
+],
+"k:PREP|w:who": [
+1,
+0
+],
+"k:PREP|w:whoa": [
+1,
+1
+],
+"k:PREP|w:xmen": [
+1,
+1
+],
+"k:PREP|w:you": [
+3,
+1
+],
+"k:PRON|*": [
+135,
+29
+],
+"k:PRON|k:ADV": [
+8,
+2
+],
+"k:PRON|k:AUX": [
+35,
+0
+],
+"k:PRON|k:CONJ": [
+4,
+2
+],
+"k:PRON|k:DET": [
+11,
+3
+],
+"k:PRON|k:INTJ": [
+5,
+3
+],
+"k:PRON|k:NUM": [
+1,
+0
+],
+"k:PRON|k:PREP": [
+5,
+1
+],
+"k:PRON|k:PRON": [
+3,
+3
+],
+"k:PRON|k:WH": [
+1,
+0
+],
+"k:PRON|k:WORD": [
+62,
+15
+],
+"k:PRON|w:9": [
+1,
+0
+],
+"k:PRON|w:a": [
+4,
+0
+],
+"k:PRON|w:actually": [
+1,
+0
+],
+"k:PRON|w:after": [
+1,
+0
+],
+"k:PRON|w:all": [
+2,
+1
+],
+"k:PRON|w:alright": [
+1,
+0
+],
+"k:PRON|w:always": [
+1,
+0
+],
+"k:PRON|w:am": [
+1,
+0
+],
+"k:PRON|w:amm": [
+1,
+0
+],
+"k:PRON|w:and": [
+1,
+1
+],
+"k:PRON|w:apart": [
+1,
+1
+],
+"k:PRON|w:are": [
+2,
+0
+],
+"k:PRON|w:because": [
+1,
+1
+],
+"k:PRON|w:been": [
+2,
+0
+],
+"k:PRON|w:believe": [
+1,
+0
+],
+"k:PRON|w:bought": [
+2,
+0
+],
+"k:PRON|w:came": [
+1,
+0
+],
+"k:PRON|w:can": [
+4,
+0
+],
+"k:PRON|w:can't": [
+4,
+0
+],
+"k:PRON|w:did": [
+1,
+0
+],
+"k:PRON|w:didn't": [
+2,
+0
+],
+"k:PRON|w:do": [
+1,
+0
+],
+"k:PRON|w:don't": [
+2,
+0
+],
+"k:PRON|w:fail": [
+2,
+0
+],
+"k:PRON|w:found": [
+1,
+0
+],
+"k:PRON|w:from": [
+1,
+0
+],
+"k:PRON|w:funny": [
+1,
+0
+],
+"k:PRON|w:go": [
+1,
+0
+],
+"k:PRON|w:going": [
+2,
+0
+],
+"k:PRON|w:gonna": [
+1,
+0
+],
+"k:PRON|w:got": [
+2,
+0
+],
+"k:PRON|w:guess": [
+2,
+0
+],
+"k:PRON|w:had": [
+2,
+0
+],
+"k:PRON|w:have": [
+2,
+0
+],
+"k:PRON|w:haven't": [
+2,
+0
+],
+"k:PRON|w:hear": [
+1,
+0
+],
+"k:PRON|w:hiding": [
+6,
+5
+],
+"k:PRON|w:i": [
+2,
+2
+],
+"k:PRON|w:is": [
+1,
+0
+],
+"k:PRON|w:just": [
+2,
+0
+],
+"k:PRON|w:kids": [
+1,
+1
+],
+"k:PRON|w:know": [
+5,
+0
+],
+"k:PRON|w:like": [
+2,
+0
+],
+"k:PRON|w:made": [
+1,
+0
+],
+"k:PRON|w:must": [
+1,
+0
+],
+"k:PRON|w:my": [
+2,
+1
+],
+"k:PRON|w:never": [
+2,
+0
+],
+"k:PRON|w:not": [
+1,
+1
+],
+"k:PRON|w:okay": [
+1,
+1
+],
+"k:PRON|w:parked": [
+1,
+1
+],
+"k:PRON|w:parker": [
+1,
+0
+],
+"k:PRON|w:pass": [
+1,
+0
+],
+"k:PRON|w:play": [
+7,
+1
+],
+"k:PRON|w:proud": [
+1,
+0
+],
+"k:PRON|w:replay": [
+1,
+0
+],
+"k:PRON|w:right": [
+1,
+1
+],
+"k:PRON|w:said": [
+2,
+0
+],
+"k:PRON|w:sang": [
+1,
+0
+],
+"k:PRON|w:so": [
+2,
+0
+],
+"k:PRON|w:tearing": [
+1,
+1
+],
+"k:PRON|w:the": [
+4,
+1
+],
+"k:PRON|w:there": [
+1,
+1
+],
+"k:PRON|w:these": [
+1,
+1
+],
+"k:PRON|w:they'd": [
+1,
+1
+],
+"k:PRON|w:think": [
+2,
+0
+],
+"k:PRON|w:thought": [
+2,
+0
+],
+"k:PRON|w:to": [
+1,
+0
+],
+"k:PRON|w:tom": [
+2,
+1
+],
+"k:PRON|w:try": [
+1,
+1
+],
+"k:PRON|w:up": [
+1,
+0
+],
+"k:PRON|w:want": [
+1,
+0
+],
+"k:PRON|w:was": [
+6,
+0
+],
+"k:PRON|w:we": [
+1,
+1
+],
+"k:PRON|w:went": [
+1,
+0
+],
+"k:PRON|w:why": [
+1,
+0
+],
+"k:PRON|w:wish": [
+1,
+0
+],
+"k:PRON|w:with": [
+1,
+1
+],
+"k:PRON|w:would": [
+1,
+0
+],
+"k:PRON|w:yeah": [
+2,
+2
+],
+"k:WH|*": [
+14,
+1
+],
+"k:WH|k:AUX": [
+6,
+0
+],
+"k:WH|k:DET": [
+1,
+1
+],
+"k:WH|k:LONG": [
+1,
+0
+],
+"k:WH|k:PRON": [
+4,
+0
+],
+"k:WH|k:WORD": [
+2,
+0
+],
+"k:WH|w:could": [
+1,
+0
+],
+"k:WH|w:dare": [
+1,
+0
+],
+"k:WH|w:eventually": [
+1,
+0
+],
+"k:WH|w:i": [
+3,
+0
+],
+"k:WH|w:i'm": [
+1,
+0
+],
+"k:WH|w:is": [
+2,
+0
+],
+"k:WH|w:knows": [
+1,
+0
+],
+"k:WH|w:the": [
+1,
+1
+],
+"k:WH|w:will": [
+1,
+0
+],
+"k:WH|w:won't": [
+1,
+0
+],
+"k:WH|w:would": [
+1,
+0
+],
+"k:WORD|*": [
+368,
+206
+],
+"k:WORD|k:ADV": [
+6,
+4
+],
+"k:WORD|k:AUX": [
+25,
+19
+],
+"k:WORD|k:CONJ": [
+10,
+10
+],
+"k:WORD|k:DET": [
+27,
+14
+],
+"k:WORD|k:INTJ": [
+8,
+8
+],
+"k:WORD|k:LONG": [
+26,
+13
+],
+"k:WORD|k:NUM": [
+2,
+2
+],
+"k:WORD|k:PREP": [
+54,
+24
+],
+"k:WORD|k:PRON": [
+64,
+45
+],
+"k:WORD|k:WH": [
+3,
+2
+],
+"k:WORD|k:WORD": [
+143,
+65
+],
+"k:WORD|w:10": [
+1,
+1
+],
+"k:WORD|w:5": [
+1,
+1
+],
+"k:WORD|w:a": [
+6,
+3
+],
+"k:WORD|w:after": [
+1,
+0
+],
+"k:WORD|w:ago": [
+1,
+0
+],
+"k:WORD|w:all": [
+1,
+1
+],
+"k:WORD|w:along": [
+1,
+0
+],
+"k:WORD|w:always": [
+2,
+2
+],
+"k:WORD|w:and": [
+7,
+7
+],
+"k:WORD|w:are": [
+7,
+6
+],
+"k:WORD|w:around": [
+1,
+0
+],
+"k:WORD|w:as": [
+1,
+1
+],
+"k:WORD|w:august": [
+1,
+0
+],
+"k:WORD|w:baby": [
+1,
+1
+],
+"k:WORD|w:bad": [
+1,
+1
+],
+"k:WORD|w:beautiful": [
+1,
+1
+],
+"k:WORD|w:because": [
+1,
+1
+],
+"k:WORD|w:between": [
+1,
+1
+],
+"k:WORD|w:bit": [
+1,
+0
+],
+"k:WORD|w:button": [
+1,
+0
+],
+"k:WORD|w:by": [
+1,
+1
+],
+"k:WORD|w:called": [
+2,
+2
+],
+"k:WORD|w:can": [
+1,
+1
+],
+"k:WORD|w:casali": [
+1,
+1
+],
+"k:WORD|w:closed": [
+1,
+1
+],
+"k:WORD|w:cole": [
+1,
+0
+],
+"k:WORD|w:cruise": [
+1,
+0
+],
+"k:WORD|w:day": [
+1,
+0
+],
+"k:WORD|w:do": [
+2,
+1
+],
+"k:WORD|w:does": [
+1,
+1
+],
+"k:WORD|w:don't": [
+2,
+2
+],
+"k:WORD|w:down": [
+2,
+0
+],
+"k:WORD|w:dramatic": [
+1,
+0
+],
+"k:WORD|w:early": [
+1,
+1
+],
+"k:WORD|w:elliot": [
+1,
+0
+],
+"k:WORD|w:era": [
+1,
+0
+],
+"k:WORD|w:everyone": [
+1,
+1
+],
+"k:WORD|w:finale": [
+1,
+0
+],
+"k:WORD|w:find": [
+2,
+0
+],
+"k:WORD|w:firestar": [
+1,
+1
+],
+"k:WORD|w:first": [
+1,
+1
+],
+"k:WORD|w:for": [
+3,
+2
+],
+"k:WORD|w:funny": [
+1,
+0
+],
+"k:WORD|w:girl": [
+1,
+0
+],
+"k:WORD|w:go": [
+2,
+0
+],
+"k:WORD|w:gray": [
+1,
+0
+],
+"k:WORD|w:guy": [
+1,
+0
+],
+"k:WORD|w:guys": [
+3,
+1
+],
+"k:WORD|w:had": [
+1,
+0
+],
+"k:WORD|w:hats": [
+2,
+0
+],
+"k:WORD|w:have": [
+2,
+0
+],
+"k:WORD|w:he": [
+1,
+1
+],
+"k:WORD|w:he'd": [
+1,
+1
+],
+"k:WORD|w:he's": [
+1,
+1
+],
+"k:WORD|w:hey": [
+2,
+2
+],
+"k:WORD|w:holland": [
+1,
+0
+],
+"k:WORD|w:i": [
+18,
+17
+],
+"k:WORD|w:i'd": [
+1,
+0
+],
+"k:WORD|w:i'm": [
+2,
+2
+],
+"k:WORD|w:i've": [
+2,
+2
+],
+"k:WORD|w:iconic": [
+1,
+0
+],
+"k:WORD|w:in": [
+2,
+2
+],
+"k:WORD|w:interest": [
+2,
+1
+],
+"k:WORD|w:internet": [
+1,
+0
+],
+"k:WORD|w:into": [
+1,
+1
+],
+"k:WORD|w:is": [
+4,
+3
+],
+"k:WORD|w:it": [
+9,
+1
+],
+"k:WORD|w:it's": [
+3,
+3
+],
+"k:WORD|w:jean": [
+1,
+1
+],
+"k:WORD|w:john": [
+1,
+0
+],
+"k:WORD|w:just": [
+1,
+1
+],
+"k:WORD|w:keanu": [
+1,
+1
+],
+"k:WORD|w:kid": [
+1,
+1
+],
+"k:WORD|w:kids": [
+2,
+2
+],
+"k:WORD|w:know": [
+1,
+0
+],
+"k:WORD|w:late": [
+1,
+1
+],
+"k:WORD|w:less": [
+1,
+1
+],
+"k:WORD|w:let": [
+1,
+1
+],
+"k:WORD|w:let's": [
+2,
+2
+],
+"k:WORD|w:likely": [
+1,
+0
+],
+"k:WORD|w:little": [
+1,
+0
+],
+"k:WORD|w:love": [
+1,
+0
+],
+"k:WORD|w:main": [
+1,
+1
+],
+"k:WORD|w:marie": [
+2,
+2
+],
+"k:WORD|w:maybe": [
+2,
+2
+],
+"k:WORD|w:mayday": [
+1,
+1
+],
+"k:WORD|w:me": [
+6,
+0
+],
+"k:WORD|w:mixer": [
+1,
+1
+],
+"k:WORD|w:more": [
+1,
+0
+],
+"k:WORD|w:mutants": [
+1,
+1
+],
+"k:WORD|w:my": [
+1,
+0
+],
+"k:WORD|w:named": [
+1,
+1
+],
+"k:WORD|w:namor": [
+1,
+0
+],
+"k:WORD|w:new": [
+2,
+1
+],
+"k:WORD|w:now": [
+1,
+0
+],
+"k:WORD|w:nowadays": [
+1,
+1
+],
+"k:WORD|w:of": [
+14,
+5
+],
+"k:WORD|w:off": [
+1,
+1
+],
+"k:WORD|w:ohh": [
+1,
+1
+],
+"k:WORD|w:okay": [
+1,
+1
+],
+"k:WORD|w:old": [
+3,
+0
+],
+"k:WORD|w:on": [
+5,
+3
+],
+"k:WORD|w:one": [
+3,
+2
+],
+"k:WORD|w:our": [
+1,
+0
+],
+"k:WORD|w:out": [
+6,
+1
+],
+"k:WORD|w:parallel": [
+1,
+1
+],
+"k:WORD|w:park": [
+2,
+0
+],
+"k:WORD|w:parker": [
+3,
+0
+],
+"k:WORD|w:pass": [
+1,
+0
+],
+"k:WORD|w:peep": [
+1,
+1
+],
+"k:WORD|w:peter": [
+6,
+5
+],
+"k:WORD|w:place": [
+2,
+0
+],
+"k:WORD|w:point": [
+1,
+0
+],
+"k:WORD|w:popular": [
+1,
+1
+],
+"k:WORD|w:pppeter": [
+1,
+1
+],
+"k:WORD|w:probably": [
+1,
+0
+],
+"k:WORD|w:punisher's": [
+1,
+1
+],
+"k:WORD|w:put": [
+1,
+1
+],
+"k:WORD|w:reeves": [
+3,
+1
+],
+"k:WORD|w:ride": [
+1,
+0
+],
+"k:WORD|w:rider": [
+1,
+0
+],
+"k:WORD|w:right": [
+2,
+0
+],
+"k:WORD|w:scared": [
+1,
+1
+],
+"k:WORD|w:september": [
+1,
+0
+],
+"k:WORD|w:should": [
+2,
+2
+],
+"k:WORD|w:singing": [
+1,
+1
+],
+"k:WORD|w:sink": [
+1,
+0
+],
+"k:WORD|w:site": [
+1,
+0
+],
+"k:WORD|w:six": [
+1,
+0
+],
+"k:WORD|w:sizes": [
+1,
+0
+],
+"k:WORD|w:so": [
+1,
+1
+],
+"k:WORD|w:some": [
+2,
+0
+],
+"k:WORD|w:someone": [
+1,
+0
+],
+"k:WORD|w:something": [
+8,
+2
+],
+"k:WORD|w:songs": [
+1,
+0
+],
+"k:WORD|w:sorry": [
+1,
+1
+],
+"k:WORD|w:spider": [
+1,
+1
+],
+"k:WORD|w:spiderman": [
+4,
+3
+],
+"k:WORD|w:spiderman's": [
+1,
+1
+],
+"k:WORD|w:stacy": [
+1,
+0
+],
+"k:WORD|w:star": [
+1,
+0
+],
+"k:WORD|w:stop": [
+1,
+0
+],
+"k:WORD|w:stunts": [
+3,
+1
+],
+"k:WORD|w:superhero": [
+1,
+0
+],
+"k:WORD|w:sure": [
+1,
+1
+],
+"k:WORD|w:surfer": [
+1,
+0
+],
+"k:WORD|w:sweet": [
+1,
+1
+],
+"k:WORD|w:take": [
+1,
+0
+],
+"k:WORD|w:test": [
+1,
+1
+],
+"k:WORD|w:that": [
+1,
+0
+],
+"k:WORD|w:that's": [
+3,
+2
+],
+"k:WORD|w:the": [
+11,
+9
+],
+"k:WORD|w:there": [
+1,
+0
+],
+"k:WORD|w:these": [
+1,
+1
+],
+"k:WORD|w:they": [
+1,
+1
+],
+"k:WORD|w:thing": [
+2,
+1
+],
+"k:WORD|w:this": [
+2,
+0
+],
+"k:WORD|w:time": [
+2,
+0
+],
+"k:WORD|w:to": [
+14,
+5
+],
+"k:WORD|w:tom": [
+2,
+1
+],
+"k:WORD|w:tony": [
+1,
+0
+],
+"k:WORD|w:tony's": [
+1,
+1
+],
+"k:WORD|w:too": [
+1,
+1
+],
+"k:WORD|w:track": [
+1,
+0
+],
+"k:WORD|w:turning": [
+1,
+0
+],
+"k:WORD|w:ummm": [
+1,
+1
+],
+"k:WORD|w:up": [
+1,
+1
+],
+"k:WORD|w:us": [
+1,
+0
+],
+"k:WORD|w:villain": [
+1,
+0
+],
+"k:WORD|w:want": [
+1,
+1
+],
+"k:WORD|w:watch": [
+1,
+1
+],
+"k:WORD|w:we": [
+1,
+1
+],
+"k:WORD|w:we'll": [
+3,
+3
+],
+"k:WORD|w:we're": [
+1,
+1
+],
+"k:WORD|w:weeks": [
+1,
+0
+],
+"k:WORD|w:what's": [
+1,
+1
+],
+"k:WORD|w:who": [
+2,
+2
+],
+"k:WORD|w:whoa": [
+1,
+1
+],
+"k:WORD|w:whoop": [
+2,
+2
+],
+"k:WORD|w:why": [
+1,
+0
+],
+"k:WORD|w:will": [
+1,
+1
+],
+"k:WORD|w:without": [
+1,
+1
+],
+"k:WORD|w:won't": [
+1,
+1
+],
+"k:WORD|w:would": [
+1,
+1
+],
+"k:WORD|w:yeah": [
+5,
+5
+],
+"k:WORD|w:years": [
+1,
+1
+],
+"k:WORD|w:york": [
+1,
+0
+],
+"k:WORD|w:yorkers": [
+1,
+0
+],
+"k:WORD|w:you": [
+12,
+11
+],
+"k:WORD|w:you're": [
+1,
+1
+],
+"k:WORD|w:your": [
+3,
+1
+],
+"w:10|k:CONJ": [
+2,
+1
+],
+"w:10|k:WORD": [
+2,
+0
+],
+"w:10|w:and": [
+2,
+1
+],
+"w:10|w:year": [
+2,
+0
+],
+"w:15|k:WORD": [
+1,
+0
+],
+"w:15|w:year": [
+1,
+0
+],
+"w:2|k:CONJ": [
+1,
+1
+],
+"w:2|k:PRON": [
+1,
+1
+],
+"w:2|w:but": [
+1,
+1
+],
+"w:2|w:it": [
+1,
+1
+],
+"w:3|k:PRON": [
+1,
+1
+],
+"w:3|w:you're": [
+1,
+1
+],
+"w:5|k:WORD": [
+1,
+0
+],
+"w:5|w:points": [
+1,
+0
+],
+"w:6|k:AUX": [
+1,
+0
+],
+"w:6|w:am": [
+1,
+0
+],
+"w:9|k:AUX": [
+1,
+0
+],
+"w:9|k:CONJ": [
+2,
+1
+],
+"w:9|w:am": [
+1,
+0
+],
+"w:9|w:and": [
+2,
+1
+],
+"w:able|k:PREP": [
+1,
+0
+],
+"w:able|w:to": [
+1,
+0
+],
+"w:accident|k:CONJ": [
+1,
+1
+],
+"w:accident|w:and": [
+1,
+1
+],
+"w:actually|k:DET": [
+1,
+1
+],
+"w:actually|w:my": [
+1,
+1
+],
+"w:after|k:DET": [
+1,
+0
+],
+"w:after|k:WORD": [
+1,
+0
+],
+"w:after|w:nine": [
+1,
+0
+],
+"w:after|w:this": [
+1,
+0
+],
+"w:all|k:DET": [
+1,
+0
+],
+"w:all|k:PREP": [
+1,
+0
+],
+"w:all|k:WORD": [
+5,
+2
+],
+"w:all|w:my": [
+1,
+0
+],
+"w:all|w:new": [
+1,
+1
+],
+"w:all|w:of": [
+1,
+0
+],
+"w:all|w:peep": [
+1,
+1
+],
+"w:all|w:right": [
+2,
+0
+],
+"w:all|w:time": [
+1,
+0
+],
+"w:alright|k:WORD": [
+1,
+1
+],
+"w:alright|w:watch": [
+1,
+1
+],
+"w:also|k:WORD": [
+1,
+1
+],
+"w:also|w:wield": [
+1,
+1
+],
+"w:always|k:ADV": [
+1,
+1
+],
+"w:always|k:AUX": [
+1,
+0
+],
+"w:always|k:PRON": [
+1,
+0
+],
+"w:always|k:WORD": [
+1,
+1
+],
+"w:always|w:always": [
+1,
+1
+],
+"w:always|w:do": [
+1,
+0
+],
+"w:always|w:go": [
+1,
+1
+],
+"w:always|w:me": [
+1,
+0
+],
+"w:amm|k:WORD": [
+2,
+2
+],
+"w:amm|w:marie": [
+1,
+1
+],
+"w:amm|w:ummm": [
+1,
+1
+],
+"w:am|k:CONJ": [
+1,
+1
+],
+"w:am|k:WORD": [
+2,
+1
+],
+"w:am|w:and": [
+1,
+1
+],
+"w:am|w:saying": [
+1,
+0
+],
+"w:am|w:walking": [
+1,
+1
+],
+"w:and|k:AUX": [
+1,
+0
+],
+"w:and|k:CONJ": [
+1,
+0
+],
+"w:and|k:DET": [
+1,
+0
+],
+"w:and|k:LONG": [
+1,
+0
+],
+"w:and|k:NUM": [
+5,
+0
+],
+"w:and|k:PRON": [
+10,
+1
+],
+"w:and|k:WORD": [
+3,
+0
+],
+"w:and|w:2": [
+2,
+0
+],
+"w:and|w:3": [
+2,
+0
+],
+"w:and|w:9": [
+1,
+0
+],
+"w:and|w:did": [
+1,
+0
+],
+"w:and|w:gave": [
+1,
+0
+],
+"w:and|w:he": [
+2,
+0
+],
+"w:and|w:i": [
+2,
+1
+],
+"w:and|w:it": [
+3,
+0
+],
+"w:and|w:it's": [
+1,
+0
+],
+"w:and|w:mj": [
+1,
+0
+],
+"w:and|w:my": [
+1,
+0
+],
+"w:and|w:obviously": [
+1,
+0
+],
+"w:and|w:see": [
+1,
+0
+],
+"w:and|w:that's": [
+1,
+0
+],
+"w:and|w:then": [
+1,
+0
+],
+"w:and|w:we": [
+1,
+0
+],
+"w:announce|k:WORD": [
+1,
+1
+],
+"w:announce|w:that": [
+1,
+1
+],
+"w:apart|k:WORD": [
+1,
+1
+],
+"w:apart|w:maybe": [
+1,
+1
+],
+"w:are|k:AUX": [
+1,
+1
+],
+"w:are|k:CONJ": [
+1,
+1
+],
+"w:are|k:INTJ": [
+1,
+0
+],
+"w:are|k:PREP": [
+1,
+1
+],
+"w:are|k:PRON": [
+6,
+0
+],
+"w:are|w:don't": [
+1,
+1
+],
+"w:are|w:in": [
+1,
+1
+],
+"w:are|w:like": [
+1,
+0
+],
+"w:are|w:so": [
+1,
+1
+],
+"w:are|w:you": [
+6,
+0
+],
+"w:around|k:WORD": [
+1,
+1
+],
+"w:around|w:central": [
+1,
+1
+],
+"w:as|k:CONJ": [
+1,
+0
+],
+"w:as|k:WORD": [
+1,
+0
+],
+"w:as|w:all": [
+1,
+0
+],
+"w:as|w:if": [
+1,
+0
+],
+"w:at|k:DET": [
+1,
+0
+],
+"w:at|k:WORD": [
+1,
+0
+],
+"w:at|w:that": [
+1,
+0
+],
+"w:at|w:this": [
+1,
+0
+],
+"w:august|k:WORD": [
+1,
+1
+],
+"w:august|w:early": [
+1,
+1
+],
+"w:a|k:LONG": [
+2,
+1
+],
+"w:a|k:NUM": [
+1,
+0
+],
+"w:a|k:WORD": [
+15,
+0
+],
+"w:a|w:15": [
+1,
+0
+],
+"w:a|w:break": [
+1,
+0
+],
+"w:a|w:couple": [
+1,
+0
+],
+"w:a|w:friend": [
+1,
+0
+],
+"w:a|w:hero": [
+1,
+0
+],
+"w:a|w:leash": [
+1,
+0
+],
+"w:a|w:legendary": [
+1,
+1
+],
+"w:a|w:little": [
+3,
+0
+],
+"w:a|w:minute": [
+1,
+0
+],
+"w:a|w:movie": [
+1,
+0
+],
+"w:a|w:new": [
+1,
+0
+],
+"w:a|w:parker": [
+1,
+0
+],
+"w:a|w:picture": [
+1,
+0
+],
+"w:a|w:prototype": [
+1,
+0
+],
+"w:a|w:rest": [
+1,
+0
+],
+"w:a|w:similar": [
+1,
+0
+],
+"w:baby|k:WORD": [
+1,
+1
+],
+"w:baby|w:sweet": [
+1,
+1
+],
+"w:bad|k:WORD": [
+1,
+0
+],
+"w:bad|w:guys": [
+1,
+0
+],
+"w:beanie|k:WORD": [
+1,
+0
+],
+"w:beanie|w:hats": [
+1,
+0
+],
+"w:beautiful|k:WORD": [
+1,
+0
+],
+"w:beautiful|w:day": [
+1,
+0
+],
+"w:because|k:DET": [
+1,
+1
+],
+"w:because|k:PRON": [
+1,
+0
+],
+"w:because|w:the": [
+1,
+1
+],
+"w:because|w:they": [
+1,
+0
+],
+"w:becomes|k:WORD": [
+1,
+1
+],
+"w:becomes|w:spider": [
+1,
+1
+],
+"w:been|k:PREP": [
+1,
+1
+],
+"w:been|k:WORD": [
+2,
+1
+],
+"w:been|w:on": [
+1,
+1
+],
+"w:been|w:trying": [
+1,
+1
+],
+"w:been|w:waiting": [
+1,
+0
+],
+"w:believe|k:DET": [
+1,
+1
+],
+"w:believe|w:the": [
+1,
+1
+],
+"w:between|k:NUM": [
+1,
+0
+],
+"w:between|w:6": [
+1,
+0
+],
+"w:be|k:DET": [
+2,
+1
+],
+"w:be|k:LONG": [
+1,
+1
+],
+"w:be|k:WORD": [
+4,
+3
+],
+"w:be|w:a": [
+2,
+1
+],
+"w:be|w:able": [
+1,
+0
+],
+"w:be|w:ghost": [
+1,
+1
+],
+"w:be|w:prince": [
+1,
+1
+],
+"w:be|w:silver": [
+1,
+1
+],
+"w:be|w:spiderman's": [
+1,
+1
+],
+"w:billy|k:WORD": [
+1,
+0
+],
+"w:billy|w:elliot": [
+1,
+0
+],
+"w:bit|k:PREP": [
+1,
+1
+],
+"w:bit|w:of": [
+1,
+1
+],
+"w:bought|k:LONG": [
+1,
+1
+],
+"w:bought|k:PRON": [
+1,
+0
+],
+"w:bought|w:everyone": [
+1,
+1
+],
+"w:bought|w:us": [
+1,
+0
+],
+"w:brain|k:CONJ": [
+1,
+1
+],
+"w:brain|w:and": [
+1,
+1
+],
+"w:brand|k:WORD": [
+1,
+0
+],
+"w:brand|w:new": [
+1,
+0
+],
+"w:break|k:AUX": [
+1,
+1
+],
+"w:break|w:do": [
+1,
+1
+],
+"w:bring|k:DET": [
+1,
+1
+],
+"w:bring|w:a": [
+1,
+1
+],
+"w:british|k:PRON": [
+1,
+1
+],
+"w:british|w:he's": [
+1,
+1
+],
+"w:burrito|k:PRON": [
+1,
+1
+],
+"w:burrito|w:i": [
+1,
+1
+],
+"w:but|k:ADV": [
+1,
+0
+],
+"w:but|k:PRON": [
+1,
+0
+],
+"w:but|w:i": [
+1,
+0
+],
+"w:but|w:now": [
+1,
+0
+],
+"w:by|k:LONG": [
+1,
+0
+],
+"w:by|w:accident": [
+1,
+0
+],
+"w:called|k:PRON": [
+2,
+0
+],
+"w:called|k:WORD": [
+1,
+0
+],
+"w:called|w:john": [
+1,
+0
+],
+"w:called|w:me": [
+2,
+0
+],
+"w:came|k:PREP": [
+1,
+1
+],
+"w:came|w:up": [
+1,
+1
+],
+"w:can't|k:ADV": [
+2,
+1
+],
+"w:can't|k:LONG": [
+2,
+1
+],
+"w:can't|w:really": [
+2,
+1
+],
+"w:can't|w:understand": [
+2,
+1
+],
+"w:can|k:ADV": [
+1,
+0
+],
+"w:can|k:PRON": [
+3,
+1
+],
+"w:can|k:WORD": [
+2,
+0
+],
+"w:can|w:also": [
+1,
+0
+],
+"w:can|w:i": [
+1,
+1
+],
+"w:can|w:try": [
+1,
+0
+],
+"w:can|w:walk": [
+1,
+0
+],
+"w:can|w:we": [
+1,
+0
+],
+"w:can|w:you": [
+1,
+0
+],
+"w:carry|k:PREP": [
+1,
+0
+],
+"w:carry|w:on": [
+1,
+0
+],
+"w:casali|k:CONJ": [
+1,
+1
+],
+"w:casali|w:and": [
+1,
+1
+],
+"w:central|k:WORD": [
+2,
+0
+],
+"w:central|w:park": [
+2,
+0
+],
+"w:characters|k:WH": [
+1,
+1
+],
+"w:characters|w:who": [
+1,
+1
+],
+"w:character|k:PRON": [
+1,
+1
+],
+"w:character|w:they": [
+1,
+1
+],
+"w:cheap|k:PRON": [
+1,
+1
+],
+"w:cheap|w:they": [
+1,
+1
+],
+"w:cheek|k:PREP": [
+1,
+0
+],
+"w:cheek|w:of": [
+1,
+0
+],
+"w:chips|k:WORD": [
+1,
+1
+],
+"w:chips|w:peter": [
+1,
+1
+],
+"w:closed|k:DET": [
+1,
+0
+],
+"w:closed|w:a": [
+1,
+0
+],
+"w:cole|k:WORD": [
+1,
+1
+],
+"w:cole|w:we'll": [
+1,
+1
+],
+"w:could|k:AUX": [
+1,
+0
+],
+"w:could|w:be": [
+1,
+0
+],
+"w:couple|k:WORD": [
+1,
+1
+],
+"w:couple|w:years": [
+1,
+1
+],
+"w:cruise|k:AUX": [
+1,
+1
+],
+"w:cruise|w:does": [
+1,
+1
+],
+"w:dare|k:PRON": [
+1,
+0
+],
+"w:dare|w:you": [
+1,
+0
+],
+"w:daughter|k:PREP": [
+1,
+1
+],
+"w:daughter|w:of": [
+1,
+1
+],
+"w:day|k:WORD": [
+1,
+1
+],
+"w:day|w:late": [
+1,
+1
+],
+"w:delicious|k:WORD": [
+2,
+2
+],
+"w:delicious|w:burrito": [
+1,
+1
+],
+"w:delicious|w:tom": [
+1,
+1
+],
+"w:didn't|k:WORD": [
+2,
+0
+],
+"w:didn't|w:get": [
+1,
+0
+],
+"w:didn't|w:know": [
+1,
+0
+],
+"w:did|k:PRON": [
+2,
+0
+],
+"w:did|k:WORD": [
+1,
+0
+],
+"w:did|w:i": [
+1,
+0
+],
+"w:did|w:that": [
+1,
+0
+],
+"w:did|w:you": [
+1,
+0
+],
+"w:doesn't|k:AUX": [
+1,
+0
+],
+"w:doesn't|w:do": [
+1,
+0
+],
+"w:does|k:DET": [
+1,
+0
+],
+"w:does|w:a": [
+1,
+0
+],
+"w:dog|k:PREP": [
+2,
+2
+],
+"w:dog|w:in": [
+1,
+1
+],
+"w:dog|w:on": [
+1,
+1
+],
+"w:don't|k:AUX": [
+2,
+0
+],
+"w:don't|k:WORD": [
+4,
+0
+],
+"w:don't|w:be": [
+1,
+0
+],
+"w:don't|w:do": [
+1,
+0
+],
+"w:don't|w:know": [
+2,
+0
+],
+"w:don't|w:move": [
+1,
+0
+],
+"w:don't|w:stop": [
+1,
+0
+],
+"w:down|k:WORD": [
+2,
+2
+],
+"w:down|w:slow": [
+1,
+1
+],
+"w:down|w:whoa": [
+1,
+1
+],
+"w:do|k:DET": [
+1,
+1
+],
+"w:do|k:PRON": [
+1,
+0
+],
+"w:do|k:WORD": [
+4,
+1
+],
+"w:do|w:all": [
+1,
+1
+],
+"w:do|w:my": [
+1,
+1
+],
+"w:do|w:one": [
+1,
+0
+],
+"w:do|w:that": [
+2,
+0
+],
+"w:do|w:you": [
+1,
+0
+],
+"w:dramatic|k:WORD": [
+1,
+1
+],
+"w:dramatic|w:yea": [
+1,
+1
+],
+"w:drive|k:LONG": [
+1,
+1
+],
+"w:drive|w:spiderman": [
+1,
+1
+],
+"w:early|k:LONG": [
+1,
+0
+],
+"w:early|w:september": [
+1,
+0
+],
+"w:elliot|k:WORD": [
+1,
+1
+],
+"w:elliot|w:one": [
+1,
+1
+],
+"w:era|k:PREP": [
+1,
+0
+],
+"w:era|w:of": [
+1,
+0
+],
+"w:eventually|k:WORD": [
+1,
+1
+],
+"w:eventually|w:becomes": [
+1,
+1
+],
+"w:everyone|k:DET": [
+1,
+1
+],
+"w:everyone|w:these": [
+1,
+1
+],
+"w:every|k:LONG": [
+1,
+0
+],
+"w:every|w:character": [
+1,
+0
+],
+"w:ever|k:WORD": [
+1,
+0
+],
+"w:ever|w:stop": [
+1,
+0
+],
+"w:explain|k:PRON": [
+2,
+1
+],
+"w:explain|w:it": [
+2,
+1
+],
+"w:fail|k:PRON": [
+1,
+1
+],
+"w:fail|k:WORD": [
+1,
+1
+],
+"w:fail|w:bad": [
+1,
+1
+],
+"w:fail|w:i": [
+1,
+1
+],
+"w:favorite|k:AUX": [
+1,
+1
+],
+"w:favorite|k:WORD": [
+1,
+0
+],
+"w:favorite|w:is": [
+1,
+1
+],
+"w:favorite|w:thing": [
+1,
+0
+],
+"w:film's|k:WORD": [
+1,
+1
+],
+"w:film's|w:main": [
+1,
+1
+],
+"w:film|k:LONG": [
+1,
+1
+],
+"w:film|k:WORD": [
+1,
+0
+],
+"w:film|w:guy": [
+1,
+0
+],
+"w:film|w:spiderman": [
+1,
+1
+],
+"w:finale|k:LONG": [
+1,
+1
+],
+"w:finale|w:parallel": [
+1,
+1
+],
+"w:find|k:PREP": [
+4,
+1
+],
+"w:find|w:out": [
+4,
+1
+],
+"w:finish|k:DET": [
+1,
+1
+],
+"w:finish|w:the": [
+1,
+1
+],
+"w:firestar|k:WH": [
+1,
+1
+],
+"w:firestar|w:who": [
+1,
+1
+],
+"w:first|k:LONG": [
+1,
+0
+],
+"w:first|k:PREP": [
+1,
+0
+],
+"w:first|w:of": [
+1,
+0
+],
+"w:first|w:superhero": [
+1,
+0
+],
+"w:for|k:DET": [
+1,
+0
+],
+"w:for|k:PRON": [
+1,
+0
+],
+"w:for|k:WORD": [
+1,
+0
+],
+"w:for|w:a": [
+1,
+0
+],
+"w:for|w:that": [
+1,
+0
+],
+"w:for|w:you": [
+1,
+0
+],
+"w:found|k:PREP": [
+1,
+0
+],
+"w:found|w:out": [
+1,
+0
+],
+"w:friend|k:WORD": [
+2,
+2
+],
+"w:friend|w:named": [
+1,
+1
+],
+"w:friend|w:tony's": [
+1,
+1
+],
+"w:from|k:WORD": [
+1,
+1
+],
+"w:from|w:new": [
+1,
+1
+],
+"w:funny|k:AUX": [
+1,
+1
+],
+"w:funny|k:WORD": [
+1,
+1
+],
+"w:funny|w:is": [
+1,
+1
+],
+"w:funny|w:peter": [
+1,
+1
+],
+"w:gave|k:PRON": [
+1,
+0
+],
+"w:gave|w:me": [
+1,
+0
+],
+"w:get|k:PRON": [
+2,
+1
+],
+"w:get|w:it": [
+1,
+0
+],
+"w:get|w:you": [
+1,
+1
+],
+"w:ghost|k:WORD": [
+1,
+0
+],
+"w:ghost|w:rider": [
+1,
+0
+],
+"w:girl|k:PRON": [
+1,
+1
+],
+"w:girl|w:i": [
+1,
+1
+],
+"w:give|k:PRON": [
+2,
+0
+],
+"w:give|w:it": [
+1,
+0
+],
+"w:give|w:me": [
+1,
+0
+],
+"w:glorious|k:PRON": [
+1,
+1
+],
+"w:glorious|w:it's": [
+1,
+1
+],
+"w:going|k:PREP": [
+3,
+0
+],
+"w:going|w:after": [
+1,
+0
+],
+"w:going|w:to": [
+2,
+0
+],
+"w:gonna|k:WORD": [
+1,
+0
+],
+"w:gonna|w:lose": [
+1,
+0
+],
+"w:got|k:DET": [
+3,
+1
+],
+"w:got|k:PRON": [
+1,
+0
+],
+"w:got|w:a": [
+1,
+0
+],
+"w:got|w:it": [
+1,
+0
+],
+"w:got|w:the": [
+2,
+1
+],
+"w:go|k:PREP": [
+1,
+0
+],
+"w:go|k:PRON": [
+1,
+1
+],
+"w:go|w:i": [
+1,
+1
+],
+"w:go|w:to": [
+1,
+0
+],
+"w:grand|k:WORD": [
+1,
+0
+],
+"w:grand|w:finale": [
+1,
+0
+],
+"w:gray|k:WH": [
+1,
+1
+],
+"w:gray|w:who": [
+1,
+1
+],
+"w:guess|k:WORD": [
+2,
+1
+],
+"w:guess|w:turning": [
+1,
+0
+],
+"w:guess|w:we'll": [
+1,
+1
+],
+"w:guys|k:INTJ": [
+1,
+1
+],
+"w:guys|k:PRON": [
+1,
+1
+],
+"w:guys|w:yeah": [
+1,
+1
+],
+"w:guys|w:you": [
+1,
+1
+],
+"w:guy|k:WORD": [
+1,
+1
+],
+"w:guy|w:called": [
+1,
+1
+],
+"w:gwen|k:WORD": [
+1,
+0
+],
+"w:gwen|w:stacy": [
+1,
+0
+],
+"w:had|k:DET": [
+1,
+1
+],
+"w:had|k:WORD": [
+2,
+1
+],
+"w:had|w:a": [
+1,
+1
+],
+"w:had|w:ordered": [
+1,
+1
+],
+"w:had|w:posted": [
+1,
+0
+],
+"w:hands|k:INTJ": [
+1,
+1
+],
+"w:hands|k:PREP": [
+1,
+1
+],
+"w:hands|w:hey": [
+1,
+1
+],
+"w:hands|w:in": [
+1,
+1
+],
+"w:hats|k:INTJ": [
+1,
+1
+],
+"w:hats|w:okay": [
+1,
+1
+],
+"w:hat|k:PREP": [
+1,
+0
+],
+"w:hat|w:on": [
+1,
+0
+],
+"w:haven't|k:WORD": [
+2,
+1
+],
+"w:haven't|w:got": [
+2,
+1
+],
+"w:have|k:DET": [
+1,
+1
+],
+"w:have|k:INTJ": [
+1,
+0
+],
+"w:have|k:PREP": [
+1,
+0
+],
+"w:have|k:WORD": [
+3,
+1
+],
+"w:have|w:a": [
+1,
+1
+],
+"w:have|w:called": [
+1,
+0
+],
+"w:have|w:loads": [
+1,
+0
+],
+"w:have|w:lost": [
+1,
+1
+],
+"w:have|w:no": [
+1,
+0
+],
+"w:have|w:to": [
+1,
+0
+],
+"w:he'd|k:LONG": [
+1,
+0
+],
+"w:he'd|w:probably": [
+1,
+0
+],
+"w:he's|k:PREP": [
+1,
+0
+],
+"w:he's|w:from": [
+1,
+0
+],
+"w:hear|k:DET": [
+1,
+0
+],
+"w:hear|w:this": [
+1,
+0
+],
+"w:hey|k:INTJ": [
+4,
+2
+],
+"w:hey|k:LONG": [
+1,
+1
+],
+"w:hey|k:WORD": [
+2,
+1
+],
+"w:hey|w:hey": [
+4,
+2
+],
+"w:hey|w:loki": [
+1,
+0
+],
+"w:hey|w:sorry": [
+1,
+1
+],
+"w:hey|w:spiderman": [
+1,
+1
+],
+"w:he|k:AUX": [
+2,
+0
+],
+"w:he|k:WORD": [
+1,
+0
+],
+"w:he|w:came": [
+1,
+0
+],
+"w:he|w:is": [
+1,
+0
+],
+"w:he|w:was": [
+1,
+0
+],
+"w:hiding|k:LONG": [
+6,
+1
+],
+"w:hiding|w:something": [
+6,
+1
+],
+"w:his|k:WORD": [
+1,
+0
+],
+"w:his|w:brain": [
+1,
+0
+],
+"w:holland|k:CONJ": [
+1,
+1
+],
+"w:holland|w:and": [
+1,
+1
+],
+"w:how|k:WORD": [
+1,
+0
+],
+"w:how|w:dare": [
+1,
+0
+],
+"w:i'd|k:WORD": [
+1,
+0
+],
+"w:i'd|w:got": [
+1,
+0
+],
+"w:i'm|k:DET": [
+2,
+0
+],
+"w:i'm|k:PRON": [
+1,
+1
+],
+"w:i'm|k:WORD": [
+2,
+0
+],
+"w:i'm|w:a": [
+1,
+0
+],
+"w:i'm|w:going": [
+1,
+0
+],
+"w:i'm|w:parker": [
+1,
+0
+],
+"w:i'm|w:the": [
+1,
+0
+],
+"w:i'm|w:we": [
+1,
+1
+],
+"w:i've|k:ADV": [
+1,
+0
+],
+"w:i've|k:AUX": [
+2,
+0
+],
+"w:i've|k:WORD": [
+1,
+0
+],
+"w:i've|w:been": [
+2,
+0
+],
+"w:i've|w:made": [
+1,
+0
+],
+"w:i've|w:never": [
+1,
+0
+],
+"w:iconic|k:WORD": [
+1,
+0
+],
+"w:iconic|w:songs": [
+1,
+0
+],
+"w:idea|k:PRON": [
+1,
+1
+],
+"w:idea|w:that's": [
+1,
+1
+],
+"w:if|k:PRON": [
+1,
+1
+],
+"w:if|w:i": [
+1,
+1
+],
+"w:instagram|k:WORD": [
+1,
+1
+],
+"w:instagram|w:marvel": [
+1,
+1
+],
+"w:insulted|k:PREP": [
+1,
+1
+],
+"w:insulted|w:in": [
+1,
+1
+],
+"w:interest|k:WH": [
+1,
+1
+],
+"w:interest|k:WORD": [
+1,
+1
+],
+"w:interest|w:gwen": [
+1,
+1
+],
+"w:interest|w:who": [
+1,
+1
+],
+"w:internet|k:PRON": [
+1,
+1
+],
+"w:internet|w:you": [
+1,
+1
+],
+"w:into|k:DET": [
+1,
+0
+],
+"w:into|w:the": [
+1,
+0
+],
+"w:in|k:DET": [
+2,
+0
+],
+"w:in|k:LONG": [
+1,
+0
+],
+"w:in|k:NUM": [
+1,
+0
+],
+"w:in|k:WORD": [
+1,
+0
+],
+"w:in|w:9": [
+1,
+0
+],
+"w:in|w:central": [
+1,
+0
+],
+"w:in|w:my": [
+1,
+0
+],
+"w:in|w:the": [
+1,
+0
+],
+"w:in|w:theaters": [
+1,
+0
+],
+"w:is|k:ADV": [
+3,
+2
+],
+"w:is|k:DET": [
+3,
+1
+],
+"w:is|k:INTJ": [
+1,
+1
+],
+"w:is|k:WH": [
+1,
+1
+],
+"w:is|k:WORD": [
+4,
+0
+],
+"w:is|w:a": [
+1,
+0
+],
+"w:is|w:most": [
+1,
+0
+],
+"w:is|w:not": [
+1,
+0
+],
+"w:is|w:now": [
+1,
+1
+],
+"w:is|w:oh": [
+1,
+1
+],
+"w:is|w:that": [
+2,
+0
+],
+"w:is|w:the": [
+2,
+1
+],
+"w:is|w:there": [
+1,
+1
+],
+"w:is|w:tom": [
+1,
+0
+],
+"w:is|w:when": [
+1,
+1
+],
+"w:it's|k:ADV": [
+1,
+0
+],
+"w:it's|k:CONJ": [
+1,
+0
+],
+"w:it's|k:DET": [
+1,
+0
+],
+"w:it's|k:INTJ": [
+1,
+0
+],
+"w:it's|k:NUM": [
+1,
+0
+],
+"w:it's|k:PREP": [
+1,
+0
+],
+"w:it's|k:WORD": [
+1,
+0
+],
+"w:it's|w:9": [
+1,
+0
+],
+"w:it's|w:a": [
+1,
+0
+],
+"w:it's|w:actually": [
+1,
+0
+],
+"w:it's|w:after": [
+1,
+0
+],
+"w:it's|w:all": [
+1,
+0
+],
+"w:it's|w:like": [
+1,
+0
+],
+"w:it's|w:so": [
+1,
+0
+],
+"w:it|k:ADV": [
+1,
+1
+],
+"w:it|k:AUX": [
+4,
+0
+],
+"w:it|k:CONJ": [
+2,
+2
+],
+"w:it|k:DET": [
+1,
+0
+],
+"w:it|k:INTJ": [
+1,
+1
+],
+"w:it|k:PRON": [
+2,
+2
+],
+"w:it|k:WORD": [
+2,
+1
+],
+"w:it|w:a": [
+1,
+0
+],
+"w:it|w:and": [
+1,
+1
+],
+"w:it|w:because": [
+1,
+1
+],
+"w:it|w:i": [
+2,
+2
+],
+"w:it|w:right": [
+1,
+1
+],
+"w:it|w:said": [
+1,
+0
+],
+"w:it|w:there": [
+1,
+1
+],
+"w:it|w:was": [
+4,
+0
+],
+"w:it|w:yeah": [
+1,
+1
+],
+"w:i|k:ADV": [
+2,
+0
+],
+"w:i|k:AUX": [
+21,
+0
+],
+"w:i|k:INTJ": [
+1,
+1
+],
+"w:i|k:WORD": [
+17,
+0
+],
+"w:i|w:always": [
+1,
+0
+],
+"w:i|w:am": [
+1,
+0
+],
+"w:i|w:bought": [
+1,
+0
+],
+"w:i|w:can": [
+3,
+0
+],
+"w:i|w:can't": [
+3,
+0
+],
+"w:i|w:did": [
+1,
+0
+],
+"w:i|w:didn't": [
+2,
+0
+],
+"w:i|w:do": [
+1,
+0
+],
+"w:i|w:don't": [
+2,
+0
+],
+"w:i|w:fail": [
+1,
+0
+],
+"w:i|w:found": [
+1,
+0
+],
+"w:i|w:got": [
+1,
+0
+],
+"w:i|w:guess": [
+2,
+0
+],
+"w:i|w:had": [
+2,
+0
+],
+"w:i|w:have": [
+2,
+0
+],
+"w:i|w:haven't": [
+2,
+0
+],
+"w:i|w:hear": [
+1,
+0
+],
+"w:i|w:know": [
+2,
+0
+],
+"w:i|w:must": [
+1,
+0
+],
+"w:i|w:never": [
+1,
+0
+],
+"w:i|w:pass": [
+1,
+0
+],
+"w:i|w:said": [
+1,
+0
+],
+"w:i|w:sang": [
+1,
+0
+],
+"w:i|w:think": [
+1,
+0
+],
+"w:i|w:thought": [
+2,
+0
+],
+"w:i|w:was": [
+1,
+0
+],
+"w:i|w:went": [
+1,
+0
+],
+"w:i|w:wish": [
+1,
+0
+],
+"w:i|w:yeah": [
+1,
+1
+],
+"w:jean|k:WORD": [
+1,
+0
+],
+"w:jean|w:gray": [
+1,
+0
+],
+"w:john|k:WORD": [
+1,
+1
+],
+"w:john|w:casali": [
+1,
+1
+],
+"w:just|k:WORD": [
+3,
+1
+],
+"w:just|w:give": [
+1,
+1
+],
+"w:just|w:keep": [
+1,
+0
+],
+"w:just|w:started": [
+1,
+0
+],
+"w:keanu|k:WORD": [
+2,
+0
+],
+"w:keanu|w:reeves": [
+2,
+0
+],
+"w:keep|k:PRON": [
+2,
+0
+],
+"w:keep|w:it": [
+2,
+0
+],
+"w:kids|k:LONG": [
+1,
+1
+],
+"w:kids|k:WORD": [
+2,
+0
+],
+"w:kids|w:hats": [
+1,
+0
+],
+"w:kids|w:nowadays": [
+1,
+1
+],
+"w:kids|w:sizes": [
+1,
+0
+],
+"w:kid|k:ADV": [
+1,
+0
+],
+"w:kid|k:INTJ": [
+1,
+1
+],
+"w:kid|w:now": [
+1,
+0
+],
+"w:kid|w:yeah": [
+1,
+1
+],
+"w:know|k:AUX": [
+1,
+1
+],
+"w:know|k:DET": [
+2,
+1
+],
+"w:know|k:PRON": [
+5,
+5
+],
+"w:know|k:WH": [
+1,
+0
+],
+"w:know|w:i": [
+1,
+1
+],
+"w:know|w:is": [
+1,
+1
+],
+"w:know|w:some": [
+1,
+0
+],
+"w:know|w:the": [
+1,
+1
+],
+"w:know|w:what's": [
+1,
+1
+],
+"w:know|w:why": [
+1,
+0
+],
+"w:know|w:you": [
+3,
+3
+],
+"w:late|k:WORD": [
+1,
+0
+],
+"w:late|w:august": [
+1,
+0
+],
+"w:learn|k:PREP": [
+1,
+0
+],
+"w:learn|w:to": [
+1,
+0
+],
+"w:leash|k:PREP": [
+1,
+1
+],
+"w:leash|k:PRON": [
+1,
+1
+],
+"w:leash|w:between": [
+1,
+1
+],
+"w:leash|w:it's": [
+1,
+1
+],
+"w:legendary|k:WORD": [
+1,
+0
+],
+"w:legendary|w:sound": [
+1,
+0
+],
+"w:less|k:LONG": [
+1,
+0
+],
+"w:less|w:dramatic": [
+1,
+0
+],
+"w:let's|k:AUX": [
+1,
+0
+],
+"w:let's|k:WORD": [
+4,
+0
+],
+"w:let's|w:do": [
+1,
+0
+],
+"w:let's|w:go": [
+2,
+0
+],
+"w:let's|w:pass": [
+1,
+0
+],
+"w:let's|w:take": [
+1,
+0
+],
+"w:let|k:PRON": [
+1,
+0
+],
+"w:let|w:me": [
+1,
+0
+],
+"w:life|k:WORD": [
+1,
+0
+],
+"w:life|w:tom": [
+1,
+0
+],
+"w:likely|k:PREP": [
+1,
+1
+],
+"w:likely|w:to": [
+1,
+1
+],
+"w:like|k:AUX": [
+1,
+1
+],
+"w:like|k:LONG": [
+2,
+1
+],
+"w:like|k:PREP": [
+1,
+1
+],
+"w:like|k:PRON": [
+1,
+1
+],
+"w:like|k:WORD": [
+2,
+2
+],
+"w:like|w:can": [
+1,
+1
+],
+"w:like|w:go": [
+1,
+1
+],
+"w:like|w:i've": [
+1,
+1
+],
+"w:like|w:keanu": [
+1,
+1
+],
+"w:like|w:literally": [
+1,
+1
+],
+"w:like|w:squeezing": [
+1,
+0
+],
+"w:like|w:to": [
+1,
+1
+],
+"w:literally|k:INTJ": [
+1,
+1
+],
+"w:literally|w:like": [
+1,
+1
+],
+"w:little|k:WORD": [
+4,
+3
+],
+"w:little|w:bit": [
+1,
+0
+],
+"w:little|w:kids": [
+1,
+1
+],
+"w:little|w:less": [
+1,
+1
+],
+"w:little|w:scared": [
+1,
+1
+],
+"w:loads|k:WORD": [
+1,
+0
+],
+"w:loads|w:more": [
+1,
+0
+],
+"w:loki|k:WORD": [
+1,
+1
+],
+"w:loki|w:put": [
+1,
+1
+],
+"w:lose|k:NUM": [
+1,
+1
+],
+"w:lose|w:5": [
+1,
+1
+],
+"w:lost|k:WORD": [
+1,
+0
+],
+"w:lost|w:track": [
+1,
+0
+],
+"w:love|k:LONG": [
+2,
+1
+],
+"w:love|w:interest": [
+2,
+1
+],
+"w:lyrics|k:AUX": [
+1,
+0
+],
+"w:lyrics|k:PREP": [
+1,
+1
+],
+"w:lyrics|w:are": [
+1,
+0
+],
+"w:lyrics|w:to": [
+1,
+1
+],
+"w:made|k:PRON": [
+1,
+0
+],
+"w:made|w:it": [
+1,
+0
+],
+"w:main|k:WORD": [
+1,
+0
+],
+"w:main|w:villain": [
+1,
+0
+],
+"w:marie|k:INTJ": [
+1,
+1
+],
+"w:marie|k:WORD": [
+1,
+1
+],
+"w:marie|w:first": [
+1,
+1
+],
+"w:marie|w:yeah": [
+1,
+1
+],
+"w:marvel's|k:AUX": [
+1,
+0
+],
+"w:marvel's|w:been": [
+1,
+0
+],
+"w:marvel|k:AUX": [
+1,
+0
+],
+"w:marvel|w:had": [
+1,
+0
+],
+"w:mate|k:AUX": [
+1,
+1
+],
+"w:mate|w:will": [
+1,
+1
+],
+"w:maybe|k:DET": [
+1,
+0
+],
+"w:maybe|k:WORD": [
+1,
+0
+],
+"w:maybe|w:a": [
+1,
+0
+],
+"w:maybe|w:six": [
+1,
+0
+],
+"w:mayday|k:WORD": [
+1,
+0
+],
+"w:mayday|w:parker": [
+1,
+0
+],
+"w:mcu|k:AUX": [
+1,
+1
+],
+"w:mcu|w:would": [
+1,
+1
+],
+"w:me|k:DET": [
+2,
+1
+],
+"w:me|k:INTJ": [
+1,
+1
+],
+"w:me|k:PREP": [
+2,
+1
+],
+"w:me|k:WORD": [
+3,
+3
+],
+"w:me|w:a": [
+1,
+0
+],
+"w:me|w:apart": [
+1,
+1
+],
+"w:me|w:okay": [
+1,
+1
+],
+"w:me|w:the": [
+1,
+1
+],
+"w:me|w:they'd": [
+1,
+1
+],
+"w:me|w:tom": [
+1,
+1
+],
+"w:me|w:up": [
+1,
+0
+],
+"w:me|w:with": [
+1,
+1
+],
+"w:minute|k:WORD": [
+1,
+1
+],
+"w:minute|w:let": [
+1,
+1
+],
+"w:mixer|k:PREP": [
+1,
+1
+],
+"w:mixer|w:on": [
+1,
+1
+],
+"w:mj|k:WH": [
+1,
+1
+],
+"w:mj|w:who": [
+1,
+1
+],
+"w:more|k:WORD": [
+1,
+1
+],
+"w:more|w:sure": [
+1,
+1
+],
+"w:most|k:DET": [
+1,
+1
+],
+"w:most|k:WORD": [
+3,
+1
+],
+"w:most|w:iconic": [
+1,
+0
+],
+"w:most|w:likely": [
+1,
+0
+],
+"w:most|w:popular": [
+1,
+1
+],
+"w:most|w:the": [
+1,
+1
+],
+"w:move|k:ADV": [
+1,
+1
+],
+"w:move|w:just": [
+1,
+1
+],
+"w:movie|k:WORD": [
+1,
+0
+],
+"w:movie|w:star": [
+1,
+0
+],
+"w:much|k:PREP": [
+1,
+0
+],
+"w:much|w:for": [
+1,
+0
+],
+"w:musical|k:WORD": [
+1,
+1
+],
+"w:musical|w:closed": [
+1,
+1
+],
+"w:must|k:AUX": [
+1,
+0
+],
+"w:must|w:have": [
+1,
+0
+],
+"w:mutants|k:PREP": [
+1,
+1
+],
+"w:mutants|w:into": [
+1,
+1
+],
+"w:my|k:LONG": [
+3,
+2
+],
+"w:my|k:WORD": [
+6,
+1
+],
+"w:my|w:delicious": [
+1,
+1
+],
+"w:my|w:favorite": [
+2,
+1
+],
+"w:my|w:friend": [
+1,
+0
+],
+"w:my|w:life": [
+1,
+0
+],
+"w:my|w:own": [
+3,
+1
+],
+"w:my|w:song": [
+1,
+0
+],
+"w:named|k:WORD": [
+1,
+0
+],
+"w:named|w:tony": [
+1,
+0
+],
+"w:name|k:PREP": [
+3,
+2
+],
+"w:name|w:of": [
+3,
+2
+],
+"w:namor|k:AUX": [
+1,
+1
+],
+"w:namor|w:should": [
+1,
+1
+],
+"w:never|k:CONJ": [
+1,
+1
+],
+"w:never|k:WORD": [
+1,
+0
+],
+"w:never|w:ever": [
+1,
+0
+],
+"w:never|w:so": [
+1,
+1
+],
+"w:news|k:CONJ": [
+1,
+1
+],
+"w:news|w:as": [
+1,
+1
+],
+"w:new|k:LONG": [
+1,
+0
+],
+"w:new|k:WORD": [
+4,
+0
+],
+"w:new|w:day": [
+1,
+0
+],
+"w:new|w:era": [
+1,
+0
+],
+"w:new|w:spiderman": [
+1,
+0
+],
+"w:new|w:york": [
+1,
+0
+],
+"w:new|w:yorkers": [
+1,
+0
+],
+"w:next|k:LONG": [
+1,
+1
+],
+"w:next|k:WORD": [
+1,
+0
+],
+"w:next|w:spiderman": [
+1,
+1
+],
+"w:next|w:thing": [
+1,
+0
+],
+"w:not|k:ADV": [
+1,
+0
+],
+"w:not|k:WORD": [
+2,
+0
+],
+"w:not|w:again": [
+1,
+0
+],
+"w:not|w:british": [
+1,
+0
+],
+"w:not|w:going": [
+1,
+0
+],
+"w:nowadays|k:WORD": [
+1,
+0
+],
+"w:nowadays|w:huh": [
+1,
+0
+],
+"w:nowhere|k:DET": [
+1,
+1
+],
+"w:nowhere|w:the": [
+1,
+1
+],
+"w:now|k:PREP": [
+1,
+0
+],
+"w:now|k:PRON": [
+1,
+0
+],
+"w:now|k:WORD": [
+1,
+1
+],
+"w:now|w:at": [
+1,
+0
+],
+"w:now|w:it's": [
+1,
+0
+],
+"w:now|w:thor": [
+1,
+1
+],
+"w:no|k:DET": [
+1,
+1
+],
+"w:no|k:WORD": [
+2,
+0
+],
+"w:no|w:hands": [
+1,
+0
+],
+"w:no|w:idea": [
+1,
+0
+],
+"w:no|w:the": [
+1,
+1
+],
+"w:obviously|k:PREP": [
+1,
+1
+],
+"w:obviously|w:at": [
+1,
+1
+],
+"w:off|k:DET": [
+1,
+0
+],
+"w:off|w:the": [
+1,
+0
+],
+"w:of|k:DET": [
+5,
+3
+],
+"w:of|k:LONG": [
+1,
+0
+],
+"w:of|k:PRON": [
+1,
+0
+],
+"w:of|k:WORD": [
+10,
+1
+],
+"w:of|w:all": [
+2,
+0
+],
+"w:of|w:my": [
+1,
+0
+],
+"w:of|w:nowhere": [
+1,
+0
+],
+"w:of|w:peter": [
+1,
+0
+],
+"w:of|w:respect": [
+1,
+0
+],
+"w:of|w:spiderman": [
+1,
+0
+],
+"w:of|w:that": [
+3,
+0
+],
+"w:of|w:the": [
+3,
+2
+],
+"w:of|w:these": [
+1,
+1
+],
+"w:of|w:time": [
+1,
+0
+],
+"w:of|w:xmen": [
+1,
+1
+],
+"w:of|w:you": [
+1,
+0
+],
+"w:ohh|k:PRON": [
+1,
+1
+],
+"w:ohh|w:he": [
+1,
+1
+],
+"w:oh|k:WH": [
+1,
+1
+],
+"w:oh|k:WORD": [
+1,
+1
+],
+"w:oh|w:give": [
+1,
+1
+],
+"w:oh|w:why": [
+1,
+1
+],
+"w:okay|k:CONJ": [
+1,
+1
+],
+"w:okay|k:WORD": [
+2,
+2
+],
+"w:okay|w:but": [
+1,
+1
+],
+"w:okay|w:let's": [
+1,
+1
+],
+"w:okay|w:peter": [
+1,
+1
+],
+"w:old|k:WORD": [
+3,
+3
+],
+"w:old|w:keanu": [
+1,
+1
+],
+"w:old|w:kid": [
+1,
+1
+],
+"w:old|w:reeves": [
+1,
+1
+],
+"w:one|k:PREP": [
+3,
+1
+],
+"w:one|k:PRON": [
+3,
+2
+],
+"w:one|w:i": [
+1,
+1
+],
+"w:one|w:of": [
+2,
+0
+],
+"w:one|w:that's": [
+1,
+0
+],
+"w:one|w:we": [
+1,
+1
+],
+"w:one|w:without": [
+1,
+1
+],
+"w:on|k:CONJ": [
+1,
+1
+],
+"w:on|k:DET": [
+3,
+0
+],
+"w:on|k:LONG": [
+2,
+0
+],
+"w:on|w:a": [
+1,
+0
+],
+"w:on|w:and": [
+1,
+1
+],
+"w:on|w:instagram": [
+1,
+0
+],
+"w:on|w:our": [
+1,
+0
+],
+"w:on|w:television": [
+1,
+0
+],
+"w:on|w:their": [
+1,
+0
+],
+"w:ordered|k:WORD": [
+1,
+1
+],
+"w:ordered|w:kids": [
+1,
+1
+],
+"w:other|k:WORD": [
+1,
+0
+],
+"w:other|w:love": [
+1,
+0
+],
+"w:our|k:WORD": [
+3,
+1
+],
+"w:our|w:film": [
+1,
+0
+],
+"w:our|w:new": [
+1,
+1
+],
+"w:our|w:web": [
+1,
+0
+],
+"w:out|k:PREP": [
+3,
+2
+],
+"w:out|k:PRON": [
+1,
+1
+],
+"w:out|k:WH": [
+1,
+0
+],
+"w:out|k:WORD": [
+1,
+1
+],
+"w:out|w:in": [
+1,
+0
+],
+"w:out|w:of": [
+1,
+1
+],
+"w:out|w:on": [
+1,
+1
+],
+"w:out|w:whether": [
+1,
+1
+],
+"w:out|w:who": [
+1,
+0
+],
+"w:out|w:you": [
+1,
+1
+],
+"w:own|k:WORD": [
+3,
+1
+],
+"w:own|w:stunts": [
+3,
+1
+],
+"w:parallel|k:WORD": [
+1,
+0
+],
+"w:parallel|w:parking": [
+1,
+0
+],
+"w:parked|k:PRON": [
+1,
+1
+],
+"w:parked|w:i": [
+1,
+1
+],
+"w:parker|k:DET": [
+1,
+1
+],
+"w:parker|k:WORD": [
+4,
+3
+],
+"w:parker|w:peter": [
+2,
+1
+],
+"w:parker|w:pppeter": [
+1,
+1
+],
+"w:parker|w:test": [
+1,
+1
+],
+"w:parker|w:the": [
+1,
+1
+],
+"w:park|k:LONG": [
+1,
+1
+],
+"w:park|k:PREP": [
+1,
+1
+],
+"w:park|w:beautiful": [
+1,
+1
+],
+"w:park|w:off": [
+1,
+1
+],
+"w:pass|k:WORD": [
+1,
+0
+],
+"w:pass|w:someone": [
+1,
+0
+],
+"w:peep|k:INTJ": [
+1,
+1
+],
+"w:peep|w:yeah": [
+1,
+1
+],
+"w:peter|k:AUX": [
+7,
+7
+],
+"w:peter|k:CONJ": [
+1,
+1
+],
+"w:peter|k:PRON": [
+1,
+1
+],
+"w:peter|k:WORD": [
+1,
+0
+],
+"w:peter|w:and": [
+1,
+1
+],
+"w:peter|w:are": [
+6,
+6
+],
+"w:peter|w:i'm": [
+1,
+1
+],
+"w:peter|w:is": [
+1,
+1
+],
+"w:peter|w:parker": [
+1,
+0
+],
+"w:picture|k:PREP": [
+1,
+1
+],
+"w:picture|w:of": [
+1,
+1
+],
+"w:play|k:DET": [
+1,
+1
+],
+"w:play|k:LONG": [
+3,
+3
+],
+"w:play|k:NUM": [
+1,
+1
+],
+"w:play|k:WORD": [
+4,
+3
+],
+"w:play|w:10": [
+1,
+1
+],
+"w:play|w:along": [
+1,
+0
+],
+"w:play|w:firestar": [
+1,
+1
+],
+"w:play|w:jean": [
+1,
+1
+],
+"w:play|w:mayday": [
+1,
+1
+],
+"w:play|w:one": [
+1,
+1
+],
+"w:play|w:punisher's": [
+1,
+1
+],
+"w:play|w:spiderman's": [
+1,
+1
+],
+"w:play|w:the": [
+1,
+1
+],
+"w:please|k:WORD": [
+1,
+1
+],
+"w:please|w:let's": [
+1,
+1
+],
+"w:points|k:PREP": [
+1,
+1
+],
+"w:points|w:for": [
+1,
+1
+],
+"w:point|k:PRON": [
+2,
+2
+],
+"w:point|w:i've": [
+1,
+1
+],
+"w:point|w:you": [
+1,
+1
+],
+"w:popular|k:LONG": [
+1,
+0
+],
+"w:popular|w:internet": [
+1,
+0
+],
+"w:posted|k:DET": [
+1,
+1
+],
+"w:posted|w:a": [
+1,
+1
+],
+"w:pppeter|k:WORD": [
+1,
+0
+],
+"w:pppeter|w:parker": [
+1,
+0
+],
+"w:president|k:PREP": [
+1,
+0
+],
+"w:president|w:of": [
+1,
+0
+],
+"w:prince|k:WORD": [
+1,
+0
+],
+"w:prince|w:namor": [
+1,
+0
+],
+"w:probably|k:WORD": [
+1,
+1
+],
+"w:probably|w:want": [
+1,
+1
+],
+"w:prototype|k:PRON": [
+1,
+1
+],
+"w:prototype|w:i": [
+1,
+1
+],
+"w:proud|k:PREP": [
+1,
+1
+],
+"w:proud|w:to": [
+1,
+1
+],
+"w:punisher's|k:LONG": [
+1,
+1
+],
+"w:punisher's|w:sidekick": [
+1,
+1
+],
+"w:put|k:DET": [
+2,
+0
+],
+"w:put|k:WORD": [
+1,
+0
+],
+"w:put|w:that": [
+1,
+0
+],
+"w:put|w:your": [
+2,
+0
+],
+"w:rachel|k:WORD": [
+1,
+0
+],
+"w:rachel|w:cole": [
+1,
+0
+],
+"w:really|k:WORD": [
+2,
+1
+],
+"w:really|w:explain": [
+2,
+1
+],
+"w:reeves|k:AUX": [
+1,
+1
+],
+"w:reeves|k:WORD": [
+1,
+1
+],
+"w:reeves|w:should": [
+1,
+1
+],
+"w:reeves|w:want": [
+1,
+1
+],
+"w:replay|k:CONJ": [
+1,
+1
+],
+"w:replay|w:so": [
+1,
+1
+],
+"w:respect|k:INTJ": [
+1,
+1
+],
+"w:respect|w:yeah": [
+1,
+1
+],
+"w:ride|k:PREP": [
+1,
+1
+],
+"w:ride|w:for": [
+1,
+1
+],
+"w:right|k:ADV": [
+1,
+0
+],
+"w:right|k:PRON": [
+1,
+1
+],
+"w:right|w:it's": [
+1,
+1
+],
+"w:right|w:there": [
+1,
+0
+],
+"w:sadie|k:WORD": [
+1,
+0
+],
+"w:sadie|w:sink": [
+1,
+0
+],
+"w:said|k:DET": [
+1,
+1
+],
+"w:said|k:LONG": [
+1,
+1
+],
+"w:said|k:PRON": [
+1,
+1
+],
+"w:said|w:something": [
+1,
+1
+],
+"w:said|w:these": [
+1,
+1
+],
+"w:said|w:we're": [
+1,
+1
+],
+"w:same|k:PRON": [
+1,
+1
+],
+"w:same|w:i": [
+1,
+1
+],
+"w:sang|k:CONJ": [
+1,
+1
+],
+"w:sang|w:and": [
+1,
+1
+],
+"w:scared|k:PREP": [
+1,
+0
+],
+"w:scared|w:of": [
+1,
+0
+],
+"w:see|k:DET": [
+1,
+0
+],
+"w:see|k:PRON": [
+1,
+1
+],
+"w:see|w:some": [
+1,
+0
+],
+"w:see|w:you": [
+1,
+1
+],
+"w:september|k:CONJ": [
+1,
+1
+],
+"w:september|w:and": [
+1,
+1
+],
+"w:should|k:AUX": [
+2,
+0
+],
+"w:should|w:be": [
+2,
+0
+],
+"w:sidekick|k:WORD": [
+1,
+1
+],
+"w:sidekick|w:rachel": [
+1,
+1
+],
+"w:silver|k:WORD": [
+1,
+0
+],
+"w:silver|w:surfer": [
+1,
+0
+],
+"w:similar|k:WORD": [
+1,
+1
+],
+"w:similar|w:thing": [
+1,
+1
+],
+"w:singing|k:PREP": [
+1,
+0
+],
+"w:singing|w:out": [
+1,
+0
+],
+"w:sink|k:PRON": [
+1,
+1
+],
+"w:sink|w:you": [
+1,
+1
+],
+"w:site|k:PREP": [
+1,
+1
+],
+"w:site|w:to": [
+1,
+1
+],
+"w:six|k:WORD": [
+1,
+0
+],
+"w:six|w:weeks": [
+1,
+0
+],
+"w:sizes|k:PREP": [
+1,
+1
+],
+"w:sizes|w:by": [
+1,
+1
+],
+"w:slow|k:PREP": [
+2,
+0
+],
+"w:slow|w:down": [
+2,
+0
+],
+"w:something|k:INTJ": [
+1,
+0
+],
+"w:something|k:WORD": [
+1,
+1
+],
+"w:something|w:else": [
+1,
+1
+],
+"w:something|w:like": [
+1,
+0
+],
+"w:some|k:CONJ": [
+1,
+1
+],
+"w:some|k:WORD": [
+1,
+0
+],
+"w:some|w:and": [
+1,
+1
+],
+"w:some|w:more": [
+1,
+0
+],
+"w:songs|k:PREP": [
+1,
+1
+],
+"w:songs|w:of": [
+1,
+1
+],
+"w:song|k:WORD": [
+1,
+1
+],
+"w:song|w:guys": [
+1,
+1
+],
+"w:sorry|k:AUX": [
+1,
+1
+],
+"w:sorry|k:WORD": [
+1,
+1
+],
+"w:sorry|w:don't": [
+1,
+1
+],
+"w:sorry|w:sorry": [
+1,
+1
+],
+"w:sound|k:WORD": [
+1,
+1
+],
+"w:sound|w:mixer": [
+1,
+1
+],
+"w:so|k:AUX": [
+1,
+0
+],
+"w:so|k:LONG": [
+2,
+0
+],
+"w:so|k:WORD": [
+3,
+2
+],
+"w:so|w:cheap": [
+1,
+0
+],
+"w:so|w:cute": [
+1,
+1
+],
+"w:so|w:delicious": [
+1,
+0
+],
+"w:so|w:did": [
+1,
+0
+],
+"w:so|w:insulted": [
+1,
+0
+],
+"w:so|w:thanks": [
+1,
+1
+],
+"w:spiderman's|k:WORD": [
+2,
+2
+],
+"w:spiderman's|w:first": [
+1,
+1
+],
+"w:spiderman's|w:other": [
+1,
+1
+],
+"w:spiderman|k:AUX": [
+3,
+2
+],
+"w:spiderman|k:CONJ": [
+1,
+1
+],
+"w:spiderman|k:PRON": [
+1,
+1
+],
+"w:spiderman|k:WORD": [
+1,
+1
+],
+"w:spiderman|w:and": [
+1,
+1
+],
+"w:spiderman|w:brand": [
+1,
+1
+],
+"w:spiderman|w:doesn't": [
+1,
+1
+],
+"w:spiderman|w:i": [
+1,
+1
+],
+"w:spiderman|w:is": [
+2,
+1
+],
+"w:spider|k:WORD": [
+1,
+0
+],
+"w:spider|w:girl": [
+1,
+0
+],
+"w:squeezing|k:DET": [
+1,
+1
+],
+"w:squeezing|w:his": [
+1,
+1
+],
+"w:stacy|k:PRON": [
+1,
+1
+],
+"w:stacy|w:i": [
+1,
+1
+],
+"w:started|k:WORD": [
+1,
+1
+],
+"w:started|w:singing": [
+1,
+1
+],
+"w:star|k:PRON": [
+1,
+1
+],
+"w:star|w:i've": [
+1,
+1
+],
+"w:stop|k:ADV": [
+1,
+1
+],
+"w:stop|k:AUX": [
+1,
+1
+],
+"w:stop|w:always": [
+1,
+1
+],
+"w:stop|w:don't": [
+1,
+1
+],
+"w:studio|k:WORD": [
+1,
+1
+],
+"w:studio|w:called": [
+1,
+1
+],
+"w:stunts|k:ADV": [
+1,
+1
+],
+"w:stunts|k:PRON": [
+1,
+1
+],
+"w:stunts|k:WORD": [
+1,
+1
+],
+"w:stunts|w:all": [
+1,
+1
+],
+"w:stunts|w:always": [
+1,
+1
+],
+"w:stunts|w:i": [
+1,
+1
+],
+"w:superhero|k:DET": [
+1,
+1
+],
+"w:superhero|k:WORD": [
+1,
+1
+],
+"w:superhero|w:love": [
+1,
+1
+],
+"w:superhero|w:the": [
+1,
+1
+],
+"w:sure|k:WORD": [
+1,
+1
+],
+"w:sure|w:peter": [
+1,
+1
+],
+"w:surfer|k:PRON": [
+1,
+1
+],
+"w:surfer|w:i": [
+1,
+1
+],
+"w:sweet|k:WORD": [
+1,
+0
+],
+"w:sweet|w:ride": [
+1,
+0
+],
+"w:take|k:DET": [
+1,
+1
+],
+"w:take|w:a": [
+1,
+1
+],
+"w:tearing|k:PRON": [
+1,
+0
+],
+"w:tearing|w:me": [
+1,
+0
+],
+"w:television|k:CONJ": [
+1,
+1
+],
+"w:television|w:and": [
+1,
+1
+],
+"w:test|k:WORD": [
+1,
+0
+],
+"w:test|w:time": [
+1,
+0
+],
+"w:thanks|k:WORD": [
+1,
+0
+],
+"w:thanks|w:guys": [
+1,
+0
+],
+"w:that's|k:DET": [
+2,
+1
+],
+"w:that's|k:WH": [
+1,
+0
+],
+"w:that's|k:WORD": [
+3,
+1
+],
+"w:that's|w:all": [
+1,
+1
+],
+"w:that's|w:amm": [
+1,
+0
+],
+"w:that's|w:my": [
+2,
+1
+],
+"w:that's|w:replay": [
+1,
+0
+],
+"w:that's|w:why": [
+1,
+0
+],
+"w:that|k:AUX": [
+2,
+2
+],
+"w:that|k:DET": [
+1,
+0
+],
+"w:that|k:PRON": [
+2,
+2
+],
+"w:that|k:WORD": [
+6,
+1
+],
+"w:that|w:button": [
+1,
+0
+],
+"w:that|w:can": [
+1,
+1
+],
+"w:that|w:i": [
+2,
+2
+],
+"w:that|w:marie": [
+1,
+1
+],
+"w:that|w:one": [
+1,
+0
+],
+"w:that|w:our": [
+1,
+0
+],
+"w:that|w:place": [
+2,
+0
+],
+"w:that|w:point": [
+1,
+0
+],
+"w:that|w:won't": [
+1,
+1
+],
+"w:their|k:WORD": [
+1,
+0
+],
+"w:their|w:website": [
+1,
+0
+],
+"w:then|k:DET": [
+1,
+1
+],
+"w:then|w:the": [
+1,
+1
+],
+"w:there|k:AUX": [
+1,
+0
+],
+"w:there|k:PRON": [
+1,
+1
+],
+"w:there|k:WORD": [
+1,
+1
+],
+"w:there|w:i": [
+1,
+1
+],
+"w:there|w:is": [
+1,
+0
+],
+"w:there|w:keep": [
+1,
+1
+],
+"w:these|k:AUX": [
+1,
+0
+],
+"w:these|k:LONG": [
+1,
+0
+],
+"w:these|k:WORD": [
+2,
+1
+],
+"w:these|w:are": [
+1,
+0
+],
+"w:these|w:beanie": [
+1,
+1
+],
+"w:these|w:characters": [
+1,
+0
+],
+"w:these|w:tiny": [
+1,
+0
+],
+"w:they'd|k:AUX": [
+1,
+0
+],
+"w:they'd|w:have": [
+1,
+0
+],
+"w:they're|k:CONJ": [
+1,
+0
+],
+"w:they're|w:so": [
+1,
+0
+],
+"w:they|k:AUX": [
+2,
+0
+],
+"w:they|k:WORD": [
+1,
+0
+],
+"w:they|w:are": [
+1,
+0
+],
+"w:they|w:bought": [
+1,
+0
+],
+"w:they|w:would": [
+1,
+0
+],
+"w:the|k:DET": [
+1,
+1
+],
+"w:the|k:LONG": [
+2,
+0
+],
+"w:the|k:WORD": [
+29,
+2
+],
+"w:the|w:billy": [
+1,
+0
+],
+"w:the|w:cheek": [
+1,
+0
+],
+"w:the|w:chips": [
+1,
+1
+],
+"w:the|w:daughter": [
+1,
+0
+],
+"w:the|w:film": [
+1,
+0
+],
+"w:the|w:film's": [
+1,
+0
+],
+"w:the|w:grand": [
+1,
+0
+],
+"w:the|w:hammer": [
+1,
+0
+],
+"w:the|w:kid": [
+1,
+0
+],
+"w:the|w:leash": [
+1,
+0
+],
+"w:the|w:lyrics": [
+2,
+0
+],
+"w:the|w:mcu": [
+1,
+0
+],
+"w:the|w:most": [
+3,
+1
+],
+"w:the|w:musical": [
+1,
+0
+],
+"w:the|w:name": [
+3,
+0
+],
+"w:the|w:news": [
+1,
+0
+],
+"w:the|w:next": [
+2,
+0
+],
+"w:the|w:one": [
+1,
+0
+],
+"w:the|w:president": [
+1,
+0
+],
+"w:the|w:same": [
+1,
+0
+],
+"w:the|w:studio": [
+2,
+0
+],
+"w:the|w:the": [
+1,
+1
+],
+"w:the|w:wheel": [
+1,
+0
+],
+"w:the|w:words": [
+2,
+0
+],
+"w:thing|k:AUX": [
+1,
+0
+],
+"w:thing|k:PRON": [
+2,
+2
+],
+"w:thing|w:i": [
+1,
+1
+],
+"w:thing|w:i'm": [
+1,
+1
+],
+"w:thing|w:is": [
+1,
+0
+],
+"w:think|k:PRON": [
+1,
+1
+],
+"w:think|k:WORD": [
+1,
+1
+],
+"w:think|w:he'd": [
+1,
+1
+],
+"w:think|w:you": [
+1,
+1
+],
+"w:this|k:AUX": [
+1,
+0
+],
+"w:this|k:WORD": [
+3,
+1
+],
+"w:this|w:hat": [
+1,
+0
+],
+"w:this|w:is": [
+1,
+0
+],
+"w:this|w:point": [
+1,
+0
+],
+"w:this|w:whoop": [
+1,
+1
+],
+"w:those|k:DET": [
+1,
+0
+],
+"w:those|w:my": [
+1,
+0
+],
+"w:thought|k:PRON": [
+2,
+1
+],
+"w:thought|w:i": [
+1,
+1
+],
+"w:thought|w:it": [
+1,
+0
+],
+"w:time|k:CONJ": [
+1,
+1
+],
+"w:time|k:WORD": [
+1,
+1
+],
+"w:time|w:baby": [
+1,
+1
+],
+"w:time|w:because": [
+1,
+1
+],
+"w:tiny|k:WORD": [
+1,
+0
+],
+"w:tiny|w:little": [
+1,
+0
+],
+"w:tom|k:PRON": [
+1,
+1
+],
+"w:tom|k:WORD": [
+5,
+3
+],
+"w:tom|w:cruise": [
+1,
+0
+],
+"w:tom|w:holland": [
+1,
+0
+],
+"w:tom|w:let's": [
+1,
+1
+],
+"w:tom|w:peter": [
+1,
+1
+],
+"w:tom|w:tom": [
+1,
+1
+],
+"w:tom|w:you": [
+1,
+1
+],
+"w:tony's|k:PRON": [
+1,
+1
+],
+"w:tony's|w:it's": [
+1,
+1
+],
+"w:too|k:WORD": [
+1,
+0
+],
+"w:too|w:much": [
+1,
+0
+],
+"w:to|k:AUX": [
+3,
+1
+],
+"w:to|k:DET": [
+1,
+0
+],
+"w:to|k:LONG": [
+1,
+0
+],
+"w:to|k:PRON": [
+1,
+0
+],
+"w:to|k:WORD": [
+12,
+1
+],
+"w:to|w:announce": [
+1,
+0
+],
+"w:to|w:be": [
+3,
+1
+],
+"w:to|w:drive": [
+1,
+0
+],
+"w:to|w:find": [
+2,
+0
+],
+"w:to|w:finish": [
+1,
+0
+],
+"w:to|w:get": [
+1,
+0
+],
+"w:to|w:know": [
+1,
+0
+],
+"w:to|w:lie": [
+1,
+0
+],
+"w:to|w:me": [
+1,
+0
+],
+"w:to|w:one": [
+1,
+0
+],
+"w:to|w:our": [
+1,
+0
+],
+"w:to|w:play": [
+2,
+0
+],
+"w:to|w:see": [
+1,
+1
+],
+"w:to|w:wait": [
+1,
+0
+],
+"w:track|k:PREP": [
+1,
+0
+],
+"w:track|w:of": [
+1,
+0
+],
+"w:trying|k:PREP": [
+1,
+0
+],
+"w:trying|w:to": [
+1,
+0
+],
+"w:try|k:LONG": [
+1,
+0
+],
+"w:try|k:WORD": [
+1,
+0
+],
+"w:try|w:funny": [
+1,
+0
+],
+"w:try|w:something": [
+1,
+0
+],
+"w:turning|k:DET": [
+1,
+1
+],
+"w:turning|w:the": [
+1,
+1
+],
+"w:ummm|k:PRON": [
+1,
+1
+],
+"w:ummm|w:that's": [
+1,
+1
+],
+"w:understand|k:PRON": [
+1,
+1
+],
+"w:understand|k:WH": [
+1,
+1
+],
+"w:understand|w:what": [
+1,
+1
+],
+"w:understand|w:you": [
+1,
+1
+],
+"w:up|k:CONJ": [
+1,
+1
+],
+"w:up|k:PREP": [
+1,
+0
+],
+"w:up|w:and": [
+1,
+1
+],
+"w:up|w:to": [
+1,
+0
+],
+"w:us|k:DET": [
+1,
+1
+],
+"w:us|w:these": [
+1,
+1
+],
+"w:villain|k:WORD": [
+1,
+1
+],
+"w:villain|w:we'll": [
+1,
+1
+],
+"w:waiting|k:WORD": [
+1,
+1
+],
+"w:waiting|w:maybe": [
+1,
+1
+],
+"w:wait|k:CONJ": [
+1,
+1
+],
+"w:wait|w:and": [
+1,
+1
+],
+"w:walking|k:PREP": [
+1,
+0
+],
+"w:walking|w:around": [
+1,
+0
+],
+"w:walk|k:DET": [
+1,
+1
+],
+"w:walk|w:your": [
+1,
+1
+],
+"w:want|k:PREP": [
+3,
+0
+],
+"w:want|w:to": [
+3,
+0
+],
+"w:was|k:INTJ": [
+2,
+0
+],
+"w:was|k:LONG": [
+1,
+1
+],
+"w:was|k:NUM": [
+2,
+1
+],
+"w:was|k:WORD": [
+1,
+0
+],
+"w:was|w:10": [
+2,
+1
+],
+"w:was|w:glorious": [
+1,
+1
+],
+"w:was|w:like": [
+2,
+0
+],
+"w:was|w:said": [
+1,
+0
+],
+"w:watch|k:DET": [
+1,
+0
+],
+"w:watch|w:this": [
+1,
+0
+],
+"w:we'll|k:AUX": [
+1,
+0
+],
+"w:we'll|k:WORD": [
+2,
+0
+],
+"w:we'll|w:find": [
+2,
+0
+],
+"w:we'll|w:have": [
+1,
+0
+],
+"w:we're|k:WORD": [
+1,
+0
+],
+"w:we're|w:proud": [
+1,
+0
+],
+"w:website|k:CONJ": [
+1,
+1
+],
+"w:website|w:and": [
+1,
+1
+],
+"w:web|k:WORD": [
+1,
+0
+],
+"w:web|w:site": [
+1,
+0
+],
+"w:weeks|k:PREP": [
+1,
+1
+],
+"w:weeks|w:to": [
+1,
+1
+],
+"w:went|k:PREP": [
+1,
+1
+],
+"w:went|w:on": [
+1,
+1
+],
+"w:we|k:ADV": [
+1,
+0
+],
+"w:we|k:WORD": [
+3,
+2
+],
+"w:we|w:going": [
+1,
+0
+],
+"w:we|w:just": [
+1,
+0
+],
+"w:we|w:parked": [
+1,
+1
+],
+"w:we|w:try": [
+1,
+1
+],
+"w:what's|k:DET": [
+2,
+0
+],
+"w:what's|k:WORD": [
+1,
+0
+],
+"w:what's|w:funny": [
+1,
+0
+],
+"w:what's|w:the": [
+2,
+0
+],
+"w:what|k:PRON": [
+2,
+0
+],
+"w:what|w:i": [
+2,
+0
+],
+"w:wheel|k:ADV": [
+1,
+1
+],
+"w:wheel|w:too": [
+1,
+1
+],
+"w:when|k:PRON": [
+1,
+0
+],
+"w:when|w:i": [
+1,
+0
+],
+"w:whether|k:PRON": [
+1,
+0
+],
+"w:whether|w:i'd": [
+1,
+0
+],
+"w:whoop|k:INTJ": [
+1,
+1
+],
+"w:whoop|k:WORD": [
+2,
+2
+],
+"w:whoop|w:hey": [
+1,
+1
+],
+"w:whoop|w:whoop": [
+2,
+2
+],
+"w:who|k:AUX": [
+5,
+0
+],
+"w:who|k:DET": [
+1,
+1
+],
+"w:who|k:LONG": [
+1,
+0
+],
+"w:who|k:WORD": [
+1,
+0
+],
+"w:who|w:could": [
+1,
+0
+],
+"w:who|w:eventually": [
+1,
+0
+],
+"w:who|w:is": [
+2,
+0
+],
+"w:who|w:knows": [
+1,
+0
+],
+"w:who|w:the": [
+1,
+1
+],
+"w:who|w:will": [
+1,
+0
+],
+"w:who|w:would": [
+1,
+0
+],
+"w:why|k:AUX": [
+1,
+0
+],
+"w:why|k:PRON": [
+1,
+0
+],
+"w:why|w:i'm": [
+1,
+0
+],
+"w:why|w:won't": [
+1,
+0
+],
+"w:wield|k:DET": [
+1,
+0
+],
+"w:wield|w:the": [
+1,
+0
+],
+"w:will|k:WORD": [
+2,
+0
+],
+"w:will|w:bring": [
+1,
+0
+],
+"w:will|w:ya": [
+1,
+0
+],
+"w:wish|k:PRON": [
+1,
+0
+],
+"w:wish|w:i": [
+1,
+0
+],
+"w:without|k:DET": [
+1,
+0
+],
+"w:without|w:the": [
+1,
+0
+],
+"w:with|k:DET": [
+1,
+0
+],
+"w:with|w:this": [
+1,
+0
+],
+"w:woho|k:WORD": [
+1,
+1
+],
+"w:woho|w:whoa": [
+1,
+1
+],
+"w:won't|k:ADV": [
+1,
+1
+],
+"w:won't|k:PRON": [
+1,
+0
+],
+"w:won't|w:not": [
+1,
+1
+],
+"w:won't|w:you": [
+1,
+0
+],
+"w:words|k:PRON": [
+2,
+2
+],
+"w:words|w:i": [
+1,
+1
+],
+"w:words|w:you": [
+1,
+1
+],
+"w:would|k:AUX": [
+1,
+1
+],
+"w:would|k:NUM": [
+1,
+1
+],
+"w:would|k:PRON": [
+1,
+0
+],
+"w:would|w:10": [
+1,
+1
+],
+"w:would|w:have": [
+1,
+1
+],
+"w:would|w:you": [
+1,
+0
+],
+"w:xmen|k:WORD": [
+1,
+1
+],
+"w:xmen|w:mutants": [
+1,
+1
+],
+"w:ya|k:PRON": [
+1,
+1
+],
+"w:ya|w:you're": [
+1,
+1
+],
+"w:yeah|k:DET": [
+1,
+1
+],
+"w:yeah|k:PRON": [
+4,
+3
+],
+"w:yeah|w:i": [
+2,
+2
+],
+"w:yeah|w:i'm": [
+1,
+1
+],
+"w:yeah|w:it's": [
+1,
+0
+],
+"w:yeah|w:those": [
+1,
+1
+],
+"w:years|k:WORD": [
+1,
+0
+],
+"w:years|w:ago": [
+1,
+0
+],
+"w:year|k:WORD": [
+3,
+0
+],
+"w:year|w:old": [
+3,
+0
+],
+"w:yea|k:PRON": [
+1,
+1
+],
+"w:yea|w:i": [
+1,
+1
+],
+"w:yorkers|k:WORD": [
+1,
+0
+],
+"w:yorkers|w:know": [
+1,
+0
+],
+"w:york|k:WORD": [
+1,
+1
+],
+"w:york|w:ohh": [
+1,
+1
+],
+"w:you're|k:AUX": [
+1,
+0
+],
+"w:you're|k:WORD": [
+1,
+1
+],
+"w:you're|w:gonna": [
+1,
+0
+],
+"w:you're|w:tearing": [
+1,
+1
+],
+"w:your|k:WORD": [
+3,
+0
+],
+"w:your|w:dog": [
+2,
+0
+],
+"w:your|w:hands": [
+1,
+0
+],
+"w:you|k:ADV": [
+2,
+1
+],
+"w:you|k:AUX": [
+3,
+0
+],
+"w:you|k:INTJ": [
+1,
+0
+],
+"w:you|k:PREP": [
+1,
+0
+],
+"w:you|k:WORD": [
+24,
+7
+],
+"w:you|w:alright": [
+1,
+0
+],
+"w:you|w:are": [
+1,
+0
+],
+"w:you|w:believe": [
+1,
+0
+],
+"w:you|w:can": [
+1,
+0
+],
+"w:you|w:can't": [
+1,
+0
+],
+"w:you|w:fail": [
+1,
+0
+],
+"w:you|w:go": [
+1,
+0
+],
+"w:you|w:hiding": [
+6,
+5
+],
+"w:you|w:just": [
+1,
+0
+],
+"w:you|w:kids": [
+1,
+1
+],
+"w:you|w:know": [
+3,
+0
+],
+"w:you|w:like": [
+1,
+0
+],
+"w:you|w:not": [
+1,
+1
+],
+"w:you|w:play": [
+7,
+1
+],
+"w:you|w:think": [
+1,
+0
+],
+"w:you|w:to": [
+1,
+0
+],
+"w:you|w:tom": [
+1,
+0
+],
+"w:you|w:want": [
+1,
+0
+]
+}
+}

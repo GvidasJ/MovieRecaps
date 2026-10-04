@@ -119,8 +119,9 @@ def test_captions_start_when_their_first_word_is_spoken():
                                                   ("favorite", 1.3, 1.6), ("that", 2.0, 2.6)))
     items = [{"start": 0, "end": 360, "in": 0, "out": 360, "speed": 1.0}]
     onsets, ref = C.speech_starts(items, sm, FPS)
-    assert onsets == pytest.approx([0.2, 1.0, 2.0], abs=0.04)
-    on = [round(o * 60) for o in onsets]                               # the frames the sounds start on
+    # each sound's start, and where a word starts inside one (words run together: "The" | "one")
+    assert onsets == pytest.approx([0.2, 0.5, 1.0, 1.3, 2.0], abs=0.04)
+    on = [round(min(onsets, key=lambda o: abs(o - t)) * 60) for t in (0.2, 1.0, 2.0)]   # the captions' sounds
     # the competitor switched to "my favorite" 0.33 s after she says it, and to "that" early
     caps = [C.Caption("The one", 12, 80, "competitor"), C.Caption("my favorite", 80, 110, "competitor"),
             C.Caption("that", 110, 160, "competitor")]
