@@ -64,11 +64,11 @@ def test_the_hard_checks_find_what_was_wrong_in_bug_edit_xml():
     assert ex.premiere_item_problems(BUG) == [
         "V1 S10 raw.mp4 at 00:00:08:57: in 1312 is not before out 1300",
         "A1 S10 raw.mp4 audio at 00:00:08:57: in 1312 is not before out 1300"]
-    # and the stutters at its cuts: S04 shows S03's RAW again, S05 S04's, S13 S12's
+    # and the stutters at its cuts: S04 shows S03's RAW again, S05 S04's (S13 starts on S12's last RAW frame, 722 of
+    # the 30 fps RAW: that frame held a moment longer, not shown again)
     assert ex.premiere_repeat_problems(BUG) == [
         "V1 S03 at 00:00:05:11 and S04 at 00:00:05:27 both play RAW 14.27-14.43 s: a stutter at a cut",
-        "V1 S04 at 00:00:05:29 and S05 at 00:00:05:57 both play RAW 14.30-14.47 s: a stutter at a cut",
-        "V1 S12 at 00:00:11:01 and S13 at 00:00:11:03 both play RAW 24.07-24.10 s: a stutter at a cut"]
+        "V1 S04 at 00:00:05:29 and S05 at 00:00:05:57 both play RAW 14.30-14.47 s: a stutter at a cut"]
 
 
 def test_a_reversed_clip_is_written_with_in_before_out_and_its_audio_is_kept(tmp_path):
@@ -82,13 +82,13 @@ def test_a_reversed_clip_is_written_with_in_before_out_and_its_audio_is_kept(tmp
     import xml.etree.ElementTree as ET
     root = ET.parse(xml).getroot()
     for kind in ("video", "audio"):
-        item = [e for e in root.iter("clipitem") if e.findtext("name").startswith("S02")
+        item = [e for e in root.iter("clipitem") if ex.item_label(e) == "S02"
                 and (e.find("sourcetrack/mediatype").text == kind)][0]
         a, b = int(item.findtext("in")), int(item.findtext("out"))
         # RAW 60.0 s played backwards for 12 sequence frames: frames 3589..3600 (at 60 fps), shown 3600 first
         assert (a, b) == (3589, 3601) and a < b
         assert [p.findtext("value") for p in item.iter("parameter") if p.findtext("parameterid") == "reverse"] == ["TRUE"]
-    s2 = [c for c in x["clips"] if c["name"].startswith("S02")][0]
+    s2 = [c for c in x["clips"] if c["label"] == "S02"][0]
     assert (s2["in"], s2["out"], s2["speed"]) == (3600, 3588, -1.0)      # parsed back to the plan's frames
     assert ex.plan_in_out(*ex.xml_in_out(3600, 3588), True) == (3600, 3588)
     assert ex.xml_in_out(100, 112) == (100, 112)                          # forward: unchanged
@@ -100,7 +100,7 @@ def test_the_fcp7_export_writes_reversed_clips_the_same_way(tmp_path):
     ex.write_fcp7_xml(cl, xml)
     ex.write_edl(cl, edl)
     import xml.etree.ElementTree as ET
-    items = [e for e in ET.parse(xml).getroot().iter("clipitem") if e.findtext("name").startswith("S10")]
+    items = [e for e in ET.parse(xml).getroot().iter("clipitem") if (e.findtext("name") or "").startswith("S10")]
     assert items and all(int(e.findtext("in")) < int(e.findtext("out")) for e in items)
     assert ex.validate_exports(cl, xml, edl)["ok"]
 
@@ -130,7 +130,7 @@ def test_every_item_must_be_one_premiere_can_import(tmp_path):
     assert got[("2", "in")] == ["V1 S02 raw.mp4: in '1800.5' not a whole frame"]
     assert got[("2", "end")] == ["V1 S02 raw.mp4 at 00:00:01:00: start 60 is not before end 60"]
     assert got[("3", "out")] == ["V1 S03 raw.mp4 at 00:00:02:00: in 3000 is not before out 2950"]   # the S10 bug
-    assert got[("a2", "in")] == ["A1 S02 raw.mp4 audio at 00:00:01:00: out - in = 50 source frames, but it lasts 60 "
+    assert got[("a2", "in")] == ["A1 S02 raw.mp4 at 00:00:01:00: out - in = 50 source frames, but it lasts 60 "
                                  "sequence frames at 100 % (want 60)"]
     assert got[("3", "in")] == [
         "V1 S03 raw.mp4 at 00:00:02:00: out - in = 3066 source frames, but it lasts 60 sequence frames at 100 % "
@@ -141,7 +141,7 @@ def test_every_item_must_be_one_premiere_can_import(tmp_path):
     # doubled audio: an A1 item moved over its neighbour
     bad = _broken(_broken(xml, tmp_path, "a2", "start", "20"), tmp_path, "a2", "end", "50")
     assert ex.premiere_item_problems(bad)[-1] == (
-        "A1 S02 raw.mp4 audio at 00:00:00:20: overlaps A1 S01 raw.mp4 audio, which ends at 00:00:01:00 (doubled audio: "
+        "A1 S02 raw.mp4 at 00:00:00:20: overlaps A1 S01 raw.mp4, which ends at 00:00:01:00 (doubled audio: "
         "two audio clips at the same moment)")
     # the validation fails on any of them: the run fails, like the gap check
     v2 = ex.validate_premiere_exports(cl, _broken(xml, tmp_path, "2", "in", "1800.5"), None,
@@ -190,8 +190,8 @@ def test_a_stutter_at_a_cut_is_trimmed_so_nothing_plays_twice(tmp_path):
     assert v["ok"] and v["repeat_problems"] == [], v["errors"]
     assert x["duration"] == 174                                    # 180 - the 6 repeated frames
     # the two sides now play one continuous take: one clip, its audio one item with no fade
-    assert [(c["name"], c["start"], c["end"], c["in"], c["out"]) for c in x["clips"]] == [
-        ("S01+S02 raw.mp4", 0, 114, 600, 714), ("S03 raw.mp4", 114, 174, 2400, 2460)]   # RAW 10 s = frame 600
+    assert [(c["label"], c["start"], c["end"], c["in"], c["out"]) for c in x["clips"]] == [
+        ("S01+S02", 0, 114, 600, 714), ("S03", 114, 174, 2400, 2460)]   # RAW 10 s = frame 600
     assert [(a["start"], a["end"], a["levels"]) for a in x["audio"]] == [(0, 114, []), (114, 174, [])]
     from match_cuts.pipeline import repeat_lines
     assert repeat_lines(plan) == [
@@ -211,7 +211,7 @@ def test_a_clip_that_only_repeats_the_end_of_the_one_before_goes(tmp_path):
     assert [(r["removed"], r["a"], r["b"], r["why"]) for r in plan["repeats"]["rows"]] == [
         ("S02", 60, 72, "the end of the clip before")]
     assert v["ok"], v["errors"]
-    assert [c["name"] for c in x["clips"]] == ["S01 raw.mp4", "S03 raw.mp4"]
+    assert [c["label"] for c in x["clips"]] == ["S01", "S03"]
 
 
 def test_the_same_moment_twice_loses_the_copy_out_of_order(tmp_path):
@@ -221,7 +221,7 @@ def test_the_same_moment_twice_loses_the_copy_out_of_order(tmp_path):
     rows = plan["repeats"]["rows"]
     assert [(r["kind"], r["removed"], r["kept"], r["a"], r["b"], r["copy"], r["why"]) for r in rows] == [
         ("repeat", "S01", "S02+S03", 0, 120, [1320, 1440], "out of chronological order")]   # S02, S03: one take
-    assert v["ok"] and x["duration"] == 1680 and x["clips"][0]["name"].startswith("S02")
+    assert v["ok"] and x["duration"] == 1680 and x["clips"][0]["label"].startswith("S02")
     # both in chronological order: the later copy goes
     cl = cutlist([seg(1, 0, 60, 10.0), seg(2, 60, 120, 30.0), seg(3, 120, 180, 31.0)])
     plan, xml, v, x = export(tmp_path, cl, "later.xml")

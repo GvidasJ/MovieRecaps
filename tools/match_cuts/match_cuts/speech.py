@@ -36,6 +36,7 @@ BOUNDARY_S = 0.25         # the dip nearest a boundary between two transcribed w
 VOICED = 0.8              # a clear pitch: the normalised autocorrelation peak (70-400 Hz, 40 ms) at least this ...
 VOICED_S = 0.05           # ... for this long makes an untranscribed sound speech (less: a breath, a smack, a click)
 MAX_SHIFT_S = 0.1         # an audio line jumping this little inside speech where the picture does not cut plays on
+MAX_JUMP_S = 0.1          # a cut skipping (or repeating) this little of the RAW inside speech: the clips play on as one take
 EPS = 1e-6
 
 
@@ -136,7 +137,10 @@ def speech_map(y: np.ndarray, sr: int, st: Any = None, words: Sequence[Any] | No
     dur = len(y) / float(sr)
     if not len(db):
         return SpeechMap([], dur, levels={"how": "no audio", "words": None})
-    lv = silence.levels(db, st)
+    in_heard = np.zeros(len(t), bool)
+    for h0, h1 in heard or []:
+        in_heard[np.searchsorted(t, h0, "left"):np.searchsorted(t, h1, "right")] = True
+    lv = silence.levels(db[in_heard] if in_heard.sum() > 100 else db, st)   # the levels where the edit plays
     q = silence.quiet_windows(db, lv)
     ws = sorted((w for w in (words or []) if float(w.end) >= float(w.start)), key=lambda w: float(w.start))
     if ws:
@@ -316,29 +320,31 @@ class Piece:
     lock_end: bool = False
     shiftable: bool = False      # an audio line (not the picture's own audio): its source may move a little
     slack: int = 0               # a locked start (a cross dissolve of this many frames): the A1 cut may slide under it
+    v_off: float | None = 0.0    # V1's RAW time minus A1's here (s; an audio line); None: V1 is not the RAW at 100 %
 
 
 def _shift_jumps(ps: list[Piece], sm: SpeechMap, f: float, v1_cuts: set[int] | None) -> list[tuple[int, int]]:
-    """Audio-only jumps inside speech: where A1 jumps (at most MAX_SHIFT_S) inside speech but V1 does not cut, the
-    audio line before (else after) the jump moves by the jump, so A1 plays on there; the jump moves to that line's
-    other end. [(the moved piece's first sequence frame, frames)] -- ``ps`` changed in place."""
-    out = []
-    for p, q in zip(ps, ps[1:]):
-        if p.r1 != q.r0 or (v1_cuts is not None and p.r1 in v1_cuts) or abs(p.speed - 1) > 1e-6 or \
-                abs(q.speed - 1) > 1e-6:
+    """Audio-line jumps inside speech: where A1 jumps a little (at most MAX_SHIFT_S) inside speech and the piece before
+    the jump is an audio line (its sound is not the picture's own), that line moves by the jump so A1 plays on -- the
+    picture is not touched; the lines before it in a chain move with it (from the last jump back). A jump where V1
+    does not cut and only the piece after is an audio line moves that one instead. [(the moved piece's first
+    sequence frame, frames)] -- ``ps`` changed in place."""
+    cap = MAX_SHIFT_S * f + 1e-9
+    moved: dict[int, int] = {}
+    for p, q in reversed(list(zip(ps, ps[1:]))):
+        if p.r1 != q.r0 or abs(p.speed - 1) > 1e-6 or abs(q.speed - 1) > 1e-6:
             continue
         j = int(round(q.src - (p.src + (p.r1 - p.r0))))
-        if j == 0 or abs(j) > MAX_SHIFT_S * f + 1e-9:
+        if j == 0 or abs(j) > cap or not (_inside(sm, (p.src + (p.r1 - p.r0)) / f) or _inside(sm, q.src / f)):
             continue
-        if not (_inside(sm, (p.src + (p.r1 - p.r0)) / f) or _inside(sm, q.src / f)):
-            continue
-        if p.shiftable:
+        if p.shiftable and abs(moved.get(p.r0, 0) + j) <= cap:
             p.src += j
-            out.append((p.r0, j))
-        elif q.shiftable:
+            moved[p.r0] = moved.get(p.r0, 0) + j
+        elif (v1_cuts is not None and p.r1 not in v1_cuts and q.shiftable and q.r0 not in moved
+              and abs(j) <= cap):
             q.src -= j
-            out.append((q.r0, -j))
-    return out
+            moved[q.r0] = -j
+    return [(r, d) for r, d in sorted(moved.items()) if d]
 
 
 def _slide_dissolves(ps: list[Piece], sm: SpeechMap, f: float) -> list[tuple[int, int]]:
@@ -361,16 +367,54 @@ def _slide_dissolves(ps: list[Piece], sm: SpeechMap, f: float) -> list[tuple[int
     return out
 
 
+def shot_guard(sm: SpeechMap, na: float, nb: float, changes: Sequence[float], pa: float, pb: float,
+               free_start: bool = True, free_end: bool = True, min_s: float | None = None) -> tuple[float, float]:
+    """(start, end) of a clip playing RAW [na, nb) (s) with no piece of a shot shorter than ``min_s``
+    (shots.MIN_SHOT_S) at its start or end -- ``changes``: the RAW's shot changes, on the clip's source times. A
+    sliver of another shot with no speech in it goes (the padding stops at the shot change); one the speech runs
+    into is shown for ``min_s`` (the clip plays on / starts earlier, in the quiet)."""
+    from .shots import MIN_SHOT_S
+    m = MIN_SHOT_S if min_s is None else float(min_s)
+    for _ in range(4):
+        moved = False
+        inside = [c for c in changes if na + 1e-6 < c < nb - 1e-6]
+        if free_end and inside and nb - inside[-1] < m - 1e-6:
+            c = inside[-1]
+            j = sm.speech_before(nb)
+            if j is None or sm.sounds[j].s1 <= c + 1e-3:             # the speech ended before the shot change
+                nb = c
+            else:                                                     # it runs into the new shot: show it m long
+                x = min(sm.dur, c + m)
+                k = sm.sound_at(x)
+                nb = max(x, end_after(sm, k, pa, pb)) if k is not None and sm.sounds[k].speech else x
+            moved = True
+        inside = [c for c in changes if na + 1e-6 < c < nb - 1e-6]
+        if free_start and inside and inside[0] - na < m - 1e-6:
+            c = inside[0]
+            j = sm.speech_after(na)
+            if j is None or sm.sounds[j].s0 >= c - 1e-3:              # no speech before the shot change
+                na = c
+            else:
+                x = max(0.0, c - m)
+                k = sm.sound_at(x)
+                na = min(x, start_before(sm, k, pa, pb)) if k is not None and sm.sounds[k].speech else x
+            moved = True
+        if not moved or nb <= na:
+            break
+    return na, nb
+
+
 def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after: float, pad_before: float,
-               v1_cuts: set[int] | None = None, src_max: float | None = None
+               v1_cuts: set[int] | None = None, src_max: float | None = None, shots: Sequence[float] | None = None
                ) -> tuple[list[tuple[int, int]], list[tuple[int, int, str, float]], list[dict], list[tuple[int, int]]]:
     """(the trims: removed sequence frames [a, b), the extensions: (at, frames, side, RAW frame the added frames
     start at) -- silence.Insert --, one row per moved cut, the audio lines moved: (first frame, frames)) that put
     every audio cut of ``pieces`` into the quiet of ``sm`` (module docstring). Only clips at 100 % move; a piece
     running on in the very next RAW frame is one take (no cut there). ``v1_cuts``: the sequence frames where V1
     cuts -- an A1 edge elsewhere moves only when the pieces between it and V1's last cut went (the picture cuts there
-    then); an audio line jumping a little inside speech there plays on instead (_shift_jumps). A clip left with
-    nothing to play goes."""
+    then); an audio line jumping a little inside speech there plays on instead (_shift_jumps). ``shots``: the RAW's
+    shot changes (s): no clip starts or ends with a sliver of another shot (shot_guard). A clip left with nothing to
+    play goes."""
     f = float(fps)
     hi_s = sm.dur if src_max is None else min(sm.dur, float(src_max) / f)
     ps = [Piece(**vars(p)) for p in sorted(pieces, key=lambda p: p.r0)]
@@ -379,7 +423,7 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
     trims: list[tuple[int, int]] = []
     inserts: list[tuple[int, int, str, float]] = []
     rows: list[dict] = []
-    prev = None            # the last clip kept: (piece, its new RAW end s, its planned RAW end s)
+    prev = None            # the last clip kept: (piece, new RAW end s, planned RAW end s, new RAW start s, joined on)
     reach = None           # the sequence frame up to which nothing plays after it (pieces that went in between)
     gone_from = None       # the first frame of the pieces that went right before this one (V1 cuts there)
 
@@ -398,10 +442,24 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                     and abs(nxt.src / f - b) < 0.5 / f)
         free_start = free(p.r0, p.lock_start) and not cont_in
         free_end = not p.lock_end and (v1_cuts is None or p.r1 in v1_cuts) and not cont_out
-        na = start_at(sm, a, b, pad_after, pad_before) if free_start else a
-        nb = end_at(sm, b, a, pad_after, pad_before) if free_end else b
-        if touching and free_start and prev[0].src / f - 0.5 / f <= na < prev[1]:
+        # a tiny jump (or repeat) of the RAW inside speech at a cut: the two clips play on as one take -- the clip
+        # after starts exactly where the one before ends (the picture still cuts, the sound does not jump)
+        join_out = (free_end and nxt is not None and nxt.r0 == p.r1 and abs(nxt.speed - 1.0) < 1e-6
+                    and not nxt.lock_start and 0.5 / f <= abs(nxt.src / f - b) <= MAX_JUMP_S + 1e-9
+                    and (_inside(sm, b) or _inside(sm, nxt.src / f)))
+        join_in = touching and free_start and prev[4]
+        na = (prev[1] if join_in else start_at(sm, a, b, pad_after, pad_before)) if free_start else a
+        nb = end_at(sm, b, a, pad_after, pad_before) if free_end and not join_out else b
+        if join_out and nxt.src / f > b:
+            nb = nxt.src / f                         # a skip: this clip plays on to where the next one starts
+        if touching and free_start and not join_in and na < prev[1] - 0.5 / f and nb > prev[3] + 0.5 / f:
             na = start_after(sm, prev[1], pad_after, pad_before)    # never show again what the clip before shows
+        if shots and p.v_off is not None and (free_start or free_end):
+            cs = [c - p.v_off for c in shots]                          # the shot changes on A1's source times
+            na, nb = shot_guard(sm, na, nb, cs, pad_after, pad_before, free_start and not join_in,
+                                free_end and not join_out)
+            if touching and free_start and na < prev[1] - 0.5 / f and nb > prev[3] + 0.5 / f:
+                na = prev[1]                                           # never back into what the clip before shows
         na, nb = max(0.0, na), min(hi_s, nb)
         da = int(round((na - a) * f))
         db = int(round((nb - b) * f))
@@ -428,7 +486,7 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                 rows.append({"clip": p.label, "edge": edge, "at": p.r0 if edge == "start" else p.r1, "from_s": old,
                              "to_s": new, "frames": d, "said": sm.said(min(old, new) - 0.15, max(old, new) + 0.15),
                              "inside": _inside(sm, old)})
-        prev, reach = (p, b + db / f, b), p.r1
+        prev, reach = (p, b + db / f, b, a + da / f, join_out), p.r1
     for at, d in shifts:
         rows.append({"clip": next(p.label for p in ps if p.r0 == at), "edge": "audio line", "at": at,
                      "from_s": None, "to_s": None, "frames": d, "said": "", "inside": True})
@@ -439,11 +497,12 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
 
 
 def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: Fraction, st: Any, n_frames: int,
-              src_max: float | None = None, fac: int = 1) -> tuple[Any, list[dict]]:
+              src_max: float | None = None, fac: int = 1, shots: Sequence[float] | None = None) -> tuple[Any, list[dict]]:
     """(silence.Ripple of the speech-safe cuts, one row per moved cut) of the Premiere plan's V1 clips
     (export_xml_edl.PremiereClip) and A1 items: snap_edits on the A1 items, V1 cutting where it cuts; both sides of a
     cross dissolve stay (an A1 cut inside speech slides under the dissolve: _slide_dissolves). The trims and extensions
-    apply to V1 and A1 alike (picture and sound stay in sync). ``fac``: sequence frames per competitor frame."""
+    apply to V1 and A1 alike (picture and sound stay in sync). ``fac``: sequence frames per competitor frame;
+    ``shots``: the RAW's shot changes (s) -- no clip starts or ends with a sliver of another shot."""
     from .silence import Cut, Insert, Ripple
     f = float(fps)
     v1_cuts: set[int] = set()
@@ -457,11 +516,14 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
     for it in audio:
         seg = it.get("seg")
         label = f"S{int(seg.id):02d}" if seg is not None else str(it.get("label") or "?")
+        v = next((c for c in clips if c.rec_start <= int(it["start"]) < c.rec_end), None)
+        v_off = ((v.src_in + (int(it["start"]) - v.rec_start) * float(v.speed) - float(it["in"])) / f
+                 if v is not None and abs(float(v.speed) - 1.0) < 1e-6 else None)
         pieces.append(Piece(label, int(it["start"]), int(it["end"]), float(it["in"]), float(it["speed"]),
                             int(it["start"]) in locked, int(it["end"]) in locked, it.get("what") == "audio line",
-                            locked.get(int(it["start"]), 0)))
+                            locked.get(int(it["start"]), 0), v_off))
     trims, inserts, rows, shifts = snap_edits(pieces, sm, fps, float(st.pad_after), float(st.pad_before), v1_cuts,
-                                              src_max)
+                                              src_max, shots)
     merged: list[list[int]] = []
     for a, b in sorted(trims):
         if merged and a <= merged[-1][1]:

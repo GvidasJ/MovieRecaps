@@ -275,6 +275,7 @@ class Report:
         self.rows: list[dict] = []           # listed under "Captions worth a look"
         self.notes: dict[str, int] = {"from_transcript": 0, "noise_dropped": 0, "stops_commas": 0}
         self.kept_weak: list[dict] = []
+        self.stutters: list[dict] = []       # a short word said twice in a row inside one caption, kept once
 
     def change(self, c: Cap, rule: int) -> None:
         if rule not in c.changed:
@@ -287,7 +288,7 @@ class Report:
 
     def to_dict(self) -> dict:
         return {"mode": self.mode, "changed": dict(self.changed), "flagged": dict(self.flagged), "rows": self.rows,
-                "notes": dict(self.notes), "kept_weak": self.kept_weak}
+                "notes": dict(self.notes), "kept_weak": self.kept_weak, "stutters": self.stutters}
 
 
 def _split_frame(c: Cap, k: int, fps: Fraction, lo: int | None = None, hi: int | None = None) -> int | None:
@@ -1141,6 +1142,7 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     _move_weak(cs, fps, mode, rep, cuts)
     cs = _join_lone(cs, fps, rep, cuts)
     cs = _cut_split(cs, cuts, fps, rep)
+    _collapse_stutters(cs, rep)                          # after the regrouping: two captions may have met
     _pause_capitals(cs, words, rep, fps)
     for i, c in enumerate(cs):
         why = weak_reason(cs, i, fps, mode, cuts)
@@ -1179,6 +1181,41 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     d["left"] = {r: len(v) for r, v in left.items()}
     d["left_rows"] = {r: v[:20] for r, v in left.items() if v}
     return res, d
+
+
+STUTTER_LETTERS = 3       # a stutter: a word of at most this many letters (or a weak word) said twice in a row
+
+
+def _short_word(x: str) -> bool:
+    return bool(x) and (len(_letters(x)) <= STUTTER_LETTERS or is_weak(x))
+
+
+def _collapse_stutters(cs: list[Cap], rep: Report) -> None:
+    """A short word said twice in a row inside one caption ("The the one that's", "I I", "to to") is kept once --
+    the first, with the second's punctuation -- and listed (``rep.stutters``). A word repeated as separate captions
+    ("no" | "no" | "no") is a deliberate repeat and stays."""
+    for c in cs:
+        if not c.spoken or len(c.toks) < 2:
+            continue
+        keep: list[Tok] = [c.toks[0]]
+        was = c.text
+        gone = []
+        for t in c.toks[1:]:
+            p = keep[-1]
+            x = norm(core(t.text))
+            if x and x == norm(core(p.text)) and _short_word(x):
+                tail = t.text[len(t.text.rstrip("?!.,;:…")):]
+                p.text = p.text.rstrip("?!.,;:…") + tail
+                p.raw = p.raw.rstrip("?!.,;:…") + t.raw[len(t.raw.rstrip("?!.,;:…")):]
+                gone.append(t)
+                continue
+            keep.append(t)
+        if gone:
+            c.toks = keep
+            when = next((t.word.start for t in gone if t.word is not None), c.start / float(rep.fps))
+            rep.stutters.append({"time": round(float(when), 3), "start_tc": _tc(c.start, rep.fps),
+                                 "end_tc": _tc(c.end, rep.fps), "was": was, "now": c.text,
+                                 "words": [t.text for t in gone]})
 
 
 def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: Lexicon | None = None,

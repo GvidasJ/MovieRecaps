@@ -646,7 +646,7 @@ def test_premiere_markers_on_uncertain_and_not_in_raw_spots(premiere):
     assert ms[(380, 440)]["name"] == "NOT IN RAW S07"
     assert ms[(500, 540)]["name"] == "RETIME S09" and "freeze" in ms[(500, 540)]["comment"]
     assert not any(m["name"].startswith("Cut") for m in premiere["x"]["markers"])
-    assert not any(c["name"].startswith(("S06", "S07")) for c in premiere["x"]["clips"])   # V1 empty there
+    assert not any(c["label"].startswith(("S06", "S07")) for c in premiere["x"]["clips"])  # V1 empty there
 
 
 def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_at_most_5_percent(premiere_keyframed):
@@ -676,7 +676,7 @@ def test_premiere_framing_fills_the_window_keeps_the_competitor_view_and_zooms_a
 
 def test_premiere_pan_stays_motion_keyframes_at_source_times(premiere_keyframed):
     cl, x = premiere_keyframed["cl"], premiere_keyframed["x"]
-    got = next(c for c in x["clips"] if c["name"].startswith("S02"))
+    got = next(c for c in x["clips"] if c["label"].startswith("S02"))
     keys = got["motion"]["keys"]
     assert len(keys["scale"]) == len(keys["center"]) == 2
     whens = [w for w, _ in keys["center"]]
@@ -862,14 +862,14 @@ def test_min_move_keeps_the_framing_under_250_px_and_merges_one_take(tmp_path):
 def test_min_move_zero_gives_every_piece_its_own_framing(tmp_path):
     r = _min_move_export(tmp_path, premiere_min_move=0)
     assert r["v"]["ok"], r["v"]["errors"]
-    assert [c["name"].split()[0] for c in r["x"]["clips"]] == ["S01", "S02", "S03", "S04", "S05", "S06"]
+    assert [c["label"] for c in r["x"]["clips"]] == ["S01", "S02", "S03", "S04", "S05", "S06"]
     assert (r["v"]["xml"]["framing_changes"], r["v"]["xml"]["merged"]) == (5, 0)
 
 
 def test_min_move_validation_catches_a_small_reframe(tmp_path):
     r = _min_move_export(tmp_path)
     text = r["xml"].read_text(encoding="utf-8")
-    i = text.index("<name>S03 ")
+    i = _clip_item(text, "S03")
     j = text.index("<horiz>", i)
     k = text.index("</horiz>", j)
     bad = text[:j + 7] + f"{float(text[j + 7:k]) + 0.05:.6f}" + text[k:]   # S03 moved 0.05 x 1920 (source) = 96 px
@@ -931,8 +931,14 @@ def test_premiere_xml_positions_are_the_planned_ones_in_premiere_units(premiere)
         assert h == pytest.approx((cx - 540) / 1920, abs=1e-6) and v == pytest.approx((cy - 960) / 1080, abs=1e-6)
 
 
+def _clip_item(text: str, label: str) -> int:
+    """Where the V1 clip item of segment ``label`` starts in the XML text (every clip is named raw.mp4; the segment
+    id is in its comment)."""
+    return text.rindex("<clipitem", 0, text.index(f"<mastercomment1>{label} "))
+
+
 def _set_motion(text: str, clip_name: str, horiz: float, vert: float, scale: float) -> str:
-    i = text.index(f"<name>{clip_name} ")
+    i = _clip_item(text, clip_name)
     j = text.index("<parameterid>scale</parameterid>", i)
     a, b = text.index("<value>", j) + 7, text.index("</value>", j)
     text = text[:a] + f"{scale:.6f}" + text[b:]
@@ -1067,7 +1073,7 @@ def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(
 
     def position(c: dict) -> tuple[float, float]:
         return ex.premiere_position(c["motion"]["center"], SEQ, SRC)
-    s21 = next(c for c in x["clips"] if c["name"].startswith("S21"))
+    s21 = next(c for c in x["clips"] if c["label"].startswith("S21"))
     at = next(c for c in x["clips"] if c["start"] <= 1153 < c["end"])   # 00:00:19:13 in the 60 fps sequence
     for c in (s21, at):
         px, py = position(c)

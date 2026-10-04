@@ -147,19 +147,32 @@ def test_cuts_inside_speech_move_and_nothing_plays_twice():
     starts before "again" instead. The trims / extensions are on the sequence; the rows say what moved."""
     _, sm = three()
     a = SP.Piece("A", 0, 120, 0.9 * 60, 1.0)          # RAW 0.9-2.9: ends inside "there"
-    b = SP.Piece("B", 120, 210, 2.8 * 60, 1.0)        # RAW 2.8-4.3: starts inside "there", ends inside "again"
+    b = SP.Piece("B", 120, 210, 2.7 * 60, 1.0)        # RAW 2.7-4.2: starts inside "there", ends inside "again"
     trims, inserts, rows, shifts = SP.snap_edits([a, b], sm, FPS, PA, PB)
     ext = {(at, side): d for at, d, side, _ in inserts}
     assert ext[(120, "end")] == pytest.approx((3.0 + PA - 2.9) * 60, abs=TOL * 60)      # A: + about 15 frames
     b_trim = next(t for t in trims if t[0] == 120)
-    assert (b_trim[1] - 120) / 60 + 2.8 == pytest.approx(3.8 - PB, abs=TOL)          # B starts just before "again"
-    assert ext[(210, "end")] == pytest.approx((4.4 + PA - 4.3) * 60, abs=TOL * 60)      # B plays "again" to its end
+    assert (b_trim[1] - 120) / 60 + 2.7 == pytest.approx(3.8 - PB, abs=TOL)          # B starts just before "again"
+    assert ext[(210, "end")] == pytest.approx((4.4 + PA - 4.2) * 60, abs=TOL * 60)      # B plays "again" to its end
     assert not shifts and {r["clip"] for r in rows} == {"A", "B"}
     assert any(r["inside"] for r in rows)
     # a clip that only plays what the clip before now plays goes
-    c = SP.Piece("C", 120, 150, 2.95 * 60, 1.0)        # RAW 2.95-3.45: the end of "there" and the pause
+    c = SP.Piece("C", 120, 150, 2.75 * 60, 1.0)        # RAW 2.75-3.25: the end of "there" (again) and the pause
     trims, _, rows, _ = SP.snap_edits([a, c], sm, FPS, PA, PB)
     assert (120, 150) in trims and [r["edge"] for r in rows if r["clip"] == "C"] == ["whole"]
+
+
+def test_a_tiny_jump_inside_speech_plays_on_as_one_take():
+    """A cut skipping (or repeating) at most 0.1 s of the RAW inside speech: the two clips play on as one take --
+    a skip, the clip before plays on to where the next starts; a repeat, the next starts where the one before ends."""
+    _, sm = three()
+    a = SP.Piece("A", 0, 120, 0.7 * 60, 1.0)          # RAW 0.7-2.7: ends inside "there"
+    skip = SP.Piece("B", 120, 150, 2.7 * 60 + 3, 1.0)                  # 3 frames on
+    trims, inserts, rows, _ = SP.snap_edits([a, skip], sm, FPS, PA, PB)
+    assert (120, 3, "end", 2.7 * 60) in inserts and not any(t[0] == 120 for t in trims)
+    again = SP.Piece("B", 120, 150, 2.7 * 60 - 4, 1.0)                 # 4 frames back
+    trims, inserts, rows, _ = SP.snap_edits([a, again], sm, FPS, PA, PB)
+    assert (120, 124) in trims and not any(i[0] == 120 for i in inserts)
 
 
 def test_one_take_running_on_is_not_a_cut_and_a_locked_edge_stays():

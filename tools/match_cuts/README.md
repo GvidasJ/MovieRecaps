@@ -94,7 +94,11 @@ playing, the export shows the RAW video that matches the audio instead, so the m
 ### Premiere (`--premiere`)
 
 `1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
-V2 and above empty. Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
+V2 and above empty. Every clip on V1 and A1 is simply `raw.mp4`: the same name, the same file and one shared master
+clip, so Premiere's Project panel shows a single `raw.mp4` all the timeline clips are cut from (the RAW is always
+copied as `extras/media/raw.mp4`, whatever the input file is called; the competitor is never in the project). The
+segment ids (`S01+S02`) are in each clip's comments and in the markers. Two defaults of this mode (config
+`premiere_static_framing` / `premiere_follow_audio`):
 
 * **No camera movement.** Every clip holds one fixed Position and Scale — no keyframes on Position, Scale or
   Rotation, rotation 0. It is the competitor's framing for that clip (averaged over the clip when the competitor
@@ -139,6 +143,13 @@ V2 and above empty. Two defaults of this mode (config `premiere_static_framing` 
   The end summary lists every removed repeat with both times (*Repeats*); a repeat left in the final XML that is
   not allowed fails the run (`XML REPEAT`). A freeze placed at 100 % (marked RETIME, to redo by hand) is not
   counted.
+* **No flash frames** (`match_cuts/shots.py`). The RAW is often edited itself: its own shot changes are found where
+  the edit plays it (thumbnails of every frame; a change where the picture jumps far more than it moves around
+  it). The padding of a clip stops at a shot change, and no clip starts or ends with a piece of a shot shorter than
+  0.25 s: a sliver with no speech in it is cut away, one the speech runs into is shown 0.25 s; a silence cut keeps
+  no such sliver either (nor a sliver of a clip's framing, nor a frame of an empty V1). The check on the final XML
+  fails the run on any run of frames of one RAW shot under 0.25 s at a cut (`XML FLASH`). The Zendaya run's frame at
+  00:00:06:54 (S11 ran one frame into the RAW's next shot at 3.76 s) is caught by it and no longer made.
 * **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor
@@ -170,6 +181,11 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   clip left with nothing new to play goes. Two pieces that end up playing one continuous take become one clip, with
   no cut. Both sides of a cross dissolve stay as they are. Where A1 jumps a few frames (at most 0.1 s) inside
   speech but the picture does not cut (an audio line), the audio line moves by those frames so A1 plays on.
+* **A tiny jump at a cut inside speech plays on.** The competitor often cuts 1–3 frames out of a sentence (or shows
+  them twice): a cut skipping or repeating at most 0.1 s of the RAW inside speech is closed — the clip before plays
+  on to where the next one starts, or the next starts where the one before ends — so the sound never jumps; the
+  picture still cuts there (a framing change). An audio line (sound that is not the picture's own) moves by the jump
+  instead, along its whole chain, so the picture is not touched.
 * **The hard check, on the final XML**: every audio cut of A1 (an item's start or end where the RAW does not play on)
   must land outside speech; one that lands inside fails the run (`XML SPEECH` in the report and the console, with
   the words there). On run 011 the competitor-placed cuts fail it 10 times; the new export passes.
@@ -183,6 +199,13 @@ kept 0.39 s after "age." and 0.04 s after "am" where the tool keeps `--pad-after
 before "to" to drop it, where the tool keeps "a son to a married couple" playing.
 
 ### Silence removal (`--keep-silence` turns it off)
+
+* **Silence across a cut, too.** The end of one clip and the start of the next together never keep more silence
+  than `--pad-after` + `--pad-before` (0.2 s): longer, both sides are trimmed, however short the pause (the 0.3 s
+  `--min-silence` is for pauses inside a clip). The check on the final XML fails the run on a cut with more
+  (`XML SILENCE`, two frames of rounding allowed; an edge held 0.25 s from a RAW shot change against a flash frame
+  may keep more). Silence is the quiet of the RAW's speech map (above) — the same quiet the speech check knows, so a
+  breath is never cut as silence.
 
 Every silence of **my** edit's audio is cut out of `1_edit.xml` — measured on the RAW audio under my clips (A1),
 never on the competitor's, so music it added does not count as speech. In competitor mode this happens after the
@@ -255,8 +278,8 @@ with its competitor and 60 fps sequence timecodes.
 (competitor frame k = sequence frame 2k for a 30 fps competitor). The mode is chosen per clip:
 
 * **competitor** (auto, when the layout finds burned-in captions; with or without `--premiere`): the competitor
-  decides the **timing** (each caption starts on the frame its first word appeared on their screen; their silences
-  kept) and **where captions split** where they already show 2+ words that pass my rules; my rules decide **how the
+  decides the **words** and **where captions split** where they already show 2+ words that pass my rules (the
+  timing: see *Timed to the speech* below); my rules decide **how the
   text looks** (the hard rules below). Where the competitor shows **one word at a time**, the words are regrouped
   into 2–4 word captions by the voice-mode rules below (20 characters, pairs kept together, never a lone weak word)
   on the competitor's timing: `a` | `joke` → `a joke`, `Bronx` | `School` → `Bronx School`; a word left between
@@ -279,6 +302,20 @@ with its competitor and 60 fps sequence timecodes.
   own example keeps "there is"), no full stops or commas (except inside numbers), back-to-back timing,
   `*...*` placeholders for silences over ~1 s, a new caption after every sentence end. `--voiceover FILE` captions
   your own narration instead.
+
+**Timed to the speech of the final edit, both modes** (`captions.py`). Every caption starts within 2 frames of
+its first word being spoken in the final edit — after every cut change (speech-safe cuts, padding, silences,
+repeats). The captions' text is aligned, as one stream, with the RAW's words (medium.en) where A1 plays them, then
+with the edit's own transcript; the first word's start moves to where its sound starts in the loudness (within
+0.2 s; past an audio cut a word cannot straddle). A caption moved past its own end keeps its length, and
+captions that were back to back stay back to back. Competitor mode keeps the competitor's words and splits on this
+timing. A competitor caption whose words my edit does not play (the competitor's own audio, e.g. under a cutaway)
+is left out, and speech of my edit no competitor caption covers is captioned from the transcript; both are listed.
+The end summary lists every caption that is still off (*Captions off their first word*).
+
+**Stutters**: the same short word said twice in a row inside one caption (`The the one that's`, `I I`, `a a`,
+`to to`) is kept once (`The one that's`) and listed (*Caption stutters kept once*); a word repeated as separate
+captions (`no` | `no` | `no`) is deliberate and stays.
 
 **Grouping, both modes** (`captions.py`):
 
