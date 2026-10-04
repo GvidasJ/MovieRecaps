@@ -97,8 +97,19 @@ playing, the export shows the RAW video that matches the audio instead, so the m
 V2 and above empty. Every clip on V1 and A1 is simply `raw.mp4`: the same name, the same file and one shared master
 clip, so Premiere's Project panel shows a single `raw.mp4` all the timeline clips are cut from (the RAW is always
 copied as `extras/media/raw.mp4`, whatever the input file is called; the competitor is never in the project). The
-segment ids (`S01+S02`) are in each clip's comments and in the markers. Two defaults of this mode (config
-`premiere_static_framing` / `premiere_follow_audio`):
+segment ids (`S01+S02`) are in each clip's comments and in the markers.
+
+**Linked clips.** Every V1 clip imports linked to its own A1 clip (the `<link>`s Premiere writes in its own XML), so
+moving, trimming or cutting a clip takes its audio with it. Each V1 clip is linked to the A1 clip it overlaps most;
+audio shifted a few frames from its picture (an A1 cut moved to close a jump) stays linked to that picture. Where one
+take of audio runs under several V1 clips (the picture changes framing or repeats frames while the audio plays on),
+A1 is split at those V1 cuts into seamless pieces — the source runs on, nothing is heard — one for each clip; where
+an A1 cut falls inside a V1 clip, that clip is split there the same way. Only a clip with no audio under it (a
+freeze, muted B-roll: silent on purpose), an A1 clip under an empty V1 and another video's stretch (`OTHER VIDEO`)
+stay unlinked. The hard check `XML LINK` fails the run unless every V1 clip with audio under it is linked to exactly
+one A1 clip and every A1 clip under a picture to exactly one V1 clip, the same pair in both, overlapping.
+
+Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
 
 * **No camera movement.** Every clip holds one fixed Position and Scale — no keyframes on Position, Scale or
   Rotation, rotation 0. It is the competitor's framing for that clip (averaged over the clip when the competitor

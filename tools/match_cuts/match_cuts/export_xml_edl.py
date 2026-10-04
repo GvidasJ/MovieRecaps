@@ -53,6 +53,7 @@ Time conventions
 from __future__ import annotations
 
 import csv
+import dataclasses
 import math
 import os
 import re
@@ -1162,11 +1163,96 @@ class PremiereClip:
     retime: str | None               # why the clip's speed is not the segment's real time map (marker text)
     events: list[EditEvent] = field(default_factory=list)   # the edit events it plays (several: merged, --min-move)
     framing_note: str = ""           # --min-move: why the framing is not this clip's own (kept from the clip before)
+    link_split: bool = False         # a piece of one take split so each V1 clip links to one A1 clip (link_pairs)
 
     @property
     def label(self) -> str:
         evs = self.events or [self.ev]
         return "+".join(_seg_label(e.seg) for e in evs) if len(evs) > 1 else _seg_label(self.seg)
+
+
+def _overlap(a0: int, a1: int, b0: int, b1: int) -> int:
+    return max(0, min(a1, b1) - max(a0, b0))
+
+
+def _split_clip(cl: PremiereClip, at: int) -> tuple[PremiereClip, PremiereClip]:
+    """A V1 clip as two seamless pieces at sequence frame ``at`` (the source runs on; framing keys are in source
+    time, so both keep them)."""
+    mid = cl.src_in + int(round((at - cl.rec_start) * cl.speed))
+    return (dataclasses.replace(cl, end=at, rec_end=at, src_out=mid, link_split=True),
+            dataclasses.replace(cl, start=at, rec_start=at, src_in=mid, link_split=True))
+
+
+def _split_audio(it: dict, at: int) -> tuple[dict, dict]:
+    """An A1 item as two seamless pieces at sequence frame ``at`` (the source runs on: no fade, no click)."""
+    mid = it["in"] + int(round((at - it["start"]) * float(it["speed"])))
+    return (dict(it, end=at, out=mid, fade_out=False, piece=True),
+            dict(it, start=at, **{"in": mid}, fade_in=False, piece=True))
+
+
+def _main_audio(clips: Sequence[PremiereClip], audio: Sequence[dict]) -> dict[int, int]:
+    """{V1 clip: the A1 item it overlaps most (the earlier on a tie)} for every V1 clip with audio under it."""
+    out = {}
+    for vi, cl in enumerate(clips):
+        best = max(((_overlap(cl.rec_start, cl.rec_end, it["start"], it["end"]), -ai) for ai, it in enumerate(audio)),
+                   default=(0, 0))
+        if best[0] > 0:
+            out[vi] = -best[1]
+    return out
+
+
+def link_pairs(clips: Sequence[PremiereClip], audio: Sequence[dict]
+               ) -> tuple[list[PremiereClip], list[dict], list[tuple[int, int]]]:
+    """V1 clips and A1 items as linked pairs (Premiere's linked clips: move, trim or cut one and its audio goes with
+    it): every V1 clip with the A1 item it overlaps most, every A1 item with one V1 clip. An A1 item several V1 clips
+    play over (one take of audio while the picture cuts: a framing change, retimed repeats) is split at their cuts
+    into seamless pieces (the source runs on: nothing is heard); an A1 item no V1 clip claims (an audio cut inside a
+    V1 clip) splits that V1 clip at its edge (the picture runs on). Audio shifted a little from its own picture (an
+    A1 cut a few frames from V1's, to close a jump) stays linked to that picture. Returns (V1 clips, A1 items,
+    [(V1 index, A1 index)]): a V1 clip with no audio under it (a freeze, muted B-roll) and an A1 item under an empty
+    V1 are left unlinked."""
+    clips, audio = list(clips), [dict(it) for it in audio]
+    for _ in range(len(clips) + len(audio) + 1):            # A1 cuts inside a V1 clip: split it there
+        claimed = set(_main_audio(clips, audio).values())
+        orphan = next((it for ai, it in enumerate(audio) if ai not in claimed and any(
+            _overlap(c.rec_start, c.rec_end, it["start"], it["end"]) for c in clips)), None)
+        if orphan is None:
+            break
+        vi = max(range(len(clips)), key=lambda v: _overlap(clips[v].rec_start, clips[v].rec_end, orphan["start"],
+                                                           orphan["end"]))
+        cl = clips[vi]
+        cuts = sorted(x for x in (orphan["start"], orphan["end"]) if cl.rec_start < x < cl.rec_end)
+        if not cuts:
+            break
+        pieces, rest = [], cl
+        for x in cuts:
+            a, rest = _split_clip(rest, x)
+            pieces.append(a)
+        clips[vi:vi + 1] = pieces + [rest]
+    main = _main_audio(clips, audio)
+    by_a: dict[int, list[int]] = {}
+    for vi, ai in main.items():
+        by_a.setdefault(ai, []).append(vi)
+    out_a: list[dict] = []
+    pairs: list[tuple[int, int]] = []
+    for ai, it in enumerate(audio):
+        vs = sorted(by_a.get(ai, []), key=lambda v: clips[v].rec_start)
+        pieces, rest = [], it
+        for v in vs[1:]:                                    # one take under several V1 clips: a piece for each
+            if rest["start"] < clips[v].rec_start < rest["end"]:
+                a, rest = _split_audio(rest, clips[v].rec_start)
+                pieces.append(a)
+        pieces.append(rest)
+        if len(pieces) == len(vs):
+            for piece, v in zip(pieces, vs):
+                pairs.append((v, len(out_a)))
+                out_a.append(piece)
+        else:                                               # not one piece per clip: link the take to its main clip
+            if vs:
+                pairs.append((max(vs, key=lambda v: _overlap(clips[v].rec_start, clips[v].rec_end, it["start"],
+                                                             it["end"])), len(out_a)))
+            out_a.append(it)
+    return clips, out_a, sorted(pairs)
 
 
 def premiere_center(position: tuple[float, float], seq_wh: tuple[float, float], src_wh: tuple[float, float]
@@ -1653,6 +1739,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     if silence is not None and silence.active:
         clips, audio_items, markers = sil.apply_premiere(clips, audio_items, markers, silence)
         N = silence.new_frames
+    clips, audio_items, pairs = link_pairs(clips, audio_items)       # V1 + A1 as linked clips
+    a_of = {v: a for v, a in pairs}
+    v_of = {a: v for v, a in pairs}
     if str((cutlist.settings or {}).get("audio_sync") or "raw") == "competitor":
         warnings.append("--audio-sync competitor is not used by the Premiere export: A1 keeps the RAW lip-sync at the "
                         "same cuts as V1")
@@ -1718,6 +1807,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         stv = _sub(ci, "sourcetrack")
         _sub(stv, "mediatype", "video")
         _sub(stv, "trackindex", 1)
+        if n - 1 in a_of:
+            _links(ci, n, a_of[n - 1] + 1)
         cm = _sub(ci, "comments")
         _sub(cm, "mastercomment1", f"{cl.label} speed {cl.speed:.6f} conf {float(cl.seg.confidence or 0):.2f}")
         _sub(cm, "mastercomment2", note)
@@ -1753,6 +1844,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             sta = _sub(ai, "sourcetrack")
             _sub(sta, "mediatype", "audio")
             _sub(sta, "trackindex", 1)
+            if n_a - 1 in v_of:
+                _links(ai, v_of[n_a - 1] + 1, n_a)
             cm = _sub(ai, "comments")
             _sub(cm, "mastercomment1", f"{_seg_label(it['seg'])} {it['what']}")
     for m in markers:
@@ -1766,9 +1859,22 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     atomic_write_text(path, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + body + "\n")
     for w in warnings:
         log.info("premiere export: %s", w)
-    return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac,
+    return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
+
+
+def _links(parent: ET.Element, v: int, a: int) -> None:
+    """The <link>s of one linked pair, written into both its clip items the way Premiere exports linked clips: the V1
+    clip (clipitem-<v>, the v-th clip of V1) and its A1 clip (clipitem-a<a>, the a-th of A1)."""
+    for ref, kind, idx in ((f"clipitem-{v}", "video", v), (f"clipitem-a{a}", "audio", a)):
+        lk = _sub(parent, "link")
+        _sub(lk, "linkclipref", ref)
+        _sub(lk, "mediatype", kind)
+        _sub(lk, "trackindex", 1)
+        _sub(lk, "clipindex", idx)
+        if kind == "audio":
+            _sub(lk, "groupindex", 1)
 
 
 def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
@@ -2232,7 +2338,8 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
         elif el.tag == "clipitem":
             speed = _remap_speed(el)
             s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
-            out["clips"].append({"name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
+            out["clips"].append({"id": el.get("id"), "links": _link_refs(el),
+                                 "name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                                  "in": s_in, "out": s_out,
                                  "timebase": int(_text(el, "rate/timebase", 0)), "ntsc": _text(el, "rate/ntsc"),
                                  "speed": speed, "motion": _motion_of(el),
@@ -2245,12 +2352,18 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
                   if _text(eff, "effectid") == "audiolevels" for k in eff.findall("parameter/keyframe")]
         speed = _remap_speed(el)
         s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
-        out["audio"].append({"name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
+        out["audio"].append({"id": el.get("id"), "links": _link_refs(el),
+                             "name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                              "in": s_in, "out": s_out, "speed": speed, "levels": levels})
     for mk in seq.findall("marker"):
         out["markers"].append({"name": _text(mk, "name"), "comment": _text(mk, "comment"),
                                "in": int(_text(mk, "in")), "out": int(_text(mk, "out"))})
     return out
+
+
+def _link_refs(el: ET.Element) -> list[tuple[str, str]]:
+    """A clip item's <link>s: [(linkclipref, mediatype)]."""
+    return [(str(_text(lk, "linkclipref", "")), str(_text(lk, "mediatype", ""))) for lk in el.findall("link")]
 
 
 def _sim_from_motion(scale: float, rot: float, center: tuple[float, float], W: int, H: int,
@@ -2388,6 +2501,70 @@ def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[flo
     items += [{"label": "OTHER VIDEO", "start": a, "end": b, "speed": None, "allowed": True}   # filled by hand
               for a, b in other_video_ranges(x)]
     return flash_problems(items, fps, changes_s)
+
+
+LINK_AUDIO_SHARE = 0.5     # a V1 clip with A1 under at least this share of it has audio (it must be linked)
+
+
+def _track_ranges(items: Sequence[dict], transitions: Sequence[dict]) -> list[tuple[int, int]]:
+    """The record ranges of a track's clip items, an edge inside a cross dissolve (-1) at the transition's start."""
+    starts = sorted(int(t["start"]) for t in transitions)
+    out = []
+    for it in items:
+        s0, e0 = int(it["start"]), int(it["end"])
+        if s0 == -1:
+            s0 = max((t for t in starts if t < e0), default=e0)
+        if e0 == -1:
+            e0 = min((t for t in starts if t > s0), default=s0)
+        out.append((s0, e0))
+    return out
+
+
+def premiere_link_problems(xml_path: str | os.PathLike) -> tuple[list[str], list[str]]:
+    """The hard link check of the final XML, on its own numbers (Premiere's linked clips: write_premiere_xml's
+    link_pairs): every V1 clip with audio under it (A1 under at least LINK_AUDIO_SHARE of it) is linked to exactly one
+    A1 clip, and every A1 clip with picture over it to exactly one V1 clip -- the same pair in both clip items, the
+    two overlapping on the sequence. Returns (problems, exceptions): a V1 clip with no audio under it (a freeze, muted
+    B-roll: silent on purpose) and an A1 clip under an empty V1 are left unlinked and listed. Another video's
+    stretches (OTHER VIDEO) have no clip at all."""
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    vr = _track_ranges(x["clips"], x["transitions"])
+    ar = [(int(a["start"]), int(a["end"])) for a in x["audio"]]
+    vid = {c["id"]: i for i, c in enumerate(x["clips"])}
+    aid = {a["id"]: i for i, a in enumerate(x["audio"])}
+    problems, exceptions = [], []
+
+    def name(kind: str, i: int) -> str:
+        it, (s0, _) = (x["clips"][i], vr[i]) if kind == "V1" else (x["audio"][i], ar[i])
+        return f"{kind} {it.get('label')} at {_tc(s0, fps)}"
+    v_links = [[aid[r] for r, k in c["links"] if k == "audio" and r in aid] for c in x["clips"]]
+    a_links = [[vid[r] for r, k in a["links"] if k == "video" and r in vid] for a in x["audio"]]
+    for i, c in enumerate(x["clips"]):
+        bad = [r for r, k in c["links"] if (k == "video" and r not in vid) or (k == "audio" and r not in aid)]
+        if bad:
+            problems.append(f"{name('V1', i)}: links to {', '.join(bad)}, which is no clip of V1 / A1")
+        heard = sum(_overlap(*vr[i], *a) for a in ar)
+        has_audio = heard >= LINK_AUDIO_SHARE * max(1, vr[i][1] - vr[i][0])
+        if len(v_links[i]) == 1:
+            j = v_links[i][0]
+            if a_links[j] != [i]:
+                problems.append(f"{name('V1', i)}: linked to {name('A1', j)}, which does not link back to it alone")
+            if not _overlap(*vr[i], *ar[j]):
+                problems.append(f"{name('V1', i)}: linked to {name('A1', j)}, which plays elsewhere on the sequence")
+        elif v_links[i] or has_audio:
+            problems.append(f"{name('V1', i)}: linked to {len(v_links[i])} A1 clips (exactly one: its audio)")
+        else:
+            exceptions.append(f"{name('V1', i)}: no audio under it (silent on purpose) -- not linked")
+    for j, a in enumerate(x["audio"]):
+        seen = any(_overlap(*v, *ar[j]) for v in vr)
+        if len(a_links[j]) == 1:
+            continue                                     # (checked from its V1 clip)
+        if a_links[j] or seen:
+            problems.append(f"{name('A1', j)}: linked to {len(a_links[j])} V1 clips (exactly one: its picture)")
+        else:
+            exceptions.append(f"{name('A1', j)}: under an empty V1 (nothing to link it to) -- not linked")
+    return problems, exceptions
 
 
 def premiere_other_video_problems(xml_path: str | os.PathLike, want: Sequence[tuple[str, int]]) -> list[str]:
@@ -2648,10 +2825,15 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                               for (name, _), (a, b) in zip(want_ov, other_video_ranges(x0))]
     except Exception as e:  # noqa: BLE001
         ov = [f"the other-video check could not read the XML: {type(e).__name__}: {e}"]
+    try:
+        links, out["link_exceptions"] = premiere_link_problems(xml_path) if not bad_items else ([], [])
+    except Exception as e:  # noqa: BLE001
+        links, out["link_exceptions"] = [f"the link check could not read the XML: {type(e).__name__}: {e}"], []
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
                [f"XML SPEECH {t}" for t in talk] + [f"XML FLASH {t}" for t in flash] +
-               [f"XML SILENCE {t}" for t in hush] + [f"XML OTHER VIDEO {t}" for t in ov])
-    out["other_video_problems"] = ov
+               [f"XML SILENCE {t}" for t in hush] + [f"XML OTHER VIDEO {t}" for t in ov] +
+               [f"XML LINK {t}" for t in links])
+    out["other_video_problems"], out["link_problems"] = ov, links
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
     out["flash_problems"], out["silence_problems"] = flash, hush
     out["speech_checked"], out["flash_checked"] = speech is not None, shots is not None
@@ -2663,6 +2845,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if cut:
             from .silence import apply_premiere
             clips, want_a, markers = apply_premiere(clips, want_a, markers, silence)
+        clips, want_a, _ = link_pairs(clips, want_a)          # as write_premiere_xml links them
         x = parse_premiere_xml(xml_path)
     except Exception as e:  # noqa: BLE001
         errors.append(f"XML: validation crashed: {type(e).__name__}: {e}")
@@ -2775,7 +2958,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                     errors.append(f"XML {cb.label}: the framing changes by {mv:.0f} px after {ca.label} "
                                   f"(under --min-move {st['min_move']:g})")
             elif (ga["end"] != -1 and ga["end"] == gb["start"] and gb["in"] == ga["out"]
-                  and _speed_ok(gb["speed"], ga["speed"])
+                  and _speed_ok(gb["speed"], ga["speed"]) and not (ca.link_split and cb.link_split)
                   and ga["flip"] == gb["flip"] and not ca.retime and not cb.retime):
                 errors.append(f"XML {ca.label} / {cb.label}: one continuous RAW take with the same framing, "
                               "but two clips")
@@ -2790,14 +2973,15 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     if len(x["audio"]) != len(want_a):
         errors.append(f"XML: {len(x['audio'])} A1 clips, expected {len(want_a)}")
     ev_ranges = ({(it["start"], it["end"]) for it in want_a} if cut else
-                 {(ev.rec_in * fac, ev.rec_out * fac) for ev in events}) | {(cl.rec_start, cl.rec_end) for cl in clips}
+                 {(ev.rec_in * fac, ev.rec_out * fac) for ev in events}) | {(cl.rec_start, cl.rec_end) for cl in clips} \
+        | {(it["start"], it["end"]) for it in want_a if it.get("piece")}        # one take split for its link
     for got, it in zip(x["audio"], want_a):
         if (got["start"], got["end"], got["in"], got["out"]) != (it["start"], it["end"], it["in"], it["out"]):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: {got} (want {it['start']}-{it['end']} in {it['in']})")
         if (got["start"], got["end"]) not in ev_ranges:
             errors.append(f"XML A1 {_seg_label(it['seg'])}: range {got['start']}-{got['end']} is not a V1 cut range")
         cl = next((c for c in clips if c.rec_start <= got["start"] and got["end"] <= c.rec_end), None)
-        if it["what"] == "picture" and cl is not None and \
+        if it["what"] == "picture" and cl is not None and not it.get("piece") and \
                 got["in"] != cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
         from .silence import FADE_FRAMES
