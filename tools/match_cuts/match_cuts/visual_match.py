@@ -74,7 +74,10 @@ _WARNED: set[str] = set()
 SPAWN_TREE_BYTES_PER_DESC = 800
 SPAWN_WORKER_BASE_BYTES = 300 << 20        # interpreter + numpy / OpenCV + per-task working set
 SPAWN_MEM_MARGIN_BYTES = 768 << 20         # kept free for the parent / OS (at least; or 10 % of available)
-_MEM_CAPS: dict[tuple, int] = {}           # (index identity, requested workers) -> cap (decided once)
+# Every other spawn pool is capped too: a worker on refine's tasks holds ~0.85 GB of private memory (measured on
+# the Deadpool clip: 30 workers, 28 GB) -- with After Effects holding 47 GB, 30 such workers left Windows 4 GB.
+SPAWN_WORKER_EST_BYTES = 1 << 30
+_MEM_CAPS: dict[tuple, int] = {}           # (index identity or 'any', descriptors, requested workers) -> cap (once)
 
 
 def _warn_once(key: str, msg: str, *args: Any) -> None:
@@ -200,8 +203,11 @@ def _state_index(state: dict) -> "RawIndex | None":
 
 def _available_ram() -> int | None:
     """Bytes of RAM available to new processes without swapping, or None when unknown: Linux
-    /proc/meminfo MemAvailable, Windows GlobalMemoryStatusEx.ullAvailPhys, macOS vm_stat free + inactive
-    + speculative + purgeable pages, else POSIX SC_AVPHYS_PAGES."""
+    /proc/meminfo MemAvailable, Windows GlobalMemoryStatusEx: the smaller of ullAvailPhys and ullAvailPageFile
+    (the commit charge left -- Windows refuses any allocation past the commit limit, free RAM or not: with
+    After Effects holding 27 GB, 34 GB RAM was free but only 22 GB could be committed, and 28 workers of 1 GB
+    each failed with "Insufficient memory"), macOS vm_stat free + inactive + speculative + purgeable pages,
+    else POSIX SC_AVPHYS_PAGES."""
     plat = _platform()
     try:
         if plat.startswith("linux"):
@@ -221,7 +227,7 @@ def _available_ram() -> int | None:
             ms = _MS()
             ms.dwLength = ctypes.sizeof(_MS)
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):  # type: ignore[attr-defined]
-                return int(ms.ullAvailPhys)
+                return int(min(ms.ullAvailPhys, ms.ullAvailPageFile))
             return None
         elif plat == "darwin":
             import re
@@ -244,32 +250,78 @@ def _available_ram() -> int | None:
     return None
 
 
+def _pool_private_bytes() -> int:
+    """Private memory (Windows: commit charge) of this process's spawn-pool workers -- released when the pool is
+    replaced by one of another size; 0 when unknown or not on Windows (fork workers share the parent's pages)."""
+    pool = _POOL["pool"]
+    if pool is None or _POOL["pid"] != os.getpid() or not _platform().startswith("win"):
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        k32.OpenProcess.restype = wintypes.HANDLE
+        total = 0
+        for p in pool_workers(pool):
+            h = k32.OpenProcess(0x1000, False, int(p.pid))          # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                continue
+            try:
+                c = _PMC()
+                c.cb = ctypes.sizeof(_PMC)
+                if k32.K32GetProcessMemoryInfo(h, ctypes.byref(c), c.cb):
+                    total += int(c.PagefileUsage)
+            finally:
+                k32.CloseHandle(h)
+        return total
+    except Exception:  # noqa: BLE001 - unknown: count nothing
+        return 0
+
+
 def _spawn_mem_cap(workers: int, state: dict) -> int:
-    """Spawn pool size for ``state``: ``workers`` unless the state holds a :class:`RawIndex`, then at most
-    (available RAM - margin - the memmapped descriptors) // (SPAWN_TREE_BYTES_PER_DESC x descriptors +
-    SPAWN_WORKER_BASE_BYTES), >= 1. The available RAM already excludes the parent (which holds its own
-    tree). Decided once per (index, workers) in this process -- later calls with the same index would
-    otherwise count the trees the pool's workers already hold -- and logged once."""
-    idx = _state_index(state)
-    if idx is None or workers <= 1:
+    """Spawn pool size for ``state``: at most the workers that fit in the memory available to new processes (the
+    available RAM -- on Windows also the commit charge left -- plus what this process's own pool workers hold,
+    released when the pool is replaced) less a margin: SPAWN_WORKER_EST_BYTES a worker, or, when the state holds a
+    :class:`RawIndex`, SPAWN_TREE_BYTES_PER_DESC x descriptors + SPAWN_WORKER_BASE_BYTES a worker with the
+    memmapped descriptors counted once; >= 1. The available RAM already excludes the parent (which holds its own
+    tree). Decided once per (index or any state, workers) in this process -- later calls would otherwise count
+    the memory the pool's workers already hold -- and logged once."""
+    if workers <= 1:
         return workers
-    n_desc = int(len(idx.desc))
-    ident = (str(idx.key) or f"id{id(idx)}", n_desc, int(workers))
+    idx = _state_index(state)
+    n_desc = int(len(idx.desc)) if idx is not None else 0
+    ident = ((str(idx.key) or f"id{id(idx)}") if idx is not None else "any", n_desc, int(workers))
     if ident in _MEM_CAPS:
         return _MEM_CAPS[ident]
     cap = int(workers)
     avail = _available_ram()
-    if avail is not None and n_desc > 0:
-        per_worker = SPAWN_TREE_BYTES_PER_DESC * n_desc + SPAWN_WORKER_BASE_BYTES
-        shared = n_desc * 128 * (1 + 4)                  # uint8 + float32 descriptor memmaps (page cache)
+    if avail is not None and (idx is None or n_desc > 0):
+        avail += _pool_private_bytes()
+        if idx is not None:
+            per_worker = SPAWN_TREE_BYTES_PER_DESC * n_desc + SPAWN_WORKER_BASE_BYTES
+            shared = n_desc * 128 * (1 + 4)              # uint8 + float32 descriptor memmaps (page cache)
+        else:
+            per_worker, shared = SPAWN_WORKER_EST_BYTES, 0
         margin = max(SPAWN_MEM_MARGIN_BYTES, avail // 10)
         cap = int(max(1, min(int(workers), (avail - margin - shared) // per_worker)))
         if cap < workers:
             POOL_STATS["spawn_mem_capped"] += 1
-            log.warning("spawn workers: %d instead of %d for the RAW index search - each spawn worker loads its "
-                        "own FLANN tree (%.2f GB for %d descriptors + %.2f GB base) and %.1f GB RAM is available%s",
-                        cap, workers, SPAWN_TREE_BYTES_PER_DESC * n_desc / 1e9, n_desc, SPAWN_WORKER_BASE_BYTES / 1e9,
-                        avail / 1e9, " (running single-process)" if cap <= 1 else "")
+            if idx is not None:
+                log.warning("spawn workers: %d instead of %d for the RAW index search - each spawn worker loads "
+                            "its own FLANN tree (%.2f GB for %d descriptors + %.2f GB base) and %.1f GB RAM is "
+                            "available%s", cap, workers, SPAWN_TREE_BYTES_PER_DESC * n_desc / 1e9, n_desc,
+                            SPAWN_WORKER_BASE_BYTES / 1e9, avail / 1e9, " (running single-process)" if cap <= 1 else "")
+            else:
+                log.warning("spawn workers: %d instead of %d - each worker process needs about %.1f GB and %.1f GB of "
+                            "memory is available (other programs hold the rest)%s", cap, workers,
+                            per_worker / 1e9, avail / 1e9, " (running single-process)" if cap <= 1 else "")
         else:
             log.debug("spawn workers: %d (RAW index %d descriptors, %.1f GB available)", workers, n_desc, avail / 1e9)
     _MEM_CAPS[ident] = cap

@@ -2827,6 +2827,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         ov = [f"the other-video check could not read the XML: {type(e).__name__}: {e}"]
     try:
         links, out["link_exceptions"] = premiere_link_problems(xml_path) if not bad_items else ([], [])
+        xl = parse_premiere_xml(xml_path)
+        out["link_counts"] = {"v1": len(xl["clips"]), "a1": len(xl["audio"]),
+                              "linked": sum(1 for c in xl["clips"] if [k for _, k in c["links"]].count("audio") == 1)}
     except Exception as e:  # noqa: BLE001
         links, out["link_exceptions"] = [f"the link check could not read the XML: {type(e).__name__}: {e}"], []
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +

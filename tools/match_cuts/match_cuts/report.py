@@ -1410,6 +1410,40 @@ def _environment(ctx: Any) -> list[str]:
     return out
 
 
+PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, what it checks)
+    ("XML ITEM", "item_problems", "every item imports: whole frames, in < out, inside its media, no overlap"),
+    ("XML GAP", "gaps", "every clip covers the template window"),
+    ("XML REPEAT", "repeat_problems", "no RAW footage or audio plays twice"),
+    ("XML SPEECH", "speech_problems", "no audio cut inside speech"),
+    ("XML FLASH", "flash_problems", "no piece of a RAW shot under 0.25 s at a cut"),
+    ("XML SILENCE", "silence_problems", "no more silence across a cut than --pad-after + --pad-before"),
+    ("XML OTHER VIDEO", "other_video_problems", "another video's stretch left empty for exactly its length"),
+    ("XML LINK", "link_problems", "every V1 clip linked to its own A1 clip and back"),
+]
+
+
+def _premiere_checks(ctx: Any) -> list[str]:
+    """--premiere: the hard checks on the final 1_edit.xml (each one fails the run), and the linked clips."""
+    if not getattr(getattr(ctx, "cfg", None), "premiere", False):
+        return ["Not used: only the Premiere export (--premiere) is checked this way."]
+    v = getattr(ctx, "exports", None) or {}
+    if not v:
+        return ["1_edit.xml was not validated (see *Warnings*)."]
+    not_run = {"speech_problems": not v.get("speech_checked", True), "flash_problems": not v.get("flash_checked", True)}
+    rows = []
+    for name, key, what in PREMIERE_CHECKS:
+        probs = v.get(key)
+        status = ("not run" if probs is None or not_run.get(key) else
+                  "OK" if not probs else f"**FAIL** ({len(probs)})")
+        rows.append([f"`{name}`", what, status])
+    out = [md_table(["check", "what it checks", "result"], rows)]
+    if "link_counts" in v:
+        from .pipeline import link_lines
+        ll = link_lines(v)
+        out += ["", f"**Linked clips**: {ll[0]}."] + [f"- {r}" for r in ll[1:]]
+    return out
+
+
 def _silence(ctx: Any) -> list[str]:
     """silence.py: every silence of the RAW audio under my clips cut out of 1_edit.xml (or why none was)."""
     plan = getattr(ctx, "silence", None) or {}
@@ -1466,6 +1500,7 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
     ("Captions", _captions),
     ("B-roll cutaways", _broll),
     ("Silence removal", _silence),
+    ("Premiere XML checks", _premiere_checks),
 ]
 
 

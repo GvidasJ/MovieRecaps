@@ -530,6 +530,7 @@ def clean_pool_env(monkeypatch):
 def test_start_method_platform_defaults_and_env(monkeypatch):
     monkeypatch.delenv(vm.START_METHOD_ENV, raising=False)
     monkeypatch.setattr(vm, "_platform", lambda: "linux")
+    monkeypatch.setattr(vm, "_fork_available", lambda: True)     # the platforms are simulated: Linux has fork
     assert vm.start_method() == "fork"
     for plat in ("win32", "darwin"):
         monkeypatch.setattr(vm, "_platform", lambda plat=plat: plat)
@@ -568,10 +569,12 @@ def test_parallel_map_macos_uses_spawn_and_env_overrides(monkeypatch, clean_pool
     monkeypatch.setattr(vm, "_platform", lambda: "darwin")
     res = _run_probe(3)
     assert not any(r[3] for r in res) and os.getpid() not in {r[2] for r in res}
-    monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
-    res_f = _run_probe(3)
-    assert all(r[3] for r in res_f) and os.getpid() not in {r[2] for r in res_f}   # forked
-    assert vm._POOL["pool"] is None                       # the spawn pool is shut down before forking
+    res_f = res
+    if vm._fork_available():                              # (Windows has no fork)
+        monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
+        res_f = _run_probe(3)
+        assert all(r[3] for r in res_f) and os.getpid() not in {r[2] for r in res_f}   # forked
+        assert vm._POOL["pool"] is None                   # the spawn pool is shut down before forking
     monkeypatch.setattr(vm, "_platform", lambda: "linux")
     monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
     res_s = _run_probe(3)
@@ -699,7 +702,8 @@ def test_index_and_search_bit_identical_inline_fork_spawn(scene, tmp_path, monke
     frames = [0, 12, 33, 52, 66, 73, 78]
     out = {}
     try:
-        for mode, workers in (("inline", 1), ("fork", 3), ("spawn", 3)):
+        for mode, workers in [m for m in (("inline", 1), ("fork", 3), ("spawn", 3))
+                              if m[0] != "fork" or vm._fork_available()]:       # (Windows has no fork)
             monkeypatch.setenv(vm.START_METHOD_ENV, "spawn" if mode == "spawn" else "fork")
             cfg = make_config(tmp_path / mode, workers=workers)
             before = dict(vm.POOL_STATS)
@@ -714,7 +718,7 @@ def test_index_and_search_bit_identical_inline_fork_spawn(scene, tmp_path, monke
     finally:
         vm.shutdown_workers()
     i0, a0 = out["inline"]
-    for mode in ("fork", "spawn"):
+    for mode in [m for m in ("fork", "spawn") if m in out]:
         i1, a1 = out[mode]
         for k in ("frames", "desc", "owner", "pts", "offsets"):
             assert np.array_equal(getattr(i0, k), getattr(i1, k)), (mode, k)
@@ -756,6 +760,7 @@ def test_spawn_pool_capped_by_available_ram(scene, built, monkeypatch, clean_poo
     inline = vm.parallel_map(_index_probe, items, 1, {"index": idx}, seed=1)
     monkeypatch.setenv(vm.START_METHOD_ENV, "spawn")
     monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_pool_private_bytes", lambda: 0)
     monkeypatch.setattr(vm, "_available_ram", lambda: _ram_for_workers(idx, 2.5))
     before = dict(vm.POOL_STATS)
     with caplog.at_level(logging.WARNING, logger="match_cuts"):
@@ -772,9 +777,12 @@ def test_spawn_pool_capped_by_available_ram(scene, built, monkeypatch, clean_poo
     with caplog.at_level(logging.WARNING, logger="match_cuts"):
         res2 = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
     assert vm._POOL["n"] == 2 and [r[3] for r in res2] == [r[3] for r in inline] and "instead of" not in caplog.text
-    # a state without a RawIndex is not capped
-    vm.parallel_map(_probe, list(range(40)), 4, {"mul": 7}, seed=1)
-    assert vm._POOL["n"] == 4
+    # a state without a RawIndex is capped at SPAWN_WORKER_EST_BYTES a worker (decided once, logged)
+    monkeypatch.setattr(vm, "_available_ram", lambda: vm.SPAWN_MEM_MARGIN_BYTES + int(3.5 * vm.SPAWN_WORKER_EST_BYTES))
+    with caplog.at_level(logging.WARNING, logger="match_cuts"):
+        vm.parallel_map(_probe, list(range(40)), 4, {"mul": 7}, seed=1)
+    assert vm._POOL["n"] == 3 and "spawn workers: 3 instead of 4 - each worker process needs" in caplog.text
+    monkeypatch.setattr(vm, "_available_ram", lambda: 1)
     # only one worker fits: single-process (the parent already holds the tree), no spawn pool used
     monkeypatch.setattr(vm, "_MEM_CAPS", {})
     monkeypatch.setattr(vm, "_available_ram", lambda: _ram_for_workers(idx, 1.5))
@@ -789,6 +797,8 @@ def test_spawn_pool_capped_by_available_ram(scene, built, monkeypatch, clean_poo
     monkeypatch.setattr(vm, "_available_ram", lambda: None)
     assert vm._spawn_mem_cap(4, {"index": idx}) == 4
     # the fork path never consults the memory cap (the tree is shared copy-on-write)
+    if not vm._fork_available():                          # (Windows has no fork)
+        return
     monkeypatch.setenv(vm.START_METHOD_ENV, "fork")
 
     def boom(*a, **k):
@@ -797,6 +807,18 @@ def test_spawn_pool_capped_by_available_ram(scene, built, monkeypatch, clean_poo
     before = dict(vm.POOL_STATS)
     res4 = vm.parallel_map(_index_probe, items, 4, {"index": idx}, seed=1)
     assert vm.POOL_STATS["fork"] == before["fork"] + 1 and [r[3] for r in res4] == [r[3] for r in inline]
+
+
+def test_memory_cap_counts_what_the_pool_workers_hold(monkeypatch):
+    """The memory this process's own pool workers hold is released when the pool is replaced: it counts as
+    available (else a second pool size would be decided against the first pool's own memory)."""
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_available_ram", lambda: vm.SPAWN_MEM_MARGIN_BYTES + vm.SPAWN_WORKER_EST_BYTES // 2)
+    monkeypatch.setattr(vm, "_pool_private_bytes", lambda: 0)
+    assert vm._spawn_mem_cap(8, {"mul": 1}) == 1
+    monkeypatch.setattr(vm, "_MEM_CAPS", {})
+    monkeypatch.setattr(vm, "_pool_private_bytes", lambda: 3 * vm.SPAWN_WORKER_EST_BYTES)
+    assert vm._spawn_mem_cap(8, {"mul": 1}) == 3
 
 
 def test_available_ram_probe_returns_bytes():

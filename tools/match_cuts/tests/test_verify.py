@@ -1463,16 +1463,14 @@ def _write_video(path: Path, frames: np.ndarray, fps=F30) -> None:
 
 def _fake_aerender(path: Path, frames_dir: Path, n: int, rc: int = 0) -> Path:
     """A fake aerender: copies the first ``n`` PNGs of frames_dir to the -output pattern, exits with ``rc``."""
-    path.write_text("#!" + sys.executable + "\n"
-                    "import sys, shutil, pathlib\n"
+    from portable import fake_exe
+    return fake_exe(path, "import sys, shutil, pathlib\n"
                     "out = pathlib.Path(sys.argv[sys.argv.index('-output') + 1])\n"
                     f"src = sorted(pathlib.Path({str(frames_dir)!r}).glob('*.png'))[:{n}]\n"
                     "if 'PNG' in sys.argv[sys.argv.index('-OMtemplate') + 1]:\n"
                     "    for i, p in enumerate(src):\n"
                     "        shutil.copy(p, out.parent / ('ae_%05d.png' % i))\n"
                     f"sys.exit({rc})\n")
-    path.chmod(0o755)
-    return path
 
 
 def test_ae_render_rejects_failed_stale_and_truncated_renders(tmp_path):
@@ -1904,7 +1902,8 @@ def _outlined_word(img: np.ndarray, text: str, x: int, y: int, size: int = 14, s
     """Burn an outlined caption word into ``img`` in place: DejaVu Sans Bold, white fill, black stroke (ffmpeg
     drawtext's fontcolor=white:borderw=N:bordercolor=black, like the synthetic captions)."""
     from PIL import Image, ImageDraw, ImageFont
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+    from portable import font_file
+    font = ImageFont.truetype(font_file("bold"), size)
     im = Image.fromarray(img)
     ImageDraw.Draw(im).text((int(x), int(y)), text, font=font, fill=255, stroke_width=stroke, stroke_fill=0)
     img[:] = np.asarray(im)

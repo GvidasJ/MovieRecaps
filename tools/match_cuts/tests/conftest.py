@@ -22,6 +22,8 @@ VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 
 if str(TESTS_DIR) not in sys.path:                     # `import synth` from any test module
     sys.path.insert(0, str(TESTS_DIR))
+# never the After Effects of this machine: also for the CLI runs the end-to-end tests start (they inherit it)
+os.environ["MATCH_CUTS_NO_AE"] = "1"
 
 
 def _slow_enabled(config) -> bool:
@@ -45,6 +47,22 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_after_effects(monkeypatch):
+    """Tests never use the After Effects installed on this machine: a test that runs the whole CLI would otherwise
+    send its build_ae_project.jsx to it (``AfterFX.exe -r``, into the user's open After Effects) and wait up to
+    10 minutes for a project that never comes. The search with explicit ``roots`` (its own tests) still runs."""
+    from match_cuts import pipeline
+    real = pipeline.find_after_effects
+
+    def no_installed_ae(system=None, roots=None):
+        if roots is None:
+            return {"ae_app": None, "aerender": None, "ae_version": None, "ae_app_name": None}
+        return real(system, roots)
+    no_installed_ae.real = real                          # the search itself, for its own tests
+    monkeypatch.setattr(pipeline, "find_after_effects", no_installed_ae)
 
 
 @pytest.fixture(scope="session")

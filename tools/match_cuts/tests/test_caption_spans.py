@@ -5,7 +5,7 @@
   / last frames and text; a pop-in whose first frame is misread and a highlighted word stay one caption; a caption
   that grows word by word is a new caption at each new word; the same word twice is two captions;
 * the rules on hand-made data: the video's writing conventions, joining runs, a lone bar, the transcript fallback;
-* the acceptance test on input/competitor.mp4 against tests/fixtures/competitor_captions_truth.srt, the answer key
+* the acceptance test on tests/real/spiderman-school/competitor.mp4 against tests/fixtures/competitor_captions_truth.srt, the answer key
   written by eye from contact sheets of every frame: every caption READ with its text identical and its first and last
   frame within one frame; the file WRITTEN keeps the competitor's words and timing (each caption starts on the frame
   its first word appeared), regrouped into 2-4 word captions where it shows one word at a time, in lower case but
@@ -28,10 +28,12 @@ from match_cuts import caption_ocr, captions as C
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf",
          "/Library/Fonts/Arial Bold.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"]
-FONT = next((f for f in FONTS if Path(f).is_file()), None)
-REAL = Path(__file__).resolve().parents[3] / "input" / "competitor.mp4"
+from portable import font_file, pop_in  # noqa: E402
+
+FONT = next((f for f in [font_file('bold')] + FONTS if Path(f).is_file()), None)   # DejaVu first
+REAL = Path(__file__).resolve().parents[3] / "tests" / "real" / "spiderman-school" / "competitor.mp4"
 TRUTH_SRT = Path(__file__).resolve().parent / "fixtures" / "competitor_captions_truth.srt"
-# the zones layout.py measures on input/competitor.mp4 (1080x1920, 60 fps, 1965 frames)
+# the zones layout.py measures on that clip (1080x1920, 60 fps, 1965 frames)
 REAL_LAYOUT = {"zones": [{"type": "logo", "x": 310, "y": 222, "w": 116, "h": 118},
                          {"type": "channel_name", "x": 450, "y": 250, "w": 298, "h": 84},
                          {"type": "title", "x": 168, "y": 400, "w": 742, "h": 118},
@@ -49,7 +51,8 @@ need_ocr = pytest.mark.skipif(caption_ocr.available() is not None, reason="Rapid
 
 
 def _ff(p: str) -> str:
-    return p.replace("\\", "/").replace(":", "\\\\:")
+    from portable import ff_path
+    return ff_path(p, quoted=True)          # used inside '...'
 
 
 @pytest.fixture(scope="module")
@@ -61,17 +64,16 @@ def clip(tmp_path_factory) -> Path:
     st = f"fontfile='{font}':fontcolor=0xF0E18C:shadowcolor=black@0.85:shadowx=3:shadowy=3"
     hi = f"fontfile='{font}':fontcolor=0x40FF40:shadowcolor=black@0.85:shadowx=3:shadowy=3"
     ctr = "x=(w-tw)/2:y=880-th/2"
-    pop = "if(lt(n,{a}+2),44*(0.5+0.25*(n-{a})),44)"
     vf = ",".join([
         f"drawtext={st}:text='MY TITLE':fontsize=60:x=(w-tw)/2:y=80",
         f"drawtext={st}:text='Deadpool':fontsize=44:{ctr}:enable='between(n,0,9)'",
-        f"drawtext={st}:text='builds a team':fontsize='{pop.format(a=10)}':{ctr}:enable='between(n,10,34)'",
+        *pop_in(st, "builds a team", 10, 34, ctr),
         f"drawtext={st}:text='the X-Force':fontsize=44:x=200:y=860:enable='between(n,35,59)'",
         f"drawtext={hi}:text='the':fontsize=44:x=200:y=860:enable='between(n,47,59)'",          # highlighted word
         f"drawtext={st}:text='you see':fontsize=44:{ctr}:enable='between(n,60,69)'",            # grows word by word:
         f"drawtext={st}:text='you see him':fontsize=44:{ctr}:enable='between(n,70,89)'",        # two captions
         f"drawtext={st}:text='no':fontsize=44:{ctr}:enable='between(n,90,104)'",
-        f"drawtext={st}:text='no':fontsize='{pop.format(a=105)}':{ctr}:enable='between(n,105,119)'",
+        *pop_in(st, "no", 105, 119, ctr),
         f"drawtext={st}:text='*laughs*':fontsize=44:{ctr}:enable='between(n,125,149)'",
     ])
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r=30:d={N / 30}",
@@ -143,11 +145,11 @@ def test_only_unreadable_captions_take_the_words_heard_and_they_are_listed():
 
 
 # ---------------------------------------------------------------------------------------------
-# acceptance: input/competitor.mp4 against the answer key
+# acceptance: tests/real/spiderman-school/competitor.mp4 against the answer key
 # ---------------------------------------------------------------------------------------------
 
 @need_ocr
-@pytest.mark.skipif(not REAL.is_file(), reason="input/competitor.mp4 not in this checkout")
+@pytest.mark.skipif(not REAL.is_file(), reason="tests/real/spiderman-school not in this checkout")
 def test_real_competitor_captions_match_the_answer_key(tmp_path, monkeypatch):
     from match_cuts import transcribe
     from match_cuts.common import Cache

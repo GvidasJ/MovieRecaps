@@ -33,8 +33,10 @@ FULLSCREEN = (30, 38)
 FLASH = 71                                      # one full-canvas white flash frame
 N_FRAMES = 72
 FONT = cv2.FONT_HERSHEY_DUPLEX
-TTF = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+from portable import ff_path, font_file  # noqa: E402
+
+TTF = ff_path(font_file("bold"), quoted=False)          # DejaVu Sans Bold on Linux, Arial Bold on Windows
+MONO = ff_path(font_file("mono"), quoted=False)
 
 
 # ----------------------------------------------------------------------------------------------

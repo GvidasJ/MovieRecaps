@@ -532,6 +532,8 @@ def plan_fingerprint(name: str, monkeypatch) -> tuple[str, int]:
 def test_existing_profiles_plan_unchanged(name, monkeypatch):
     """Making the RAW rate, shot list, timing model, overlays and audio plan profile fields (film24) must not
     change a single ffmpeg argument, filtergraph or truth frame of the mini / full profiles."""
+    if S.FONT != "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf":
+        pytest.skip("the plan hashes were recorded with the DejaVu fonts of Linux (the plan holds the font path)")
     digest, n_cmd = plan_fingerprint(name, monkeypatch)
     assert n_cmd >= 30
     assert digest == PLAN_SHA256_PRE_FILM24[name], f"{name}: generation plan changed ({n_cmd} commands)"

@@ -19,7 +19,9 @@ from match_cuts import caption_ocr, captions as C
 
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf",
          "/Library/Fonts/Arial Bold.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"]
-FONT = next((f for f in FONTS if Path(f).is_file()), None)
+from portable import font_file, pop_in  # noqa: E402
+
+FONT = next((f for f in [font_file('bold')] + FONTS if Path(f).is_file()), None)   # DejaVu first
 
 pytestmark = [
     pytest.mark.skipif(caption_ocr.available() is not None, reason="RapidOCR not installed"),
@@ -46,7 +48,8 @@ LAYOUT = {
 
 
 def _ff_path(p: str) -> str:
-    return p.replace("\\", "/").replace(":", "\\\\:")
+    from portable import ff_path
+    return ff_path(p, quoted=True)          # used inside '...'
 
 
 @pytest.fixture(scope="module")
@@ -54,19 +57,17 @@ def clip(tmp_path_factory) -> Path:
     out = tmp_path_factory.mktemp("caption_ocr") / "captions.mp4"
     font = _ff_path(FONT)
     st = f"fontfile='{font}':fontcolor=white:borderw=4:bordercolor=black"
-    pop = "if(lt(n,{a}+2),44*(0.5+0.25*(n-{a})),44)"
     centre = "x=(w-tw)/2:y=880-th/2"
     vf = ",".join([
         f"drawtext={st}:text='MY TITLE':fontsize=60:x=(w-tw)/2:y=80",                                # static title
         f"drawtext={st}:text='@chan':fontsize=22:x=600:y=905",                                      # static watermark
         f"drawtext={st}:text='I got a Parker Peter':fontsize=44:{centre}:enable='between(n,10,29)'",
-        f"drawtext={st}:text='*automatic audi braking*':fontsize='{pop.format(a=30)}':{centre}"
-        f":enable='between(n,30,54)'",                                                              # pop-in
+        *pop_in(st, "*automatic audi braking*", 30, 54, centre),                                     # pop-in
         f"drawtext={st}:text='whoa!! x2':fontsize=44:x=250:y=860:enable='between(n,55,84)'",
         f"drawtext=fontfile='{font}':fontcolor=yellow:borderw=4:bordercolor=black:text='whoa!!':fontsize=44"
         f":x=250:y=860:enable='between(n,70,84)'",                                                  # highlight
         f"drawtext={st}:text='no':fontsize=44:{centre}:enable='between(n,85,99)'",
-        f"drawtext={st}:text='no':fontsize='{pop.format(a=100)}':{centre}:enable='between(n,100,114)'",  # again
+        *pop_in(st, "no", 100, 114, centre),                                                        # again
         f"drawtext={st}:text='Spider-Man is':fontsize=44:{centre}:enable='between(n,118,140)'",
     ])
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r=30:d={N / 30}",

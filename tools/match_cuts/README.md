@@ -107,7 +107,11 @@ A1 is split at those V1 cuts into seamless pieces — the source runs on, nothin
 an A1 cut falls inside a V1 clip, that clip is split there the same way. Only a clip with no audio under it (a
 freeze, muted B-roll: silent on purpose), an A1 clip under an empty V1 and another video's stretch (`OTHER VIDEO`)
 stay unlinked. The hard check `XML LINK` fails the run unless every V1 clip with audio under it is linked to exactly
-one A1 clip and every A1 clip under a picture to exactly one V1 clip, the same pair in both, overlapping.
+one A1 clip and every A1 clip under a picture to exactly one V1 clip, the same pair in both, overlapping. The end
+summary says how many are linked (*Linked clips: 14 of 14 V1 clips linked to their own A1 clip*) and lists every clip
+left unlinked on purpose; `report.md` section *Premiere XML checks* has one row per hard check on `1_edit.xml` (`XML
+ITEM`, `GAP`, `REPEAT`, `SPEECH`, `FLASH`, `SILENCE`, `OTHER VIDEO`, `LINK`) with its result. In Premiere, with
+*Linked Selection* on (the chain button at the top left of the timeline), clicking a V1 clip selects its audio too.
 
 Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
 
@@ -241,7 +245,7 @@ recheck model's word timings of the RAW; without a competitor (below) the RAW al
 * **The threshold adapts to each video**: its speech level (the loudness of its loudest 5% of 50 ms windows) and its
   background noise (its quietest 10%, digital silence ignored) are measured, and the threshold sits a third of the
   way from the noise up to the speech (at least 3 dB above the noise, at least 6 dB under the speech). A noisy
-  video's pauses are cut too, and loud and quiet recordings need no setting: on `input/raw_test.mp4` (speech
+  video's pauses are cut too, and loud and quiet recordings need no setting: on the Deadpool RAW `tests/real/deadpool/raw.mp4` (speech
   -16.2 dBFS, background -42.2 dBFS) it is -33.1 dBFS. `--silence-db DB` replaces it with DB under the speech level
   (e.g. `--silence-db -20`).
 * **Never inside a word**: the edit's audio is transcribed (word timings, the same `small.en` model as the captions,
@@ -717,7 +721,10 @@ running the remaining 788 of 1200 tasks in this process (identical results, only
 ```
 
 and continues in the main process with exactly the same results. After two such stops in one run, the rest of
-the run does not use worker processes at all. If the machine is short of memory, close other programs or run
+the run does not use worker processes at all. Worker pools are sized by the memory free for new processes -- on
+Windows the smaller of the free RAM and the commit charge left, because Windows refuses allocations past the commit
+limit (with After Effects holding 47 GB of a 96 GB PC, 28 workers of 1 GB each crashed with *Insufficient memory*):
+about 1 GB a worker; the console says when it uses fewer. If the machine is short of memory, close other programs or run
 with `--workers 2` (fewer processes, less memory). `--workers 1` never starts worker processes.
 (Settings: `pool_stall_timeout_s`, `pool_max_failures`, `progress_log_s` in `config.py`.)
 
@@ -824,18 +831,26 @@ Changed defaults: none yet.
 
 ```bash
 cd tools/match_cuts
-../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s
-../../.venv/bin/python -m pytest -q tests/test_synthetic.py   # Stage 1 end-to-end (slow, minutes)
+../../.venv/bin/python -m pytest -q -m "not slow"      # unit tests, each file < 60 s   (Windows: ..\..\.venv\Scripts\python)
+../../.venv/bin/python -m pytest -q -m slow --runslow  # end to end on synthetic video (slow, minutes each)
 ```
+
+The real clips the tests use live in `tests/real/` at the repository root (`zendaya/`, `deadpool/` -- the Deadpool clip
+and its RAW, once `input/competitor.mp4` + `input/raw_test.mp4` --, `spiderman-school/competitor.mp4`), never in
+`input/`, so the videos you work on there do not change what the tests check. The suite runs on Linux and Windows:
+the conftest sets `MATCH_CUTS_NO_AE=1` (After Effects counts as not installed: no test, nor a CLI run it starts, ever
+opens the After Effects of the machine), text is drawn with the DejaVu fonts (the system's on Linux, matplotlib's copy
+elsewhere), and what needs fork / `/proc` (Linux), ffmpeg's `flite` source or OpenTimelineIO (no wheel for Python 3.14)
+is skipped where missing.
 
 `tests/test_caption_spans.py` checks the Premiere competitor captions: exact caption timing on a synthetic clip in
 the real competitor's style (pop-in, highlighted word, word-by-word growth, the same word twice, `*laughs*`), the
-text rules, and the acceptance run on `input/competitor.mp4` (every caption real words, none under 0.1 s).
+text rules, and the acceptance run on `tests/real/spiderman-school/competitor.mp4` (every caption real words, none under 0.1 s).
 `tests/test_export_xml_edl.py` checks the fixed framing (no keyframes, rotation 0, the window covered), the
 `--min-move` rule (a 100 px pan in one take joins the clips, a 150 px reframe across a real cut keeps the
 framing, 300 px and a 30 % zoom reframe, coverage kept with the least change), the Premiere `<center>` units,
 the hard gap check (it fails S21's old values: x 42–431 uncovered), face-centred stretches, and S21 on
-`input/raw_test.mp4` (within 50 px of the hand-fixed Position 1083, no clip leaving a gap) and
+`tests/real/deadpool/raw.mp4` (within 50 px of the hand-fixed Position 1083, no clip leaving a gap) and
 `tests/test_broll.py` the B-roll-follows-the-audio default (trimmed audio under a cutaway, music, glitches, dips).
 
 `tests/test_restyle.py` runs the restyle on `reference/plain_captions.prproj` and checks that the result

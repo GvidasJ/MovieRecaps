@@ -199,6 +199,18 @@ def norm_text(t: str) -> str:
     return re.sub(r"[^a-z0-9]", "", t.lower())
 
 
+OCR_ALIKE = (("rn", "m"), ("vv", "w"), ("cl", "d"), ("1", "l"), ("i", "l"), ("0", "o"), ("5", "s"))
+
+
+def ocr_key(t: str) -> str:
+    """norm_text with the letters OCR mixes up in small text made the same (rn / m, vv / w, i / l / 1, 0 / o):
+    the misread first frame of a pop-in ('bullds a tearn') compares like its caption ('builds a team')."""
+    k = norm_text(t)
+    for a, b in OCR_ALIKE:
+        k = k.replace(a, b)
+    return k
+
+
 @dataclass
 class Band:
     """Where the captions are, in competitor pixels: the rows read (the whole frame width, so letters never touch
@@ -290,7 +302,7 @@ POP_S = 0.25              # ... within this time: it popped in again (a new capt
 POP_SHAPE = 0.5           # a pop-in / pop-out frame looks like its caption (scale-free IoU) at least this much ...
 POP_TEXT = 0.8            # ... and reads like it at least this much (small text misread), or cannot be read at all
 FILL_TOL = 60.0           # BGR distance of a letter pixel from the learned fill colour
-SPAN_VERSION = 4
+SPAN_VERSION = 5          # 5: pop-in frames compared with OCR look-alike letters (ocr_key)
 BAR_READS = frozenset(["1", "l", "|", "ı", "i", "I", "/"])     # a lone bar may be read as any of these
 
 
@@ -423,6 +435,7 @@ def join_runs(runs: Sequence[Sequence[int]], texts: Sequence[str], widths: np.nd
     import difflib
     pop = max(1, int(round(POP_S * float(fps))))
     keys = [norm_text(t) for t in texts]
+    looks = [ocr_key(t) for t in texts]                    # compared with the letters OCR mixes up made alike
     n = len(runs)
     touch = [i > 0 and runs[i - 1][1] == runs[i][0] for i in range(n)]
     for _ in range(n if alike is not None else 0):        # until stable: a pop-in of several misread frames
@@ -433,13 +446,13 @@ def join_runs(runs: Sequence[Sequence[int]], texts: Sequence[str], widths: np.nd
             best, top = None, POP_SHAPE
             for j, ok in ((i - 1, touch[i]), (i + 1, i + 1 < n and touch[i + 1])):
                 if not ok or not keys[j] or keys[j] == keys[i] or (keys[i] and difflib.SequenceMatcher(
-                        None, keys[i], keys[j], autojunk=False).ratio() < POP_TEXT):
+                        None, looks[i], looks[j], autojunk=False).ratio() < POP_TEXT):
                     continue
                 s = alike(min(i, j), max(i, j))
                 if s >= top:
                     best, top = j, s
             if best is not None:
-                keys[i], changed = keys[best], True
+                keys[i], looks[i], changed = keys[best], looks[best], True
         if not changed:
             break
 

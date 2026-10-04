@@ -429,6 +429,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             rows = list(hc.get("audio") or [])
             lines.append(f"  V1 clips without their audio on A1 (on purpose): {len(rows) if rows else 'none'}")
             lines += [f"    {r}" for r in rows[:max_rows]]
+        if hc.get("links"):
+            rows = list(hc["links"])
+            lines.append(f"  Linked clips: {rows[0]}")
+            lines += [f"    {r}" for r in rows[1:max_rows + 1]]
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
         if "caption_stutters" in hc:

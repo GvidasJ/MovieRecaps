@@ -15,3 +15,5 @@ examples/**/media/
 examples/**/*.mp4
 # temporary agent worktrees
 .claude/worktrees/
+# speech / face models downloaded on first use (Hugging Face cache etc.)
+/models/

@@ -155,7 +155,7 @@ def test_offsets_beyond_the_search_and_early_audio(venv_python, synthetic_mini, 
     pass_with_exceptions(av_offset), no fake J/L, no D3 warnings."""
     comp = _shifted(Path(synthetic_mini["competitor"]), int(round(delay_ms * 48)), tmp_path / "competitor.mp4")
     proc = _run(venv_python, comp, synthetic_mini["raw"], tmp_path / "out", tmp_path / "work")
-    _, cl, ver, plan = _load({"raw": (proc, tmp_path / "out")}, "raw")
+    _, cl, ver, plan = _load({"raw": (proc, tmp_path / "out" / "001" / "extras")}, "raw")   # the run's own folder
     av = cl["audio"]["av_offset"]
     lo, hi = av["lag_ms_interval"]
     assert av["status"] == "measured" and lo <= -delay_ms + 0.5 and hi >= -delay_ms - 0.5, av

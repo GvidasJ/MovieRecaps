@@ -215,9 +215,13 @@ def find_after_effects(system: str | None = None, roots: dict[str, str] | None =
     Windows: ``C:\\Program Files\\Adobe\\Adobe After Effects *\\Support Files\\{AfterFX,aerender}.exe``;
     macOS: ``/Applications/Adobe After Effects */{Adobe After Effects *.app, aerender}``. The newest
     version (natural sort of the folder name) wins. ``roots`` overrides the base folders (tests).
+    ``MATCH_CUTS_NO_AE=1`` in the environment: After Effects counts as not installed (the test suite sets it, so
+    no test run -- in this process or a CLI it starts -- ever opens the After Effects of the machine).
     """
     system = system or platform.system()
     out: dict[str, Any] = {"ae_app": None, "aerender": None, "ae_version": None, "ae_app_name": None}
+    if roots is None and os.environ.get("MATCH_CUTS_NO_AE", "").strip() not in ("", "0"):
+        return out
     if system == "Windows":
         base = (roots or {}).get("Windows", r"C:\Program Files\Adobe")
         dirs = sorted(glob.glob(os.path.join(base, "Adobe After Effects *")), key=_natural_key, reverse=True)
@@ -2565,6 +2569,9 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("speech_problems"):
             ctx.warn(f"Premiere XML: {len(validation['speech_problems'])} audio cut(s) inside speech -- the run "
                      "fails: " + "; ".join(validation["speech_problems"]))
+        if validation.get("link_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['link_problems'])} clip(s) not linked one to one with their "
+                     "audio / picture -- the run fails: " + "; ".join(validation["link_problems"]))
         warn_flash_silence(ctx, validation)
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
@@ -2626,6 +2633,19 @@ def repeat_plan(ctx: Context, cl: Cutlist, plan: dict) -> dict:
     log.info("repeat removal: %d repeats cut (%.2f s)", len(rows), out["repeats"]["removed_s"])
     ctx.dlog.record("repeats", "removed", rows=rows, left=len(out["repeats"]["left"]))
     return out
+
+
+def link_lines(exports: dict) -> list[str]:
+    """The end summary's linked-clips lines (export_xml_edl.premiere_link_problems on the final XML): how many V1
+    clips are linked to their own A1 clip, then every clip left unlinked on purpose and every problem (which fails
+    the run)."""
+    n = exports.get("link_counts") or {}
+    probs, exc = list(exports.get("link_problems") or []), list(exports.get("link_exceptions") or [])
+    head = (f"{n.get('linked', 0)} of {n.get('v1', 0)} V1 clips linked to their own A1 clip ({n.get('a1', 0)} A1 "
+            "clips): move, trim or cut one and its audio goes with it" +
+            (f"; {len(exc)} not linked on purpose" if exc else "") +
+            (f"; {len(probs)} PROBLEM(S) -- the run fails" if probs else ""))
+    return [head] + [f"not linked on purpose: {e}" for e in exc] + [f"PROBLEM: {p}" for p in probs]
 
 
 def repeat_lines(plan: dict) -> list[str]:
@@ -3018,6 +3038,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     exports = getattr(ctx, "exports", None)
     if getattr(cfg, "premiere", False) and isinstance(exports, dict) and "audio_exceptions" in exports:
         out["audio"] = list(exports.get("audio_exceptions") or [])
+    if getattr(cfg, "premiere", False) and isinstance(exports, dict) and "link_counts" in exports:
+        out["links"] = link_lines(exports)
     cap = ctx.captions or {}
 
     def tc(c: dict) -> str:

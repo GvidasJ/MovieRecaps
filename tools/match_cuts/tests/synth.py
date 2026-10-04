@@ -66,8 +66,10 @@ RAW_TB = Fraction(1, 30000)           # -video_track_timescale 30000 on raw.mp4 
 TICKS_PER_COMP_FRAME = 1000           # 1/30 s in RAW_TB ticks
 AUDIO_SR = 48000
 SAMPLES_PER_COMP_FRAME = AUDIO_SR // 30   # 1600
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+from portable import ff_path, font_file  # noqa: E402
+
+FONT = ff_path(font_file("bold"), quoted=False)        # DejaVu Sans Bold on Linux (as recorded), else the OS's own
+FONT_MONO = ff_path(font_file("mono"), quoted=False)
 MAX_PARALLEL = 3                      # max concurrent ffmpeg processes (shared machine)
 ID_W, ID_H = 512, 64
 GEOMETRY_WHITELIST = ("hflip", "scale", "crop", "perspective", "pad", "format", "setsar")
@@ -2720,9 +2722,25 @@ def synth_key(profile: Profile) -> str:
 
 @contextlib.contextmanager
 def _locked(path: Path):
-    import fcntl
+    """An exclusive lock on ``path`` (one generator at a time per profile): flock on POSIX, msvcrt on Windows."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as fh:
+        if os.name == "nt":
+            import msvcrt
+            import time
+            while True:                                  # LK_LOCK gives up after 10 s: wait as flock does
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    time.sleep(1.0)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            return
+        import fcntl
         fcntl.flock(fh, fcntl.LOCK_EX)
         try:
             yield

@@ -674,7 +674,7 @@ def test_mock_non_ascii_media_name_round_trip(tmp_path):
     rec = ea.run_jsx_in_mock(jsx, meta_for(cl))
     assert rec["status"] == "ok" and rec["saved"], rec["alerts"]
     raw = next(f for f in rec["footage"] if f["comment"] == "mc:raw")
-    assert raw["file"].endswith("média/räw clip.mp4")
+    assert raw["file"].replace("\\", "/").endswith("média/räw clip.mp4")
 
 
 @needs_node

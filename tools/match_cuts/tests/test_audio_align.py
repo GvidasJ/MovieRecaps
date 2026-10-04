@@ -393,6 +393,9 @@ def flite_speech(text: str, d: Path) -> np.ndarray:
 
 
 def test_segments_not_in_raw_voice_over_and_sfx(raw, cfg, tmpdir_mod):
+    from portable import ffmpeg_filters
+    if "flite" not in ffmpeg_filters():
+        pytest.skip("this ffmpeg build has no flite (speech synthesis) source")
     plan = [(40.0, 90, 1.0), (None, 30, 1.0), (100.0, 150, 1.0), (20.0, 90, 1.0)]
     comp, segs, _ = build_competitor(raw, plan, music_db=None)
     rng = np.random.default_rng(5)

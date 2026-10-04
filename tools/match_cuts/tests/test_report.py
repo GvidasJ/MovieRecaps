@@ -194,7 +194,7 @@ def test_report_renders_every_section(tmp_path):
     assert "| 0.95-0.98 | 12 |" in md and "pitch_preserved" in md and "[x] MAIN comp created" in md
     assert "File → Scripts → Run Script File…" in md and "Allow Scripts to Write Files and Access Network" in md
     assert "Difference" in md and "media/raw_ae.mov" in md
-    assert "| cutlist | cutlist.json |" in md and "../work/decisions.jsonl" in md
+    assert "| cutlist | cutlist.json |" in md and "../work/decisions.jsonl" in md.replace("\\", "/")
     assert "| S9 verify | 30.10 |" in md and "| total | 88.00 |" in md
 
 

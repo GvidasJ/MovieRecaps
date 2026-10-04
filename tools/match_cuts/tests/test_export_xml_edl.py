@@ -12,14 +12,19 @@ import re
 from fractions import Fraction
 from pathlib import Path
 
-import opentimelineio as otio
 import pytest
+
+try:
+    import opentimelineio as otio
+except ImportError:          # optional (no wheel for every Python, e.g. 3.14 on Windows): its re-parse checks skip
+    otio = None
 
 from match_cuts import export_xml_edl as ex
 from match_cuts.config import Config
 from match_cuts.geometry import Sim, sim_to_ae
 from match_cuts.model import Box, Cutlist, Segment
 
+need_otio = pytest.mark.skipif(otio is None, reason="OpenTimelineIO not installed")
 RF = Fraction(30000, 1001)
 N = 300
 SIM = {"scale": 0.52, "rotation_deg": 0.0, "tx": -10.0, "ty": 480.0}
@@ -186,6 +191,7 @@ def test_edl_text_m2_and_structure(exported):
     assert sum(1 for ln in lines if ln.startswith("* LOC:")) == 11
 
 
+@need_otio
 def test_edl_otio_parse_total_duration(exported):
     tl = otio.adapters.read_from_file(str(exported["edl"]), adapter_name="cmx_3600", rate=30)
     v = [t for t in tl.tracks if t.kind == otio.schema.TrackKind.Video][0]
@@ -244,6 +250,7 @@ def test_xml_structure_rates_speed_motion(exported):
     assert whens == [exact_frame(S[4], 130), exact_frame(S[4], 174)]
 
 
+@need_otio
 def test_xml_otio_parse(exported):
     tl = otio.adapters.read_from_file(str(exported["xml"]), adapter_name="fcp_xml")
     v = [t for t in tl.tracks if t.kind == otio.schema.TrackKind.Video][0]
@@ -261,8 +268,11 @@ def test_validate_exports_round_trip(exported):
     res = ex.validate_exports(exported["cl"], exported["xml"], exported["edl"])
     assert res["ok"], res["errors"]
     assert res["total_frames"] == N and res["events"] == 11
-    assert res["edl"]["otio"]["status"] == "ok" and res["edl"]["otio"]["total_frames"] == N
-    assert res["xml"]["otio"]["status"] == "ok" and res["xml"]["otio"]["total_frames"] == N
+    if otio is None:
+        assert res["edl"]["otio"]["status"] == res["xml"]["otio"]["status"] == "not_available"
+    else:
+        assert res["edl"]["otio"]["status"] == "ok" and res["edl"]["otio"]["total_frames"] == N
+        assert res["xml"]["otio"]["status"] == "ok" and res["xml"]["otio"]["total_frames"] == N
     assert res["edl"]["own"]["total_frames"] == N and res["xml"]["own"]["total_frames"] == N
 
 
@@ -397,17 +407,19 @@ def test_added_audio_becomes_labelled_edl_and_xml_placeholders(tmp_path):
     assert locs[3][0].startswith("LOC: 00:00:03:10 YELLOW  VOICE-OVER placeholder 00:00:03:10-00:00:05:25")
     assert locs[6][0].startswith("LOC: 00:00:07:02 YELLOW  SFX placeholder 00:00:07:02-00:00:07:10")
     assert sum(len(v) for v in locs.values()) == 3
-    tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30)
-    v = [t for t in tl.tracks if t.kind == otio.schema.TrackKind.Video][0]
-    yellow = [m.name for c in v if isinstance(c, otio.schema.Clip) for m in c.markers if m.color == "YELLOW"]
-    assert len(yellow) == 3 and yellow[0].startswith("MUSIC placeholder")
+    if otio is not None:
+        tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30)
+        v = [t for t in tl.tracks if t.kind == otio.schema.TrackKind.Video][0]
+        yellow = [m.name for c in v if isinstance(c, otio.schema.Clip) for m in c.markers if m.color == "YELLOW"]
+        assert len(yellow) == 3 and yellow[0].startswith("MUSIC placeholder")
     # XML: sequence range markers [comp_in, comp_out)
     x = ex.parse_fcp7_xml(xml)
     got = [(m["name"], m["in"], m["out"]) for m in x["markers"] if "placeholder" in m["name"]]
     assert got == [(m["label"], m["comp_in"], m["comp_out"]) for m in mk]
-    tlx = otio.adapters.read_from_file(str(xml), adapter_name="fcp_xml")
-    rng = {m.name: (m.marked_range.start_time.value, m.marked_range.duration.value) for m in tlx.tracks.markers}
-    assert rng["VOICE-OVER placeholder 00:00:03:10-00:00:05:25"] == (100, 75)
+    if otio is not None:
+        tlx = otio.adapters.read_from_file(str(xml), adapter_name="fcp_xml")
+        rng = {m.name: (m.marked_range.start_time.value, m.marked_range.duration.value) for m in tlx.tracks.markers}
+        assert rng["VOICE-OVER placeholder 00:00:03:10-00:00:05:25"] == (100, 75)
     res = ex.validate_exports(cl, xml, edl)
     assert res["ok"], res["errors"]
     # validation catches a missing placeholder
@@ -501,8 +513,9 @@ def test_competitor_sync_audio_events_nearest_frame_and_remainder(tmp_path):
     evs = ex.parse_edl_text(edl.read_text())
     assert {e["chan"] for e in evs} == {"V", "A"} and sum(e["chan"] == "A" for e in evs) == len(items)
     assert "* AUDIO: S01 picture, nearest RAW frame, remainder" in edl.read_text()
-    tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30.0)
-    assert [t.kind for t in tl.tracks].count(otio.schema.TrackKind.Audio) >= 1
+    if otio is not None:
+        tl = otio.adapters.read_from_file(str(edl), adapter_name="cmx_3600", rate=30.0)
+        assert [t.kind for t in tl.tracks].count(otio.schema.TrackKind.Audio) >= 1
     # tampering with an audio event is caught
     a1 = next(e for e in evs if e["chan"] == "A")
     bad = tmp_path / "bad.edl"
@@ -1035,11 +1048,11 @@ def test_no_face_found_keeps_the_framing_and_still_covers(tmp_path, monkeypatch)
     assert "no face found, framing kept" in c.framing_note and c.covered
 
 
-# ---- S21 on the real RAW: input/raw_test.mp4 with the export cutlist of the run on it --------------------------------
+# ---- S21 on the real RAW: tests/real/deadpool/raw.mp4 (input/raw_test.mp4) with the export cutlist of the run on it --------------------------------
 
-RAW_TEST = Path(__file__).resolve().parents[3] / "input" / "raw_test.mp4"
+RAW_TEST = Path(__file__).resolve().parents[3] / "tests" / "real" / "deadpool" / "raw.mp4"
 RAW_TEST_CUTLIST = Path(__file__).resolve().parent / "data" / "raw_test_export_cutlist.json"
-need_raw_test = pytest.mark.skipif(not RAW_TEST.is_file(), reason="input/raw_test.mp4 not in this checkout")
+need_raw_test = pytest.mark.skipif(not RAW_TEST.is_file(), reason="tests/real/deadpool not in this checkout")
 
 
 @need_raw_test

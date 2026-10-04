@@ -9,6 +9,7 @@ import dataclasses
 import json
 import math
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from match_cuts.config import Config
 from match_cuts.geometry import Sim
 from match_cuts.model import AudioHints, Box, FrameMap, Layout, Proxy, Segment, Status, StreamInfo
 
-PY = "/home/user/MovieRecaps/.venv/bin/python"
+PY = sys.executable                     # the interpreter running the tests (the venv's)
 F30 = Fraction(30)
 
 
@@ -97,7 +98,7 @@ def test_help_lists_every_flag(capsys):
 
 def test_module_entry_point_help():
     res = subprocess.run([PY, "-m", "match_cuts", "--help"], capture_output=True, text=True,
-                         cwd="/home/user/MovieRecaps/tools/match_cuts")
+                         cwd=str(Path(__file__).resolve().parents[1]))
     assert res.returncode == 0 and "match|fill|source" in res.stdout.replace("{", "").replace("}", "").replace(",", "|")
 
 
@@ -302,10 +303,23 @@ def test_find_after_effects_layouts(tmp_path):
     assert pipeline.find_after_effects("Linux")["ae_app"] is None
 
 
+def test_no_ae_environment_hides_an_installed_after_effects(tmp_path, monkeypatch):
+    """MATCH_CUTS_NO_AE=1 (set by conftest for every test and the CLI runs they start): the machine's After Effects
+    counts as not installed -- the search of explicit folders (its own tests) still works."""
+    real = pipeline.find_after_effects.real
+    win = tmp_path / "win" / "Adobe After Effects 2024" / "Support Files"
+    win.mkdir(parents=True)
+    (win / "AfterFX.exe").write_text("")
+    monkeypatch.setenv("MATCH_CUTS_NO_AE", "1")
+    assert real("Windows")["ae_app"] is None and real("Darwin")["ae_app"] is None
+    assert real("Windows", {"Windows": str(tmp_path / "win")})["ae_version"] == "2024"
+    assert os.environ.get("MATCH_CUTS_NO_AE") == "1"
+
+
 def test_check_env_here():
     env = pipeline.check_env()
     assert env["ffmpeg"] and env["ffprobe"] and env["ffmpeg_ok"]
-    assert env["os"] == "Linux" and env["ae_app"] is None and env["aerender"] is None
+    assert env["os"] == platform.system() and env["ae_app"] is None and env["aerender"] is None   # (conftest: no AE)
     assert env["versions"].get("cv2")
 
 
@@ -770,9 +784,8 @@ def test_end_to_end_non_match_layout_uses_in_memory_render(monkeypatch, clips, t
 
 
 def _fake_exe(path: Path, body: str) -> Path:
-    path.write_text("#!" + PY + "\nimport sys, re, time, pathlib\n" + body)
-    path.chmod(0o755)
-    return path
+    from portable import fake_exe
+    return fake_exe(path, "import sys, re, time, pathlib\n" + body)
 
 
 def test_run_after_effects_polls_for_the_saved_project(tmp_path, monkeypatch):
@@ -787,6 +800,8 @@ def test_run_after_effects_polls_for_the_saved_project(tmp_path, monkeypatch):
     r = pipeline.run_after_effects({"os": "Windows", "ae_app": str(afx)}, jsx, timeout=15, poll_s=0.1)
     assert r["status"] == "ok" and r["aep"] == str(jsx.parent / "recreated_edit.aep")
     assert _time.monotonic() - t0 < 10                      # did not wait for the AE process to exit
+    if os.name == "nt":                                     # a fake osascript on PATH needs a real .exe here
+        return
     # macOS: osascript DoScriptFile returns when the script is done
     (jsx.parent / "recreated_edit.aep").unlink()
     bindir = tmp_path / "bin"

@@ -194,7 +194,8 @@ def test_frame_map_bit_identical_inline_fork_spawn(run, tmp_path, monkeypatch):
     anchors = [vm.Anchor.from_dict({**a.to_dict(), "k": a.k - a0}) for a in run["anchors"] if a0 <= a.k < a1]
     outs = {}
     try:
-        for mode, workers in (("inline", 1), ("fork", 3), ("spawn", 3)):
+        for mode, workers in [m for m in (("inline", 1), ("fork", 3), ("spawn", 3))
+                              if m[0] != "fork" or vm._fork_available()]:       # (Windows has no fork)
             monkeypatch.setenv(vm.START_METHOD_ENV, "spawn" if mode == "spawn" else "fork")
             cfg = S.make_config(tmp_path / mode, workers=workers)
             ov = OverlayMasks(comp.frames.shape[1:])
@@ -209,7 +210,7 @@ def test_frame_map_bit_identical_inline_fork_spawn(run, tmp_path, monkeypatch):
     finally:
         vm.shutdown_workers()
     fm0, m0 = outs["inline"]
-    for mode in ("fork", "spawn"):
+    for mode in [m for m in ("fork", "spawn") if m in outs]:
         fm1, m1 = outs[mode]
         for name, col in fm0.d.items():
             assert np.array_equal(col, fm1.d[name], equal_nan=True), (mode, name)
