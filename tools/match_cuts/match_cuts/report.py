@@ -1419,6 +1419,7 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML SILENCE", "silence_problems", "no more silence across a cut than --pad-after + --pad-before"),
     ("XML OTHER VIDEO", "other_video_problems", "another video's stretch left empty for exactly its length"),
     ("XML LINK", "link_problems", "every V1 clip linked to its own A1 clip and back"),
+    ("XML PERSON", "person_problems", "the person speaking fully inside the window (nobody speaking: one person)"),
 ]
 
 
@@ -1441,6 +1442,11 @@ def _premiere_checks(ctx: Any) -> list[str]:
         from .pipeline import link_lines
         ll = link_lines(v)
         out += ["", f"**Linked clips**: {ll[0]}."] + [f"- {r}" for r in ll[1:]]
+    if getattr(ctx, "people", None) is not None:
+        from .pipeline import person_lines
+        pl = person_lines(ctx)
+        out += ["", f"**The person speaking in the picture** (faces: YuNet; who speaks: the face whose mouth moves with "
+                f"the speech, Light-ASD): {pl[0]}."] + [f"- {r}" for r in pl[1:]]
     return out
 
 

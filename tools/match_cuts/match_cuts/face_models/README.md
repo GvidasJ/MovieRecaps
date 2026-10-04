@@ -1,4 +1,10 @@
-OpenCV's Haar cascade face detectors (`haarcascade_frontalface_alt2.xml`, `haarcascade_profileface.xml`), copied
-unchanged from the `cv2/data/` folder of the opencv-python-headless 4.10.0.84 wheel: OpenCV 5 wheels no longer ship
-them. Their license (the Intel License Agreement for the Open Source Computer Vision Library, BSD-style) is in the
-header of each file. Used by `match_cuts/faces.py` (`--premiere`: face-centred framing).
+The face and speaker models of `match_cuts/people.py` (`--premiere`: the person speaking is always in the picture)
+and `match_cuts/faces.py`:
+
+* `face_detection_yunet_2023mar.onnx` -- YuNet (Wu, Peng, Yu et al. 2023), OpenCV's FaceDetectorYN model, copied
+  unchanged from opencv_zoo (`models/face_detection_yunet/`); MIT licence, `YUNET_LICENSE`. It replaced OpenCV's
+  Haar cascades.
+* `light_asd_talkset.model` -- Light-ASD (Liao, Duan, Zhang, Li, Zhang, "A Light Weight Model for Active Speaker
+  Detection", CVPR 2023), the authors' weights fine-tuned on TalkSet (`weight/finetuning_TalkSet.model` of
+  https://github.com/Junhua-Liao/Light-ASD), copied unchanged; MIT licence, `LIGHT_ASD_LICENSE`. The network itself
+  is `match_cuts/asd_model.py`.

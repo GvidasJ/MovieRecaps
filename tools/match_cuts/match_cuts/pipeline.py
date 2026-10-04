@@ -123,6 +123,8 @@ class Context:
     silence: dict = field(default_factory=dict)       # silence.plan_premiere: the silences cut out of the Premiere export
     speech: Any = None                                # speech.SpeechMap of the RAW: no cut lands inside speech
     shots: Any = None                                 # the RAW's shot changes (s; shots.py): no flash frame
+    people: Any = None                                # speakers.Context: who is in the picture and who speaks
+    premiere_xml: Any = None                          # write_premiere_xml's result (the re-framed clips ...)
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2542,9 +2544,12 @@ def stage_exports(ctx: Context) -> None:
     if premiere:
         ctx.speech = speech_of(ctx, ex)
         ctx.shots = shots_of(ctx, ex)
+        ctx.people = people_of(ctx, ex)
+        cfg.premiere_people = ctx.people             # from here on premiere_clips frames on the person speaking
         ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
         rp = ctx.silence.get("ripple")
-        produced["xml"], _ = _soft(ctx, "S8 Premiere XML", lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
+        produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
+                                                  lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
     else:
         produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(ex, xml, cfg))
     produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(ex, edl, cfg))
@@ -2572,6 +2577,9 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("link_problems"):
             ctx.warn(f"Premiere XML: {len(validation['link_problems'])} clip(s) not linked one to one with their "
                      "audio / picture -- the run fails: " + "; ".join(validation["link_problems"]))
+        if validation.get("person_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['person_problems'])} clip(s) do not show the person speaking -- "
+                     "the run fails: " + "; ".join(validation["person_problems"]))
         warn_flash_silence(ctx, validation)
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
@@ -2633,6 +2641,22 @@ def repeat_plan(ctx: Context, cl: Cutlist, plan: dict) -> dict:
     log.info("repeat removal: %d repeats cut (%.2f s)", len(rows), out["repeats"]["removed_s"])
     ctx.dlog.record("repeats", "removed", rows=rows, left=len(out["repeats"]["left"]))
     return out
+
+
+def person_lines(ctx: Context) -> list[str]:
+    """The end summary's person lines (speakers.py): how the clips' people were checked on the final XML, every clip
+    re-framed to show the person speaking (with its time in the edit) and every problem (which fails the run)."""
+    ex = getattr(ctx, "exports", None) or {}
+    pp = getattr(getattr(ctx, "people", None), "people", None)
+    n = ex.get("person_counts") or {}
+    probs = list(ex.get("person_problems") or [])
+    rows = list((getattr(ctx, "premiere_xml", None) or {}).get("reframed") or [])
+    head = (f"{n.get('clips', 0)} V1 clips checked ({n.get('speaker', 0)} with the person speaking found by "
+            f"{getattr(pp, 'asd', '?')}, {n.get('biggest face', 0)} the biggest face, {n.get('a person', 0)} nobody "
+            f"speaking, {n.get('nobody', 0)} nobody in the picture); {len(rows)} re-framed to show the person speaking"
+            + (f"; {len(probs)} PROBLEM(S) -- the run fails" if probs else ""))
+    return ([head] + [f"{r['tc']}  {r['label']}: {r['note']}" for r in rows] + [f"PROBLEM: {p}" for p in probs] +
+            [f"not checked: {e}" for e in ex.get("person_exceptions") or []])
 
 
 def link_lines(exports: dict) -> list[str]:
@@ -2741,6 +2765,44 @@ def speech_of(ctx: Context, cl: Cutlist) -> Any:
 
 
 SPEECH_MARGIN_S = 3.0      # the RAW transcribed this far around what the edit plays (a cut may move that far)
+
+
+def people_of(ctx: Context, cl: Cutlist) -> Any:
+    """Who is in the picture and who speaks where the edit plays the RAW (people.py: YuNet faces, Light-ASD speaking
+    scores on the GPU when there is one), as the speakers.Context the Premiere framing and its hard check use (the
+    RAW's speech from ctx.speech, its shot changes over the whole RAW when the analysis proxy holds every frame --
+    the 250 px rule holds only inside one shot --, else where the edit plays it); None when it cannot be done (no
+    RAW video, it failed: warned -- the framing is then the competitor's and not checked for the person speaking)."""
+    from . import people, shots, speakers
+    from .export_xml_edl import premiere_clips, premiere_settings
+    from .transcribe import resample
+    if not getattr(ctx.cfg, "premiere", False) or getattr(ctx.cfg, "people", True) is False:
+        return None
+    try:
+        info = ctx.raw_info
+        f = float(premiere_settings(ctx.cfg)["fps"])
+        clips, _, _ = premiere_clips(cl, ctx.cfg)
+        ranges = [tuple(sorted((c.src_in / f, c.src_out / f))) for c in clips]
+        audio16 = None
+        if ctx.raw_audio is not None and len(ctx.raw_audio):
+            audio16 = resample(ctx.raw_audio, int(ctx.audio_sr))
+        proxy = getattr(ctx, "raw_proxy", None)
+        whole = None
+        if proxy is not None and getattr(proxy, "index_map", None) is None:
+            whole = shots.seconds(shots.raw_shot_changes(info, None, ctx.cache, proxy), Fraction(info.fps))
+        cuts = whole if whole is not None else list(ctx.shots or [])
+        pp = people.analyse(str(info.path), float(info.fps), ranges, audio16, cuts, ctx.cache, info.file_hash)
+        speech = [(s.s0, s.s1) for s in ctx.speech.sounds if s.speech] if ctx.speech is not None else []
+        sp = speakers.Context(pp, speech, cuts if (whole is not None or ctx.shots is not None) else None,
+                              (float(cl.raw["width"]), float(cl.raw["height"])))
+        log.info("people of the RAW: %d faces tracked, speaking scored by %s; %d shot changes for the framing",
+                 len(pp.tracks), pp.asd, len(cuts))
+        return sp
+    except Exception as e:  # noqa: BLE001 - the edit is still made with the competitor's framing
+        log.error("people analysis failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"who is speaking could not be found ({type(e).__name__}: {e}): the framing is the competitor's and "
+                 "is not checked for the person speaking")
+        return None
 
 
 def shots_of(ctx: Context, cl: Cutlist | None = None) -> list[float] | None:
@@ -3040,6 +3102,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         out["audio"] = list(exports.get("audio_exceptions") or [])
     if getattr(cfg, "premiere", False) and isinstance(exports, dict) and "link_counts" in exports:
         out["links"] = link_lines(exports)
+    if getattr(cfg, "premiere", False) and getattr(ctx, "people", None) is not None:
+        out["people"] = person_lines(ctx)
     cap = ctx.captions or {}
 
     def tc(c: dict) -> str:

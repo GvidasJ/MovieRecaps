@@ -433,6 +433,15 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             rows = list(hc["links"])
             lines.append(f"  Linked clips: {rows[0]}")
             lines += [f"    {r}" for r in rows[1:max_rows + 1]]
+        if hc.get("people"):
+            rows = list(hc["people"])
+            lines.append(f"  The person speaking in the picture: {rows[0]}")
+            shown = [r for r in rows[1:] if not r.startswith("not checked")]
+            lines += [f"    {r}" for r in shown]                       # every re-framed clip, with its time
+            rest = len(rows) - 1 - len(shown)
+            if rest:
+                lines.append(f"    ... {rest} clip(s) not checked (nobody in the picture / another video): "
+                             f"{run_folders.EXTRAS}/report.md")
         for r in hc.get("caption_recheck") or []:
             lines.append(f"  Unclear caption words: {r}")
         if "caption_stutters" in hc:

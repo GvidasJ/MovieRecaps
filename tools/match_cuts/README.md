@@ -123,16 +123,31 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   only when it is 250 px or more from the framing on screen, measured in the 1080×1920 sequence as the biggest
   movement of the picture's centre or of one of its edges (so a zoom counts by how far the edges move). Below
   that it keeps the previous clip's framing exactly — across real cuts too — changed only as little as needed if it
-  would leave part of the window uncovered. Neighbouring pieces of one continuous RAW take (the next starts on the
+  would leave part of the window uncovered. The hold applies only inside one shot of the RAW: at a shot change of
+  the RAW the new shot chooses its framing fresh, and a framing that would not show the clip's person speaking is
+  never held (below). Neighbouring pieces of one continuous RAW take (the next starts on the
   very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
   clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
-* **Face-centred where the competitor's framing cannot be used.** A stretch of clips sharing one framing that holds
-  a replaced B-roll / NOT-IN-RAW / uncertain spot (its framing was only copied from a neighbour), or whose framing
-  would leave part of the window uncovered, keeps its zoom and height but is moved sideways so the main person's
-  face sits at the centre of the window: OpenCV's face detector (the cascades are in `match_cuts/face_models/`) on
-  frames from the whole stretch, the main face being the largest one inside the view, the median of its position
-  used. No face found: the framing is kept, moved only as needed to cover. `--min-move` applies again afterwards.
+* **The person speaking is always in the picture** (`match_cuts/people.py`, `speakers.py`). Where the edit plays the
+  RAW (+- 3 s), every 1/25 s: faces found by YuNet (OpenCV's FaceDetectorYN, a modern CNN detector, replacing the Haar
+  cascades), tracked from frame to frame (never across a RAW shot change; a small face that never speaks -- a poster,
+  a photo -- is no person), and who speaks found by active-speaker detection: Light-ASD (CVPR 2023) scores how well
+  each face's mouth moves with the sound, on the GPU (PyTorch CUDA; the CPU without one). Each clip's speaker is the
+  face that is the top speaking face on most of its speech frames (the RAW's speech map); unclear -- nobody's mouth
+  goes with the sound, e.g. a voice off camera -- the biggest face. While someone speaks, that person's face (the
+  10th-90th percentile of its edges over the speech) must be fully inside the window x 42-1039, y 555-1591; when
+  nobody speaks, at least one person must. A clip that fails keeps its zoom and is moved sideways to centre that
+  person, still covering the window (up or down only if the face is cut off there) -- one position for a stretch of
+  clips sharing a framing when one shows all their people, else each clip its own. This beats the competitor's
+  framing and `--min-move`. The same move frames a stretch the competitor's framing cannot be used for at all (a
+  replaced B-roll / NOT-IN-RAW / uncertain spot, or a framing that leaves the window uncovered); without the people
+  analysis (no PyTorch, an error: said in the summary) the main face is centred there (`faces.main_face_x`, YuNet).
+  The hard check `XML PERSON` re-reads every clip's framing from the final XML and fails the run when a clip does not
+  show its person; a clip with nobody in the picture and another video's stretch are listed, not failed. The end
+  summary lists every re-framed clip with its time in the edit (*The person speaking in the picture*), and each
+  clip's comment says why. On the Zendaya interview 7 of 10 clips are re-framed (the competitor showed the listener's
+  reaction); on Deadpool and Spider-Man school the competitor's framing already shows the speaker everywhere.
 * **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
   of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
   size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
@@ -213,6 +228,12 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   on to where the next one starts, or the next starts where the one before ends — so the sound never jumps; the
   picture still cuts there (a framing change). An audio line (sound that is not the picture's own) moves by the jump
   instead, along its whole chain, so the picture is not touched.
+* **A sliver the clip before plays through goes.** When a clip's start has to move past its own frames (a frame or
+  two repeating the end of the clip before, inside a word), the clip before plays on to the end of the word and the
+  sliver goes -- its frames are never trimmed out of the next clip and no extension is left without a clip (on the
+  Spider-Man school clip this left holes of 14 and 8 frames on V1 and A1). An A1 edge where V1 does not cut and the
+  other side is a muted piece (a cutaway over music) moves on its own: the audio plays on into the silence to the end
+  of the word, or stops before the word when that silence is too short.
 * **The hard check, on the final XML**: every audio cut of A1 (an item's start or end where the RAW does not play on)
   must land outside speech; one that lands inside fails the run (`XML SPEECH` in the report and the console, with
   the words there). On run 011 the competitor-placed cuts fail it 10 times; the new export passes.

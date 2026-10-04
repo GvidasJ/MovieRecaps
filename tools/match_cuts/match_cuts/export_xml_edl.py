@@ -1164,6 +1164,7 @@ class PremiereClip:
     events: list[EditEvent] = field(default_factory=list)   # the edit events it plays (several: merged, --min-move)
     framing_note: str = ""           # --min-move: why the framing is not this clip's own (kept from the clip before)
     link_split: bool = False         # a piece of one take split so each V1 clip links to one A1 clip (link_pairs)
+    person_note: str = ""            # re-framed to show the person speaking (speakers.py): what moved and why
 
     @property
     def label(self) -> str:
@@ -1418,28 +1419,70 @@ def _least_cover(sim: Sim, raw_wh: tuple[float, float], win: tuple[float, float,
     return Sim(s, 0.0, cx - s * W / 2.0, cy - s * H / 2.0)
 
 
+def _clip_raw_s(cl: PremiereClip, fps: Fraction) -> tuple[float, float]:
+    """(first, last) RAW second the clip shows, in playing order."""
+    f = float(fps)
+    return cl.src_in / f, cl.src_out / f
+
+
+def _last_raw_s(cl: PremiereClip, fps: Fraction) -> float:
+    """The RAW second of the last frame the clip shows (its end is exclusive): what the next clip's shot is compared
+    with."""
+    return cl.src_out / float(fps) - 0.5 * max(abs(float(cl.speed)), 1e-3) / float(fps) * (1 if cl.src_out >= cl.src_in
+                                                                                          else -1)
+
+
+def _people_of(cfg: Any) -> Any:
+    """The speakers.Context the pipeline attached to the run's Config (who is in the picture and who speaks), or
+    None: then no person check and the framing is the competitor's (and faces.main_face_x where it cannot be)."""
+    return getattr(cfg, "premiere_people", None)
+
+
+def _person_of(cl: PremiereClip, sp: Any, fps: Fraction) -> Any:
+    """What clip ``cl`` has to show (speakers.Faces), or None (nothing analysed / no check)."""
+    if sp is None:
+        return None
+    a, b = _clip_raw_s(cl, fps)
+    return sp.faces(min(a, b), max(a, b))
+
+
 def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
-                  min_move: float, subject: str = "the competitor's") -> list[list[PremiereClip]]:
-    """--min-move (after the fixed framing): a clip takes its own framing only when it is at least min_move px from
-    the framing on screen (framing_move); otherwise it keeps that framing exactly -- across real cuts too -- changed
-    only as little as needed if it would not cover the window. A clip with no framing keeps the one on screen.
-    Returns the stretches of clips that show one framing."""
+                  min_move: float, subject: str = "the competitor's", sp: Any = None,
+                  fps: Fraction | None = None) -> list[list[PremiereClip]]:
+    """--min-move (after the fixed framing): a clip takes its own framing when it is at least min_move px from the
+    framing on screen (framing_move), at a shot change of the RAW (``sp.same_shot``: a new shot chooses its framing
+    fresh), or when the framing on screen would not show the clip's person (speakers.passes); otherwise it keeps that
+    framing exactly -- across real cuts too -- changed only as little as needed if it would not cover the window. A
+    clip with no framing keeps the one on screen. Returns the stretches of clips that show one framing."""
+    from . import speakers
     runs: list[list[PremiereClip]] = []
     held: Sim | None = None
     held_from = ""
+    last_t: float | None = None                  # the RAW second the clip before ends on (its shot)
     for cl in clips:
         when = cl.keys[0][0] if cl.keys else cl.src_in
         own = cl.keys[0][1] if cl.keys else None
-        if own is not None and held is not None and _same_framing(own, held):
+        t_in = _clip_raw_s(cl, fps)[0] if fps is not None else None
+        new_shot = sp is not None and last_t is not None and t_in is not None and not sp.same_shot(last_t, t_in)
+        last_t = _last_raw_s(cl, fps) if fps is not None else None
+        if own is not None and held is not None and _same_framing(own, held) and not new_shot:
             runs[-1].append(cl)                          # already showing it
             continue
         move = framing_move(held, own, raw_wh) if (held is not None and own is not None) else None
-        if held is None or (move is not None and move >= min_move):
+        keep = None
+        if held is not None and not (move is not None and move >= min_move) and (not new_shot or own is None):
+            keep = held if _covers(held, raw_wh, win, tol=1e-6) else _least_cover(held, raw_wh, win)
+            if own is not None and sp is not None and fps is not None and not speakers.passes(
+                    keep, _person_of(cl, sp, fps), raw_wh[0], bool(cl.seg.flip_h), win):
+                keep = None                              # holding it would hide this clip's person
+        if keep is None:
+            if own is not None and held is not None and move is not None and move < min_move:
+                cl.framing_note = ("its own framing: a new shot of the RAW (--min-move holds only inside one shot)"
+                                   if new_shot else "its own framing: the framing before would not show its person")
             if own is not None:
                 held, held_from = own, cl.label
             runs.append([cl])
             continue
-        keep = held if _covers(held, raw_wh, win, tol=1e-6) else _least_cover(held, raw_wh, win)
         cl.framing_note = (f"framing kept from {held_from}: " +
                            (f"{subject} moves {move:.0f} px here, under --min-move {min_move:g}" if move is not None
                             else "no framing measured here") +
@@ -1475,13 +1518,16 @@ def _face_centred(fr: Sim, face_x: float, raw_wh: tuple[float, float], win: tupl
 
 
 def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[float, float],
-                    win: tuple[float, float, float, float], min_move: float, fps: Fraction) -> None:
-    """The final fixed framings: --min-move on the competitor's framings, then every stretch that shows one framing
-    and cannot take it from the competitor -- it holds a replaced B-roll / NOT-IN-RAW / uncertain spot, or the framing
-    would leave part of the window uncovered -- keeps its zoom and height with the main person's face at the window's
-    centre (faces.main_face_x over the stretch's frames), and --min-move again between the final framings."""
-    from . import faces
-    runs = _hold_framing(clips, raw_wh, win, min_move)
+                    win: tuple[float, float, float, float], min_move: float, fps: Fraction, sp: Any = None) -> None:
+    """The final fixed framings: --min-move on the competitor's framings (inside one shot of the RAW, never hiding
+    the clip's person), then every stretch that shows one framing and cannot take it from the competitor -- it holds
+    a replaced B-roll / NOT-IN-RAW / uncertain spot, the framing would leave part of the window uncovered, or it does
+    not show the person speaking (``sp``: speakers.py) -- keeps its zoom and is moved sideways to centre that person
+    (one position for the whole stretch when one fits, else each clip its own); where the RAW's people were not
+    analysed, the main face (faces.main_face_x over the stretch's frames). Then --min-move again between the final
+    framings."""
+    from . import faces, speakers
+    runs = _hold_framing(clips, raw_wh, win, min_move, sp=sp, fps=fps)
     video = str(cutlist.raw.get("file_abs") or cutlist.raw.get("file") or "")
     raw_fps = float(cutlist.raw_fps)
     face_run = False
@@ -1490,7 +1536,22 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
         if fr is None:
             continue
         why = [w for w in (_unreliable(c) for c in run) if w]
-        if not why and _covers(fr, raw_wh, win, tol=1e-6):
+        need = [(c, _person_of(c, sp, fps), bool(c.seg.flip_h)) for c in run] if sp is not None else []
+        hidden = [c for c, f, fl in need if not speakers.passes(fr, f, raw_wh[0], fl, win)]
+        if not why and not hidden and _covers(fr, raw_wh, win, tol=1e-6):
+            continue
+        if sp is not None and any(f is not None and f.how != "nobody" for _, f, _ in need):
+            base = fr if _covers(fr, raw_wh, win, tol=1e-6) else _least_cover(fr, raw_wh, win)
+            news = speakers.frame_run(base, need, raw_wh, win)
+            reason = "; ".join(why) if why else ("it would not show the person speaking" if hidden else
+                                                 "the framing would leave part of the window uncovered")
+            span = run[0].label + (f"..{run[-1].label}" if len(run) > 1 else "")
+            for c, new in zip(run, news):
+                new = new if new is not None else base
+                c.keys = [(c.keys[0][0] if c.keys else c.src_in, new)]
+                c.covered = _covers(new, raw_wh, win, tol=1e-6)
+                c.framing_note = f"{span}: {reason}: framed on the person (zoom kept)"
+            face_run = True
             continue
         times = [t for c in run for t in
                  ((c.src_in + (c.src_out - c.src_in) * (i + 0.5) / 5.0) / float(fps) for i in range(5))]
@@ -1511,7 +1572,7 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
             c.framing_note = f"{span}: {note}"
         face_run = True
     if face_run:                     # a moved stretch may now sit under min_move from its neighbour: hold again
-        _hold_framing(clips, raw_wh, win, min_move, subject="its framing")
+        _hold_framing(clips, raw_wh, win, min_move, subject="its framing", sp=sp, fps=fps)
 
 
 def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
@@ -1527,6 +1588,7 @@ def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
                 and _same_framing(p.keys[0][1], cl.keys[0][1])):
             p.end, p.rec_end, p.src_out = cl.end, cl.rec_end, cl.src_out
             p.events = (p.events or [p.ev]) + (cl.events or [cl.ev])
+            p.person_note = p.person_note or cl.person_note
             continue
         out.append(cl)
     return out
@@ -1670,11 +1732,43 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None) -> tuple[list[PremiereClip
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
                                   1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime, [ev]))
     if st["static"]:
-        # fewer reframes and cuts: hold the framing under min_move px, face-centre what the competitor cannot frame,
-        # then join the pieces of one take that are left alike
-        _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps)
+        # fewer reframes and cuts: hold the framing under min_move px (inside one RAW shot), frame on the person speaking
+        # what the competitor cannot frame or does not show them, then join the pieces of one take that are left alike
+        sp = _people_of(cfg)
+        competitor = {id(c): (c.keys[0][1] if c.keys else None) for c in clips}
+        _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps, sp)
+        if sp is not None:
+            _person_notes(clips, competitor, sp, raw_wh, win, fps)
         clips = _merge_continuous(clips)
     return clips, markers, warnings
+
+
+def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], sp: Any, raw_wh: tuple[float, float],
+                  win: tuple[float, float, float, float], fps: Fraction) -> None:
+    """The re-framed clips' notes (the end summary lists them): every clip whose competitor framing would not show
+    its person and whose final framing does -- who, where in the RAW, how far the picture moved."""
+    from . import speakers
+    for c in clips:
+        old, new = competitor.get(id(c)), (c.keys[0][1] if c.keys else None)
+        f = _person_of(c, sp, fps)
+        if old is None or new is None or f is None or f.how == "nobody":
+            continue
+        flip = bool(c.seg.flip_h)
+        before = speakers.passes(old, f, raw_wh[0], flip, win)
+        after = speakers.passes(new, f, raw_wh[0], flip, win)
+        if before or _same_framing(old, new):
+            continue
+        b = speakers.target(new, f, raw_wh[0], flip, win)
+        who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
+               "a person": "a person (nobody speaks)"}.get(f.how, f.how)
+        cx = (b[0] + b[2]) / 2.0 if b else float("nan")
+        dx = (new.tx + new.s * raw_wh[0] / 2.0) - (old.tx + old.s * raw_wh[0] / 2.0)     # the picture's centre
+        dy = (new.ty + new.s * raw_wh[1] / 2.0) - (old.ty + old.s * raw_wh[1] / 2.0)
+        c.person_note = ((f"re-framed to show {who} (RAW x {cx:.0f}): the competitor's framing showed "
+                          f"{'nobody' if f.how == 'a person' else 'someone else'} -- the picture moved "
+                          f"{dx:+.0f} px sideways" + (f", {dy:+.0f} px up/down" if abs(dy) >= 0.5 else "") +
+                          ", zoom kept") if after else
+                         f"could not show {who} (RAW x {cx:.0f}) with the zoom kept: re-frame it by hand")
 
 
 def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw_wh: tuple[int, int]) -> str:
@@ -1811,7 +1905,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _links(ci, n, a_of[n - 1] + 1)
         cm = _sub(ci, "comments")
         _sub(cm, "mastercomment1", f"{cl.label} speed {cl.speed:.6f} conf {float(cl.seg.confidence or 0):.2f}")
-        _sub(cm, "mastercomment2", note)
+        _sub(cm, "mastercomment2", note + (f"; {cl.person_note}" if cl.person_note else ""))
         _sub(cm, "mastercomment3", ("source in inside the frame-exact interval" if cl.in_exact else
                                     "source in = nearest 1/60 s (outside the frame-exact interval)")
              + f" ({cl.in_error_ms:+.2f} ms from the plan)")
@@ -1859,7 +1953,13 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     atomic_write_text(path, '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + body + "\n")
     for w in warnings:
         log.info("premiere export: %s", w)
+    reframed: list[dict] = []
+    for cl in clips:                   # the clips framed on their person (speakers.py), each once
+        if cl.person_note and not (reframed and reframed[-1]["label"] == cl.label and reframed[-1]["note"] == cl.person_note):
+            s0 = cl.start if cl.start != -1 else cl.rec_start
+            reframed.append({"label": cl.label, "start": int(s0), "tc": _tc(int(s0), fps), "note": cl.person_note})
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
+            "reframed": reframed,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
 
@@ -2765,6 +2865,70 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
     return out
 
 
+def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = None
+                             ) -> tuple[list[str], list[str], dict]:
+    """The hard person check of the final XML, on its own numbers: every V1 clip's framing as Premiere shows it
+    (Position = sequence centre + <center> x the clip's source size, Scale, Horizontal Flip) shows, fully inside the
+    template window, the person speaking in it -- or, when nobody speaks there, at least one person (speakers.py on
+    ``sp``: the RAW's people, speech and shots). Returns (problems, exceptions, counts): a clip with nobody in the
+    picture (B-roll, an object) or whose RAW was not analysed is listed, not failed; another video's stretch (OTHER
+    VIDEO) has no clip at all and is listed too."""
+    from . import speakers
+    st = premiere_settings(cfg)
+    W, H = st["size"]
+    win = st["window"]
+    root = ET.parse(str(xml_path)).getroot()
+    sizes = {f.get("id") or "": (float(f.findtext("media/video/samplecharacteristics/width")),
+                                 float(f.findtext("media/video/samplecharacteristics/height")))
+             for f in root.iter("file") if f.findtext("media/video/samplecharacteristics/width")}
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    f = float(fps)
+    seq = root.find("sequence")
+    items = seq.find("media/video/track").findall("clipitem") if seq is not None else []
+    problems, exceptions = [], []
+    counts = {"clips": 0, "speaker": 0, "biggest face": 0, "a person": 0, "nobody": 0, "not analysed": 0}
+    for el, c in zip(items, x["clips"]):
+        counts["clips"] += 1
+        fe = el.find("file")
+        src = sizes.get(fe.get("id") if fe is not None else "", None)
+        s0 = int(c["start"]) if int(c["start"]) >= 0 else int(c["end"])
+        where = f"{c.get('label')} at {_tc(s0, fps)}"
+        a, b = sorted((c["in"] / f, c["out"] / f))
+        need = sp.faces(a, b) if sp is not None else None
+        if need is None:
+            counts["not analysed"] += 1
+            exceptions.append(f"{where}: its RAW ({a:.2f}-{b:.2f} s) was not analysed for people -- not checked")
+            continue
+        counts[need.how] = counts.get(need.how, 0) + 1
+        if need.how == "nobody":
+            exceptions.append(f"{where}: nobody in the picture (RAW {a:.2f}-{b:.2f} s) -- nothing to show, not checked")
+            continue
+        if src is None:
+            problems.append(f"{where}: no source size in the XML, its framing cannot be checked")
+            continue
+        m = c["motion"]
+        sc = float(m.get("scale", 100.0)) / 100.0
+        ch, cv = m.get("center", (0.0, 0.0))
+        px, py = W / 2.0 + ch * src[0], H / 2.0 + cv * src[1]
+        sim = Sim(sc, 0.0, px - sc * src[0] / 2.0, py - sc * src[1] / 2.0)
+        if abs(float(m.get("rotation", 0.0))) > 1e-6 or m.get("keys"):
+            exceptions.append(f"{where}: rotated / keyframed framing -- not checked")
+            continue
+        if speakers.passes(sim, need, src[0], bool(c.get("flip")), win):
+            continue
+        t = speakers.target(sim, need, src[0], bool(c.get("flip")), win)
+        r = speakers.on_screen(sim, t, src[0], bool(c.get("flip"))) if t else None
+        who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
+               "a person": "any person (nobody speaks)"}.get(need.how, need.how)
+        problems.append(f"{where}: {who} is not fully inside the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
+                        f"{win[1]:.0f}-{win[1] + win[3]:.0f})" +
+                        (f": face at x {r[0]:.0f}-{r[2]:.0f}, y {r[1]:.0f}-{r[3]:.0f}" if r else ""))
+    for a_, b_ in other_video_ranges(x):
+        exceptions.append(f"OTHER VIDEO {_tc(a_, fps)}-{_tc(b_, fps)}: another video's stretch, no clip -- not checked")
+    return problems, exceptions, counts
+
+
 def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl_path: str | os.PathLike | None,
                               cfg: Any = None, silence: Any = None, speech: Any = None,
                               shots: Sequence[float] | None = None) -> dict:
@@ -2832,10 +2996,18 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                               "linked": sum(1 for c in xl["clips"] if [k for _, k in c["links"]].count("audio") == 1)}
     except Exception as e:  # noqa: BLE001
         links, out["link_exceptions"] = [f"the link check could not read the XML: {type(e).__name__}: {e}"], []
+    sp = _people_of(cfg)
+    persons: list[str] = []
+    if sp is not None and not bad_items:
+        try:
+            persons, out["person_exceptions"], out["person_counts"] = premiere_person_problems(xml_path, sp, cfg)
+        except Exception as e:  # noqa: BLE001
+            persons = [f"the person check could not read the XML: {type(e).__name__}: {e}"]
     errors += ([f"XML ITEM {b}" for b in bad_items] + [f"XML REPEAT {r}" for r in reps] +
                [f"XML SPEECH {t}" for t in talk] + [f"XML FLASH {t}" for t in flash] +
                [f"XML SILENCE {t}" for t in hush] + [f"XML OTHER VIDEO {t}" for t in ov] +
-               [f"XML LINK {t}" for t in links])
+               [f"XML LINK {t}" for t in links] + [f"XML PERSON {t}" for t in persons])
+    out["person_problems"] = persons if sp is not None else None
     out["other_video_problems"], out["link_problems"] = ov, links
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
     out["flash_problems"], out["silence_problems"] = flash, hush
@@ -2942,14 +3114,26 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                               f"(allowed 0 .. {100.0 * (st['max_zoom'] - 1.0):.0f} %)")
             if cl.covered and not _covers(ps, raw_wh, win, tol=0.01):
                 errors.append(f"XML {name} key {i}: the RAW does not cover the template window")
-    # --min-move: the framing changes only by min_move px or more (or to cover the window), and one continuous RAW
-    # take with one framing is one clip
+    # --min-move: inside one RAW shot the framing changes only by min_move px or more (or to cover the window, or to
+    # show the clip's person: speakers.py), and one continuous RAW take with one framing is one clip
     changes = 0
+    sp = _people_of(cfg)
     if st["static"] and len(x["clips"]) == len(clips):
+        from . import speakers
+
         def fixed(c: dict) -> Sim | None:
             m = c["motion"]
             return _sim_from_motion(m["scale"], m["rotation"], m["center"], W, H, raw_wh) \
                 if all(k in m for k in ("scale", "rotation", "center")) and not m["keys"] else None
+
+        def free_change(ca: PremiereClip, cb: PremiereClip, fa: Sim) -> bool:
+            """A change under min_move is the rule's: at a shot change of the RAW, or the framing before would not
+            show cb's person."""
+            if sp is None:
+                return False
+            if not sp.same_shot(_last_raw_s(ca, fps), _clip_raw_s(cb, fps)[0]):
+                return True
+            return not speakers.passes(fa, _person_of(cb, sp, fps), raw_wh[0], bool(cb.seg.flip_h), win)
         for (ga, ca), (gb, cb) in zip(zip(x["clips"], clips), zip(x["clips"][1:], clips[1:])):
             fa, fb = fixed(ga), fixed(gb)
             if fa is None or fb is None:
@@ -2957,7 +3141,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             mv = framing_move(fa, fb, raw_wh)
             if mv > 0.5:
                 changes += 1
-                if mv < st["min_move"] - 0.5 and "changed the least to cover" not in cb.framing_note:
+                if mv < st["min_move"] - 0.5 and "changed the least to cover" not in cb.framing_note \
+                        and not free_change(ca, cb, fa):
                     errors.append(f"XML {cb.label}: the framing changes by {mv:.0f} px after {ca.label} "
                                   f"(under --min-move {st['min_move']:g})")
             elif (ga["end"] != -1 and ga["end"] == gb["start"] and gb["in"] == ga["out"]

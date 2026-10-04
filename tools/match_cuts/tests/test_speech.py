@@ -334,3 +334,46 @@ def test_run_011_no_cut_inside_speech_and_my_cuts_matched(tmp_path):
     # the 3 others: I kept 0.39 s after "age." and 0.04 s after "am" (the tool keeps --pad-after 0.15), and I ended
     # S08b before "to" to drop it -- the tool keeps "son to a married couple" playing
     assert {k for k, d in got.items() if d is None} == {"S01 end", "S04 end", "S08b end"}
+
+
+# ---------------------------------------------------------------------------------------------
+# a sliver the clip before plays through; an A1 edge next to a muted piece (task 2: the Spider-Man holes)
+# ---------------------------------------------------------------------------------------------
+
+def test_a_sliver_whose_start_passes_its_end_goes_and_the_clip_before_plays_its_words():
+    """Spider-Man S11: one frame inside "kids," right after S10 (one take, a frame skipped). Its start had to move past
+    its own frame: the trim used to reach into the next clip and its extensions belonged to no clip (a 14-frame hole on
+    V1 and A1). Now the sliver goes and the clip before plays on to the end of the word."""
+    _, sm = three()                                                         # hello 1.0-1.6, there 2.4-3.0
+    f = float(FPS)
+    p1 = SP.Piece("S10", 0, 60, 30.0, 1.0)                                  # RAW 0.5-1.5: ends inside "hello"
+    p2 = SP.Piece("S11", 60, 61, 88.0, 1.0)                                 # RAW 1.467: one frame repeating S10's end
+    p3 = SP.Piece("S12", 61, 121, 138.0, 1.0)                               # RAW 2.3-3.3: another moment ("there")
+    trims, inserts, rows, _ = SP.snap_edits([p1, p2, p3], sm, FPS, PA, PB, {0, 60, 61, 121})
+    assert (60, 61) in trims and not any(a < 61 < b or (a <= 60 < b and (a, b) != (60, 61)) for a, b in trims)
+    ext = [i for i in inserts if i[0] == 60 and i[2] == "end"]
+    assert ext and sum(i[1] for i in ext) == pytest.approx((1.6 + PA - 1.5) * f, abs=3)   # S10 plays on through "hello"
+    for at, n, side, _ in inserts:                                            # every extension belongs to a clip
+        assert not any(a < at < b or (at == b and side == "end") or (at == a and side == "start") for a, b in trims)
+    assert any(r["clip"] == "S11" and r["edge"] == "whole" for r in rows)
+
+
+def test_an_audio_edge_next_to_a_muted_piece_plays_on_into_the_silence_or_stops_before_the_word():
+    """Spider-Man S31: A1 ended inside "Spider-Man." where V1 plays on (the next piece is muted: a cutaway over music).
+    The A1 edge alone moves (a slide: the picture is untouched): on to the end of the word when the silence after it
+    is long enough, else back before the word."""
+    _, sm = three()
+    f = float(FPS)
+    p = SP.Piece("S31", 0, 60, 30.0, 1.0)                                   # RAW 0.5-1.5: ends inside "hello"
+    q = SP.Piece("S33", 90, 150, 300.0, 1.0)                                # A1 resumes 0.5 s later (V1 never cut)
+    *_, shifts = SP.snap_edits([p, q], sm, FPS, PA, PB, {0, 150})
+    slides = [(at, d) for at, d, *kind in shifts if kind]
+    assert len(slides) == 1 and slides[0][0] == 60                          # plays on into the silence ...
+    assert abs(slides[0][1] - (1.6 + PA - 1.5) * f) <= TOL * f              # ... to the end of "hello" + --pad-after
+    _, sm2 = three()
+    p = SP.Piece("S31", 0, 150, 30.0, 1.0)                                  # RAW 0.5-3.0: ends inside "there"
+    q = SP.Piece("S33", 155, 200, 500.0, 1.0)                               # only 5 frames of silence after it
+    *_, shifts = SP.snap_edits([p, q], sm2, FPS, PA, PB, {0, 200})
+    slides = [(at, d) for at, d, *kind in shifts if kind]
+    assert len(slides) == 1 and slides[0][0] == 150 and slides[0][1] < 0    # stops before "there": after "hello"
+    assert (150 + slides[0][1]) / f + 0.5 == pytest.approx(1.6 + PA, abs=TOL)

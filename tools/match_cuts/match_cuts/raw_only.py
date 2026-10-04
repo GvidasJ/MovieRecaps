@@ -6,8 +6,10 @@ The RAW is laid out as an edit of itself on the sequence's own 60 fps grid (comp
 one segment per stretch of speech and one per silence to remove, so the Premiere export, its fixed framing and
 --min-move rule, the silence removal, the captions and the end summary are exactly those of competitor mode. Framing:
 every stretch of speech shows the RAW scaled to cover the template window, the main person's face (faces.py, five
-frames: the largest face, then the same person while they stay in view) at the window's centre; --min-move then holds
-the framing until it would move that far. Captions: voice
+frames: the largest face, then the same person while they stay in view) at the window's centre; then, as in
+competitor mode, the person speaking (people.py / speakers.py: YuNet faces, Light-ASD) must be in the window -- a clip
+that does not show them is moved sideways to centre them -- and --min-move holds the framing inside one shot of the
+RAW until it would move that far. Captions: voice
 mode with the RAW recheck, transcribed from the cut edit.
 """
 from __future__ import annotations
@@ -136,6 +138,8 @@ def run_raw_only(cfg: Any) -> dict:
                 return faces.main_face_x(video, raw_fps, [t0 + (t1 - t0) * (i + 0.5) / 5.0 for i in range(5)],
                                          view)[0]
             ctx.cutlist, framing_notes = build_cutlist(raw_block, n_frames, cuts, win, seq_wh, face_x)
+            ctx.people = pipeline.people_of(ctx, ctx.cutlist)          # the person speaking always in the picture
+            cfg.premiere_people = ctx.people
         if getattr(cfg, "keep_silence", False):
             ctx.silence = {"off": "--keep-silence"}
         else:
@@ -168,6 +172,10 @@ def run_raw_only(cfg: Any) -> dict:
             if ctx.exports.get("speech_problems"):
                 ctx.warn("Premiere XML: audio cut(s) inside speech -- the run fails: "
                          + "; ".join(ctx.exports["speech_problems"]))
+            if ctx.exports.get("person_problems"):
+                ctx.warn("Premiere XML: clip(s) do not show the person speaking -- the run fails: "
+                         + "; ".join(ctx.exports["person_problems"]))
+            ctx.premiere_xml = res
             pipeline.warn_flash_silence(ctx, ctx.exports)
             if ctx.exports.get("ok") is not True:
                 ctx.warn(f"Premiere XML check failed: {'; '.join(ctx.exports.get('errors') or [])[:500]}")

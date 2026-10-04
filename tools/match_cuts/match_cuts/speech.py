@@ -404,8 +404,51 @@ def shot_guard(sm: SpeechMap, na: float, nb: float, changes: Sequence[float], pa
     return na, nb
 
 
+def _a1_gap_edges(ps: Sequence[Piece], sm: SpeechMap, f: float, pa: float, pb: float, v1_cuts: set[int] | None,
+                  seq_end: int | None, rows: list[dict]) -> list[tuple[int, int]]:
+    """A1 edges where V1 does not cut and A1 has nothing on the other side (the next piece is muted: a cutaway over
+    music / voice-over) that land inside speech: the A1 edge alone moves (an A1 slide: the picture is not touched)
+    -- the audio plays on into the silence until the word ends (pa after it), or, when that silence is too short,
+    stops before the word (pa after the speech before it); an A1 start the same way, earlier. [(frame, frames)]."""
+    out: list[tuple[int, int]] = []
+    if v1_cuts is None:
+        return out
+    for i, p in enumerate(ps):
+        if abs(p.speed - 1.0) > 1e-6:                                     # at 100 % only
+            continue
+        nxt = ps[i + 1] if i + 1 < len(ps) else None
+        prv = ps[i - 1] if i > 0 else None
+        a, b = p.src / f, (p.src + (p.r1 - p.r0)) / f
+        room_after = (nxt.r0 if nxt is not None else (seq_end if seq_end is not None else p.r1)) - p.r1
+        if not p.lock_end and p.r1 not in v1_cuts and room_after > 0 and _inside(sm, b):
+            k = sm.sound_at(b)
+            on = int(round((end_after(sm, k, pa, pb) - b) * f))             # play on to the end of the word
+            j = sm.speech_before(sm.sounds[k].s0)
+            back = int(round((end_after(sm, j, pa, pb) - b) * f)) if j is not None else None
+            d = on if 0 < on <= room_after else (back if back is not None and p.r1 + back > p.r0 else 0)
+            if d:
+                out.append((p.r1, d))
+                rows.append({"clip": p.label, "edge": "end", "at": p.r1, "from_s": b, "to_s": b + d / f,
+                             "frames": d, "said": sm.said(min(b, b + d / f) - 0.15, max(b, b + d / f) + 0.15),
+                             "inside": True})
+        room_before = p.r0 - (prv.r1 if prv is not None else 0)
+        if not p.lock_start and p.r0 not in v1_cuts and room_before > 0 and _inside(sm, a):
+            k = sm.sound_at(a)
+            early = int(round((start_before(sm, k, pa, pb) - a) * f))       # start before the word
+            j = sm.speech_after(sm.sounds[k].s1)
+            late = int(round((start_before(sm, j, pa, pb) - a) * f)) if j is not None else None
+            d = early if -room_before <= early < 0 else (late if late is not None and p.r0 + late < p.r1 else 0)
+            if d:
+                out.append((p.r0, d))
+                rows.append({"clip": p.label, "edge": "start", "at": p.r0, "from_s": a, "to_s": a + d / f,
+                             "frames": d, "said": sm.said(min(a, a + d / f) - 0.15, max(a, a + d / f) + 0.15),
+                             "inside": True})
+    return out
+
+
 def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after: float, pad_before: float,
-               v1_cuts: set[int] | None = None, src_max: float | None = None, shots: Sequence[float] | None = None
+               v1_cuts: set[int] | None = None, src_max: float | None = None, shots: Sequence[float] | None = None,
+               seq_end: int | None = None
                ) -> tuple[list[tuple[int, int]], list[tuple[int, int, str, float]], list[dict], list[tuple[int, int]]]:
     """(the trims: removed sequence frames [a, b), the extensions: (at, frames, side, RAW frame the added frames
     start at) -- silence.Insert --, one row per moved cut, the audio lines moved: (first frame, frames)) that put
@@ -463,6 +506,32 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
         na, nb = max(0.0, na), min(hi_s, nb)
         da = int(round((na - a) * f))
         db = int(round((nb - b) * f))
+        if da >= p.r1 - p.r0 and (p.r1 + db) - (p.r0 + da) > 0:
+            # its start moved past its own frames (a sliver the clip before plays on through, or a start pushed to
+            # the end of a word that outlasts the clip): a trim of the original timeline reaching past the clip would
+            # cut the next clip's first frames, and the extensions at its end would belong to no clip -- a hole (the
+            # Spider-Man S11: one frame inside "kids,"). The clip before, playing on into this take, plays what this
+            # one would; otherwise it goes
+            if join_in and prev is not None and prev[0].r1 == p.r0:
+                end = nb
+                if shots and prev[0].v_off is not None:                # never a sliver of the next RAW shot
+                    _, end = shot_guard(sm, prev[3], nb, [c - prev[0].v_off for c in shots], pad_after, pad_before,
+                                        False, True)
+                extra = int(round((min(hi_s, end) - prev[1]) * f))
+                if extra > 0:
+                    inserts.append((prev[0].r1, extra, "end", prev[1] * f))
+                    rows.append({"clip": prev[0].label, "edge": "end", "at": prev[0].r1, "from_s": prev[1],
+                                 "to_s": prev[1] + extra / f, "frames": extra,
+                                 "said": sm.said(prev[1] - 0.15, prev[1] + extra / f + 0.15),
+                                 "inside": _inside(sm, prev[1])})
+                prev = (prev[0], prev[1] + max(0, extra) / f, prev[2], prev[3], False)
+            trims.append((p.r0, p.r1))
+            rows.append({"clip": p.label, "edge": "whole", "at": p.r0, "from_s": a, "to_s": b,
+                         "frames": -(p.r1 - p.r0), "said": sm.said(a, b), "inside": False})
+            if touching or prev is None:
+                reach = p.r1
+                gone_from = p.r0 if gone_from is None else gone_from
+            continue
         if (p.r1 + db) - (p.r0 + da) <= 0:                         # nothing left to play
             trims.append((p.r0, p.r1))
             rows.append({"clip": p.label, "edge": "whole", "at": p.r0, "from_s": a, "to_s": b,
@@ -487,13 +556,14 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                              "to_s": new, "frames": d, "said": sm.said(min(old, new) - 0.15, max(old, new) + 0.15),
                              "inside": _inside(sm, old)})
         prev, reach = (p, b + db / f, b, a + da / f, join_out), p.r1
+    gaps = _a1_gap_edges(ps, sm, f, pad_after, pad_before, v1_cuts, seq_end, rows)
     for at, d in shifts:
         rows.append({"clip": next(p.label for p in ps if p.r0 == at), "edge": "audio line", "at": at,
                      "from_s": None, "to_s": None, "frames": d, "said": "", "inside": True})
     for at, d in slides:
         rows.append({"clip": next(p.label for p in ps if p.r0 == at), "edge": "dissolve", "at": at,
                      "from_s": None, "to_s": None, "frames": d, "said": "", "inside": True})
-    return trims, inserts, rows, shifts + [(at, d, "slide") for at, d in slides]
+    return trims, inserts, rows, shifts + [(at, d, "slide") for at, d in slides + gaps]
 
 
 def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: Fraction, st: Any, n_frames: int,
@@ -523,7 +593,7 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
                             int(it["start"]) in locked, int(it["end"]) in locked, it.get("what") == "audio line",
                             locked.get(int(it["start"]), 0), v_off))
     trims, inserts, rows, shifts = snap_edits(pieces, sm, fps, float(st.pad_after), float(st.pad_before), v1_cuts,
-                                              src_max, shots)
+                                              src_max, shots, int(n_frames))
     merged: list[list[int]] = []
     for a, b in sorted(trims):
         if merged and a <= merged[-1][1]:
@@ -533,6 +603,12 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
     rp = Ripple([Cut(a, b, a / f, b / f) for a, b in merged], int(n_frames),
                 [Insert(at, d, side, src) for at, d, side, src in inserts],
                 [(at, d) for at, d, *kind in shifts if not kind], [(at, d) for at, d, *kind in shifts if kind])
+    lost = [i for i in rp.inserts if any(c.a < i.at < c.b or (i.at == c.b and i.side == "end") or
+                                         (i.at == c.a and i.side == "start") for c in rp.cuts)]
+    if lost:                     # an extension no clip carries would move everything after it: a hole on V1 and A1
+        from .common import log
+        log.error("speech-safe cuts: %d extension(s) inside removed frames, no clip plays them: %s", len(lost),
+                  [(i.at, i.frames, i.side) for i in lost])
     return rp, rows
 
 
