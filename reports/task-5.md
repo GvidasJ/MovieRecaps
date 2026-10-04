@@ -166,9 +166,12 @@ Thorough fits better than `--fast` by more than 0.01 on 40 frames of Deadpool (`
 
 ### The models of the speech and framing checks
 
-- **Speech-safe cuts** (cuts only in gaps between words, flash and repeat checks): the RAW's word map now comes from
+- **Speech-safe cuts** (cuts only in gaps between words, and the repeat check): the RAW's word map now comes from
   Whisper large-v3, the most accurate model of Task 4 (4.2 % word errors against 6.5 % for turbo). `--fast` keeps
   turbo.
+- **The flash-frame check is unchanged.** It finds the RAW's shot changes with the same thumbnail detector as before.
+  I looked at a learned shot-boundary model (TransNetV2) for it but did not get to test it against the detector, so
+  nothing changed there.
 - **Framing check** (the person speaking is in the picture): YuNet faces and Light-ASD, the models of Task 2,
   already run on every RAW frame the edit plays, at 25 fps (Light-ASD's own rate). There is no more accurate model
   in the project. I tried finding faces at the RAW's full width instead of 960 px: on Zendaya the same person was
