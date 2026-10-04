@@ -64,11 +64,11 @@ def test_the_hard_checks_find_what_was_wrong_in_bug_edit_xml():
     assert ex.premiere_item_problems(BUG) == [
         "V1 S10 raw.mp4 at 00:00:08:57: in 1312 is not before out 1300",
         "A1 S10 raw.mp4 audio at 00:00:08:57: in 1312 is not before out 1300"]
-    # and the stutters at its cuts: S04 shows S03's RAW again, S05 S04's, S13 S12's
+    # and the stutters at its cuts: S04 shows S03's RAW again, S05 S04's (S13 starts on S12's last RAW frame, 722 of
+    # the 30 fps RAW: that frame held a moment longer, not shown again)
     assert ex.premiere_repeat_problems(BUG) == [
         "V1 S03 at 00:00:05:11 and S04 at 00:00:05:27 both play RAW 14.27-14.43 s: a stutter at a cut",
-        "V1 S04 at 00:00:05:29 and S05 at 00:00:05:57 both play RAW 14.30-14.47 s: a stutter at a cut",
-        "V1 S12 at 00:00:11:01 and S13 at 00:00:11:03 both play RAW 24.07-24.10 s: a stutter at a cut"]
+        "V1 S04 at 00:00:05:29 and S05 at 00:00:05:57 both play RAW 14.30-14.47 s: a stutter at a cut"]
 
 
 def test_a_reversed_clip_is_written_with_in_before_out_and_its_audio_is_kept(tmp_path):

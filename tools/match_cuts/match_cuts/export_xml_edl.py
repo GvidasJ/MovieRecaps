@@ -2267,7 +2267,8 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
             for idx, e in enumerate(els):
                 if e.tag == "transitionitem":
                     continue
-                name = f"{item_label(e)} {_text(e, 'name', e.get('id') or '?')}"
+                name = str(_text(e, 'name', e.get('id') or '?'))
+                name = name if name.split()[:1] == [item_label(e)] else f"{item_label(e)} {name}"
                 raw = {k: _text(e, k) for k in ("start", "end", "in", "out")}
                 bad = [k for k, v in raw.items() if v is None or not _WHOLE.fullmatch(v)]
                 if bad:

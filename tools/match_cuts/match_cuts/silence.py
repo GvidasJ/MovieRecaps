@@ -277,13 +277,14 @@ def shot_guard_frames(clips: Sequence[Any] | None, sm: Any, changes_s: Sequence[
         hi = min([cl.rec_start for cl in clips if cl.rec_start > fr] or [fr + 1])
         return lo, hi
 
+    n = int(math.ceil(m * f - 1e-9))
+
     def guard(a: int, b: int) -> tuple[int, int]:
-        h = hole(a - 1)                              # never keep a frame of an empty V1 (a black frame) at a cut
-        if h is not None:
-            a = h[0]
-        h = hole(b)
-        if h is not None:
-            b = h[1]
+        ha, hb = hole(a - 1), hole(b)                # empty V1 (black) kept at the cut: both sides join after it
+        black = (a - ha[0] if ha else 0) + (hb[1] - b if hb else 0)
+        if 0 < black < n:                            # a sliver of black: cut away with the silence
+            a = ha[0] if ha else a
+            b = hb[1] if hb else b
         got = clip_at(a - 1)
         if got is not None:
             t_end, lo, _ = got[0] + 1.0 / f, got[1], got[2]
@@ -300,15 +301,19 @@ def shot_guard_frames(clips: Sequence[Any] | None, sm: Any, changes_s: Sequence[
                 c = near[0]
                 b = (b + int(round((c - t0) * f)) if not said(t0, c) else
                      b - int(math.ceil((t0 - (c - m)) * f - 1e-9)))
-        # nor a sliver of a V1 clip (another framing) shorter than that, with no speech in it, on either side
-        n = int(math.ceil(m * f - 1e-9))
+        # nor a sliver of a V1 clip (another framing) shorter than that, with no speech in it, on either side (the
+        # pieces of one clip kept on both sides of the cut join after it)
         for cl in clips or []:
             if abs(float(cl.speed) - 1.0) > 1e-6:
                 continue
             t = lambda fr: (cl.src_in + (fr - cl.rec_start)) / f                  # noqa: E731
-            if cl.rec_start < a < cl.rec_end and a - cl.rec_start < n and not said(t(cl.rec_start), t(a)):
+            in_a, in_b = cl.rec_start < a < cl.rec_end, cl.rec_start < b < cl.rec_end
+            kept = (a - cl.rec_start if in_a else 0) + (cl.rec_end - b if in_b else 0)
+            if not 0 < kept < n:
+                continue
+            if in_a and not said(t(cl.rec_start), t(a)):
                 a = cl.rec_start
-            if cl.rec_start < b < cl.rec_end and cl.rec_end - b < n and not said(t(b), t(cl.rec_end)):
+            if in_b and not said(t(b), t(cl.rec_end)):
                 b = cl.rec_end
         return (a, b) if b > a else (a, a)
     return guard
