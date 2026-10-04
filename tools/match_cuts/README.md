@@ -363,8 +363,8 @@ fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start 
 **The words** are what is said in the cut edit (its audio: the RAW audio on the edit's cuts, never the raw clip):
 
 * **Speech recognition** (`asr.py`; see *Speech recognition* below): Whisper **large-v3** on the GPU
-  (`--caption-model`), with the words of `caption_allowlist.txt` (and of `caption_glossary.txt`, when there is one)
-  as vocabulary hints. Every word is then timed by **forced alignment** (`align.py`: torchaudio's MMS_FA wav2vec2
+  (`--caption-model`), with the words of `caption_allowlist.txt` (and the written side of `caption_glossary.txt`,
+  the words you corrected before: see *Learn from your corrections*) as vocabulary hints. Every word is then timed by **forced alignment** (`align.py`: torchaudio's MMS_FA wav2vec2
   model, on the GPU, 20 ms steps; a word after a pause starts on its first sound), within a frame.
 * **A second model** (`--caption-check-model`, default `large-v3-turbo`; `none` turns it off) transcribes the same
   audio. Where the two disagree: the same words written two ways, the reduced form wins ("gonna": a model writes it
@@ -570,6 +570,62 @@ root); `match_cuts/restyle.py` only chooses their arguments and checks the resul
 
 `--donor PROJECT.prproj` takes the style from another correctly styled project; `--overwrite` replaces an
 existing `3_captions_styled.prproj` (without it the run stops rather than overwrite one you may have worked in).
+
+### Learn from your corrections (`learn`)
+
+After you finish a video in Premiere:
+
+```
+..\..\.venv\Scripts\python -m match_cuts learn "<your finished project>.prproj"
+```
+
+It compares your finished project with what the tool generated for that run (`1_edit.xml` and `2_captions.srt`).
+
+- **The run** is found from your project: its clips play the RAW from the run's `extras\media\` folder (the older
+  flat `output\media\` layout too). `--run <folder>` names it when the media moved.
+  - The run's RAW must be the video your project plays: the same size, frame rate and length, as Premiere recorded
+    them in the project. The older flat folder keeps only its latest run, so a project made from an earlier one is
+    refused with the difference, for example `1920x1080 against 1280x720; 23.976 fps against 59.940`. Nothing is
+    compared with the wrong run.
+- **Caption words you changed go into a glossary**, `caption_glossary.txt` next to `caption_allowlist.txt`, one
+  `heard -> written` per line, with the videos each came from.
+  - Words are compared in order, not by time, because a moved cut shifts every caption after it. A change counts
+    only between 2 unchanged words on each side, and at most 3 words long; a longer rewrite does not count.
+  - Only corrections go in: a changed word spelled like the heard one ("zendeya" -> "Zendaya", "want to" ->
+    "wanna"), or the capitals of a name or an acronym ("tom" -> "Tom"). A plain word in capitals ("like" -> "LIKE":
+    your emphasis) and other words ("eventually" -> "and then": a one-off mishearing) are kept in the test case's
+    `learned.json` only.
+  - Next time the written forms go to both speech models as hot words.
+  - Where a model still hears the old words, the written form replaces them only where the audio fits: both models
+    score both readings of the phrase against the audio, and the written form must be at most 1 nat less likely
+    (about a third as likely; you corrected it before). Words are never replaced blindly.
+  - Where the competitor's screen shows exactly what you once corrected the heard words to, the screen's reading
+    needs only to fit the audio, not to be likelier.
+  - Edit or delete lines of the file freely.
+- **Your cut and framing changes are recorded** in `learned.json`.
+  - Cuts are compared on the sound: A1 plays the RAW in both edits, even when your picture is an After Effects comp.
+    Recorded: each clip's start and end moved (RAW seconds), clips removed, clips added.
+  - Framing is compared on the picture clips, when your project still has the RAW's own clips: moved sideways (px)
+    or zoomed (%).
+  - A kind of change you make on 3 or more videos (on 30 % of a video's clips, at least 3) becomes a **suggested
+    new default**, printed with the videos it comes from, for example `clips end earlier on 3 videos (...; median
+    -0.19 s): --pad-after 0.00 instead of 0.15`. Nothing is ever changed for you.
+- **A test case** in `tests/real/<name>/`: `competitor.mp4`, `raw.mp4`, `answer.srt` (your captions: the answer
+  key), `answer_edit.json` (your timeline: what the RAW plays where), `case.json` and `learned.json`.
+  - check-all then scores every video you ever corrected.
+  - A case of the same competitor is updated, not doubled: your new answer key replaces the old one, and `git diff`
+    shows what changed before you push.
+  - The name comes from the competitor's file (`--name` to choose).
+- **A RAW over 100 MB** is copied smaller automatically: the same width, height and frame rate, every frame kept,
+  and the audio as it is (H.264 at a capped bit rate, about 90 MB). GitHub refuses files over 100 MB.
+- At the end it prints a short summary and the exact git commands that push the new case, for example:
+
+```
+cd "C:\Users\you\MovieRecaps"
+git add "tests/real/zendaya-interview" "tools/match_cuts/caption_glossary.txt"
+git commit -m "Test case zendaya-interview: learned from my finished edit"
+git push
+```
 
 ## Outputs
 

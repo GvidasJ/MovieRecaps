@@ -565,6 +565,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if argv[:1] == ["check-all"]:                # python -m match_cuts check-all: every test video, one scorecard
         from .check_all import main as check_all_main
         return check_all_main(argv[1:])
+    if argv[:1] == ["learn"]:                    # python -m match_cuts learn PROJECT.prproj: learn from your edit
+        from .learn import main as learn_main
+        return learn_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     raw_only = args.competitor is None and args.raw is not None        # no competitor: the edit from the RAW alone

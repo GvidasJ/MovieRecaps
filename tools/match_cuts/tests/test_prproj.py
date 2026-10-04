@@ -157,3 +157,18 @@ def test_audio_pieces_pick_the_edit_not_the_reference_track(tmp_path):
 def test_flat_text_takes_the_last_string():
     assert P.flat_text(flat("AnimationType", "ArialMT", "I\u2019m actually")) == "I\u2019m actually"
     assert P.flat_text("") == "" and P.flat_text("not base64 !!") == ""
+
+
+def test_what_premiere_knows_about_a_media_file(tmp_path):
+    """A media file's size, frame rate and length as Premiere measured it (learn: is the run's RAW the project's?)."""
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<PremiereData Version="3">\n\t'
+           '<Media ObjectUID="m-raw"><VideoStream ObjectRef="153"/><AudioStream ObjectRef="152"/>'
+           '<ActualMediaFilePath>C:/x/output/001/extras/media/raw.mp4</ActualMediaFilePath></Media>\n\t'
+           '<VideoStream ObjectID="153"><FrameRate>4237833600</FrameRate><FrameRect>0,0,1280,720</FrameRect>'
+           f'<Duration>{int(283.75 * T)}</Duration></VideoStream>\n\t'
+           f'<AudioStream ObjectID="152"><Duration>{int(283.75 * T)}</Duration></AudioStream>\n</PremiereData>\n')
+    p = tmp_path / "m.prproj"
+    p.write_bytes(gzip.compress(xml.encode("utf-8")))
+    m = P.read(p).media["C:/x/output/001/extras/media/raw.mp4"]
+    assert (m["width"], m["height"]) == (1280, 720) and m["fps"] == pytest.approx(59.94, abs=0.001)
+    assert m["duration"] == pytest.approx(283.75)

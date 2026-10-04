@@ -72,6 +72,8 @@ class Sequence:
 class Project:
     path: str
     sequences: list[Sequence]
+    media: dict[str, dict] = field(default_factory=dict)   # file path -> {width, height, fps, duration} (as Premiere
+                                                           # measured the file; what it knows)
 
 
 def _load(path: str | Path) -> ET.Element:
@@ -136,6 +138,27 @@ def read(path: str | Path) -> Project:
             return uids.get(el.attrib["ObjectURef"])
         return None
 
+    media: dict[str, dict] = {}
+    for el in (e for e in root if e.tag == "Media"):
+        path = el.findtext("ActualMediaFilePath") or el.findtext("FilePath") or ""
+        if not path:
+            continue
+        props: dict[str, Any] = {}
+        vs = ref(el.find("VideoStream"))
+        if vs is not None:
+            rect = (vs.findtext("FrameRect") or "").split(",")
+            if len(rect) == 4:
+                props["width"], props["height"] = int(rect[2]), int(rect[3])
+            fr = vs.findtext("FrameRate")
+            if fr and int(fr) > 0:
+                props["fps"] = TICKS / int(fr)
+            du = vs.findtext("Duration")
+            if du:
+                props["duration"] = int(du) / TICKS
+        aus = ref(el.find("AudioStream"))
+        if aus is not None and "duration" not in props and aus.findtext("Duration"):
+            props["duration"] = int(aus.findtext("Duration")) / TICKS
+        media[path] = props
     seqs = []
     for seq in (e for e in root if e.tag == "Sequence"):
         s = Sequence(seq.findtext("Name") or "", 0.0, 0, 0)
@@ -163,7 +186,7 @@ def read(path: str | Path) -> Project:
                     if it is not None:
                         s.items.extend(_items(it, kind, n, ref))
         seqs.append(s)
-    return Project(str(path), seqs)
+    return Project(str(path), seqs, media)
 
 
 def _items(it: ET.Element, kind: str, track: int, ref) -> list[Item]:

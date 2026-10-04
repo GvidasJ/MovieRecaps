@@ -1530,11 +1530,24 @@ def run_captions(ctx) -> dict:
                                 words, R2.screen_words(spans, span_fps), y16,
                                 [_judge(m, ctx.cache) for m in (check_model, model)],
                                 avoid=lambda a, b: any(st["a"] < b * float(fps) and st["b"] > a * float(fps)
-                                                       for st in ov), pieces=pieces, source=source)
+                                                       for st in ov), pieces=pieces, source=source,
+                                glossary=glossary_entries())
                         except Exception as e:  # noqa: BLE001 - the words as heard
                             warn(f"the screen's readings could not be scored ({type(e).__name__}: {e})")
                 except Exception as e:  # noqa: BLE001 - the main transcript alone
                     warn(f"the second speech model ({check_model}) could not run: {type(e).__name__}: {e}")
+            learned = glossary_entries()
+            if words and learned:                # the words the user corrected before, where the audio fits
+                try:
+                    from . import caption_recheck as R2
+                    pieces, source = (_raw_source(ctx, cl, rp, fps) if not voiceover else (None, None))
+                    names = [m for m in dict.fromkeys((check_model, model)) if m and m.lower() != "none"]
+                    words, res["glossary_readings"] = R2.glossary_readings(
+                        words, learned, y16, [_judge(m, ctx.cache) for m in names],
+                        avoid=lambda a, b: any(st["a"] < b * float(fps) and st["b"] > a * float(fps) for st in ov),
+                        pieces=pieces, source=source)
+                except Exception as e:  # noqa: BLE001 - the words as heard
+                    warn(f"the learned glossary could not be checked against the audio ({type(e).__name__}: {e})")
     res["transcriber"] = {"engine": "asr.py", "model": model, "words": len(words), "error": err, "hints": hints,
                           "runs": list(transcribe.LOG)}
     res["transcript"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]
@@ -1702,17 +1715,27 @@ def run_captions(ctx) -> dict:
     return res
 
 
-def caption_hints() -> list[str]:
-    """Words the speech model is told to expect (hot words): caption_allowlist.txt and the learned glossary
-    (glossary.txt next to it, written by ``match_cuts learn``: the words the user corrected)."""
-    from .caption_rules import ALLOWLIST_FILE, read_allowlist
-    out = list(read_allowlist())
-    gl = ALLOWLIST_FILE.with_name("caption_glossary.txt")
+def glossary_entries(path: str | Path | None = None) -> list[tuple[str, str]]:
+    """The learned glossary (caption_glossary.txt next to caption_allowlist.txt, written by ``match_cuts learn``):
+    [(heard, written)] -- the words the user corrected in earlier videos."""
+    from .caption_rules import ALLOWLIST_FILE
+    gl = Path(path) if path else ALLOWLIST_FILE.with_name("caption_glossary.txt")
+    out = []
     if gl.is_file():
         for line in gl.read_text(encoding="utf-8").splitlines():
-            line = line.split("#", 1)[0].strip()
-            if line:
-                out.append(line.split("\t")[0].split(" -> ")[-1].strip())
+            body = line.split("#", 1)[0].split("\t")[0].strip()
+            if " -> " in body:
+                heard, written = (x.strip() for x in body.split(" -> ", 1))
+                if heard and written:
+                    out.append((heard, written))
+    return out
+
+
+def caption_hints() -> list[str]:
+    """Words the speech model is told to expect (hot words): caption_allowlist.txt and the written side of the
+    learned glossary (glossary_entries)."""
+    from .caption_rules import read_allowlist
+    out = list(read_allowlist()) + [w for _h, w in glossary_entries()]
     return [h for h in dict.fromkeys(out) if h]
 
 

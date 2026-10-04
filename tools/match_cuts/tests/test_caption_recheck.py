@@ -404,3 +404,46 @@ def test_the_screen_judge_hears_over_a_pause_the_edit_cut_out_but_not_over_speec
     assert R._source_window(ctx, pause_cut, src) is not None
     raw[int(6.1 * 16000):int(6.3 * 16000)] = 0.3 * rng.standard_normal(int(0.2 * 16000))   # a word in it
     assert R._source_window(ctx, pause_cut, src) is None
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# the learned glossary (Task 6: match_cuts learn writes it from the words the user corrected)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _scored(written_minus_heard: float):
+    """A judge that finds the written reading this much more (or less) likely than the heard one."""
+    def run(jobs):
+        return [[0.0, written_minus_heard] for _ in jobs]
+    return run
+
+
+def test_a_learned_word_replaces_the_heard_one_only_where_the_audio_fits():
+    words = [W("I", 0.0, 0.1), W("went", 0.1, 0.3), W("to", 0.3, 0.4), W("the", 0.4, 0.5), W("zendeya", 0.5, 1.0),
+             W("interview.", 1.0, 1.6)]
+    y = np.zeros(16000 * 2, np.float32)
+    learned = [("zendeya", "Zendaya")]
+    out, rows = R.glossary_readings(words, learned, y, [_scored(-0.5), _scored(0.2)])     # within the slack: fits
+    assert [w.text for w in out] == ["I", "went", "to", "the", "Zendaya", "interview"] and rows[0]["taken"] is True
+    assert (out[4].start, out[4].end) == pytest.approx((0.5, 1.0))                      # where the heard word was
+    out, rows = R.glossary_readings(words, learned, y, [_scored(-3.0), _scored(0.2)])     # one model: the audio says
+    assert out[4].text == "zendeya" and rows[0]["taken"] is False                       # otherwise -- never blindly
+    out, rows = R.glossary_readings(words, learned, None, [_scored(1.0)])                 # no audio: no replacement
+    assert out[4].text == "zendeya" and rows[0]["why"] == "no audio to check it against"
+
+
+def test_a_learned_capital_is_written_that_way_without_asking_the_audio():
+    words = [W("with", 0.0, 0.2), W("tom", 0.2, 0.4), W("holland,", 0.4, 0.8), W("today", 0.9, 1.2)]
+    out, rows = R.glossary_readings(words, [("tom holland", "Tom Holland")], None, [])
+    assert [w.text for w in out] == ["with", "Tom", "Holland", "today"] and out[2].raw == "Holland,"
+    assert rows == [{"time": 0.2, "heard": "tom holland", "written": "Tom Holland", "kind": "capitals", "taken": True}]
+
+
+def test_the_screen_showing_a_learned_correction_needs_only_to_fit_the_audio():
+    words = [W("I", 0.0, 0.1), W("met", 0.1, 0.3), W("zendeya", 0.3, 0.8), W("today", 0.9, 1.3)]
+    spans = [{"comp_in": 0, "comp_out": 40, "ocr": "I MET ZENDAYA TODAY", "score": 0.99, "agreement": 1.0}]
+    shown = R.screen_words(spans, Fraction(30))
+    y = np.zeros(16000 * 2, np.float32)
+    out, rows = R.screen_readings(words, shown, y, [_scored(-0.4), _scored(-0.4)])        # a little less likely
+    assert out[2].text == "zendeya" and rows[0]["taken"] is False                       # unknown: as heard
+    out, rows = R.screen_readings(words, shown, y, [_scored(-0.4), _scored(-0.4)], glossary=[("zendeya", "Zendaya")])
+    assert C.norm(out[2].text) == "zendaya" and rows[0]["taken"] is True and rows[0]["glossary"] is True

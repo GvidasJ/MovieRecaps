@@ -492,6 +492,9 @@ SCREEN_PAD_S = 0.3        # the audio scored reaches this far past them
 SCREEN_JUMP_S = 1.5       # a longer gap between two of those words: no single phrase to score
 SCREEN_MAX_S = 28.0       # the speech models hear at most 30 s at once
 SCREEN_QUIET_DB = 20.0    # source the edit leaves out between two words, this much under them at its loudest: a pause
+GLOSSARY_SLACK = 1.0      # the learned glossary's written form (the user's own correction, match_cuts learn) is taken
+                          # where every speech model finds it at most this much less likely than what it heard
+                          # (log-likelihood, nats: about a third as likely) -- the audio fits; never on its own
 
 
 def screen_words(spans: Sequence[dict], fps: Any) -> list[Word]:
@@ -559,8 +562,8 @@ def _a_pause(source: Callable[[float, float], tuple[np.ndarray | None, float]], 
 def screen_readings(words: Sequence[Word], shown: Sequence[Word], y16: np.ndarray | None,
                     judges: Sequence[Callable[[list], list]], sr: int = SR,
                     avoid: Callable[[float, float], bool] | None = None, pieces: Sequence[Piece] | None = None,
-                    source: Callable[[float, float], tuple[np.ndarray | None, float]] | None = None
-                    ) -> tuple[list[Word], list[dict]]:
+                    source: Callable[[float, float], tuple[np.ndarray | None, float]] | None = None,
+                    glossary: Sequence[tuple[str, str]] = ()) -> tuple[list[Word], list[dict]]:
     """Where a caption read clearly on screen says other words than the speech models heard ("SO AS A JOKE" for
     "There was a joke", "the X-Force" for "X-Force"): both readings of the phrase -- the same words heard around
     them -- are scored for that audio by each judge (a speech model's likelihood of the text), and the screen's
@@ -568,10 +571,13 @@ def screen_readings(words: Sequence[Word], shown: Sequence[Word], y16: np.ndarra
     competitor wrote but nobody said, stays out). The audio scored is the source's (``pieces`` / ``source``, as
     recheck) where the edit plays the phrase in order -- the words whole, however the edit cuts into them --, else
     the edit's (y16). ``judges``: f([(audio, [text, ...]), ...]) -> [[score, ...]]; ``avoid(t0, t1)``: edit audio
-    not to score (another video's stretch). Returns (the words in their spoken order, one row per place)."""
+    not to score (another video's stretch). ``glossary``: the learned (heard, written) pairs -- where the screen
+    shows exactly what the user once corrected the heard words to, the screen's reading needs only to fit the audio
+    (GLOSSARY_SLACK), not to be likelier. Returns (the words in their spoken order, one row per place)."""
     out = list(words)
     if not out or not shown or not judges or y16 is None or not len(y16):
         return list(out), []
+    known = {(k, tuple(norm(t) for t in w)) for k, w in _gloss_index(glossary).items()}
     letters = "".join(ch for w in shown for ch in str(w.raw or w.text) if ch.isalpha())
     all_caps = len(letters) >= 12 and sum(ch.isupper() for ch in letters) >= 0.9 * len(letters)
     sm = difflib.SequenceMatcher(None, [norm(w.text) for w in out], [norm(w.text) for w in shown], autojunk=False)
@@ -603,10 +609,12 @@ def screen_readings(words: Sequence[Word], shown: Sequence[Word], y16: np.ndarra
     take = []
     for n, (i1, i2, b_ws, t0, _t1, _texts, _y) in enumerate(places):
         scores = [v[n] for v in verdicts]
-        ok = all(sc[1] > sc[0] for sc in scores)
+        learned = (tuple(norm(w.text) for w in out[i1:i2]), tuple(norm(w.text) for w in b_ws)) in known
+        ok = all(sc[1] > sc[0] for sc in scores) or (learned and all(sc[1] >= sc[0] - GLOSSARY_SLACK for sc in scores))
         rows.append({"time": round(out[i1].start if i2 > i1 else t0, 3), "heard": _text(out[i1:i2]),
                      "screen": " ".join(str(w.raw or w.text) for w in b_ws),
-                     "scores": [[round(x, 2) for x in sc] for sc in scores], "taken": ok})
+                     "scores": [[round(x, 2) for x in sc] for sc in scores], "taken": ok,
+                     **({"glossary": True} if learned else {})})
         if ok:
             take.append((i1, i2, b_ws))
     for i1, i2, b_ws in sorted(take, key=lambda x: -x[0]):
@@ -614,6 +622,99 @@ def screen_readings(words: Sequence[Word], shown: Sequence[Word], y16: np.ndarra
         hi = out[i2].start if i2 < len(out) else math.inf
         new = [Word(w.text.lower() if all_caps else w.text, w.start, w.end, 0.9,
                     str(w.raw or w.text).lower() if all_caps else str(w.raw or w.text)) for w in b_ws]
+        out[i1:i2] = _retime(new, out[i1:i2], lo, hi)
+    return out, rows
+
+
+def _gloss_index(entries: Sequence[tuple[str, str]]) -> dict[tuple[str, ...], list[str]]:
+    """The learned glossary as {heard words (normalised): written words}."""
+    out: dict[tuple[str, ...], list[str]] = {}
+    for heard, written in entries or ():
+        hk = tuple(norm(t) for t in str(heard).split() if norm(t))
+        wt = [t for t in str(written).split() if t]
+        if hk and wt:
+            out.setdefault(hk, wt)
+    return out
+
+
+def _tail(raw: str) -> str:
+    """The punctuation a word is written with after its letters ("holland," -> ",")."""
+    i = len(raw)
+    while i > 0 and not raw[i - 1].isalnum():
+        i -= 1
+    return raw[i:]
+
+
+def glossary_readings(words: Sequence[Word], entries: Sequence[tuple[str, str]], y16: np.ndarray | None,
+                      judges: Sequence[Callable[[list], list]], sr: int = SR,
+                      avoid: Callable[[float, float], bool] | None = None, pieces: Sequence[Piece] | None = None,
+                      source: Callable[[float, float], tuple[np.ndarray | None, float]] | None = None
+                      ) -> tuple[list[Word], list[dict]]:
+    """The learned glossary (match_cuts learn: "heard -> written", the words the user corrected in an earlier video)
+    where the speech models still heard the old words. An entry of the same words (the user's capitals: "tom ->
+    Tom") is written that way -- no word changes. For other words both readings of the phrase -- the same words heard
+    around it -- are scored for the audio by each judge, as screen_readings does, and the written form replaces the
+    heard one only when every judge finds it at most GLOSSARY_SLACK less likely: the user's word where the audio says
+    it, never a blind replacement. Returns (the words, one row per place)."""
+    out = list(words)
+    index = _gloss_index(entries)
+    if not out or not index:
+        return out, []
+    lens = sorted({len(k) for k in index}, reverse=True)
+    nw = [norm(w.text) for w in out]
+    rows: list[dict] = []
+    places: list[tuple[int, int, list[str]]] = []
+    i = 0
+    while i < len(out):
+        hit = next(((n, index[tuple(nw[i:i + n])]) for n in lens if tuple(nw[i:i + n]) in index), None)
+        if hit is None:
+            i += 1
+            continue
+        n, wt = hit
+        if tuple(norm(t) for t in wt) == tuple(nw[i:i + n]):
+            if [w.text for w in out[i:i + n]] != wt:
+                for j, t in zip(range(i, i + n), wt):
+                    w = out[j]
+                    out[j] = replace(w, text=t, raw=t + _tail(str(w.raw or w.text)))
+                rows.append({"time": round(out[i].start, 3), "heard": " ".join(nw[i:i + n]), "written": " ".join(wt),
+                             "kind": "capitals", "taken": True})
+        else:
+            places.append((i, i + n, wt))
+        i += n
+    if not places or not judges or y16 is None or not len(y16):
+        rows += [{"time": round(out[a].start, 3), "heard": _text(out[a:b]), "written": " ".join(wt), "kind": "words",
+                  "taken": False, "why": "no audio to check it against"} for a, b, wt in places]
+        return out, rows
+    jobs, meta = [], []
+    for i1, i2, wt in places:
+        k0, k1 = max(0, i1 - SCREEN_CONTEXT), min(len(out), i2 + SCREEN_CONTEXT)
+        ctx = out[k0:k1]
+        t0, t1 = max(0.0, ctx[0].start - SCREEN_PAD_S), min(len(y16) / sr, ctx[-1].end + SCREEN_PAD_S)
+        if any(y.start - x.end > SCREEN_JUMP_S for x, y in zip(ctx, ctx[1:])) or t1 - t0 > SCREEN_MAX_S or \
+                (avoid and avoid(t0, t1)):
+            rows.append({"time": round(out[i1].start, 3), "heard": _text(out[i1:i2]), "written": " ".join(wt),
+                         "kind": "words", "taken": False, "why": "no single phrase to score"})
+            continue
+        new = [Word(t, 0.0, 0.0, 0.9, t) for t in wt]
+        pre, post = out[k0:i1], out[i2:k1]
+        y = _source_window(ctx, pieces, source) if sr == SR else None
+        jobs.append((y if y is not None and len(y) else y16[int(t0 * sr):int(t1 * sr)],
+                     [_plain(pre + out[i1:i2] + post), _plain(pre + new + post)]))
+        meta.append((i1, i2, wt))
+    verdicts = [judge(jobs) for judge in judges] if jobs else []
+    take = []
+    for n, (i1, i2, wt) in enumerate(meta):
+        scores = [v[n] for v in verdicts]
+        ok = bool(scores) and all(sc[1] >= sc[0] - GLOSSARY_SLACK for sc in scores)
+        rows.append({"time": round(out[i1].start, 3), "heard": _text(out[i1:i2]), "written": " ".join(wt),
+                     "kind": "words", "scores": [[round(x, 2) for x in sc] for sc in scores], "taken": ok})
+        if ok:
+            take.append((i1, i2, wt))
+    for i1, i2, wt in sorted(take, key=lambda x: -x[0]):
+        lo = out[i1 - 1].end if i1 > 0 else 0.0
+        hi = out[i2].start if i2 < len(out) else math.inf
+        tail = _tail(str(out[i2 - 1].raw or out[i2 - 1].text))
+        new = [Word(t, 0.0, 0.0, 0.9, t + (tail if k == len(wt) - 1 else "")) for k, t in enumerate(wt)]
         out[i1:i2] = _retime(new, out[i1:i2], lo, hi)
     return out, rows
 
