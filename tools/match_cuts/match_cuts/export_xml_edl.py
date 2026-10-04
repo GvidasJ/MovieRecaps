@@ -3202,6 +3202,15 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 out["audio_exceptions"].append(f"{cl.label} {span}: {why}")
             else:
                 errors.append(f"XML A1: V1 clip {cl.label} has no audio on A1 at {span}")
+    # another video's stretches (broll.py): V1 and A1 empty on purpose -- every check allows them, and lists them
+    out["gap_exceptions"] = []
+    for ov in out.get("other_video") or []:
+        a, b = int(ov["in"]), int(ov["out"])
+        tag = f"OTHER VIDEO {_tc(a, fps)}-{_tc(b, fps)} ({(b - a) / float(fps):.2f} s)"
+        out["audio_exceptions"].append(f"{tag}: A1 empty on purpose -- another video's sound goes there")
+        out.setdefault("link_exceptions", []).append(f"{tag}: V1 and A1 empty on purpose -- nothing to link")
+        out["gap_exceptions"].append(f"{tag}: V1 empty on purpose -- no clip to cover the window, not a black flash, "
+                                     "no silence cut")
     # markers: every UNCERTAIN / NOT-IN-RAW spot
     have = {(m["in"], m["out"]) for m in x["markers"]}
     for ev in events:

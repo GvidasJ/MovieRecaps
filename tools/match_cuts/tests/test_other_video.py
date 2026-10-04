@@ -124,6 +124,11 @@ def test_v1_and_a1_stay_empty_for_exactly_its_length_marked_and_never_silence_cu
     v = ex.validate_premiere_exports(cl, xml, None, cfg, plan["ripple"])
     assert v["ok"], v["errors"]
     assert v["other_video"] == [{"segment": "S07", "in": a, "out": b, "name": m["name"]}]
+    # the gap, audio and link checks allow the stretch and list it (task 3); the person check does too (test_speakers)
+    tag = "OTHER VIDEO 00:00:05:53-00:00:06:53 (1.00 s)"
+    assert len(v["gap_exceptions"]) == 1 and v["gap_exceptions"][0].startswith(tag)
+    assert sum(e.startswith(tag) for e in v["audio_exceptions"]) == 1
+    assert sum(e.startswith(tag) for e in v["link_exceptions"]) == 1 and v["link_problems"] == []
 
 
 def _edit_marker(xml: Path, dest: Path, **vals) -> Path:

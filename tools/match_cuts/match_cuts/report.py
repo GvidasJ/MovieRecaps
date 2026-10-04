@@ -1438,6 +1438,9 @@ def _premiere_checks(ctx: Any) -> list[str]:
                   "OK" if not probs else f"**FAIL** ({len(probs)})")
         rows.append([f"`{name}`", what, status])
     out = [md_table(["check", "what it checks", "result"], rows)]
+    if v.get("gap_exceptions"):
+        out += ["", "**Left empty on purpose** (allowed by `XML GAP`, `XML FLASH`, `XML SILENCE`, `XML LINK`, "
+                "`XML PERSON` and the audio check, listed here):"] + [f"- {r}" for r in v["gap_exceptions"]]
     if "link_counts" in v:
         from .pipeline import link_lines
         ll = link_lines(v)

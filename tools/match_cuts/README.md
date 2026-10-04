@@ -195,8 +195,10 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   says). The previous clip never plays over it and no silence is removed inside it (it counts as sound: the pads
   around it are kept). Its captions are the competitor's own when it has them, else transcribed from the
   competitor's audio there, and timed to that audio (my edit's own audio is transcribed with the stretch taken out).
-  The checks allow the stretch (`XML OTHER VIDEO` only fails a stretch cut shorter or played over) and the end summary
-  lists it (*Other video (not in RAW), left empty on purpose*). The competitor's audio is transcribed once, whole, to
+  The checks allow the stretch (`XML OTHER VIDEO` only fails a stretch cut shorter or played over) and list it: the end
+  summary (*Other video (not in RAW), left empty on purpose*), the audio check (*V1 clips without their audio on A1*),
+  the link check (*not linked on purpose*), the person check (*not checked*) and `report.md`'s *Left empty on
+  purpose* (the gap, flash and silence checks). The competitor's audio is transcribed once, whole, to
   look for that speech (a short cut-out piece can make Whisper miss speech or invent some). The Zendaya clip is such
   a case: its 5.5 s "I can't really explain it. I haven't got the words." (competitor 00:00:05:01–00:00:10:16).
 
