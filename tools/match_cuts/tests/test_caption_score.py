@@ -89,6 +89,26 @@ def test_competitor_timeline_follows_the_audio_maps():
     assert t.at(2.5) is None                                     # a dip plays no RAW
 
 
+def test_competitor_timeline_puts_pieces_found_in_the_sound_in_the_pictures_time():
+    # the competitor's file plays its sound 54 ms after its picture: a B-roll replacement placed where its sound
+    # plays (broll.py) sits 54 ms early in the RAW against the shots around it, and a cut of the sound between two
+    # such pieces is heard 54 ms after its editor made it
+    segs = [Segment(1, "raw", 0, 30, raw_in_seconds=10.0),
+            Segment(2, "raw", 30, 60, raw_in_seconds=20.0),
+            Segment(3, "raw", 60, 90, raw_in_seconds=40.0)]
+    for s in segs[1:]:
+        s.audio["broll"] = {"replaced": "NOT-IN-RAW", "line": "audio found at RAW", "how": "audio", "heard": True}
+    cl = Cutlist(1, {"fps": "30", "frames": 90}, {"fps": "30"}, {}, segs)
+    cl.audio = {"av_offset": {"status": "measured", "lag_ms": -54.0}}
+    t = S.competitor_timeline(cl)
+    assert t.at(0.5) == ("raw", pytest.approx(10.5))                     # a RAW shot: in its picture's time
+    assert t.at(1.0 + 1e-4) == ("raw", pytest.approx(20.054, abs=1e-3))  # the picture's cut stays
+    assert t.at(1.94) == ("raw", pytest.approx(20.0 + 0.94 + 0.054))     # found in the sound: + 54 ms
+    assert t.at(1.95) == ("raw", pytest.approx(40.0 - 0.05 + 0.054))     # the sound's cut, 54 ms earlier
+    del cl.audio["av_offset"]
+    assert S.competitor_timeline(cl).at(1.95) == ("raw", pytest.approx(20.95))   # no offset measured: as found
+
+
 # ---- the score ------------------------------------------------------------------------------------------------------
 
 def test_exact_within_two_frames_and_text():

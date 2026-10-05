@@ -121,6 +121,44 @@ def test_follow_competitor_keeps_its_breaks_and_timing_with_the_words_heard():
     assert [n["heard"] for n in notes["changed"]] == ["was like", "we're gonna", "This is gonna"]
 
 
+def _brad(first_frame: int):
+    """The competitor plays the end of one take (RAW 100-101) and cuts to the next (RAW 105) at 1.0 s; its caption
+    "Brad Pitt's" shows from ``first_frame`` (30 fps). My edit plays the first take on to 1.3 s before its cut."""
+    from match_cuts.caption_score import Piece, Timeline
+    comp_tl = Timeline([Piece(0.0, 1.0, "raw", 100.0), Piece(1.0, 3.0, "raw", 105.0)])
+    tool_tl = Timeline([Piece(0.0, 1.3, "raw", 100.0), Piece(1.3, 3.3, "raw", 105.0)])
+    spans = [{"comp_in": 0, "comp_out": first_frame, "ocr": "Back up"},
+             {"comp_in": first_frame, "comp_out": 60, "ocr": "Brad Pitt's"}]
+    words = [W("back", 0.1, 0.3), W("up.", 0.35, 0.6), W("Brad", 1.35, 1.55), W("Pitt's", 1.6, 1.9)]
+    caps, _ = S.follow_competitor(spans, words, comp_tl, tool_tl, 30, FPS)
+    return {c.text: c.start for c in caps}
+
+
+def test_follow_a_caption_just_before_the_competitors_cut_starts_on_my_cut():
+    # one frame before its cut: the caption goes with the take after it -- in my edit, on my cut (1.3 s), not where
+    # my edit plays the frame before the competitor's cut (0.97 s, 20 frames early)
+    assert _brad(29) == {"Back up": 0, "Brad Pitt's": 78}
+
+
+def test_follow_a_caption_before_a_cut_keeps_its_lead_on_the_take_of_its_first_word():
+    # 4 frames (0.133 s) before the cut, its first word after it: 0.133 s before my edit plays that take
+    assert _brad(26) == {"Back up": 0, "Brad Pitt's": 78 - 8}
+
+
+def test_follow_my_edit_without_the_captions_first_moment_keeps_the_competitors_lead():
+    from match_cuts.caption_score import Piece, Timeline
+    # the competitor's caption shows 0.4 s before its first word, in a pause my edit cut out (RAW 101.0-101.65)
+    comp_tl = Timeline([Piece(0.0, 3.0, "raw", 100.0)])
+    tool_tl = Timeline([Piece(0.0, 1.0, "raw", 100.0), Piece(1.0, 3.0, "raw", 101.65)])
+    spans = [{"comp_in": 0, "comp_out": 39, "ocr": "Back up"}, {"comp_in": 39, "comp_out": 90, "ocr": "Brad Pitt's"}]
+    words = [W("back", 0.1, 0.3), W("up.", 0.35, 0.5), W("Brad", 1.05, 1.25), W("Pitt's", 1.3, 1.6)]
+    caps, _ = S.follow_competitor(spans, words, comp_tl, tool_tl, 30, FPS)
+    assert {c.text: c.start for c in caps} == {"Back up": 0, "Brad Pitt's": 39}     # 1.05 - 0.4 s: frame 39
+    words[1] = W("up.", 0.35, 0.8)                     # ... never before the word before it ends
+    caps, _ = S.follow_competitor(spans, words, comp_tl, tool_tl, 30, FPS)
+    assert {c.text: c.start for c in caps}["Brad Pitt's"] == 48
+
+
 def test_hints_move_the_breaks():
     m = {"pairs": {"*|*": [100, 30]}, "lengths": {"1": 0.24, "2": 0.41, "3": 0.27, "4": 0.07, "5": 0.01}}
     words = "name surname and age".split()

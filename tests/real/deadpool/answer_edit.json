@@ -1,5 +1,5 @@
 {
- "what": "the competitor's own edit as heard (answer.srt keeps the competitor's caption timing): each piece of its audio and the RAW second it plays -- from the cut list with the two cutaways over RAW speech replaced (broll.py), RAW lip sync",
+ "what": "the competitor's own edit as its editor made it (answer.srt keeps the competitor's caption timing): each piece from one picture cut to the next and the RAW second it plays, in the picture's time -- the cut list with the two cutaways over RAW speech replaced (broll.py), corrected against the competitor's own picture and sound (Task 7: its file plays the sound 54 ms after the picture)",
  "fps": 30,
  "audio": [
   {
@@ -18,23 +18,23 @@
   },
   {
    "start": 1.033333,
-   "end": 1.8,
+   "end": 1.746,
    "kind": "raw",
-   "src_in": 68.679452,
+   "src_in": 68.733452,
    "speed": 1.0
   },
   {
-   "start": 1.8,
-   "end": 3.3,
+   "start": 1.746,
+   "end": 2.946,
    "kind": "raw",
    "src_in": 69.812764,
    "speed": 1.0
   },
   {
-   "start": 3.3,
+   "start": 2.946,
    "end": 3.8,
    "kind": "raw",
-   "src_in": 72.42945,
+   "src_in": 72.12945,
    "speed": 1.0
   },
   {
@@ -130,16 +130,9 @@
   },
   {
    "start": 14.866667,
-   "end": 14.9,
-   "kind": "raw",
-   "src_in": 91.666575,
-   "speed": 1.0
-  },
-  {
-   "start": 14.9,
    "end": 16.333333,
    "kind": "raw",
-   "src_in": 91.767534,
+   "src_in": 91.734201,
    "speed": 1.0
   },
   {
@@ -151,37 +144,30 @@
   },
   {
    "start": 17.166667,
-   "end": 17.233333,
-   "kind": "raw",
-   "src_in": 99.59945,
-   "speed": 1.0
-  },
-  {
-   "start": 17.233333,
    "end": 18.1,
    "kind": "raw",
-   "src_in": 100.03335,
+   "src_in": 99.966684,
    "speed": 1.0
   },
   {
    "start": 18.1,
-   "end": 18.166667,
+   "end": 18.133333,
    "kind": "raw",
    "src_in": 100.900017,
    "speed": 1.0
   },
   {
-   "start": 18.166667,
+   "start": 18.133333,
    "end": 19.866667,
    "kind": "raw",
-   "src_in": 101.66825,
+   "src_in": 101.595433,
    "speed": 1.0
   },
   {
    "start": 19.866667,
    "end": 22.3,
    "kind": "raw",
-   "src_in": 103.274781,
+   "src_in": 103.328767,
    "speed": 1.0
   },
   {

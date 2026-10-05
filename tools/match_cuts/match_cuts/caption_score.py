@@ -160,15 +160,21 @@ class Timeline:
 
 
 def competitor_timeline(cutlist: Any, lag_s: float = 0.0) -> Timeline:
-    """The competitor's own edit as heard: each segment's audio range (J/L offsets included) playing its RAW audio
-    map (render_preview.audio_segment: its own, or the audio line it follows) -- ``lag_s`` later in the RAW (the
-    competitor's audio offset, export_ae.audio_sync_params) -- and another video's stretches as the competitor's own
-    seconds. Pass the cut list with the B-roll spots replaced (broll.py) so a cutaway over RAW speech maps too."""
+    """The competitor's own edit as its editor made it: each segment's audio range (J/L offsets included) playing
+    its RAW audio map (render_preview.audio_segment: its own, or the audio line it follows) in the picture's time --
+    ``lag_s`` later in the RAW (the competitor's audio offset, export_ae.audio_sync_params) -- and another video's
+    stretches as the competitor's own seconds. Pass the cut list with the B-roll spots replaced (broll.py) so a
+    cutaway over RAW speech maps too: a piece placed where the competitor's sound plays (``audio.broll.heard``) moves
+    by the competitor's measured A/V offset into the picture's time (a file that plays its sound 54 ms after the
+    picture: 54 ms later in the RAW), and so do the sound's cuts between two such pieces (its editor made them that
+    much earlier than they are heard)."""
     from .export_xml_edl import _raw_in_seconds, other_video_of, seg_speed
     from .render_preview import audio_segment
     cf, rf = Fraction(cutlist.comp_fps), Fraction(cutlist.raw_fps)
     n = int(cutlist.competitor["frames"])
-    ps = []
+    av = (getattr(cutlist, "audio", None) or {}).get("av_offset") or {}
+    g = float(av["lag_ms"]) / 1000.0 if av.get("status") == "measured" and av.get("lag_ms") is not None else 0.0
+    ps, heard = [], []
     for seg in sorted(cutlist.segments, key=lambda s: (int(s.comp_in), int(s.id))):
         au = seg.audio or {}
         k0 = max(0, int(seg.comp_in) + int(au.get("in_offset_frames") or 0))
@@ -177,13 +183,23 @@ def competitor_timeline(cutlist: Any, lag_s: float = 0.0) -> Timeline:
             continue
         if other_video_of(seg) is not None:
             ps.append(Piece(k0 / float(cf), k1 / float(cf), "comp", k0 / float(cf)))
+            heard.append(False)
             continue
         a = audio_segment(seg)
         if a is None or a.time_remap_keys:
             continue
         v = float(seg_speed(a, cf))
-        r0 = _raw_in_seconds(a, rf) + v * (float(Fraction(k0 - int(seg.comp_in)) / cf) + lag_s)
+        by_sound = bool(((seg.audio or {}).get("broll") or {}).get("heard"))
+        r0 = _raw_in_seconds(a, rf) + v * (float(Fraction(k0 - int(seg.comp_in)) / cf) + lag_s - (g if by_sound else 0.0))
         ps.append(Piece(k0 / float(cf), k1 / float(cf), "raw", r0, v))
+        heard.append(by_sound)
+    for i in range(len(ps) - 1):                 # a cut of the sound between two pieces found in the sound
+        p, q = ps[i], ps[i + 1]
+        if heard[i] and heard[i + 1] and abs(p.t1 - q.t0) < 1e-6 and g:
+            t = p.t1 + g
+            if p.t0 < t < q.t1:
+                ps[i] = Piece(p.t0, t, p.kind, p.src, p.speed)
+                ps[i + 1] = Piece(t, q.t1, q.kind, q.src + q.speed * (t - q.t0), q.speed)
     return Timeline(ps)
 
 

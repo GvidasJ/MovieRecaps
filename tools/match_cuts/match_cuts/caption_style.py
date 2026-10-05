@@ -186,6 +186,8 @@ CUT_START_S = 0.5               # a caption whose first word comes this soon aft
 FILLERS = frozenset("like um uh umm uhh er erm ah".split())      # said, but left out when the competitor leaves them out
 FLICKER_COMP_FRAMES = 2         # a competitor caption this short (its frames) reading like the next: that one's first frame
 WORD_IN_S = 0.04                # a word belongs to the caption on screen this long after its (aligned) start
+FIRST_WORD_S = 0.1              # follow mode: a caption's first word may start this long before the caption shows
+MAX_LEAD_S = 0.5                # ... and the caption shows at most this long before its first word
 COMP_BREAK_BONUS = 1.0          # regroup: a break where the competitor's caption changes, its odds times e^this (on
                                 #   the answer keys you break there 44 % of the time, inside one of its captions 26 %)
 
@@ -361,10 +363,14 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
     timing, the words in it **as heard** ("we're going" read, "we're gonna" said: "we're gonna").
 
     Both edits are matched by what they play, not by their timelines (the speech-safe cuts make mine longer):
-    ``comp_tl`` -- the competitor's edit as heard (caption_score.competitor_timeline), ``tool_tl`` -- my final edit
-    (caption_score.Timeline.from_xml). A caption starts where my edit plays the moment the competitor's caption
-    starts on (its first word when my edit leaves that out); a heard word belongs to the caption on screen as it
-    starts (the competitor switches captions as the word before ends). The screen gives the capital of a caption's
+    ``comp_tl`` -- the competitor's edit in its picture's time (caption_score.competitor_timeline), ``tool_tl`` --
+    my final edit (caption_score.Timeline.from_xml). A caption starts where my edit plays the moment the
+    competitor's caption starts on; where the two edits differ between that moment and the caption's first word, on
+    the words my edit plays: a cut of the competitor's between them -- the caption goes with the take after the cut,
+    as long before my edit plays it as the competitor's caption shows before its cut (one frame before: on the cut);
+    my edit without that moment -- as long before its first word as the competitor's caption (at most MAX_LEAD_S),
+    never before the word before it ends. A heard word belongs to the caption on screen as it starts (the
+    competitor switches captions as the word before ends). The screen gives the capital of a caption's
     first word and keeps a filler (like, um, uh) or a repeat ("yeah yeah") out when it leaves it out; its own text
     stays where nothing was heard (a ``*sound*`` caption, a word the transcript missed). ``spans``: the competitor's
     captions as read (competitor frames). Returns (captions, notes)."""
@@ -387,11 +393,29 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
     notes: dict = {"from_screen": [], "changed": [], "not_in_edit": []}
     starts: list[int | None] = []
     after = None
+    cuts = [q.t0 for p, q in zip(comp_tl.pieces, comp_tl.pieces[1:])        # where its edit jumps (not a piece
+            if q.t0 > p.t1 + 1e-6 or q.kind != p.kind or abs(p.at(q.t0) - q.src) > 0.5 / cf]   # that runs on)
+    said: list[float | None] = []                    # where the competitor plays each heard word's start (its time)
+    last = None
+    for w in words:
+        m = tool_tl.at(float(w.start) + 1e-4)
+        hit = comp_tl.find(m[0], m[1], last) if m is not None else None
+        said.append(hit[0] if hit is not None and hit[1] <= SAME_MOMENT_S else None)
+        last = said[-1] if said[-1] is not None else last
     for i, (a, b, text, d) in enumerate(rows):       # where my edit plays each caption's first moment
-        m = comp_tl.at(a / cf + 1e-4)
+        t0, pre = a / cf, 0.0
+        sw = text.split()
+        j = next((k for k, x in enumerate(said) if x is not None and x >= t0 - FIRST_WORD_S), None)
+        tw = said[j] if j is not None and sw and _same_word(words[j].text, sw[0]) and said[j] - t0 <= MAX_LEAD_S \
+            else None                                # its first word, as the competitor plays it
+        cut = max((c for c in cuts if t0 < c <= max(t0 + 1.0 / cf, tw or 0.0) + 1e-6), default=None)
+        if cut is not None:      # the competitor cuts before its first word: the caption goes with the take after
+            pre = cut - t0 if cut - t0 > 1.0 / cf + 1e-6 else 0.0      # the cut (one frame before it: on the cut)
+            t0 = cut
+        m = comp_tl.at(t0 + 1e-4)
         hit = tool_tl.find(m[0], m[1], after) if m is not None else None
         if hit is not None and hit[1] <= SAME_MOMENT_S:
-            starts.append(to_frame(hit[0], f))
+            starts.append(to_frame(max(0.0, hit[0] - pre), f))
             after = hit[0]
         else:
             starts.append(None)
@@ -402,8 +426,12 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
         heard = [w for w, k in zip(words, owner) if k == i]
         info = {k: d.get(k) for k in ("score", "agreement", "reads", "variants", "comp_in", "comp_out")}
         start = starts[i]
-        if start is None and heard:
-            start = to_frame(max(0.0, heard[0].start - LEAD_S), f)
+        if start is None and heard:              # my edit leaves out its first moment: on its first word, as long
+            k = next(n for n, w in enumerate(words) if w is heard[0])      # before it as the competitor's caption
+            x = said[k]                                                     # (never before the word before it ends)
+            lead = min(MAX_LEAD_S, max(0.0, x - a / cf)) if x is not None else LEAD_S
+            lo = float(words[k - 1].end) if k > 0 else 0.0
+            start = to_frame(max(0.0, lo, heard[0].start - lead), f)
         if start is None:
             notes["not_in_edit"].append({"text": screen, "comp_in": a})
             continue

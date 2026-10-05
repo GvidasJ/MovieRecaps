@@ -388,7 +388,14 @@ fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start 
 * **follow**: the competitor's captions are already in your style (mixed case, 2–4 words). Its caption breaks and
   timing are kept, with the words heard in place of the words read: a word goes with the caption on screen when it
   is said (where the competitor switches captions in mid-word, the words around the switch go where the two
-  captions' text says).
+  captions' text says). A caption starts where my edit plays the moment of the RAW the competitor's caption starts
+  on, in the competitor's picture time (a cutaway placed by where the competitor's sound plays is moved by its
+  measured A/V offset, so the whole edit runs on one clock: Deadpool's file plays its sound 54 ms after the
+  picture). Where the two edits differ between a caption's start and its first word, the caption is timed on the
+  words my edit plays: when the competitor cuts between them, the caption starts as long before my edit plays the
+  take after that cut as the competitor's starts before its cut (one frame before the cut: on the cut); when my
+  edit leaves out the caption's first moment (a pause it cut), it starts as long before its first word as the
+  competitor's did, never before the word before it ends.
 * **regroup**: the competitor writes in capitals or one word at a time. The words heard are grouped in your style by
   a model of where you break between two words (learned from your SRTs by word and by kind of word, plus the pause
   between them, and the caption lengths you use), the best grouping by dynamic programming; never across a sentence

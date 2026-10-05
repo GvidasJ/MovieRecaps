@@ -49,6 +49,7 @@ class Line:
     anchor: Segment
     source: str
     lag_s: float = 0.0              # render lag calibrated on the anchor (the competitor's audio offset there)
+    heard: bool = False             # placed where the competitor's sound plays (its picture's time is av_offset away)
 
     def at(self, t: float) -> float:
         return self.raw_in + self.v * (t - self.t_in)
@@ -151,7 +152,8 @@ def replacement(s: Segment, line: Line, fps: Fraction, raw_fps: Fraction, eviden
         time_remap_keys=[], transition_in=copy.deepcopy(s.transition_in), transition_out=copy.deepcopy(s.transition_out),
         audio={"in_offset_frames": 0, "out_offset_frames": 0, "pitch_preserved": None,
                "lag_ms": evidence.get("lag_ms"), "corr": evidence.get("corr"), "exception": None, "line": None,
-               "broll": {"replaced": shown, "line": line.source, "ranges": [[int(s.comp_in), int(s.comp_out), int(s.id)]]}},
+               "broll": {"replaced": shown, "line": line.source, "ranges": [[int(s.comp_in), int(s.comp_out), int(s.id)]],
+                         **({"heard": True} if line.heard else {})}},
         time_mode="stretch", retime="none", region=int(a.region), box=copy.deepcopy(a.box),
         confidence=float(a.confidence), raw_in_interval=iv, label=f"B-ROLL REPLACED {seg_name(s)}",
         notes=f"--no-broll: the competitor showed {shown} here over the main clip's continuing RAW audio "
@@ -407,7 +409,7 @@ def hint_line(s: Segment, hints: Any, fps: Fraction) -> Line | None:
     med = float(np.median(off))
     if float(np.max(np.abs(off - med))) > HINT_SPREAD_S:
         return None
-    return Line(t0 + med, 1.0, t0, s, f"audio found at RAW {t0 + med:.3f}s")
+    return Line(t0 + med, 1.0, t0, s, f"audio found at RAW {t0 + med:.3f}s", heard=True)
 
 
 def _keeps_playing(prev: Segment | None, nxt: Segment | None, s: Segment, fps: Fraction,
@@ -584,7 +586,8 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
                     if okr is False or frame_src is None:
                         continue
                     ta = float(Fraction(ka) / fps)
-                    ln = Line(ta + off + lag, 1.0, ta, frame_src, f"audio found at RAW {ta + off + lag:.3f}s")
+                    ln = Line(ta + off + lag, 1.0, ta, frame_src, f"audio found at RAW {ta + off + lag:.3f}s",
+                              heard=True)
                     pieces.append((ka, kb, ln, {"ok": True, "corr": round(pk, 4) if okr else None,
                                                 "lag_ms": round(lag * 1000.0, 3)}, "audio"))
         if s.type == "raw" and not pieces:
