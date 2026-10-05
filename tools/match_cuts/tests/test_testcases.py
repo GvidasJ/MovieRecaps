@@ -77,3 +77,29 @@ def test_read_run_and_scorecard(tmp_path):
     assert "1m15s" in card and "PASS" in card and "1/1 (100 %) +1" in card
     bad = dict(row, deliverables={"status": "fail", "failures": ["XML PERSON S14"]})
     assert not check_all.hard_ok(bad) and "XML PERSON S14" in check_all.scorecard([bad])
+
+
+def test_check_all_runs_every_video_with_the_fast_comparison(tmp_path, monkeypatch):
+    """A normal run makes no --fast comparison (off by default: --compare-fast); check-all asks for it on every run
+    (its scorecard says what the thoroughness changed), and --fast runs never make it."""
+    d = tmp_path / "cases" / "one"
+    d.mkdir(parents=True)
+    (d / "competitor.mp4").write_bytes(b"c")
+    (d / "raw.mp4").write_bytes(b"r")
+    seen = []
+
+    def fake_run(case, out_root, work_root, extra=(), python=None, cwd=None):
+        seen.append(list(extra))
+        return {"case": case.name, "exit": 0, "seconds": 1.0}
+    monkeypatch.setattr(check_all, "run_case", fake_run)
+    monkeypatch.setattr(check_all, "scorecard", lambda rows, prev=None: "")
+    check_all.main(["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"),
+                    "--work", str(tmp_path / "w")])
+    check_all.main(["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"),
+                    "--work", str(tmp_path / "w"), "--fast"])
+    assert seen == [["--compare-fast"], ["--fast"]]
+    from match_cuts import cli
+    parse = cli.build_parser().parse_args
+    assert not cli.config_from_args(parse([]), "c.mp4", "r.mp4").compare_fast
+    assert cli.config_from_args(parse(["--compare-fast"]), "c.mp4", "r.mp4").compare_fast
+    assert not cli.config_from_args(parse(["--fast", "--compare-fast"]), "c.mp4", "r.mp4").compare_fast

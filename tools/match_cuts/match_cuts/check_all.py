@@ -145,12 +145,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--out", default=str(DEFAULT_OUT / "runs"), help="run folders (one sub-folder per case)")
     ap.add_argument("--work", default=str(DEFAULT_OUT / "work"), help="stage caches (one sub-folder per case)")
     ap.add_argument("--rescore", action="store_true", help="score each case's newest run again without running it")
-    ap.add_argument("--fast", action="store_true", help="pass --fast to every run (quick, less thorough)")
+    ap.add_argument("--fast", action="store_true", help="pass --fast to every run (quick, less thorough); "
+                                                         "otherwise every run gets --compare-fast")
     ap.add_argument("--python", default=sys.executable, help=argparse.SUPPRESS)
     ap.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
     a, extra = ap.parse_known_args(argv)
     if a.fast:
         extra = ["--fast", *extra]
+    elif "--compare-fast" not in extra:
+        extra = ["--compare-fast", *extra]          # the scorecard runs say what the thoroughness changed
     names = [n for n in a.cases.split(",") if n]
     cases = testcases.cases(names or None, Path(a.cases_dir))
     out_root, work_root = Path(a.out), Path(a.work)

@@ -175,7 +175,8 @@ class Config:
                                            #   resolved at the start of a run to whether one can be used (gpu.py)
     full_res: bool = True                  # every matched frame and every cut verified at full resolution, slightly
                                            #   uncertain frames re-checked there before the cuts are decided (fullres.py)
-    compare_fast: bool = True              # thorough runs also make the --fast analysis (cached) and the end summary
+    compare_fast: bool = False             # --compare-fast: a thorough run also makes the --fast analysis (cached) and
+                                           # the end summary says what the thoroughness changed (check-all turns it on)
                                            #   says what the thoroughness changed
     speech_map_model: str = ""             # the speech map's model ("": caption_recheck_model, the most accurate;
                                            #   --fast: large-v3-turbo)

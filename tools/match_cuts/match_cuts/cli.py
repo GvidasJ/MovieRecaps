@@ -153,10 +153,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", default=None, type=int, help="random seed (RANSAC / FLANN); default from config")
     p.add_argument("--fast", action="store_true",
                    help="a quick run: the RAW index samples the RAW (10 frames a second) instead of holding every "
-                        "frame, every 3rd competitor frame is searched instead of every one, no full-resolution check "
-                        "or re-check of uncertain frames, the faster speech model for the speech-safe cuts and faces "
-                        "found at 960 px. Default: the most thorough matching (the end summary says what it changed "
-                        "against --fast)")
+                        "frame, every 3rd competitor frame is searched instead of every one, no full-resolution "
+                        "re-check, cut placement, framing or check, and the faster speech model for the speech-safe "
+                        "cuts. Default: the most thorough matching")
+    p.add_argument("--compare-fast", action="store_true",
+                   help="a thorough run also makes the analysis a --fast run would make of the same video (from the "
+                        "same caches, a few minutes more) and the end summary says what the thoroughness changed "
+                        "against it (check-all does this for every video)")
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
@@ -267,6 +270,8 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
         cfg.seed = int(args.seed)
     if getattr(args, "fast", False):
         cfg.apply_fast()
+    else:
+        cfg.compare_fast = bool(getattr(args, "compare_fast", False))
     return cfg
 
 

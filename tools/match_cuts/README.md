@@ -80,7 +80,7 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 | `--audio-sync` | `raw` | which audio timing the export uses when the competitor's sound is shifted against its picture (see *A/V offset* below): `raw` keeps the RAW's own lip-sync; `competitor` copies the competitor's shift exactly |
 | `-v` | off | debug logging on the console |
 
-Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
+Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--compare-fast` (a thorough run also says what it changed against `--fast`), `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
@@ -114,7 +114,7 @@ matching slower, not faster: the same 120 searches take 32-34 s with 12-15 worke
 | verification | also every frame and every cut at full resolution (9.9): each frame as delivered, the framing error the refinement finds, a neighbouring RAW frame that fits better (a failure beyond 0.01, unless it is the repeat cadence one constant-speed clip cannot follow: the competitor shows one picture on two frames where the time line steps, or the time line shows one RAW frame twice where the competitor moves on), and each cut (a failure when a frame next to it fits the other side's model better by 0.01, unless the competitor repeats a picture across the cut) | the proxy checks |
 | speech-safe cuts (speech map) | large-v3 | large-v3-turbo |
 | framing check (who speaks) | YuNet faces and Light-ASD on every RAW frame the edit plays, at 25 fps (Light-ASD's own rate), faces found at 960 px wide (full width was tried on tests/real/zendaya: the same person found speaking on 688 of 699 frames -- the other 11 an overlap where both speak -- and only two more tracks, a 34 px background face and an 11-frame fragment, for 4x the pixels to search) | the same |
-| end summary | `Run time`, what the full-resolution pass changed, and `Against --fast`: what the thorough analysis changed against the one a --fast run makes of the same video (it is made too, from the same caches) and how long each takes | `Run time` |
+| end summary | `Run time` and what the full-resolution pass changed; with `--compare-fast` (check-all always) also `Against --fast`: what the thorough analysis changed against the one a --fast run makes of the same video (made from the same caches, a few minutes more) and how long each takes | `Run time` |
 
 Without a CUDA GPU the default samples the RAW like `--fast` (an every-frame index needs the exact GPU search), skips
 the full-resolution pass, and says so.

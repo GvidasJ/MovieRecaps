@@ -15,7 +15,7 @@ F30 = Fraction(30)
 def test_the_default_is_thorough_and_fast_is_the_quick_profile():
     c = Config()
     assert (c.fast, c.comp_search_stride, c.raw_index_every_frame, c.full_res, c.compare_fast) == (False, 1, True,
-                                                                                                    True, True)
+                                                                                                    True, False)
     f = c.fast_twin()
     assert (f.fast, f.comp_search_stride, f.raw_index_every_frame, f.full_res, f.compare_fast) == (True, 3, False,
                                                                                                     False, False)
