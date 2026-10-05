@@ -1322,8 +1322,9 @@ verification honesty) were fixed under these shared rules:
     centre of the weighted max-coverage ('interval stabbing') set; **g = 0 exactly** when 0 is in that set
     or covers ≥ `av_offset_zero_frac` of its weight (zero-offset inputs behave exactly as before). Accepted
     with ≥ 3 segments, ≥ 2 s of audio, ≥ 70 % coverage, |g| ∈ [2 ms, 1 s] and no single segment deciding
-    WHERE it is (every leave-one-out set within `av_offset_max_spread_ms` of the published one -- a segment
-    may only narrow it); else 0. No drift is fitted (the real data are piecewise constant). Published as
+    WHERE it is (every leave-one-out set within `av_offset_max_spread_ms` of the published one, or a quarter
+    of a RAW frame when more -- the intervals are the RAW frames' phase, so one segment of 25 fps footage narrows
+    the set by several ms; a segment may only narrow it); else 0. No drift is fitted (the real data are piecewise constant). Published as
     `cutlist.audio.av_offset = {status: measured|zero|not_measured, lag_ms, lag_ms_interval, centre_ms,
     n_segments, coverage, coverage_zero, spread_ms, loo_distance_ms, audio_s, reason, text, prior,
     segments, switch_baseline_ms, switch_baseline, sync_mode}` with plain text ("competitor audio is 86.0

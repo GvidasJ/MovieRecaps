@@ -1,0 +1,246 @@
+{
+ "what": "your finished video (final.mp4) matched against the RAW frame by frame, as the tool matches a competitor, each piece placed by its sound and the cutaways over the RAW's sound given that sound (learn.sound_edit): what the RAW plays where -- the timeline answer.srt is timed on, and your cuts",
+ "track": "sound",
+ "fps": 30.0,
+ "raw_fps": 25.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 3.9,
+   "kind": "raw",
+   "src_in": 489.847065,
+   "speed": 1.0
+  },
+  {
+   "start": 3.9,
+   "end": 5.2,
+   "kind": "raw",
+   "src_in": 493.980399,
+   "speed": 1.0
+  },
+  {
+   "start": 5.2,
+   "end": 7.833333,
+   "kind": "raw",
+   "src_in": 495.980399,
+   "speed": 1.0
+  },
+  {
+   "start": 7.833333,
+   "end": 8.833333,
+   "kind": "raw",
+   "src_in": 499.047065,
+   "speed": 1.0
+  },
+  {
+   "start": 8.833333,
+   "end": 9.833333,
+   "kind": "raw",
+   "src_in": 501.647066,
+   "speed": 1.0
+  },
+  {
+   "start": 9.833333,
+   "end": 10.433333,
+   "kind": "raw",
+   "src_in": 502.847067,
+   "speed": 1.0
+  },
+  {
+   "start": 10.433333,
+   "end": 11.966667,
+   "kind": "raw",
+   "src_in": 503.647067,
+   "speed": 1.0
+  },
+  {
+   "start": 11.966667,
+   "end": 12.333333,
+   "kind": "raw",
+   "src_in": 505.413731,
+   "speed": 1.0
+  },
+  {
+   "start": 12.333333,
+   "end": 12.9,
+   "kind": "raw",
+   "src_in": 505.7804,
+   "speed": 1.0
+  },
+  {
+   "start": 12.9,
+   "end": 13.866667,
+   "kind": "raw",
+   "src_in": 506.347067,
+   "speed": 1.0
+  },
+  {
+   "start": 13.866667,
+   "end": 14.666667,
+   "kind": "raw",
+   "src_in": 507.313734,
+   "speed": 1.0
+  },
+  {
+   "start": 14.666667,
+   "end": 15.133333,
+   "kind": "raw",
+   "src_in": 508.547067,
+   "speed": 1.0
+  },
+  {
+   "start": 15.133333,
+   "end": 21.1,
+   "kind": "raw",
+   "src_in": 509.313733,
+   "speed": 1.0
+  },
+  {
+   "start": 21.1,
+   "end": 22.2,
+   "kind": "raw",
+   "src_in": 516.413731,
+   "speed": 1.0
+  },
+  {
+   "start": 22.2,
+   "end": 24.733333,
+   "kind": "raw",
+   "src_in": 518.247065,
+   "speed": 1.0
+  },
+  {
+   "start": 24.733333,
+   "end": 25.833333,
+   "kind": "raw",
+   "src_in": 521.013733,
+   "speed": 1.0
+  },
+  {
+   "start": 25.833333,
+   "end": 26.833333,
+   "kind": "raw",
+   "src_in": 523.280399,
+   "speed": 1.0
+  },
+  {
+   "start": 26.833333,
+   "end": 30.166667,
+   "kind": "raw",
+   "src_in": 525.613731,
+   "speed": 1.0
+  },
+  {
+   "start": 30.166667,
+   "end": 30.3,
+   "kind": "raw",
+   "src_in": 528.947067,
+   "speed": 1.0
+  },
+  {
+   "start": 30.3,
+   "end": 31.933333,
+   "kind": "raw",
+   "src_in": 529.213732,
+   "speed": 1.0
+  },
+  {
+   "start": 31.933333,
+   "end": 34.933333,
+   "kind": "raw",
+   "src_in": 531.1804,
+   "speed": 1.0
+  },
+  {
+   "start": 34.933333,
+   "end": 38.0,
+   "kind": "raw",
+   "src_in": 535.147066,
+   "speed": 1.0
+  },
+  {
+   "start": 38.0,
+   "end": 40.133333,
+   "kind": "raw",
+   "src_in": 539.913731,
+   "speed": 1.0
+  },
+  {
+   "start": 40.133333,
+   "end": 42.433333,
+   "kind": "raw",
+   "src_in": 542.180402,
+   "speed": 1.0
+  },
+  {
+   "start": 42.433333,
+   "end": 42.833333,
+   "kind": "raw",
+   "src_in": 544.747068,
+   "speed": 1.0
+  },
+  {
+   "start": 42.833333,
+   "end": 43.666667,
+   "kind": "raw",
+   "src_in": 545.213734,
+   "speed": 1.0
+  },
+  {
+   "start": 43.666667,
+   "end": 44.866667,
+   "kind": "raw",
+   "src_in": 546.713733,
+   "speed": 1.0
+  },
+  {
+   "start": 44.866667,
+   "end": 47.833333,
+   "kind": "raw",
+   "src_in": 548.613734,
+   "speed": 1.0
+  },
+  {
+   "start": 47.833333,
+   "end": 49.933333,
+   "kind": "raw",
+   "src_in": 552.547068,
+   "speed": 1.0
+  },
+  {
+   "start": 49.933333,
+   "end": 51.733333,
+   "kind": "raw",
+   "src_in": 555.780401,
+   "speed": 1.0
+  },
+  {
+   "start": 51.733333,
+   "end": 52.3,
+   "kind": "raw",
+   "src_in": 557.813734,
+   "speed": 1.0
+  },
+  {
+   "start": 52.3,
+   "end": 53.366667,
+   "kind": "raw",
+   "src_in": 562.147066,
+   "speed": 1.0
+  },
+  {
+   "start": 53.366667,
+   "end": 54.2,
+   "kind": "raw",
+   "src_in": 566.180399,
+   "speed": 1.0
+  },
+  {
+   "start": 54.2,
+   "end": 55.133333,
+   "kind": "raw",
+   "src_in": 567.5804,
+   "speed": 1.0
+  }
+ ]
+}

@@ -2131,7 +2131,7 @@ def _stab_centre(st: dict, lo: np.ndarray, hi: np.ndarray, w: np.ndarray, zero_f
 
 
 def solve_av_offset(lo: Sequence[float], hi: Sequence[float], w: Sequence[float], cfg: Any,
-                    audio_s: float | None = None) -> dict:
+                    audio_s: float | None = None, frame_s: float | None = None) -> dict:
     """The run's A/V offset (seconds, xcorr convention) from per-segment offset intervals [lo_i, hi_i].
 
     g = 0 EXACTLY when 0 is in the max-coverage set or covers >= cfg.av_offset_zero_frac of the best
@@ -2139,7 +2139,9 @@ def solve_av_offset(lo: Sequence[float], hi: Sequence[float], w: Sequence[float]
     of the max-coverage set, accepted when there are >= av_offset_min_segments segments and >=
     av_offset_min_audio_s of audio, the offset explains >= av_offset_min_coverage of the weight, no single
     segment decides where it is (every leave-one-out max-coverage set lies within av_offset_max_spread_ms of
-    the published set; a segment may only narrow it) and av_offset_min_ms <= |g| <= av_offset_max_s; else
+    the published set, or within a quarter of a RAW frame ``frame_s`` when that is more: the segments' intervals
+    are their RAW frame's phase, so with 25 fps footage one segment narrows the set by several ms; a segment may
+    only narrow it) and av_offset_min_ms <= |g| <= av_offset_max_s; else
     0 and today's per-segment behaviour. Returns {'status': 'measured' | 'zero' | 'not_measured', 'lag_s',
     'interval_s' (the max-coverage set), 'centre_s', 'n', 'coverage', 'coverage_zero', 'spread_ms' (spread
     of the leave-one-out centres), 'loo_distance_ms', 'audio_s', 'reason'}."""
@@ -2180,7 +2182,10 @@ def solve_av_offset(lo: Sequence[float], hi: Sequence[float], w: Sequence[float]
         why.append(f"{audio_s:.2f} s of audio")
     if out["coverage"] < float(_cfg(cfg, "av_offset_min_coverage", 0.7)):
         why.append(f"coverage {out['coverage']:.0%}")
-    if dist * 1000.0 > float(_cfg(cfg, "av_offset_max_spread_ms", 2.0)):
+    lim_ms = float(_cfg(cfg, "av_offset_max_spread_ms", 2.0))
+    if frame_s:
+        lim_ms = max(lim_ms, 250.0 * float(frame_s))
+    if dist * 1000.0 > lim_ms:
         why.append(f"one segment moves the offset by {dist * 1000.0:.2f} ms")
     if abs(c) * 1000.0 < float(_cfg(cfg, "av_offset_min_ms", 2.0)):
         why.append(f"|offset| {abs(c) * 1000.0:.2f} ms below the minimum")
@@ -2276,7 +2281,7 @@ def av_offset_prior(hints: Any, segments: Sequence[Segment], comp_fps: Any, cfg:
 
 
 def av_offset_probe(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.ndarray, sr: int, comp_fps: Any,
-                    cfg: Any, dlog: DecisionLog | None = None) -> dict:
+                    cfg: Any, dlog: DecisionLog | None = None, raw_fps: Any = None) -> dict:
     """Fallback search centre when the S5.1 windows give no prior (too few long windows, DESIGN §7 D9): one
     wide lag search (±cfg.av_offset_max_s, at most half the range) per speed-1 stretch segment with >=
     av_offset_seg_min_s of core audio; the segments correlating >= verify_audio_strong_corr constrain the
@@ -2316,7 +2321,7 @@ def av_offset_probe(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.n
             hi.append(x_a - ia + eps)
             w.append((b - a) / sr * pk * pk)
             dur += (b - a) / sr
-        sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur)
+        sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur, frame_s=_frame_s(raw_fps))
         out.update(n_segments=sol["n"], reason=sol["reason"], accepted=sol["status"] in ("measured", "zero"),
                    lag_s=float(sol["lag_s"]),
                    interval_ms=None if sol["interval_s"] is None else [round(sol["interval_s"][0] * 1000.0, 3),
@@ -2326,8 +2331,12 @@ def av_offset_probe(segments: Sequence[Segment], comp_y: np.ndarray, raw_y: np.n
         return out
 
 
+def _frame_s(raw_fps: Any) -> float | None:
+    return None if raw_fps is None else 1.0 / float(parse_fps(raw_fps))
+
+
 def av_offset_estimate(segments: Sequence[Segment], audio_result: dict, cfg: Any, dlog: DecisionLog | None = None,
-                       *, prior: dict | None = None) -> dict:
+                       *, prior: dict | None = None, raw_fps: Any = None) -> dict:
     """The run's A/V offset from a per-segment audio pass (DESIGN §7 D9): every forward stretch segment with
     corr >= cfg.verify_audio_strong_corr over >= av_offset_seg_min_s of audio (or >= av_offset_seg_short_s at
     corr >= av_offset_seg_short_corr) gives the offset interval [(x_a - hi) / v, (x_a - lo) / v] (x_a = raw_in
@@ -2366,7 +2375,7 @@ def av_offset_estimate(segments: Sequence[Segment], audio_result: dict, cfg: Any
         items.append({"seg": int(s.id), "speed": v, "lag_total_ms": float(m["lag_total_ms"]), "corr": corr,
                       "dur_s": round(d_s, 4),
                       "interval_ms": [round((x_a - b) / v * 1000.0, 3), round((x_a - a) / v * 1000.0, 3)]})
-    sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur)
+    sol = solve_av_offset(lo, hi, w, cfg, audio_s=dur, frame_s=_frame_s(raw_fps))
     lag_ms = round(sol["lag_s"] * 1000.0, 3)
     iv = sol["interval_s"]
     pr = dict(prior or {})

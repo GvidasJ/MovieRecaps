@@ -248,6 +248,8 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
         return lines[key]
 
     replaced: dict[int, list[Segment]] = {}          # original segment id -> its replacement piece(s)
+    used_line: dict[int, Line] = {}                   # ... the line it follows (verified)
+    short_ids: set[int] = set()                       # pieces too short to hear whether the RAW audio continues
     pending: list[tuple[Segment, Segment | None, Segment | None, bool]] = []
     i, n = 0, len(segs)
     while i < n:
@@ -289,6 +291,8 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
             if used is None and ev.get("ok") is None and same_line and fwd is not None:
                 used, ev = fwd, dict(ev, bridged=True)    # too short to hear: between two shots of the same line
             if used is None:
+                if ev.get("ok") is None:
+                    short_ids.add(int(s.id))
                 if follow_audio:
                     pending.append((s, A, B, same_line))
                     continue
@@ -301,9 +305,24 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
                 continue
             new = replacement(s, used, fps, raw_fps, ev)
             replaced[int(s.id)] = [new]
+            used_line[int(s.id)] = used
             res["replaced"].append(dict(_row(s, fps, None, ev), line=used.source, raw_in_seconds=new.raw_in_seconds,
                                         raw_out_seconds=round(used.at(float(Fraction(int(s.comp_out)) / fps)), 6),
                                         bridged=bool(ev.get("bridged")), how="audio"))
+        # a piece too short to hear between two pieces replaced by the same line: that line too, as between two shots
+        # of one line (video4: 7 frames of another RAW moment between two cutaways over S10's continuing speech)
+        for x, y, z in zip(region, region[1:], region[2:]):
+            lx = used_line.get(int(x.id))
+            if int(y.id) not in short_ids or int(y.id) in replaced or lx is None or used_line.get(int(z.id)) is not lx:
+                continue
+            ev = {"ok": None, "corr": None, "lag_ms": None, "sidelobe": None, "bridged": True}
+            new = replacement(y, lx, fps, raw_fps, ev)
+            replaced[int(y.id)] = [new]
+            used_line[int(y.id)] = lx
+            pending = [q for q in pending if int(q[0].id) != int(y.id)]
+            res["replaced"].append(dict(_row(y, fps, None, ev), line=lx.source, raw_in_seconds=new.raw_in_seconds,
+                                        raw_out_seconds=round(lx.at(float(Fraction(int(y.comp_out)) / fps)), 6),
+                                        bridged=True, how="audio"))
         i = j + 1
     if follow_audio:
         _follow_audio(segs, pending, replaced, res, comp_y, raw_y, sr, fps, raw_fps, strong, hints, have_audio,
@@ -440,6 +459,8 @@ BROLL_GAP_S = 1.0         # follow_audio: a RAW piece is B-roll only when its pi
 RUN_CORR = 0.6            # a found audio run is kept when the competitor's audio follows it this well (music may lie under)
 RUN_CONF = 1.3            # audio-alignment windows used to find the runs under a cutaway
 MUTE_MIN_S = 0.5          # a spot this long with no RAW audio found has music / voice-over: no RAW audio under it
+OWN_SOUND_MS = 100.0      # a RAW piece whose sound is its own picture's RAW (corr >= strong) this near: the main clip
+#                           (an anchor needs it within audio_lag_tol_ms; video4's S27 was 22 ms off)
 OTHER_MIN_S = 0.25        # a NOT-IN-RAW stretch this long or longer can be another video (shots.MIN_SHOT_S)
 OTHER_MIN_WORDS = 2       # ... when the competitor's audio says at least this many words there ...
 OTHER_MIN_SPEECH_S = 0.3  # ... spoken over at least this long
@@ -591,10 +612,16 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
                     pieces.append((ka, kb, ln, {"ok": True, "corr": round(pk, 4) if okr else None,
                                                 "lag_ms": round(lag * 1000.0, 3)}, "audio"))
         if s.type == "raw" and not pieces:
-            if (s.audio or {}).get("corr") is None and not same_line:
+            au = s.audio or {}
+            if au.get("corr") is not None and float(au["corr"]) >= strong and au.get("lag_ms") is not None                     and abs(float(au["lag_ms"])) <= OWN_SOUND_MS:
+                continue                        # its own sound is its picture's RAW (a small A/V shift): the main clip
+            from .shots import MIN_SHOT_S
+            if (s.audio or {}).get("corr") is None and not same_line                     and (int(s.comp_out) - int(s.comp_in)) / float(fps) >= MIN_SHOT_S - 1e-9:
                 res["kept"].append(_row(s, fps, "its sound could not be measured (too short) and it is not inside one "
                                                 "continuous shot: left as the competitor has it", None))
                 continue
+            # shorter than a shot can be (shots.MIN_SHOT_S): left as it is, it would be a flash frame -- the clip
+            # before plays on over it, as over a flash (video4: 4 frames at the end of the competitor's rewind)
             prev = next((x for x in reversed(flat_before(k)) if x.type == "raw"), None)
             ln = _keeps_playing(prev, None, s, fps, raw_len)
             if ln is None or s.raw_in_seconds is None or abs(ln.at(t0) - float(s.raw_in_seconds)) <= BROLL_GAP_S:

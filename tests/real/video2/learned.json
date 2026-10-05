@@ -1,0 +1,191 @@
+{
+ "video": "video2",
+ "date": "2026-10-05",
+ "folder": "..\\..\\finished\\video2",
+ "kind": "finished",
+ "runs": {
+  "tool": "..\\..\\work\\t8\\final4\\runs\\video2\\001",
+  "user": "..\\..\\work\\t8\\user\\video2\\001"
+ },
+ "belongs": {
+  "competitor_from_raw": 1.0,
+  "final_from_raw": 1.0,
+  "same_story": 0.866
+ },
+ "captions": {
+  "source": null,
+  "why": "not read: the project's 67 captions are not this video's (only 0 % of them show on final.mp4's screen, which shows 'Look' first)",
+  "count": 0,
+  "on_screen": 0.0,
+  "changes": []
+ },
+ "edit": {
+  "clips": 1,
+  "starts": [
+   -0.0029
+  ],
+  "ends": [
+   -0.0029
+  ],
+  "removed": 0,
+  "added": 0,
+  "how": "at the cuts you and the tool both make (within 0.5 s): your RAW moment minus the tool's"
+ },
+ "cuts": {
+  "tool": {
+   "cuts": 1,
+   "reproduced": 1,
+   "near": 0,
+   "others": 3,
+   "reproduced_pct": 100.0,
+   "length_key": 10.067,
+   "length_got": 10.125,
+   "length_diff": 0.058,
+   "length_diff_pct": 0.6,
+   "tol_s": 0.0667,
+   "misses": [],
+   "trims": [
+    {
+     "t": 6.033,
+     "out": -0.0029,
+     "into": -0.0029
+    }
+   ],
+   "out_median": -0.0029,
+   "into_median": -0.0029
+  },
+  "competitor": {
+   "cuts": 1,
+   "reproduced": 0,
+   "near": 1,
+   "others": 17,
+   "reproduced_pct": 0.0,
+   "length_key": 10.067,
+   "length_got": 11.708,
+   "length_diff": 1.642,
+   "length_diff_pct": 16.3,
+   "tol_s": 0.0667,
+   "misses": [
+    {
+     "t": 6.033,
+     "out": 303.747,
+     "into": 304.914,
+     "got_out": 303.879,
+     "got_into": 304.504
+    }
+   ],
+   "trims": [
+    {
+     "t": 6.033,
+     "out": -0.1321,
+     "into": 0.4096
+    }
+   ],
+   "out_median": -0.1321,
+   "into_median": 0.4096
+  },
+  "competitor_cuts": 18,
+  "competitor_cuts_kept": 1,
+  "length": {
+   "yours": 10.067,
+   "tool": 10.125,
+   "competitor": 11.708
+  },
+  "only_tool_s": 0.068,
+  "only_tool": [
+   [
+    309.453,
+    309.521
+   ]
+  ],
+  "only_yours_s": 0.775,
+  "only_yours": [
+   [
+    297.714,
+    297.979
+   ],
+   [
+    306.208,
+    306.562
+   ],
+   [
+    307.771,
+    307.875
+   ],
+   [
+    308.896,
+    308.947
+   ]
+  ],
+  "framing": {
+   "pieces": 7,
+   "dx": [
+    0.0013,
+    0.0062,
+    0.0081,
+    0.0567,
+    0.0151,
+    0.0137,
+    0.006
+   ],
+   "dy": [
+    0.0403,
+    0.0345,
+    0.0324,
+    0.0343,
+    0.0331,
+    0.0331,
+    0.0315
+   ],
+   "zoom": [
+    0.778,
+    0.807,
+    0.782,
+    0.786,
+    0.799,
+    0.798,
+    0.805
+   ],
+   "dx_median": 0.0081,
+   "dy_median": 0.0331,
+   "zoom_median": 0.798
+  }
+ },
+ "topaz": {
+  "topaz": {
+   "width": 2160,
+   "height": 3840,
+   "fps": 30.0,
+   "duration": 10.1,
+   "audio": false
+  },
+  "final": {
+   "width": 1080,
+   "height": 1920,
+   "fps": 30.0,
+   "duration": 10.067,
+   "audio": true
+  },
+  "raw": {
+   "width": 624,
+   "height": 480,
+   "fps": 25.0,
+   "duration": 1464.431,
+   "audio": true
+  },
+  "cuts_seen": 1.0,
+  "what": "your edited picture, not the RAW: the length of final.mp4 (10.10 s against 10.07 s), and it cuts where final.mp4 cuts (100 % of your cuts); 2160x3840 at 30 fps, no sound -- the RAW is 624x480 at 25 fps, 1464 s"
+ },
+ "sound": {
+  "yours": {
+   "offset_ms": -35.1,
+   "moved": [],
+   "given": []
+  },
+  "competitor": {
+   "offset_ms": null,
+   "moved": [],
+   "given": []
+  }
+ }
+}

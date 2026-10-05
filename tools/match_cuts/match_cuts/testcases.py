@@ -6,7 +6,9 @@ A case folder holds:
   same frame rate, same audio; small_copy);
 * ``answer.srt`` (optional) -- the user's finished captions: check-all's caption answer key;
 * ``answer_edit.xml`` / ``answer_edit.json`` (optional) -- the user's finished edit: the timeline answer.srt is
-  timed on (an FCP7 / Premiere XML, or {"audio": [{start, end, src_in, speed}]} seconds of the RAW it plays);
+  timed on (an FCP7 / Premiere XML, or {"audio": [{start, end, src_in, speed}]} seconds of the RAW it plays, its
+  "track" picture or sound) -- and, on the user's own edit (timeline "edit"), check-all's cut answer key
+  (edit_score.py);
 * ``case.json`` (optional) -- {"options": [extra command-line options], "timeline": "edit" | "competitor" (the key
   is timed on the competitor's own edit: answer_edit.json then holds the competitor's timeline -> RAW), "notes"}.
 """
@@ -40,6 +42,11 @@ class Case:
     @property
     def has_key(self) -> bool:
         return self.answer_srt is not None and self.answer_edit is not None
+
+    @property
+    def has_cut_key(self) -> bool:
+        """The answer key holds the user's own edit (not the competitor's timeline): its cuts are scored too."""
+        return self.answer_edit is not None and self.timeline == "edit"
 
 
 def load(d: Path) -> Case | None:

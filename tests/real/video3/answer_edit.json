@@ -1,0 +1,92 @@
+{
+ "what": "your finished video (final.mp4) matched against the RAW frame by frame, as the tool matches a competitor, each piece placed by its sound and the cutaways over the RAW's sound given that sound (learn.sound_edit): what the RAW plays where -- the timeline answer.srt is timed on, and your cuts",
+ "track": "sound",
+ "fps": 30.0,
+ "raw_fps": 25.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 1.666667,
+   "kind": "raw",
+   "src_in": 342.45,
+   "speed": 1.0
+  },
+  {
+   "start": 1.666667,
+   "end": 3.833333,
+   "kind": "raw",
+   "src_in": 344.35,
+   "speed": 1.0
+  },
+  {
+   "start": 3.833333,
+   "end": 4.0,
+   "kind": "raw",
+   "src_in": 346.683334,
+   "speed": 1.0
+  },
+  {
+   "start": 4.0,
+   "end": 5.466667,
+   "kind": "raw",
+   "src_in": 346.983333,
+   "speed": 1.0
+  },
+  {
+   "start": 5.466667,
+   "end": 6.466667,
+   "kind": "raw",
+   "src_in": 349.15,
+   "speed": 1.0
+  },
+  {
+   "start": 6.466667,
+   "end": 7.3,
+   "kind": "raw",
+   "src_in": 350.483333,
+   "speed": 1.0
+  },
+  {
+   "start": 7.3,
+   "end": 10.0,
+   "kind": "raw",
+   "src_in": 351.85,
+   "speed": 1.0
+  },
+  {
+   "start": 10.0,
+   "end": 13.366667,
+   "kind": "raw",
+   "src_in": 355.45,
+   "speed": 1.0
+  },
+  {
+   "start": 13.366667,
+   "end": 16.2,
+   "kind": "raw",
+   "src_in": 359.116666,
+   "speed": 1.0
+  },
+  {
+   "start": 16.2,
+   "end": 22.266667,
+   "kind": "raw",
+   "src_in": 362.816667,
+   "speed": 1.0
+  },
+  {
+   "start": 22.266667,
+   "end": 29.733333,
+   "kind": "raw",
+   "src_in": 369.083334,
+   "speed": 1.0
+  },
+  {
+   "start": 29.733333,
+   "end": 32.766667,
+   "kind": "raw",
+   "src_in": 378.283333,
+   "speed": 1.0
+  }
+ ]
+}

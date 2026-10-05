@@ -12,8 +12,8 @@ Every engine turns 16 kHz mono audio into words (captions.Word: text, start, end
 * ``cohere-transcribe`` -- Cohere Transcribe through Transformers: gated on Hugging Face (its terms accepted and
   ``hf auth login`` first).
 
-``transcribe(y16, name, hints)`` runs one; ``hints`` (caption_allowlist.txt and the learned glossary: names, rare
-words) go to Whisper as hot words. The GPU is used when torch / CTranslate2 see one; if loading or running there
+``transcribe(y16, name, hints)`` runs one; ``hints`` (caption_allowlist.txt: names, rare words) go to Whisper as hot
+words. The GPU is used when torch / CTranslate2 see one; if loading or running there
 fails, the engine runs again on the CPU and Result.note says so (the run's summary shows it).
 """
 from __future__ import annotations

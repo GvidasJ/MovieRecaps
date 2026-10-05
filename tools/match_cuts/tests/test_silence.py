@@ -162,9 +162,9 @@ def test_raw_only_run_cuts_the_silences_of_the_raw(tmp_path, monkeypatch, capsys
     run = tmp_path / "out" / "001"
     x = ex.parse_premiere_xml(run / "1_edit.xml")
     assert (x["width"], x["height"], x["timebase"]) == (1080, 1920, 60)
-    # 6 s minus about 2 s of silence (the 0.3 s pause kept; 0.15 s kept after each stretch of speech, 0.05 s before
+    # 6 s minus about 2 s of silence (the 0.3 s pause kept; 0.05 s kept after each stretch of speech, 0.05 s before
     # it, and the soft edges the AAC encoding gives each burst count as sound)
-    assert 232 <= x["duration"] <= 246
+    assert 222 <= x["duration"] <= 236
     assert len(x["clips"]) == 2 and not ex.premiere_gaps(run / "1_edit.xml")    # two pieces, the window covered
     assert "Silences: 3 removed" in out and "length 00:06.00 -> " in out
     assert out.count(" s  (cut at ") == 3 and "RAW-only edit" in out
@@ -208,14 +208,14 @@ def test_the_caption_stage_moves_copied_captions_with_the_cuts(tmp_path, monkeyp
 def test_the_defaults_are_tight_and_can_be_overridden():
     from match_cuts import cli
     from match_cuts.config import Config
-    # only pauses longer than 0.3 s are cut, keeping 0.05 s before the speech that follows and 0.15 s after the speech
-    # before (as in my own edit of run 011)
+    # only pauses longer than 0.3 s are cut, keeping 0.05 s before the speech that follows and 0.05 s after the speech
+    # before (as in my finished videos: Task 8)
     assert (S.Settings().db, S.Settings().min_s, S.Settings().pad_before, S.Settings().pad_after) == \
-        (None, 0.3, 0.05, 0.15)
+        (None, 0.3, 0.05, 0.05)
     c = Config()
-    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.3, 0.05, 0.15)
+    assert (c.silence_db, c.min_silence, c.pad_before, c.pad_after) == (None, 0.3, 0.05, 0.05)
     a = cli.build_parser().parse_args([])
-    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.3, 0.05, 0.15)
+    assert (a.silence_db, a.min_silence, a.pad_before, a.pad_after) == (None, 0.3, 0.05, 0.05)
     assert not a.allow_repeats and cli.build_parser().parse_args(["--allow-repeats"]).allow_repeats
     a = cli.build_parser().parse_args(["--silence-db", "-25", "--min-silence", "0.3", "--pad-before", "0.1",
                                        "--pad-after", "0.2"])
@@ -265,7 +265,7 @@ def test_the_summary_shows_the_settings_used_and_the_time_removed():
     assert lines[0] == "1 removed, 0.50 s in all; length 00:10.00 -> 00:09.50"
     assert lines[1] == ("settings for this video: speech -16.2 dBFS, background -42.2 dBFS -> silence below -33.1 dBFS "
                         "(set from the speech level and the background noise), longer than 0.3 s; kept 0.05 s before "
-                        "/ 0.15 s after each word; cuts only between words (632 words timed)")
+                        "/ 0.05 s after each word; cuts only between words (632 words timed)")
     plan = S.summarize([], 600, FPS, S.Settings(), dict(lv, words=None))
     assert pipeline.silence_lines(plan)[0] == "none found; length 00:10.00"
     assert "word timings not available: cuts from loudness alone" in pipeline.silence_lines(plan)[1]

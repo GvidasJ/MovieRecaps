@@ -95,6 +95,11 @@ SHORT_FREE_RUN = 10
 # (motion blur, a dissolve) is no sample -- the proxy's stays
 FULL_SAMPLE_MIN = 0.95
 FULL_CHUNK = 200
+# ... and the phase of a constant-speed segment whose proxy solve leaves a choice (a tie on a breakpoint, or a range of
+# phases showing other frames) decided by its frames scored at full resolution: kept when the frames that differ
+# score this much better in all (ZNCC, summed), each frame's difference counted once it is over FULL_PHASE_NOISE
+FULL_PHASE_GAIN = 0.01
+FULL_PHASE_NOISE = 0.002
 _AUTO = object()     # sentinel: "compute it here"
 _PRUNED = object()   # fit(): feasible, but no explanation can cost <= bound
 
@@ -953,6 +958,15 @@ class _Seg:
 # =================================================================================================
 # the builder
 # =================================================================================================
+
+def hold_frames(comp_fps: Any, raw_fps: Any, v: float) -> int:
+    """How many consecutive competitor frames on one RAW frame make a hold (moving_holds): at least 3, and more than
+    one RAW frame lasts by itself at speed ``v`` -- comp_fps / (raw_fps x v) competitor frames (a 60 fps competitor
+    over a 25 fps RAW at 100 %: 2.4, so a run of 3 is its cadence and a hold takes 4)."""
+    v = abs(float(v))
+    natural = math.ceil(float(comp_fps) / (float(raw_fps) * v) - 1e-9) if v > 1e-6 else 0
+    return max(3, natural + 1)
+
 
 class _Builder:
     full: Any = None    # criterion 2's scorer at full resolution (fullres.SideScorer; the thorough default) or None
@@ -3684,19 +3698,23 @@ class _Builder:
         unsnapped speed once the freeze was rejected) while the competitor itself is NOT static there (``static``:
         transform-compensated, captions masked, noise floor from its own repeat pairs) and no frame-blend path was
         verified: the recreation would hold a still where the competitor moves (the real run's S65). Its timing is
-        'retimed / interpolated - unresolved' -> an 'uncertain' segment, never a freeze."""
+        'retimed / interpolated - unresolved' -> an 'uncertain' segment, never a freeze. A RAW frame lasts
+        comp_fps / (raw_fps x speed) competitor frames by itself: a hold is a run longer than that (video1: a 60 fps
+        competitor over a 25 fps RAW shows every RAW frame 2 or 3 times at 100 %, and its slow zoom keeps it moving --
+        every such segment had been 'uncertain')."""
         if self.S.static_fn is None:
             return
         for S in segs:
             if S.kind != "raw" or S.ramp or S.blend_path is not None or S.model is None or S.length < 3:
                 continue
+            hold = hold_frames(self.cf, self.rf, float(S.model.v))
             js = np.asarray(self.pred(S, np.arange(S.a, S.b)), dtype=np.int64)
             run0 = 0
             bad = None
             for i in range(1, len(js) + 1):
                 if i < len(js) and js[i] == js[run0]:
                     continue
-                if i - run0 >= 3 and not self.static(S.a + run0, S.a + i):
+                if i - run0 >= hold and not self.static(S.a + run0, S.a + i):
                     bad = (S.a + run0, S.a + i, int(js[run0]))
                     break
                 run0 = i
@@ -3771,6 +3789,7 @@ class _Builder:
                 sel = ~np.isin(ks[pen[0]], np.asarray(m.drops, dtype=np.int64))
                 pen = (pen[0][sel], pen[1][sel], pen[2][sel]) if sel.any() else None
             sol = ps.solve_raw_in(ks, lo, hi, S.a, m.v, cf, self.rf, penalties=pen)
+            sol, ks, lo, hi = self._full_res_phase(S, ks, lo, hi, sol)
         else:
             sol = m.sol
         m.sol = sol
@@ -3838,6 +3857,78 @@ class _Builder:
         seg.__dict__["_phase_extra"] = {int(k): (int(v[0]), int(v[1])) for k, v in S.extra.items()
                                         if self.F.status[k] != Status.MATCH}
         return seg
+
+    def _full_res_phase(self, S: _Seg, ks: np.ndarray, lo: np.ndarray, hi: np.ndarray, sol: dict
+                        ) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+        """The phase of a constant-speed segment decided at full resolution where the proxy cannot tell (Task 8):
+        Zendaya-age's RAW is a 30 fps file of 25 fps footage (every 6th frame twice) and the competitor's copy repeats
+        on other frames, so no phase shows every frame right and the proxy's solve sits on a tie between two (or on a
+        range of phases). Every constraint frame's RAW frames over that choice -- half a RAW frame of play either side
+        -- are scored at full resolution (the framing refined for each); the phase is solved again with those scores as the
+        data term (the frames' ranges widened to them) and kept when the frames that differ fit FULL_PHASE_GAIN better
+        in all. Returns (sol, ks, lo, hi)."""
+        out = (sol, ks, lo, hi)
+        m = S.model
+        if self.full is None or not ks.size or not sol.get("ok", False) or m is None or float(m.v) <= 0.0:
+            return out
+        rf, cf = float(self.rf), float(self.cf)
+        a0, b0 = (float(x) for x in (sol.get("interval_soft") or (sol["raw_in"], sol["raw_in"])))
+        if (b0 - a0) * rf < 1e-3 and not sol.get("tie_frames"):
+            return out                                   # pinned with slack: the proxy's frames decide
+        skipped = {"unreadable": 0, "alike": 0}
+        half = 0.5 / rf
+        v = float(m.v)
+        j_lo = np.asarray(ps.ae_frame(a0 - half, v, ks, S.a, self.cf, self.rf), np.int64)
+        j_hi = np.asarray(ps.ae_frame(b0 + half, v, ks, S.a, self.cf, self.rf), np.int64)
+        j_now = np.asarray(ps.ae_frame(round(float(sol["raw_in"]), 9), v, ks, S.a, self.cf, self.rf), np.int64)   # as written
+        pi, pj, pw = [], [], []
+        best_now = 0.0
+        scored: dict[tuple[int, int], float] = {}
+        for i, k in enumerate(ks):
+            cands = list(range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1))
+            if len(cands) < 2:
+                continue
+            sc = self.full(int(k), [(j, self.sim_at(S, int(k)), S.flip) for j in cands], refine=True)
+            if sc is None or not np.all(np.isfinite(sc)):
+                skipped["unreadable"] += 1
+                continue
+            for j, z in zip(cands, sc):
+                scored[(int(k), j)] = float(z)
+            top = float(np.max(sc))
+            if top - float(np.min(sc)) <= FULL_PHASE_NOISE:
+                skipped["alike"] += 1
+                continue                                 # the candidates look alike (a repeated picture)
+            for j, z in zip(cands, sc):
+                pi.append(i)
+                pj.append(j)
+                pw.append(float(np.clip((top - float(z)) / 0.01, 0.0, 1.0)))
+        if not pi:
+            self.log("full_res_phase", seg=[int(S.a), int(S.b)], frames=0, kept=False, **skipped)
+            return out
+        lo2 = np.minimum(lo, np.minimum(j_lo, j_hi))
+        hi2 = np.maximum(hi, np.maximum(j_lo, j_hi))
+        sol2 = ps.solve_raw_in(ks, lo2, hi2, S.a, m.v, cf, self.rf, penalties=(
+            np.asarray(pi, np.int64), np.asarray(pj, np.int64), np.asarray(pw, np.float64)))
+        if not sol2.get("ok", False):
+            self.log("full_res_phase", seg=[int(S.a), int(S.b)], frames=0, kept=False, why="no phase fits", **skipped)
+            return out
+        j_new = np.asarray(ps.ae_frame(round(float(sol2["raw_in"]), 9), v, ks, S.a, self.cf, self.rf), np.int64)
+        diff = [i for i in range(len(ks)) if j_new[i] != j_now[i]]
+        if not diff or any((int(ks[i]), int(j_new[i])) not in scored or (int(ks[i]), int(j_now[i])) not in scored
+                           for i in diff):
+            self.log("full_res_phase", seg=[int(S.a), int(S.b)], frames=len(diff), kept=False,
+                     why="the same frames" if not diff else "a frame not scored", **skipped)
+            return out
+        gain = sum(scored[(int(ks[i]), int(j_new[i]))] - scored[(int(ks[i]), int(j_now[i]))] for i in diff)
+        self.log("full_res_phase", seg=[int(S.a), int(S.b)], frames=len(diff), gain=round(gain, 5),
+                 raw_in=[round(float(sol["raw_in"]), 9), round(float(sol2["raw_in"]), 9)], kept=bool(gain > FULL_PHASE_GAIN))
+        if gain <= FULL_PHASE_GAIN:
+            return out
+        for i in diff:
+            self._widen(int(ks[i]), int(j_new[i]), "full-resolution phase")
+        S.notes.append(f"phase decided at full resolution: {len(diff)} frame(s) show the RAW frame "
+                       f"{'after' if int(np.sum(j_new - j_now)) > 0 else 'before'} the proxy's ({gain:+.3f} ZNCC in all)")
+        return sol2, ks, lo2, hi2
 
     def _uncertain_segment(self, S: _Seg) -> Segment:
         """An UNRESOLVED stretch (FX-08): neither a match nor NOT-IN-RAW. Carries the best-evidence RAW frame per comp

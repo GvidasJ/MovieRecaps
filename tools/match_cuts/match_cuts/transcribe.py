@@ -5,8 +5,8 @@ the frame.
 The default is the most accurate engine of the comparison on the answer-key videos (reports/task-4.md): Whisper
 large-v3 through faster-whisper -- 4 % word errors against the user's own captions, where the earlier default
 small.en made 8 %. Its own word timings are coarse (cross-attention, ~90 ms off), so every word is then aligned to
-the audio (wav2vec2 CTC, ~35 ms) and a word after a pause starts on its first sound. ``hints`` (caption_allowlist.txt
-and the learned glossary: names, rare words) go to the model as hot words. If the default cannot run here (not
+the audio (wav2vec2 CTC, ~35 ms) and a word after a pause starts on its first sound. ``hints`` (caption_allowlist.txt:
+names, rare words) go to the model as hot words. If the default cannot run here (not
 installed, the download failed, no memory), FALLBACK -- the earlier default, small.en -- is used and the run's
 summary says so (``LOG``). Results are cached in WORK_DIR by audio content, engine, hints and alignment.
 """

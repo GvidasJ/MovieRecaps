@@ -62,7 +62,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .common import atomic_write_text, fps_str, log, replace_file, timecode
 from .geometry import Sim, sim_to_ae
@@ -1286,6 +1286,167 @@ def premiere_settings(cfg: Any = None) -> dict:
             "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05),
             "static": True if static is None else bool(static),
             "min_move": 250.0 if move is None else max(0.0, float(move))}
+
+
+RETIME_SLIVER_S = 0.25      # --premiere: a speed change this short inside one take plays at 100 % (the take runs on)
+
+
+def _line_interval(p_: Segment, k: int, cf: float) -> list[float] | None:
+    """The frame-exact raw_in interval of the line of clip ``p_`` at competitor frame ``k`` (its own interval moved
+    along its line): a sliver played on that line is placed exactly like the take (_pick_in_tick)."""
+    iv = p_.raw_in_interval
+    if not iv or len(iv) != 2 or p_.time_remap_keys:
+        return None
+    d = float(p_.speed) * (int(k) - int(p_.comp_in)) / cf
+    return [float(iv[0]) + d, float(iv[1]) + d]
+
+
+def play_on_slivers(cl: Cutlist) -> tuple[Cutlist, list[dict]]:
+    """--premiere: the competitor's speed changes of at most RETIME_SLIVER_S inside one continuous take -- a RAW
+    segment at 100 % on each side and the RAW running on through it (within two RAW frames) -- play at 100 % in the
+    Premiere edit: a slow-motion or hold sliver this short is a frame-rate artifact or a hold, not an edit (video2's
+    competitor: 4 frames at 50 % in the middle of "definitely", the take running on under them; the finished edit
+    plays the take on). When the clip after continues the clip before's line, the sliver plays on that line; when the
+    sliver's own RAW runs on into the next clip, it plays from where it starts (repeats.py takes out what the next
+    one would show twice). Either way the take runs on as one, and its sound is never slowed inside a word.
+    A sliver at 100 % inside one take whose picture is off the take's line by at most speech.MAX_JUMP_S (a picture
+    glitch: video4's competitor shows 6 frames 84 ms ahead in the middle of "each other's Spidey") plays on the line
+    too -- its sound already does (speech.py), and a picture jumping ahead and back would be a repeat to cut out
+    inside the word. The faithful cut list (the checks against the competitor) keeps them. Returns (cut list,
+    changes)."""
+    import copy
+    rf, cf = float(Fraction(cl.raw_fps)), float(Fraction(cl.comp_fps))
+    segs = sorted(cl.segments, key=lambda s: (int(s.comp_in), int(s.id)))
+
+    def plain(s: Segment) -> bool:
+        return (s.type == "raw" and s.raw_in_seconds is not None and not s.time_remap_keys
+                and abs(float(s.speed) - 1.0) < 1e-6)
+
+    def own_sound_line(s: Segment, p_end: float) -> bool:
+        # the competitor's sound under it follows a line of its own, off the take's (more than half a RAW frame from
+        # where the clip before ends): left as the competitor has it -- played on, its picture would no longer cut
+        # there and that line could only be shifted onto the take's by whole frames, ms off inside the word
+        # (Zendaya's S19: 6 frames at 120 %, its sound 91 ms behind). A sound that continues the take (video4's
+        # glitch: "S01 continued") is no line of its own.
+        ln = (s.audio or {}).get("line") or {}
+        r = ln.get("raw_in_seconds")
+        return r is not None and abs(float(r) - p_end) > 0.5 / rf
+    from .speech import MAX_JUMP_S
+    out, done = [], []
+    for i, s in enumerate(segs):
+        if (0 < i < len(segs) - 1 and plain(s) and plain(segs[i - 1]) and plain(segs[i + 1])
+                and (int(s.comp_out) - int(s.comp_in)) / cf <= RETIME_SLIVER_S + 1e-9):
+            p_, n_ = segs[i - 1], segs[i + 1]
+            p_end = float(p_.raw_in_seconds) + (int(p_.comp_out) - int(p_.comp_in)) / cf
+            line = float(p_.raw_in_seconds) + (int(n_.comp_in) - int(p_.comp_in)) / cf
+            off = abs(float(s.raw_in_seconds) - p_end)
+            if (abs(line - float(n_.raw_in_seconds)) <= 2.0 / rf and 2.0 / rf < off <= MAX_JUMP_S + 1e-9
+                    and not own_sound_line(s, p_end)):
+                s2 = copy.deepcopy(s)
+                s2.raw_in_seconds = round(p_end, 9)
+                s2.raw_in_frame = int(math.floor(p_end * rf + 1e-6))
+                s2.raw_in_interval = _line_interval(p_, int(s.comp_in), cf)
+                out.append(s2)
+                done.append({"segment": int(s.id), "comp_in": int(s.comp_in), "comp_out": int(s.comp_out),
+                             "speed": 1.0, "jump_s": round(off, 4)})
+                continue
+        if (0 < i < len(segs) - 1 and s.type == "raw" and s.raw_in_seconds is not None and not s.time_remap_keys
+                and abs(float(s.speed) - 1.0) > 1e-6 and float(s.speed) > 0
+                and (int(s.comp_out) - int(s.comp_in)) / cf <= RETIME_SLIVER_S + 1e-9
+                and plain(segs[i - 1]) and plain(segs[i + 1])):
+            p_, n_ = segs[i - 1], segs[i + 1]
+            p_end = float(p_.raw_in_seconds) + (int(p_.comp_out) - int(p_.comp_in)) / cf
+            s_end = float(s.raw_in_seconds) + float(s.speed) * (int(s.comp_out) - int(s.comp_in)) / cf
+            line = float(p_.raw_in_seconds) + (int(n_.comp_in) - int(p_.comp_in)) / cf
+            on_line = abs(line - float(n_.raw_in_seconds)) <= 2.0 / rf     # the take runs on under it (a stall)
+            if own_sound_line(s, p_end):
+                out.append(s)
+                continue
+            runs_on = abs(p_end - float(s.raw_in_seconds)) <= 2.0 / rf and abs(s_end - float(n_.raw_in_seconds)) <= 2.0 / rf
+            if on_line or runs_on:
+                s2 = copy.deepcopy(s)
+                s2.speed, s2.speed_measured, s2.retime = 1.0, 1.0, "none"
+                if on_line:
+                    s2.raw_in_seconds = round(p_end, 9)
+                    s2.raw_in_frame = int(math.floor(p_end * rf + 1e-6))
+                    s2.raw_in_interval = _line_interval(p_, int(s.comp_in), cf)
+                out.append(s2)
+                done.append({"segment": int(s.id), "comp_in": int(s.comp_in), "comp_out": int(s.comp_out),
+                             "speed": round(float(s.speed), 4)})
+                continue
+        out.append(s)
+    if not done:
+        return cl, []
+    cl2 = copy.copy(cl)
+    cl2.segments = out
+    return cl2, done
+
+
+HARD_DISSOLVE_S = 0.1       # --premiere: a cross dissolve this short whose cut is inside speech becomes a hard cut
+
+
+def harden_dissolves(cl: Cutlist, inside: Callable[[float], bool]) -> tuple[Cutlist, list[dict]]:
+    """--premiere: a cross dissolve of at most HARD_DISSOLVE_S between two RAW clips whose cut lands inside speech
+    (``inside(raw second)`` on either side, at the dissolve's middle frame) becomes a hard cut there, so the
+    speech-safe cuts can move it out of the word like any cut: a dissolve is locked in place, and its sound may only
+    slide inside its own frames (speech._slide_dissolves) -- video1's competitor cuts with 2-frame dissolves inside
+    "tippex tippex" and "breaking even". A 2-frame dissolve is 33 ms of the two pictures mixed: nothing is lost. The
+    faithful cut list (the checks against the competitor) keeps the dissolve. Returns (cut list, changes)."""
+    import copy
+    cf = float(Fraction(cl.comp_fps))
+    rf = float(Fraction(cl.raw_fps))
+    segs = sorted(cl.segments, key=lambda s: (int(s.comp_in), int(s.id)))
+    out = [copy.copy(s) for s in segs]
+    done = []
+
+    def raw_at(s: Segment, k: int) -> float:
+        return float(s.raw_in_seconds) + float(s.speed) * (k - int(s.comp_in)) / cf
+
+    for i in range(len(out) - 1):
+        p_, q_ = out[i], out[i + 1]
+        tr = (p_.transition_out or {}) if (p_.transition_out or {}).get("type") == "crossfade" else \
+            (q_.transition_in or {}) if (q_.transition_in or {}).get("type") == "crossfade" else None
+        if not tr or int(p_.comp_out) <= int(q_.comp_in):
+            continue
+        if any(x.type != "raw" or x.raw_in_seconds is None or x.time_remap_keys or float(x.speed) <= 0
+               for x in (p_, q_)):
+            continue
+        d = int(p_.comp_out) - int(q_.comp_in)
+        if d / cf > HARD_DISSOLVE_S + 1e-9:
+            continue
+        mid = int(q_.comp_in) + d // 2
+        if not (inside(raw_at(p_, mid)) or inside(raw_at(q_, mid))):
+            continue
+        p2, q2 = copy.deepcopy(p_), copy.deepcopy(q_)
+        shift = float(q2.speed) * (mid - int(q2.comp_in)) / cf
+        q2.raw_in_seconds = round(float(q2.raw_in_seconds) + shift, 9)
+        q2.raw_in_frame = int(math.floor(float(q2.raw_in_seconds) * rf + 1e-6))
+        if q2.raw_in_interval and len(q2.raw_in_interval) == 2:
+            q2.raw_in_interval = [float(q2.raw_in_interval[0]) + shift, float(q2.raw_in_interval[1]) + shift]
+        p2.comp_out, q2.comp_in = mid, mid
+        p2.transition_out, q2.transition_in = None, None
+        out[i], out[i + 1] = p2, q2
+        done.append({"cut": mid, "segments": [int(p2.id), int(q2.id)], "frames": d,
+                     "raw": [round(raw_at(p_, mid), 3), round(raw_at(q_, mid), 3)]})
+    if not done:
+        return cl, []
+    cl2 = copy.copy(cl)
+    cl2.segments = out
+    return cl2, done
+
+
+def sequence_fps(comp_fps: Fraction, want: Fraction) -> Fraction:
+    """The Premiere sequence rate for a competitor: ``want`` when a competitor frame is a whole number of its frames,
+    else the whole multiple of the competitor's rate nearest to it (the lower one on a tie): a 24 fps competitor in a
+    48 fps sequence, 25 fps in 50 -- every cut on a competitor frame. A competitor rate that is no whole number keeps
+    ``want`` (premiere_factor then says why it cannot be placed)."""
+    c, w = Fraction(comp_fps), Fraction(want)
+    if c <= 0 or c.denominator != 1 or ((w / c).denominator == 1 and w >= c):
+        return w
+    lo = max(1, int(w // c))
+    hi = lo + 1
+    k = lo if abs(lo * c - w) <= abs(hi * c - w) else hi
+    return k * c
 
 
 def premiere_factor(comp_fps: Fraction, seq_fps: Fraction) -> int:
@@ -2793,13 +2954,22 @@ def other_video_ranges(x: dict) -> list[tuple[int, int]]:
                   if str(m.get("name") or "").startswith(OTHER_VIDEO) and int(m["out"]) > int(m["in"]))
 
 
+def held_at_shot(t: float, changes_s: Sequence[float], seq_fps: float, raw_fps: Any = None) -> bool:
+    """Is the edge at RAW second ``t`` one the flash guard holds shots.MIN_SHOT_S from a RAW shot change? Within 1.5
+    sequence frames of it, or up to one RAW frame past it: the hold lands on the RAW's own frames."""
+    from .shots import MIN_SHOT_S
+    late = 1.5 / seq_fps + (1.0 / float(Fraction(raw_fps)) if raw_fps else 0.0)
+    return any(-1.5 / seq_fps <= abs(t - c) - MIN_SHOT_S <= late for c in changes_s)
+
+
 def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_after: float, pad_before: float,
-                              changes_s: Sequence[float] = ()) -> list[str]:
+                              changes_s: Sequence[float] = (), raw_fps: Any = None) -> list[str]:
     """The silence check at the cuts of the final XML: at every audio cut of A1 (speech.audio_cuts), the silence at
     the end of the item before it plus the silence at the start of the item after it (the quiet between the RAW's
     sounds, ``speech``: its speech.SpeechMap) is at most ``pad_after`` + ``pad_before`` (+ two frames of rounding:
     cut points land on whole frames). An edge held
-    shots.MIN_SHOT_S from a RAW shot change (``changes_s``: no flash frame) may keep more. One line per cut."""
+    shots.MIN_SHOT_S from a RAW shot change (``changes_s``: no flash frame) may keep more -- placed on the RAW's own
+    frames, up to one ``raw_fps`` frame past it (video1: 0.28 s past a change, its RAW at 25 fps). One line per cut."""
     from .shots import MIN_SHOT_S
     from .speech import audio_cuts
     x = parse_premiere_xml(xml_path)
@@ -2808,7 +2978,7 @@ def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_afte
     its = sorted([dict(it, name=it.get("label") or "?") for it in x["audio"] if it["start"] >= 0],
                  key=lambda d: d["start"])
     edges = {(e[1], e[3]): e for e in audio_cuts(its, fps, int(x["duration"]))}
-    near_shot = lambda t: any(abs(abs(t - c) - MIN_SHOT_S) <= 1.5 / f for c in changes_s)   # noqa: E731
+    near_shot = lambda t: held_at_shot(t, changes_s, f, raw_fps)   # noqa: E731
     out = []
     for a, b in zip(its, its[1:]):
         if a["end"] != b["start"] or ("end", a["end"]) not in edges or ("start", b["start"]) not in edges:
@@ -3076,7 +3246,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     except Exception as e:  # noqa: BLE001
         flash = [f"the flash check could not read the XML: {type(e).__name__}: {e}"]
     try:
-        hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or ())
+        hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or (), cutlist.raw_fps)
                 if speech is not None and not bad_items and not getattr(cfg, "keep_silence", False) else [])
     except Exception as e:  # noqa: BLE001
         hush = [f"the silence check could not read the XML: {type(e).__name__}: {e}"]
@@ -3239,14 +3409,35 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             return _sim_from_motion(m["scale"], m["rotation"], m["center"], W, H, raw_wh) \
                 if all(k in m for k in ("scale", "rotation", "center")) and not m["keys"] else None
 
+        plan_of = {id(e): c for c in plan_clips for e in (c.events or [c.ev])}
+
+        def planned(c: PremiereClip) -> list[PremiereClip]:
+            """The planned clips (before the silences were cut and the pieces of one take joined) final clip c plays."""
+            out: list[PremiereClip] = []
+            for e in c.events or [c.ev]:
+                pc = plan_of.get(id(e))
+                if pc is not None and all(pc is not x for x in out):
+                    out.append(pc)
+            return out
+
         def free_change(ca: PremiereClip, cb: PremiereClip, fa: Sim) -> bool:
             """A change under min_move is the rule's: at a shot change of the RAW, or the framing before would not
-            show cb's person."""
+            show cb's person -- judged on the final clips, or as the plan judged it on its own clips: the silence
+            removal moves clip edges afterwards (video1: a clip played on 0.28 s into the next shot of the RAW, so the
+            final clips seem one shot), and the pieces it joins were framed one by one (video1: S17, 5 frames whose
+            person S16's framing would not show, joined with S18)."""
             if sp is None:
                 return False
             if not sp.same_shot(_last_raw_s(ca, fps), _clip_raw_s(cb, fps)[0]):
                 return True
-            return not speakers.passes(fa, _person_of(cb, sp, fps), raw_wh[0], bool(cb.seg.flip_h), win)
+            pa, pb = planned(ca), planned(cb)
+            if pa and pb and pa[-1] is not pb[0] and not sp.same_shot(_last_raw_s(pa[-1], fps),
+                                                                   _clip_raw_s(pb[0], fps)[0]):
+                return True
+            for c in [cb] + pb:
+                if not speakers.passes(fa, _person_of(c, sp, fps), raw_wh[0], bool(c.seg.flip_h), win):
+                    return True
+            return False
         for (ga, ca), (gb, cb) in zip(zip(x["clips"], clips), zip(x["clips"][1:], clips[1:])):
             fa, fb = fixed(ga), fixed(gb)
             if fa is None or fb is None:

@@ -103,3 +103,29 @@ def test_the_frames_around_a_raw_jump_are_rechecked_at_full_resolution():
     fm.status = np.full(len(raw), int(Status.MATCH), np.int8)
     fm.raw = fm.raw_lo = fm.raw_hi = fm.soft_lo = fm.soft_hi = np.array(raw, np.int32)
     assert fullres.uncertain_frames(fm, int(Status.MATCH)) == [2, 3, 4, 5]     # around 13 -> 40 only (45 45 is a repeat)
+
+
+def test_the_raws_own_repeated_frames_are_the_cadence_too():
+    """Task 8 (Zendaya-age S03 / S19): the RAW is a 30 fps file of 25 fps footage -- it repeats every 6th picture on
+    two of its frames (284 / 285) -- and the competitor repeats on other frames (58 / 59). The edit shows RAW 284 and
+    285 (one picture) where the competitor moves on: explained, measured at full resolution (``same_picture``);
+    without the RAW's repeat, the same frame is a real mismatch."""
+    import numpy as np
+    from match_cuts.fullres import _repeat, cadence
+    pl = np.full(10, 2)
+    pl[2] = 1                                                # competitor frames 2 and 3: one picture
+    shown = {k: (284 + k, 0.0, 1.0) for k in range(8)}       # the time line: one RAW frame per frame
+    same = lambda a, b: {a, b} == {284, 285}                 # noqa: E731 -- the RAW repeats 284 on 285
+    assert "the RAW repeats it on its frames 284-285" in cadence(1, 285, 286, shown, pl, same)
+    assert cadence(1, 285, 286, shown, pl) == ""             # no RAW repeat known: a mismatch
+    assert "the time line steps" in cadence(2, 286, 287, shown, pl, same)    # the competitor's own repeat, as before
+    rng = np.random.default_rng(0)
+
+    def noisy(img):
+        return np.clip(img.astype(int) + rng.integers(-1, 2, img.shape), 0, 255).astype(np.uint8)
+    a = rng.integers(0, 255, (64, 96), dtype=np.uint8)
+    b = np.roll(a, 3, axis=1)
+    moving = [a, b, noisy(b), np.roll(b, 3, axis=1)]          # a repeat (frames 1-2) between two real changes
+    assert _repeat(moving.__getitem__, 1) and not _repeat(moving.__getitem__, 0)
+    still = [a, noisy(a), noisy(a), noisy(a)]                 # a still shot: every pair differs a little
+    assert not _repeat(still.__getitem__, 1)

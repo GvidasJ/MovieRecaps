@@ -35,7 +35,7 @@ import numpy as np
 
 MIN_SILENCE_S = 0.3       # cut silences longer than this ...
 PAD_BEFORE_S = 0.05       # ... keeping this much before each word (or other sound) that follows
-PAD_AFTER_S = 0.15        # ... and this much after each word (or other sound) that precedes
+PAD_AFTER_S = 0.05        # ... and this much after each word (or other sound) that precedes (config.pad_after)
 WIN_S = 0.05              # loudness window (RMS) ...
 HOP_S = 0.01              # ... every HOP_S
 SPEECH_PCT = 95           # the speech level: this percentile of the windows' loudness
@@ -624,7 +624,8 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         guard = shot_guard_frames(clips, speech, shots or [], fps)
         fixed = {k: (speech.levels or {}).get(k) for k in ("speech_db", "noise_db", "threshold_db", "how")} \
             if speech is not None else None
-        quiet = a1_quiet(audio, speech, fps, n_frames) if speech is not None else None
+        quiet = (a1_quiet(audio, speech, fps, n_frames, bool(getattr(cfg, "silence_breaths", False)))
+                 if speech is not None else None)
         cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
     out = summarize(cuts, n_frames, fps, st, lv, before=snap)
     out["speech"] = {"rows": snap_rows, "levels": dict((speech.levels or {}) if speech is not None else {}),
@@ -634,14 +635,16 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     return out
 
 
-def a1_quiet(audio: Sequence[dict], sm: Any, fps: Fraction, n_frames: int) -> list[tuple[float, float]]:
+def a1_quiet(audio: Sequence[dict], sm: Any, fps: Fraction, n_frames: int,
+             breaths: bool = False) -> list[tuple[float, float]]:
     """The quiet stretches of A1 (sequence seconds): inside every item at 100 % the gaps of the RAW's speech map
-    ``sm`` (the same quiet the speech check knows: a breath or other sound is not quiet), and wherever A1 plays
-    nothing; an item at another speed counts as sound. Stretches that meet at a cut are one."""
+    ``sm`` (the same quiet the speech check knows: a breath or other sound is not quiet -- with ``breaths``, the gaps
+    between speech: a pause with a breath in it is a pause), and wherever A1 plays nothing; an item at another speed
+    counts as sound. Stretches that meet at a cut are one."""
     f = float(fps)
     spans: list[tuple[float, float]] = []
     covered: list[tuple[float, float]] = []
-    gaps = sm.gaps
+    gaps = sm.speech_gaps if breaths else sm.gaps
     for it in sorted(audio, key=lambda d: d["start"]):
         t0, t1 = it["start"] / f, it["end"] / f
         covered.append((t0, t1))

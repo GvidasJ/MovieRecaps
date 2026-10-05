@@ -1,0 +1,1009 @@
+{
+ "video": "video1",
+ "date": "2026-10-05",
+ "folder": "..\\..\\finished\\video1",
+ "kind": "finished",
+ "runs": {
+  "tool": "..\\..\\work\\t8\\final4\\runs\\video1\\001",
+  "user": "..\\..\\work\\t8\\user\\video1\\002"
+ },
+ "belongs": {
+  "competitor_from_raw": 1.002,
+  "final_from_raw": 1.0,
+  "same_story": 0.936
+ },
+ "captions": {
+  "source": "project",
+  "why": "the project's 111 caption graphics (100 % of them show on final.mp4's screen)",
+  "count": 111,
+  "on_screen": 1.0,
+  "words": 6,
+  "case": 0,
+  "removed": 6,
+  "added": 11,
+  "rewritten": 3,
+  "changes": [
+   {
+    "heard": "we",
+    "written": "you",
+    "kind": "words",
+    "before": "country if",
+    "after": "want to",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "10",
+    "written": "ten",
+    "kind": "words",
+    "before": "instead of",
+    "after": "then on",
+    "glossary": false,
+    "why": "other words, not a spelling: similarity 0.00"
+   },
+   {
+    "heard": "the 10",
+    "written": "a ten",
+    "kind": "words",
+    "before": "you change",
+    "after": "to a",
+    "glossary": false,
+    "why": "other words, not a spelling: similarity 0.44"
+   },
+   {
+    "heard": "stationery's",
+    "written": "Stacey has",
+    "kind": "words",
+    "before": "a minute",
+    "after": "got a",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "you're getting",
+    "written": "you get in",
+    "kind": "words",
+    "before": "way when",
+    "after": "paper can",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "of",
+    "written": "to",
+    "kind": "words",
+    "before": "a word",
+    "after": "the cops",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ },
+ "edit": {
+  "clips": 17,
+  "starts": [
+   0.0804,
+   0.1137,
+   0.3971,
+   0.0637,
+   0.0971,
+   0.0637,
+   0.1471,
+   0.0637,
+   0.1137,
+   -0.0529,
+   -0.2363,
+   0.0971,
+   0.0971,
+   0.0804,
+   0.4304,
+   0.0637,
+   0.0637
+  ],
+  "ends": [
+   -0.0196,
+   0.0137,
+   -0.0029,
+   -0.0196,
+   0.0971,
+   -0.0363,
+   -0.2863,
+   -0.0363,
+   0.0804,
+   -0.0029,
+   0.1137,
+   0.1471,
+   -0.0029,
+   0.1471,
+   0.1637,
+   0.0304,
+   0.0137
+  ],
+  "removed": 0,
+  "added": 0,
+  "how": "at the cuts you and the tool both make (within 0.5 s): your RAW moment minus the tool's"
+ },
+ "cuts": {
+  "tool": {
+   "cuts": 29,
+   "reproduced": 6,
+   "near": 11,
+   "others": 4,
+   "reproduced_pct": 20.7,
+   "length_key": 55.133,
+   "length_got": 59.117,
+   "length_diff": 3.983,
+   "length_diff_pct": 7.2,
+   "tol_s": 0.0667,
+   "misses": [
+    {
+     "t": 3.9,
+     "out": 493.747,
+     "into": 493.98,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 5.2,
+     "out": 495.28,
+     "into": 495.98,
+     "got_out": 495.3,
+     "got_into": 495.9
+    },
+    {
+     "t": 7.833,
+     "out": 498.614,
+     "into": 499.047,
+     "got_out": 498.6,
+     "got_into": 498.933
+    },
+    {
+     "t": 8.833,
+     "out": 500.047,
+     "into": 501.647,
+     "got_out": 500.05,
+     "got_into": 501.25
+    },
+    {
+     "t": 9.833,
+     "out": 502.647,
+     "into": 502.847,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 10.433,
+     "out": 503.447,
+     "into": 503.647,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 14.667,
+     "out": 508.114,
+     "into": 508.547,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 15.133,
+     "out": 509.014,
+     "into": 509.314,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 21.1,
+     "out": 515.28,
+     "into": 516.414,
+     "got_out": 515.183,
+     "got_into": 516.317
+    },
+    {
+     "t": 22.2,
+     "out": 517.514,
+     "into": 518.247,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 25.833,
+     "out": 522.114,
+     "into": 523.28,
+     "got_out": 522.4,
+     "got_into": 523.133
+    },
+    {
+     "t": 26.833,
+     "out": 524.28,
+     "into": 525.614,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 31.933,
+     "out": 530.847,
+     "into": 531.18,
+     "got_out": 530.767,
+     "got_into": 531.067
+    },
+    {
+     "t": 38.0,
+     "out": 538.214,
+     "into": 539.914,
+     "got_out": 538.1,
+     "got_into": 540.15
+    },
+    {
+     "t": 40.133,
+     "out": 542.047,
+     "into": 542.18,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 42.433,
+     "out": 544.48,
+     "into": 544.747,
+     "got_out": 544.333,
+     "got_into": 544.65
+    },
+    {
+     "t": 42.833,
+     "out": 545.147,
+     "into": 545.214,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 43.667,
+     "out": 546.047,
+     "into": 546.714,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 44.867,
+     "out": 547.914,
+     "into": 548.614,
+     "got_out": 547.917,
+     "got_into": 548.517
+    },
+    {
+     "t": 47.833,
+     "out": 551.58,
+     "into": 552.547,
+     "got_out": 551.433,
+     "got_into": 552.467
+    },
+    {
+     "t": 49.933,
+     "out": 554.647,
+     "into": 555.78,
+     "got_out": 554.483,
+     "got_into": 555.35
+    },
+    {
+     "t": 51.733,
+     "out": 557.58,
+     "into": 557.814,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 53.367,
+     "out": 563.214,
+     "into": 566.18,
+     "got_out": null,
+     "got_into": null
+    }
+   ],
+   "trims": [
+    {
+     "t": 5.2,
+     "out": -0.0196,
+     "into": 0.0804
+    },
+    {
+     "t": 7.833,
+     "out": 0.0137,
+     "into": 0.1137
+    },
+    {
+     "t": 8.833,
+     "out": -0.0029,
+     "into": 0.3971
+    },
+    {
+     "t": 11.967,
+     "out": -0.0196,
+     "into": 0.0637
+    },
+    {
+     "t": 21.1,
+     "out": 0.0971,
+     "into": 0.0971
+    },
+    {
+     "t": 24.733,
+     "out": -0.0363,
+     "into": 0.0637
+    },
+    {
+     "t": 25.833,
+     "out": -0.2863,
+     "into": 0.1471
+    },
+    {
+     "t": 30.3,
+     "out": -0.0363,
+     "into": 0.0637
+    },
+    {
+     "t": 31.933,
+     "out": 0.0804,
+     "into": 0.1137
+    },
+    {
+     "t": 34.933,
+     "out": -0.0029,
+     "into": -0.0529
+    },
+    {
+     "t": 38.0,
+     "out": 0.1137,
+     "into": -0.2363
+    },
+    {
+     "t": 42.433,
+     "out": 0.1471,
+     "into": 0.0971
+    },
+    {
+     "t": 44.867,
+     "out": -0.0029,
+     "into": 0.0971
+    },
+    {
+     "t": 47.833,
+     "out": 0.1471,
+     "into": 0.0804
+    },
+    {
+     "t": 49.933,
+     "out": 0.1637,
+     "into": 0.4304
+    },
+    {
+     "t": 52.3,
+     "out": 0.0304,
+     "into": 0.0637
+    },
+    {
+     "t": 54.2,
+     "out": 0.0137,
+     "into": 0.0637
+    }
+   ],
+   "out_median": 0.0137,
+   "into_median": 0.0804
+  },
+  "competitor": {
+   "cuts": 29,
+   "reproduced": 6,
+   "near": 13,
+   "others": 5,
+   "reproduced_pct": 20.7,
+   "length_key": 55.133,
+   "length_got": 56.4,
+   "length_diff": 1.267,
+   "length_diff_pct": 2.3,
+   "tol_s": 0.0667,
+   "misses": [
+    {
+     "t": 7.833,
+     "out": 498.614,
+     "into": 499.047,
+     "got_out": 498.536,
+     "got_into": 498.97
+    },
+    {
+     "t": 8.833,
+     "out": 500.047,
+     "into": 501.647,
+     "got_out": 499.97,
+     "got_into": 501.603
+    },
+    {
+     "t": 9.833,
+     "out": 502.647,
+     "into": 502.847,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 10.433,
+     "out": 503.447,
+     "into": 503.647,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 11.967,
+     "out": 505.18,
+     "into": 505.414,
+     "got_out": 505.067,
+     "got_into": 505.47
+    },
+    {
+     "t": 14.667,
+     "out": 508.114,
+     "into": 508.547,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 15.133,
+     "out": 509.014,
+     "into": 509.314,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 21.1,
+     "out": 515.28,
+     "into": 516.414,
+     "got_out": 515.203,
+     "got_into": 516.27
+    },
+    {
+     "t": 22.2,
+     "out": 517.514,
+     "into": 518.247,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 25.833,
+     "out": 522.114,
+     "into": 523.28,
+     "got_out": 522.136,
+     "got_into": 523.07
+    },
+    {
+     "t": 26.833,
+     "out": 524.28,
+     "into": 525.614,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 31.933,
+     "out": 530.847,
+     "into": 531.18,
+     "got_out": 530.77,
+     "got_into": 531.136
+    },
+    {
+     "t": 34.933,
+     "out": 534.18,
+     "into": 535.147,
+     "got_out": 534.103,
+     "got_into": 535.17
+    },
+    {
+     "t": 40.133,
+     "out": 542.047,
+     "into": 542.18,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 42.433,
+     "out": 544.48,
+     "into": 544.747,
+     "got_out": 544.353,
+     "got_into": 544.653
+    },
+    {
+     "t": 42.833,
+     "out": 545.147,
+     "into": 545.214,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 43.667,
+     "out": 546.047,
+     "into": 546.714,
+     "got_out": 545.97,
+     "got_into": 546.603
+    },
+    {
+     "t": 44.867,
+     "out": 547.914,
+     "into": 548.614,
+     "got_out": 548.003,
+     "got_into": 548.516
+    },
+    {
+     "t": 47.833,
+     "out": 551.58,
+     "into": 552.547,
+     "got_out": 551.453,
+     "got_into": 552.47
+    },
+    {
+     "t": 49.933,
+     "out": 554.647,
+     "into": 555.78,
+     "got_out": 554.47,
+     "got_into": 555.736
+    },
+    {
+     "t": 51.733,
+     "out": 557.58,
+     "into": 557.814,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 53.367,
+     "out": 563.214,
+     "into": 566.18,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 54.2,
+     "out": 567.014,
+     "into": 567.58,
+     "got_out": 566.936,
+     "got_into": 567.468
+    }
+   ],
+   "trims": [
+    {
+     "t": 3.9,
+     "out": 0.0108,
+     "into": 0.0441
+    },
+    {
+     "t": 5.2,
+     "out": 0.0441,
+     "into": 0.0108
+    },
+    {
+     "t": 7.833,
+     "out": 0.0775,
+     "into": 0.0775
+    },
+    {
+     "t": 8.833,
+     "out": 0.0775,
+     "into": 0.0441
+    },
+    {
+     "t": 11.967,
+     "out": 0.1137,
+     "into": -0.0559
+    },
+    {
+     "t": 21.1,
+     "out": 0.0775,
+     "into": 0.1441
+    },
+    {
+     "t": 24.733,
+     "out": 0.0275,
+     "into": 0.0275
+    },
+    {
+     "t": 25.833,
+     "out": -0.0225,
+     "into": 0.2108
+    },
+    {
+     "t": 30.3,
+     "out": 0.0504,
+     "into": 0.0608
+    },
+    {
+     "t": 31.933,
+     "out": 0.0775,
+     "into": 0.0441
+    },
+    {
+     "t": 34.933,
+     "out": 0.0775,
+     "into": -0.0225
+    },
+    {
+     "t": 38.0,
+     "out": 0.0108,
+     "into": 0.0441
+    },
+    {
+     "t": 42.433,
+     "out": 0.1275,
+     "into": 0.0941
+    },
+    {
+     "t": 43.667,
+     "out": 0.0775,
+     "into": 0.1108
+    },
+    {
+     "t": 44.867,
+     "out": -0.0892,
+     "into": 0.0973
+    },
+    {
+     "t": 47.833,
+     "out": 0.1271,
+     "into": 0.0775
+    },
+    {
+     "t": 49.933,
+     "out": 0.1775,
+     "into": 0.0441
+    },
+    {
+     "t": 52.3,
+     "out": 0.0441,
+     "into": 0.0108
+    },
+    {
+     "t": 54.2,
+     "out": 0.0775,
+     "into": 0.1121
+    }
+   ],
+   "out_median": 0.0775,
+   "into_median": 0.0441
+  },
+  "competitor_cuts": 24,
+  "competitor_cuts_kept": 19,
+  "length": {
+   "yours": 55.133,
+   "tool": 59.117,
+   "competitor": 56.4
+  },
+  "only_tool_s": 7.281,
+  "only_tool": [
+   [
+    489.383,
+    489.847
+   ],
+   [
+    493.747,
+    493.98
+   ],
+   [
+    495.9,
+    495.98
+   ],
+   [
+    498.933,
+    499.047
+   ],
+   [
+    501.25,
+    501.647
+   ],
+   [
+    502.647,
+    502.847
+   ],
+   [
+    503.447,
+    503.647
+   ],
+   [
+    505.35,
+    505.414
+   ],
+   [
+    516.317,
+    516.414
+   ],
+   [
+    520.78,
+    520.817
+   ],
+   [
+    520.95,
+    521.014
+   ],
+   [
+    522.114,
+    522.4
+   ],
+   [
+    523.133,
+    523.28
+   ],
+   [
+    524.28,
+    525.483
+   ],
+   [
+    525.567,
+    525.614
+   ],
+   [
+    529.08,
+    529.117
+   ],
+   [
+    529.15,
+    529.214
+   ],
+   [
+    531.067,
+    531.18
+   ],
+   [
+    542.047,
+    542.18
+   ],
+   [
+    544.65,
+    544.747
+   ],
+   [
+    545.147,
+    545.214
+   ],
+   [
+    546.047,
+    546.714
+   ],
+   [
+    548.517,
+    548.614
+   ],
+   [
+    552.467,
+    552.547
+   ],
+   [
+    555.35,
+    555.78
+   ],
+   [
+    557.58,
+    557.814
+   ],
+   [
+    562.083,
+    562.147
+   ],
+   [
+    563.214,
+    564.717
+   ],
+   [
+    567.517,
+    567.58
+   ]
+  ],
+  "only_yours_s": 3.266,
+  "only_yours": [
+   [
+    508.067,
+    508.114
+   ],
+   [
+    508.547,
+    509.014
+   ],
+   [
+    509.314,
+    509.383
+   ],
+   [
+    515.183,
+    515.28
+   ],
+   [
+    517.467,
+    517.514
+   ],
+   [
+    518.247,
+    519.717
+   ],
+   [
+    530.767,
+    530.847
+   ],
+   [
+    535.147,
+    535.2
+   ],
+   [
+    538.1,
+    538.214
+   ],
+   [
+    539.914,
+    540.15
+   ],
+   [
+    544.333,
+    544.48
+   ],
+   [
+    551.433,
+    551.58
+   ],
+   [
+    554.483,
+    554.647
+   ],
+   [
+    558.35,
+    558.38
+   ],
+   [
+    568.417,
+    568.514
+   ]
+  ],
+  "framing": {
+   "pieces": 33,
+   "dx": [
+    0.0963,
+    0.0383,
+    0.0866,
+    -0.0144,
+    -0.0144,
+    -0.0144,
+    -0.0144,
+    0.2217,
+    0.2217,
+    0.0465,
+    0.0465,
+    0.088,
+    0.0549,
+    -0.0012,
+    0.0843,
+    0.0818,
+    -0.0888,
+    -0.1837,
+    -0.1838,
+    -0.1839,
+    -0.0084,
+    -0.0124,
+    -0.0124,
+    -0.0124,
+    -0.0124,
+    -0.0048,
+    0.1064,
+    0.192,
+    0.0665,
+    0.0664,
+    0.0243,
+    -0.2092,
+    -0.1445
+   ],
+   "dy": [
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0078,
+    -0.0078,
+    -0.0078,
+    -0.0078,
+    -0.0078,
+    -0.0078,
+    -0.0079,
+    -0.0079,
+    -0.0078,
+    -0.0077,
+    -0.0078,
+    -0.0078,
+    -0.0074,
+    -0.0078,
+    -0.0076,
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0079,
+    -0.0078,
+    -0.0078,
+    -0.0077,
+    -0.0078,
+    -0.0077,
+    -0.0078,
+    -0.0079,
+    -0.0079
+   ],
+   "zoom": [
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.034,
+    1.033,
+    1.033,
+    1.033,
+    1.032,
+    1.032,
+    1.034,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.033,
+    1.034,
+    1.033
+   ],
+   "dx_median": -0.0012,
+   "dy_median": -0.0078,
+   "zoom_median": 1.033
+  }
+ },
+ "topaz": {
+  "topaz": {
+   "width": 2160,
+   "height": 3840,
+   "fps": 30.0,
+   "duration": 55.167,
+   "audio": false
+  },
+  "final": {
+   "width": 1080,
+   "height": 1920,
+   "fps": 30.0,
+   "duration": 55.133,
+   "audio": true
+  },
+  "raw": {
+   "width": 700,
+   "height": 480,
+   "fps": 25.0,
+   "duration": 1409.985,
+   "audio": true
+  },
+  "cuts_seen": 0.806,
+  "what": "your edited picture, not the RAW: the length of final.mp4 (55.17 s against 55.13 s), and it cuts where final.mp4 cuts (81 % of your cuts); 2160x3840 at 30 fps, no sound -- the RAW is 700x480 at 25 fps, 1410 s"
+ },
+ "sound": {
+  "yours": {
+   "offset_ms": -35.1,
+   "moved": [
+    {
+     "start": 12.9,
+     "end": 13.867,
+     "frames": -0.74
+    }
+   ],
+   "given": []
+  },
+  "competitor": {
+   "offset_ms": 13.7,
+   "moved": [],
+   "given": []
+  }
+ }
+}

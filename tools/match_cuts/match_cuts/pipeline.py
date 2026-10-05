@@ -1591,13 +1591,14 @@ def segment_and_assemble(ctx: Context, fm_pre: FrameMap, dlog: DecisionLog, debu
     prior = audio_align.av_offset_prior(ctx.hints, segments, ctx.comp_fps, cfg, dlog)
     if not prior.get("accepted") and len(comp_y) and len(raw_y):
         # too few long S5.1 windows: one wide per-segment search instead (offsets beyond the +-100 ms residual search)
-        probe = audio_align.av_offset_probe(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog)
+        probe = audio_align.av_offset_probe(segments, comp_y, raw_y, ctx.audio_sr, ctx.comp_fps, cfg, dlog,
+                                            raw_fps=ctx.raw_fps)
         if probe.get("accepted"):
             prior = {**prior, **probe, "windows_reason": prior.get("reason")}
     g0 = float(prior["lag_s"])
     audio_result = analyse(g0, "video_phase")
     apply_segment_audio(segments, audio_result)
-    offset = audio_align.av_offset_estimate(segments, audio_result, cfg, dlog, prior=prior)
+    offset = audio_align.av_offset_estimate(segments, audio_result, cfg, dlog, prior=prior, raw_fps=ctx.raw_fps)
     g = float(offset["lag_s"])
     if abs(g - g0) > 1e-3:
         # the first pass was centred elsewhere: redo it around g (its exceptions are judged on the residual)
@@ -2151,6 +2152,14 @@ def stage_probe_conform(ctx: Context) -> None:
             ctx.warn(f"{info.role} media {Path(info.path).name} still has AE issues after conform: "
                      f"{', '.join(info.ae_issues)}", analysis=True)
     ctx.main_fps = resolve_main_fps(ctx.cfg, ctx.comp_fps, ctx.raw_fps)
+    if getattr(cfg, "premiere", False):         # the Premiere sequence: a whole number of frames per competitor frame
+        from .export_xml_edl import sequence_fps
+        want = Fraction(str(cfg.premiere_fps or "60"))
+        seq = sequence_fps(Fraction(ctx.comp_fps), want)
+        if seq != want:
+            cfg.premiere_fps = fps_str(seq)
+            ctx.warn(f"the competitor runs at {fps_str(Fraction(ctx.comp_fps))} fps: the Premiere sequence is "
+                     f"{fps_str(seq)} fps instead of {fps_str(want)}, so every cut lands on a competitor frame")
     ctx.main_size = resolve_main_size(ctx.cfg, (ctx.comp_info.display_width or ctx.comp_info.width,
                                                 ctx.comp_info.display_height or ctx.comp_info.height),
                                       (ctx.raw_info.display_width or ctx.raw_info.width,
@@ -2722,12 +2731,7 @@ def stage_exports(ctx: Context) -> None:
     premiere = bool(getattr(cfg, "premiere", False))
     rp = None
     if premiere:
-        ctx.speech = speech_of(ctx, ex)
-        ctx.shots = shots_of(ctx, ex)
-        ctx.people = people_of(ctx, ex)
-        cfg.premiere_people = ctx.people             # from here on premiere_clips frames on the person speaking
-        ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
-        rp = ctx.silence.get("ripple")
+        ex, rp = premiere_plan(ctx, ex)
         produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
                                                   lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
     else:
@@ -2787,6 +2791,37 @@ def stage_exports(ctx: Context) -> None:
         if produced["compare"] and cmp_path.exists():
             ctx.paths["compare"] = str(cmp_path)
     ctx.exports.update(collect_deliverables(ctx, produced))
+
+
+def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
+    """The Premiere export's plan of the export cut list ``ex``: a speed-change sliver inside one take plays on
+    (export_xml_edl.play_on_slivers), then the RAW's speech map, shot changes and people, the speech-safe cuts and the
+    silences and repeats taken out. Returns (the cut list written, the ripple of its cuts)."""
+    from .export_xml_edl import play_on_slivers
+    ex, slivers = play_on_slivers(ex)
+    for d in slivers:
+        ctx.dlog.record("premiere", "sliver_played_on", **d)
+        if "jump_s" in d:
+            log.info("Premiere: S%02d (%d frames, %.0f ms off its take) plays on the take's line", d["segment"],
+                     d["comp_out"] - d["comp_in"], 1000 * d["jump_s"])
+        else:
+            log.info("Premiere: S%02d (%d frames at %.0f %%) plays at 100 %% inside its take", d["segment"],
+                     d["comp_out"] - d["comp_in"], 100 * d["speed"])
+    ctx.speech = speech_of(ctx, ex)
+    if ctx.speech is not None:
+        from . import speech as speech_mod
+        from .export_xml_edl import harden_dissolves
+        ex, hard = harden_dissolves(ex, lambda t: speech_mod._inside(ctx.speech, t))
+        for d in hard:
+            ctx.dlog.record("premiere", "dissolve_hardened", **d)
+            log.info("Premiere: the %d-frame dissolve S%02d|S%02d inside speech (RAW %.2f / %.2f s) is a cut at "
+                     "competitor frame %d, so the cut can move out of the word", d["frames"], d["segments"][0],
+                     d["segments"][1], d["raw"][0], d["raw"][1], d["cut"])
+    ctx.shots = shots_of(ctx, ex)
+    ctx.people = people_of(ctx, ex)
+    ctx.cfg.premiere_people = ctx.people         # from here on premiere_clips frames on the person speaking
+    ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
+    return ex, ctx.silence.get("ripple")
 
 
 def silence_lines(plan: dict) -> list[str]:
@@ -3328,6 +3363,15 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
                 out["caption_score"] = summary_lines(*got)
         except Exception as e:  # noqa: BLE001 - the summary must not fail the run
             out["caption_score"] = [f"(could not be scored: {type(e).__name__}: {e})"]
+    if comp and Path(comp).is_file() and (Path(cfg.deliver) / "1_edit.xml").is_file():
+        try:                                     # ... and how close my cuts come to the user's own edit
+            from . import edit_score
+            from .common import file_hash
+            got = edit_score.for_run(comp, file_hash(comp), cfg.deliver)
+            if got is not None:
+                out["cut_score"] = [f"{got[1].line()} -- answer key tests/real/{got[0]}"]
+        except Exception as e:  # noqa: BLE001 - the summary must not fail the run
+            out["cut_score"] = [f"(could not be scored: {type(e).__name__}: {e})"]
     cap = ctx.captions or {}
 
     def tc(c: dict) -> str:

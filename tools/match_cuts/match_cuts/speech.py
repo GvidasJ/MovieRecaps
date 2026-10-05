@@ -37,6 +37,9 @@ KEEP_FRAC = 0.25          # a cut inside a sound (a word) keeps it whole when th
 BOUNDARY_S = 0.25         # the dip nearest a boundary between two transcribed words, this close, is the gap there
 VOICED = 0.8              # a clear pitch: the normalised autocorrelation peak (70-400 Hz, 40 ms) at least this ...
 VOICED_S = 0.05           # ... for this long makes an untranscribed sound speech (less: a breath, a smack, a click)
+TAIL_GAP_S = 0.08         # an untranscribed sound starting this soon after a transcribed word ...
+TAIL_VOICED_S = 0.02      # ... voiced this long is that word's end, its timing cut short (video2: the "-kay" of "OK?",
+#                           voiced 0.04 s, 0.06 s after "team, OK?" -- a breath is not voiced at all)
 MAX_SHIFT_S = 0.1         # an audio line jumping this little inside speech where the picture does not cut plays on
 MAX_JUMP_S = 0.1          # a cut skipping (or repeating) this little of the RAW inside speech: the clips play on as one take
 EPS = 1e-6
@@ -66,6 +69,21 @@ class SpeechMap:
     def gaps(self) -> list[tuple[float, float]]:
         out, at = [], 0.0
         for s in self.sounds:
+            if s.s0 > at + EPS:
+                out.append((at, s.s0))
+            at = max(at, s.s1)
+        if self.dur > at + EPS:
+            out.append((at, self.dur))
+        return out
+
+    @property
+    def speech_gaps(self) -> list[tuple[float, float]]:
+        """The stretches between speech (``gaps`` with every sound that is not speech -- a breath, a lip smack, a
+        click -- counted as quiet)."""
+        out, at = [], 0.0
+        for s in self.sounds:
+            if not s.speech:
+                continue
             if s.s0 > at + EPS:
                 out.append((at, s.s0))
             at = max(at, s.s1)
@@ -162,7 +180,7 @@ def speech_map(y: np.ndarray, sr: int, st: Any = None, words: Sequence[Any] | No
         w0 = [n[1] for n in both]
         span = max([n[2] - n[1] for n in both] or [0.0])
         need = []
-        for s in sounds:
+        for k, s in enumerate(sounds):
             if heard is not None and not any(h0 <= s.s0 + EPS and s.s1 <= h1 + EPS for h0, h1 in heard):
                 s.why = "not transcribed here"
                 continue
@@ -171,17 +189,32 @@ def speech_map(y: np.ndarray, sr: int, st: Any = None, words: Sequence[Any] | No
             if said:
                 s.why = "words: " + " ".join(dict.fromkeys(n[0] for n in said))
             else:
-                need.append(s)
+                need.append((k, s))
         if need:
             from .transcribe import resample, SR
             y16 = resample(y, sr)
-            for s in need:
+            tails: dict[int, float] = {}
+            for k, s in need:
                 tt = np.arange(s.s0 + silence.HOP_S / 2.0, s.s1, silence.HOP_S)
                 v = voicing(y16, SR, tt)
                 voiced_s = float(np.sum(v >= VOICED)) * silence.HOP_S
+                prev = sounds[k - 1] if k > 0 else None
+                if (voiced_s < VOICED_S - 1e-9 and voiced_s >= TAIL_VOICED_S - 1e-9 and prev is not None
+                        and str(prev.why).startswith("words:") and s.s0 - prev.s1 <= TAIL_GAP_S + 1e-9):
+                    tails[k] = voiced_s
+                    continue
                 s.speech = voiced_s >= VOICED_S - 1e-9
                 s.why = (f"no words, voiced {voiced_s:.2f} s" if s.speech else
                          f"no words, voiced {voiced_s:.2f} s: a breath or a noise")
+            if tails:                       # a word's end: one sound with the word (no cut between them)
+                merged: list[Sound] = []
+                for k, s in enumerate(sounds):
+                    if k in tails and merged:
+                        merged[-1].s1 = s.s1
+                        merged[-1].why = f"{merged[-1].why} + its end (no words, voiced {tails[k]:.2f} s)"
+                        continue
+                    merged.append(s)
+                sounds = merged
     lv["words"] = None if words is None else len(ws)
     return SpeechMap(sounds, dur, named, lv)
 

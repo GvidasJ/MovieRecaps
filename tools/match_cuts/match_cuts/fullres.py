@@ -41,6 +41,9 @@ OVERRULE = 0.01         # the re-check takes a RAW frame outside the proxy's sof
 OVERRULE_MIN = 0.9      # ... by more than this, and itself scores at least this (a clear picture, not a blur)
 VERIFY_NOISE = 0.002      # verification: a neighbour fitting better by more than this is listed ...
 VERIFY_FAIL = 0.01        # ... and by more than this (or a cut whose other side fits better by it) fails the check
+REPEAT_EPS = 1e-3         # two frames are one picture (a repeat) when 1 - ZNCC is under this (Zendaya-age at full
+                          # resolution: repeats 2e-5 to 1.4e-4, the smallest move 2.9e-3) ...
+REPEAT_REL = 0.2          # ... and under this share of the change on each side of them
 MIN_PIXELS = 4096
 
 
@@ -97,12 +100,26 @@ class FrameStore:
 class LazyFrames:
     """Full-resolution gray frames of one video decoded on demand -- ``around`` frames on each side of one asked for
     come along (criterion 2 looks at a cut's two frames and moves it frame by frame) -- at most ``keep`` in memory,
-    the least recently used going first."""
+    the least recently used going first. One decoder serves every read (seeking): a decoder opened and closed for
+    each read starts and ends its frame threads every time, and in a process that has loaded CUDA that keeps memory
+    for good -- ~70 MB per 1080x1920 decoder (Task 8: 92 GB on video1's 1,654-frame finished video)."""
 
     def __init__(self, info: Any, keep: int = 192, around: int = 2):
         self.info, self.keep, self.around = info, int(keep), int(around)
         self.n = int(getattr(info, "nb_frames", 0) or 0)
         self.frames: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._rd: Any = None
+
+    def _reader(self) -> Any:
+        if self._rd is None:
+            self._rd = open_reader(self.info)
+        return self._rd
+
+    def close(self) -> None:
+        self.frames.clear()
+        if self._rd is not None:
+            self._rd.close()
+            self._rd = None
 
     def prefetch(self, a: int, b: int) -> None:
         """Frames [a, b) in one sequential decode (a segment's frames), when they fit in ``keep``."""
@@ -110,10 +127,9 @@ class LazyFrames:
         b = min(int(b), self.n) if self.n else int(b)
         if b <= a or b - a > self.keep or all(i in self.frames for i in range(a, b)):
             return
-        with open_reader(self.info) as rd:
-            for j, img in rd.frames(a, b, fmt="gray"):
-                self.frames[int(j)] = np.ascontiguousarray(img)
-                self.frames.move_to_end(int(j))
+        for j, img in self._reader().frames(a, b, fmt="gray"):
+            self.frames[int(j)] = np.ascontiguousarray(img)
+            self.frames.move_to_end(int(j))
         while len(self.frames) > self.keep:
             self.frames.popitem(last=False)
 
@@ -125,10 +141,9 @@ class LazyFrames:
             a, b = max(0, i - self.around), i + self.around
             if self.n:
                 b = min(b, self.n - 1)
-            with open_reader(self.info) as rd:
-                for j, img in rd.frames(a, b + 1, fmt="gray"):
-                    self.frames[int(j)] = np.ascontiguousarray(img)
-                    self.frames.move_to_end(int(j))
+            for j, img in self._reader().frames(a, b + 1, fmt="gray"):
+                self.frames[int(j)] = np.ascontiguousarray(img)
+                self.frames.move_to_end(int(j))
             while len(self.frames) > self.keep:
                 self.frames.popitem(last=False)
         img = self.frames.get(i)
@@ -516,23 +531,73 @@ class SideScorer:
 
     def close(self) -> None:
         self.sc.close()
-        self.comp.frames.clear()
-        self.raw.frames.clear()
+        self.comp.close()
+        self.raw.close()
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 # verification of every frame and every cut (after the cut list)
 # ---------------------------------------------------------------------------------------------------------------------
 
-def cadence(k: int, j: int, jb: int, shown: dict[int, tuple[int, float, float]], pair_label: np.ndarray) -> str:
+def _change(a: np.ndarray, b: np.ndarray, mask: np.ndarray | None = None) -> float:
+    """How much two decoded frames differ: 1 - ZNCC of their grey levels (every 4th pixel; ``mask``: only there);
+    inf when they cannot be compared."""
+    if a is None or b is None or a.shape != b.shape:
+        return float("inf")
+    sel = (slice(None, None, 4), slice(None, None, 4))
+    x, y = np.asarray(a[sel], np.float32), np.asarray(b[sel], np.float32)
+    if mask is not None:
+        m = np.asarray(mask, bool)
+        if m.shape != a.shape:
+            import cv2
+            m = cv2.resize(m.astype(np.uint8), (a.shape[1], a.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
+        m = m[sel]
+        x, y = x[m], y[m]
+    x, y = x.reshape(-1), y.reshape(-1)
+    if x.size < 64:
+        return float("inf")
+    x, y = x - x.mean(), y - y.mean()
+    d = float(np.sqrt((x * x).sum() * (y * y).sum()))
+    return 1.0 - float((x * y).sum()) / d if d > 0 else float("inf")
+
+
+def _repeat(get: Any, a: int, mask: Any = None) -> bool:
+    """Frames a and a + 1 of a video are one picture (``get(i)``: its decoded frame; ``mask(i)``: the pixels to
+    compare): they differ by under REPEAT_EPS, and by under REPEAT_REL of the change on each side of them (a repeat
+    sits between two real changes -- in a still shot every pair differs that little, and none is a repeat)."""
+    def ch(i: int) -> float:
+        m = None
+        if mask is not None:
+            try:
+                m = np.asarray(mask(i), bool) & np.asarray(mask(i + 1), bool)
+            except Exception:  # noqa: BLE001 - no mask: the whole frame
+                m = None
+        return _change(get(i), get(i + 1), m)
+    x = ch(a)
+    if not x < REPEAT_EPS:
+        return False
+    sides = [v for v in (ch(a - 1), ch(a + 1)) if np.isfinite(v)]
+    return bool(sides) and x < REPEAT_REL * min(sides)
+
+
+def cadence(k: int, j: int, jb: int, shown: dict[int, tuple[int, float, float]], pair_label: Any,
+            same_picture: Any = None) -> str:
     """Why frame k -- showing RAW j where RAW jb fits better -- is the repeat cadence ('' when it is not).
-    ``shown``: k -> (RAW frame, blend fraction, speed) of the edit; ``pair_label``: refine's competitor pairs
-    (k, k + 1): 1 the same picture, 2 / 3 it moves on. One constant-speed clip cannot follow a cadence that is not
-    its own: the competitor shows one picture on two frames where the edit's time line steps between them (jb is
-    what the edit shows on the other frame), or the edit shows one RAW frame on two frames where the competitor
-    moves on (jb is the next RAW frame in the direction of play)."""
+    ``shown``: k -> (RAW frame, blend fraction, speed) of the edit; ``pair_label``: the competitor pairs (k, k + 1)
+    -- an array of refine's labels, or a function of k (verify: refine's, else measured at full resolution) --: 1 the
+    same picture, 2 / 3 it moves on; ``same_picture(i, j)``: RAW frames i and j are one picture
+    (the RAW file repeats it: a 30 fps file of 25 fps footage repeats every 6th frame). One constant-speed clip
+    cannot follow a cadence that is not its own: the competitor shows one picture on two frames where the edit's
+    time line steps between them (jb is what the edit shows on the other frame), or the edit shows one picture on two
+    frames where the competitor moves on -- one RAW frame twice, or two RAW frames that are one picture (jb is the
+    next RAW frame in the direction of play)."""
     def label(a: int) -> int:
+        if callable(pair_label):
+            return int(pair_label(a))
         return int(pair_label[a]) if 0 <= a < len(pair_label) else -1
+
+    def one(a: int, b: int) -> bool:
+        return a == b or (same_picture is not None and abs(a - b) == 1 and bool(same_picture(a, b)))
     if k not in shown or shown[k][1] != 0.0:
         return ""
     step = 1 if shown[k][2] >= 0 else -1
@@ -540,11 +605,14 @@ def cadence(k: int, j: int, jb: int, shown: dict[int, tuple[int, float, float]],
         if q not in shown or shown[q][1] != 0.0:
             continue
         a = min(q, k)
-        if label(a) == 1 and shown[q][0] == jb:
+        if label(a) == 1 and one(shown[q][0], jb):
             return (f"the competitor shows one picture on frames {a}-{a + 1} and the time line steps between them "
-                    f"(RAW {jb} is shown on frame {q})")
-        if label(a) in (2, 3) and shown[q][0] == j and jb == j + (step if q < k else -step):
-            return f"the time line shows RAW {j} on frames {a}-{a + 1} where the competitor moves on (to RAW {jb})"
+                    f"(RAW {shown[q][0]} is shown on frame {q})")
+        if label(a) in (2, 3) and one(shown[q][0], j) and jb == j + (step if q < k else -step):
+            if shown[q][0] == j:
+                return f"the time line shows RAW {j} on frames {a}-{a + 1} where the competitor moves on (to RAW {jb})"
+            return (f"the time line shows one picture on frames {a}-{a + 1} (the RAW repeats it on its frames "
+                    f"{min(j, shown[q][0])}-{max(j, shown[q][0])}) where the competitor moves on (to RAW {jb})")
     return ""
 
 
@@ -629,9 +697,30 @@ def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_sto
                 row["better_raw"] = int(max(z_nb, key=z_nb.get))
                 pending.append(row)
             rows.append(row)
+        same: dict[tuple[int, int], bool] = {}
+
+        def same_picture(a: int, b: int) -> bool:          # the RAW file repeats a picture (full resolution)
+            key = (min(a, b), max(a, b))
+            if key not in same:
+                raw_store.load(range(key[0] - 1, key[0] + 3))
+                same[key] = _repeat(raw_store.get, key[0])
+            return same[key]
+        measured: dict[int, int] = {}
+
+        def pair_of(a: int) -> int:                          # refine's label of the competitor pair (a, a + 1); one it
+            lab = int(pl[a]) if 0 <= a < len(pl) else -1     # did not measure, measured here at full resolution
+            if lab in (1, 2, 3):
+                return lab
+            if a not in measured:
+                comp_store.load(range(a - 1, a + 3))
+                if comp_store.get(a) is None or comp_store.get(a + 1) is None:
+                    measured[a] = lab
+                else:
+                    measured[a] = 1 if _repeat(comp_store.get, a, allowed) else 2
+            return measured[a]
         for row in pending:
             k, jb = row["k"], row["better_raw"]
-            why = cadence(k, row["raw"], jb, plain, pl)
+            why = cadence(k, row["raw"], jb, plain, pair_of, same_picture)
             if why:
                 row["explained"] = why
                 explained.append(row)

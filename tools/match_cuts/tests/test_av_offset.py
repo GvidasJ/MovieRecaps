@@ -431,3 +431,26 @@ def test_published_block_and_cutlist_fields():
     block = pipeline.published_av_offset(pub, {"_switch_baseline": {"ms": 48.0, "n": 16, "spread_ms": 9.0}}, Config())
     assert "lag_s" not in block and block["sync_mode"] == "raw" and block["switch_baseline_ms"] == 48.0
     assert block["switch_baseline"] == {"n": 16, "spread_ms": 9.0} and block["status"] == "measured"
+
+
+def test_one_segment_may_move_the_offset_by_a_quarter_of_a_raw_frame():
+    """video4's competitor (60 fps, a 59.94 fps RAW): nine segments put its sound ~58 ms after its picture, and one
+    of them moves the max-coverage set by 3.1 ms -- more than 2 ms, less than a quarter of a RAW frame (4.2 ms):
+    the segments' intervals are their RAW frame's phase. Without the offset no segment was an anchor."""
+    segs = [([-59.858, -44.392], 1.2333, 0.9857), ([-79.109, -63.975], 1.3333, 0.9746),
+            ([-72.575, -56.958], 1.0834, 0.9816), ([-70.924, -55.108], 0.9, 0.9865),
+            ([-72.191, -57.158], 1.7, 0.933), ([-60.458, -45.124], 1.3333, 0.9625),
+            ([-80.559, -80.309], 0.3, 0.9476), ([-64.125, -48.175], 0.7334, 0.9922),
+            ([-66.06, -49.693], 0.5, 0.9232)]
+    lo = [a / 1000.0 - 0.0005 for (a, _b), _d, _c in segs]          # widened by av_offset_eps_ms, as the estimate does
+    hi = [b / 1000.0 + 0.0005 for (_a, b), _d, _c in segs]
+    w = [d * c * c for _iv, d, c in segs]
+    cfg = Config()
+    sol = aa.solve_av_offset(lo, hi, w, cfg, audio_s=9.117)
+    assert sol["status"] == "not_measured" and "moves the offset by 3.12 ms" in sol["reason"]
+    sol = aa.solve_av_offset(lo, hi, w, cfg, audio_s=9.117, frame_s=1001 / 60000)
+    assert sol["status"] == "measured" and abs(sol["lag_s"] * 1000.0 + 58.5) <= 0.1, sol
+    # two disjoint, equally supported offsets stay undecided at any frame rate (25 fps: a 10 ms quarter frame)
+    blo = [-0.0865, -0.0864, -0.0866, -0.0405, -0.0404, -0.0406]
+    sol = aa.solve_av_offset(blo, [x + 0.001 for x in blo], [1, 1, 1.02, 1, 1, 1], cfg, audio_s=6.0, frame_s=0.04)
+    assert sol["status"] == "not_measured" and sol["lag_s"] == 0.0

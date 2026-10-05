@@ -214,6 +214,17 @@ def test_coverage_fullscreen_period_needs_its_own_box():
     assert r["status"] == "pass_with_exceptions" and len(r["exceptions"]) == 2
 
 
+def test_coverage_of_a_video_full_screen_throughout():
+    """video4's competitor shows the RAW full-screen from start to end: its layout IS full-screen (layout_kind), the
+    canvas is the layout's own box, and segment.py gives no segment a box of its own -- c1 passes."""
+    lb = {"layout_kind": "fullscreen", "box": {"x": 0, "y": 0, "w": 64, "h": 36, "corner_radius": 0},
+          "periods": [{"comp_in": 0, "comp_out": 30, "mode": "fullscreen"}]}
+    segs = [seg(1, "raw", 0, 10, 100), seg(2, "raw", 10, 20, 300), seg(3, "raw", 20, 30, 500)]
+    r = verify.check_coverage(segs, 30, lb)
+    assert r["status"] == "pass", r
+    assert r["fullscreen_frames"] == [[0, 29]]
+
+
 def test_coverage_fullscreen_period_boundary_inside_a_dissolve_or_off_by_a_sliver():
     """review R2-5 / real-world D1-c1-transition: a dissolve between a boxed shot and a full-screen shot makes the
     detected full-screen period start (or end) inside the dissolve; segment.py keeps the boxed segment boxless

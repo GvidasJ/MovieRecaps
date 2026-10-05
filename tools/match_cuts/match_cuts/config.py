@@ -70,7 +70,11 @@ class Config:
                                            #   from its speech level and background noise, silence.levels)
     min_silence: float = 0.3               # cut silences longer than this (s), only between words
     pad_before: float = 0.05               # kept before each word: a clip's start, after a removed silence (s)
-    pad_after: float = 0.15                # kept after each word: a clip's end, before a removed silence (s)
+    pad_after: float = 0.05                # kept after each word: a clip's end, before a removed silence (s); 0.05
+    #                                        since Task 8: at the cuts the tool and your finished videos both make,
+    #                                        you leave 0.09-0.12 s earlier than 0.15 did (video2, video4, Zendaya-age)
+    silence_breaths: bool = False          # a pause with a breath / click in it is a pause (the speech map's gaps
+                                           #   between speech, not between every sound)
     allow_repeats: bool = False            # --premiere: keep a RAW moment over 0.5 s that plays twice (repeats.py);
                                            #   a stutter at a cut is trimmed either way
     captions: str = "auto"                 # auto | competitor | voice: captions.srt copied from the competitor's burned-in
@@ -152,7 +156,8 @@ class Config:
     av_offset_min_segments: int = 3        # acceptance: >= 3 segments ...
     av_offset_min_audio_s: float = 2.0     # ... >= 2 s of audio ...
     av_offset_min_coverage: float = 0.7    # ... the offset explains >= 70 % of the segment weight ...
-    av_offset_max_spread_ms: float = 2.0   # ... no single segment moves the max-coverage set by more than 2 ms ...
+    av_offset_max_spread_ms: float = 2.0   # ... no single segment moves the max-coverage set by more than 2 ms
+    #                                        (or a quarter of a RAW frame, when more) ...
     av_offset_min_ms: float = 2.0          # ... and |offset| >= 2 ms (smaller offsets are indistinguishable from phase)
     av_offset_zero_frac: float = 0.9       # offset = 0 exactly when 0 explains >= this fraction of the best coverage
 
@@ -354,7 +359,7 @@ class Config:
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
-                  "silence_db", "min_silence", "pad_before", "pad_after", "allow_repeats",
+                  "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
                   "caption_language", "fast", "compare_fast", "speech_map_model",
                   "no_broll",

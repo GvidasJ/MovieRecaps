@@ -138,6 +138,28 @@ def test_a_voiced_sound_nobody_transcribed_is_speech():
     assert all(s.speech for s in sm.sounds) and "voiced" in sm.sounds[0].why
 
 
+def test_a_voiced_sound_right_after_a_word_is_the_end_of_that_word():
+    """video2: "team, OK?" is timed to end 0.06 s before the "-kay" its speaker says, voiced only 0.04 s -- under
+    VOICED_S, but right after a word: that word's end (the edit plays it to its end); a breath (no pitch) right after
+    a word, or a short voiced click well after one, stays out."""
+    y = tone(room(), 1.2, 1.5)                                          # "OK" as timed
+    tone(y, 1.56, 1.60, amp=0.1)                                      # "-kay": 0.04 s voiced ...
+    hiss(y, 1.60, 1.69, amp=0.02)                                     # ... and its unvoiced rest
+    hiss(y, 2.6, 2.9)                                                 # a breath later
+    tone(y, 3.4, 3.44, amp=0.1)                                       # a short voiced click, well after the word
+    sm = SP.speech_map(y, SR, S.Settings(), words(("OK?", 1.2, 1.5)))
+    ok = sm.sounds[0]                                                 # one sound with the word: no cut between them
+    assert ok.speech and "its end" in ok.why and ok.s1 == pytest.approx(1.69, abs=TOL)
+    assert [s.speech for s in sm.sounds[1:]] == [False, False]
+    assert SP.end_at(sm, 1.55, 1.0, PA, PB) == pytest.approx(ok.s1 + PA, abs=TOL)      # a cut there plays it out
+    old, SP.TAIL_VOICED_S = SP.TAIL_VOICED_S, 1.0                     # without the rule: a breath, cut off
+    try:
+        sm0 = SP.speech_map(y, SR, S.Settings(), words(("OK?", 1.2, 1.5)))
+    finally:
+        SP.TAIL_VOICED_S = old
+    assert [s.speech for s in sm0.sounds] == [True, False, False, False]
+
+
 # ---------------------------------------------------------------------------------------------
 # snapping the cuts of an edit
 # ---------------------------------------------------------------------------------------------
@@ -316,8 +338,8 @@ def test_run_011_no_cut_inside_speech_and_my_cuts_matched(tmp_path):
     y = media.extract_audio(ROOT / "raw_audio.m4a", sr=48000, mono=True)
     sm = SP.speech_map(y, 48000, S.Settings(), w["medium.en"], w["small.en"])
     cl = run011_cutlist()
-    cfg = Config(out_dir=str(tmp_path), premiere=True)
-    assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)
+    cfg = Config(out_dir=str(tmp_path), premiere=True, pad_after=0.15)  # that session's pads (the default is 0.05
+    assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)             # since Task 8: my finished videos leave earlier)
     # the generated edit cut inside speech 9 times (the hard check finds them; a 10th lands on the boundary between
     # two words that run together -- a cut may fall there)
     assert len(ex.premiere_speech_problems(ROOT / "generated_edit.xml", sm)) == 9

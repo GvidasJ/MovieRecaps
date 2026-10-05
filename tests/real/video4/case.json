@@ -1,0 +1,10 @@
+{
+ "timeline": "edit",
+ "notes": "learned from ..\\..\\finished\\video4 (2026-10-05): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your captions read from its screen",
+ "learned_from": "..\\..\\finished\\video4",
+ "captions_from": "screen",
+ "runs": {
+  "tool": "..\\..\\work\\t8\\final4\\runs\\video4\\001",
+  "user": "..\\..\\work\\t8\\user\\video4\\001"
+ }
+}

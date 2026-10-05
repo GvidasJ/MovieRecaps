@@ -1776,3 +1776,14 @@ def test_the_thorough_framing_samples_are_measured_at_full_resolution():
     got = {k: s for k, s, _j in b._full_res_samples(NS(a=0, b=10, flip=False), out, info, False)}
     assert got[2] is proxy and got[7] is measured and got[0] is measured
     assert info["full_res"] == 9 and info["full_res_added"] == 1
+
+
+def test_a_hold_is_longer_than_one_raw_frame_lasts_by_itself():
+    """video1: a 60 fps competitor over a 25 fps RAW shows every RAW frame 2 or 3 times at 100 %, and its slow zoom
+    keeps it moving -- a run of 3 is its cadence, not a held still (every such segment had been 'uncertain')."""
+    from fractions import Fraction
+    from match_cuts.segment import hold_frames
+    assert hold_frames(Fraction(60), Fraction(25), 1.0) == 4
+    assert hold_frames(Fraction(30), Fraction(30000, 1001), 1.0) == 3       # same rate: 3, as before
+    assert hold_frames(Fraction(30), Fraction(25), 1.0) == 3
+    assert hold_frames(Fraction(60), Fraction(25), 0.5) == 6                # half speed: each RAW frame lasts 4.8

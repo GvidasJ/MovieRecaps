@@ -87,8 +87,9 @@ Captions (see *Captions* below): `--captions auto|competitor|voice` (default `au
 `--caption-model NAME` (default `large-v3`), `--caption-check-model NAME` (default `large-v3-turbo`, `none` = off),
 `--caption-recheck-model NAME` (default `large-v3`, `none` = off).
 Premiere-only export: `--premiere`. Cuts never inside speech, silence removal (Premiere export and RAW-only runs):
-`--pad-before S` (default 0.05: a clip starts this long before its first word), `--pad-after S` (default 0.15: a clip
-ends this long after its last word), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
+`--pad-before S` (default 0.05: a clip starts this long before its first word), `--pad-after S` (default 0.05: a clip
+ends this long after its last word; 0.15 until Task 8 -- at the cuts your finished videos and the tool both make you
+leave 0.09-0.12 s earlier than that), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
 per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
 or audio (see *Premiere* below): `--allow-repeats` keeps a moment over 0.5 s that plays twice. No `--competitor`: the
 edit from the RAW alone (see *Without a competitor* below).
@@ -111,7 +112,8 @@ matching slower, not faster: the same 120 searches take 32-34 s with 12-15 worke
 | slightly uncertain frames | re-checked at full resolution on the GPU before the cuts are decided: refine's low-margin / confounded / tied frames and the 2 frames on each side of every RAW jump (the first frames after a jump cut in a fast pan are blurred on the proxy); each candidate RAW frame with its own framing refined at full size, following a score still rising past the candidates' edge. The re-check narrows which RAW frames a frame may show, and decides against the proxy only when full resolution is clearly sure (better by more than 0.01 ZNCC, at least 0.9) | -- |
 | where a cut goes (criterion 2) | at full resolution: two RAW frames on the two sides -- which one the competitor shows, each with its framing refined (in a fast pan both models' framings are off at a cut); one RAW frame -- its framing as delivered | on the proxy |
 | each clip's framing (keys) | every matched frame's framing measured at full resolution (sub-pixel, the transition frames of a fast pan included), the keys fitted to those | refine's per-frame measurements on the proxy |
-| verification | also every frame and every cut at full resolution (9.9): each frame as delivered, the framing error the refinement finds, a neighbouring RAW frame that fits better (a failure beyond 0.01, unless it is the repeat cadence one constant-speed clip cannot follow: the competitor shows one picture on two frames where the time line steps, or the time line shows one RAW frame twice where the competitor moves on), and each cut (a failure when a frame next to it fits the other side's model better by 0.01, unless the competitor repeats a picture across the cut) | the proxy checks |
+| a clip's phase (which competitor frames show a repeated RAW frame) | where the proxy leaves a choice (a tie, or a range of phases showing other frames), each frame's candidates scored at full resolution, their framing refined, and the phase solved again with those scores; kept when it fits better by 0.01 in all | the proxy's measurements |
+| verification | also every frame and every cut at full resolution (9.9): each frame as delivered, the framing error the refinement finds, a neighbouring RAW frame that fits better (a failure beyond 0.01, unless it is the repeat cadence one constant-speed clip cannot follow: the competitor shows one picture on two frames where the time line steps, or the time line shows one picture on two frames where the competitor moves on -- one RAW frame twice, or two RAW frames the RAW file itself repeats, as a 30 fps file of 25 fps footage does; a repeat is measured at full resolution where refine did not, and counts only between two real changes), and each cut (a failure when a frame next to it fits the other side's model better by 0.01, unless the competitor repeats a picture across the cut) | the proxy checks |
 | speech-safe cuts (speech map) | large-v3 | large-v3-turbo |
 | framing check (who speaks) | YuNet faces and Light-ASD on every RAW frame the edit plays, at 25 fps (Light-ASD's own rate), faces found at 960 px wide (full width was tried on tests/real/zendaya: the same person found speaking on 688 of 699 frames -- the other 11 an overlap where both speak -- and only two more tracks, a 34 px background face and an 11-frame fragment, for 4x the pixels to search) | the same |
 | end summary | `Run time` and what the full-resolution pass changed; with `--compare-fast` (check-all always) also `Against --fast`: what the thorough analysis changed against the one a --fast run makes of the same video (made from the same caches, a few minutes more) and how long each takes | `Run time` |
@@ -124,7 +126,14 @@ Measured on an RTX 5080 with 15 cores, from empty caches: tests/real/deadpool (a
 ### Premiere (`--premiere`)
 
 `1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
-V2 and above empty. Every clip on V1 and A1 is simply `raw.mp4`: the same name, the same file and one shared master
+V2 and above empty. (A competitor whose frame rate does not divide 60 gets the whole multiple of its rate nearest to
+it, so every cut lands on one of its frames: a 24 fps competitor a 48 fps sequence, 25 fps a 50 fps one; the end
+summary says so.) A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or
+hold sliver, a frame-rate artifact rather than an edit -- plays at 100 % here, so the take runs on as one and its
+sound is never slowed inside a word; so does a picture glitch of at most 0.25 s inside one take, its picture at
+most 0.1 s off the take (it plays on the take's line, picture and sound) -- unless the competitor's sound there
+follows a line of its own, off the take's: then it stays as the competitor has it. `cutlist.json` keeps both as the
+competitor has them. Every clip on V1 and A1 is simply `raw.mp4`: the same name, the same file and one shared master
 clip, so Premiere's Project panel shows a single `raw.mp4` all the timeline clips are cut from (the RAW is always
 copied as `extras/media/raw.mp4`, whatever the input file is called; the competitor is never in the project). The
 segment ids (`S01+S02`) are in each clip's comments and in the markers.
@@ -244,16 +253,19 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   captions' model as a second opinion when it is another one. A dip in the loudness inside a word (the closure of a "t")
   is part of the word; the dip nearest each boundary between two words (within 0.25 s — the timings are often that
   far off) is the gap between them, however short. A sound either transcript heard a word in, or with a clear pitch
-  for 0.05 s, is speech — "okay", "uh" and every other filler included; a sound with neither (a breath, a lip
-  smack) is not speech, so a clip's start or end may leave it out, but no cut lands inside it either. Without
-  faster-whisper every sound counts as speech.
-* **A clip ends `--pad-after` (0.15 s) after its last word has completely finished and starts `--pad-before`
+  for 0.05 s, is speech — "okay", "uh" and every other filler included; so is a sound starting at most 0.08 s after
+  a word with a pitch for 0.02 s: that word's end, its timing cut short (the "-kay" of "OK?"), one sound with it. A
+  sound with neither (a breath, a lip smack) is not speech, so a clip's start or end may leave it out, but no cut
+  lands inside it either. Without faster-whisper every sound counts as speech.
+* **A clip ends `--pad-after` (0.05 s) after its last word has completely finished and starts `--pad-before`
   (0.05 s) before its first** — inside the quiet there: a pause shorter than both pads is split between them, a
   breath right after the word stops the clip at the breath. A competitor cut that falls inside speech moves to the
   nearer end of that sound: the clip plays on to the end of it (it is extended, and everything after it moves
   later) or stops before it. A clip never shows again what the clip before it now shows: it starts after it, and a
   clip left with nothing new to play goes. Two pieces that end up playing one continuous take become one clip, with
-  no cut. Both sides of a cross dissolve stay as they are. Where A1 jumps a few frames (at most 0.1 s) inside
+  no cut. Both sides of a cross dissolve stay as they are -- except a dissolve of at most 0.1 s whose cut is inside
+  speech: it becomes a hard cut, moved out of the word like any other (33 ms of two pictures mixed are not
+  missed; `cutlist.json` keeps the dissolve). Where A1 jumps a few frames (at most 0.1 s) inside
   speech but the picture does not cut (an audio line), the audio line moves by those frames so A1 plays on.
 * **A tiny jump at a cut inside speech plays on.** The competitor often cuts 1–3 frames out of a sentence (or shows
   them twice): a cut skipping or repeating at most 0.1 s of the RAW inside speech is closed — the clip before plays
@@ -274,14 +286,16 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   `extras/report.md` has the same list.
 
 On run 011 (the files at the repo root), 9 of the 12 cut edges I moved by hand (leaving out where I dropped
-"Okay", "Uh", "to" and the 1.5 s before "I have a daughter") come out within 2 frames of mine. The other three: I
-kept 0.39 s after "age." and 0.04 s after "am" where the tool keeps `--pad-after` 0.15 s, and I ended S08b just
-before "to" to drop it, where the tool keeps "a son to a married couple" playing.
+"Okay", "Uh", "to" and the 1.5 s before "I have a daughter") come out within 2 frames of mine with that session's
+`--pad-after` 0.15 s (7 with today's 0.05). The other three: I kept 0.39 s after "age." and 0.04 s after "am", and I
+ended S08b just before "to" to drop it, where the tool keeps "a son to a married couple" playing. My finished
+Zendaya-age edit, made later, leaves 0.12 s earlier than 0.15 s at the cuts it shares with the tool -- like my other
+finished videos: hence 0.05.
 
 ### Silence removal (`--keep-silence` turns it off)
 
 * **Silence across a cut, too.** The end of one clip and the start of the next together never keep more silence
-  than `--pad-after` + `--pad-before` (0.2 s): longer, both sides are trimmed, however short the pause (the 0.3 s
+  than `--pad-after` + `--pad-before` (0.1 s): longer, both sides are trimmed, however short the pause (the 0.3 s
   `--min-silence` is for pauses inside a clip). The check on the final XML fails the run on a cut with more
   (`XML SILENCE`, two frames of rounding allowed; an edge held 0.25 s from a RAW shot change against a flash frame
   may keep more). Silence is the quiet of the RAW's speech map (above) — the same quiet the speech check knows, so a
@@ -303,7 +317,7 @@ recheck model's word timings of the RAW; without a competitor (below) the RAW al
   (e.g. `--silence-db -20`).
 * **Never inside a word**: the edit's audio is transcribed (word timings, the captions' model, cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
   over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
-  `--pad-after` (0.15 s) after the word before it and `--pad-before` (0.05 s) before the word after it
+  `--pad-after` (0.05 s) after the word before it and `--pad-before` (0.05 s) before the word after it
   are kept (at the very start and end of the edit there is no word to protect). The soft end of a word that trails
   off under the threshold (still 3 dB over the background, at most 0.2 s) belongs to the word, so the pads are kept
   after it. Without
@@ -342,8 +356,11 @@ the same check as the continuous audio lines: a strong correlation within ±10 m
 alignment, after calibrating the competitor's A/V offset on the main-clip shot itself. When it passes,
 the cutaway becomes the RAW video of that line, framed like the main-clip shot, and is joined with it into
 one continuous clip when framing and speed continue unchanged; a cutaway too short to measure (≤ 2 frames)
-is replaced only between two shots of the same line. When the RAW audio does not continue (music,
-voice-over, the cutaway's own sound) the cutaway stays as the competitor has it.
+is replaced only between two shots of the same line, or between two cutaways replaced by the same line. When the
+RAW audio does not continue (music, voice-over, the cutaway's own sound) the cutaway stays as the competitor has it
+-- unless it is shorter than a shot can be (0.25 s) and its sound cannot be measured: then the clip before plays on
+over it (it would be a flash frame). A shot of the main clip whose own sound plays under it (a strong correlation
+up to 0.1 s off its picture: too far for the ±10 ms above) is the main clip, never a cutaway.
 
 Only what you import changes: `1_edit.xml` (with a `B-ROLL REPLACED` marker on every spot),
 `recreated_edit.edl` and `cutlist.csv` (`debug/cutlist_no_broll.json` holds the export cut list).
@@ -363,8 +380,8 @@ fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start 
 **The words** are what is said in the cut edit (its audio: the RAW audio on the edit's cuts, never the raw clip):
 
 * **Speech recognition** (`asr.py`; see *Speech recognition* below): Whisper **large-v3** on the GPU
-  (`--caption-model`), with the words of `caption_allowlist.txt` (and the written side of `caption_glossary.txt`,
-  the words you corrected before: see *Learn from your corrections*) as vocabulary hints. Every word is then timed by **forced alignment** (`align.py`: torchaudio's MMS_FA wav2vec2
+  (`--caption-model`), with the words of `caption_allowlist.txt` as vocabulary hints (not the glossary's: see *Learn
+  from your corrections*). Every word is then timed by **forced alignment** (`align.py`: torchaudio's MMS_FA wav2vec2
   model, on the GPU, 20 ms steps; a word after a pause starts on its first sound), within a frame.
 * **A second model** (`--caption-check-model`, default `large-v3-turbo`; `none` turns it off) transcribes the same
   audio. Where the two disagree: the same words written two ways, the reduced form wins ("gonna": a model writes it
@@ -495,7 +512,9 @@ NeMo / transformers (`pip install "nemo_toolkit[asr]" transformers`), only for t
 gated on Hugging Face (accept its terms, `hf auth login`, then it runs too).
 
 **A/V offset.** Many short-form edits play their sound a little early or late against the picture (for
-example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`) and the report
+example −85 ms). match_cuts measures this shift **once per run** (`cutlist.audio.av_offset`: accepted when at least
+3 segments and 2 s of audio, 70 % of their weight, agree, and no single segment moves it by more than 2 ms or a
+quarter of a RAW frame, whichever is more) and the report
 shows it in one line, e.g. *"Audio sync: competitor audio is 85.4 ms later than its picture, relative to RAW's
 own A/V sync (lag -85.4 ms, interval -86.6 … -84.2 ms, 16 segment(s), coverage 100%; a property of the input
 files, measured); … export keeps RAW lip-sync (--audio-sync raw)"*. It is a property of the competitor file,
@@ -578,6 +597,42 @@ root); `match_cuts/restyle.py` only chooses their arguments and checks the resul
 `--donor PROJECT.prproj` takes the style from another correctly styled project; `--overwrite` replaces an
 existing `3_captions_styled.prproj` (without it the run stops rather than overwrite one you may have worked in).
 
+### Learn from your finished videos (`learn <folder>`)
+
+```
+..\..\.venv\Scripts\python -m match_cuts learn finished
+```
+
+`finished\` holds one folder per finished video: `final.mp4` (the video as you exported it), `competitor.mp4`,
+`raw.mp4` and `project.prproj` (for your captions); `topaz.mp4` and `project.aep` may be there too. `learn` works on
+every folder in it (or on the one folder you give):
+
+- **Two runs of the tool per video**, in `work\learn\` (a finished run of the same two files there is used again;
+  `--fresh` for new ones, `--fast` for quick ones): the tool on `competitor.mp4` + `raw.mp4` -- what it makes now
+  -- and on `final.mp4` + `raw.mp4`: your finished video matched against the RAW frame by frame, the way the tool
+  matches a competitor. **Your cuts and framing are read from the picture**, so it works whatever the project holds
+  (an After Effects comp, an enhanced sound file on A1). Silence is never measured on `final.mp4` (its sound is
+  enhanced): the tool's speech checks use `raw.mp4`.
+- **The files must belong together, by their content** (no name inside a project is ever used): `final.mp4` and
+  `competitor.mp4` must each show the RAW for at least half their time, and play the same part of it (at least 30 %
+  of what your video plays). A folder missing a file, or whose files do not belong together, is skipped, and the
+  summary says which and why.
+- **Your captions** are the project's caption graphics, used only when they are this video's: at least 60 % of them
+  show on `final.mp4`'s screen (read the way the tool reads a competitor's captions, from the row of text that
+  changes most -- not a handle or watermark that stays) within 0.25 s. Otherwise none are used and the summary says
+  so. `--final-only <folder>` takes them from `final.mp4`'s screen and leaves the
+  project out (a project changed after the export).
+- **`topaz.mp4`**, when there is one, is told by its content: your edited picture (the length of `final.mp4`,
+  cutting where it cuts) or the RAW enhanced, with its size, frame rate and sound.
+- **What it compares**: your cuts against the tool's (the cut score, see check-all) and the competitor's (which of
+  its cuts you kept), the three edits' lengths, your clips' starts and ends against the tool's, and your framing
+  against the competitor's (where your picture looks into the RAW, how much of it it shows). Caption words you
+  changed go into the glossary as below; a kind of change made on several videos becomes a suggested default.
+- **A test case** in `tests/real/<folder name>/`: `competitor.mp4`, `raw.mp4` (smaller over 100 MB),
+  `answer_edit.json` (your timeline from `final.mp4`: the cut answer key, and what `answer.srt` is timed on),
+  `answer.srt` (your captions, when they could be read), `case.json` and `learned.json`. The `finished\` folder
+  itself is never committed: only the test case is.
+
 ### Learn from your corrections (`learn`)
 
 After you finish a video in Premiere:
@@ -602,7 +657,9 @@ It compares your finished project with what the tool generated for that run (`1_
     "wanna"), or the capitals of a name or an acronym ("tom" -> "Tom"). A plain word in capitals ("like" -> "LIKE":
     your emphasis) and other words ("eventually" -> "and then": a one-off mishearing) are kept in the test case's
     `learned.json` only.
-  - Next time the written forms go to both speech models as hot words.
+  - The glossary is not given to the speech models as hot words. A hot word changes how the whole transcript is
+    punctuated and capitalised, also in videos that never say it: with `others` and `Tobey` as hot words, Deadpool
+    had 42 of 60 captions exactly instead of 47. Only `caption_allowlist.txt` goes to them.
   - Where a model still hears the old words, the written form replaces them only where the audio fits: both models
     score both readings of the phrase against the audio, and the written form must be at most 1 nat less likely
     (about a third as likely; you corrected it before). Words are never replaced blindly.
@@ -616,7 +673,8 @@ It compares your finished project with what the tool generated for that run (`1_
     or zoomed (%).
   - A kind of change you make on 3 or more videos (on 30 % of a video's clips, at least 3) becomes a **suggested
     new default**, printed with the videos it comes from, for example `clips end earlier on 3 videos (...; median
-    -0.19 s): --pad-after 0.00 instead of 0.15`. Nothing is ever changed for you.
+    -0.19 s): --pad-after 0.00 instead of 0.05`. Nothing is ever changed for you. For a finished video (`learn
+    <folder>`) only the cuts you and the tool both make are compared (how you trim each), not its clips one by one.
 - **A test case** in `tests/real/<name>/`: `competitor.mp4`, `raw.mp4`, `answer.srt` (your captions: the answer
   key), `answer_edit.json` (your timeline: what the RAW plays where), `case.json` and `learned.json`.
   - check-all then scores every video you ever corrected.
@@ -969,12 +1027,19 @@ answer key: your `answer.srt` and your edit's timeline (`answer_edit.xml`, or `a
 shows the run's time, the hard checks (the run's own exit code and deliverables) and the **caption score** against
 your SRT: captions reproduced exactly (the same text, starting within 2 frames of where your caption's first moment
 plays in the tool's edit), word errors (where both edits play the same moment) and breaks of your caption style (over
-20 characters / 4 words, a full stop or comma, a gap or overlap), with the differences by kind. The end summary of a
-normal run shows the same caption score when the competitor is one of these videos.
+20 characters / 4 words, a full stop or comma, a gap or overlap), with the differences by kind. Where the answer key
+is your own edit (not the competitor's timeline), the **cut score** too: how many of your cut points the tool's edit
+reproduces -- the RAW moment the picture leaves and the one it cuts to, both within 2 frames of your video (compared
+by the RAW, so the two edits may run in another order); the ones it makes trimmed otherwise (within 0.5 s) are
+counted apart -- and how much longer or shorter the tool's edit is. The end summary of a normal run shows the same
+scores when the competitor is one of these videos.
 
 The real clips the tests use live in `tests/real/` at the repository root (`zendaya/`, `deadpool/` -- the Deadpool clip
-and its RAW, once `input/competitor.mp4` + `input/raw_test.mp4` --, `spiderman-school/competitor.mp4`), never in
-`input/`, so the videos you work on there do not change what the tests check. The suite runs on Linux and Windows:
+and its RAW, once `input/competitor.mp4` + `input/raw_test.mp4` --, `spiderman-school/competitor.mp4`,
+`zendaya-age/`, and `video1/` ... `video4/`: four of your finished videos, made by `learn finished` -- the competitor,
+the RAW (a smaller copy over 100 MB), your edit as the cut key and, where your captions could be read, your captions;
+`finished/` itself is never committed), never in `input/`, so the videos you work on there do not change what the
+tests check. The suite runs on Linux and Windows:
 the conftest sets `MATCH_CUTS_NO_AE=1` (After Effects counts as not installed: no test, nor a CLI run it starts, ever
 opens the After Effects of the machine), text is drawn with the DejaVu fonts (the system's on Linux, matplotlib's copy
 elsewhere), and what needs fork / `/proc` (Linux), ffmpeg's `flite` source or OpenTimelineIO (no wheel for Python 3.14)

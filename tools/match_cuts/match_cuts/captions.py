@@ -1432,6 +1432,8 @@ def run_captions(ctx) -> dict:
             res["ocr"] = {"frames_read": got.get("frames_read"), "band": got.get("band"), "fill": got.get("fill"),
                           "events": len(spans), "runs": got.get("runs"), "conventions": got.get("conventions"),
                           "engine": caption_ocr.engine_name(), "notes": {}}
+            res["screen"] = [{"comp_in": int(d["comp_in"]), "comp_out": int(d["comp_out"]),     # as read, on the
+                              "text": str(d.get("ocr") or "")} for d in spans]                # competitor's frames
             if n_events and not spans:
                 warn(f"{n_events} caption events detected but no caption could be read")
     span_fps, span_seq = comp_fps, to_seq          # the spans' frames -> sequence frames
@@ -1732,11 +1734,12 @@ def glossary_entries(path: str | Path | None = None) -> list[tuple[str, str]]:
 
 
 def caption_hints() -> list[str]:
-    """Words the speech model is told to expect (hot words): caption_allowlist.txt and the written side of the
-    learned glossary (glossary_entries)."""
+    """Words the speech model is told to expect (hot words): caption_allowlist.txt. Not the learned glossary: a hot
+    word changes how the whole transcript is punctuated and capitalised, in videos that never say it too (Deadpool:
+    47 -> 42 captions exact with "others" and "Tobey" as hot words, word errors 2.4 -> 4.8 %); the glossary is applied
+    after the transcription, where the audio fits (caption_recheck.glossary_readings)."""
     from .caption_rules import read_allowlist
-    out = list(read_allowlist()) + [w for _h, w in glossary_entries()]
-    return [h for h in dict.fromkeys(out) if h]
+    return [h for h in dict.fromkeys(read_allowlist()) if h]
 
 
 def _read_spans(ctx, layout: dict, comp_fps: Fraction) -> dict:

@@ -1,0 +1,407 @@
+{
+ "video": "video3",
+ "date": "2026-10-05",
+ "folder": "..\\..\\finished\\video3",
+ "kind": "finished",
+ "runs": {
+  "tool": "..\\..\\work\\t8\\final4\\runs\\video3\\001",
+  "user": "..\\..\\work\\t8\\user\\video3\\001"
+ },
+ "belongs": {
+  "competitor_from_raw": 0.556,
+  "final_from_raw": 1.0,
+  "same_story": 0.508
+ },
+ "captions": {
+  "source": null,
+  "why": "not read: the project's 67 captions are not this video's (only 2 % of them show on final.mp4's screen, which shows 'So I said' first)",
+  "count": 0,
+  "on_screen": 0.015,
+  "changes": []
+ },
+ "edit": {
+  "clips": 1,
+  "starts": [
+   0.0833
+  ],
+  "ends": [
+   0.0167
+  ],
+  "removed": 0,
+  "added": 0,
+  "how": "at the cuts you and the tool both make (within 0.5 s): your RAW moment minus the tool's"
+ },
+ "cuts": {
+  "tool": {
+   "cuts": 11,
+   "reproduced": 0,
+   "near": 1,
+   "others": 15,
+   "reproduced_pct": 0.0,
+   "length_key": 32.767,
+   "length_got": 27.133,
+   "length_diff": -5.633,
+   "length_diff_pct": -17.2,
+   "tol_s": 0.0667,
+   "misses": [
+    {
+     "t": 1.667,
+     "out": 344.117,
+     "into": 344.35,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 3.833,
+     "out": 346.517,
+     "into": 346.683,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 4.0,
+     "out": 346.85,
+     "into": 346.983,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 5.467,
+     "out": 348.45,
+     "into": 349.15,
+     "got_out": 348.433,
+     "got_into": 349.067
+    },
+    {
+     "t": 6.467,
+     "out": 350.15,
+     "into": 350.483,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 7.3,
+     "out": 351.317,
+     "into": 351.85,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 10.0,
+     "out": 354.55,
+     "into": 355.45,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 13.367,
+     "out": 358.817,
+     "into": 359.117,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 16.2,
+     "out": 361.95,
+     "into": 362.817,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 22.267,
+     "out": 368.883,
+     "into": 369.083,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 29.733,
+     "out": 376.55,
+     "into": 378.283,
+     "got_out": null,
+     "got_into": null
+    }
+   ],
+   "trims": [
+    {
+     "t": 5.467,
+     "out": 0.0167,
+     "into": 0.0833
+    }
+   ],
+   "out_median": 0.0167,
+   "into_median": 0.0833
+  },
+  "competitor": {
+   "cuts": 11,
+   "reproduced": 0,
+   "near": 0,
+   "others": 18,
+   "reproduced_pct": 0.0,
+   "length_key": 32.767,
+   "length_got": 41.633,
+   "length_diff": 8.867,
+   "length_diff_pct": 27.1,
+   "tol_s": 0.0667,
+   "misses": [
+    {
+     "t": 1.667,
+     "out": 344.117,
+     "into": 344.35,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 3.833,
+     "out": 346.517,
+     "into": 346.683,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 4.0,
+     "out": 346.85,
+     "into": 346.983,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 5.467,
+     "out": 348.45,
+     "into": 349.15,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 6.467,
+     "out": 350.15,
+     "into": 350.483,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 7.3,
+     "out": 351.317,
+     "into": 351.85,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 10.0,
+     "out": 354.55,
+     "into": 355.45,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 13.367,
+     "out": 358.817,
+     "into": 359.117,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 16.2,
+     "out": 361.95,
+     "into": 362.817,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 22.267,
+     "out": 368.883,
+     "into": 369.083,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 29.733,
+     "out": 376.55,
+     "into": 378.283,
+     "got_out": null,
+     "got_into": null
+    }
+   ],
+   "trims": [],
+   "out_median": null,
+   "into_median": null
+  },
+  "competitor_cuts": 18,
+  "competitor_cuts_kept": 0,
+  "length": {
+   "yours": 32.767,
+   "tool": 27.133,
+   "competitor": 41.633
+  },
+  "only_tool_s": 8.217,
+  "only_tool": [
+   [
+    342.35,
+    342.45
+   ],
+   [
+    344.117,
+    344.35
+   ],
+   [
+    349.067,
+    349.15
+   ],
+   [
+    351.767,
+    351.85
+   ],
+   [
+    354.6,
+    355.45
+   ],
+   [
+    358.817,
+    359.117
+   ],
+   [
+    361.95,
+    362.817
+   ],
+   [
+    376.55,
+    378.283
+   ],
+   [
+    381.317,
+    381.417
+   ],
+   [
+    381.433,
+    385.3
+   ]
+  ],
+  "only_yours_s": 14.417,
+  "only_yours": [
+   [
+    345.05,
+    346.517
+   ],
+   [
+    346.683,
+    346.85
+   ],
+   [
+    346.983,
+    347.183
+   ],
+   [
+    349.767,
+    350.15
+   ],
+   [
+    350.483,
+    351.317
+   ],
+   [
+    352.533,
+    354.55
+   ],
+   [
+    356.083,
+    357.883
+   ],
+   [
+    363.533,
+    368.883
+   ],
+   [
+    369.083,
+    369.183
+   ],
+   [
+    369.867,
+    371.15
+   ],
+   [
+    374.383,
+    374.95
+   ],
+   [
+    375.667,
+    375.917
+   ]
+  ],
+  "framing": {
+   "pieces": 9,
+   "dx": [
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009,
+    0.0009
+   ],
+   "dy": [
+    0.0055,
+    0.0056,
+    0.0053,
+    0.0064,
+    0.0051,
+    0.0051,
+    0.0052,
+    0.0063,
+    0.0051
+   ],
+   "zoom": [
+    1.411,
+    1.411,
+    1.411,
+    1.411,
+    1.411,
+    1.411,
+    1.411,
+    1.411,
+    1.411
+   ],
+   "dx_median": 0.0009,
+   "dy_median": 0.0053,
+   "zoom_median": 1.411
+  }
+ },
+ "topaz": {
+  "topaz": {
+   "width": 2160,
+   "height": 3840,
+   "fps": 30.0,
+   "duration": 32.867,
+   "audio": false
+  },
+  "final": {
+   "width": 1080,
+   "height": 1920,
+   "fps": 30.0,
+   "duration": 32.767,
+   "audio": true
+  },
+  "raw": {
+   "width": 640,
+   "height": 480,
+   "fps": 25.0,
+   "duration": 1452.687,
+   "audio": true
+  },
+  "cuts_seen": 1.0,
+  "what": "your edited picture, not the RAW: the length of final.mp4 (32.87 s against 32.77 s), and it cuts where final.mp4 cuts (100 % of your cuts); 2160x3840 at 30 fps, no sound -- the RAW is 640x480 at 25 fps, 1453 s"
+ },
+ "sound": {
+  "yours": {
+   "offset_ms": -38.0,
+   "moved": [],
+   "given": []
+  },
+  "competitor": {
+   "offset_ms": null,
+   "moved": [],
+   "given": []
+  }
+ }
+}

@@ -6,7 +6,8 @@ Each case runs as its own ``python -m match_cuts --premiere`` process (``--out <
 video: the run time, the hard checks of the Premiere deliverables (9.8: the XML item / gap / audio / link / person /
 ... checks and the captions file), determinism (9.7) and coverage (c1), and -- for a video with an answer key -- the
 caption score (caption_score.py: the user's captions reproduced exactly, word errors, rule breaks, the remaining
-differences by type). The criteria c2-c5 (a frame-exact After Effects recreation) are not part of it: real videos
+differences by type) and, where the key is the user's own edit, the cut score (edit_score.py: the user's cut points
+reproduced within 2 frames, and how much longer or shorter the tool's edit is). The criteria c2-c5 (a frame-exact After Effects recreation) are not part of it: real videos
 fail them by design.
 
 The scorecard is saved as ``<out>/scorecard.json`` and appended to ``<out>/history.jsonl``; the previous one is
@@ -87,6 +88,12 @@ def read_run(case: testcases.Case, run_dir: Path | None) -> dict:
             row["score"] = sc.to_dict()
         except Exception as e:  # noqa: BLE001 - a broken run scores nothing; the card says why
             row["score_error"] = f"{type(e).__name__}: {e}"
+    if case.has_cut_key:
+        try:
+            from . import edit_score
+            row["cut_score"] = edit_score.score_run(case.answer_edit, run_dir).to_dict()
+        except Exception as e:  # noqa: BLE001
+            row["cut_score_error"] = f"{type(e).__name__}: {e}"
     return row
 
 
@@ -104,7 +111,7 @@ def _fmt_s(s: float | None) -> str:
 def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
     before = {r["case"]: r for r in (prev or {}).get("rows") or []}
     lines = [f"{'video':<20} {'time':>7}  {'hard checks':<12} {'captions exactly':<22} {'word errors':<16} "
-             f"{'rule breaks':<12} differences"]
+             f"{'rule breaks':<12} {'cuts reproduced':<20} {'length':<16} differences"]
     for r in rows:
         hc = "PASS" if hard_ok(r) else "FAIL"
         sc = r.get("score")
@@ -117,8 +124,16 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
             rb = f"{len(sc['rule_breaks'])}" + (f" {len(sc['rule_breaks']) - len(b['rule_breaks']):+d}" if b else "")
             diff = ", ".join(f"{k} {v}" for k, v in (sc.get("by_type") or {}).items())
         else:
-            ex, we, rb, diff = ("no answer key" if "score_error" not in r else "score failed"), "-", "-", ""
-        lines.append(f"{r['case']:<20} {_fmt_s(r.get('seconds')):>7}  {hc:<12} {ex:<22} {we:<16} {rb:<12} {diff}")
+            ex, we, rb, diff = ("no caption key" if "score_error" not in r else "score failed"), "-", "-", ""
+        cs, cb = r.get("cut_score"), (before.get(r["case"]) or {}).get("cut_score")
+        if cs:
+            cu = f"{cs['reproduced']}/{cs['cuts']} ({cs['reproduced_pct']:.0f} %)" + (
+                f" {cs['reproduced'] - cb['reproduced']:+d}" if cb else "")
+            le = f"{cs['length_diff']:+.1f} s ({cs['length_diff_pct']:+.0f} %)"
+        else:
+            cu, le = ("no cut key" if "cut_score_error" not in r else "score failed"), "-"
+        lines.append(f"{r['case']:<20} {_fmt_s(r.get('seconds')):>7}  {hc:<12} {ex:<22} {we:<16} {rb:<12} {cu:<20} "
+                     f"{le:<16} {diff}")
         if not hard_ok(r):
             for k in ("deliverables", "determinism", "coverage"):
                 st = (r.get(k) or {})
@@ -132,8 +147,16 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
         ex = sum(s["exact"] for s in keyed)
         w = sum(s["words"] for s in keyed)
         e = sum(s["subs"] + s["ins"] + s["dels"] for s in keyed)
-        lines.append(f"{'all answer keys':<20} {'':>7}  {'':<12} {ex}/{n} ({100 * ex / max(1, n):.0f} %){'':<6} "
+        lines.append(f"{'all caption keys':<20} {'':>7}  {'':<12} {ex}/{n} ({100 * ex / max(1, n):.0f} %){'':<6} "
                      f"{100 * e / max(1, w):.1f} %{'':<10} {sum(len(s['rule_breaks']) for s in keyed)}")
+    cut = [r["cut_score"] for r in rows if r.get("cut_score")]
+    if cut:
+        n = sum(s["cuts"] for s in cut)
+        ex = sum(s["reproduced"] for s in cut)
+        k = sum(s["length_key"] for s in cut)
+        d = sum(s["length_diff"] for s in cut)
+        lines.append(f"{'all cut keys':<20} {'':>7}  {'':<12} {'':<22} {'':<16} {'':<12} "
+                     f"{f'{ex}/{n} ({100 * ex / max(1, n):.0f} %)':<20} {d:+.1f} s ({100 * d / max(1e-9, k):+.0f} %)")
     return "\n".join(lines)
 
 

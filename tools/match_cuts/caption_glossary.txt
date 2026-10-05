@@ -1,0 +1,9 @@
+# Caption glossary: the words you corrected in Premiere (python -m match_cuts learn), one per line:
+#   heard -> written<TAB># the videos it came from
+# The speech models are told to expect the written form, and a heard word is replaced by it only
+# where the audio fits: both models find the written form about as likely as what they heard (at
+# most 1 nat less). Edit or delete lines freely.
+other's -> others	# video4
+Toby -> Tobey	# video4
+banknote-forging -> banknote forging	# video1
+Stationery's -> Stacey has	# video1

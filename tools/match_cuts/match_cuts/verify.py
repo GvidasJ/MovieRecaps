@@ -228,6 +228,8 @@ def check_coverage(segments: Sequence[Segment], n_frames: int, layout_block: dic
             continue
         a, b = int(p["comp_in"]), int(p["comp_out"])
         fullscreen.append([a, b - 1])
+        if str(lb.get("layout_kind") or "") == "fullscreen":
+            continue        # a full-screen video: the layout's own box is the canvas (segment.py: no box per segment)
         boxed = [s for s in segs if s.type == "raw" and s.comp_in < b and s.comp_out > a and not s.box]
         for s in boxed:
             part = boxless_fullscreen_frames(s, segs, a, b)

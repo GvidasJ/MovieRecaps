@@ -1098,3 +1098,124 @@ def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(
         assert py - 1.3588 * 540 <= 555 and py + 1.3588 * 540 >= 1592   # and y 555-1591
     text = xml.read_text(encoding="utf-8")
     assert "S26 NOT-IN-RAW replaced" in text and "face-centred -- the main face" in text
+
+
+def test_the_premiere_sequence_takes_a_whole_number_of_frames_per_competitor_frame():
+    from fractions import Fraction as Fr
+    from match_cuts.export_xml_edl import premiere_factor, sequence_fps
+    assert sequence_fps(Fr(30), Fr(60)) == 60 and sequence_fps(Fr(60), Fr(60)) == 60
+    assert sequence_fps(Fr(24), Fr(60)) == 48              # 60 / 24 = 2.5: 48 and 72 are as near; the lower
+    assert sequence_fps(Fr(25), Fr(60)) == 50
+    assert sequence_fps(Fr(15), Fr(60)) == 60 and sequence_fps(Fr(120), Fr(60)) == 120
+    assert premiere_factor(Fr(24), sequence_fps(Fr(24), Fr(60))) == 2
+    assert sequence_fps(Fr(30000, 1001), Fr(60)) == 60     # no whole rate: unchanged (premiere_factor says why)
+
+
+def test_a_speed_change_sliver_inside_one_take_plays_at_100_percent():
+    """Task 8 (video2): the competitor shows 4 frames at 50 % in the middle of a word; the take runs on through it
+    (the RAW before and after at 100 %, continuing): the Premiere edit plays it at 100 %. A longer slow motion, or one
+    between two other takes, stays."""
+    from fractions import Fraction as Fr
+    from match_cuts.export_xml_edl import play_on_slivers
+    from match_cuts.model import Cutlist, Segment
+
+    def cl(slow_frames: int, jump: float = 0.0):
+        a = Segment(1, "raw", 0, 24, raw_in_seconds=10.0)
+        b = Segment(2, "raw", 24, 24 + slow_frames, raw_in_seconds=11.0, speed=0.5)
+        c = Segment(3, "raw", 24 + slow_frames, 72, raw_in_seconds=11.0 + 0.5 * slow_frames / 24 + jump)
+        return Cutlist(1, {"fps": "24", "frames": 72, "width": 1080, "height": 1920},
+                       {"fps": "25", "width": 640, "height": 480}, {}, [a, b, c])
+    out, done = play_on_slivers(cl(4))
+    assert [round(s.speed, 3) for s in out.segments] == [1.0, 1.0, 1.0] and done[0]["segment"] == 2
+    assert play_on_slivers(cl(12))[1] == []                     # 0.5 s of slow motion: an effect, kept
+    assert play_on_slivers(cl(4, jump=1.0))[1] == []            # the next clip is another moment: kept
+
+
+def test_a_stall_in_the_competitors_picture_plays_on_the_takes_line():
+    """video2: 4 frames at 50 % where the take runs on under them (the clip after continues the clip before's line):
+    the sliver plays that line at 100 %."""
+    from match_cuts.export_xml_edl import play_on_slivers
+    from match_cuts.model import Cutlist, Segment
+    a = Segment(1, "raw", 0, 24, raw_in_seconds=10.0)
+    b = Segment(2, "raw", 24, 28, raw_in_seconds=10.96, speed=0.5)
+    c = Segment(3, "raw", 28, 72, raw_in_seconds=10.0 + 28 / 24)
+    out, done = play_on_slivers(Cutlist(1, {"fps": "24", "frames": 72, "width": 1080, "height": 1920},
+                                        {"fps": "25", "width": 640, "height": 480}, {}, [a, b, c]))
+    s = out.segments[1]
+    assert done and (s.speed, round(s.raw_in_seconds, 6)) == (1.0, 11.0)
+
+
+def test_a_picture_glitch_inside_one_take_plays_on_the_takes_line():
+    """video4: 6 frames 84 ms ahead of the take in the middle of "each other's Spidey" (the clip after continues the
+    clip before's line): they play on the line -- else the picture jumps ahead and back, and the repeat it shows is
+    cut out inside the word. A jump further than speech.MAX_JUMP_S stays a cut."""
+    from match_cuts.export_xml_edl import play_on_slivers
+    from match_cuts.model import Cutlist, Segment
+    comp, raw = {"fps": "60", "frames": 200, "width": 1080, "height": 1920}, {"fps": "60000/1001", "width": 1280,
+                                                                            "height": 720}
+    for jump, played in ((0.084, True), (0.3, False)):
+        a = Segment(1, "raw", 0, 74, raw_in_seconds=269.19, raw_in_interval=[269.189, 269.191])
+        b = Segment(2, "raw", 74, 80, raw_in_seconds=269.19 + 74 / 60 + jump,
+                    raw_in_interval=[269.19 + 74 / 60 + jump - 0.001, 269.19 + 74 / 60 + jump + 0.001])
+        c = Segment(3, "raw", 80, 200, raw_in_seconds=269.19 + 80 / 60)
+        out, done = play_on_slivers(Cutlist(1, comp, raw, {}, [a, b, c]))
+        s = out.segments[1]
+        if played:
+            assert done == [{"segment": 2, "comp_in": 74, "comp_out": 80, "speed": 1.0, "jump_s": 0.084}]
+            assert round(s.raw_in_seconds, 6) == round(269.19 + 74 / 60, 6)
+            # placed like the take: the line's frame-exact interval, not its own (the export clamps to it)
+            assert s.raw_in_interval == pytest.approx([269.189 + 74 / 60, 269.191 + 74 / 60])
+        else:
+            assert not done and s.raw_in_seconds == b.raw_in_seconds
+
+
+def test_a_sliver_whose_sound_follows_a_line_of_its_own_is_left_as_it_is():
+    """Zendaya's S19: 6 frames at 120 % where the take runs on under them, but the competitor's sound there follows a
+    line of its own, 91 ms behind the take: played on, the picture would no longer cut there and that sound line could
+    only be shifted onto the take's by whole frames -- a few ms off inside "you know what's funny". It stays a 120 %
+    sliver (the repeat removal makes its sound continuous, as before). A glitch whose sound continues the take
+    (video4: "S01 continued") still plays on."""
+    from match_cuts.export_xml_edl import play_on_slivers
+    from match_cuts.model import Cutlist, Segment
+    comp, raw = {"fps": "30", "frames": 500, "width": 1080, "height": 1920}, {"fps": "30", "width": 1280, "height": 720}
+    a = Segment(18, "raw", 444, 450, raw_in_seconds=166.503333)
+    b = Segment(19, "raw", 450, 456, raw_in_seconds=166.68, speed=1.2,
+                audio={"line": {"raw_in_seconds": 166.612406, "speed": 1.0, "source": "own in-point at speed 1"}})
+    c = Segment(20, "raw", 456, 470, raw_in_seconds=166.503333 + 12 / 30)
+    out, done = play_on_slivers(Cutlist(1, comp, raw, {}, [a, b, c]))
+    assert not done and out.segments[1].speed == 1.2 and out.segments[1].raw_in_seconds == 166.68
+    b.audio = {"line": {"raw_in_seconds": 166.503333 + 6 / 30, "speed": 1.0, "source": "S18 continued"}}
+    out, done = play_on_slivers(Cutlist(1, comp, raw, {}, [a, b, c]))
+    assert [d["segment"] for d in done] == [19] and out.segments[1].speed == 1.0
+
+
+def test_a_short_dissolve_inside_speech_becomes_a_cut_the_speech_rule_can_move():
+    """video1's competitor cuts with 2-frame cross dissolves inside "tippex tippex" and "breaking even": a dissolve is
+    locked in place (its sound may only slide inside its own 2 frames), so the cut stayed inside the word. A dissolve
+    of at most 0.1 s whose cut is inside speech becomes a hard cut at its middle frame; one in a pause, or a longer
+    one, stays."""
+    from match_cuts.export_xml_edl import harden_dissolves
+    from match_cuts.model import Cutlist, Segment
+    comp, raw = {"fps": "60", "frames": 400, "width": 1080, "height": 1920}, {"fps": "25", "width": 700, "height": 480}
+
+    def pair(d):
+        a = Segment(22, "raw", 0, 100 + d, raw_in_seconds=544.65,
+                    transition_out={"type": "crossfade", "duration_frames": d})
+        b = Segment(23, "raw", 100, 200, raw_in_seconds=546.58, raw_in_interval=[546.579, 546.581])
+        return Cutlist(1, comp, raw, {}, [a, b])
+    talk = lambda t: 545.91 <= t <= 547.05          # noqa: E731 - "tippex tippex"
+    out, done = harden_dissolves(pair(2), talk)
+    a, b = out.segments
+    assert done == [{"cut": 101, "segments": [22, 23], "frames": 2, "raw": [546.333, 546.597]}]
+    assert (a.comp_out, b.comp_in, a.transition_out, b.transition_in) == (101, 101, None, None)
+    assert b.raw_in_seconds == pytest.approx(546.58 + 1 / 60) and b.raw_in_interval[0] == pytest.approx(546.579 + 1 / 60)
+    assert not harden_dissolves(pair(2), lambda t: False)[1]          # in a pause: the dissolve stays
+    assert not harden_dissolves(pair(12), talk)[1]                    # 0.2 s: a real dissolve stays
+
+
+def test_the_silence_check_accepts_a_hold_on_the_raws_frames():
+    """video1: the flash guard holds an edge 0.25 s after a RAW shot change, placed on the 25 fps RAW's own frames --
+    0.28 s after it; the silence check let it keep more quiet only within 1.5 sequence frames of 0.25 s."""
+    from match_cuts.export_xml_edl import held_at_shot
+    assert held_at_shot(522.40, [522.12], 60.0, "25") and not held_at_shot(522.40, [522.12], 60.0)
+    assert held_at_shot(522.37, [522.12], 60.0) and not held_at_shot(522.45, [522.12], 60.0, "25")

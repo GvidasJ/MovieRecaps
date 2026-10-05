@@ -270,3 +270,70 @@ def test_dips_are_filled_too():
     res = broll.apply_no_broll(cl, None, None, SR, Config(premiere=True), follow_audio=True)
     assert all(s.type == "raw" for s in res["cutlist"].segments)
     assert res["replaced"][0]["segment"] == 2
+
+
+def _comp_from(spans: list[tuple[float, float, float]], seconds: float = 8.0) -> np.ndarray:
+    """The competitor's audio: RAW t + offset over each (t0, t1, offset)."""
+    t = np.arange(int(seconds * SR)) / SR
+    pos = np.full(t.shape, np.nan)
+    for t0, t1, off in spans:
+        m = (t >= t0) & (t < t1)
+        pos[m] = t[m] + off
+    return RAW_Y[np.clip((np.nan_to_num(pos) * SR).astype(int), 0, RAW_Y.size - 1)]
+
+
+def test_a_piece_too_short_to_hear_between_two_cutaways_on_one_line_follows_that_line():
+    """video4: two cutaways over the main clip's continuing speech, and between them 2 frames of another RAW moment
+    whose sound could not be measured -- they follow the same line (as between two shots of one line), not a blip of
+    another moment's sound inside the speech."""
+    short = Segment(id=3, type="raw", comp_in=90, comp_out=92, raw_in_seconds=45.0, raw_in_frame=1078, speed=1.0,
+                    transform=dict(PAN), confidence=0.9, audio={"in_offset_frames": 0, "out_offset_frames": 0,
+                                                                "pitch_preserved": None, "lag_ms": None, "corr": None,
+                                                                "exception": None, "line": None})
+    segs = [shot(1, 0, 60, 10.0), broll_shot(2, 60, 90, 40.0), short, broll_shot(4, 92, 120, 42.0),
+            shot(5, 120, 240, 50.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    comp = _comp_from([(0.0, 4.0, 10.0), (4.0, 8.0, 46.0)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    rows = {r["segment"]: r for r in res["replaced"]}
+    assert sorted(rows) == [2, 3, 4] and not res["kept"]
+    assert {r["line"] for r in rows.values()} == {"S01 continued"}
+    assert rows[3]["bridged"] and not rows[2]["bridged"] and not rows[4]["bridged"]
+    first = res["cutlist"].segments[0]
+    assert first.comp_out == 120 and first.raw_in_seconds == 10.0      # one clip: S01 plays through to S05
+
+
+def test_a_main_clip_shot_whose_own_sound_is_a_little_off_its_picture_is_not_replaced():
+    """video4's S27: a jump to another moment of the interview whose own sound is 22 ms off its picture -- too far
+    for an anchor (10 ms), but its sound is its own: the main clip, never replaced by the shot before it playing on."""
+    segs = [shot(1, 0, 60, 10.0), shot(2, 60, 120, 20.0, audio={"lag_ms": 22.0, "corr": 0.95}),
+            shot(3, 120, 240, 30.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    comp = _comp_from([(0.0, 2.0, 10.0), (2.0, 4.0, 18.0 - 0.022), (4.0, 8.0, 26.0)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    assert not res["replaced"]
+    s2 = next(s for s in res["cutlist"].segments if s.comp_in == 60)
+    assert s2.raw_in_seconds == 20.0 and not (s2.audio or {}).get("broll")
+
+
+def test_a_raw_piece_too_short_to_be_a_shot_is_never_left_as_a_flash():
+    """video4: 4 frames of another RAW moment at the end of the competitor's rewind effect, their sound too short to
+    measure: left as they are they would be a flash frame (shorter than shots.MIN_SHOT_S, a hard failure of the
+    export) -- the clip before plays on over them, as over a flash."""
+    tiny = Segment(id=3, type="raw", comp_in=120, comp_out=124, raw_in_seconds=45.0, raw_in_frame=1078, speed=1.0,
+                   transform=dict(PAN), confidence=0.9, audio={"in_offset_frames": 0, "out_offset_frames": 0,
+                                                               "pitch_preserved": None, "lag_ms": None, "corr": None,
+                                                               "exception": None, "line": None})
+    segs = [shot(1, 0, 60, 10.0), broll_shot(2, 60, 120, 40.0), tiny, shot(4, 124, 240, 30.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    t = np.arange(int(8.0 * SR)) / SR
+    comp = RAW_Y[np.clip(((10.0 + t) * SR).astype(int), 0, RAW_Y.size - 1)].copy()
+    comp[int(2.0 * SR):int(124 / 30 * SR)] = np.resize(MUSIC, int(124 / 30 * SR) - int(2.0 * SR))
+    k = int(124 / 30 * SR)
+    comp[k:] = RAW_Y[np.clip(((30.0 + t[k:] - 124 / 30) * SR).astype(int), 0, RAW_Y.size - 1)]
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    rows = {r["segment"]: r for r in res["replaced"]}
+    assert 3 in rows and rows[3]["how"] == "keeps playing (short)" and not res["kept"]

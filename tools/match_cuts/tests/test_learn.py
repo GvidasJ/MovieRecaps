@@ -170,7 +170,7 @@ def test_the_glossary_keeps_each_correction_once_with_its_videos(tmp_path):
     assert L.add_to_glossary([a], "video-1", g) == [("zendeya", "Zendaya")]
     assert L.add_to_glossary([a], "video-2", g) == []
     assert L.read_glossary(g) == [("zendeya", "Zendaya", ["video-1", "video-2"])]
-    # the captions' hot words read the written side
+    # the captions read the written side after the transcription
     from match_cuts import captions
     text = g.read_text(encoding="utf-8")
     assert "zendeya -> Zendaya" in text and text.startswith("# Caption glossary")
@@ -229,9 +229,9 @@ def test_the_same_change_on_several_videos_suggests_a_new_default_and_changes_no
     assert L.suggestions(two) == []                                       # two videos: not yet
     three = [dict(rec, video=f"v{i}") for i in range(3)]
     s = L.suggestions(three)
-    assert len(s) == 1 and "clips end later on 3 videos" in s[0] and "--pad-after 0.38 instead of 0.15" in s[0]
+    assert len(s) == 1 and "clips end later on 3 videos" in s[0] and "--pad-after 0.28 instead of 0.05" in s[0]
     from match_cuts.config import Config
-    assert Config().pad_after == 0.15                                      # nothing changed
+    assert Config().pad_after == 0.05                                      # nothing changed
 
 
 def test_a_run_whose_raw_is_another_video_is_refused(world):
@@ -249,7 +249,7 @@ def test_only_real_corrections_go_into_the_glossary():
     ch, _ = L.caption_changes(["so i want to go to the school now ok", "and it was like crazy right there"],
                               ["so i wanna go to the School now ok", "and it was LIKE crazy right there"])
     got = {(c.heard, c.written): c.glossary for c in ch}
-    assert got == {("want to", "wanna"): True,              # spelled alike: your way of writing it
+    assert got == {("want to", "wanna"): False,             # a spoken form: the video's style (video4 the other way)
                    ("school", "School"): False,             # an ordinary word in capitals: style
                    ("like", "LIKE"): False}                 # emphasis
     ch, _ = L.caption_changes(["we saw it 4 times and then"], ["we saw it fake name and times and then"])
@@ -264,3 +264,179 @@ def test_the_cuts_come_from_the_sound_when_the_picture_is_an_after_effects_comp(
     tool_pic, tool_snd, _fps, _w = L.tool_clips(world["run"] / "1_edit.xml")
     e = L.edit_changes(tool_snd, snd, tool_pic, pic)
     assert e["framing"].startswith("not compared") and e["starts"][:2] == [pytest.approx(0.1), pytest.approx(0.0)]
+
+
+# ---- finished folders (Task 8) ---------------------------------------------------------------------------------------
+
+def _run(path: Path, comp: Path, raw: Path, segs, screen=None, edit=None, caps=None) -> Path:
+    """A run folder: its cut list (segments [(comp_in, comp_out, type, raw second, scale)] at 30 fps of a 640x480
+    25 fps RAW, the picture in a 1080x810 box), the captions it read from the screen, its 1_edit.xml and SRT."""
+    run = path / "001"
+    (run / "extras" / "debug").mkdir(parents=True)
+    rows = [{"id": i, "type": t, "comp_in": a, "comp_out": b, "raw_in_seconds": r, "speed": 1.0,
+             "transform": {"scale": s, "rotation_deg": 0.0, "tx": 540 - 320 * s, "ty": 960 - 240 * s}}
+            for i, (a, b, t, r, s) in enumerate(segs, start=1)]
+    (run / "extras" / "cutlist.json").write_text(json.dumps({
+        "competitor": {"fps": "30/1", "frames": segs[-1][1], "width": 1080, "height": 1920, "source_path": str(comp)},
+        "raw": {"fps": "25/1", "width": 640, "height": 480, "source_path": str(raw)},
+        "layout": {"box": {"x": 0.0, "y": 555.0, "w": 1080.0, "h": 810.0}}, "segments": rows}), encoding="utf-8")
+    (run / "extras" / "debug" / "captions.json").write_text(json.dumps({"screen": [
+        {"comp_in": a, "comp_out": b, "text": t} for a, b, t in (screen or [])]}), encoding="utf-8")
+    write_edit_xml(run / "1_edit.xml", edit or [(0.0, 1.0, 10.0, 0.0)])
+    (run / "2_captions.srt").write_text(srt(caps or []), encoding="utf-8")
+    return run
+
+
+@pytest.fixture
+def finished(tmp_path):
+    """A finished folder: the competitor, the RAW, your final video and project; the tool's run of the competitor and
+    the run that read your final video (made beforehand: learn uses them as they are)."""
+    d = tmp_path / "finished" / "video1"
+    d.mkdir(parents=True)
+    for n in ("competitor.mp4", "raw.mp4", "final.mp4"):
+        (d / n).write_bytes(n.encode() * 64)
+    write_project(d / "project.prproj", "C:/elsewhere/raw.mp4", [(0.0, 3.0, 0.0, None)],
+                  [(0.0, 0.5, "We're the most"), (0.5, 1.2, "notorious gang"), (1.2, 2.0, "in the country")])
+    # the competitor: 10-12 s, a cut to 20-22 s; the tool's edit keeps the gap 12-12.5 s and cuts at 20.5
+    tool = _run(tmp_path / "runs" / "tool", d / "competitor.mp4", d / "raw.mp4",
+                [(0, 60, "raw", 10.0, 1.6875), (60, 120, "raw", 20.0, 1.6875)],
+                edit=[(0.0, 2.5, 10.0, 0.0), (2.5, 4.0, 20.5, 0.0)],
+                caps=[(0.0, 0.5, "we're the most"), (0.5, 1.2, "notorius gang"), (1.2, 2.0, "in the country")])
+    # yours: 10-12 s, a cut to 20.5-22 s, zoomed in (scale 2.25: three quarters of the RAW's width)
+    user = _run(tmp_path / "runs" / "user", d / "final.mp4", d / "raw.mp4",
+                [(0, 60, "raw", 10.0, 2.25), (60, 105, "raw", 20.5, 2.25)],
+                screen=[(0, 15, "We're the most"), (15, 36, "notorious gang"), (36, 60, "in the country")])
+    return {"tmp": tmp_path, "dir": d, "tool": tool, "user": user, "cases": tmp_path / "cases",
+            "glossary": tmp_path / "glossary.txt"}
+
+
+def _learn(f, **kw):
+    return L.learn_folder(f["dir"], f["tmp"] / "runs", f["cases"], tool_run=f["tool"], user_run=f["user"],
+                          glossary=f["glossary"], log=lambda *_a: None, **kw)
+
+
+def test_a_finished_folder_your_cuts_from_final_mp4_and_your_captions_from_the_project(finished):
+    r = _learn(finished)
+    case = r["case"]
+    assert case.name == "video1" and not r["updated"]
+    assert {p.name for p in case.iterdir()} == {"competitor.mp4", "raw.mp4", "answer.srt", "answer_edit.json",
+                                                "case.json", "learned.json"}
+    assert "We're the most" in (case / "answer.srt").read_text(encoding="utf-8")       # the project's captions ...
+    assert r["captions"]["source"] == "project" and "show on final.mp4's screen" in r["captions"]["why"]
+    edit = json.loads((case / "answer_edit.json").read_text(encoding="utf-8"))
+    assert edit["track"] == "picture" and [(p["start"], p["src_in"]) for p in edit["audio"]] == [(0.0, 10.0), (2.0, 20.5)]
+    c = r["compare"]
+    assert (c["tool"]["cuts"], c["tool"]["reproduced"]) == (1, 0)          # 12 -> 20.5 against the tool's 12.5 -> 20.5
+    assert c["tool"]["near"] == 1 and c["length"] == {"yours": 3.5, "tool": 4.0, "competitor": 4.0}
+    assert c["competitor_cuts_kept"] == 1                                  # the competitor's cut, trimmed
+    assert c["framing"]["zoom_median"] == pytest.approx(2.25 / 1.6875, abs=1e-3)       # you show less of the RAW
+    assert [(x.heard, x.written) for x in r["changes"]] == [("notorius", "notorious")]      # -> the glossary
+    assert json.loads((case / "case.json").read_text(encoding="utf-8"))["timeline"] == "edit"
+    lines = L.folder_summary({"done": [r], "skipped": [], "suggestions": [], "git": []})
+    assert any("the tool reproduces 0/1 of your cuts" in x for x in lines)
+
+
+def test_final_only_reads_your_captions_from_the_screen_and_ignores_the_project(finished):
+    (finished["dir"] / "project.prproj").unlink()                    # not even needed
+    r = _learn(finished, final_only=True)
+    assert r["captions"]["source"] == "screen"
+    srt_text = (r["case"] / "answer.srt").read_text(encoding="utf-8")
+    assert "00:00:00,500 --> 00:00:01,200\nnotorious gang" in srt_text
+
+
+def test_a_projects_captions_of_another_video_are_not_used(finished):
+    write_project(finished["dir"] / "project.prproj", "C:/elsewhere/raw.mp4", [(0.0, 3.0, 0.0, None)],
+                  [(0.0, 0.5, "Excuse me"), (0.5, 1.2, "did you phone us"), (1.2, 2.0, "the breakdown service")])
+    r = _learn(finished)
+    assert r["captions"]["source"] is None and "not this video's" in r["captions"]["why"]
+    assert not (r["case"] / "answer.srt").exists() and (r["case"] / "answer_edit.json").is_file()
+
+
+def test_folders_missing_a_file_or_not_belonging_together_are_skipped(finished, tmp_path):
+    other = finished["dir"].parent / "video2"
+    other.mkdir()
+    (other / "final.mp4").write_bytes(b"x" * 64)
+    with pytest.raises(L.LearnError, match="skipped: no competitor.mp4, raw.mp4, project.prproj"):
+        L.learn_folder(other, tmp_path / "runs", finished["cases"], log=lambda *_a: None)
+    lost = _run(tmp_path / "runs" / "lost", finished["dir"] / "final.mp4", finished["dir"] / "raw.mp4",
+                [(0, 30, "raw", 10.0, 2.25), (30, 105, "not_in_raw", None, 2.25)])
+    with pytest.raises(L.LearnError, match="final.mp4 does not come from raw.mp4"):
+        L.learn_folder(finished["dir"], tmp_path / "runs", finished["cases"], tool_run=finished["tool"], user_run=lost,
+                       log=lambda *_a: None)
+    assert L.finished_folders(finished["dir"].parent) == [finished["dir"], other]
+
+
+def test_the_caption_row_is_the_text_that_changes_most():
+    """video4's final: a static @-handle under the picture (one event of 751 frames) had won the caption band over 19
+    captions in the middle of the picture; the row with the most events is the captions."""
+    lay = {"captions": [{"type": "captions", "comp_in": 120, "comp_out": 871, "x": 584, "y": 1550, "w": 52, "h": 22}]
+           + [{"type": "text", "comp_in": 40 * i, "comp_out": 40 * i + 30, "x": 380, "y": 1102 + (i % 3), "w": 320,
+               "h": 46} for i in range(19)],
+           "zones": [{"type": "captions", "x": 0, "y": 1530, "w": 1080, "h": 60}, {"type": "logo", "x": 1, "y": 1}]}
+    out, moved = L.caption_rows(lay)
+    assert moved and [z["type"] for z in out["zones"]] == ["logo"]
+    caps = [e for e in out["captions"] if e["type"] == "captions"]
+    assert len(caps) == 19 and all(1100 <= e["y"] <= 1105 for e in caps)
+    same, moved2 = L.caption_rows(out)
+    assert not moved2
+
+
+def test_a_spoken_form_against_its_written_one_is_style_not_glossary():
+    ch, _ = L.caption_changes(["and they said we're gonna do the meme", "really quickly now"],
+                              ["and they said we're going to do the meme", "really quickly now"])
+    assert [(c.heard, c.written, c.glossary) for c in ch] == [("gonna", "going to", False)]
+    assert "style" in ch[0].why
+
+
+def test_your_edit_is_placed_by_its_sound(tmp_path):
+    """The run of your final video: its sound 25 ms after its picture (the render's A/V offset, taken out); the second
+    clip's picture 30 ms ahead of its sound (a picture shifted by Topaz / After Effects: no cut of yours); a cutaway
+    over the RAW's continuing sound (proved by the run's cutaway check) given that sound; a real cut after it."""
+    from match_cuts import edit_score as E
+    run = tmp_path / "001"
+    (run / "extras" / "debug").mkdir(parents=True)
+    segs = [{"id": 1, "type": "raw", "comp_in": 0, "comp_out": 60, "raw_in_seconds": 10.0, "speed": 1.0,
+             "audio": {"corr": 0.95, "lag_ms": -25.0}},
+            {"id": 2, "type": "raw", "comp_in": 60, "comp_out": 120, "raw_in_seconds": 11.03, "speed": 1.0,
+             "audio": {"corr": 0.95, "lag_ms": -55.0}},
+            {"id": 3, "type": "not_in_raw", "comp_in": 120, "comp_out": 180},
+            {"id": 4, "type": "raw", "comp_in": 180, "comp_out": 240, "raw_in_seconds": 20.0, "speed": 1.0,
+             "audio": {"corr": 0.95, "lag_ms": -25.0}}]
+    (run / "extras" / "cutlist.json").write_text(json.dumps({
+        "competitor": {"fps": "60/1", "frames": 240, "width": 1080, "height": 1920},
+        "raw": {"fps": "60/1", "width": 1280, "height": 720}, "segments": segs,
+        "audio": {"av_offset": {"status": "not_measured", "lag_ms": 0.0}}}), encoding="utf-8")
+    (run / "extras" / "debug" / "decisions.jsonl").write_text(json.dumps({
+        "stage": "broll", "decision": "no_broll", "kept": [], "replaced": [
+            {"segment": 3, "comp_in": 120, "comp_out": 180, "corr": 0.9, "how": "audio", "bridged": False,
+             "line": "S02 continued", "raw_in_seconds": 12.03, "showed": "NOT-IN-RAW insert"}]}) + "\n",
+        encoding="utf-8")
+    pic = E.Edit.from_cutlist(run / "extras" / "cutlist.json")
+    assert [round(c.t, 2) for c in pic.cuts()] == [1.0, 2.0, 3.0]
+    snd, info = L.sound_edit(run, pic)
+    assert snd.what == "sound" and info["offset_ms"] == -25.0
+    assert [(round(c.t, 2), round(c.out, 3), round(c.into, 3)) for c in snd.cuts()] == [(3.0, 13.0, 20.0)]
+    assert info["moved"] == [{"start": 1.0, "end": 2.0, "frames": -1.8}]
+    assert info["given"] == [{"start": 2.0, "end": 3.0, "raw": 12.0, "corr": 0.9, "showed": "NOT-IN-RAW insert"}]
+
+
+def test_ordinary_words_heard_wrong_are_not_glossary_entries():
+    """video1: "of" -> "to" and "you're getting" -> "you get in" are what was heard at one moment -- as glossary
+    entries they would change every "of" the audio allows; a spelling (same letters) or a name stays."""
+    ch, _ = L.caption_changes(["the gang of the country was here", "and you're getting it right now ok",
+                               "a banknote-forging gang in the town", "and Toby said it was so"],
+                              ["the gang to the country was here", "and you get in it right now ok",
+                               "a banknote forging gang in the town", "and Tobey said it was so"])
+    got = {(c.heard, c.written): c.glossary for c in ch}
+    assert got[("of", "to")] is False and got[("you're getting", "you get in")] is False
+    assert got[("banknote-forging", "banknote forging")] is True and got[("Toby", "Tobey")] is True
+
+
+def test_the_glossary_is_not_given_to_the_speech_model(monkeypatch):
+    """A hot word changes how the whole transcript is punctuated and capitalised, in videos that never say it too
+    (Deadpool: 47 -> 42 captions exact with "others" and "Tobey" as hot words): the hot words are the allowlist's, and
+    the glossary is applied after the transcription only (caption_recheck.glossary_readings)."""
+    from match_cuts import caption_rules, captions
+    monkeypatch.setattr(captions, "glossary_entries", lambda path=None: [("Toby", "Tobey"), ("other's", "others")])
+    monkeypatch.setattr(caption_rules, "read_allowlist", lambda *a, **k: ["MJ", "MCU", "MJ", ""])
+    assert captions.caption_hints() == ["MJ", "MCU"]
