@@ -54,7 +54,7 @@ import numpy as np
 
 from . import scoring
 from .scoring import noise_delta
-from .common import Cache, DecisionLog, log, null_dlog, params_hash, stage_key
+from .common import Cache, DecisionLog, log, null_dlog, params_hash, stage_key, write_image
 from .geometry import (AETransform, Sim, ae_to_matrix, from_cv_matrix, h3, interpolate_keys, rdp, sim_to_ae,
                        to_cv_matrix, translate3)
 from .model import CAND_W, AudioHints, FrameMap, Layout, Proxy, Status
@@ -2676,7 +2676,7 @@ class _Refiner:
                 t = cv2.cvtColor(p, cv2.COLOR_GRAY2BGR)
                 cv2.putText(t, lab, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1, cv2.LINE_AA)
                 tiles.append(t)
-            cv2.imwrite(str(out / f"k{k:05d}.png"), np.hstack(tiles))
+            write_image(out / f"k{k:05d}.png", np.hstack(tiles))    # unicode-safe (cv2.imwrite is not)
         return len(low)
 
     # -- main -------------------------------------------------------------------------------------

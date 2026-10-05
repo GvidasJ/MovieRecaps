@@ -450,7 +450,8 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
         lines.append(f"  {label:<30} {st:<6} {c.get('summary', '')}")
     for key, label in (("s9_7_determinism", "9.7 determinism"), ("s9_8_deliverables", "9.8 deliverables"),
-                       ("s9_9_full_res", "9.9 full resolution")):
+                       ("s9_9_full_res", "9.9 full resolution"), ("hard_checks_not_run", "1_edit.xml hard checks"),
+                       ("inputs_unchanged", "inputs unchanged")):
         chk = checks.get(key) or {}
         if chk:
             st = STATUS_TEXT.get(chk.get("status"), str(chk.get("status") or "not run").upper())

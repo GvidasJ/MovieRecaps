@@ -248,8 +248,9 @@ def test_package_never_starts_the_ducc_fft_pool():
     assert os.environ.get("DUCC0_NUM_THREADS") == "1"
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc thread census is Linux-only")
 def test_release_native_threads_frees_pyav_scaler_threads():
+    """The scaler PyAV keeps for this thread is dropped (every platform); where /proc counts the threads (Linux),
+    its slice threads are gone too."""
     av = pytest.importorskip("av")
     import av.video.frame as vfm
     if not hasattr(vfm, "_thread_local"):
@@ -262,22 +263,27 @@ def test_release_native_threads_frees_pyav_scaler_threads():
     with_scaler = common.native_threads()
     common.release_native_threads()
     assert vfm._thread_local.reformatter is None
-    assert common.native_threads() <= with_scaler
-    assert common.native_threads() <= base
+    again = frame.reformat(format="yuv420p").to_ndarray(format="bgr24")    # a new scaler: the same pixels
+    assert np.array_equal(again, frame.reformat(format="yuv420p").to_ndarray(format="bgr24"))
+    if base is not None:                                            # /proc (Linux): the threads themselves
+        assert common.native_threads() <= with_scaler
+        common.release_native_threads()
+        assert common.native_threads() <= base
 
 
-@pytest.mark.skipif("fork" not in mp.get_all_start_methods() or not hasattr(signal, "SIGKILL"),
-                    reason="needs fork + SIGKILL")
 @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
 def test_close_pool_never_blocks_on_a_broken_pool():
     """An idle pool worker holds the task queue's lock while it waits for work. Killed there (as the OS
-    out-of-memory killer does), it leaves that lock held forever: the replacement workers block on it and
-    Pool.terminate() waits for it too. close_pool gives up after wait_s, kills the workers and leaves the
-    cleanup to a daemon thread."""
-    pool = mp.get_context("fork").Pool(2)
-    assert pool.map(abs, [-1, -2, -3]) == [1, 2, 3]       # both workers started and idle
+    out-of-memory killer does), it leaves that lock held forever -- a semaphore on Windows as on Linux, released
+    by nobody: the replacement workers block on it and Pool.terminate() waits for it too. close_pool gives up after
+    wait_s, kills the workers and leaves the cleanup to a daemon thread. Fork workers where there are (Linux),
+    spawn workers (Windows: the pools the runs use there)."""
+    method = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
+    pool = mp.get_context(method).Pool(2)
+    assert pool.map(abs, [-1, -2, -3]) == [1, 2, 3]       # the workers started
+    time.sleep(1.0)                                        # ... and wait for work: one of them holds the lock
     for p in common.pool_workers(pool):
-        os.kill(p.pid, signal.SIGKILL)
+        p.kill()                                           # SIGKILL / TerminateProcess
         p.join(5)
     time.sleep(0.5)                                        # the pool replaces them; they wait on the dead lock
     try:
@@ -289,7 +295,10 @@ def test_close_pool_never_blocks_on_a_broken_pool():
             p.join(5)
             assert p.exitcode is not None                  # the replacement workers were killed too
     finally:
-        pool._inqueue._rlock.release()                     # let the abandoned cleanup thread finish
+        try:
+            pool._inqueue._rlock.release()                 # let the abandoned cleanup thread finish
+        except ValueError:                                 # (not held after all)
+            pass
 
 
 def test_close_pool_on_a_healthy_pool_is_clean():

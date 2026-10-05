@@ -196,12 +196,18 @@ def headline(ver: dict | None) -> str:
     if any(s not in KNOWN_STATUSES or s == "fail" for s in statuses):
         return "FAIL"
     na = [k for k in CRITERIA_KEYS if (crit.get(k) or {}).get("status") == "not_available"]
-    if not na:
+    nv = [str(r) for v in checks.values() for r in ((v or {}).get("not_verified") or [])]
+    if not na and not nv:
         return "PASS"
-    nums = [k[1:].split("_", 1)[0] for k in na]
-    reasons = "; ".join(str((crit.get(k) or {}).get("summary") or "not available") for k in na)
-    label = f"criterion {nums[0]}" if len(nums) == 1 else "criteria " + ", ".join(nums)
-    return f"PASS ({label} not verified: {reasons})"
+    parts = []
+    if na:
+        nums = [k[1:].split("_", 1)[0] for k in na]
+        reasons = "; ".join(str((crit.get(k) or {}).get("summary") or "not available") for k in na)
+        label = f"criterion {nums[0]}" if len(nums) == 1 else "criteria " + ", ".join(nums)
+        parts.append(f"{label} not verified: {reasons}")
+    if nv:                                 # a hard check of 1_edit.xml whose analysis failed (pipeline.not_verified)
+        parts.append("not checked: " + "; ".join(nv))
+    return f"PASS ({'; '.join(parts)})"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -337,6 +343,12 @@ def _criteria(ctx: Any) -> list[str]:
     full = checks.get("s9_9_full_res", {})
     if full:
         rows.append(["9.9 Full resolution", _status(full.get("status")), full.get("summary", "not run")])
+    nrun = checks.get("hard_checks_not_run", {})
+    if nrun:
+        rows.append(["1_edit.xml hard checks", _status(nrun.get("status")), nrun.get("summary", "")])
+    moved = checks.get("inputs_unchanged", {})
+    if moved:
+        rows.append(["Inputs unchanged", _status(moved.get("status")), moved.get("summary", "")])
     out = [f"**Overall: {headline(ver)}**", "", md_table(["Criterion", "Status", "Evidence"], rows)]
     settings = (ctx.cutlist.settings if getattr(ctx, "cutlist", None) else {}) or {}
     if settings and not settings.get("criteria_exact", True):

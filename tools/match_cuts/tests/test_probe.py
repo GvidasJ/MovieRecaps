@@ -340,6 +340,31 @@ def test_container_duration_of_a_longer_audio_is_not_a_truncation(audio_tail, tm
     assert t["kind"] == "truncated" and t["audio_end_s"] < 3.0 and t["missing_s"] > 2.0
 
 
+def test_a_seek_that_lists_no_packets_is_not_read_as_a_truncation(audio_tail, tmp_path, monkeypatch):
+    """Task 10: ffprobe's seek to the listing's start now and then lands past the end of the file and lists no packet
+    at all, exit status 0 (FFmpeg 8.0: 5 runs in 40 of the same command on this Matroska file, 1 in 40 on the FLV)
+    -- read as 'the audio does not reach the container end', a false 'truncated' (the test above failed in every
+    full suite run since Task 1). A listing that misses a stream is redone over the whole file."""
+    from match_cuts import probe as P
+    real = P._packet_ends
+    calls: list = []
+
+    def failed_seek(path, intervals, timeout=P.TAIL_TIMEOUT_S):
+        calls.append(intervals)
+        return {} if intervals is not None else real(path, intervals, timeout)
+    monkeypatch.setattr(P, "_packet_ends", failed_seek)
+    for key in ("flv", "mkv"):
+        calls.clear()
+        info = probe(audio_tail[key], "raw", tmp_path / key)
+        assert input_warnings(info) == [] and truncation_info(info) is None, key
+        tails = probe_extra(info)["stream_tails"]
+        assert tails["intervals"] == "whole file" and calls == [calls[0], None] and calls[0] is not None, key
+        assert tails["video_end_s"] == pytest.approx(3.0, abs=0.05), key
+        assert tails["audio_end_s"] == pytest.approx(5.0, abs=0.1), key
+    part = probe(audio_tail["flv_part"], "raw", tmp_path / "part")      # really truncated: still reported
+    assert truncation_info(part)["kind"] == "truncated"
+
+
 def test_old_probe_cache_entries_with_a_false_truncation_are_re_measured(audio_tail, tmp_path):
     import json
     for key, expect_warning in (("flv", False), ("flv_part", True)):

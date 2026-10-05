@@ -201,6 +201,50 @@ def test_exit_codes():
     assert pipeline.headline_for({**na6, "c2_cuts": {"status": "fail"}}) == "FAIL"
 
 
+def test_a_hard_check_that_could_not_run_is_never_a_plain_pass(tmp_path):
+    """Task 10: the speech / flash / person checks of 1_edit.xml are skipped when their analysis fails (the speech
+    map, the RAW's shot changes, who speaks) -- that run said PASS, exit 0. Now 'PASS (not checked: ...)', exit 3;
+    a failure still wins."""
+    crit = {k: {"status": v} for k, v in ALL_PASS.items()}
+    why = "no audio cut inside speech (the speech map failed: RuntimeError: no model)"
+    nv = {pipeline.UNCHECKED: {"status": "not_available", "not_verified": [why]}}
+    assert pipeline.exit_code_for(crit, nv) == 3
+    assert pipeline.headline_for(crit, nv) == f"PASS (not checked: {why})"
+    assert pipeline.exit_code_for(crit, {**nv, "s9_8_deliverables": {"status": "fail"}}) == 1
+    na6 = {**crit, "c6_after_effects": {"status": "not_available", "summary": "no node"}}
+    assert pipeline.headline_for(na6, nv) == f"PASS (criterion 6 not verified: no node; not checked: {why})"
+    # the analysis that fails records it: here the speech map (a cut list it cannot read)
+    ctx = pipeline.Context(cfg=Config())
+    ctx.raw_audio, ctx.audio_sr = np.zeros(16000, np.float32), 16000
+    assert pipeline.speech_of(ctx, types.SimpleNamespace(raw={"has_audio": True})) is None
+    assert len(ctx.unchecked) == 1 and ctx.unchecked[0].startswith("no audio cut inside speech (the speech map failed")
+    # ... and the run's checks carry it into verify.json, the report and the exit code
+    ctx.verify = {"checks": {}}
+    pipeline.run_checks(ctx, ctx.verify["checks"])
+    assert pipeline.exit_code_for(crit, ctx.verify["checks"]) == 3
+    assert ctx.verify["checks"][pipeline.UNCHECKED]["not_verified"] == ctx.unchecked
+
+
+def test_an_input_that_changes_during_the_run_fails_it(tmp_path):
+    """Task 10: a RAW still being downloaded or copied, or replaced, while the run reads it was only an error line in
+    the log after the report (exit 0). The run's check fails it now."""
+    raw = tmp_path / "raw.mp4"
+    raw.write_bytes(b"x" * 1000)
+    ctx = pipeline.Context(cfg=Config())
+    ctx.input_stats = {str(raw): pipeline._input_stat(str(raw))}
+    ctx.verify = {"checks": {}}
+    pipeline.run_checks(ctx, ctx.verify["checks"])
+    assert ctx.verify["checks"] == {}                                  # unchanged: nothing to say
+    with open(raw, "ab") as f:
+        f.write(b"more")                                               # the download goes on
+    pipeline.run_checks(ctx, ctx.verify["checks"])
+    chk = ctx.verify["checks"]["inputs_unchanged"]
+    assert chk["status"] == "fail" and "raw.mp4 changed during the run" in chk["summary"]
+    assert pipeline.exit_code_for({k: {"status": v} for k, v in ALL_PASS.items()}, ctx.verify["checks"]) == 1
+    raw.unlink()                                                       # removed during the run: the same
+    assert pipeline.changed_inputs(ctx.input_stats) == [str(raw)]
+
+
 def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys):
     seen = {}
 

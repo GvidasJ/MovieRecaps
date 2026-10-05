@@ -44,7 +44,7 @@ from . import common as _common
 from . import scoring
 from .common import (POOL_WATCHDOG, Cache, DecisionLog, PoolFailure, Progress, close_pool, file_hash, fps_str, log,
                      native_threads, null_dlog, params_hash, pool_workers, progress_name, release_native_threads,
-                     seed_everything, single_thread_blas, stage_key, watched_results)
+                     replace_file, seed_everything, single_thread_blas, stage_key, watched_results)
 from .geometry import Sim, from_cv_matrix
 from .model import AudioHints, Layout, Proxy
 
@@ -969,7 +969,7 @@ class RawIndex:
                 if not ok:
                     tmp = p.with_name(p.name + f".{os.getpid()}.tmp.npy")
                     np.save(tmp, np.ascontiguousarray(arr))
-                    os.replace(tmp, p)
+                    replace_file(tmp, p)
         except OSError as e:
             log.warning("RAW index: spawn side files not written (%s) - workers receive the descriptors", e)
             return
@@ -982,7 +982,7 @@ class RawIndex:
         try:
             self._flann.save(str(tmp))
             if tmp.is_file() and tmp.stat().st_size > 0:
-                os.replace(tmp, paths["flann"])
+                replace_file(tmp, paths["flann"])
                 files["flann"] = str(paths["flann"])
         except (OSError, cv2.error) as e:           # e.g. a non-ASCII path on Windows (OpenCV file API)
             log.info("RAW index: FLANN tree not saved (%s) - spawn workers re-train it (same seed)", e)

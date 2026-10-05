@@ -564,10 +564,12 @@ def _needs_tail_check(header_s: float, header_source: str, decoded_s: float, has
             and header_s - decoded_s > _trunc_threshold(header_s))
 
 
-def _packet_ends(path: str | os.PathLike, intervals: str, timeout: float = TAIL_TIMEOUT_S) -> dict[int, float] | None:
+def _packet_ends(path: str | os.PathLike, intervals: str | None, timeout: float = TAIL_TIMEOUT_S
+                 ) -> dict[int, float] | None:
     """{stream index: absolute end (pts + duration, s) of its last packet} within ffprobe
-    ``-read_intervals intervals`` (packets are listed, not decoded); None when ffprobe fails."""
-    cmd = [ffprobe_bin(), "-v", "error", "-read_intervals", intervals, "-show_entries",
+    ``-read_intervals intervals`` (the whole file when None; packets are listed, not decoded); None when ffprobe
+    fails."""
+    cmd = [ffprobe_bin(), "-v", "error", *(["-read_intervals", intervals] if intervals else []), "-show_entries",
            "packet=stream_index,pts_time,dts_time,duration_time", "-of", "compact=p=0", str(path)]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
@@ -601,7 +603,8 @@ def stream_tails(path: str | os.PathLike, pj: dict, v_start: float, decoded_s: f
     {video_end_s, audio_end_s, container_end_s, intervals}; a stream without packets in the listed range
     has None. Packets are listed from TAIL_LEAD_S before the decoded video end to EOF, or -- when that
     span exceeds TAIL_FULL_SPAN_S -- in two TAIL_WINDOW_S windows (around the decoded video end and
-    before the container end). None when there is no audio stream or ffprobe fails."""
+    before the container end); the whole file when that misses the video or the audio (a failed seek).
+    None when there is no audio stream or ffprobe fails."""
     fmt = pj.get("format", {}) or {}
     vs = _video_ordinal(pj)[1]
     auds = [st for st in pj.get("streams", []) if st.get("codec_type") == "audio"]
@@ -618,6 +621,14 @@ def stream_tails(path: str | os.PathLike, pj: dict, v_start: float, decoded_s: f
     else:
         intervals = f"{a:.3f}%+{TAIL_WINDOW_S + TAIL_LEAD_S:.3f},{max(0.0, c_end - TAIL_WINDOW_S):.3f}%"
     ends = _packet_ends(path, intervals)
+    if ends is not None and (vi not in ends or ai not in ends):
+        # FFmpeg's seek to an interval's start now and then lands past the end of the file and lists nothing, exit
+        # status 0 (FFmpeg 8.0: 5 runs in 40 of the same command on a Matroska file, 1 in 40 on an FLV), which read
+        # as "the audio does not reach the container end" -- a false "truncated". The decoded video's last packets
+        # are inside the first interval, so a stream missing there means the seek failed: the whole file is listed
+        # from its start instead (packets only, no seeking: the same every time; seconds even for an episode).
+        log.info("%s: the packet listing after seeking missed a stream -- listing the whole file", path)
+        ends, intervals = _packet_ends(path, None), "whole file"
     if ends is None:
         return None
 

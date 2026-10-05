@@ -1356,7 +1356,7 @@ def _said_as(w: Word) -> tuple:
     return w.text, round(w.start, 4), round(w.end, 4)
 
 
-def _time_new_words(y16: np.ndarray, words: list[Word], mine: set[tuple]) -> list[Word]:
+def _time_new_words(y16: np.ndarray, words: list[Word], mine: set[tuple], warn: Any = None) -> list[Word]:
     """The words another model or the recheck gave (rough times: spread over the words they replace) timed by
     forced alignment, each between the words around it; the main model's own words keep their times (aligned once
     already -- aligning the whole transcript again only moves them)."""
@@ -1369,7 +1369,12 @@ def _time_new_words(y16: np.ndarray, words: list[Word], mine: set[tuple]) -> lis
     try:
         timed = align.refine_onsets(y16, align.align(y16, words)[0])
     except Exception as e:  # noqa: BLE001 - the rough times
-        warn(f"the replaced words could not be timed ({type(e).__name__}: {e})")
+        msg = f"the replaced words could not be timed ({type(e).__name__}: {e})"
+        if warn is None:
+            from .common import log
+            log.warning("captions: %s", msg)
+        else:
+            warn(msg)
         return words
     if len(timed) != len(words):
         return words
@@ -1580,7 +1585,7 @@ def run_captions(ctx) -> dict:
             warn(f"unclear words not rechecked with {rmodel}: {type(e).__name__}: {e}")
 
     if mine and y16 is not None and len(y16):
-        words = _time_new_words(y16, words, mine)
+        words = _time_new_words(y16, words, mine, warn)
     res["words_final"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]    # (debug)
 
     # another video's stretches: the words the competitor's audio says there (as said, with their punctuation)

@@ -135,6 +135,8 @@ class Context:
     warnings: list[str] = field(default_factory=list)            # everything (report + CLI)
     analysis_warnings: list[str] = field(default_factory=list)   # known before S5.4 -> cutlist.warnings
     errors: list[dict] = field(default_factory=list)             # non-fatal stage errors (S7/S8)
+    unchecked: list[str] = field(default_factory=list)           # hard checks of 1_edit.xml that could not run
+    input_stats: dict = field(default_factory=dict)               # {input path: (size, mtime)} when the run started
     previous_cutlist: dict | None = None                          # cutlist.json of the previous run (s9_7)
     keys: dict[str, str] = field(default_factory=dict)           # cache keys used
 
@@ -2054,6 +2056,27 @@ def _input_stat(path: str) -> tuple[int, int]:
     return st.st_size, st.st_mtime_ns
 
 
+def run_checks(ctx: Context, checks: dict) -> None:
+    """The run's own checks, next to verification's (``checks``: ctx.verify's): an input file that changed during
+    the run fails it ('inputs_unchanged'); a hard check of 1_edit.xml that could not run because its analysis failed
+    (ctx.unchecked) makes it 'PASS (not checked: ...)', never a plain PASS (UNCHECKED)."""
+    changed = changed_inputs(ctx.input_stats)
+    if changed:                                     # the analysis mixed two versions of an input file
+        msg = (f"{' and '.join(changed)} changed during the run (still being downloaded or copied, re-exported or "
+               "replaced?): the result mixes two versions of the file -- run again once it is complete")
+        checks["inputs_unchanged"] = {"status": "fail", "summary": msg, "failures": [msg]}
+        ctx.verify.setdefault("failures", []).append(f"inputs: {msg}")
+    if ctx.unchecked:
+        checks[UNCHECKED] = {"status": "not_available", "not_verified": list(ctx.unchecked),
+                             "summary": "not checked: " + "; ".join(ctx.unchecked)}
+
+
+def changed_inputs(stats: dict) -> list[str]:
+    """The inputs (``stats``: {path: _input_stat at the start}) that are no longer the files the run started with --
+    still being downloaded or copied, re-exported, replaced or removed during the run."""
+    return [str(p) for p, st in (stats or {}).items() if not Path(p).exists() or _input_stat(p) != st]
+
+
 def _guard_paths(cfg: Config) -> None:
     """Inputs must exist, differ, and never live where outputs are written (inputs are never modified)."""
     for role, p in (("competitor", cfg.competitor), ("raw", cfg.raw)):
@@ -2735,6 +2758,11 @@ def stage_exports(ctx: Context) -> None:
         ex, rp = premiere_plan(ctx, ex)
         produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
                                                   lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
+        n_ch = int(cl.raw.get("audio_channels") or 0) if bool(cl.raw.get("has_audio", True)) else 0
+        if n_ch > 2:                  # every test RAW so far is stereo: how Premiere maps the channels is unchecked
+            ctx.warn(f"the RAW's audio has {n_ch} channels (5.1?): 1_edit.xml puts it on A1 as one {n_ch}-channel "
+                     "clip -- check in Premiere that A1 plays the dialogue (the centre channel), not only the front "
+                     "left / right")
     else:
         produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(ex, xml, cfg))
     produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(ex, edl, cfg))
@@ -2977,6 +3005,7 @@ def speech_of(ctx: Context, cl: Cutlist) -> Any:
     except Exception as e:  # noqa: BLE001 - the plan's cuts stay; the run cannot be checked for cuts inside speech
         log.error("speech map failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"speech map failed ({type(e).__name__}: {e}): cuts not moved off speech, not checked")
+        ctx.unchecked.append(f"no audio cut inside speech (the speech map failed: {type(e).__name__}: {e})")
         return None
 
 
@@ -3018,6 +3047,8 @@ def people_of(ctx: Context, cl: Cutlist) -> Any:
         log.error("people analysis failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"who is speaking could not be found ({type(e).__name__}: {e}): the framing is the competitor's and "
                  "is not checked for the person speaking")
+        ctx.unchecked.append(f"the person speaking in the picture (who speaks could not be found: {type(e).__name__}: "
+                             f"{e})")
         return None
 
 
@@ -3041,6 +3072,8 @@ def shots_of(ctx: Context, cl: Cutlist | None = None) -> list[float] | None:
     except Exception as e:  # noqa: BLE001 - the edit is still made; flashes are then not guarded / checked
         log.error("RAW shot changes failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"RAW shot changes not found ({type(e).__name__}: {e}): flash frames not guarded or checked")
+        ctx.unchecked.append(f"no flash frames at a cut (the RAW's shot changes could not be found: {type(e).__name__}: "
+                             f"{e})")
         return None
 
 
@@ -3258,6 +3291,7 @@ def stage_verify(ctx: Context) -> None:
         checks["s9_8_deliverables"] = chk
         if chk["status"] == "fail":
             ctx.verify.setdefault("failures", []).extend(f"s9_8 deliverables: {f}" for f in chk["failures"])
+    run_checks(ctx, checks)
     p = ctx.cfg.out / "verify.json"
     dump_json(ctx.verify, p)
     ctx.paths["verify"] = str(p)
@@ -3460,7 +3494,19 @@ def exit_code_for(criteria: dict, checks: dict | None = None) -> int:
         return EXIT_FAIL
     if any(s not in OK_CRITERION_STATUSES + ("not_available",) for s in st):
         return EXIT_FAIL
-    return EXIT_NOT_VERIFIED if any(s == "not_available" for s in st) else EXIT_PASS
+    if any(s == "not_available" for s in st) or not_verified(checks):
+        return EXIT_NOT_VERIFIED
+    return EXIT_PASS
+
+
+UNCHECKED = "hard_checks_not_run"     # the checks entry listing the hard checks of 1_edit.xml that could not run
+
+
+def not_verified(checks: dict | None) -> list[str]:
+    """What a run could not check although it should have (the checks' ``not_verified`` lists: a hard check of
+    1_edit.xml whose analysis failed) -- such a run is 'PASS (... not verified ...)', exit code 3, never a plain
+    PASS."""
+    return [str(r) for v in (checks or {}).values() for r in ((v or {}).get("not_verified") or [])]
 
 
 def _criterion_number(key: str) -> str:
@@ -3480,8 +3526,12 @@ def headline_for(criteria: dict, checks: dict | None = None, code: int | None = 
         from .verify import CRITERIA
         na = [(k, criteria.get(k) or {}) for k in CRITERIA if (criteria.get(k) or {}).get("status") == "not_available"]
         nums = ", ".join(_criterion_number(k) for k, _ in na)
-        reasons = "; ".join(str(c.get("summary") or "not available").strip()[:160] for _, c in na)
-        return f"PASS ({'criterion' if len(na) == 1 else 'criteria'} {nums} not verified: {reasons})"
+        parts = ([f"{'criterion' if len(na) == 1 else 'criteria'} {nums} not verified: "
+                  + "; ".join(str(c.get("summary") or "not available").strip()[:160] for _, c in na)] if na else [])
+        nv = not_verified(checks)
+        if nv:
+            parts.append("not checked: " + "; ".join(r[:160] for r in nv))
+        return f"PASS ({'; '.join(parts) or 'not verified'})"
     return "FAIL"
 
 
@@ -3518,6 +3568,7 @@ def run(cfg: Config) -> dict:
     for note in resolve_gpu(cfg):
         ctx.warn(note)
     stats = {p: _input_stat(p) for p in (cfg.competitor, cfg.raw)}
+    ctx.input_stats = dict(stats)
     seed_everything(cfg.seed)
     t_all = time.perf_counter()
     try:

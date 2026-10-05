@@ -61,6 +61,20 @@ class LearnError(Exception):
 # the run
 # ---------------------------------------------------------------------------------------------------------------------
 
+def finished_run(d: str | Path) -> bool:
+    """A run folder whose run has finished: its report (the last file a run writes) is there. 1_edit.xml and
+    cutlist.json are written long before the captions, the checks and the report -- a run still going on (or one that
+    stopped early) must not be read as a finished one (Task 8: video4's run read mid-run kept 1 change of 19 instead
+    of 3)."""
+    d = Path(d)
+    return (d / EXTRAS / "report.md").is_file() or (d / OLD_EDIT_XML).is_file() and (d / "report.md").is_file()
+
+
+def unfinished(d: str | Path) -> str:
+    return (f"{d} is not a finished run (no {EXTRAS}/report.md: the run is still going on, or it stopped early) -- "
+            "wait for it to finish, or give another run")
+
+
 def run_files(d: Path) -> dict[str, Path] | None:
     """The files of a run folder: the numbered layout (1_edit.xml, extras/) or the older flat one."""
     d = Path(d)
@@ -117,10 +131,14 @@ def find_run(seq: PR.Sequence, run: str | Path | None = None) -> dict[str, Path]
         rf = run_files(Path(run))
         if rf is None:
             raise LearnError(f"{run}: no {EDIT_XML} (or {OLD_EDIT_XML}) there -- not a run folder")
+        if not finished_run(run):
+            raise LearnError(unfinished(run))
         return rf
     for d in media_dirs(seq):
         rf = run_files(d)
         if rf is not None:
+            if not finished_run(d):
+                raise LearnError(unfinished(d))
             return rf
     raise LearnError("the project's clips do not play a run's media (<run>/extras/media/...): give the run folder "
                      "with --run")
@@ -588,7 +606,7 @@ def make_run(comp: Path, raw: Path, out: Path, work: Path, fast: bool = False, f
     if not fresh:
         for _n, d in sorted(run_dirs(out), reverse=True):
             cl = d / EXTRAS / "cutlist.json"
-            if (d / EDIT_XML).is_file() and cl.is_file():
+            if (d / EDIT_XML).is_file() and cl.is_file() and finished_run(d):
                 ih = (json.loads(cl.read_text(encoding="utf-8")).get("provenance") or {}).get("input_hashes") or {}
                 if ih.get("competitor") == hc and ih.get("raw") == hr:
                     return d
@@ -601,7 +619,7 @@ def make_run(comp: Path, raw: Path, out: Path, work: Path, fast: bool = False, f
                        cwd=str(Path(__file__).resolve().parents[1]))
     (out / "learn-run.log").write_text(r.stdout + "\n" + r.stderr, encoding="utf-8")
     d = newest_run_dir(out)
-    if d is None or not (d / EDIT_XML).is_file():
+    if d is None or not (d / EDIT_XML).is_file() or not finished_run(d):
         raise LearnError(f"the run of {comp.name} + {raw.name} failed (exit {r.returncode}): see {out / 'learn-run.log'}")
     return d
 
@@ -1041,6 +1059,9 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
     tool_dir = Path(tool_run) if tool_run else make_run(case_dir / "competitor.mp4", case_dir / "raw.mp4",
                                                        runs / "tool" / case_dir.name, cw / case_dir.name, fast, fresh,
                                                        log)
+    for given in (tool_dir, user_dir):
+        if not finished_run(given):
+            raise LearnError(unfinished(given))
     comp_cl = json.loads((tool_dir / EXTRAS / "cutlist.json").read_text(encoding="utf-8"))
     user_cl = json.loads((user_dir / EXTRAS / "cutlist.json").read_text(encoding="utf-8"))
     comp_pic, user_pic = ES.Edit.from_cutlist(comp_cl), ES.Edit.from_cutlist(user_cl)

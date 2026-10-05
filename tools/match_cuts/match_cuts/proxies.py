@@ -24,7 +24,7 @@ from typing import Iterable, Iterator, Sequence
 
 import numpy as np
 
-from .common import Cache, atomic_write_text, file_hash, log, stage_key
+from .common import Cache, atomic_write_text, file_hash, log, replace_file, stage_key
 from .model import Proxy, StreamInfo
 from .probe import load_pts, reader_sar, video_stream_ordinal
 
@@ -174,7 +174,7 @@ def _build_dense(info: StreamInfo, size: tuple[int, int], path: Path) -> None:
             tmp.unlink()
         raise
     del mm
-    os.replace(tmp, path)
+    replace_file(tmp, path)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -222,7 +222,7 @@ class _FrameStore:
         allf = np.concatenate([have, np.asarray(new_ids, np.int64)])
         tmp = self.meta.with_name(self.meta.name[:-4] + ".tmp.npy")
         np.save(tmp, allf)
-        os.replace(tmp, self.meta)
+        replace_file(tmp, self.meta)
         log.info("sparse proxy %s: +%d frames (%d stored)", self.data.name, len(new_ids), len(allf))
         return allf
 
@@ -343,7 +343,7 @@ def load_audio(info: StreamInfo, sr: int, cache: Cache) -> np.ndarray:
     y = np.ascontiguousarray(y, dtype=np.float32)
     tmp = p.with_name(p.name[:-4] + ".tmp.npy")
     np.save(tmp, y)
-    os.replace(tmp, p)
+    replace_file(tmp, p)
     return y
 
 

@@ -50,7 +50,7 @@ from typing import Any
 import numpy as np
 
 from .common import (DecisionLog, STAGE_VERSION, atomic_write_text, ffmpeg_bin, file_hash, fps_str, log,
-                     null_dlog, params_hash)
+                     null_dlog, params_hash, replace_file)
 from .model import StreamInfo
 from .probe import (ae_issues, display_geometry, load_pts_int, probe, reader_sar, video_stream_ordinal)
 
@@ -684,7 +684,7 @@ def _link_or_copy(src: Path, dst: Path) -> str:
     except OSError:
         tmp = dst.with_name(dst.name + ".tmp")
         shutil.copy2(src, tmp)
-        os.replace(tmp, dst)
+        replace_file(tmp, dst)
         return "copy"
 
 
@@ -778,7 +778,7 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
             tmp.unlink()
         raise RuntimeError(f"conform {role}: ffmpeg failed ({r.returncode}): {' '.join(cmd)}\n{r.stderr[-3000:]}")
     enc_s = time.perf_counter() - t0
-    os.replace(tmp, dst)
+    replace_file(tmp, dst)
     out_info = probe(dst, role, cfg.work_dir, decode=True)
     ver = verify_transcode(info, out_info, plan)
     ver["encode_seconds"] = round(enc_s, 3)

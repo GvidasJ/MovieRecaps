@@ -51,8 +51,9 @@ def resample(y: np.ndarray, sr: int) -> np.ndarray:
 
 
 def audio_key(y: np.ndarray, model: str, language: str | None, extra: str = "") -> str:
+    from .common import stage_code_hash
     h = hashlib.sha1(np.ascontiguousarray(y, np.float32).tobytes())
-    h.update(f"{model}|{language}|{CACHE_VERSION}|{extra}".encode())
+    h.update(f"{model}|{language}|{CACHE_VERSION}|{stage_code_hash('captions_asr')}|{extra}".encode())
     return h.hexdigest()[:24]
 
 

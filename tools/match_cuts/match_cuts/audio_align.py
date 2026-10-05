@@ -51,7 +51,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 

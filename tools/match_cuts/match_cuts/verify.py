@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterable, Iterator, Sequence
 
 import numpy as np
 
-from .common import fps_str, json_default, log, parse_fps, timecode
+from .common import fps_str, json_default, log, parse_fps, read_image, timecode, write_image
 from .geometry import Sim, interpolate_keys
 from .model import Box, FrameMap, Segment, Status
 
@@ -3609,8 +3609,7 @@ def _failure_image(path: Path, comp: np.ndarray, rec: np.ndarray, roi: tuple[int
     tile = np.hstack([a, b, d]).astype(np.uint8)
     tile = cv2.cvtColor(tile, cv2.COLOR_GRAY2BGR)
     cv2.putText(tile, f"{path.stem} zncc {score:.3f}", (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(path), tile)
+    write_image(path, tile)                  # unicode-safe (cv2.imwrite cannot open non-ASCII Windows paths)
 
 
 def placeholder_gray(name: str = "PLACEHOLDER_RGB") -> float | None:
@@ -3848,7 +3847,7 @@ def write_cut_images(cuts: Sequence[int], n_frames: int, comp_bgr: Callable[[lis
         rows = [np.hstack([np.pad(t, ((0, 0), (0, wmax - t.shape[1]), (0, 0))) for t in row]) for row in (top, bot)]
         img = np.vstack(rows)
         p = out_dir / f"cut_{i:02d}.png"
-        if cv2.imwrite(str(p), img):
+        if write_image(p, img):              # unicode-safe (cv2.imwrite cannot open non-ASCII Windows paths)
             written.append(str(p))
         else:
             failures.append(f"could not write {p}")
@@ -4037,7 +4036,7 @@ def _ae_render_compare(env: dict, aep: str | None, preview: str | None, n_main: 
     def render_iter():
         if frames:
             for K, p in enumerate(frames):
-                img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+                img = read_image(p, cv2.IMREAD_GRAYSCALE)        # unicode-safe (cv2.imread is not)
                 if img is None:
                     continue
                 yield K, _resize(img, proxy_size).astype(np.float32)

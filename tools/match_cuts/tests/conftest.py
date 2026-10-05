@@ -18,7 +18,8 @@ import pytest
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[2]                       # .../MovieRecaps
 SYNTH_ROOT = REPO_ROOT / "work" / "synthetic"
-VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+VENV_PYTHON = next((p for p in (REPO_ROOT / ".venv" / "Scripts" / "python.exe", REPO_ROOT / ".venv" / "bin" / "python")
+                    if p.exists()), REPO_ROOT / ".venv" / "bin" / "python")       # Windows, then Linux / macOS
 
 if str(TESTS_DIR) not in sys.path:                     # `import synth` from any test module
     sys.path.insert(0, str(TESTS_DIR))
@@ -63,6 +64,30 @@ def _no_real_after_effects(monkeypatch):
         return real(system, roots)
     no_installed_ae.real = real                          # the search itself, for its own tests
     monkeypatch.setattr(pipeline, "find_after_effects", no_installed_ae)
+
+
+@pytest.fixture(autouse=True)
+def _match_cuts_logger_as_found():
+    """A test that runs the CLI in this process (cli.main -> common.setup_logging) leaves handlers on the
+    ``match_cuts`` logger: one writing to that test's captured stderr -- closed when the test ends, so every later
+    log line became a 'Logging error ... I/O operation on closed file' -- and one holding its run's log file open.
+    Every test gets the logger back as it found it."""
+    import logging
+    lg = logging.getLogger("match_cuts")
+    handlers, level, propagate = list(lg.handlers), lg.level, lg.propagate
+    yield
+    for h in list(lg.handlers):
+        if h not in handlers:
+            lg.removeHandler(h)
+            try:
+                h.close()
+            except Exception:  # noqa: BLE001 - a handler that cannot close is still gone
+                pass
+    for h in handlers:
+        if h not in lg.handlers:
+            lg.addHandler(h)
+    lg.setLevel(level)
+    lg.propagate = propagate
 
 
 @pytest.fixture(scope="session")

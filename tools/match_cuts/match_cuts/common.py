@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import time
+import zipfile
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
@@ -208,9 +209,90 @@ STAGE_VERSION: dict[str, int] = {
 }
 
 
+# ... and a cached result is only ever reused by the code that computed it: every key also holds a fingerprint of
+# that code (stage_code_hash: the stage's own modules below and every package module they import, read from their
+# import statements), so a change that forgets the bump above cannot reuse what the old code computed. The
+# orchestration (pipeline, exports, reports, checks) is left out: it decides what is computed and with which
+# parameters -- which the keys hold already --, not how.
+STAGE_CODE: dict[str, tuple[str, ...]] = {
+    "probe": ("probe",), "conform": ("conform",), "proxy": ("proxies",), "audio": ("proxies",),
+    "layout": ("layout",), "layout_refine": ("layout",), "audio_align": ("audio_align",),
+    "raw_index": ("visual_match",), "sparse_search": ("visual_match",), "frame_map": ("refine",),
+    "fullres_recheck": ("fullres",), "scenedetect": ("segment",), "people": ("people",), "raw_shots": ("shots",),
+    "captions_spans": ("caption_ocr",), "captions_asr": ("transcribe",), "captions_score": ("transcribe",),
+}
+NOT_STAGE_CODE = frozenset({"pipeline", "cli", "report", "verify", "export_ae", "export_xml_edl", "render_preview",
+                            "check_all", "learn", "testcases", "restyle", "asr_bench", "raw_only", "__main__",
+                            "__init__"})
+_PACKAGE_IMPORTS: dict[str, dict[str, frozenset[str]]] = {}
+_STAGE_CODE_HASH: dict[tuple[str, str], str] = {}
+
+
+def _package_root(root: str | os.PathLike | None = None) -> Path:
+    return Path(root) if root is not None else Path(__file__).resolve().parent
+
+
+def package_imports(root: str | os.PathLike | None = None) -> dict[str, frozenset[str]]:
+    """{module: the package modules it imports} for every module of the package (``root``: this one), read from the
+    import statements anywhere in it (those inside functions too)."""
+    r = _package_root(root)
+    if str(r) not in _PACKAGE_IMPORTS:
+        import ast
+        mods = {p.stem: p for p in r.glob("*.py")}
+        graph: dict[str, frozenset[str]] = {}
+        for name, p in mods.items():
+            deps: set[str] = set()
+            try:
+                tree = ast.parse(p.read_bytes())
+            except (OSError, SyntaxError, ValueError):
+                tree = None
+            for n in ast.walk(tree) if tree is not None else ():
+                if isinstance(n, ast.ImportFrom):
+                    mod = (n.module or "").split(".")
+                    if n.level == 1:
+                        deps.update([mod[0]] if mod[0] else [a.name for a in n.names])
+                    elif n.level == 0 and mod[0] == LOG_NAME:
+                        deps.update([mod[1]] if len(mod) > 1 else [a.name for a in n.names])
+                elif isinstance(n, ast.Import):
+                    deps.update(a.name.split(".")[1] for a in n.names
+                                if a.name.split(".")[0] == LOG_NAME and "." in a.name)
+            graph[name] = frozenset(d for d in deps if d in mods and d != name)
+        _PACKAGE_IMPORTS[str(r)] = graph
+    return _PACKAGE_IMPORTS[str(r)]
+
+
+def stage_modules(stage: str, root: str | os.PathLike | None = None) -> list[str]:
+    """The package modules whose code computes ``stage``'s cached result (STAGE_CODE and what they import, the
+    orchestration modules left out); [] for a stage not in STAGE_CODE."""
+    graph = package_imports(root)
+    seen: set[str] = set()
+    todo = list(STAGE_CODE.get(stage, ()))
+    while todo:
+        m = todo.pop()
+        if m in seen or m not in graph:
+            continue
+        seen.add(m)
+        todo += [d for d in graph[m] if d not in NOT_STAGE_CODE]
+    return sorted(seen)
+
+
+def stage_code_hash(stage: str, root: str | os.PathLike | None = None) -> str:
+    """Fingerprint of the source of :func:`stage_modules` (line ends normalised, so a checkout with CRLF line ends
+    keys as one with LF); '' for a stage not in STAGE_CODE. Computed once per process."""
+    r = _package_root(root)
+    if (str(r), stage) not in _STAGE_CODE_HASH:
+        h = hashlib.blake2b(digest_size=8)
+        mods = stage_modules(stage, r)
+        for m in mods:
+            h.update(m.encode() + b"\0" + (r / f"{m}.py").read_bytes().replace(b"\r\n", b"\n") + b"\0")
+        _STAGE_CODE_HASH[(str(r), stage)] = h.hexdigest() if mods else ""
+    return _STAGE_CODE_HASH[(str(r), stage)]
+
+
 def stage_key(stage: str, *parts: Any) -> str:
-    """Cache key = params_hash(STAGE_VERSION[stage], stage, *parts). Parts must include input hashes."""
-    return params_hash(STAGE_VERSION.get(stage, 0), stage, *parts)
+    """Cache key = params_hash(STAGE_VERSION[stage], stage, the code's fingerprint, *parts). Parts must include
+    input hashes."""
+    return params_hash(STAGE_VERSION.get(stage, 0), stage, stage_code_hash(stage), *parts)
 
 
 def seed_everything(seed: int) -> None:
@@ -218,6 +300,18 @@ def seed_everything(seed: int) -> None:
     FlannBasedMatcher (it trains lazily on the first knnMatch) and at the start of every worker."""
     import cv2
     cv2.setRNGSeed(int(seed))
+
+
+# A cache file cut short or zeroed -- the PC reset or lost power while it was written (the rename that publishes it is
+# atomic, the data it points to is not always on disk yet) -- is a cache miss: dropped and computed again, not a crash.
+UNREADABLE_CACHE: tuple[type[BaseException], ...] = (ValueError, EOFError, OSError, zipfile.BadZipFile)
+
+
+def drop_unreadable(path: str | os.PathLike, err: BaseException) -> None:
+    """Log and remove an unreadable cache file (UNREADABLE_CACHE) so that it is computed again."""
+    log.warning("cache file %s is unreadable (%s: %s) -- computed again", path, type(err).__name__, err)
+    with contextlib.suppress(OSError):
+        os.remove(path)
 
 
 class Cache:
@@ -239,7 +333,10 @@ class Cache:
     def json(self, stage: str, key: str, compute: Callable[[], Any]) -> Any:
         p = self.path(stage, key, ".json")
         if p.exists():
-            return json.loads(p.read_text(encoding="utf-8"))
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except UNREADABLE_CACHE as e:
+                drop_unreadable(p, e)
         val = compute()
         atomic_write_text(p, json.dumps(val, default=json_default, indent=1, sort_keys=True))
         return json.loads(p.read_text(encoding="utf-8"))
@@ -247,10 +344,13 @@ class Cache:
     def npz(self, stage: str, key: str, compute: Callable[[], dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
         p = self.path(stage, key, ".npz")
         if p.exists():
-            with np.load(p, allow_pickle=False) as z:
-                return {k: z[k] for k in z.files}
+            try:
+                with np.load(p, allow_pickle=False) as z:
+                    return {k: z[k] for k in z.files}
+            except UNREADABLE_CACHE as e:
+                drop_unreadable(p, e)
         val = compute()
-        tmp = p.with_suffix(".tmp.npz")
+        tmp = p.with_name(f"{p.stem}.{os.getpid()}.tmp.npz")      # its own per process: two runs on one work folder
         np.savez_compressed(tmp, **val)
         replace_file(tmp, p)
         return val
@@ -262,10 +362,28 @@ class Cache:
 REPLACE_RETRY_S = 5.0
 
 
+def flush_to_disk(path: str | os.PathLike) -> None:
+    """The file's data written to the disk now (fsync), before the rename that publishes it: a PC that resets or
+    loses power after the rename could otherwise leave the renamed file with blocks of zeros -- a cache entry that
+    still loads and silently feeds wrong frames or numbers to the next run. Skipped for what cannot be opened so."""
+    try:
+        fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def replace_file(src: str | os.PathLike, dst: str | os.PathLike, retry_s: float | None = None) -> None:
-    """``os.replace(src, dst)``, retried on PermissionError for up to ``retry_s`` seconds (REPLACE_RETRY_S); then
-    a PermissionError that names the file and says to close the program holding it."""
+    """``os.replace(src, dst)`` once ``src`` is on the disk (:func:`flush_to_disk`), retried on PermissionError for up
+    to ``retry_s`` seconds (REPLACE_RETRY_S); then a PermissionError that names the file and says to close the
+    program holding it."""
     limit = REPLACE_RETRY_S if retry_s is None else float(retry_s)
+    flush_to_disk(src)
     t0 = time.monotonic()
     delay = 0.05
     while True:
@@ -286,7 +404,7 @@ def atomic_write_text(path: str | os.PathLike, text: str) -> None:
     cannot encode the arrows / dashes / ± of report.md and crashed S10 (UnicodeEncodeError)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")             # its own per process (two runs, one folder)
     tmp.write_text(text, encoding="utf-8")
     replace_file(tmp, p)
 
@@ -300,10 +418,23 @@ def write_image(path: str | os.PathLike, img: np.ndarray, ext: str = ".png") -> 
     if not ok:
         return False
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.stem + ".tmp" + ext)
+    tmp = p.with_name(f"{p.stem}.{os.getpid()}.tmp{ext}")
     tmp.write_bytes(buf.tobytes())
     replace_file(tmp, p)
     return True
+
+
+def read_image(path: str | os.PathLike, flags: int | None = None) -> np.ndarray | None:
+    """``cv2.imread`` through Python file I/O (``cv2.imdecode``; it cannot open non-ASCII paths on Windows either:
+    it returns None for every file under C:\\Users\\Žygimantas\\...). None when the file cannot be read or decoded."""
+    import cv2
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except (OSError, ValueError):
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR if flags is None else int(flags))
 
 
 # --------------------------------------------------------------------------------------

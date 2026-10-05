@@ -284,6 +284,18 @@ def test_headline_d5():
     assert h.startswith("PASS (criteria 5, 6 not verified: ")
 
 
+def test_headline_says_which_hard_check_could_not_run():
+    """Task 10: a hard check of 1_edit.xml whose analysis failed is named in the headline (as pipeline.headline_for
+    names it), never a plain PASS."""
+    ver = _ver(ALL, {"s9_8_deliverables": "pass"})
+    ver["checks"]["hard_checks_not_run"] = {"status": "not_available", "not_verified": ["no flash frames at a cut (x)"]}
+    assert report.headline(ver) == "PASS (not checked: no flash frames at a cut (x))"
+    ver["criteria"]["c6_after_effects"] = {"status": "not_available", "summary": "no node"}
+    assert report.headline(ver) == "PASS (criterion 6 not verified: no node; not checked: no flash frames at a cut (x))"
+    ver["checks"]["s9_8_deliverables"]["status"] = "fail"
+    assert report.headline(ver) == "FAIL"
+
+
 def test_report_overall_uses_the_d5_headline(tmp_path):
     ctx = make_ctx(tmp_path)
     ctx.verify["checks"]["s9_8_deliverables"] = {"status": "fail", "summary": "7/8 deliverables present",

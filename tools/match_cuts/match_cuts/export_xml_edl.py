@@ -425,9 +425,20 @@ def _media(cutlist: Cutlist, cfg: Any, role: str) -> tuple[str, str]:
 
 
 def _file_url(path: str) -> str:
+    """The media's file URL. A Windows network path (\\\\server\\share\\..., e.g. a RAW over large_file_bytes left on
+    a NAS) keeps its server as the URL's host (RFC 8089: file://server/share/...) -- as file://localhost/server/...
+    it would be a folder of the current drive, and the clip offline; a long-path prefix (\\\\?\\) is dropped."""
     if not path:
         return ""
-    p = Path(path).as_posix()
+    s = str(path)
+    if s.startswith("\\\\?\\UNC\\"):
+        s = "\\\\" + s[8:]
+    elif s.startswith("\\\\?\\"):
+        s = s[4:]
+    if s.startswith(("\\\\", "//")):
+        host, _, rest = s.lstrip("\\/").replace("\\", "/").partition("/")
+        return f"file://{host}/" + urllib.parse.quote(rest)
+    p = Path(s).as_posix()
     if not p.startswith("/"):
         p = "/" + p
     return "file://localhost" + urllib.parse.quote(p)

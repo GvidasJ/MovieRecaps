@@ -299,6 +299,24 @@ def test_only_the_words_taken_from_elsewhere_are_timed_again(monkeypatch):
     assert (out[3].start, out[3].end) == pytest.approx((0.65, 0.90))
 
 
+def test_words_that_cannot_be_timed_again_keep_their_rough_times(monkeypatch):
+    """Task 10: when the forced alignment of the replaced words fails, they keep their rough times and the run says
+    so. It called a ``warn`` that only run_captions has: the NameError lost the whole captions.srt."""
+    from match_cuts import align as A
+    mine = [C.Word("a", 0.0, 0.2, 0.9, "a")]
+    words = [mine[0], C.Word("b", 0.25, 0.3, 0.9, "b")]
+    monkeypatch.setattr(A, "available", lambda: None)
+
+    def broken(y, ws, **k):
+        raise RuntimeError("CUDA out of memory")
+    monkeypatch.setattr(A, "align", broken)
+    said: list[str] = []
+    out = C._time_new_words(np.zeros(16000, np.float32), words, {C._said_as(w) for w in mine}, said.append)
+    assert out == words
+    assert said == ["the replaced words could not be timed (RuntimeError: CUDA out of memory)"]
+    assert C._time_new_words(np.zeros(16000, np.float32), words, {C._said_as(w) for w in mine}) == words  # logged
+
+
 def test_no_caption_runs_into_the_next():
     caps = [C.Caption("to death", 0, 60, "competitor"), C.Caption("*...*", 60, 160, "placeholder"),
             C.Caption("us", 157, 160, "transcript"), C.Caption("for", 160, 161, "transcript")]
