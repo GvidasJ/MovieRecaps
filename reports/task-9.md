@@ -1,12 +1,30 @@
-# Task 9: speed -- work in progress (stopped for a second PC restart, 6 Oct 2026, about 00:40)
+# Task 9: speed -- work in progress (stopped a third time: you need the PC, 6 Oct 2026, about 01:18)
 
 ## Where I stopped
 
 Everything below is committed and pushed: the code is the frozen copy `work/frozen/t9c` the timing runs used. No run
-is going on. The final timing batch (`work/t9/time/run_after.sh`, code `t9c`) was stopped because the PC had become
-stuck and very laggy; the video1 run's log stops at 00:20, 3.5 minutes into refine.
+is going on and no python process is left.
 
-**Timing runs that finished, or measured something:**
+After the second restart I started the final timing batch again from the beginning (`work/t9/time/run_after.sh`, code
+`t9c`, full-size `finished\` files, empty caches, one run at a time) at 00:29, on an idle PC (all 16 cores, Adobe
+closed, nothing else running). I stopped it at 01:18 because you need the PC: it was still in its **first** run,
+video1 thorough, 48 minutes in, in refine. **None of the eight runs of this batch finished.**
+
+What that stopped run did measure is valid (a healthy, idle PC; its log is in
+`work/t9/time/stopped3/video1-thorough/runs/001/extras/match_cuts.log`):
+
+| stage (video1, thorough, `t9c`, full-size files) | time |
+|---|---|
+| probe, conform, audio, audio alignment, proxies, layout | 42 s |
+| the RAW index: 35,249 frames, 10.0 M SIFT descriptors | 2.5 min |
+| the search stage S5.2 in all: the index, competitor features, the exact search in 6 batches next to the per-frame search | **24.8 min** (33.0 on the laggy PC before the second restart) |
+| refine S5.3 | more than 22.5 min, not finished when stopped |
+
+So video1 alone was at 48 minutes before the re-check, the segments, the exports, the captions and verify: in
+thorough mode it will not get under 25 minutes. GPU memory peaked at 9.7 of 16 GB during refine (logged every 5 s
+from 01:10). The stopped run's caches are deleted, so the rerun starts from empty caches again.
+
+**Earlier timing runs that finished, or measured something:**
 
 | run | when | code, files | what it measured | caveat |
 |---|---|---|---|---|
@@ -16,10 +34,11 @@ stuck and very laggy; the video1 run's log stops at 00:20, 3.5 minutes into refi
 | video1, the new code without the overlap (item 5) | 5 Oct 23:15-23:37, stopped | `t9b`, full-size files | index 3.0 min, competitor features about 1.5, **exact search 12.5 min**, per-frame search about 20 (from its progress) | stopped to add item 5 |
 | video1, the final code | 5 Oct 23:42 - 6 Oct 00:20, stopped | `t9c`, full-size files | index 3.0 min, **search stage 33.0 min** (features, exact search in 6 batches and the per-frame search side by side) | the PC became stuck and laggy during refine (log ends 00:20): the 33 min may be slower than it should be |
 
-**Timing runs that must run again** (from empty caches, full-size `finished\` files, one at a time on a free,
-healthy PC: `CODE=work/frozen/t9c TAG=after bash work/t9/time/run_after.sh`, after deleting `work/t9/time/STOP`):
-video1, video2, video3 and video4, each thorough and `--fast` -- all eight. Then: the comparison of video2's new
-edit with the Task 8 code's (the identity check from empty caches), check-all, the run-time table below, commit.
+**Timing runs that must run again** -- still all eight: video1, video2, video3 and video4, each thorough and
+`--fast` (from empty caches, full-size `finished\` files, one at a time on a free, healthy PC: delete
+`work/t9/time/STOP`, then `CODE=work/frozen/t9c TAG=after bash work/t9/time/run_after.sh`). Then: the comparison of
+video2's new edit with the Task 8 code's (the identity check from empty caches), check-all, the run-time table
+below, commit.
 
 
 ## In short
