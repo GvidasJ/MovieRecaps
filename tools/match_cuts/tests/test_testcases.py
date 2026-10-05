@@ -80,8 +80,9 @@ def test_read_run_and_scorecard(tmp_path):
 
 
 def test_check_all_runs_every_video_with_the_fast_comparison(tmp_path, monkeypatch):
-    """A normal run makes no --fast comparison (off by default: --compare-fast); check-all asks for it on every run
-    (its scorecard says what the thoroughness changed), and --fast runs never make it."""
+    """A normal run makes no --fast comparison (off by default: --compare-fast) and does not re-assemble its cut list
+    from the caches (--check-determinism); check-all asks for both on every run (its scorecard says what the
+    thoroughness changed; 9.7 is a hard check), and --fast runs never make the comparison."""
     d = tmp_path / "cases" / "one"
     d.mkdir(parents=True)
     (d / "competitor.mp4").write_bytes(b"c")
@@ -97,9 +98,11 @@ def test_check_all_runs_every_video_with_the_fast_comparison(tmp_path, monkeypat
                     "--work", str(tmp_path / "w")])
     check_all.main(["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"),
                     "--work", str(tmp_path / "w"), "--fast"])
-    assert seen == [["--compare-fast"], ["--fast"]]
+    assert seen == [["--check-determinism", "--compare-fast"], ["--check-determinism", "--fast"]]
     from match_cuts import cli
     parse = cli.build_parser().parse_args
     assert not cli.config_from_args(parse([]), "c.mp4", "r.mp4").compare_fast
     assert cli.config_from_args(parse(["--compare-fast"]), "c.mp4", "r.mp4").compare_fast
     assert not cli.config_from_args(parse(["--fast", "--compare-fast"]), "c.mp4", "r.mp4").compare_fast
+    assert not cli.config_from_args(parse([]), "c.mp4", "r.mp4").check_determinism
+    assert cli.config_from_args(parse(["--fast", "--check-determinism"]), "c.mp4", "r.mp4").check_determinism

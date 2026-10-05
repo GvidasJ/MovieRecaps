@@ -149,3 +149,120 @@ def test_the_refined_framing_comes_back_as_a_sim_that_fits():
     assert abs(sc.score(prep, rr, sc.inverse_map(new, False)) - z_ref) < 1e-6 and z_ref > 0.995
     assert abs(new.tx - SIM.tx) < 0.5 and abs(new.ty - SIM.ty) < 0.5 and abs(new.s / SIM.s - 1) < 1e-3
     sc.close()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Task 9: the scorer samples each framing once (the score at it and the next step from it share the samples), finds a
+# mask's pixels once, caches the pixel grid -- the numbers must be the ones the earlier code gave, bit for bit
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _old_coords(sc, A, p, roi):
+    t = sc.t
+    x0, y0, w, h = roi
+    cx, cy = x0 + 0.5 * (w - 1), y0 + 0.5 * (h - 1)
+    ys, xs = t.meshgrid(t.arange(h, device=sc.dev, dtype=t.float32) + (y0 - cy),
+                        t.arange(w, device=sc.dev, dtype=t.float32) + (x0 - cx), indexing="ij")
+    a, b, tx, ty = (float(v) for v in p)
+    X = (1.0 + a) * xs - b * ys + tx + cx
+    Y = b * xs + (1.0 + a) * ys + ty + cy
+    u = float(A[0, 0]) * X + float(A[0, 1]) * Y + float(A[0, 2])
+    v = float(A[1, 0]) * X + float(A[1, 1]) * Y + float(A[1, 2])
+    return u, v, xs, ys
+
+
+def _old_zncc(t, a, b, m):
+    n = int(m.sum())
+    if n < fullres.MIN_PIXELS:
+        return float("nan")
+    a = a[m].double()
+    b = b[m].double()
+    a = a - a.mean()
+    b = b - b.mean()
+    den = t.sqrt((a * a).sum() * (b * b).sum())
+    return float((a * b).sum() / den) if float(den) > 1e-9 else float("nan")
+
+
+def _old_score(sc, comp, raw, A, p=None):
+    T, M, roi = comp
+    img = raw[0]
+    H, W = img.shape
+    u, v, _, _ = _old_coords(sc, A, np.zeros(4) if p is None else p, roi)
+    valid = (u >= 1.0) & (u <= W - 2.0) & (v >= 1.0) & (v <= H - 2.0)
+    return _old_zncc(sc.t, T, sc._sample(img, u, v), M & valid)
+
+
+def _old_refine(sc, comp, raw, A, iters=fullres.REFINE_ITERS):
+    """fullres.Scorer.refine as it was before Task 9 (the reference)."""
+    t = sc.t
+    T, M, roi = comp
+    img, gu, gv = raw
+    H, W = img.shape
+    p = np.zeros(4)
+    best_p, best_z = p.copy(), _old_score(sc, comp, raw, A, p)
+    A2 = t.tensor(A[:, :2], dtype=t.float32, device=sc.dev)
+    for _ in range(int(iters)):
+        u, v, xs, ys = _old_coords(sc, A, p, roi)
+        valid = (u >= 1.0) & (u <= W - 2.0) & (v >= 1.0) & (v <= H - 2.0)
+        m = M & valid
+        if int(m.sum()) < fullres.MIN_PIXELS:
+            break
+        I = sc._sample(img, u, v)
+        Iu = sc._sample(gu, u, v)
+        Iv = sc._sample(gv, u, v)
+        Tm, Im = T[m], I[m]
+        ts, is_ = Tm.std() + 1e-6, Im.std() + 1e-6
+        e = (Tm - Tm.mean()) / ts - (Im - Im.mean()) / is_
+        gx = (A2[0, 0] * Iu[m] + A2[1, 0] * Iv[m]) / is_
+        gy = (A2[0, 1] * Iu[m] + A2[1, 1] * Iv[m]) / is_
+        X, Y = xs[m], ys[m]
+        J = t.stack([gx * X + gy * Y, -gx * Y + gy * X, gx, gy], dim=1)
+        Hm = (J.T @ J).double().cpu().numpy()
+        g = (J.T @ e).double().cpu().numpy()
+        try:
+            dp = np.linalg.solve(Hm + 1e-9 * np.eye(4), g)
+        except np.linalg.LinAlgError:
+            break
+        if not np.all(np.isfinite(dp)):
+            break
+        p = p + dp
+        z = _old_score(sc, comp, raw, A, p)
+        if np.isfinite(z) and (not np.isfinite(best_z) or z > best_z):
+            best_p, best_z = p.copy(), z
+        if abs(dp[2]) < 0.01 and abs(dp[3]) < 0.01 and abs(dp[0]) < 1e-5 and abs(dp[1]) < 1e-5:
+            break
+    return best_p, float(best_z)
+
+
+def _same(a, b):
+    return (np.isnan(a) and np.isnan(b)) or a == b
+
+
+def test_the_scorer_gives_the_numbers_it_gave_before_bit_for_bit():
+    base = texture(3)
+    sc = fullres.Scorer((RAW_W, RAW_H), blur_px=1.0)
+    full = np.zeros((COMP_H, COMP_W), bool)
+    full[120:520, 30:330] = True
+    holes = full.copy()
+    holes[300:340, 60:300] = False                         # a caption band left out
+    tiny = np.zeros((COMP_H, COMP_W), bool)
+    tiny[300:330, 100:200] = True                          # 3,000 pixels: under MIN_PIXELS
+    cases = 0
+    for k, (j, mask, d) in enumerate([(5, full, Sim(1.0, 0.0, 3.0, -2.0)), (6, holes, Sim(1.012, 0.3, -1.5, 4.0)),
+                                      (9, full, Sim(0.99, -0.4, 6.0, 1.0)), (7, tiny, Sim(1.0, 0.0, 1.0, 1.0))]):
+        raw = raw_frame(j, base)
+        comp = comp_of(raw, SIM)
+        prep = sc.comp(k, comp, mask)
+        if prep is None:                                   # too few pixels for a competitor ROI at all
+            continue
+        rr = sc.raw(j, raw)
+        shifted = Sim(SIM.s * d.s, SIM.theta_deg + d.theta_deg, SIM.tx + d.tx, SIM.ty + d.ty)
+        A = sc.inverse_map(shifted, False)
+        p_new, z_new, z0 = sc.refine(prep, rr, A, start=True)
+        p_old, z_old = _old_refine(sc, prep, rr, A)
+        assert np.array_equal(p_new, p_old) and _same(z_new, z_old), (k, p_new, p_old, z_new, z_old)
+        assert _same(z0, _old_score(sc, prep, rr, A)) and _same(sc.score(prep, rr, A, p_new), _old_score(sc, prep, rr, A, p_new))
+        p2, z2 = sc.refine(prep, rr, A)                     # without the start score: the same
+        assert np.array_equal(p2, p_new) and _same(z2, z_new)
+        cases += 1
+    assert cases >= 3
+    sc.close()

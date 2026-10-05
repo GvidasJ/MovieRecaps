@@ -173,6 +173,7 @@ class Scorer:
         self.r = r
         self._raw: dict[int, Any] = {}
         self._comp: dict[int, tuple] = {}
+        self._grids: OrderedDict[tuple[int, int, int, int], tuple[Any, Any]] = OrderedDict()
 
     # -- images ----------------------------------------------------------------------------------------------------
     def _blur(self, img: Any) -> Any:
@@ -237,8 +238,14 @@ class Scorer:
         """RAW coordinates of the ROI pixels under A o R(p) (R: a small similarity about the ROI centre)."""
         x0, y0, w, h = roi
         cx, cy = x0 + 0.5 * (w - 1), y0 + 0.5 * (h - 1)
-        ys, xs = self.t.meshgrid(self.t.arange(h, device=self.dev, dtype=self.t.float32) + (y0 - cy),
-                                 self.t.arange(w, device=self.dev, dtype=self.t.float32) + (x0 - cx), indexing="ij")
+        grid = self._grids.get(tuple(roi))
+        if grid is None:                             # the ROI's pixel grid about its centre: the same for every call
+            grid = self.t.meshgrid(self.t.arange(h, device=self.dev, dtype=self.t.float32) + (y0 - cy),
+                                   self.t.arange(w, device=self.dev, dtype=self.t.float32) + (x0 - cx), indexing="ij")
+            self._grids[tuple(roi)] = grid
+            while len(self._grids) > 8:
+                self._grids.popitem(last=False)
+        ys, xs = grid
         a, b, tx, ty = (float(v) for v in p)
         X = (1.0 + a) * xs - b * ys + tx + cx
         Y = b * xs + (1.0 + a) * ys + ty + cy
@@ -249,55 +256,68 @@ class Scorer:
     # -- scores ----------------------------------------------------------------------------------------------------
     @staticmethod
     def _zncc_t(t: Any, a: Any, b: Any, m: Any) -> float:
-        n = int(m.sum())
+        return Scorer._zncc_i(t, a, b, m.nonzero(as_tuple=True))
+
+    @staticmethod
+    def _zncc_i(t: Any, a: Any, b: Any, idx: tuple) -> float:
+        """Masked ZNCC over the mask's pixels ``idx`` (its nonzero(as_tuple=True): the pixels a[m] takes, in the same
+        order -- found once and shared by every use of the mask)."""
+        n = int(idx[0].numel())
         if n < MIN_PIXELS:
             return float("nan")
-        a = a[m].double()
-        b = b[m].double()
+        a = a[idx].double()
+        b = b[idx].double()
         a = a - a.mean()
         b = b - b.mean()
         den = t.sqrt((a * a).sum() * (b * b).sum())
         return float((a * b).sum() / den) if float(den) > 1e-9 else float("nan")
 
-    def score(self, comp: tuple, raw: tuple, A: np.ndarray, p: np.ndarray | None = None) -> float:
-        """Masked ZNCC of a prepared competitor ROI against a prepared RAW frame under map A (o R(p))."""
+    def _at(self, comp: tuple, raw: tuple, A: np.ndarray, p: np.ndarray) -> tuple:
+        """What both the score at p and the Gauss-Newton step from p use: (u, v, xs, ys, the mask's pixels, the RAW
+        frame sampled at them) -- computed once for each p."""
         T, M, roi = comp
         img = raw[0]
         H, W = img.shape
-        u, v, _, _ = self._coords(A, np.zeros(4) if p is None else p, roi)
+        u, v, xs, ys = self._coords(A, p, roi)
         valid = (u >= 1.0) & (u <= W - 2.0) & (v >= 1.0) & (v <= H - 2.0)
-        return self._zncc_t(self.t, T, self._sample(img, u, v), M & valid)
+        return u, v, xs, ys, (M & valid).nonzero(as_tuple=True), self._sample(img, u, v)
 
-    def refine(self, comp: tuple, raw: tuple, A: np.ndarray, iters: int = REFINE_ITERS) -> tuple[np.ndarray, float]:
+    def score(self, comp: tuple, raw: tuple, A: np.ndarray, p: np.ndarray | None = None) -> float:
+        """Masked ZNCC of a prepared competitor ROI against a prepared RAW frame under map A (o R(p))."""
+        st = self._at(comp, raw, A, np.zeros(4) if p is None else p)
+        return self._zncc_i(self.t, comp[0], st[5], st[4])
+
+    def refine(self, comp: tuple, raw: tuple, A: np.ndarray, iters: int = REFINE_ITERS, start: bool = False
+               ) -> tuple[np.ndarray, float] | tuple[np.ndarray, float, float]:
         """The small similarity R(p) (about the ROI centre, competitor px) that best aligns the RAW frame warped by
         A o R(p) with the competitor ROI: Gauss-Newton on the normalised difference (ZNCC's own measure). Returns
-        (p = [scale-1 cos part, sin part, tx, ty], ZNCC at p)."""
+        (p = [scale-1 cos part, sin part, tx, ty], ZNCC at p), and the ZNCC at A itself with ``start``. Each p is
+        sampled once: the score at it and the next step from it share the samples (Task 9; the same numbers)."""
         t = self.t
         T, M, roi = comp
         img, gu, gv = raw
-        H, W = img.shape
         p = np.zeros(4)
-        best_p, best_z = p.copy(), self.score(comp, raw, A, p)
+        st = self._at(comp, raw, A, p)
+        best_p, best_z = p.copy(), self._zncc_i(t, T, st[5], st[4])
+        z0 = best_z
         A2 = t.tensor(A[:, :2], dtype=t.float32, device=self.dev)
         for _ in range(int(iters)):
-            u, v, xs, ys = self._coords(A, p, roi)
-            valid = (u >= 1.0) & (u <= W - 2.0) & (v >= 1.0) & (v <= H - 2.0)
-            m = M & valid
-            if int(m.sum()) < MIN_PIXELS:
+            u, v, xs, ys, idx, I = st
+            if int(idx[0].numel()) < MIN_PIXELS:
                 break
-            I = self._sample(img, u, v)
             Iu = self._sample(gu, u, v)
             Iv = self._sample(gv, u, v)
-            Tm, Im = T[m], I[m]
+            Tm, Im = T[idx], I[idx]
             ts, is_ = Tm.std() + 1e-6, Im.std() + 1e-6
             e = (Tm - Tm.mean()) / ts - (Im - Im.mean()) / is_
-            gx = (A2[0, 0] * Iu[m] + A2[1, 0] * Iv[m]) / is_          # d I / d X (competitor x), normalised
-            gy = (A2[0, 1] * Iu[m] + A2[1, 1] * Iv[m]) / is_
-            X, Y = xs[m], ys[m]
+            gx = (A2[0, 0] * Iu[idx] + A2[1, 0] * Iv[idx]) / is_          # d I / d X (competitor x), normalised
+            gy = (A2[0, 1] * Iu[idx] + A2[1, 1] * Iv[idx]) / is_
+            X, Y = xs[idx], ys[idx]
             J = t.stack([gx * X + gy * Y, -gx * Y + gy * X, gx, gy], dim=1)
-            # the 4 x 4 normal equations solved on the CPU (a GPU solve of so small a system costs ~0.1 s a call)
-            Hm = (J.T @ J).double().cpu().numpy()
-            g = (J.T @ e).double().cpu().numpy()
+            # the 4 x 4 normal equations solved on the CPU (a GPU solve of so small a system costs ~0.1 s a call),
+            # brought over in one copy
+            Hg = t.cat([J.T @ J, (J.T @ e)[:, None]], 1).double().cpu().numpy()
+            Hm, g = Hg[:, :4], Hg[:, 4]
             try:
                 dp = np.linalg.solve(Hm + 1e-9 * np.eye(4), g)
             except np.linalg.LinAlgError:
@@ -305,12 +325,13 @@ class Scorer:
             if not np.all(np.isfinite(dp)):
                 break
             p = p + dp
-            z = self.score(comp, raw, A, p)
+            st = self._at(comp, raw, A, p)
+            z = self._zncc_i(t, T, st[5], st[4])
             if np.isfinite(z) and (not np.isfinite(best_z) or z > best_z):
                 best_p, best_z = p.copy(), z
             if abs(dp[2]) < 0.01 and abs(dp[3]) < 0.01 and abs(dp[0]) < 1e-5 and abs(dp[1]) < 1e-5:
                 break
-        return best_p, float(best_z)
+        return (best_p, float(best_z), float(z0)) if start else (best_p, float(best_z))
 
     def refined_sim(self, sim: Sim, flip: bool, p: np.ndarray, roi: tuple[int, int, int, int]) -> Sim:
         """The canonical Sim whose map is A o R(p) (``refine``'s result as a framing): RAW -> competitor is
@@ -522,8 +543,7 @@ class SideScorer:
             if prep is not None:
                 rp = self.sc.raw(int(j), r)
                 A = self.sc.inverse_map(sim, bool(flip))
-                z0 = self.sc.score(prep, rp, A)
-                p, z = self.sc.refine(prep, rp, A)
+                p, z, z0 = self.sc.refine(prep, rp, A, start=True)     # z0: the score at sim (refine's start)
                 if np.isfinite(z):
                     out = (self.sc.refined_sim(sim, bool(flip), p, prep[2]), float(z), float(z0))
         self._measured[key] = out
@@ -677,8 +697,7 @@ def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_sto
                 rr = sc.raw(-(j + 1) * 1000 - int(round(f * 999)), np.clip(np.rint(mix), 0, 255).astype(np.uint8))
             else:
                 rr = sc.raw(j, r)
-            z_model = sc.score(prep, rr, A)
-            p, z_ref = sc.refine(prep, rr, A)
+            p, z_ref, z_model = sc.refine(prep, rr, A, start=True)      # z_model: the score at A (refine's start)
             shift = sc.shift_px(p, prep[2])
             z_nb = {}
             for jj in (j - 1, j + 1):

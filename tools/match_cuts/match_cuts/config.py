@@ -182,7 +182,10 @@ class Config:
                                            #   uncertain frames re-checked there before the cuts are decided (fullres.py)
     compare_fast: bool = False             # --compare-fast: a thorough run also makes the --fast analysis (cached) and
                                            # the end summary says what the thoroughness changed (check-all turns it on)
-                                           #   says what the thoroughness changed
+    check_determinism: bool = False        # --check-determinism: verify s9_7 also re-runs the segments stage from the
+                                           #   caches and byte-compares the cut list -- as long as the stage itself
+                                           #   (check-all turns it on); otherwise s9_7 compares the run with the
+                                           #   previous one of the same inputs and settings
     speech_map_model: str = ""             # the speech map's model ("": caption_recheck_model, the most accurate;
                                            #   --fast: large-v3-turbo)
 
@@ -209,6 +212,12 @@ class Config:
                                            # existing track whose RAW time line they continue (refine, FX-03 step 3)
     anchor_zncc_slack: float = 0.05        # anchor accepted only if masked ZNCC >= match_thresh - slack
     audio_restrict_s: float = 2.0          # search +- this around a confident audio hint
+    audio_region_margin_s: float = 0.0     # the RAW index holds only the RAW the audio alignment (S5.1) places the
+                                           #   competitor in, +- this; a frame the audio cannot place, or whose
+                                           #   picture is not found there, is searched in the whole RAW (Task 9:
+                                           #   the farthest picture of the test videos lies 14.7 s from where the
+                                           #   audio places it; 30 s planned). 0 = the whole RAW -- the default
+                                           #   until it keeps the test videos' results (reports/task-9.md)
 
     # ---- refinement (Stage 5.3) ---------------------------------------------------------
     refine_radius: int = 3                 # evaluate m-3 .. m+3
@@ -361,10 +370,12 @@ class Config:
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
-                  "caption_language", "fast", "compare_fast", "speech_map_model",
+                  "caption_language", "fast", "compare_fast", "check_determinism", "speech_map_model",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", *VERIFY_ONLY_PARAMS):
             d.pop(k, None)
+        if not d.get("audio_region_margin_s"):
+            d.pop("audio_region_margin_s", None)      # off: the keys of the whole-RAW index stay what they were
         return d
 
     def apply_fast(self) -> "Config":
@@ -374,6 +385,7 @@ class Config:
         self.index_max_descriptors = 2_000_000
         self.comp_search_stride = 3
         self.full_res = False
+        self.audio_region_margin_s = 0.0
         self.compare_fast = False
         self.speech_map_model = "large-v3-turbo"
         return self

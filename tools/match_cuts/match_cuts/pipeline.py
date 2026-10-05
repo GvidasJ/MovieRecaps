@@ -1951,8 +1951,11 @@ def save_frame_map_cache(fm: FrameMap, overlays: Any, fm_path: Path, ov_path: Pa
     replace_file(tmp, fm_path)   # the FrameMap file last: its existence marks a complete entry
 
 
-def hint_windows(hints: AudioHints, raw_fps: Fraction, n_raw: int, cfg: Config, extra_times: list[float] = ()) -> list[tuple[int, int]]:
-    """Dense RAW windows (frame ranges, half-open) around confident audio hints (long-RAW proxies)."""
+def hint_windows(hints: AudioHints, raw_fps: Fraction, n_raw: int, cfg: Config, extra_times: list[float] = (),
+                 margin_s: float | None = None) -> list[tuple[int, int]]:
+    """Dense RAW windows (frame ranges, half-open) around confident audio hints, +- ``margin_s`` (default
+    cfg.long_raw_window_s: long-RAW proxies; cfg.audio_region_margin_s: the RAW index's audio regions)."""
+    m = float(cfg.long_raw_window_s if margin_s is None else margin_s)
     ts = []
     if hints is not None and len(hints.comp_t):
         conf = hints.confident(cfg.audio_min_conf)
@@ -1960,8 +1963,8 @@ def hint_windows(hints: AudioHints, raw_fps: Fraction, n_raw: int, cfg: Config, 
     ts.extend(float(t) for t in extra_times)
     wins: list[tuple[int, int]] = []
     for t in sorted(ts):
-        a = max(0, int(math.floor((t - cfg.long_raw_window_s) * float(raw_fps))))
-        b = min(int(n_raw), int(math.ceil((t + cfg.long_raw_window_s) * float(raw_fps))) + 1)
+        a = max(0, int(math.floor((t - m) * float(raw_fps))))
+        b = min(int(n_raw), int(math.ceil((t + m) * float(raw_fps))) + 1)
         if b <= a:
             continue
         if wins and a <= wins[-1][1]:
@@ -2270,7 +2273,16 @@ def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str
         with ctx.dlog.capture("frame_map") as cap:
             with _stage(ctx, f"S5.2 visual search{label}"):
                 seed_everything(cfg.seed)
-                ctx.index = visual_match.RawIndex.build(base_raw, cfg, ctx.cache)
+                regions = None                      # Task 9: the RAW the audio places the competitor in (+ margin)
+                if float(getattr(cfg, "audio_region_margin_s", 0.0) or 0.0) > 0 and getattr(base_raw, "dense", True):
+                    regions = hint_windows(ctx.hints, ctx.raw_fps, int(base_raw.n), cfg,
+                                           margin_s=float(cfg.audio_region_margin_s)) or None
+                ctx.index = visual_match.RawIndex.build(base_raw, cfg, ctx.cache, regions=regions)
+                if ctx.index.regions is not None:   # the whole RAW, built when a frame needs it
+                    ctx.index.whole_fn = lambda: visual_match.RawIndex.build(base_raw, cfg, ctx.cache)
+                ctx.dlog.record("visual_match", "index_regions", margin_s=float(getattr(cfg, "audio_region_margin_s", 0)),
+                                regions=[list(r) for r in (ctx.index.regions or [])],
+                                frames=int(len(ctx.index.frames)), whole=ctx.index.regions is None)
                 ctx.anchors = cached_anchors(ctx, lambda: visual_match.sparse_search(
                     ctx.comp_proxy, base_raw, ctx.layout, overlays, ctx.index, ctx.hints, cfg, ctx.dlog), *extra)
                 ctx.dlog.record("visual_match", "summary", anchors=len(ctx.anchors))

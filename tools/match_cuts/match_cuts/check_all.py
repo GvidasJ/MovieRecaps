@@ -177,6 +177,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra = ["--fast", *extra]
     elif "--compare-fast" not in extra:
         extra = ["--compare-fast", *extra]          # the scorecard runs say what the thoroughness changed
+    if "--check-determinism" not in extra:
+        extra = ["--check-determinism", *extra]     # the hard check 9.7: the cut list re-assembled from the caches
     names = [n for n in a.cases.split(",") if n]
     cases = testcases.cases(names or None, Path(a.cases_dir))
     out_root, work_root = Path(a.out), Path(a.work)

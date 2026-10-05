@@ -534,8 +534,11 @@ def install_stub_world(monkeypatch, calls: dict):
         source: str
 
     class RawIndex:
+        regions = None                              # the whole RAW (the stub world has no audio regions)
+        frames = ()
+
         @staticmethod
-        def build(raw, cfg, cache):
+        def build(raw, cfg, cache, regions=None):
             calls["index"] = calls.get("index", 0) + 1
             return RawIndex()
 
@@ -689,7 +692,8 @@ def test_end_to_end_with_stub_modules(monkeypatch, clips, tmp_path, capsys):
     calls: dict = {}
     truth = install_stub_world(monkeypatch, calls)
     out, work = tmp_path / "output", tmp_path / "work"
-    argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work", str(work)]
+    argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work", str(work),
+            "--check-determinism"]
     code = cli.main(argv)
     printed = capsys.readouterr().out
     assert code == 0, printed
@@ -1259,7 +1263,7 @@ def test_long_raw_proxy_windows_survive_the_frame_map_cache(monkeypatch, clips, 
     _install_sparse_raw(monkeypatch, calls)
     out, work = tmp_path / "output", tmp_path / "work"
     argv = ["--competitor", str(clips["portrait"]), "--raw", str(clips["landscape"]), "--out", str(out), "--work",
-            str(work), "--skip-compare"]
+            str(work), "--skip-compare", "--check-determinism"]       # the re-assembly from the caches sees them too
     cli.main(argv)
     first = json.loads((_x(out) / "cutlist.json").read_text())
     n_ext_first = len(calls["extend"])

@@ -1572,6 +1572,7 @@ def test_check_determinism_uses_fresh_rerun(monkeypatch, tmp_path):
     from match_cuts import pipeline
     cfg = Config()
     cfg.out_dir = str(tmp_path)
+    cfg.check_determinism = True
     ctx = types.SimpleNamespace(cfg=cfg, cutlist=_cutlist())
     ctx.cutlist.save(tmp_path / "cutlist.json")
     monkeypatch.setattr(pipeline, "rerun_assembly", lambda c: _cutlist(timings={}))
@@ -1587,6 +1588,7 @@ def test_check_determinism_fails_when_the_previous_identical_run_differs(monkeyp
     from match_cuts import pipeline
     cfg = Config()
     cfg.out_dir = str(tmp_path)
+    cfg.check_determinism = True
     cur = _cutlist()
     cur.provenance.update(input_hashes={"competitor": "a", "raw": "b"}, analysis_params_hash="p", stage_versions={"x": 1})
     cur.settings = {"layout_mode": "match"}
@@ -1601,6 +1603,34 @@ def test_check_determinism_fails_when_the_previous_identical_run_differs(monkeyp
     assert r["status"] == "fail" and "previous run" in r["failures"][0]
     ctx.previous_cutlist["provenance"]["stage_versions"] = {"x": 2}          # the tool changed: not compared
     assert verify.check_determinism(ctx)["status"] == "pass"
+
+
+def test_a_normal_run_does_not_re_assemble_its_cut_list(monkeypatch, tmp_path):
+    """Task 9: the re-assembly from the caches costs as much as the segments stage (17 minutes on video1) and changes
+    nothing in the run: check-all asks for it (--check-determinism). A normal run still compares the written cut list
+    and the previous run of the same inputs."""
+    from match_cuts import pipeline
+    cfg = Config()
+    cfg.out_dir = str(tmp_path)
+    cur = _cutlist()
+    cur.provenance.update(input_hashes={"competitor": "a", "raw": "b"}, analysis_params_hash="p", stage_versions={"x": 1})
+    cur.settings = {"layout_mode": "match"}
+    ctx = types.SimpleNamespace(cfg=cfg, cutlist=cur)
+
+    def never(c):
+        raise AssertionError("re-assembled")
+    monkeypatch.setattr(pipeline, "rerun_assembly", never)
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "not_available" and "check-all" in r["summary"] and not r["rerun"]
+    ctx.previous_cutlist = json.loads(json.dumps(cur.to_dict()))
+    r = verify.check_determinism(ctx)
+    assert r["status"] == "pass" and "identical to the previous run" in r["summary"]
+    ctx.previous_cutlist["segments"][0]["notes"] = "different"
+    assert verify.check_determinism(ctx)["status"] == "fail"
+    ctx.previous_cutlist = None
+    cur.save(tmp_path / "cutlist.json")
+    cur.segments[0].notes = "changed after writing"
+    assert verify.check_determinism(ctx)["status"] == "fail"
 
 
 def _deliverables_ctx(tmp_path: Path, **over):
@@ -1713,6 +1743,7 @@ def test_previous_run_comparison_ignores_locations_and_gates_on_ffmpeg(monkeypat
     # end to end through check_determinism: the moved-inputs rerun passes s9_7
     cfg = Config()
     cfg.out_dir = str(tmp_path)
+    cfg.check_determinism = True
     cl = _cutlist(timings={"S2": 1.0})
     cl.provenance.update(cur["provenance"])
     cl.settings = dict(cur["settings"])

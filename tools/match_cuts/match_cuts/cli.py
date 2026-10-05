@@ -160,6 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="a thorough run also makes the analysis a --fast run would make of the same video (from the "
                         "same caches, a few minutes more) and the end summary says what the thoroughness changed "
                         "against it (check-all does this for every video)")
+    p.add_argument("--check-determinism", action="store_true",
+                   help="check 9.7 also re-runs the cut decisions from the caches and compares the cut list byte for "
+                        "byte (as long as the segments stage again; check-all does this for every video). Without it "
+                        "9.7 compares the run with the previous run of the same inputs and settings")
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
@@ -268,6 +272,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "large-v3")
     if args.seed is not None:
         cfg.seed = int(args.seed)
+    cfg.check_determinism = bool(getattr(args, "check_determinism", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()
     else:

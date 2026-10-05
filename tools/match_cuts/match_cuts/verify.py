@@ -4098,13 +4098,16 @@ def compare_cutlists(a: dict, b: dict) -> dict:
 
 def check_determinism(ctx: Any) -> dict:
     """Re-run S5.4 -> S6 from the cached FrameMap / AudioHints in a fresh context and byte-compare the
-    cutlist JSON (timings excluded); also check that the written cutlist.json equals the in-memory one."""
+    cutlist JSON (timings excluded) -- with cfg.check_determinism (check-all; --check-determinism): it costs as much
+    as the segments stage itself (17 minutes on a 56 s, 60 fps video) and changes nothing in the run. Always: the
+    written cutlist.json equals the in-memory one, and the run equals the previous run of the same inputs, settings
+    and code. Without the re-run and without a previous run to compare, the status is not_available."""
     from . import pipeline
     first = ctx.cutlist.to_dict()
-    second = pipeline.rerun_assembly(ctx).to_dict()
-    cmp = compare_cutlists(first, second)
+    rerun = bool(getattr(ctx.cfg, "check_determinism", True))
+    cmp = compare_cutlists(first, pipeline.rerun_assembly(ctx).to_dict()) if rerun else None
     failures = []
-    if not cmp["identical"]:
+    if cmp is not None and not cmp["identical"]:
         failures.append(f"re-assembly from caches differs: {cmp['differences'][:5]}")
     p = Path(ctx.cfg.out) / "cutlist.json"
     if p.exists():
@@ -4116,13 +4119,19 @@ def check_determinism(ctx: Any) -> dict:
     if prev.get("compared") and not prev.get("identical"):
         failures.append("cutlist.json differs from the previous run with identical inputs, parameters, settings and "
                         f"tool / stage versions ({prev['differences'][:3]}): Stage 9.7 requires a re-run to reproduce it")
-    status = "fail" if failures else "pass"
-    summary = "cutlist re-assembled from caches is byte-identical" if not failures else "cutlist NOT reproducible"
+    status = "fail" if failures else ("pass" if rerun or prev.get("compared") else "not_available")
+    if failures:
+        summary = "cutlist NOT reproducible"
+    elif rerun:
+        summary = "cutlist re-assembled from caches is byte-identical"
+    else:
+        summary = "cut list not re-assembled from the caches (check-all does: --check-determinism)"
     if prev.get("compared"):
         summary += "; " + ("identical to the previous run" if prev.get("identical") else "DIFFERS from the previous run")
     elif prev.get("changed"):
         summary += "; previous run not compared (" + ", ".join(prev["changed"]) + " changed)"
-    return {"status": status, "summary": summary, "failures": failures, "differences": cmp["differences"],
+    return {"status": status, "summary": summary, "failures": failures,
+            "differences": cmp["differences"] if cmp is not None else [], "rerun": rerun,
             "previous_run": prev, "warnings": warnings}
 
 
