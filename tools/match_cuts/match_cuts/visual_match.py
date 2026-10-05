@@ -911,8 +911,7 @@ class RawIndex:
     """SIFT descriptors of sampled RAW proxy frames with cluster-aware voting (DESIGN §5)."""
 
     def __init__(self, frames: np.ndarray, desc: np.ndarray, owner: np.ndarray, pts: np.ndarray,
-                 offsets: np.ndarray, raw_fps, step: int, cfg, key: str = "", npz_path: str = "",
-                 regions: Sequence[tuple[int, int]] | None = None, nfeat: int = 0):
+                 offsets: np.ndarray, raw_fps, step: int, cfg, key: str = "", npz_path: str = ""):
         self.frames = np.asarray(frames, np.int32)          # sampled RAW frame indices (sorted)
         self.desc = np.asarray(desc, np.uint8)              # [N, 128] uint8 (lossless SIFT values)
         self.owner = np.asarray(owner, np.int32)            # [N] RAW frame of each descriptor
@@ -932,15 +931,9 @@ class RawIndex:
         self._gpu = None                                    # gpu.KnnIndex (this process only, never pickled)
         self._data32: np.ndarray | None = None
         self._spawn_files: dict[str, str] | None = None     # set by prepare_spawn (cached index only)
-        # the audio regions it holds, [j0, j1) RAW frames (None: the whole RAW), and the features per frame (the
-        # whole index's, so a region's rows are the whole index's rows)
-        self.regions = [(int(a), int(b)) for a, b in regions] if regions else None
-        self.nfeat = int(nfeat)
-        self.whole_fn: Callable[[], "RawIndex"] | None = None    # the whole RAW's index (this process; never pickled)
-        self._whole: RawIndex | None = None
 
     # -- pickling for spawn workers (DESIGN D7) ---------------------------------------------------
-    _SCALARS = ("fps", "step", "key", "npz_path", "knn", "ratio", "far", "seed", "flann_free", "regions", "nfeat")
+    _SCALARS = ("fps", "step", "key", "npz_path", "knn", "ratio", "far", "seed", "flann_free")
 
     def prepare_spawn(self) -> None:
         """Called by :func:`parallel_map` before pickling for spawn workers. Trains FLANN here (once) and,
@@ -1010,14 +1003,11 @@ class RawIndex:
 
     # -- construction ---------------------------------------------------------------------------
     @staticmethod
-    def build(raw: Proxy, cfg, cache: Cache | None, regions: Sequence[tuple[int, int]] | None = None) -> "RawIndex":
+    def build(raw: Proxy, cfg, cache: Cache | None) -> "RawIndex":
         """SIFT every RAW proxy frame (cfg.raw_index_every_frame, with the GPU search) or every round(raw_fps /
         index_fps) frames (index_fps = raw_index_fps_short for RAW <= 10 min, else raw_index_fps_long); nfeatures per
         frame lowered so the total stays below cfg.index_max_descriptors. Cached (stage 'raw_index', npz) by proxy
-        identity + parameters. With cfg.gpu (and a usable GPU) it is searched exactly on the GPU (:meth:`neighbours`).
-        ``regions`` ([j0, j1) RAW frames, sorted, apart: the audio regions, Task 9): only their frames, each with the
-        features the whole RAW's index gives it (the same nfeatures); regions covering nearly the whole RAW (90 %)
-        give the whole index."""
+        identity + parameters. With cfg.gpu (and a usable GPU) it is searched exactly on the GPU (:meth:`neighbours`)."""
         from . import gpu
         fps = float(raw.fps)
         duration = raw.n / fps if fps > 0 else 0.0
@@ -1029,18 +1019,7 @@ class RawIndex:
         if not frames:
             raise ValueError("RawIndex.build: the RAW proxy holds no index frames")
         nfeat = int(min(cfg.sift_nfeatures, max(32, cfg.index_max_descriptors // max(1, len(frames)))))
-        n_whole = len(frames)
-        if regions:
-            regions = [(int(a), int(b)) for a, b in regions if int(b) > int(a)]
-            fr = np.asarray(frames, np.int64)
-            pos = np.searchsorted(np.asarray([a for a, _ in regions], np.int64), fr, side="right") - 1
-            keep = (pos >= 0) & (fr < np.asarray([b for _, b in regions], np.int64)[np.clip(pos, 0, None)])
-            if not keep.any() or int(keep.sum()) >= 0.9 * len(fr):
-                regions = None
-            else:
-                frames = fr[keep].tolist()
-        key = stage_key("raw_index", proxy_id(raw), cfg.analysis_params(), step, nfeat, "sift_precise_upscale",
-                        *([[list(r) for r in regions]] if regions else []))
+        key = stage_key("raw_index", proxy_id(raw), cfg.analysis_params(), step, nfeat, "sift_precise_upscale")
 
         def compute() -> dict[str, np.ndarray]:
             workers = cfg.resolved_workers()
@@ -1065,23 +1044,12 @@ class RawIndex:
         data = cache.npz("raw_index", key, compute) if cache is not None else compute()
         npz_path = str(cache.path("raw_index", key, ".npz")) if cache is not None else ""
         idx = RawIndex(data["frames"], data["desc"], data["owner"], data["pts"], data["offsets"], raw.fps,
-                       int(data["step"]), cfg, key, npz_path=npz_path, regions=regions, nfeat=nfeat)
+                       int(data["step"]), cfg, key, npz_path=npz_path)
         idx.flann_free = on_gpu
-        where = "" if not regions else (f" in the audio regions: {len(regions)} stretch(es), {len(idx.frames)} of the "
-                                        f"RAW's {n_whole} index frames ({100.0 * len(idx.frames) / n_whole:.0f} %)")
-        log.info("RAW index: %d frames (step %d), %d descriptors (%.1f MB uint8)%s, searched %s", len(idx.frames),
-                 idx.step, len(idx.desc), idx.desc.nbytes / 1e6, where,
+        log.info("RAW index: %d frames (step %d), %d descriptors (%.1f MB uint8), searched %s", len(idx.frames),
+                 idx.step, len(idx.desc), idx.desc.nbytes / 1e6,
                  f"exactly on the GPU ({gpu.device_name()})" if on_gpu else "with FLANN kd-trees (approximate, CPU)")
         return idx
-
-    def whole(self) -> "RawIndex":
-        """The whole RAW's index (built when first asked: a frame the audio cannot place, or whose picture is not in
-        the audio regions); this index itself when it already is the whole RAW's."""
-        if self.regions is None or self.whole_fn is None:
-            return self
-        if self._whole is None:
-            self._whole = self.whole_fn()
-        return self._whole
 
     # -- GPU search (exact) -------------------------------------------------------------------------
     def neighbours(self, queries: Sequence[np.ndarray]) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -1093,12 +1061,10 @@ class RawIndex:
         return self._gpu.search(queries, int(min(self.knn, len(self.desc))))
 
     def close_gpu(self) -> None:
-        """Free the GPU copy (after the searches of S5.2 / S5.3), the whole RAW's index's too."""
+        """Free the GPU copy (after the searches of S5.2 / S5.3)."""
         if self._gpu is not None:
             self._gpu.close()
             self._gpu = None
-        if getattr(self, "_whole", None) is not None and self._whole is not self:
-            self._whole.close_gpu()
 
     # -- FLANN ----------------------------------------------------------------------------------
     def ensure_built(self) -> None:
@@ -1167,13 +1133,8 @@ class RawIndex:
             outside = (self.frames < j0) | (self.frames >= j1)
             v[outside] = 0.0
         sm = v.copy()
-        if getattr(self, "regions", None) is None:
-            sm[1:] += v[:-1]
-            sm[:-1] += v[1:]
-        else:                                            # the audio regions: no neighbour across a gap
-            adj = (np.diff(self.frames) == self.step).astype(np.float64)
-            sm[1:] += v[:-1] * adj
-            sm[:-1] += v[1:] * adj
+        sm[1:] += v[:-1]
+        sm[:-1] += v[1:]
         if outside is not None:
             sm[outside] = 0.0
         return sm
@@ -1189,10 +1150,6 @@ class RawIndex:
             return []
         left = np.concatenate([[-np.inf], sm[:-1]])
         right = np.concatenate([sm[1:], [-np.inf]])
-        if getattr(self, "regions", None) is not None:  # the audio regions: no neighbour across a gap
-            gap = np.diff(self.frames) != self.step
-            left[1:][gap] = -np.inf
-            right[:-1][gap] = -np.inf
         peaks = np.flatnonzero((sm > 0) & (sm >= left) & (sm > right))
         order = sorted(peaks.tolist(), key=lambda i: (-sm[i], int(self.frames[i])))
         return [(int(self.frames[i]), float(sm[i])) for i in order[:max(1, int(top))]]
@@ -1694,6 +1651,10 @@ def _sift_worker(state: dict, k: int) -> tuple[np.ndarray, np.ndarray]:
                        state["roi"])
 
 
+SEARCH_PARTS = 6           # run_searches: the GPU finds a part's neighbours while the CPU workers search the part before
+SEARCH_PART_MIN = 200      # ... at least this many frames to a part (fewer: one part, as before)
+
+
 def run_searches(comp: Proxy, raw: Proxy, index: RawIndex, allowed: Callable[[int], np.ndarray],
                  roi: tuple[int, int, int, int], hints: AudioHints | None, frames: Iterable[int], cfg,
                  source: str = "global") -> list[tuple[int, list[Anchor], list]]:
@@ -1701,58 +1662,42 @@ def run_searches(comp: Proxy, raw: Proxy, index: RawIndex, allowed: Callable[[in
 
     A GPU-searched index (``index.flann_free``): the frames' SIFT features first (worker pool), then the exact
     neighbours of all of them and of their mirrors on the GPU in this process (one batch), then the searches with
-    those -- the workers never hold a kd-tree (an every-frame index would need ~800 B per descriptor in each).
-
-    An index of the audio regions (``index.regions``, Task 9): a frame the audio places is searched there (its audio
-    window, then the regions); a frame the audio cannot place, and one with no strong anchor in the regions, is
-    searched in the whole RAW (``index.whole()``), as every frame was before."""
-    tasks: list[tuple] = [(int(k), audio_window(hints, k, comp.fps, raw.fps, cfg, raw.n), source) for k in frames]
-    if getattr(index, "regions", None) is None or getattr(index, "whole_fn", None) is None:
-        return _search_pass(comp, raw, index, allowed, roi, tasks, cfg)
-    feats: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-    placed = [t for t in tasks if t[1] is not None]
-    out = {k: (anchors, rep) for k, anchors, rep in _search_pass(comp, raw, index, allowed, roi, placed, cfg, feats)}
-    weak = ("_near", "_gray")
-    redo = [(k, None, s) for k, w, s in tasks
-            if w is None or not out[k][0] or all(a.source.endswith(weak) for a in out[k][0])]
-    if redo:
-        whole = index.whole()
-        log.info("RAW index: %d frame(s) searched in the whole RAW (%d the audio cannot place, %d not found in "
-                 "the audio regions)", len(redo), sum(1 for t in tasks if t[1] is None),
-                 len(redo) - sum(1 for t in tasks if t[1] is None))
-        rank = lambda aa: 0 if not aa else (2 if not all(a.source.endswith(weak) for a in aa) else  # noqa: E731
-                                            (1 if any(a.source.endswith("_near") for a in aa) else 0.5))
-        for k, anchors, rep in _search_pass(comp, raw, whole, allowed, roi, redo, cfg, feats):
-            if k not in out or rank(anchors) > rank(out[k][0]):
-                out[k] = (anchors, rep)
-    return [(k, *out[k]) for k, _w, _s in tasks]
-
-
-def _search_pass(comp: Proxy, raw: Proxy, index: RawIndex, allowed: Callable[[int], np.ndarray],
-                 roi: tuple[int, int, int, int], tasks: list[tuple], cfg,
-                 feats: dict[int, tuple[np.ndarray, np.ndarray]] | None = None) -> list[tuple[int, list[Anchor], list]]:
-    """:func:`run_searches`' search of ``tasks`` [(k, window, source)] with one index; ``feats``: the frames' SIFT
-    features found by an earlier pass (reused; filled with the ones found here)."""
+    those -- the workers never hold a kd-tree (an every-frame index would need ~800 B per descriptor in each)."""
     workers = cfg.resolved_workers()
-    if not tasks:
-        return []
-    if index.flann_free:
-        feats = {} if feats is None else feats
-        todo = [t[0] for t in tasks if t[0] not in feats]
-        if todo:
-            got = parallel_map(_sift_worker, todo, workers, {"comp": comp, "cfg": cfg, "allowed": allowed, "roi": roi},
-                               cfg.seed, min_items=4, label="search features")
-            feats.update(zip(todo, got))
-        fs = [feats[t[0]] for t in tasks]
-        nn = index.neighbours([d for _p, d in fs] + [np.ascontiguousarray(d[:, _MIRROR_IDX]) for _p, d in fs])
-        n = len(fs)
-        tasks = [(k, w, s, {"cpts": fs[i][0], "cdesc": fs[i][1], "nn": nn[i], "nn_f": nn[n + i]})
-                 for i, (k, w, s) in enumerate(tasks)]
-    else:
-        index.ensure_built()
+    tasks: list[tuple] = [(int(k), audio_window(hints, k, comp.fps, raw.fps, cfg, raw.n), source) for k in frames]
     state = {"comp": comp, "raw": raw, "index": index, "cfg": cfg, "allowed": allowed, "roi": roi}
-    res = parallel_map(_search_worker, tasks, workers, state, cfg.seed, min_items=4)
-    return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
+    if not (index.flann_free and tasks):
+        index.ensure_built()
+        res = parallel_map(_search_worker, tasks, workers, state, cfg.seed, min_items=4)
+        return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in res]
+    feats = parallel_map(_sift_worker, [t[0] for t in tasks], workers,
+                         {"comp": comp, "cfg": cfg, "allowed": allowed, "roi": roi}, cfg.seed, min_items=4,
+                         label="search features")
+
+    def neighbours(part: list[int]) -> list[tuple[np.ndarray, np.ndarray]]:
+        return index.neighbours([feats[i][1] for i in part] +
+                                [np.ascontiguousarray(feats[i][1][:, _MIRROR_IDX]) for i in part])
+    # Task 9: the next part's neighbours on the GPU (a thread of this process) while the workers search the part
+    # before on the CPU -- each query's neighbours do not depend on the others searched with it, and every frame's
+    # search is seeded on its own, so the results are the same as in one part
+    n_parts = max(1, min(SEARCH_PARTS, len(tasks) // max(1, SEARCH_PART_MIN)))
+    size = -(-len(tasks) // n_parts)
+    parts = [list(range(p, min(p + size, len(tasks)))) for p in range(0, len(tasks), size)]
+    out: list = []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=1) as gpu:
+        nxt = gpu.submit(neighbours, parts[0])
+        for p, part in enumerate(parts):
+            nn = nxt.result()
+            if p + 1 < len(parts):
+                nxt = gpu.submit(neighbours, parts[p + 1])
+            m = len(part)
+            ptasks = [(tasks[i][0], tasks[i][1], tasks[i][2],
+                       {"cpts": feats[i][0], "cdesc": feats[i][1], "nn": nn[q], "nn_f": nn[m + q]})
+                      for q, i in enumerate(part)]
+            out.extend(parallel_map(_search_worker, ptasks, workers, state, cfg.seed, min_items=4,
+                                    label="search" if len(parts) == 1 else f"search {p + 1}/{len(parts)}"))
+    return [(k, [Anchor.from_dict(d) for d in ads], rep) for k, ads, rep in out]
 
 
 def sparse_search(comp: Proxy, raw: Proxy, layout: Layout | None, overlays: Any, index: RawIndex,

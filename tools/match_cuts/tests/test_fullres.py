@@ -266,3 +266,88 @@ def test_the_scorer_gives_the_numbers_it_gave_before_bit_for_bit():
         cases += 1
     assert cases >= 3
     sc.close()
+
+
+def test_the_recheck_in_several_gpu_processes_decides_exactly_as_in_one():
+    """Task 9: the uncertain frames scored in processes sharing the GPU (a run of frames each) give every frame the
+    same scores, so the same decisions, as one process."""
+    base = texture(5)
+    raws = {j: raw_frame(j, base) for j in range(0, 24)}
+    shown = [5, 7, 9, 11, 12, 14, 16, 18]
+    comp = {k: comp_of(raws[j], SIM) for k, j in enumerate(shown) if k != 6}     # frame 6 cannot be read
+    fm = make_fm(n=len(shown), raw=0, soft=(0, 0))
+    for k, j in enumerate(shown):
+        fm.raw[k] = fm.raw_lo[k] = fm.raw_hi[k] = j - 1 if k % 2 else j
+        fm.soft_lo[k], fm.soft_hi[k] = j - 1, j + 1 + (k % 3)
+    full = np.ones((COMP_H, COMP_W), bool)
+    band = full.copy()
+    band[300:340, :] = False
+    masks = {k: (band if k in (2, 5) else full) for k in range(len(shown))}
+    one, r1 = fullres.recheck(fm, Store(comp), Store(raws), lambda k: masks[k], (RAW_W, RAW_H), 24, int(Status.MATCH))
+    many, r3 = fullres.recheck(fm, Store(comp), Store(raws), lambda k: masks[k], (RAW_W, RAW_H), 24,
+                               int(Status.MATCH), workers=3)
+    assert r3.get("workers") == 3 and r1["frames"] == r3["frames"] == len(shown)
+    for col in ("raw", "raw_lo", "raw_hi", "soft_lo", "soft_hi", "low_margin"):
+        assert np.array_equal(getattr(one, col), getattr(many, col)), col
+    assert r1["rows"] == r3["rows"] and len(r1["rows"]) == len(shown) - 1
+
+
+def test_requests_computed_beforehand_in_gpu_processes_are_the_ones_computed_when_asked(synthetic_mini, tmp_path,
+                                                                                       monkeypatch):
+    """Task 9: the segmenter's full-resolution requests prefetched in processes sharing the GPU give exactly what
+    asking for each one then gives; and measure keeps the first start of each (k, j, flip), as before."""
+    from match_cuts import probe
+    comp = probe.probe(str(synthetic_mini["competitor"]), "competitor", tmp_path, decode=True)
+    raw = probe.probe(str(synthetic_mini["raw"]), "raw", tmp_path, decode=True)
+    wh = (float(raw.width), float(raw.height))
+    mask = np.ones((int(comp.height), int(comp.width)), bool)
+    base = Sim(float(comp.height) / float(raw.height), 0.0, 0.0, 0.0)
+    calls = [(k, [(j, base, False), (j + 1, base.translated(2.0, -1.0), False)], bool(k % 2)) for k, j in
+             zip(range(2, 18), range(5, 21))]
+    meas = [(k, j, base.translated(0.5 * (k % 3), 0.0), False) for k, j in zip(range(2, 18), range(5, 21))]
+    meas.append((4, 7, base.translated(9.0, 9.0), False))          # asked again with another start: the first decides
+    monkeypatch.setattr(fullres, "PREFETCH_MIN", 4)
+    one = fullres.SideScorer(comp, raw, lambda k: mask, wh, int(raw.nb_frames))
+    many = fullres.SideScorer(comp, raw, lambda k: mask, wh, int(raw.nb_frames), workers=2)
+    try:
+        many.prefetch(calls)
+        many.prefetch_measure(meas)
+        assert many._pool is not None and len(many._called) == len(calls)
+        for k, items, refine in calls:
+            a, b = one(k, items, refine), many(k, items, refine)
+            assert (a is None and b is None) or np.array_equal(a, b), (k, a, b)
+        for k, j, sim, flip in meas:
+            a, b = one.measure(k, j, sim, flip), many.measure(k, j, sim, flip)
+            assert (a is None) == (b is None)
+            if a is not None:
+                assert (a[0].s, a[0].theta_deg, a[0].tx, a[0].ty, a[1], a[2]) == \
+                       (b[0].s, b[0].theta_deg, b[0].tx, b[0].ty, b[1], b[2]), (k, j)
+        assert one.calls == many.calls
+    finally:
+        one.close()
+        many.close()
+
+
+def test_verifys_frames_measured_in_gpu_processes_are_the_ones_measured_here(synthetic_mini, tmp_path):
+    """Task 9: 9.9's per-frame measurement (as delivered, refined, the neighbours; a blend of two RAW frames too) in
+    processes sharing the GPU gives exactly what this process gives."""
+    from match_cuts import probe
+    comp = probe.probe(str(synthetic_mini["competitor"]), "competitor", tmp_path, decode=True)
+    raw = probe.probe(str(synthetic_mini["raw"]), "raw", tmp_path, decode=True)
+    wh = (float(raw.width), float(raw.height))
+    mask = np.ones((int(comp.height), int(comp.width)), bool)
+    base = Sim(float(comp.height) / float(raw.height), 0.0, 0.0, 0.0)
+    reqs = [("vframe", k, j, (0.25 if k % 4 == 0 else 0.0), base.translated(0.3 * (k % 3), 0.0), False)
+            for k, j in zip(range(1, 15), range(3, 17))]
+    side = fullres.SideScorer(comp, raw, lambda k: mask, wh, int(raw.nb_frames))
+    pool = fullres.GpuPool(2, comp, raw, wh, int(raw.nb_frames))
+    try:
+        got = pool.run(reqs, lambda k: mask)
+        for r, b in zip(reqs, got):
+            a = fullres._verify_frame(side.sc, side.comp.get, side.raw_get, mask, r[1], r[2], r[3], r[4], r[5])
+            assert (a is None) == (b is None)
+            if a is not None:
+                assert a[:3] == b[:3] and a[3] == b[3], (r, a, b)
+    finally:
+        pool.close()
+        side.close()

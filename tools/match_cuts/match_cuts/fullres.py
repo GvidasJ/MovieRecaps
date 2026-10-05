@@ -387,10 +387,117 @@ def uncertain_frames(fm: Any, match_status: int) -> list[int]:
     return sorted(out)
 
 
+def _candidate_scores(sc: "Scorer", k: int, comp_store: Any, raw_store: Any, mask: Any, sim: Sim, flip: bool,
+                      cands: Sequence[int], n_raw: int) -> dict[int, float] | None:
+    """:func:`recheck`'s full-resolution scores of competitor frame k's candidate RAW frames (each with its framing
+    refined), following a score still rising past the candidates' edge; None when the frame cannot be read."""
+    img = comp_store.get(k)
+    if img is None:
+        return None
+    prep = sc.comp(k, img, mask)
+    if prep is None:
+        return None
+    A = sc.inverse_map(sim, bool(flip))
+    z: dict[int, float] = {}
+
+    def try_j(j: int) -> None:
+        r = raw_store.get(j)
+        if r is None:
+            return
+        _p, zj = sc.refine(prep, sc.raw(j, r), A)
+        if np.isfinite(zj):
+            z[j] = zj
+    for j in cands:
+        try_j(j)
+    if not z:
+        return z
+    for step in (1, -1):                         # a score still rising at an edge: the best lies further on
+        for _ in range(EXTEND):
+            edge = max(z) if step > 0 else min(z)
+            if max(z, key=lambda j: z[j]) != edge or not 0 <= edge + step < n_raw:
+                break
+            n0 = len(z)
+            try_j(edge + step)
+            if len(z) == n0:
+                break
+    return z
+
+
+class _GivenFrames:
+    """Frames handed to a worker (a store with no video file behind it: the tests' synthetic frames)."""
+
+    def __init__(self, frames: dict[int, np.ndarray]):
+        self.frames = frames
+
+    def load(self, idx: Iterable[int]) -> None:
+        pass
+
+    def get(self, i: int) -> np.ndarray | None:
+        return self.frames.get(int(i))
+
+
+def _recheck_part(task: tuple) -> dict[int, dict[int, float] | None]:
+    """One process's part of the re-check (:func:`recheck`, ``workers``): its frames decoded and scored on the GPU,
+    the same computation as in the parent."""
+    comp_src, raw_src, raw_wh, n_raw, items, masks = task
+    comp_store = FrameStore(comp_src) if not isinstance(comp_src, dict) else _GivenFrames(comp_src)
+    raw_store = FrameStore(raw_src) if not isinstance(raw_src, dict) else _GivenFrames(raw_src)
+    comp_store.load(k for k, *_ in items)
+    raw_store.load(j for _k, js, *_ in items for j in range(js[0] - EXTEND, js[-1] + EXTEND + 1) if 0 <= j < n_raw)
+    sc = Scorer(raw_wh)
+    try:
+        return {int(k): _candidate_scores(sc, k, comp_store, raw_store, masks[mi], sim, flip, js, n_raw)
+                for k, js, sim, flip, mi in items}
+    finally:
+        sc.close()
+
+
+def _recheck_parallel(fm: Any, ks: list[int], cands: dict[int, list[int]], comp_store: Any, raw_store: Any,
+                      allowed: Any, raw_wh: tuple[float, float], n_raw: int, workers: int
+                      ) -> dict[int, dict[int, float] | None] | None:
+    """The candidates' scores of ``ks`` in ``workers`` processes sharing the GPU, each a run of consecutive frames
+    (decoded there); None when that cannot run (the caller then scores them itself: the same numbers)."""
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+    n = max(1, min(int(workers), len(ks)))
+    size = -(-len(ks) // n)
+    tasks = []
+    for p in range(0, len(ks), size):
+        part = ks[p:p + size]
+        masks: list[np.ndarray] = []
+        seen: dict[tuple, int] = {}
+        items = []
+        for k in part:
+            m = np.ascontiguousarray(np.asarray(allowed(k), bool))
+            mi = seen.setdefault((m.shape, m.tobytes()), len(masks))
+            if mi == len(masks):
+                masks.append(m)
+            items.append((int(k), list(cands[k]), fm.sim(k), bool(fm.flip[k]), mi))
+        if getattr(comp_store, "info", None) is not None and getattr(raw_store, "info", None) is not None:
+            srcs = (comp_store.info, raw_store.info)
+        else:                                       # given frames (no video file): handed over as they are
+            js = {j for _k, c, *_ in items for j in range(c[0] - EXTEND, c[-1] + EXTEND + 1)}
+            srcs = ({k: comp_store.get(k) for k in part if comp_store.get(k) is not None},
+                    {j: raw_store.get(j) for j in js if raw_store.get(j) is not None})
+        tasks.append((srcs[0], srcs[1], tuple(raw_wh), int(n_raw), items, masks))
+    try:
+        out: dict[int, dict[int, float] | None] = {}
+        with ProcessPoolExecutor(max_workers=len(tasks), mp_context=mp.get_context("spawn")) as ex:
+            for part in ex.map(_recheck_part, tasks):
+                out.update(part)
+        return out
+    except Exception as e:  # noqa: BLE001 - the parent scores them itself (the same numbers, more slowly)
+        log.warning("full-resolution re-check: the %d GPU processes failed (%s: %s); scoring in this process",
+                    len(tasks), type(e).__name__, e)
+        return None
+
+
 def recheck(fm: Any, comp_store: FrameStore, raw_store: FrameStore, allowed: Any, raw_wh: tuple[float, float],
-            n_raw: int, match_status: int, dlog: Any = None) -> tuple[Any, dict]:
+            n_raw: int, match_status: int, dlog: Any = None, workers: int = 0) -> tuple[Any, dict]:
     """A copy of ``fm`` with the slightly uncertain frames re-checked at full resolution (module docstring), and a
-    summary {frames, decided, narrowed, kept, outside, seconds, rows}."""
+    summary {frames, decided, narrowed, kept, outside, seconds, rows}. ``workers`` > 1: the frames are scored in that
+    many processes sharing the GPU (Task 9: one process leaves the GPU mostly idle); each frame's scores, and so every
+    decision, are the same."""
     t0 = time.time()
     fm = fm.copy()
     ks = uncertain_frames(fm, match_status)
@@ -407,84 +514,66 @@ def recheck(fm: Any, comp_store: FrameStore, raw_store: FrameStore, allowed: Any
         js = [j for j in range(lo, hi + 1) if 0 <= j < n_raw]
         js = sorted(js, key=lambda j: (abs(j - c), j))[:MAX_CANDS]
         cands[k] = sorted(js)
-    comp_store.load(ks)
-    raw_store.load(j for js in cands.values() for j in range(js[0] - EXTEND, js[-1] + EXTEND + 1) if 0 <= j < n_raw)
-    sc = Scorer(raw_wh)
-    try:
-        for k in ks:
-            img = comp_store.get(k)
-            if img is None:
-                continue
-            prep = sc.comp(k, img, allowed(k))
-            if prep is None:
-                continue
-            A = sc.inverse_map(fm.sim(k), bool(fm.flip[k]))
-            z: dict[int, float] = {}
-
-            def try_j(j: int) -> None:
-                r = raw_store.get(j)
-                if r is None:
-                    return
-                _p, zj = sc.refine(prep, sc.raw(j, r), A)
-                if np.isfinite(zj):
-                    z[j] = zj
-            for j in cands[k]:
-                try_j(j)
-            if not z:
-                continue
-            for step in (1, -1):                 # a score still rising at an edge: the best lies further on
-                for _ in range(EXTEND):
-                    edge = max(z) if step > 0 else min(z)
-                    if max(z, key=lambda j: z[j]) != edge or not 0 <= edge + step < n_raw:
-                        break
-                    n0 = len(z)
-                    try_j(edge + step)
-                    if len(z) == n0:
-                        break
-            best = max(z, key=lambda j: (z[j], -abs(j - int(fm.raw[k]))))
-            near = sorted(j for j in z if z[j] >= z[best] - DECIDE)
-            old = (int(fm.soft_lo[k]), int(fm.soft_hi[k]))
-            lo, hi = max(old[0], near[0]), min(old[1], near[-1])
-            row = {"k": int(k), "soft": list(old), "full": {str(j): round(v, 5) for j, v in z.items()},
-                   "best": int(best)}
-            inside = [j for j in z if old[0] <= j <= old[1]]
-            lead = z[best] - max((z[j] for j in inside), default=float("-inf"))
-            if not (old[0] <= best <= old[1]) and lead > OVERRULE and z[best] >= OVERRULE_MIN:
-                # full resolution is clearly sure where the proxy is not (a frame inside a fast pan): it decides
-                near_b = sorted(j for j in z if z[j] >= z[best] - DECIDE)
-                fm.soft_lo[k], fm.soft_hi[k] = near_b[0], near_b[-1]
-                fm.raw[k] = best
-                fm.raw_lo[k] = fm.raw_hi[k] = best
+    scores = None
+    if int(workers) > 1 and len(ks) >= 2 * int(workers):
+        scores = _recheck_parallel(fm, ks, cands, comp_store, raw_store, allowed, raw_wh, n_raw, int(workers))
+        res["workers"] = int(workers) if scores is not None else 1
+    if scores is None:
+        comp_store.load(ks)
+        raw_store.load(j for js in cands.values() for j in range(js[0] - EXTEND, js[-1] + EXTEND + 1)
+                       if 0 <= j < n_raw)
+        sc = Scorer(raw_wh)
+        try:
+            scores = {k: _candidate_scores(sc, k, comp_store, raw_store, allowed(k), fm.sim(k), bool(fm.flip[k]),
+                                           cands[k], n_raw) for k in ks}
+        finally:
+            sc.close()
+    for k in ks:
+        z = scores.get(k)
+        if not z:
+            continue
+        best = max(z, key=lambda j: (z[j], -abs(j - int(fm.raw[k]))))
+        near = sorted(j for j in z if z[j] >= z[best] - DECIDE)
+        old = (int(fm.soft_lo[k]), int(fm.soft_hi[k]))
+        lo, hi = max(old[0], near[0]), min(old[1], near[-1])
+        row = {"k": int(k), "soft": list(old), "full": {str(j): round(v, 5) for j, v in z.items()},
+               "best": int(best)}
+        inside = [j for j in z if old[0] <= j <= old[1]]
+        lead = z[best] - max((z[j] for j in inside), default=float("-inf"))
+        if not (old[0] <= best <= old[1]) and lead > OVERRULE and z[best] >= OVERRULE_MIN:
+            # full resolution is clearly sure where the proxy is not (a frame inside a fast pan): it decides
+            near_b = sorted(j for j in z if z[j] >= z[best] - DECIDE)
+            fm.soft_lo[k], fm.soft_hi[k] = near_b[0], near_b[-1]
+            fm.raw[k] = best
+            fm.raw_lo[k] = fm.raw_hi[k] = best
+            fm.low_margin[k] = False
+            res["overruled"] = res.get("overruled", 0) + 1
+            row["result"] = f"full resolution chose RAW {best} (by {lead:.4f}) outside {old[0]}-{old[1]}"
+        elif not (old[0] <= best <= old[1]):
+            res["outside"] += 1
+            row["result"] = "outside the soft range: kept"
+        elif lo > hi or (lo, hi) == old:
+            res["kept"] += 1
+            row["result"] = "within noise: kept"
+        else:
+            res["narrowed"] += 1
+            if lo == hi or (lo >= int(fm.raw_lo[k]) and hi <= int(fm.raw_hi[k])):
+                res["decided"] += 1
                 fm.low_margin[k] = False
-                res["overruled"] = res.get("overruled", 0) + 1
-                row["result"] = f"full resolution chose RAW {best} (by {lead:.4f}) outside {old[0]}-{old[1]}"
-            elif not (old[0] <= best <= old[1]):
-                res["outside"] += 1
-                row["result"] = "outside the soft range: kept"
-            elif lo > hi or (lo, hi) == old:
-                res["kept"] += 1
-                row["result"] = "within noise: kept"
-            else:
-                res["narrowed"] += 1
-                if lo == hi or (lo >= int(fm.raw_lo[k]) and hi <= int(fm.raw_hi[k])):
-                    res["decided"] += 1
-                    fm.low_margin[k] = False
-                fm.soft_lo[k], fm.soft_hi[k] = lo, hi
-                if int(fm.raw[k]) < lo or int(fm.raw[k]) > hi:
-                    fm.raw[k] = best
-                # refine's measured range stays inside the narrowed one: what full resolution ruled out is no longer
-                # "measured" (else the segmenter charges every line for leaving a frame it may not show)
-                m_lo, m_hi = max(int(fm.raw_lo[k]), lo), min(int(fm.raw_hi[k]), hi)
-                if m_lo > m_hi or not m_lo <= int(fm.raw[k]) <= m_hi:
-                    m_lo = m_hi = int(fm.raw[k])
-                fm.raw_lo[k], fm.raw_hi[k] = m_lo, m_hi
-                row["result"] = f"soft range {old[0]}-{old[1]} -> {lo}-{hi}"
-                row["measured"] = [m_lo, m_hi]
-            rows.append(row)
-            if dlog is not None:
-                dlog.record("fullres", "recheck", **row)
-    finally:
-        sc.close()
+            fm.soft_lo[k], fm.soft_hi[k] = lo, hi
+            if int(fm.raw[k]) < lo or int(fm.raw[k]) > hi:
+                fm.raw[k] = best
+            # refine's measured range stays inside the narrowed one: what full resolution ruled out is no longer
+            # "measured" (else the segmenter charges every line for leaving a frame it may not show)
+            m_lo, m_hi = max(int(fm.raw_lo[k]), lo), min(int(fm.raw_hi[k]), hi)
+            if m_lo > m_hi or not m_lo <= int(fm.raw[k]) <= m_hi:
+                m_lo = m_hi = int(fm.raw[k])
+            fm.raw_lo[k], fm.raw_hi[k] = m_lo, m_hi
+            row["result"] = f"soft range {old[0]}-{old[1]} -> {lo}-{hi}"
+            row["measured"] = [m_lo, m_hi]
+        rows.append(row)
+        if dlog is not None:
+            dlog.record("fullres", "recheck", **row)
     res["seconds"] = round(time.time() - t0, 1)
     return fm, res
 
@@ -497,7 +586,8 @@ class SideScorer:
     the wrong RAW frame (the thorough Deadpool 271: RAW 2498 0.830 against 2509 0.823 as given, 0.841 against 0.993
     refined; 412 alike). ``(k, items, refine) -> scores``, or None for a frame it cannot read."""
 
-    def __init__(self, comp_info: Any, raw_info: Any, allowed: Any, raw_wh: tuple[float, float], n_raw: int):
+    def __init__(self, comp_info: Any, raw_info: Any, allowed: Any, raw_wh: tuple[float, float], n_raw: int,
+                 workers: int = 0):
         self.comp = LazyFrames(comp_info, keep=600)
         self.raw = LazyFrames(raw_info, keep=600)
         self.allowed = allowed
@@ -505,8 +595,22 @@ class SideScorer:
         self.n_raw = int(n_raw)
         self.calls = 0
         self._measured: dict[tuple[int, int, bool], tuple[Sim, float, float] | None] = {}
+        # Task 9: requests the segmenter will make, computed beforehand in ``workers`` processes sharing the GPU
+        self.workers = int(workers)
+        self._spec = (comp_info, raw_info, tuple(raw_wh), int(n_raw))
+        self._pool: Any = None
+        self._called: dict[tuple, np.ndarray | None] = {}
 
     def __call__(self, k: int, items: Sequence[tuple[int, Sim, bool]], refine: bool = False) -> np.ndarray | None:
+        key = _call_key(k, items, refine)
+        if key in self._called:                      # computed beforehand (prefetch): the same numbers
+            out = self._called.pop(key)
+            if out is not None:
+                self.calls += 1
+            return out
+        return self._call_now(k, items, refine)
+
+    def _call_now(self, k: int, items: Sequence[tuple[int, Sim, bool]], refine: bool = False) -> np.ndarray | None:
         img = self.comp.get(int(k))
         if img is None:
             return None
@@ -535,6 +639,11 @@ class SideScorer:
         key = (int(k), int(j), bool(flip))
         if key in self._measured:
             return self._measured[key]
+        out = self._measure_now(k, j, sim, flip)
+        self._measured[key] = out
+        return out
+
+    def _measure_now(self, k: int, j: int, sim: Sim, flip: bool) -> tuple[Sim, float, float] | None:
         out = None
         img = self.comp.get(int(k))
         r = self.raw.get(int(j)) if 0 <= int(j) < self.n_raw else None
@@ -546,13 +655,129 @@ class SideScorer:
                 p, z, z0 = self.sc.refine(prep, rp, A, start=True)     # z0: the score at sim (refine's start)
                 if np.isfinite(z):
                     out = (self.sc.refined_sim(sim, bool(flip), p, prep[2]), float(z), float(z0))
-        self._measured[key] = out
         return out
 
+    def raw_get(self, j: int) -> np.ndarray | None:
+        """RAW frame j (None outside the RAW)."""
+        return self.raw.get(int(j)) if 0 <= int(j) < self.n_raw else None
+
+    def measured(self, k: int, j: int, flip: bool) -> bool:
+        """Whether (k, j, flip) is measured already (``measure`` will not read a frame for it)."""
+        return (int(k), int(j), bool(flip)) in self._measured
+
+    # -- requests computed beforehand in processes sharing the GPU (Task 9) --------------------------------------
+    def prefetch(self, calls: Sequence[tuple[int, Sequence[tuple[int, Sim, bool]], bool]]) -> None:
+        """The scores of these (k, items, refine) requests -- ones the segmenter is about to make -- computed in the
+        GPU processes; each later call with the same request takes its result (the same numbers as computing it
+        then). Does nothing without ``workers`` or for fewer than PREFETCH_MIN requests."""
+        todo, seen = [], set()
+        for k, items, refine in calls:
+            key = _call_key(k, items, refine)
+            if key not in self._called and key not in seen:
+                seen.add(key)
+                todo.append((key, ("call", int(k), [(int(j), s, bool(f)) for j, s, f in items], bool(refine))))
+        for (key, _r), out in zip(todo, self._run([r for _key, r in todo]) or []):
+            self._called[key] = out
+
+    def prefetch_measure(self, reqs: Sequence[tuple[int, int, Sim, bool]]) -> None:
+        """:meth:`measure` of these (k, j, sim, flip) requests, in the order the segmenter will ask, computed in the
+        GPU processes: as ``measure`` keeps the first start of each (k, j, flip), so does this -- one measured
+        already, or asked again later in the list, is left out."""
+        todo, seen = [], set()
+        for k, j, sim, flip in reqs:
+            key = (int(k), int(j), bool(flip))
+            if key not in self._measured and key not in seen:
+                seen.add(key)
+                todo.append((key, ("measure", int(k), int(j), sim, bool(flip))))
+        for (key, _r), out in zip(todo, self._run([r for _key, r in todo]) or []):
+            self._measured[key] = out
+
+    def _run(self, reqs: list[tuple]) -> list | None:
+        if self.workers < 2 or len(reqs) < PREFETCH_MIN:
+            return None
+        try:
+            if self._pool is None:
+                self._pool = GpuPool(self.workers, *self._spec)
+            return self._pool.run(reqs, self.allowed)
+        except Exception as e:  # noqa: BLE001 - computed when asked then (the same numbers, more slowly)
+            log.warning("full resolution: the %d GPU processes failed (%s: %s); computing in this process",
+                        self.workers, type(e).__name__, e)
+            self.workers = 0
+            self.close_pool()
+            return None
+
+    def close_pool(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
+
     def close(self) -> None:
+        self.close_pool()
+        self._called.clear()
         self.sc.close()
         self.comp.close()
         self.raw.close()
+
+
+PREFETCH_MIN = 12          # requests in one batch before the GPU processes are worth starting / asking
+
+
+def _call_key(k: int, items: Sequence[tuple[int, Sim, bool]], refine: bool) -> tuple:
+    return (int(k), bool(refine), tuple((int(j), float(s.s), float(s.theta_deg), float(s.tx), float(s.ty), bool(f))
+                                        for j, s, f in items))
+
+
+_SIDE: dict = {}
+
+
+def _side_init(comp_info: Any, raw_info: Any, raw_wh: tuple[float, float], n_raw: int) -> None:
+    """A GPU process's own SideScorer (decoders, scorer, CUDA), kept for every batch it is given."""
+    _SIDE["sc"] = SideScorer(comp_info, raw_info, None, raw_wh, n_raw)
+
+
+def _side_run(task: tuple) -> list:
+    """A GPU process's batch: [("call", k, items, refine) | ("measure", k, j, sim, flip) | ("vframe", k, j, f, sim,
+    flip)], with the frames' masks."""
+    reqs, masks = task
+    side = _SIDE["sc"]
+    side.allowed = masks.__getitem__
+    out = []
+    for r in reqs:
+        if r[0] == "call":
+            out.append(side._call_now(r[1], r[2], r[3]))
+        elif r[0] == "measure":
+            out.append(side._measure_now(r[1], r[2], r[3], r[4]))
+        else:
+            out.append(_verify_frame(side.sc, side.comp.get, side.raw_get, masks[int(r[1])], r[1], r[2], r[3],
+                                     r[4], r[5]))
+    return out
+
+
+class GpuPool:
+    """Processes sharing the GPU, each with its own SideScorer for a whole stage (Task 9): one process leaves the GPU
+    mostly idle while it decodes, launches small kernels and waits on them. A batch is cut in runs of consecutive
+    requests (one per process) and comes back in order."""
+
+    def __init__(self, workers: int, comp_info: Any, raw_info: Any, raw_wh: tuple[float, float], n_raw: int):
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        self.n = max(1, int(workers))
+        self.ex = ProcessPoolExecutor(max_workers=self.n, mp_context=mp.get_context("spawn"), initializer=_side_init,
+                                      initargs=(comp_info, raw_info, tuple(raw_wh), int(n_raw)))
+
+    def run(self, reqs: list[tuple], allowed: Any) -> list:
+        size = -(-len(reqs) // self.n)
+        tasks = []
+        for p in range(0, len(reqs), size):
+            part = reqs[p:p + size]
+            tasks.append((part, {int(r[1]): np.asarray(allowed(int(r[1])), bool) for r in part}))
+        out: list = []
+        for res in self.ex.map(_side_run, tasks):
+            out.extend(res)
+        return out
+
+    def close(self) -> None:
+        self.ex.shutdown(wait=True, cancel_futures=True)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -636,9 +861,56 @@ def cadence(k: int, j: int, jb: int, shown: dict[int, tuple[int, float, float]],
     return ""
 
 
+def _verify_frame(sc: "Scorer", comp_get: Any, raw_get: Any, mask: Any, k: int, j: int, f: float, sim: Sim,
+                  flip: bool) -> tuple[float, float, float, dict[int, float]] | None:
+    """:func:`verify`'s measurement of competitor frame k as delivered (RAW frame j, or the mix of j and j + 1 by f):
+    (the ZNCC at the segment's framing, the refined ZNCC, how far the refinement moves the framing, the neighbouring
+    RAW frames' ZNCC at the refined framing); None when a frame cannot be read."""
+    img = comp_get(k)
+    r = raw_get(j)
+    if img is None or r is None:
+        return None
+    prep = sc.comp(k, img, mask)
+    if prep is None:
+        return None
+    A = sc.inverse_map(sim, bool(flip))
+    if f > 0.0 and raw_get(j + 1) is not None:
+        mix = (1.0 - f) * r.astype(np.float32) + f * raw_get(j + 1).astype(np.float32)
+        rr = sc.raw(-(j + 1) * 1000 - int(round(f * 999)), np.clip(np.rint(mix), 0, 255).astype(np.uint8))
+    else:
+        rr = sc.raw(j, r)
+    p, z_ref, z_model = sc.refine(prep, rr, A, start=True)      # z_model: the score at A (refine's start)
+    shift = sc.shift_px(p, prep[2])
+    z_nb = {}
+    for jj in (j - 1, j + 1):
+        rj = raw_get(jj)
+        if rj is not None and f == 0.0:
+            z_nb[jj] = sc.score(prep, sc.raw(jj, rj), A, p)
+    return z_model, z_ref, shift, z_nb
+
+
+def _verify_parallel(shown: dict, comp_info: Any, raw_info: Any, allowed: Any, raw_wh: tuple[float, float],
+                     n_raw: int, workers: int) -> dict | None:
+    """:func:`_verify_frame` of every shown frame in ``workers`` processes sharing the GPU; None when they fail (the
+    caller then measures in this process: the same numbers)."""
+    pool = None
+    try:
+        pool = GpuPool(workers, comp_info, raw_info, raw_wh, n_raw)
+        ks = list(shown)
+        res = pool.run([("vframe", int(k), int(shown[k][1]), float(shown[k][2]), shown[k][3],
+                         bool(shown[k][0].flip_h)) for k in ks], allowed)
+        return dict(zip(ks, res))
+    except Exception as e:  # noqa: BLE001
+        log.warning("9.9: the %d GPU processes failed (%s: %s); measuring in this process", workers, type(e).__name__, e)
+        return None
+    finally:
+        if pool is not None:
+            pool.close()
+
+
 def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_store: FrameStore, allowed: Any,
            raw_wh: tuple[float, float], comp_fps: Fraction, raw_fps: Fraction, n_raw: int,
-           pair_label: np.ndarray | None = None) -> dict:
+           pair_label: np.ndarray | None = None, workers: int = 0) -> dict:
     """Every frame each RAW segment shows and every cut between two RAW segments, at full resolution (module
     docstring). ``pair_label``: refine's competitor pairs (k, k + 1): 1 the same picture, 2 / 3 it moves on. A
     neighbouring RAW frame fitting better is EXPLAINED only by the repeat cadence -- one constant-speed clip cannot
@@ -646,7 +918,8 @@ def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_sto
     steps between them (the better RAW frame is the one the edit shows on the other frame), or the edit shows one
     RAW frame on two frames where the competitor moves on (the better RAW frame is the next one in the direction of
     play); a cut is explained when the competitor repeats a picture across it. Every other better-fitting neighbour
-    is listed (beyond VERIFY_FAIL a failure). Returns {status, summary, failures, frames, cuts, explained, rows}."""
+    is listed (beyond VERIFY_FAIL a failure). ``workers`` > 1: the frames are scored in that many processes sharing
+    the GPU, with the same numbers (Task 9). Returns {status, summary, failures, frames, cuts, explained, rows}."""
     from .verify import seg_shown, seg_sim, single_raw_segments
     t0 = time.time()
     seg_at = single_raw_segments(segments, int(n_comp))
@@ -674,8 +947,6 @@ def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_sto
     for k, (_s, j, f, _sim) in shown.items():
         need.update(x for x in (j - 1, j, j + 1, j + 2 if f > 0 else j) if 0 <= x < n_raw)
     need.update(j for j, _ in other.values() if 0 <= j < n_raw)
-    comp_store.load(shown)
-    raw_store.load(need)
     sc = Scorer(raw_wh)
     rows: list[dict] = []
     scores, shifts = [], []
@@ -683,27 +954,22 @@ def verify(segments: Sequence[Any], n_comp: int, comp_store: FrameStore, raw_sto
     pl = np.asarray(pair_label if pair_label is not None else np.zeros(0), dtype=np.int64)
     plain = {k: (j, f, float(getattr(s, "speed", 1.0) or 1.0)) for k, (s, j, f, _sim) in shown.items()}
     try:
+        got = None
+        if int(workers) > 1 and len(shown) >= PREFETCH_MIN and getattr(comp_store, "info", None) is not None \
+                and getattr(raw_store, "info", None) is not None:
+            got = _verify_parallel(shown, comp_store.info, raw_store.info, allowed, raw_wh, n_raw, int(workers))
+        if got is None:
+            comp_store.load(shown)
+            raw_store.load(need)
+            got = {k: _verify_frame(sc, comp_store.get, raw_store.get, allowed(k), k, j, f, sim, bool(s.flip_h))
+                   for k, (s, j, f, sim) in shown.items()}
+        else:                                      # the cuts' frames only (each frame was scored in a GPU process)
+            comp_store.load({k for c in cuts for k in (c - 1, c)})
+            raw_store.load({shown[k][1] for c in cuts for k in (c - 1, c)} | {j for j, _ in other.values()})
         for k, (s, j, f, sim) in shown.items():
-            img = comp_store.get(k)
-            r = raw_store.get(j)
-            if img is None or r is None:
+            if got.get(k) is None:
                 continue
-            prep = sc.comp(k, img, allowed(k))
-            if prep is None:
-                continue
-            A = sc.inverse_map(sim, bool(s.flip_h))
-            if f > 0.0 and raw_store.get(j + 1) is not None:
-                mix = (1.0 - f) * r.astype(np.float32) + f * raw_store.get(j + 1).astype(np.float32)
-                rr = sc.raw(-(j + 1) * 1000 - int(round(f * 999)), np.clip(np.rint(mix), 0, 255).astype(np.uint8))
-            else:
-                rr = sc.raw(j, r)
-            p, z_ref, z_model = sc.refine(prep, rr, A, start=True)      # z_model: the score at A (refine's start)
-            shift = sc.shift_px(p, prep[2])
-            z_nb = {}
-            for jj in (j - 1, j + 1):
-                rj = raw_store.get(jj)
-                if rj is not None and f == 0.0:
-                    z_nb[jj] = sc.score(prep, sc.raw(jj, rj), A, p)
+            z_model, z_ref, shift, z_nb = got[k]
             row = {"k": int(k), "segment": int(s.id), "raw": int(j), "zncc": round(z_model, 5),
                    "zncc_refined": round(z_ref, 5), "framing_px": round(shift, 2),
                    "neighbours": {str(a): round(b, 5) for a, b in z_nb.items()}}

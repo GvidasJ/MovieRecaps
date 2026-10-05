@@ -534,11 +534,8 @@ def install_stub_world(monkeypatch, calls: dict):
         source: str
 
     class RawIndex:
-        regions = None                              # the whole RAW (the stub world has no audio regions)
-        frames = ()
-
         @staticmethod
-        def build(raw, cfg, cache, regions=None):
+        def build(raw, cfg, cache):
             calls["index"] = calls.get("index", 0) + 1
             return RawIndex()
 

@@ -929,72 +929,20 @@ def test_a_gpu_searched_index_does_not_shrink_the_pool_for_trees_it_never_loads(
     assert per_tree > 0 and idx.flann_free
 
 
-# ---------------------------------------------------------------------------------------------------------------------
-# Task 9: the RAW index of the audio regions -- where the audio places the competitor, the whole RAW only when needed
-# ---------------------------------------------------------------------------------------------------------------------
-
-def _scene_hints(scene, ks):
-    """Confident audio hints placing competitor frames ``ks`` on shot 0's line (seg 1 / seg 2), as a competitor whose
-    sound runs on under a flash of another shot (k 40) does."""
-    truth = scene["truth"]
-    rf = float(RAW_FPS)
-    line = {k: (truth[k]["raw"] if truth[k].get("seg") in (1, 2) else truth[39]["raw"] + (k - 39)) for k in ks}
-    comp_t = np.array([k / float(COMP_FPS) for k in ks])
-    raw_t = np.array([(line[k] + 0.5) / rf for k in ks])
-    n = len(ks)
-    return AudioHints(comp_t, raw_t, np.ones(n), np.full(n, 5.0, np.float32), np.full(n, 10.0, np.float32),
-                      np.full(n, 0.9, np.float32), 1.0, 0.25)
-
-
-def test_the_index_of_the_audio_regions_holds_the_whole_indexs_rows(scene, built_gpu):
-    idx_all, cfg, cache = built_gpu["index"], built_gpu["cfg"], built_gpu["cache"]
-    reg = vm.RawIndex.build(scene["raw"], cfg, cache, regions=[(0, 70), (150, 170)])
-    assert reg.regions == [(0, 70), (150, 170)] and reg.key != idx_all.key and reg.nfeat
-    assert list(reg.frames) == list(range(0, 70)) + list(range(150, 170))
-    for j in (0, 33, 69, 150, 169):                  # each frame's features are the whole index's
-        a, b = reg.frame_features(j), idx_all.frame_features(j)
-        assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
-    # nearly the whole RAW (90 %): the whole index itself
-    assert vm.RawIndex.build(scene["raw"], cfg, cache, regions=[(0, 230)]).regions is None
-    # the votes are not smoothed across the gap between two regions: frame 69 (the end of one) and frame 150 (the
-    # start of the next) sit side by side in the index, but frame 69's own features do not vote for frame 150
-    q = np.ascontiguousarray(idx_all.desc[idx_all.offsets[69]:idx_all.offsets[70]])
-    sm = reg.votes(q)
-    p69, p150 = int(np.searchsorted(reg.frames, 69)), int(np.searchsorted(reg.frames, 150))
-    assert p150 == p69 + 1 and sm[p69] > 0 and sm[p150] < 0.1 * sm[p69], (sm[p69], sm[p150])
-    pk = reg.query(q, 5)
-    assert pk and pk[0][0] in (68, 69)
-
-
-def test_frames_are_searched_in_the_audio_regions_and_in_the_whole_raw_only_when_needed(scene, built_gpu):
-    cfg, cache = built_gpu["cfg"], built_gpu["cache"]
-    comp, raw, truth = scene["comp"], scene["raw"], scene["truth"]
+def test_searching_in_parts_while_the_gpu_finds_the_next_parts_neighbours_gives_the_same_anchors(scene, built_gpu,
+                                                                                                  monkeypatch):
+    """Task 9: the frames searched in parts -- the GPU finding a part's neighbours while the workers search the part
+    before -- give exactly the anchors (and the rejected candidates) of one part."""
+    idx, cfg = built_gpu["index"], built_gpu["cfg"]
+    comp, raw = scene["comp"], scene["raw"]
     am = _allowed(scene, cfg)
     roi = vm.box_roi(scene["layout"], comp)
-    hints = _scene_hints(scene, list(range(0, 50)))
-    built = []
-
-    def whole():
-        built.append(1)
-        return vm.RawIndex.build(raw, cfg, cache)
-    # placed and in the regions: the whole RAW is never built
-    reg = vm.RawIndex.build(raw, cfg, cache, regions=[(0, 70)])
-    reg.whole_fn = whole
-    got = {k: a for k, a, _r in vm.run_searches(comp, raw, reg, am, roi, hints, [3, 33], cfg)}
-    assert not built and all(got[k] and got[k][0].raw == truth[k]["raw"] for k in (3, 33))
-    # k 40: placed by its sound, but its picture is shot 3's (outside the regions); k 64: placed, its picture outside
-    # the regions; k 100: no sound places it -- each found in the whole RAW, built once
-    reg = vm.RawIndex.build(raw, cfg, cache, regions=[(0, 70)])
-    reg.whole_fn = whole
-    assert vm.audio_window(hints, 100, comp.fps, raw.fps, cfg, raw.n) is None
-    got = {k: a for k, a, _r in vm.run_searches(comp, raw, reg, am, roi, hints, [3, 40, 64, 100], cfg)}
-    assert built == [1]
-    for k in (3, 40, 64, 100):
-        assert got[k] and abs(got[k][0].raw - truth[k]["raw"]) <= 1, (k, got[k][:1], truth[k])
-    assert got[64][0].flip and got[40][0].raw >= 3 * SHOT_LEN
-    # the same anchors as the search of the whole RAW finds for them
-    full = {k: a for k, a, _r in vm.run_searches(comp, raw, built_gpu["index"], am, roi, hints, [3, 40, 64, 100], cfg)}
-    assert [(a.raw, a.flip) for k in (3, 40, 64, 100) for a in got[k][:1]] == \
-           [(a.raw, a.flip) for k in (3, 40, 64, 100) for a in full[k][:1]]
-    reg.close_gpu()
+    frames = list(range(0, comp.n, 4))
+    monkeypatch.setattr(vm, "SEARCH_PART_MIN", 10 ** 9)
+    one = vm.run_searches(comp, raw, idx, am, roi, None, frames, cfg)
+    monkeypatch.setattr(vm, "SEARCH_PART_MIN", 5)
+    parts = vm.run_searches(comp, raw, idx, am, roi, None, frames, cfg)
+    assert len(frames) // 5 >= 3                                   # it did run in several parts
+    assert [(k, [a.to_dict() for a in aa], rep) for k, aa, rep in one] == \
+           [(k, [a.to_dict() for a in aa], rep) for k, aa, rep in parts]
     vm.shutdown_workers()

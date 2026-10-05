@@ -1929,14 +1929,20 @@ class _Builder:
             return F.measured(k) or F.sim(k)
 
         js = {k: (int(self.shown(seg, k)) if has else int(F.raw[k])) for k in todo}
+        if hasattr(self.full, "prefetch_measure"):      # Task 9: measured beforehand in the GPU processes
+            self.full.prefetch_measure([(k, js[k], start(k), seg.flip) for k in todo
+                                        if js[k] >= 0 and start(k) is not None])
         new = dict(have)
         measured = added = 0
         for c0 in range(0, len(todo), FULL_CHUNK):
             chunk = todo[c0:c0 + FULL_CHUNK]
-            self.full.comp.prefetch(chunk[0], chunk[-1] + 1)
-            jv = [js[k] for k in chunk if js[k] >= 0]
-            if jv:
-                self.full.raw.prefetch(min(jv), max(jv) + 1)
+            done = hasattr(self.full, "measured") and all(self.full.measured(k, js[k], seg.flip)
+                                                          for k in chunk if js[k] >= 0)
+            if not done:                                   # (frames read here only for what is left to measure)
+                self.full.comp.prefetch(chunk[0], chunk[-1] + 1)
+                jv = [js[k] for k in chunk if js[k] >= 0]
+                if jv:
+                    self.full.raw.prefetch(min(jv), max(jv) + 1)
             for k in chunk:
                 s0, j = start(k), js[k]
                 if s0 is None or j < 0:
@@ -3884,6 +3890,10 @@ class _Builder:
         pi, pj, pw = [], [], []
         best_now = 0.0
         scored: dict[tuple[int, int], float] = {}
+        if hasattr(self.full, "prefetch"):              # Task 9: scored beforehand in the GPU processes
+            self.full.prefetch([(int(k), [(j, self.sim_at(S, int(k)), S.flip)
+                                          for j in range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1)], True)
+                                for i, k in enumerate(ks) if int(max(j_lo[i], j_hi[i])) > int(min(j_lo[i], j_hi[i]))])
         for i, k in enumerate(ks):
             cands = list(range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1))
             if len(cands) < 2:
