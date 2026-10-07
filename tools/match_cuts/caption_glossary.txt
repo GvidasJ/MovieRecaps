@@ -8,3 +8,4 @@ Toby -> Tobey	# video4
 banknote-forging -> banknote forging	# video1
 Stationery's -> Stacey has	# video1
 color everything's -> and everything	# video5
+cross-eyed -> cross eyed	# video017-fixed

@@ -165,6 +165,69 @@ def test_the_words_the_user_changed_between_unchanged_words():
     assert ch == []
 
 
+def test_the_tools_framing_is_read_in_its_source_size_as_premiere_shows_it(tmp_path):
+    """Premiere reads a clip's Basic Motion <center> in units of its SOURCE frame size (export_xml_edl.premiere_center).
+    video017 (a 1280x720 RAW in the 1080x1920 sequence): learned.json said every clip had moved -10.2 px, where the
+    user had moved none -- the tool's offset was taken in the sequence's width."""
+    cx = -0.0508428
+    xml = write_edit_xml(tmp_path / "1_edit.xml", [(0.0, 1.0, 10.0, cx), (1.0, 2.0, 20.0, cx), (2.0, 3.0, 30.0, 0.1)])
+    full = ('<file id="file-raw"><name>raw.mp4</name><media><video><samplecharacteristics><width>1280</width>'
+            "<height>720</height></samplecharacteristics></video></media></file>")
+    t = xml.read_text(encoding="utf-8")
+    t = t.replace('<clipitem id="v1"><name>S01 raw.mp4</name>', '<clipitem id="v1"><name>S01 raw.mp4</name>' + full, 1)
+    t = t.replace('<clipitem id="v2"><name>S02 raw.mp4</name>',      # later clips only name the file
+                  '<clipitem id="v2"><name>S02 raw.mp4</name><file id="file-raw"/>', 1)
+    xml.write_text(t, encoding="utf-8")
+    assert L.source_widths(xml) == {"v1": 1280.0, "v2": 1280.0}
+    pic, _snd, _fps, width = L.tool_clips(xml)
+    assert width == 1080
+    assert [c.dx for c in pic] == [pytest.approx(cx * 1280), pytest.approx(cx * 1280),
+                                   pytest.approx(0.1 * 1080)]           # no size known at all: the sequence's width
+    assert L.tool_clips(xml, raw_width=1280.0)[0][2].dx == pytest.approx(0.1 * 1280)   # else the run's RAW width
+    # the user's picture where the tool put it (Position 474.92 px = 0.439742 of the 1080 px frame): nothing moved
+    user = [L.Clip(c.t0, c.t1, c.r0, c.r1, (0.439742 - 0.5) * 1080 if k < 2 else c.dx, c.scale)
+            for k, c in enumerate(pic)]
+    e = L.edit_changes(pic, user, pic, user)
+    assert e["moved"] == [pytest.approx(0.0, abs=0.1)] * 3
+
+
+def test_captions_on_a_hidden_track_are_named_and_never_an_empty_key(world):
+    """A project whose captions are all on a hidden track (its eye closed before saving) shows no captions: learn
+    says where they are and writes no answer.srt -- an empty key would score every run against nothing -- and an
+    older key of the same competitor is removed, not kept with the new edit."""
+    cases, g = world["tmp"] / "cases", world["tmp"] / "caption_glossary.txt"
+    L.learn(world["project"], cases_dir=cases, glossary=g)
+    case = cases / "zendaya-interview"
+    assert (case / "answer.srt").is_file()
+    p = world["project"]
+    xml = gzip.decompress(p.read_bytes()).decode("utf-8")
+    hide = "</TrackItems></ClipItems></ClipTrack></CaptionDataClipTrack>"
+    assert hide in xml
+    p.write_bytes(gzip.compress(xml.replace(hide, '</TrackItems></ClipItems><Track Version="1"><IsMuted>true'
+                                                  "</IsMuted></Track></ClipTrack></CaptionDataClipTrack>").encode()))
+    res = L.learn(p, cases_dir=cases, glossary=g)
+    assert res["updated"] and not (case / "answer.srt").exists()
+    note = res["files"]["answer.srt"]
+    assert note.startswith("not written: your captions are on C1 (3 captions), hidden") and "old one removed" in note
+    assert any(x.startswith("  Captions: not read -- your captions are on C1") for x in L.summary(res))
+    rec = json.loads((case / "learned.json").read_text(encoding="utf-8"))
+    assert rec["captions"]["count"] == 0 and rec["captions"]["changes"] == []
+    assert (case / "answer_edit.json").is_file()                        # the cuts are still learned
+
+
+def test_your_edit_is_read_from_the_track_that_is_shown(world):
+    """A hidden video track of the RAW (a backup copy of the edit, say) never stands for your edit, even when it plays
+    more of the RAW than the visible one."""
+    raw = str(world["run"] / "extras" / "media" / "raw.mp4")
+    items = [P.Item("video", 1, 0.0, 1.0, media=raw, src_in=10.0), P.Item("video", 1, 1.0, 2.0, media=raw, src_in=20.0),
+             P.Item("video", 2, 0.0, 3.0, media=raw, src_in=50.0)]                      # hidden V2: longer
+    seq = P.Sequence("edit", 60.0, 1080, 1920, items, hidden={("video", 2)})
+    pic, _snd = L.user_clips(seq, "raw.mp4")
+    assert [c.r0 for c in pic] == [10.0, 20.0]
+    seq.hidden.clear()
+    assert [c.r0 for c in L.user_clips(seq, "raw.mp4")[0]] == [50.0]
+
+
 def test_the_glossary_keeps_each_correction_once_with_its_videos(tmp_path):
     g = tmp_path / "caption_glossary.txt"
     a = L.WordChange("zendeya", "Zendaya", "words")

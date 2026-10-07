@@ -342,11 +342,39 @@ class Clip:
     scale: float | None = None
 
 
-def tool_clips(edit_xml: Path) -> tuple[list[Clip], list[Clip], float, int]:
-    """The run's clips of the RAW in 1_edit.xml: (V1 picture clips with their framing, A1 sound clips), the sequence
-    frame rate and width."""
+def source_widths(edit_xml: Path) -> dict[str, float]:
+    """{clipitem id: the width of the media it plays} from 1_edit.xml's <file> entries (only a file's first clipitem
+    carries the full <file>; the others name its id). Premiere reads a clip's Basic Motion <center> in units of its
+    SOURCE size, not the sequence's (export_xml_edl.premiere_center)."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(str(edit_xml)).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    sizes: dict[str, float] = {}
+    for f in root.iter("file"):
+        w = f.findtext("media/video/samplecharacteristics/width")
+        try:
+            if f.get("id") and w and float(w) > 0:
+                sizes[f.get("id")] = float(w)
+        except ValueError:
+            continue
+    out: dict[str, float] = {}
+    for ci in root.iter("clipitem"):
+        f = ci.find("file")
+        if ci.get("id") and f is not None and f.get("id") in sizes:
+            out[ci.get("id")] = sizes[f.get("id")]
+    return out
+
+
+def tool_clips(edit_xml: Path, raw_width: float | None = None) -> tuple[list[Clip], list[Clip], float, int]:
+    """The run's clips of the RAW in 1_edit.xml: (V1 picture clips with their framing -- the sideways offset in
+    sequence px: <center> x the clip's source width, as Premiere shows it (source_widths; when the file does not say:
+    ``raw_width``, the RAW's width from the run's cut list, and only then the sequence's) -- and A1 sound clips), the
+    sequence frame rate and width."""
     from .export_xml_edl import parse_premiere_xml
     x = parse_premiere_xml(edit_xml)
+    widths = source_widths(edit_xml)
     fps = float(x["timebase"]) * (1000.0 / 1001.0 if str(x.get("ntsc") or "").upper() == "TRUE" else 1.0)
     sound = [Clip(a["start"] / fps, a["end"] / fps, a["in"] / fps, a["out"] / fps) for a in x["audio"]
              if 0 <= a["start"] < a["end"] and abs(float(a.get("speed") or 1.0)) > 0]
@@ -359,7 +387,8 @@ def tool_clips(edit_xml: Path) -> tuple[list[Clip], list[Clip], float, int]:
         keyed = bool(m.get("keys"))
         ctr = m.get("center")
         out.append(Clip(c["start"] / fps, c["end"] / fps, c["in"] / cf, c["out"] / cf,
-                        None if keyed or ctr is None else float(ctr[0]) * float(x["width"]),
+                        None if keyed or ctr is None
+                        else float(ctr[0]) * float(widths.get(c["id"]) or raw_width or x["width"]),
                         None if keyed or m.get("scale") is None else float(m["scale"])))
     return out, sound, fps, int(x["width"])
 
@@ -377,7 +406,8 @@ def user_clips(seq: PR.Sequence, raw_name: str) -> tuple[list[Clip], list[Clip]]
     per: dict[int, float] = {}
     for it in mine:
         per[it.track] = per.get(it.track, 0.0) + it.end - it.start
-    n = max(per, key=per.get)
+    seen = {k: v for k, v in per.items() if (PR.VIDEO, k) not in seq.hidden} or per      # a visible track first
+    n = max(seen, key=seen.get)
     out = []
     for it in sorted((it for it in mine if it.track == n), key=lambda it: it.start):
         keyed = bool(it.keyframed)
@@ -523,8 +553,10 @@ def case_name(cl: dict, comp: Path, project: Path, name: str | None) -> str:
 
 
 def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name: str, caps: Sequence[PR.Item],
-               meta: dict) -> dict[str, str]:
-    """The test case's files (module docstring, 4); returns {file: what it is}."""
+               meta: dict, no_caps_why: str = "") -> dict[str, str]:
+    """The test case's files (module docstring, 4); returns {file: what it is}. Without captions there is no
+    answer.srt (an empty key would score every run against nothing): an old one is removed, ``no_caps_why`` says
+    why."""
     from .testcases import small_copy
     case_dir.mkdir(parents=True, exist_ok=True)
     done: dict[str, str] = {}
@@ -537,8 +569,16 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
         done[fname] = (f"a smaller copy: {info['bytes'] / 1e6:.0f} MB ({src.stat().st_size / 1e6:.0f} MB before), "
                        f"{info.get('width')}x{info.get('height')} at {info.get('fps')} fps as before"
                        if info.get("reencoded") else f"copied ({info['bytes'] / 1e6:.0f} MB)")
-    (case_dir / "answer.srt").write_text(srt_of(caps), encoding="utf-8", newline="\n")
-    done["answer.srt"] = f"your {len(caps)} captions (the answer key)"
+    key = case_dir / "answer.srt"
+    if caps:
+        key.write_text(srt_of(caps), encoding="utf-8", newline="\n")
+        done["answer.srt"] = f"your {len(caps)} captions (the answer key)"
+    else:
+        had = key.is_file()
+        if had:
+            key.unlink()
+        done["answer.srt"] = (f"not written: {no_caps_why or 'the project has no captions'}"
+                              + (" (the old one removed)" if had else ""))
     pieces = []
     for p in PR.audio_pieces(seq, raw_name):
         pieces.append({"start": p["start"], "end": p["end"], "kind": "raw", "src_in": p["src_in"], "speed": p["speed"]})
@@ -647,7 +687,9 @@ def project_edit(project: Path, raw: dict, window: Sequence[float] | None = None
         kx, ky = sw / float(st["size"][0]), sh / float(st["size"][1])
         win = [win[0] * kx, win[1] * ky, win[2] * kx, win[3] * ky]
     picture, framed = [], 0
-    for it in sorted((it for it in mine if per and it.track == max(per, key=per.get)), key=lambda it: it.start):
+    seen = {k: v for k, v in per.items() if (PR.VIDEO, k) not in seq.hidden} or per      # a visible track first
+    pick = max(seen, key=seen.get) if seen else None
+    for it in sorted((it for it in mine if it.track == pick), key=lambda it: it.start):
         view = None
         if not it.keyframed and rw and rh:
             pos = it.position if it.position is not None else (0.5, 0.5)            # Premiere's defaults:
@@ -718,6 +760,23 @@ def raw_overlap(a: Any, b: Any) -> float:
     total = sum(y - x for x, y in sa)
     both = sum(max(0.0, min(y1, y2) - max(x1, x2)) for x1, y1 in sa for x2, y2 in sb)
     return both / total if total > 0 else 0.0
+
+
+def hidden_captions_note(seq: PR.Sequence) -> str:
+    """When a sequence shows no captions but hidden tracks hold some: which, and what to do; else ""."""
+    hid = PR.hidden_text(seq)
+    if not hid:
+        return ""
+    names = ", ".join(f"{PR.track_name(k, n)} ({c} {'captions' if k == PR.CAPTION else 'text graphics'})"
+                      for k, n, c in hid)
+    return (f"your captions are on {names}, hidden (its output off: the eye closed) -- not in the finished video; "
+            "turn it on and save, then run learn again")
+
+
+def project_no_captions(project: Path) -> str:
+    """Why a project gives no captions: its captions on hidden tracks (named), or none at all."""
+    seq = PR.main_sequence(PR.read(project))
+    return (hidden_captions_note(seq) if seq else "") or "the project has no captions"
 
 
 def project_captions(project: Path) -> list[tuple[float, float, str]]:
@@ -1166,7 +1225,7 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
         pcaps = project_captions(d / PROJECT)
         caps, source = pcaps, "project"
         why = (f"the project's {len(pcaps)} captions, as they are (no final.mp4: your final captions)" if pcaps else
-               "not read: the project has no captions")
+               "not read: " + project_no_captions(d / PROJECT))
     elif final_only:
         caps, source = screen, "screen"
         why = f"read from final.mp4's screen ({len(screen)} captions): the project was not used"
@@ -1179,9 +1238,10 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
         else:
             why = (f"not read: the project's {len(proj)} captions are not this video's (only {100 * shown:.0f} % of them "
                    f"show on final.mp4's screen" + (f", which shows '{screen[0][2]}' first" if screen else "") + ")"
-                   if proj else "not read: the project has no captions")
+                   if proj else "not read: " + project_no_captions(d / PROJECT))
     if caps:
-        caps = [(a, b, t) for a, b, t in caps if b > 0 and a < user.duration]          # inside the finished video
+        caps = [(a, min(b, user.duration), t) for a, b, t in caps                     # inside the finished video:
+                if b > 0 and a < user.duration]                                        # the last one ends with it
     tool_caps = [c["text"] for c in read_srt(tool_dir / CAPTIONS_SRT)] if (tool_dir / CAPTIONS_SRT).is_file() else []
     changes, ccount = caption_changes(tool_caps, [t for _a, _b, t in caps]) if caps else ([], {})
     edit = compare_edits(user, comp, tool, user_pic, comp_pic)
@@ -1347,7 +1407,7 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     if bad:
         raise LearnError(f"{project.name}: the run's RAW ({rf['dir']}) is not the video your project plays ({bad}) -- "
                          "a later run in the same folder? Give the run it was made from with --run")
-    tool_pic, tool_snd, _fps, _w = tool_clips(rf["edit"])
+    tool_pic, tool_snd, _fps, _w = tool_clips(rf["edit"], float((cl.get("raw") or {}).get("width") or 0) or None)
     user_pic, user_snd = user_clips(seq, raw_name)
     if not user_pic and not user_snd:
         raise LearnError(f"{project.name}: no clip plays the run's RAW ({raw_name})")
@@ -1358,7 +1418,9 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     from .captions import read_srt
     tool_caps = [c["text"] for c in read_srt(rf["captions"])] if rf["captions"].is_file() else []
     caps = PR.captions_of(seq)
-    changes, ccount = caption_changes(tool_caps, [c.text for c in caps])
+    no_caps_why = "" if caps else (hidden_captions_note(seq) or "the project has no captions")
+    changes, ccount = (caption_changes(tool_caps, [c.text for c in caps]) if caps
+                       else ([], {"count": 0, "why": no_caps_why}))
     cases = Path(cases_dir) if cases_dir else CASES_DIR
     case_dir = same_case(cases, file_hash(comp))
     updated = case_dir is not None
@@ -1372,7 +1434,7 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     new_words = add_to_glossary(changes, video, gpath) if changes else []
     meta = {"notes": f"learned from {project.name} ({dt.date.today().isoformat()}): answer.srt and answer_edit.json "
                      "are your finished edit", "learned_from": str(project), "run": str(rf["dir"])}
-    files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta)
+    files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta, no_caps_why)
     record = {"video": video, "date": dt.date.today().isoformat(), "project": str(project), "run": str(rf["dir"]),
               "edit": edit, "captions": {**ccount, "changes": [c.__dict__ for c in changes]}}
     (case_dir / "learned.json").write_text(json.dumps(record, indent=1), encoding="utf-8", newline="\n")
@@ -1405,7 +1467,7 @@ def summary(res: dict) -> list[str]:
             out.append("    kept in learned.json only: " + "; ".join(
                 f"'{x.heard}' -> '{x.written}' ({x.why})" for x in rest[:6]) + (" ..." if len(rest) > 6 else ""))
     else:
-        out.append("  Captions: no word changed")
+        out.append(f"  Captions: not read -- {c['why']}" if c.get("why") else "  Captions: no word changed")
     if c.get("removed") or c.get("added") or c.get("rewritten"):
         out.append(f"    ({c['removed']} word(s) removed, {c['added']} added, {c['rewritten']} longer passage(s) "
                    "rewritten: kept in learned.json, not in the glossary)")

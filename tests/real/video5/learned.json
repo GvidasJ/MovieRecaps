@@ -13,12 +13,12 @@
  },
  "captions": {
   "source": "project",
-  "why": "the project's 35 captions, as they are (no final.mp4: your final captions)",
-  "count": 35,
+  "why": "the project's 37 captions, as they are (no final.mp4: your final captions)",
+  "count": 37,
   "on_screen": null,
   "words": 3,
   "case": 0,
-  "removed": 22,
+  "removed": 18,
   "added": 0,
   "rewritten": 2,
   "changes": [

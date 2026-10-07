@@ -1,0 +1,71 @@
+{
+ "video": "video017-fixed",
+ "date": "2026-10-07",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\output\\017\\video017_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\output\\017",
+ "edit": {
+  "clips": 8,
+  "starts": [
+   0.317,
+   0.083,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   3.433
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   -0.0,
+   -0.283,
+   0.0,
+   0.0,
+   -0.0,
+   -1.467
+  ],
+  "removed": 0,
+  "added": 0,
+  "moved": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 1.0
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 7,
+  "added": 7,
+  "rewritten": 0,
+  "changes": [
+   {
+    "heard": "cross-eyed",
+    "written": "cross eyed",
+    "kind": "words",
+    "before": "I'm just",
+    "after": "what was",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

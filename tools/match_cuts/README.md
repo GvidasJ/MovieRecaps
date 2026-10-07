@@ -632,7 +632,10 @@ caption track your captions, as they are. `learn` works on every folder in it (o
   show on `final.mp4`'s screen (read the way the tool reads a competitor's captions, from the row of text that
   changes most -- not a handle or watermark that stays) within 0.25 s. Otherwise none are used and the summary says
   so. `--final-only <folder>` takes them from `final.mp4`'s screen and leaves the
-  project out (a project changed after the export).
+  project out (a project changed after the export). Only what the finished video shows counts: a hidden track (its
+  eye closed or muted) and a disabled clip never do. When you upgrade an imported caption track to graphics, Premiere
+  keeps that track hidden next to them with the text from before your edits, and a template can bring hidden caption
+  tracks of another video; if all your captions are hidden, the summary names the track.
 - **`topaz.mp4`**, when there is one, is told by its content: your edited picture (the length of `final.mp4`,
   cutting where it cuts) or the RAW enhanced, with its size, frame rate and sound.
 - **What it compares**: your cuts against the tool's (the cut score, see check-all) and the competitor's (which of
@@ -688,6 +691,9 @@ It compares your finished project with what the tool generated for that run (`1_
     <folder>`) only the cuts you and the tool both make are compared (how you trim each), not its clips one by one.
 - **A test case** in `tests/real/<name>/`: `competitor.mp4`, `raw.mp4`, `answer.srt` (your captions: the answer
   key), `answer_edit.json` (your timeline: what the RAW plays where), `case.json` and `learned.json`.
+  - Your captions are the ones your finished video shows: a visible caption track, else your caption graphics. A
+    hidden track or a disabled clip never counts. If all your captions are on a hidden track, `learn` names it and
+    writes no `answer.srt`; an empty key would score every run against nothing.
   - check-all then scores every video you ever corrected.
   - A case of the same competitor is updated, not doubled: your new answer key replaces the old one, and `git diff`
     shows what changed before you push.

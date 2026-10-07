@@ -1,6 +1,6 @@
 {
  "timeline": "edit",
- "notes": "learned from ..\\..\\finished\\video1 (2026-10-05): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your project's captions",
+ "notes": "learned from ..\\..\\finished\\video1 (2026-10-07): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your project's captions",
  "learned_from": "..\\..\\finished\\video1",
  "captions_from": "project",
  "runs": {

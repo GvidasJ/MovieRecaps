@@ -1,6 +1,6 @@
 {
  "video": "video1",
- "date": "2026-10-05",
+ "date": "2026-10-07",
  "folder": "..\\..\\finished\\video1",
  "kind": "finished",
  "runs": {
@@ -17,10 +17,10 @@
   "why": "the project's 111 caption graphics (100 % of them show on final.mp4's screen)",
   "count": 111,
   "on_screen": 1.0,
-  "words": 6,
+  "words": 5,
   "case": 0,
   "removed": 6,
-  "added": 11,
+  "added": 10,
   "rewritten": 3,
   "changes": [
    {
@@ -31,15 +31,6 @@
     "after": "want to",
     "glossary": false,
     "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
-   },
-   {
-    "heard": "10",
-    "written": "ten",
-    "kind": "words",
-    "before": "instead of",
-    "after": "then on",
-    "glossary": false,
-    "why": "other words, not a spelling: similarity 0.00"
    },
    {
     "heard": "the 10",

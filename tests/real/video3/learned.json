@@ -1,6 +1,6 @@
 {
  "video": "video3",
- "date": "2026-10-05",
+ "date": "2026-10-07",
  "folder": "..\\..\\finished\\video3",
  "kind": "finished",
  "runs": {
@@ -13,11 +13,53 @@
   "same_story": 0.508
  },
  "captions": {
-  "source": null,
-  "why": "not read: the project's 67 captions are not this video's (only 2 % of them show on final.mp4's screen, which shows 'So I said' first)",
-  "count": 0,
-  "on_screen": 0.015,
-  "changes": []
+  "source": "project",
+  "why": "the project's 71 caption graphics (100 % of them show on final.mp4's screen)",
+  "count": 71,
+  "on_screen": 1.0,
+  "words": 4,
+  "case": 0,
+  "removed": 1,
+  "added": 45,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "me",
+    "written": "my",
+    "kind": "words",
+    "before": "replacement of",
+    "after": "own and",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "I'll",
+    "written": "you want I'd",
+    "kind": "words",
+    "before": "it's entertainment",
+    "after": "throw in",
+    "glossary": false,
+    "why": "other words, not a spelling: similarity 0.17"
+   },
+   {
+    "heard": "me",
+    "written": "my",
+    "kind": "words",
+    "before": "throw in",
+    "after": "own portable",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "convenience",
+    "written": "inconvenience You're",
+    "kind": "words",
+    "before": "own portable",
+    "after": "Not even",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
  },
  "edit": {
   "clips": 1,

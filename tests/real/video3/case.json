@@ -1,8 +1,8 @@
 {
  "timeline": "edit",
- "notes": "learned from ..\\..\\finished\\video3 (2026-10-05): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt absent (not read: the project's 67 captions are not this video's (only 2 % of them show on final.mp4's screen, which shows 'So I said' first))",
+ "notes": "learned from ..\\..\\finished\\video3 (2026-10-07): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your project's captions",
  "learned_from": "..\\..\\finished\\video3",
- "captions_from": null,
+ "captions_from": "project",
  "runs": {
   "tool": "..\\..\\work\\t8\\final4\\runs\\video3\\001",
   "user": "..\\..\\work\\t8\\user\\video3\\001"
