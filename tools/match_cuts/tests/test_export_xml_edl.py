@@ -1108,7 +1108,22 @@ def test_the_premiere_sequence_takes_a_whole_number_of_frames_per_competitor_fra
     assert sequence_fps(Fr(25), Fr(60)) == 50
     assert sequence_fps(Fr(15), Fr(60)) == 60 and sequence_fps(Fr(120), Fr(60)) == 120
     assert premiere_factor(Fr(24), sequence_fps(Fr(24), Fr(60))) == 2
-    assert sequence_fps(Fr(30000, 1001), Fr(60)) == 60     # no whole rate: unchanged (premiere_factor says why)
+
+
+def test_an_ntsc_competitor_gets_the_ntsc_sequence_rate():
+    """Task 10: a 29.97 fps competitor kept the 60.00 fps sequence, where its frames cannot land (2.002 sequence
+    frames each): the run did its whole analysis, then the Premiere export raised -- no 1_edit.xml. It takes the NTSC
+    version of what its whole rate takes now, as 24 fps takes 48: 59.94 (ntsc TRUE), every competitor frame 2."""
+    from fractions import Fraction as Fr
+    from match_cuts.export_xml_edl import premiere_factor, sequence_fps, xml_rate
+    with pytest.raises(ValueError, match="cannot be placed frame-exactly"):
+        premiere_factor(Fr(30000, 1001), Fr(60))                          # what used to happen at the export
+    for comp, seq, fac in ((Fr(30000, 1001), Fr(60000, 1001), 2), (Fr(24000, 1001), Fr(48000, 1001), 2),
+                           (Fr(60000, 1001), Fr(60000, 1001), 1)):
+        assert sequence_fps(comp, Fr(60)) == seq and premiere_factor(comp, seq) == fac
+    assert xml_rate(Fr(60000, 1001)) == (60, "TRUE") and xml_rate(Fr(48)) == (48, "FALSE")
+    assert xml_rate(Fr(24691, 823)) is None                                # 30.001: no rate FCP7 XML can state
+    assert sequence_fps(Fr(24691, 823), Fr(60)) == 60                      # (such a rate is snapped by the probe)
 
 
 def test_a_speed_change_sliver_inside_one_take_plays_at_100_percent():

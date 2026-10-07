@@ -1124,7 +1124,8 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
 # Premiere Pro only (--premiere): 60.00 fps sequence for an overlay template with a video window
 # ---------------------------------------------------------------------------------------------
 #
-# The sequence (default 1080x1920 at exactly 60/1, ntsc FALSE) carries the edit on V1 and the RAW audio on A1;
+# The sequence (default 1080x1920 at exactly 60/1, ntsc FALSE; an NTSC competitor 60000/1001, ntsc TRUE: sequence_fps)
+# carries the edit on V1 and the RAW audio on A1;
 # V2 and above stay empty for the user's template and captions. Every competitor frame k becomes sequence frames
 # [f k, f (k + 1)) with f = sequence fps / competitor fps (must be an integer: 60 / 30 = 2), so every cut lands on
 # the same moment as in the competitor-rate plan. Clipitem <rate> = the sequence rate (Premiere's own convention):
@@ -1449,15 +1450,35 @@ def harden_dissolves(cl: Cutlist, inside: Callable[[float], bool]) -> tuple[Cutl
 def sequence_fps(comp_fps: Fraction, want: Fraction) -> Fraction:
     """The Premiere sequence rate for a competitor: ``want`` when a competitor frame is a whole number of its frames,
     else the whole multiple of the competitor's rate nearest to it (the lower one on a tie): a 24 fps competitor in a
-    48 fps sequence, 25 fps in 50 -- every cut on a competitor frame. A competitor rate that is no whole number keeps
-    ``want`` (premiere_factor then says why it cannot be placed)."""
+    48 fps sequence, 25 fps in 50 -- every cut on a competitor frame. An NTSC competitor takes the NTSC version of
+    what its whole rate would take: 29.97 fps a 59.94 fps sequence (ntsc TRUE), 23.976 fps 47.952 -- a 60.00 fps
+    sequence cannot place its frames (2.002 sequence frames each). A rate that is neither keeps ``want``
+    (premiere_factor then says why it cannot be placed)."""
     c, w = Fraction(comp_fps), Fraction(want)
-    if c <= 0 or c.denominator != 1 or ((w / c).denominator == 1 and w >= c):
+    if c <= 0:
         return w
-    lo = max(1, int(w // c))
-    hi = lo + 1
-    k = lo if abs(lo * c - w) <= abs(hi * c - w) else hi
+    ntsc = c.denominator == 1001 and (c * Fraction(1001, 1000)).denominator == 1
+    base = c * Fraction(1001, 1000) if ntsc else c                 # 29.97 -> 30 (whole frames per second)
+    if base.denominator != 1:
+        return w
+    if (w / base).denominator == 1 and w >= base:
+        k = int(w / base)
+    else:
+        lo = max(1, int(w // base))
+        hi = lo + 1
+        k = lo if abs(lo * base - w) <= abs(hi * base - w) else hi
     return k * c
+
+
+def xml_rate(fps: Fraction) -> tuple[int, str] | None:
+    """(<timebase>, <ntsc>) of a rate in FCP7 XML: a whole rate, or an NTSC one (x 1000/1001, ntsc TRUE); None for a
+    rate the format cannot state."""
+    f = Fraction(fps)
+    if f.denominator == 1:
+        return int(f), "FALSE"
+    if f.denominator == 1001 and (f * Fraction(1001, 1000)).denominator == 1:
+        return int(f * Fraction(1001, 1000)), "TRUE"
+    return None
 
 
 def premiere_factor(comp_fps: Fraction, seq_fps: Fraction) -> int:
@@ -3215,7 +3236,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                               cfg: Any = None, silence: Any = None, speech: Any = None,
                               shots: Sequence[float] | None = None) -> dict:
     """Re-parse the Premiere XML (and the EDL, which stays at the competitor rate) and check: the sequence is exactly
-    W x H at the Premiere rate (ntsc FALSE); V1 only (V2+ empty), every clip's record range = its event's range x
+    W x H at the Premiere rate (xml_rate: ntsc TRUE for an NTSC rate only); V1 only (V2+ empty), every clip's record
+    range = its event's range x
     the rate factor (cuts on the competitor's moments), source in / out / speed as planned; A1 cut exactly like V1
     (same record ranges, the same source in-point as the picture unless an audio line plays); Basic Motion covers
     the template window, keeps the competitor's framing (the window centre shows the RAW point the competitor's box
@@ -3323,8 +3345,11 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     fps, (W, H), win = st["fps"], st["size"], st["window"]
     fac = premiere_factor(cutlist.comp_fps, fps)
     raw_wh = (float(cutlist.raw["width"]), float(cutlist.raw["height"]))
-    if fps.denominator != 1 or x["timebase"] != int(fps) or x["ntsc"] != "FALSE":
-        errors.append(f"XML: sequence rate timebase {x['timebase']} ntsc {x['ntsc']} (want {fps_str(fps)} exactly, ntsc FALSE)")
+    want_rate = xml_rate(fps)                    # 60 / 48 / 50 (ntsc FALSE), 59.94 / 47.952 for NTSC (ntsc TRUE)
+    if want_rate is None or (x["timebase"], str(x["ntsc"]).upper()) != want_rate:
+        errors.append(f"XML: sequence rate timebase {x['timebase']} ntsc {x['ntsc']} (want {fps_str(fps)} exactly: "
+                      + ("not a rate FCP7 XML can state" if want_rate is None else
+                         f"timebase {want_rate[0]} ntsc {want_rate[1]}") + ")")
     if (x["width"], x["height"]) != (W, H):
         errors.append(f"XML: sequence {x['width']}x{x['height']} (want {W}x{H})")
     want_n = silence.new_frames if cut else out["total_frames"] * fac
@@ -3357,7 +3382,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             errors.append(f"XML {name}: end {got['end']} (want {cl.end})")
         if (got["in"], got["out"]) != (cl.src_in, cl.src_out):
             errors.append(f"XML {name}: in/out {got['in']}/{got['out']} (want {cl.src_in}/{cl.src_out})")
-        if (got["timebase"], got["ntsc"]) != (int(fps), "FALSE"):
+        if (got["timebase"], str(got["ntsc"]).upper()) != want_rate:
             errors.append(f"XML {name}: clip rate {got['timebase']} {got['ntsc']} (want the sequence rate)")
         if not _speed_ok(got["speed"], cl.speed):
             errors.append(f"XML {name}: speed {got['speed']:.6f} (want {cl.speed:.6f})")

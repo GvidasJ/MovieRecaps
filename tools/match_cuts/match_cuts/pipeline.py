@@ -1551,6 +1551,7 @@ def side_scorer(ctx: Context) -> Any:
     if fullres.available(ctx.cfg) or ctx.comp_info is None or ctx.raw_info is None or ctx.raw_proxy is None:
         return None
     try:
+        release_gpu_memory("criterion 2 at full resolution")
         allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, ctx.cfg)
         return fullres.SideScorer(ctx.comp_info, ctx.raw_info, allowed, tuple(ctx.raw_proxy.full_size),
                                   int(ctx.raw_info.nb_frames), workers=int(getattr(ctx.cfg, "full_res_workers", 0) or 0))
@@ -2398,6 +2399,31 @@ def initial_overlays(layout: Layout, fallback: Any) -> Any:
     return copy.deepcopy(fallback)
 
 
+def release_gpu_memory(why: str) -> None:
+    """Before the full-resolution GPU processes start (fullres.GpuPool): the GPU memory this process holds but no longer
+    needs given back -- the speech models the speech map and the captions loaded (asr, align: loaded again if a later
+    step needs one) and torch's cached blocks. Task 10: video4's full-resolution check (9.9) ran its 4 processes next
+    to the 6.6 GB this process still held -- 15.4 of the card's 16.3 GB, and 4 times slower than in one process. Logs
+    what is free; does nothing without CUDA."""
+    import gc
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        before = torch.cuda.mem_get_info()[0]
+    except Exception:  # noqa: BLE001 - no CUDA: nothing to give back
+        return
+    for name, fn in (("asr", "unload_all"), ("align", "unload")):
+        mod = sys.modules.get(f"{__package__}.{name}")       # only what this run loaded (no import just for this)
+        if mod is not None:
+            getattr(mod, fn)()
+    gc.collect()
+    torch.cuda.empty_cache()
+    free, total = torch.cuda.mem_get_info()
+    log.info("%s: %.1f of %.1f GB of GPU memory free for its processes (%.1f GB given back)", why, free / 2 ** 30,
+             total / 2 ** 30, (free - before) / 2 ** 30)
+
+
 def _full_frames(ctx: Context) -> tuple[Any, Any]:
     from . import fullres
     if ctx.full_frames is None:
@@ -2426,6 +2452,7 @@ def stage_full_res(ctx: Context) -> None:
         log.info("full-resolution re-check: cache hit %s", fm_path.name)
     else:
         try:
+            release_gpu_memory("full-resolution re-check")
             comp_st, raw_st = _full_frames(ctx)
             allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, cfg)
             fm, res = fullres.recheck(ctx.fm_pre, comp_st, raw_st, allowed, tuple(ctx.raw_proxy.full_size),
@@ -2490,8 +2517,8 @@ def stage_fast_compare(ctx: Context, start: dict) -> None:
     f = dataclasses.replace(ctx, cfg=fcfg, dlog=DecisionLog(Path(fcfg.work_dir) / "decisions.jsonl", truncate=True),
                             layout=start["layout"], overlays=start["overlays"], raw_proxy=start["raw_proxy"],
                             keys=dict(start["keys"]), analysis_warnings=list(start["analysis_warnings"]), warnings=[],
-                            timings={}, errors=[], index=None, anchors=[], fm_pre=None, fm=None, segments=[],
-                            audio_result={}, cutlist=None, full_res={}, full_frames=None, fast_compare={})
+                            timings={}, errors=[], unchecked=[], index=None, anchors=[], fm_pre=None, fm=None,
+                            segments=[], audio_result={}, cutlist=None, full_res={}, full_frames=None, fast_compare={})
     t = time.perf_counter()
     try:
         stage_visual_refine(f)
@@ -3256,6 +3283,7 @@ def full_res_check(ctx: Context) -> dict | None:
     if fullres.available(ctx.cfg) or not ctx.segments:
         return None
     try:
+        release_gpu_memory("9.9 full resolution")
         comp_st, raw_st = _full_frames(ctx)
         fm = ctx.fm if ctx.fm is not None else ctx.fm_pre
         res = fullres.verify(ctx.segments, ctx.n_comp, comp_st, raw_st, verify_mod._allowed_fn(ctx),

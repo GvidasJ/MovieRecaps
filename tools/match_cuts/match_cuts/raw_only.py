@@ -94,6 +94,7 @@ def run_raw_only(cfg: Any) -> dict:
     log.info("match_cuts RAW-only: raw=%s out=%s work=%s", cfg.raw, cfg.out_dir, cfg.work_dir)
     ctx = pipeline.Context(cfg=cfg, dlog=DecisionLog(cfg.work / "decisions.jsonl", truncate=True),
                            cache=Cache(cfg.work))
+    ctx.input_stats = {cfg.raw: pipeline._input_stat(cfg.raw)}
     t_all = time.perf_counter()
     ok = False
     try:
@@ -200,9 +201,17 @@ def run_raw_only(cfg: Any) -> dict:
         checklist = pipeline.hand_checks(ctx)
     except Exception as e:  # noqa: BLE001 - the summary must not fail the run
         checklist = {"broll": [], "spots": [], "captions": [f"(could not list: {type(e).__name__}: {e})"]}
-    code = 0 if ok else 1
-    headline = ("PASS" if ok else "FAIL") + " (RAW-only edit, no competitor: 1_edit.xml checked against its plan)"
-    return {"raw_only": True, "criteria": {}, "checks": {}, "failures": [] if ok else ctx.exports.get("errors", []),
+    checks: dict = {}
+    ctx.verify = {"checks": checks}
+    pipeline.run_checks(ctx, checks)              # (as in competitor mode) a changed RAW, a hard check left unrun
+    moved = (checks.get("inputs_unchanged") or {}).get("summary")
+    nv = pipeline.not_verified(checks)
+    ok = ok and not moved
+    code = 1 if not ok else (3 if nv else 0)
+    headline = ("FAIL" if not ok else f"PASS (not checked: {'; '.join(nv)})" if nv else "PASS") + \
+        " (RAW-only edit, no competitor: 1_edit.xml checked against its plan)"
+    fails = ([] if ok else list(ctx.exports.get("errors", []))) + ([moved] if moved else [])
+    return {"raw_only": True, "criteria": {}, "checks": checks, "failures": fails,
             "warnings": list(ctx.warnings), "paths": dict(ctx.paths), "timings": dict(ctx.timings),
             "exit_code": code, "headline": headline, "context": ctx, "run_dir": str(cfg.deliver),
             "checklist": checklist}

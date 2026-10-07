@@ -121,15 +121,22 @@ matching slower, not faster: the same 120 searches take 32-34 s with 12-15 worke
 Without a CUDA GPU the default samples the RAW like `--fast` (an every-frame index needs the exact GPU search), skips
 the full-resolution pass, and says so.
 
+The full-resolution steps run in `full_res_workers` = 4 processes sharing the GPU. Before they start, the run gives
+back the GPU memory it no longer needs (the speech models, loaded again when needed), and each process keeps at most
+512 MB of RAW frames and 256 MB of competitor frames on the GPU (`fullres.RAW_CACHE_BYTES`, `COMP_CACHE_BYTES`), so a
+long 1080p RAW fits a 16 GB card. When the GPU's memory still runs out (another program using it, an Adobe render),
+Windows lends it some of the PC's memory: much slower, the same numbers.
+
 Measured on an RTX 5080 with a 16-core CPU (Task 9), on the finished videos at full size, from empty caches, one run at a time on a free GPU: video1 (a 23.5-minute RAW at 700x480, 3,384 competitor frames) takes 70 minutes thorough and 26 with `--fast`; video2 (24.4 minutes, 281 frames) 15 and 5; video3 (24.2 minutes, 1,249 frames) 14 and 6; video4 (12.7 minutes at 1280x720 and 59.94 fps, 1,078 frames) 47 and 19. The search grows with the RAW's length (every RAW frame is indexed) and with the competitor's frames; refine and the full-resolution steps grow with the competitor's frames and the RAW's resolution.
 
 ### Premiere (`--premiere`)
 
 `1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
 V2 and above empty. (A competitor whose frame rate does not divide 60 gets the whole multiple of its rate nearest to
-it, so every cut lands on one of its frames: a 24 fps competitor a 48 fps sequence, 25 fps a 50 fps one; the end
-summary says so.) A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or
-hold sliver, a frame-rate artifact rather than an edit -- plays at 100 % here, so the take runs on as one and its
+it, so every cut lands on one of its frames: a 24 fps competitor a 48 fps sequence, 25 fps a 50 fps one, and an NTSC
+competitor the NTSC version of that -- 29.97 fps a 59.94 fps sequence, 23.976 fps 47.952; the end summary says
+so.) A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or hold
+sliver, a frame-rate artifact rather than an edit -- plays at 100 % here, so the take runs on as one and its
 sound is never slowed inside a word; so does a picture glitch of at most 0.25 s inside one take, its picture at
 most 0.1 s off the take (it plays on the take's line, picture and sound) -- unless the competitor's sound there
 follows a line of its own, off the take's: then it stays as the competitor has it. `cutlist.json` keeps both as the
@@ -541,9 +548,9 @@ flags.
 | code | meaning | headline |
 |---|---|---|
 | `0` | every acceptance criterion is `pass` / `pass_with_exceptions` and no Stage 9 check failed | `PASS` |
-| `1` | an acceptance criterion or a Stage 9 check (incl. `9.8 deliverables`) failed | `FAIL` |
+| `1` | an acceptance criterion or a Stage 9 check (incl. `9.8 deliverables`) failed, or an input file changed during the run (still being downloaded or copied, re-exported: `inputs unchanged`) | `FAIL` |
 | `2` | the run itself failed: missing/ambiguous inputs, a crashed stage (see `extras/match_cuts.log` in the run folder) | none (`match_cuts: ERROR: …` on stderr) |
-| `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock) | `PASS (criterion 6 not verified: …)` |
+| `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock), or a hard check of `1_edit.xml` could not run because its analysis failed (the speech map, the RAW's shot changes, who speaks) | `PASS (criterion 6 not verified: …)` / `PASS (not checked: …)` |
 
 A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked"
 (`3` is the normal result on a machine without Node.js / After Effects). Ctrl-C exits with `130`.
@@ -775,9 +782,12 @@ ignores; everything else is identical on a re-run.
 | S10 | `report` | `report.md` and the summary |
 
 Re-runs are fast: the expensive stages are cached in `work/cache`. Changing only export settings
-(`--layout`, `--comp-size`, `--fps`, `--ae-time-mode`) never recomputes the analysis. To force a stage to
-recompute, delete `work/cache/<stage>/` (stage versions in `common.STAGE_VERSION` invalidate caches
-automatically when an algorithm changes).
+(`--layout`, `--comp-size`, `--fps`, `--ae-time-mode`) never recomputes the analysis. A cached result is only ever
+reused by the code that computed it: every key holds a fingerprint of that code (`common.STAGE_CODE`: the stage's
+modules and the package modules they import -- not the pipeline, exports or report), so after an update the stages
+whose code changed are computed again, the rest is reused (the version numbers in `common.STAGE_VERSION` still count
+too). A cache file a reset or a power loss left damaged is computed again (every file is on the disk before it is
+published). To force a stage to recompute, delete `work/cache/<stage>/`.
 
 ## Verification (Stage 9) and the acceptance criteria
 
@@ -819,9 +829,11 @@ A criterion is `pass`, `pass_with_exceptions` (every exception is listed with it
 Statuses: `pass`, `pass_with_exceptions` (every exception listed and explained), `fail`,
 `not_available` (e.g. no Node for the mock, no AE for aerender).
 
-Exit codes (the table under *Usage*): `0` everything passed; `1` a criterion or check failed; `2` the
-run itself failed (bad inputs, a crashed stage); `3` nothing failed but a criterion could not be verified
-(headline `PASS (criterion 6 not verified: …)`, e.g. Node.js missing so the JSX was never executed).
+Exit codes (the table under *Usage*): `0` everything passed; `1` a criterion or check failed (or an input file
+changed during the run: `inputs unchanged`); `2` the run itself failed (bad inputs, a crashed stage); `3` nothing
+failed but a criterion could not be verified (headline `PASS (criterion 6 not verified: …)`, e.g. Node.js missing so
+the JSX was never executed), or a hard check of `1_edit.xml` could not run because its analysis failed (`PASS (not
+checked: no audio cut inside speech (the speech map failed: …))`: the run never says a plain PASS then).
 
 ## Running the result in After Effects
 
@@ -862,7 +874,7 @@ the script again.
 
 **`UnicodeEncodeError: 'charmap' codec can't encode character …` (Windows)** — fixed: every text file
 (report, cut list, XML/EDL, logs) is written as UTF-8 whatever the system code page. Update with
-`git pull` and rerun; the analysis is cached, so only the exports and the report are redone. On an older
+`git pull` and rerun; the analysis is cached, so only the stages whose code changed are redone. On an older
 copy, `$env:PYTHONUTF8 = "1"` in PowerShell before the run works around it.
 
 **Media not found / relink** — the script looks for the media next to itself (`media/…`), then at the

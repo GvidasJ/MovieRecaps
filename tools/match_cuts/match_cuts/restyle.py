@@ -418,8 +418,9 @@ def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, 
         pop = pop_timing(donor_px, donor_item)
         tmp_dst = dst.with_name(dst.name + ".tmp")
         try:
+            from .common import replace_file
             tmp_dst.write_bytes(_pack(result) if gz else result)
-            os.replace(tmp_dst, dst)
+            replace_file(tmp_dst, dst)               # --overwrite while Premiere has it open: retried, then explained
         finally:
             if tmp_dst.exists():
                 tmp_dst.unlink()

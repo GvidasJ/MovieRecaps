@@ -74,6 +74,12 @@ def read_run(case: testcases.Case, run_dir: Path | None) -> dict:
                          "failures": list(c.get("failures") or [])[:20]}
         c1 = crit.get("c1_coverage") or {}
         row["coverage"] = {"status": c1.get("status") or "not run", "summary": c1.get("summary") or ""}
+        nv = [str(r) for c in checks.values() for r in ((c or {}).get("not_verified") or [])]
+        if nv:                             # a hard check of 1_edit.xml that could not run: never a passed case
+            row["not_checked"] = nv
+        moved = checks.get("inputs_unchanged") or {}
+        if moved:
+            row["inputs"] = {"status": moved.get("status"), "summary": moved.get("summary") or ""}
     else:
         row["error"] = "no verify.json (the run stopped early: see check-all.log)"
     cj = run_dir / EXTRAS / "debug" / "captions.json"
@@ -98,8 +104,11 @@ def read_run(case: testcases.Case, run_dir: Path | None) -> dict:
 
 
 def hard_ok(row: dict) -> bool:
+    """The case's hard checks passed: deliverables, determinism, coverage -- and none of 1_edit.xml's hard checks
+    was left unrun (``not_checked``), no input changed during the run."""
     ok = lambda k: str((row.get(k) or {}).get("status")) in ("pass", "pass_with_exceptions")    # noqa: E731
-    return ok("deliverables") and ok("determinism") and ok("coverage") and "error" not in row
+    return (ok("deliverables") and ok("determinism") and ok("coverage") and "error" not in row
+            and not row.get("not_checked") and (row.get("inputs") or {}).get("status") != "fail")
 
 
 def _fmt_s(s: float | None) -> str:
@@ -139,6 +148,10 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
                 st = (r.get(k) or {})
                 if str(st.get("status")) not in ("pass", "pass_with_exceptions"):
                     lines.append(f"{'':<30}{k}: {st.get('status')} -- {'; '.join(st.get('failures') or [])[:300]}")
+            for x in r.get("not_checked") or []:
+                lines.append(f"{'':<30}not checked: {x}")
+            if (r.get("inputs") or {}).get("status") == "fail":
+                lines.append(f"{'':<30}inputs: {r['inputs']['summary']}")
             if r.get("error"):
                 lines.append(f"{'':<30}{r['error']}")
     keyed = [r["score"] for r in rows if r.get("score")]

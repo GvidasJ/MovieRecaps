@@ -225,7 +225,7 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
     search_s = _cfg(cfg, "audio_residual_search_s", 0.1)
     out_cl = copy.deepcopy(cutlist)
     segs = sorted(out_cl.segments, key=lambda s: int(s.comp_in))
-    res: dict = {"cutlist": out_cl, "replaced": [], "kept": [], "other_video": [], "notes": []}
+    res: dict = {"cutlist": out_cl, "replaced": [], "kept": [], "other_video": [], "slipped": [], "notes": []}
     have_audio = comp_y is not None and raw_y is not None and len(comp_y) and len(raw_y)
     if not have_audio:
         res["notes"].append("no competitor or RAW audio: cutaways cannot be checked, nothing replaced")
@@ -281,6 +281,14 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
                     res["kept"].append(_row(s, fps, "no main-clip shot right before or after it", None))
                 continue
             if not all(picture_off_line(s, g, fps) for g in geo):
+                new = slip_onto_line(s, by_comp_in, A, B, fps, raw_fps) if follow_audio else None
+                if new is not None:                        # its picture a frame or two off its sound: on its sound
+                    replaced[int(s.id)] = [new]
+                    res["slipped"].append({"segment": int(s.id), "comp_in": int(s.comp_in),
+                                           "comp_out": int(s.comp_out), "line": (s.audio or {})["line"].get("source"),
+                                           "picture_ms": round(1000.0 * (float(s.raw_in_seconds)
+                                                                         - float(new.raw_in_seconds)), 1),
+                                           "raw_in_seconds": new.raw_in_seconds})
                 continue                                   # the main clip itself (a retime / effect): not a cutaway
             ev, used = _check(s, fwd, bwd, comp_y, raw_y, sr, fps, strong, tol_ms, search_s) if have_audio else \
                 ({"ok": False, "corr": None, "lag_ms": None, "sidelobe": None}, None)
@@ -332,8 +340,16 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
         new_ids = {int(x.id) for v in replaced.values() for x in v}
         _clear_edges(new_segs, new_ids, fps)
         out_cl.segments = join(new_segs, new_ids, fps)
-        res["notes"].append(f"{len(replaced)} cutaway(s) replaced by the main clip; {len(out_cl.segments)} segments "
-                            f"in the export (was {len(segs)})")
+        n_rep = len(replaced) - len(res["slipped"])
+        if n_rep:
+            res["notes"].append(f"{n_rep} cutaway(s) replaced by the main clip; {len(out_cl.segments)} segments in "
+                                f"the export (was {len(segs)})")
+    if res["slipped"]:
+        res["notes"].append(
+            f"{len(res['slipped'])} piece(s) whose sound continues another clip play at the RAW time of that sound, "
+            "their own framing kept (their picture ran a frame or two off it; played as it was, the picture would "
+            "repeat or skip frames where the sound plays on): "
+            + ", ".join(f"S{r['segment']:02d} ({r['picture_ms']:+.0f} ms, {r['line']})" for r in res["slipped"]))
     if res["other_video"]:
         res["notes"].append(f"{len(res['other_video'])} stretch(es) of another video (NOT-IN-RAW, speech not in the "
                             "RAW): left empty and marked")
@@ -588,7 +604,7 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
         k = order[int(s.id)]
         t0 = float(Fraction(int(s.comp_in)) / fps)
         pieces: list[tuple[int, int, Line, dict, str]] = []          # (comp_in, comp_out, line, evidence, how)
-        fx14 = (s.audio or {}).get("line") if s.type in ("not_in_raw", "uncertain") else None
+        fx14 = (s.audio or {}).get("line") if s.type in ("not_in_raw", "uncertain") or other_clips_line(s) else None
         if fx14 and have_audio:
             ln = _fx14_line(s, fx14, by_comp_in, A, B, fps)
             if ln.anchor is not None:
@@ -613,7 +629,8 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
                                                 "lag_ms": round(lag * 1000.0, 3)}, "audio"))
         if s.type == "raw" and not pieces:
             au = s.audio or {}
-            if au.get("corr") is not None and float(au["corr"]) >= strong and au.get("lag_ms") is not None                     and abs(float(au["lag_ms"])) <= OWN_SOUND_MS:
+            if au.get("corr") is not None and float(au["corr"]) >= strong and au.get("lag_ms") is not None \
+                    and abs(float(au["lag_ms"])) <= OWN_SOUND_MS and not other_clips_line(s):
                 continue                        # its own sound is its picture's RAW (a small A/V shift): the main clip
             from .shots import MIN_SHOT_S
             if (s.audio or {}).get("corr") is None and not same_line                     and (int(s.comp_out) - int(s.comp_in)) / float(fps) >= MIN_SHOT_S - 1e-9:
@@ -695,6 +712,51 @@ def _follow_audio(segs: list[Segment], pending: list, replaced: dict[int, list[S
                           for f in filled])
         res["replaced"].append(row)
     res["replaced"].sort(key=lambda r: r["comp_in"])
+
+
+def other_clips_line(s: Segment) -> bool:
+    """A RAW piece whose sound the audio stage found on ANOTHER clip's line (FX-14: "S08 continued", bridged or not,
+    or the in-point line of a piece before it): its corr / lag are that line's, not its own picture's, and that line
+    is the RAW video of the audio playing there. Task 10 (video4 on the full-size files): 1 and 4 frames of other RAW
+    moments under S08's continuing speech read as "their own sound" and were kept -- two flash frames."""
+    ln = (s.audio or {}).get("line")
+    try:
+        return s.type == "raw" and bool(ln) and int(ln["id"]) != int(s.comp_in)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def slip_onto_line(s: Segment, by_comp_in: dict, A: Segment | None, B: Segment | None, fps: Fraction,
+                   raw_fps: Fraction) -> Segment | None:
+    """--premiere (follow_audio): a RAW piece whose sound is on ANOTHER clip's line (other_clips_line), at that line's
+    speed, whose picture runs a frame or two off the line (within JUMP_FRAMES: no cutaway), played ON the line -- its
+    picture at the RAW time of its sound, its own framing kept; None when that does not apply.
+
+    A picture a frame or two off its own sound is what the match's time / translation confound leaves open (or a slip
+    nobody sees). Played as it is, V1 repeats or skips those frames at the cut while A1 plays on, and the repeat
+    removal (repeats.py) then cuts the sound as well: your video1 (final.mp4), S09 -- its picture 3 frames behind
+    S08's line, whose sound it continues: the speech-safe cuts kept A1 playing on, the repeat removal took the 5
+    repeated V1 frames out of A1 too, and A1 jumped 0.08 s inside "Exactly, so I'm open"."""
+    fx = (s.audio or {}).get("line") or {}
+    if (not other_clips_line(s) or s.time_remap_keys or (s.retime or "none") != "none" or s.speed is None
+            or s.raw_in_seconds is None or fx.get("raw_in_seconds") is None):
+        return None
+    v = float(fx.get("speed") or 1.0)
+    d = float(fx["raw_in_seconds"]) - float(s.raw_in_seconds)
+    if abs(float(s.speed) - v) > 1e-9 or abs(d) <= 1e-6 or abs(d) > JUMP_FRAMES / float(fps):
+        return None
+    ln = _fx14_line(s, fx, by_comp_in, A, B, fps)
+    new = replacement(s, ln, fps, raw_fps, {"ok": True, "corr": fx.get("corr"), "lag_ms": fx.get("lag_ms")})
+    # only its time moves: its own framing, box, label and confidence; no B-roll marker (it is no cutaway)
+    new.flip_h, new.transform, new.transform_keys = bool(s.flip_h), copy.deepcopy(s.transform), \
+        copy.deepcopy(s.transform_keys)
+    new.easing, new.box, new.region = s.easing, copy.deepcopy(s.box), int(s.region)
+    new.confidence, new.label = s.confidence, s.label
+    new.audio.pop("broll", None)
+    new.notes = (f"--premiere: its picture ran {-1000.0 * d:+.0f} ms off the RAW time of its sound ({ln.source}); "
+                 "played at that time, its own framing kept, so the picture neither repeats nor skips frames where "
+                 "the sound plays on")
+    return new
 
 
 def _as_seg(p: tuple, s: Segment, fps: Fraction, raw_fps: Fraction) -> Segment:

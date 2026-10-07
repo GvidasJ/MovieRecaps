@@ -63,6 +63,45 @@ def test_write_image_handles_non_ascii_paths(tmp_path):
     assert not list(d.glob("*.tmp*"))
 
 
+def test_read_image_handles_non_ascii_paths(tmp_path):
+    """cv2.imread returns None for every file under a non-ASCII Windows path (OpenCV 5.0 here): read_image goes
+    through Python file I/O. (The AE render's frames were read with cv2.imread: none could be read there.)"""
+    d = tmp_path / "Vidéos Ąžuolas"
+    img = (np.arange(40 * 50) % 251).astype(np.uint8).reshape(40, 50)
+    assert common.write_image(d / "ae_00001.png", img)
+    back = common.read_image(d / "ae_00001.png", cv2.IMREAD_GRAYSCALE)
+    assert back is not None and np.array_equal(back, img)
+    assert common.read_image(d / "missing.png") is None
+    (d / "empty.png").write_bytes(b"")
+    assert common.read_image(d / "empty.png") is None
+
+
+def test_no_module_opens_image_files_through_opencv():
+    """OpenCV's own file API cannot open non-ASCII Windows paths: images go through common.write_image / read_image
+    (the cut images of check 9.8 failed the run under such a folder)."""
+    import re
+    from pathlib import Path
+    pkg = Path(common.__file__).resolve().parent
+    bad = [f"{p.name}:{i}" for p in sorted(pkg.glob("*.py")) for i, line in
+           enumerate(p.read_text(encoding="utf-8").splitlines(), start=1)
+           if re.search(r"cv2\.(imwrite|imread)\(", line) and not line.lstrip().startswith(("#", '"', "'"))
+           and "``cv2." not in line]
+    assert not bad, bad
+
+
+def test_media_urls_of_network_and_long_paths():
+    """A RAW over large_file_bytes is referenced where it lies: a network share keeps its server (file://server/...);
+    file://localhost/server/... was a folder of the current drive -- the clip offline in Premiere."""
+    from match_cuts.export_xml_edl import _file_url
+    bs = chr(92)
+    unc = bs * 2 + "nas" + bs + "videos" + bs + "raw ep 1.mp4"
+    assert _file_url(unc) == "file://nas/videos/raw%20ep%201.mp4"
+    assert _file_url(bs * 2 + "?" + bs + "UNC" + bs + "nas" + bs + "v" + bs + "raw.mp4") == "file://nas/v/raw.mp4"
+    assert _file_url(bs * 2 + "?" + bs + "C:" + bs + "long" + bs + "raw.mp4") == "file://localhost/C%3A/long/raw.mp4"
+    assert _file_url("Z:" + bs + "mapped" + bs + "raw #1.mp4") == "file://localhost/Z%3A/mapped/raw%20%231.mp4"
+    assert _file_url("") == ""
+
+
 def test_console_logging_never_fails_on_unencodable_characters():
     """A redirected Windows console uses the ANSI code page (cp1252): no arrows / >= signs. Such characters
     become escapes instead of '--- Logging error ---' tracebacks."""

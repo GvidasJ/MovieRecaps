@@ -176,7 +176,11 @@ Task 8 code and the Task 9 code on the same full-size files, from empty caches, 
   video1 6/29, video2 1/1, video3 0/11, video4 2/7, zendaya-age 1/9). Every hard check passes on all eight; the
   full-resolution notes (9.9) are the same as in Task 8's runs (video3 and video4 fail it there too). check-all ran
   in three parts, because you needed the PC for a render twice:
-  - deadpool, spiderman-school and video1: on a free PC (6 Oct 13:36-16:36);
+  - deadpool, spiderman-school and video1: on a free PC (6 Oct 13:36-16:36), except for video1 from 15:14 on
+    (corrected in Task 10, from the GPU log). From then another program, most likely Adobe opened before your
+    render, held up to 7 GB of the GPU's memory. The card ran out and borrowed up to 6.4 GB of the PC's memory
+    for most of the rest of the run. video1's 115 minutes are therefore too high: Task 10's check-all, on a free PC,
+    took 97 minutes on it, with the same cut list. Its results are not affected;
   - video2 and video3: while Adobe Media Encoder and After Effects were rendering (19:40-20:40; After Effects used
     about 5 cores and Media Encoder 2 the whole time, and the GPU's memory was full and borrowing 5-10 GB from the
     PC's). Their run times say nothing; their results are identical, and no GPU step fell back in their logs;

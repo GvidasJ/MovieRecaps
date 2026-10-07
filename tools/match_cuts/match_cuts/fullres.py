@@ -45,6 +45,12 @@ REPEAT_EPS = 1e-3         # two frames are one picture (a repeat) when 1 - ZNCC 
                           # resolution: repeats 2e-5 to 1.4e-4, the smallest move 2.9e-3) ...
 REPEAT_REL = 0.2          # ... and under this share of the change on each side of them
 MIN_PIXELS = 4096
+# The GPU copies a Scorer keeps for its next calls -- RAW frames (each with its two gradients, float32) and competitor
+# ROIs -- bounded in bytes as well as in number: 96 RAW frames of a 1080p RAW are 2.4 GB, in each of the 4 GPU
+# processes (full_res_workers). Task 10: video4's full-resolution check (a 1280x720 RAW) filled 15.4 of the card's
+# 16.3 GB and ran 4 times slower than in one process. A frame dropped is computed again the same way: the same numbers.
+RAW_CACHE_BYTES = 512 << 20
+COMP_CACHE_BYTES = 256 << 20
 
 
 def available(cfg: Any) -> str | None:
@@ -156,6 +162,11 @@ class LazyFrames:
 # GPU scoring
 # ---------------------------------------------------------------------------------------------------------------------
 
+def _nbytes(tensors: Sequence[Any]) -> int:
+    """The bytes a cache entry's tensors take on the GPU."""
+    return sum(int(x.numel()) * int(x.element_size()) for x in tensors)
+
+
 class Scorer:
     """Masked ZNCC of competitor frames against warped RAW frames at full resolution, on the GPU."""
 
@@ -173,6 +184,7 @@ class Scorer:
         self.r = r
         self._raw: dict[int, Any] = {}
         self._comp: dict[int, tuple] = {}
+        self._raw_bytes = self._comp_bytes = 0
         self._grids: OrderedDict[tuple[int, int, int, int], tuple[Any, Any]] = OrderedDict()
 
     # -- images ----------------------------------------------------------------------------------------------------
@@ -196,8 +208,9 @@ class Scorer:
             gv[1:-1, :] = 0.5 * (b[2:, :] - b[:-2, :])
             hit = (b, gu, gv)
             self._raw[int(j)] = hit
-            if len(self._raw) > 96:
-                self._raw.pop(next(iter(self._raw)))
+            self._raw_bytes += _nbytes(hit)
+            while len(self._raw) > 1 and (len(self._raw) > 96 or self._raw_bytes > RAW_CACHE_BYTES):
+                self._raw_bytes -= _nbytes(self._raw.pop(next(iter(self._raw))))
         return hit
 
     def comp(self, k: int, img: np.ndarray, allowed: np.ndarray) -> tuple[Any, Any, tuple[int, int, int, int]] | None:
@@ -217,9 +230,11 @@ class Scorer:
             roi = (x0, y0, x1 - x0, y1 - y0)
             full = self._blur(self.t.from_numpy(np.ascontiguousarray(img)).to(self.dev).float())
             hit = (full[y0:y1, x0:x1].contiguous(), self.t.from_numpy(m[y0:y1, x0:x1]).to(self.dev), roi)
+            del full
             self._comp[int(k)] = hit
-            if len(self._comp) > 48:
-                self._comp.pop(next(iter(self._comp)))
+            self._comp_bytes += _nbytes(hit[:2])
+            while len(self._comp) > 1 and (len(self._comp) > 48 or self._comp_bytes > COMP_CACHE_BYTES):
+                self._comp_bytes -= _nbytes(self._comp.pop(next(iter(self._comp)))[:2])
         return hit
 
     # -- geometry --------------------------------------------------------------------------------------------------
@@ -357,6 +372,7 @@ class Scorer:
     def close(self) -> None:
         self._raw.clear()
         self._comp.clear()
+        self._raw_bytes = self._comp_bytes = 0
         try:
             self.t.cuda.empty_cache()
         except Exception:  # noqa: BLE001

@@ -318,6 +318,76 @@ def test_a_main_clip_shot_whose_own_sound_is_a_little_off_its_picture_is_not_rep
     assert s2.raw_in_seconds == 20.0 and not (s2.audio or {}).get("broll")
 
 
+def _on_line(id_, a, b, raw_in, line_id, line_raw_in, source):
+    """A RAW piece whose sound the audio stage (FX-14) found on a line: the line's corr / lag are copied into its own
+    audio fields, as audio_align._audio_lines does."""
+    s = broll_shot(id_, a, b, raw_in)
+    s.audio = dict(s.audio, corr=0.986, lag_ms=0.0, exception=None,
+                   line={"id": line_id, "raw_in_seconds": line_raw_in, "speed": 1.0, "source": source, "lag_ms": 0.0,
+                         "corr": 0.986})
+    return s
+
+
+def test_short_pieces_whose_sound_follows_another_clips_line_are_filled_from_it():
+    """Task 10 (video4 on the full-size files): right after the main clip, 1 and 4 frames of other RAW moments under
+    its continuing speech. The audio stage put them on the main clip's line ("S01 continued (bridged)", corr 0.986,
+    lag 0, copied into their own audio fields) and the "its own sound is its picture's RAW" test read those numbers
+    as theirs: both were kept -- two flash frames in 1_edit.xml, the export's hard check failed. Their sound is the
+    line's: they show its RAW video, one clip through the cutaway after them."""
+    segs = [shot(1, 0, 60, 10.0), _on_line(2, 60, 61, 45.0, 0, 12.0, "S01 continued (bridged)"),
+            _on_line(3, 61, 65, 50.0, 0, 10.0 + 61 / 30, "S01 continued (bridged)"), broll_shot(4, 65, 120, 40.0),
+            shot(5, 120, 240, 30.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    comp = _comp_from([(0.0, 4.0, 10.0), (4.0, 8.0, 26.0)])      # S01's speech runs on to 4 s, then S05 (RAW 30 s)
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    rows = {r["segment"]: r for r in res["replaced"]}
+    assert {2, 3, 4} <= set(rows) and not res["kept"], rows
+    first = res["cutlist"].segments[0]
+    assert first.comp_out == 120 and first.raw_in_seconds == 10.0      # one clip: S01 plays through, no flash frame
+
+
+def test_a_piece_on_its_own_in_point_line_keeps_its_own_sound():
+    """The other side of that fix: a piece whose line starts at itself (the audio stage's "own in-point at speed 1",
+    a video-only slow motion over its own sound) has its own sound -- left as the competitor has it."""
+    slow = _on_line(2, 60, 90, 40.0, 60, 40.0, "own in-point at speed 1")
+    slow.speed, slow.retime = 0.5, "constant"
+    segs = [shot(1, 0, 60, 10.0), slow, shot(3, 90, 240, 30.0)]
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    comp = _comp_from([(0.0, 2.0, 10.0), (2.0, 3.0, 38.0), (3.0, 8.0, 27.0)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    assert 2 not in {r["segment"] for r in res["replaced"]}
+    s2 = next(s for s in res["cutlist"].segments if s.comp_in == 60)
+    assert s2.raw_in_seconds == 40.0 and s2.speed == 0.5
+
+
+def test_a_piece_whose_sound_continues_the_clip_before_plays_at_its_sounds_time():
+    """Task 10 (your video1, final.mp4): S09's sound continues S08's line, its picture ran 3 frames behind that line
+    -- no cutaway (within JUMP_FRAMES), so it was left as it was: V1 repeated those frames at the cut while A1 played
+    on, and the repeat removal then cut A1 inside a word. With --premiere's follow-the-audio it plays at the RAW time
+    of its sound, its own framing kept: one clip with the shot before, nothing repeated, no B-roll marker."""
+    line = {"id": 0, "raw_in_seconds": 12.0, "speed": 1.0, "source": "S01 continued", "lag_ms": 0.0, "corr": 0.994}
+    piece = shot(2, 60, 120, 12.0 - 0.05, audio={"corr": 0.994, "lag_ms": 0.0, "line": line})
+    base = make_cutlist()
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, [shot(1, 0, 60, 10.0), piece, shot(3, 120, 240, 30.0)])
+    comp = _comp_from([(0.0, 4.0, 10.0), (4.0, 8.0, 26.0)])      # S01's sound runs on to 4 s, then S03 (RAW 30 s)
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
+    assert [r["segment"] for r in res["slipped"]] == [2] and res["slipped"][0]["picture_ms"] == -50.0
+    assert not res["replaced"] and not res["kept"]
+    first = res["cutlist"].segments[0]
+    assert first.comp_out == 120 and first.raw_in_seconds == 10.0          # one clip on S01's line
+    assert not ((first.audio or {}).get("broll") or {}).get("ranges")      # no B-ROLL REPLACED marker
+    assert next(s for s in cl.segments if s.comp_in == 60).raw_in_seconds == 11.95     # the input is untouched
+    # without follow-the-audio nothing moves; nor does a piece whose line starts at itself (its own sound)
+    plain = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(), follow_audio=False)
+    assert not plain["slipped"] and next(s for s in plain["cutlist"].segments if s.comp_in == 60).raw_in_seconds == 11.95
+    own = copy.deepcopy(piece)
+    own.audio["line"] = dict(line, id=60, source="own in-point at speed 1")
+    cl2 = Cutlist(1, base.competitor, base.raw, base.layout, [shot(1, 0, 60, 10.0), own, shot(3, 120, 240, 30.0)])
+    assert not broll.apply_no_broll(cl2, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)["slipped"]
+
+
 def test_a_raw_piece_too_short_to_be_a_shot_is_never_left_as_a_flash():
     """video4: 4 frames of another RAW moment at the end of the competitor's rewind effect, their sound too short to
     measure: left as they are they would be a flash frame (shorter than shots.MIN_SHOT_S, a hard failure of the

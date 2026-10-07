@@ -77,6 +77,14 @@ def test_read_run_and_scorecard(tmp_path):
     assert "1m15s" in card and "PASS" in card and "1/1 (100 %) +1" in card
     bad = dict(row, deliverables={"status": "fail", "failures": ["XML PERSON S14"]})
     assert not check_all.hard_ok(bad) and "XML PERSON S14" in check_all.scorecard([bad])
+    # Task 10: a hard check of 1_edit.xml that could not run (its analysis failed) is no passed case on the scorecard
+    v = json.loads((run / "extras" / "verify.json").read_text(encoding="utf-8"))
+    v["checks"]["hard_checks_not_run"] = {"status": "not_available",
+                                          "not_verified": ["no audio cut inside speech (the speech map failed: X)"]}
+    (run / "extras" / "verify.json").write_text(json.dumps(v), encoding="utf-8")
+    unchecked = dict(check_all.read_run(case, run), case="x", seconds=75.0)
+    assert not check_all.hard_ok(unchecked)
+    assert "not checked: no audio cut inside speech (the speech map failed: X)" in check_all.scorecard([unchecked])
 
 
 def test_check_all_runs_every_video_with_the_fast_comparison(tmp_path, monkeypatch):

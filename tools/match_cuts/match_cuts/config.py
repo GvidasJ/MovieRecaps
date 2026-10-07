@@ -54,7 +54,8 @@ class Config:
     run_ae: bool = True                    # open After Effects (when installed) to run the JSX and save the .aep
     ae_timeout_s: float = 600.0            # how long to wait for After Effects to save recreated_edit.aep
     premiere: bool = False                 # Premiere-only (--premiere): no AE export / checks; recreated_edit.xml for
-    premiere_size: str = "1080x1920"       #   Premiere: WxH sequence at exactly premiere_fps (ntsc FALSE), the edit on V1,
+    premiere_size: str = "1080x1920"       #   Premiere: WxH sequence at exactly premiere_fps (an NTSC competitor: its NTSC
+                                           #   version, e.g. 59.94 for 29.97 -- ntsc TRUE), the edit on V1,
     premiere_fps: str = "60"               #   RAW audio on A1, V2+ empty; every clip framed into the template window
     premiere_window: tuple = (42.0, 555.0, 998.0, 1037.0)   # (x, y, w, h) CORNER px: template pixels 42-1039 x 555-1591
     premiere_max_zoom: float = 1.05        # at most this much bigger than the competitor's framing to cover the window

@@ -166,7 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "9.7 compares the run with the previous run of the same inputs and settings")
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
-                        "at exactly 60.00 fps (every competitor frame = 2 frames), RAW audio on A1, V2+ empty. Every clip "
+                        "at exactly 60.00 fps (every competitor frame = 2 frames; 48 for 24 fps, 50 for 25, 59.94 "
+                        "for 29.97), RAW audio on A1, V2+ empty. Every clip "
                         "holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing that still "
                         "covers the template window x 42-1039, y 555-1591. B-roll follows the audio: every NOT-IN-RAW / "
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "

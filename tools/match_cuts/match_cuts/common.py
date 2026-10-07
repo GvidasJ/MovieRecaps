@@ -345,7 +345,10 @@ class Cache:
         p = self.path(stage, key, ".npz")
         if p.exists():
             try:
-                with np.load(p, allow_pickle=False) as z:
+                # the file opened here, closed here: np.load(path) on a damaged .npz fails inside numpy after it has
+                # handed its own file over to the NpzFile that failed -- left open until the error is freed, and on
+                # Windows an open file cannot be removed or replaced (Task 10: the cache then could not heal itself)
+                with open(p, "rb") as f, np.load(f, allow_pickle=False) as z:
                     return {k: z[k] for k in z.files}
             except UNREADABLE_CACHE as e:
                 drop_unreadable(p, e)

@@ -73,6 +73,11 @@ def _device(device: str) -> str:
         return "cpu"
 
 
+def unload() -> None:
+    """Drop the alignment model (loaded again when needed): the run's GPU processes need the memory more."""
+    _MODELS.clear()
+
+
 def _model(device: str):
     if device not in _MODELS:
         import torchaudio

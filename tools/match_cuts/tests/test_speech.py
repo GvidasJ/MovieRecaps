@@ -381,6 +381,24 @@ def test_a_sliver_whose_start_passes_its_end_goes_and_the_clip_before_plays_its_
     assert any(r["clip"] == "S11" and r["edge"] == "whole" for r in rows)
 
 
+def test_a_clip_the_sliver_before_it_now_runs_into_is_one_take_with_it():
+    """Task 10 (a 29.97 fps Zendaya, inside "know what's funny"): S16 ends inside a word, S17 is two frames stepping
+    back, S18 goes on 2 frames after S16's end. S17 goes and S16 plays on through S17's place -- to exactly where S18
+    starts: one take. S18's start was still taken for a cut inside the word and moved 4 frames later: A1 jumped there
+    (the run's hard speech check failed). Now S18 starts where S16 now ends; no cut is left inside the word."""
+    _, sm = three()                                                         # "there" 2.4-3.0
+    f = float(FPS)
+    s16 = SP.Piece("S16", 0, 60, 1.70 * 60, 1.0)                            # RAW 1.70-2.70: ends inside "there"
+    s17 = SP.Piece("S17", 60, 62, 2.65 * 60, 1.0)                           # RAW 2.65-2.683: two frames back
+    s18 = SP.Piece("S18", 62, 122, 2.70 * 60 + 2, 1.0)                      # RAW 2.733-3.733: 2 frames on from S16
+    trims, inserts, rows, _ = SP.snap_edits([s16, s17, s18], sm, FPS, PA, PB, {0, 60, 62, 122})
+    assert (60, 62) in trims                                                # the sliver goes
+    s16_end = 2.70 + sum(n for at, n, side, _ in inserts if at == 60 and side == "end") / f
+    assert s16_end == pytest.approx(2.70 + 2 / f)                           # S16 plays on through S17's place ...
+    assert not any(r["clip"] == "S18" and r["edge"] in ("start", "whole") for r in rows)   # ... and S18 goes on
+    assert not any(t[0] == 62 for t in trims) and not any(i[0] == 62 and i[2] == "start" for i in inserts)
+
+
 def test_an_audio_edge_next_to_a_muted_piece_plays_on_into_the_silence_or_stops_before_the_word():
     """Spider-Man S31: A1 ended inside "Spider-Man." where V1 plays on (the next piece is muted: a cutaway over music).
     The A1 edge alone moves (a slide: the picture is untouched): on to the end of the word when the silence after it

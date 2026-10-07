@@ -268,6 +268,59 @@ def test_the_scorer_gives_the_numbers_it_gave_before_bit_for_bit():
     sc.close()
 
 
+def test_the_scorers_gpu_caches_stay_within_their_bytes_and_give_the_same_numbers(monkeypatch):
+    """Task 10: the GPU copies a Scorer keeps (RAW frames with their gradients, competitor ROIs) are bounded in bytes --
+    96 RAW frames of a 1080p RAW were 2.4 GB in each of the 4 GPU processes. With room for only 3 RAW frames and one
+    ROI, every score is the one the full caches give, bit for bit (a dropped frame is computed again the same way)."""
+    base = texture(7)
+    mask = np.zeros((COMP_H, COMP_W), bool)
+    mask[120:520, 30:330] = True
+    frames = {j: raw_frame(j, base) for j in range(12)}
+    comps = {k: comp_of(frames[k], SIM) for k in range(12)}
+
+    def scores(sc):
+        out = []
+        for k in list(range(12)) + list(range(11, -1, -1)):     # forwards, then back: dropped frames are asked again
+            prep = sc.comp(k, comps[k], mask)
+            for j in (k - 1, k, k + 1):
+                if 0 <= j < 12:
+                    out.append(sc.score(prep, sc.raw(j, frames[j]), sc.inverse_map(SIM, False)))
+        return out
+    sc = fullres.Scorer((RAW_W, RAW_H), blur_px=1.0)
+    want = scores(sc)
+    assert len(sc._raw) == 12 and len(sc._comp) == 12           # this RAW: the default bounds keep every frame
+    sc.close()
+    per_raw = 3 * RAW_W * RAW_H * 4
+    monkeypatch.setattr(fullres, "RAW_CACHE_BYTES", 3 * per_raw)
+    monkeypatch.setattr(fullres, "COMP_CACHE_BYTES", 1)
+    sc = fullres.Scorer((RAW_W, RAW_H), blur_px=1.0)
+    assert scores(sc) == want
+    assert len(sc._raw) == 3 and sc._raw_bytes == 3 * per_raw == fullres._nbytes([x for v in sc._raw.values() for x in v])
+    assert len(sc._comp) == 1
+    sc.close()
+    assert not sc._raw and sc._raw_bytes == sc._comp_bytes == 0
+
+
+def test_the_run_gives_back_its_speech_models_before_its_gpu_processes(caplog):
+    """Task 10: video4's full-resolution check started its 4 GPU processes next to the 6.6 GB the run's own process
+    still held (the speech map's and the captions' models) -- 15.4 of the card's 16.3 GB, 4 times slower. The run now
+    unloads them first (loaded again if a later step needs one) and says how much memory is free."""
+    import logging
+    from match_cuts import align, asr, pipeline
+
+    class Engine:
+        unloaded = False
+
+        def unload(self):
+            Engine.unloaded = True
+    asr._LOADED["test-engine"] = Engine()
+    align._MODELS["test-device"] = ("a model", {})
+    with caplog.at_level(logging.INFO, logger="match_cuts"):
+        pipeline.release_gpu_memory("9.9 full resolution")
+    assert Engine.unloaded and "test-engine" not in asr._LOADED and "test-device" not in align._MODELS
+    assert "9.9 full resolution:" in caplog.text and "GB of GPU memory free for its processes" in caplog.text
+
+
 def test_the_recheck_in_several_gpu_processes_decides_exactly_as_in_one():
     """Task 9: the uncertain frames scored in processes sharing the GPU (a run of frames each) give every frame the
     same scores, so the same decisions, as one process."""

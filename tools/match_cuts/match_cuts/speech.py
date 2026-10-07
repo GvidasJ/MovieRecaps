@@ -569,7 +569,10 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
         a, b = p.src / f, (p.src + (p.r1 - p.r0)) / f            # the RAW it plays (s)
         nxt = ps[i + 1] if i + 1 < len(ps) else None
         touching = prev is not None and reach == p.r0
-        cont_in = touching and abs(prev[2] - a) < 0.5 / f and prev[1] == prev[2]
+        # one take with the clip before: it now ends (where it was planned to, or played on to) where this one starts
+        # -- Task 10: a sliver between them gone, the clip before playing on through its place, the clip after was
+        # still taken for a cut inside the word and moved (A1 jumped inside "know what's funny")
+        cont_in = touching and abs(prev[1] - a) < 0.5 / f
         cont_out = (nxt is not None and nxt.r0 == p.r1 and abs(nxt.speed - 1.0) < 1e-6
                     and abs(nxt.src / f - b) < 0.5 / f)
         free_start = free(p.r0, p.lock_start) and not cont_in

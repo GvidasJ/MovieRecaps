@@ -1,0 +1,4 @@
+# The reference subtitle files are compared byte for byte by the tests (tools/match_cuts/tests/test_captions.py):
+# never convert their line ends. Git's Windows default (core.autocrlf true) would check them out with CRLF, and 11
+# caption tests then fail on a fresh clone (Task 10).
+srt/*.srt -text
