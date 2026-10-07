@@ -1,0 +1,120 @@
+{
+ "what": "your edit as your Premiere project holds it (project.prproj, no final.mp4): the A1 clips of the RAW -- your audio cuts -- what the RAW plays where: the timeline answer.srt is timed on, and your cuts",
+ "track": "sound",
+ "fps": 60.0,
+ "raw_fps": 29.97002997002997,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 1.133333,
+   "kind": "raw",
+   "src_in": 0.666667,
+   "speed": 1.0
+  },
+  {
+   "start": 1.133333,
+   "end": 1.433333,
+   "kind": "raw",
+   "src_in": 2.035367,
+   "speed": 0.842105
+  },
+  {
+   "start": 1.433333,
+   "end": 2.066667,
+   "kind": "raw",
+   "src_in": 2.533333,
+   "speed": 1.0
+  },
+  {
+   "start": 2.066667,
+   "end": 3.6,
+   "kind": "raw",
+   "src_in": 3.6036,
+   "speed": 0.946237
+  },
+  {
+   "start": 3.6,
+   "end": 4.5,
+   "kind": "raw",
+   "src_in": 5.166667,
+   "speed": 1.0
+  },
+  {
+   "start": 4.5,
+   "end": 5.166667,
+   "kind": "raw",
+   "src_in": 7.9,
+   "speed": 1.0
+  },
+  {
+   "start": 5.166667,
+   "end": 6.433333,
+   "kind": "raw",
+   "src_in": 8.583333,
+   "speed": 1.0
+  },
+  {
+   "start": 6.433333,
+   "end": 9.383333,
+   "kind": "raw",
+   "src_in": 10.043367,
+   "speed": 0.977401
+  },
+  {
+   "start": 9.383333,
+   "end": 11.35,
+   "kind": "raw",
+   "src_in": 13.183333,
+   "speed": 1.0
+  },
+  {
+   "start": 11.35,
+   "end": 14.716667,
+   "kind": "raw",
+   "src_in": 15.283333,
+   "speed": 1.0
+  },
+  {
+   "start": 14.716667,
+   "end": 15.416667,
+   "kind": "raw",
+   "src_in": 19.316667,
+   "speed": 1.0
+  },
+  {
+   "start": 15.416667,
+   "end": 16.016667,
+   "kind": "raw",
+   "src_in": 20.316667,
+   "speed": 1.0
+  },
+  {
+   "start": 16.016667,
+   "end": 17.216667,
+   "kind": "raw",
+   "src_in": 21.654967,
+   "speed": 0.945946
+  },
+  {
+   "start": 17.216667,
+   "end": 18.683333,
+   "kind": "raw",
+   "src_in": 22.883333,
+   "speed": 1.0
+  },
+  {
+   "start": 18.683333,
+   "end": 19.45,
+   "kind": "raw",
+   "src_in": 25.133333,
+   "speed": 1.0
+  },
+  {
+   "start": 19.45,
+   "end": 20.216667,
+   "kind": "raw",
+   "src_in": 26.3,
+   "speed": 1.0
+  }
+ ]
+}

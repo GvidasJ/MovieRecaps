@@ -1,0 +1,517 @@
+{
+ "video": "video5",
+ "date": "2026-10-07",
+ "folder": "..\\..\\finished\\video5",
+ "kind": "project",
+ "runs": {
+  "tool": "..\\..\\work\\t10\\learn\\tool\\video5\\001"
+ },
+ "belongs": {
+  "competitor_from_raw": 0.995,
+  "final_from_raw": 1.0,
+  "same_story": 0.992
+ },
+ "captions": {
+  "source": "project",
+  "why": "the project's 35 captions, as they are (no final.mp4: your final captions)",
+  "count": 35,
+  "on_screen": null,
+  "words": 3,
+  "case": 0,
+  "removed": 22,
+  "added": 0,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "looks",
+    "written": "knows",
+    "kind": "words",
+    "before": "well Leo",
+    "after": "completely different",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "disgusted",
+    "written": "No",
+    "kind": "words",
+    "before": "I'm like",
+    "after": "No no",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "color everything's",
+    "written": "and everything",
+    "kind": "words",
+    "before": "Say it",
+    "after": "sculptured Oh",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ },
+ "edit": {
+  "clips": 4,
+  "starts": [
+   0.0333,
+   0.0036,
+   0.05,
+   0.0833
+  ],
+  "ends": [
+   -0.0787,
+   -0.0167,
+   0.2,
+   -0.0833
+  ],
+  "removed": 0,
+  "added": 0,
+  "how": "at the cuts you and the tool both make (within 0.5 s): your RAW moment minus the tool's"
+ },
+ "cuts": {
+  "tool": {
+   "cuts": 14,
+   "reproduced": 1,
+   "near": 3,
+   "others": 2,
+   "reproduced_pct": 7.1,
+   "length_key": 20.217,
+   "length_got": 24.1,
+   "length_diff": 3.883,
+   "length_diff_pct": 19.2,
+   "tol_s": 0.0333,
+   "misses": [
+    {
+     "t": 1.133,
+     "out": 1.8,
+     "into": 2.035,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 1.433,
+     "out": 2.288,
+     "into": 2.533,
+     "got_out": 2.367,
+     "got_into": 2.5
+    },
+    {
+     "t": 3.6,
+     "out": 5.054,
+     "into": 5.167,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 4.5,
+     "out": 6.067,
+     "into": 7.9,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 6.433,
+     "out": 9.85,
+     "into": 10.043,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 9.383,
+     "out": 12.927,
+     "into": 13.183,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 11.35,
+     "out": 15.15,
+     "into": 15.283,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 14.717,
+     "out": 18.65,
+     "into": 19.317,
+     "got_out": 18.45,
+     "got_into": 19.267
+    },
+    {
+     "t": 15.417,
+     "out": 20.017,
+     "into": 20.317,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 16.017,
+     "out": 20.917,
+     "into": 21.655,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 17.217,
+     "out": 22.79,
+     "into": 22.883,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 18.683,
+     "out": 24.35,
+     "into": 25.133,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 19.45,
+     "out": 25.9,
+     "into": 26.3,
+     "got_out": 25.983,
+     "got_into": 26.217
+    }
+   ],
+   "trims": [
+    {
+     "t": 1.433,
+     "out": -0.0787,
+     "into": 0.0333
+    },
+    {
+     "t": 2.067,
+     "out": -0.0167,
+     "into": 0.0036
+    },
+    {
+     "t": 14.717,
+     "out": 0.2,
+     "into": 0.05
+    },
+    {
+     "t": 19.45,
+     "out": -0.0833,
+     "into": 0.0833
+    }
+   ],
+   "out_median": -0.0477,
+   "into_median": 0.0417
+  },
+  "competitor": {
+   "cuts": 14,
+   "reproduced": 1,
+   "near": 3,
+   "others": 3,
+   "reproduced_pct": 7.1,
+   "length_key": 20.217,
+   "length_got": 24.7,
+   "length_diff": 4.483,
+   "length_diff_pct": 22.2,
+   "tol_s": 0.0333,
+   "misses": [
+    {
+     "t": 1.133,
+     "out": 1.8,
+     "into": 2.035,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 1.433,
+     "out": 2.288,
+     "into": 2.533,
+     "got_out": 2.363,
+     "got_into": 2.563
+    },
+    {
+     "t": 2.067,
+     "out": 3.167,
+     "into": 3.604,
+     "got_out": 3.229,
+     "got_into": 3.696
+    },
+    {
+     "t": 3.6,
+     "out": 5.054,
+     "into": 5.167,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 4.5,
+     "out": 6.067,
+     "into": 7.9,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 6.433,
+     "out": 9.85,
+     "into": 10.043,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 9.383,
+     "out": 12.927,
+     "into": 13.183,
+     "got_out": 12.996,
+     "got_into": 13.196
+    },
+    {
+     "t": 11.35,
+     "out": 15.15,
+     "into": 15.283,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 15.417,
+     "out": 20.017,
+     "into": 20.317,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 16.017,
+     "out": 20.917,
+     "into": 21.655,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 17.217,
+     "out": 22.79,
+     "into": 22.883,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 18.683,
+     "out": 24.35,
+     "into": 25.133,
+     "got_out": null,
+     "got_into": null
+    },
+    {
+     "t": 19.45,
+     "out": 25.9,
+     "into": 26.3,
+     "got_out": null,
+     "got_into": null
+    }
+   ],
+   "trims": [
+    {
+     "t": 1.433,
+     "out": -0.0746,
+     "into": -0.0293
+    },
+    {
+     "t": 2.067,
+     "out": -0.0626,
+     "into": -0.0924
+    },
+    {
+     "t": 9.383,
+     "out": -0.0693,
+     "into": -0.0126
+    },
+    {
+     "t": 14.717,
+     "out": -0.0126,
+     "into": 0.0207
+    }
+   ],
+   "out_median": -0.066,
+   "into_median": -0.0209
+  },
+  "competitor_cuts": 7,
+  "competitor_cuts_kept": 4,
+  "length": {
+   "yours": 20.217,
+   "tool": 24.1,
+   "competitor": 24.7
+  },
+  "only_tool_s": 4.324,
+  "only_tool": [
+   [
+    0.583,
+    0.667
+   ],
+   [
+    1.8,
+    2.035
+   ],
+   [
+    2.288,
+    2.367
+   ],
+   [
+    2.5,
+    2.533
+   ],
+   [
+    5.054,
+    5.167
+   ],
+   [
+    6.067,
+    6.85
+   ],
+   [
+    9.85,
+    10.043
+   ],
+   [
+    12.927,
+    13.183
+   ],
+   [
+    15.15,
+    15.283
+   ],
+   [
+    19.267,
+    19.317
+   ],
+   [
+    20.017,
+    20.1
+   ],
+   [
+    20.1,
+    20.317
+   ],
+   [
+    20.917,
+    20.967
+   ],
+   [
+    21.067,
+    21.655
+   ],
+   [
+    22.79,
+    22.883
+   ],
+   [
+    24.35,
+    25.133
+   ],
+   [
+    25.9,
+    25.983
+   ],
+   [
+    26.217,
+    26.3
+   ],
+   [
+    27.067,
+    27.45
+   ]
+  ],
+  "only_yours_s": 0.2,
+  "only_yours": [
+   [
+    18.45,
+    18.65
+   ]
+  ],
+  "framing": {
+   "pieces": 16,
+   "dx": [
+    -0.0527,
+    -0.0527,
+    0.0534,
+    0.0536,
+    -0.0527,
+    0.0925,
+    0.0925,
+    0.0925,
+    -0.0049,
+    -0.0049,
+    -0.0469,
+    0.0289,
+    0.0323,
+    -0.0055,
+    -0.0055,
+    -0.0055
+   ],
+   "dy": [
+    0.0198,
+    0.0198,
+    0.0786,
+    0.0788,
+    0.0198,
+    0.0292,
+    0.0292,
+    0.0292,
+    0.0198,
+    0.0198,
+    0.0198,
+    0.0787,
+    0.0782,
+    0.0198,
+    0.0198,
+    0.0198
+   ],
+   "zoom": [
+    0.983,
+    0.983,
+    0.787,
+    0.789,
+    0.983,
+    0.788,
+    0.788,
+    0.788,
+    0.983,
+    0.983,
+    0.983,
+    0.787,
+    0.79,
+    0.983,
+    0.983,
+    0.983
+   ],
+   "dx_median": -0.0049,
+   "dy_median": 0.0198,
+   "zoom_median": 0.983
+  }
+ },
+ "topaz": null,
+ "sound": {
+  "yours": {
+   "from": "project",
+   "media": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video5\\raw.mp4",
+   "sequence": "_222FIXEDZendaya & Tom Holland Are The Perfect Couple \uff5c Extended Interview \uff5c The Graham Norton Show [GFeHygcGwSc]",
+   "fps": 60.0,
+   "size": [
+    1080,
+    1920
+   ],
+   "picture_clips": 16,
+   "sound_clips": 16,
+   "framing": 16
+  },
+  "competitor": {
+   "offset_ms": -53.6,
+   "moved": [
+    {
+     "start": 1.7,
+     "end": 2.367,
+     "frames": 0.54
+    },
+    {
+     "start": 2.367,
+     "end": 3.867,
+     "frames": 0.72
+    }
+   ],
+   "given": []
+  }
+ }
+}

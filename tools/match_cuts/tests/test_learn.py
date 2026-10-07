@@ -143,6 +143,7 @@ def world(tmp_path):
     write_edit_xml(run / "1_edit.xml", [(0.0, 1.0, 170.4, 0.0), (1.0, 2.5, 180.0, 0.0), (2.5, 3.0, 190.0, 0.0)])
     (run / "2_captions.srt").write_text(srt([(0.0, 1.0, "I went to the zendeya"), (1.0, 2.0, "interview with tom holland"),
                                              (2.0, 3.0, "and it was great")]), encoding="utf-8")
+    (run / "extras" / "report.md").write_text("# the run's report: it finished\n", encoding="utf-8")
     proj = write_project(tmp_path / "finished.prproj", str(run / "extras" / "media" / "raw.mp4").replace("/", "\\"),
                          [(0.0, 0.9, 170.5, None),            # S01: starts 0.1 s later
                           (0.9, 2.6, 180.0, 0.4),             # S02: plays on 0.2 s, moved 108 px to the left
@@ -216,6 +217,20 @@ def test_learn_makes_a_test_case_the_glossary_and_the_git_commands(world):
     assert again["case"] == case and again["updated"]
 
 
+def test_a_run_that_has_not_finished_is_never_read(world, tmp_path):
+    """Task 10: 1_edit.xml and cutlist.json are written long before the captions, the checks and the report -- a run
+    still going on (or one that stopped early) is refused, whether found from the project, given, or reused by a
+    finished folder's learn (Task 8: video4's run read mid-run kept 1 change of 19 instead of 3)."""
+    (world["run"] / "extras" / "report.md").unlink()
+    seq = P.main_sequence(P.read(world["project"]))
+    for call in (lambda: L.find_run(seq), lambda: L.find_run(seq, world["run"])):
+        with pytest.raises(L.LearnError, match="not a finished run"):
+            call()
+    assert not L.finished_run(world["run"])
+    (world["run"] / "extras" / "report.md").write_text("done", encoding="utf-8")
+    assert L.finished_run(world["run"]) and L.find_run(seq)["dir"] == world["run"]
+
+
 def test_a_project_of_another_run_is_refused(world):
     write_edit_xml(world["run"] / "1_edit.xml", [(0.0, 3.0, 500.0, 0.0)])     # a later run overwrote the folder
     with pytest.raises(L.LearnError, match="not the run it was made from"):
@@ -284,6 +299,7 @@ def _run(path: Path, comp: Path, raw: Path, segs, screen=None, edit=None, caps=N
         {"comp_in": a, "comp_out": b, "text": t} for a, b, t in (screen or [])]}), encoding="utf-8")
     write_edit_xml(run / "1_edit.xml", edit or [(0.0, 1.0, 10.0, 0.0)])
     (run / "2_captions.srt").write_text(srt(caps or []), encoding="utf-8")
+    (run / "extras" / "report.md").write_text("# the run's report: it finished\n", encoding="utf-8")
     return run
 
 
@@ -364,6 +380,69 @@ def test_folders_missing_a_file_or_not_belonging_together_are_skipped(finished, 
         L.learn_folder(finished["dir"], tmp_path / "runs", finished["cases"], tool_run=finished["tool"], user_run=lost,
                        log=lambda *_a: None)
     assert L.finished_folders(finished["dir"].parent) == [finished["dir"], other]
+
+
+def test_a_finished_folder_without_final_mp4_takes_your_edit_from_the_project(finished):
+    """video5: a Premiere project with no final.mp4 and no After Effects comp -- your cuts, audio cuts, framing and
+    captions are the project's own: the answer key is its A1 clips of the RAW and its captions as they are, your
+    framing its V1 clips' Motion; no run of a finished video is made."""
+    d = finished["dir"]
+    (d / "final.mp4").unlink()
+    write_project(d / "project.prproj", "D:/downloads/episode 3.mp4",
+                  [(0.0, 2.0, 10.0, 0.5), (2.0, 3.5, 20.5, 0.6)],          # yours: 10-12 s, a cut to 20.5-22 s
+                  [(0.0, 0.5, "Were the most"), (0.5, 1.2, "notorious gang"), (1.2, 2.0, "in the country")])
+    assert L.missing_files(d) == []
+    r = L.learn_folder(d, finished["tmp"] / "runs", finished["cases"], tool_run=finished["tool"],
+                       glossary=finished["glossary"], log=lambda *_a: None)
+    case = r["case"]
+    assert r["runs"]["user"] is None
+    assert {p.name for p in case.iterdir()} == {"competitor.mp4", "raw.mp4", "answer.srt", "answer_edit.json",
+                                                "case.json", "learned.json"}
+    edit = json.loads((case / "answer_edit.json").read_text(encoding="utf-8"))
+    assert edit["track"] == "sound" and edit["fps"] == pytest.approx(60.0) and "project.prproj" in edit["what"]
+    assert [(p["start"], p["end"], p["src_in"]) for p in edit["audio"]] == [
+        (0.0, 2.0, pytest.approx(10.0)), (2.0, 3.5, pytest.approx(20.5))]
+    srt_text = (case / "answer.srt").read_text(encoding="utf-8")
+    assert "00:00:00,000 --> 00:00:00,500\nWere the most" in srt_text           # as they are: no punctuation added
+    assert r["captions"]["source"] == "project" and "as they are" in r["captions"]["why"]
+    learned = json.loads((case / "learned.json").read_text(encoding="utf-8"))
+    assert learned["kind"] == "project" and set(learned["runs"]) == {"tool"}
+    assert learned["sound"]["yours"]["picture_clips"] == 2 and learned["sound"]["yours"]["framing"] == 2
+    c = r["compare"]
+    assert (c["tool"]["cuts"], c["tool"]["reproduced"], c["tool"]["near"]) == (1, 0, 1)    # 12 -> 20.5 vs 12.5 -> 20.5
+    assert c["framing"]["pieces"] == 2                 # your framing (Motion) against the competitor's
+    meta = json.loads((case / "case.json").read_text(encoding="utf-8"))
+    assert meta["timeline"] == "edit" and "project.prproj holds it" in meta["notes"]
+    lines = L.folder_summary({"done": [r], "skipped": [], "suggestions": [], "git": []})
+    assert any("your edit read from project.prproj" in x for x in lines) and not any("None" in x for x in lines)
+
+
+def test_your_edit_in_a_project_is_the_clips_of_the_raw_not_the_template(monkeypatch, tmp_path):
+    """The project's RAW is the media its clips play most whose size, frame rate and length are the RAW's -- the
+    template PNG on V2 and the competitor kept for reference are not your edit. The framing: the part of the RAW the
+    template window shows (Position / Scale; Premiere's defaults where the project keeps none)."""
+    raw = "C:/films/raw source.mp4"
+    items = [P.Item(P.VIDEO, 1, 0.0, 2.0, media=raw, src_in=10.0, position=(0.5, 0.5), scale=300.0),
+             P.Item(P.VIDEO, 1, 2.0, 3.0, media=raw, src_in=20.0),                     # Motion untouched
+             P.Item(P.VIDEO, 2, 0.0, 3.0, media="C:/template/overlay.png"),
+             P.Item(P.VIDEO, 3, 0.0, 3.0, media="C:/films/competitor.mp4", enabled=False),
+             P.Item(P.AUDIO, 1, 0.0, 2.0, media=raw, src_in=10.0),
+             P.Item(P.AUDIO, 1, 2.0, 3.0, media=raw, src_in=20.0)]
+    project = P.Project("p", [P.Sequence("Edit", 60.0, 1080, 1920, items)],
+                        {raw: {"width": 640, "height": 480, "fps": 25.0, "duration": 600.0},
+                         "C:/template/overlay.png": {"width": 1080, "height": 1920},
+                         "C:/films/competitor.mp4": {"width": 1080, "height": 1920, "fps": 30.0, "duration": 60.0}})
+    monkeypatch.setattr(P, "read", lambda path: project)
+    pic, snd, info = L.project_edit(tmp_path / "project.prproj", {"width": 640, "height": 480, "fps": "25/1",
+                                                                    "duration_s": 600.0})
+    assert info["media"] == raw and info["sound_clips"] == 2 and info["picture_clips"] == 2
+    assert [(p.t0, p.raw) for p in snd.pieces] == [(0.0, 10.0), (2.0, 20.0)] and snd.what == "sound"
+    v0, v1 = pic.pieces[0].view, pic.pieces[1].view
+    # 300 %: the RAW 1920 x 1440 px centred -- the 998 px window shows 998 / 1920 of its width, centred
+    assert v0[0] == pytest.approx(0.5, abs=1e-3) and v0[2] == pytest.approx(998 / 1920, abs=1e-3)
+    assert v1[2] == pytest.approx(640 / 640, abs=1e-3)     # 100 %: 640 px, narrower than the window: all of it
+    with pytest.raises(L.LearnError, match="no clip of project.prproj plays raw.mp4"):
+        L.project_edit(tmp_path / "project.prproj", {"width": 1280, "height": 720, "fps": "30/1"})
 
 
 def test_the_caption_row_is_the_text_that_changes_most():

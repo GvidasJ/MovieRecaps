@@ -590,8 +590,80 @@ def finished_folders(path: str | Path) -> list[Path]:
 
 
 def missing_files(d: Path, final_only: bool = False) -> list[str]:
-    need = [FINAL, COMPETITOR, RAW_FILE] + ([] if final_only else [PROJECT])
+    """The files a finished folder lacks: final.mp4, competitor.mp4, raw.mp4 and project.prproj -- or, without
+    final.mp4, the project alone holds your edit (project_edit): competitor.mp4, raw.mp4 and project.prproj."""
+    if not final_only and not (d / FINAL).is_file() and (d / PROJECT).is_file():
+        need = [COMPETITOR, RAW_FILE, PROJECT]
+    else:
+        need = [FINAL, COMPETITOR, RAW_FILE] + ([] if final_only else [PROJECT])
     return [n for n in need if not (d / n).is_file()]
+
+
+def project_edit(project: Path, raw: dict, window: Sequence[float] | None = None) -> tuple[Any, Any, dict]:
+    """Your edit as your project holds it -- a finished folder with no final.mp4: your cuts, audio cuts and framing are
+    the project's own clips of the RAW. ``raw``: the RAW as a run of the tool measured it (its cut list's "raw": width,
+    height, fps, duration_s). The RAW is the media the project's clips play most, its size, frame rate and length
+    agreeing with ``raw`` (media_mismatch; one that has sound first, so the template's picture never wins); other
+    footage -- the template overlay, graphics -- is not your edit of the RAW. Returns (the picture edit: the V1 clips
+    with the part of the RAW the template ``window`` shows -- their Motion Position / Scale --, the sound edit: the A1
+    clips, the timeline answer.srt is timed on, {"media", "sequence", "fps", "size", "picture_clips",
+    "sound_clips", "framing"}). Rotation and anchor point are not read (0 and the centre)."""
+    from fractions import Fraction
+    from . import edit_score as ES
+    from .export_xml_edl import premiere_settings
+    pr = PR.read(project)
+    seq = PR.main_sequence(pr)
+    if seq is None:
+        raise LearnError(f"skipped: {project.name} has no sequence")
+    rw, rh = float(raw.get("width") or 0), float(raw.get("height") or 0)
+    try:
+        rfps = float(Fraction(str(raw.get("fps"))))
+    except (ValueError, ZeroDivisionError, TypeError):
+        rfps = 0.0
+    wanted = {"raw": raw}
+    played: dict[str, list[float]] = {}                        # media -> [seconds on audio, seconds on video]
+    for it in seq.items:
+        if it.media and it.enabled and it.kind in (PR.AUDIO, PR.VIDEO):
+            t = played.setdefault(it.media, [0.0, 0.0])
+            t[0 if it.kind == PR.AUDIO else 1] += it.end - it.start
+    fits = [m for m in played if media_mismatch(pr.media.get(m) or {}, wanted) is None]
+    if not fits:
+        raise LearnError(f"skipped: no clip of {project.name} plays raw.mp4 (its media: "
+                         + ", ".join(sorted(PR.file_name(m) for m in played)) + ")" if played else
+                         f"skipped: {project.name} has no clip of a video file")
+    media = max(fits, key=lambda m: (played[m][0] > 0, played[m][0] + played[m][1]))
+    name = PR.file_name(media)
+    fps = float(seq.fps or 0) or 60.0
+    sound = [ES.Piece(p["start"], p["end"], p["src_in"], float(p["speed"] or 1.0))
+             for p in PR.audio_pieces(seq, name)] if played[media][0] > 0 else []
+    mine = [it for it in seq.items if it.kind == PR.VIDEO and it.enabled and it.media == media]
+    per: dict[int, float] = {}
+    for it in mine:
+        per[it.track] = per.get(it.track, 0.0) + it.end - it.start
+    st = premiere_settings(None)
+    sw, sh = float(seq.width or st["size"][0]), float(seq.height or st["size"][1])
+    win = [float(v) for v in (window or st["window"])]
+    if window is None and (sw, sh) != tuple(float(v) for v in st["size"]):      # the template window, scaled
+        kx, ky = sw / float(st["size"][0]), sh / float(st["size"][1])
+        win = [win[0] * kx, win[1] * ky, win[2] * kx, win[3] * ky]
+    picture, framed = [], 0
+    for it in sorted((it for it in mine if per and it.track == max(per, key=per.get)), key=lambda it: it.start):
+        view = None
+        if not it.keyframed and rw and rh:
+            pos = it.position if it.position is not None else (0.5, 0.5)            # Premiere's defaults:
+            s = (float(it.scale) if it.scale is not None else 100.0) / 100.0          # centred, 100 %
+            px, py = float(pos[0]) * sw, float(pos[1]) * sh
+            view = ES._view({"scale": s, "rotation_deg": 0.0, "tx": px - s * rw / 2.0, "ty": py - s * rh / 2.0},
+                            win, rw, rh)
+            framed += view is not None
+        picture.append(ES.Piece(it.start, it.end, it.src_in, float(it.speed or 1.0), view))
+    if not sound and not picture:
+        raise LearnError(f"skipped: no clip of {project.name} plays {name}")
+    info = {"media": media, "sequence": seq.name, "fps": fps, "size": [int(sw), int(sh)],
+            "picture_clips": len(picture), "sound_clips": len(sound), "framing": framed}
+    pic = ES.Edit(picture, fps, rfps or fps, "picture")
+    snd = ES.Edit(sound, fps, rfps or fps, "sound") if sound else ES.Edit(list(picture), fps, rfps or fps, "picture")
+    return pic, snd, info
 
 
 def make_run(comp: Path, raw: Path, out: Path, work: Path, fast: bool = False, fresh: bool = False,
@@ -965,9 +1037,9 @@ def compare_edits(user: Any, comp: Any, tool: Any, user_pic: Any = None, comp_pi
             "trims": trims_at_cuts(tool_sc), "framing": framing_changes(user_pic or user, comp_pic or comp)}
 
 
-def _edit_json(e: Any, fps: float) -> dict:
+def _edit_json(e: Any, fps: float, what: str | None = None) -> dict:
     """answer_edit.json of a finished video: its pieces of the RAW (as you cut it: sound_edit), other footage as kind
-    "other"."""
+    "other" (``what``: the file's description, when the edit is not final.mp4's)."""
     rows = []
     for q in e.pieces:
         if q.raw is None:
@@ -977,10 +1049,10 @@ def _edit_json(e: Any, fps: float) -> dict:
             rows.append({"start": round(q.t0, 6), "end": round(q.t1, 6), "kind": "raw", "src_in": round(q.raw, 6),
                          "speed": round(q.speed, 6)})
     snd = e.what == "sound"
-    return {"what": "your finished video (final.mp4) matched against the RAW frame by frame, as the tool matches a "
-                    "competitor" + (", each piece placed by its sound and the cutaways over the RAW's sound given that "
-                                    "sound (learn.sound_edit)" if snd else "") +
-                    ": what the RAW plays where -- the timeline answer.srt is timed on, and your cuts",
+    return {"what": what or ("your finished video (final.mp4) matched against the RAW frame by frame, as the tool "
+                             "matches a competitor" + (", each piece placed by its sound and the cutaways over the RAW's "
+                                                       "sound given that sound (learn.sound_edit)" if snd else "") +
+                             ": what the RAW plays where -- the timeline answer.srt is timed on, and your cuts"),
             "track": "sound" if snd else "picture", "fps": fps, "raw_fps": e.raw_fps, "audio": rows}
 
 
@@ -1003,9 +1075,10 @@ def write_media(case_dir: Path, comp: Path, raw: Path) -> dict[str, str]:
 
 
 def write_finished_case(case_dir: Path, caps: Sequence[tuple[float, float, str]] | None, user: Any,
-                        meta: dict) -> dict[str, str]:
+                        meta: dict, what: str | None = None) -> dict[str, str]:
     """The answer keys and notes of a finished folder's test case (answer.srt when its captions could be read,
-    answer_edit.json, case.json); returns {file: what it is}."""
+    answer_edit.json -- ``what``: its description, when the edit is not final.mp4's --, case.json); returns {file:
+    what it is}."""
     done: dict[str, str] = {}
     srt = case_dir / "answer.srt"
     if caps:
@@ -1016,7 +1089,7 @@ def write_finished_case(case_dir: Path, caps: Sequence[tuple[float, float, str]]
     elif srt.is_file():
         srt.unlink()
         done["answer.srt"] = "removed: this video's captions could not be read"
-    (case_dir / "answer_edit.json").write_text(json.dumps(_edit_json(user, user.fps), indent=1) + "\n",
+    (case_dir / "answer_edit.json").write_text(json.dumps(_edit_json(user, user.fps, what), indent=1) + "\n",
                                                encoding="utf-8", newline="\n")
     n = len(user.cuts())
     done["answer_edit.json"] = (f"your timeline: {len(user.raw_pieces())} pieces of the RAW, "
@@ -1044,6 +1117,8 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
     miss = missing_files(d, final_only)
     if miss:
         raise LearnError(f"skipped: no {', '.join(miss)}")
+    from_project = not final_only and not (d / FINAL).is_file()     # no final.mp4: the project holds your edit
+    yours = "your project's edit" if from_project else "final.mp4"
     cases = Path(cases_dir) if cases_dir else CASES_DIR
     case_dir = same_case(cases, file_hash(d / COMPETITOR))
     if case_dir is None:
@@ -1052,36 +1127,47 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
         while case_dir.exists():
             case_dir, i = cases / f"{slug(d.name)}-{i}", i + 1
     updated = any((case_dir / n).is_file() for n in ("answer_edit.json", "answer_edit.xml", "answer.srt"))
-    user_dir = Path(user_run) if user_run else make_run(d / FINAL, d / RAW_FILE, runs / "user" / case_dir.name,
-                                                       runs / "work" / case_dir.name, fast, fresh, log)
+    user_dir = None if from_project else (
+        Path(user_run) if user_run else make_run(d / FINAL, d / RAW_FILE, runs / "user" / case_dir.name,
+                                                 runs / "work" / case_dir.name, fast, fresh, log))
     media = write_media(case_dir, d / COMPETITOR, d / RAW_FILE)
     cw = Path(check_work) if check_work else DEFAULT_OUT / "work"
     tool_dir = Path(tool_run) if tool_run else make_run(case_dir / "competitor.mp4", case_dir / "raw.mp4",
                                                        runs / "tool" / case_dir.name, cw / case_dir.name, fast, fresh,
                                                        log)
     for given in (tool_dir, user_dir):
-        if not finished_run(given):
+        if given is not None and not finished_run(given):
             raise LearnError(unfinished(given))
     comp_cl = json.loads((tool_dir / EXTRAS / "cutlist.json").read_text(encoding="utf-8"))
-    user_cl = json.loads((user_dir / EXTRAS / "cutlist.json").read_text(encoding="utf-8"))
-    comp_pic, user_pic = ES.Edit.from_cutlist(comp_cl), ES.Edit.from_cutlist(user_cl)
+    comp_pic = ES.Edit.from_cutlist(comp_cl)
     comp, comp_sound = sound_edit(tool_dir, comp_pic)
-    user, user_sound = sound_edit(user_dir, user_pic)
+    if from_project:
+        user_pic, user, proj = project_edit(d / PROJECT, comp_cl.get("raw") or {})
+        user_sound = {"from": "project", **proj}
+    else:
+        user_cl = json.loads((user_dir / EXTRAS / "cutlist.json").read_text(encoding="utf-8"))
+        user_pic = ES.Edit.from_cutlist(user_cl)
+        user, user_sound = sound_edit(user_dir, user_pic)
     tool = ES.Edit.from_xml(tool_dir / EDIT_XML, "sound" if user.what == "sound" else "picture")
     belongs = {"competitor_from_raw": round(raw_share(comp_pic), 3), "final_from_raw": round(raw_share(user_pic), 3),
                "same_story": round(raw_overlap(user_pic, comp_pic), 3)}
     if belongs["final_from_raw"] < FROM_RAW:
-        raise LearnError(f"skipped: final.mp4 does not come from raw.mp4 (only {100 * belongs['final_from_raw']:.0f} % "
+        raise LearnError(f"skipped: {yours} does not come from raw.mp4 (only {100 * belongs['final_from_raw']:.0f} % "
                          "of it shows the RAW)")
     if belongs["competitor_from_raw"] < FROM_RAW:
         raise LearnError("skipped: competitor.mp4 does not come from raw.mp4 (only "
                          f"{100 * belongs['competitor_from_raw']:.0f} % of it shows the RAW)")
     if belongs["same_story"] < SAME_STORY:
-        raise LearnError("skipped: final.mp4 and competitor.mp4 play different parts of raw.mp4 (only "
+        raise LearnError(f"skipped: {yours} and competitor.mp4 play different parts of raw.mp4 (only "
                          f"{100 * belongs['same_story']:.0f} % of the RAW your video plays is in the competitor's)")
-    screen = screen_captions(user_dir, d / FINAL)
+    screen = screen_captions(user_dir, d / FINAL) if not from_project else []
     caps, source, why, shown = None, None, "", None
-    if final_only:
+    if from_project:
+        pcaps = project_captions(d / PROJECT)
+        caps, source = pcaps, "project"
+        why = (f"the project's {len(pcaps)} captions, as they are (no final.mp4: your final captions)" if pcaps else
+               "not read: the project has no captions")
+    elif final_only:
         caps, source = screen, "screen"
         why = f"read from final.mp4's screen ({len(screen)} captions): the project was not used"
     else:
@@ -1099,17 +1185,23 @@ def learn_folder(d: Path, runs: Path, cases_dir: Path | None = None, final_only:
     tool_caps = [c["text"] for c in read_srt(tool_dir / CAPTIONS_SRT)] if (tool_dir / CAPTIONS_SRT).is_file() else []
     changes, ccount = caption_changes(tool_caps, [t for _a, _b, t in caps]) if caps else ([], {})
     edit = compare_edits(user, comp, tool, user_pic, comp_pic)
-    topaz = topaz_of(d / TOPAZ, d / FINAL, d / RAW_FILE, [c.t for c in user_pic.cuts()]) if (d / TOPAZ).is_file() else None
+    topaz = (topaz_of(d / TOPAZ, d / FINAL, d / RAW_FILE, [c.t for c in user_pic.cuts()])
+             if (d / TOPAZ).is_file() and (d / FINAL).is_file() else None)
     gpath = Path(glossary) if glossary else glossary_path()
     new_words = add_to_glossary(changes, case_dir.name, gpath) if changes else []
-    meta = {"notes": f"learned from {d} ({dt.date.today().isoformat()}): answer_edit.json is your finished video "
-                     "(final.mp4) matched against the RAW; answer.srt " + (
-                         "your captions read from its screen" if source == "screen" else
-                         "your project's captions" if source == "project" else "absent (" + why + ")"),
-            "learned_from": str(d), "captions_from": source, "runs": {"tool": str(tool_dir), "user": str(user_dir)}}
-    files = {**media, **write_finished_case(case_dir, caps, user, meta)}
-    record = {"video": case_dir.name, "date": dt.date.today().isoformat(), "folder": str(d), "kind": "finished",
-              "runs": {"tool": str(tool_dir), "user": str(user_dir)}, "belongs": belongs,
+    run_paths = {"tool": str(tool_dir)} | ({} if user_dir is None else {"user": str(user_dir)})
+    meta = {"notes": f"learned from {d} ({dt.date.today().isoformat()}): answer_edit.json is " + (
+                "your edit as project.prproj holds it (no final.mp4): the A1 clips of the RAW, your audio cuts"
+                if from_project else "your finished video (final.mp4) matched against the RAW") + "; answer.srt " + (
+                "your captions read from its screen" if source == "screen" else
+                "your project's captions" if source == "project" else "absent (" + why + ")"),
+            "learned_from": str(d), "captions_from": source, "runs": run_paths}
+    what = ("your edit as your Premiere project holds it (project.prproj, no final.mp4): the A1 clips of the RAW -- your "
+            "audio cuts -- what the RAW plays where: the timeline answer.srt is timed on, and your cuts"
+            if from_project else None)
+    files = {**media, **write_finished_case(case_dir, caps, user, meta, what)}
+    record = {"video": case_dir.name, "date": dt.date.today().isoformat(), "folder": str(d),
+              "kind": "project" if from_project else "finished", "runs": run_paths, "belongs": belongs,
               "captions": {"source": source, "why": why, "count": len(caps or []), "on_screen": shown, **ccount,
                            "changes": [c.__dict__ for c in changes]},
               "edit": edit["trims"], "cuts": {k: v for k, v in edit.items() if k != "trims"}, "topaz": topaz,
@@ -1173,7 +1265,9 @@ def folder_summary(res: dict) -> list[str]:
         c, cmp_ = r["captions"], r["compare"]
         t, k = cmp_["tool"], cmp_["competitor"]
         ln = cmp_["length"]
-        out.append(f"{r['folder'].name}: learned (runs {r['runs']['tool']}, {r['runs']['user']})")
+        mine = r["runs"].get("user")
+        out.append(f"{r['folder'].name}: learned (runs " + ", ".join(str(v) for v in r["runs"].values() if v is not None)
+                   + ")" + ("" if mine is not None else " -- your edit read from project.prproj (no final.mp4)"))
         out.append(f"  Cuts: the tool reproduces {t['reproduced']}/{t['cuts']} of your cuts within 2 frames"
                    + (f" ({t['near']} more trimmed otherwise)" if t["near"] else "")
                    + f"; the competitor already had {k['reproduced'] + k['near']} of them; you kept "

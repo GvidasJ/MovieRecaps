@@ -604,8 +604,12 @@ existing `3_captions_styled.prproj` (without it the run stops rather than overwr
 ```
 
 `finished\` holds one folder per finished video: `final.mp4` (the video as you exported it), `competitor.mp4`,
-`raw.mp4` and `project.prproj` (for your captions); `topaz.mp4` and `project.aep` may be there too. `learn` works on
-every folder in it (or on the one folder you give):
+`raw.mp4` and `project.prproj` (for your captions); `topaz.mp4` and `project.aep` may be there too. A folder with no
+`final.mp4` -- your cuts, audio cuts, framing and captions directly in `project.prproj` (no After Effects comp) -- is
+read from the project instead: the project's clips of the RAW (the media whose size, frame rate and length are
+`raw.mp4`'s; the template overlay and other footage are not your edit) give your audio cuts (A1: the answer key) and
+your cuts and framing (V1: the part of the RAW the template window shows, from each clip's Position and Scale), its
+caption track your captions, as they are. `learn` works on every folder in it (or on the one folder you give):
 
 - **Two runs of the tool per video**, in `work\learn\` (a finished run of the same two files there is used again;
   `--fresh` for new ones, `--fast` for quick ones): the tool on `competitor.mp4` + `raw.mp4` -- what it makes now
