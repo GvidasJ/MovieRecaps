@@ -80,8 +80,10 @@ def synthetic(request) -> dict:
 
 
 def _run_cli(py: str, syn: dict, out: Path, work: Path) -> subprocess.CompletedProcess:
+    # --check-determinism: since Task 9 a normal run no longer re-assembles its cut list from the caches (check 9.7
+    # says not_available then); this end-to-end run still proves the whole pipeline deterministic, as check-all does
     cmd = [py, "-m", "match_cuts", "--competitor", syn["competitor"], "--raw", syn["raw"],
-           "--out", str(out), "--work", str(work)]
+           "--out", str(out), "--work", str(work), "--check-determinism"]
     return subprocess.run(cmd, cwd=str(TOOL_DIR), capture_output=True, text=True, timeout=CLI_TIMEOUT_S)
 
 

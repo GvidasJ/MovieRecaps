@@ -121,7 +121,7 @@ matching slower, not faster: the same 120 searches take 32-34 s with 12-15 worke
 Without a CUDA GPU the default samples the RAW like `--fast` (an every-frame index needs the exact GPU search), skips
 the full-resolution pass, and says so.
 
-Measured on an RTX 5080 with 15 cores, from empty caches: tests/real/deadpool (a 203 s 1080p RAW, 700 competitor frames) takes 9m01s on a free GPU; tests/real/zendaya (278 s, 740 frames) 16m21s thorough, 6m16s with `--fast` and 4m11s thorough again from its caches, and tests/real/spiderman-school (a 284 s RAW at 59.94 fps, 1,965 frames) 82 minutes -- the last three while a Media Encoder render shared the GPU. The exact search of every RAW frame grows with the RAW's length times the competitor's frames (33 minutes of Spider-Man's run).
+Measured on an RTX 5080 with a 16-core CPU (Task 9), on the finished videos at full size, from empty caches, one run at a time on a free GPU: video1 (a 23.5-minute RAW at 700x480, 3,384 competitor frames) takes 70 minutes thorough and 26 with `--fast`; video2 (24.4 minutes, 281 frames) 15 and 5; video3 (24.2 minutes, 1,249 frames) 14 and 6; video4 (12.7 minutes at 1280x720 and 59.94 fps, 1,078 frames) 47 and 19. The search grows with the RAW's length (every RAW frame is indexed) and with the competitor's frames; refine and the full-resolution steps grow with the competitor's frames and the RAW's resolution.
 
 ### Premiere (`--premiere`)
 
