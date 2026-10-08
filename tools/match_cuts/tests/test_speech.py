@@ -184,6 +184,19 @@ def test_cuts_inside_speech_move_and_nothing_plays_twice():
     assert (120, 150) in trims and [r["edge"] for r in rows if r["clip"] == "C"] == ["whole"]
 
 
+def test_the_edits_first_frame_is_never_before_the_competitors():
+    """A clip starting inside a word starts before the word -- except the edit's very first clip: on all 9 answer keys
+    you start at or after the competitor's first frame, and you moved back every earlier start this step made
+    (video1 -0.42 s, video017 -0.23 s, video018 -0.35 s with 16 frames of the shot before). A later clip still moves."""
+    _, sm = three()
+    first = SP.Piece("A", 0, 60, 1.2 * 60, 1.0)         # RAW 1.2-2.2: starts inside "hello"
+    b = SP.Piece("B", 60, 120, 3.95 * 60, 1.0)          # RAW 3.95-4.95: starts inside "again"
+    _, inserts, _, _ = SP.snap_edits([first, b], sm, FPS, PA, PB)
+    ext = {(at, side): d for at, d, side, _ in inserts}
+    assert (0, "start") not in ext                      # the first frame stays the competitor's
+    assert ext[(60, "start")] == pytest.approx((3.95 - (3.8 - PB)) * 60, abs=TOL * 60)   # B starts before "again"
+
+
 def test_a_tiny_jump_inside_speech_plays_on_as_one_take():
     """A cut skipping (or repeating) at most 0.1 s of the RAW inside speech: the two clips play on as one take --
     a skip, the clip before plays on to where the next starts; a repeat, the next starts where the one before ends."""
@@ -338,8 +351,8 @@ def test_run_011_no_cut_inside_speech_and_my_cuts_matched(tmp_path):
     y = media.extract_audio(ROOT / "raw_audio.m4a", sr=48000, mono=True)
     sm = SP.speech_map(y, 48000, S.Settings(), w["medium.en"], w["small.en"])
     cl = run011_cutlist()
-    cfg = Config(out_dir=str(tmp_path), premiere=True, pad_after=0.15)  # that session's pads (the default is 0.05
-    assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)             # since Task 8: my finished videos leave earlier)
+    cfg = Config(out_dir=str(tmp_path), premiere=True, pad_after=0.15, pad_before=0.05)   # that session's pads (the
+    assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)   # defaults are 0.05 since Task 8 / 0.03 since video018)
     # the generated edit cut inside speech 9 times (the hard check finds them; a 10th lands on the boundary between
     # two words that run together -- a cut may fall there)
     assert len(ex.premiere_speech_problems(ROOT / "generated_edit.xml", sm)) == 9

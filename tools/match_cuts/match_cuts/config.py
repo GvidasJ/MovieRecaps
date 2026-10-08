@@ -70,7 +70,8 @@ class Config:
     silence_db: float | None = None        # silence threshold this many dB under the speech level (None: set per video
                                            #   from its speech level and background noise, silence.levels)
     min_silence: float = 0.3               # cut silences longer than this (s), only between words
-    pad_before: float = 0.05               # kept before each word: a clip's start, after a removed silence (s)
+    pad_before: float = 0.03               # kept before each word: a clip's start, after a removed silence (s); 0.05
+                                           #   until video017/018: your starts sit on the sound's onset (0.015 s before it)
     pad_after: float = 0.05                # kept after each word: a clip's end, before a removed silence (s); 0.05
     #                                        since Task 8: at the cuts the tool and your finished videos both make,
     #                                        you leave 0.09-0.12 s earlier than 0.15 did (video2, video4, Zendaya-age)

@@ -155,13 +155,13 @@ def test_captions_start_when_their_first_word_is_spoken():
 
 def test_the_silence_across_a_cut_is_trimmed_to_both_pads():
     y = tone(tone(room(), 0.5, 1.5), 1.82, 3.0)                       # 0.32 s of quiet across the cut at 1.6 s
-    st = S.Settings()                                                  # --pad-after 0.05 + --pad-before 0.05
+    st = S.Settings()                                                  # --pad-after 0.05 + --pad-before 0.03
     inside, _ = S.removal_ranges(y, SR, FPS, 360, st)
     assert not any(c.s0 <= 1.6 <= c.s1 for c in inside)               # inside a clip it is no pause to cut (< 0.3 s)
     across, _ = S.removal_ranges(y, SR, FPS, 360, st, cuts_at=[96])
     c = next(c for c in across if c.s0 <= 1.6 <= c.s1)
     kept = (c.s1 - c.s0) - (c.b - c.a) / 60.0
-    assert kept == pytest.approx(0.1, abs=2.0 / 60) and c.a / 60 >= c.s0 + 0.05 - 1e-9
+    assert kept == pytest.approx(0.08, abs=2.0 / 60) and c.a / 60 >= c.s0 + 0.05 - 1e-9
 
 
 # ---------------------------------------------------------------------------------------------

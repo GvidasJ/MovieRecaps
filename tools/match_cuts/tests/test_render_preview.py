@@ -379,6 +379,53 @@ def test_load_raw_audio_windows_match_full_decode(raw_clip, tmp_path, container)
     assert np.max(np.abs(y_full - y_part)) < 1e-4, np.max(np.abs(y_full - y_part))
 
 
+def test_audio_slow_remap_starting_between_samples_and_speeds_rounding_to_zero():
+    """video018 (verify s9_5_audio crashed: ZeroDivisionError in sample_positions): at the 16 kHz analysis rate the
+    slow reverse remap S14 (-0.066x) starts between two output samples (frame 1073 = sample 286133.33: its audio
+    starts at sample round() = 286133, its first key's piece at ceil() = 286134), which left a 1-sample piece across
+    the key (1/3 sample held before it) whose speed (2/3 x -0.066 = -0.044) rounds to 0/1 -- P = 0. A speed that
+    rounds to 0 over its piece (the read moves <= 0.05 samples in all) plays like a frozen one: silence."""
+    sr = 16000
+    v = -3 / 58                                         # -0.052x; frame 31 at 30 fps = sample 16533.33 at 16 kHz
+    keys = [{"comp_frame": 31, "raw_seconds": 5.0}, {"comp_frame": 60, "raw_seconds": 5.0 + v * 29 / 30}]
+    seg = Segment(id=1, type="raw", comp_in=31, comp_out=60, raw_in_seconds=5.0, speed=v, time_mode="remap",
+                  time_remap_keys=keys, transform=centred(0.75))
+    cl = make_cutlist(segments=[seg], n=60)
+    assert [(a, b) for _s, a, b, _t, _v in rp.audio_pieces(cl, sr)] == [(16533, 16534), (16534, 32000)]
+    x = tone(3.0 * np.arange(int(RAW_N / float(RF) * sr))).astype(np.float32)    # the RAW's tones at 16 kHz
+    y = rp.build_audio(cl, x, sr)                                                # was: ZeroDivisionError
+    assert y.shape == (32000,) and np.all(y[:16534] == 0)
+    n = np.arange(16634, 31900)
+    ref = tone((5.0 + v * (n / sr - 31 / 30)) * SR)                               # the remap (tone() takes 48 kHz positions)
+    assert np.sqrt(np.mean((y[n] - ref) ** 2) / np.mean(ref ** 2)) < 5e-3
+    # speeds that round to 0/1 over their piece (|v| <= 0.05 / n, or <= 1/20000): silent, never a crash
+    xs = raw_audio()
+    for p0, vv, k in ((1000.3, 0.04, 1), (1000.3, -0.04, 1), (5000.5, 0.002, 10), (5000.5, 1e-5, 20000)):
+        assert np.all(rp.sample_positions(xs, p0, vv, k) == 0), (vv, k)
+    assert abs(rp.sample_positions(xs, 1000.3, 1.0, 1)[0] - tone(np.array([1000.3]))[0]) < 2e-3  # 1 sample, real speed
+
+
+def test_audio_jcut_on_a_reverse_remap_at_23976_is_held_not_a_crash():
+    """A piece wholly before a remap's first key is held (AE), speed 0: silent. On a 23.976 fps
+    grid that key's boundary sample is exact (frame 69 = sample 138138 at 48 kHz) but float rounding gave the piece of
+    a 2-frame J-cut a speed of -1e-14 instead of 0, which _rational rounds to 0/1: P = 0 on an ordinary -1x reverse."""
+    from fractions import Fraction
+    f = Fraction(24000, 1001)
+    keys = [{"comp_frame": 69, "raw_seconds": 5.0}, {"comp_frame": 89, "raw_seconds": 5.0 - 20 / float(f)}]
+    seg = Segment(id=1, type="raw", comp_in=69, comp_out=89, raw_in_seconds=5.0, speed=-1.0, time_mode="remap",
+                  time_remap_keys=keys, transform=centred(0.75),
+                  audio={"in_offset_frames": -2, "out_offset_frames": 0, "pitch_preserved": None, "lag_ms": None,
+                         "corr": None, "exception": None})
+    cl = make_cutlist(segments=[seg], n=95)
+    cl.competitor["fps"] = "24000/1001"
+    assert [(a, b) for _s, a, b, _t, _v in rp.audio_pieces(cl, SR)] == [(134134, 138138), (138138, 178178)]
+    y = rp.build_audio(cl, raw_audio(), SR)                                  # was: ZeroDivisionError
+    assert y.shape == (190190,) and np.all(y[134134:138138] == 0)           # the J-cut before the first key: held
+    n = np.arange(138238, 178078)
+    ref = tone((5.0 - (n / SR - 69 / float(f))) * SR)                       # the -1x reverse
+    assert np.sqrt(np.mean((y[n] - ref) ** 2) / np.mean(ref ** 2)) < 5e-3
+
+
 def test_preview_audio_is_muxed_and_aligned(preview):
     res = preview["res"]
     assert res["audio"]["status"] == "ok" and res["audio"]["samples"] == N * 1600

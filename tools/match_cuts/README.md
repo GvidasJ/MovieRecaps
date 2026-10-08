@@ -87,7 +87,8 @@ Captions (see *Captions* below): `--captions auto|competitor|voice` (default `au
 `--caption-model NAME` (default `large-v3`), `--caption-check-model NAME` (default `large-v3-turbo`, `none` = off),
 `--caption-recheck-model NAME` (default `large-v3`, `none` = off).
 Premiere-only export: `--premiere`. Cuts never inside speech, silence removal (Premiere export and RAW-only runs):
-`--pad-before S` (default 0.05: a clip starts this long before its first word), `--pad-after S` (default 0.05: a clip
+`--pad-before S` (default 0.03: a clip starts this long before its first word; 0.05 until video017/018 -- your starts
+sit right on the sound's onset), `--pad-after S` (default 0.05: a clip
 ends this long after its last word; 0.15 until Task 8 -- at the cuts your finished videos and the tool both make you
 leave 0.09-0.12 s earlier than that), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
 per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
@@ -169,9 +170,11 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   only when it is 250 px or more from the framing on screen, measured in the 1080×1920 sequence as the biggest
   movement of the picture's centre or of one of its edges (so a zoom counts by how far the edges move). Below
   that it keeps the previous clip's framing exactly — across real cuts too — changed only as little as needed if it
-  would leave part of the window uncovered. The hold applies only inside one shot of the RAW: at a shot change of
-  the RAW the new shot chooses its framing fresh, and a framing that would not show the clip's person speaking is
-  never held (below). Neighbouring pieces of one continuous RAW take (the next starts on the
+  would leave part of the window uncovered. Across a shot change of the RAW the framing is held only when the new
+  shot's own framing is alike (under 250 px away, within 5 % zoom: `SHOT_HOLD_ZOOM`) and the framing on screen
+  still shows the person of the clip before -- your habit: one framing for alike shots (video018's wide shots,
+  zendaya-age, video1-3); otherwise the new shot chooses its framing fresh (a close-up after a wide shot). A
+  framing that would not show the clip's person speaking is never held (below). Neighbouring pieces of one continuous RAW take (the next starts on the
   very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
   clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
@@ -187,7 +190,8 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   person, still covering the window (up or down only if the face is cut off there) -- one position for a stretch of
   clips sharing a framing when one shows all their people, else each clip its own. This beats the competitor's
   framing and `--min-move`. The same move frames a stretch the competitor's framing cannot be used for at all (a
-  replaced B-roll / NOT-IN-RAW / uncertain spot, or a framing that leaves the window uncovered); without the people
+  replaced B-roll / NOT-IN-RAW / uncertain spot -- not a 1-2 frame cutaway the clip's own take plays on through,
+  which keeps the take's framing -- or a framing that leaves the window uncovered); without the people
   analysis (no PyTorch, an error: said in the summary) the main face is centred there (`faces.main_face_x`, YuNet).
   The hard check `XML PERSON` re-reads every clip's framing from the final XML and fails the run when a clip does not
   show its person; a clip with nobody in the picture and another video's stretch are listed, not failed. The end
@@ -265,7 +269,7 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   sound with neither (a breath, a lip smack) is not speech, so a clip's start or end may leave it out, but no cut
   lands inside it either. Without faster-whisper every sound counts as speech.
 * **A clip ends `--pad-after` (0.05 s) after its last word has completely finished and starts `--pad-before`
-  (0.05 s) before its first** — inside the quiet there: a pause shorter than both pads is split between them, a
+  (0.03 s) before its first** — inside the quiet there: a pause shorter than both pads is split between them, a
   breath right after the word stops the clip at the breath. A competitor cut that falls inside speech moves to the
   nearer end of that sound: the clip plays on to the end of it (it is extended, and everything after it moves
   later) or stops before it. A clip never shows again what the clip before it now shows: it starts after it, and a
@@ -302,7 +306,7 @@ finished videos: hence 0.05.
 ### Silence removal (`--keep-silence` turns it off)
 
 * **Silence across a cut, too.** The end of one clip and the start of the next together never keep more silence
-  than `--pad-after` + `--pad-before` (0.1 s): longer, both sides are trimmed, however short the pause (the 0.3 s
+  than `--pad-after` + `--pad-before` (0.08 s): longer, both sides are trimmed, however short the pause (the 0.3 s
   `--min-silence` is for pauses inside a clip). The check on the final XML fails the run on a cut with more
   (`XML SILENCE`, two frames of rounding allowed; an edge held 0.25 s from a RAW shot change against a flash frame
   may keep more). Silence is the quiet of the RAW's speech map (above) — the same quiet the speech check knows, so a
@@ -324,7 +328,7 @@ recheck model's word timings of the RAW; without a competitor (below) the RAW al
   (e.g. `--silence-db -20`).
 * **Never inside a word**: the edit's audio is transcribed (word timings, the captions' model, cached) and a cut only falls in a gap between two words. Each word's timing is trimmed to its audible part (6 dB
   over the background), so a timing that runs on into the pause does not keep the pause. Of each gap,
-  `--pad-after` (0.05 s) after the word before it and `--pad-before` (0.05 s) before the word after it
+  `--pad-after` (0.05 s) after the word before it and `--pad-before` (0.03 s) before the word after it
   are kept (at the very start and end of the edit there is no word to protect). The soft end of a word that trails
   off under the threshold (still 3 dB over the background, at most 0.2 s) belongs to the word, so the pads are kept
   after it. Without

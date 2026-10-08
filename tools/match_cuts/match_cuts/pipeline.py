@@ -2874,6 +2874,7 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
                      "competitor frame %d, so the cut can move out of the word", d["frames"], d["segments"][0],
                      d["segments"][1], d["raw"][0], d["raw"][1], d["cut"])
     ctx.shots = shots_of(ctx, ex)
+    ctx.cfg.premiere_shots = ctx.shots           # from here on V1 cuts land on the RAW's shot changes (snap_to_shots)
     ctx.people = people_of(ctx, ex)
     ctx.cfg.premiere_people = ctx.people         # from here on premiere_clips frames on the person speaking
     ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))

@@ -161,16 +161,43 @@ class _Ctx(SP.Context):
         return None
 
 
-def test_min_move_holds_inside_one_shot_and_chooses_fresh_at_a_shot_change():
+def test_min_move_holds_alike_framings_across_a_shot_change_and_chooses_fresh_otherwise():
+    """--min-move holds a framing inside a shot, and across a RAW shot change when the new shot's own framing is alike
+    (your habit: one framing for alike shots -- video018's wide shots, zendaya-age); a close-up after a wide shot, or
+    a framing that would not show the clip before's person, is chosen fresh."""
     from match_cuts import export_xml_edl as ex
     near = sim_showing(560)                                                       # 23 px from the framing before
     nobody = SP.Faces("nobody", False)
-    for shots, held in (([], True), ([10.5], True), ([11.0], False)):   # S02 starts the new shot
+    for shots in ([], [10.5], [11.0]):                                            # [11.0]: S02 starts a new shot
         clips = [_pclip("S01", 0, 60, 600, sim_showing(540)), _pclip("S02", 60, 120, 660, near)]
-        ctx = _Ctx(shots, [((0.0, 100.0), nobody)])
-        ex._hold_framing(clips, RAW, WIN, 250.0, sp=ctx, fps=Fraction(60))
-        assert ex._same_framing(clips[1].keys[0][1], sim_showing(540)) is held
-        assert ("a new shot of the RAW" in clips[1].framing_note) is (not held)
+        ex._hold_framing(clips, RAW, WIN, 250.0, sp=_Ctx(shots, [((0.0, 100.0), nobody)]), fps=Fraction(60))
+        assert ex._same_framing(clips[1].keys[0][1], sim_showing(540))          # held: one framing for alike shots
+        assert ("across a RAW shot change" in clips[1].framing_note) is (shots == [11.0])
+    # a new shot zoomed in 10 % (a close-up after a wide shot): chosen fresh
+    s0 = sim_showing(540)
+    zoomed = Sim(s0.s * 1.10, 0.0, s0.tx - 0.05 * s0.s * RAW[0], s0.ty - 0.05 * s0.s * RAW[1])
+    clips = [_pclip("S01", 0, 60, 600, s0), _pclip("S02", 60, 120, 660, zoomed)]
+    ex._hold_framing(clips, RAW, WIN, 250.0, sp=_Ctx([11.0], [((0.0, 100.0), nobody)]), fps=Fraction(60))
+    assert ex._same_framing(clips[1].keys[0][1], zoomed) and "a new shot of the RAW" in clips[1].framing_note
+    # the framing on screen does not show the person of the clip before (it is about to be re-framed on them): a new
+    # shot is not held to it
+    far = SP.Faces("speaker", True, (1500.0, 180.0, 1700.0, 420.0), [(1500.0, 180.0, 1700.0, 420.0)])
+    clips = [_pclip("S01", 0, 60, 600, s0), _pclip("S02", 60, 120, 660, near)]
+    ctx = _Ctx([11.0], [((10.0, 10.99), far), ((11.0, 100.0), nobody)])
+    ex._hold_framing(clips, RAW, WIN, 250.0, sp=ctx, fps=Fraction(60))
+    assert ex._same_framing(clips[1].keys[0][1], near) and "a new shot of the RAW" in clips[1].framing_note
+
+
+def test_a_short_cutaway_the_take_plays_on_through_does_not_make_a_stretch_unreliable():
+    """video018 S07 (1 frame) and S12 (2 frames): the competitor's cutaway over which the take plays on keeps the take's
+    framing; a 20-frame NOT-IN-RAW replacement still does not."""
+    from match_cuts import export_xml_edl as ex
+    clip = _pclip("S07", 0, 60, 600, sim_showing(540))
+    clip.ev = type("E", (), {"seg": clip.seg, "rec_in": 0, "rec_out": 30})()
+    clip.seg.audio = {"broll": {"replaced": "an uncertain match", "ranges": [[0, 1, 7, "keeps playing (short)"]]}}
+    assert ex._unreliable(clip) is None
+    clip.seg.audio = {"broll": {"replaced": "NOT-IN-RAW insert", "ranges": [[0, 20, 7, "audio"]]}}
+    assert ex._unreliable(clip) == "S07 NOT-IN-RAW insert replaced"
 
 
 def test_a_framing_that_would_hide_the_speaker_is_not_held():

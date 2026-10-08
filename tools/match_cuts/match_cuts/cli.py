@@ -182,9 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "level and its background noise")
     p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.3, metavar="S",
                    help="cut only silences longer than this, in the gaps between words (seconds, default 0.3)")
-    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.05, metavar="S",
+    p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.03, metavar="S",
                    help="a clip starts this long before its first word, and a removed silence keeps this much before "
-                        "the word that follows it (seconds, default 0.05)")
+                        "the word that follows it (seconds, default 0.03)")
     p.add_argument("--pad-after", type=_seconds_arg("--pad-after"), default=0.05, metavar="S",
                    help="a clip ends this long after its last word has finished, and a removed silence keeps this much "
                         "after the word before it (seconds, default 0.05)")
@@ -260,7 +260,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     db = getattr(args, "silence_db", None)
     cfg.silence_db = None if db is None else float(db)
     cfg.min_silence = float(getattr(args, "min_silence", 0.3))
-    cfg.pad_before = float(getattr(args, "pad_before", 0.05))
+    cfg.pad_before = float(getattr(args, "pad_before", 0.03))
     cfg.allow_repeats = bool(getattr(args, "allow_repeats", False))
     cfg.pad_after = float(getattr(args, "pad_after", 0.05))
     cfg.ae_timeout_s = float(getattr(args, "ae_timeout", 600.0))

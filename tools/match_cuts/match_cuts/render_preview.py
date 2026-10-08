@@ -1232,7 +1232,9 @@ def _rational(v: float, n_out: int, max_den: int = 10000) -> Fraction:
 def sample_positions(x: np.ndarray, p0: float, v: float, n: int) -> np.ndarray:
     """Tape-style resampling: y[i] = x(p0 + v*i), i in [0, n) -- x band-limited, zero outside [0, len(x)).
 
-    v = 0 -> silence (a frozen time-remapped layer plays no audio); v < 0 plays the RAW backwards.
+    v = 0 -> silence (a frozen time-remapped layer plays no audio), and so does a speed that rounds to 0 over the n
+    samples (the read moves at most 0.05 samples in all, or |v| < 1/20000: video018's 1-sample piece before a slow
+    reverse remap's first key, at 16 kHz); v < 0 plays the RAW backwards.
     Exact positions: the input is shifted by the fractional part of its start with a windowed-sinc
     fractional delay, then resampled with ``scipy.signal.resample_poly(up=Q, down=P)`` where P/Q is a
     rational approximation of |v| whose drift stays below 0.05 samples over the chunk (1.1 -> 11/10 exactly).
@@ -1247,6 +1249,8 @@ def sample_positions(x: np.ndarray, p0: float, v: float, n: int) -> np.ndarray:
         xr = x[::-1]
         return sample_positions(xr, (x.shape[0] - 1) - p0, -v, n)
     fr = _rational(v, n)
+    if fr == 0:                         # frozen over these n samples: silent, like v = 0 (was P = 0: a division by 0)
+        return np.zeros(shape, np.float32)
     P, Q = fr.numerator, fr.denominator
     pad = P * max(1, math.ceil(64 / P))
     base = math.floor(p0)

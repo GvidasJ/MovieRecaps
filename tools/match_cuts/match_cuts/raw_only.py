@@ -123,6 +123,7 @@ def run_raw_only(cfg: Any) -> dict:
                 words = words_of(ctx.raw_audio) if words_of else None
                 ctx.speech = speech.speech_map(ctx.raw_audio, ctx.audio_sr, sst, words)   # the hard speech check
             ctx.shots = pipeline.shots_of(ctx)                                             # no flash frame
+            cfg.premiere_shots = ctx.shots                        # V1 cuts on the RAW's shot changes (snap_to_shots)
             if getattr(cfg, "keep_silence", False):
                 cuts, lv = [], {"how": "--keep-silence"}
             elif ctx.raw_audio is not None and len(ctx.raw_audio):

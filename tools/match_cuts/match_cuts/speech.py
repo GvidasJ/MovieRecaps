@@ -41,6 +41,8 @@ TAIL_GAP_S = 0.08         # an untranscribed sound starting this soon after a tr
 TAIL_VOICED_S = 0.02      # ... voiced this long is that word's end, its timing cut short (video2: the "-kay" of "OK?",
 #                           voiced 0.04 s, 0.06 s after "team, OK?" -- a breath is not voiced at all)
 MAX_SHIFT_S = 0.1         # an audio line jumping this little inside speech where the picture does not cut plays on
+MAX_RETIMED_EXT_S = 0.1   # an audio line under a retimed picture (V1 not at 100 %) is extended by at most this much new
+#                           picture: the shared ripple extends V1 too, at its speed
 MAX_JUMP_S = 0.1          # a cut skipping (or repeating) this little of the RAW inside speech: the clips play on as one take
 EPS = 1e-6
 
@@ -364,6 +366,16 @@ def start_after(sm: SpeechMap, x: float, pa: float, pb: float) -> float:
     return max(start_before(sm, j, pa, pb), x)
 
 
+def end_before(sm: SpeechMap, x: float, lo: float, pa: float, pb: float) -> float:
+    """The last end allowed at or before x for a clip starting at lo: pa after its speech before the sound x is in
+    (end_after); lo -- nothing left to play -- when it has none."""
+    k = sm.sound_at(x)
+    j = sm.speech_before(sm.sounds[k].s0 if k is not None and sm.sounds[k].speech else x)
+    if j is None or sm.sounds[j].s1 <= lo + EPS:
+        return lo
+    return min(end_after(sm, j, pa, pb), x)
+
+
 @dataclass
 class Piece:
     """One A1 item of the plan: sequence frames [r0, r1) playing the RAW from frame ``src`` (sequence rate) at
@@ -378,6 +390,8 @@ class Piece:
     shiftable: bool = False      # an audio line (not the picture's own audio): its source may move a little
     slack: int = 0               # a locked start (a cross dissolve of this many frames): the A1 cut may slide under it
     v_off: float | None = 0.0    # V1's RAW time minus A1's here (s; an audio line); None: V1 is not the RAW at 100 %
+    v_speed: float | None = None  # V1's speed at the piece's first frame (None: no V1 there): extending the piece
+    #                               extends that V1 too, at this speed
 
 
 def _shift_jumps(ps: list[Piece], sm: SpeechMap, f: float, v1_cuts: set[int] | None) -> list[tuple[int, int]]:
@@ -595,6 +609,21 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                                 free_end and not join_out)
             if touching and free_start and na < prev[1] - 0.5 / f and nb > prev[3] + 0.5 / f:
                 na = prev[1]                                           # never back into what the clip before shows
+        if p.v_speed is not None and abs(p.v_speed - 1.0) > 1e-6 and abs(p.v_speed) > 1e-9:
+            # a retimed picture over this audio line: the ripple extends V1 too, at its speed (video018 S15: 74
+            # frames = 85 frames of picture at 115 %, back into what S13+S14 shows -- the repeat removal then cut
+            # A1 into the laugh after 'minute?'). No more than MAX_RETIMED_EXT_S of new picture: the cut moves into
+            # the clip instead, and the clip goes when nothing is left
+            cap = MAX_RETIMED_EXT_S / abs(p.v_speed) + 0.5 / f
+            if a - na > cap:
+                na = start_after(sm, a, pad_after, pad_before) if _inside(sm, a) else a
+            if nb - b > cap:
+                nb = end_before(sm, b, na, pad_after, pad_before) if _inside(sm, b) else b
+        if p.r0 == 0 and na < a:
+            # the edit's first frame is never before the competitor's (it may start later): on all 9 of your answer
+            # keys you start at or after it, and every time this step had started earlier you moved it back
+            # (video1 -0.42 s, video017 -0.23 s, video018 -0.35 s with 16 frames of the shot before)
+            na = a
         na, nb = max(0.0, na), min(hi_s, nb)
         da = int(round((na - a) * f))
         db = int(round((nb - b) * f))
@@ -683,7 +712,7 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
                  if v is not None and abs(float(v.speed) - 1.0) < 1e-6 else None)
         pieces.append(Piece(label, int(it["start"]), int(it["end"]), float(it["in"]), float(it["speed"]),
                             int(it["start"]) in locked, int(it["end"]) in locked, it.get("what") == "audio line",
-                            locked.get(int(it["start"]), 0), v_off))
+                            locked.get(int(it["start"]), 0), v_off, float(v.speed) if v is not None else None))
     trims, inserts, rows, shifts = snap_edits(pieces, sm, fps, float(st.pad_after), float(st.pad_before), v1_cuts,
                                               src_max, shots, int(n_frames))
     merged: list[list[int]] = []
@@ -721,7 +750,7 @@ def check(edges: Sequence[tuple[str, str, float, int]], sm: SpeechMap, fps: Frac
         if k is not None and sm.sounds[k].speech:
             s = sm.sounds[k]
             out.append({"clip": label, "edge": edge, "raw_s": x, "at": at, "speech": (s.s0, s.s1),
-                        "said": sm.said(x - 0.3, x + 0.3) or s.why})
+                        "said": sm.said(s.s0, s.s1) or s.why})       # what the sound holds, not the words near it
     return out
 
 

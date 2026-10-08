@@ -12,8 +12,8 @@ third of the way from the noise up to the speech, so the pauses of a noisy video
 it that many dB under the speech level instead). Words: the edit's audio is transcribed (word timings) and a cut
 only ever falls in a gap between words -- each word's timing trimmed to its audible part, so a timing that runs on
 into the pause does not keep the pause -- and the soft end or start of a sound (the windows next to it still SOFT_DB
-above the noise, at most SOFT_MAX_S) belongs to it. Of each gap, ``--pad-after`` (0.15 s) after the word before it
-and ``--pad-before`` (0.05 s) before the word after it are kept; at the very start and end of the edit there is no
+above the noise, at most SOFT_MAX_S) belongs to it. Of each gap, ``--pad-after`` (0.05 s) after the word before it
+and ``--pad-before`` (0.03 s) before the word after it are kept; at the very start and end of the edit there is no
 word to protect. The cut points land on whole sequence frames (rounded inwards: never more
 is removed than the silence), and never inside a cross dissolve.
 
@@ -34,7 +34,7 @@ from typing import Any, Sequence
 import numpy as np
 
 MIN_SILENCE_S = 0.3       # cut silences longer than this ...
-PAD_BEFORE_S = 0.05       # ... keeping this much before each word (or other sound) that follows
+PAD_BEFORE_S = 0.03       # ... keeping this much before each word (or other sound) that follows
 PAD_AFTER_S = 0.05        # ... and this much after each word (or other sound) that precedes (config.pad_after)
 WIN_S = 0.05              # loudness window (RMS) ...
 HOP_S = 0.01              # ... every HOP_S

@@ -52,6 +52,7 @@ Time conventions
 """
 from __future__ import annotations
 
+import bisect
 import csv
 import dataclasses
 import math
@@ -1301,6 +1302,8 @@ def premiere_settings(cfg: Any = None) -> dict:
 
 
 RETIME_SLIVER_S = 0.25      # --premiere: a speed change this short inside one take plays at 100 % (the take runs on)
+SHOT_HOLD_ZOOM = 0.05       # --min-move across a RAW shot change: held when the new shot's own framing is this alike in
+#                             zoom (and under --min-move away, and the framing still shows the clip before's person)
 
 
 def _line_interval(p_: Segment, k: int, cf: float) -> list[float] | None:
@@ -1726,20 +1729,30 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
                   min_move: float, subject: str = "the competitor's", sp: Any = None,
                   fps: Fraction | None = None) -> list[list[PremiereClip]]:
     """--min-move (after the fixed framing): a clip takes its own framing when it is at least min_move px from the
-    framing on screen (framing_move), at a shot change of the RAW (``sp.same_shot``: a new shot chooses its framing
-    fresh), or when the framing on screen would not show the clip's person (speakers.passes); otherwise it keeps that
-    framing exactly -- across real cuts too -- changed only as little as needed if it would not cover the window. A
-    clip with no framing keeps the one on screen. Returns the stretches of clips that show one framing."""
+    framing on screen (framing_move), at a shot change of the RAW to a framing that is not alike (``sp.same_shot``;
+    over SHOT_HOLD_ZOOM in zoom, or the framing on screen would not show the person of the clip before: a new shot
+    chooses its framing fresh then), or when the framing on screen would not show the clip's person
+    (speakers.passes); otherwise it keeps that framing exactly -- across real cuts and alike RAW shots too (your
+    habit: one framing for alike shots -- video018's wide shots, zendaya-age, video1-3) -- changed only as little as
+    needed if it would not cover the window. A clip with no framing keeps the one on screen. Returns the stretches of
+    clips that show one framing."""
     from . import speakers
     runs: list[list[PremiereClip]] = []
     held: Sim | None = None
     held_from = ""
     last_t: float | None = None                  # the RAW second the clip before ends on (its shot)
+    prev: PremiereClip | None = None             # the clip before: a framing held across a shot shows its person
     for cl in clips:
         when = cl.keys[0][0] if cl.keys else cl.src_in
         own = cl.keys[0][1] if cl.keys else None
         t_in = _clip_raw_s(cl, fps)[0] if fps is not None else None
         new_shot = sp is not None and last_t is not None and t_in is not None and not sp.same_shot(last_t, t_in)
+        across = False
+        if (new_shot and own is not None and held is not None and prev is not None
+                and abs(own.s / held.s - 1.0) <= SHOT_HOLD_ZOOM
+                and speakers.passes(held, _person_of(prev, sp, fps), raw_wh[0], bool(prev.seg.flip_h), win)):
+            new_shot, across = False, True       # an alike framing across the RAW cut: held as inside one shot
+        prev = cl
         last_t = _last_raw_s(cl, fps) if fps is not None else None
         if own is not None and held is not None and _same_framing(own, held) and not new_shot:
             runs[-1].append(cl)                          # already showing it
@@ -1753,8 +1766,9 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
                 keep = None                              # holding it would hide this clip's person
         if keep is None:
             if own is not None and held is not None and move is not None and move < min_move:
-                cl.framing_note = ("its own framing: a new shot of the RAW (--min-move holds only inside one shot)"
-                                   if new_shot else "its own framing: the framing before would not show its person")
+                cl.framing_note = ("its own framing: a new shot of the RAW (--min-move holds only alike framings "
+                                   "across a shot)" if new_shot else
+                                   "its own framing: the framing before would not show its person")
             if own is not None:
                 held, held_from = own, cl.label
             runs.append([cl])
@@ -1762,6 +1776,7 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
         cl.framing_note = (f"framing kept from {held_from}: " +
                            (f"{subject} moves {move:.0f} px here, under --min-move {min_move:g}" if move is not None
                             else "no framing measured here") +
+                           (" (an alike framing across a RAW shot change)" if across else "") +
                            ("" if keep is held else "; changed the least to cover the window"))
         if own is not None and cl.zoom > 0:
             cl.zoom = keep.s / (own.s / cl.zoom)          # relative to this clip's own (average) framing
@@ -1777,11 +1792,15 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
 
 def _unreliable(cl: PremiereClip) -> str | None:
     """Why the clip's framing cannot be copied from the competitor: it plays a B-roll / NOT-IN-RAW / uncertain spot
-    replaced by the RAW (broll.py; the framing there is a neighbour's), else None."""
+    replaced by the RAW (broll.py; the framing there is a neighbour's), else None. A 'keeps playing (short)' spot --
+    the competitor's 1-2 frame cutaway over which the clip's own take plays on -- does not count: the framing there
+    is the take's own (video018: S07 re-centred the whole S05..S10 stretch, 80 px from both yours and the
+    competitor's)."""
     for e in cl.events or [cl.ev]:
         seg = e.seg
         b = (seg.audio or {}).get("broll") or {}
-        hit = [r for r in b.get("ranges") or [] if max(int(r[0]), e.rec_in) < min(int(r[1]), e.rec_out)]
+        hit = [r for r in b.get("ranges") or [] if max(int(r[0]), e.rec_in) < min(int(r[1]), e.rec_out)
+               and not (len(r) > 3 and r[3] == "keeps playing (short)")]
         if hit or seg.type in ("uncertain", "not_in_raw"):
             return f"{_seg_label(seg)} {b.get('replaced') or seg.type.replace('_', '-')} replaced"
     return None
@@ -1872,6 +1891,54 @@ def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
             continue
         out.append(cl)
     return out
+
+
+def snap_to_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None, fps: Fraction
+                  ) -> tuple[list[PremiereClip], list[dict]]:
+    """V1 cuts one sequence frame off a RAW shot change, moved onto it. Premiere shows at sequence frame r the RAW
+    frame floor(t x raw_fps) of the clip's source time t (shots.py), so the change at RAW frame k first shows on tick
+    ceil(k x fps / raw_fps). The source in-points (_pick_in_tick), the speech-safe cuts and the audio lines place a
+    cut on the NEAREST tick of a RAW time: one tick early when k x fps / raw_fps has a fraction under one half (a
+    29.97 fps RAW in 60 fps: k mod 500 < 250), one late when an in-point rounds up past the change -- video018
+    S05|S06: S06's first frame showed RAW 22032, its shot before's last; S16|S17: S16's last frame RAW 22483, the next
+    shot's first, at S16's framing. The two clips trade that frame: the clip after a cut whose first frame is the
+    shot before's last starts one frame later (the clip before plays one more frame of its own shot); the clip before
+    whose last frame is the next shot's first ends one frame earlier (the clip after starts one frame earlier in its
+    source). Nothing else moves: the sequence keeps its length and A1 its cuts (a take runs on under the picture; a
+    one-frame split edit elsewhere). Only between two clips of two frames or more with no dissolve between them,
+    where the clip whose <in> moves plays at 100 % and the frame the other one takes stays in its own shot. Returns
+    (clips, [{'clips', 'from', 'to'}])."""
+    if not changes_s or len(clips) < 2:
+        return clips, []
+    f = float(fps)
+    cs = sorted(float(c) for c in changes_s)
+
+    def shot(tick: float) -> int:
+        return bisect.bisect_right(cs, tick / f + 1e-9)
+    out, moves = list(clips), []
+    for i in range(len(out) - 1):
+        a, b = out[i], out[i + 1]
+        r = a.rec_end
+        if (a.end == -1 or b.start == -1 or b.rec_start != r or float(a.speed) <= 0.0
+                or abs(float(b.speed) - 1.0) > 1e-9 or r - a.rec_start < 2 or b.rec_end - r < 2):
+            continue
+
+        def ta(j: int) -> float:
+            return a.src_in + (j - a.rec_start) * float(a.speed)
+
+        def tb(j: int) -> float:
+            return b.src_in + (j - r)
+        early = shot(tb(r)) != shot(tb(r + 1)) and shot(ta(r)) == shot(ta(r - 1))
+        late = shot(ta(r - 1)) != shot(ta(r - 2)) and shot(tb(r - 1)) == shot(tb(r))
+        if early == late:
+            continue
+        d = 1 if early else -1
+        out[i] = dataclasses.replace(a, end=r + d, rec_end=r + d,
+                                     src_out=a.src_in + int(round((r + d - a.rec_start) * float(a.speed))))
+        out[i + 1] = dataclasses.replace(b, start=r + d, rec_start=r + d, src_in=b.src_in + d,
+                                         in_error_ms=b.in_error_ms + 1000.0 * d / f)
+        moves.append({"clips": f"{a.label}|{b.label}", "from": r, "to": r + d})
+    return out, moves
 
 
 def _source_seconds(seg: Segment, k: float, comp_fps: Fraction, raw_fps: Fraction) -> float:
@@ -2122,6 +2189,10 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     if silence is not None and silence.active:
         clips, audio_items, markers = sil.apply_premiere(clips, audio_items, markers, silence)
         N = silence.new_frames
+    clips, snapped = snap_to_shots(clips, getattr(cfg, "premiere_shots", None), fps)   # cuts on the RAW's own cuts
+    for m in snapped:
+        warnings.append(f"{m['clips']}: the cut moved {m['to'] - m['from']:+d} frame onto the RAW's shot change "
+                        f"({_tc(m['from'], fps)} -> {_tc(m['to'], fps)})")
     clips, audio_items, pairs = link_pairs(clips, audio_items)       # V1 + A1 as linked clips
     a_of = {v: a for v, a in pairs}
     v_of = {a: v for v, a in pairs}
@@ -2248,7 +2319,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             s0 = cl.start if cl.start != -1 else cl.rec_start
             reframed.append({"label": cl.label, "start": int(s0), "tc": _tc(int(s0), fps), "note": cl.person_note})
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
-            "reframed": reframed,
+            "reframed": reframed, "snapped": snapped,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
 
@@ -2872,24 +2943,40 @@ def premiere_speech_problems(xml_path: str | os.PathLike, speech: Any) -> list[s
     return out
 
 
-def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[float]) -> list[str]:
+def _fixed_framing(c: dict) -> tuple | None:
+    """A parsed V1 clip's fixed Basic Motion (scale, rotation, centre, flip) as the flash check compares it; None for
+    a keyframed one (its framing moves: compared by shot only)."""
+    m = c.get("motion") or {}
+    if m.get("keys"):
+        return None
+    return (round(float(m.get("scale", 100.0)), 3), round(float(m.get("rotation", 0.0)), 3),
+            tuple(round(float(v), 5) for v in m.get("center", (0.0, 0.0))), bool(c.get("flip")))
+
+
+def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[float], raw_fps: Any = None) -> list[str]:
     """The hard flash check of the final XML (shots.py): every run of V1 frames showing one RAW shot (``changes_s``:
-    the RAW's shot changes, s), across cuts that stay in that shot, lasts shots.MIN_SHOT_S. One line per flash."""
+    the RAW's shot changes, s), across cuts that stay in that shot, lasts shots.MIN_SHOT_S, and none of its framings
+    lasts one RAW frame (``raw_fps``) or less. A clip joined to its neighbour by a cross dissolve counts where it shows
+    alone; the dissolve's own frames mix two pictures (any length). (Dropping such clips made the sequence read black
+    up to the next clip: video018's S05, which starts inside a 2-frame dissolve, left S06's first frame -- the last
+    frame of S05's own shot, at S05's framing -- looking like a 1-frame flash.) One line per flash."""
     from .shots import flash_problems
     x = parse_premiere_xml(xml_path)
     fps = _seq_rate(x)
+    trans = sorted((int(t["start"]), int(t["end"])) for t in x["transitions"])
     items = []
-    for c in x["clips"]:
-        s0 = c["start"] if c["start"] != -1 else None
-        e0 = c["end"] if c["end"] != -1 else None
-        if s0 is None or e0 is None:
-            continue                                          # inside a cross dissolve: both shots show, no flash
+    for c, (s0, e0) in zip(x["clips"], _track_ranges(x["clips"], x["transitions"])):
+        a = next((t1 for t0, t1 in trans if t0 == s0), s0) if c["start"] == -1 else s0    # alone after the dissolve
+        if e0 <= a:
+            continue
         sp = float(c["speed"])
-        items.append({"label": c.get("label"), "start": s0, "end": e0, "speed": sp,
-                      "in": (c["in"] + (1 if sp < 0 else 0)) if sp else c["in"]})
+        base = (c["in"] + (1 if sp < 0 else 0)) if sp else c["in"]
+        items.append({"label": c.get("label"), "start": a, "end": e0, "speed": sp, "in": base + (a - s0) * sp,
+                      "framing": _fixed_framing(c)})
+    items += [{"label": "dissolve", "start": t0, "end": t1, "speed": None, "allowed": True} for t0, t1 in trans]
     items += [{"label": "OTHER VIDEO", "start": a, "end": b, "speed": None, "allowed": True}   # filled by hand
               for a, b in other_video_ranges(x)]
-    return flash_problems(items, fps, changes_s)
+    return flash_problems(items, fps, changes_s, raw_fps=raw_fps)
 
 
 LINK_AUDIO_SHARE = 0.5     # a V1 clip with A1 under at least this share of it has audio (it must be linked)
@@ -3275,7 +3362,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     except Exception as e:  # noqa: BLE001
         talk = [f"the speech check could not read the XML: {type(e).__name__}: {e}"]
     try:
-        flash = premiere_flash_problems(xml_path, shots) if shots is not None and not bad_items else []
+        flash = (premiere_flash_problems(xml_path, shots, cutlist.raw_fps) if shots is not None and not bad_items
+                 else [])
     except Exception as e:  # noqa: BLE001
         flash = [f"the flash check could not read the XML: {type(e).__name__}: {e}"]
     try:
@@ -3336,6 +3424,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if cut:
             from .silence import apply_premiere
             clips, want_a, markers = apply_premiere(clips, want_a, markers, silence)
+        clips, _ = snap_to_shots(clips, getattr(cfg, "premiere_shots", None), st["fps"])   # as write_premiere_xml
         clips, want_a, _ = link_pairs(clips, want_a)          # as write_premiere_xml links them
         x = parse_premiere_xml(xml_path)
     except Exception as e:  # noqa: BLE001
@@ -3355,7 +3444,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     want_n = silence.new_frames if cut else out["total_frames"] * fac
     if x["duration"] != want_n:
         errors.append(f"XML: sequence duration {x['duration']} (want {want_n})")
-    for cl in plan_clips if cut else []:                 # the competitor's cuts, before the silences go
+    for cl in plan_clips:              # the competitor's cuts, before the silences go and a cut moves onto a RAW cut
         evs = cl.events or [cl.ev]
         if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
                 any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
@@ -3371,10 +3460,6 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     trans = {t["start"]: t for t in x["transitions"]}
     for got, cl in zip(x["clips"], clips):
         name = cl.label
-        evs = cl.events or [cl.ev]
-        if not cut and ((cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or
-                        any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:]))):
-            errors.append(f"XML {name}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
         s0 = got["start"] if got["start"] != -1 else (cl.rec_start if cl.rec_start in trans else None)
         if s0 != cl.rec_start or (got["start"] == -1) != (cl.start == -1):
             errors.append(f"XML {name}: start {got['start']} (want {cl.start}, record {cl.rec_start})")

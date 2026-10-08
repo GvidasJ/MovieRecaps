@@ -6,7 +6,13 @@ reaches a few frames over one of those shot changes shows a frame or two of a di
 a change where the picture differs from the frame before far more than it moves around it. The rules that use them
 (speech.snap_edits, silence.removal_ranges): padding stops at a shot change, and no clip starts or ends with a piece of
 a shot shorter than MIN_SHOT_S. ``flash_problems`` is the hard check on the final XML: every run of frames of one RAW
-shot in the edit (across cuts that stay in that shot) must last MIN_SHOT_S.
+shot in the edit (across cuts that stay in that shot) must last MIN_SHOT_S, and no framing of it one RAW frame or less.
+
+Where a frame shows: a 60 fps sequence shows at frame r the RAW frame floor(t x raw_fps) of the clip's source time
+t = <in> / 60 + (r - start) x speed / 60 (Premiere's sampling; test_premiere_source_in_is_a_60fps_tick_inside_...).
+A shot change at RAW frame k therefore first shows on tick ceil(k x 60 / raw_fps) -- for a 29.97 fps RAW, k x 2.002:
+between two ticks unless k is a multiple of 500; for 25 fps, k x 2.4. A cut placed on the NEAREST tick is one frame
+early whenever that fraction is under one half (export_xml_edl.snap_to_shots moves it onto the change).
 """
 from __future__ import annotations
 
@@ -112,14 +118,19 @@ def shot_of(t: float, changes_s: Sequence[float]) -> int:
 
 
 def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[float], n_frames: int | None = None,
-                   min_s: float = MIN_SHOT_S) -> list[str]:
-    """The hard flash check of an edit's V1 items [{label, start, end, in, out, speed}] (sequence frames at ``fps``,
-    ``in`` the source position at the sequence rate; an item with speed None is not the RAW; one with ``allowed``
-    is a stretch left empty on purpose -- another video's, filled by hand -- of any length): every run of
-    consecutive frames showing one RAW shot -- across cuts that stay in the same shot -- lasts at least ``min_s``.
-    One line per shorter run (a flash frame), unless the run is the whole edit."""
+                   min_s: float = MIN_SHOT_S, raw_fps: Any = None) -> list[str]:
+    """The hard flash check of an edit's V1 items [{label, start, end, in, out, speed, framing}] (sequence frames at
+    ``fps``, ``in`` the source position at the sequence rate; an item with speed None is not the RAW; one with
+    ``allowed`` is a stretch left empty on purpose -- another video's, filled by hand, or a cross dissolve's frames --
+    of any length): every run of consecutive frames showing one RAW shot -- across cuts that stay in the same shot --
+    lasts at least ``min_s``; and inside such a run no piece at one ``framing`` (any value compared with ==; None: not
+    known, joins its neighbours) lasts one RAW frame (1 / ``raw_fps``; one sequence frame without it) or less, unless
+    it is the whole run -- a frame of the next (last) shot shown at the clip before's (after's) framing: video018 S16
+    at 00:00:20:06, RAW 22483's first frame at S16's framing, then S17's. One line per flash, unless the run is the
+    whole edit."""
     f = float(Fraction(fps))
     runs: list[list] = []                 # [shot key, first frame, end frame, labels]
+    pieces: dict[int, list[list]] = {}    # run index -> [[framing, first frame, end frame, labels]] (RAW runs)
     for it in sorted(items, key=lambda d: d["start"]):
         s, e = int(it["start"]), int(it["end"])
         if e <= s:
@@ -140,6 +151,7 @@ def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[flo
                     keys[-1] = (k, keys[-1][1], r + 1)
                 else:
                     keys.append((k, r, r + 1))
+        fr = it.get("framing")
         for k, a, b in keys:
             if runs and runs[-1][0] == k and runs[-1][2] == a:
                 runs[-1][2] = b
@@ -147,15 +159,34 @@ def flash_problems(items: Sequence[dict], fps: Fraction, changes_s: Sequence[flo
                     runs[-1][3].append(it.get("label"))
             else:
                 runs.append([k, a, b, [it.get("label")]])
+            if k[0] == "raw":
+                pcs = pieces.setdefault(len(runs) - 1, [])
+                if pcs and pcs[-1][2] == a and (fr is None or pcs[-1][0] is None or fr == pcs[-1][0]):
+                    pcs[-1][0] = fr if pcs[-1][0] is None else pcs[-1][0]
+                    pcs[-1][2] = b
+                    if it.get("label") not in pcs[-1][3]:
+                        pcs[-1][3].append(it.get("label"))
+                else:
+                    pcs.append([fr, a, b, [it.get("label")]])
     if len(runs) <= 1:
         return []
     out = []
     need = int(math.ceil(min_s * f - 1e-9))
-    for k, a, b, labels in runs:
+    one = 1.0 / float(Fraction(raw_fps)) if raw_fps else 1.0 / f      # one RAW frame (s)
+    h = int(round(f))
+
+    def tc(a: int) -> str:
+        return f"{a // (3600 * h):02d}:{a // (60 * h) % 60:02d}:{a // h % 60:02d}:{a % h:02d}"
+    for i, (k, a, b, labels) in enumerate(runs):
         if b - a < need and k[0] != "allowed":
-            h = int(round(f))
-            tc = f"{a // (3600 * h):02d}:{a // (60 * h) % 60:02d}:{a // h % 60:02d}:{a % h:02d}"
             what = {"raw": "a different RAW shot", "black": "nothing (black)"}.get(k[0], "a clip")
-            out.append(f"{'+'.join(str(x) for x in labels)} at {tc}: {b - a} frame(s) of {what} "
+            out.append(f"{'+'.join(str(x) for x in labels)} at {tc(a)}: {b - a} frame(s) of {what} "
                        f"({(b - a) / f:.2f} s, under {min_s:g} s) -- a flash frame")
+            continue
+        pcs = pieces.get(i, [])
+        for _, pa, pb, pl in pcs if len(pcs) > 1 else []:
+            if (pb - pa) / f <= one + 1e-9:
+                out.append(f"{'+'.join(str(x) for x in pl)} at {tc(pa)}: {pb - pa} frame(s) of a RAW shot at the "
+                           f"framing of another clip of it ({(pb - pa) / f:.3f} s, one RAW frame or less) -- a flash "
+                           "frame")
     return out
