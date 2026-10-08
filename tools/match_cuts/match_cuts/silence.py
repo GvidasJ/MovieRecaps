@@ -249,6 +249,28 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
     return cuts, lv
 
 
+def tail_after_last_word(words: Sequence[Any] | None, quiet: Sequence[tuple[float, float]] | None, n_frames: int,
+                         fps: Fraction, st: Settings, protect: Sequence[tuple[int, int]] = (), guard: Any = None
+                         ) -> Cut | None:
+    """Your ending: the edit stops --pad-after after the sound holding its last word (``words``: the words on A1,
+    sequence s; ``quiet``: A1's quiet stretches, a1_quiet) -- the laughter, reaction or outro the competitor plays
+    after its last line goes like a trailing silence (video017: 0.03 s after 'Sorry', video018: 0.04 s after the sound
+    holding 'insurance'; on 7 of 8 answer keys you end before the tool did). None when there is no word, nothing to
+    cut after it, or the tail holds a protected range (a cross dissolve, another video's stretch)."""
+    if not words or quiet is None:
+        return None
+    f = float(fps)
+    last = max(float(w.end) for w in words)
+    after = [q0 for q0, q1 in quiet if q1 > last + 1e-6]
+    s_end = max(last, min(after)) if after else n_frames / f
+    a = int(math.ceil((s_end + st.pad_after) * f - 1e-9))
+    if guard is not None and a < n_frames:
+        a = guard(a, n_frames)[0]
+    if a >= n_frames - 1 or any(p0 < n_frames and p1 > a for p0, p1 in protect):
+        return None
+    return Cut(a, n_frames, s_end, n_frames / f)
+
+
 def shot_guard_frames(clips: Sequence[Any] | None, sm: Any, changes_s: Sequence[float], fps: Fraction,
                       min_s: float | None = None) -> Any:
     """``guard(a, b)`` for removal_ranges: a removed range [a, b) (sequence frames) moved so the picture kept on
@@ -627,6 +649,11 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         quiet = (a1_quiet(audio, speech, fps, n_frames, bool(getattr(cfg, "silence_breaths", False)))
                  if speech is not None else None)
         cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
+        tail = tail_after_last_word(words, quiet, n_frames, fps, st, protect + other, guard)
+        if tail is not None:                         # your ending: nothing plays after the last line
+            first = min([c.a for c in cuts if c.b > tail.a] + [tail.a])
+            cuts = [c for c in cuts if c.b <= first] + [Cut(first, n_frames, tail.s0, tail.s1)]
+            lv = dict(lv, ending={"from_s": round(first / float(fps), 3), "last_sound_end_s": round(tail.s0, 3)})
     out = summarize(cuts, n_frames, fps, st, lv, before=snap)
     out["speech"] = {"rows": snap_rows, "levels": dict((speech.levels or {}) if speech is not None else {}),
                      "on": speech is not None, "fps": str(fps)}

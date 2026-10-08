@@ -311,6 +311,11 @@ finished videos: hence 0.05.
   (`XML SILENCE`, two frames of rounding allowed; an edge held 0.25 s from a RAW shot change against a flash frame
   may keep more). Silence is the quiet of the RAW's speech map (above) — the same quiet the speech check knows, so a
   breath is never cut as silence.
+* **Nothing after the last line.** The edit ends `--pad-after` after the sound that holds its last word: the laughter,
+  reaction or outro the competitor plays after its last line goes like a trailing silence (your video017 ends 0.03 s
+  after "Sorry", video018 0.04 s after the sound holding "insurance", video3 right after "very lonely!" -- the tool
+  played 1.5, 2.1 and 4.0 s more; on 7 of 8 answer keys you ended before the tool did). Never into a cross dissolve
+  or another video's stretch; `--keep-silence` keeps it too.
 
 Every silence of **my** edit's audio is cut out of `1_edit.xml` — measured on the RAW audio under my clips (A1),
 never on the competitor's, so music it added does not count as speech. In competitor mode this happens after the
