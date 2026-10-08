@@ -277,6 +277,16 @@ def apply_no_broll(cutlist: Cutlist, comp_y: np.ndarray | None, raw_y: np.ndarra
                 if follow_audio and s.type in ("not_in_raw", "uncertain"):
                     pending.append((s, A, B, False))
                     continue
+                new = slip_onto_line(s, by_comp_in, A, B, fps, raw_fps, BROLL_GAP_S) \
+                    if follow_audio and take_line(s, by_comp_in) else None
+                if new is not None:                        # the same take under its sound: on its sound
+                    replaced[int(s.id)] = [new]
+                    res["slipped"].append({"segment": int(s.id), "comp_in": int(s.comp_in),
+                                           "comp_out": int(s.comp_out), "line": (s.audio or {})["line"].get("source"),
+                                           "picture_ms": round(1000.0 * (float(s.raw_in_seconds)
+                                                                         - float(new.raw_in_seconds)), 1),
+                                           "raw_in_seconds": new.raw_in_seconds})
+                    continue
                 if s.type in ("not_in_raw", "uncertain"):
                     res["kept"].append(_row(s, fps, "no main-clip shot right before or after it", None))
                 continue
@@ -726,8 +736,23 @@ def other_clips_line(s: Segment) -> bool:
         return False
 
 
+def take_line(s: Segment, by_comp_in: dict) -> bool:
+    """The line piece s's sound follows is a take playing on: its anchor is a plain RAW shot at the line's own speed
+    (video018: S20's take under S21-S22). Not the own in-point line of a sped-up or slowed piece: the pictures after
+    it are another moment of the take (zendaya: S20-S23 after S19's 1.2x speed-up, slipped onto that line, put an A1
+    cut inside "funny it's")."""
+    fx = (s.audio or {}).get("line") or {}
+    try:
+        a = by_comp_in.get(int(fx.get("id")))
+    except (TypeError, ValueError):
+        return False
+    v = float(fx.get("speed") or 1.0)
+    return (a is not None and a.type == "raw" and not a.time_remap_keys and (a.retime or "none") == "none"
+            and a.speed is not None and abs(float(a.speed) - v) <= 1e-9)
+
+
 def slip_onto_line(s: Segment, by_comp_in: dict, A: Segment | None, B: Segment | None, fps: Fraction,
-                   raw_fps: Fraction) -> Segment | None:
+                   raw_fps: Fraction, limit_s: float | None = None) -> Segment | None:
     """--premiere (follow_audio): a RAW piece whose sound is on ANOTHER clip's line (other_clips_line), at that line's
     speed, whose picture runs a frame or two off the line (within JUMP_FRAMES: no cutaway), played ON the line -- its
     picture at the RAW time of its sound, its own framing kept; None when that does not apply.
@@ -736,14 +761,21 @@ def slip_onto_line(s: Segment, by_comp_in: dict, A: Segment | None, B: Segment |
     nobody sees). Played as it is, V1 repeats or skips those frames at the cut while A1 plays on, and the repeat
     removal (repeats.py) then cuts the sound as well: your video1 (final.mp4), S09 -- its picture 3 frames behind
     S08's line, whose sound it continues: the speech-safe cuts kept A1 playing on, the repeat removal took the 5
-    repeated V1 frames out of A1 too, and A1 jumped 0.08 s inside "Exactly, so I'm open"."""
+    repeated V1 frames out of A1 too, and A1 jumped 0.08 s inside "Exactly, so I'm open".
+
+    ``limit_s`` (default JUMP_FRAMES competitor frames): how far off its sound the picture may run. A piece with no
+    main-clip shot beside it passes BROLL_GAP_S: its picture that near its sound is the same take (a stutter or a
+    reaction repeat under the sound that plays on), never a cutaway -- video018's S21-S22, reframed on the other
+    person 0.1 and 0.3 s behind S20's take, which dissolves into them: you cut "Yeah I have insurance" in sync, on
+    that framing; played as they were, the repeat removal cut "insurance"."""
     fx = (s.audio or {}).get("line") or {}
     if (not other_clips_line(s) or s.time_remap_keys or (s.retime or "none") != "none" or s.speed is None
             or s.raw_in_seconds is None or fx.get("raw_in_seconds") is None):
         return None
     v = float(fx.get("speed") or 1.0)
     d = float(fx["raw_in_seconds"]) - float(s.raw_in_seconds)
-    if abs(float(s.speed) - v) > 1e-9 or abs(d) <= 1e-6 or abs(d) > JUMP_FRAMES / float(fps):
+    lim = JUMP_FRAMES / float(fps) if limit_s is None else float(limit_s)
+    if abs(float(s.speed) - v) > 1e-9 or abs(d) <= 1e-6 or abs(d) > lim:
         return None
     ln = _fx14_line(s, fx, by_comp_in, A, B, fps)
     new = replacement(s, ln, fps, raw_fps, {"ok": True, "corr": fx.get("corr"), "lag_ms": fx.get("lag_ms")})

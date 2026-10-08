@@ -254,3 +254,52 @@ def test_report_names_audio_lines_and_the_switch_baseline_support():
                                               "switch_baseline": {"n": 4, "tier": "decisive"}, "sync_mode": "raw",
                                               "text": "competitor audio is 86.0 ms later"}}, settings={})
     assert "(switch baseline over 4 decisive cut(s))" in report.av_offset_line(cl)
+
+
+def test_a_picture_that_stutters_back_under_a_sound_that_plays_on_takes_the_previous_line():
+    """video018's ending: S20 dissolves (2 frames) into S21, whose picture goes 0.1 s back on the same take (reframed
+    on the other person), then S22 0.3 s back, while the competitor's sound plays S20's take on ("Yeah I have
+    insurance"); then a real cut. S21 was never tried on S20's line: a dissolved piece was no candidate and the
+    dissolve's overlap made S20 no neighbour; S22, 0.57 s at speed 1, was no candidate either. They kept their
+    pictures' sound, and the repeat removal cut "insurance". Both take S20's line now; the real cut after them keeps
+    its own sound."""
+    raw = _raw()
+    xf = {"type": "crossfade", "duration_frames": 2}
+    segs = [_seg(1, 0, 60, 2.0, transition_out=dict(xf)),
+            _seg(2, 58, 80, 2.0 + 58 / 30 - 0.1, transition_in=dict(xf)),
+            _seg(3, 80, 100, 2.0 + 80 / 30 - 0.3),
+            _seg(4, 100, 140, 9.0)]
+    comp = _comp(raw, [(0, 100, 2.0, 1.0), (100, 140, 9.0, 1.0)], 140)
+    res, _ = _analyse(segs, comp, raw)
+    per = res["segments"]
+    for sid, k0 in ((2, 58), (3, 80)):
+        line = per[sid]["line"]
+        assert line is not None and line["source"] == "S01 continued", per[sid]
+        assert line["raw_in_seconds"] == pytest.approx(2.0 + k0 / 30, abs=1e-6) and abs(line["lag_ms"]) < 0.5
+        assert per[sid]["exception"] is None
+    assert per[4]["line"] is None and per[4]["exception"] is None and abs(per[4]["lag_ms"]) < 0.5
+
+
+def test_a_picture_one_frame_off_a_sound_that_plays_on_keeps_its_own_sound():
+    """The other side of the weak-match rule: a picture a frame behind the take whose sound plays on correlates with
+    that sound strongly, only 33 ms off -- no candidate (it stays "confidently misaligned" for criterion 5). Lines
+    there were tried: on zendaya-age S07 (16 ms off) the line carried the short piece after it into the B-roll fill,
+    and one frame of it was left at a cut (XML FLASH)."""
+    raw = _raw()
+    segs = [_seg(1, 0, 60, 2.0), _seg(2, 60, 120, 4.0 - 1 / 30), _seg(3, 120, 160, 15.0)]
+    comp = _comp(raw, [(0, 120, 2.0, 1.0), (120, 160, 15.0, 1.0)], 160)
+    res, _ = _analyse(segs, comp, raw)
+    per = res["segments"]
+    assert per[2]["line"] is None and per[2]["corr"] > 0.9 and abs(abs(per[2]["lag_ms"]) - 1000 / 30) < 2, per[2]
+    assert per[3]["line"] is None
+
+
+def test_foreign_sound_under_a_weak_piece_verifies_no_line():
+    """The other side: a piece whose sound is not the RAW at all (a tone over it) is tried on its neighbour's line
+    and fails -- no line, its exception stays."""
+    raw = _raw()
+    segs = [_seg(1, 0, 60, 2.0), _seg(2, 60, 120, 4.0), _seg(3, 120, 160, 15.0)]
+    comp = _comp(raw, [(0, 60, 2.0, 1.0), (60, 120, None, 1.0), (120, 160, 15.0, 1.0)], 160)
+    res, _ = _analyse(segs, comp, raw)
+    per = res["segments"]
+    assert per[2]["line"] is None and per[2]["exception"] in ("audio_replaced", "music_dominated"), per[2]

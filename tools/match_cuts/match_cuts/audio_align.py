@@ -81,6 +81,8 @@ _TAPE, _TEMPO = "tape", "tempo"
 _ADDED_FRAME_S = 0.02         # residual-energy frame for added-audio detection
 _MAX_LAG_SEG_S = 0.1          # per-segment lag search (same as verify s9_5)
 _MIN_SEG_S = 0.5              # shorter audio ranges -> 'too_short' when they do not line up
+NOT_FOLLOWING_CORR = 0.5      # a piece whose sound matches its own picture below this: tried on a neighbour's line
+STUTTER_FRAMES = 2.0          # ... or whose sound is more than this many competitor frames off its picture (a stutter)
 
 
 # OpenBLAS thread control lives in common (the whole run pins it to one thread, DESIGN D7); these names stay for
@@ -1216,6 +1218,13 @@ def _build_model(s: Segment, fps: Fraction, sr: int) -> _Model | None:
     return _Model(s, "stretch", float(s.raw_in_seconds), float(s.speed), t_in)
 
 
+def _follows(a: Segment, b: Segment) -> bool:
+    """b plays right after a in the competitor: it starts at a's comp_out, or inside a's last frames by exactly the
+    cross dissolve between them (b.comp_in = a.comp_out - the dissolve's frames: the competitor shows both there)."""
+    d = int(a.comp_out) - int(b.comp_in)
+    return d == 0 or (d > 0 and d in (_crossfade_frames(b)[0], _crossfade_frames(a)[1]))
+
+
 def _crossfade_frames(s: Segment) -> tuple[int, int]:
     """(frames of incoming overlap at comp_in, frames of outgoing overlap at comp_out)."""
     def d(tr: dict | None) -> int:
@@ -1844,9 +1853,13 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
                  cuts: list[dict]) -> dict[int, _Model]:
     """FX-14: continuous audio across video-only retimes, uncertain segments and placeholders.
 
-    A REGION is a maximal run of adjacent pieces whose own picture map does not explain their audio (corr <
-    verify_audio_strong_corr or a residual beyond audio_lag_tol_ms) and that are a placeholder, a retimed segment
-    (remap / freeze / speed != 1 / frame blend), an uncertain segment or a piece shorter than _MIN_SEG_S. Candidate
+    A REGION is a maximal run of adjacent pieces (_follows: end to start, or across the cross dissolve between
+    them) whose own picture map does not explain their audio (corr < verify_audio_strong_corr or a residual beyond
+    audio_lag_tol_ms) and that are a placeholder, a retimed segment (remap / freeze / speed != 1 / frame blend), an
+    uncertain segment, a piece shorter than _MIN_SEG_S, or one whose sound follows its own picture only weakly (corr <
+    NOT_FOLLOWING_CORR) or more than STUTTER_FRAMES competitor frames off it -- a picture that stutters under a sound
+    that plays on (video018: S20's take runs on under S21-S22, whose pictures go back 0.1 and 0.3 s); a frame or two
+    off is a slip nobody sees, left as it was. Candidate
     lines (picture-synced RAW time r(t) = r0 + v (t - t0), played at the run's offset g like any segment):
       * the confidently explained segment just before the region, its map extended forward;
       * the one just after it, extended backward;
@@ -1872,7 +1885,9 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
         return int(round(Fraction(int(k)) * sr / fps))
 
     def window(s: Segment) -> tuple[int, int]:
-        return max(0, f2s(s.comp_in) + sh_hi), min(f2s(s.comp_out) + sh_lo, comp.size)
+        """The surely-played samples: without the cross dissolves at its ends (both sources play there)."""
+        xi, xo = _crossfade_frames(s)
+        return max(0, f2s(s.comp_in + xi) + sh_hi), min(f2s(s.comp_out - xo) + sh_lo, comp.size)
 
     def explained(s: Segment) -> bool:
         o, m = out[s.id], models.get(s.id)
@@ -1886,9 +1901,18 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
     def candidate(s: Segment) -> bool:
         if s.type in ("not_in_raw", "uncertain"):      # no verified RAW picture: the audio may still follow a line
             return True
-        if s.type != "raw" or explained(s) or out[s.id]["pitch_preserved"] or _crossfade_frames(s) != (0, 0):
+        if s.type != "raw" or explained(s) or out[s.id]["pitch_preserved"]:
             return False
-        return retimed(s) or bool(s.uncertain) or f2s(s.comp_out) - f2s(s.comp_in) < int(_MIN_SEG_S * sr)
+        if retimed(s) or bool(s.uncertain) or f2s(s.comp_out) - f2s(s.comp_in) < int(_MIN_SEG_S * sr):
+            return True
+        # its sound does not follow its own picture -- weakly matched, or more than two frames off it: it may play on
+        # from a neighbour under a picture that stutters; the line test stays as strict (a strong peak within +-tol
+        # beating every other alignment). A frame or two off is a slip nobody sees (broll.JUMP_FRAMES), left as it
+        # was: lines there (zendaya-age S07, 16 ms off) carried a short neighbour into the B-roll fill and left a
+        # 1-frame flash
+        o = out[s.id]
+        return o["corr"] is not None and (float(o["corr"]) < NOT_FOLLOWING_CORR or (
+            o["lag_ms"] is not None and abs(float(o["lag_ms"])) > 1000.0 * STUTTER_FRAMES / float(fps)))
 
     def verify(s: Segment, lm: _Model, lim_ms: float) -> tuple[bool | None, float, float, float]:
         """(ok | None when too short to measure, residual lag s, peak, sidelobe) of piece s against line lm."""
@@ -1939,11 +1963,11 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
             i += 1
             continue
         j = i
-        while j + 1 < n and candidate(segs[j + 1]) and segs[j + 1].comp_in == segs[j].comp_out:
+        while j + 1 < n and candidate(segs[j + 1]) and _follows(segs[j], segs[j + 1]):
             j += 1
         region = list(segs[i:j + 1])
-        prev = segs[i - 1] if i > 0 and segs[i - 1].comp_out == region[0].comp_in and explained(segs[i - 1]) else None
-        nxt = segs[j + 1] if j + 1 < n and segs[j + 1].comp_in == region[-1].comp_out and explained(segs[j + 1]) else None
+        prev = segs[i - 1] if i > 0 and _follows(segs[i - 1], region[0]) and explained(segs[i - 1]) else None
+        nxt = segs[j + 1] if j + 1 < n and _follows(region[-1], segs[j + 1]) and explained(segs[j + 1]) else None
         if prev is not None:
             run(region, line_of(prev), int(prev.comp_in), f"S{prev.id:02d} continued", tol_ms)
         if nxt is not None:

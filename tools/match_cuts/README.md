@@ -371,7 +371,13 @@ is replaced only between two shots of the same line, or between two cutaways rep
 RAW audio does not continue (music, voice-over, the cutaway's own sound) the cutaway stays as the competitor has it
 -- unless it is shorter than a shot can be (0.25 s) and its sound cannot be measured: then the clip before plays on
 over it (it would be a flash frame). A shot of the main clip whose own sound plays under it (a strong correlation
-up to 0.1 s off its picture: too far for the ±10 ms above) is the main clip, never a cutaway.
+up to 0.1 s off its picture: too far for the ±10 ms above) is the main clip, never a cutaway. A RAW piece whose
+sound is another clip's audio line (below) plays at the RAW time of that sound with its own framing (`--premiere`):
+when its picture is a frame or two off it, or -- with no main-clip shot right beside it (a dissolve in between) --
+up to 1 s off when that sound is a take playing on at its own speed (not the line of a sped-up or slowed piece): the
+same take stuttering or repeating a reaction under the sound that plays on. Played as it was, V1
+would repeat those frames while A1 plays on, and the repeat removal would cut the sound with them (video018: S21-S22,
+0.1 and 0.3 s behind S20's take, cost "insurance").
 
 Only what you import changes: `1_edit.xml` (with a `B-ROLL REPLACED` marker on every spot),
 `recreated_edit.edl` and `cutlist.csv` (`debug/cutlist_no_broll.json` holds the export cut list).
@@ -539,7 +545,9 @@ exception.
   exactly like the competitor. The preview follows the same rule; FCP7 XML / EDL get separate audio events at
   the nearest whole frame (the sub-frame rest is written as a comment next to each event).
 - Either way, sound that keeps playing under a video-only slow motion, freeze, uncertain range or placeholder
-  is exported as one continuous audio-only layer (`Sxx-Syy  audio (audio line: …)`) instead of silence.
+  -- or under a picture that stutters on the same take (its own picture matches that sound only weakly, or more than
+  two frames off) -- is exported as one continuous audio-only layer (`Sxx-Syy  audio (audio line: …)`) instead of
+  silence.
 
 **Input auto-detection** (prompt Configuration): the competitor is the *portrait* file, failing that the
 *shorter* one. If `--competitor`/`--raw` look reversed they are swapped with a warning (`--no-swap`

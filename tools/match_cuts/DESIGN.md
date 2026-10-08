@@ -1356,10 +1356,16 @@ verification honesty) were fixed under these shared rules:
     under a dynamic original only crosses the threshold where the original is quiet: typed piece by piece every
     < 1.5 s piece looked like an effect -- film24's −12 dB bed read 'sfx'); the residual is the competitor minus
     the offset-corrected rebuild (each model rendered at g + its residual).
-  * Audio lines (FX-14, `audio_align._audio_lines`): a REGION is a maximal run of adjacent pieces whose own
-    picture map does not explain their audio (corr < `verify_audio_strong_corr` or residual beyond
-    `audio_lag_tol_ms`) and that are a placeholder, a retimed segment (remap / freeze / speed ≠ 1 / frame
-    blend), an uncertain segment or a piece shorter than 0.5 s. Candidate lines (picture-synced RAW time,
+  * Audio lines (FX-14, `audio_align._audio_lines`): a REGION is a maximal run of adjacent pieces (end to
+    start, or across the cross dissolve between them: `_follows`) whose own picture map does not explain their
+    audio (corr < `verify_audio_strong_corr` or residual beyond `audio_lag_tol_ms`) and that are a placeholder, a
+    retimed segment (remap / freeze / speed ≠ 1 / frame blend), an uncertain segment, a piece shorter than 0.5 s,
+    or one whose sound follows its own picture only weakly (corr < `NOT_FOLLOWING_CORR` 0.5) or more than
+    `STUTTER_FRAMES` (2) competitor frames off it -- a picture that stutters under a sound that plays on (video018:
+    S20's take runs on under S21-S22, pictures 0.1 and 0.3 s back; a dissolve's overlap frames are left out of the
+    verify window). Not a piece a frame or two off its sound (a slip nobody sees): such lines (zendaya-age S07,
+    16 ms off) carried a short neighbour into the B-roll fill and left a 1-frame flash. Candidate lines
+    (picture-synced RAW time,
     played at g like any segment): the confidently explained segment just before the region extended forward,
     the one just after extended backward, and a retimed piece's own picture in-point at speed 1 corrected by
     its measured residual (video-only slow motion / freeze over audio that keeps playing). A piece takes a

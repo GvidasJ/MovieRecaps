@@ -407,3 +407,53 @@ def test_a_raw_piece_too_short_to_be_a_shot_is_never_left_as_a_flash():
     res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True)
     rows = {r["segment"]: r for r in res["replaced"]}
     assert 3 in rows and rows[3]["how"] == "keeps playing (short)" and not res["kept"]
+
+
+def test_pieces_under_another_clips_sound_with_no_shot_beside_them_play_at_their_sounds_time():
+    """video018's ending: S20 dissolves into S21, reframed on the other person 0.1 s back on the same take, then S22
+    0.3 s back, under S20's sound ("Yeah I have insurance"); the audio stage put them on S20's line. The dissolve
+    keeps S20 from being the shot right before them and the shot after them (S23, its own sound under music: corr
+    0.59) is no anchor either -- no main-clip shot beside them, so they kept their pictures: V1 repeated 0.3 s of the
+    take while A1 played on, and the repeat removal cut "insurance". Within BROLL_GAP_S of their sound they are the
+    same take, no cutaway: they play at the RAW time of their sound, each its own framing kept (you cut that line in
+    sync, on that framing). A piece over 1 s off its line is not the same take: never slipped."""
+    xf = {"type": "crossfade", "duration_frames": 2}
+    line = {"id": 0, "raw_in_seconds": 0.0, "speed": 1.0, "source": "S01 continued", "lag_ms": 0.0, "corr": 0.86}
+    other = {**PAN, "tx": PAN["tx"] + 300.0, "scale": 0.6}
+
+    def piece(id_, a, b, back_s):
+        at = 10.0 + a / 30
+        s = shot(id_, a, b, at - back_s, transition_in=dict(xf) if a == 58 else None,
+                 audio={"corr": 0.86, "lag_ms": 0.0, "line": dict(line, raw_in_seconds=at)})
+        s.transform = dict(other)
+        return s
+    base = make_cutlist()
+    s1 = shot(1, 0, 60, 10.0, transition_out=dict(xf))
+    after = shot(4, 100, 240, 30.0, audio={"corr": 0.59, "lag_ms": 1.3})       # its own sound, under music
+    segs = [s1, piece(2, 58, 80, 0.1), piece(3, 80, 100, 0.3), after]
+    cl = Cutlist(1, base.competitor, base.raw, base.layout, segs)
+    comp = _comp_from([(0.0, 100 / 30, 10.0), (100 / 30, 8.0, 30.0 - 100 / 30)])
+    res = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True, hints=None)
+    assert sorted(r["segment"] for r in res["slipped"]) == [2, 3], res
+    assert not [r for r in res["replaced"] if r["segment"] in (2, 3)]
+    out = {s.comp_in: s for s in res["cutlist"].segments}
+    # one clip on S01's line from 58 to 100 (the two pieces, one framing: joined), its own framing
+    assert out[58].comp_out == 100 and out[58].raw_in_seconds == pytest.approx(10.0 + 58 / 30)
+    assert out[58].transform == other and out[0].transform == PAN
+    assert out[100].raw_in_seconds == 30.0                                     # the real cut after them: untouched
+    assert next(s for s in cl.segments if s.comp_in == 80).raw_in_seconds == pytest.approx(10.0 + 80 / 30 - 0.3)
+    # over BROLL_GAP_S off its sound: not the same take
+    far = Cutlist(1, base.competitor, base.raw, base.layout,
+                  [copy.deepcopy(s1), piece(2, 58, 80, 1.5), shot(4, 80, 240, 30.0 - 20 / 30, audio={"corr": 0.59})])
+    res2 = broll.apply_no_broll(far, comp, RAW_Y, SR, Config(premiere=True), follow_audio=True, hints=None)
+    assert 2 not in [r["segment"] for r in res2["slipped"]]
+    # without follow-the-audio nothing moves
+    plain = broll.apply_no_broll(cl, comp, RAW_Y, SR, Config(), follow_audio=False)
+    assert not plain["slipped"]
+    # the own in-point line of a sped-up piece is no take playing on (zendaya: S20-S23 after S19's 1.2x speed-up --
+    # slipped, an A1 cut fell inside "funny it's"): not slipped
+    fast = copy.deepcopy(s1)
+    fast.speed = 1.2
+    res3 = broll.apply_no_broll(Cutlist(1, base.competitor, base.raw, base.layout, [fast] + segs[1:]), comp, RAW_Y,
+                                SR, Config(premiere=True), follow_audio=True, hints=None)
+    assert not [r for r in res3["slipped"] if r["segment"] in (2, 3)]
