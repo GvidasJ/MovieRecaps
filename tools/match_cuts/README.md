@@ -413,6 +413,11 @@ fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start 
   heard one only when both models find it the more likely, so a misread screen, or a word the competitor wrote that
   nobody said, stays out. Where the screen writes the spoken form ("WANNA") and the transcript the full one ("want
   to"), the screen's form is used.
+* **Captions in more than one colour** (competitor captions): the OCR learns the colour the captions are written in
+  from the video. A competitor that gives each speaker a colour of their own (video018: yellow, green, a laugh in
+  pink) has every colour learned and read: a further colour counts only where it makes whole captions of its own (no
+  letter of the colours found before on those frames) for at least 0.5 s, the size of the main colour's, that read as
+  words -- a word highlighted in another colour inside a caption, or a bright detail of the picture, never does.
 * **Unclear words are rechecked against the RAW** (below).
 * **Another video's stretch** (see *B-roll*): the competitor's audio there is transcribed and captioned; the stretch
   is the only gap the captions keep.
@@ -1104,7 +1109,7 @@ per replaced spot, and the report lists them with timecodes.
 statistics, a byte-exact SRT round trip, regrouping their words: ≥ 80 % of the captions come out exactly,
 every rule holds, the 29 weak endings are fixed except 4 that a rule keeps); `tests/test_caption_ocr.py`
 reads a short synthetic clip with burned-in captions (pop-in, colour highlight, the same word twice, static
-text) and checks every caption's text and first / last frame.
+text) and one with a caption colour per speaker, and checks every caption's text and first / last frame.
 
 `tests/test_synthetic.py` builds a synthetic RAW and a competitor made with ffmpeg filtergraphs (jump
 cuts, an out-of-order hook, a re-used moment, a 1.10× segment, a flipped segment, a push-in, a punch-in,

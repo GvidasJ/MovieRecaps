@@ -281,8 +281,12 @@ def _ignore_mask(band: Band) -> np.ndarray | None:
 #
 # Caption styles differ (white text with a black outline or a soft shadow, cream text, a word highlighted in another
 # colour, a pop-in that grows the text over its first frames, ...). What they share: bright letters with dark pixels
-# right next to them, in ONE fill colour that repeats over the whole video. The fill colour is learned from the band;
-# a frame's caption layer is the bright pixels of that colour next to dark ones, on the caption's own line.
+# right next to them, in a fill colour that repeats over the whole video. The fill colour is learned from the band;
+# a frame's caption layer is the bright pixels of that colour next to dark ones, on the caption's own line. Some
+# competitors give each speaker a colour of their own (video018: yellow and green, a laugh in pink): where none of the
+# colours found so far shows a caption, the colour learned there is one more caption colour when its letters make
+# whole captions of their own there, as big as the main colour's (a word highlighted in another colour inside a
+# caption, or a bright detail of the picture between captions, never does).
 #
 # Timing: captions switch on whole frames, so every frame is compared with the one before it. Where the letters
 # overlap the previous frame's less than CAND_IOU -- and, around the caption, the bright shapes in any colour changed
@@ -306,8 +310,16 @@ POP_S = 0.25              # ... within this time: it popped in again (a new capt
 POP_SHAPE = 0.5           # a pop-in / pop-out frame looks like its caption (scale-free IoU) at least this much ...
 POP_TEXT = 0.8            # ... and reads like it at least this much (small text misread), or cannot be read at all
 FILL_TOL = 60.0           # BGR distance of a letter pixel from the learned fill colour
-SPAN_VERSION = 6          # 5: pop-in frames compared with OCR look-alike letters (ocr_key); 6: a zone over the
-                          #   caption events is not ignored
+EXTRA_FILL_S = 0.5        # another caption colour: captions of its own (the colours found before absent) at least this
+#                           long over the sampled frames ...
+EXTRA_FILL_AREA = 0.3     # ... their letters at least this share of the main colour's median letter area
+MAX_FILLS = 4             # the main colour and at most three more ...
+EXTRA_FILL_TRIES = 6      # ... out of this many candidate colours tried (a colourful picture offers some first)
+EXTRA_FILL_READS = 8      # ... and its caption lines READ as text: of up to this many of them (spread out), at least half
+EXTRA_FILL_SCORE = 0.8    #   read a word of two or more letters at least this surely (a picture detail next to a
+#                           shadow reads as nothing, a stray glyph or one bar: zendaya, zendaya-age)
+SPAN_VERSION = 7          # 5: pop-in frames compared with OCR look-alike letters (ocr_key); 6: a zone over the
+                          #   caption events is not ignored; 7: captions in more than one fill colour
 BAR_READS = frozenset(["1", "l", "|", "ı", "i", "I", "/"])     # a lone bar may be read as any of these
 
 
@@ -321,10 +333,11 @@ def _near_dark(crop: np.ndarray, glyph_h: float) -> np.ndarray:
     return (mx >= 160) & near
 
 
-def learn_fill_colour(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.ndarray | None) -> np.ndarray | None:
+def learn_fill_colour(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.ndarray | None,
+                      exclude: Sequence[np.ndarray] = ()) -> np.ndarray | None:
     """The caption fill colour (BGR): the most frequent colour (24-level bins) of the bright-next-to-dark pixels of
     thin bright strokes in the band over the sampled frames -- the caption is on screen far more than any other such
-    detail."""
+    detail. Pixels within FILL_TOL of a colour in ``exclude`` (the caption colours found already) do not count."""
     import cv2
     hist: Counter = Counter()
     for c in crops:
@@ -337,7 +350,12 @@ def learn_fill_colour(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.nd
         r = max(2, int(round(0.25 * glyph_h)))
         widest = cv2.dilate(dist, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
         m &= widest <= max(2.5, 0.2 * glyph_h)
-        q = (c[m] // 24).astype(np.int32)
+        px = c[m]
+        if len(exclude) and len(px):
+            near = np.min([np.linalg.norm(px.astype(np.float32) - np.asarray(e, np.float32), axis=1) for e in exclude],
+                          axis=0)
+            px = px[near > FILL_TOL]
+        q = (px // 24).astype(np.int32)
         if len(q):
             hist.update(map(tuple, q.tolist()))
     if not hist:
@@ -347,13 +365,53 @@ def learn_fill_colour(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.nd
     return top
 
 
-def caption_layer(crop: np.ndarray, glyph_h: float, fill: np.ndarray, ignore: np.ndarray | None
-                  ) -> tuple[np.ndarray, np.ndarray]:
-    """(letters in the fill colour on the caption line, every bright-next-to-dark pixel) of one band crop."""
+def learn_fill_colours(crops: Sequence[np.ndarray], glyph_h: float, ignore: np.ndarray | None,
+                       min_frames: int, eng: Any = None) -> list[np.ndarray]:
+    """The caption fill colours (BGR), the main one first (learn_fill_colour over every sampled crop). Then, on the
+    sampled crops where none of the colours found so far shows a letter (a frame with a word highlighted in another
+    colour shows the rest of its caption in the main colour), the colour learned there is one more when
+    its letters make a caption line on at least ``min_frames`` of them, at least EXTRA_FILL_AREA of the main colour's
+    median letter area, and when they read as text (EXTRA_FILL_READS / EXTRA_FILL_SCORE): captions of their own in
+    another colour (video018: yellow and green per speaker, a laugh in pink). A word highlighted in another colour
+    sits inside a caption of the main colour, and a bright detail of the picture between captions reads as no word:
+    neither is learned."""
+    main = learn_fill_colour(crops, glyph_h, ignore)
+    if main is None:
+        return []
+    fills = [main]
+    min_area = max(6.0, 0.06 * glyph_h * glyph_h)
+    areas = [int(np.count_nonzero(caption_layer(c, glyph_h, fills, ignore)[0])) for c in crops]
+    ref = float(np.median([a for a in areas if a >= min_area] or [0]))
+    rest = [c for c, a in zip(crops, areas) if a < min_area]
+    tried: list[np.ndarray] = []
+    while ref > 0 and len(fills) < MAX_FILLS and rest and len(tried) < EXTRA_FILL_TRIES:
+        cand = learn_fill_colour(rest, glyph_h, ignore, exclude=fills + tried)
+        if cand is None:
+            break
+        tried.append(cand)
+        layers = [caption_layer(c, glyph_h, [cand], ignore)[0] for c in rest]
+        got = [int(np.count_nonzero(m)) for m in layers]
+        on = [i for i, a in enumerate(got) if a >= EXTRA_FILL_AREA * ref]
+        if len(on) < min_frames:
+            continue
+        picks = sorted({on[j * (len(on) - 1) // max(1, EXTRA_FILL_READS - 1)] for j in range(EXTRA_FILL_READS)})
+        reads = [recognise(layers[i], glyph_h, eng) for i in picks]
+        if 2 * sum(s >= EXTRA_FILL_SCORE and re.search(r"[^\W\d_]{2,}", tx) is not None for tx, s in reads) < len(picks):
+            continue
+        fills.append(cand)
+        rest = [c for c, a in zip(rest, got) if a < min_area]
+    return fills
+
+
+def caption_layer(crop: np.ndarray, glyph_h: float, fill: np.ndarray | Sequence[np.ndarray],
+                  ignore: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
+    """(letters in the fill colour(s) on the caption line, every bright-next-to-dark pixel) of one band crop."""
     cand = _near_dark(crop, glyph_h)
     if ignore is not None:
         cand &= ~ignore
-    d = np.linalg.norm(crop.astype(np.float32) - fill.astype(np.float32), axis=2)
+    fills = [np.asarray(fill)] if np.ndim(fill) == 1 else [np.asarray(f) for f in fill]
+    c32 = crop.astype(np.float32)
+    d = np.min([np.linalg.norm(c32 - f.astype(np.float32), axis=2) for f in fills], axis=0)
     return caption_line(cand & (d <= FILL_TOL), glyph_h), cand
 
 
@@ -529,9 +587,10 @@ def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: 
     gh = band.glyph_h
     with VideoReader(video, fps=fps) as vr:                     # pass 1: the fill colour
         sample = [img[band.y:band.y + band.h].copy() for k, img in vr.frames(0, n_frames) if k % 4 == 0]
-    fill = learn_fill_colour(sample, gh, ign)
+    eng = eng or engine()
+    fills = learn_fill_colours(sample, gh, ign, max(3, int(round(EXTRA_FILL_S * float(fps) / 4))), eng)
     del sample
-    if fill is None:
+    if not fills:
         return empty
     min_area = max(6.0, 0.06 * gh * gh)          # about one small letter (a pop-in's first frame included)
     present = np.zeros(n_frames, bool)
@@ -543,7 +602,7 @@ def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: 
     count = 0
     with VideoReader(video, fps=fps) as vr:                     # pass 2: the caption layer of every frame
         for k, img in vr.frames(0, n_frames):
-            lc, ls = caption_layer(img[band.y:band.y + band.h], gh, fill, ign)
+            lc, ls = caption_layer(img[band.y:band.y + band.h], gh, fills, ign)
             areas[k] = int(np.count_nonzero(lc))
             present[k] = areas[k] >= min_area
             if present[k]:
@@ -590,11 +649,12 @@ def read_caption_spans(video: str, layout: Any, frame_wh: tuple[int, int], fps: 
         out.append({"comp_in": int(runs[g[0]][0]), "comp_out": int(runs[g[-1]][1]), "ocr": maj["text"],
                     "score": maj["score"], "reads": maj["reads"], "agreement": maj["agreement"],
                     "variants": maj["variants"]})
-    log.info("captions OCR: %d captions (%d runs), band x %d y %d %dx%d (glyph %.0f px), %d frames, %s", len(out),
-             len(runs), band.x, band.y, band.w, band.h, gh, count,
+    log.info("captions OCR: %d captions (%d runs), band x %d y %d %dx%d (glyph %.0f px), %d frames, %d fill colour(s) "
+             "%s, %s", len(out), len(runs), band.x, band.y, band.w, band.h, gh, count, len(fills),
+             " ".join("BGR(%d,%d,%d)" % tuple(int(v) for v in f) for f in fills),
              ", ".join(k for k, v in conv.items() if v is True) or "no case / quote convention")
     return {"spans": out, "frames_read": count, "runs": len(runs), "conventions": conv,
-            "fill": [round(float(v), 1) for v in fill],
+            "fill": [round(float(v), 1) for v in fills[0]], "fills": [[round(float(v), 1) for v in f] for f in fills],
             "band": {"x": band.x, "y": band.y, "w": band.w, "h": band.h, "glyph_h": gh, "keep": band.keep},
             "notes": {}}
 

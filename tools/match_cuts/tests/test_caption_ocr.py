@@ -127,3 +127,40 @@ def test_a_zone_over_the_caption_events_is_not_ignored():
     band, spans = band_from_layout(lay, (1080, 1920))
     assert spans == [(73, 93)]
     assert band.ignore == [(900, 1500, 100, 80)]
+
+
+# video018's competitor: each speaker's captions in a colour of their own (yellow, green; a laugh in pink)
+TRUTH_COLOURS = [("Are you okay", 5, 35, "yellow"), ("I gotta go", 35, 60, "0x00FF00"), ("trail mix", 60, 95, "yellow"),
+                 ("*laughing*", 95, 120, "0xFF6CE4"), ("bye now", 120, 145, "0x00FF00")]
+
+
+@pytest.fixture(scope="module")
+def colour_clip(tmp_path_factory) -> Path:
+    out = tmp_path_factory.mktemp("caption_ocr_colours") / "colours.mp4"
+    font = _ff_path(FONT)
+    vf = ",".join(
+        [f"drawtext=fontfile='{font}':fontcolor=white:borderw=4:bordercolor=black:text='MY TITLE':fontsize=60"
+         ":x=(w-tw)/2:y=80"] +
+        [f"drawtext=fontfile='{font}':fontcolor={col}:borderw=4:bordercolor=black:text='{t}':fontsize=44"
+         f":x=(w-tw)/2:y=880-th/2:enable='between(n,{a},{b - 1})'" for t, a, b, col in TRUTH_COLOURS])
+    # the moving test pattern without its colours: its saturated yellow and green bars would be caption colours here
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r=30:d={N / 30}",
+           "-vf", "hue=s=0," + vf, "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(out)]
+    subprocess.run(cmd, check=True)
+    return out
+
+
+def test_captions_in_a_colour_per_speaker_are_all_read(colour_clip):
+    """video018: the competitor wrote one speaker's captions in yellow, the other's in green and a laugh in pink;
+    only the yellow ones were read (one fill colour learned) -- 20 of its 50 captions were missing, and the stretches
+    without a read caption fell back to the transcript. Every caption is read now, with its exact frames; the
+    colours learned are the three."""
+    lay = {"captions": [{"type": "captions", "comp_in": a, "comp_out": b, "x": 200, "y": 862, "w": 320, "h": 36}
+                        for _, a, b, _ in TRUTH_COLOURS],
+           "zones": [{"type": "title", "x": 150, "y": 70, "w": 420, "h": 90},
+                     {"type": "captions", "x": 100, "y": 850, "w": 520, "h": 60,
+                      "notes": "5 caption events; white text with dark outline, median glyph height 32 px"}]}
+    res = caption_ocr.read_caption_spans(str(colour_clip), lay, (W, H), Fraction(30), N)
+    got = [(c["ocr"], c["comp_in"], c["comp_out"]) for c in res["spans"]]
+    assert got == [(t, a, b) for t, a, b, _ in TRUTH_COLOURS]
+    assert len(res["fills"]) == 3 and res["fill"] == res["fills"][0]
