@@ -1,0 +1,47 @@
+{
+ "video": "video020-fixed",
+ "date": "2026-10-09",
+ "project": "..\\..\\output\\020\\video020_fixed.prproj",
+ "run": "..\\..\\output\\020",
+ "edit": {
+  "clips": 3,
+  "starts": [
+   0.483,
+   -1.183
+  ],
+  "ends": [
+   0.2,
+   -0.333
+  ],
+  "removed": 1,
+  "added": 1,
+  "moved": [
+   0.1,
+   96.4
+  ],
+  "zoomed": [
+   0.01,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.947
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 0,
+  "added": 43,
+  "rewritten": 0,
+  "changes": [
+   {
+    "heard": "were",
+    "written": "are",
+    "kind": "words",
+    "before": "what you",
+    "after": "doing I'm",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

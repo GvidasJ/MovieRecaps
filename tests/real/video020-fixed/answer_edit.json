@@ -1,0 +1,111 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on",
+ "fps": 60.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 1.016667,
+   "kind": "raw",
+   "src_in": 503.983333,
+   "speed": 1.0
+  },
+  {
+   "start": 1.016667,
+   "end": 1.833333,
+   "kind": "raw",
+   "src_in": 505.25,
+   "speed": 1.0
+  },
+  {
+   "start": 1.833333,
+   "end": 2.933333,
+   "kind": "raw",
+   "src_in": 506.25,
+   "speed": 1.0
+  },
+  {
+   "start": 2.933333,
+   "end": 3.6,
+   "kind": "raw",
+   "src_in": 507.716667,
+   "speed": 1.0
+  },
+  {
+   "start": 3.6,
+   "end": 4.55,
+   "kind": "raw",
+   "src_in": 508.566667,
+   "speed": 1.0
+  },
+  {
+   "start": 4.55,
+   "end": 5.766667,
+   "kind": "raw",
+   "src_in": 510.05,
+   "speed": 1.0
+  },
+  {
+   "start": 5.766667,
+   "end": 8.35,
+   "kind": "raw",
+   "src_in": 511.266667,
+   "speed": 1.0
+  },
+  {
+   "start": 8.35,
+   "end": 9.65,
+   "kind": "raw",
+   "src_in": 513.85,
+   "speed": 1.0
+  },
+  {
+   "start": 9.65,
+   "end": 11.516667,
+   "kind": "raw",
+   "src_in": 515.35,
+   "speed": 1.0
+  },
+  {
+   "start": 11.516667,
+   "end": 12.4,
+   "kind": "raw",
+   "src_in": 517.433333,
+   "speed": 1.0
+  },
+  {
+   "start": 12.4,
+   "end": 13.566667,
+   "kind": "raw",
+   "src_in": 519.016667,
+   "speed": 1.0
+  },
+  {
+   "start": 13.566667,
+   "end": 14.15,
+   "kind": "raw",
+   "src_in": 520.683333,
+   "speed": 1.0
+  },
+  {
+   "start": 14.15,
+   "end": 15.85,
+   "kind": "raw",
+   "src_in": 522.433333,
+   "speed": 1.0
+  },
+  {
+   "start": 15.85,
+   "end": 18.75,
+   "kind": "raw",
+   "src_in": 524.133333,
+   "speed": 1.0
+  },
+  {
+   "start": 18.75,
+   "end": 19.583333,
+   "kind": "raw",
+   "src_in": 528.466667,
+   "speed": 1.0
+  }
+ ]
+}
