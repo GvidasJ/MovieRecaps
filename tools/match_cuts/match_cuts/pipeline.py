@@ -127,6 +127,7 @@ class Context:
     speech: Any = None                                # speech.SpeechMap of the RAW: no cut lands inside speech
     shots: Any = None                                 # the RAW's shot changes (s; shots.py): no flash frame
     people: Any = None                                # speakers.Context: who is in the picture and who speaks
+    keep_map: Any = None                              # --keep-speed: keep_speed.KeepMap (competitor frame -> edit)
     premiere_xml: Any = None                          # write_premiere_xml's result (the re-framed clips ...)
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
@@ -2854,6 +2855,18 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     (export_xml_edl.play_on_slivers), then the RAW's speech map, shot changes and people, the speech-safe cuts and the
     silences and repeats taken out. Returns (the cut list written, the ripple of its cuts)."""
     from .export_xml_edl import play_on_slivers
+    if getattr(ctx.cfg, "keep_speed", False):
+        from .keep_speed import keep_speed
+        n0 = int(ex.competitor["frames"])
+        ex, ctx.keep_map = keep_speed(ex)
+        n1 = int(ex.competitor["frames"])
+        changed = sum(1 for s in ex.segments if s.type == "raw") if ctx.keep_map.stretched else 0
+        ctx.dlog.record("premiere", "keep_speed", frames_before=n0, frames_after=n1, knots=ctx.keep_map.knots)
+        log.info("--keep-speed: every RAW clip at 100 %% -- the edit runs %.2f s instead of the competitor's %.2f s "
+                 "(%d RAW clip(s), the same moments in the same order)", n1 / float(ex.comp_fps),
+                 n0 / float(ex.comp_fps), changed)
+        if not ctx.keep_map.stretched:
+            log.info("--keep-speed: the competitor changes no clip's speed -- nothing to do")
     ex, slivers = play_on_slivers(ex)
     for d in slivers:
         ctx.dlog.record("premiere", "sliver_played_on", **d)

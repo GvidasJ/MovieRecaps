@@ -173,6 +173,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
                         "the spoken words. The framing changes only where the competitor's moves --min-move px or more")
+    p.add_argument("--keep-speed", action="store_true",
+                   help="--premiere: play every clip of 1_edit.xml at 100 %% speed instead of the competitor's speed "
+                        "change -- the same moments of the RAW in the same order (a clip the competitor sped up to "
+                        "125 %% lasts 1.25 x as long); the captions are timed to that edit")
     p.add_argument("--keep-silence", action="store_true",
                    help="keep the silences of my edit (default: cut out every silence of the RAW audio under my clips, "
                         "after the competitor's cuts are recreated; without --competitor the RAW alone is cut this way)")
@@ -257,6 +261,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.premiere_min_move = float(getattr(args, "min_move", 250.0))
     cfg.keep_silence = bool(getattr(args, "keep_silence", False))
+    cfg.keep_speed = bool(getattr(args, "keep_speed", False))
     db = getattr(args, "silence_db", None)
     cfg.silence_db = None if db is None else float(db)
     cfg.min_silence = float(getattr(args, "min_silence", 0.3))
@@ -597,6 +602,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.voiceover and not Path(args.voiceover).is_file():
         print(f"match_cuts: voice-over file not found: {args.voiceover}", file=sys.stderr)
+        return 2
+    if getattr(args, "keep_speed", False) and not (args.premiere or raw_only):
+        print("match_cuts: --keep-speed changes the Premiere edit: add --premiere", file=sys.stderr)
         return 2
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)

@@ -1399,7 +1399,9 @@ def run_captions(ctx) -> dict:
     fps = Fraction(premiere_settings(cfg)["fps"])
     comp_fps = Fraction(ctx.comp_fps)
     to_seq = seq_frame_of(comp_fps, fps)
-    n_seq = to_seq(ctx.n_comp)
+    km = getattr(ctx, "keep_map", None)            # --keep-speed: the edit's timeline is the competitor's stretched
+    km = km if km is not None and km.stretched else None
+    n_seq = to_seq(km.map(ctx.n_comp) if km is not None else ctx.n_comp)
     rp = (getattr(ctx, "silence", None) or {}).get("ripple")      # silences cut out of the Premiere export
     rp = rp if rp is not None and rp.active else None
     if rp is not None:
@@ -1443,6 +1445,8 @@ def run_captions(ctx) -> dict:
                 warn(f"{n_events} caption events detected but no caption could be read")
     span_fps, span_seq = comp_fps, to_seq          # the spans' frames -> sequence frames
     comp_spans = list(spans)                         # as read, on the competitor's own frames
+    if km is not None and spans:                     # --keep-speed: each caption where its moment plays at 100 %
+        spans = [dict(d, comp_in=km.map(int(d["comp_in"])), comp_out=km.map(int(d["comp_out"]))) for d in spans]
     if rp is not None and spans:                    # the silences cut out: the copies move with the cuts
         spans, gone = move_spans(spans, to_seq, rp)
         span_fps, span_seq = fps, int
@@ -1492,6 +1496,9 @@ def run_captions(ctx) -> dict:
         from .render_preview import build_audio
         cl = ((getattr(ctx, "broll", None) or {}).get("cutlist") if isinstance(getattr(ctx, "broll", None), dict)
               else None) or ctx.cutlist        # --no-broll: the audio of the edit you import
+        if km is not None:                          # --keep-speed: every clip at 100 %, as in 1_edit.xml
+            from .keep_speed import keep_speed
+            cl = keep_speed(cl)[0]
         y16 = transcribe.resample(build_audio(cl, ctx.raw_audio, int(ctx.audio_sr)), int(ctx.audio_sr))
         res["source"] = "the cut edit (RAW audio on the edit's cuts)"
         if rp is not None:                          # the edit as exported: its silences cut out
@@ -1570,7 +1577,7 @@ def run_captions(ctx) -> dict:
         else:
             (pieces, source), sname = _raw_source(ctx, cl, rp, fps), "RAW"
         opinion = (R.clear_captions(spans, span_fps) if spans else
-                   _lazy_opinion(ctx, layout, comp_fps, rp, to_seq, fps) if requested == "voice" and not voiceover
+                   _lazy_opinion(ctx, layout, comp_fps, rp, to_seq, fps, km) if requested == "voice" and not voiceover
                    else None)
         try:
             words, res["recheck"] = R.recheck(
@@ -1777,10 +1784,11 @@ def move_spans(spans: Sequence[dict], to_seq, rp) -> tuple[list[dict], list[dict
     return moved, gone
 
 
-def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction, rp=None, to_seq=None, seq_fps: Fraction | None = None):
+def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction, rp=None, to_seq=None, seq_fps: Fraction | None = None,
+                  km=None):
     """The competitor's clearly read captions as the recheck's third opinion in forced voice mode: read (OCR) only
     when the recheck first asks, and only when the layout has a caption band (moved with the cuts when silences were
-    cut out: ``rp`` / ``to_seq`` / ``seq_fps``)."""
+    cut out: ``rp`` / ``to_seq`` / ``seq_fps``; stretched by ``km`` with --keep-speed)."""
     box: dict = {}
 
     def get(t0: float, t1: float) -> str | None:
@@ -1793,6 +1801,9 @@ def _lazy_opinion(ctx, layout: dict, comp_fps: Fraction, rp=None, to_seq=None, s
                 wh = (int(info.display_width or info.width), int(info.display_height or info.height))
                 if caption_ocr.available() is None and caption_ocr.caption_band(layout, wh) is not None:
                     got = _read_spans(ctx, layout, comp_fps).get("spans") or []
+                    if km is not None:
+                        got = [dict(d, comp_in=km.map(int(d["comp_in"])), comp_out=km.map(int(d["comp_out"])))
+                               for d in got]
                     box["get"] = (clear_captions(move_spans(got, to_seq, rp)[0], seq_fps) if rp is not None else
                                   clear_captions(got, comp_fps))
             except Exception as e:  # noqa: BLE001 - no third opinion: the two transcriptions decide

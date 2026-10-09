@@ -1477,7 +1477,12 @@ def _silence(ctx: Any) -> list[str]:
         return [f"Not removed ({plan['error']}): 1_edit.xml keeps every silence."]
     from .pipeline import speech_lines
     talk = speech_lines(plan)
-    pre = ([f"**Cuts moved off speech** (speech.py: every audio cut lands in the quiet between words -- a clip ends "
+    km = getattr(ctx, "keep_map", None)
+    keep = ([f"**--keep-speed**: every RAW clip plays at 100 % -- the competitor's moments of the RAW in its order, "
+             f"its speed changes left out: the edit before the silences runs {km.knots[-1][1] / float(ctx.comp_fps):.2f} s "
+             f"(the competitor: {km.knots[-1][0] / float(ctx.comp_fps):.2f} s); the captions are timed to it.", ""]
+            if km is not None and km.stretched else [])
+    pre = keep + ([f"**Cuts moved off speech** (speech.py: every audio cut lands in the quiet between words -- a clip ends "
             f"--pad-after after its last speech and starts --pad-before before its first; a breath at a clip's edge "
             f"may be left out): {talk[0]}"] + [f"- {r}" for r in talk[1:]] + [""]) if talk else []
     if plan.get("off"):
