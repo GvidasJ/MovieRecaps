@@ -112,7 +112,7 @@ def test_v1_and_a1_stay_empty_for_exactly_its_length_marked_and_never_silence_cu
     cl = _other_video_cutlist()
     plan, xml, cfg = _export(tmp_path, cl)
     # A1 plays nothing there: a plain NOT-IN-RAW spot's silence is cut away (test_silence: 389-433); this stays whole
-    assert plan["cuts"] == [(27, 54), (509, 534)]
+    assert plan["cuts"] == [(27, 54)]                               # the freeze plays its own sound: no silence
     x = ex.parse_premiere_xml(xml)
     (a, b), = ex.other_video_ranges(x)
     assert b - a == 60                                              # 30 competitor frames at 60 fps, exactly

@@ -177,6 +177,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="--premiere: play every clip of 1_edit.xml at 100 %% speed instead of the competitor's speed "
                         "change -- the same moments of the RAW in the same order (a clip the competitor sped up to "
                         "125 %% lasts 1.25 x as long); the captions are timed to that edit")
+    p.add_argument("--no-scene-cuts", action="store_true",
+                   help="--premiere: do not split V1 / A1 at the RAW's own shot changes (default: a cut at every shot "
+                        "change a clip plays, like Premiere's Scene Edit Detection)")
+    p.add_argument("--audio-lines", action="store_true",
+                   help="--premiere: let A1 play another moment's sound (an audio line), mute a cutaway or leave a "
+                        "freeze silent where the competitor did (default: every picture plays its own sound at 0 dB)")
+    p.add_argument("--min-clip", type=int, default=10, metavar="FRAMES",
+                   help="--premiere: a V1 clip shorter than this many sequence frames is joined into its neighbour "
+                        "(no mini cuts; a cut on a RAW shot change stays; default 10, 0 = off)")
     p.add_argument("--keep-silence", action="store_true",
                    help="keep the silences of my edit (default: cut out every silence of the RAW audio under my clips, "
                         "after the competitor's cuts are recreated; without --competitor the RAW alone is cut this way)")
@@ -262,6 +271,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere_min_move = float(getattr(args, "min_move", 250.0))
     cfg.keep_silence = bool(getattr(args, "keep_silence", False))
     cfg.keep_speed = bool(getattr(args, "keep_speed", False))
+    cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_cuts", False))
+    cfg.premiere_normal_audio = not bool(getattr(args, "audio_lines", False))
+    cfg.premiere_min_clip_frames = max(0, int(getattr(args, "min_clip", 10)))
     db = getattr(args, "silence_db", None)
     cfg.silence_db = None if db is None else float(db)
     cfg.min_silence = float(getattr(args, "min_silence", 0.3))

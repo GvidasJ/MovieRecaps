@@ -178,6 +178,21 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
   clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
+* **A cut at every RAW shot change (`--no-scene-cuts` turns it off).** Like Premiere's Scene Edit Detection ("apply
+  a cut at each detected cut point"), which you always run: every V1 clip, and its A1 clip with it, is split at each
+  shot change of the RAW it plays (`shots.py`), on the frame the new shot first shows. The pieces play on seamlessly
+  (the same source, speed and framing), each linked to its own audio. Checked on your fixed projects: every detected
+  change inside a played stretch was split (video018: 3, video020: 2), none left unsplit.
+* **Every audio clip has its own sound at normal volume (`--audio-lines` for the earlier A1).** A1 under each V1 clip
+  is that clip's own RAW sound at 0 dB: no muted cutaway, no silent freeze (it plays at 100 % with its RETIME
+  marker, and so does its sound), no sound of another moment put under the picture -- except an audio line that
+  carries on the sound already playing (one take of sound under stuttering pictures: video018's "insurance"). Only
+  the 1-frame anti-click fades at removed silences remain.
+* **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)
+  -- output/020 had S06, S07, S09, S10 and S13 of 3-9 frames; your own clips are 0.3 s or longer -- goes into its
+  neighbour: the clip before plays on over it (its take runs on), else the clip after starts that much earlier,
+  whichever does not reach into another RAW shot. A clip that starts a new RAW shot of the take before keeps its cut,
+  and the scene cuts above are made after this, so a real shot change always keeps its cut.
 * **The person speaking is always in the picture** (`match_cuts/people.py`, `speakers.py`). Where the edit plays the
   RAW (+- 3 s), every 1/25 s: faces found by YuNet (OpenCV's FaceDetectorYN, a modern CNN detector, replacing the Haar
   cascades), tracked from frame to frame (never across a RAW shot change; a small face that never speaks -- a poster,

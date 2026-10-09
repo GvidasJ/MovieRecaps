@@ -150,9 +150,11 @@ def test_every_item_must_be_one_premiere_can_import(tmp_path):
 
 
 def test_every_v1_clip_has_its_audio_on_a1_unless_removed_on_purpose(tmp_path):
-    cl = T.premiere_cutlist()                       # S09 is a freeze: a frozen picture plays no audio
-    cl.segments[7].audio = {"mute": True}           # S08: a cutaway over music, picture only
-    plan, xml, v, x = export(tmp_path, cl)
+    cl = T.premiere_cutlist()                       # S09 is a freeze
+    cl.segments[7].audio = {"mute": True}           # S08: a cutaway over music
+    plan, xml, v, x = export(tmp_path, cl)          # every picture plays its own sound: no exception
+    assert v["ok"] and v["audio_exceptions"] == [], v["errors"]
+    plan, xml, v, x = export(tmp_path, cl, premiere_normal_audio=False)    # --audio-lines: as the competitor
     assert v["ok"], v["errors"]
     assert v["audio_exceptions"] == [
         "S08 00:00:07:20-00:00:08:20: muted on purpose: the competitor showed a cutaway over music / voice-over here "
@@ -283,8 +285,10 @@ def test_a_freeze_placeholder_is_not_a_repeat(tmp_path):
     # the fixture's S09 freeze is placed at 100 % (to redo by hand): it may run into RAW the next clip shows
     cl = T.premiere_cutlist()
     cl.segments[9] = T._grid_seg(10, 270, 300, 2700)                     # S10 starts on the freeze's RAW (90 s)
-    plan, xml, v, x = export(tmp_path, cl)
+    plan, xml, v, x = export(tmp_path, cl, premiere_normal_audio=False)
     assert plan["repeats"]["rows"] == [] and v["ok"] and v["repeat_problems"] == [], v["errors"]
+    plan, xml, v, x = export(tmp_path, cl)          # the freeze's own sound runs into S10's: trimmed on A1 only
+    assert [r["track"] for r in plan["repeats"]["rows"]] == ["A1"] and v["ok"] and v["repeat_problems"] == [],         v["errors"]
 
 
 def test_a_removal_never_leaves_a_sliver_of_a_clip():

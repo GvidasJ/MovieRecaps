@@ -1392,7 +1392,11 @@ def premiere_settings(cfg: Any = None) -> dict:
     return {"size": (W, H), "fps": fps, "window": win,
             "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05),
             "static": True if static is None else bool(static),
-            "min_move": 250.0 if move is None else max(0.0, float(move))}
+            "min_move": 250.0 if move is None else max(0.0, float(move)),
+            "scene_cuts": bool(getattr(cfg, "premiere_scene_cuts", True)),
+            "normal_audio": bool(getattr(cfg, "premiere_normal_audio", True)),
+            "min_clip": int(getattr(cfg, "premiere_min_clip_frames", MIN_CLIP_FRAMES)
+                            if getattr(cfg, "premiere_min_clip_frames", None) is not None else MIN_CLIP_FRAMES)}
 
 
 RETIME_SLIVER_S = 0.25      # --premiere: a speed change this short inside one take plays at 100 % (the take runs on)
@@ -2039,6 +2043,106 @@ def snap_to_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None, 
     return out, moves
 
 
+MIN_CLIP_FRAMES = 10        # --premiere: a V1 clip shorter than this (sequence frames: 1/6 s at 60 fps) is a mini cut;
+#                             yours are 0.3 s or longer (one 10-frame piece on video3); output/020's were 3-9 frames
+
+
+def _shot_change_ticks(cl: PremiereClip, changes_s: Sequence[float], raw_fps: Fraction, fps: Fraction,
+                       lo: int, hi: int) -> list[int]:
+    """Sequence frames r in (lo, hi) of clip ``cl`` (playing forward) where a RAW shot change first shows: Premiere
+    shows at r the RAW frame floor(t x raw_fps) of t = (src_in + (r - rec_start) x speed) / fps (shots.py), so the
+    change at RAW frame k first shows on the smallest r with src_in + (r - rec_start) x speed >= k x fps / raw_fps."""
+    v = Fraction(cl.speed).limit_denominator(1_000_000)
+    if v <= 0:
+        return []
+    out = []
+    for c in changes_s:
+        k = round(Fraction(c).limit_denominator(1_000_000) * raw_fps)
+        r = cl.rec_start + math.ceil((Fraction(k) * fps / raw_fps - cl.src_in) / v)
+        if lo < r < hi:
+            out.append(int(r))
+    return sorted(set(out))
+
+
+def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | None, raw_fps: Fraction, fps: Fraction,
+                     min_frames: int = MIN_CLIP_FRAMES) -> tuple[list[PremiereClip], list[dict]]:
+    """--premiere: no mini cuts. A V1 clip shorter than ``min_frames`` (no dissolve on either side) goes into its
+    neighbours: the clip before plays on over it (its take runs on), else the clip after starts that much earlier in
+    its own source -- whichever does not reach into another RAW shot (a sliver of a shot is a flash frame). A clip
+    that starts a new RAW shot of the take before it (a real shot change: its cut stays) is kept, and so is one neither
+    neighbour can cover. Its events go to the clip that covers it, so A1 follows (premiere_audio: one clip's events =
+    one take of sound). Returns (clips, [{'clip', 'into', 'frames', 'how'}])."""
+    if min_frames <= 0 or len(clips) < 2:
+        return clips, []
+    cs = sorted(float(c) for c in (changes_s or ()))
+    f = float(fps)
+
+    def shot(t_tick: float) -> int:
+        return bisect.bisect_right(cs, t_tick / f + 1e-9)
+
+    def raw_at(cl: PremiereClip, r: int) -> float:              # source position (sequence ticks) shown at frame r
+        return cl.src_in + (r - cl.rec_start) * float(cl.speed)
+    out, moves = list(clips), []
+    i = 0
+    while i < len(out):
+        m = out[i]
+        n = m.rec_end - m.rec_start
+        a = out[i - 1] if i > 0 else None
+        b = out[i + 1] if i + 1 < len(out) else None
+        if n >= min_frames or m.start == -1 or m.end == -1 or len(out) < 2:
+            i += 1
+            continue
+        if a is not None and a.end != -1 and a.rec_end == m.rec_start and float(a.speed) > 0 and cs and \
+                abs(m.src_in - a.src_out) <= 1 and shot(raw_at(m, m.rec_start)) != shot(raw_at(a, a.rec_end - 1)):
+            i += 1                                              # a new RAW shot of the take before: a real cut
+            continue
+        done = None
+        if a is not None and a.end != -1 and a.rec_end == m.rec_start and float(a.speed) > 0 and not a.retime and \
+                all(shot(raw_at(a, r)) == shot(raw_at(a, a.rec_end - 1)) for r in range(a.rec_end, m.rec_end)):
+            a.end, a.rec_end = m.end, m.rec_end
+            a.src_out = a.src_in + int(round((a.rec_end - a.rec_start) * float(a.speed)))
+            a.events = (a.events or [a.ev]) + (m.events or [m.ev])
+            done = (a, "the clip before plays on")
+        elif b is not None and b.start != -1 and b.rec_start == m.rec_end and float(b.speed) > 0 and not b.retime \
+                and b.src_in - int(round(n * float(b.speed))) >= 0 and \
+                all(shot(raw_at(b, r)) == shot(raw_at(b, b.rec_start)) for r in range(m.rec_start, b.rec_start)):
+            d = int(round(n * float(b.speed)))
+            b.start, b.rec_start, b.src_in = m.start, m.rec_start, b.src_in - d
+            b.in_exact, b.in_error_ms = False, b.in_error_ms - 1000.0 * d / f
+            b.events = (m.events or [m.ev]) + (b.events or [b.ev])
+            done = (b, "the clip after starts earlier")
+        if done is None:
+            i += 1
+            continue
+        moves.append({"clip": m.label, "into": done[0].label, "frames": int(n), "how": done[1], "at": int(m.rec_start)})
+        del out[i]
+        i = max(0, i - 1)
+    return out, moves
+
+
+def split_at_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None, raw_fps: Fraction, fps: Fraction,
+                   fac: int = 1) -> tuple[list[PremiereClip], list[dict]]:
+    """--premiere: Premiere's Scene Edit Detection ("apply a cut at each detected cut point"), as you always run it:
+    every V1 clip is split at every RAW shot change it plays (shots.py), on the frame the new shot first shows; the
+    pieces play on seamlessly (the same source, speed and framing) and link_pairs splits A1 with them. Not inside a
+    cross dissolve's frames, nor a reverse. Returns (clips, [{'clip', 'at'}])."""
+    if not changes_s:
+        return clips, []
+    out: list[PremiereClip] = []
+    splits = []
+    for cl in clips:
+        lo = cl.rec_start + (int(cl.ev.dissolve_in or 0) * fac if cl.start == -1 else 0)   # after a dissolve's frames
+        ticks = _shot_change_ticks(cl, changes_s, raw_fps, fps, lo, cl.rec_end)
+        rest = cl
+        for r in ticks:
+            if rest.rec_start < r < rest.rec_end:
+                p, rest = _split_clip(rest, r)
+                out.append(p)
+                splits.append({"clip": cl.label, "at": int(r)})
+        out.append(rest)
+    return out, splits
+
+
 def _source_seconds(seg: Segment, k: float, comp_fps: Fraction, raw_fps: Fraction) -> float:
     """The plan's exact RAW time at competitor frame k (continuous; remap keys interpolated)."""
     if seg.time_remap_keys:
@@ -2217,6 +2321,11 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             _person_after_merge(clips, sp, raw_wh, win, fps)
             if _hold_after_merge(clips, sp, raw_wh, win, fps, st["min_move"]):
                 clips = _merge_continuous(clips)
+    clips, mini = merge_mini_clips(clips, getattr(cfg, "premiere_shots", None), raw_fps, fps, st["min_clip"])
+    for m in mini:                      # no mini cuts: a clip of a few frames goes into its neighbour
+        markers_note = (f"{m['clip']}: {m['frames']} frame(s) -- a mini cut, joined into {m['into']} "
+                        f"({m['how']}; {_tc(m['at'], fps)})")
+        warnings.append(markers_note)
     return clips, markers, warnings
 
 
@@ -2315,6 +2424,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     for m in snapped:
         warnings.append(f"{m['clips']}: the cut moved {m['to'] - m['from']:+d} frame onto the RAW's shot change "
                         f"({_tc(m['from'], fps)} -> {_tc(m['to'], fps)})")
+    scene: list[dict] = []
+    if st["scene_cuts"]:                # Scene Edit Detection: a cut at every RAW shot change inside a clip
+        clips, scene = split_at_shots(clips, getattr(cfg, "premiere_shots", None), raw_fps, fps, fac)
     clips, audio_items, pairs = link_pairs(clips, audio_items)       # V1 + A1 as linked clips
     a_of = {v: a for v, a in pairs}
     v_of = {a: v for v, a in pairs}
@@ -2440,7 +2552,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             s0 = cl.start if cl.start != -1 else cl.rec_start
             reframed.append({"label": cl.label, "start": int(s0), "tc": _tc(int(s0), fps), "note": cl.person_note})
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
-            "reframed": reframed, "snapped": snapped,
+            "reframed": reframed, "snapped": snapped, "scene_cuts": scene,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
 
@@ -2506,13 +2618,24 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
         if seg is None:
             continue
         a = audio_segment(seg)
-        if a is None:
-            continue
         line = bool((seg.audio or {}).get("line"))
         cl = by_seg.get(seg.id)
         start, end = ev.rec_in * fac, ev.rec_out * fac
+        if cl is not None and st["normal_audio"] and (a is None or line):
+            # every picture plays its own sound (no muted, silent or replaced A1) -- unless its audio line carries on
+            # the sound already playing (one take of sound under the pictures: video018's "insurance")
+            prev = out[-1] if out else None
+            keep_line = False
+            if a is not None and line and prev is not None and prev["end"] == start:
+                v_l = float(a.speed)
+                tau_l = _raw_in_seconds(a, raw_fps) + v_l * float(Fraction(ev.rec_in - int(seg.comp_in)) / comp_fps)
+                keep_line = abs(int(round(tau_l * float(fps))) - prev["out"]) <= 1 and abs(v_l - prev["speed"]) < 1e-6
+            if not keep_line:
+                a, line = seg, False
+        if a is None:
+            continue
         if cl is not None and not line:
-            if abs(seg_speed(cl.seg, comp_fps)) < 1e-9:
+            if abs(seg_speed(cl.seg, comp_fps)) < 1e-9 and not st["normal_audio"]:
                 continue                                      # frozen picture: silent
             prev = out[-1] if out else None
             if prev is not None and prev.get("clip") is cl and prev["end"] == start:
@@ -3565,6 +3688,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             from .silence import apply_premiere
             clips, want_a, markers = apply_premiere(clips, want_a, markers, silence)
         clips, _ = snap_to_shots(clips, getattr(cfg, "premiere_shots", None), st["fps"])   # as write_premiere_xml
+        if st["scene_cuts"]:
+            clips, _ = split_at_shots(clips, getattr(cfg, "premiere_shots", None), cutlist.raw_fps, st["fps"],
+                                      premiere_factor(cutlist.comp_fps, st["fps"]))
         clips, want_a, _ = link_pairs(clips, want_a)          # as write_premiere_xml links them
         x = parse_premiere_xml(xml_path)
     except Exception as e:  # noqa: BLE001

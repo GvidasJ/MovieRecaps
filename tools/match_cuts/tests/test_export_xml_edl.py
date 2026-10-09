@@ -642,10 +642,11 @@ def test_premiere_cuts_land_on_the_30fps_moments_and_a1_has_the_same_cuts(premie
     assert [(c.rec_start, c.rec_end) for c in clips] == [(2 * ev.rec_in, 2 * ev.rec_out) for ev in clip_events]
     # the crossfade S04 -> S05 is a cross dissolve starting at the edit point, 2 x 6 frames
     assert x["transitions"] == [{"start": 248, "end": 260}]
-    # A1: one item per V1 clip at its record range (the freeze is silent) + the uncertain spot's audio line
+    # A1: one item per V1 clip at its record range (the freeze too: every picture plays its own sound) + the
+    # uncertain spot's audio line (no picture there)
     a = {(i["start"], i["end"]) for i in x["audio"]}
-    v_ranges = {(c.rec_start, c.rec_end) for c in clips if c.seg.id != 9}
-    assert v_ranges <= a and (320, 380) in a and (380, 440) not in a and (500, 540) not in a
+    v_ranges = {(c.rec_start, c.rec_end) for c in clips}
+    assert v_ranges <= a and (320, 380) in a and (380, 440) not in a and (500, 540) in a
     assert {(i["start"], i["end"]) for i in x["audio"]} <= {(2 * ev.rec_in, 2 * ev.rec_out) for ev in events}
     pic = {c.rec_start: c for c in clips}
     for i in x["audio"]:
@@ -653,6 +654,13 @@ def test_premiere_cuts_land_on_the_30fps_moments_and_a1_has_the_same_cuts(premie
             assert i["in"] == pic[i["start"]].src_in                       # A1 locked to V1's source in-point
     line = next(i for i in x["audio"] if i["start"] == 320)
     assert line["in"] == round(51.2 * 60)                                  # the audio line's RAW time, 1/60 s
+
+
+def test_premiere_audio_lines_option_keeps_the_freeze_silent(tmp_path):
+    """--audio-lines: the earlier A1 -- a freeze plays no sound."""
+    x = _premiere_export(tmp_path, premiere_normal_audio=False)["x"]
+    a = {(i["start"], i["end"]) for i in x["audio"]}
+    assert (320, 380) in a and (500, 540) not in a
 
 
 def test_premiere_markers_on_uncertain_and_not_in_raw_spots(premiere):
@@ -1341,3 +1349,61 @@ def test_flip_is_read_from_flop_or_the_old_horizontal_flip():
     vert = ET.fromstring("<effect><effectid>Flop</effectid><parameter><parameterid>direction</parameterid>"
                          "<value>2</value></parameter></effect>")
     assert ex._is_flip(old) and not ex._is_flip(vert)
+
+
+def _shots_cfg(tmp_path, shots, **kw) -> Config:
+    cfg = Config(out_dir=str(tmp_path), premiere=True, **kw)
+    cfg.premiere_shots = shots                       # the RAW's shot changes (pipeline: ctx.shots)
+    return cfg
+
+
+def test_scene_edit_detection_splits_v1_and_a1_at_every_raw_shot_change_seamlessly(tmp_path):
+    """Your habit (video018: 3 of 3 detected changes inside a clip split, video020: 2 of 2): a cut at every RAW shot
+    change a clip plays, on the frame the new shot first shows, the source running on; A1 split with it, linked."""
+    from match_cuts.shots import shot_of
+    change = 175 * 1001 / 24000                                             # RAW frame 175: inside S01 (158-190)
+    cl = premiere_cutlist()
+    cfg = _shots_cfg(tmp_path, [change])
+    xml = tmp_path / "1_edit.xml"
+    res = ex.write_premiere_xml(cl, xml, cfg)
+    assert [d["clip"] for d in res["scene_cuts"]] == ["S01"]
+    x = ex.parse_premiere_xml(xml)
+    a, b = x["clips"][0], x["clips"][1]
+    assert a["end"] == b["start"] and b["in"] == a["out"]                    # seamless: the source runs on
+    f = 60.0
+    assert shot_of((b["in"]) / f, [change]) == 1 and shot_of((a["out"] - 1) / f, [change]) == 0
+    assert [(i["start"], i["end"]) for i in x["audio"][:2]] == [(a["start"], a["end"]), (b["start"], b["end"])]
+    assert ex.validate_premiere_exports(cl, xml, None, cfg)["ok"]
+    res2 = ex.write_premiere_xml(cl, xml, _shots_cfg(tmp_path, [change], premiere_scene_cuts=False))
+    assert not res2["scene_cuts"] and ex.parse_premiere_xml(xml)["clips"][0]["end"] == 80
+
+
+def test_a_mini_clip_of_a_few_frames_joins_its_neighbour(tmp_path):
+    """No mini cuts (output/020: S06, S07, S09, S10, S13 of 3-9 frames): a 4-frame competitor piece goes into the
+    clip before (its take plays on), A1 with it; with a RAW shot change right after the clip before, the clip after
+    starts earlier instead; --min-clip 0 keeps it."""
+    def cutlist():
+        cl = premiere_cutlist()
+        cl.segments[2] = _grid_seg(3, 70, 74, 900, transform=dict(PAN0, ty=322.0))
+        cl.segments[3] = _grid_seg(4, 74, 130, 1200, speed=1.1, transition_out=dict(XF))
+        return cl
+    cl = cutlist()
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml = tmp_path / "1_edit.xml"
+    ex.write_premiere_xml(cl, xml, cfg)
+    x = ex.parse_premiere_xml(xml)
+    assert all(c["end"] - c["start"] >= ex.MIN_CLIP_FRAMES for c in x["clips"] if c["start"] != -1 and c["end"] != -1)
+    s2 = next(c for c in x["clips"] if c["start"] == 80)
+    assert s2["end"] == 148 and s2["out"] - s2["in"] == 68                  # S02 plays on over S03's 8 frames
+    a2 = next(i for i in x["audio"] if i["start"] == 80)
+    assert (a2["end"], a2["in"]) == (148, s2["in"])
+    assert ex.validate_premiere_exports(cl, xml, None, cfg)["ok"]
+    # a shot change 2 frames after S02's end: S04 starts earlier instead
+    s2_end_raw = (s2["in"] + 60) / 60.0
+    cfg_s = _shots_cfg(tmp_path, [s2_end_raw + 2 / 60.0])
+    clips, _, _ = ex.premiere_clips(cutlist(), cfg_s)
+    s4 = next(c for c in clips if c.seg.id == 4)
+    assert s4.rec_start == 140 and [e.seg.id for e in s4.events] == [3, 4]
+    clips0, _, _ = ex.premiere_clips(cutlist(), Config(out_dir=str(tmp_path), premiere=True,
+                                                        premiere_min_clip_frames=0))
+    assert any(c.seg.id == 3 for c in clips0)

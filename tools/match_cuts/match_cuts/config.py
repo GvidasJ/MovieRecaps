@@ -68,6 +68,9 @@ class Config:
                                            #   the previous clip's, and one continuous RAW take with one framing = one clip
     keep_silence: bool = False             # --premiere: keep the silences of my edit (False: cut them out, silence.py)
     keep_speed: bool = False               # --premiere: every RAW clip at 100 % (keep_speed.py), same moments / order
+    premiere_scene_cuts: bool = True       # --premiere: V1 / A1 split at every RAW shot change (Scene Edit Detection)
+    premiere_normal_audio: bool = True     # --premiere: every V1 clip's own sound on A1 at 0 dB (--audio-lines: off)
+    premiere_min_clip_frames: int = 10     # --premiere (--min-clip): shorter V1 clips join a neighbour (0 = off)
     silence_db: float | None = None        # silence threshold this many dB under the speech level (None: set per video
                                            #   from its speech level and background noise, silence.levels)
     min_silence: float = 0.3               # cut silences longer than this (s), only between words
@@ -367,6 +370,7 @@ class Config:
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence", "keep_speed",
+                  "premiere_scene_cuts", "premiere_normal_audio", "premiere_min_clip_frames",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
                   "caption_language", "fast", "compare_fast", "check_determinism", "speech_map_model",

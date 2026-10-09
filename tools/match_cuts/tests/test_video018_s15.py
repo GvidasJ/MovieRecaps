@@ -92,7 +92,7 @@ def test_the_speech_check_of_video018_s15_passes(tmp_path):
                  {"mode": "match", "layout_kind": "boxed", "box": box, "background": "solid",
                   "background_detail": {"type": "solid", "color": "#000000"}, "canvas_bg": "#000000"}, segs)
     sm = speech_map_018()
-    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    cfg = Config(out_dir=str(tmp_path), premiere=True, premiere_normal_audio=False)   # S14 muted, S15's line
     plan = repeats.add_to_plan(S.plan_premiere(cl, None, 16000, cfg, None, sm, shots=SHOTS_018), cl, cfg)
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])

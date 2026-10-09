@@ -82,7 +82,7 @@ def _export(tmp_path):
 def test_the_xml_links_every_clip_to_its_audio_both_ways(tmp_path):
     cl, cfg, plan, xml, res = _export(tmp_path)
     x = ex.parse_premiere_xml(xml)
-    assert (res["links"], len(x["audio"])) == (8, 9)                  # A1 S06: an audio line under an empty V1
+    assert (res["links"], len(x["audio"])) == (9, 10)                 # A1 S06: an audio line under an empty V1
     for c in x["clips"]:
         if c["links"]:
             (vref, vk), (aref, ak) = c["links"]
@@ -94,9 +94,9 @@ def test_the_xml_links_every_clip_to_its_audio_both_ways(tmp_path):
     v = ex.validate_premiere_exports(cl, xml, None, cfg, plan["ripple"])
     assert v["ok"], v["errors"]
     assert v["link_problems"] == []
-    # the clips with nothing to link: the freeze (no audio), the uncertain spot's audio line under an empty V1
-    assert [e.split(": ")[0] for e in v["link_exceptions"]] == [      # the freeze (split by a silence cut) ...
-        "V1 S09 at 00:00:07:09", "V1 S09 at 00:00:07:18", "A1 S06 at 00:00:04:53"]   # ... and an audio line
+    # the one thing with nothing to link: the uncertain spot's audio line under an empty V1 (the freeze plays its
+    # own sound now, linked like every other clip)
+    assert [e.split(": ")[0] for e in v["link_exceptions"]] == ["A1 S06 at 00:00:04:53"]
 
 
 def _tamper(xml: Path, dest: Path, fn) -> Path:

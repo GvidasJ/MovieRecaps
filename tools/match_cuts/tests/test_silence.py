@@ -118,15 +118,16 @@ def test_premiere_export_with_silences_removed(premiere_cl, tmp_path):
 
 def test_the_plan_is_measured_on_my_clips_audio(premiere_cl):
     """A1 of the fixture plays RAW 6.6-7.9 s for clip 1 (sequence 0-80): silence the RAW under it and that part goes;
-    so do the NOT-IN-RAW spot and the freeze, which play no RAW audio. Speech everywhere else stays."""
+    so does the NOT-IN-RAW spot, which plays no RAW audio. The freeze plays its own sound (every picture does: speech
+    there), so it stays. Speech everywhere else stays."""
     from match_cuts.config import Config
     raw = (0.2 * np.sin(np.arange(200 * SR) * 0.3)).astype(np.float32)          # speech everywhere ...
     raw[int(6.9 * SR):int(7.6 * SR)] = 0.0                                         # ... but under clip 1
     plan = S.plan_premiere(premiere_cl, raw, SR, Config(premiere=True, silence_db=-20.0, min_silence=0.35,
                                                          pad_before=0.08, pad_after=0.12))
-    assert plan["cuts"] == [(27, 54), (389, 433), (509, 534)]       # clip 1; NOT-IN-RAW 380-440; freeze 500-540
+    assert plan["cuts"] == [(27, 54), (389, 433)]                   # clip 1; NOT-IN-RAW 380-440
     assert 18 + 0.12 * 60 <= 27 and 54 <= 60 - 0.08 * 60           # inside RAW 6.9-7.6 s, pads kept
-    assert plan["new_s"] == round((600 - 96) / 60, 3) and len(plan["rows"]) == 3
+    assert plan["new_s"] == round((600 - 71) / 60, 3) and len(plan["rows"]) == 2
 
 
 def test_copied_captions_move_with_the_cuts_and_fully_silent_ones_are_dropped():

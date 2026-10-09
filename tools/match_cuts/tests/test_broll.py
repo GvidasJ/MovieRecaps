@@ -191,7 +191,7 @@ def test_follow_audio_fills_every_spot_and_lets_the_previous_clip_play_over_musi
     assert s6.comp_out == 285
 
 
-def test_follow_audio_premiere_xml_marks_each_spot_and_a1_is_silent_under_music(follow, tmp_path):
+def test_follow_audio_premiere_xml_marks_each_spot_and_a1_plays_the_picture_under_music(follow, tmp_path):
     cfg = Config(out_dir=str(tmp_path), premiere=True)
     xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
     ex.write_premiere_xml(follow["cutlist"], xml, cfg)
@@ -203,7 +203,16 @@ def test_follow_audio_premiere_xml_marks_each_spot_and_a1_is_silent_under_music(
     assert set(ms) == {"B-ROLL REPLACED S02", "B-ROLL REPLACED S04", "B-ROLL REPLACED S06", "B-ROLL REPLACED S08"}
     assert "music / voice-over" in ms["B-ROLL REPLACED S06"]["comment"]
     assert (ms["B-ROLL REPLACED S06"]["in"], ms["B-ROLL REPLACED S06"]["out"]) == (480, 570)
-    assert not [a for a in x["audio"] if a["start"] < 570 and a["end"] > 480]       # A1 silent under the music
+    # A1 under the music: the picture's own RAW sound at 0 dB (every audio clip has sound; --audio-lines: silent)
+    under = [a for a in x["audio"] if a["start"] < 570 and a["end"] > 480]
+    assert under and all(not a.get("levels") for a in under)
+    for a in under:
+        c = next(c for c in x["clips"] if c["start"] <= a["start"] and a["end"] <= c["end"])
+        assert a["in"] == c["in"] + (a["start"] - c["start"])
+    cfg2 = Config(out_dir=str(tmp_path), premiere=True, premiere_normal_audio=False)
+    ex.write_premiere_xml(follow["cutlist"], xml, cfg2)
+    x2 = ex.parse_premiere_xml(xml)
+    assert not [a for a in x2["audio"] if a["start"] < 570 and a["end"] > 480]      # --audio-lines: muted
     v1 = sorted((c["start"], c["end"]) for c in x["clips"])
     assert v1[0][0] == 0 and v1[-1][1] == 720 and all(a[1] == b[0] for a, b in zip(v1, v1[1:]))   # no V1 gap
 
