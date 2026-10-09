@@ -2140,6 +2140,26 @@ def split_at_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None,
                 out.append(p)
                 splits.append({"clip": cl.label, "at": int(r)})
         out.append(rest)
+    # a split one RAW frame or less after a clip's start: that frame is the shot before's last, at this clip's framing
+    # (a flash; snap_to_shots moves such a cut only for a clip at 100 %): the clip before, adjacent and still in that
+    # shot, plays on over it (output/020 --fast: S12 at 125 %, 1 frame at 00:00:19:03)
+    cs = sorted(float(c) for c in changes_s)
+    one = float(fps) / float(raw_fps)
+    i = 1
+    while i < len(out) - 1:
+        a, p, b = out[i - 1], out[i], out[i + 1]
+        n = p.rec_end - p.rec_start
+        if (p.start != -1 and a.end != -1 and a.rec_end == p.rec_start and b.rec_start == p.rec_end and p.link_split
+                and b.link_split and p.src_out == b.src_in and n * abs(float(p.speed)) <= one + 1e-9
+                and float(a.speed) > 0 and not a.retime):
+            t = lambda c, r: (c.src_in + (r - c.rec_start) * float(c.speed)) / float(fps)     # noqa: E731
+            if all(bisect.bisect_right(cs, t(a, r) + 1e-9) == bisect.bisect_right(cs, t(a, a.rec_end - 1) + 1e-9)
+                   for r in range(a.rec_end, p.rec_end)):
+                out[i - 1] = dataclasses.replace(a, end=p.end, rec_end=p.rec_end, src_out=a.src_in + int(round(
+                    (p.rec_end - a.rec_start) * float(a.speed))))
+                del out[i]
+                continue
+        i += 1
     return out, splits
 
 

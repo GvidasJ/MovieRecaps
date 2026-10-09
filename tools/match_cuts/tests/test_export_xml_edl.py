@@ -1407,3 +1407,18 @@ def test_a_mini_clip_of_a_few_frames_joins_its_neighbour(tmp_path):
     clips0, _, _ = ex.premiere_clips(cutlist(), Config(out_dir=str(tmp_path), premiere=True,
                                                         premiere_min_clip_frames=0))
     assert any(c.seg.id == 3 for c in clips0)
+
+
+def test_a_scene_cut_one_raw_frame_into_a_clip_gives_that_frame_to_the_clip_before(tmp_path):
+    """output/020 --fast: a RAW shot change one frame after S12 started (S12 at 125 %, so snap_to_shots does not
+    move that cut): the split left 1 frame -- the shot before's last -- at S12's framing, a flash. The clip before
+    plays on over it; the cut is on the change."""
+    change = 336 * 1001 / 24000                                            # RAW frame 336: S02's second tick
+    cl = premiere_cutlist()
+    cl.segments[1].speed = 1.25                                            # S02 at 125 %, as S12 was
+    cfg = _shots_cfg(tmp_path, [change])
+    xml = tmp_path / "1_edit.xml"
+    ex.write_premiere_xml(cl, xml, cfg)
+    x = ex.parse_premiere_xml(xml)
+    assert (x["clips"][0]["end"], x["clips"][1]["start"]) == (81, 81) and x["clips"][1]["end"] == 140
+    assert ex.validate_premiere_exports(cl, xml, None, cfg)["ok"]
