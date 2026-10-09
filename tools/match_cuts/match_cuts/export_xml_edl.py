@@ -174,6 +174,65 @@ def plan_in_out(xml_in: int, xml_out: int, reverse: bool) -> tuple[int, int]:
     return (int(xml_out) - 1, int(xml_in) - 1) if reverse else (int(xml_in), int(xml_out))
 
 
+# A speed-changed clip item (Time Remap) counts its <in> / <out>, <duration> and keyframe <when> on the RETIMED clip
+# (FCP7, as Premiere imports it): <out> - <in> is its length on the timeline and Premiere plays source time <in> x
+# speed. The plan keeps source time (1/fps ticks); these map it onto that scale and back. Identity at 100 %. Written
+# as source time, a 125 % clip of output/020 (23.976 fps RAW) showed RAW 629 s instead of 503 s in Premiere.
+
+def _remap_factor(speed: float) -> float:
+    """|speed| as the Time Remap filter states it (percent to 4 decimals: _time_remap) -- the factor Premiere uses."""
+    s = round(abs(float(speed)) * 100.0, 4) / 100.0
+    return 1.0 if s < 1e-9 or abs(s - 1.0) < 1e-9 else s
+
+
+def remap_encode(lo: int, hi: int, speed: float, length: int | None = None) -> tuple[int, int]:
+    """An ascending SOURCE range [lo, hi) (1/fps ticks) as the <in> / <out> of a clip item at ``speed``; ``length``:
+    the item's length on the timeline (<end> - <start>, when both are real) -- <out> - <in> is exactly that."""
+    s = _remap_factor(speed)
+    if s == 1.0:
+        return int(lo), int(hi)
+    x_lo = int(round(lo / s))
+    return x_lo, x_lo + (int(length) if length is not None else int(round((hi - lo) / s)))
+
+
+def remap_decode(x_lo: int, x_hi: int, speed: float) -> tuple[int, int]:
+    """The inverse of :func:`remap_encode`: the SOURCE range of a clip item's <in> / <out> (rounded to ticks)."""
+    s = _remap_factor(speed)
+    if s == 1.0:
+        return int(x_lo), int(x_hi)
+    lo = int(round(x_lo * s))
+    return lo, lo + int(round((x_hi - x_lo) * s))
+
+
+def remap_when(when: int, lo: int, speed: float, decode: bool = False) -> int:
+    """A keyframe <when> of a clip item whose ascending source range starts at ``lo`` (source ticks): encoded onto
+    the retimed clip like its <in> (``decode``: back to source ticks, ``lo`` then the item's decoded source start)."""
+    s = _remap_factor(speed)
+    if s == 1.0:
+        return int(when)
+    x_lo = int(round(lo / s))
+    if decode:
+        return lo + int(round((int(when) - x_lo) * s))
+    return x_lo + int(round((int(when) - lo) / s))
+
+
+def remap_duration(frames: int, speed: float) -> int:
+    """A clip item's <duration>: the media's length on the retimed clip."""
+    return int(math.floor(int(frames) / _remap_factor(speed)))
+
+
+def item_length(start: int, end: int) -> int | None:
+    """A clip item's length on the timeline, None inside a transition (<start> or <end> -1)."""
+    return int(end) - int(start) if int(start) >= 0 and int(end) >= 0 else None
+
+
+def xml_roundtrip(src_in: int, src_out: int, speed: float, length: int | None = None) -> tuple[int, int]:
+    """The plan's (src_in, src_out) as the XML gives it back (parse_premiere_xml): exact at 100 %, within a tick at
+    another speed (the retimed scale rounds)."""
+    lo, hi = xml_in_out(src_in, src_out)
+    return plan_in_out(*remap_decode(*remap_encode(lo, hi, speed, length), speed), float(speed) < 0)
+
+
 def _tc_to_frames(tc: str, nominal: int) -> int:
     """HH:MM:SS:FF (NDF, ':' or ';' separators) -> frame count at an integer nominal rate."""
     m = re.fullmatch(r"(-?)(\d+):(\d\d):(\d\d)[:;.](\d\d)", tc.strip())
@@ -766,6 +825,37 @@ def _effect(parent: ET.Element, name: str, effectid: str, category: str, etype: 
     return e
 
 
+def _flop(clipitem: ET.Element) -> ET.Element:
+    """A horizontal mirror on a clip item: FCP7's Flop filter (Perspective), direction Horizontal -- the FCP effect
+    Premiere's XML import translates to its Horizontal Flip (and its XML export writes for one). Premiere does not
+    translate an FCP effect named "Horizontal Flip": output/020 lost its mirroring that way."""
+    e = _effect(_sub(clipitem, "filter"), "Flop", "Flop", "Perspective", "filter")
+    p = _sub(e, "parameter")
+    _sub(p, "parameterid", "direction")
+    _sub(p, "name", "Direction")
+    _sub(p, "valuemin", 1)
+    _sub(p, "valuemax", 3)
+    vl = _sub(p, "valuelist")
+    for n, v in (("Horizontal", 1), ("Vertical", 2), ("Both", 3)):
+        ve = _sub(vl, "valueentry")
+        _sub(ve, "name", n)
+        _sub(ve, "value", v)
+    _sub(p, "value", 1)
+    return e
+
+
+def _is_flip(effect: ET.Element) -> bool:
+    """Whether a filter effect mirrors its clip horizontally: Flop (direction Horizontal or Both), or an older
+    export's "Horizontal Flip"."""
+    eid = (effect.findtext("effectid") or effect.findtext("name") or "").strip()
+    if eid == "Horizontal Flip":
+        return True
+    if eid.lower() != "flop":
+        return False
+    v = next((p.findtext("value") for p in effect.findall("parameter")), None)
+    return v is None or str(v).strip() in ("1", "3")
+
+
 def _xml_geometry(cutlist: Cutlist, cfg: Any) -> tuple[str, int, int, Box | None]:
     """(layout mode, sequence width, height, fill box) of the XML sequence."""
     mode = str(getattr(cfg, "layout_mode", None) or cutlist.layout.get("mode") or "match") if cfg is not None \
@@ -820,8 +910,10 @@ def _seg_sims(seg: Segment, mode: str, W: int, H: int, fill_box: Box | None, raw
 
 
 def _basic_motion(parent: ET.Element, seg: Segment, mode: str, W: int, H: int, fill_box: Box | None,
-                  box: Box | None, raw_wh: tuple[int, int], comp_fps: Fraction, raw_fps: Fraction) -> None:
-    """Basic Motion (+ Crop) filters of one RAW clipitem."""
+                  box: Box | None, raw_wh: tuple[int, int], comp_fps: Fraction, raw_fps: Fraction,
+                  speed: float = 1.0, src_lo: int = 0) -> None:
+    """Basic Motion (+ Crop) filters of one RAW clipitem (``speed`` / ``src_lo``: its Time Remap speed and ascending
+    source start, for keyframe times on the retimed clip: remap_when)."""
     sims = _seg_sims(seg, mode, W, H, fill_box, raw_wh)
     if not sims:
         return
@@ -842,8 +934,8 @@ def _basic_motion(parent: ET.Element, seg: Segment, mode: str, W: int, H: int, f
     else:
         # keyframe times in source-media frames (FCP7 keyframes stay with the media when a clip is
         # trimmed): the RAW frame shown at the key's comp frame (AE rule), so the first key == <in>
-        whens = [int(math.floor(float(raw_fps) * _raw_seconds_cont(seg, k, comp_fps, raw_fps) + _AE_EPS))
-                 for k, _ in sims]
+        whens = [remap_when(int(math.floor(float(raw_fps) * _raw_seconds_cont(seg, k, comp_fps, raw_fps) + _AE_EPS)),
+                            src_lo, speed) for k, _ in sims]
         vals = [motion(s) for _, s in sims]
         _param(e, "scale", "Scale", None, 0, 1000, [(w, _fmt(v[0])) for w, v in zip(whens, vals)])
         _param(e, "rotation", "Rotation", None, -8640, 8640, [(w, _fmt(v[1])) for w, v in zip(whens, vals)])
@@ -925,7 +1017,7 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
     Sequence size: competitor (match), the fill target (fill: cfg.comp_size or 1080x1920) or RAW (source);
     rate: always the competitor fps (exact cut timing). Basic Motion = the canonical Sim through
     geometry.sim_to_ae (Scale = 100 s, Rotation = theta, Center = (Position - frame centre) / frame size),
-    'Horizontal Flip' filter for flip_h, Crop to the competitor box in match mode (constant, unrotated
+    Flop filter (Horizontal: _flop) for flip_h, Crop to the competitor box in match mode (constant, unrotated
     framing), Time Remap speed filter when speed != 1."""
     comp_fps, raw_fps = cutlist.comp_fps, cutlist.raw_fps
     N = int(cutlist.competitor["frames"])
@@ -986,12 +1078,12 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             ci = _sub(vtrack, "clipitem", id=f"clipitem-{n_clip}")
             _sub(ci, "name", f"{_seg_label(seg)} {raw_name}")
             _sub(ci, "enabled", "TRUE")
-            _sub(ci, "duration", raw_frames)
+            _sub(ci, "duration", remap_duration(raw_frames, ev.speed))
             _rate_el(ci, raw_fps)
             _sub(ci, "start", start)
             _sub(ci, "end", end)
             src_out = int(ev.src_in) + _src_advance(ev.speed, ev.n_rec + tail, raw_fps, comp_fps)
-            x_in, x_out = xml_in_out(int(ev.src_in), src_out)
+            x_in, x_out = remap_encode(*xml_in_out(int(ev.src_in), src_out), ev.speed)
             _sub(ci, "in", x_in)
             _sub(ci, "out", x_out)
             _sub(ci, "alphatype", "none")
@@ -1001,10 +1093,10 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             if abs(ev.speed - 1.0) > 1e-9:
                 _time_remap(ci, ev.speed)
             seg_box = _own_box(seg) or layout_box            # crop: the segment's own box (D1) or the layout box
-            _basic_motion(ci, seg, mode, W, H, fill_box, seg_box, (raw_w, raw_h), comp_fps, raw_fps)
+            _basic_motion(ci, seg, mode, W, H, fill_box, seg_box, (raw_w, raw_h), comp_fps, raw_fps, ev.speed,
+                          xml_in_out(int(ev.src_in), src_out)[0])
             if seg.flip_h and mode != "source":
-                f = _sub(ci, "filter")
-                _effect(f, "Horizontal Flip", "Horizontal Flip", "Transform", "filter")
+                _flop(ci)
             st = _sub(ci, "sourcetrack")
             _sub(st, "mediatype", "video")
             _sub(st, "trackindex", 1)
@@ -1043,12 +1135,12 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
             _sub(ai, "name", f"{_seg_label(it.seg)} {raw_name} audio")
             _sub(ai, "enabled", "TRUE")
-            _sub(ai, "duration", raw_frames)
+            _sub(ai, "duration", remap_duration(raw_frames, it.speed))
             _rate_el(ai, raw_fps)
             _sub(ai, "start", it.rec_in)
             _sub(ai, "end", it.rec_out)
-            x_in, x_out = xml_in_out(int(it.src_in), int(it.src_in) + _src_advance(it.speed, it.n_rec, raw_fps,
-                                                                                   comp_fps))
+            x_in, x_out = remap_encode(*xml_in_out(int(it.src_in), int(it.src_in) +
+                                                   _src_advance(it.speed, it.n_rec, raw_fps, comp_fps)), it.speed)
             _sub(ai, "in", x_in)
             _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
@@ -1081,12 +1173,12 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
             ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
             _sub(ai, "name", f"{_seg_label(ev.seg)} {raw_name}")
             _sub(ai, "enabled", "TRUE")
-            _sub(ai, "duration", raw_frames)
+            _sub(ai, "duration", remap_duration(raw_frames, ev.speed))
             _rate_el(ai, raw_fps)
             _sub(ai, "start", ev.rec_in)
             _sub(ai, "end", ev.rec_out)
-            x_in, x_out = xml_in_out(int(ev.src_in), int(ev.src_in) + _src_advance(ev.speed, ev.n_rec, raw_fps,
-                                                                                   comp_fps))
+            x_in, x_out = remap_encode(*xml_in_out(int(ev.src_in), int(ev.src_in) +
+                                                   _src_advance(ev.speed, ev.n_rec, raw_fps, comp_fps)), ev.speed)
             _sub(ai, "in", x_in)
             _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
@@ -1130,7 +1222,9 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
 # V2 and above stay empty for the user's template and captions. Every competitor frame k becomes sequence frames
 # [f k, f (k + 1)) with f = sequence fps / competitor fps (must be an integer: 60 / 30 = 2), so every cut lands on
 # the same moment as in the competitor-rate plan. Clipitem <rate> = the sequence rate (Premiere's own convention):
-# <in> / <out> / keyframe <when> count SOURCE time in sequence-rate frames (1/60 s), <start> / <end> sequence frames.
+# <in> / <out> / keyframe <when> count SOURCE time in sequence-rate frames (1/60 s), <start> / <end> sequence frames
+# -- at 100 %. A speed-changed clip counts them on the RETIMED clip (remap_encode: out - in = end - start, Premiere plays
+# source <in> x speed); the plan (PremiereClip) keeps source time and only the writer / readers convert.
 #
 # Framing: the region of the RAW the competitor shows inside its box (the segment's own box -- a fullscreen period,
 # DESIGN §7 D1 -- else the layout box) is mapped onto the template window by ONE uniform scale + translation (box
@@ -1142,10 +1236,10 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
 # frame size, Rotation = theta); each clip's comment carries the Premiere Effect Controls values to compare after
 # import (Position in sequence px, Scale %).
 #
-# Source in-point: <in> is a whole 1/60 s. The tool's plan allows any raw_in inside the segment's frame-exact
-# interval (floor rule at the competitor rate), so <in> is the 1/60 s tick inside that interval nearest the plan's
-# raw_in; when no tick lies inside (the interval can be narrower than 1/60 s) it is the nearest tick and the clip is
-# listed (some competitor-rate frames may show a neighbouring RAW frame). Between two competitor frames the second
+# Source in-point: <in> is a whole 1/60 s (at another speed a whole tick of the retimed clip: speed x 1/60 s of
+# source). The tool's plan allows any raw_in inside the segment's frame-exact interval (floor rule at the competitor
+# rate), so <in> is the tick inside that interval nearest the plan's raw_in; when no tick lies inside (the interval
+# can be narrower than a tick) it is the nearest tick and the clip is listed (some competitor-rate frames may show a neighbouring RAW frame). Between two competitor frames the second
 # 60 fps frame shows the RAW 1/60 s later (Premiere samples the source at the sequence rate).
 #
 # Not expressible in Premiere's XML import (said in markers and the validation warnings, never silently changed):
@@ -1165,11 +1259,11 @@ class PremiereClip:
     end: int
     rec_start: int                   # the event's record range at the Premiere rate (always real values)
     rec_end: int
-    src_in: int                      # SOURCE time at the cut, in sequence-rate frames (<in>)
+    src_in: int                      # SOURCE time at the cut, in sequence-rate frames (<in> at 100 %: remap_encode)
     src_out: int
     speed: float
     in_exact: bool                   # <in> lies inside the segment's frame-exact interval
-    in_error_ms: float               # <in> / fps minus the plan's exact RAW time at the cut (ms)
+    in_error_ms: float               # the source second Premiere starts at minus the plan's exact RAW time (ms)
     zoom: float                      # extra zoom about the window centre (1 = the competitor's framing exactly)
     covered: bool                    # the RAW covers the template window on every key and between keys
     keys: list[tuple[int, Sim]]      # (<when> in source sequence-rate frames, Sim RAW -> sequence px)
@@ -1872,16 +1966,20 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
 
 def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
     """--min-move: neighbouring clips that play one continuous RAW take (the next one starts on the very source frame
-    the previous one ends on, same speed, same flip, no transition, no retime) with the same fixed framing become one
-    clip -- no cut there. Real cuts (a jump in RAW time) stay."""
+    the previous one ends on -- a tick off on a retimed clip's in-point grid --, the same speed within SPEED_TOL, same
+    flip, no transition, no retime) with the same fixed framing become one clip -- no cut there; it plays on at the
+    first one's speed (output/020: S02 at 125 % and S03 at 125.125 %, one take). Real cuts (a jump in RAW time) stay."""
     out: list[PremiereClip] = []
     for cl in clips:
         p = out[-1] if out else None
-        if (p is not None and p.end != -1 and cl.start != -1 and p.rec_end == cl.rec_start and cl.src_in == p.src_out
-                and abs(cl.speed - p.speed) < 1e-9 and not p.retime and not cl.retime
+        exact = abs(cl.speed - p.speed) < 1e-9 if p is not None else True
+        if (p is not None and p.end != -1 and cl.start != -1 and p.rec_end == cl.rec_start
+                and abs(cl.src_in - p.src_out) <= (0 if exact and _remap_factor(p.speed) == 1.0 else 1)
+                and _speed_ok(cl.speed, p.speed) and not p.retime and not cl.retime
                 and bool(p.seg.flip_h) == bool(cl.seg.flip_h) and len(p.keys) == 1 and len(cl.keys) == 1
                 and _same_framing(p.keys[0][1], cl.keys[0][1])):
-            p.end, p.rec_end, p.src_out = cl.end, cl.rec_end, cl.src_out
+            p.end, p.rec_end = cl.end, cl.rec_end
+            p.src_out = cl.src_out if exact and cl.src_in == p.src_out else                 p.src_in + int(round((p.rec_end - p.rec_start) * float(p.speed)))
             p.events = (p.events or [p.ev]) + (cl.events or [cl.ev])
             p.person_note = p.person_note or cl.person_note
             if p.person_span is not None or cl.person_span is not None:
@@ -1948,20 +2046,42 @@ def _source_seconds(seg: Segment, k: float, comp_fps: Fraction, raw_fps: Fractio
     return _raw_in_seconds(seg, raw_fps) + float(seg.speed) * (float(k) - float(seg.comp_in)) / float(comp_fps)
 
 
-def _pick_in_tick(seg: Segment, rec_in: int, tau0: float, comp_fps: Fraction, fps: Fraction) -> tuple[int, bool]:
-    """(<in> in 1/fps ticks, inside the frame-exact interval): the tick inside the segment's feasible raw_in interval
-    (shifted to rec_in) nearest the plan's raw time, else the nearest tick."""
+def _pick_in_tick(seg: Segment, rec_in: int, tau0: float, comp_fps: Fraction, fps: Fraction,
+                  speed: float = 1.0) -> tuple[int, bool]:
+    """(<in> in 1/fps source ticks, inside the frame-exact interval): the tick inside the segment's feasible raw_in
+    interval (shifted to rec_in) nearest the plan's raw time, else the nearest tick. At another ``speed`` Premiere
+    starts the clip at a whole tick of the RETIMED clip (remap_encode: source time x * speed / fps), so the candidates
+    are those -- returned as the source tick that encodes to it."""
     f = float(fps)
+    s = _remap_factor(speed)
     iv = seg.raw_in_interval if not seg.time_remap_keys else None
     if iv and len(iv) == 2 and float(iv[1]) > float(iv[0]):
         shift = float(seg.speed) * (rec_in - int(seg.comp_in)) / float(comp_fps)
         lo, hi = float(iv[0]) + shift, float(iv[1]) + shift
-        n_lo, n_hi = math.ceil(lo * f - 1e-9), math.floor(hi * f - 1e-9)
-        if n_hi >= n_lo:
-            n = min(max(int(round(tau0 * f)), n_lo), n_hi)
-            if lo - 1e-9 <= n / f < hi:
-                return int(n), True
-    return int(round(tau0 * f)), False
+        x_lo, x_hi = math.ceil(lo * f / s - 1e-9), math.floor(hi * f / s - 1e-9)
+        if x_hi >= x_lo:
+            x = min(max(int(round(tau0 * f / s)), x_lo), x_hi)
+            if lo - 1e-9 <= x * s / f < hi:
+                return _source_tick(x, s), True
+    return _source_tick(int(round(tau0 * f / s)), s), False
+
+
+def _played_s(n: int, speed: float, fps: Fraction) -> float:
+    """The source second Premiere starts a clip at whose plan in-point is source tick n (remap_encode's tick x
+    times the speed)."""
+    s = _remap_factor(speed)
+    return int(round(n / s)) * s / float(fps)
+
+
+def _source_tick(x: int, s: float) -> int:
+    """The source tick n with remap_encode(n) == x (retimed tick x at factor s): round(x * s), moved one tick when
+    rounding back would land on a neighbour (s > 1)."""
+    n = int(round(x * s))
+    if s != 1.0:
+        for c in (n, n - 1, n + 1):
+            if int(round(c / s)) == x:
+                return c
+    return n
 
 
 OTHER_VIDEO = "OTHER VIDEO \u2013 not in RAW"     # the marker on a stretch of another video (broll.py)
@@ -2051,11 +2171,12 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
         else:
             v = float(seg.speed)
         tau0 = _source_seconds(seg, ev.rec_in, comp_fps, raw_fps)
-        n_in, exact = _pick_in_tick(seg, ev.rec_in, tau0, comp_fps, fps)
+        n_in, exact = _pick_in_tick(seg, ev.rec_in, tau0, comp_fps, fps, v)
         if not exact and not seg.time_remap_keys:
-            warnings.append(f"{ev.seg_name}: no 1/{float(fps):g} s source in-point inside its frame-exact interval; "
-                            f"nearest tick is {1000.0 * (n_in / float(fps) - tau0):+.2f} ms from the plan (a few frames "
-                            "may show a neighbouring RAW frame)")
+            step = f"1/{float(fps):g} s" if _remap_factor(v) == 1.0 else                 f"{100.0 * _remap_factor(v):g} % x 1/{float(fps):g} s (Premiere's in-point grid at that speed)"
+            warnings.append(f"{ev.seg_name}: no {step} source in-point inside its frame-exact interval; nearest is "
+                            f"{1000.0 * (_played_s(n_in, v, fps) - tau0):+.2f} ms from the plan (a few frames may show a "
+                            "neighbouring RAW frame)")
         n_seq = (ev.n_rec + tail) * fac
         n_out = n_in + int(round(n_seq * v))
         # framing: the competitor box region -> the template window, keys at their SOURCE time (FCP7 media time)
@@ -2080,7 +2201,7 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
                     for k, s in mapped]
         clips.append(PremiereClip(seg, ev, -1 if dis_in else ev.rec_in * fac, -1 if tail else ev.rec_out * fac,
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
-                                  1000.0 * (n_in / float(fps) - tau0), z, covered, keys, retime, [ev]))
+                                  1000.0 * (_played_s(n_in, v, fps) - tau0), z, covered, keys, retime, [ev]))
     if st["static"]:
         # fewer reframes and cuts: hold the framing under min_move px (inside one RAW shot), frame on the person speaking
         # what the competitor cannot frame or does not show them, then join the pieces of one take that are left alike
@@ -2146,7 +2267,8 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
         _param(e, "rotation", "Rotation", _fmt(rot), -8640, 8640)
         _param(e, "center", "Center", ctr)
     else:
-        whens = [w for w, _ in clip.keys]
+        lo = xml_in_out(clip.src_in, clip.src_out)[0]
+        whens = [remap_when(w, lo, clip.speed) for w, _ in clip.keys]
         _param(e, "scale", "Scale", None, 0, 1000, [(w, _fmt(v[0])) for w, v in zip(whens, vals)])
         _param(e, "rotation", "Rotation", None, -8640, 8640, [(w, _fmt(v[1])) for w, v in zip(whens, vals)])
         _param(e, "center", "Center", None, keys=[(w, v[2]) for w, v in zip(whens, vals)])
@@ -2241,11 +2363,11 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(ci, "masterclipid", PREMIERE_MASTERCLIP)         # one master clip: the Project panel shows one RAW
         _sub(ci, "name", raw_name)                            # the segment ids are in the comments
         _sub(ci, "enabled", "TRUE")
-        _sub(ci, "duration", src_dur)
+        _sub(ci, "duration", remap_duration(src_dur, cl.speed))
         _rate_el(ci, fps)
         _sub(ci, "start", cl.start)
         _sub(ci, "end", cl.end)
-        x_in, x_out = xml_in_out(cl.src_in, cl.src_out)
+        x_in, x_out = remap_encode(*xml_in_out(cl.src_in, cl.src_out), cl.speed, item_length(cl.start, cl.end))
         _sub(ci, "in", x_in)
         _sub(ci, "out", x_out)
         _sub(ci, "alphatype", "none")
@@ -2256,8 +2378,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _time_remap(ci, cl.speed)
         note = _premiere_motion(ci, cl, W, H, (raw_w, raw_h))
         if cl.seg.flip_h:
-            f = _sub(ci, "filter")
-            _effect(f, "Horizontal Flip", "Horizontal Flip", "Transform", "filter")
+            _flop(ci)
         stv = _sub(ci, "sourcetrack")
         _sub(stv, "mediatype", "video")
         _sub(stv, "trackindex", 1)
@@ -2283,11 +2404,11 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(ai, "masterclipid", PREMIERE_MASTERCLIP)
             _sub(ai, "name", raw_name)
             _sub(ai, "enabled", "TRUE")
-            _sub(ai, "duration", src_dur)
+            _sub(ai, "duration", remap_duration(src_dur, it["speed"]))
             _rate_el(ai, fps)
             _sub(ai, "start", it["start"])
             _sub(ai, "end", it["end"])
-            x_in, x_out = xml_in_out(it["in"], it["out"])
+            x_in, x_out = remap_encode(*xml_in_out(it["in"], it["out"]), it["speed"], item_length(it["start"], it["end"]))
             _sub(ai, "in", x_in)
             _sub(ai, "out", x_out)
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
@@ -2345,6 +2466,11 @@ def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
         keys += [(it["in"], "0"), (it["in"] + n, "1")]
     if it.get("fade_out"):
         keys += [(it["out"] - n, "1"), (it["out"], "0")]
+    s = _remap_factor(it.get("speed", 1.0))
+    if s != 1.0:                       # on the retimed clip: from its encoded ends, never shorter than one tick
+        x_in, x_out = remap_encode(*xml_in_out(it["in"], it["out"]), it["speed"], item_length(it["start"], it["end"]))
+        m = max(1, int(round(n / s)))
+        keys = ([(x_in, "0"), (x_in + m, "1")] if it.get("fade_in") else []) +             ([(x_out - m, "1"), (x_out, "0")] if it.get("fade_out") else [])
     f = _sub(parent, "filter")
     e = _effect(f, "Audio Levels", "audiolevels", "audiolevels", "audiolevels", "audio")
     _param(e, "level", "Level", None, 0, "3.98109", sorted(keys))
@@ -2478,9 +2604,10 @@ def parse_fcp7_xml(path: str | os.PathLike) -> dict:
                             speed = float(_text(p, "value")) / 100.0
                         elif pid == "reverse":
                             reverse = str(_text(p, "value")).upper() == "TRUE"
-                elif eid in ("Horizontal Flip", "flop", "Flop"):
+                elif _is_flip(fe):
                     flip = True
-            s_in, s_out = plan_in_out(int(float(_text(e, "in", 0))), int(float(_text(e, "out", 0))), reverse)
+            s_in, s_out = plan_in_out(*remap_decode(int(float(_text(e, "in", 0))), int(float(_text(e, "out", 0))),
+                                                    speed), reverse)
             items.append({"tag": e.tag, "id": e.get("id"), "name": _text(e, "name", ""), "start": start, "end": end,
                           "in": s_in, "out": s_out, "speed": -speed if reverse else speed, "flip": flip,
                           "rate": _xml_rate(e), "generator": e.tag == "generatoritem"})
@@ -2634,7 +2761,7 @@ def _validate_xml(cutlist: Cutlist, xml_path: Path, events: list[EditEvent], err
             if it["generator"]:
                 errors.append(f"XML {ev.seg_name}: RAW clip exported as a generator")
                 continue
-            if it["in"] != ev.src_in:
+            if abs(it["in"] - ev.src_in) > (0 if _remap_factor(ev.speed) == 1.0 else 1):   # retimed scale rounds
                 errors.append(f"XML {ev.seg_name}: in {it['in']} != RAW frame {ev.src_in}")
             if it["rate"] != raw_fps:
                 errors.append(f"XML {ev.seg_name}: clip rate {it['rate']} != RAW fps {fps_str(raw_fps)}")
@@ -2654,7 +2781,9 @@ def _validate_xml(cutlist: Cutlist, xml_path: Path, events: list[EditEvent], err
     if want_a:
         got_a = [(it["start"], it["end"], it["in"]) for it in own["audio_items"]]
         exp_a = [(it.rec_in, it.rec_out, it.src_in) for it in want_a]
-        if got_a != exp_a:
+        slack = [0 if _remap_factor(it.speed) == 1.0 else 1 for it in want_a]     # the retimed scale rounds
+        if len(got_a) != len(exp_a) or any(g[:2] != w[:2] or abs(g[2] - w[2]) > s
+                                           for g, w, s in zip(got_a, exp_a, slack)):
             errors.append(f"XML: audio items {got_a[:6]} != {exp_a[:6]}")
     want_tr = [(ev.rec_in, ev.rec_in + ev.dissolve_in) for ev in events if ev.dissolve_in]
     got_tr = [(t["start"], t["end"]) for t in own["transitions"]]
@@ -2797,13 +2926,17 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
             out["transitions"].append({"start": int(_text(el, "start")), "end": int(_text(el, "end"))})
         elif el.tag == "clipitem":
             speed = _remap_speed(el)
-            s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
+            lo, hi = remap_decode(int(_text(el, "in")), int(_text(el, "out")), speed)
+            s_in, s_out = plan_in_out(lo, hi, speed < 0)
+            motion = _motion_of(el)
+            motion["keys"] = {pid: [(remap_when(w, lo, speed, decode=True), v) for w, v in kf]
+                              for pid, kf in (motion.get("keys") or {}).items()}
             out["clips"].append({"id": el.get("id"), "links": _link_refs(el),
                                  "name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                                  "in": s_in, "out": s_out,
                                  "timebase": int(_text(el, "rate/timebase", 0)), "ntsc": _text(el, "rate/ntsc"),
-                                 "speed": speed, "motion": _motion_of(el),
-                                 "flip": any(_text(e, "effectid") == "Horizontal Flip" for e in el.findall("filter/effect"))})
+                                 "speed": speed, "motion": motion,
+                                 "flip": any(_is_flip(e) for e in el.findall("filter/effect"))})
         elif el.tag == "generatoritem":
             out.setdefault("generators", []).append(_text(el, "name"))
     at = seq.find("media/audio/track")
@@ -2811,7 +2944,9 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
         levels = [(int(_text(k, "when")), float(_text(k, "value"))) for eff in el.findall("filter/effect")
                   if _text(eff, "effectid") == "audiolevels" for k in eff.findall("parameter/keyframe")]
         speed = _remap_speed(el)
-        s_in, s_out = plan_in_out(int(_text(el, "in")), int(_text(el, "out")), speed < 0)
+        lo, hi = remap_decode(int(_text(el, "in")), int(_text(el, "out")), speed)
+        s_in, s_out = plan_in_out(lo, hi, speed < 0)
+        levels = [(remap_when(w, lo, speed, decode=True), v) for w, v in levels]
         out["audio"].append({"id": el.get("id"), "links": _link_refs(el),
                              "name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
                              "in": s_in, "out": s_out, "speed": speed, "levels": levels})
@@ -2902,13 +3037,17 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
                 if not a < b:
                     out.append(f"{where}: in {a} is not before out {b}")
                     continue
+                # FCP7 / Premiere count a retimed clip's <in> / <out> on the retimed clip (remap_encode): out - in is
+                # its length on the timeline at any speed (in the clip's rate); a source-time length plays elsewhere
                 speed = abs(_remap_speed(e))
                 rate = _xml_rate(e) or seq_rate
-                want = (e_media - s_media) * speed * float(rate) / float(seq_rate)
-                tol = 0 if abs(speed - 1.0) < 1e-9 and rate == seq_rate else 1
+                want = (e_media - s_media) * float(rate) / float(seq_rate)
+                tol = 0 if rate == seq_rate else 1
                 if abs((b - a) - want) > tol + 1e-6:
-                    out.append(f"{where}: out - in = {b - a} source frames, but it lasts {e_media - s_media} sequence "
-                               f"frames at {100.0 * speed:g} % (want {want:g})")
+                    retimed = abs(speed - 1.0) > 1e-9
+                    out.append(f"{where}: out - in = {b - a} {'retimed' if retimed else 'source'} frames, but it lasts "
+                               f"{e_media - s_media} sequence frames at {100.0 * speed:g} % (want {want:g}"
+                               + ("; in / out count on the retimed clip)" if retimed else ")"))
                 dur = _text(e, "duration")
                 if dur is not None and _WHOLE.fullmatch(dur) and (a < 0 or b > int(dur)):
                     out.append(f"{where}: in / out {a}-{b} outside its media (0-{int(dur)})")
@@ -3156,6 +3295,7 @@ def premiere_repeat_problems(xml_path: str | os.PathLike, allow_repeats: bool = 
             v = _remap_speed(e) * float(_xml_rate(e) or seq_rate) / float(seq_rate)
             if abs(v) < 1e-9:
                 continue
+            a, b = remap_decode(a, b, _remap_speed(e))           # the source range (in / out count on the retimed clip)
             name = item_label(e)
             fe = e.find("file")
             spans.append(Span("V1" if kind == "video" else "A1", name, start, end, float(a if v > 0 else b), v, dis,
@@ -3253,9 +3393,9 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
 def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = None,
                              spans: Sequence[tuple[float, float]] | None = None) -> tuple[list[str], list[str], dict]:
     """The hard person check of the final XML, on its own numbers: every V1 clip's framing as Premiere shows it
-    (Position = sequence centre + <center> x the clip's source size, Scale, Horizontal Flip) shows, fully inside the
-    template window, the person speaking in it -- or, when nobody speaks there, at least one person (speakers.py on
-    ``sp``: the RAW's people, speech and shots). Returns (problems, exceptions, counts): a clip with nobody in the
+    (Position = sequence centre + <center> x the clip's source size, Scale, Horizontal Flip) shows the person speaking
+    in the template window (speakers.shown: at most SHOWN_FRAC of the face cut off) -- or, when nobody speaks there,
+    at least one person (speakers.py on ``sp``: the RAW's people, speech and shots). Returns (problems, exceptions, counts): a clip with nobody in the
     picture (B-roll, an object) or whose RAW was not analysed is listed, not failed; another video's stretch (OTHER
     VIDEO) has no clip at all and is listed too."""
     from . import speakers
@@ -3310,7 +3450,7 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
         r = speakers.on_screen(sim, t, src[0], bool(c.get("flip"))) if t else None
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
                "a person": "any person (nobody speaks)"}.get(need.how, need.how)
-        problems.append(f"{where}: {who} is not fully inside the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
+        problems.append(f"{where}: {who} is not in the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
                         f"{win[1]:.0f}-{win[1] + win[3]:.0f})" +
                         (f": face at x {r[0]:.0f}-{r[2]:.0f}, y {r[1]:.0f}-{r[3]:.0f}" if r else "") +
                         f" (who is there: RAW {a:.2f}-{b:.2f} s)")
@@ -3465,7 +3605,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             errors.append(f"XML {name}: start {got['start']} (want {cl.start}, record {cl.rec_start})")
         if got["end"] != cl.end:
             errors.append(f"XML {name}: end {got['end']} (want {cl.end})")
-        if (got["in"], got["out"]) != (cl.src_in, cl.src_out):
+        if (got["in"], got["out"]) != xml_roundtrip(cl.src_in, cl.src_out, cl.speed, item_length(cl.start, cl.end)):
             errors.append(f"XML {name}: in/out {got['in']}/{got['out']} (want {cl.src_in}/{cl.src_out})")
         if (got["timebase"], str(got["ntsc"]).upper()) != want_rate:
             errors.append(f"XML {name}: clip rate {got['timebase']} {got['ntsc']} (want the sequence rate)")
@@ -3480,7 +3620,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         n_keys = max([len(v) for v in m["keys"].values()] or [1])
         if n_keys != len(cl.keys) and not (n_keys == 1 and not m["keys"]):
             errors.append(f"XML {name}: {n_keys} motion keys (want {len(cl.keys)})")
-        if m["keys"] and [w for w, _ in m["keys"].get("scale", [])] != [w for w, _ in cl.keys]:
+        tick = 0 if _remap_factor(cl.speed) == 1.0 else 2          # the retimed scale rounds (in-point and offset)
+        got_w, want_w = [w for w, _ in m["keys"].get("scale", [])], [w for w, _ in cl.keys]
+        if m["keys"] and (len(got_w) != len(want_w) or any(abs(a - b) > tick for a, b in zip(got_w, want_w))):
             errors.append(f"XML {name}: motion key times differ from the source times of the framing keys")
         vals = list(zip(m["keys"]["scale"], m["keys"]["rotation"], m["keys"]["center"])) if m["keys"] else \
             [((0, m["scale"]), (0, m["rotation"]), (0, m["center"]))]
@@ -3589,18 +3731,21 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                  {(ev.rec_in * fac, ev.rec_out * fac) for ev in events}) | {(cl.rec_start, cl.rec_end) for cl in clips} \
         | {(it["start"], it["end"]) for it in want_a if it.get("piece")}        # one take split for its link
     for got, it in zip(x["audio"], want_a):
-        if (got["start"], got["end"], got["in"], got["out"]) != (it["start"], it["end"], it["in"], it["out"]):
+        tick = 0 if _remap_factor(it["speed"]) == 1.0 else 2         # the retimed scale rounds (in-point and offset)
+        want_src = xml_roundtrip(it["in"], it["out"], it["speed"], item_length(it["start"], it["end"]))
+        if (got["start"], got["end"], got["in"], got["out"]) != (it["start"], it["end"], *want_src):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: {got} (want {it['start']}-{it['end']} in {it['in']})")
         if (got["start"], got["end"]) not in ev_ranges:
             errors.append(f"XML A1 {_seg_label(it['seg'])}: range {got['start']}-{got['end']} is not a V1 cut range")
         cl = next((c for c in clips if c.rec_start <= got["start"] and got["end"] <= c.rec_end), None)
         if it["what"] == "picture" and cl is not None and not it.get("piece") and \
-                got["in"] != cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)):
+                abs(got["in"] - (cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)))) > tick +                 (0 if _remap_factor(cl.speed) == 1.0 else 1):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
         from .silence import FADE_FRAMES
         fade = ([(it["in"], 0.0), (it["in"] + FADE_FRAMES, 1.0)] if it.get("fade_in") else []) + \
             ([(it["out"] - FADE_FRAMES, 1.0), (it["out"], 0.0)] if it.get("fade_out") else [])
-        if sorted(got.get("levels") or []) != sorted(fade):
+        got_lv, want_lv = sorted(got.get("levels") or []), sorted(fade)
+        if len(got_lv) != len(want_lv) or any(abs(a[0] - b[0]) > tick or a[1] != b[1] for a, b in zip(got_lv, want_lv)):
             errors.append(f"XML A1 {_seg_label(it['seg'])} at {got['start']}: audio fades {got.get('levels')} "
                           f"(want {sorted(fade)} where a silence was cut out)")
     # every V1 clip has its audio on A1 (the XML's own A1 items), unless it was removed on purpose: listed

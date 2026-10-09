@@ -137,7 +137,7 @@ class Timeline:
         inside a project): A1 (the RAW), plus another video's stretches ``other_video`` ([{a, b (sequence frames),
         t0 (competitor s)}], the run's captions.json)."""
         import xml.etree.ElementTree as ET
-        from .export_xml_edl import _remap_speed, plan_in_out
+        from .export_xml_edl import _remap_speed, plan_in_out, remap_decode
         root = ET.parse(str(xml)).getroot()
         seqs = [root] if root.tag == "sequence" else list(root.iter("sequence"))
         if not seqs:
@@ -153,7 +153,7 @@ class Timeline:
             if not 0 <= s < e:
                 continue
             sp = _remap_speed(el)
-            i0, _i1 = plan_in_out(int(el.findtext("in") or 0), int(el.findtext("out") or 0), sp < 0)
+            i0, _i1 = plan_in_out(*remap_decode(int(el.findtext("in") or 0), int(el.findtext("out") or 0), sp), sp < 0)
             ps.append(Piece(s / f, e / f, "raw", i0 / f, float(sp or 1.0)))
         ps += [Piece(int(o["a"]) / f, int(o["b"]) / f, "comp", float(o["t0"])) for o in other_video or []]
         return cls(ps)

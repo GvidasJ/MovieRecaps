@@ -283,9 +283,11 @@ def test_validate_exports_catches_tampering(exported, tmp_path):
     res = ex.validate_exports(cl, exported["xml"], edl)
     assert not res["ok"] and any("S02" in e and "speed" in e for e in res["errors"])
     xml = tmp_path / "bad.xml"
-    xml.write_text(exported["xml"].read_text().replace("<in>2000</in>", "<in>2001</in>", 1))
+    # S02 runs at 110 %: its <in> is on the retimed clip (2000 / 1.1 -> 1818, Premiere plays 1818 x 1.1 = RAW 2000)
+    assert "<in>1818</in>" in exported["xml"].read_text()
+    xml.write_text(exported["xml"].read_text().replace("<in>1818</in>", "<in>1820</in>", 1))
     res = ex.validate_exports(cl, xml, exported["edl"])
-    assert not res["ok"] and any("S02" in e and "in 2001" in e for e in res["errors"])
+    assert not res["ok"] and any("S02" in e and "in 2002" in e for e in res["errors"])
     short = tmp_path / "short.edl"                             # drop the last event -> duration mismatch
     txt = exported["edl"].read_text()
     short.write_text(txt[:txt.index("\n011  ")] + "\n")
@@ -704,10 +706,21 @@ def test_premiere_source_in_is_a_60fps_tick_inside_the_frame_exact_interval(prem
     for c in clips:
         if c.seg.time_remap_keys:
             continue
-        assert c.in_exact, c.seg.id
+        # Premiere starts a clip at a whole tick x of the RETIMED clip: source time x * speed / 60 (remap_encode)
+        s = Fraction(ex._remap_factor(c.speed)).limit_denominator(1000)
+        x = ex.remap_encode(c.src_in, c.src_out, float(c.speed))[0]
+        t0 = x * s / 60
+        lo, hi = (Fraction(v).limit_denominator(10 ** 9) for v in c.seg.raw_in_interval)
+        lo, hi = lo + s * (c.ev.rec_in - c.seg.comp_in) / 30, hi + s * (c.ev.rec_in - c.seg.comp_in) / 30
+        on_grid = [y for y in range(math.ceil(lo * 60 / s), math.floor(hi * 60 / s) + 1) if lo <= y * s / 60 < hi]
+        assert c.in_exact == bool(on_grid), c.seg.id
+        if not c.in_exact:
+            # S04 at 110 %: its 0.16 ms interval holds no point of the 1.1 / 60 s grid -- the nearest one, flagged
+            assert c.seg.id == 4 and abs(float(t0) - float(lo)) * 1000 < 1000 * float(s) / 60, c.seg.id
+            continue
         # every competitor frame k shows the plan's RAW frame at its first 60 fps frame (floor sampling)
         for k in range(c.ev.rec_in, c.ev.rec_out):
-            t = Fraction(c.src_in, 60) + Fraction(2 * (k - c.ev.rec_in), 60) * Fraction(c.speed).limit_denominator(1000)
+            t = t0 + Fraction(2 * (k - c.ev.rec_in), 60) * s
             assert math.floor(t * R24) == ex.seg_raw_frame(c.seg, k, Fraction(30), R24), (c.seg.id, k)
 
 
@@ -1234,3 +1247,97 @@ def test_the_silence_check_accepts_a_hold_on_the_raws_frames():
     from match_cuts.export_xml_edl import held_at_shot
     assert held_at_shot(522.40, [522.12], 60.0, "25") and not held_at_shot(522.40, [522.12], 60.0)
     assert held_at_shot(522.37, [522.12], 60.0) and not held_at_shot(522.45, [522.12], 60.0, "25")
+
+
+# ---------------------------------------------------------------------------------------------
+# output/020: a 23.976 fps 4K RAW, a 60 fps competitor sped up 125 % and mirrored
+# ---------------------------------------------------------------------------------------------
+
+def _cutlist_020() -> Cutlist:
+    """Like output/020: competitor 60 fps 1080x1920, RAW 3840x2160 at 23.976 fps, every shot sped up 125 % and
+    mirrored; S02 pans (two keys), S03 plays at 100 % unflipped."""
+    pan = {"scale": 0.5, "rotation_deg": 0.0, "tx": -420.0, "ty": 420.0}
+
+    def seg(id_, a, b, raw_s, **kw):
+        kw.setdefault("transform", dict(pan))
+        return Segment(id=id_, type="raw", comp_in=a, comp_out=b, raw_in_seconds=raw_s, speed=kw.pop("speed", 1.25),
+                       flip_h=kw.pop("flip_h", True), confidence=.98, **kw)
+    segs = [seg(1, 0, 304, 503.52), seg(2, 304, 568, 509.87, transform_keys=[
+                {"comp_frame": 304, **pan}, {"comp_frame": 567, **dict(pan, tx=-470.0)}]),
+            seg(3, 568, 700, 600.0, speed=1.0, flip_h=False)]
+    comp = {"file": "media/competitor_ref.mp4", "width": 1080, "height": 1920, "fps": "60/1", "frames": 700}
+    raw = {"file": "media/raw.mp4", "file_abs": "/abs/media/raw.mp4", "width": 3840, "height": 2160,
+           "fps": "24000/1001", "frames": 30728, "has_audio": True, "audio_sample_rate": 48000, "audio_channels": 2}
+    layout = {"mode": "match", "layout_kind": "full", "box": {"x": 0.0, "y": 0.0, "w": 1080.0, "h": 1920.0,
+                                                              "corner_radius": 0.0},
+              "background": "solid", "background_detail": {"type": "solid", "color": "#000000"}, "canvas_bg": "#000000"}
+    return Cutlist(1, comp, raw, layout, segs)
+
+
+def test_premiere_speed_change_on_a_23976_raw_counts_in_out_on_the_retimed_clip_and_mirrors_with_flop(tmp_path):
+    """output/020: Premiere read every 125 % clip's <in> as a point on the retimed clip (RAW 629 s, not 503 s) and
+    dropped the "Horizontal Flip" effect. <in> / <out> / <duration> / keyframe <when> now count on the retimed clip
+    (out - in = end - start; Premiere plays source in x speed) and the mirror is FCP7's Flop filter, which Premiere
+    translates to its Horizontal Flip."""
+    import xml.etree.ElementTree as ET
+    cl = _cutlist_020()
+    cfg = Config(out_dir=str(tmp_path), premiere=True, premiere_static_framing=False)
+    xml = tmp_path / "1_edit.xml"
+    ex.write_premiere_xml(cl, xml, cfg)
+    clips, _, _ = ex.premiere_clips(cl, cfg)
+    root = ET.parse(xml).getroot()
+    src_dur = int(30728 * 60 / R24)
+    items = root.findall("sequence/media/video/track/clipitem") + root.findall("sequence/media/audio/track/clipitem")
+    assert len(items) >= 6
+    for el in items:
+        g = {k: int(el.findtext(k)) for k in ("start", "end", "in", "out", "duration")}
+        speed = ex._remap_speed(el)
+        assert g["out"] - g["in"] == g["end"] - g["start"], (el.get("id"), g)          # its length on the timeline
+        assert g["duration"] == int(src_dur // speed), (el.get("id"), g)
+    # V1: Premiere starts each clip at the plan's RAW second (in x speed / 60), not at in / 60
+    for el, c in zip(root.findall("sequence/media/video/track/clipitem"), clips):
+        speed = ex._remap_speed(el)
+        played = int(el.findtext("in")) * speed / 60.0
+        assert played == pytest.approx(c.src_in / 60.0, abs=1.25 / 60.0), c.label
+        if abs(speed - 1.0) > 1e-9:
+            assert abs(int(el.findtext("in")) / 60.0 - c.src_in / 60.0) > 100.0           # the old reading: 125 s off
+        # the mirror: a Flop filter (direction 1 = horizontal) on a flipped clip, never the untranslated name
+        effs = [e.findtext("effectid") for e in el.findall("filter/effect")]
+        assert "Horizontal Flip" not in effs
+        flop = [e for e in el.findall("filter/effect") if e.findtext("effectid") == "Flop"]
+        assert len(flop) == (1 if c.seg.flip_h else 0), c.label
+        if flop:
+            assert flop[0].findtext("effectcategory") == "Perspective" and flop[0].findtext("parameter/value") == "1"
+    # the panned S02: its keyframes sit on the retimed clip too (the first at its <in>)
+    s02 = root.findall("sequence/media/video/track/clipitem")[1]
+    whens = [int(k.findtext("when")) for k in s02.findall("filter/effect/parameter/keyframe")]
+    assert whens and whens[0] == int(s02.findtext("in")) and max(whens) <= int(s02.findtext("out"))
+    # read back: the plan's source times, the flip, a clean validation
+    x = ex.parse_premiere_xml(xml)
+    for got, c in zip(x["clips"], clips):
+        assert abs(got["in"] - c.src_in) <= 1 and abs(got["out"] - c.src_out) <= 1, (got, c.src_in, c.src_out)
+        assert got["flip"] == bool(c.seg.flip_h)
+    v = ex.validate_premiere_exports(cl, xml, None, cfg)
+    assert v["ok"], v["errors"]
+
+
+def test_remap_encode_and_decode_round_trip_within_a_tick():
+    for speed in (1.0, 1.25, 1.25125, 1.1, 0.994429, -1.25, 2.0, 0.5):
+        for lo, n in ((30211, 380), (0, 7), (44111, 1), (123457, 999)):
+            x_lo, x_hi = ex.remap_encode(lo, lo + n, speed)
+            a, b = ex.remap_decode(x_lo, x_hi, speed)
+            tol = 0 if abs(abs(speed) - 1.0) < 1e-9 else max(1, int(abs(speed) + 0.5))
+            assert abs(a - lo) <= tol and abs(b - (lo + n)) <= tol + 1, (speed, lo, n, a, b)
+    assert ex.remap_encode(30211, 30591, 1.25, 304) == (24169, 24473)               # output/020's S01
+    assert ex.remap_duration(76896, 1.25) == 61516
+
+
+def test_flip_is_read_from_flop_or_the_old_horizontal_flip():
+    import xml.etree.ElementTree as ET
+    ci = ET.Element("clipitem")
+    ex._flop(ci)
+    assert ex._is_flip(ci.find("filter/effect"))
+    old = ET.fromstring("<effect><name>Horizontal Flip</name><effectid>Horizontal Flip</effectid></effect>")
+    vert = ET.fromstring("<effect><effectid>Flop</effectid><parameter><parameterid>direction</parameterid>"
+                         "<value>2</value></parameter></effect>")
+    assert ex._is_flip(old) and not ex._is_flip(vert)

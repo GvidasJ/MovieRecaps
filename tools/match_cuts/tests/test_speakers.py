@@ -81,6 +81,23 @@ def test_a_face_cut_off_at_the_top_moves_down_only_as_much_as_needed():
     assert abs((s * high[1] + new.ty) - WIN[1]) < 1e-6                               # its top on the window's top
 
 
+def test_a_close_up_the_competitor_crops_at_the_forehead_still_shows_its_person():
+    """output/020 (4K RAW, mirrored, 125 %): S03's speaker in close-up, the competitor's own framing. Their face box
+    (the 10th-90th percentile over 9 s) is 86 px above the window's top and 12 px past its right edge -- the person
+    is plainly shown; a fully-inside rule re-centred the picture onto the other person."""
+    W = 3840.0
+    comp = Sim(0.6240, 0.0, -657.5, 395.8)
+    face = (1100.0, 118.0, 2073.0, 1443.0)
+    r = SP.on_screen(comp, face, W, True)
+    assert r[1] < WIN[1] and r[2] > WIN[0] + WIN[2]                                  # cut off at the top and the side
+    assert SP.passes(comp, SP.Faces("speaker", True, face, [face]), W, True, WIN)
+    # the picture 480 px further right: half the face past the window's right edge -- not shown
+    assert not SP.passes(Sim(0.6240, 0.0, -657.5 + 480.0, 395.8), SP.Faces("speaker", True, face, [face]), W, True, WIN)
+    # more than SHOWN_FRAC cut off at the top: not shown
+    low = Sim(0.6240, 0.0, -657.5, 395.8 - 0.2 * 0.6240 * (face[3] - face[1]))
+    assert not SP.passes(low, SP.Faces("speaker", True, face, [face]), W, True, WIN)
+
+
 def test_a_face_wider_than_the_window_cannot_be_framed():
     huge = (200.0, 100.0, 1700.0, 1000.0)
     assert SP.centred(sim_showing(960), huge, RAW, False, WIN) is None

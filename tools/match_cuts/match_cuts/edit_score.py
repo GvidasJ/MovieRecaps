@@ -141,7 +141,7 @@ class Edit:
         the sequence inside a project): V1 (``track`` 'picture') or A1 ('sound'), each clip's in / out in its own
         rate; the gaps between them as other footage."""
         import xml.etree.ElementTree as ET
-        from .export_xml_edl import _remap_speed, plan_in_out
+        from .export_xml_edl import _remap_speed, plan_in_out, remap_decode
 
         def rate(el, default: float) -> float:
             tb = el.findtext("rate/timebase") if el is not None else None
@@ -163,7 +163,7 @@ class Edit:
             cf = rate(el, fps)
             raw_fps = raw_fps or rate(el.find("file"), cf)          # the media's own rate, when the file says
             sp = _remap_speed(el)
-            i0, i1 = plan_in_out(int(el.findtext("in") or 0), int(el.findtext("out") or 0), sp < 0)
+            i0, i1 = plan_in_out(*remap_decode(int(el.findtext("in") or 0), int(el.findtext("out") or 0), sp), sp < 0)
             t0, t1 = a / fps, b / fps
             v = (i1 - i0) / cf / (t1 - t0) if sp >= 0 else float(sp)
             pieces.append(Piece(t0, t1, i0 / cf, v))
