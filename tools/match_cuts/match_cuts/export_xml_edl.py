@@ -2326,6 +2326,12 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
         clips.append(PremiereClip(seg, ev, -1 if dis_in else ev.rec_in * fac, -1 if tail else ev.rec_out * fac,
                                   ev.rec_in * fac, ev.rec_out * fac, n_in, n_out, v, exact,
                                   1000.0 * (_played_s(n_in, v, fps) - tau0), z, covered, keys, retime, [ev]))
+    clips, mini = merge_mini_clips(clips, getattr(cfg, "premiere_shots", None), raw_fps, fps, st["min_clip"])
+    for m in mini:                      # no mini cuts: a clip of a few frames goes into its neighbour
+        # (before the framing below: the person check and --min-move judge the joined clip -- zendaya)
+        markers_note = (f"{m['clip']}: {m['frames']} frame(s) -- a mini cut, joined into {m['into']} "
+                        f"({m['how']}; {_tc(m['at'], fps)})")
+        warnings.append(markers_note)
     if st["static"]:
         # fewer reframes and cuts: hold the framing under min_move px (inside one RAW shot), frame on the person speaking
         # what the competitor cannot frame or does not show them, then join the pieces of one take that are left alike
@@ -2341,11 +2347,6 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             _person_after_merge(clips, sp, raw_wh, win, fps)
             if _hold_after_merge(clips, sp, raw_wh, win, fps, st["min_move"]):
                 clips = _merge_continuous(clips)
-    clips, mini = merge_mini_clips(clips, getattr(cfg, "premiere_shots", None), raw_fps, fps, st["min_clip"])
-    for m in mini:                      # no mini cuts: a clip of a few frames goes into its neighbour
-        markers_note = (f"{m['clip']}: {m['frames']} frame(s) -- a mini cut, joined into {m['into']} "
-                        f"({m['how']}; {_tc(m['at'], fps)})")
-        warnings.append(markers_note)
     return clips, markers, warnings
 
 
@@ -2645,8 +2646,10 @@ def premiere_audio(cutlist: Cutlist, clips: list[PremiereClip], cfg: Any = None)
             # every picture plays its own sound (no muted, silent or replaced A1) -- unless its audio line carries on
             # the sound already playing (one take of sound under the pictures: video018's "insurance")
             prev = out[-1] if out else None
-            keep_line = False
-            if a is not None and line and prev is not None and prev["end"] == start:
+            # its own sound at 100 % under a retimed picture (FX-14 "own in-point") is the picture's own sound
+            keep_line = a is not None and line and str(((seg.audio or {}).get("line") or {}).get("source") or ""
+                                                      ).startswith("own in-point")
+            if not keep_line and a is not None and line and prev is not None and prev["end"] == start:
                 v_l = float(a.speed)
                 tau_l = _raw_in_seconds(a, raw_fps) + v_l * float(Fraction(ev.rec_in - int(seg.comp_in)) / comp_fps)
                 keep_line = abs(int(round(tau_l * float(fps))) - prev["out"]) <= 1 and abs(v_l - prev["speed"]) < 1e-6
