@@ -2,5 +2,6 @@
  "timeline": "edit",
  "notes": "learned from video020_fixed.prproj (2026-10-09): answer.srt and answer_edit.json are your finished edit",
  "learned_from": "..\\..\\output\\020\\video020_fixed.prproj",
- "run": "..\\..\\output\\020"
+ "run": "..\\..\\output\\020",
+ "full_raw": "output/020/extras/media/raw.mp4"
 }

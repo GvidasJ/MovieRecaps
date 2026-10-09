@@ -183,6 +183,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--rescore", action="store_true", help="score each case's newest run again without running it")
     ap.add_argument("--fast", action="store_true", help="pass --fast to every run (quick, less thorough); "
                                                          "otherwise every run gets --compare-fast")
+    ap.add_argument("--full-size", action="store_true",
+                    help="run the cases whose full-size originals are on this machine (case.json full_raw: the file "
+                         "the committed smaller copy was made from) on those originals, as <case>@full -- a fix that "
+                         "only works on the smaller copy fails here")
     ap.add_argument("--python", default=sys.executable, help=argparse.SUPPRESS)
     ap.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
     a, extra = ap.parse_known_args(argv)
@@ -194,6 +198,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra = ["--check-determinism", *extra]     # the hard check 9.7: the cut list re-assembled from the caches
     names = [n for n in a.cases.split(",") if n]
     cases = testcases.cases(names or None, Path(a.cases_dir))
+    if a.full_size:
+        full = [testcases.full_size(c) for c in cases]
+        skipped = [c.name for c, f in zip(cases, full) if f is None]
+        if skipped:
+            print(f"check-all --full-size: no full-size original here for {', '.join(skipped)}", flush=True)
+        cases = [f for f in full if f is not None]
     out_root, work_root = Path(a.out), Path(a.work)
     card = out_root.parent / "scorecard.json"
     prev = json.loads(card.read_text(encoding="utf-8")) if card.is_file() else None

@@ -10,7 +10,10 @@ A case folder holds:
   "track" picture or sound) -- and, on the user's own edit (timeline "edit"), check-all's cut answer key
   (edit_score.py);
 * ``case.json`` (optional) -- {"options": [extra command-line options], "timeline": "edit" | "competitor" (the key
-  is timed on the competitor's own edit: answer_edit.json then holds the competitor's timeline -> RAW), "notes"}.
+  is timed on the competitor's own edit: answer_edit.json then holds the competitor's timeline -> RAW), "notes",
+  "full_raw" / "full_competitor": the full-size original a smaller copy was made from, on the machine that made
+  the case (relative to the repository; never committed) -- ``check-all --full-size`` runs on it where it exists,
+  so a fix that only works on the smaller copy is caught (output/019: video018's "insurance" ending)}.
 """
 from __future__ import annotations
 
@@ -38,6 +41,8 @@ class Case:
     answer_edit: Path | None = None
     timeline: str = "edit"
     notes: str = ""
+    full_raw: Path | None = None             # the full-size original on this machine (None: not here)
+    full_competitor: Path | None = None
 
     @property
     def has_key(self) -> bool:
@@ -61,7 +66,26 @@ def load(d: Path) -> Case | None:
     srt = d / "answer.srt"
     edit = next((d / n for n in ("answer_edit.json", "answer_edit.xml") if (d / n).is_file()), None)
     return Case(d.name, d, comp, raw, list(meta.get("options") or []), srt if srt.is_file() else None, edit,
-                str(meta.get("timeline") or "edit"), str(meta.get("notes") or ""))
+                str(meta.get("timeline") or "edit"), str(meta.get("notes") or ""),
+                _here(meta.get("full_raw")), _here(meta.get("full_competitor")))
+
+
+def _here(p: Any) -> Path | None:
+    """A case.json path (relative to the repository, or absolute) when that file is on this machine."""
+    if not p:
+        return None
+    q = Path(str(p))
+    q = q if q.is_absolute() else REPO / q
+    return q if q.is_file() else None
+
+
+def full_size(case: Case) -> Case | None:
+    """The case on its full-size originals (named <case>@full), or None when none is on this machine."""
+    if case.full_raw is None and case.full_competitor is None:
+        return None
+    import dataclasses
+    return dataclasses.replace(case, name=f"{case.name}@full", raw=case.full_raw or case.raw,
+                               competitor=case.full_competitor or case.competitor)
 
 
 def cases(names: list[str] | None = None, root: Path = CASES_DIR) -> list[Case]:

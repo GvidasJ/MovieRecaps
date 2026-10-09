@@ -1096,6 +1096,9 @@ cd tools/match_cuts
 ../../.venv/bin/python -m match_cuts check-all                    # every case (Windows: ..\..\.venv\Scripts\python)
 ../../.venv/bin/python -m match_cuts check-all --cases deadpool   # some of them
 ../../.venv/bin/python -m match_cuts check-all --rescore          # score the newest runs again, no new run
+../../.venv/bin/python -m match_cuts check-all --full-size        # the cases on their full-size originals (case.json
+#                                                                   full_raw, on this machine): fixes that only work on
+#                                                                   the smaller committed copy fail here
 ```
 
 A case is a folder with the competitor and RAW (or `case.json` naming them) and, for a video you corrected, the

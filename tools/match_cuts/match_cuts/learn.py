@@ -552,6 +552,16 @@ def case_name(cl: dict, comp: Path, project: Path, name: str | None) -> str:
     return slug(project.stem if stem.lower() in ("competitor", "competitor_ref", "") else stem)
 
 
+def _repo_path(p: Path) -> str:
+    """A path for case.json: relative to the repository when inside it (the full-size original, on this machine)."""
+    from .testcases import REPO
+    q = Path(p).resolve()
+    try:
+        return q.relative_to(REPO.resolve()).as_posix()
+    except ValueError:
+        return str(q)
+
+
 def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name: str, caps: Sequence[PR.Item],
                meta: dict, no_caps_why: str = "") -> dict[str, str]:
     """The test case's files (module docstring, 4); returns {file: what it is}. Without captions there is no
@@ -569,6 +579,8 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
         done[fname] = (f"a smaller copy: {info['bytes'] / 1e6:.0f} MB ({src.stat().st_size / 1e6:.0f} MB before), "
                        f"{info.get('width')}x{info.get('height')} at {info.get('fps')} fps as before"
                        if info.get("reencoded") else f"copied ({info['bytes'] / 1e6:.0f} MB)")
+        if info.get("reencoded"):                    # check-all --full-size runs on the original (testcases.py)
+            meta = {**meta, f"full_{fname[:-4]}": _repo_path(src)}
     key = case_dir / "answer.srt"
     if caps:
         key.write_text(srt_of(caps), encoding="utf-8", newline="\n")
