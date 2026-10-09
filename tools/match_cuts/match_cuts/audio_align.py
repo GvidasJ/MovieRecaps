@@ -83,6 +83,8 @@ _MAX_LAG_SEG_S = 0.1          # per-segment lag search (same as verify s9_5)
 _MIN_SEG_S = 0.5              # shorter audio ranges -> 'too_short' when they do not line up
 NOT_FOLLOWING_CORR = 0.5      # a piece whose sound matches its own picture below this: tried on a neighbour's line
 STUTTER_FRAMES = 2.0          # ... or whose sound is more than this many competitor frames off its picture (a stutter)
+SHORT_BRIDGE_CORR = 0.7       # a line piece too short for a full measure (under _MIN_SEG_S) on the line's lag that
+SHORT_BRIDGE_MARGIN = 0.3     # reaches this (and beats its sidelobe by this): pending, bridged if the next verifies
 
 
 # OpenBLAS thread control lives in common (the whole run pins it to one thread, DESIGN D7); these names stay for
@@ -1947,6 +1949,14 @@ def _audio_lines(segs: Sequence[Segment], out: dict, models: dict, comp: np.ndar
             trials.append({"seg": s.id, "line": lid, "source": src, "ok": ok, "lag_ms": round(lag * 1000.0, 3),
                            "corr": round(pk, 4), "sidelobe": round(sl, 4)})
             if ok is None:
+                pending.append(s)
+                continue
+            w0, w1 = window(s)
+            if not ok and pending == [] and w1 - w0 < int(_MIN_SEG_S * sr) and abs(lag) * 1000.0 <= lim_ms \
+                    and pk >= SHORT_BRIDGE_CORR and pk > sl + SHORT_BRIDGE_MARGIN:
+                # a short piece (its window cut by a dissolve) on the line's lag that only just misses strong: no
+                # proof either way -- bridged when the next piece verifies (output/019: S21's 0.35 s at 0.78 before
+                # 'insurance'; the smaller copy measured it 0.81)
                 pending.append(s)
                 continue
             if not ok:

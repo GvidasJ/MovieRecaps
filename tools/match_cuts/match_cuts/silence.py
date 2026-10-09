@@ -652,6 +652,13 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         tail = tail_after_last_word(words, quiet, n_frames, fps, st, protect + other, guard)
         if tail is not None:                         # your ending: nothing plays after the last line
             first = min([c.a for c in cuts if c.b > tail.a] + [tail.a])
+            from .shots import MIN_SHOT_S
+            n_min = int(math.ceil(MIN_SHOT_S * float(fps) - 1e-9))
+            for cl in clips:                         # a sliver of a clip after the last line's sound: goes too
+                if cl.rec_start < first < cl.rec_end and first - cl.rec_start < n_min and \
+                        cl.rec_start >= int(math.floor(tail.s0 * float(fps))) and \
+                        not any(p0 < first and p1 > cl.rec_start for p0, p1 in protect + other):
+                    first = cl.rec_start             # (output/019: 3 frames of S24 after 'insurance': a flash)
             cuts = [c for c in cuts if c.b <= first] + [Cut(first, n_frames, tail.s0, tail.s1)]
             lv = dict(lv, ending={"from_s": round(first / float(fps), 3), "last_sound_end_s": round(tail.s0, 3)})
     out = summarize(cuts, n_frames, fps, st, lv, before=snap)

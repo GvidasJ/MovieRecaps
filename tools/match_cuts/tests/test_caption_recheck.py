@@ -464,3 +464,26 @@ def test_the_screen_mixing_both_transcriptions_word_by_word_wins_and_the_windows
     assert (out[2].start, out[2].end) == (0.5, 0.56) and "each word of it" in rep["changes"][0]["why"]
     out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe)       # no screen: the edge "Bye" not doubled
     assert [w.text for w in out].count("Bye") == 1
+
+
+def test_a_word_starting_the_competitors_caption_agrees_with_it_though_the_word_before_is_on_the_caption_before():
+    """output/019 re-run: the edit heard "...the hallway. I gotta call.", the RAW recheck "got" for "I" (more
+    confident); the screen says "I gotta call" -- "hallway" is on the caption before, so "I" + "gotta" at the start
+    of this one agrees: the edit's "I" stays."""
+    words = [W("hallway.", 0.0, 0.08), W("I", 0.1, 0.42, 0.43), W("gotta", 0.47, 0.6), W("call.", 0.6, 0.7)]
+    src = Source([("hallway.", 10.0, 10.08, 0.9), ("got", 10.1, 10.42, 0.84), ("gotta", 10.47, 10.6, 0.9),
+                  ("call.", 10.6, 10.7, 0.9)])
+    spans = [{"comp_in": 0, "comp_out": 3, "ocr": "run down the hallway", "score": 0.97, "agreement": 1.0},
+             {"comp_in": 3, "comp_out": 30, "ocr": "I gotta call", "score": 0.97, "agreement": 1.0}]
+    out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe, captions=R.clear_captions(spans, Fraction(30)))
+    assert [w.text for w in out] == ["hallway", "I", "gotta", "call"] and rep["changed"] == 0
+
+
+def test_the_start_of_the_next_word_heard_again_never_replaces_a_word():
+    """output/019 re-run: "I gotta call" heard; the RAW recheck (more confident) "got" for "I" -- the start of
+    "gotta" (= got to) heard again at the window's edge. "I" stays, even with no clear caption to ask."""
+    words = [W("hallway.", 0.0, 0.08), W("I", 0.1, 0.42, 0.43), W("gotta", 0.47, 0.6), W("call.", 0.6, 0.7)]
+    src = Source([("hallway.", 10.0, 10.08, 0.9), ("got", 10.1, 10.42, 0.84), ("gotta", 10.47, 10.6, 0.9),
+                  ("call.", 10.6, 10.7, 0.9)])
+    out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe)
+    assert [w.text for w in out] == ["hallway", "I", "gotta", "call"] and rep["changed"] == 0

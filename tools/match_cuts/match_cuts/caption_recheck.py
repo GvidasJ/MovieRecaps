@@ -168,7 +168,15 @@ def _agrees(ws: Sequence[Word], caption: str | None, left: Word | None = None, r
         return False
     have = _tokens([caption])
     want = _tokens([w.text for w in ([left] if left else []) + list(ws) + ([right] if right else [])])
-    return any(have[k:k + len(want)] == want for k in range(len(have) - len(want) + 1))
+    if any(have[k:k + len(want)] == want for k in range(len(have) - len(want) + 1)):
+        return True
+    # at the caption's edge the word kept beside them is on the caption before / after (video018: "...the hallway" |
+    # "I gotta call": "I" agrees with the caption it starts)
+    mid = _tokens([w.text for w in ws])
+    head = mid + (_tokens([right.text]) if right else [])
+    tail = (_tokens([left.text]) if left else []) + mid
+    return bool(mid) and ((left is not None and have[:len(head)] == head and len(head) > len(mid)) or
+                          (right is not None and len(tail) > len(mid) and have[-len(tail):] == tail))
 
 
 def _screen_mix(a_ws: Sequence[Word], b_ws: Sequence[Word], caption: str | None, left: Word | None,
@@ -350,6 +358,10 @@ def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int
             b_ws = b_ws[:-1]                              # the window's edge heard the next word again: "to call Bye"
         if a_ws and len(b_ws) > 1 and left is not None and norm(b_ws[0].text) == norm(left.text):
             b_ws = b_ws[1:]
+        if a_ws and b_ws and right is not None:              # "got" for "I" before "gotta" (= got to): the next
+            rt, bt = _tokens([right.text]), _tokens([b_ws[-1].text])     # word's start heard again (output/019)
+            if bt and rt and bt[-1] == rt[0] and _tokens([a_ws[-1].text])[-1:] != rt[:1]:
+                b_ws = b_ws[:-1]
         if (a_ws and len(b_ws) > len(a_ws) and len(b_ws) > 1 and norm(b_ws[-1].text) == norm(b_ws[-2].text)
                 == norm(a_ws[-1].text) and (len(a_ws) < 2 or norm(a_ws[-2].text) != norm(a_ws[-1].text))):
             b_ws = b_ws[:-2] + b_ws[-1:]                  # the same: the next word heard twice ("Bye Bye" for "Bye")
