@@ -641,6 +641,23 @@ root); `match_cuts/restyle.py` only chooses their arguments and checks the resul
 `--donor PROJECT.prproj` takes the style from another correctly styled project; `--overwrite` replaces an
 existing `3_captions_styled.prproj` (without it the run stops rather than overwrite one you may have worked in).
 
+### Many videos unattended (`batch <folder>`)
+
+```
+..\..\.venv\Scripts\python -m match_cuts batch "D:\to do" --out ..\..\output
+..\..\.venv\Scripts\python -m match_cuts batch "D:\to do" -- --keep-speed     # more options for every run after --
+```
+
+`<folder>` holds one subfolder per video with `competitor.mp4` and `raw.mp4` (any video extension). They run one
+after another, each as its own `--premiere --fast` run (`--thorough` for full runs), into a run folder named after
+the subfolder (`<out>\<name>\`, `<name>-2` when that exists) with `1_edit.xml`, `2_captions.srt` and `extras\`. A
+video that fails or crashes never stops the batch. Every run folder works on its own: the RAW and competitor sit in
+its `extras\media\` (a hard link on the same drive: no copy, no extra space -- also for a RAW over 2 GB, which was
+referenced in `input\` before), so you can move or delete the input folder afterwards. At the end (and after every
+video) `<out>\batch_summary.md` / `.json`: per video the run folder, the run time, PASS / FAIL (the Premiere
+deliverables' hard checks and coverage, as check-all; the recreation criteria c2-c5 are not part of it), why it
+failed, whether 1_edit.xml uses any media outside its run folder, and what to check by hand.
+
 ### Learn from your finished videos (`learn <folder>`)
 
 ```

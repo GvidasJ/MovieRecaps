@@ -41,6 +41,8 @@ CROP_SCALE = 0.4                   # Light-ASD's face crop around the box (its d
 SPEAKING = 0.0                     # a speaking logit above this: speaking
 MARGIN_S = 3.0                     # analysed this far around every clip: the speaker model's context, and the
                                    # speech-safe cuts may let a clip play on that far (speech.py)
+FRAME_BUDGET_BYTES = 1 << 30      # decoded RAW frames held at once (4K: ~42 analysis frames, 1.7 s); a longer
+                                   # stretch is analysed a chunk at a time (decoded twice: faces, then their crops)
 MIN_COVERED = 0.5                  # a clip is judged on its analysed frames when at least this share of it is
 VERSION = 1
 MODEL_DIR = Path(__file__).resolve().parent / "face_models"
@@ -240,10 +242,8 @@ def mfcc(sig: np.ndarray) -> np.ndarray:
     return feat
 
 
-def face_crops(frames: dict[int, np.ndarray], t: Track) -> np.ndarray:
-    """Light-ASD's input: per frame of the track a 112x112 grey crop around its (median-smoothed) box, the box
-    widened by CROP_SCALE and reaching further down (the mouth and chin), as the authors' demo crops."""
-    import cv2
+def _crop_geometry(t: Track) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(half size, centre y, centre x) of track t's crop per frame: its box median-smoothed over 13 frames."""
     from scipy.signal import medfilt
     b = t.box
     s = np.maximum(b[:, 3] - b[:, 1], b[:, 2] - b[:, 0]) / 2
@@ -252,21 +252,37 @@ def face_crops(frames: dict[int, np.ndarray], t: Track) -> np.ndarray:
     ksz = min(13, len(s) if len(s) % 2 else len(s) - 1)
     if ksz >= 3:
         s, y, x = medfilt(s, ksz), medfilt(y, ksz), medfilt(x, ksz)
+    return s, y, x
+
+
+def _crop(img: np.ndarray, s: float, y: float, x: float) -> np.ndarray | None:
+    """One 112x112 grey crop (face_crops)."""
+    import cv2
     cs = CROP_SCALE
-    out = np.zeros((len(t.k), 112, 112), np.uint8)
+    bs = max(1.0, float(s))
+    bsi = int(bs * (1 + 2 * cs))
+    fr = cv2.copyMakeBorder(img, bsi, bsi, bsi, bsi, cv2.BORDER_CONSTANT, value=(110, 110, 110))
+    my, mx = y + bsi, x + bsi
+    face = fr[max(0, int(my - bs)):int(my + bs * (1 + 2 * cs)), max(0, int(mx - bs * (1 + cs))):int(mx + bs * (1 + cs))]
+    if face.size == 0:
+        return None
+    g = cv2.cvtColor(cv2.resize(face, (224, 224)), cv2.COLOR_BGR2GRAY)
+    return g[56:168, 56:168]
+
+
+def face_crops(frames: dict[int, np.ndarray], t: Track, out: np.ndarray | None = None) -> np.ndarray:
+    """Light-ASD's input: per frame of the track a 112x112 grey crop around its (median-smoothed) box, the box
+    widened by CROP_SCALE and reaching further down (the mouth and chin), as the authors' demo crops. ``out``: the
+    crops so far, filled in for the frames given (the chunked analysis: a chunk of frames at a time)."""
+    s, y, x = _crop_geometry(t)
+    out = np.zeros((len(t.k), 112, 112), np.uint8) if out is None else out
     for i, k in enumerate(t.k):
         img = frames.get(int(k))
         if img is None:
             continue
-        bs = max(1.0, float(s[i]))
-        bsi = int(bs * (1 + 2 * cs))
-        fr = cv2.copyMakeBorder(img, bsi, bsi, bsi, bsi, cv2.BORDER_CONSTANT, value=(110, 110, 110))
-        my, mx = y[i] + bsi, x[i] + bsi
-        face = fr[max(0, int(my - bs)):int(my + bs * (1 + 2 * cs)), max(0, int(mx - bs * (1 + cs))):int(mx + bs * (1 + cs))]
-        if face.size == 0:
-            continue
-        g = cv2.cvtColor(cv2.resize(face, (224, 224)), cv2.COLOR_BGR2GRAY)
-        out[i] = g[56:168, 56:168]
+        c = _crop(img, s[i], y[i], x[i])
+        if c is not None:
+            out[i] = c
     return out
 
 
@@ -287,10 +303,12 @@ def asd_model() -> tuple[Any, str] | None:
     return _ASD["model"]
 
 
-def speaking_scores(model: Any, dev: str, audio16: np.ndarray, frames: dict[int, np.ndarray], t: Track) -> np.ndarray:
-    """Light-ASD's speaking logit for every frame of track t (averaged over 1-6 s windows, smoothed +-2 frames)."""
+def speaking_scores(model: Any, dev: str, audio16: np.ndarray, frames: dict[int, np.ndarray] | None, t: Track,
+                    crops: np.ndarray | None = None) -> np.ndarray:
+    """Light-ASD's speaking logit for every frame of track t (averaged over 1-6 s windows, smoothed +-2 frames), from
+    the frames or the track's face crops made already (``crops``)."""
     import torch
-    v = face_crops(frames, t)
+    v = face_crops(frames or {}, t) if crops is None else crops
     t0 = t.k[0] / ANALYSIS_FPS
     n = len(t.k)
     a0 = int(round(t0 * 16000))
@@ -359,8 +377,10 @@ def analyse(video: str, raw_fps: float, ranges_s: Sequence[tuple[float, float]],
         tid = 0
         with VideoReader(video) as rd:
             res["raw_wh"] = [int(rd.width), int(rd.height)]
-            for a, b in wins:
-                ks = list(range(int(round(a * ANALYSIS_FPS)), int(round(b * ANALYSIS_FPS))))
+            per_frame = max(1, int(rd.width) * int(rd.height) * 3)
+            chunk = max(ANALYSIS_FPS, int(FRAME_BUDGET_BYTES // per_frame))     # analysis frames held at once
+
+            def load(ks: list[int]) -> dict[int, np.ndarray]:
                 idx = {k: int(round(k / ANALYSIS_FPS * raw_fps)) for k in ks}
                 try:
                     got = rd.get_many(sorted(set(idx.values())), fmt="bgr24")
@@ -371,12 +391,28 @@ def analyse(video: str, raw_fps: float, ranges_s: Sequence[tuple[float, float]],
                             got[j] = rd.get(j, fmt="bgr24")
                         except Exception:  # noqa: BLE001 - past the end: no frame
                             pass
-                frames = {k: got[idx[k]] for k in ks if idx[k] in got}
-                dets = {k: [d for d in detect(img) if d[4] >= MIN_SCORE] for k, img in frames.items()}
+                return {k: got[idx[k]] for k in ks if idx[k] in got}
+            for a, b in wins:
+                ks = list(range(int(round(a * ANALYSIS_FPS)), int(round(b * ANALYSIS_FPS))))
+                parts = [ks[i:i + chunk] for i in range(0, len(ks), chunk)] or [[]]
+                frames = load(ks) if len(parts) == 1 else None             # a short stretch: decoded once
+                dets: dict[int, list] = {}
+                for part in parts:                    # the faces of every frame (a chunk of frames at a time)
+                    fr = frames if frames is not None else load(part)
+                    inside = set(part)
+                    dets.update({k: [d for d in detect(img) if d[4] >= MIN_SCORE] for k, img in fr.items()
+                                 if k in inside})
+                    del fr
                 trs = track(dets, [c for c in brk_all if ks[0] < c <= ks[-1]])
-                for t in trs:
-                    if asd is not None:
-                        t.score = speaking_scores(asd[0], asd[1], audio16, frames, t)
+                if asd is not None and trs:
+                    crops = {id(t): np.zeros((len(t.k), 112, 112), np.uint8) for t in trs}
+                    for part in parts:                # the face crops: the frames decoded again, a chunk at a time
+                        fr = frames if frames is not None else load(part)
+                        for t in trs:
+                            face_crops(fr, t, crops[id(t)])
+                        del fr
+                    for t in trs:
+                        t.score = speaking_scores(asd[0], asd[1], audio16, None, t, crops[id(t)])
                 # no person: a face much smaller than its shot's biggest that never speaks (a poster, a photo)
                 big = max((t.height for t in trs), default=0.0)
                 keep = [t for t in trs if t.height >= BACKGROUND_FRAC * big or
@@ -386,7 +422,7 @@ def analyse(video: str, raw_fps: float, ranges_s: Sequence[tuple[float, float]],
                                           "found": t.found.astype(int).tolist(),
                                           "score": [None if not np.isfinite(s) else round(float(s), 3) for s in t.score]})
                     tid += 1
-                del frames, got
+                del frames
         log.info("people: %d faces tracked in %d stretch(es) of the RAW, speaking scored by %s (%.1f s)",
                  len(res["tracks"]), len(wins), res["asd"], time.time() - t0)
         return res

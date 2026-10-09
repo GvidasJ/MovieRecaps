@@ -276,3 +276,21 @@ def test_once_the_takes_are_joined_a_clip_holds_the_framing_that_shows_its_perso
     assert ex._same_framing(cs[1].keys[0][1], sim_showing(980))
     cs = clips()                                         # a new shot of the RAW: chosen fresh, never held
     assert ex._hold_after_merge(cs, _Ctx([11.0], [((0.0, 100.0), shown)]), RAW, WIN, Fraction(60), 250.0) == 0
+
+
+def test_the_person_check_decoded_in_chunks_finds_exactly_what_it_finds_in_one_go(monkeypatch):
+    """A long stretch of a big RAW is analysed a chunk of frames at a time (people.FRAME_BUDGET_BYTES: it held ~1 GB
+    a second of 4K at once): the faces, tracks and speaking scores are identical to decoding the stretch in one go."""
+    pytest.importorskip("torch")
+    if not (ZEN / "raw.mp4").is_file():
+        pytest.skip("tests/real/zendaya not in this checkout")
+    from match_cuts.media import extract_audio
+    y = extract_audio(ZEN / "raw.mp4", sr=16000, mono=True)
+    ranges = [(166.7, 169.2)]
+    one = P.analyse(str(ZEN / "raw.mp4"), 25.0, ranges, y)
+    monkeypatch.setattr(P, "FRAME_BUDGET_BYTES", 1)                 # the smallest chunk: one second of frames
+    chunked = P.analyse(str(ZEN / "raw.mp4"), 25.0, ranges, y)
+    assert len(one.tracks) == len(chunked.tracks) >= 1
+    for a, b in zip(one.tracks, chunked.tracks):
+        assert np.array_equal(a.k, b.k) and np.array_equal(a.box, b.box) and np.array_equal(a.found, b.found)
+        assert np.array_equal(np.nan_to_num(a.score, nan=-99), np.nan_to_num(b.score, nan=-99))

@@ -115,12 +115,22 @@ def test_ae_safe_raw_linked_unchanged(clips, tmp_path):
     assert any(e["decision"] == "copy" and e["role"] == "raw" for e in lines)
 
 
-def test_large_ae_safe_raw_referenced_by_path(clips, tmp_path):
+def test_large_ae_safe_raw_is_hard_linked_into_media_else_referenced_by_path(clips, tmp_path, monkeypatch):
+    """A big RAW (output/020's 3 GB 4K) goes into media/ as a hard link -- no copy, and the run keeps working when the
+    input folder is moved or deleted; only where the drive cannot link is it referenced where it lies."""
+    import os
+    from match_cuts import conform as C
     cfg = make_cfg(tmp_path, large_file_bytes=1000)
     info = probe(clips["safe"], "raw", cfg.work_dir)
     res = conform(info, "raw", cfg, None)
+    dst = tmp_path / "out" / "media" / "raw.mp4"
+    assert not res.conformed and res.file_rel == "media/raw.mp4" and os.path.samefile(dst, clips["safe"])
+    dst.unlink()
+    monkeypatch.setattr(C.os, "link", lambda a, b: (_ for _ in ()).throw(OSError("another drive")))
+    cfg2 = make_cfg(tmp_path / "b", large_file_bytes=1000)
+    res = conform(probe(clips["safe"], "raw", cfg2.work_dir), "raw", cfg2, None)
     assert not res.conformed and res.file_rel == "" and res.path == res.file_abs == str(clips["safe"].resolve())
-    assert not (tmp_path / "out" / "media" / "raw.mp4").exists()
+    assert not (tmp_path / "b" / "out" / "media" / "raw.mp4").exists()
 
 
 def test_vfr_competitor_shows_frame_displayed_at_tk(clips, tmp_path):

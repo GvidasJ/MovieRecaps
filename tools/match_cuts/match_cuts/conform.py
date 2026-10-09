@@ -668,6 +668,25 @@ def _save_state(media: Path, state: dict) -> None:
     atomic_write_text(media / CONFORM_JSON, json.dumps(state, indent=1, sort_keys=True))
 
 
+def _hardlink(src: Path, dst: Path) -> bool:
+    """A big RAW hard-linked into media/ (no copy: the same file under a second name, so the run keeps working when
+    the input folder is moved or deleted); False when the drive cannot (another volume, FAT)."""
+    try:
+        if dst.exists() and os.path.samefile(src, dst):
+            return True
+    except OSError:
+        pass
+    tmp = dst.with_name(".link_" + dst.name)
+    try:
+        if tmp.exists():
+            tmp.unlink()
+        os.link(src, tmp)
+    except OSError:
+        return False
+    replace_file(tmp, dst)
+    return True
+
+
 def _link_or_copy(src: Path, dst: Path) -> str:
     """Place ``src`` at ``dst`` without ever writing into an existing inode (dst may be a hard link to an
     input file: it is unlinked, never truncated). Returns 'same' | 'hardlink' | 'copy'."""
@@ -728,7 +747,9 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
 
     # ------------------------------------------------------------------ untouched placement
     if not need:
-        if role != "competitor" and info.file_size > int(getattr(cfg, "large_file_bytes", 2 * 1024 ** 3)):
+        big = role != "competitor" and info.file_size > int(getattr(cfg, "large_file_bytes", 2 * 1024 ** 3))
+        if big and not _hardlink(src, media / _media_name_for_raw(src)):
+            # another drive: no free link -- referenced where it is (the run then needs the input left in place)
             params = {"mode": "reference", "version": STAGE_VERSION.get("conform", 1)}
             res = ConformResult(str(src), False, f"AE-safe; {info.file_size / 1e9:.2f} GB > large_file_bytes: "
                                 "referenced by absolute path (the JSX offers a relink dialog)",

@@ -3155,8 +3155,19 @@ def raw_words(ctx: Context, ranges: list[tuple[float, float]], model: str, langu
     return out
 
 
+BIG_MOVE_S = 0.23          # a cut moved this far out (a clip playing on / starting earlier to keep out of a sound): you
+#                            undid every such move on video017/018 (7 of 7) and kept the smaller ones -- flagged
+
+
+def big_move(r: dict, fps: float = 60.0) -> bool:
+    """A speech-safe row that moved a cut outwards by BIG_MOVE_S or more (the clip plays on / starts earlier)."""
+    out = (r.get("edge") == "end" and r.get("frames", 0) > 0) or (r.get("edge") == "start" and r.get("frames", 0) < 0)
+    return out and abs(int(r.get("frames", 0))) / fps >= BIG_MOVE_S - 1e-9
+
+
 def speech_lines(plan: dict) -> list[str]:
-    """The end summary's lines on the speech-safe cuts: how many cuts were moved off speech (and how), then each."""
+    """The end summary's lines on the speech-safe cuts: how many cuts were moved off speech (and how), then each --
+    a move out of BIG_MOVE_S or more flagged to check by hand."""
     sp = (plan or {}).get("speech")
     if not sp:
         return []
@@ -3168,6 +3179,10 @@ def speech_lines(plan: dict) -> list[str]:
     head = (f"{sum(1 for r in rows if r['edge'] in ('start', 'end'))} clip edge(s) moved, "
             f"{sum(1 for r in rows if r['edge'] == 'whole')} clip(s) left with nothing to play removed "
             f"(words: {models})" if rows else f"no cut needed moving (words: {models})")
+    big = sum(1 for r in rows if big_move(r))
+    if big:
+        head += (f"; {big} moved out {BIG_MOVE_S:g} s or more -- CHECK BY HAND (you undid every move this big on "
+                 "video017/018)")
     out = [head]
     for r in rows:
         if r["edge"] == "whole":
@@ -3183,7 +3198,8 @@ def speech_lines(plan: dict) -> list[str]:
                 ("starts later" if r["frames"] > 0 else "starts earlier")
             out.append(f"{r['clip']} {how} by {abs(r['frames'])} frame(s): RAW {r['from_s']:.2f} -> "
                        f"{r['to_s']:.2f} s{' (was inside speech)' if r.get('inside') else ''}"
-                       f"{(' -- ' + repr(r['said'])) if r.get('said') else ''}")
+                       f"{(' -- ' + repr(r['said'])) if r.get('said') else ''}"
+                       + (f" -- CHECK BY HAND: {abs(r['frames']) / 60.0:.2f} s out" if big_move(r) else ""))
     return out
 
 

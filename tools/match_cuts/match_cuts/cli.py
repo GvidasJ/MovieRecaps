@@ -125,6 +125,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=DEFAULTS["out"], metavar="Z",
                    help=f"output folder (default {DEFAULTS['out']}): each run gets its own numbered folder in it (001, "
                         "002, ...) with 1_edit.xml, 2_captions.srt and everything else in extras/")
+    p.add_argument("--run-dir", default=None, metavar="DIR",
+                   help="this exact folder as the run folder (created; must not hold a run yet) instead of the next "
+                        "numbered one in --out (batch: one named after each video)")
     p.add_argument("--layout", default=DEFAULTS["layout"], choices=["match", "fill", "source"],
                    help="match = recreate the competitor layout (box, corners, background, per-shot framing); "
                         "fill = full-screen 9:16 keeping the per-shot framing; source = cuts only at RAW size "
@@ -596,6 +599,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if argv[:1] == ["check-all"]:                # python -m match_cuts check-all: every test video, one scorecard
         from .check_all import main as check_all_main
         return check_all_main(argv[1:])
+    if argv[:1] == ["batch"]:                    # python -m match_cuts batch FOLDER: every video of a folder
+        from .batch import main as batch_main
+        return batch_main(argv[1:])
     if argv[:1] == ["learn"]:                    # python -m match_cuts learn PROJECT.prproj: learn from your edit
         from .learn import main as learn_main
         return learn_main(argv[1:])
@@ -626,7 +632,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     # each run its own numbered folder in --out: 1_edit.xml / 2_captions.srt there, everything else in its extras/
     base = Path(cfg.out_dir)
     prev = run_folders.newest_run_dir(base)
-    run_dir = run_folders.new_run_dir(base)
+    if getattr(args, "run_dir", None):
+        run_dir = Path(args.run_dir)
+        if (run_dir / run_folders.EDIT_XML).exists() or (run_dir / run_folders.EXTRAS).exists():
+            print(f"match_cuts: --run-dir {run_dir} holds a run already", file=sys.stderr)
+            return 2
+        run_dir.mkdir(parents=True, exist_ok=True)
+        prev = None
+    else:
+        run_dir = run_folders.new_run_dir(base)
     cfg.deliver_dir, cfg.out_dir = str(run_dir), str(run_dir / run_folders.EXTRAS)
     if prev is not None and (prev / run_folders.EXTRAS / "cutlist.json").is_file():
         cfg.previous_out_dir = str(prev / run_folders.EXTRAS)          # s9_7: compared with the previous run
