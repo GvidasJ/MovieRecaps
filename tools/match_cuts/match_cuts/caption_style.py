@@ -31,7 +31,9 @@ from typing import Iterable, Sequence
 MAX_CHARS = 20
 MAX_WORDS = 5
 PAUSE_WEIGHT = 3.0               # a 0.25 s pause multiplies the odds of a break by e^3 (~20), capped at 0.6 s
-SMOOTH = 3.0                     # additive smoothing of a pair's break share towards the more general counts
+SMOOTH = 1.0                     # additive smoothing of a pair's break share towards the more general counts (3.0
+                                 #   until overnight2: 1.0 trusts a pair's own counts more -- the offline replay
+                                 #   of 11 answer keys: split errors 203 -> 192, exact captions 118 -> 120)
 MODEL_FILE = Path(__file__).resolve().parent / "caption_style.json"
 SRT_DIR = Path(__file__).resolve().parents[3] / "srt"
 
@@ -188,8 +190,9 @@ FLICKER_COMP_FRAMES = 2         # a competitor caption this short (its frames) r
 WORD_IN_S = 0.04                # a word belongs to the caption on screen this long after its (aligned) start
 FIRST_WORD_S = 0.1              # follow mode: a caption's first word may start this long before the caption shows
 MAX_LEAD_S = 0.5                # ... and the caption shows at most this long before its first word
-COMP_BREAK_BONUS = 1.0          # regroup: a break where the competitor's caption changes, its odds times e^this (on
-                                #   the answer keys you break there 44 % of the time, inside one of its captions 26 %)
+COMP_BREAK_BONUS = 0.5          # regroup: a break where the competitor's caption changes, its odds times e^this (on
+                                #   the answer keys you break there 44 % of the time, inside one of its captions 26 %;
+                                #   1.0 until overnight2: 0.5 with SMOOTH 1.0 is the best of the grid, no video worse)
 
 
 def style_captions(words, fps, n_frames: int, *, cuts: Sequence[int] = (), lo: int = 0, hi: int | None = None,

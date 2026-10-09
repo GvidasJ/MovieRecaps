@@ -611,3 +611,16 @@ def test_the_cuts_come_from_the_v1_clips_of_the_edit(monkeypatch):
 def test_title_case_keeps_a_contractions_ending_small():
     assert R._title("THEY'RE") == "They're" and R._title("vanisher's") == "Vanisher's"
     assert R._title("o'brien") == "O'Brien" and R._title("spider-man") == "Spider-Man"
+
+
+def test_the_glossarys_capitals_are_written_as_learned(tmp_path):
+    """video018: "the Vr set" (the glossary has "Vr -> VR" from your fix): capitals cannot be heard, so a
+    capitals-only entry is a text rule like the allowlist's; the other entries stay audio-checked (captions.py)."""
+    from match_cuts import caption_rules as R
+    (tmp_path / "caption_allowlist.txt").write_text("MCU\n", encoding="utf-8")
+    (tmp_path / "caption_glossary.txt").write_text("Vr -> VR\t# video018-fixed\nToby -> Tobey\t# video4\n",
+                                                   encoding="utf-8")
+    assert R.glossary_capitals(tmp_path / "caption_glossary.txt") == ["VR"]
+    lex = R.lexicon(tmp_path / "caption_allowlist.txt")
+    assert lex.allow["vr"] == "VR" and "tobey" not in lex.allow
+    assert not R.case_ok("Vr", lex) and R.case_ok("VR", lex)

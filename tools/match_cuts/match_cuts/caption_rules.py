@@ -96,6 +96,22 @@ def read_allowlist(path: str | Path | None = None) -> list[str]:
     return out
 
 
+def glossary_capitals(path: str | Path) -> list[str]:
+    """The glossary's capitals-only corrections (``learn``: "Vr -> VR", one word, the same letters): the written
+    forms. The sound cannot tell capitals apart, so these are text rules like the allowlist's (the glossary's other
+    entries replace heard words only where the audio fits: captions.py)."""
+    p = Path(path)
+    if not p.is_file():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
+        heard, arrow, written = line.split("#", 1)[0].partition("->")
+        heard, written = heard.strip(), written.strip()
+        if arrow and heard and written and " " not in written and heard != written and heard.lower() == written.lower():
+            out.append(written)
+    return out
+
+
 def lexicon(allowlist: str | Path | None = None) -> Lexicon:
     """The word list (loaded once) with this allowlist."""
     key = str(Path(allowlist) if allowlist else ALLOWLIST_FILE)
@@ -113,7 +129,10 @@ def lexicon(allowlist: str | Path | None = None) -> Lexicon:
             _LEX[""] = base
         base = _LEX[""]
         words = [w for e in read_allowlist(allowlist) for w in e.split()]     # a phrase's words as written too
-        _LEX[key] = Lexicon(base.lower, base.forms, {w.lower().replace("’", "'"): w for w in words}, key)
+        allow = {w.lower().replace("’", "'"): w for w in words}
+        for w in glossary_capitals(Path(key).with_name("caption_glossary.txt")):
+            allow.setdefault(w.lower(), w)              # your capitals from the glossary ("Vr -> VR"): as written
+        _LEX[key] = Lexicon(base.lower, base.forms, allow, key)
     return _LEX[key]
 
 

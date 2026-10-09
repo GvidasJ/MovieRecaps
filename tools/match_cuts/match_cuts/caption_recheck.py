@@ -171,6 +171,36 @@ def _agrees(ws: Sequence[Word], caption: str | None, left: Word | None = None, r
     return any(have[k:k + len(want)] == want for k in range(len(have) - len(want) + 1))
 
 
+def _screen_mix(a_ws: Sequence[Word], b_ws: Sequence[Word], caption: str | None, left: Word | None,
+                right: Word | None) -> list[Word] | None:
+    """The competitor's caption read between the kept words on either side, when it is a word-by-word mix of the
+    two transcriptions (as many words as both, each the edit's or the source's word at that place, both of them
+    used): the edit heard "I gotta go Bye", the source "I to call Bye", the screen "I gotta call" -- each model heard
+    part of it (video018). The words keep the edit's timing. None otherwise."""
+    if not caption or not a_ws or len(a_ws) != len(b_ws) or left is None:
+        return None
+    def toks(texts: Sequence[str]) -> list[str]:             # word for word ("gotta" stays one word)
+        return [n for t in texts for x in str(t).split() for n in [norm(x).strip("'").replace("'", "")] if n]
+    have = toks([caption])
+    na, nb = toks([w.text for w in a_ws]), toks([b.text for b in b_ws])
+    if len(na) != len(a_ws) or len(nb) != len(b_ws):
+        return None
+    lt = toks([left.text])
+    rt = toks([right.text]) if right is not None else []
+    n = len(a_ws)
+    for k in range(len(have) - n):
+        if have[k:k + 1] != lt[-1:]:
+            continue
+        got = have[k + 1:k + 1 + n]
+        after = have[k + 1 + n:k + 2 + n]
+        if len(got) != n or (after and rt and after != rt[:1]):
+            continue
+        if all(g in (x, y) for g, x, y in zip(got, na, nb)) and got != na and got != nb:
+            return [replace(b if g == y and g != x else a, start=a.start, end=a.end)
+                    for g, a, b, x, y in zip(got, a_ws, b_ws, na, nb)]
+    return None
+
+
 def recheck(words: Sequence[Word], y16: np.ndarray | None, pieces: Sequence[Piece],
             source: Callable[[float, float], tuple[np.ndarray, float]] | None,
             transcribe: Callable[[np.ndarray], list[Word]], *, captions: Callable[[float, float], str | None] | None
@@ -316,9 +346,26 @@ def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int
             continue
         left = words[A[i1 - 1]] if i1 > 0 else None
         right = words[A[i2]] if i2 < len(A) else None
+        if a_ws and len(b_ws) > 1 and right is not None and norm(b_ws[-1].text) == norm(right.text):
+            b_ws = b_ws[:-1]                              # the window's edge heard the next word again: "to call Bye"
+        if a_ws and len(b_ws) > 1 and left is not None and norm(b_ws[0].text) == norm(left.text):
+            b_ws = b_ws[1:]
+        if (a_ws and len(b_ws) > len(a_ws) and len(b_ws) > 1 and norm(b_ws[-1].text) == norm(b_ws[-2].text)
+                == norm(a_ws[-1].text) and (len(a_ws) < 2 or norm(a_ws[-2].text) != norm(a_ws[-1].text))):
+            b_ws = b_ws[:-2] + b_ws[-1:]                  # the same: the next word heard twice ("Bye Bye" for "Bye")
         t0 = min([w.start for w in a_ws] + [b.start for b in b_ws] + ([left.start] if left else []))
         t1 = max([w.end for w in a_ws] + [b.end for b in b_ws] + ([right.end] if right else []))
         cap = captions(t0, t1) if captions is not None else None
+        mix = _screen_mix(a_ws, b_ws, cap, left, right)
+        if mix is not None:                               # each transcript heard part of it: the screen's words
+            swaps.append((list(a_idx), mix))
+            rep["changed"] += sum(1 for a, m in zip(a_ws, mix) if norm(a.text) != norm(m.text))
+            rep["changes"].append({"time": round(a_ws[0].start, 3), "end": round(a_ws[-1].end, 3),
+                                   "from": _text(a_ws), "to": _text(mix),
+                                   "why": f"the competitor's caption: '{_text(a_ws)}' / '{_text(b_ws)}' heard, "
+                                          "each word of it in one of them", "conf": [round(_conf(a_ws), 2),
+                                                                                     round(_conf(b_ws), 2)]})
+            continue
         agree_a, agree_b = _agrees(a_ws, cap, left, right), _agrees(b_ws, cap, left, right)
         t0 = min([w.start for w in a_ws] + [b.start for b in b_ws])
         t1 = max([w.end for w in a_ws] + [b.end for b in b_ws])

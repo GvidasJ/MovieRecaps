@@ -447,3 +447,20 @@ def test_the_screen_showing_a_learned_correction_needs_only_to_fit_the_audio():
     assert out[2].text == "zendeya" and rows[0]["taken"] is False                       # unknown: as heard
     out, rows = R.screen_readings(words, shown, y, [_scored(-0.4), _scored(-0.4)], glossary=[("zendeya", "Zendaya")])
     assert C.norm(out[2].text) == "zendaya" and rows[0]["taken"] is True and rows[0]["glossary"] is True
+
+
+def test_the_screen_mixing_both_transcriptions_word_by_word_wins_and_the_windows_edge_word_is_not_doubled():
+    """output/019 (video018 full size): the edit heard "I gotta go. Bye.", the RAW recheck "I to call Bye" -- its
+    window caught the next "Bye" again -- and "to call Bye" replaced "gotta go": "I to call Bye Bye". The
+    competitor's screen says "I gotta call" / "bye": each model heard part of it -- the screen's words, the edit's
+    timing, one "Bye"."""
+    words = [W("I", 0.1, 0.3), W("gotta", 0.35, 0.5, 0.4), W("go.", 0.5, 0.56, 0.4), W("Bye.", 0.9, 1.4)]
+    src = Source([("I", 10.1, 10.3, 0.9), ("to", 10.3, 10.36, 0.83), ("call.", 10.36, 10.5, 0.83),
+                  ("Bye.", 10.52, 10.58, 0.83), ("Bye.", 10.9, 11.4, 0.9)])
+    spans = [{"comp_in": 0, "comp_out": 18, "ocr": "I gotta call", "score": 0.97, "agreement": 1.0},
+             {"comp_in": 18, "comp_out": 30, "ocr": "bye", "score": 0.97, "agreement": 1.0}]
+    out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe, captions=R.clear_captions(spans, Fraction(30)))
+    assert [w.text for w in out] == ["I", "gotta", "call", "Bye"]
+    assert (out[2].start, out[2].end) == (0.5, 0.56) and "each word of it" in rep["changes"][0]["why"]
+    out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe)       # no screen: the edge "Bye" not doubled
+    assert [w.text for w in out].count("Bye") == 1
