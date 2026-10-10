@@ -103,29 +103,61 @@ class FrameStore:
         return self.frames.get(int(i))
 
 
+LAZY_CACHE_BYTES = 512 << 20   # a LazyFrames keeps at most this many bytes of frames (as well as ``keep`` frames): 600
+#                                4K gray frames are 5 GB, in each of the 5 processes of the full-resolution pass (a
+#                                16 GB laptop swaps); 512 MB still holds 61 4K / 256 1080p frames
+READ_AHEAD = 48                # a miss at most this many frames past the running decode continues it (no seek)
+
+
 class LazyFrames:
     """Full-resolution gray frames of one video decoded on demand -- ``around`` frames on each side of one asked for
-    come along (criterion 2 looks at a cut's two frames and moves it frame by frame) -- at most ``keep`` in memory,
-    the least recently used going first. One decoder serves every read (seeking): a decoder opened and closed for
+    come along (criterion 2 looks at a cut's two frames and moves it frame by frame) -- at most ``keep`` in memory and
+    ``max_bytes``, the least recently used going first. One decoder serves every read: a decoder opened and closed for
     each read starts and ends its frame threads every time, and in a process that has loaded CUDA that keeps memory
-    for good -- ~70 MB per 1080x1920 decoder (Task 8: 92 GB on video1's 1,654-frame finished video)."""
+    for good -- ~70 MB per 1080x1920 decoder (Task 8: 92 GB on video1's 1,654-frame finished video). A miss just
+    ahead of the frames decoded last (READ_AHEAD) goes on decoding from there instead of seeking: a seek decodes from
+    the keyframe before, and the full-resolution phase walks a segment frame by frame -- on 020's 4K RAW (keyframes up
+    to 4 s apart) every few frames decoded a GOP again. The frames are the same either way."""
 
-    def __init__(self, info: Any, keep: int = 192, around: int = 2):
+    def __init__(self, info: Any, keep: int = 192, around: int = 2, max_bytes: int = LAZY_CACHE_BYTES):
         self.info, self.keep, self.around = info, int(keep), int(around)
+        self.max_bytes = int(max_bytes)
         self.n = int(getattr(info, "nb_frames", 0) or 0)
         self.frames: OrderedDict[int, np.ndarray] = OrderedDict()
         self._rd: Any = None
+        self._run: Any = None          # the decode running on (VideoReader.frames from some frame, to the end) ...
+        self._pos = -1                 # ... and the last frame it gave
+        self.seeks = 0
 
     def _reader(self) -> Any:
         if self._rd is None:
             self._rd = open_reader(self.info)
         return self._rd
 
+    def _stop(self) -> None:
+        if self._run is not None:
+            self._run.close()
+        self._run, self._pos = None, -1
+
     def close(self) -> None:
+        self._stop()
         self.frames.clear()
         if self._rd is not None:
             self._rd.close()
             self._rd = None
+
+    def _keep(self, j: int, img: np.ndarray) -> None:
+        self.frames[int(j)] = np.ascontiguousarray(img)
+        self.frames.move_to_end(int(j))
+
+    def _trim(self) -> None:
+        limit = self.keep
+        if self.frames and self.max_bytes > 0:
+            nb = next(iter(self.frames.values())).nbytes
+            if nb:
+                limit = max(8, min(limit, self.max_bytes // nb))
+        while len(self.frames) > limit:
+            self.frames.popitem(last=False)
 
     def prefetch(self, a: int, b: int) -> None:
         """Frames [a, b) in one sequential decode (a segment's frames), when they fit in ``keep``."""
@@ -133,11 +165,27 @@ class LazyFrames:
         b = min(int(b), self.n) if self.n else int(b)
         if b <= a or b - a > self.keep or all(i in self.frames for i in range(a, b)):
             return
+        self._stop()                               # the reader seeks: a running decode cannot go on after it
+        self.seeks += 1
         for j, img in self._reader().frames(a, b, fmt="gray"):
-            self.frames[int(j)] = np.ascontiguousarray(img)
-            self.frames.move_to_end(int(j))
-        while len(self.frames) > self.keep:
-            self.frames.popitem(last=False)
+            self._keep(j, img)
+        self._trim()
+
+    def _decode_to(self, a: int, b: int) -> None:
+        """Every frame up to b decoded, frames [a, b] among them: on from the running decode when a is just ahead of
+        it, else from a (a seek)."""
+        if self._run is None or not (self._pos < a <= self._pos + 1 + READ_AHEAD):
+            self._stop()
+            self._run = self._reader().frames(a, None, fmt="gray")
+            self._pos = a - 1
+            self.seeks += 1
+        for j, img in self._run:
+            self._pos = int(j)
+            self._keep(j, img)
+            if j >= b:
+                break
+        else:
+            self._run, self._pos = None, -1        # the end of the video
 
     def get(self, i: int) -> np.ndarray | None:
         i = int(i)
@@ -147,11 +195,10 @@ class LazyFrames:
             a, b = max(0, i - self.around), i + self.around
             if self.n:
                 b = min(b, self.n - 1)
-            for j, img in self._reader().frames(a, b + 1, fmt="gray"):
-                self.frames[int(j)] = np.ascontiguousarray(img)
-                self.frames.move_to_end(int(j))
-            while len(self.frames) > self.keep:
-                self.frames.popitem(last=False)
+            if self._run is not None and self._pos < i <= self._pos + 1 + READ_AHEAD:
+                a = self._pos + 1                  # the frames before it are decoded (and kept) already
+            self._decode_to(a, b)
+            self._trim()
         img = self.frames.get(i)
         if img is not None:
             self.frames.move_to_end(i)
@@ -714,7 +761,7 @@ class SideScorer:
         try:
             if self._pool is None:
                 self._pool = GpuPool(self.workers, *self._spec)
-            return self._pool.run(reqs, self.allowed)
+            return self._pool.run(reqs, self.allowed, "criterion 2 at full resolution")
         except Exception as e:  # noqa: BLE001 - computed when asked then (the same numbers, more slowly)
             log.warning("full resolution: the %d GPU processes failed (%s: %s); computing in this process",
                         self.workers, type(e).__name__, e)
@@ -746,8 +793,29 @@ def _call_key(k: int, items: Sequence[tuple[int, Sim, bool]], refine: bool) -> t
 _SIDE: dict = {}
 
 
+def _watch_parent(poll_s: float = 2.0, exit_fn: Any = None) -> None:
+    """End this process when the one that started it is gone: a run killed by force leaves its GPU processes behind,
+    holding the card's memory (10 October: 12 of them from stopped runs held 10 GB of it for hours, and every run
+    after them was slower)."""
+    import multiprocessing as mp
+    import os
+    import threading
+    parent = mp.parent_process()
+    if parent is None:
+        return
+    end = exit_fn if exit_fn is not None else os._exit
+
+    def watch() -> None:
+        while parent.is_alive():
+            time.sleep(poll_s)
+        end(1)
+    threading.Thread(target=watch, name="match_cuts-parent-watch", daemon=True).start()
+
+
 def _side_init(comp_info: Any, raw_info: Any, raw_wh: tuple[float, float], n_raw: int) -> None:
-    """A GPU process's own SideScorer (decoders, scorer, CUDA), kept for every batch it is given."""
+    """A GPU process's own SideScorer (decoders, scorer, CUDA), kept for every batch it is given -- and the process
+    ends with the run that started it (_watch_parent)."""
+    _watch_parent()
     _SIDE["sc"] = SideScorer(comp_info, raw_info, None, raw_wh, n_raw)
 
 
@@ -769,10 +837,15 @@ def _side_run(task: tuple) -> list:
     return out
 
 
+POOL_PARTS = 4             # a batch goes to the GPU processes in this many runs of consecutive requests each: the
+#                            progress counter moves as runs come back (one run per process said nothing for 27 min)
+
+
 class GpuPool:
     """Processes sharing the GPU, each with its own SideScorer for a whole stage (Task 9): one process leaves the GPU
     mostly idle while it decodes, launches small kernels and waits on them. A batch is cut in runs of consecutive
-    requests (one per process) and comes back in order."""
+    requests (POOL_PARTS per process) and comes back in order, counted as it does (common.Progress: '<name>: x/y
+    frames done' in the log)."""
 
     def __init__(self, workers: int, comp_info: Any, raw_info: Any, raw_wh: tuple[float, float], n_raw: int):
         import multiprocessing as mp
@@ -781,15 +854,18 @@ class GpuPool:
         self.ex = ProcessPoolExecutor(max_workers=self.n, mp_context=mp.get_context("spawn"), initializer=_side_init,
                                       initargs=(comp_info, raw_info, tuple(raw_wh), int(n_raw)))
 
-    def run(self, reqs: list[tuple], allowed: Any) -> list:
-        size = -(-len(reqs) // self.n)
+    def run(self, reqs: list[tuple], allowed: Any, name: str = "full resolution") -> list:
+        from .common import Progress
+        size = max(1, -(-len(reqs) // (self.n * POOL_PARTS)))
         tasks = []
         for p in range(0, len(reqs), size):
             part = reqs[p:p + size]
             tasks.append((part, {int(r[1]): np.asarray(allowed(int(r[1])), bool) for r in part}))
         out: list = []
-        for res in self.ex.map(_side_run, tasks):
-            out.extend(res)
+        with Progress(name, len(reqs), "frames") as prog:
+            for res in self.ex.map(_side_run, tasks):
+                out.extend(res)
+                prog.step(len(res))
         return out
 
     def close(self) -> None:
@@ -914,7 +990,7 @@ def _verify_parallel(shown: dict, comp_info: Any, raw_info: Any, allowed: Any, r
         pool = GpuPool(workers, comp_info, raw_info, raw_wh, n_raw)
         ks = list(shown)
         res = pool.run([("vframe", int(k), int(shown[k][1]), float(shown[k][2]), shown[k][3],
-                         bool(shown[k][0].flip_h)) for k in ks], allowed)
+                         bool(shown[k][0].flip_h)) for k in ks], allowed, "9.9 full resolution")
         return dict(zip(ks, res))
     except Exception as e:  # noqa: BLE001
         log.warning("9.9: the %d GPU processes failed (%s: %s); measuring in this process", workers, type(e).__name__, e)

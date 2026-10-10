@@ -78,7 +78,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from . import phase_solve as ps
-from .common import DecisionLog, log, null_dlog, seed_everything, timecode
+from .common import DecisionLog, Progress, log, null_dlog, seed_everything, timecode
 from .geometry import Sim, interpolate_keys, rdp
 from .model import REASSIGN_REASONS, FrameMap, Segment, Status, reassign_code
 
@@ -1934,24 +1934,25 @@ class _Builder:
                                         if js[k] >= 0 and start(k) is not None])
         new = dict(have)
         measured = added = 0
-        for c0 in range(0, len(todo), FULL_CHUNK):
-            chunk = todo[c0:c0 + FULL_CHUNK]
-            done = hasattr(self.full, "measured") and all(self.full.measured(k, js[k], seg.flip)
-                                                          for k in chunk if js[k] >= 0)
-            if not done:                                   # (frames read here only for what is left to measure)
-                self.full.comp.prefetch(chunk[0], chunk[-1] + 1)
-                jv = [js[k] for k in chunk if js[k] >= 0]
-                if jv:
-                    self.full.raw.prefetch(min(jv), max(jv) + 1)
-            for k in chunk:
-                s0, j = start(k), js[k]
-                if s0 is None or j < 0:
-                    continue
-                r = self.full.measure(k, j, s0, seg.flip)
-                if r is not None and r[1] >= FULL_SAMPLE_MIN:
-                    added += k not in have
-                    measured += 1
-                    new[k] = (r[0], j)
+        with Progress(f"framing at full resolution (frames {seg.a}-{seg.b})", len(todo), "frames") as prog:
+            for c0 in range(0, len(todo), FULL_CHUNK):
+                chunk = todo[c0:c0 + FULL_CHUNK]
+                done = hasattr(self.full, "measured") and all(self.full.measured(k, js[k], seg.flip)
+                                                              for k in chunk if js[k] >= 0)
+                if not done:                               # (frames read here only for what is left to measure)
+                    self.full.comp.prefetch(chunk[0], chunk[-1] + 1)
+                    jv = [js[k] for k in chunk if js[k] >= 0]
+                    if jv:
+                        self.full.raw.prefetch(min(jv), max(jv) + 1)
+                for k in chunk:
+                    s0, j = start(k), js[k]
+                    if s0 is not None and j >= 0:
+                        r = self.full.measure(k, j, s0, seg.flip)
+                        if r is not None and r[1] >= FULL_SAMPLE_MIN:
+                            added += k not in have
+                            measured += 1
+                            new[k] = (r[0], j)
+                    prog.step()
         info["full_res"] = measured
         info["full_res_added"] = added
         return [(k, new[k][0], new[k][1]) for k in sorted(new)]
@@ -3894,24 +3895,28 @@ class _Builder:
             self.full.prefetch([(int(k), [(j, self.sim_at(S, int(k)), S.flip)
                                           for j in range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1)], True)
                                 for i, k in enumerate(ks) if int(max(j_lo[i], j_hi[i])) > int(min(j_lo[i], j_hi[i]))])
-        for i, k in enumerate(ks):
-            cands = list(range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1))
-            if len(cands) < 2:
-                continue
-            sc = self.full(int(k), [(j, self.sim_at(S, int(k)), S.flip) for j in cands], refine=True)
-            if sc is None or not np.all(np.isfinite(sc)):
-                skipped["unreadable"] += 1
-                continue
-            for j, z in zip(cands, sc):
-                scored[(int(k), j)] = float(z)
-            top = float(np.max(sc))
-            if top - float(np.min(sc)) <= FULL_PHASE_NOISE:
-                skipped["alike"] += 1
-                continue                                 # the candidates look alike (a repeated picture)
-            for j, z in zip(cands, sc):
-                pi.append(i)
-                pj.append(j)
-                pw.append(float(np.clip((top - float(z)) / 0.01, 0.0, 1.0)))
+        with Progress(f"phase at full resolution (frames {S.a}-{S.b})", len(ks), "frames") as prog:
+            for i, k in enumerate(ks):
+                try:
+                    cands = list(range(int(min(j_lo[i], j_hi[i])), int(max(j_lo[i], j_hi[i])) + 1))
+                    if len(cands) < 2:
+                        continue
+                    sc = self.full(int(k), [(j, self.sim_at(S, int(k)), S.flip) for j in cands], refine=True)
+                    if sc is None or not np.all(np.isfinite(sc)):
+                        skipped["unreadable"] += 1
+                        continue
+                    for j, z in zip(cands, sc):
+                        scored[(int(k), j)] = float(z)
+                    top = float(np.max(sc))
+                    if top - float(np.min(sc)) <= FULL_PHASE_NOISE:
+                        skipped["alike"] += 1
+                        continue                         # the candidates look alike (a repeated picture)
+                    for j, z in zip(cands, sc):
+                        pi.append(i)
+                        pj.append(j)
+                        pw.append(float(np.clip((top - float(z)) / 0.01, 0.0, 1.0)))
+                finally:
+                    prog.step()
         if not pi:
             self.log("full_res_phase", seg=[int(S.a), int(S.b)], frames=0, kept=False, **skipped)
             return out

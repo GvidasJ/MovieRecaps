@@ -388,3 +388,61 @@ def test_a_clip_keeping_the_competitors_own_framing_is_listed_not_failed(tmp_pat
     assert len(problems) == len(clips)                                     # the extended stretch is not inside it
     problems, exceptions, _ = ex.premiere_person_problems(xml, Ctx(), cfg, spans, spans)
     assert not problems and all("keeps the competitor's own framing" in e for e in exceptions)
+
+
+def test_lazy_frames_decode_on_instead_of_seeking_and_give_the_same_frames(synthetic_mini, tmp_path, monkeypatch):
+    """020's 4K RAW (keyframes up to 4 s apart): the full-resolution phase walks a segment frame by frame, and every
+    few frames LazyFrames sought and decoded a GOP again (27 minutes for one segment). A miss just ahead of the running
+    decode now goes on decoding: the same frames, a few seeks; and at most max_bytes of frames are kept."""
+    from match_cuts import fullres, probe
+    raw = probe.probe(str(synthetic_mini["raw"]), "raw", tmp_path, decode=True)
+    asks = [j for k in range(60) for j in (10 + int(k * 1.25), 11 + int(k * 1.25), 12 + int(k * 1.25))]
+    asks += [40, 15, 90, 3]                                    # criterion 2: back to a few cuts
+    new = fullres.LazyFrames(raw, keep=600)
+    got = {j: new.get(j) for j in asks}
+    assert new.seeks <= 5
+    monkeypatch.setattr(fullres, "READ_AHEAD", -1)            # every miss seeks: how it read before
+    old = fullres.LazyFrames(raw, keep=600)
+    want = {j: old.get(j) for j in asks}
+    assert old.seeks > 20
+    assert all(got[j] is not None and np.array_equal(got[j], want[j]) for j in asks)
+    small = fullres.LazyFrames(raw, keep=600, max_bytes=10 * got[asks[0]].nbytes)
+    for j in range(40):
+        small.get(j)
+    assert len(small.frames) == 10
+    for lf in (new, old, small):
+        lf.close()
+
+
+def test_the_gpu_processes_fit_in_the_free_gpu_memory(monkeypatch):
+    """Several GPU processes next to another run on the card (or on a small laptop card) page its memory out: many
+    times slower. As many as the free memory holds, the rest in this process -- the same numbers either way."""
+    from match_cuts import pipeline as P
+    cfg = Config(out_dir=".", full_res_workers=4)
+    for free_gb, want in ((14.6, 4), (6.0, 3), (3.5, 0), (None, 4)):
+        monkeypatch.setattr(P, "release_gpu_memory", lambda why, f=free_gb: None if f is None else int(f * 2 ** 30))
+        assert P.gpu_workers(cfg, "test") == want
+
+
+def test_a_gpu_process_ends_when_the_run_that_started_it_is_gone(monkeypatch):
+    """Runs stopped by force left their GPU processes behind (12 of them held 10 GB of the card for hours): each one
+    now watches the process that started it and ends with it."""
+    import multiprocessing as mp
+    import time
+    from match_cuts import fullres
+    calls: list = []
+
+    class Gone:
+        def is_alive(self) -> bool:
+            return False
+    monkeypatch.setattr(mp, "parent_process", lambda: Gone())
+    fullres._watch_parent(poll_s=0.01, exit_fn=calls.append)
+    for _ in range(200):
+        if calls:
+            break
+        time.sleep(0.01)
+    assert calls == [1]
+    monkeypatch.setattr(mp, "parent_process", lambda: None)   # the run itself (no parent pool): nothing to watch
+    fullres._watch_parent(poll_s=0.01, exit_fn=calls.append)
+    time.sleep(0.05)
+    assert calls == [1]

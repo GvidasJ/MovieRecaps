@@ -245,6 +245,21 @@ def test_a_run_holding_a_framing_that_shows_nobody_keeps_it():
         assert [not ex._same_framing(c.keys[0][1], sim_showing(540)) for c in clips] == [follow, follow]
 
 
+def test_a_held_framing_is_no_failed_re_frame_in_the_notes():
+    """021 (final run): S47..S49 held S46's framing under --min-move; the notes listed them as "could not show the
+    person speaking: re-frame it by hand" -- nothing was re-framed. Only a clip framed on the person gets a note."""
+    from fractions import Fraction as F
+    from match_cuts import export_xml_edl as ex
+    far = SP.Faces("speaker", True, (1500.0, 180.0, 1700.0, 420.0), [(1500.0, 180.0, 1700.0, 420.0)])
+    c = _pclip("S02", 60, 120, 660, sim_showing(540))
+    c.framing_note = "framing kept from S01: the competitor's moves 20 px here, under --min-move 250"
+    ex._person_notes([c], {id(c): sim_showing(560)}, _Ctx([], [((0.0, 100.0), far)]), RAW, WIN, F(60))
+    assert c.person_note == ""
+    c.framing_note = "S01..S02: S02 uncertain replaced: framed on the person (zoom kept)"
+    ex._person_notes([c], {id(c): sim_showing(560)}, _Ctx([], [((0.0, 100.0), far)]), RAW, WIN, F(60))
+    assert c.person_note.startswith("could not show the person speaking")
+
+
 def test_a_clip_holds_the_framing_before_when_its_own_does_not_show_its_person_either():
     """video3 / video1 (night 3 check-all): the held framing hid the clip's speaker, so the clip took its own -- which
     hid them too (the competitor showed someone else) and sat 1 px / 71 px off the one before: a change under

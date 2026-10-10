@@ -1556,10 +1556,10 @@ def side_scorer(ctx: Context) -> Any:
     if fullres.available(ctx.cfg) or ctx.comp_info is None or ctx.raw_info is None or ctx.raw_proxy is None:
         return None
     try:
-        release_gpu_memory("criterion 2 at full resolution")
+        workers = gpu_workers(ctx.cfg, "criterion 2 at full resolution")
         allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, ctx.cfg)
         return fullres.SideScorer(ctx.comp_info, ctx.raw_info, allowed, tuple(ctx.raw_proxy.full_size),
-                                  int(ctx.raw_info.nb_frames), workers=int(getattr(ctx.cfg, "full_res_workers", 0) or 0))
+                                  int(ctx.raw_info.nb_frames), workers=workers)
     except Exception as e:  # noqa: BLE001 - the proxy decides then
         log.warning("criterion 2 at full resolution not available (%s: %s): the proxy decides", type(e).__name__, e)
         return None
@@ -2404,20 +2404,20 @@ def initial_overlays(layout: Layout, fallback: Any) -> Any:
     return copy.deepcopy(fallback)
 
 
-def release_gpu_memory(why: str) -> None:
+def release_gpu_memory(why: str) -> int | None:
     """Before the full-resolution GPU processes start (fullres.GpuPool): the GPU memory this process holds but no longer
     needs given back -- the speech models the speech map and the captions loaded (asr, align: loaded again if a later
     step needs one) and torch's cached blocks. Task 10: video4's full-resolution check (9.9) ran its 4 processes next
     to the 6.6 GB this process still held -- 15.4 of the card's 16.3 GB, and 4 times slower than in one process. Logs
-    what is free; does nothing without CUDA."""
+    and returns what is free (bytes); does nothing without CUDA (None)."""
     import gc
     try:
         import torch
         if not torch.cuda.is_available():
-            return
+            return None
         before = torch.cuda.mem_get_info()[0]
     except Exception:  # noqa: BLE001 - no CUDA: nothing to give back
-        return
+        return None
     for name, fn in (("asr", "unload_all"), ("align", "unload")):
         mod = sys.modules.get(f"{__package__}.{name}")       # only what this run loaded (no import just for this)
         if mod is not None:
@@ -2427,6 +2427,28 @@ def release_gpu_memory(why: str) -> None:
     free, total = torch.cuda.mem_get_info()
     log.info("%s: %.1f of %.1f GB of GPU memory free for its processes (%.1f GB given back)", why, free / 2 ** 30,
              total / 2 ** 30, (free - before) / 2 ** 30)
+    return int(free)
+
+
+GPU_WORKER_BYTES = 3 << 29    # 1.5 GB: what one full-resolution GPU process takes at most -- its CUDA context, its
+#                               frame caches (fullres.RAW_CACHE_BYTES + COMP_CACHE_BYTES), a refinement's buffers
+
+
+def gpu_workers(cfg: Config, why: str) -> int:
+    """The GPU processes of a full-resolution step: cfg.full_res_workers, or as many as the GPU memory free now holds
+    next to this process (GPU_WORKER_BYTES each) -- more than fit share the card by paging its memory out, many times
+    slower (020's 4K RAW next to another run: 27 minutes for one segment's phase). Each frame's numbers do not depend
+    on the processes (fullres), so neither do the results. Under 2: the work runs in this process (0)."""
+    want = int(getattr(cfg, "full_res_workers", 0) or 0)
+    free = release_gpu_memory(why)
+    if free is None or want < 2:
+        return want
+    n = min(want, max(0, int(free // GPU_WORKER_BYTES) - 1))       # one share kept for this process
+    n = n if n >= 2 else 0
+    if n < want:
+        log.info("%s: %s instead of %d GPU processes -- %.1f GB of GPU memory free (another program on the GPU?)",
+                 why, f"{n} GPU processes" if n else "this process alone", want, free / 2 ** 30)
+    return n
 
 
 def _full_frames(ctx: Context) -> tuple[Any, Any]:
@@ -2457,12 +2479,12 @@ def stage_full_res(ctx: Context) -> None:
         log.info("full-resolution re-check: cache hit %s", fm_path.name)
     else:
         try:
-            release_gpu_memory("full-resolution re-check")
+            workers = gpu_workers(cfg, "full-resolution re-check")
             comp_st, raw_st = _full_frames(ctx)
             allowed = visual_match.AllowedMasks(ctx.layout, ctx.overlays, ctx.comp_proxy, cfg)
             fm, res = fullres.recheck(ctx.fm_pre, comp_st, raw_st, allowed, tuple(ctx.raw_proxy.full_size),
                                       int(ctx.raw_info.nb_frames), int(Status.MATCH), ctx.dlog,
-                                      workers=int(getattr(cfg, "full_res_workers", 0) or 0))
+                                      workers=workers)
         except Exception as e:  # noqa: BLE001 - the proxy analysis stands; said in the summary
             log.error("full-resolution re-check failed: %s\n%s", e, traceback.format_exc())
             ctx.full_res["why_not"] = f"the re-check failed ({type(e).__name__}: {e})"
@@ -3488,13 +3510,13 @@ def full_res_check(ctx: Context) -> dict | None:
     if fullres.available(ctx.cfg) or not ctx.segments:
         return None
     try:
-        release_gpu_memory("9.9 full resolution")
+        workers = gpu_workers(ctx.cfg, "9.9 full resolution")
         comp_st, raw_st = _full_frames(ctx)
         fm = ctx.fm if ctx.fm is not None else ctx.fm_pre
         res = fullres.verify(ctx.segments, ctx.n_comp, comp_st, raw_st, verify_mod._allowed_fn(ctx),
                              tuple(ctx.raw_proxy.full_size), ctx.comp_fps, ctx.raw_fps, int(ctx.raw_info.nb_frames),
                              pair_label=None if fm is None else np.asarray(fm.pair_label),
-                             workers=int(getattr(ctx.cfg, "full_res_workers", 0) or 0))
+                             workers=workers)
     except Exception as e:  # noqa: BLE001 - an extra check that could not run: said, c1-c6 still decide
         log.error("full-resolution verification could not run: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"full-resolution verification could not run ({type(e).__name__}: {e})")

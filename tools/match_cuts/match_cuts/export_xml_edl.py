@@ -2529,7 +2529,9 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
 def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], sp: Any, raw_wh: tuple[float, float],
                   win: tuple[float, float, float, float], fps: Fraction, follow: bool = False) -> None:
     """The re-framed clips' notes (the end summary lists them): every clip whose competitor framing would not show
-    its person and whose final framing does -- who, where in the RAW, how far the picture moved."""
+    its person and whose final framing does -- who, where in the RAW, how far the picture moved. Only a clip framed on
+    the person (_settle_framing) -- a --min-move hold of the framing before is no re-frame (021 S46..S52 were listed
+    as "could not show the person speaking: re-frame it by hand"); --follow-speaker: every changed one, as before."""
     from . import speakers
     for c in clips:
         old, new = competitor.get(id(c)), (c.keys[0][1] if c.keys else None)
@@ -2539,9 +2541,10 @@ def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], 
         flip = bool(c.seg.flip_h)
         before = speakers.passes(old, f, raw_wh[0], flip, win)
         after = speakers.passes(new, f, raw_wh[0], flip, win)
-        if before or _same_framing(old, new) or (not follow and not after and
-                                                  speakers.shows_anyone(new, f, raw_wh[0], flip, win)):
-            continue                     # (the competitor's framing kept on another person: its choice, no note)
+        if before or _same_framing(old, new) or (not follow and (
+                "framed on the person" not in str(c.framing_note) or
+                (not after and speakers.shows_anyone(new, f, raw_wh[0], flip, win)))):
+            continue                     # (the competitor's framing kept, or held: its choice, no note)
         b = speakers.target(new, f, raw_wh[0], flip, win)
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
                "a person": "a person (nobody speaks)"}.get(f.how, f.how)
