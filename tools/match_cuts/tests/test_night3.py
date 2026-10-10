@@ -360,3 +360,31 @@ def test_restyle_checks_the_captions_against_the_frames_caption_zone(tmp_path):
     lines = frame_check(styled)
     assert lines[0].startswith("FRAME:") and len(lines) > 1
     assert frame_check(tmp_path / "elsewhere" / "x.prproj") == []                 # no frame.json: no check
+
+
+def test_a_clip_keeping_the_competitors_own_framing_is_listed_not_failed(tmp_path, monkeypatch):
+    """021 S49 / S51 / S52: the competitor's own framing is kept (the face detection missed its subject, the laughing
+    man): the XML PERSON check lists the detected speaker outside it for a look instead of failing the run -- judged
+    on the planned clip's whole stretch, which the speech-safe cuts may extend past the clip's own RAW (S49 did)."""
+    from match_cuts import speakers as SP
+    kc, _ = keep_speed(cutlist())
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    xml = tmp_path / "1_edit.xml"
+    ex.write_premiere_xml(kc, xml, cfg)
+    clips = ex.parse_premiere_xml(xml)["clips"]
+    face = SP.Faces("speaker", True, (0.0, 180.0, 40.0, 300.0), [(0.0, 180.0, 40.0, 300.0)])
+
+    class Ctx:
+        def faces(self, t0, t1):
+            return face
+    monkeypatch.setattr(SP, "passes", lambda *a, **k: False)               # nobody of the clip is in the window
+    monkeypatch.setattr(SP, "shows_anyone", lambda *a, **k: False)
+    f = 60.0
+    spans = [(min(c["in"], c["out"]) / f - 0.5, max(c["in"], c["out"]) / f + 0.5) for c in clips]   # + extensions
+    problems, exceptions, _ = ex.premiere_person_problems(xml, Ctx(), cfg, spans)
+    assert len(problems) == len(clips) and not exceptions
+    own = [(min(c["in"], c["out"]) / f, max(c["in"], c["out"]) / f) for c in clips]       # the clips' own RAW only
+    problems, _, _ = ex.premiere_person_problems(xml, Ctx(), cfg, spans, own)
+    assert len(problems) == len(clips)                                     # the extended stretch is not inside it
+    problems, exceptions, _ = ex.premiere_person_problems(xml, Ctx(), cfg, spans, spans)
+    assert not problems and all("keeps the competitor's own framing" in e for e in exceptions)

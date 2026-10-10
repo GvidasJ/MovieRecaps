@@ -3863,8 +3863,7 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
             exceptions.append(f"{where}: shows another person than {who} found (the competitor's choice of whom to "
                               f"show, kept) -- check" + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
             continue
-        ca, cb = sorted((c["in"] / f, c["out"] / f))
-        if own and any(o0 - tol <= ca and cb <= o1 + tol for o0, o1 in own):
+        if own and any(o0 - tol <= a and b <= o1 + tol for o0, o1 in own):
             exceptions.append(f"{where}: keeps the competitor's own framing -- {who} found by the detection is outside "
                               "it (the face detection may miss the competitor's subject) -- check"
                               + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
@@ -3958,7 +3957,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 f_ = float(premiere_settings(cfg)["fps"])
                 plan_spans = [(min(c.person_span or (c.src_in, c.src_out)) / f_,
                                max(c.person_span or (c.src_in, c.src_out)) / f_) for c in pc]
-                own_spans = [(min(c.src_in, c.src_out) / f_, max(c.src_in, c.src_out) / f_) for c in pc
+                own_spans = [(min(c.person_span or (c.src_in, c.src_out)) / f_,
+                              max(c.person_span or (c.src_in, c.src_out)) / f_) for c in pc
                              if _own_framing([c]) and "framed on the person" not in str(c.framing_note)]
             except Exception:  # noqa: BLE001 - each clip on its own then
                 plan_spans, own_spans = None, None
