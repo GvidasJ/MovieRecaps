@@ -43,6 +43,7 @@ class Case:
     notes: str = ""
     full_raw: Path | None = None             # the full-size original on this machine (None: not here)
     full_competitor: Path | None = None
+    raw_offset: float = 0.0                  # raw.mp4 is a window of full_raw starting at this second (window_copy)
 
     @property
     def has_key(self) -> bool:
@@ -65,9 +66,10 @@ def load(d: Path) -> Case | None:
         return None
     srt = d / "answer.srt"
     edit = next((d / n for n in ("answer_edit.json", "answer_edit.xml") if (d / n).is_file()), None)
-    return Case(d.name, d, comp, raw, list(meta.get("options") or []), srt if srt.is_file() else None, edit,
+    opts = [str(o).replace("{case}", str(d)) for o in meta.get("options") or []]      # {case}: the case's folder
+    return Case(d.name, d, comp, raw, opts, srt if srt.is_file() else None, edit,
                 str(meta.get("timeline") or "edit"), str(meta.get("notes") or ""),
-                _here(meta.get("full_raw")), _here(meta.get("full_competitor")))
+                _here(meta.get("full_raw")), _here(meta.get("full_competitor")), float(meta.get("raw_offset") or 0.0))
 
 
 def _here(p: Any) -> Path | None:
@@ -84,8 +86,27 @@ def full_size(case: Case) -> Case | None:
     if case.full_raw is None and case.full_competitor is None:
         return None
     import dataclasses
+    edit = case.answer_edit
+    if case.full_raw is not None and abs(case.raw_offset) > 1e-9 and edit is not None and edit.suffix == ".json":
+        # raw.mp4 is a window of the full RAW: the key moves to the full RAW's time
+        edit = shifted_answer(edit, case.raw_offset, REPO / "work" / "check-all" / "keys" / case.name)
     return dataclasses.replace(case, name=f"{case.name}@full", raw=case.full_raw or case.raw,
-                               competitor=case.full_competitor or case.competitor)
+                               competitor=case.full_competitor or case.competitor, answer_edit=edit, raw_offset=0.0)
+
+
+def for_raw(case: Case, raw: str | Path | None) -> Case:
+    """The case as a run on ``raw`` scores against it: a window case (raw_offset) run on another file than its own
+    raw.mp4 -- the full RAW, e.g. your output\\021 -- gets its key moved onto the full RAW's time."""
+    import dataclasses
+    if not raw or abs(case.raw_offset) < 1e-9 or case.answer_edit is None or case.answer_edit.suffix != ".json":
+        return case
+    try:
+        if Path(raw).stat().st_size == case.raw.stat().st_size:
+            return case                                  # the case's own window copy: its key as it is
+    except OSError:
+        return case
+    edit = shifted_answer(case.answer_edit, case.raw_offset, REPO / "work" / "check-all" / "keys" / case.name)
+    return dataclasses.replace(case, answer_edit=edit, raw_offset=0.0)
 
 
 def cases(names: list[str] | None = None, root: Path = CASES_DIR) -> list[Case]:
@@ -162,3 +183,78 @@ def small_copy(src: Path, dst: Path, target: int = SMALL_TARGET, limit: int = MA
         raise RuntimeError(f"the smaller copy changed the size or frame rate: {v0} -> {v1}")
     return {"bytes": dst.stat().st_size, "reencoded": True, "video_kbps_cap": kbps, "width": v1["width"],
             "height": v1["height"], "fps": v1["r_frame_rate"], "seconds": dur}
+
+
+WINDOW_MIN_KBPS = 1500                  # a whole-video smaller copy below this video bit rate is too blurry to test on
+WINDOW_MARGIN_S = 30.0                  # a window copy keeps this much of the RAW before and after what the edit plays
+
+
+def copy_kbps(src: Path, target: int = SMALL_TARGET) -> float:
+    """The video bit rate (kbps) a whole-video smaller copy of src could have under ``target`` bytes."""
+    info = probe(src)
+    dur = float(info["format"]["duration"])
+    a_bps = sum(int(s.get("bit_rate") or 192000) for s in info["streams"] if s.get("codec_type") == "audio")
+    return (target * 8 / max(dur, 1e-6) - a_bps) * 0.97 / 1000.0
+
+
+def window_copy(src: Path, dst: Path, t0: float, t1: float, target: int = SMALL_TARGET, limit: int = MAX_BYTES) -> dict:
+    """The part [t0, t1) of src (seconds) as a video of its own under ``limit`` bytes, its timestamps from 0: the same
+    width, height and frame rate, every frame of that part (t0 moved back onto a frame of src), the sound of the same
+    instants; H.264 at a quality capped so the file lands near ``target``. For a RAW too long for a sharp whole-video
+    copy (21 or 95 minutes in 90 MB: a blur the analysis fails on, video020-fixed). Returns {"bytes", "offset" (the
+    second of src the copy's first frame is), "frames", "fps", ...}."""
+    import math
+    from fractions import Fraction
+    from .common import ffmpeg_bin
+    src, dst = Path(src), Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    info = probe(src)
+    v0 = next(s for s in info["streams"] if s.get("codec_type") == "video")
+    fps = Fraction(str(v0["r_frame_rate"]))
+    total = float(info["format"]["duration"])
+    k0 = max(0, int(math.floor(max(0.0, t0) * fps)))
+    k1 = max(k0 + 1, int(math.ceil(min(total, t1) * fps)))
+    offset, dur = float(k0 / fps), float((k1 - k0) / fps)
+    ss = max(0.0, offset - 5.0)                      # seek near, then cut on the frames exactly
+    a = (k0 - 0.5) / float(fps) - ss
+    b = (k1 - 0.5) / float(fps) - ss
+    has_audio = any(s.get("codec_type") == "audio" for s in info["streams"])
+    tmp = dst.with_name(dst.stem + ".part" + dst.suffix)
+    kbps = int(max(WINDOW_MIN_KBPS * 1000, (target * 8 / dur - 256000) * 0.97) / 1000)
+    for attempt in range(4):
+        graph = f"[0:v:0]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS[v]"
+        if has_audio:
+            graph += f";[0:a:0]atrim=start={max(0.0, offset - ss):.6f}:duration={dur:.6f},asetpts=PTS-STARTPTS[a]"
+        cmd = [ffmpeg_bin(), "-v", "error", "-y", "-ss", f"{ss:.6f}", "-i", str(src), "-filter_complex", graph,
+               "-map", "[v]"] + (["-map", "[a]", "-c:a", "aac", "-b:a", "256k"] if has_audio else []) + [
+               "-c:v", "libx264", "-preset", "slow", "-crf", "14", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
+               "-pix_fmt", "yuv420p", "-r", str(fps), "-movflags", "+faststart", str(tmp)]
+        subprocess.run(cmd, check=True)
+        size = tmp.stat().st_size
+        if size <= limit:
+            break
+        kbps = int(kbps * 0.85 * limit / size)
+    else:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"could not make a window of {src.name} smaller than {limit} bytes")
+    tmp.replace(dst)
+    got = probe(dst)
+    v1 = next(s for s in got["streams"] if s.get("codec_type") == "video")
+    if (v0["width"], v0["height"], v0["r_frame_rate"]) != (v1["width"], v1["height"], v1["r_frame_rate"]):
+        raise RuntimeError(f"the window copy changed the size or frame rate: {v0} -> {v1}")
+    return {"bytes": dst.stat().st_size, "reencoded": True, "window": True, "offset": round(offset, 6),
+            "end": round(offset + dur, 6), "frames": k1 - k0, "video_kbps_cap": kbps, "width": v1["width"],
+            "height": v1["height"], "fps": v1["r_frame_rate"], "seconds": dur}
+
+
+def shifted_answer(path: Path, shift: float, out_dir: Path) -> Path:
+    """answer_edit.json with every RAW time moved by ``shift`` seconds (a case whose raw.mp4 is a window of the
+    full-size RAW: its key is timed on the window; the full-size run needs it on the whole RAW), written to out_dir."""
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    for it in d.get("audio") or []:
+        if it.get("kind", "raw") == "raw" and it.get("src_in") is not None:
+            it["src_in"] = round(float(it["src_in"]) + float(shift), 6)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    q = out_dir / f"answer_edit_shift{shift:+.3f}.json"
+    q.write_text(json.dumps(d, indent=1), encoding="utf-8", newline="\n")
+    return q

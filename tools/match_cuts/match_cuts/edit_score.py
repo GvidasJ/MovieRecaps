@@ -339,15 +339,16 @@ def score(key: Edit, got: Edit, frames: int = CUT_FRAMES) -> CutScore:
 
 
 def for_run(comp_path: str | Path, comp_hash: str, run_dir: str | Path,
-            cases_dir: str | Path | None = None) -> tuple[str, CutScore] | None:
+            cases_dir: str | Path | None = None, raw: str | Path | None = None) -> tuple[str, CutScore] | None:
     """(case name, cut score) when the run's competitor is a test video whose answer key is the user's own edit (the
-    same file content), else None."""
+    same file content), else None. ``raw``: the run's RAW (a window case run on the full RAW: testcases.for_raw)."""
     from . import testcases
     from .common import file_hash
     size = Path(comp_path).stat().st_size
     root = Path(cases_dir) if cases_dir else testcases.CASES_DIR
     for case in testcases.cases(root=root):
         if case.has_cut_key and case.competitor.stat().st_size == size and file_hash(case.competitor) == comp_hash:
+            case = testcases.for_raw(case, raw)
             return case.name, score_run(case.answer_edit, run_dir)
     return None
 

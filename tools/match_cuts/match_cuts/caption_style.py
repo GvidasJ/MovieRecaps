@@ -288,6 +288,114 @@ def competitor_style(spans: Sequence[dict]) -> dict:
     return dict(out, follow=True, why=f"mixed case, {mean:.1f} words a caption: like yours")
 
 
+NOISE_GAP_FRAMES = 3            # screen reads this close (competitor frames) are one caption's reads (_screen_noise_out)
+NOISE_SIMILAR = 0.75            # ... when their texts are this alike (an animated caption re-read on every frame)
+NOISE_LETTERS = 2               # a read with at most this many letters, shorter than NOISE_SHORT_S, is a flicker ...
+NOISE_SHORT_S = 0.3             # ... ("A", "1A", "'A", "o?": the pop-in of the caption after it)
+
+
+def _letters(text: str) -> int:
+    return sum(1 for ch in str(text) if "a" <= ch.lower() <= "z")
+
+
+def _screen_noise_out(rows: list, cf: float) -> list:
+    """The competitor's caption reads without screen noise (laptop004: an animated caption read on every frame --
+    "A", "1A", "'A", "1", "_____", "Iguess it wuld be", "I guess it would be" -- each a caption of its own): a read with
+    no letter goes; a read of one or two letters lasting under NOISE_SHORT_S joins the caption it touches (the one
+    after it first: a pop-in); consecutive reads alike (NOISE_SIMILAR) become one caption, with the text read on
+    the most frames (a real word first). ``rows``: [(comp_in, comp_out, text, span)]."""
+    from difflib import SequenceMatcher
+
+    def clean(t: str) -> str:              # a read on two lines: the line(s) with letters ("so?" over a glyph "Λ")
+        lines = [ln.strip() for ln in str(t).split("\n") if ln.strip()]
+        most = max([_letters(ln) for ln in lines] or [0])
+        keep = [ln for ln in lines if _letters(ln) >= max(2, most // 2)] if most >= 2 else lines
+        return re.sub(r"^[^A-Za-z'*\"(]*(?=[A-Za-z'*\"(])", "", " ".join(keep)).strip()
+    rows = [(a, b, clean(t) if "\n" in str(t) else t, d) for a, b, t, d in rows]
+    rows = [r for r in rows if _letters(r[2]) > 0]
+    key = lambda s: re.sub(r"[^a-z0-9 ]", "", str(s).lower())                 # noqa: E731
+    alike = lambda x, y: SequenceMatcher(None, key(x), key(y)).ratio() >= NOISE_SIMILAR   # noqa: E731
+    short = lambda r: (r[1] - r[0]) / cf < NOISE_SHORT_S                       # noqa: E731
+    flick: list = []                                     # a lone letter or two, read for a moment: its neighbour's
+    for r in rows:
+        if _letters(r[2]) <= NOISE_LETTERS and short(r) and flick and r[0] - flick[-1][1] <= NOISE_GAP_FRAMES and \
+                _letters(flick[-1][2]) > NOISE_LETTERS:
+            flick[-1] = (flick[-1][0], r[1], flick[-1][2], flick[-1][3])
+            continue
+        flick.append(r)
+    rows = [r for i, r in enumerate(flick)               # a misread of 1-3 frames inside one caption's reads goes
+            if not (0 < i < len(flick) - 1 and r[1] - r[0] <= 3 and not alike(r[2], flick[i - 1][2])
+                    and alike(flick[i - 1][2], flick[i + 1][2]) and flick[i + 1][0] - flick[i - 1][1] <= 20)]
+    out: list = []
+    i = 0
+    while i < len(rows):
+        a, b, text, d = rows[i]
+        if _letters(text) <= NOISE_LETTERS and (b - a) / cf < NOISE_SHORT_S:
+            nxt = rows[i + 1] if i + 1 < len(rows) else None
+            if nxt is not None and nxt[0] - b <= NOISE_GAP_FRAMES and _letters(nxt[2]) > NOISE_LETTERS:
+                rows[i + 1] = (a, nxt[1], nxt[2], nxt[3])           # the next caption's pop-in
+                i += 1
+                continue
+            if out and a - out[-1][1] <= NOISE_GAP_FRAMES:
+                pa, _pb, pt, pd = out[-1]
+                out[-1] = (pa, b, pt, pd)
+                i += 1
+                continue
+            i += 1
+            continue
+        out.append((a, b, text, d))
+        i += 1
+    merged: list = []
+    for a, b, text, d in out:
+        if merged:
+            pa, pb, pt, pd, votes = merged[-1]
+            last = max(votes, key=votes.get)
+            if a - pb <= 5 * NOISE_GAP_FRAMES and alike(pt, text) and (votes[last] / cf < NOISE_SHORT_S or
+                                                                     (b - a) / cf < NOISE_SHORT_S):
+                votes[text] = votes.get(text, 0) + (b - a)
+                merged[-1] = (pa, b, pt, pd, votes)
+                continue
+        merged.append((a, b, text, d, {text: b - a}))
+    res = []
+    for a, b, text, d, votes in merged:
+        if len(votes) > 1:
+            def score(t: str) -> tuple:
+                ws = re.findall(r"[a-z']+", t.lower())
+                try:
+                    from .caption_rules import lexicon
+                    lex = lexicon().lower
+                    known = sum(1 for w in ws if w.strip("'") in lex)
+                except Exception:  # noqa: BLE001
+                    known = 0
+                return (known - (len(ws) - known), votes[t])
+            text = max(votes, key=score)
+        res.append((a, b, text, d))
+    return res
+
+
+CLEAR_AGREEMENT = 0.9           # a competitor caption read the same on this share of its frames (and twice or more): its
+#                                 words are trusted where the transcript lacks them (follow_competitor)
+
+
+def _split_lost_space(words: list[str]) -> list[str]:
+    """Screen words with a space the OCR lost after "I" put back: "Ishould" -> "I", "should" (021) -- an unknown word
+    that is "I" + a known word."""
+    try:
+        from .caption_rules import lexicon
+        lex = lexicon().lower
+    except Exception:  # noqa: BLE001 - no word list: as read
+        return words
+    out: list[str] = []
+    for w in words:
+        core = re.sub(r"[^A-Za-z']", "", w)
+        rest = core[1:]
+        if len(core) > 2 and core[0] == "I" and rest[:1].islower() and core.lower() not in lex and rest.lower() in lex:
+            out += ["I", w[w.index(core) + 1:] if core in w else rest]
+        else:
+            out.append(w)
+    return out
+
+
 def _same_word(a: str, b: str) -> bool:
     from .captions import norm
     return norm(a).strip("'") == norm(b).strip("'")
@@ -392,6 +500,7 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
                 SequenceMatcher(None, rows[-1][2].lower(), text.lower()).ratio() >= 0.6:
             a = rows.pop()[0]                        # a misread first frame of this caption ("his is going")
         rows.append((a, b, text, d))
+    rows = _screen_noise_out(rows, cf)
     cover = [_intervals(comp_tl, a / cf, b / cf) for a, b, _, _ in rows]
     notes: dict = {"from_screen": [], "changed": [], "not_in_edit": []}
     starts: list[int | None] = []
@@ -435,6 +544,16 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
             lead = min(MAX_LEAD_S, max(0.0, x - a / cf)) if x is not None else LEAD_S
             lo = float(words[k - 1].end) if k > 0 else 0.0
             start = to_frame(max(0.0, lo, heard[0].start - lead), f)
+        if start is None and is_action_text(screen):
+            # an action caption ("*disgusted*") whose first moment my edit leaves out: from the first moment of it my
+            # edit plays -- never dropped while my edit shows part of it (the caption before would run on over it)
+            prev_t = caps[-1].start / float(f) if caps else None          # after the caption before it
+            for n in range(int(a) + 1, int(b)):
+                m = comp_tl.at(n / cf + 1e-4)
+                hit = tool_tl.find(m[0], m[1], prev_t) if m is not None else None
+                if hit is not None and hit[1] <= SAME_MOMENT_S:
+                    start = to_frame(hit[0], f)
+                    break
         if start is None:
             notes["not_in_edit"].append({"text": screen, "comp_in": a})
             continue
@@ -445,11 +564,28 @@ def follow_competitor(spans: Sequence[dict], words, comp_tl, tool_tl, comp_fps, 
                 if not is_action_text(screen):
                     notes["from_screen"].append({"start": start, "text": screen})
             continue
-        sw = screen.split()
+        sw = _split_lost_space(screen.split())
         sm = SequenceMatcher(None, [norm(x).strip("'") for x in sw], [norm(w.text).strip("'") for w in heard],
                              autojunk=False)
         out_words: list[str] = []
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        clear = float(info.get("agreement") or 0.0) >= CLEAR_AGREEMENT and int(info.get("reads") or 0) >= 2
+        nxt_first = norm(rows[i + 1][2].split()[0]).strip("'") if i + 1 < len(rows) and rows[i + 1][2].split() else ""
+        ops = sm.get_opcodes()
+        for tag, i1, i2, j1, j2 in ops:
+            if clear and tag == "delete" and (i1 == 0 or i2 == len(sw)) and not any(
+                    is_action_text(x) for x in sw[i1:i2]):
+                # a word the competitor shows at its caption's edge that the transcript lacks here: said (021: "I've-
+                # I'm currently" heard as one "I'm", "why are you" as "are you" -- you kept the screen's words)
+                out_words.extend(re.sub(r"[.,]+$", "", x) for x in sw[i1:i2])
+                notes.setdefault("kept_from_screen", []).append({"start": starts[i], "words": " ".join(sw[i1:i2])})
+                continue
+            if clear and tag == "replace" and j2 == len(heard) and i2 == len(sw) and nxt_first and \
+                    norm(heard[j1].text).strip("'") == nxt_first:
+                # the heard word opens the next caption on the screen (021: "children" heard as the "I'm" of "I'm
+                # still" -- the transcript missed "children"): the screen's word, the heard one goes with its caption
+                out_words.extend(re.sub(r"[.,]+$", "", x) for x in sw[i1:i2])
+                notes.setdefault("kept_from_screen", []).append({"start": starts[i], "words": " ".join(sw[i1:i2])})
+                continue
             if tag == "equal":
                 for k2, (x, w) in enumerate(zip(sw[i1:i2], heard[j1:j2])):   # the screen's capitals, heard ? and !
                     tail = re.sub(r"^[\w'\u2019-]+", "", (w.raw or w.text).strip())

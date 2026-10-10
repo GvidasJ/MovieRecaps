@@ -129,6 +129,10 @@ class Context:
     people: Any = None                                # speakers.Context: who is in the picture and who speaks
     keep_map: Any = None                              # --keep-speed: keep_speed.KeepMap (competitor frame -> edit)
     premiere_xml: Any = None                          # write_premiere_xml's result (the re-framed clips ...)
+    frame: Any = None                                 # --frame: frame.Frame (the PNG and its hole)
+    premiere_cutlist: Any = None                      # the cut list 1_edit.xml was written from (premiere_plan's)
+    unmirrored: int = 0                               # segments whose competitor mirror the Premiere edit took off
+    finish: dict = field(default_factory=dict)        # --speed / --frame: what the last step did (stage_finish)
     verify: dict = field(default_factory=dict)
     # --- bookkeeping ---
     paths: dict[str, str] = field(default_factory=dict)
@@ -2784,6 +2788,7 @@ def stage_exports(ctx: Context) -> None:
     rp = None
     if premiere:
         ex, rp = premiere_plan(ctx, ex)
+        ctx.premiere_cutlist = ex
         produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
                                                   lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
         n_ch = int(cl.raw.get("audio_channels") or 0) if bool(cl.raw.get("has_audio", True)) else 0
@@ -2826,7 +2831,10 @@ def stage_exports(ctx: Context) -> None:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
     ctx.exports = dict(validation)
     if not cfg.skip_preview:
-        prev = out / "preview_recreation.mp4"
+        # --frame: preview_recreation.mp4 becomes your edit seen through the frame (stage_finish); the competitor-timed
+        # recreation the checks and compare.mp4 read goes to debug/
+        prev = (cfg.debug_dir / "recreation_check.mp4") if ctx.frame is not None else out / "preview_recreation.mp4"
+        prev.parent.mkdir(parents=True, exist_ok=True)
         with _stage(ctx, "S8.preview"):
             ok, res = _soft(ctx, "S8 preview_recreation.mp4",
                             lambda: render_preview.render_preview(cl, ctx.raw_info.path, prev, cfg))
@@ -2862,11 +2870,19 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
         n1 = int(ex.competitor["frames"])
         changed = sum(1 for s in ex.segments if s.type == "raw") if ctx.keep_map.stretched else 0
         ctx.dlog.record("premiere", "keep_speed", frames_before=n0, frames_after=n1, knots=ctx.keep_map.knots)
-        log.info("--keep-speed: every RAW clip at 100 %% -- the edit runs %.2f s instead of the competitor's %.2f s "
-                 "(%d RAW clip(s), the same moments in the same order)", n1 / float(ex.comp_fps),
+        log.info("every RAW clip at 100 %% (--speed changes the edit afterwards) -- the edit runs %.2f s instead of the "
+                 "competitor's %.2f s (%d RAW clip(s), the same moments in the same order)", n1 / float(ex.comp_fps),
                  n0 / float(ex.comp_fps), changed)
         if not ctx.keep_map.stretched:
-            log.info("--keep-speed: the competitor changes no clip's speed -- nothing to do")
+            log.info("100 %%: the competitor changes no clip's speed -- nothing to do")
+    if not getattr(ctx.cfg, "premiere_mirror", False):
+        from .export_xml_edl import unmirror
+        ex, n_mirror = unmirror(ex)
+        if n_mirror:
+            ctx.dlog.record("premiere", "unmirrored", segments=n_mirror)
+            log.info("Premiere: the competitor's mirror taken off %d segment(s) -- the same part of the RAW, the right "
+                     "way round, as in your finished edits (--mirror keeps it)", n_mirror)
+            ctx.unmirrored = n_mirror
     ex, slivers = play_on_slivers(ex)
     for d in slivers:
         ctx.dlog.record("premiere", "sliver_played_on", **d)
@@ -2880,7 +2896,7 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     if ctx.speech is not None:
         from . import speech as speech_mod
         from .export_xml_edl import harden_dissolves
-        ex, hard = harden_dissolves(ex, lambda t: speech_mod._inside(ctx.speech, t))
+        ex, hard = harden_dissolves(ex, lambda t: speech_mod._inside_sound(ctx.speech, t))
         for d in hard:
             ctx.dlog.record("premiere", "dissolve_hardened", **d)
             log.info("Premiere: the %d-frame dissolve S%02d|S%02d inside speech (RAW %.2f / %.2f s) is a cut at "
@@ -2891,7 +2907,11 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     ctx.people = people_of(ctx, ex)
     ctx.cfg.premiere_people = ctx.people         # from here on premiere_clips frames on the person speaking
     ctx.silence = repeat_plan(ctx, ex, silence_plan(ctx, ex))
-    return ex, ctx.silence.get("ripple")
+    rp = ctx.silence.get("ripple")
+    beats = ctx.silence.get("beats") or []
+    # the short action-captioned beats on the final timeline: the silence check leaves their quiet alone
+    ctx.cfg.premiere_beats = [(rp.map(a), rp.map(b)) for a, b in beats] if rp is not None else list(beats)
+    return ex, rp
 
 
 def silence_lines(plan: dict) -> list[str]:
@@ -2980,15 +3000,58 @@ def repeat_lines(plan: dict) -> list[str]:
     return out
 
 
+ACTION_BEAT_MAX_S = 1.0     # an action-captioned beat this short is kept whole (action_beats); a longer one is not
+
+
+def action_beats(ctx: Context) -> list[tuple[int, int]]:
+    """The short beats (ACTION_BEAT_MAX_S) the competitor shows an action caption over ("*looks over*": its burned-in
+    captions, read by caption_ocr -- cached, the captions stage reads the same), as sequence frames of the Premiere
+    plan before its cuts: the speech-safe cuts and the silence removal keep them whatever is heard there -- a quick
+    reaction is content (021: the 0.5 s "*looks over*" shot after "gentlemen" was trimmed to a 5-frame flash; you kept
+    its 0.5 s). Longer ones follow the usual rules: you cut 021's 1.4 s "*disgusted*" and 2.2 s "*laughing*" the
+    competitor showed. [] when the competitor has no readable captions."""
+    try:
+        from . import caption_ocr
+        from .captions import _read_spans, is_action_text
+        from .export_xml_edl import premiere_factor, premiere_settings
+        layout = getattr(ctx.cutlist, "layout", None) or {}
+        info = ctx.comp_info
+        wh = (int(info.display_width or info.width), int(info.display_height or info.height))
+        if caption_ocr.caption_band(layout, wh) is None or caption_ocr.available():
+            return []
+        spans = _read_spans(ctx, layout, ctx.comp_fps).get("spans") or []
+        fac = premiere_factor(ctx.comp_fps, premiere_settings(ctx.cfg)["fps"])
+        km = ctx.keep_map if ctx.keep_map is not None and ctx.keep_map.stretched else None
+        out, names = [], []
+        for d in spans:
+            if is_action_text(str(d.get("ocr") or "").strip()):
+                a, b = int(d["comp_in"]), int(d["comp_out"])
+                if (b - a) / float(ctx.comp_fps) > ACTION_BEAT_MAX_S + 1e-9:
+                    continue                    # a long reaction: the usual rules (you cut 021's 1.4 s "*disgusted*")
+                names.append(f"{str(d.get('ocr')).strip()} ({timecode(a, ctx.comp_fps)}, {(b - a) / float(ctx.comp_fps):.2f} s)")
+                if km is not None:
+                    a, b = km.map(a), km.map(b)
+                out.append((a * fac, b * fac))
+        if out:
+            log.info("action captions on the competitor: %d short beat(s) kept whatever is heard there: %s", len(out),
+                     ", ".join(names)[:400])
+        return out
+    except Exception as e:  # noqa: BLE001 - the cuts are planned without them
+        log.warning("action captions not read for the cuts (%s: %s)", type(e).__name__, e)
+        return []
+
+
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     """silence.plan_premiere of the Premiere export: the speech-safe cuts (ctx.speech), then the silences of the RAW
     audio under my clips (not with --keep-silence: {'off': ...} plus the speech-safe cuts); a failure warns and keeps
     every silence (and every cut where the plan put it: the speech check then decides)."""
     from . import silence
     keep = bool(getattr(ctx.cfg, "keep_silence", False))
+    beats = action_beats(ctx)
     try:
         plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx), ctx.speech,
-                                     remove=not keep, shots=ctx.shots)
+                                     remove=not keep, shots=ctx.shots, keep=beats)
+        plan["beats"] = beats
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
         ctx.warn(f"silences not removed: {type(e).__name__}: {e}")
@@ -3253,6 +3316,8 @@ def collect_deliverables(ctx: Context, produced: dict[str, bool] | None = None) 
             skipped[name] = "--skip-preview"
             files[name] = None
             continue
+        elif name == "preview" and ctx.paths.get("preview"):
+            p = Path(ctx.paths["preview"])            # --frame: the competitor-timed one is debug/recreation_check.mp4
         elif name == "compare" and cfg.skip_compare:
             skipped[name] = "--skip-compare"
             files[name] = None
@@ -3303,6 +3368,116 @@ def stage_captions(ctx: Context) -> None:
         ctx.warn(f"captions.srt not written: {type(e).__name__}: {e}")
     if ctx.captions.get("path"):
         ctx.paths["captions"] = ctx.captions["path"]
+
+
+def prepare_frame(ctx: Context) -> Any:
+    """--frame (frame.py): the frame PNG copied into the run's media folder (1_edit.xml points at the copy, so the run
+    keeps working when the input moves), the Premiere sequence set to its size and the window to its hole, and
+    extras/frame.json written; the Frame, or None without --frame (a frame that cannot be read stops the run: the
+    command line checked it already)."""
+    cfg = ctx.cfg
+    if not getattr(cfg, "premiere", False) or not str(getattr(cfg, "frame_png", "") or ""):
+        return None
+    import shutil
+    from . import frame as frame_mod
+    src = Path(cfg.frame_png)
+    cfg.media_dir.mkdir(parents=True, exist_ok=True)
+    dst = cfg.media_dir / ("frame" + (src.suffix.lower() or ".png"))
+    if src.resolve() != dst.resolve():
+        shutil.copyfile(src, dst)
+    cfg.frame_png = str(dst.resolve())
+    fr = frame_mod.apply_to_config(cfg)
+    frame_mod.write_info(fr, cfg, cfg.out / "frame.json")
+    x, y, w, h = cfg.premiere_window
+    log.info("--frame %s (%dx%d): its transparent hole is x %.0f-%.0f, y %.0f-%.0f on the %s sequence -- every clip "
+             "covers it; the PNG goes on V2", src.name, fr.width, fr.height, x, x + w, y, y + h, cfg.premiere_size)
+    ctx.paths["frame"] = str(dst)
+    return fr
+
+
+def stage_finish(ctx: Context) -> None:
+    """The Premiere edit's last step, after it was made, checked and captioned at 100 %: --speed (1_edit.xml and
+    2_captions.srt played that fast -- the 100 % versions stay in extras/ as edit_100pct.xml / captions_100pct.srt) and
+    --frame (preview_recreation.mp4 = 1_edit.xml seen through the frame). A problem is a warning: the 100 % edit then
+    stays (with --speed) and the run fails its 1_edit.xml check."""
+    cfg = ctx.cfg
+    k = float(getattr(cfg, "premiere_speed", 1.0) or 1.0)
+    xml = cfg.deliver / run_folders.EDIT_XML
+    if abs(k - 1.0) > 1e-9 and xml.exists():
+        ok, res = _soft(ctx, "S8 --speed", lambda: apply_speed(ctx, k))
+        ctx.finish["speed"] = res if ok and isinstance(res, dict) else {"error": "the speed step failed", "speed": k}
+        probs = (ctx.finish["speed"].get("problems") or []) if ok else ["the speed step failed"]
+        if probs:
+            ctx.warn(f"--speed {100 * k:g}: {len(probs)} problem(s) in 1_edit.xml -- the run fails: " + "; ".join(probs[:6]))
+            if isinstance(ctx.exports, dict):
+                ctx.exports["ok"] = False
+                ctx.exports.setdefault("speed_problems", []).extend(probs)
+    if ctx.frame is not None and not cfg.skip_preview and xml.exists():
+        from . import premiere_preview
+        dst = cfg.out / "preview_recreation.mp4"
+        ok, res = _soft(ctx, "S8 framed preview", lambda: premiere_preview.render(xml, dst, cfg, ctx.frame))
+        ctx.finish["preview"] = res if ok and isinstance(res, dict) else {"error": "not rendered"}
+        if ok and dst.exists():
+            ctx.paths["framed_preview"] = str(dst)
+
+
+def apply_speed(ctx: Context, k: float) -> dict:
+    """--speed: 1_edit.xml written again from the same plan with every clip k times as fast (export_xml_edl.retime_edit)
+    and 2_captions.srt timed to it (every caption's start and end / k, on whole sequence frames); the 100 % files kept
+    in extras/. Checked: the new XML's items (premiere_item_problems), its frame track, and every clip against the
+    100 % one (the same RAW, k times as fast, at its place / k: speed_problems)."""
+    import shutil
+    from . import export_xml_edl as X
+    from .captions import read_srt
+    cfg = ctx.cfg
+    xml = cfg.deliver / run_folders.EDIT_XML
+    base = cfg.out / "edit_100pct.xml"
+    shutil.copyfile(xml, base)
+    ex = ctx.premiere_cutlist
+    rp = (ctx.silence or {}).get("ripple") if isinstance(ctx.silence, dict) else None
+    res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k)
+    probs = X.premiere_item_problems(xml)
+    if str(getattr(cfg, "frame_png", "") or ""):
+        probs += X.frame_track_problems(xml, X.parse_premiere_xml(xml)["duration"])
+    probs += X.speed_problems(base, xml, k)
+    srt = cfg.deliver / run_folders.CAPTIONS_SRT
+    caps_n = 0
+    if srt.exists():
+        shutil.copyfile(srt, cfg.out / "captions_100pct.srt")
+        fps = float(X.premiere_settings(cfg)["fps"])
+        rows = read_srt(srt)
+        caps_n = len(rows)
+        srt.write_text(scaled_srt(rows, k, fps), encoding="utf-8", newline="\n")
+        if ctx.captions.get("path"):
+            ctx.paths["captions"] = str(srt)
+    x0, x1 = X.parse_premiere_xml(base), X.parse_premiere_xml(xml)
+    f = float(X.premiere_settings(cfg)["fps"])
+    out = {"speed": k, "clips": res.get("clips"), "captions": caps_n, "problems": probs,
+           "seconds_100": round(x0["duration"] / f, 3), "seconds": round(x1["duration"] / f, 3),
+           "base_xml": str(base)}
+    log.info("--speed %g: 1_edit.xml plays the %d clips at %g %% -- %.2f s instead of %.2f s; %d captions timed to it; "
+             "%s", 100 * k, res.get("clips") or 0, 100 * k, out["seconds"], out["seconds_100"], caps_n,
+             "every check OK" if not probs else f"{len(probs)} problem(s)")
+    ctx.dlog.record("premiere", "speed", **{kk: v for kk, v in out.items() if kk != "problems"}, problems=probs[:20])
+    return out
+
+
+def scaled_srt(rows: list[dict], k: float, fps: float) -> str:
+    """The SRT (captions.read_srt rows) with every caption starting and ending k times sooner (--speed): its frames of
+    the sequence / k, rounded as retime_edit rounds the cuts (a caption that starts on a cut still does), written like
+    captions.srt_text."""
+    from .captions import frame_ms, ms_tc
+    blocks = []
+    prev_end = 0
+    for i, r in enumerate(rows, start=1):
+        f0 = int(round(float(r["start_ms"]) * fps / 1000.0))          # the 100 % edit's sequence frames
+        f1 = int(round(float(r["end_ms"]) * fps / 1000.0))
+        a = max(int(round(f0 / k)), prev_end)
+        b = max(a + 1, int(round(f1 / k)))
+        prev_end = b
+        text = "\n".join(line.strip() for line in str(r["text"]).splitlines() if line.strip())
+        blocks.append(f"{i}\n{ms_tc(frame_ms(a, Fraction(fps)))} --> {ms_tc(frame_ms(b, Fraction(fps)))}\n{text}\n")
+    return "\n".join(blocks)
 
 
 def full_res_check(ctx: Context) -> dict | None:
@@ -3452,7 +3627,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         try:                                     # a test video with an answer key: how close my captions come
             from .caption_score import for_run, summary_lines
             from .common import file_hash
-            got = for_run(comp, file_hash(comp), cfg.deliver)
+            got = for_run(comp, file_hash(comp), cfg.deliver, raw=str(getattr(cfg, "raw", "") or "") or None)
             if got is not None:
                 out["caption_score"] = summary_lines(*got)
         except Exception as e:  # noqa: BLE001 - the summary must not fail the run
@@ -3461,7 +3636,7 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         try:                                     # ... and how close my cuts come to the user's own edit
             from . import edit_score
             from .common import file_hash
-            got = edit_score.for_run(comp, file_hash(comp), cfg.deliver)
+            got = edit_score.for_run(comp, file_hash(comp), cfg.deliver, raw=str(getattr(cfg, "raw", "") or "") or None)
             if got is not None:
                 out["cut_score"] = [f"{got[1].line()} -- answer key tests/real/{got[0]}"]
         except Exception as e:  # noqa: BLE001 - the summary must not fail the run
@@ -3625,6 +3800,10 @@ def run(cfg: Config) -> dict:
     ctx = Context(cfg=cfg, dlog=DecisionLog(cfg.work / "decisions.jsonl", truncate=True), cache=Cache(cfg.work))
     for note in resolve_gpu(cfg):
         ctx.warn(note)
+    ctx.frame = prepare_frame(ctx)
+    if abs(float(getattr(cfg, "premiere_speed", 1.0) or 1.0) - 1.0) > 1e-9:
+        log.info("--speed %g: the edit is made at 100 %%, then 1_edit.xml plays it at %g %%",
+                 100.0 * cfg.premiere_speed, 100.0 * cfg.premiere_speed)
     stats = {p: _input_stat(p) for p in (cfg.competitor, cfg.raw)}
     ctx.input_stats = dict(stats)
     seed_everything(cfg.seed)
@@ -3660,6 +3839,9 @@ def run(cfg: Config) -> dict:
             stage_exports(ctx)
         with _stage(ctx, "S8 captions"):
             stage_captions(ctx)
+        if getattr(cfg, "premiere", False):
+            with _stage(ctx, "S8 speed + frame"):
+                stage_finish(ctx)
         with _stage(ctx, "S9 verify"):
             stage_verify(ctx)
         ctx.timings["total"] = round(time.perf_counter() - t_all, 3)

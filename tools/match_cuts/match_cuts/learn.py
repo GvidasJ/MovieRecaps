@@ -125,8 +125,9 @@ def media_mismatch(props: dict, cutlist: dict) -> str | None:
     return "; ".join(bad) or None
 
 
-def find_run(seq: PR.Sequence, run: str | Path | None = None) -> dict[str, Path]:
-    """The run the project was made from (``run``: given)."""
+def find_run(seq: PR.Sequence | Sequence[PR.Sequence], run: str | Path | None = None) -> dict[str, Path]:
+    """The run the project was made from (``run``: given; else found from the media of ``seq`` -- one sequence or
+    several, the first ones first)."""
     if run:
         rf = run_files(Path(run))
         if rf is None:
@@ -134,14 +135,33 @@ def find_run(seq: PR.Sequence, run: str | Path | None = None) -> dict[str, Path]
         if not finished_run(run):
             raise LearnError(unfinished(run))
         return rf
-    for d in media_dirs(seq):
-        rf = run_files(d)
-        if rf is not None:
-            if not finished_run(d):
-                raise LearnError(unfinished(d))
-            return rf
+    seqs = [seq] if isinstance(seq, PR.Sequence) else list(seq)
+    for s in seqs:
+        for d in media_dirs(s):
+            rf = run_files(d)
+            if rf is not None:
+                if not finished_run(d):
+                    raise LearnError(unfinished(d))
+                return rf
     raise LearnError("the project's clips do not play a run's media (<run>/extras/media/...): give the run folder "
                      "with --run")
+
+
+def sequence_of(project: PR.Project, media_name: str, cutlist: dict | None = None) -> PR.Sequence | None:
+    """The project's sequence that holds the edit of ``media_name`` (the run's RAW): the one whose clips play it the
+    longest -- only a file whose size, frame rate and length agree with the run's RAW counts when the project says
+    (``cutlist``: the run's; every run's RAW is called raw.mp4). A project built on a template holds the template's
+    sequences of other videos too -- 021_fixed.prproj holds the 020 edit first (another raw.mp4, the most clips:
+    main_sequence's choice) and the 021 edit third."""
+    def same(path: str) -> bool:
+        return cutlist is None or media_mismatch(project.media.get(path) or {}, cutlist) is None
+    best, most = None, 0.0
+    for s in project.sequences:
+        t = sum(it.end - it.start for it in s.items
+                if it.media and it.enabled and PR.file_name(it.media) == media_name and same(it.media))
+        if t > most + 1e-9:
+            best, most = s, t
+    return best
 
 
 def load_cutlist(rf: dict[str, Path]) -> dict:
@@ -150,18 +170,29 @@ def load_cutlist(rf: dict[str, Path]) -> dict:
 
 
 def run_media(rf: dict[str, Path], cutlist: dict, kind: str) -> Path | None:
-    """The run's input ``kind`` ('competitor' / 'raw'): the original file when it still exists, else the run's
-    copy in its media folder."""
+    """The run's input ``kind`` ('competitor' / 'raw'): the run's own copy in its media folder (the file it analysed:
+    a hard link of the input, or its conformed copy), else the file the run read when it is still there and still that
+    video (its length as the cut list says: a run made on another PC names that PC's input\\raw.mp4 -- laptop004 named
+    the path that holds 021's RAW here)."""
     info = cutlist.get(kind) or {}
-    for key in ("source_path", "file_abs"):
-        p = info.get(key)
-        if p and Path(p).is_file():
-            return Path(p)
     rel = info.get("file") or info.get("file_rel")
     if rel and (rf["dir"] / EXTRAS / rel).is_file():
         return rf["dir"] / EXTRAS / rel
     if rel and (rf["dir"] / rel).is_file():
         return rf["dir"] / rel
+    want = info.get("duration_s")
+    for key in ("file_abs", "source_path"):
+        p = info.get(key)
+        if p and Path(p).is_file():
+            if want:
+                try:
+                    from .cli import quick_probe
+                    got = float(quick_probe(p)["duration"])
+                    if abs(got - float(want)) > max(1.0, 0.01 * float(want)):
+                        continue                         # another video under the same name
+                except Exception:  # noqa: BLE001 - cannot tell: not this one
+                    continue
+            return Path(p)
     return None
 
 
@@ -340,6 +371,7 @@ class Clip:
     r1: float
     dx: float | None = None
     scale: float | None = None
+    flipped: bool = False
 
 
 def source_widths(edit_xml: Path) -> dict[str, float]:
@@ -367,11 +399,14 @@ def source_widths(edit_xml: Path) -> dict[str, float]:
     return out
 
 
-def tool_clips(edit_xml: Path, raw_width: float | None = None) -> tuple[list[Clip], list[Clip], float, int]:
+def tool_clips(edit_xml: Path, raw_width: float | None = None, unflip: bool = True
+               ) -> tuple[list[Clip], list[Clip], float, int]:
     """The run's clips of the RAW in 1_edit.xml: (V1 picture clips with their framing -- the sideways offset in
     sequence px: <center> x the clip's source width, as Premiere shows it (source_widths; when the file does not say:
-    ``raw_width``, the RAW's width from the run's cut list, and only then the sequence's) -- and A1 sound clips), the
-    sequence frame rate and width."""
+    ``raw_width``, the RAW's width from the run's cut list, and only then the sequence's); a mirrored clip (Flop: the
+    competitor flipped the picture) as the offset of an unmirrored picture showing the same part of the RAW in the
+    middle, i.e. the offset negated, since a finished project shows no flip (laptop004: none on any clip) -- and A1
+    sound clips), the sequence frame rate and width. ``Clip.flipped`` says which were mirrored."""
     from .export_xml_edl import parse_premiere_xml
     x = parse_premiere_xml(edit_xml)
     widths = source_widths(edit_xml)
@@ -386,11 +421,31 @@ def tool_clips(edit_xml: Path, raw_width: float | None = None) -> tuple[list[Cli
         m = c.get("motion") or {}
         keyed = bool(m.get("keys"))
         ctr = m.get("center")
+        dx = None if keyed or ctr is None else float(ctr[0]) * float(widths.get(c["id"]) or raw_width or x["width"])
+        flip = bool(c.get("flip"))
         out.append(Clip(c["start"] / fps, c["end"] / fps, c["in"] / cf, c["out"] / cf,
-                        None if keyed or ctr is None
-                        else float(ctr[0]) * float(widths.get(c["id"]) or raw_width or x["width"]),
-                        None if keyed or m.get("scale") is None else float(m["scale"])))
+                        None if dx is None else (-dx if flip and unflip else dx),
+                        None if keyed or m.get("scale") is None else float(m["scale"]), flip))
     return out, sound, fps, int(x["width"])
+
+
+def project_flips(project: Path) -> int:
+    """How many horizontal-flip effects the project holds (Premiere's Horizontal Flip on a clip; 0: no clip mirrored)."""
+    import gzip
+    try:
+        raw = Path(project).read_bytes()
+        try:
+            text = gzip.decompress(raw).decode("utf-8", "replace")
+        except OSError:
+            text = raw.decode("utf-8", "replace")
+    except OSError:
+        return 0
+    return len(re.findall(r"<MatchName>[^<]*(?:Flip|Mirror)[^<]*</MatchName>", text))
+
+
+def speeds(clips: Sequence[Clip]) -> list[float]:
+    """Each clip's speed (RAW seconds per timeline second)."""
+    return [round((c.r1 - c.r0) / (c.t1 - c.t0), 4) for c in clips if c.t1 - c.t0 > 1e-6]
 
 
 def user_clips(seq: PR.Sequence, raw_name: str) -> tuple[list[Clip], list[Clip]]:
@@ -429,14 +484,19 @@ def edit_changes(tool: Sequence[Clip], user: Sequence[Clip], tool_pic: Sequence[
     from the picture clips ``tool_pic`` / ``user_pic`` when the project still has them."""
     starts, ends = [], []
     removed = 0
+
+    def shared(c: Clip, u: Clip) -> bool:
+        # the same piece of the RAW: more than a sliver of the shorter one (a clip touching a neighbour's last frame
+        # is not that clip: laptop004's T04 shares 0.03 s with the 7.7 s clip before it -- "starts 7.7 s earlier")
+        return _overlap(c, u) > min(0.1, 0.5 * min(abs(c.r1 - c.r0), abs(u.r1 - u.r0)))
     for c in tool:
-        mine = [u for u in user if _overlap(c, u) > 0.0]
+        mine = [u for u in user if shared(c, u)]
         if not mine:
             removed += 1
             continue
         starts.append(round(min(u.r0 for u in mine) - c.r0, 3))
         ends.append(round(max(u.r1 for u in mine) - c.r1, 3))
-    added = sum(1 for u in user if not any(_overlap(c, u) > 0.0 for c in tool))
+    added = sum(1 for u in user if not any(shared(c, u) for c in tool))
     total = sum(u.r1 - u.r0 for u in user)
     played = sum(max((_overlap(c, u) for c in tool), default=0.0) for u in user) / total if total > 0 else 0.0
     moved, zoomed = [], []
@@ -562,18 +622,46 @@ def _repo_path(p: Path) -> str:
         return str(q)
 
 
+def raw_window(raw: Path, spans: Sequence[tuple[float, float]], window: str = "auto") -> tuple[float, float] | None:
+    """The part of the RAW a test case keeps (RAW seconds), or None for the whole RAW: ``window`` 'auto' -- a RAW over
+    100 MB whose whole-video copy would be blurrier than testcases.WINDOW_MIN_KBPS (a 21-minute episode in 90 MB:
+    0.4 Mbit/s) keeps what the edits play (``spans``: the user's and the run's clips) and WINDOW_MARGIN_S around
+    it, at full sharpness; 'full' the whole RAW (a smaller copy)."""
+    from .testcases import MAX_BYTES, WINDOW_MARGIN_S, WINDOW_MIN_KBPS, copy_kbps
+    if window == "full" or not spans or raw.stat().st_size <= MAX_BYTES or copy_kbps(raw) >= WINDOW_MIN_KBPS:
+        return None
+    lo, hi = min(a for a, _ in spans), max(b for _, b in spans)
+    return max(0.0, lo - WINDOW_MARGIN_S), hi + WINDOW_MARGIN_S
+
+
 def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name: str, caps: Sequence[PR.Item],
-               meta: dict, no_caps_why: str = "") -> dict[str, str]:
+               meta: dict, no_caps_why: str = "", picture: Sequence[Clip] | None = None,
+               window: tuple[float, float] | None = None) -> dict[str, str]:
     """The test case's files (module docstring, 4); returns {file: what it is}. Without captions there is no
     answer.srt (an empty key would score every run against nothing): an old one is removed, ``no_caps_why`` says
-    why."""
-    from .testcases import small_copy
+    why. ``picture``: the user's picture clips -- the answer key is then the picture (V1), not the sound (A1): for a
+    project whose audio the user moved by hand (021, laptop004). ``window``: raw.mp4 is that part of the RAW
+    (testcases.window_copy), the key timed on it (case.json raw_offset, full_raw)."""
+    from .testcases import WINDOW_MARGIN_S, small_copy, window_copy
     case_dir.mkdir(parents=True, exist_ok=True)
     done: dict[str, str] = {}
+    old: dict = {}
+    if (case_dir / "case.json").is_file():
+        old = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
+    offset = float(old.get("raw_offset") or 0.0) if window is not None else 0.0
     for src, fname in ((comp, "competitor.mp4"), (raw, "raw.mp4")):
         dst = case_dir / fname
         if dst.is_file() and dst.stat().st_size:
             done[fname] = "kept (already in the case)"
+            continue
+        if fname == "raw.mp4" and window is not None:
+            info = window_copy(src, dst, window[0], window[1])
+            offset = float(info["offset"])
+            done[fname] = (f"RAW {info['offset']:.2f}-{info['end']:.2f} s of the {src.stat().st_size / 1e9:.1f} GB RAW "
+                           f"(the part the edits play and {WINDOW_MARGIN_S:g} s around it, sharp): "
+                           f"{info['bytes'] / 1e6:.0f} MB, {info.get('width')}x{info.get('height')} at {info.get('fps')} "
+                           "fps; the answer key is timed on this window (case.json raw_offset)")
+            meta = {**meta, "full_raw": _repo_path(src), "raw_offset": offset}
             continue
         info = small_copy(src, dst)
         done[fname] = (f"a smaller copy: {info['bytes'] / 1e6:.0f} MB ({src.stat().st_size / 1e6:.0f} MB before), "
@@ -592,15 +680,24 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
         done["answer.srt"] = (f"not written: {no_caps_why or 'the project has no captions'}"
                               + (" (the old one removed)" if had else ""))
     pieces = []
-    for p in PR.audio_pieces(seq, raw_name):
-        pieces.append({"start": p["start"], "end": p["end"], "kind": "raw", "src_in": p["src_in"], "speed": p["speed"]})
-    (case_dir / "answer_edit.json").write_text(json.dumps({
-        "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is "
-                "timed on", "fps": seq.fps, "audio": pieces}, indent=1), encoding="utf-8", newline="\n")
-    done["answer_edit.json"] = f"your timeline ({len(pieces)} pieces of the RAW)"
-    old = {}
-    if (case_dir / "case.json").is_file():
-        old = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
+    if picture:
+        for c in picture:
+            pieces.append({"start": round(c.t0, 6), "end": round(c.t1, 6), "kind": "raw",
+                           "src_in": round(c.r0 - offset, 6), "speed": round((c.r1 - c.r0) / (c.t1 - c.t0), 6)})
+        what = ("your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio "
+                "by hand, so the picture is the key): the timeline answer.srt is timed on")
+    else:
+        for p in PR.audio_pieces(seq, raw_name):
+            pieces.append({"start": p["start"], "end": p["end"], "kind": "raw", "src_in": round(p["src_in"] - offset, 6),
+                           "speed": p["speed"]})
+        what = ("your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is "
+                "timed on")
+    if window is not None:
+        what += f"; RAW times on raw.mp4, the RAW from {offset:.3f} s"
+    (case_dir / "answer_edit.json").write_text(json.dumps({"what": what, "fps": seq.fps, "audio": pieces}, indent=1),
+                                               encoding="utf-8", newline="\n")
+    done["answer_edit.json"] = (f"your timeline ({len(pieces)} {'picture clips' if picture else 'pieces'} of the "
+                                "RAW)")
     old.pop("timeline", None)
     (case_dir / "case.json").write_text(json.dumps({**old, "timeline": "edit", **meta}, indent=1), encoding="utf-8",
                                         newline="\n")
@@ -1393,25 +1490,30 @@ def folder_summary(res: dict) -> list[str]:
 # ---------------------------------------------------------------------------------------------------------------------
 
 def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | Path | None = None,
-          name: str | None = None, glossary: str | Path | None = None) -> dict:
+          name: str | None = None, glossary: str | Path | None = None, picture: bool = False,
+          window: str = "auto") -> dict:
     """Everything above for one finished project; returns {case, updated, files, glossary, glossary_new, changes,
-    captions, edit, tendencies, suggestions, run, git}."""
+    captions, edit, tendencies, suggestions, run, git}. ``picture``: the cuts and the answer key from the picture (V1)
+    -- the user moved audio by hand; ``window``: raw_window."""
     from .common import file_hash
     from .testcases import CASES_DIR
     project = Path(project)
     if not project.is_file():
         raise LearnError(f"{project}: no such project")
     pr = PR.read(project)
-    seq = PR.main_sequence(pr)
-    if seq is None:
+    if not pr.sequences:
         raise LearnError(f"{project.name}: no sequence")
-    rf = find_run(seq, run)
+    order = sorted(pr.sequences, key=lambda s: (-sum(1 for it in s.items if it.media), -s.duration))
+    rf = find_run(order, run)
     cl = load_cutlist(rf)
     comp, raw = run_media(rf, cl, "competitor"), run_media(rf, cl, "raw")
     if comp is None or raw is None:
         raise LearnError(f"{rf['dir']}: the run's competitor or RAW cannot be found (moved or deleted?)")
     raw_name = PR.file_name(str((cl.get("raw") or {}).get("file") or raw.name))
+    seq = sequence_of(pr, raw_name, cl) or sequence_of(pr, raw_name) or PR.main_sequence(pr)
+    played = {it.media for it in seq.items if it.media and PR.file_name(it.media) == raw_name}
     cands = {k: v for k, v in pr.media.items() if PR.file_name(k) == raw_name}
+    cands = {k: v for k, v in cands.items() if k in played} or cands
     here = rf["dir"].as_posix().lower()
     inside = [v for k, v in cands.items() if str(k).replace(chr(92), "/").lower().startswith(here)]
     props = (inside or list(cands.values()) or [{}])[0]
@@ -1419,11 +1521,23 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     if bad:
         raise LearnError(f"{project.name}: the run's RAW ({rf['dir']}) is not the video your project plays ({bad}) -- "
                          "a later run in the same folder? Give the run it was made from with --run")
-    tool_pic, tool_snd, _fps, _w = tool_clips(rf["edit"], float((cl.get("raw") or {}).get("width") or 0) or None)
+    flips = project_flips(project)
+    tool_pic, tool_snd, _fps, _w = tool_clips(rf["edit"], float((cl.get("raw") or {}).get("width") or 0) or None,
+                                              unflip=flips == 0)
     user_pic, user_snd = user_clips(seq, raw_name)
     if not user_pic and not user_snd:
         raise LearnError(f"{project.name}: no clip plays the run's RAW ({raw_name})")
-    edit = edit_changes(tool_snd or tool_pic, user_snd or user_pic, tool_pic, user_pic)
+    if picture and not user_pic:
+        raise LearnError(f"{project.name}: --picture-key but no picture clip plays the run's RAW ({raw_name})")
+    edit = (edit_changes(tool_pic, user_pic, tool_pic, user_pic) if picture else
+            edit_changes(tool_snd or tool_pic, user_snd or user_pic, tool_pic, user_pic))
+    sp_t, sp_u = speeds(tool_pic or tool_snd), speeds(user_pic or user_snd)
+    edit["speed"] = {"tool": statistics.median(sp_t) if sp_t else None,
+                     "user": statistics.median(sp_u) if sp_u else None}
+    edit["flip"] = {"tool": sum(1 for c in tool_pic if c.flipped), "project": flips}
+    edit["key"] = "picture" if picture else "sound"
+    edit["sequence"] = {"name": seq.name, "index": pr.sequences.index(seq), "of": len(pr.sequences),
+                        "size": [seq.width, seq.height], "fps": round(float(seq.fps), 3)}
     if edit["played"] < MIN_PLAYED:
         raise LearnError(f"{project.name}: run {rf['dir']} plays only {100 * edit['played']:.0f} % of what the "
                          "project plays -- not the run it was made from (a later run in the same folder?): give --run")
@@ -1445,8 +1559,13 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     gpath = Path(glossary) if glossary else glossary_path()
     new_words = add_to_glossary(changes, video, gpath) if changes else []
     meta = {"notes": f"learned from {project.name} ({dt.date.today().isoformat()}): answer.srt and answer_edit.json "
-                     "are your finished edit", "learned_from": str(project), "run": str(rf["dir"])}
-    files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta, no_caps_why)
+                     "are your finished edit" + (" (its picture: you moved the audio by hand)" if picture else ""),
+            "learned_from": str(project), "run": str(rf["dir"])}
+    spans = [(min(c.r0, c.r1), max(c.r0, c.r1)) for c in list(user_pic) + list(user_snd) + list(tool_pic)
+             + list(tool_snd)]
+    win = raw_window(raw, spans, window)
+    files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta, no_caps_why,
+                       picture=user_pic if picture else None, window=win)
     record = {"video": video, "date": dt.date.today().isoformat(), "project": str(project), "run": str(rf["dir"]),
               "edit": edit, "captions": {**ccount, "changes": [c.__dict__ for c in changes]}}
     (case_dir / "learned.json").write_text(json.dumps(record, indent=1), encoding="utf-8", newline="\n")
@@ -1466,6 +1585,20 @@ def summary(res: dict) -> list[str]:
     """The short summary learn prints."""
     e, c = res["edit"], res["captions"]
     out = [f"Learned from your finished edit (run {res['run']}):"]
+    sq = e.get("sequence") or {}
+    if sq.get("of", 1) > 1:
+        out.append(f"  Sequence: '{sq['name']}' ({sq['index'] + 1} of {sq['of']} in the project: the one that plays the "
+                   f"run's RAW), {sq['size'][0]}x{sq['size'][1]} at {sq['fps']:g} fps")
+    sp = e.get("speed") or {}
+    if sp.get("user") and sp.get("tool"):
+        out.append(f"  Speed: your clips play at {100 * sp['user']:.1f} % (median), the run's at {100 * sp['tool']:.1f} %")
+    fl = e.get("flip") or {}
+    if fl.get("tool"):
+        out.append(f"  Mirror: the run flipped {fl['tool']} clip(s) (the competitor is mirrored); your project has "
+                   + (f"{fl['project']} flip effect(s)" if fl.get("project") else
+                      "none -- compared as unmirrored pictures (Premiere dropped the flip, or you took it off)"))
+    if e.get("key") == "picture":
+        out.append("  Cuts: from your picture (V1) -- your audio was moved by hand")
     if res["changes"]:
         kept = [x for x in res["changes"] if x.glossary]
         rest = [x for x in res["changes"] if not x.glossary]
@@ -1535,6 +1668,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                                                  "file)")
     ap.add_argument("--cases-dir", default=None, help=argparse.SUPPRESS)
     ap.add_argument("--glossary", default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--picture-key", action="store_true",
+                    help="a project: your cuts from the picture (V1), not the sound (A1) -- for a project where you "
+                         "unlinked and moved audio by hand; the answer key is then your picture clips")
+    ap.add_argument("--raw-window", choices=["auto", "full"], default="auto",
+                    help="a project: the test case's raw.mp4 -- auto: a RAW too long for a sharp copy under 100 MB keeps "
+                         "the part the edits play and 30 s around it (case.json raw_offset); full: the whole RAW")
     a = ap.parse_args(argv)
     target = Path(a.project)
     try:
@@ -1545,7 +1684,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 a.fresh, a.tool_run, a.user_run, a.glossary, check_work=a.check_work)
             print("\n".join(folder_summary(res)))
             return 0 if res["done"] else 2
-        res = learn(a.project, a.run, a.cases_dir, a.name, a.glossary)
+        res = learn(a.project, a.run, a.cases_dir, a.name, a.glossary, a.picture_key, a.raw_window)
     except LearnError as e:
         print(f"learn: {e}", file=sys.stderr)
         return 2

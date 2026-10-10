@@ -340,8 +340,12 @@ def shot_guard_frames(clips: Sequence[Any] | None, sm: Any, changes_s: Sequence[
                 continue
             if in_a and not said(t(cl.rec_start), t(a)):
                 a = cl.rec_start
+            elif in_a and cl.rec_end - cl.rec_start >= n:      # speech in the sliver: it stays n frames long, never a
+                a = max(a, cl.rec_start + n)                     # flash of a few frames (021: 5 frames at 00:00:02:02)
             if in_b and not said(t(b), t(cl.rec_end)):
                 b = cl.rec_end
+            elif in_b and cl.rec_end - cl.rec_start >= n:
+                b = min(b, cl.rec_end - n)
         return (a, b) if b > a else (a, a)
     return guard
 
@@ -602,7 +606,7 @@ def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n
 
 def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None,
                   words_of: Any = None, speech: Any = None, remove: bool = True,
-                  shots: Sequence[float] | None = None) -> dict:
+                  shots: Sequence[float] | None = None, keep: Sequence[tuple[int, int]] = ()) -> dict:
     """The cuts of the Premiere export of ``cutlist`` before it is written: {cuts, ripple, threshold_db, levels,
     rows, removed_s, old_s, new_s, settings, speech}. First the speech-safe cuts (``speech``: the RAW's
     speech.SpeechMap -- every audio cut moved into the quiet, clips trimmed or extended: speech.plan_cuts), then
@@ -610,7 +614,9 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     inside a cross dissolve; at every cut, the end of one clip and the start of the next keep at most --pad-after +
     --pad-before of silence together. The words that keep a silence cut out of a word: the speech map's (mapped onto
     A1), else ``words_of(y)`` -> the words heard in that audio, or None: then the cuts follow the loudness alone.
-    ``shots``: the RAW's shot changes (s) -- no cut leaves a sliver of a shot (shots.py)."""
+    ``shots``: the RAW's shot changes (s) -- no cut leaves a sliver of a shot (shots.py). ``keep``: sequence frames
+    [a, b) of the edit before these cuts that stay whatever is heard there -- the beats the competitor shows an action
+    caption over ("*looks over*", "*dying*": a reaction, kept like speech; 021)."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
     st = Settings.from_cfg(cfg)
     pst = premiere_settings(cfg)
@@ -624,13 +630,15 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     if speech is not None and audio:
         from .speech import plan_cuts
         src_max = int(math.floor(int(cutlist.raw["frames"]) * float(fps) / float(cutlist.raw_fps)))
-        snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac, shots)
+        snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac, shots, keep)
         if snap.active:
             clips, audio, _ = apply_premiere(clips, audio, [], snap)
             other = [snap.map_hole1(a, b) for a, b in other]
+            keep = [(snap.map1(a), snap.map1(b)) for a, b in keep]
         n_frames = snap.new_frames
     protect = [(cl.rec_start, cl.rec_start + int(cl.ev.dissolve_in) * fac) for cl in clips if cl.start == -1]
     protect += other                       # another video plays there (filled by hand): never cut, it is no silence
+    protect += [(a, b) for a, b in keep if b > a]     # an action-captioned beat: a reaction, never cut as silence
     if not remove:
         cuts, lv = [], {"how": "--keep-silence"}
     elif raw_audio is None or not len(raw_audio) or not audio:

@@ -458,16 +458,17 @@ def score_run(name: str, key_srt: str | Path, key_tl: Timeline, run_dir: str | P
 
 
 def for_run(comp_path: str | Path, comp_hash: str, run_dir: str | Path,
-            cases_dir: str | Path | None = None) -> tuple[str, Score] | None:
+            cases_dir: str | Path | None = None, raw: str | Path | None = None) -> tuple[str, Score] | None:
     """(case name, score) when the run's competitor is a test video with an answer key (the same file content:
     tests/real/<case>/competitor.mp4 and answer.srt), else None. Only a case whose competitor has the run's file
-    size is hashed."""
+    size is hashed. ``raw``: the run's RAW -- a window case run on the full RAW scores on the full RAW's time."""
     from . import testcases
     from .common import file_hash
     size = Path(comp_path).stat().st_size
     root = Path(cases_dir) if cases_dir else testcases.CASES_DIR
     for case in testcases.cases(root=root):
         if case.has_key and case.competitor.stat().st_size == size and file_hash(case.competitor) == comp_hash:
+            case = testcases.for_raw(case, raw)
             return case.name, score_run(case.name, case.answer_srt, testcases.answer_timeline(case), run_dir)
     return None
 

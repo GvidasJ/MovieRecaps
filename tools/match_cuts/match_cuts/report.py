@@ -1596,11 +1596,54 @@ SECTIONS: list[tuple[str, Callable[[Any], list[str]]]] = [
 ]
 
 
+def speed_frame_lines(ctx: Any) -> list[str]:
+    """The report's first lines for a Premiere run: the speed 1_edit.xml plays at (--speed), and the frame (--frame)."""
+    cfg = ctx.cfg
+    if not getattr(cfg, "premiere", False):
+        return []
+    k = float(getattr(cfg, "premiere_speed", 1.0) or 1.0)
+    sp = (getattr(ctx, "finish", None) or {}).get("speed") or {}
+    km = getattr(ctx, "keep_map", None)
+    comp = (f" -- the competitor's own speed changes left out (its edit: {km.knots[-1][0] / float(ctx.comp_fps):.2f} s, "
+            f"at 100 %: {km.knots[-1][1] / float(ctx.comp_fps):.2f} s before the silences)"
+            if km is not None and km.stretched else "")
+    if abs(k - 1.0) < 1e-9:
+        out = [f"**Speed: 100 %** (the default; --speed to change it): every clip of 1_edit.xml plays at 100 %{comp}."]
+    else:
+        out = [f"**Speed: {100 * k:g} %** (--speed {100 * k:g}): the edit was made at 100 %{comp} -- cuts off speech, "
+               f"silences and repeats out, captions transcribed -- then every clip of 1_edit.xml plays {100 * k:g} % fast "
+               f"and every cut and caption moved with it"
+               + (f": {sp['seconds_100']:.2f} s -> {sp['seconds']:.2f} s" if sp.get("seconds") else "")
+               + ("; the edit at 100 % is extras/edit_100pct.xml (captions_100pct.srt). Times below are on the 100 % "
+                  f"edit: divide them by {k:g} for 1_edit.xml." if sp.get("seconds") else ".")]
+        if sp.get("problems"):
+            out.append(f"- **{len(sp['problems'])} problem(s) in the sped-up 1_edit.xml** (the run fails): "
+                       + "; ".join(sp["problems"][:6]))
+        elif sp.get("error"):
+            out.append(f"- **the speed step failed: {sp['error']}** -- 1_edit.xml is the 100 % edit")
+    fr = getattr(ctx, "frame", None)
+    if fr is not None:
+        x, y, w, h = getattr(cfg, "premiere_window", (0, 0, 0, 0))
+        prev = (getattr(ctx, "finish", None) or {}).get("preview") or {}
+        out.append(f"**Frame:** {Path(fr.path).name} ({fr.width}x{fr.height}) on V2 over the whole edit; the "
+                   f"{cfg.premiere_size} sequence, every clip framed to cover its transparent hole (x {x:.0f}-{x + w:.0f}, "
+                   f"y {y:.0f}-{y + h:.0f}); captions belong between {100 * fr.caption_zone(int(str(cfg.premiere_size).split('x')[1]))[0] / int(str(cfg.premiere_size).split('x')[1]):.0f} % "
+                   f"and {100 * fr.caption_zone(int(str(cfg.premiere_size).split('x')[1]))[1] / int(str(cfg.premiere_size).split('x')[1]):.0f} % of the height (restyle checks it); "
+                   + ("preview_recreation.mp4 is the edit seen through the frame (the competitor-timed recreation the "
+                      "checks read: debug/recreation_check.mp4)." if prev.get("path") else
+                      f"the framed preview was not rendered ({prev.get('error') or 'skipped'})."))
+    return out + [""]
+
+
 def render_report(ctx: Any) -> str:
     cfg = ctx.cfg
     comp = Path(getattr(cfg, "competitor", "competitor")).name
     raw = Path(getattr(cfg, "raw", "raw")).name
     lines = [f"# Match cuts report: {comp} rebuilt from {raw}", ""]
+    try:
+        lines += speed_frame_lines(ctx)
+    except Exception as e:  # noqa: BLE001 - the header line must not lose the report
+        lines += [f"_Speed / frame line could not be rendered: {type(e).__name__}: {e}_", ""]
     for i, (title, fn) in enumerate(SECTIONS, start=1):
         lines += [f"## {i}. {title}", ""]
         try:

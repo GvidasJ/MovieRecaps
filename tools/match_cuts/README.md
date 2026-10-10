@@ -130,6 +130,43 @@ Windows lends it some of the PC's memory: much slower, the same numbers.
 
 Measured on an RTX 5080 with a 16-core CPU (Task 9), on the finished videos at full size, from empty caches, one run at a time on a free GPU: video1 (a 23.5-minute RAW at 700x480, 3,384 competitor frames) takes 70 minutes thorough and 26 with `--fast`; video2 (24.4 minutes, 281 frames) 15 and 5; video3 (24.2 minutes, 1,249 frames) 14 and 6; video4 (12.7 minutes at 1280x720 and 59.94 fps, 1,078 frames) 47 and 19. The search grows with the RAW's length (every RAW frame is indexed) and with the competitor's frames; refine and the full-resolution steps grow with the competitor's frames and the RAW's resolution.
 
+### Speed (`--speed PERCENT`, default 100)
+
+Every Premiere edit is made at **100 %**, whatever speed the competitor used: the same moments of the RAW in the
+same order (a clip the competitor sped up to 125 % lasts 1.25 x as long; what `--keep-speed` did before -- that
+option still works and changes nothing). The competitor's speed is still measured: the matching needs it.
+
+`--speed 125` plays the whole edit at 125 % in Premiere: the edit is first made, checked and captioned at 100 % --
+cuts off speech, silences and repeats out, every hard check -- then `1_edit.xml` is written again with every V1 and
+A1 clip at 125 %, every cut, dissolve and marker at its frame / 1.25, and `2_captions.srt` timed the same way (every
+caption's frames / 1.25). Each clip's in-point lands on the grid Premiere starts a retimed clip on (`<in>` / `<out>`
+count the retimed clip -- output/020's bug), and the pieces of one take stay seamless. The 100 % files stay in
+`extras\edit_100pct.xml` / `captions_100pct.srt`; the check `XML SPEED` compares every clip of the fast edit with
+its 100 % twin (the same RAW, 1.25 x as fast, at its place / 1.25). No clip is shorter than `--min-clip` frames
+after the speed-up (the planned minimum is scaled by the speed). The speed is the first line of `report.md` and of
+the end summary.
+
+```
+..\..\.venv\Scripts\python -m match_cuts --premiere --speed 125
+```
+
+### Your channel's frame (`--frame PNG`)
+
+`--frame input\frame.png`: the PNG with your header and headline and a **transparent hole** where the video goes.
+The tool finds the hole from the alpha channel (the largest transparent area; a faint watermark inside it belongs
+to it), makes `1_edit.xml` a **2160x3840** sequence (`--frame-size` to change it) with the PNG on **V2** over the
+whole edit (straight alpha, scaled to the sequence: 100 % for a 2160x3840 PNG, 200 % for a 1080x1920 one), and frames
+every clip to **cover the hole**: the competitor's framing mapped into the hole, zoomed only as much as needed,
+moved to show the person speaking where the competitor's framing would not (the usual person check). The PNG is
+copied into the run's `extras\media\` (the XML points there). `extras\frame.json` holds the hole and the caption zone
+(inside the hole, below its top third: never over the header or headline); `restyle` checks the styled captions
+against it. `preview_recreation.mp4` is then **your edit seen through the frame** (1080x1920, from `1_edit.xml`);
+the competitor-timed recreation the checks read is `extras\debug\recreation_check.mp4`.
+
+```
+..\..\.venv\Scripts\python -m match_cuts --premiere --frame input\frame.png --speed 125
+```
+
 ### Premiere (`--premiere`)
 
 `1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
@@ -271,6 +308,17 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 
 A cut must never interrupt speech, whatever the competitor did (`match_cuts/speech.py`). Before the silences are cut,
 every audio cut of the edit is placed by the speech of the RAW, not by the competitor:
+
+* **Noise is not speech (night 3, from your 021).** A sound of 0.6 s or more with no word in it -- laughter,
+  applause, cheering, "ewww", music -- is noise: a cut may land inside it, so the competitor's cut stays where it is
+  (S44 had played on 3.08 s to the end of the applause, S11 0.53 s to the end of the "ewww": you cut inside both). A
+  word whose sound runs on into such noise with no quiet between (S50: "this" and 1.3 s of applause) ends 0.12 s
+  after the word. Noise is still kept like speech: no clip is trimmed out of it.
+* **Short action-captioned beats are kept (night 3).** Where the competitor shows an action caption for 1 s or
+  less (`*looks over*`, `*high five*`), that stretch is a quick reaction: neither the speech-safe trims nor the silence
+  removal cut into it (021's 0.5 s `*looks over*` shot had been trimmed to a 5-frame flash after "gentlemen"; you kept
+  its 0.5 s). Longer ones follow the usual rules (you cut 021's 1.4 s `*disgusted*` and 2.2 s `*laughing*`). The
+  silence removal never leaves a piece of a clip shorter than 0.25 s at a cut either.
 
 * **Speech map of the RAW.** A sound is the 50 ms loudness at or above this video's silence threshold, with its soft
   start and end (the windows next to it still 3 dB over the background, at most 0.2 s: the soft "s" or "-ty five"
@@ -645,8 +693,11 @@ existing `3_captions_styled.prproj` (without it the run stops rather than overwr
 
 ```
 ..\..\.venv\Scripts\python -m match_cuts batch "D:\to do" --out ..\..\output
-..\..\.venv\Scripts\python -m match_cuts batch "D:\to do" -- --keep-speed     # more options for every run after --
+..\..\.venv\Scripts\python -m match_cuts batch "D:\to do" -- --frame input\frame.png   # options for every run after --
 ```
+
+**Speed per video:** a `speed.txt` in a video's subfolder holding `125` runs that video with `--speed 125` (it wins
+over a `--speed` after `--`); without one, 100. The summary has a speed column.
 
 `<folder>` holds one subfolder per video with `competitor.mp4` and `raw.mp4` (any video extension). They run one
 after another, each as its own `--premiere --fast` run (`--thorough` for full runs), into a run folder named after
@@ -754,6 +805,17 @@ It compares your finished project with what the tool generated for that run (`1_
   - The name comes from the competitor's file (`--name` to choose).
 - **A RAW over 100 MB** is copied smaller automatically: the same width, height and frame rate, every frame kept,
   and the audio as it is (H.264 at a capped bit rate, about 90 MB). GitHub refuses files over 100 MB.
+  - A RAW too long for a sharp copy (a 20-minute episode in 90 MB would be 0.4 Mbit/s: a blur the analysis fails on)
+    keeps only **the part the edits play and 30 s around it**, at full sharpness (`--raw-window full` for the whole
+    RAW). Its timestamps start at 0; `case.json` says where it starts (`raw_offset`) and the answer key is timed on
+    it; `check-all --full-size` runs the full RAW and moves the key back.
+- **Several sequences** (a project built on your template holds the template's edit too): the sequence that plays
+  the run's RAW -- the same size, frame rate and length -- is the one compared.
+- **`--picture-key`**: your cuts from the picture (V1) instead of the sound (A1), and the answer key your picture
+  clips -- for a project where you unlinked and moved audio by hand (021, laptop004).
+- **A run made on another PC** (`--run output\laptop004`): its own `extras\media\` copies are used, never the path its
+  cut list names (that PC's `input\raw.mp4` is another video here). A mirrored run (the competitor flipped) is
+  compared as the unmirrored picture when your project has no flip; the speeds of both edits are recorded.
 - At the end it prints a short summary and the exact git commands that push the new case, for example:
 
 ```

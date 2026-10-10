@@ -147,6 +147,7 @@ class Track:
     styled: list[str]
     other: list[str]         # clips that are not captions
     odd: list[str]           # captions with other components than plain or styled
+    frame: tuple[int, int] | None = None   # the sequence's frame size (px)
 
     @property
     def name(self) -> str:
@@ -168,9 +169,11 @@ def scan(px: ProjectXml) -> list[Track]:
     for m in re.finditer(r'\n\t<VideoTrackGroup ObjectID="(\d+)".*?</VideoTrackGroup>', px.text, re.S):
         tg, block = m.group(1), m.group(0)
         fr = re.search(r"<FrameRate>(\d+)</FrameRate>", block)
+        fsz = re.search(r"<FrameRect>0,0,(\d+),(\d+)</FrameRect>", block)
         for i, uid in re.findall(r'<Track Index="(\d+)" ObjectURef="([^"]+)"/>', block):
             items = re.findall(r'<TrackItem Index="\d+" ObjectRef="(\d+)"/>', px.uobj(uid) or "")
-            t = Track(tg, int(i), seq_names.get(tg, ""), int(fr.group(1)) if fr else None, items, [], [], [], [])
+            t = Track(tg, int(i), seq_names.get(tg, ""), int(fr.group(1)) if fr else None, items, [], [], [], [],
+                      (int(fsz.group(1)), int(fsz.group(2))) if fsz else None)
             for it in items:
                 refs = px.components(it)
                 objs = [px.obj(r) or "" for r in refs]
@@ -378,8 +381,10 @@ def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, 
                 _must("injectstyle.py", ref_xml, orig, work, cwd=td)
                 notes.append(f"style item POPW added to the project panel (from {ref.name})")
         wpx = px if work == orig else ProjectXml(work.read_bytes().decode("utf-8"))
+        donor_frame = None
         if same is not None:
             donor_px, donor_item = px, same.items[0]
+            donor_frame = same.frame
             source = f"{same.label} of this project"
             _style_link_check(wpx, donor_px, donor_item)
             if same.tg == target.tg:
@@ -394,6 +399,7 @@ def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, 
             if dtrack is None:
                 raise RestyleError(f"{ref.name} has no styled caption to copy the style from")
             donor_px, donor_item = dpx, dtrack.items[0]
+            donor_frame = dtrack.frame
             source = f"{ref.name} {dtrack.name}"
             _style_link_check(wpx, donor_px, donor_item)
             log = _must("capfix_xdonor.py", ref_xml, dtrack.tg, dtrack.idx, work, out_xml, target.tg, target.idx,
@@ -429,6 +435,12 @@ def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, 
     ft = target.frame_ticks
     echo(f"Restyled {len(after)} captions on {target.label} -> {dst}")
     echo(f"  style, position and pop copied from {source}")
+    if donor_frame and target.frame and donor_frame[0] != target.frame[0]:
+        r = target.frame[0] / float(donor_frame[0])
+        echo(f"  SIZE: the donor caption comes from a {donor_frame[0]}x{donor_frame[1]} sequence, your captions are on "
+             f"a {target.frame[0]}x{target.frame[1]} one (--frame: 2160x3840). Premiere keeps a graphic's size in pixels, "
+             f"so they look {r:g} x {'smaller' if r > 1 else 'bigger'} -- select them all and multiply Effect Controls > "
+             f"Motion > Scale by {r:g}, or style one caption at the right size and restyle with it as the donor")
     for n in notes:
         echo(f"  {n}")
     if pop:
@@ -449,7 +461,39 @@ def restyle(project: str | os.PathLike, donor: str | os.PathLike | None = None, 
     if left:
         echo("Plain captions on other tracks, left as they are (only the track with the most is restyled): " +
              ", ".join(f"{t.label}: {len(t.plain)}" for t in left))
+    for line in frame_check(dst):
+        echo(line)
     return dst
+
+
+def frame_check(styled: Path) -> list[str]:
+    """--frame runs: the restyled captions' place against the frame's caption zone (the run folder's
+    extras/frame.json): inside the transparent hole, clear of the header and the headline. A report line (or a
+    warning per caption outside it); [] for a run without a frame."""
+    import json
+    from .run_folders import EXTRAS
+    info = Path(styled).parent / EXTRAS / "frame.json"
+    if not info.is_file():
+        return []
+    try:
+        fr = json.loads(info.read_text(encoding="utf-8"))
+        lo, hi = (float(v) for v in fr["caption_zone_frac"])
+        from . import prproj as PR
+        seq = PR.main_sequence(PR.read(styled))
+        caps = PR.captions_of(seq) if seq is not None else []
+    except Exception as e:  # noqa: BLE001 - a check, never a failure
+        return [f"Frame: the captions' place could not be checked ({type(e).__name__}: {e})"]
+    ys = [(c, float(c.position[1])) for c in caps if c.position is not None]
+    if not ys:
+        return [f"Frame {Path(fr.get('path', '')).name}: keep the captions between {100 * lo:.0f} % and {100 * hi:.0f} % "
+                "of the height (inside the hole, clear of the header and headline) -- their place could not be read"]
+    out_of = [(c, y) for c, y in ys if not lo <= y <= hi]
+    if not out_of:
+        return [f"Frame {Path(fr.get('path', '')).name}: every caption sits at {100 * ys[0][1]:.0f} % of the height -- "
+                f"inside the hole, clear of the header and headline ({100 * lo:.0f}-{100 * hi:.0f} %)"]
+    return [f"FRAME: {len(out_of)} caption(s) outside the hole's caption zone ({100 * lo:.0f}-{100 * hi:.0f} % of the "
+            f"height): over the header / headline or the frame's bottom -- move them (Effect Controls > Position):"] + \
+        [f"  {c.start:.2f} s \"{c.text}\": at {100 * y:.0f} %" for c, y in out_of[:12]]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

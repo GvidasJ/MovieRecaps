@@ -1274,6 +1274,7 @@ class PremiereClip:
     person_note: str = ""            # re-framed to show the person speaking (speakers.py): what moved and why
     person_span: tuple[int, int] | None = None   # the source range it plays in the final edit (sequence-rate frames):
                                                  # the speech-safe cuts may extend it (premiere_clips(silence=))
+    dissolve_frames: int = -1        # its cross dissolve's length (sequence frames); -1: the event's (ev.dissolve_in)
 
     @property
     def label(self) -> str:
@@ -1291,6 +1292,70 @@ def _split_clip(cl: PremiereClip, at: int) -> tuple[PremiereClip, PremiereClip]:
     mid = cl.src_in + int(round((at - cl.rec_start) * cl.speed))
     return (dataclasses.replace(cl, end=at, rec_end=at, src_out=mid, link_split=True),
             dataclasses.replace(cl, start=at, rec_start=at, src_in=mid, link_split=True))
+
+
+def retime_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: Sequence[dict], n_frames: int,
+                k: float, fac: int) -> tuple[list[PremiereClip], list[dict], list[dict], int]:
+    """--speed: the edit made at 100 % (every cut off speech, silences and repeats out) played ``k`` times as fast --
+    every V1 clip and A1 item at speed x k, every cut, dissolve and marker at frame x / k (rounded: two clips meeting at
+    a cut keep meeting), the source each plays unchanged. Each item's source in-point is taken on the 100 % timeline at
+    its new first frame, and lands on the grid Premiere starts a retimed clip on (<in> counts the RETIMED clip:
+    remap_encode); a piece continuing the piece before in one take (a link split, a scene cut) starts exactly where that
+    one's retimed source ends -- no tick repeated or skipped at its cut. Returns (clips, audio, markers, frames)."""
+    def at(x: int) -> int:
+        return int(round(int(x) / float(k)))
+
+    def chain(items: list, get, put) -> None:
+        # items: [(old, new)] in timeline order; get(item) -> (rec_start, rec_end, src_in, speed); put sets src_in
+        prev = None
+        for old, new in items:
+            r0, r1, s_in, v = get(old)
+            if prev is not None:
+                p_old, p_new = prev
+                q0, q1, q_in, q_v = get(p_old)
+                if q1 == r0 and abs(q_v - v) < 1e-9 and int(q_in + round((q1 - q0) * q_v)) == int(s_in):
+                    n0, n1, n_in, n_v = get(p_new)
+                    s = _remap_factor(n_v)
+                    x = remap_encode(*xml_in_out(n_in, n_in + int(round((n1 - n0) * n_v))), n_v, n1 - n0)
+                    put(new, _source_tick(x[0] + (n1 - n0), s) if n_v > 0 else
+                        n_in + int(round((n1 - n0) * n_v)))
+            prev = (old, new)
+    out_c: list[PremiereClip] = []
+    for cl in clips:
+        a, b = at(cl.rec_start), at(cl.rec_end)
+        b = max(b, a + 1)
+        v = float(cl.speed) * float(k)
+        s_in = cl.src_in + int(round((a * k - cl.rec_start) * float(cl.speed)))
+        s_out = cl.src_in + int(round((b * k - cl.rec_start) * float(cl.speed)))
+        d = -1
+        if cl.start == -1:
+            d0 = cl.dissolve_frames if cl.dissolve_frames >= 0 else int(getattr(cl.ev, "dissolve_in", 0) or 0) * fac
+            d = max(1, at(cl.rec_start + d0) - a)
+        out_c.append(dataclasses.replace(cl, start=-1 if cl.start == -1 else a, end=-1 if cl.end == -1 else b,
+                                         rec_start=a, rec_end=b, src_in=s_in, src_out=s_out, speed=v,
+                                         dissolve_frames=d))
+
+    def put_clip(c: PremiereClip, n_in: int) -> None:
+        c.src_out = n_in + (c.src_out - c.src_in)
+        c.src_in = n_in
+    chain(list(zip(clips, out_c)), lambda c: (c.rec_start, c.rec_end, c.src_in, float(c.speed)), put_clip)
+    out_a: list[dict] = []
+    for it in audio:
+        a, b = at(it["start"]), at(it["end"])
+        b = max(b, a + 1)
+        v = float(it["speed"])
+        n_in = int(it["in"]) + int(round((a * k - int(it["start"])) * v))
+        n_out = int(it["in"]) + int(round((b * k - int(it["start"])) * v))
+        out_a.append(dict(it, start=a, end=b, speed=v * float(k), **{"in": n_in, "out": n_out}))
+
+    def put_audio(d: dict, n_in: int) -> None:
+        d["out"] = n_in + (d["out"] - d["in"])
+        d["in"] = n_in
+    chain(list(zip(audio, out_a)), lambda d: (int(d["start"]), int(d["end"]), int(d["in"]), float(d["speed"])),
+          put_audio)
+    out_m = [dict(m, **{"in": at(m["in"]), "out": (at(m["out"]) if int(m["out"]) >= 0 else m["out"])})
+             for m in markers]
+    return out_c, out_a, out_m, at(n_frames)
 
 
 def _split_audio(it: dict, at: int) -> tuple[dict, dict]:
@@ -1389,14 +1454,54 @@ def premiere_settings(cfg: Any = None) -> dict:
     win = tuple(float(v) for v in (getattr(cfg, "premiere_window", None) or (42.0, 555.0, 998.0, 1037.0)))
     static = getattr(cfg, "premiere_static_framing", None)
     move = getattr(cfg, "premiere_min_move", None)
+    min_clip = int(getattr(cfg, "premiere_min_clip_frames", MIN_CLIP_FRAMES)
+                   if getattr(cfg, "premiere_min_clip_frames", None) is not None else MIN_CLIP_FRAMES)
+    k = float(getattr(cfg, "premiere_speed", 1.0) or 1.0)
+    if k > 1.0 + 1e-9 and min_clip > 0:            # --speed: no clip under min_clip frames once it plays k x as fast
+        min_clip = int(math.ceil(min_clip * k - 1e-9))
     return {"size": (W, H), "fps": fps, "window": win,
             "max_zoom": float(getattr(cfg, "premiere_max_zoom", None) or 1.05),
             "static": True if static is None else bool(static),
-            "min_move": 250.0 if move is None else max(0.0, float(move)),
+            # --min-move counts px of the 1080x1920 sequence: the same move on a 2160x3840 one (--frame) is twice the px
+            "min_move": (250.0 if move is None else max(0.0, float(move))) * W / 1080.0,
             "scene_cuts": bool(getattr(cfg, "premiere_scene_cuts", True)),
             "normal_audio": bool(getattr(cfg, "premiere_normal_audio", True)),
-            "min_clip": int(getattr(cfg, "premiere_min_clip_frames", MIN_CLIP_FRAMES)
-                            if getattr(cfg, "premiere_min_clip_frames", None) is not None else MIN_CLIP_FRAMES)}
+            "min_clip": min_clip}
+
+
+def unmirror(cl: Cutlist) -> tuple[Cutlist, int]:
+    """The Premiere edit without the competitor's mirror (night 3; --mirror keeps it): your finished edits of the two
+    mirrored competitors (020, laptop004) have no clip flipped. Each mirrored segment shows the same part of the RAW,
+    the right way round: its framing (RAW -> competitor px, of the mirrored RAW) mirrored about its box's centre --
+    p' = s R(-theta) p + (2 c - s cos(theta) W - tx, ty + s sin(theta) W). Returns (cut list, segments unmirrored)."""
+    import copy
+    W = float(cl.raw["width"])
+    Wc, Hc = float(cl.competitor["width"]), float(cl.competitor["height"])
+    layout_box = Box.from_dict(cl.layout["box"]) if (cl.layout or {}).get("box") else Box(0.0, 0.0, Wc, Hc)
+    segs, n = [], 0
+    for s in cl.segments:
+        if not s.flip_h:
+            segs.append(s)
+            continue
+        box = _own_box(s) or layout_box
+        c = box.x + box.w / 2.0
+
+        def mirror(d: dict) -> dict:
+            sim = Sim.from_dict(d)
+            th = math.radians(sim.theta_deg)
+            m = Sim(sim.s, -sim.theta_deg, 2.0 * c - sim.s * math.cos(th) * W - sim.tx, sim.ty + sim.s * math.sin(th) * W)
+            return dict(d, **m.to_dict())
+        t = copy.deepcopy(s)
+        if t.transform:
+            t.transform = mirror(t.transform)
+        if t.transform_keys:
+            t.transform_keys = [mirror(k) for k in t.transform_keys]
+        t.flip_h = False
+        segs.append(t)
+        n += 1
+    if not n:
+        return cl, 0
+    return dataclasses.replace(cl, segments=segs), n
 
 
 RETIME_SLIVER_S = 0.25      # --premiere: a speed change this short inside one take plays at 100 % (the take runs on)
@@ -1777,7 +1882,7 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
         old = c.keys[0][1]
         f = _person_of(c, sp, fps)
         flip = bool(c.seg.flip_h)
-        if f is None or f.how == "nobody" or speakers.passes(old, f, raw_wh[0], flip, win):
+        if f is None or f.how == "nobody" or speakers.shows_anyone(old, f, raw_wh[0], flip, win):
             continue
         new = speakers.frame_run(old, [(c, f, flip)], raw_wh, win)[0]
         if new is None:
@@ -1930,12 +2035,16 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
             continue
         why = [w for w in (_unreliable(c) for c in run) if w]
         need = [(c, _person_of(c, sp, fps), bool(c.seg.flip_h)) for c in run] if sp is not None else []
-        hidden = [c for c, f, fl in need if not speakers.passes(fr, f, raw_wh[0], fl, win)]
+        # re-framed only where the framing shows nobody of the clip: a person shown -- even not the one the speech
+        # detection picked -- is the competitor's choice (speakers.shows_anyone; 021, laptop004)
+        hidden = [c for c, f, fl in need if not speakers.shows_anyone(fr, f, raw_wh[0], fl, win)]
         if not why and not hidden and _covers(fr, raw_wh, win, tol=1e-6):
             continue
         if sp is not None and any(f is not None and f.how != "nobody" for _, f, _ in need):
             base = fr if _covers(fr, raw_wh, win, tol=1e-6) else _least_cover(fr, raw_wh, win)
-            news = speakers.frame_run(base, need, raw_wh, win)
+            # the competitor's framing (covering the window) wins where it shows a person (speakers.shows_anyone)
+            keep_base = all(speakers.shows_anyone(base, f, raw_wh[0], fl, win) for _, f, fl in need)
+            news = [None] * len(run) if keep_base else speakers.frame_run(base, need, raw_wh, win)
             reason = "; ".join(why) if why else ("it would not show the person speaking" if hidden else
                                                  "the framing would leave part of the window uncovered")
             span = run[0].label + (f"..{run[-1].label}" if len(run) > 1 else "")
@@ -1943,7 +2052,8 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
                 new = new if new is not None else base
                 c.keys = [(c.keys[0][0] if c.keys else c.src_in, new)]
                 c.covered = _covers(new, raw_wh, win, tol=1e-6)
-                c.framing_note = f"{span}: {reason}: framed on the person (zoom kept)"
+                c.framing_note = (f"{span}: {reason}: the competitor's framing, moved the least to cover the window"
+                                  if keep_base else f"{span}: {reason}: framed on the person (zoom kept)")
             face_run = True
             continue
         times = [t for c in run for t in
@@ -2363,8 +2473,8 @@ def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], 
         flip = bool(c.seg.flip_h)
         before = speakers.passes(old, f, raw_wh[0], flip, win)
         after = speakers.passes(new, f, raw_wh[0], flip, win)
-        if before or _same_framing(old, new):
-            continue
+        if before or _same_framing(old, new) or (not after and speakers.shows_anyone(new, f, raw_wh[0], flip, win)):
+            continue                     # (the competitor's framing kept on another person: its choice, no note)
         b = speakers.target(new, f, raw_wh[0], flip, win)
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
                "a person": "a person (nobody speaks)"}.get(f.how, f.how)
@@ -2415,14 +2525,17 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
 PREMIERE_MASTERCLIP = "masterclip-raw"
 
 
-def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None) -> dict:
+def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,
+                       speed: float = 1.0) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
     silence.Ripple: the speech-safe cuts, then the silences and repeats): its ranges are cut out -- everything after
     them moves earlier --, clips are extended where their speech must finish, and A1 fades over
-    silence.FADE_FRAMES on both sides of every removed range (Audio Levels keyframes: no click). Returns {'clips',
-    'markers', 'warnings', 'factor'}."""
+    silence.FADE_FRAMES on both sides of every removed range (Audio Levels keyframes: no click). ``speed`` (--speed /
+    100): the finished edit played that fast (retime_edit). With --frame (cfg.frame_png) the sequence is the frame's
+    (frame.py), the window its hole, and V2 holds the PNG over the whole edit. Returns {'clips', 'markers', 'warnings',
+    'factor'}."""
     from . import silence as sil
     st = premiere_settings(cfg)
     comp_fps, raw_fps, fps = cutlist.comp_fps, cutlist.raw_fps, st["fps"]
@@ -2449,6 +2562,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     if st["scene_cuts"]:                # Scene Edit Detection: a cut at every RAW shot change inside a clip
         clips, scene = split_at_shots(clips, getattr(cfg, "premiere_shots", None), raw_fps, fps, fac)
     clips, audio_items, pairs = link_pairs(clips, audio_items)       # V1 + A1 as linked clips
+    if abs(float(speed) - 1.0) > 1e-9:                                # --speed: the whole edit that much faster
+        clips, audio_items, markers, N = retime_edit(clips, audio_items, markers, N, float(speed), fac)
     a_of = {v: a for v, a in pairs}
     v_of = {a: v for v, a in pairs}
     if str((cutlist.settings or {}).get("audio_sync") or "raw") == "competitor":
@@ -2484,7 +2599,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             ti = _sub(vtrack, "transitionitem")
             _rate_el(ti, fps)
             _sub(ti, "start", cl.rec_start)
-            _sub(ti, "end", cl.rec_start + ev.dissolve_in * fac)
+            _sub(ti, "end", cl.rec_start + (cl.dissolve_frames if cl.dissolve_frames >= 0 else ev.dissolve_in * fac))
             _sub(ti, "alignment", "start")
             e = _effect(ti, "Cross Dissolve", "Cross Dissolve", "Dissolve", "transition")
             _sub(e, "wipecode", 0)
@@ -2523,6 +2638,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(cm, "mastercomment3", ("source in inside the frame-exact interval" if cl.in_exact else
                                     "source in = nearest 1/60 s (outside the frame-exact interval)")
              + f" ({cl.in_error_ms:+.2f} ms from the plan)")
+    if str(getattr(cfg, "frame_png", "") or ""):                      # --frame: the PNG on V2, over everything
+        _frame_track(video, str(cfg.frame_png), N, fps, W, H)
     # A1: the RAW audio at the SAME record ranges as V1 (picture-synced; an audio line where FX-14 found one)
     if has_audio:
         audio = _sub(media, "audio")
@@ -2576,6 +2693,116 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             "reframed": reframed, "snapped": snapped, "scene_cuts": scene,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
+
+
+FRAME_CLIP = "clipitem-frame"
+
+
+def speed_problems(base_xml: str | os.PathLike, fast_xml: str | os.PathLike, k: float) -> list[str]:
+    """--speed: 1_edit.xml (``fast_xml``) against the same edit at 100 % (``base_xml``, the one every other check
+    read): the same V1 clips and A1 items in the same order, each at its 100 % speed x k, starting and ending at its
+    100 % frame / k (within a frame), playing the same RAW (within Premiere's in-point grid at that speed: k ticks, +1
+    for the rounding) -- the timing bug of output/020 (in / out counted as source time on a retimed clip: RAW 629 s
+    instead of 503 s) shows here as clips far off their RAW. The sequence lasts its 100 % length / k."""
+    a, b = parse_premiere_xml(base_xml), parse_premiere_xml(fast_xml)
+    out: list[str] = []
+    f = float(a["timebase"])
+    if abs(b["duration"] - a["duration"] / k) > 1.0:
+        out.append(f"XML SPEED: the sequence lasts {b['duration']} frames, want {a['duration'] / k:.1f} "
+                   f"({a['duration']} / {k:g})")
+    tol = int(math.ceil(abs(k))) + 1
+    for kind in ("clips", "audio"):
+        xa, xb = a[kind], b[kind]
+        if len(xa) != len(xb):
+            out.append(f"XML SPEED: {len(xb)} {'V1 clips' if kind == 'clips' else 'A1 items'}, the 100 % edit has "
+                       f"{len(xa)}")
+            continue
+        for i, (p, q) in enumerate(zip(xa, xb), start=1):
+            what = f"{'V1' if kind == 'clips' else 'A1'} item {i} ({p.get('label') or '?'})"
+            if abs(float(q["speed"]) - float(p["speed"]) * k) > 2e-4 * abs(float(p["speed"]) * k):
+                out.append(f"XML SPEED {what}: speed {100 * float(q['speed']):.3f} %, want "
+                           f"{100 * float(p['speed']) * k:.3f} %")
+            for key in ("start", "end"):
+                if int(p[key]) >= 0 and abs(int(q[key]) - int(p[key]) / k) > 1.0:
+                    out.append(f"XML SPEED {what}: {key} {q[key]}, want {int(p[key]) / k:.1f}")
+            if abs(int(q["in"]) - int(p["in"])) > tol * 2 or abs(int(q["out"]) - int(p["out"])) > tol * 2:
+                out.append(f"XML SPEED {what}: plays RAW {int(q['in']) / f:.3f}-{int(q['out']) / f:.3f} s, the 100 % "
+                           f"edit {int(p['in']) / f:.3f}-{int(p['out']) / f:.3f} s")
+    return out
+
+
+def frame_track_problems(xml_path: str | os.PathLike, n: int) -> list[str]:
+    """--frame: V2 must hold exactly the frame PNG, from the first frame of the edit to its last (``n`` frames), with
+    straight alpha and an existing file -- otherwise part of the edit is shown without its frame."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    tracks = seq.findall("media/video/track") if seq is not None else []
+    if len(tracks) < 2:
+        return ["XML FRAME: no V2 track with the frame"]
+    items = tracks[1].findall("clipitem")
+    if len(items) != 1 or items[0].get("id") != FRAME_CLIP:
+        return [f"XML FRAME: V2 holds {len(items)} item(s), want the frame PNG alone"]
+    ci = items[0]
+    out = []
+    if (int(_text(ci, "start", -9)), int(_text(ci, "end", -9))) != (0, int(n)):
+        out.append(f"XML FRAME: the frame covers {_text(ci, 'start')}-{_text(ci, 'end')}, want 0-{n} (the whole edit)")
+    if str(_text(ci, "alphatype", "")).lower() != "straight":
+        out.append("XML FRAME: alphatype is not straight (the hole would not show V1)")
+    url = str(_text(ci, "file/pathurl", "") or "")
+    path = urllib.parse.unquote(url.replace("file://localhost/", "", 1)) if url.startswith("file://localhost/") else ""
+    if not path or not Path(path).is_file():
+        out.append(f"XML FRAME: the frame file {url} does not exist")
+    return out
+
+
+def _frame_track(video: ET.Element, png: str, n: int, fps: Fraction, W: int, H: int) -> None:
+    """V2 (--frame, frame.py): the frame PNG over the whole edit -- one still clip with straight alpha (its transparent
+    hole shows V1 under it), scaled to fill the W x H sequence (Scale 100 for a PNG of the sequence's size, 200 for one
+    half as big), its centre on the sequence's."""
+    from .frame import load_frame
+    fr = load_frame(png)
+    name = Path(fr.path).name
+    tr = _sub(video, "track")
+    ci = _sub(tr, "clipitem", id=FRAME_CLIP)
+    _sub(ci, "masterclipid", "masterclip-frame")
+    _sub(ci, "name", name)
+    _sub(ci, "enabled", "TRUE")
+    _sub(ci, "duration", int(n))
+    _rate_el(ci, fps)
+    _sub(ci, "start", 0)
+    _sub(ci, "end", int(n))
+    _sub(ci, "in", 0)
+    _sub(ci, "out", int(n))
+    _sub(ci, "alphatype", "straight")
+    _sub(ci, "pixelaspectratio", "square")
+    _sub(ci, "anamorphic", "FALSE")
+    fe = _sub(ci, "file", id="file-frame")
+    _sub(fe, "name", name)
+    _sub(fe, "pathurl", _file_url(fr.path))
+    _rate_el(fe, fps)
+    _sub(fe, "duration", int(n))
+    media = _sub(fe, "media")
+    sc = _sub(_sub(media, "video"), "samplecharacteristics")
+    _rate_el(sc, fps)
+    _sub(sc, "width", int(fr.width))
+    _sub(sc, "height", int(fr.height))
+    _sub(sc, "anamorphic", "FALSE")
+    _sub(sc, "pixelaspectratio", "square")
+    _sub(sc, "fielddominance", "none")
+    e = _effect(_sub(ci, "filter"), "Basic Motion", "basic", "motion", "motion")
+    _param(e, "scale", "Scale", _fmt(fr.premiere_scale(W, H)), 0, 1000)
+    _param(e, "rotation", "Rotation", "0", -8640, 8640)
+    _param(e, "center", "Center", (0.0, 0.0))
+    _param(e, "centerOffset", "Anchor Point", (0.0, 0.0))
+    st = _sub(ci, "sourcetrack")
+    _sub(st, "mediatype", "video")
+    _sub(st, "trackindex", 1)
+    x, y, w, h = fr.window(W, H)
+    cm = _sub(ci, "comments")
+    _sub(cm, "mastercomment1", "FRAME")
+    _sub(cm, "mastercomment2", f"--frame {name} ({fr.width}x{fr.height}): Scale {fr.premiere_scale(W, H):g} %, "
+                               f"Position {W / 2:g}, {H / 2:g} px; its transparent hole x {x:.0f}-{x + w:.0f}, "
+                               f"y {y:.0f}-{y + h:.0f} on this sequence -- every V1 clip covers it")
 
 
 def _links(parent: ET.Element, v: int, a: int) -> None:
@@ -3367,7 +3594,8 @@ def held_at_shot(t: float, changes_s: Sequence[float], seq_fps: float, raw_fps: 
 
 
 def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_after: float, pad_before: float,
-                              changes_s: Sequence[float] = (), raw_fps: Any = None) -> list[str]:
+                              changes_s: Sequence[float] = (), raw_fps: Any = None,
+                              kept: Sequence[tuple[int, int]] = ()) -> list[str]:
     """The silence check at the cuts of the final XML: at every audio cut of A1 (speech.audio_cuts), the silence at
     the end of the item before it plus the silence at the start of the item after it (the quiet between the RAW's
     sounds, ``speech``: its speech.SpeechMap) is at most ``pad_after`` + ``pad_before`` (+ two frames of rounding:
@@ -3392,6 +3620,8 @@ def premiere_silence_problems(xml_path: str | os.PathLike, speech: Any, pad_afte
         last = max((s.s1 for s in speech.sounds if s.s0 < e_raw - 1e-6 and s.s1 > a0), default=a0)
         first = min((s.s0 for s in speech.sounds if s.s1 > s_raw + 1e-6 and s.s0 < b1), default=b1)
         quiet = max(0.0, e_raw - min(last, e_raw)) + max(0.0, max(first, s_raw) - s_raw)
+        if any(k0 - 2 <= int(a["end"]) <= k1 + 2 for k0, k1 in kept):
+            continue                         # a short action-captioned beat ends / starts here: its quiet is kept
         if quiet > pad_after + pad_before + 2.0 / f + 1e-6 and not (near_shot(e_raw) or near_shot(s_raw)):
             out.append(f"{a.get('label')} / {b.get('label')} at {_tc(int(a['end']), fps)}: {quiet:.2f} s of silence "
                        f"across the cut ({max(0.0, e_raw - min(last, e_raw)):.2f} s + "
@@ -3596,6 +3826,10 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
         r = speakers.on_screen(sim, t, src[0], bool(c.get("flip"))) if t else None
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
                "a person": "any person (nobody speaks)"}.get(need.how, need.how)
+        if speakers.shows_anyone(sim, need, src[0], bool(c.get("flip")), win):
+            exceptions.append(f"{where}: shows another person than {who} found (the competitor's choice of whom to "
+                              f"show, kept) -- check" + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
+            continue
         problems.append(f"{where}: {who} is not in the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
                         f"{win[1]:.0f}-{win[1] + win[3]:.0f})" +
                         (f": face at x {r[0]:.0f}-{r[2]:.0f}, y {r[1]:.0f}-{r[3]:.0f}" if r else "") +
@@ -3653,7 +3887,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     except Exception as e:  # noqa: BLE001
         flash = [f"the flash check could not read the XML: {type(e).__name__}: {e}"]
     try:
-        hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or (), cutlist.raw_fps)
+        hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or (), cutlist.raw_fps,
+                                          getattr(cfg, "premiere_beats", None) or ())
                 if speech is not None and not bad_items and not getattr(cfg, "keep_silence", False) else [])
     except Exception as e:  # noqa: BLE001
         hush = [f"the silence check could not read the XML: {type(e).__name__}: {e}"]
@@ -3738,8 +3973,12 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
                 any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
             errors.append(f"XML {cl.label}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
-    if x["video_tracks"] != 1:
-        errors.append(f"XML: {x['video_tracks']} video tracks (V1 only; V2+ must stay empty)")
+    framed = bool(str(getattr(cfg, "frame_png", "") or ""))
+    if x["video_tracks"] != (2 if framed else 1):
+        errors.append(f"XML: {x['video_tracks']} video tracks (" + ("V1 and the frame on V2" if framed else
+                                                                     "V1 only; V2+ must stay empty") + ")")
+    elif framed:
+        errors += frame_track_problems(xml_path, x["duration"])
     if x["audio_tracks"] > 1:
         errors.append(f"XML: {x['audio_tracks']} audio tracks (A1 only)")
     if x.get("generators"):

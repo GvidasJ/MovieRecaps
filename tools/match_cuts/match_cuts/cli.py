@@ -97,6 +97,16 @@ def _seconds_arg(name: str):
     return parse
 
 
+def _speed_arg(value: str) -> float:
+    try:
+        v = float(str(value).strip().rstrip("%").strip())
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--speed must be a percentage (e.g. 125), got {value!r}") from None
+    if not (10.0 <= v <= 1000.0) or v != v:
+        raise argparse.ArgumentTypeError("--speed must be between 10 and 1000 (percent)")
+    return v
+
+
 def _db_arg(value: str) -> float:
     try:
         v = float(str(value).lower().removesuffix("db"))
@@ -177,9 +187,25 @@ def build_parser() -> argparse.ArgumentParser:
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
                         "the spoken words. The framing changes only where the competitor's moves --min-move px or more")
     p.add_argument("--keep-speed", action="store_true",
-                   help="--premiere: play every clip of 1_edit.xml at 100 %% speed instead of the competitor's speed "
-                        "change -- the same moments of the RAW in the same order (a clip the competitor sped up to "
-                        "125 %% lasts 1.25 x as long); the captions are timed to that edit")
+                   help="the default now (kept so old command lines work): every clip of 1_edit.xml is made at 100 %% "
+                        "speed, whatever the competitor's speed -- the same moments of the RAW in the same order (a "
+                        "clip the competitor sped up to 125 %% lasts 1.25 x as long); see --speed")
+    p.add_argument("--speed", type=_speed_arg, default=100.0, metavar="PERCENT",
+                   help="--premiere: the whole edit plays at this speed in Premiere (e.g. 125), whatever speed the "
+                        "competitor used: the edit is made at 100 %% (cuts off speech, silences and repeats out, the "
+                        "captions transcribed), then every clip of 1_edit.xml plays PERCENT %% fast and every cut and "
+                        "caption moves with it (default 100; batch: a speed.txt in a video's folder)")
+    p.add_argument("--frame", default=None, metavar="PNG",
+                   help="--premiere: your channel's overlay, a PNG with a TRANSPARENT hole where the video goes "
+                        "(header and headline around it): the video is fitted to cover the hole (cropped as needed, "
+                        "on the person speaking), the PNG goes on V2 over it for the whole edit, 1_edit.xml is made for "
+                        "a 2160x3840 sequence (--frame-size), the captions stay inside the hole and "
+                        "preview_recreation.mp4 is the edit seen through the frame")
+    p.add_argument("--mirror", action="store_true",
+                   help="--premiere: keep the competitor's horizontal mirror (Flop) in 1_edit.xml. Default: the RAW the "
+                        "right way round showing the same part of it, as in your finished edits of mirrored competitors")
+    p.add_argument("--frame-size", type=_comp_size, default="2160x3840", metavar="WxH",
+                   help="--frame: the sequence size 1_edit.xml is made for (default 2160x3840; the PNG is scaled to it)")
     p.add_argument("--no-scene-cuts", action="store_true",
                    help="--premiere: do not split V1 / A1 at the RAW's own shot changes (default: a cut at every shot "
                         "change a clip plays, like Premiere's Scene Edit Detection)")
@@ -273,7 +299,12 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere = bool(getattr(args, "premiere", False))
     cfg.premiere_min_move = float(getattr(args, "min_move", 250.0))
     cfg.keep_silence = bool(getattr(args, "keep_silence", False))
-    cfg.keep_speed = bool(getattr(args, "keep_speed", False))
+    cfg.keep_speed = True                   # every run: the edit is made at 100 % (--keep-speed: the old switch)
+    cfg.premiere_speed = float(getattr(args, "speed", 100.0) or 100.0) / 100.0
+    cfg.premiere_mirror = bool(getattr(args, "mirror", False))
+    if getattr(args, "frame", None):
+        cfg.frame_png = str(args.frame)
+        cfg.frame_size = str(getattr(args, "frame_size", None) or "2160x3840")
     cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_cuts", False))
     cfg.premiere_normal_audio = not bool(getattr(args, "audio_lines", False))
     cfg.premiere_min_clip_frames = max(0, int(getattr(args, "min_clip", 10)))
@@ -466,6 +497,13 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
     checks = result.get("checks") or {}
     lines = []
     lines.append(f"match_cuts result: {headline(result)}")
+    rcfg = getattr(result.get("context"), "cfg", None)
+    if rcfg is not None and getattr(rcfg, "premiere", False):
+        k = float(getattr(rcfg, "premiere_speed", 1.0) or 1.0)
+        fr = getattr(result.get("context"), "frame", None)
+        lines.append(f"  Speed: {100 * k:g} %" + (" (the default)" if abs(k - 1.0) < 1e-9 else
+                                                  " (--speed: made at 100 %, 1_edit.xml plays it this fast)")
+                     + (f"; frame: {Path(fr.path).name} on V2, {rcfg.premiere_size} sequence" if fr is not None else ""))
     for key, label in [] if result.get("raw_only") else CRITERIA_LABELS:
         c = crit.get(key) or {}
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
@@ -621,9 +659,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.voiceover and not Path(args.voiceover).is_file():
         print(f"match_cuts: voice-over file not found: {args.voiceover}", file=sys.stderr)
         return 2
-    if getattr(args, "keep_speed", False) and not (args.premiere or raw_only):
-        print("match_cuts: --keep-speed changes the Premiere edit: add --premiere", file=sys.stderr)
+    if raw_only and (abs(float(getattr(args, "speed", 100.0) or 100.0) - 100.0) > 1e-9 or getattr(args, "frame", None)):
+        print("match_cuts: --speed and --frame need a competitor (--competitor): the RAW-only edit does not take them "
+              "yet", file=sys.stderr)
         return 2
+    if abs(float(getattr(args, "speed", 100.0) or 100.0) - 100.0) > 1e-9 and not (args.premiere or raw_only):
+        print("match_cuts: --speed changes the Premiere edit (1_edit.xml): add --premiere", file=sys.stderr)
+        return 2
+    if getattr(args, "frame", None):
+        if not (args.premiere or raw_only):
+            print("match_cuts: --frame changes the Premiere edit (1_edit.xml): add --premiere", file=sys.stderr)
+            return 2
+        try:
+            from .frame import load_frame
+            load_frame(args.frame)                       # a readable PNG with a transparent hole, or stop here
+        except Exception as e:  # noqa: BLE001 - said to the user
+            print(f"match_cuts: --frame {args.frame}: {e}", file=sys.stderr)
+            return 2
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)
     cfg = config_from_args(args, comp, raw)

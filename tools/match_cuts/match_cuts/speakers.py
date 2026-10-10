@@ -11,8 +11,12 @@ The check, for one clip's fixed framing (a Sim: RAW px -> sequence px, rotation 
 * a clip with nobody in the picture (B-roll, a hand, an object) cannot be checked: listed, not failed.
 
 The fix (``reframe``): keep the zoom, move the picture sideways so the person is centred in the window -- as far as
-the picture still covers the window; up or down only when the face is cut off at the top or bottom. It beats the
-competitor's framing and --min-move.
+the picture still covers the window; up or down only when the face is cut off at the top or bottom. It beats
+--min-move -- and, since night 3, the competitor's framing only where that shows nobody at all (``shows_anyone``):
+where it shows a person, even not the one the speech detection picked, the competitor chose whom to show (021: you
+framed 3 of the 5 re-framed clips back onto the competitor's subject -- the "speaker" was a face at the edge of a wide
+shot; laptop004, a cartoon, was re-framed onto the wrong panda). The hard check then lists such a clip ("shows
+another person") instead of failing the run.
 """
 from __future__ import annotations
 
@@ -39,6 +43,7 @@ class Faces:
     boxes: list[tuple[float, float, float, float]] = field(default_factory=list)   # 'a person': any one of these
     track: int | None = None
     share: float = 0.0
+    others: list[tuple[float, float, float, float]] = field(default_factory=list)  # every face present over the clip
 
 
 @dataclass
@@ -58,11 +63,11 @@ class Context:
         ks = v["ks"]
         if v["track"] is None:
             return Faces("nobody", bool(v["speaking"]))
+        everyone = [b for b in (extent(t, ks) for t in p.present(ks)) if b is not None]
         if v["how"] == "a person":
-            boxes = [b for b in (extent(t, ks) for t in p.present(ks)) if b is not None]
-            return Faces("a person", False, None, boxes)
+            return Faces("a person", False, None, everyone, others=everyone)
         b = extent(v["track"], ks)
-        return Faces(v["how"], True, b, [b] if b else [], int(v["track"].id), float(v["share"])) if b else \
+        return Faces(v["how"], True, b, [b] if b else [], int(v["track"].id), float(v["share"]), everyone) if b else \
             Faces("nobody", True)
 
     def same_shot(self, t_a: float, t_b: float) -> bool:
@@ -117,6 +122,16 @@ def passes(sim: Any, f: Faces | None, raw_w: float, flip: bool, win: tuple[float
     if f.how == "a person":
         return any(shown(on_screen(sim, b, raw_w, flip), win) for b in f.boxes) if f.boxes else True
     return shown(on_screen(sim, f.box, raw_w, flip), win)
+
+
+def shows_anyone(sim: Any, f: Faces | None, raw_w: float, flip: bool, win: tuple[float, float, float, float]) -> bool:
+    """The framing shows a person of the clip -- the one speaking or anyone else (night 3: the competitor's choice of
+    whom to show wins; you framed 021's re-framed clips back onto the competitor's subject 3 times of 5, and
+    laptop004's re-frame onto "the speaker" showed the wrong panda)."""
+    if f is None or f.how == "nobody":
+        return True
+    return any(shown(on_screen(sim, b, raw_w, flip), win) for b in ([f.box] if f.box else []) + list(f.boxes)
+               + list(f.others) if b)
 
 
 def x_range(sim: Any, box: tuple[float, float, float, float], raw_wh: tuple[float, float], flip: bool,

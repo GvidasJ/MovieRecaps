@@ -44,16 +44,25 @@ MAX_SHIFT_S = 0.1         # an audio line jumping this little inside speech wher
 MAX_RETIMED_EXT_S = 0.1   # an audio line under a retimed picture (V1 not at 100 %) is extended by at most this much new
 #                           picture: the shared ripple extends V1 too, at its speed
 MAX_JUMP_S = 0.1          # a cut skipping (or repeating) this little of the RAW inside speech: the clips play on as one take
+NOISE_S = 0.6             # a sound this long with no word in it (laughter, applause, cheering, music) is noise: a cut may
+#                           land inside it -- the competitor's cut stays (021: you cut inside 3.4 s of applause at S44 and
+#                           kept S11's sound to the competitor's cut inside 1.7 s of "ewww"; playing on to its end added
+#                           3.08 s / 0.53 s, CHECK BY HAND)
+WORD_TAIL_S = 0.12        # a word's sound running on (no quiet) into such noise ends this long after the word (021 S50:
+#                           "this" 1204.98-1205.16 s, its sound to 1206.45 s through applause)
 EPS = 1e-6
 
 
 @dataclass
 class Sound:
-    """One sound of the recording (seconds): speech (said) or not (a breath, a click: may be left out at an edge)."""
+    """One sound of the recording (seconds): speech (said) or not (a breath, a click: may be left out at an edge).
+    ``noise``: a long sound with no word in it (NOISE_S): kept like speech (a clip is not trimmed out of it), but a
+    cut may land inside it (laughter, applause, cheering, music under no words)."""
     s0: float
     s1: float
     speech: bool
     why: str = ""
+    noise: bool = False
 
 
 @dataclass
@@ -217,8 +226,44 @@ def speech_map(y: np.ndarray, sr: int, st: Any = None, words: Sequence[Any] | No
                         continue
                     merged.append(s)
                 sounds = merged
+        sounds = _noise(sounds, both)
     lv["words"] = None if words is None else len(ws)
     return SpeechMap(sounds, dur, named, lv)
+
+
+def _noise(sounds: list[Sound], words: Sequence[tuple[str, float, float]]) -> list[Sound]:
+    """The noise of a transcribed recording (NOISE_S): a long sound with no word in it is noise; a sound whose words
+    end WORD_TAIL_S or more before a long stretch of it (no quiet in between: applause after "this") is split there --
+    the words, then the noise (and the same before its first word)."""
+    out: list[Sound] = []
+    w0 = [n[1] for n in words]
+    span = max([n[2] - n[1] for n in words] or [0.0])
+    for s in sounds:
+        if s.why == "not transcribed here":
+            out.append(s)
+            continue
+        i0, i1 = bisect.bisect_left(w0, s.s0 - span - 0.01), bisect.bisect_right(w0, s.s1)
+        said = [n for n in words[i0:i1] if n[2] > s.s0 + 0.01 and n[1] < s.s1 - 0.01]
+        if not said:
+            if s.s1 - s.s0 >= NOISE_S - 1e-9:      # voiced (a laugh, cheering): kept like speech; else trimmable
+                out.append(Sound(s.s0, s.s1, s.speech, f"{s.why or 'no words'}; {s.s1 - s.s0:.2f} s with no word: "
+                                                       "laughter / applause / noise -- a cut may land in it", True))
+            else:
+                out.append(s)
+            continue
+        first, last = min(n[1] for n in said), max(n[2] for n in said)
+        a, b = s.s0, s.s1
+        head = first - WORD_TAIL_S
+        tail = last + WORD_TAIL_S
+        if head - a >= NOISE_S - 1e-9:
+            out.append(Sound(a, head, True, f"before '{said[0][0]}': {head - a:.2f} s with no word -- noise", True))
+            a = head
+        if b - tail >= NOISE_S - 1e-9:
+            out.append(Sound(a, tail, s.speech, s.why))
+            out.append(Sound(tail, b, True, f"after '{said[-1][0]}': {b - tail:.2f} s with no word -- noise", True))
+        else:
+            out.append(Sound(a, b, s.speech, s.why))
+    return out
 
 
 def _block_word_dips(q: np.ndarray, t: np.ndarray, db: np.ndarray, noise: float, ws: Sequence[Any]) -> np.ndarray:
@@ -313,8 +358,11 @@ def end_at(sm: SpeechMap, x: float, lo: float, pa: float, pb: float) -> float:
     """Where a clip playing the RAW from ``lo`` ends when the plan ends it at ``x`` (seconds): ``pa`` after its last
     speech (end_after). Inside speech (a word, or words heard as one sound): the clip plays on to its end -- the
     competitor played part of it -- or, when it has played less than KEEP_FRAC of it and speech before it, stops
-    before it. A clip with no speech before ``x`` keeps ``x`` (out of a breath)."""
+    before it. Inside noise (NOISE_S: laughter, applause): ``x``, where the competitor cut. A clip with no speech
+    before ``x`` keeps ``x`` (out of a breath)."""
     k = sm.sound_at(x)
+    if k is not None and sm.sounds[k].noise:
+        return x
     if k is not None and sm.sounds[k].speech:
         s = sm.sounds[k]
         j = sm.speech_before(s.s0)
@@ -331,8 +379,11 @@ def start_at(sm: SpeechMap, x: float, hi: float, pa: float, pb: float) -> float:
     """Where a clip ending in the RAW at ``hi`` starts when the plan starts it at ``x``: ``pb`` before its first
     speech (start_before). Inside speech (a word, or words heard as one sound): the clip starts before it -- the
     competitor played part of it -- or, when less than KEEP_FRAC of it is left to play and speech follows in the
-    clip, after it. A clip with no speech after ``x`` keeps ``x`` (out of a breath)."""
+    clip, after it. Inside noise (laughter, applause): ``x``. A clip with no speech after ``x`` keeps ``x`` (out of a
+    breath)."""
     k = sm.sound_at(x)
+    if k is not None and sm.sounds[k].noise:
+        return x
     if k is not None and sm.sounds[k].speech:
         s = sm.sounds[k]
         j = sm.speech_after(s.s1)
@@ -482,8 +533,9 @@ def shot_guard(sm: SpeechMap, na: float, nb: float, changes: Sequence[float], pa
         if free_end and inside and nb - inside[-1] < m - 1e-6:
             c = inside[-1]
             j = sm.speech_before(nb)
-            if j is None or sm.sounds[j].s1 <= c + 1e-3:             # the speech ended before the shot change
-                nb = c
+            kc = sm.sound_at(c)
+            if j is None or sm.sounds[j].s1 <= c + 1e-3 or (kc is not None and sm.sounds[kc].noise):
+                nb = c                       # the speech ended before the shot change, or noise runs over it: cut there
             else:                                                     # it runs into the new shot: show it m long
                 x = min(sm.dur, c + m)
                 k = sm.sound_at(x)
@@ -493,8 +545,9 @@ def shot_guard(sm: SpeechMap, na: float, nb: float, changes: Sequence[float], pa
         if free_start and inside and inside[0] - na < m - 1e-6:
             c = inside[0]
             j = sm.speech_after(na)
-            if j is None or sm.sounds[j].s0 >= c - 1e-3:              # no speech before the shot change
-                na = c
+            kc = sm.sound_at(c)
+            if j is None or sm.sounds[j].s0 >= c - 1e-3 or (kc is not None and sm.sounds[kc].noise):
+                na = c                       # no speech before the shot change, or noise runs over it: start there
             else:
                 x = max(0.0, c - m)
                 k = sm.sound_at(x)
@@ -549,7 +602,7 @@ def _a1_gap_edges(ps: Sequence[Piece], sm: SpeechMap, f: float, pa: float, pb: f
 
 def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after: float, pad_before: float,
                v1_cuts: set[int] | None = None, src_max: float | None = None, shots: Sequence[float] | None = None,
-               seq_end: int | None = None
+               seq_end: int | None = None, keep: Sequence[tuple[int, int]] = ()
                ) -> tuple[list[tuple[int, int]], list[tuple[int, int, str, float]], list[dict], list[tuple[int, int]]]:
     """(the trims: removed sequence frames [a, b), the extensions: (at, frames, side, RAW frame the added frames
     start at) -- silence.Insert --, one row per moved cut, the audio lines moved: (first frame, frames)) that put
@@ -558,8 +611,10 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
     cuts -- an A1 edge elsewhere moves only when the pieces between it and V1's last cut went (the picture cuts there
     then); an audio line jumping a little inside speech there plays on instead (_shift_jumps), one jumping further
     takes its picture's own sound, so A1 cuts where V1 cuts (_own_sound). ``shots``: the RAW's
-    shot changes (s): no clip starts or ends with a sliver of another shot (shot_guard). A clip left with nothing to
-    play goes."""
+    shot changes (s): no clip starts or ends with a sliver of another shot (shot_guard). ``keep``: sequence frames
+    [a, b) a clip is never trimmed into -- the beats the competitor shows an action caption over ("*looks over*": 021's
+    reaction shot after "gentlemen", trimmed to 5 frames of quiet -- a flash -- where you kept the competitor's 0.5 s).
+    A clip left with nothing to play goes."""
     f = float(fps)
     hi_s = sm.dur if src_max is None else min(sm.dur, float(src_max) / f)
     ps = [Piece(**vars(p)) for p in sorted(pieces, key=lambda p: p.r0)]
@@ -619,6 +674,14 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                 na = start_after(sm, a, pad_after, pad_before) if _inside(sm, a) else a
             if nb - b > cap:
                 nb = end_before(sm, b, na, pad_after, pad_before) if _inside(sm, b) else b
+        for k0, k1 in keep:                     # an action-captioned beat this clip shows: never trimmed into
+            if k1 > p.r0 and k0 < p.r1:          # (unless that would cut inside a word: the speech-safe cut wins)
+                lo_k = a + (max(p.r0, k0) - p.r0) / f
+                hi_k = a + (min(p.r1, k1) - p.r0) / f
+                if free_start and na > lo_k + 1e-9 and not _inside(sm, lo_k):
+                    na = lo_k
+                if free_end and nb < hi_k - 1e-9 and not _inside(sm, hi_k):
+                    nb = hi_k
         if p.r0 == 0 and na < a:
             # the edit's first frame is never before the competitor's (it may start later): on all 9 of your answer
             # keys you start at or after it, and every time this step had started earlier you moved it back
@@ -688,7 +751,8 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
 
 
 def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: Fraction, st: Any, n_frames: int,
-              src_max: float | None = None, fac: int = 1, shots: Sequence[float] | None = None) -> tuple[Any, list[dict]]:
+              src_max: float | None = None, fac: int = 1, shots: Sequence[float] | None = None,
+              keep: Sequence[tuple[int, int]] = ()) -> tuple[Any, list[dict]]:
     """(silence.Ripple of the speech-safe cuts, one row per moved cut) of the Premiere plan's V1 clips
     (export_xml_edl.PremiereClip) and A1 items: snap_edits on the A1 items, V1 cutting where it cuts; both sides of a
     cross dissolve stay (an A1 cut inside speech slides under the dissolve: _slide_dissolves). The trims and extensions
@@ -714,7 +778,7 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
                             int(it["start"]) in locked, int(it["end"]) in locked, it.get("what") == "audio line",
                             locked.get(int(it["start"]), 0), v_off, float(v.speed) if v is not None else None))
     trims, inserts, rows, shifts = snap_edits(pieces, sm, fps, float(st.pad_after), float(st.pad_before), v1_cuts,
-                                              src_max, shots, int(n_frames))
+                                              src_max, shots, int(n_frames), keep)
     merged: list[list[int]] = []
     for a, b in sorted(trims):
         if merged and a <= merged[-1][1]:
@@ -735,6 +799,13 @@ def plan_cuts(clips: Sequence[Any], audio: Sequence[dict], sm: SpeechMap, fps: F
 
 def _inside(sm: SpeechMap, x: float) -> bool:
     k = sm.sound_at(x)
+    return k is not None and sm.sounds[k].speech and not sm.sounds[k].noise
+
+
+def _inside_sound(sm: SpeechMap, x: float) -> bool:
+    """Inside speech or noise (laughter, applause): a short dissolve there becomes a cut (harden_dissolves) -- its
+    incoming frames are often another shot's (021 S11|S12)."""
+    k = sm.sound_at(x)
     return k is not None and sm.sounds[k].speech
 
 
@@ -747,7 +818,7 @@ def check(edges: Sequence[tuple[str, str, float, int]], sm: SpeechMap, fps: Frac
     out = []
     for label, edge, x, at in edges:
         k = sm.sound_at(x, tol)
-        if k is not None and sm.sounds[k].speech:
+        if k is not None and sm.sounds[k].speech and not sm.sounds[k].noise:       # noise: a cut may land in it
             s = sm.sounds[k]
             out.append({"clip": label, "edge": edge, "raw_s": x, "at": at, "speech": (s.s0, s.s1),
                         "said": sm.said(s.s0, s.s1) or s.why})       # what the sound holds, not the words near it
