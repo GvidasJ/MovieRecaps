@@ -294,3 +294,21 @@ def test_the_person_check_decoded_in_chunks_finds_exactly_what_it_finds_in_one_g
     for a, b in zip(one.tracks, chunked.tracks):
         assert np.array_equal(a.k, b.k) and np.array_equal(a.box, b.box) and np.array_equal(a.found, b.found)
         assert np.array_equal(np.nan_to_num(a.score, nan=-99), np.nan_to_num(b.score, nan=-99))
+
+
+def test_the_competitors_own_framing_stays_and_follow_speaker_moves_it_onto_the_speaker():
+    """Night 3: a clip whose own competitor framing shows the listener (Tom) while Zendaya speaks keeps it -- your
+    finished 020 / 021 / laptop004 framed such clips back onto the competitor's subject; --follow-speaker moves it onto
+    the speaker, as before night 3 (the Zendaya interview), zoom kept."""
+    from types import SimpleNamespace
+    from match_cuts import export_xml_edl as ex
+    cutlist = SimpleNamespace(raw={"file": ""}, raw_fps=Fraction(24000, 1001))
+    zen = SP.Faces("speaker", True, ZENDAYA, [ZENDAYA], others=[TOM, ZENDAYA])
+    for follow in (False, True):
+        clips = [_pclip("S01", 0, 120, 600, sim_showing(530))]                  # the competitor shows Tom
+        clips[0].events = [SimpleNamespace(seg=clips[0].seg, rec_in=0, rec_out=60)]
+        ex._settle_framing(clips, cutlist, RAW, WIN, 250.0, Fraction(60), _Ctx([], [((0.0, 100.0), zen)]), follow)
+        new = clips[0].keys[0][1]
+        assert SP.passes(new, zen, RAW[0], False, WIN) is follow
+        assert ex._same_framing(new, sim_showing(530)) is not follow
+        assert abs(new.s - 1.16) < 1e-9                                         # the zoom is never changed

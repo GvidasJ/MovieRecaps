@@ -204,6 +204,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mirror", action="store_true",
                    help="--premiere: keep the competitor's horizontal mirror (Flop) in 1_edit.xml. Default: the RAW the "
                         "right way round showing the same part of it, as in your finished edits of mirrored competitors")
+    p.add_argument("--follow-speaker", action="store_true",
+                   help="--premiere: move every clip whose framing does not show the person speaking onto them, as "
+                        "before night 3 (an interview where the competitor shows the listener). Default: the "
+                        "competitor's own framing is kept -- your finished 020 / 021 / laptop004 framed such clips back")
     p.add_argument("--frame-size", type=_comp_size, default="2160x3840", metavar="WxH",
                    help="--frame: the sequence size 1_edit.xml is made for (default 2160x3840; the PNG is scaled to it)")
     p.add_argument("--no-scene-cuts", action="store_true",
@@ -302,6 +306,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.keep_speed = True                   # every run: the edit is made at 100 % (--keep-speed: the old switch)
     cfg.premiere_speed = float(getattr(args, "speed", 100.0) or 100.0) / 100.0
     cfg.premiere_mirror = bool(getattr(args, "mirror", False))
+    cfg.premiere_follow_speaker = bool(getattr(args, "follow_speaker", False))
     if getattr(args, "frame", None):
         cfg.frame_png = str(args.frame)
         cfg.frame_size = str(getattr(args, "frame_size", None) or "2160x3840")

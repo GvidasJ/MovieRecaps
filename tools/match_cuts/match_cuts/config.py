@@ -76,6 +76,8 @@ class Config:
     frame_size: str = "2160x3840"          # --frame: the sequence 1_edit.xml is made for (the PNG scaled to it)
     premiere_mirror: bool = False          # --mirror: keep the competitor's horizontal mirror in 1_edit.xml (default:
                                            #   the RAW the right way round, as in your finished 020 / laptop004)
+    premiere_follow_speaker: bool = False  # --follow-speaker: move every framing that does not show the person speaking
+                                           #   onto them (before night 3); default: the competitor's own framing kept
     premiere_scene_cuts: bool = True       # --premiere: V1 / A1 split at every RAW shot change (Scene Edit Detection)
     premiere_normal_audio: bool = True     # --premiere: every V1 clip's own sound on A1 at 0 dB (--audio-lines: off)
     premiere_min_clip_frames: int = 10     # --premiere (--min-clip): shorter V1 clips join a neighbour (0 = off)
@@ -378,7 +380,7 @@ class Config:
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence", "keep_speed",
-                  "premiere_speed", "frame_png", "frame_size", "premiere_mirror",
+                  "premiere_speed", "frame_png", "frame_size", "premiere_mirror", "premiere_follow_speaker",
                   "premiere_scene_cuts", "premiere_normal_audio", "premiere_min_clip_frames",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",

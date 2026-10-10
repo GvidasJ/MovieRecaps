@@ -1870,10 +1870,11 @@ def _final_spans(clips: list[PremiereClip], silence: Any) -> None:
 
 
 def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
-                        win: tuple[float, float, float, float], fps: Fraction) -> int:
+                        win: tuple[float, float, float, float], fps: Fraction, follow: bool = False) -> int:
     """Once the pieces of one take are joined into one clip (_merge_continuous), the joined clip is checked again on
     its whole stretch -- as the XML's person check reads it -- and moved sideways to show its person when it does not
-    (speakers.frame_run, zoom kept). Returns how many moved."""
+    (speakers.frame_run, zoom kept); the competitor's own framing stays unless ``follow`` (--follow-speaker).
+    Returns how many moved."""
     from . import speakers
     moved = 0
     for c in clips:
@@ -1882,8 +1883,9 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
         old = c.keys[0][1]
         f = _person_of(c, sp, fps)
         flip = bool(c.seg.flip_h)
-        if f is None or f.how == "nobody" or speakers.shows_anyone(old, f, raw_wh[0], flip, win) or \
-                (_own_framing([c]) and "framed on the person" not in str(c.framing_note)):
+        if f is None or f.how == "nobody" or speakers.passes(old, f, raw_wh[0], flip, win) or (not follow and (
+                speakers.shows_anyone(old, f, raw_wh[0], flip, win) or
+                (_own_framing([c]) and "framed on the person" not in str(c.framing_note)))):
             continue                     # the competitor's own framing wins (_settle_framing)
         new = speakers.frame_run(old, [(c, f, flip)], raw_wh, win)[0]
         if new is None:
@@ -2026,19 +2028,22 @@ def _face_centred(fr: Sim, face_x: float, raw_wh: tuple[float, float], win: tupl
 
 
 def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[float, float],
-                    win: tuple[float, float, float, float], min_move: float, fps: Fraction, sp: Any = None) -> None:
+                    win: tuple[float, float, float, float], min_move: float, fps: Fraction, sp: Any = None,
+                    follow: bool = False) -> None:
     """The final fixed framings: --min-move on the competitor's framings (inside one shot of the RAW, never hiding
     the clip's person), then every stretch that shows one framing and cannot take it from the competitor -- it holds
     a replaced B-roll / NOT-IN-RAW / uncertain spot, the framing would leave part of the window uncovered, or it does
     not show the person speaking (``sp``: speakers.py) -- keeps its zoom and is moved sideways to centre that person
     (one position for the whole stretch when one fits, else each clip its own); where the RAW's people were not
     analysed, the main face (faces.main_face_x over the stretch's frames). Then --min-move again between the final
-    framings."""
+    framings. The competitor's own framing is never moved onto the detected speaker -- unless ``follow``
+    (--follow-speaker: the rule before night 3, every framing that does not show the person speaking is moved)."""
     from . import faces, speakers
     runs = _hold_framing(clips, raw_wh, win, min_move, sp=sp, fps=fps)
     video = str(cutlist.raw.get("file_abs") or cutlist.raw.get("file") or "")
     raw_fps = float(cutlist.raw_fps)
     face_run = False
+    shown = speakers.passes if follow else speakers.shows_anyone
     for run in runs:
         fr = run[0].keys[0][1] if run[0].keys else None
         if fr is None:
@@ -2047,7 +2052,7 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
         need = [(c, _person_of(c, sp, fps), bool(c.seg.flip_h)) for c in run] if sp is not None else []
         # re-framed only where the framing shows nobody of the clip: a person shown -- even not the one the speech
         # detection picked -- is the competitor's choice (speakers.shows_anyone; 021, laptop004)
-        hidden = [c for c, f, fl in need if not speakers.shows_anyone(fr, f, raw_wh[0], fl, win)]
+        hidden = [c for c, f, fl in need if not shown(fr, f, raw_wh[0], fl, win)]
         if not why and not hidden and _covers(fr, raw_wh, win, tol=1e-6):
             continue
         if sp is not None and any(f is not None and f.how != "nobody" for _, f, _ in need):
@@ -2056,8 +2061,8 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
             # from another clip, a replaced spot) and shows no person of the clip (speakers.shows_anyone); the face
             # detection can miss the competitor's subject (021 S51: the laughing man) and the speech detection pick
             # the wrong face (you framed 3 of 5 such clips back onto the competitor's subject)
-            keep_base = _own_framing(run, why) or all(speakers.shows_anyone(base, f, raw_wh[0], fl, win)
-                                                      for _, f, fl in need)
+            keep_base = not follow and (_own_framing(run, why) or all(speakers.shows_anyone(base, f, raw_wh[0], fl,
+                                                                                            win) for _, f, fl in need))
             news = [None] * len(run) if keep_base else speakers.frame_run(base, need, raw_wh, win)
             reason = "; ".join(why) if why else ("it would not show the person speaking" if hidden else
                                                  "the framing would leave part of the window uncovered")
@@ -2481,19 +2486,20 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
         if sp is not None and silence is not None and getattr(silence, "active", False):
             _final_spans(clips, silence)
         competitor = {id(c): (c.keys[0][1] if c.keys else None) for c in clips}
-        _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps, sp)
+        follow = bool(getattr(cfg, "premiere_follow_speaker", False))     # --follow-speaker
+        _settle_framing(clips, cutlist, raw_wh, win, st["min_move"], fps, sp, follow)
         if sp is not None:
-            _person_notes(clips, competitor, sp, raw_wh, win, fps)
+            _person_notes(clips, competitor, sp, raw_wh, win, fps, follow)
         clips = _merge_continuous(clips)
         if sp is not None:
-            _person_after_merge(clips, sp, raw_wh, win, fps)
+            _person_after_merge(clips, sp, raw_wh, win, fps, follow)
             if _hold_after_merge(clips, sp, raw_wh, win, fps, st["min_move"]):
                 clips = _merge_continuous(clips)
     return clips, markers, warnings
 
 
 def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], sp: Any, raw_wh: tuple[float, float],
-                  win: tuple[float, float, float, float], fps: Fraction) -> None:
+                  win: tuple[float, float, float, float], fps: Fraction, follow: bool = False) -> None:
     """The re-framed clips' notes (the end summary lists them): every clip whose competitor framing would not show
     its person and whose final framing does -- who, where in the RAW, how far the picture moved."""
     from . import speakers
@@ -2505,7 +2511,8 @@ def _person_notes(clips: list[PremiereClip], competitor: dict[int, Sim | None], 
         flip = bool(c.seg.flip_h)
         before = speakers.passes(old, f, raw_wh[0], flip, win)
         after = speakers.passes(new, f, raw_wh[0], flip, win)
-        if before or _same_framing(old, new) or (not after and speakers.shows_anyone(new, f, raw_wh[0], flip, win)):
+        if before or _same_framing(old, new) or (not follow and not after and
+                                                  speakers.shows_anyone(new, f, raw_wh[0], flip, win)):
             continue                     # (the competitor's framing kept on another person: its choice, no note)
         b = speakers.target(new, f, raw_wh[0], flip, win)
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
@@ -3823,6 +3830,7 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
     problems, exceptions = [], []
     counts = {"clips": 0, "speaker": 0, "biggest face": 0, "a person": 0, "nobody": 0, "not analysed": 0}
     tol = 1.5 / f
+    follow = bool(getattr(cfg, "premiere_follow_speaker", False))   # --follow-speaker: every clip shows the speaker
     for el, c in zip(items, x["clips"]):
         counts["clips"] += 1
         fe = el.find("file")
@@ -3859,11 +3867,11 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
         r = speakers.on_screen(sim, t, src[0], bool(c.get("flip"))) if t else None
         who = {"speaker": "the person speaking", "biggest face": "the biggest face (who speaks is unclear)",
                "a person": "any person (nobody speaks)"}.get(need.how, need.how)
-        if speakers.shows_anyone(sim, need, src[0], bool(c.get("flip")), win):
+        if not follow and speakers.shows_anyone(sim, need, src[0], bool(c.get("flip")), win):
             exceptions.append(f"{where}: shows another person than {who} found (the competitor's choice of whom to "
                               f"show, kept) -- check" + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
             continue
-        if own and any(o0 - tol <= a and b <= o1 + tol for o0, o1 in own):
+        if own and not follow and any(o0 - tol <= a and b <= o1 + tol for o0, o1 in own):
             exceptions.append(f"{where}: keeps the competitor's own framing -- {who} found by the detection is outside "
                               "it (the face detection may miss the competitor's subject) -- check"
                               + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))

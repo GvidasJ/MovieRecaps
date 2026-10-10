@@ -156,9 +156,10 @@ the end summary.
 The tool finds the hole from the alpha channel (the largest transparent area; a faint watermark inside it belongs
 to it), makes `1_edit.xml` a **2160x3840** sequence (`--frame-size` to change it) with the PNG on **V2** over the
 whole edit (straight alpha, scaled to the sequence: 100 % for a 2160x3840 PNG, 200 % for a 1080x1920 one), and frames
-every clip to **cover the hole**: the competitor's framing mapped into the hole, zoomed only as much as needed,
-moved to show the person speaking where the competitor's framing would not (the usual person check). The PNG is
-copied into the run's `extras\media\` (the XML points there). `extras\frame.json` holds the hole and the caption zone
+every clip to **cover the hole**: the competitor's framing mapped into the hole (centred where the competitor
+centred it -- on the person it shows), zoomed only as much as needed; a borrowed framing that shows nobody is moved
+onto the person speaking (the usual person check below; `--follow-speaker` moves every framing that does not show
+the person speaking). The PNG is copied into the run's `extras\media\` (the XML points there). `extras\frame.json` holds the hole and the caption zone
 (inside the hole, below its top third: never over the header or headline); `restyle` checks the styled captions
 against it. `preview_recreation.mp4` is then **your edit seen through the frame** (1080x1920, from `1_edit.xml`);
 the competitor-timed recreation the checks read is `extras\debug\recreation_check.mp4`.
@@ -255,9 +256,10 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   The hard check `XML PERSON` re-reads every clip's framing from the final XML and fails the run when such a clip
   does not show its person; a clip showing another person than the detected one, a clip with nobody in the picture
   and another video's stretch are listed, not failed. The end summary lists every re-framed clip with its time in
-  the edit (*The person speaking in the picture*), and each clip's comment says why. (Before night 3, 7 of 10 clips
-  of the Zendaya interview were moved onto the speaker where the competitor showed the listener's reaction; now
-  they keep the competitor's choice.)
+  the edit (*The person speaking in the picture*), and each clip's comment says why. **`--follow-speaker`** brings
+  back the rule before night 3: every clip whose framing does not show the person speaking is moved onto them, and
+  `XML PERSON` fails any clip that does not show them -- for an interview where the competitor shows the listener's
+  reaction and you want the speaker (the Zendaya interview: 5 stretches moved that way, most of the edit).
 * **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
   of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
   size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
