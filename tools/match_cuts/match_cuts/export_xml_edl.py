@@ -2228,11 +2228,14 @@ def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | Non
         if n >= min_frames or m.start == -1 or m.end == -1 or len(out) < 2:
             i += 1
             continue
-        if seamless(m, b):
-            # the clip after runs on its take: it starts on its first frame -- nothing is lost, the cut before
-            # stays (deadpool S04 + S05, 4 + 4 competitor frames of one shot: S03 played on over both, "And I was")
-            b.start, b.rec_start, b.src_in = m.start, m.rec_start, m.src_in
-            b.in_exact, b.in_error_ms = m.in_exact, m.in_error_ms
+        if seamless(m, b) and not seamless(a, m):
+            # the clip after runs on its take (the clip before is another take): it starts on its first frame --
+            # nothing is lost, the cut before stays (deadpool S04 + S05, 4 + 4 competitor frames of one shot: S03
+            # played on over both, "And I was"). On its own source timeline (the pieces may meet 1 tick apart)
+            d = int(round(n * float(b.speed)))
+            b.start, b.rec_start, b.src_in = m.start, m.rec_start, b.src_in - d
+            b.in_exact, b.in_error_ms = ((m.in_exact, m.in_error_ms) if b.src_in == m.src_in else
+                                         (False, b.in_error_ms - 1000.0 * d / f))
             b.events = (m.events or [m.ev]) + (b.events or [b.ev])
             moves.append({"clip": m.label, "into": b.label, "frames": int(n), "how": "the same take runs on",
                           "at": int(m.rec_start)})
