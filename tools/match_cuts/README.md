@@ -228,8 +228,10 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 * **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)
   -- output/020 had S06, S07, S09, S10 and S13 of 3-9 frames; your own clips are 0.3 s or longer -- goes into its
   neighbour: the clip before plays on over it (its take runs on), else the clip after starts that much earlier,
-  whichever does not reach into another RAW shot. A clip that starts a new RAW shot of the take before keeps its cut,
-  and the scene cuts above are made after this, so a real shot change always keeps its cut.
+  whichever does not reach into another RAW shot. A piece the clip after runs on from (the same take: the
+  competitor cut inside one shot) goes into that clip first -- nothing of it is lost (deadpool's S04 + S05, 8 + 8
+  sequence frames of "And I was", are one 16-frame clip). A clip that starts a new RAW shot of the take before keeps
+  its cut, and the scene cuts above are made after this, so a real shot change always keeps its cut.
 * **The person speaking is always in the picture** (`match_cuts/people.py`, `speakers.py`). Where the edit plays the
   RAW (+- 3 s), every 1/25 s: faces found by YuNet (OpenCV's FaceDetectorYN, a modern CNN detector, replacing the Haar
   cascades), tracked from frame to frame (never across a RAW shot change; a small face that never speaks -- a poster,
@@ -238,18 +240,24 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   face that is the top speaking face on most of its speech frames (the RAW's speech map); unclear -- nobody's mouth
   goes with the sound, e.g. a voice off camera -- the biggest face. While someone speaks, that person's face (the
   10th-90th percentile of its edges over the speech) must be fully inside the window x 42-1039, y 555-1591; when
-  nobody speaks, at least one person must. A clip that fails keeps its zoom and is moved sideways to centre that
-  person, still covering the window (up or down only if the face is cut off there) -- one position for a stretch of
-  clips sharing a framing when one shows all their people, else each clip its own. This beats the competitor's
-  framing and `--min-move`. The same move frames a stretch the competitor's framing cannot be used for at all (a
-  replaced B-roll / NOT-IN-RAW / uncertain spot -- not a 1-2 frame cutaway the clip's own take plays on through,
-  which keeps the take's framing -- or a framing that leaves the window uncovered); without the people
+  nobody speaks, at least one person must. **The competitor's own framing is never moved onto the detected speaker**
+  (night 3: in your finished 020, 021 and laptop004 you framed such clips back onto the competitor's subject -- the
+  "speaker" was a small face at the edge of a wide shot, the second man in a laughing shot, the dad instead of the
+  panda -- and the face detection can miss the competitor's subject altogether): a clip showing it keeps it (mapped
+  into the window), and `XML PERSON` lists the detected speaker outside it ("keeps the competitor's own framing --
+  check") instead of failing. Only a framing a clip borrows is moved -- one held from the clip before by
+  `--min-move`, or a stretch the competitor's framing cannot be used for at all (a replaced B-roll / NOT-IN-RAW /
+  uncertain spot -- not a 1-2 frame cutaway the clip's own take plays on through, which keeps the take's framing --
+  or a framing that leaves the window uncovered) -- when it shows nobody: it keeps its zoom and is moved sideways to
+  centre that person, still covering the window (up or down only if the face is cut off there) -- one position for a
+  stretch of clips sharing a framing when one shows all their people, else each clip its own; without the people
   analysis (no PyTorch, an error: said in the summary) the main face is centred there (`faces.main_face_x`, YuNet).
-  The hard check `XML PERSON` re-reads every clip's framing from the final XML and fails the run when a clip does not
-  show its person; a clip with nobody in the picture and another video's stretch are listed, not failed. The end
-  summary lists every re-framed clip with its time in the edit (*The person speaking in the picture*), and each
-  clip's comment says why. On the Zendaya interview 7 of 10 clips are re-framed (the competitor showed the listener's
-  reaction); on Deadpool and Spider-Man school the competitor's framing already shows the speaker everywhere.
+  The hard check `XML PERSON` re-reads every clip's framing from the final XML and fails the run when such a clip
+  does not show its person; a clip showing another person than the detected one, a clip with nobody in the picture
+  and another video's stretch are listed, not failed. The end summary lists every re-framed clip with its time in
+  the edit (*The person speaking in the picture*), and each clip's comment says why. (Before night 3, 7 of 10 clips
+  of the Zendaya interview were moved onto the speaker where the competitor showed the listener's reaction; now
+  they keep the competitor's choice.)
 * **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
   of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
   size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
