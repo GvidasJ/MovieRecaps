@@ -2207,6 +2207,12 @@ def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | Non
 
     def raw_at(cl: PremiereClip, r: int) -> float:              # source position (sequence ticks) shown at frame r
         return cl.src_in + (r - cl.rec_start) * float(cl.speed)
+
+    def seamless(x: PremiereClip | None, y: PremiereClip | None) -> bool:
+        """y runs on x's take from the next frame (the same source, speed): no cut shows between them."""
+        return (x is not None and y is not None and x.end != -1 and y.start != -1 and x.rec_end == y.rec_start
+                and float(x.speed) > 0 and abs(float(x.speed) - float(y.speed)) < 1e-9 and not x.retime
+                and not y.retime and abs(y.src_in - x.src_out) <= 1)
     out, moves = list(clips), []
     i = 0
     while i < len(out):
@@ -2216,6 +2222,17 @@ def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | Non
         b = out[i + 1] if i + 1 < len(out) else None
         if n >= min_frames or m.start == -1 or m.end == -1 or len(out) < 2:
             i += 1
+            continue
+        if seamless(m, b):
+            # the clip after runs on its take: it starts on its first frame -- nothing is lost, the cut before
+            # stays (deadpool S04 + S05, 4 + 4 competitor frames of one shot: S03 played on over both, "And I was")
+            b.start, b.rec_start, b.src_in = m.start, m.rec_start, m.src_in
+            b.in_exact, b.in_error_ms = m.in_exact, m.in_error_ms
+            b.events = (m.events or [m.ev]) + (b.events or [b.ev])
+            moves.append({"clip": m.label, "into": b.label, "frames": int(n), "how": "the same take runs on",
+                          "at": int(m.rec_start)})
+            del out[i]
+            i = max(0, i - 1)
             continue
         if a is not None and a.end != -1 and a.rec_end == m.rec_start and float(a.speed) > 0 and cs and \
                 abs(m.src_in - a.src_out) <= 1 and shot(raw_at(m, m.rec_start)) != shot(raw_at(a, a.rec_end - 1)):

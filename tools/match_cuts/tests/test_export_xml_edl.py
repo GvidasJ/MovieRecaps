@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import dataclasses
 import math
 import re
 from fractions import Fraction
@@ -1407,6 +1408,27 @@ def test_a_mini_clip_of_a_few_frames_joins_its_neighbour(tmp_path):
     clips0, _, _ = ex.premiere_clips(cutlist(), Config(out_dir=str(tmp_path), premiere=True,
                                                         premiere_min_clip_frames=0))
     assert any(c.seg.id == 3 for c in clips0)
+
+
+def test_two_mini_pieces_of_one_take_are_one_clip_the_clip_before_does_not_play_on_over_them(tmp_path):
+    """deadpool S04 + S05: 4 + 4 competitor frames of one RAW shot (it cut inside the shot). Each piece alone is a
+    mini cut, together they are a 16-frame clip of their own RAW: the clip before played on over both and "And I was"
+    was gone from the edit."""
+    cl = premiere_cutlist()
+    s = cl.segments
+    cl.segments = s[:2] + [_grid_seg(3, 70, 74, 900, transform=dict(PAN0, ty=322.0)),
+                           _grid_seg(4, 74, 78, 904, transform=dict(PAN0, ty=322.0)),       # the same take runs on
+                           _grid_seg(5, 78, 130, 1200, speed=1.1, transition_out=dict(XF))] + \
+        [dataclasses.replace(x, id=x.id + 1) for x in s[4:]]
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    clips, _, _ = ex.premiere_clips(cl, cfg)
+    both = next(c for c in clips if any(e.seg.id == 3 for e in c.events))
+    assert [e.seg.id for e in both.events] == [3, 4]
+    assert (both.rec_start, both.rec_end, both.src_in, both.src_out) == (140, 156, 1800, 1816)   # RAW 30.0-30.27 s
+    assert next(c for c in clips if c.seg.id == 2).rec_end == 140             # the clip before stops at its own cut
+    xml = tmp_path / "1_edit.xml"
+    ex.write_premiere_xml(cl, xml, cfg)
+    assert ex.validate_premiere_exports(cl, xml, None, cfg)["ok"]
 
 
 def test_a_scene_cut_one_raw_frame_into_a_clip_gives_that_frame_to_the_clip_before(tmp_path):
