@@ -342,3 +342,21 @@ def test_the_premiere_plan_drops_the_mirror_unless_asked(tmp_path):
     ex.write_premiere_xml(un, xml, cfg)
     assert not any(c["flip"] for c in ex.parse_premiere_xml(xml)["clips"])
     assert ex.validate_premiere_exports(un, xml, None, cfg)["ok"]
+
+
+def test_restyle_checks_the_captions_against_the_frames_caption_zone(tmp_path):
+    import shutil
+    from match_cuts.frame import load_frame
+    from match_cuts.restyle import frame_check
+    from match_cuts.testcases import REPO
+    styled = tmp_path / "3_captions_styled.prproj"
+    shutil.copyfile(REPO / "reference" / "popw_reference.prproj", styled)        # its captions sit at 58 %
+    (tmp_path / "extras").mkdir()
+    fr = load_frame(_frame_png(tmp_path / "frame.png"))
+    (tmp_path / "extras" / "frame.json").write_text(json.dumps(fr.to_dict(1080, 1920)), encoding="utf-8")
+    assert "inside the hole" in frame_check(styled)[0]
+    high = _frame_png(tmp_path / "high.png", hole=(22, 1300, 1058, 1900))      # a hole below them: they are outside
+    (tmp_path / "extras" / "frame.json").write_text(json.dumps(load_frame(high).to_dict(1080, 1920)), encoding="utf-8")
+    lines = frame_check(styled)
+    assert lines[0].startswith("FRAME:") and len(lines) > 1
+    assert frame_check(tmp_path / "elsewhere" / "x.prproj") == []                 # no frame.json: no check

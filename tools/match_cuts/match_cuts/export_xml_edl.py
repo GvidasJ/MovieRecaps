@@ -1882,8 +1882,9 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
         old = c.keys[0][1]
         f = _person_of(c, sp, fps)
         flip = bool(c.seg.flip_h)
-        if f is None or f.how == "nobody" or speakers.shows_anyone(old, f, raw_wh[0], flip, win):
-            continue
+        if f is None or f.how == "nobody" or speakers.shows_anyone(old, f, raw_wh[0], flip, win) or \
+                (_own_framing([c]) and "framed on the person" not in str(c.framing_note)):
+            continue                     # the competitor's own framing wins (_settle_framing)
         new = speakers.frame_run(old, [(c, f, flip)], raw_wh, win)[0]
         if new is None:
             continue
@@ -1993,6 +1994,15 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
     return runs
 
 
+HELD_NOTE = "framing kept from"          # _hold_framing's note on a clip showing another clip's framing
+
+
+def _own_framing(run: Sequence[PremiereClip], why: Sequence[str] = ()) -> bool:
+    """The clips show their own competitor framing: none holds another clip's (--min-move) and none plays a replaced
+    spot (_unreliable: B-roll / NOT-IN-RAW / uncertain -- the framing there is a neighbour's)."""
+    return not why and not any(str(c.framing_note).startswith(HELD_NOTE) or _unreliable(c) for c in run)
+
+
 def _unreliable(cl: PremiereClip) -> str | None:
     """Why the clip's framing cannot be copied from the competitor: it plays a B-roll / NOT-IN-RAW / uncertain spot
     replaced by the RAW (broll.py; the framing there is a neighbour's), else None. A 'keeps playing (short)' spot --
@@ -2042,8 +2052,12 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
             continue
         if sp is not None and any(f is not None and f.how != "nobody" for _, f, _ in need):
             base = fr if _covers(fr, raw_wh, win, tol=1e-6) else _least_cover(fr, raw_wh, win)
-            # the competitor's framing (covering the window) wins where it shows a person (speakers.shows_anyone)
-            keep_base = all(speakers.shows_anyone(base, f, raw_wh[0], fl, win) for _, f, fl in need)
+            # the competitor's own framing wins (night 3): kept -- covering the window -- unless it is borrowed (held
+            # from another clip, a replaced spot) and shows no person of the clip (speakers.shows_anyone); the face
+            # detection can miss the competitor's subject (021 S51: the laughing man) and the speech detection pick
+            # the wrong face (you framed 3 of 5 such clips back onto the competitor's subject)
+            keep_base = _own_framing(run, why) or all(speakers.shows_anyone(base, f, raw_wh[0], fl, win)
+                                                      for _, f, fl in need)
             news = [None] * len(run) if keep_base else speakers.frame_run(base, need, raw_wh, win)
             reason = "; ".join(why) if why else ("it would not show the person speaking" if hidden else
                                                  "the framing would leave part of the window uncovered")
@@ -2052,7 +2066,8 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
                 new = new if new is not None else base
                 c.keys = [(c.keys[0][0] if c.keys else c.src_in, new)]
                 c.covered = _covers(new, raw_wh, win, tol=1e-6)
-                c.framing_note = (f"{span}: {reason}: the competitor's framing, moved the least to cover the window"
+                c.framing_note = ((f"{span}: the competitor's own framing kept" +
+                                   ("" if base is fr else ", moved the least to cover the window"))
                                   if keep_base else f"{span}: {reason}: framed on the person (zoom kept)")
             face_run = True
             continue
@@ -3767,7 +3782,8 @@ def premiere_gaps(xml_path: str | os.PathLike, cfg: Any = None) -> list[str]:
 
 
 def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = None,
-                             spans: Sequence[tuple[float, float]] | None = None) -> tuple[list[str], list[str], dict]:
+                             spans: Sequence[tuple[float, float]] | None = None,
+                             own: Sequence[tuple[float, float]] | None = None) -> tuple[list[str], list[str], dict]:
     """The hard person check of the final XML, on its own numbers: every V1 clip's framing as Premiere shows it
     (Position = sequence centre + <center> x the clip's source size, Scale, Horizontal Flip) shows the person speaking
     in the template window (speakers.shown: at most SHOWN_FRAC of the face cut off) -- or, when nobody speaks there,
@@ -3829,6 +3845,12 @@ def premiere_person_problems(xml_path: str | os.PathLike, sp: Any, cfg: Any = No
         if speakers.shows_anyone(sim, need, src[0], bool(c.get("flip")), win):
             exceptions.append(f"{where}: shows another person than {who} found (the competitor's choice of whom to "
                               f"show, kept) -- check" + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
+            continue
+        ca, cb = sorted((c["in"] / f, c["out"] / f))
+        if own and any(o0 - tol <= ca and cb <= o1 + tol for o0, o1 in own):
+            exceptions.append(f"{where}: keeps the competitor's own framing -- {who} found by the detection is outside "
+                              "it (the face detection may miss the competitor's subject) -- check"
+                              + (f": that face at x {r[0]:.0f}-{r[2]:.0f}" if r else ""))
             continue
         problems.append(f"{where}: {who} is not in the window (x {win[0]:.0f}-{win[0] + win[2]:.0f}, y "
                         f"{win[1]:.0f}-{win[1] + win[3]:.0f})" +
@@ -3919,10 +3941,12 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 f_ = float(premiere_settings(cfg)["fps"])
                 plan_spans = [(min(c.person_span or (c.src_in, c.src_out)) / f_,
                                max(c.person_span or (c.src_in, c.src_out)) / f_) for c in pc]
+                own_spans = [(min(c.src_in, c.src_out) / f_, max(c.src_in, c.src_out) / f_) for c in pc
+                             if _own_framing([c]) and "framed on the person" not in str(c.framing_note)]
             except Exception:  # noqa: BLE001 - each clip on its own then
-                plan_spans = None
+                plan_spans, own_spans = None, None
             persons, out["person_exceptions"], out["person_counts"] = premiere_person_problems(xml_path, sp, cfg,
-                                                                                               plan_spans)
+                                                                                               plan_spans, own_spans)
             if persons:
                 log.info("premiere person check: the planned clips' stretches %s",
                          [(round(a_, 2), round(b_, 2)) for a_, b_ in plan_spans or []])

@@ -479,8 +479,11 @@ def frame_check(styled: Path) -> list[str]:
         fr = json.loads(info.read_text(encoding="utf-8"))
         lo, hi = (float(v) for v in fr["caption_zone_frac"])
         from . import prproj as PR
-        seq = PR.main_sequence(PR.read(styled))
-        caps = PR.captions_of(seq) if seq is not None else []
+        pr = PR.read(styled)
+        size = tuple(int(v) for v in fr.get("sequence") or ())
+        # the frame's sequence (a project built on a template holds other videos' sequences too), its most captions
+        seqs = [s for s in pr.sequences if (s.width, s.height) == size] or pr.sequences
+        caps = max((PR.captions_of(s) for s in seqs), key=len, default=[])
     except Exception as e:  # noqa: BLE001 - a check, never a failure
         return [f"Frame: the captions' place could not be checked ({type(e).__name__}: {e})"]
     ys = [(c, float(c.position[1])) for c in caps if c.position is not None]
