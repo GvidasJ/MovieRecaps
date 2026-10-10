@@ -85,9 +85,9 @@ Your edit: 21 picture clips, 29.7 s. The tool's: 32 clips, 36.1 s. The differenc
    shot, or the second man in the laughing shot; on 2 your bigger zoom shows both. My first fix (re-frame only where
    the competitor's framing shows nobody) was not enough: in the laughing shots (S49, S51, S52) the face detection
    does not find the laughing man at all, so it still moved them 1000-1500 px. Now: **a clip that shows the
-   competitor's own framing is never moved onto "the speaker"**; only a framing the tool borrowed (held from the
-   clip before by `--min-move`, or a B-roll / NOT-IN-RAW spot the RAW replaces) is re-framed, and only where it shows
-   nobody. The XML PERSON check lists those clips for you to look at instead of failing the run. This undoes part of
+   competitor's own framing is never moved onto "the speaker"** (nor one held from the clip before by `--min-move`);
+   only a framing the tool borrowed (a B-roll / NOT-IN-RAW spot the RAW replaces, or one that would leave the hole
+   uncovered) is re-framed, and only where it shows nobody. The XML PERSON check lists those clips for you to look at instead of failing the run. This undoes part of
    an earlier task of yours ("the person speaking is always in the picture"): on the Zendaya interview the tool moved
    5 stretches (most of the edit) from the listener the competitor showed onto the speaker. **`--follow-speaker`**
    brings that rule back for a video where you want it (section 5).
@@ -309,6 +309,17 @@ and let the clip before play on over both; such pieces now go into their own tak
 that fix failed 021's XML checks (the pieces of one take can meet 1 tick apart), so the joined clip now keeps its own
 source timeline. 021's S49 kept the competitor's framing correctly but the person check still failed it: the
 speech-safe cut had played it 0.65 s past its own RAW, and the check now judges such a clip on its whole stretch.
+A first full check-all on the final code then failed two old videos' `--min-move` check: video3 changed its
+framing by 1 px and video1 by 71 px for nothing. A clip gave up the held framing because it hid the detected
+speaker -- but its own framing hid them too (the competitor showed someone else); before tonight such clips were
+then moved onto the speaker, which is what you undid. Now it holds unless its own framing shows the person, and a
+clip that held a framing follows it when that framing changes later (video1's S15). That fix, run on 021, moved
+S49 / S51 / S52 onto "the speaker" again: a held framing still counted as borrowed. It is under 250 px from the
+clip's own and never hides a person the clip's own framing shows, so it counts as the competitor's own now; only
+replaced spots and uncovered windows count as borrowed. The new 021 test case (the
+thorough analysis of its RAW window) also showed a 1-frame flash: the first frame of a new RAW shot that the
+competitor cut a frame late, left at the framing of the shot before; it now goes into the clip that runs on that
+shot. check-all was then run again from the start on the fixed code (the table above).
 
 ## 5. Check by hand in the morning
 

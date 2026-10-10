@@ -251,8 +251,9 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   "speaker" was a small face at the edge of a wide shot, the second man in a laughing shot, the dad instead of the
   panda -- and the face detection can miss the competitor's subject altogether): a clip showing it keeps it (mapped
   into the window), and `XML PERSON` lists the detected speaker outside it ("keeps the competitor's own framing --
-  check") instead of failing. Only a framing a clip borrows is moved -- one held from the clip before by
-  `--min-move`, or a stretch the competitor's framing cannot be used for at all (a replaced B-roll / NOT-IN-RAW /
+  check") instead of failing. A framing held from the clip before by `--min-move` counts as the clip's own (it is
+  under 250 px from it and never hides a person the clip's own framing shows). Only a framing a clip borrows is
+  moved -- a stretch the competitor's framing cannot be used for at all (a replaced B-roll / NOT-IN-RAW /
   uncertain spot -- not a 1-2 frame cutaway the clip's own take plays on through, which keeps the take's framing --
   or a framing that leaves the window uncovered) -- when it shows nobody: it keeps its zoom and is moved sideways to
   centre that person, still covering the window (up or down only if the face is cut off there) -- one position for a
