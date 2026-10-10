@@ -228,7 +228,9 @@ D:\to do\video B\competitor.mp4, raw.mp4, speed.txt     -> 125 % (speed.txt hold
 
 ## 4. Test results
 
-All on this PC, on the final code (the GPU shared between several runs at once, so no timings here).
+All on this PC, on the final code (the GPU shared between several runs at once, so no timings here). Every run's
+own report still opens with "Result: FAIL": that is the frame-exact rebuild of the competitor (criteria c2-c5),
+which fails on every real video, as before; the Premiere hard checks below are what your import depends on.
 
 ### 021 with your frame -- `output\027`
 
