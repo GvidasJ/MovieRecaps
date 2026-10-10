@@ -212,9 +212,12 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   shot's own framing is alike (under 250 px away, within 5 % zoom: `SHOT_HOLD_ZOOM`) and the framing on screen
   still shows the person of the clip before -- your habit: one framing for alike shots (video018's wide shots,
   zendaya-age, video1-3); otherwise the new shot chooses its framing fresh (a close-up after a wide shot). A
-  framing that would not show the clip's person speaking is never held (below). Neighbouring pieces of one continuous RAW take (the next starts on the
-  very source frame the previous ends on, same speed, no transition) that end up with the same framing become one
-  clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
+  framing that would not show the clip's person speaking is not held when the clip's own framing shows them (below);
+  when neither does (the competitor shows someone else), the clip holds like any other -- a 1 px or 71 px change
+  for nothing failed video3 and video1 (`--follow-speaker`: never held then, as before night 3). A clip that held a
+  framing follows it when the clip it held from changes it later. Neighbouring pieces of one continuous RAW take
+  (the next starts on the very source frame the previous ends on, same speed, no transition) that end up with the
+  same framing become one clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
 * **A cut at every RAW shot change (`--no-scene-cuts` turns it off).** Like Premiere's Scene Edit Detection ("apply
   a cut at each detected cut point"), which you always run: every V1 clip, and its A1 clip with it, is split at each
@@ -229,10 +232,12 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 * **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)
   -- output/020 had S06, S07, S09, S10 and S13 of 3-9 frames; your own clips are 0.3 s or longer -- goes into its
   neighbour: the clip before plays on over it (its take runs on), else the clip after starts that much earlier,
-  whichever does not reach into another RAW shot. A piece the clip after runs on from (the same take: the
-  competitor cut inside one shot) goes into that clip first -- nothing of it is lost (deadpool's S04 + S05, 8 + 8
-  sequence frames of "And I was", are one 16-frame clip). A clip that starts a new RAW shot of the take before keeps
-  its cut, and the scene cuts above are made after this, so a real shot change always keeps its cut.
+  whichever does not reach into another RAW shot. A piece the clip after runs on from inside one RAW shot (the
+  competitor cut inside the shot) goes into that clip first -- nothing of it is lost (deadpool's S04 + S05, 8 + 8
+  sequence frames of "And I was", are one 16-frame clip); so does the first frame of a new RAW shot the competitor
+  cut a frame late (021's S55: a 1-frame clip at the framing of the shot before). A clip that starts a new RAW shot
+  of the take before keeps its cut otherwise, and the scene cuts above are made after this, so a real shot change
+  always keeps its cut.
 * **The person speaking is always in the picture** (`match_cuts/people.py`, `speakers.py`). Where the edit plays the
   RAW (+- 3 s), every 1/25 s: faces found by YuNet (OpenCV's FaceDetectorYN, a modern CNN detector, replacing the Haar
   cascades), tracked from frame to frame (never across a RAW shot change; a small face that never speaks -- a poster,
