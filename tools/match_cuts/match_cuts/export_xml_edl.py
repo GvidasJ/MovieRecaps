@@ -1908,10 +1908,12 @@ def _hold_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, f
     """--min-move once more on the joined clips: a clip that took its own framing (under min_move px from the one
     before, inside one RAW shot) because the framing before would not show its person -- judged on the piece it was
     then -- keeps the framing before when that does show its person over the whole joined take (as the XML check
-    reads it). Returns how many changed."""
+    reads it) -- and so do the clips after it that held its framing (video1: S15 held S13's, then S13+S14 took
+    S12's: a 71 px change under --min-move at S15). Returns how many changed."""
     from . import speakers
     held = 0
-    for ca, cb in zip(clips, clips[1:]):
+    for i in range(1, len(clips)):
+        ca, cb = clips[i - 1], clips[i]
         if len(ca.keys) != 1 or len(cb.keys) != 1 or "would not show its person" not in (cb.framing_note or ""):
             continue
         fa, own = ca.keys[0][1], cb.keys[0][1]
@@ -1928,20 +1930,33 @@ def _hold_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, f
         cb.framing_note = (f"framing kept from {ca.label}: its own framing moves {mv:.0f} px, under --min-move "
                            f"{min_move:g}, and the framing before shows its person over the whole take")
         held += 1
+        for cc in clips[i + 1:]:                 # the clips that held cb's framing hold the new one with it
+            if len(cc.keys) != 1 or not _same_framing(cc.keys[0][1], own) or \
+                    not str(cc.framing_note).startswith(HELD_NOTE) or \
+                    not speakers.passes(fa, _person_of(cc, sp, fps), raw_wh[0], bool(cc.seg.flip_h), win):
+                break
+            if cc.zoom > 0:
+                cc.zoom = fa.s / (cc.keys[0][1].s / cc.zoom)
+            cc.keys = [(cc.keys[0][0], fa)]
+            cc.covered = True
+            cc.framing_note = f"framing kept from {ca.label}, as {cb.label}'s before it (whose framing it held)"
+            held += 1
     return held
 
 
 def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: tuple[float, float, float, float],
                   min_move: float, subject: str = "the competitor's", sp: Any = None,
-                  fps: Fraction | None = None) -> list[list[PremiereClip]]:
+                  fps: Fraction | None = None, follow: bool = False) -> list[list[PremiereClip]]:
     """--min-move (after the fixed framing): a clip takes its own framing when it is at least min_move px from the
     framing on screen (framing_move), at a shot change of the RAW to a framing that is not alike (``sp.same_shot``;
     over SHOT_HOLD_ZOOM in zoom, or the framing on screen would not show the person of the clip before: a new shot
-    chooses its framing fresh then), or when the framing on screen would not show the clip's person
-    (speakers.passes); otherwise it keeps that framing exactly -- across real cuts and alike RAW shots too (your
-    habit: one framing for alike shots -- video018's wide shots, zendaya-age, video1-3) -- changed only as little as
-    needed if it would not cover the window. A clip with no framing keeps the one on screen. Returns the stretches of
-    clips that show one framing."""
+    chooses its framing fresh then), or when the framing on screen would not show the clip's person and its own
+    framing does (speakers.passes; or shows someone where the one on screen shows nobody: speakers.shows_anyone --
+    neither showing the person, the clip holds: video1, video3; ``follow``, --follow-speaker: whenever the framing on
+    screen would not show the person, as before night 3); otherwise it keeps that framing exactly -- across real cuts
+    and alike RAW shots too (your habit: one framing for alike shots -- video018's wide shots, zendaya-age, video1-3)
+    -- changed only as little as needed if it would not cover the window. A clip with no framing keeps the one on
+    screen. Returns the stretches of clips that show one framing."""
     from . import speakers
     runs: list[list[PremiereClip]] = []
     held: Sim | None = None
@@ -1967,9 +1982,13 @@ def _hold_framing(clips: list[PremiereClip], raw_wh: tuple[float, float], win: t
         keep = None
         if held is not None and not (move is not None and move >= min_move) and (not new_shot or own is None):
             keep = held if _covers(held, raw_wh, win, tol=1e-6) else _least_cover(held, raw_wh, win)
-            if own is not None and sp is not None and fps is not None and not speakers.passes(
-                    keep, _person_of(cl, sp, fps), raw_wh[0], bool(cl.seg.flip_h), win):
-                keep = None                              # holding it would hide this clip's person
+            if own is not None and sp is not None and fps is not None:
+                f, fl = _person_of(cl, sp, fps), bool(cl.seg.flip_h)
+                if not speakers.passes(keep, f, raw_wh[0], fl, win) and (
+                        follow or speakers.passes(own, f, raw_wh[0], fl, win) or
+                        (speakers.shows_anyone(own, f, raw_wh[0], fl, win) and
+                         not speakers.shows_anyone(keep, f, raw_wh[0], fl, win))):
+                    keep = None                     # holding it would hide this clip's person -- its own shows them
         if keep is None:
             if own is not None and held is not None and move is not None and move < min_move:
                 cl.framing_note = ("its own framing: a new shot of the RAW (--min-move holds only alike framings "
@@ -2039,7 +2058,7 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
     framings. The competitor's own framing is never moved onto the detected speaker -- unless ``follow``
     (--follow-speaker: the rule before night 3, every framing that does not show the person speaking is moved)."""
     from . import faces, speakers
-    runs = _hold_framing(clips, raw_wh, win, min_move, sp=sp, fps=fps)
+    runs = _hold_framing(clips, raw_wh, win, min_move, sp=sp, fps=fps, follow=follow)
     video = str(cutlist.raw.get("file_abs") or cutlist.raw.get("file") or "")
     raw_fps = float(cutlist.raw_fps)
     face_run = False
@@ -2095,7 +2114,7 @@ def _settle_framing(clips: list[PremiereClip], cutlist: Cutlist, raw_wh: tuple[f
             c.framing_note = f"{span}: {note}"
         face_run = True
     if face_run:                     # a moved stretch may now sit under min_move from its neighbour: hold again
-        _hold_framing(clips, raw_wh, win, min_move, subject="its framing", sp=sp, fps=fps)
+        _hold_framing(clips, raw_wh, win, min_move, subject="its framing", sp=sp, fps=fps, follow=follow)
 
 
 def _merge_continuous(clips: list[PremiereClip]) -> list[PremiereClip]:
@@ -2228,10 +2247,14 @@ def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | Non
         if n >= min_frames or m.start == -1 or m.end == -1 or len(out) < 2:
             i += 1
             continue
-        if seamless(m, b) and not seamless(a, m):
-            # the clip after runs on its take (the clip before is another take): it starts on its first frame --
-            # nothing is lost, the cut before stays (deadpool S04 + S05, 4 + 4 competitor frames of one shot: S03
-            # played on over both, "And I was"). On its own source timeline (the pieces may meet 1 tick apart)
+        if seamless(m, b) and not (seamless(a, m) and shot(raw_at(m, m.rec_start)) == shot(raw_at(a, a.rec_end - 1))) \
+                and all(shot(raw_at(b, r)) == shot(raw_at(b, b.rec_start)) for r in range(m.rec_start, b.rec_start)):
+            # the clip after runs on its take: it starts on the piece's first frame -- nothing is lost, the cut before
+            # stays. Not when the piece runs on the clip before's own shot (that one plays on over it, as before), nor
+            # across a RAW shot change between the piece and the clip after (a sliver of the shot before: a flash).
+            # deadpool S04 + S05 (4 + 4 competitor frames of one shot after another take: S03 played on over both,
+            # "And I was"); 021 S55 (the first frame of S56's shot, cut a frame late: a 1-frame clip at S54's
+            # framing). On its own source timeline (the pieces may meet 1 tick apart)
             d = int(round(n * float(b.speed)))
             b.start, b.rec_start, b.src_in = m.start, m.rec_start, b.src_in - d
             b.in_exact, b.in_error_ms = ((m.in_exact, m.in_error_ms) if b.src_in == m.src_in else

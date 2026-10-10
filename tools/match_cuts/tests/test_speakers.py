@@ -228,6 +228,18 @@ def test_a_framing_that_would_hide_the_speaker_is_not_held():
     assert "would not show its person" in clips[1].framing_note
 
 
+def test_a_clip_holds_the_framing_before_when_its_own_does_not_show_its_person_either():
+    """video3 / video1 (night 3 check-all): the held framing hid the clip's speaker, so the clip took its own -- which
+    hid them too (the competitor showed someone else) and sat 1 px / 71 px off the one before: a change under
+    --min-move. Held now; --follow-speaker keeps the old choice (the run is then framed on the speaker)."""
+    from match_cuts import export_xml_edl as ex
+    far = SP.Faces("speaker", True, (1500.0, 180.0, 1700.0, 420.0), [(1500.0, 180.0, 1700.0, 420.0)])
+    for follow, kept in ((False, sim_showing(540)), (True, sim_showing(560))):
+        clips = [_pclip("S01", 0, 60, 600, sim_showing(540)), _pclip("S02", 60, 120, 660, sim_showing(560))]
+        ex._hold_framing(clips, RAW, WIN, 250.0, sp=_Ctx([], [((0.0, 100.0), far)]), fps=Fraction(60), follow=follow)
+        assert ex._same_framing(clips[1].keys[0][1], kept)
+
+
 def test_a_run_is_framed_once_on_its_speakers_when_one_position_shows_them_all():
     a = SP.Faces("speaker", True, (1310.0, 180.0, 1450.0, 420.0), [])
     b = SP.Faces("speaker", True, (1370.0, 180.0, 1510.0, 420.0), [])
@@ -276,6 +288,28 @@ def test_once_the_takes_are_joined_a_clip_holds_the_framing_that_shows_its_perso
     assert ex._same_framing(cs[1].keys[0][1], sim_showing(980))
     cs = clips()                                         # a new shot of the RAW: chosen fresh, never held
     assert ex._hold_after_merge(cs, _Ctx([11.0], [((0.0, 100.0), shown)]), RAW, WIN, Fraction(60), 250.0) == 0
+
+
+def test_a_clip_that_held_a_framing_follows_it_when_the_joined_take_holds_the_one_before():
+    """video1 (night 3 check-all): S15 held S13's framing; then the joined S13+S14 took S12's (it shows its person
+    over the whole take) -- S15 stayed 71 px off, under --min-move (XML check). It follows now."""
+    from match_cuts import export_xml_edl as ex
+    cs = [_pclip("S01", 0, 60, 600, sim_showing(780)), _pclip("S02", 60, 300, 660, sim_showing(980)),
+          _pclip("S03", 300, 400, 900, sim_showing(980))]
+    cs[1].framing_note = "its own framing: the framing before would not show its person"
+    cs[2].framing_note = "framing kept from S02: the competitor's moves 4 px here, under --min-move 250"
+    shown = SP.Faces("speaker", True, (700.0, 180.0, 900.0, 420.0), [(700.0, 180.0, 900.0, 420.0)])
+    assert ex._hold_after_merge(cs, _Ctx([], [((0.0, 100.0), shown)]), RAW, WIN, Fraction(60), 250.0) == 2
+    assert all(ex._same_framing(c.keys[0][1], sim_showing(780)) for c in cs)
+    assert "as S02's before it" in cs[2].framing_note
+    hidden = SP.Faces("speaker", True, (1100.0, 180.0, 1300.0, 420.0), [(1100.0, 180.0, 1300.0, 420.0)])
+    cs[2].keys = [(900, sim_showing(980))]                # S03's person not shown by S01's framing: it keeps its own
+    cs[1].keys = [(660, sim_showing(980))]
+    cs[1].framing_note = "its own framing: the framing before would not show its person"
+    cs[2].framing_note = "framing kept from S02: the competitor's moves 4 px here, under --min-move 250"
+    faces = [((0.0, 14.0), shown), ((14.0, 100.0), hidden)]
+    assert ex._hold_after_merge(cs, _Ctx([], faces), RAW, WIN, Fraction(60), 250.0) == 1
+    assert ex._same_framing(cs[2].keys[0][1], sim_showing(980))
 
 
 def test_the_person_check_decoded_in_chunks_finds_exactly_what_it_finds_in_one_go(monkeypatch):

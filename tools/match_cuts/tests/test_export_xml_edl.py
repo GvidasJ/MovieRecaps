@@ -1455,6 +1455,28 @@ def test_a_mini_piece_joined_into_its_take_keeps_that_clips_source_timeline():
     assert (clips[0].rec_end, clips[0].src_out) == (68, 1068)
 
 
+def test_a_mini_piece_does_not_join_its_take_across_a_raw_shot_change():
+    """A piece that is the end of the RAW shot before the next clip's (the competitor cut on the RAW's own shot
+    change): joined into that clip it would open it with a sliver of the other shot -- a flash. The clip before plays
+    on over it instead, as before night 3."""
+    change = 2008.5 / 60.0                                   # between the piece's last tick (2008) and the clip's first
+    clips, moves = ex.merge_mini_clips([_mclip("S01", (0, 60), 1000), _mclip("S02", (60, 68), 2001),
+                                        _mclip("S03", (68, 130), 2009)], [change], Fraction(24000, 1001), Fraction(60))
+    assert [m["how"] for m in moves] == ["the clip before plays on"]
+    assert (clips[0].rec_end, clips[1].rec_start, clips[1].src_in) == (68, 68, 2009)
+
+
+def test_the_first_frame_of_a_new_raw_shot_joins_the_clip_that_runs_on_it():
+    """021 S55 (the check-all run): the competitor cut one frame after a RAW shot change, so the new shot's first
+    frame was a 1-frame clip at the framing of the clip before (one take through the change) -- XML FLASH. It goes
+    into the clip after, which runs on that shot; the cut stays on the shot change."""
+    change = 1059.5 / 60.0                                   # between the clip before's last tick and the piece
+    clips, moves = ex.merge_mini_clips([_mclip("S54", (0, 60), 1000), _mclip("S55", (60, 61), 1060),
+                                        _mclip("S56", (61, 130), 1061)], [change], Fraction(24000, 1001), Fraction(60))
+    assert [m["how"] for m in moves] == ["the same take runs on"] and len(clips) == 2
+    assert (clips[0].rec_end, clips[1].rec_start, clips[1].src_in, clips[1].label) == (60, 60, 1060, "S55+S56")
+
+
 def test_a_scene_cut_one_raw_frame_into_a_clip_gives_that_frame_to_the_clip_before(tmp_path):
     """output/020 --fast: a RAW shot change one frame after S12 started (S12 at 125 %, so snap_to_shots does not
     move that cut): the split left 1 frame -- the shot before's last -- at S12's framing, a flash. The clip before
