@@ -1,0 +1,151 @@
+{
+ "video": "video021-fixed",
+ "date": "2026-10-10",
+ "project": "output\\021\\021_fixed.prproj",
+ "run": "output\\021",
+ "edit": {
+  "clips": 30,
+  "starts": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.1,
+   -1.6,
+   0.217,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.6,
+   0.033,
+   1.067,
+   -0.333
+  ],
+  "ends": [
+   0.0,
+   0.417,
+   -0.167,
+   -0.233,
+   0.0,
+   0.0,
+   -0.167,
+   0.0,
+   0.0,
+   0.283,
+   0.05,
+   0.0,
+   0.0,
+   -0.0,
+   0.0,
+   0.233,
+   -0.017,
+   -0.333,
+   -0.183,
+   1.367,
+   0.917
+  ],
+  "removed": 9,
+  "added": 1,
+  "moved": [
+   0.0,
+   0.2,
+   0.0,
+   153.0,
+   -338.0,
+   -0.0,
+   84.0,
+   -203.0,
+   -0.0,
+   -307.0,
+   -739.3,
+   -0.0,
+   -0.0,
+   -152.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   42.3,
+   42.3,
+   115.5,
+   370.4
+  ],
+  "zoomed": [
+   16.79,
+   6.46,
+   20.91,
+   14.85,
+   19.4,
+   22.73,
+   22.73,
+   22.73,
+   16.54,
+   56.54,
+   43.77,
+   14.51,
+   14.51,
+   14.51,
+   14.51,
+   44.51,
+   14.51,
+   7.87,
+   7.87,
+   61.11,
+   64.8
+  ],
+  "framing": "compared",
+  "played": 0.854,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 2,
+   "of": 3,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 60.0
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 0,
+  "removed": 3,
+  "added": 3,
+  "rewritten": 0,
+  "changes": [
+   {
+    "heard": "tosses",
+    "written": "grabs the",
+    "kind": "words",
+    "before": "own safety",
+    "after": "kid laughing",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "Ishould",
+    "written": "I should",
+    "kind": "words",
+    "before": "kid laughing",
+    "after": "get away",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

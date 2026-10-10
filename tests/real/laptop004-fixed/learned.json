@@ -1,0 +1,94 @@
+{
+ "video": "laptop004-fixed",
+ "date": "2026-10-10",
+ "project": "output\\laptop004\\laptop004_fixed.prproj",
+ "run": "output\\laptop004",
+ "edit": {
+  "clips": 10,
+  "starts": [
+   0.013,
+   -3.887,
+   0.011,
+   0.03,
+   0.014,
+   -0.001,
+   -0.006,
+   -0.023,
+   -0.756
+  ],
+  "ends": [
+   0.027,
+   0.011,
+   0.034,
+   -0.022,
+   0.035,
+   -0.006,
+   1.595,
+   0.845,
+   -0.281
+  ],
+  "removed": 1,
+  "added": 0,
+  "moved": [
+   66.1,
+   66.1,
+   -72.3,
+   54.7,
+   -23.5,
+   200.1,
+   574.1,
+   1194.5,
+   -225.4
+  ],
+  "zoomed": [
+   4.27,
+   4.27,
+   4.15,
+   4.12,
+   4.16,
+   4.14,
+   4.14,
+   4.11,
+   4.11
+  ],
+  "framing": "compared",
+  "played": 0.956,
+  "speed": {
+   "tool": 1.25,
+   "user": 1.2512
+  },
+  "flip": {
+   "tool": 10,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 20,
+  "added": 1,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "so so so",
+    "written": "oh",
+    "kind": "words",
+    "before": "others so",
+    "after": "Well you",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

@@ -1,0 +1,55 @@
+{
+ "what": "your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio by hand, so the picture is the key): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 1841.840 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 3.128125,
+   "kind": "raw",
+   "src_in": 30.023118,
+   "speed": 1.25125
+  },
+  {
+   "start": 3.128125,
+   "end": 9.300958,
+   "kind": "raw",
+   "src_in": 33.937185,
+   "speed": 1.25125
+  },
+  {
+   "start": 9.300958,
+   "end": 9.926583,
+   "kind": "raw",
+   "src_in": 41.656198,
+   "speed": 1.25
+  },
+  {
+   "start": 9.926583,
+   "end": 10.677333,
+   "kind": "raw",
+   "src_in": 42.490365,
+   "speed": 1.25
+  },
+  {
+   "start": 10.677333,
+   "end": 12.178833,
+   "kind": "raw",
+   "src_in": 43.591882,
+   "speed": 1.25125
+  },
+  {
+   "start": 12.178833,
+   "end": 13.471792,
+   "kind": "raw",
+   "src_in": 45.470634,
+   "speed": 1.25125
+  },
+  {
+   "start": 13.471792,
+   "end": 15.557208,
+   "kind": "raw",
+   "src_in": 48.236574,
+   "speed": 1.25125
+  }
+ ]
+}
