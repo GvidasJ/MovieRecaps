@@ -228,6 +228,23 @@ def test_a_framing_that_would_hide_the_speaker_is_not_held():
     assert "would not show its person" in clips[1].framing_note
 
 
+def test_a_run_holding_a_framing_that_shows_nobody_keeps_it():
+    """021 (the final run of the first --min-move fix): S46..S49 held S46's framing -- neither showed the detected
+    speaker, the face detection missed the laughing man -- and that held framing then counted as borrowed: the run was
+    moved 1179 px onto "the speaker", the move you undid. A framing held by --min-move is the competitor's own;
+    --follow-speaker moves it, as before night 3."""
+    from types import SimpleNamespace
+    from match_cuts import export_xml_edl as ex
+    cutlist = SimpleNamespace(raw={"file": ""}, raw_fps=Fraction(24000, 1001))
+    far = SP.Faces("speaker", True, (1500.0, 180.0, 1700.0, 420.0), [(1500.0, 180.0, 1700.0, 420.0)])
+    for follow in (False, True):
+        clips = [_pclip("S01", 0, 60, 600, sim_showing(540)), _pclip("S02", 60, 120, 660, sim_showing(560))]
+        for c in clips:
+            c.events = [SimpleNamespace(seg=c.seg, rec_in=c.rec_start // 2, rec_out=c.rec_end // 2)]
+        ex._settle_framing(clips, cutlist, RAW, WIN, 250.0, Fraction(60), _Ctx([], [((0.0, 100.0), far)]), follow)
+        assert [not ex._same_framing(c.keys[0][1], sim_showing(540)) for c in clips] == [follow, follow]
+
+
 def test_a_clip_holds_the_framing_before_when_its_own_does_not_show_its_person_either():
     """video3 / video1 (night 3 check-all): the held framing hid the clip's speaker, so the clip took its own -- which
     hid them too (the competitor showed someone else) and sat 1 px / 71 px off the one before: a change under

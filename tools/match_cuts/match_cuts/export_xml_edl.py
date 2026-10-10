@@ -2019,9 +2019,11 @@ HELD_NOTE = "framing kept from"          # _hold_framing's note on a clip showin
 
 
 def _own_framing(run: Sequence[PremiereClip], why: Sequence[str] = ()) -> bool:
-    """The clips show their own competitor framing: none holds another clip's (--min-move) and none plays a replaced
-    spot (_unreliable: B-roll / NOT-IN-RAW / uncertain -- the framing there is a neighbour's)."""
-    return not why and not any(str(c.framing_note).startswith(HELD_NOTE) or _unreliable(c) for c in run)
+    """The clips show the competitor's own framing: none plays a replaced spot (_unreliable: B-roll / NOT-IN-RAW /
+    uncertain -- the framing there is a neighbour's) and the framing covers the window (``why``). A framing held by
+    --min-move counts as the clip's own: it is under min_move px from it and never hides a person its own framing
+    shows (_hold_framing) -- counted as borrowed, 021's S49 / S51 / S52 were moved 1000-1500 px onto "the speaker"."""
+    return not why and not any(_unreliable(c) for c in run)
 
 
 def _unreliable(cl: PremiereClip) -> str | None:
