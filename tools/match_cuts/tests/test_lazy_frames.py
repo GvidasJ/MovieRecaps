@@ -17,8 +17,8 @@ class FakeReader:
     def __init__(self, info):
         FakeReader.opened += 1
 
-    def frames(self, a, b, fmt="gray"):
-        for j in range(a, b):
+    def frames(self, a, b=None, fmt="gray"):
+        for j in range(a, b if b is not None else 1000):          # b None: on to the end, as VideoReader.frames
             yield j, np.full((4, 6), j % 256, np.uint8)
 
     def close(self):
