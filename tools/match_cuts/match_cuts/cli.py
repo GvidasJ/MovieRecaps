@@ -197,10 +197,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "caption moves with it (default 100; batch: a speed.txt in a video's folder)")
     p.add_argument("--frame", default=None, metavar="PNG",
                    help="--premiere: your channel's overlay, a PNG with a TRANSPARENT hole where the video goes "
-                        "(header and headline around it): the video is fitted to cover the hole (cropped as needed, "
-                        "on the person speaking), the PNG goes on V2 over it for the whole edit, 1_edit.xml is made for "
-                        "a 2160x3840 sequence (--frame-size), the captions stay inside the hole and "
-                        "preview_recreation.mp4 is the edit seen through the frame")
+                        "(header and headline around it): the video fills the hole completely (cropped as needed, "
+                        "centred on the person speaking), the PNG goes on V2 over it for the whole edit, 1_edit.xml is "
+                        "made for a sequence of the PNG's own size (--frame-size), the captions stay inside the hole and "
+                        "preview_recreation.mp4 is the edit seen through the frame. Default: templates/default.png of "
+                        "this repository (your template) -- every run uses it unless --no-frame")
+    p.add_argument("--no-frame", action="store_true",
+                   help="--premiere: no frame -- the competitor's own layout (a 1080x1920 sequence, the template "
+                        "window), as before night 4")
     p.add_argument("--mirror", action="store_true",
                    help="--premiere: keep the competitor's horizontal mirror (Flop) in 1_edit.xml. Default: the RAW the "
                         "right way round showing the same part of it, as in your finished edits of mirrored competitors")
@@ -208,8 +212,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="--premiere: move every clip whose framing does not show the person speaking onto them, as "
                         "before night 3 (an interview where the competitor shows the listener). Default: the "
                         "competitor's own framing is kept -- your finished 020 / 021 / laptop004 framed such clips back")
-    p.add_argument("--frame-size", type=_comp_size, default="2160x3840", metavar="WxH",
-                   help="--frame: the sequence size 1_edit.xml is made for (default 2160x3840; the PNG is scaled to it)")
+    p.add_argument("--frame-size", type=_comp_size, default=None, metavar="WxH",
+                   help="--frame: the sequence size 1_edit.xml is made for (default: the PNG's own size -- 1080x1920 "
+                        "for the default template, 2160x3840 for input/frame.png; the PNG is scaled to it)")
     p.add_argument("--no-scene-cuts", action="store_true",
                    help="--premiere: do not split V1 / A1 at the RAW's own shot changes (default: a cut at every shot "
                         "change a clip plays, like Premiere's Scene Edit Detection)")
@@ -219,9 +224,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-clip", type=int, default=10, metavar="FRAMES",
                    help="--premiere: a V1 clip shorter than this many sequence frames is joined into its neighbour "
                         "(no mini cuts; a cut on a RAW shot change stays; default 10, 0 = off)")
+    p.add_argument("--remove-silence", action="store_true",
+                   help="--premiere: cut out every silence of the RAW audio under my clips, move every cut off speech "
+                        "and end the edit after its last word (the default until night 4). Default: the competitor's "
+                        "cut points are kept and the edit ends on the competitor's last RAW moment")
     p.add_argument("--keep-silence", action="store_true",
-                   help="keep the silences of my edit (default: cut out every silence of the RAW audio under my clips, "
-                        "after the competitor's cuts are recreated; without --competitor the RAW alone is cut this way)")
+                   help="keep every silence (the default of a run with a competitor; without --competitor the RAW "
+                        "alone is cut at its silences unless this is given)")
     p.add_argument("--silence-db", type=_db_arg, default=None, metavar="DB",
                    help="silence = the short-window loudness (50 ms RMS) this many dB below the edit's speech level "
                         "(the loudness of its loudest 5%% of windows); default: set for each video from its speech "
@@ -309,7 +318,13 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.premiere_follow_speaker = bool(getattr(args, "follow_speaker", False))
     if getattr(args, "frame", None):
         cfg.frame_png = str(args.frame)
-        cfg.frame_size = str(getattr(args, "frame_size", None) or "2160x3840")
+    elif cfg.premiere and not getattr(args, "no_frame", False):
+        from .frame import default_frame
+        d = default_frame()                       # your template: every --premiere run unless --no-frame
+        cfg.frame_png = str(d) if d is not None else ""
+    if cfg.frame_png and getattr(args, "frame_size", None):
+        cfg.frame_size = str(args.frame_size)
+    cfg.remove_silence = bool(getattr(args, "remove_silence", False))
     cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_cuts", False))
     cfg.premiere_normal_audio = not bool(getattr(args, "audio_lines", False))
     cfg.premiere_min_clip_frames = max(0, int(getattr(args, "min_clip", 10)))
@@ -651,6 +666,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     raw_only = args.competitor is None and args.raw is not None        # no competitor: the edit from the RAW alone
+    if getattr(args, "frame", None) and getattr(args, "no_frame", False):
+        print("match_cuts: --frame and --no-frame: give one of them (no frame at all: --no-frame)", file=sys.stderr)
+        return 2
     try:
         if raw_only:
             if not Path(args.raw).is_file():
@@ -686,6 +704,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = config_from_args(args, comp, raw)
     if raw_only:
         cfg.competitor, cfg.premiere = "", True          # the RAW-only edit is the Premiere sequence
+        cfg.frame_png = cfg.frame_size = ""              # ... without a frame (it takes no --frame yet)
     # each run its own numbered folder in --out: 1_edit.xml / 2_captions.srt there, everything else in its extras/
     base = Path(cfg.out_dir)
     prev = run_folders.newest_run_dir(base)

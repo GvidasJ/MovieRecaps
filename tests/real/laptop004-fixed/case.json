@@ -1,11 +1,12 @@
 {
  "timeline": "edit",
- "notes": "learned from laptop004_fixed.prproj (2026-10-10): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); run with your channel's frame (frame.png, a copy of input/frame.png); your 125 % channel: --speed 125",
+ "notes": "learned from laptop004_fixed.prproj (2026-10-10): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); run with your channel's frame (frame.png, a copy of input/frame.png); your 125 % channel: --speed 125; night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "output\\laptop004\\laptop004_fixed.prproj",
  "run": "output\\laptop004",
  "full_raw": "output/laptop004/extras/media/raw_ae.mp4",
  "raw_offset": 1841.84,
  "options": [
+  "--remove-silence",
   "--speed",
   "125",
   "--frame",

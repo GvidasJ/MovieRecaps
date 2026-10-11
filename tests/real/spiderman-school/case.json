@@ -1,0 +1,7 @@
+{
+ "timeline": "edit",
+ "options": [
+  "--remove-silence"
+ ],
+ "notes": "night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like"
+}

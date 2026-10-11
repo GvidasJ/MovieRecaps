@@ -2645,6 +2645,13 @@ def stage_broll(ctx: Context) -> None:
         ctx.warn(f"--no-broll not applied: {type(e).__name__}: {e}")
         return
     ctx.dlog.record("broll", "no_broll", replaced=ctx.broll["replaced"], kept=ctx.broll["kept"])
+    if follow and getattr(ctx.cfg, "premiere_normal_audio", True):
+        # every picture plays its own sound on A1 (1_edit.xml): the captions and the preview hear that sound too --
+        # mike005: under the clip that plays on over a meme the captions copied the meme's "hey" / "oh" while A1
+        # says "okay you got her today" (what you wrote)
+        for s in ctx.broll["cutlist"].segments:
+            if (s.audio or {}).get("mute"):
+                s.audio = {k: v for k, v in s.audio.items() if k != "mute"}
     if ctx.broll["replaced"] or ctx.broll.get("other_video"):
         p = ctx.cfg.debug_dir / "cutlist_no_broll.json"
         ctx.broll["cutlist"].save(p)
@@ -2848,6 +2855,13 @@ def stage_exports(ctx: Context) -> None:
         if validation.get("person_problems"):
             ctx.warn(f"Premiere XML: {len(validation['person_problems'])} clip(s) do not show the person speaking -- "
                      "the run fails: " + "; ".join(validation["person_problems"]))
+        if validation.get("audio_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['audio_problems'])} A1 problem(s) -- every audio clip must import "
+                     "at 0 dB, unmuted, without keyframes or effects; the run fails: "
+                     + "; ".join(validation["audio_problems"]))
+        if validation.get("ending_problems"):
+            ctx.warn("Premiere XML: the edit does not end on the competitor's last RAW moment -- the run fails: "
+                     + "; ".join(validation["ending_problems"]))
         warn_flash_silence(ctx, validation)
         if validation.get("ok") is not True:
             ctx.warn(f"XML/EDL re-parse validation failed: {validation.get('errors') or validation.get('error')}")
@@ -2915,7 +2929,8 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
             log.info("Premiere: S%02d (%d frames at %.0f %%) plays at 100 %% inside its take", d["segment"],
                      d["comp_out"] - d["comp_in"], 100 * d["speed"])
     ctx.speech = speech_of(ctx, ex)
-    if ctx.speech is not None:
+    from .config import removes_silence
+    if ctx.speech is not None and removes_silence(ctx.cfg):      # the default keeps the competitor's dissolves too
         from . import speech as speech_mod
         from .export_xml_edl import harden_dissolves
         ex, hard = harden_dissolves(ex, lambda t: speech_mod._inside_sound(ctx.speech, t))
@@ -2943,7 +2958,10 @@ def silence_lines(plan: dict) -> list[str]:
     if not plan:
         return []
     if plan.get("off"):
-        return [f"kept ({plan['off']})"]
+        end = plan.get("ending") or {}
+        return [f"kept ({plan['off']})"] + ([f"the ending: the competitor closes on {end['cut_s']:.2f} s not from the RAW "
+                                             f"(a meme / outro): cut -- the edit ends on its last RAW moment"]
+                                           if end else [])
     if plan.get("error"):
         return [f"not removed ({plan['error']})"]
     from .silence import settings_line
@@ -3064,15 +3082,24 @@ def action_beats(ctx: Context) -> list[tuple[int, int]]:
 
 
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
-    """silence.plan_premiere of the Premiere export: the speech-safe cuts (ctx.speech), then the silences of the RAW
-    audio under my clips (not with --keep-silence: {'off': ...} plus the speech-safe cuts); a failure warns and keeps
-    every silence (and every cut where the plan put it: the speech check then decides)."""
+    """silence.plan_premiere of the Premiere export. With --remove-silence: the speech-safe cuts (ctx.speech), then the
+    silences of the RAW audio under my clips; by default neither ({'off': ...}: the competitor's cut points, the edit
+    ends on its last RAW moment). A failure warns and keeps every silence (and every cut where the plan put it: the
+    speech check then decides)."""
     from . import silence
-    keep = bool(getattr(ctx.cfg, "keep_silence", False))
-    beats = action_beats(ctx)
+    from .config import removes_silence
+    remove = removes_silence(ctx.cfg)
+    beats = action_beats(ctx) if remove else []
     try:
-        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx), ctx.speech,
-                                     remove=not keep, shots=ctx.shots, keep=beats)
+        plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx),
+                                     ctx.speech if remove else None, remove=remove, shots=ctx.shots, keep=beats)
+        if not remove:
+            plan["off"] = ("--keep-silence" if getattr(ctx.cfg, "keep_silence", False) else
+                           "the default: the competitor's cut points, no cut moved off speech; --remove-silence cuts "
+                           "the silences out")
+            plan["speech"] = dict(plan.get("speech") or {}, off="the competitor's cut points are kept (the default; "
+                                                                "--remove-silence moves the cuts off speech)")
+            plan = with_ending(ctx, cl, plan)
         plan["beats"] = beats
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
@@ -3085,6 +3112,49 @@ def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     ctx.dlog.record("silence", "removed", rows=plan["rows"], levels=plan["levels"], settings=plan["settings"],
                     moved=moved)
     return plan
+
+
+def competitor_ending(ctx: Context, cl: Cutlist) -> int | None:
+    """The sequence frame (the Premiere plan of ``cl``, before any cut) where the competitor's last RAW moment ends
+    when it closes on something that is not from the RAW -- a meme or outro over its own sound (no RAW audio line
+    under it, FX-14) -- else None. mike005: the competitor ends on a 1 s meme after the last line; the clip before
+    played on over it (and into the next line) and you cut that, ending on the competitor's last RAW frame."""
+    from .export_xml_edl import premiere_factor, premiere_settings
+    segs = sorted(ctx.cutlist.segments, key=lambda s: int(s.comp_in))        # the competitor's edit as matched
+    raw = [s for s in segs if s.type == "raw"]
+    if not raw:
+        return None
+    end = max(int(s.comp_out) for s in raw)
+    after = [s for s in segs if int(s.comp_in) >= end]
+    last = max(raw, key=lambda s: int(s.comp_out))
+    if not after or any((s.audio or {}).get("line") for s in after) or last.transition_out:
+        return None                       # it ends on the RAW, its RAW sound runs on, or it dissolves into the end
+    km = ctx.keep_map if ctx.keep_map is not None and ctx.keep_map.stretched else None
+    e = int(km.map(end)) if km is not None else end
+    fac = premiere_factor(cl.comp_fps, premiere_settings(ctx.cfg)["fps"])
+    n = int(cl.competitor["frames"]) * fac
+    return e * fac if e * fac < n else None
+
+
+def with_ending(ctx: Context, cl: Cutlist, plan: dict) -> dict:
+    """The default plan with the competitor's closing insert cut off (competitor_ending): the edit ends on the
+    competitor's last RAW moment, nothing filled in after it; cfg.premiere_ending holds that frame for the XML's
+    ending check (None: the end of the edit)."""
+    from .export_xml_edl import premiere_settings
+    from .silence import Cut, Ripple
+    ctx.cfg.premiere_ending = None
+    a = competitor_ending(ctx, cl)
+    old = plan.get("ripple")
+    if a is None or old is None or old.before is not None:
+        return plan
+    f = float(premiere_settings(ctx.cfg)["fps"])
+    n = old.n_frames
+    rp = Ripple([c for c in old.cuts if c.b <= a] + [Cut(a, n, a / f, n / f)], n)
+    ctx.cfg.premiere_ending = a
+    log.info("the competitor ends on %.2f s that are not from the RAW (a meme / outro over its own sound): cut -- "
+             "the edit ends on its last RAW moment, %.2f s", (n - a) / f, a / f)
+    return dict(plan, ripple=rp, cuts=[(c.a, c.b) for c in rp.cuts], new_s=round(rp.new_frames / f, 3),
+                ending={"from_s": round(a / f, 3), "cut_s": round((n - a) / f, 3)})
 
 
 def speech_of(ctx: Context, cl: Cutlist) -> Any:
@@ -3256,6 +3326,8 @@ def speech_lines(plan: dict) -> list[str]:
     sp = (plan or {}).get("speech")
     if not sp:
         return []
+    if sp.get("off"):
+        return [f"off: {sp['off']}"]
     if not sp.get("on"):
         return ["not checked (no speech map of the RAW)"]
     rows = sp.get("rows") or []

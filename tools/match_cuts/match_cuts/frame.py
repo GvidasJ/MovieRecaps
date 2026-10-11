@@ -1,5 +1,6 @@
-"""frame.py: ``--frame PNG`` -- the channel's overlay: a PNG (input/frame.png: 2160x3840) with a header and a headline
-around a TRANSPARENT hole where the video goes.
+"""frame.py: ``--frame PNG`` -- the channel's overlay: a PNG (templates/default.png: 1080x1920, the default of every
+--premiere run since night 4; input/frame.png: 2160x3840) with a header and a headline around a TRANSPARENT hole where
+the video goes (``--no-frame``: none, the competitor's own layout).
 
 ``load_frame`` finds the hole from the alpha channel: the largest connected area of pixels more transparent than
 ALPHA_HOLE (a faint watermark inside it -- "FLICK707" at a few percent -- belongs to the hole), as its bounding box
@@ -24,6 +25,8 @@ ALPHA_HOLE = 128            # a pixel at most this opaque (0-255) is part of the
 MIN_HOLE_FRAC = 0.05        # a hole smaller than this share of the picture is no video window (a stray clear pixel)
 CAPTION_TOP = 0.35          # captions start at least this far down the hole (the headline sits just above it) ...
 CAPTION_BOTTOM = 0.92       # ... and end above this much of it
+BLEED = 0.002               # every clip covers the hole this much of the sequence width wider on each side (2 px of
+#                             1080: a safety margin against Premiere's sub-pixel placement; the PNG hides it)
 
 
 @dataclass
@@ -40,10 +43,15 @@ class Frame:
         return W / float(self.width), H / float(self.height)
 
     def window(self, W: int, H: int) -> tuple[float, float, float, float]:
-        """The hole on a W x H sequence: (x, y, w, h) corner px -- the window every clip must cover."""
+        """The hole on a W x H sequence, BLEED wider on every side (inside the sequence): (x, y, w, h) corner px --
+        the window every clip must cover, so no sub-pixel rounding in Premiere can leave a hairline of black at the
+        box's edge (the laptop's output\\005 had no frame: a 130 px black strip under the clips)."""
         sx, sy = self.scale_to(W, H)
         x, y, w, h = self.hole
-        return (x * sx, y * sy, w * sx, h * sy)
+        b = BLEED * W
+        x0, y0 = max(0.0, x * sx - b), max(0.0, y * sy - b)
+        x1, y1 = min(float(W), (x + w) * sx + b), min(float(H), (y + h) * sy + b)
+        return (x0, y0, x1 - x0, y1 - y0)
 
     def caption_zone(self, H: int, W: int | None = None) -> tuple[float, float]:
         """(top, bottom) sequence px where captions may sit: inside the hole, clear of the header and headline."""
@@ -97,11 +105,34 @@ def load_frame(path: str | Path) -> Frame:
                  round(frac, 5))
 
 
+REPO = Path(__file__).resolve().parents[3]
+DEFAULT_FRAME = REPO / "templates" / "default.png"     # your template (mike005): every --premiere run uses it
+
+
+def default_frame() -> Path | None:
+    """templates/default.png of the repository -- the frame every --premiere run uses unless --frame / --no-frame --,
+    or None when it is not there."""
+    return DEFAULT_FRAME if DEFAULT_FRAME.is_file() else None
+
+
 def sequence_size(cfg) -> tuple[int, int]:
-    """The sequence size of a --frame run (cfg.frame_size, default 2160x3840)."""
+    """The sequence size of a --frame run: cfg.frame_size (--frame-size), else the frame PNG's own size (1080x1920 for
+    the default template, 2160x3840 for input/frame.png), else 2160x3840."""
     import re
-    m = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", str(getattr(cfg, "frame_size", "") or "2160x3840"))
-    return (int(m.group(1)), int(m.group(2))) if m else (2160, 3840)
+    m = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", str(getattr(cfg, "frame_size", "") or ""))
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    png = str(getattr(cfg, "frame_png", "") or "")
+    if png:
+        try:
+            from PIL import Image
+            with Image.open(png) as im:
+                w, h = im.size
+            if w >= 16 and h >= 16:
+                return int(w), int(h)
+        except Exception:  # noqa: BLE001 - load_frame reports an unreadable PNG
+            pass
+    return 2160, 3840
 
 
 def apply_to_config(cfg) -> Frame | None:

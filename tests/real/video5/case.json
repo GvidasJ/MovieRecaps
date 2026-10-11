@@ -1,9 +1,12 @@
 {
  "timeline": "edit",
- "notes": "learned from ..\\..\\finished\\video5 (2026-10-07): answer_edit.json is your edit as project.prproj holds it (no final.mp4): the A1 clips of the RAW, your audio cuts; answer.srt your project's captions",
+ "notes": "learned from ..\\..\\finished\\video5 (2026-10-07): answer_edit.json is your edit as project.prproj holds it (no final.mp4): the A1 clips of the RAW, your audio cuts; answer.srt your project's captions; night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "..\\..\\finished\\video5",
  "captions_from": "project",
  "runs": {
   "tool": "..\\..\\work\\t10\\learn\\tool\\video5\\001"
- }
+ },
+ "options": [
+  "--remove-silence"
+ ]
 }

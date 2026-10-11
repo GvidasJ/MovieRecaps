@@ -1,0 +1,96 @@
+{
+ "video": "mike005-fixed",
+ "date": "2026-10-11",
+ "project": "finished\\mike005\\mike005_fixed_relinked.prproj",
+ "run": "output\\mike005\\night4_125",
+ "edit": {
+  "clips": 13,
+  "starts": [
+   0.408,
+   -0.283,
+   -0.15,
+   -0.033,
+   0.733,
+   -0.367,
+   -1.217,
+   0.35,
+   -2.9,
+   0.117,
+   1.383,
+   -0.133
+  ],
+  "ends": [
+   0.65,
+   0.0,
+   -0.446,
+   -0.125,
+   1.379,
+   0.296,
+   -0.154,
+   1.079,
+   0.137,
+   -0.783,
+   0.488,
+   -0.112
+  ],
+  "removed": 1,
+  "added": 0,
+  "moved": [
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0
+  ],
+  "zoomed": [
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67,
+   4.67
+  ],
+  "framing": "compared",
+  "played": 0.891,
+  "speed": {
+   "tool": 1.25,
+   "user": 1.25
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 60.0
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 3,
+  "added": 5,
+  "rewritten": 1,
+  "changes": []
+ }
+}

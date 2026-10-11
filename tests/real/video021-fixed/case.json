@@ -1,11 +1,12 @@
 {
  "timeline": "edit",
- "notes": "learned from 021_fixed.prproj (2026-10-10): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); run with your channel's frame (frame.png, a copy of input/frame.png)",
+ "notes": "learned from 021_fixed.prproj (2026-10-10): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); run with your channel's frame (frame.png, a copy of input/frame.png); night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "output\\021\\021_fixed.prproj",
  "run": "output\\021",
  "full_raw": "output/021/extras/media/raw.mp4",
  "raw_offset": 1112.578133,
  "options": [
+  "--remove-silence",
   "--frame",
   "{case}/frame.png"
  ]

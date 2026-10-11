@@ -1429,9 +1429,11 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML ITEM", "item_problems", "every item imports: whole frames, in < out, inside its media, no overlap"),
     ("XML GAP", "gaps", "every clip covers the template window"),
     ("XML REPEAT", "repeat_problems", "no RAW footage or audio plays twice"),
-    ("XML SPEECH", "speech_problems", "no audio cut inside speech"),
+    ("XML AUDIO", "audio_problems", "every A1 clip at 0 dB: enabled, no level / gain / pitch / effect but its speed, no keyframes"),
+    ("XML ENDING", "ending_problems", "the edit ends on the competitor's last RAW moment (the default: no --remove-silence)"),
+    ("XML SPEECH", "speech_problems", "no audio cut inside speech (--remove-silence)"),
     ("XML FLASH", "flash_problems", "no piece of a RAW shot under 0.25 s at a cut"),
-    ("XML SILENCE", "silence_problems", "no more silence across a cut than --pad-after + --pad-before"),
+    ("XML SILENCE", "silence_problems", "no more silence across a cut than --pad-after + --pad-before (--remove-silence)"),
     ("XML OTHER VIDEO", "other_video_problems", "another video's stretch left empty for exactly its length"),
     ("XML LINK", "link_problems", "every V1 clip linked to its own A1 clip and back"),
     ("XML PERSON", "person_problems", "the person speaking in the window, at most 15 % of the face cut off (nobody speaking: one person)"),
@@ -1445,7 +1447,8 @@ def _premiere_checks(ctx: Any) -> list[str]:
     v = getattr(ctx, "exports", None) or {}
     if not v:
         return ["1_edit.xml was not validated (see *Warnings*)."]
-    not_run = {"speech_problems": not v.get("speech_checked", True), "flash_problems": not v.get("flash_checked", True)}
+    not_run = {"speech_problems": not v.get("speech_checked", True), "flash_problems": not v.get("flash_checked", True),
+               "silence_problems": not v.get("silence_checked", True)}
     rows = []
     for name, key, what in PREMIERE_CHECKS:
         probs = v.get(key)
@@ -1453,6 +1456,9 @@ def _premiere_checks(ctx: Any) -> list[str]:
                   "OK" if not probs else f"**FAIL** ({len(probs)})")
         rows.append([f"`{name}`", what, status])
     out = [md_table(["check", "what it checks", "result"], rows)]
+    if v.get("speech_notes"):
+        out += ["", f"**Cuts inside speech, kept** (the competitor's own cut points -- the default; `--remove-silence` "
+                f"moves them into the quiet): {len(v['speech_notes'])}"] + [f"- {r}" for r in v["speech_notes"]]
     if v.get("gap_exceptions"):
         out += ["", "**Left empty on purpose** (allowed by `XML GAP`, `XML FLASH`, `XML SILENCE`, `XML LINK`, "
                 "`XML PERSON` and the audio check, listed here):"] + [f"- {r}" for r in v["gap_exceptions"]]
@@ -1486,12 +1492,22 @@ def _silence(ctx: Any) -> list[str]:
             f"--pad-after after its last speech and starts --pad-before before its first; a breath at a clip's edge "
             f"may be left out): {talk[0]}"] + [f"- {r}" for r in talk[1:]] + [""]) if talk else []
     if plan.get("off"):
-        return pre + [f"Silences kept: {plan['off']}."]
+        from .pipeline import repeat_lines
+        rep = repeat_lines(plan)
+        end = plan.get("ending") or {}
+        if end:
+            pre = pre + [f"**The ending:** the competitor closes on {end['cut_s']:.2f} s that are not from the RAW (a "
+                         f"meme / outro over its own sound): cut -- the edit ends on the competitor's last RAW moment, "
+                         f"at {end['from_s']:.2f} s of the edit before the cut.", ""]
+        return pre + [f"Silences kept: {plan['off']}."] + (
+            ["", f"**Repeats of RAW footage / audio** (repeats.py: a stutter at a cut is always trimmed, the same "
+                 f"moment over 0.5 s twice is cut unless --allow-repeats): {rep[0]}"] + [f"- {r}" for r in rep[1:]]
+            if rep else [])
     from .silence import settings_line
     out = ["- Measured on the RAW audio under my clips (A1), never the competitor's: silence = the 50 ms loudness under "
            "this video's threshold (by default a third of the way from its background noise up to its speech level), "
            "outside every transcribed word; the padding kept around each word; cut points on whole frames, never inside a "
-           "cross dissolve; A1 fades over one frame on both sides of every cut (no click).",
+           "cross dissolve; every A1 clip stays at 0 dB (no fades, no keyframes).",
            f"- {settings_line(plan)}.",
            f"- {len(plan.get('rows') or [])} silences removed, {plan['removed_s']:.2f} s in all: "
            f"{plan['old_s']:.2f} s -> {plan['new_s']:.2f} s."]

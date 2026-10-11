@@ -1,10 +1,13 @@
 {
  "timeline": "edit",
- "notes": "learned from ..\\..\\finished\\video3 (2026-10-07): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your project's captions",
+ "notes": "learned from ..\\..\\finished\\video3 (2026-10-07): answer_edit.json is your finished video (final.mp4) matched against the RAW; answer.srt your project's captions; night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "..\\..\\finished\\video3",
  "captions_from": "project",
  "runs": {
   "tool": "..\\..\\work\\t8\\final4\\runs\\video3\\001",
   "user": "..\\..\\work\\t8\\user\\video3\\001"
- }
+ },
+ "options": [
+  "--remove-silence"
+ ]
 }

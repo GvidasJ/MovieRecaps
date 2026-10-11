@@ -2600,9 +2600,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
-    silence.Ripple: the speech-safe cuts, then the silences and repeats): its ranges are cut out -- everything after
-    them moves earlier --, clips are extended where their speech must finish, and A1 fades over
-    silence.FADE_FRAMES on both sides of every removed range (Audio Levels keyframes: no click). ``speed`` (--speed /
+    silence.Ripple: the repeats, and with --remove-silence the speech-safe cuts and the silences): its ranges are cut
+    out -- everything after them moves earlier -- and clips are extended where their speech must finish. Every A1
+    clip stays at 0 dB: no Audio Levels, no keyframes (premiere_audio_problems). ``speed`` (--speed /
     100): the finished edit played that fast (retime_edit). With --frame (cfg.frame_png) the sequence is the frame's
     (frame.py), the window its hole, and V2 holds the PNG over the whole edit. Returns {'clips', 'markers', 'warnings',
     'factor'}."""
@@ -2734,8 +2734,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(it["speed"] - 1.0) > 1e-9:
                 _time_remap(ai, it["speed"], "audio")
-            if it.get("fade_in") or it.get("fade_out"):
-                _audio_fades(ai, it, sil.FADE_FRAMES)
+            # no Audio Levels: every A1 clip at 0 dB, no keyframes (a fade's keyframes imported the 125 % A1 of
+            # output\005 muted: Premiere read them off the retimed clip -- XML AUDIO checks it)
             sta = _sub(ai, "sourcetrack")
             _sub(sta, "mediatype", "audio")
             _sub(sta, "trackindex", 1)
@@ -2886,24 +2886,6 @@ def _links(parent: ET.Element, v: int, a: int) -> None:
         _sub(lk, "clipindex", idx)
         if kind == "audio":
             _sub(lk, "groupindex", 1)
-
-
-def _audio_fades(parent: ET.Element, it: dict, n: int) -> None:
-    """Audio Levels keyframes (media time, like <in> / <out>) fading A1 in over its first n frames and / or out
-    over its last n frames, where a silence was cut out (silence.py): the cut cannot click."""
-    keys: list[tuple[int, str]] = []
-    if it.get("fade_in"):
-        keys += [(it["in"], "0"), (it["in"] + n, "1")]
-    if it.get("fade_out"):
-        keys += [(it["out"] - n, "1"), (it["out"], "0")]
-    s = _remap_factor(it.get("speed", 1.0))
-    if s != 1.0:                       # on the retimed clip: from its encoded ends, never shorter than one tick
-        x_in, x_out = remap_encode(*xml_in_out(it["in"], it["out"]), it["speed"], item_length(it["start"], it["end"]))
-        m = max(1, int(round(n / s)))
-        keys = ([(x_in, "0"), (x_in + m, "1")] if it.get("fade_in") else []) +             ([(x_out - m, "1"), (x_out, "0")] if it.get("fade_out") else [])
-    f = _sub(parent, "filter")
-    e = _effect(f, "Audio Levels", "audiolevels", "audiolevels", "audiolevels", "audio")
-    _param(e, "level", "Level", None, 0, "3.98109", sorted(keys))
 
 
 def no_audio_reason(cl: PremiereClip, comp_fps: Fraction) -> str | None:
@@ -3525,6 +3507,63 @@ def premiere_speech_problems(xml_path: str | os.PathLike, speech: Any) -> list[s
     return out
 
 
+AUDIO_EFFECTS_OK = {"timeremap"}        # an A1 clip's only filter: its speed (Premiere's Speed / Duration)
+
+
+def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
+    """The hard audio check of the final XML: every A1 clip imports at 0 dB and plays -- enabled, no Audio Levels /
+    gain / pan / pitch or any other effect but its speed (Time Remap), no keyframe of any kind -- and no audio track is
+    switched off or locked. Your projects often have audio at -inf because you do the sound yourself: the tool never
+    copies that (a fade's level keyframes imported the 125 % A1 of the laptop's output\\005 muted)."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    out: list[str] = []
+    for n, tr in enumerate(seq.findall("media/audio/track") if seq is not None else [], start=1):
+        if str(_text(tr, "enabled", "TRUE")).upper() == "FALSE":
+            out.append(f"A{n} is switched off (enabled FALSE): it would import muted")
+        if str(_text(tr, "locked", "FALSE")).upper() == "TRUE":
+            out.append(f"A{n} is locked")
+        for ci in tr.findall("clipitem"):
+            what = f"A{n} {item_label(ci) or ci.get('id')} at {_text(ci, 'start')}"
+            if str(_text(ci, "enabled", "TRUE")).upper() == "FALSE":
+                out.append(f"{what}: switched off (enabled FALSE)")
+            effects = [str(_text(e, "effectid", "") or _text(e, "name", "") or "?") for e in ci.findall(".//effect")]
+            extra = [e for e in effects if e.lower() not in AUDIO_EFFECTS_OK]
+            if extra:
+                out.append(f"{what}: {', '.join(extra)} on it (want 0 dB, no effect but its speed)")
+            if ci.find(".//keyframe") is not None:
+                out.append(f"{what}: keyframes on it (want none: 0 dB throughout)")
+    return out
+
+
+def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None) -> list[str]:
+    """The default (no --remove-silence): the edit ends where the competitor's does -- the last V1 clip of the parsed
+    XML ``x`` ends at the sequence's end and plays up to the competitor's last RAW moment, within a RAW frame: the RAW
+    the plan plays at its frame ``end`` (pipeline.competitor_ending: where a closing meme / outro not from the RAW was
+    cut off), else where the plan's last clip ends. Nothing after the last word is cut (output\\005: the reaction
+    after it is the point of a meme)."""
+    clips = [c for c in x["clips"] if int(c["end"]) >= 0]
+    if not plan_clips or not clips:
+        return []
+    fps = _seq_rate(x)
+    last_plan = max(plan_clips, key=lambda c: c.rec_end)
+    if end is not None:
+        last_plan = next((c for c in plan_clips if c.rec_start < int(end) <= c.rec_end), last_plan)
+    stop = min(int(end), last_plan.rec_end) if end is not None else last_plan.rec_end
+    want = int(last_plan.src_in) + int(round((stop - last_plan.rec_start) * float(last_plan.speed)))
+    got = max(clips, key=lambda c: int(c["end"]))
+    out = []
+    if int(got["end"]) != int(x["duration"]):
+        out.append(f"the last clip ends at {_tc(int(got['end']), fps)}, the sequence at {_tc(int(x['duration']), fps)}")
+    end = int(got["out"]) if float(got.get("speed", 1.0)) >= 0 else int(got["in"])
+    tol = 2 + int(math.ceil(abs(float(got.get("speed", 1.0)))))       # a RAW frame on the in-point grid, + rounding
+    if abs(end - want) > tol:
+        out.append(f"the edit ends on RAW {end / float(fps):.3f} s ({got.get('label') or '?'}), the competitor on RAW "
+                   f"{want / float(fps):.3f} s ({last_plan.label}): {abs(end - want) / float(fps):.2f} s "
+                   + ("short" if (end < want) == (float(last_plan.speed) >= 0) else "long"))
+    return out
+
+
 def _fixed_framing(c: dict) -> tuple | None:
     """A parsed V1 clip's fixed Basic Motion (scale, rotation, centre, flip) as the flash check compares it; None for
     a keyframed one (its framing moves: compared by shot only)."""
@@ -3954,10 +3993,14 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         reps = premiere_repeat_problems(xml_path, bool(getattr(cfg, "allow_repeats", False))) if not bad_items else []
     except Exception as e:  # noqa: BLE001
         reps = [f"the repeat check could not read the XML: {type(e).__name__}: {e}"]
+    from .config import removes_silence
+    moving = removes_silence(cfg)          # --remove-silence: cuts moved off speech, silences out (else the competitor's)
     try:
         talk = premiere_speech_problems(xml_path, speech) if speech is not None and not bad_items else []
     except Exception as e:  # noqa: BLE001
         talk = [f"the speech check could not read the XML: {type(e).__name__}: {e}"]
+    if not moving:                         # the competitor's own cut points: a cut inside a word is theirs, listed
+        out["speech_notes"], talk = list(talk), []
     try:
         flash = (premiere_flash_problems(xml_path, shots, cutlist.raw_fps) if shots is not None and not bad_items
                  else [])
@@ -3966,7 +4009,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     try:
         hush = (premiere_silence_problems(xml_path, speech, *_pads(cfg), shots or (), cutlist.raw_fps,
                                           getattr(cfg, "premiere_beats", None) or ())
-                if speech is not None and not bad_items and not getattr(cfg, "keep_silence", False) else [])
+                if speech is not None and not bad_items and moving else [])
     except Exception as e:  # noqa: BLE001
         hush = [f"the silence check could not read the XML: {type(e).__name__}: {e}"]
     fac0 = premiere_factor(cutlist.comp_fps, st["fps"])
@@ -4016,7 +4059,14 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     out["other_video_problems"], out["link_problems"] = ov, links
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
     out["flash_problems"], out["silence_problems"] = flash, hush
-    out["speech_checked"], out["flash_checked"] = speech is not None, shots is not None
+    out["speech_checked"], out["flash_checked"] = speech is not None and moving, shots is not None
+    out["silence_checked"] = speech is not None and moving
+    try:
+        sound = premiere_audio_problems(xml_path) if not bad_items else []
+    except Exception as e:  # noqa: BLE001
+        sound = [f"the audio check could not read the XML: {type(e).__name__}: {e}"]
+    out["audio_problems"] = sound
+    errors += [f"XML AUDIO {t}" for t in sound]
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
         plan_clips = clips
@@ -4048,6 +4098,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     want_n = silence.new_frames if cut else out["total_frames"] * fac
     if x["duration"] != want_n:
         errors.append(f"XML: sequence duration {x['duration']} (want {want_n})")
+    out["ending_problems"] = (ending_problems(plan_clips, x, getattr(cfg, "premiere_ending", None))   # the
+                              if not moving else None)                          # competitor's last RAW moment
+    errors += [f"XML ENDING {t}" for t in out["ending_problems"] or []]
     for cl in plan_clips:              # the competitor's cuts, before the silences go and a cut moves onto a RAW cut
         evs = cl.events or [cl.ev]
         if (cl.rec_start, cl.rec_end) != (evs[0].rec_in * fac, evs[-1].rec_out * fac) or \
@@ -4209,13 +4262,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if it["what"] == "picture" and cl is not None and not it.get("piece") and \
                 abs(got["in"] - (cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)))) > tick +                 (0 if _remap_factor(cl.speed) == 1.0 else 1):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
-        from .silence import FADE_FRAMES
-        fade = ([(it["in"], 0.0), (it["in"] + FADE_FRAMES, 1.0)] if it.get("fade_in") else []) + \
-            ([(it["out"] - FADE_FRAMES, 1.0), (it["out"], 0.0)] if it.get("fade_out") else [])
-        got_lv, want_lv = sorted(got.get("levels") or []), sorted(fade)
-        if len(got_lv) != len(want_lv) or any(abs(a[0] - b[0]) > tick or a[1] != b[1] for a, b in zip(got_lv, want_lv)):
-            errors.append(f"XML A1 {_seg_label(it['seg'])} at {got['start']}: audio fades {got.get('levels')} "
-                          f"(want {sorted(fade)} where a silence was cut out)")
+        # its level: 0 dB, no keyframes -- premiere_audio_problems (XML AUDIO) checks every A1 item
     # every V1 clip has its audio on A1 (the XML's own A1 items), unless it was removed on purpose: listed
     out["audio_exceptions"] = []
     if not bool(cutlist.raw.get("has_audio", True)):

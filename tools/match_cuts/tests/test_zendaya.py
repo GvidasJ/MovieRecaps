@@ -233,7 +233,7 @@ def test_zendaya_no_flash_frame_and_no_long_silence_at_a_cut(tmp_path):
     y = media.extract_audio(ZEN / "raw.mp4", sr=48000, mono=True)
     sm = SP.speech_map(y, 48000, S.Settings(), w["medium.en"], w["small.en"], [tuple(h) for h in fx["heard"]])
     cl = _cutlist(_run_clips())
-    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    cfg = Config(out_dir=str(tmp_path), premiere=True, remove_silence=True)     # the speech-safe cuts and silences
     plan = repeats.add_to_plan(S.plan_premiere(cl, y, 48000, cfg, None, sm, shots=changes), cl, cfg)
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])

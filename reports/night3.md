@@ -25,14 +25,17 @@ run's own `extras\media\` files (see 1.3: it would otherwise have taken 021's RA
 - **`--frame`** (section 3): the PNG's transparent hole is found, the sequence is 2160x3840, every clip covers the
   hole, the PNG sits on V2, captions are checked against the hole, and preview_recreation.mp4 shows the edit through
   the frame.
-- **Tests** (section 4): 021 with your frame (`output\027`) passes every Premiere check; inside the hole 14 of 19
+- **Tests** (section 4): 021 with your frame (`output\030`) passes every Premiere check; inside the hole 15 of 19
   clips are within 5 % of your zoom (none before), the 00:00:02:02 flash and the S44 / S50 moves are gone, nothing
   is moved onto "the speaker". laptop004 at 125 % on its full RAW (`output\laptop004\night3`) passes, every clip
   within 1 % of your zoom, 0.1 s from your length, caption word errors 52.6 % -> 12.5 %. 020 at 100 % and 125 %
-  both pass and play the same RAW moments (the old 629 s bug stays fixed). Unit tests: 1197 passed, 0 failed.
-  check-all on all 14 test videos: section 4.
+  both pass and play the same RAW moments (the old 629 s bug stays fixed). Unit tests: 1206 passed, 0 failed.
+  check-all: 3 of 14 videos on the final code (all pass, cuts unchanged), then stopped for night 4 (section 4).
 - **Decide** (section 5): the mirror, the pauses on the 125 % channel, and `--follow-speaker` (the competitor's
   framing is now kept even where the speaker is elsewhere -- this changes the Zendaya interview).
+- **The slow full-resolution step** (section 6, your note): it re-decoded a whole GOP for many frame reads, started
+  more GPU processes than fit and kept 5 GB of frames; fixed (4-5 times faster, the same frames and cuts), with
+  progress lines (x of y frames done).
 
 ## 1. What I learned from your two edits
 
@@ -48,8 +51,8 @@ Your edit: 21 picture clips, 29.7 s. The tool's: 32 clips, 36.1 s. The differenc
    close-ups 145-165 %) and sit lower. Measured inside your frame's hole, the tool's old framing showed RAW down to
    y 1170 of 1080 (black at the bottom of the hole) on every clip. That is the frame's hole (1036 x 1210 px at
    1080x1920) against the old template window (998 x 1037): **`--frame` now does this** (section 3). Re-run with
-   your frame, what each clip shows inside the hole is within 5 % of your zoom on 14 of the 19 clips both edits
-   play (before: none); the other 5 are your close-ups of the reactions, zoomed in further (section 4).
+   your frame, what each clip shows inside the hole is within 5 % of your zoom on 15 of the 19 clips both edits
+   play (before: none); the other 4 are your close-ups of the reactions, zoomed in further (section 4).
 2. **The flash at 00:00:02:02** (5 frames). The competitor shows a 0.5 s reaction shot after "ladies and gentlemen"
    (`*looks over*` on its screen). The speech-safe cuts end a clip 0.05 s after its last word, so the shot was
    trimmed to the 5 frames of quiet after "gentlemen" -- a separate RAW shot that short is a flash (the run's own
@@ -204,7 +207,7 @@ D:\to do\video B\competitor.mp4, raw.mp4, speed.txt     -> 125 % (speed.txt hold
 - **Every clip covers the hole**: the competitor's framing is mapped into the hole (zoomed only as much as needed,
   cropped at the sides when the hole is narrower) instead of the old 998x1037 template window; `--min-move` keeps
   its meaning (it now counts px of the 1080-wide picture on the 4K sequence). Inside the hole the zoom is now
-  within 5 % of yours on 14 of the 19 clips 021 and your edit share (before: none -- 7-18 % too small, close-ups
+  within 5 % of yours on 15 of the 19 clips 021 and your edit share (before: none -- 7-18 % too small, close-ups
   31-37 %) and on all 7 of laptop004's, and the XML GAP check confirms no clip leaves any of the hole uncovered.
   "Centred on the person speaking": the competitor already centres its framing on the person it wants you to see,
   so that framing is mapped into the hole as it is; the tool moves the picture onto the person speaking only where
@@ -232,15 +235,15 @@ All on this PC, on the final code (the GPU shared between several runs at once, 
 own report still opens with "Result: FAIL": that is the frame-exact rebuild of the competitor (criteria c2-c5),
 which fails on every real video, as before; the Premiere hard checks below are what your import depends on.
 
-### 021 with your frame -- `output\027`
+### 021 with your frame -- `output\030`
 
 `--premiere --fast --frame input\frame.png` on your 021 inputs, reusing your run's caches; scored against your
 finished edit (the new test case's answer key: your picture clips and your captions).
 
-| | the run you fixed (`output\021`) | tonight (`output\027`) |
+| | the run you fixed (`output\021`) | tonight (`output\030`) |
 |---|---|---|
 | Premiere hard checks | fail (XML FLASH at 00:00:02:02) | **pass** -- 2160x3840, frame.png on V2, every clip covers the hole, 34 of 34 clips linked to their sound |
-| zoom inside the hole within 5 % of yours | 0 of 18 clips (7-18 % smaller; close-ups 31-37 %) | **14 of 19** |
+| zoom inside the hole within 5 % of yours | 0 of 18 clips (7-18 % smaller; close-ups 31-37 %) | **15 of 19** |
 | centre within 100 px of yours | 11 of 18 | 13 of 19 |
 | clips moved onto "the speaker" | 5 | 0 |
 | your cuts reproduced (within 2 frames) | 2 of 15 | 3 of 15 |
@@ -252,8 +255,8 @@ finished edit (the new test case's answer key: your picture clips and your capti
 - S44 no longer plays 3.08 s on into the applause, and S50 starts at the competitor's cut. Two moves are left as
   CHECK BY HAND: S32 (0.37 s earlier, "this. We've" -- you kept it) and S46 (0.65 s on, "I can tell": the second
   speech model hears words in the applause; your picture stops at the competitor's cut there).
-- The 5 clips whose zoom still differs from yours: your close-ups of the reactions (you zoomed them to 145-165 %;
-  the tool keeps the competitor's framing, 0.71-0.81 of your zoom) and the `*looks over*` shot (10 % tighter).
+- The 4 clips whose zoom still differs from yours are your close-ups of the reactions (you zoomed them to
+  145-165 %; the tool keeps the competitor's framing, 0.73-0.81 of your zoom).
 - Captions: an earlier run tonight scored 11.8 % word errors; this one heard your "I'm done!" in the applause as
   "Got this I" (confidence 0.09) and made one caption of the twice-said "It's a lot". All of the competitor's
   `*laughing*` / `*applause*` / `*high five*` / `*dying*` are action captions, and `*disgusted*` is back.
@@ -280,32 +283,34 @@ onto "the speaker"; 10 of 27 captions exactly yours, 12.5 % word errors; 0.1 s s
 
 ### 020 at 100 % and 125 %
 
-Your 020 inputs, `--premiere` and `--premiere --speed 125` (`output\020\night3_final\speed100` and `\speed125`):
-the Premiere hard checks pass at both speeds (8 of 8 clips linked; at 125 % also XML SPEED). Read the way Premiere
-reads a sped-up clip (its `<in>` / `<out>` count on the sped-up clip), every clip of the 125 % XML plays the same
-RAW moments as the 100 % one (worst 12.5 ms, under one RAW frame) at its place / 1.25 (within 0.4 frame): the first
-clip starts on RAW 506.27 s, where the old bug would have played 632.8 s. Both edits are 15.38 s at 100 % (12.30 s
-at 125 %), from 24.85 s before the speech-safe cuts and silences -- the same as last night; your fixed 020 is
-19.58 s.
+Your 020 inputs, `--premiere --fast` and `--premiere --fast --speed 125` (`output\020\night3_final\speed100` and
+`\speed125`; `--fast`, as you asked, after the slow thorough run was stopped): the Premiere hard checks pass at both
+speeds (9 of 9 clips linked; at 125 % also XML SPEED). Read the way Premiere reads a sped-up clip (its `<in>` /
+`<out>` count on the sped-up clip), every clip of the 125 % XML plays the same RAW moments as the 100 % one (worst
+12.5 ms, under one RAW frame) at its place / 1.25 (within 0.4 frame): the first clip starts on RAW 506.27 s, where
+the old bug would have played 632.8 s. Both edits are 15.47 s at 100 % (12.38 s at 125 %), from 24.85 s before the
+speech-safe cuts and the silences (5.40 s); your fixed 020 is 19.58 s.
 
 ### Unit tests
 
-1197 passed, 94 skipped (files or tools not on this PC), 0 failed -- 29 new tonight: `--speed` (the 125 % XML
+1206 passed, 94 skipped (files or tools not on this PC), 0 failed -- 38 new tonight: `--speed` (the 125 % XML
 plays the same RAW moments; the encoding Premiere reads), `--frame` (the hole from the alpha, V2, coverage, the
 captions' zone), the noise / action-beat cut rules, the caption cleanups, batch `speed.txt`, `learn` (the template's
 sequence, a moved run, the RAW window), unmirroring, the competitor's own framing and `--follow-speaker`, and the
-mini-clip join (below).
+mini-clip join (below), and the full-resolution reads (section 6).
 
 ### check-all: the 14 test videos
 
-Still running when I pushed this (it takes over 3 hours; the 12 old test videos and the 2 new ones, on the final
-code); this section gets its table when it ends. Done so far: deadpool (Premiere checks pass; it now ends where the
-competitor's own edit ends, 0.63 s of laughter shorter than last night) and laptop004-fixed (above).
+Not finished on night 3's code: the last check-all (on the final code, with the full-resolution fix of section 6)
+ran 3 of the 14 videos -- deadpool, laptop004-fixed and spiderman-school: every Premiere hard check passes and each
+cut list is identical to the run before the fix -- and was then paused for your Adobe rendering and stopped at the
+start of night 4 (the code changed again). Night 4's check-all ran all 15 videos on its final code:
+`reports/night4.md`. Earlier on night 3's code, deadpool ended where the competitor's own edit ends (0.63 s of
+laughter shorter than the night before).
 
 **What check-all and the final runs found on the way** (fixed, each with a unit test): deadpool lost its "And I
-was" shot -- the
-competitor cut that shot into two 4-frame pieces, and the "no mini cuts" rule of last night judged each piece alone
-and let the clip before play on over both; such pieces now go into their own take (`S04+S05`). The first version of
+was" shot -- the competitor cut that shot into two 4-frame pieces, and the "no mini cuts" rule of last night judged
+each piece alone and let the clip before play on over both; such pieces now go into their own take (`S04+S05`). The first version of
 that fix failed 021's XML checks (the pieces of one take can meet 1 tick apart), so the joined clip now keeps its own
 source timeline. 021's S49 kept the competitor's framing correctly but the person check still failed it: the
 speech-safe cut had played it 0.65 s past its own RAW, and the check now judges such a clip on its whole stretch.
@@ -327,7 +332,7 @@ shot. check-all was then run again from the start on the fixed code (the table a
    Premiere edit is now unmirrored by default. Did Premiere import the tool's flip and you took it off, or was the
    flip missing after import? If you want the competitor's mirror, run with `--mirror` -- and tell me if it does not
    show in Premiere (Effect Controls > Horizontal Flip on each clip).
-2. **021 with your frame** (`output\027`): import `1_edit.xml` -- a 2160x3840 sequence, frame.png on V2. Check that
+2. **021 with your frame** (`output\030`): import `1_edit.xml` -- a 2160x3840 sequence, frame.png on V2. Check that
    the frame lines up (header and headline crisp, the video only inside the hole) and the framing per clip;
    `extras\preview_recreation.mp4` shows the same without Premiere.
 3. **Caption size on the 4K sequence.** Your restyle donor caption comes from a 1080x1920 sequence. Premiere keeps a
@@ -353,3 +358,33 @@ shot. check-all was then run again from the start on the fixed code (the table a
    the Zendaya interview: the competitor shows the listener's reaction for most of it, and the tool used to move
    those stretches onto the speaker (your earlier task "the person speaking is always in the picture"). If you want
    that on a video, add `--follow-speaker`; if you want it always, tell me and I make it the default again.
+
+## 6. The slow full-resolution stage (your note)
+
+Your laptop's 2 hours without a progress line and tonight's 020 run (stopped after 50 minutes in S5.4-S6) were the
+same step: in the thorough default, the cuts, the framing and the phase of each segment are checked against the RAW
+at full resolution ("criterion 2 at full resolution"). Three things made it slow, and it said nothing but "still
+running":
+
+1. **A frame read could re-decode a whole GOP.** Its frame cache sought to the keyframe before every frame it did
+   not have and decoded from there -- and the phase check walks a segment frame by frame, 2-3 RAW frames each. On
+   020's 4K RAW (keyframes up to 4 s apart) that is up to a hundred 4K frames decoded again every 2-3 frames; one
+   segment's phase check took 27 minutes. Now a frame just ahead of the ones decoded last continues that decode:
+   4-5 times faster on 020's frames, every frame bit-identical (compared frame by frame on two stretches of 020).
+2. **Its GPU processes did not fit.** It always started 4 processes on the GPU (about 1.5 GB each). Next to another
+   run -- or on a laptop's card -- they do not fit, and Windows pages GPU memory out: everything many times slower
+   (020 ran next to check-all). Now it starts as many as the free GPU memory holds and does the rest in its own
+   process; each frame's scores do not depend on the process, so the numbers are the same.
+3. **Its frame caches were too big for a laptop:** 600 frames per video in each of up to 5 processes -- 5 GB of 4K
+   frames, 1.2 GB of 1080p. Now at most 512 MB each.
+
+**Progress lines:** the log now says how far it is, every 30 s of silence -- `S5.4-S6 segments+cutlist: criterion
+2 at full resolution: 480/1380 frames done (12 min 05 s)`, and the same for the framing measurement and the phase
+check of each segment.
+
+**No time cap:** a cap changes the cuts whenever it hits. With these three fixes it should not be needed; if a run
+still sits in this step for long, tell me and I add one as an option.
+
+**Results unchanged:** the same frames and the same scores, so the same cuts -- deadpool, laptop004-fixed and
+spiderman-school, re-run on the fixed code, made cut lists identical to the runs before it (laptop004-fixed's
+thorough run: 18 min 51 s, with progress lines such as `criterion 2 at full resolution: 52/204 frames done`).

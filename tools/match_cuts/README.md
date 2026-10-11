@@ -86,11 +86,13 @@ Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--compare
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `large-v3`), `--caption-check-model NAME` (default `large-v3-turbo`, `none` = off),
 `--caption-recheck-model NAME` (default `large-v3`, `none` = off).
-Premiere-only export: `--premiere`. Cuts never inside speech, silence removal (Premiere export and RAW-only runs):
-`--pad-before S` (default 0.03: a clip starts this long before its first word; 0.05 until video017/018 -- your starts
+Premiere-only export: `--premiere` -- every run with your template as its frame (`templates\default.png`; `--frame PNG`
+for another, `--no-frame` for none), the competitor's cut points kept and the edit ending on the competitor's last
+RAW moment (night 4). `--remove-silence` moves the cuts off speech, cuts the silences out and ends after the last
+word (the default until night 4; RAW-only runs always do, unless `--keep-silence`), with `--pad-before S` (default 0.03: a clip starts this long before its first word; 0.05 until video017/018 -- your starts
 sit right on the sound's onset), `--pad-after S` (default 0.05: a clip
 ends this long after its last word; 0.15 until Task 8 -- at the cuts your finished videos and the tool both make you
-leave 0.09-0.12 s earlier than that), `--keep-silence`, `--min-silence S` (default 0.3), `--silence-db DB` (default: set
+leave 0.09-0.12 s earlier than that), `--keep-silence` (a RAW-only run keeps its silences), `--min-silence S` (default 0.3), `--silence-db DB` (default: set
 per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
 or audio (see *Premiere* below): `--allow-repeats` keeps a moment over 0.5 s that plays twice. No `--competitor`: the
 edit from the RAW alone (see *Without a competitor* below).
@@ -137,7 +139,7 @@ same order (a clip the competitor sped up to 125 % lasts 1.25 x as long; what `-
 option still works and changes nothing). The competitor's speed is still measured: the matching needs it.
 
 `--speed 125` plays the whole edit at 125 % in Premiere: the edit is first made, checked and captioned at 100 % --
-cuts off speech, silences and repeats out, every hard check -- then `1_edit.xml` is written again with every V1 and
+repeats out (with `--remove-silence` also the cuts off speech and the silences), every hard check -- then `1_edit.xml` is written again with every V1 and
 A1 clip at 125 %, every cut, dissolve and marker at its frame / 1.25, and `2_captions.srt` timed the same way (every
 caption's frames / 1.25). Each clip's in-point lands on the grid Premiere starts a retimed clip on (`<in>` / `<out>`
 count the retimed clip -- output/020's bug), and the pieces of one take stay seamless. The 100 % files stay in
@@ -150,13 +152,21 @@ the end summary.
 ..\..\.venv\Scripts\python -m match_cuts --premiere --speed 125
 ```
 
-### Your channel's frame (`--frame PNG`)
+### Your channel's frame (`templates\default.png`; `--frame PNG`, `--no-frame`)
+
+**Every `--premiere` run uses your template** -- `templates\default.png` in this repository (your mike005 template,
+1080x1920: the rounded video box, the header and the watermark; `git pull` brings it to the laptop) -- unless you
+give another with `--frame PNG` or none with `--no-frame` (then the competitor's own layout: a 1080x1920 sequence,
+the template window x 42-1039, y 555-1591, as before night 4). Its headline text is part of the PNG: give each
+video's own version with `--frame`, or replace `templates\default.png` with a new template of the same layout.
 
 `--frame input\frame.png`: the PNG with your header and headline and a **transparent hole** where the video goes.
 The tool finds the hole from the alpha channel (the largest transparent area; a faint watermark inside it belongs
-to it), makes `1_edit.xml` a **2160x3840** sequence (`--frame-size` to change it) with the PNG on **V2** over the
-whole edit (straight alpha, scaled to the sequence: 100 % for a 2160x3840 PNG, 200 % for a 1080x1920 one), and frames
-every clip to **cover the hole**: the competitor's framing mapped into the hole (centred where the competitor
+to it), makes `1_edit.xml` a sequence of **the PNG's own size** (1080x1920 for the default template, 2160x3840 for
+`input\frame.png`; `--frame-size` to change it) with the PNG on **V2** over the whole edit (straight alpha, scaled to
+the sequence: 100 % for a PNG of the sequence's size, 200 % for one half as big), and frames every clip to **fill the
+hole completely** -- never a black strip (the hard check `XML GAP` fails the run otherwise): the competitor's
+framing mapped into the hole (centred where the competitor
 centred it -- on the person it shows), zoomed only as much as needed; a borrowed framing that shows nobody is moved
 onto the person speaking (the usual person check below; `--follow-speaker` moves every framing that does not show
 the person speaking). The PNG is copied into the run's `extras\media\` (the XML points there). `extras\frame.json` holds the hole and the caption zone
@@ -195,7 +205,8 @@ stay unlinked. The hard check `XML LINK` fails the run unless every V1 clip with
 one A1 clip and every A1 clip under a picture to exactly one V1 clip, the same pair in both, overlapping. The end
 summary says how many are linked (*Linked clips: 14 of 14 V1 clips linked to their own A1 clip*) and lists every clip
 left unlinked on purpose; `report.md` section *Premiere XML checks* has one row per hard check on `1_edit.xml` (`XML
-ITEM`, `GAP`, `REPEAT`, `SPEECH`, `FLASH`, `SILENCE`, `OTHER VIDEO`, `LINK`) with its result. In Premiere, with
+ITEM`, `GAP`, `REPEAT`, `AUDIO`, `ENDING`, `SPEECH`, `FLASH`, `SILENCE`, `OTHER VIDEO`, `LINK`, `PERSON`; `SPEECH` and
+`SILENCE` with `--remove-silence`, `ENDING` without it) with its result. In Premiere, with
 *Linked Selection* on (the chain button at the top left of the timeline), clicking a V1 clip selects its audio too.
 
 Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_audio`):
@@ -203,7 +214,7 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 * **No camera movement.** Every clip holds one fixed Position and Scale — no keyframes on Position, Scale or
   Rotation, rotation 0. It is the competitor's framing for that clip (averaged over the clip when the competitor
   pans or zooms), scaled up only as much as needed and moved the least so it fully covers the template window
-  (x 42–1039, y 555–1591).
+  (x 42–1039, y 555–1591; with a frame: its hole).
 * **Fewer reframes and cuts (`--min-move`, default 250).** After the fixed framing, a clip takes its own framing
   only when it is 250 px or more from the framing on screen, measured in the 1080×1920 sequence as the biggest
   movement of the picture's centre or of one of its edges (so a zoom counts by how far the edges move). Below
@@ -227,8 +238,11 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 * **Every audio clip has its own sound at normal volume (`--audio-lines` for the earlier A1).** A1 under each V1 clip
   is that clip's own RAW sound at 0 dB: no muted cutaway, no silent freeze (it plays at 100 % with its RETIME
   marker, and so does its sound), no sound of another moment put under the picture -- except an audio line that
-  carries on the sound already playing (one take of sound under stuttering pictures: video018's "insurance"). Only
-  the 1-frame anti-click fades at removed silences remain.
+  carries on the sound already playing (one take of sound under stuttering pictures: video018's "insurance").
+  **Every A1 clip imports at 0 dB, unmuted** (night 4): no Audio Levels, gain, pan, pitch or any effect but its speed,
+  no keyframes -- the fades at removed silences are gone too (their keyframes made the 125 % A1 of the laptop's
+  output/005 import muted). The hard check `XML AUDIO` fails the run otherwise. Your projects' -inf levels and pitch
+  effects are your own sound work: never learned or copied.
 * **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)
   -- output/020 had S06, S07, S09, S10 and S13 of 3-9 frames; your own clips are 0.3 s or longer -- goes into its
   neighbour: the clip before plays on over it (its take runs on), else the clip after starts that much earlier,
@@ -320,7 +334,16 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   look for that speech (a short cut-out piece can make Whisper miss speech or invent some). The Zendaya clip is such
   a case: its 5.5 s "I can't really explain it. I haven't got the words." (competitor 00:00:05:01–00:00:10:16).
 
-### Cuts never inside speech (every Premiere export and RAW-only run)
+### Cuts never inside speech (`--remove-silence` and RAW-only runs)
+
+**The default since night 4 keeps the competitor's cut points** (a cut inside a word is the competitor's: listed in
+`report.md`, not moved) and **ends on the competitor's last RAW moment** -- the reaction after the last line stays
+(the hard check `XML ENDING`: the last clip ends where the competitor's does, within a RAW frame). When the
+competitor closes on something that is not from the RAW -- a meme or outro over its own sound -- that closing piece
+is cut off instead of letting the last clip play on over it (your mike005: the competitor's last 1 s meme; you
+deleted the tool's two clips there). Where the competitor shows such an insert in the middle, the clip before still
+plays on over it, as in your video3 and mike005 edits -- with its own RAW sound on A1, which the captions now hear too
+(mike005: they had copied the meme's "hey" / "oh" over "okay you got her today"). With `--remove-silence`:
 
 A cut must never interrupt speech, whatever the competitor did (`match_cuts/speech.py`). Before the silences are cut,
 every audio cut of the edit is placed by the speech of the RAW, not by the competitor:
@@ -368,9 +391,10 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   Spider-Man school clip this left holes of 14 and 8 frames on V1 and A1). An A1 edge where V1 does not cut and the
   other side is a muted piece (a cutaway over music) moves on its own: the audio plays on into the silence to the end
   of the word, or stops before the word when that silence is too short.
-* **The hard check, on the final XML**: every audio cut of A1 (an item's start or end where the RAW does not play on)
-  must land outside speech; one that lands inside fails the run (`XML SPEECH` in the report and the console, with
-  the words there). On run 011 the competitor-placed cuts fail it 10 times; the new export passes.
+* **The hard check, on the final XML** (`--remove-silence`): every audio cut of A1 (an item's start or end where the
+  RAW does not play on) must land outside speech; one that lands inside fails the run (`XML SPEECH` in the report and
+  the console, with the words there). On run 011 the competitor-placed cuts fail it 10 times; the new export passes.
+  By default the competitor's cuts are kept: the cuts inside speech are listed in `report.md`, not failed.
 * The end summary lists every cut that was moved (*Cuts moved off speech*: the clip, which edge, by how many frames,
   RAW before → after, the words there) and every clip removed because the clip before it now plays it;
   `extras/report.md` has the same list.
@@ -382,7 +406,7 @@ ended S08b just before "to" to drop it, where the tool keeps "a son to a married
 Zendaya-age edit, made later, leaves 0.12 s earlier than 0.15 s at the cuts it shares with the tool -- like my other
 finished videos: hence 0.05.
 
-### Silence removal (`--keep-silence` turns it off)
+### Silence removal (`--remove-silence` turns it on; RAW-only runs: `--keep-silence` turns it off)
 
 * **Silence across a cut, too.** The end of one clip and the start of the next together never keep more silence
   than `--pad-after` + `--pad-before` (0.08 s): longer, both sides are trimmed, however short the pause (the 0.3 s

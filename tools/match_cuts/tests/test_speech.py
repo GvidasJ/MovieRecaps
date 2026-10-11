@@ -351,7 +351,8 @@ def test_run_011_no_cut_inside_speech_and_my_cuts_matched(tmp_path):
     y = media.extract_audio(ROOT / "raw_audio.m4a", sr=48000, mono=True)
     sm = SP.speech_map(y, 48000, S.Settings(), w["medium.en"], w["small.en"])
     cl = run011_cutlist()
-    cfg = Config(out_dir=str(tmp_path), premiere=True, pad_after=0.15, pad_before=0.05)   # that session's pads (the
+    cfg = Config(out_dir=str(tmp_path), premiere=True, pad_after=0.15, pad_before=0.05,   # that session's pads (the
+                 remove_silence=True)                                     # (--remove-silence since night 4)
     assert (cfg.pad_after, cfg.pad_before) == (0.15, 0.05)   # defaults are 0.05 since Task 8 / 0.03 since video018)
     # the generated edit cut inside speech 9 times (the hard check finds them; a 10th lands on the boundary between
     # two words that run together -- a cut may fall there)

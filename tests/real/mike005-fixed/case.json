@@ -1,0 +1,11 @@
+{
+ "timeline": "edit",
+ "notes": "learned from mike005_fixed_relinked.prproj (2026-10-11): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); your 125 % channel: --speed 125; your template is the default frame (templates/default.png); the default cut rules of night 4 (the competitor's cut points, no --remove-silence)",
+ "learned_from": "finished\\mike005\\mike005_fixed_relinked.prproj",
+ "run": "output\\mike005\\night4_125",
+ "full_raw": "output/mike005/night4_125/extras/media/raw.mp4",
+ "options": [
+  "--speed",
+  "125"
+ ]
+}

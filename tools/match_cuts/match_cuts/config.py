@@ -66,14 +66,18 @@ class Config:
     premiere_min_move: float = 250.0       # --premiere (--min-move): a clip changes the framing only when the competitor's
                                            #   moves this many sequence px or more (centre or an edge); otherwise it keeps
                                            #   the previous clip's, and one continuous RAW take with one framing = one clip
-    keep_silence: bool = False             # --premiere: keep the silences of my edit (False: cut them out, silence.py)
+    keep_silence: bool = False             # --keep-silence: never cut a silence (RAW-only runs cut them otherwise)
+    remove_silence: bool = False           # --remove-silence: the Premiere export cuts the silences out, moves every cut
+                                           #   off speech and ends after the last word (silence.py; the default until
+                                           #   night 4). Default: the competitor's cut points, its last RAW moment
     keep_speed: bool = True                # --premiere: every RAW clip at 100 % (keep_speed.py), same moments / order --
                                            #   the default since night 3 (--keep-speed was the switch)
     premiere_speed: float = 1.0            # --speed PERCENT / 100: 1_edit.xml plays the whole edit (made at 100 %) this
                                            #   fast -- every clip, cut and caption -- whatever the competitor's speed
     frame_png: str = ""                    # --frame PNG: the channel's overlay (frame.py): the video fills its
                                            #   transparent hole, the PNG on the top video track, the preview framed
-    frame_size: str = "2160x3840"          # --frame: the sequence 1_edit.xml is made for (the PNG scaled to it)
+    frame_size: str = ""                   # --frame-size: the sequence 1_edit.xml is made for (the PNG scaled to it);
+                                           #   "" = the frame PNG's own size (frame.sequence_size)
     premiere_mirror: bool = False          # --mirror: keep the competitor's horizontal mirror in 1_edit.xml (default:
                                            #   the RAW the right way round, as in your finished 020 / laptop004)
     premiere_follow_speaker: bool = False  # --follow-speaker: move every framing that does not show the person speaking
@@ -379,7 +383,8 @@ class Config:
                   "compare_preset", "verify_alpha_tol", "verify_audio_min_corr", "verify_audio_strong_corr",
                   "verify_full_rate_max_s", "verify_audio_min_s", "verify_audio_run_search_ms", "audio_sync",
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
-                  "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence", "keep_speed",
+                  "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
+                  "remove_silence", "keep_speed",
                   "premiere_speed", "frame_png", "frame_size", "premiere_mirror", "premiere_follow_speaker",
                   "premiere_scene_cuts", "premiere_normal_audio", "premiere_min_clip_frames",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
@@ -426,3 +431,12 @@ class Config:
     @property
     def media_dir(self) -> Path:
         return Path(self.out_dir) / "media"
+
+
+def removes_silence(cfg) -> bool:
+    """--remove-silence (and not --keep-silence): the Premiere export moves its cuts off speech, cuts the silences
+    out and ends after the last word. The default since night 4: the competitor's cut points and its last RAW moment.
+    A RAW-only run (no competitor) is cut at its silences unless --keep-silence: that is its edit."""
+    if bool(getattr(cfg, "keep_silence", False)):
+        return False
+    return bool(getattr(cfg, "remove_silence", False)) or not str(getattr(cfg, "competitor", "") or "")

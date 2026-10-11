@@ -201,8 +201,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--work", default="./work", help="the stage caches (default ./work)")
     ap.add_argument("--thorough", action="store_true", help="thorough runs instead of --fast (much slower)")
     ap.add_argument("--python", default=sys.executable, help=argparse.SUPPRESS)
-    ap.epilog = ("More options for every run go after --, e.g.: batch videos -- --frame input/frame.png --keep-silence. "
-                 "A speed.txt in a video's folder (\"125\") sets that video's --speed (default 100)")
+    ap.epilog = ("More options for every run go after --, e.g.: batch videos -- --frame input/frame.png --remove-silence "
+                 "(every run uses templates/default.png unless --frame / --no-frame). A speed.txt in a video's folder "
+                 "(\"125\") sets that video's --speed (default 100)")
     argv = list(sys.argv[1:] if argv is None else argv)
     extra = argv[argv.index("--") + 1:] if "--" in argv else []
     a = ap.parse_args(argv[:argv.index("--")] if "--" in argv else argv)

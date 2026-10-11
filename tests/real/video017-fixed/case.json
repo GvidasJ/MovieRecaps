@@ -1,7 +1,10 @@
 {
- "notes": "learned from video017_fixed.prproj (2026-10-07): answer.srt and answer_edit.json are your finished edit",
+ "notes": "learned from video017_fixed.prproj (2026-10-07): answer.srt and answer_edit.json are your finished edit; night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\output\\017\\video017_fixed.prproj",
  "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\output\\017",
  "timeline": "edit",
- "full_raw": "output/017/extras/media/raw.mp4"
+ "full_raw": "output/017/extras/media/raw.mp4",
+ "options": [
+  "--remove-silence"
+ ]
 }

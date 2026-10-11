@@ -105,7 +105,8 @@ def test_load_frame_finds_the_transparent_hole(tmp_path):
     from match_cuts.frame import load_frame
     fr = load_frame(_frame_png(tmp_path / "f.png"))
     assert fr.hole == (22.0, 527.0, 1036.0, 1210.0)
-    assert fr.window(2160, 3840) == (44.0, 1054.0, 2072.0, 2420.0)        # a 1080x1920 PNG on the 4K sequence: x 2
+    assert fr.window(2160, 3840) == pytest.approx((39.68, 1049.68, 2080.64, 2428.64))   # x 2 on the 4K sequence,
+    #                                                                       4.32 px (frame.BLEED) wider on each side
     assert fr.premiere_scale(2160, 3840) == pytest.approx(200.0)
     top, bottom = fr.caption_zone(3840, 2160)
     assert 1054.0 < top < bottom < 1054.0 + 2420.0                         # inside the hole, below its top
@@ -127,9 +128,9 @@ def test_frame_puts_the_png_on_v2_and_every_clip_covers_its_hole(tmp_path):
     png = _frame_png(tmp_path / "frame.png")
     cl = cutlist()
     kc, _ = keep_speed(cl)
-    cfg = Config(out_dir=str(tmp_path), premiere=True, frame_png=str(png))
+    cfg = Config(out_dir=str(tmp_path), premiere=True, frame_png=str(png), frame_size="2160x3840")
     F.apply_to_config(cfg)
-    assert cfg.premiere_size == "2160x3840" and cfg.premiere_window == (44.0, 1054.0, 2072.0, 2420.0)
+    assert cfg.premiere_size == "2160x3840" and cfg.premiere_window == (39.68, 1049.68, 2080.64, 2428.64)   # + BLEED
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(kc, xml, cfg)
     x = ex.parse_premiere_xml(xml)
