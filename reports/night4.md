@@ -19,7 +19,9 @@
   passes on all 15**. Nothing got worse from tonight's changes; video3's caption word errors fell from 42 % to 7 %
   (the caption fix), video020-fixed passes for the first time (a false flash fixed tonight), deadpool's word errors
   8.0 % -> 4.8 %. Unit tests: 1219 passed, 0 failed.
-- **Disk** (section 7): cleaned up as the very last step, after this report was pushed (the numbers follow there).
+- **Disk** (section 7): 37.2 GiB freed in `work\` (old test runs, check-all run folders, frozen code copies, temp
+  files, pip's download cache); 107.5 GiB free on the drive now. Nothing tracked by git, nothing outside `work\`, and
+  no cache or video of yours was touched.
 
 ## 1. The rules for every run
 
@@ -246,15 +248,24 @@ from tonight's changes:** night 3's exact code, run on both, gives the identical
 
 ## 7. Disk space
 
-Measured with every file counted once however many hard links it has (Explorer counts each link, so it shows more:
-266.9 GiB for this folder before the cleanup, against 200.4 GiB really used).
+**Freed: 37.2 GiB.** Measured just before and just after the cleanup, with every file counted once however many
+hard links it has (Explorer counts every link, so it shows more -- 199.0 GiB for this folder after the cleanup):
 
-(Measured before and after the cleanup -- filled in when it has run.)
+| | before | after |
+|---|---|---|
+| `MovieRecaps`, really used | 206.0 GiB (126,221 files) | **168.8 GiB** (70,248 files) |
+| of it `work\` | 153.4 GiB | 116.1 GiB |
+| free on the drive | 70.2 GiB | **107.5 GiB** |
+
+The files deleted add up to 44.1 GiB, but 6.9 GiB of that were hard links of files that stay elsewhere (for
+example a run's copy of a RAW that is the same file as one in `output\`): deleting one link of a file frees nothing,
+so the drive gained 37.3 GiB.
 
 **Deleted** (all inside `work\`, none of it tracked by git): the old test runs and check-all run folders of nights
 1-3 (`work\t5*` ... `work\t18`, `work\check-all`, `work\check-all-before`, `work\check-all-fresh`, `work\runs`,
 `work\t10\check-all\runs` and the other `work\t10` run folders), the frozen code copies (`work\frozen`), temporary
-files (`work\_tmp`) and pip's download cache (`work\_cache\pip`; the packages stay installed).
+files (`work\_tmp`) and pip's download cache (`work\_cache\pip`; the packages stay installed). `work\t8\final4`,
+`work\t8\user` and `work\t10\learn` stay: the test cases' notes (`case.json`) name them.
 
 **Kept:** `tests\`, `finished\`, `input\`, `models\`, `.venv\`, every `output\` folder, `reference\`, and the stage
 caches (`work\cache`, `work\t10\check-all\work`): a cache entry is only reused when the code that made it is the
