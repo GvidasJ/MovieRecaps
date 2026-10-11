@@ -180,8 +180,9 @@ the competitor-timed recreation the checks read is `extras\debug\recreation_chec
 
 ### Premiere (`--premiere`)
 
-`1_edit.xml` is a 1080×1920 sequence at exactly 60.00 fps with the edit on V1, the RAW audio on A1 and
-V2 and above empty. (A competitor whose frame rate does not divide 60 gets the whole multiple of its rate nearest to
+`1_edit.xml` is a 1080×1920 sequence (with a frame: the frame's own size) at exactly 60.00 fps with the edit on V1,
+the RAW audio on A1 (every clip at 0 dB) and your template on V2 (`--frame`: that PNG; `--no-frame`: V2 and above
+empty). (A competitor whose frame rate does not divide 60 gets the whole multiple of its rate nearest to
 it, so every cut lands on one of its frames: a 24 fps competitor a 48 fps sequence, 25 fps a 50 fps one, and an NTSC
 competitor the NTSC version of that -- 29.97 fps a 59.94 fps sequence, 23.976 fps 47.952; the end summary says
 so.) A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or hold
@@ -311,7 +312,10 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   0.25 s: a sliver with no speech in it is cut away, one the speech runs into is shown 0.25 s; a silence cut keeps
   no such sliver either (nor a sliver of a clip's framing, nor a frame of an empty V1). The check on the final XML
   fails the run on any run of frames of one RAW shot under 0.25 s at a cut (`XML FLASH`). The Zendaya run's frame at
-  00:00:06:54 (S11 ran one frame into the RAW's next shot at 3.76 s) is caught by it and no longer made.
+  00:00:06:54 (S11 ran one frame into the RAW's next shot at 3.76 s) is caught by it and no longer made. A shot of
+  the RAW's own under 0.25 s that the edit plays straight through -- the RAW running on into it and out of it, as
+  video020's two-frame shot at RAW 511.18 s inside one take -- is the footage, not a sliver a cut left: no flash
+  (night 4; a cut into such a shot still is one).
 * **B-roll follows the audio.** Every NOT-IN-RAW, B-roll or uncertain spot (and dip) shows the RAW video of the
   audio playing there, so you see the person saying it: the neighbouring shot's time line when the audio simply
   continues, else the RAW moment the audio alignment found for it — split at every audio cut when the editor

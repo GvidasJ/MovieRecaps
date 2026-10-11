@@ -3597,7 +3597,49 @@ def premiere_flash_problems(xml_path: str | os.PathLike, changes_s: Sequence[flo
     items += [{"label": "dissolve", "start": t0, "end": t1, "speed": None, "allowed": True} for t0, t1 in trans]
     items += [{"label": "OTHER VIDEO", "start": a, "end": b, "speed": None, "allowed": True}   # filled by hand
               for a, b in other_video_ranges(x)]
-    return flash_problems(items, fps, changes_s, raw_fps=raw_fps)
+    return flash_problems(items, fps, played_through(items, fps, changes_s), raw_fps=raw_fps)
+
+
+def played_through(items: Sequence[dict], fps: Fraction, changes_s: Sequence[float]) -> list[float]:
+    """The RAW's shot changes for the flash check, without the two around a shot shorter than shots.MIN_SHOT_S that
+    the edit plays straight through wherever it shows it -- its first frame continuing the shot before, its last
+    continued by the shot after, the RAW time running on frame by frame: such a shot is the RAW's own (two RAW frames
+    in the footage of video020 at RAW 511.18 s, shown whole inside one take), not a sliver a cut left. Its two changes
+    become one in its middle, so the shots on either side are still judged as before (a sliver of either at a cut is
+    still a flash). ``items``: premiere_flash_problems' V1 items (sequence frames, ``in`` at ``fps``)."""
+    from .shots import MIN_SHOT_S
+    f = float(Fraction(fps))
+    cs = sorted(float(c) for c in changes_s)
+    t_at: dict[int, float] = {}                      # sequence frame -> the RAW second it shows
+    for it in items:
+        v = it.get("speed")
+        if v is None or it.get("allowed"):
+            continue
+        for r in range(int(it["start"]), int(it["end"])):
+            t_at[r] = (float(it["in"]) + (r - int(it["start"])) * float(v)) / f
+    drop: set[float] = set()
+    mids: list[float] = []
+    for c0, c1 in zip(cs, cs[1:]):
+        if c1 - c0 >= MIN_SHOT_S:
+            continue
+        shown = sorted(r for r, t in t_at.items() if c0 <= t < c1)
+        runs: list[list[int]] = []
+        for r in shown:
+            if runs and runs[-1][1] == r:
+                runs[-1][1] = r + 1
+            else:
+                runs.append([r, r + 1])
+
+        def on(r0: int, r1: int) -> bool:            # the RAW runs on from frame r0 to r1: one frame's step
+            if r0 not in t_at or r1 not in t_at:
+                return False
+            d = t_at[r1] - t_at[r0]
+            return 0.0 < d <= 2.5 / f
+        if runs and all(on(a - 1, a) and t_at[a - 1] < c0 and on(b - 1, b) and t_at[b] >= c1 for a, b in runs) \
+                and not drop & {c0, c1}:
+            drop.update((c0, c1))
+            mids.append(0.5 * (c0 + c1))
+    return sorted([c for c in cs if c not in drop] + mids)
 
 
 LINK_AUDIO_SHARE = 0.5     # a V1 clip with A1 under at least this share of it has audio (it must be linked)

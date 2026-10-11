@@ -180,9 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--premiere", action="store_true",
                    help="Premiere Pro only: no After Effects export or checks; 1_edit.xml is a 1080x1920 sequence "
                         "at exactly 60.00 fps (every competitor frame = 2 frames; 48 for 24 fps, 50 for 25, 59.94 "
-                        "for 29.97), RAW audio on A1, V2+ empty. Every clip "
-                        "holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing that still "
-                        "covers the template window x 42-1039, y 555-1591. B-roll follows the audio: every NOT-IN-RAW / "
+                        "for 29.97), RAW audio on A1 (every clip at 0 dB), your template (templates/default.png) on V2. "
+                        "Every clip holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing "
+                        "that fills the template's box (--no-frame: the window x 42-1039, y 555-1591). The competitor's "
+                        "cut points and ending are kept (--remove-silence). B-roll follows the audio: every NOT-IN-RAW / "
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
                         "the spoken words. The framing changes only where the competitor's moves --min-move px or more")

@@ -158,3 +158,27 @@ def test_the_default_frame_is_filled_by_every_clip(tmp_path):
     ex.write_premiere_xml(kc, xml, cfg)
     assert ex.premiere_gaps(xml, cfg) == []                                   # no black strip anywhere in the box
     assert ex.frame_track_problems(xml, ex.parse_premiere_xml(xml)["duration"]) == []
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# a shot of the RAW's own under 0.25 s, played straight through, is no flash (video020-fixed)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_a_short_raw_shot_played_straight_through_is_no_flash():
+    from fractions import Fraction
+    from match_cuts.shots import flash_problems
+    fps = Fraction(60)
+    changes = [10.4, 10.48]                       # two RAW frames at 24 fps: the footage's own 0.08 s shot
+    take = [{"label": "S04", "start": 0, "end": 60, "speed": 1.0, "in": 600.0, "framing": None}]   # RAW 10.0-11.0 s
+    assert flash_problems(take, fps, changes)                                   # the plain check calls it a flash
+    assert ex.played_through(take, fps, changes) == pytest.approx([10.44])
+    assert flash_problems(take, fps, ex.played_through(take, fps, changes)) == []
+    # a cut into it (the clip ends inside the short shot, another moment follows): still a flash
+    cut = [{"label": "S04", "start": 0, "end": 26, "speed": 1.0, "in": 600.0, "framing": None},
+           {"label": "S05", "start": 26, "end": 60, "speed": 1.0, "in": 1200.0, "framing": None}]
+    assert ex.played_through(cut, fps, changes) == changes
+    assert flash_problems(cut, fps, ex.played_through(cut, fps, changes))
+    # and the shot before it, cut in 3 frames before the short shot, is still a sliver at a cut
+    late = [{"label": "S03", "start": 0, "end": 30, "speed": 1.0, "in": 1200.0, "framing": None},
+            {"label": "S04", "start": 30, "end": 90, "speed": 1.0, "in": 621.0, "framing": None}]   # RAW 10.35-11.35
+    assert flash_problems(late, fps, ex.played_through(late, fps, changes))
