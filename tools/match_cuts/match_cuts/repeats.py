@@ -236,8 +236,10 @@ def add_to_plan(sil: dict, cutlist: Any, cfg: Any = None) -> dict:
     ripple's removals (one Ripple for the XML, A1, the markers and the captions; frames of the edit after the
     speech-safe cuts, its ``before``); ``sil['repeats']`` = {rows, left, removed_s, allow}. The silence rows' 'cut in
     the new edit' times are those of the final edit."""
-    from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
+    from .export_xml_edl import no_transitions, premiere_audio, premiere_clips, premiere_factor, premiere_settings
     from .silence import Cut, Ripple, apply_premiere
+    cutlist, _ = no_transitions(cutlist)     # the cut list write_premiere_xml writes: no dissolve to protect (night 5:
+    #                                          laptop008's repeat at a dissolve could not be cut -- XML REPEAT)
     fps = premiere_settings(cfg)["fps"]
     fac = premiere_factor(cutlist.comp_fps, fps)
     n_frames = int(cutlist.competitor["frames"]) * fac

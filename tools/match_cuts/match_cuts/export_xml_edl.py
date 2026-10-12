@@ -1653,6 +1653,224 @@ def harden_dissolves(cl: Cutlist, inside: Callable[[float], bool]) -> tuple[Cutl
     return cl2, done
 
 
+def no_transitions(cl: Cutlist) -> tuple[Cutlist, list[dict]]:
+    """--premiere (night 5): no transition in the edit, ever. Every cross dissolve of the competitor becomes a hard
+    cut on its middle frame -- the clip before ends there, the clip after starts there on its own time line (any
+    length, any speed; a 2-frame dissolve is 33 ms of two pictures mixed: nothing is lost) -- and a dissolve or fade
+    to / from black is dropped (the picture cuts). harden_dissolves did this only for a short dissolve inside speech
+    with --remove-silence; laptop008's dissolves made clips start at "-1" (FCP7's "joined by a transition"), which
+    its link check showed as -00:00:00:01. The faithful cut list (the checks against the competitor) keeps them.
+    Returns (cut list, [{'cut', 'segments', 'frames', 'raw'}]) -- 'cut' is None for a transition dropped without an
+    overlap (to / from black)."""
+    import copy
+    if not any(s.transition_in or s.transition_out for s in cl.segments):
+        return cl, []
+    cf = float(Fraction(cl.comp_fps))
+    rf = float(Fraction(cl.raw_fps))
+    out = [copy.deepcopy(s) for s in sorted(cl.segments, key=lambda s: (int(s.comp_in), int(s.id)))]
+    done = []
+
+    def raw_at(s: Segment, k: int) -> float | None:
+        if s.type != "raw" or s.raw_in_seconds is None or s.time_remap_keys:
+            return None
+        return float(s.raw_in_seconds) + float(s.speed) * (k - int(s.comp_in)) / cf
+
+    for i in range(len(out) - 1):
+        p_, q_ = out[i], out[i + 1]
+        d = int(p_.comp_out) - int(q_.comp_in)
+        if d <= 0 or not (p_.transition_out or q_.transition_in):
+            continue
+        mid = int(q_.comp_in) + d // 2
+        before, after = raw_at(p_, mid), raw_at(q_, mid)
+        if after is not None:
+            shift = float(q_.speed) * (mid - int(q_.comp_in)) / cf
+            q_.raw_in_seconds = round(float(q_.raw_in_seconds) + shift, 9)
+            q_.raw_in_frame = int(math.floor(float(q_.raw_in_seconds) * rf + 1e-6))
+            if q_.raw_in_interval and len(q_.raw_in_interval) == 2:
+                q_.raw_in_interval = [float(q_.raw_in_interval[0]) + shift, float(q_.raw_in_interval[1]) + shift]
+        p_.comp_out, q_.comp_in = mid, mid
+        done.append({"cut": mid, "segments": [int(p_.id), int(q_.id)], "frames": d,
+                     "raw": [round(before, 3) if before is not None else None,
+                             round(after, 3) if after is not None else None]})
+    for s in out:
+        for name in ("transition_in", "transition_out"):
+            if getattr(s, name):
+                if not any(int(s.id) in d["segments"] for d in done):
+                    done.append({"cut": None, "segments": [int(s.id)], "frames": int((getattr(s, name) or {}).get(
+                        "duration_frames") or 0), "raw": [None, None]})
+                setattr(s, name, None)
+    cl2 = copy.copy(cl)
+    cl2.segments = out
+    return cl2, done
+
+
+TAKE_JUMP_S = 0.1           # --premiere: a piece whose RAW time continues the take before it within this -- and within
+TAKE_JUMP_FRAMES = 2.5      # this many RAW frames (a RAW frame or two skipped or shown twice at the cut) -- plays on
+#                             that take's line (laptop009: +-42 ms at 23.976 fps; take_jump_s)
+TAKE_SLIVER_S = 0.25        # a piece this short (at 100 %) the cut list doubts (uncertain, or its measured speed far
+TAKE_NOISE_S = 2.5          # off) showing the RAW this near the take's line (a still picture matched anywhere near:
+TAKE_GAP_S = 1.5            # laptop009's S04-S11, 8 pieces of 1-9 frames over 0.9 s) -- a run of them at most this long
+#                             -- is the take running on: it plays on over them
+TAKE_SPEED_OFF = 0.35       # a measured speed this far (relative) from the piece's speed: its time match is in doubt
+
+
+def take_jump_s(raw_fps: Any) -> float:
+    """The biggest jump of the RAW time at a cut inside one take: TAKE_JUMP_S, at most TAKE_JUMP_FRAMES RAW frames
+    (0.1 s at 23.976 / 25 fps, 83 ms at 30, 42 ms at 60)."""
+    try:
+        rf = float(Fraction(raw_fps))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return TAKE_JUMP_S
+    return min(TAKE_JUMP_S, TAKE_JUMP_FRAMES / rf) if rf > 0 else TAKE_JUMP_S
+
+
+def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
+    """--premiere (night 5, laptop009): the pieces of one continuous RAW take play as one take. A sped-up competitor
+    full of tiny cuts gives a cut list of short pieces whose RAW times meet a RAW frame or so apart -- skipped or shown
+    twice (the competitor's frame grid against the RAW's), at a speed measured a little off on a short piece -- or a
+    piece of a still picture matched anywhere near. Laid out at 100 % one by one, each piece started on its own RAW
+    time: the sound jumped 17-50 ms or stuttered at every such cut and the repeat removal trimmed whole frames (your
+    fix of laptop009 plays each take straight through). On the competitor's cut list (before keep_speed), in order:
+
+    * a RAW piece whose RAW time continues the take before it within take_jump_s (either way) plays on the take's
+      line -- from the very RAW moment the take reaches there, at the take's speed (keep_speed then stretches the
+      whole take alike: its sound continues, nothing repeats or skips);
+    * a run of short pieces the cut list doubts (uncertain, or a measured speed TAKE_SPEED_OFF off; TAKE_SLIVER_S
+      each, showing the RAW within TAKE_NOISE_S of the take's line, TAKE_GAP_S in all) is played over by the take,
+      with the take's framing; a piece after the run that continues the take's line then continues it, else it is
+      a real cut;
+    * every other cut -- a real jump of the RAW time -- stays.
+
+    Each piece keeps its own record range; premiere_clips then joins the pieces of one take with one framing into one
+    clip (merge_mini_clips, _merge_continuous). Only plain pieces (RAW, no time remap: a freeze / ramp stays its own)
+    that meet frame to frame in the same direction. Returns (cut list, {piece id: id of the take's first piece} for
+    every piece put on a take's line, [{'segment', 'take', 'jump_s', 'how'}]); snap_takes makes the takes exact again
+    after keep_speed rounded their frames."""
+    import copy
+    cf = float(Fraction(cl.comp_fps))
+    rf = float(Fraction(cl.raw_fps))
+    tol = take_jump_s(cl.raw_fps)
+    segs = sorted(cl.segments, key=lambda s: (int(s.comp_in), int(s.id)))
+
+    def plain(s: Segment) -> bool:
+        return (s.type == "raw" and s.raw_in_seconds is not None and not s.time_remap_keys
+                and abs(float(s.speed)) > 1e-6)
+
+    def meets(a: Segment, b: Segment) -> bool:
+        return (plain(a) and plain(b) and int(b.comp_in) == int(a.comp_out)
+                and (float(a.speed) > 0) == (float(b.speed) > 0))
+
+    def line(a: Segment, k: int) -> float:
+        return float(a.raw_in_seconds) + float(a.speed) * (k - int(a.comp_in)) / cf
+
+    def length(s: Segment) -> float:                      # at 100 % (the competitor's frames x the speed)
+        return (int(s.comp_out) - int(s.comp_in)) / cf * abs(float(s.speed))
+
+    def doubted(s: Segment) -> bool:
+        if getattr(s, "uncertain", False):
+            return True
+        v, sm = float(s.speed), s.speed_measured
+        return sm is None or abs(float(sm) / v - 1.0) > TAKE_SPEED_OFF
+
+    def alike(a: Segment, b: Segment) -> bool:          # the take's speed fits it (a short piece's speed is measured
+        return doubted(b) or abs(float(b.speed) / float(a.speed) - 1.0) <= TAKE_SPEED_OFF     # a little off)
+
+    def on_line(b: Segment, a: Segment, framing: bool) -> Segment:
+        t = copy.deepcopy(b)
+        t.raw_in_seconds = round(line(a, int(b.comp_in)), 9)
+        t.raw_in_frame = int(math.floor(float(t.raw_in_seconds) * rf + 1e-6))
+        t.raw_in_interval = _line_interval(a, int(b.comp_in), cf)
+        if framing or alike(a, b):              # a real slow motion inside the take keeps its own speed
+            t.speed = float(a.speed)
+        au = dict(t.audio or {})
+        if au.get("line"):
+            au["line"] = None                   # the take's own sound plays under it
+        t.audio = au
+        if framing:                             # its framing is as doubtful as its time: the take's, where it is
+            last = sorted(a.transform_keys or [], key=lambda d: float(d["comp_frame"]))
+            t.transform = ({k: v for k, v in last[-1].items() if k != "comp_frame"} if last else
+                           copy.deepcopy(a.transform))
+            t.transform_keys = []
+            t.box, t.flip_h = copy.deepcopy(a.box), a.flip_h
+        return t
+
+    out = list(segs)
+    take: dict[int, int] = {}
+    done: list[dict] = []
+    i = 0
+    while i < len(out) - 1:
+        a, b = out[i], out[i + 1]
+        if not meets(a, b):
+            i += 1
+            continue
+        jump = float(b.raw_in_seconds) - line(a, int(b.comp_in))
+        if abs(jump) <= tol + 1e-9:
+            if abs(jump) > 1e-6 or (abs(float(b.speed) - float(a.speed)) > 1e-9 and alike(a, b)):
+                out[i + 1] = on_line(b, a, False)
+                done.append({"segment": int(b.id), "take": take.get(int(a.id), int(a.id)), "jump_s": round(jump, 4),
+                             "how": "continues"})
+            take[int(b.id)] = take.get(int(a.id), int(a.id))
+            i += 1
+            continue
+        run, total, j = [], 0.0, i + 1
+        while (j < len(out) and meets(out[j - 1], out[j]) and length(out[j]) <= TAKE_SLIVER_S + 1e-9
+               and doubted(out[j]) and abs(float(out[j].raw_in_seconds) - line(a, int(out[j].comp_in))) <= TAKE_NOISE_S
+               and total + length(out[j]) <= TAKE_GAP_S + 1e-9):
+            total += length(out[j])
+            run.append(j)
+            j += 1
+        if not run:
+            i += 1
+            continue
+        for r in run:
+            jr = float(out[r].raw_in_seconds) - line(a, int(out[r].comp_in))
+            out[r] = on_line(out[r], a, True)
+            take[int(out[r].id)] = take.get(int(a.id), int(a.id))
+            done.append({"segment": int(out[r].id), "take": take[int(out[r].id)], "jump_s": round(jr, 4),
+                         "how": "played over"})
+        i = run[-1]                             # the piece after the run is compared with the take's line next
+    if not done:
+        return cl, take, []
+    cl2 = copy.copy(cl)
+    cl2.segments = out
+    return cl2, take, done
+
+
+def snap_takes(cl: Cutlist, take: dict[int, int]) -> Cutlist:
+    """The takes of join_takes after keep_speed: keep_speed rounds every piece's frames on the 100 % timeline, so a
+    piece of a take could start a fraction of a frame off the take's line (a 1-tick jump at the cut); here every piece
+    of a take starts exactly where the piece before it ends -- its RAW time and frame-exact interval moved along that
+    piece's line."""
+    import copy
+    if not take:
+        return cl
+    cf = float(Fraction(cl.comp_fps))
+    rf = float(Fraction(cl.raw_fps))
+    segs = sorted(cl.segments, key=lambda s: (int(s.comp_in), int(s.id)))
+    out, changed = list(segs), False
+    for i in range(1, len(out)):
+        a, b = out[i - 1], out[i]
+        if (int(b.id) not in take or take.get(int(a.id), int(a.id)) != take[int(b.id)] or int(b.comp_in) != int(a.comp_out)
+                or a.raw_in_seconds is None or b.raw_in_seconds is None or a.time_remap_keys or b.time_remap_keys
+                or a.type != "raw" or b.type != "raw"):
+            continue
+        want = float(a.raw_in_seconds) + float(a.speed) * (int(b.comp_in) - int(a.comp_in)) / cf
+        if abs(want - float(b.raw_in_seconds)) <= 1e-9 and abs(float(b.speed) - float(a.speed)) <= 1e-12:
+            continue
+        t = copy.deepcopy(b)
+        t.raw_in_seconds = round(want, 9)
+        t.raw_in_frame = int(math.floor(want * rf + 1e-6))
+        t.raw_in_interval = _line_interval(a, int(b.comp_in), cf)
+        t.speed = float(a.speed)
+        out[i] = t
+        changed = True
+    if not changed:
+        return cl
+    cl2 = copy.copy(cl)
+    cl2.segments = out
+    return cl2
+
+
 def sequence_fps(comp_fps: Fraction, want: Fraction) -> Fraction:
     """The Premiere sequence rate for a competitor: ``want`` when a competitor frame is a whole number of its frames,
     else the whole multiple of the competitor's rate nearest to it (the lower one on a tie): a 24 fps competitor in a
@@ -2607,6 +2825,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     (frame.py), the window its hole, and V2 holds the PNG over the whole edit. Returns {'clips', 'markers', 'warnings',
     'factor'}."""
     from . import silence as sil
+    cutlist, _ = no_transitions(cutlist)     # never a transition (night 5; premiere_plan made them hard cuts already)
     st = premiere_settings(cfg)
     comp_fps, raw_fps, fps = cutlist.comp_fps, cutlist.raw_fps, st["fps"]
     fac = premiere_factor(comp_fps, fps)
@@ -3346,7 +3565,8 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
         "video_tracks": len(seq.findall("media/video/track")), "audio_tracks": len(seq.findall("media/audio/track")),
         "clips": [], "transitions": [], "audio": [], "markers": []}
     vt = seq.find("media/video/track")
-    for el in (list(vt) if vt is not None else []):
+    els = list(vt) if vt is not None else []
+    for idx, el in enumerate(els):
         if el.tag == "transitionitem":
             out["transitions"].append({"start": int(_text(el, "start")), "end": int(_text(el, "end"))})
         elif el.tag == "clipitem":
@@ -3356,9 +3576,17 @@ def parse_premiere_xml(path: str | os.PathLike) -> dict:
             motion = _motion_of(el)
             motion["keys"] = {pid: [(remap_when(w, lo, speed, decode=True), v) for w, v in kf]
                               for pid, kf in (motion.get("keys") or {}).items()}
+            s0, e0 = int(_text(el, "start")), int(_text(el, "end"))
+            # its record range with an edge inside a cross dissolve (-1) at that transition's start: the transition
+            # next to it on the track (a clip between two dissolves has both edges -1 -- night 5: laptop008's link
+            # check named three such clips "at -00:00:00:01")
+            prv = els[idx - 1] if idx > 0 and els[idx - 1].tag == "transitionitem" else None
+            nxt = els[idx + 1] if idx + 1 < len(els) and els[idx + 1].tag == "transitionitem" else None
+            rec = (int(_text(prv, "start")) if s0 == -1 and prv is not None else s0,
+                   int(_text(nxt, "start")) if e0 == -1 and nxt is not None else e0)
             out["clips"].append({"id": el.get("id"), "links": _link_refs(el),
-                                 "name": _text(el, "name"), "label": item_label(el), "start": int(_text(el, "start")), "end": int(_text(el, "end")),
-                                 "in": s_in, "out": s_out,
+                                 "name": _text(el, "name"), "label": item_label(el), "start": s0, "end": e0,
+                                 "rec": rec, "in": s_in, "out": s_out,
                                  "timebase": int(_text(el, "rate/timebase", 0)), "ntsc": _text(el, "rate/ntsc"),
                                  "speed": speed, "motion": motion,
                                  "flip": any(_is_flip(e) for e in el.findall("filter/effect"))})
@@ -3536,6 +3764,104 @@ def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
     return out
 
 
+def premiere_transition_problems(xml_path: str | os.PathLike) -> list[str]:
+    """The hard no-transition check of the final XML (night 5: "never add cross dissolves or any transition"): no
+    transition item on any video or audio track, and no clip item joined to its neighbour by one (start or end -1,
+    FCP7's mark of a transition's edge). One line per transition (none: [])."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    if seq is None:
+        return ["no <sequence> in the XML"]
+    fps = _xml_rate(seq) or Fraction(60)
+    out: list[str] = []
+    for kind, letter in (("video", "V"), ("audio", "A")):
+        for n, tr in enumerate(seq.findall(f"media/{kind}/track"), start=1):
+            for el in tr:
+                if el.tag == "transitionitem":
+                    s0, e0 = int(float(_text(el, "start", 0))), int(float(_text(el, "end", 0)))
+                    out.append(f"{letter}{n}: a {_text(el, 'effect/name', '') or 'transition'} at {_tc(s0, fps)}-"
+                               f"{_tc(e0, fps)} (every cut must be a hard cut)")
+                elif el.tag == "clipitem" and -1 in (int(float(_text(el, "start", 0))), int(float(_text(el, "end", 0)))):
+                    out.append(f"{letter}{n} {item_label(el) or el.get('id')}: joined to its neighbour by a transition "
+                               "(start / end -1)")
+    return out
+
+
+def premiere_sync_problems(xml_path: str | os.PathLike) -> tuple[list[str], list[str]]:
+    """The hard sound check of the final XML (night 5: "every clip's audio must be the RAW's own sound for exactly that
+    picture, continuous, in sync, with no gaps, overlaps or stutters at the cuts"), on its own numbers:
+
+    * in sync: every A1 clip linked to a V1 clip plays, over the frames they share, exactly the source that picture
+      shows (an A1 clip the export made as an audio line -- one take of sound carried on under a cut picture -- is
+      listed instead);
+    * no gap or overlap: A1 clips never overlap, and A1 has no hole under a V1 clip it is linked to;
+    * no stutter or jump at a cut: where two clips of a track meet, the next one's RAW starts exactly where the one
+      before ends (one take: the cut is only a framing change or a shot change of the RAW) or jumps more than
+      take_jump_s (a real cut) -- never a few ms skipped or played twice (laptop009: 17 ms jumps at 10 cuts inside
+      one take; the repeat check, XML REPEAT, finds the longer repeats).
+
+    Returns (problems, exceptions)."""
+    x = parse_premiere_xml(xml_path)
+    fps = _seq_rate(x)
+    f = float(fps)
+    out: list[str] = []
+    exceptions: list[str] = []
+    vid = {c["id"]: c for c in x["clips"]}
+    root = ET.parse(str(xml_path)).getroot()
+    lines = {ci.get("id") for ci in root.iter("clipitem") if "audio line" in str(_text(ci, "comments/mastercomment1", ""))}
+
+    def tc(fr: int) -> str:
+        return _tc(int(fr), fps)
+
+    def src_at(c: dict, r: int) -> float:                # the source tick played at sequence frame r (the plan's in:
+        return int(c["in"]) + (r - int(c["start"])) * float(c["speed"])      # the first frame shown, reverse too)
+    for a in x["audio"]:
+        links = [vid[r] for r, k in a["links"] if k == "video" and r in vid]
+        if len(links) != 1:
+            continue                                     # XML LINK judges it
+        v = links[0]
+        lo, hi = max(int(a["start"]), int(v["start"])), min(int(a["end"]), int(v["end"]))
+        if hi <= lo or v["start"] < 0 or a["start"] < 0:
+            continue
+        if a["id"] in lines:
+            exceptions.append(f"A1 {a.get('label')} at {tc(a['start'])}: an audio line (one take of sound carried on "
+                              f"under the picture of {v.get('label')})")
+            continue
+        tol = 0 if abs(abs(float(a["speed"])) - 1.0) < 1e-9 else 2       # a retimed in-point grid rounds
+        if abs(float(a["speed"]) - float(v["speed"])) > 1e-6 or abs(src_at(a, lo) - src_at(v, lo)) > tol + 1e-6:
+            out.append(f"A1 {a.get('label')} at {tc(a['start'])} plays RAW {src_at(a, lo) / f:.3f} s where its picture "
+                       f"{v.get('label')} shows RAW {src_at(v, lo) / f:.3f} s (speed {a['speed']:g} / {v['speed']:g}): "
+                       "the sound is not the picture's own")
+    aud = sorted(x["audio"], key=lambda a: (int(a["start"]), int(a["end"])))
+    for p, q in zip(aud, aud[1:]):
+        if int(q["start"]) < int(p["end"]):
+            out.append(f"A1 {p.get('label')} and {q.get('label')} overlap at {tc(q['start'])}-{tc(min(p['end'], q['end']))}")
+    for v in x["clips"]:
+        mine = sorted((int(a["start"]), int(a["end"])) for a in x["audio"]
+                      if any(r == v["id"] and k == "video" for r, k in a["links"]))
+        if not mine or v["start"] < 0:
+            continue
+        at = max(int(v["start"]), mine[0][0])
+        for a0, a1 in mine:
+            if a0 > at:
+                out.append(f"A1 has a gap under V1 {v.get('label')} at {tc(at)}-{tc(a0)}")
+            at = max(at, a1)
+    raw_el = next((fe for fe in root.iter("file") if fe.get("id") == "file-raw" and fe.find("rate") is not None), None)
+    jump_max = take_jump_s(_xml_rate(raw_el) if raw_el is not None else None) * f
+    for name, items in (("V1", x["clips"]), ("A1", aud)):
+        its = sorted((c for c in items if int(c["start"]) >= 0), key=lambda c: int(c["start"]))
+        for p, q in zip(its, its[1:]):
+            if int(p["end"]) != int(q["start"]) or float(p["speed"]) <= 0 or float(q["speed"]) <= 0:
+                continue
+            d = int(q["in"]) - int(p["out"])
+            grid = 0 if max(abs(abs(float(p["speed"])) - 1.0), abs(abs(float(q["speed"])) - 1.0)) < 1e-9 else 2
+            if abs(d) > grid and abs(d) <= jump_max + 1e-9:      # (a retimed clip's in-point grid rounds a tick)
+                out.append(f"{name} {p.get('label')} | {q.get('label')} at {tc(q['start'])}: the RAW "
+                           f"{'skips' if d > 0 else 'repeats'} {abs(d) / f * 1000.0:.0f} ms at the cut "
+                           f"(RAW {int(p['out']) / f:.3f} -> {int(q['in']) / f:.3f} s): one take, cut")
+    return out, exceptions
+
+
 def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None) -> list[str]:
     """The default (no --remove-silence): the edit ends where the competitor's does -- the last V1 clip of the parsed
     XML ``x`` ends at the sequence's end and plays up to the competitor's last RAW moment, within a RAW frame: the RAW
@@ -3646,10 +3972,14 @@ LINK_AUDIO_SHARE = 0.5     # a V1 clip with A1 under at least this share of it h
 
 
 def _track_ranges(items: Sequence[dict], transitions: Sequence[dict]) -> list[tuple[int, int]]:
-    """The record ranges of a track's clip items, an edge inside a cross dissolve (-1) at the transition's start."""
+    """The record ranges of a track's clip items, an edge inside a cross dissolve (-1) at the transition's start (the
+    transition next to it on the track: parse_premiere_xml's 'rec')."""
     starts = sorted(int(t["start"]) for t in transitions)
     out = []
     for it in items:
+        if it.get("rec") is not None and min(it["rec"]) >= 0:
+            out.append((int(it["rec"][0]), int(it["rec"][1])))
+            continue
         s0, e0 = int(it["start"]), int(it["end"])
         if s0 == -1:
             s0 = max((t for t in starts if t < e0), default=e0)
@@ -4024,6 +4354,8 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 out["edl"] = _validate_edl(cutlist, p, events, errors)
             except Exception as e:  # noqa: BLE001 - a parse crash is a validation failure, reported
                 errors.append(f"EDL: validation crashed: {type(e).__name__}: {e}")
+    cutlist, _ = no_transitions(cutlist)     # the XML's plan, as write_premiere_xml makes it: no transition (night 5)
+    events = edit_events(cutlist)
     # the hard item check: every item as Premiere's FCP translation reads it (whole frames, start < end, in < out,
     # lengths, inside its media, no overlap, never two audio clips at once); the hard repeat check: no RAW frames /
     # audio play twice (repeats.py). Both on the XML's own numbers, before anything else reads it
@@ -4109,6 +4441,18 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         sound = [f"the audio check could not read the XML: {type(e).__name__}: {e}"]
     out["audio_problems"] = sound
     errors += [f"XML AUDIO {t}" for t in sound]
+    try:                                   # never a transition (night 5)
+        joins = premiere_transition_problems(xml_path)
+    except Exception as e:  # noqa: BLE001
+        joins = [f"the transition check could not read the XML: {type(e).__name__}: {e}"]
+    out["transition_problems"] = joins
+    errors += [f"XML TRANSITION {t}" for t in joins]
+    try:                                   # A1 = each picture's own sound, no jump or stutter at a cut (night 5)
+        sync, out["sync_exceptions"] = premiere_sync_problems(xml_path) if not bad_items else ([], [])
+    except Exception as e:  # noqa: BLE001
+        sync, out["sync_exceptions"] = [f"the sound check could not read the XML: {type(e).__name__}: {e}"], []
+    out["sync_problems"] = sync
+    errors += [f"XML SYNC {t}" for t in sync]
     try:
         clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
         plan_clips = clips

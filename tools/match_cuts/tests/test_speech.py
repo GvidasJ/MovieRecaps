@@ -241,7 +241,8 @@ def test_an_a1_cut_under_a_cross_dissolve_slides_out_of_speech(tmp_path):
     (at, d, kind), = [e for e in edits if len(e) == 3]
     assert (at, kind) == (100, "slide") and d > 0 and not SP._inside(sm, 2.6 + d / 60)
     assert not trims or all(t[0] != 100 for t in trims)
-    # the export: the Premiere fixture's A1 cut under its cross dissolve slid 4 frames
+    # the export (night 5: no transitions): the Premiere fixture's cross dissolve is a hard cut on its middle
+    # frame (254) for V1 and A1 alike -- there is no dissolve left for an A1 cut to slide under
     from match_cuts import export_xml_edl as ex
     from match_cuts.config import Config
     cl = T.premiere_cutlist()
@@ -250,7 +251,7 @@ def test_an_a1_cut_under_a_cross_dissolve_slides_out_of_speech(tmp_path):
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(cl, xml, cfg, rp)
     a1 = {(a["start"], a["end"]) for a in ex.parse_premiere_xml(xml)["audio"]}
-    assert (200, 252) in a1 and (252, 320) in a1
+    assert (200, 254) in a1 and (254, 320) in a1
     v = ex.validate_premiere_exports(cl, xml, None, cfg, rp)
     assert v["ok"], v["errors"]
 

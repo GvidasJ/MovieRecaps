@@ -109,7 +109,8 @@ def test_premiere_export_with_silences_removed(premiere_cl, tmp_path):
     assert x["duration"] == 530
     assert [(c["start"], c["end"], c["in"], c["out"]) for c in x["clips"][:2]] == [(0, 20, 396, 416), (20, 60, 436, 476)]
     assert x["audio"][0]["levels"] == [] and x["audio"][1]["levels"] == []          # 0 dB, no fade keyframes
-    assert any(c["end"] == -1 for c in x["clips"]) and any(c["start"] == -1 for c in x["clips"])   # dissolve kept
+    assert x["transitions"] == [] and all(-1 not in (c["start"], c["end"]) for c in x["clips"])   # night 5: the
+    # dissolve is a hard cut (no transitions)
     assert ("NOT IN RAW S07", 340, 370) in [(m["name"], m["in"], m["out"]) for m in x["markers"]]
     v = ex.validate_premiere_exports(premiere_cl, xml, edl, cfg, rp)
     assert v["ok"], v["errors"]

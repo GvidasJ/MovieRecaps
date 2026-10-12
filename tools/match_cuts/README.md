@@ -195,6 +195,28 @@ clip, so Premiere's Project panel shows a single `raw.mp4` all the timeline clip
 copied as `extras/media/raw.mp4`, whatever the input file is called; the competitor is never in the project). The
 segment ids (`S01+S02`) are in each clip's comments and in the markers.
 
+**No transitions, ever** (night 5). Every cross dissolve of the competitor becomes a hard cut on its middle frame
+(the clip before ends there, the clip after starts there on its own moment of the RAW); a dissolve or fade to / from
+black is dropped. `1_edit.xml` never holds a transition, and the hard check `XML TRANSITION` fails any run whose XML
+has one (a transition item, or a clip joined by one: start / end -1). `cutlist.json`, the preview and the checks
+against the competitor keep the competitor's dissolves.
+
+**One continuous RAW take plays as one clip** (night 5, learned from your laptop009 fix). A competitor sped up with
+many tiny cuts (laptop009: 48 pieces in 24.8 s) has pieces that meet a RAW frame or so apart -- skipped or shown
+twice (its frame grid against the RAW's), at a speed measured a little off on a short piece -- and pieces of a still
+picture matched anywhere near (the cut list marks them uncertain). Laid out one by one at 100 %, the sound jumped
+17-50 ms or stuttered at every such cut, and the repeat removal trimmed whole frames out of the words. Now, on the
+competitor's cut list: a piece whose RAW time continues the take before it within 0.1 s and 2.5 RAW frames (either way; 83 ms for a 30 fps RAW) plays on that
+take's line, at the take's speed -- from the very moment the take reaches there; a run of short pieces the cut list
+doubts (uncertain or a measured speed 35 % off, at most 0.25 s each, 1.5 s in all, within 2.5 s of the take's line)
+is played over by the take with its framing (your fix: S03's take runs on to RAW 708.35 s over S04-S11); a real
+jump of the RAW time stays a cut, and a real slow motion inside a take keeps its speed. The pieces of one take with
+one framing are one clip on V1 and A1 (laptop009: 6 clips -- before the RAW's shot changes split them -- instead of
+16 with 17 ms jumps between). The hard check `XML SYNC` reads the final XML: every A1 clip plays exactly the source
+its own V1 clip shows over the frames they share (an audio line -- one take of sound carried on under a cut picture --
+is listed instead), A1 has no gap under its picture and no overlap, and no cut on V1 or A1 skips or repeats 0.1 s of
+the RAW or less (2.5 RAW frames at most; one take, cut: the run fails).
+
 **Linked clips.** Every V1 clip imports linked to its own A1 clip (the `<link>`s Premiere writes in its own XML), so
 moving, trimming or cutting a clip takes its audio with it. Each V1 clip is linked to the A1 clip it overlaps most;
 audio shifted a few frames from its picture (an A1 cut moved to close a jump) stays linked to that picture. Where one
@@ -206,7 +228,8 @@ stay unlinked. The hard check `XML LINK` fails the run unless every V1 clip with
 one A1 clip and every A1 clip under a picture to exactly one V1 clip, the same pair in both, overlapping. The end
 summary says how many are linked (*Linked clips: 14 of 14 V1 clips linked to their own A1 clip*) and lists every clip
 left unlinked on purpose; `report.md` section *Premiere XML checks* has one row per hard check on `1_edit.xml` (`XML
-ITEM`, `GAP`, `REPEAT`, `AUDIO`, `ENDING`, `SPEECH`, `FLASH`, `SILENCE`, `OTHER VIDEO`, `LINK`, `PERSON`; `SPEECH` and
+ITEM`, `GAP`, `REPEAT`, `AUDIO`, `ENDING`, `SPEECH`, `FLASH`, `SILENCE`, `OTHER VIDEO`, `LINK`, `PERSON`,
+`TRANSITION`, `SYNC`; `SPEECH` and
 `SILENCE` with `--remove-silence`, `ENDING` without it) with its result. In Premiere, with
 *Linked Selection* on (the chain button at the top left of the timeline), clicking a V1 clip selects its audio too.
 
@@ -380,9 +403,8 @@ every audio cut of the edit is placed by the speech of the RAW, not by the compe
   nearer end of that sound: the clip plays on to the end of it (it is extended, and everything after it moves
   later) or stops before it. A clip never shows again what the clip before it now shows: it starts after it, and a
   clip left with nothing new to play goes. Two pieces that end up playing one continuous take become one clip, with
-  no cut. Both sides of a cross dissolve stay as they are -- except a dissolve of at most 0.1 s whose cut is inside
-  speech: it becomes a hard cut, moved out of the word like any other (33 ms of two pictures mixed are not
-  missed; `cutlist.json` keeps the dissolve). Where A1 jumps a few frames (at most 0.1 s) inside
+  no cut. A cross dissolve is a hard cut already (night 5: no transitions), moved out of the word like any other
+  (`cutlist.json` keeps the dissolve). Where A1 jumps a few frames (at most 0.1 s) inside
   speech but the picture does not cut (an audio line), the audio line moves by those frames so A1 plays on.
 * **A tiny jump at a cut inside speech plays on.** The competitor often cuts 1–3 frames out of a sentence (or shows
   them twice): a cut skipping or repeating at most 0.1 s of the RAW inside speech is closed — the clip before plays
@@ -1224,7 +1246,10 @@ and its RAW, once `input/competitor.mp4` + `input/raw_test.mp4` --, `spiderman-s
 `zendaya-age/`, and `video1/` ... `video4/`: four of your finished videos, made by `learn finished` -- the competitor,
 the RAW (a smaller copy over 100 MB), your edit as the cut key and, where your captions could be read, your captions;
 `finished/` itself is never committed), never in `input/`, so the videos you work on there do not change what the
-tests check. The suite runs on Linux and Windows:
+tests check. `laptop009-fixed/` (night 5) is your fix of a competitor sped up to 125 % with many tiny cuts: your 16
+clips and 52 captions, run with the defaults (100 %, your template, the competitor's cut points); its cut list is also
+`tools/match_cuts/tests/data/laptop009_cutlist.json`, on which `tests/test_night5.py` checks the takes. The suite runs
+on Linux and Windows:
 the conftest sets `MATCH_CUTS_NO_AE=1` (After Effects counts as not installed: no test, nor a CLI run it starts, ever
 opens the After Effects of the machine), text is drawn with the DejaVu fonts (the system's on Linux, matplotlib's copy
 elsewhere), and what needs fork / `/proc` (Linux), ffmpeg's `flite` source or OpenTimelineIO (no wheel for Python 3.14)

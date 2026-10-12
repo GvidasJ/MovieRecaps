@@ -636,13 +636,16 @@ def test_premiere_sequence_is_1080x1920_at_exactly_60fps_with_v1_and_a1_only(pre
 
 
 def test_premiere_cuts_land_on_the_30fps_moments_and_a1_has_the_same_cuts(premiere):
-    cl, x = premiere["cl"], premiere["x"]
+    x = premiere["x"]
+    cl, hard = ex.no_transitions(premiere["cl"])            # the XML's plan: no transition (night 5)
     events = ex.edit_events(cl)
     clip_events = [ev for ev in events if ev.kind == "clip"]
     clips, _, _ = ex.premiere_clips(cl, premiere["cfg"])
     assert [(c.rec_start, c.rec_end) for c in clips] == [(2 * ev.rec_in, 2 * ev.rec_out) for ev in clip_events]
-    # the crossfade S04 -> S05 is a cross dissolve starting at the edit point, 2 x 6 frames
-    assert x["transitions"] == [{"start": 248, "end": 260}]
+    # the crossfade S04 -> S05 (6 competitor frames from the edit point, 248 in the sequence) is a hard cut on its
+    # middle frame: S04 ends and S05 starts at sequence frame 254
+    assert x["transitions"] == [] and [d["cut"] for d in hard] == [127]
+    assert any(c["end"] == 254 for c in x["clips"]) and any(c["start"] == 254 for c in x["clips"])
     # A1: one item per V1 clip at its record range (the freeze too: every picture plays its own sound) + the
     # uncertain spot's audio line (no picture there)
     a = {(i["start"], i["end"]) for i in x["audio"]}
@@ -1091,19 +1094,20 @@ def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(
     d = json.loads(RAW_TEST_CUTLIST.read_text(encoding="utf-8"))
     d["raw"]["file_abs"] = str(RAW_TEST)
     cl = Cutlist.from_dict(d)
+    cl, _, _ = ex.join_takes(cl)                     # as the pipeline (night 5): S27 continues S26's take (83 ms skip)
     cfg = Config(out_dir=str(tmp_path), premiere=True)
     xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
     from match_cuts import repeats
     plan = repeats.add_to_plan({}, cl, cfg)          # as the pipeline: S26 starts on S25's last 6 RAW frames (a stutter)
     assert [(r["removed"], r["kept"], r["a"], r["b"], r["kind"]) for r in plan["repeats"]["rows"]] == [
-        ("S26", "S25", 1192, 1198, "stutter")]
+        ("S26+S27", "S25", 1192, 1198, "stutter")]          # S27 continues S26: one clip
     ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])
     ex.write_edl(cl, edl, cfg)
     v = ex.validate_premiere_exports(cl, xml, edl, cfg, plan["ripple"])
     assert v["ok"] and v["gaps"] == [] and v["repeat_problems"] == [] and v["item_problems"] == [], v["errors"]
     ex.write_premiere_xml(cl, tmp_path / "uncut.xml", cfg)             # without the trim: the hard check fails
     assert ex.premiere_repeat_problems(tmp_path / "uncut.xml") == [
-        "V1 S25 at 00:00:19:46 and S26 at 00:00:19:52 both play RAW 103.27-103.37 s: a stutter at a cut"]
+        "V1 S25 at 00:00:19:46 and S26+S27 at 00:00:19:52 both play RAW 103.27-103.37 s: a stutter at a cut"]
     x = ex.parse_premiere_xml(xml)
 
     def position(c: dict) -> tuple[float, float]:

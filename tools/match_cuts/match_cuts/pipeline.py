@@ -2859,6 +2859,13 @@ def stage_exports(ctx: Context) -> None:
             ctx.warn(f"Premiere XML: {len(validation['audio_problems'])} A1 problem(s) -- every audio clip must import "
                      "at 0 dB, unmuted, without keyframes or effects; the run fails: "
                      + "; ".join(validation["audio_problems"]))
+        if validation.get("transition_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['transition_problems'])} transition(s) -- every cut must be a hard "
+                     "cut; the run fails: " + "; ".join(validation["transition_problems"]))
+        if validation.get("sync_problems"):
+            ctx.warn(f"Premiere XML: {len(validation['sync_problems'])} sound problem(s) -- A1 must be each picture's "
+                     "own RAW sound, with no jump or stutter at a cut; the run fails: "
+                     + "; ".join(validation["sync_problems"]))
         if validation.get("ending_problems"):
             ctx.warn("Premiere XML: the edit does not end on the competitor's last RAW moment -- the run fails: "
                      + "; ".join(validation["ending_problems"]))
@@ -2898,11 +2905,30 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     """The Premiere export's plan of the export cut list ``ex``: a speed-change sliver inside one take plays on
     (export_xml_edl.play_on_slivers), then the RAW's speech map, shot changes and people, the speech-safe cuts and the
     silences and repeats taken out. Returns (the cut list written, the ripple of its cuts)."""
-    from .export_xml_edl import play_on_slivers
+    from .export_xml_edl import join_takes, no_transitions, play_on_slivers, snap_takes, take_jump_s
+    # never a transition (night 5): every dissolve of the competitor is a hard cut on its middle frame
+    ex, hard = no_transitions(ex)
+    for d in hard:
+        ctx.dlog.record("premiere", "dissolve_hardened", **d)
+        if d["cut"] is None:
+            log.info("Premiere: S%02d's fade to / from black dropped (no transition: a hard cut)", d["segments"][0])
+        else:
+            log.info("Premiere: the %d-frame dissolve S%02d|S%02d is a hard cut at competitor frame %d (no "
+                     "transitions)", d["frames"], d["segments"][0], d["segments"][1], d["cut"])
+    # the pieces of one continuous RAW take play as one (night 5, laptop009): no jump or stutter inside a take
+    ex, takes, joined = join_takes(ex)
+    for d in joined:
+        ctx.dlog.record("premiere", "take_joined", **d)
+    if joined:
+        log.info("Premiere: %d piece(s) of one continuous RAW take play on its line (%d within %.0f ms of it, %d "
+                 "doubted slivers played over): %s", len(joined), sum(1 for d in joined if d["how"] == "continues"),
+                 1000 * take_jump_s(ex.raw_fps), sum(1 for d in joined if d["how"] != "continues"),
+                 ", ".join(f"S{d['segment']:02d} ({1000 * d['jump_s']:+.0f} ms)" for d in joined))
     if getattr(ctx.cfg, "keep_speed", False):
         from .keep_speed import keep_speed
         n0 = int(ex.competitor["frames"])
         ex, ctx.keep_map = keep_speed(ex)
+        ex = snap_takes(ex, takes)
         n1 = int(ex.competitor["frames"])
         changed = sum(1 for s in ex.segments if s.type == "raw") if ctx.keep_map.stretched else 0
         ctx.dlog.record("premiere", "keep_speed", frames_before=n0, frames_after=n1, knots=ctx.keep_map.knots)
@@ -2929,16 +2955,6 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
             log.info("Premiere: S%02d (%d frames at %.0f %%) plays at 100 %% inside its take", d["segment"],
                      d["comp_out"] - d["comp_in"], 100 * d["speed"])
     ctx.speech = speech_of(ctx, ex)
-    from .config import removes_silence
-    if ctx.speech is not None and removes_silence(ctx.cfg):      # the default keeps the competitor's dissolves too
-        from . import speech as speech_mod
-        from .export_xml_edl import harden_dissolves
-        ex, hard = harden_dissolves(ex, lambda t: speech_mod._inside_sound(ctx.speech, t))
-        for d in hard:
-            ctx.dlog.record("premiere", "dissolve_hardened", **d)
-            log.info("Premiere: the %d-frame dissolve S%02d|S%02d inside speech (RAW %.2f / %.2f s) is a cut at "
-                     "competitor frame %d, so the cut can move out of the word", d["frames"], d["segments"][0],
-                     d["segments"][1], d["raw"][0], d["raw"][1], d["cut"])
     ctx.shots = shots_of(ctx, ex)
     ctx.cfg.premiere_shots = ctx.shots           # from here on V1 cuts land on the RAW's shot changes (snap_to_shots)
     ctx.people = people_of(ctx, ex)

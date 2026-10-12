@@ -1,0 +1,9 @@
+{
+ "timeline": "edit",
+ "notes": "learned from laptop009_fixed_relinked.prproj (2026-10-12, night 5): answer.srt and answer_edit.json are your finished edit (its picture clips); the default settings -- 100 %, your template (templates/default.png), the competitor's cut points (no --remove-silence): your pause cuts inside the takes stay yours, so the cut score counts them as missed",
+ "learned_from": "finished\\laptop009\\laptop009_fixed_relinked.prproj",
+ "run": "output\\laptop009",
+ "full_raw": "output/laptop009/extras/media/raw_ae.mp4",
+ "raw_offset": 673.631292,
+ "options": []
+}

@@ -1436,6 +1436,8 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML SILENCE", "silence_problems", "no more silence across a cut than --pad-after + --pad-before (--remove-silence)"),
     ("XML OTHER VIDEO", "other_video_problems", "another video's stretch left empty for exactly its length"),
     ("XML LINK", "link_problems", "every V1 clip linked to its own A1 clip and back"),
+    ("XML TRANSITION", "transition_problems", "no transition anywhere: every cut is a hard cut"),
+    ("XML SYNC", "sync_problems", "A1 is each picture's own RAW sound: in sync, no gap or overlap, no jump or stutter at a cut"),
     ("XML PERSON", "person_problems", "the person speaking in the window, at most 15 % of the face cut off (nobody speaking: one person)"),
 ]
 

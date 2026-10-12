@@ -86,7 +86,9 @@ def test_the_flash_check_reads_the_clips_of_a_cross_dissolve_and_the_framing(tmp
     (today: missed)."""
     cfg, xml, x = export(tmp_path, "run.xml")
     assert (clip(x, "S06")["in"], clip(x, "S16")["out"], clip(x, "S17")["in"]) == (44110, 45012, 45012)
-    assert any(t["start"] == 50 for t in x["transitions"]) and clip(x, "S05")["start"] == -1
+    # night 5: no transitions -- the 2-frame dissolve S04|S05 is a hard cut on its middle frame (51), and S05 plays
+    # on from there (S04 and S05 are one take: its source runs on across the cut)
+    assert x["transitions"] == [] and clip(x, "S05")["start"] == 51 and clip(x, "S05")["in"] == clip(x, "S04")["out"]
     bad = ex.premiere_flash_problems(xml, CHANGES)
     assert [b.split(":")[0] for b in bad] == ["S16 at 00"], bad
     assert "at the framing of another clip" in bad[0] and "00:00:08:27" in bad[0]       # sequence frame 507
@@ -103,6 +105,6 @@ def test_premiere_cuts_at_a_raw_shot_change_land_on_its_first_frame(tmp_path):
     assert x["duration"] == 674
     # A1 keeps the competitor's cuts and in-points (the takes run on under the moved picture cuts)
     assert [(a["start"], a["end"], a["in"]) for a in x["audio"]] == [
-        (0, 50, 43875), (50, 236, 43925), (236, 437, 44110), (437, 508, 44941), (508, 674, 45012)]
+        (0, 51, 43875), (51, 236, 43926), (236, 437, 44110), (437, 508, 44941), (508, 674, 45012)]
     v = ex.validate_premiere_exports(cutlist(), xml, None, cfg, None, None, CHANGES)
     assert v["flash_problems"] == [] and v["ok"], v["errors"]
