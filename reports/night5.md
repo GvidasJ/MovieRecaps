@@ -12,7 +12,7 @@
 - **laptop008's export errors** (section 1): the three `XML LINK` errors "at -00:00:00:01" were the checks misreading
   a clip that starts and ends inside cross dissolves (reproduced, fixed); the `XML REPEAT` was a repeat that could not
   be cut inside a dissolve (reproduced, fixed). The 3 `XML FLASH` I could not reproduce without laptop008's own files.
-- **Tests** (section 4): unit tests: all pass, 0 failed (1204 with the GPU hidden, then the GPU tests with it: 209).
+- **Tests** (section 4): unit tests: 1232 passed, 0 failed, the same 94 skipped as last night (13 new tests).
   check-all on all 16 test videos (laptop009-fixed is new): the hard checks pass on 15 of 16 (video1 after a re-check
   -- its own verdict was hit by a change I made while it ran); **laptop004-fixed fails `XML FLASH`**, a regression from
   the take rule (2 frames of a shot at a cut; the fix is known, not made tonight). Scores: captions 159 of 656 exactly
@@ -22,7 +22,8 @@
 - **Left for next time** (sections 4 and 5): laptop004's flash (the fix is known; it needs a check-all of its own);
   laptop009's captions over the still picture (all your words are there, but grouped worse: 41 of 52 captions with
   your text, 45 before); the thorough analysis framing laptop009 at 148 % (your --fast runs find the right box).
-- **Disk** (section 6): freed after the push.
+- **Disk** (section 6): 1.5 GiB freed in `work\` (tonight's extra runs, test temp folders, code copies); 58.4 GiB
+  free. The stage caches, `output\` and everything else you listed stay.
 
 ## 1. What was wrong
 
@@ -169,17 +170,19 @@ thorough: 24 of your 52 captions exactly, 6.0 % word errors; 0 of your 13 cuts w
 
 ### Unit tests
 
-On the final code: the whole suite with the GPU hidden (so it could run next to the check-all): **1204 passed, 0
-failed**, 122 skipped; then the 11 test files that use the GPU, again with it: **209 passed, 0 failed**, 94 skipped
-(files or tools not on this PC, as last night). So every one of the 1326 tests passes or is skipped for the same reasons
-as last night's 94. 13 new (`tests\test_night5.py`): a dissolve becomes a hard cut on its middle frame, a fade to black
-is dropped, the writer never writes a transition, the transition check fails one, laptop008's two errors (a clip
-between two dissolves read at its own place; a repeat at a dissolve now cut), laptop009's real cut list giving its 6
-takes and 7 clips with no jump, the take limit per RAW frame rate, a real cut and a far sliver left alone, a real slow
-motion keeping its speed, and the sync check catching a jump, a desync and an overlap (and leaving `--remove-silence`
-pause trims to `XML SPEECH`). Six older tests changed with the rules: four expected a dissolve in the Premiere XML, one
-an A1 cut sliding under a dissolve, and the deadpool S21 test now runs the take rule first (so S26 and S27 are one
-clip in its repeat message).
+On the final code: **1232 passed, 94 skipped, 0 failed** -- last night 1219 passed and the same 94 skipped (slow tests
+that need `--runslow`, and pool tests that only run on Linux). I ran it in two parts so it could run next to the
+check-all: the whole suite with the GPU hidden (1204 passed, 122 skipped, 0 failed), then the 11 test files those 122
+are in, with the GPU (209 passed, 94 skipped, 0 failed).
+
+13 tests are new (`tests\test_night5.py`): a dissolve becomes a hard cut on its middle frame, a fade to black is
+dropped, the writer never writes a transition, the transition check fails one, laptop008's two errors (a clip between
+two dissolves read at its own place; a repeat at a dissolve now cut), laptop009's real cut list giving its 6 takes and
+7 clips with no jump, the take limit per RAW frame rate, a real cut and a far sliver left alone, a real slow motion
+keeping its speed, and the sync check catching a jump, a desync and an overlap (and leaving `--remove-silence` pause
+trims to `XML SPEECH`). Older tests in four files changed with the rules: the ones that expected a dissolve in the
+Premiere XML or an A1 cut sliding under a dissolve, and the deadpool S21 test, which now runs the take rule first (so
+S26 and S27 are one clip in its repeat message).
 
 ### check-all: the 16 test videos
 
@@ -269,8 +272,9 @@ rest behind them. The unit tests ran without the GPU while the check-all ran.
 
 ## 5. Check by hand, and decide
 
-1. **laptop009 in Premiere** (`output\laptop009\night5\001`): import `1_edit.xml` and play it through: no cross dissolve anywhere, each
-   take one clip, the sound continuous at every cut (no click, no repeated syllable), A1 exactly under its picture.
+1. **laptop009 in Premiere** (`output\laptop009\night5\001`): import `1_edit.xml` and play it through: no cross
+   dissolve anywhere, each take one clip, the sound continuous at every cut (no click, no repeated syllable), A1
+   exactly under its picture.
 2. **The RAW's 5.1 sound.** laptop009's RAW has 6 audio channels (AC3 5.1, converted to 6-channel AAC in
    `raw_ae.mp4`); every such run warns "check in Premiere that A1 plays the dialogue (the centre channel), not only the
    front left / right". Your fixed project plays `_222FIXEDSouth Park S13E12.mp4` instead, whose audio is stereo. If
@@ -294,4 +298,31 @@ rest behind them. The unit tests ran without the GPU while the check-all ran.
 
 ## 6. Disk space
 
-Freed after the push (the next commit).
+**Freed: 1.5 GiB** -- everything tonight left behind that does not have to stay. Measured just before and just after
+the cleanup, every file counted once however many hard links it has (as last night):
+
+| | before | after |
+|---|---|---|
+| `MovieRecaps`, really used | 180.6 GiB (77,970 files) | **179.2 GiB** (70,764 files) |
+| of it `work\` | 126.7 GiB | 125.2 GiB |
+| free on the drive | 56.9 GiB | **58.4 GiB** |
+
+**Deleted** (all inside `work\`, none of it tracked by git): tonight's extra runs (the laptop009 runs
+`work\t20\l009_*`, the "before" run `work\t20\pre`, the stopped third check-all stream `work\t20\ca1\C` and `C1`, a
+simulation copy `work\t20\sim15`), the unit tests' temporary folders (`work\t20\pytest_*`) and tonight's frozen code
+copies (`work\snapA` ... `work\snapD`). The deleted files add up to 2.6 GiB, but 1.1 GiB of that were hard links of
+laptop009's media, which stays in `output\laptop009`, so the drive gained 1.5 GiB. `work\_tmp` and pip's download
+cache were already empty.
+
+**Kept:** `tests\`, `finished\`, `input\`, `models\`, `.venv\`, every `output\` folder (with the new
+`output\laptop009\night5`), `reference\`, the stage caches (`work\cache` 59.4 GiB and `work\t10\check-all\work`
+62 GiB: tonight's changes touched no cached stage's code, and which older entries are stale cannot be told from file
+dates, so I kept them all, as last night), tonight's check-all runs
+(`work\t20\ca1\A` and `B`, `work\t20\ca2\D1`-`D3`: 4.1 GiB) with the combined scorecard for the next comparison, and
+the run folders the test cases name (`work\t8\final4`, `work\t8\user`, `work\t10\learn`).
+
+**Why so little:** last night's cleanup had already removed every old run. Since then `work\` grew by 10.6 GiB
+(tonight's runs and new cache entries, mostly laptop009's) and the rest of `MovieRecaps` by 1.2 GiB. The drive's
+free space fell from 107.5 GiB last night to 56.9 GiB, but `MovieRecaps` grew by only 11.8 GiB: about 39 GiB went to
+files outside `MovieRecaps` (not the temp folder, which holds 0.3 GiB). I did not look further or touch anything
+there. The next check-all needs no cleanup first: 58 GiB is above your 40 GB limit.
