@@ -3787,7 +3787,7 @@ def premiere_transition_problems(xml_path: str | os.PathLike) -> list[str]:
     return out
 
 
-def premiere_sync_problems(xml_path: str | os.PathLike) -> tuple[list[str], list[str]]:
+def premiere_sync_problems(xml_path: str | os.PathLike, moving: bool = False) -> tuple[list[str], list[str]]:
     """The hard sound check of the final XML (night 5: "every clip's audio must be the RAW's own sound for exactly that
     picture, continuous, in sync, with no gaps, overlaps or stutters at the cuts"), on its own numbers:
 
@@ -3798,7 +3798,9 @@ def premiere_sync_problems(xml_path: str | os.PathLike) -> tuple[list[str], list
     * no stutter or jump at a cut: where two clips of a track meet, the next one's RAW starts exactly where the one
       before ends (one take: the cut is only a framing change or a shot change of the RAW) or jumps more than
       take_jump_s (a real cut) -- never a few ms skipped or played twice (laptop009: 17 ms jumps at 10 cuts inside
-      one take; the repeat check, XML REPEAT, finds the longer repeats).
+      one take; the repeat check, XML REPEAT, finds the longer repeats). The default only: ``moving`` (--remove-silence)
+      moves cuts into the quiet on purpose -- a pause trimmed at a cut may skip a few ms of silence (video1: 83 ms
+      between S15 and S16) -- and XML SPEECH / XML SILENCE judge those cuts.
 
     Returns (problems, exceptions)."""
     x = parse_premiere_xml(xml_path)
@@ -3848,7 +3850,7 @@ def premiere_sync_problems(xml_path: str | os.PathLike) -> tuple[list[str], list
             at = max(at, a1)
     raw_el = next((fe for fe in root.iter("file") if fe.get("id") == "file-raw" and fe.find("rate") is not None), None)
     jump_max = take_jump_s(_xml_rate(raw_el) if raw_el is not None else None) * f
-    for name, items in (("V1", x["clips"]), ("A1", aud)):
+    for name, items in () if moving else (("V1", x["clips"]), ("A1", aud)):
         its = sorted((c for c in items if int(c["start"]) >= 0), key=lambda c: int(c["start"]))
         for p, q in zip(its, its[1:]):
             if int(p["end"]) != int(q["start"]) or float(p["speed"]) <= 0 or float(q["speed"]) <= 0:
@@ -4448,7 +4450,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     out["transition_problems"] = joins
     errors += [f"XML TRANSITION {t}" for t in joins]
     try:                                   # A1 = each picture's own sound, no jump or stutter at a cut (night 5)
-        sync, out["sync_exceptions"] = premiere_sync_problems(xml_path) if not bad_items else ([], [])
+        sync, out["sync_exceptions"] = premiere_sync_problems(xml_path, moving) if not bad_items else ([], [])
     except Exception as e:  # noqa: BLE001
         sync, out["sync_exceptions"] = [f"the sound check could not read the XML: {type(e).__name__}: {e}"], []
     out["sync_problems"] = sync

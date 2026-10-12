@@ -248,6 +248,8 @@ def test_the_sync_check_catches_a_jump_a_desync_and_an_overlap(tmp_path):
             c2.find("out").text = str(int(c1.findtext("out")) + 1 + n)
     probs, _ = ex.premiere_sync_problems(_edit(xml, tmp_path / "skip.xml", skip))
     assert any("skips 17 ms" in p for p in probs)
+    # --remove-silence moves cuts into the quiet on purpose (video1: an 83 ms pause trimmed at S15|S16): not judged here
+    assert not any("ms at the cut" in p for p in ex.premiere_sync_problems(tmp_path / "skip.xml", moving=True)[0])
 
     def desync(root):                     # A1 three frames off its picture
         ci = root.findall("sequence/media/audio/track/clipitem")[2]

@@ -215,7 +215,9 @@ one framing are one clip on V1 and A1 (laptop009: 6 clips -- before the RAW's sh
 16 with 17 ms jumps between). The hard check `XML SYNC` reads the final XML: every A1 clip plays exactly the source
 its own V1 clip shows over the frames they share (an audio line -- one take of sound carried on under a cut picture --
 is listed instead), A1 has no gap under its picture and no overlap, and no cut on V1 or A1 skips or repeats 0.1 s of
-the RAW or less (2.5 RAW frames at most; one take, cut: the run fails).
+the RAW or less (2.5 RAW frames at most; one take, cut: the run fails). That last part is for the default (the
+competitor's cut points): with `--remove-silence` the cuts move into the quiet on purpose and a pause trimmed at a cut
+may skip a few ms of silence (video1: 83 ms) -- `XML SPEECH` and `XML SILENCE` judge those cuts.
 
 **Linked clips.** Every V1 clip imports linked to its own A1 clip (the `<link>`s Premiere writes in its own XML), so
 moving, trimming or cutting a clip takes its audio with it. Each V1 clip is linked to the A1 clip it overlaps most;
