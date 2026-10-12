@@ -210,7 +210,9 @@ competitor's cut list: a piece whose RAW time continues the take before it withi
 take's line, at the take's speed -- from the very moment the take reaches there; a run of short pieces the cut list
 doubts (uncertain or a measured speed 35 % off, at most 0.25 s each, 1.5 s in all, within 2.5 s of the take's line)
 is played over by the take with its framing (your fix: S03's take runs on to RAW 708.35 s over S04-S11); a real
-jump of the RAW time stays a cut, and a real slow motion inside a take keeps its speed. The pieces of one take with
+jump of the RAW time stays a cut, and a real slow motion inside a take keeps its speed. Every piece of a take plays
+the take's own sound (an audio line the competitor had under one of them -- zendaya's S19-S23, its sound 91 ms behind
+the picture -- is dropped: at 100 % the sound is the picture's own, in sync). The pieces of one take with
 one framing are one clip on V1 and A1 (laptop009: 6 clips -- before the RAW's shot changes split them -- instead of
 16 with 17 ms jumps between). The hard check `XML SYNC` reads the final XML: every A1 clip plays exactly the source
 its own V1 clip shows over the frames they share (an audio line -- one take of sound carried on under a cut picture --
