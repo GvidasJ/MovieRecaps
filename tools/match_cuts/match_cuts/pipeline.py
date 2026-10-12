@@ -2922,7 +2922,7 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     if joined:
         log.info("Premiere: %d piece(s) of one continuous RAW take play on its line (%d within %.0f ms of it, %d "
                  "doubted slivers played over): %s", len(joined), sum(1 for d in joined if d["how"] == "continues"),
-                 1000 * take_jump_s(ex.raw_fps), sum(1 for d in joined if d["how"] != "continues"),
+                 1000 * take_jump_s(ex.raw_fps), sum(1 for d in joined if d["how"] == "played over"),
                  ", ".join(f"S{d['segment']:02d} ({1000 * d['jump_s']:+.0f} ms)" for d in joined))
     if getattr(ctx.cfg, "keep_speed", False):
         from .keep_speed import keep_speed

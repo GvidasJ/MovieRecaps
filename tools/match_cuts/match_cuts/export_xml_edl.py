@@ -1805,7 +1805,8 @@ def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
             continue
         jump = float(b.raw_in_seconds) - line(a, int(b.comp_in))
         if abs(jump) <= tol + 1e-9:
-            if abs(jump) > 1e-6 or (abs(float(b.speed) - float(a.speed)) > 1e-9 and alike(a, b)):
+            if (abs(jump) > 1e-6 or (abs(float(b.speed) - float(a.speed)) > 1e-9 and alike(a, b))
+                    or (b.audio or {}).get("line")):     # (zendaya's S20: on the line, its sound 91 ms behind)
                 out[i + 1] = on_line(b, a, False)
                 done.append({"segment": int(b.id), "take": take.get(int(a.id), int(a.id)), "jump_s": round(jump, 4),
                              "how": "continues"})
@@ -1829,6 +1830,11 @@ def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
             done.append({"segment": int(out[r].id), "take": take[int(out[r].id)], "jump_s": round(jr, 4),
                          "how": "played over"})
         i = run[-1]                             # the piece after the run is compared with the take's line next
+    for n, s in enumerate(out):                 # the piece a take starts with plays its own sound too
+        if int(s.id) in set(take.values()) and (s.audio or {}).get("line"):
+            out[n] = copy.deepcopy(s)
+            out[n].audio = dict(out[n].audio, line=None)
+            done.append({"segment": int(s.id), "take": int(s.id), "jump_s": 0.0, "how": "its own sound"})
     if not done:
         return cl, take, []
     cl2 = copy.copy(cl)
