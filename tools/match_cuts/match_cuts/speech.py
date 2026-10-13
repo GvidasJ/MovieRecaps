@@ -615,8 +615,13 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
     [a, b) a clip is never trimmed into -- the beats the competitor shows an action caption over ("*looks over*": 021's
     reaction shot after "gentlemen", trimmed to 5 frames of quiet -- a flash -- where you kept the competitor's 0.5 s).
     A clip left with nothing to play goes."""
+    from .shots import MIN_SHOT_S
     f = float(fps)
     hi_s = sm.dur if src_max is None else min(sm.dur, float(src_max) / f)
+    # a shot's piece one sequence frame longer than shots.MIN_SHOT_S: the cut lands on a whole frame (round), and
+    # 0.25 s from a change between two frames rounded down to 14 frames at 60 fps -- video020 --fast S02+S03: 14
+    # frames of the next shot, finishing "I"
+    m_shot = MIN_SHOT_S + 1.0 / f
     ps = [Piece(**vars(p)) for p in sorted(pieces, key=lambda p: p.r0)]
     shifts = _shift_jumps(ps, sm, f, v1_cuts)
     shifts += _own_sound(ps, sm, f, v1_cuts, {r for r, _ in shifts})
@@ -661,7 +666,7 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
         if shots and p.v_off is not None and (free_start or free_end):
             cs = [c - p.v_off for c in shots]                          # the shot changes on A1's source times
             na, nb = shot_guard(sm, na, nb, cs, pad_after, pad_before, free_start and not join_in,
-                                free_end and not join_out)
+                                free_end and not join_out, m_shot)
             if touching and free_start and na < prev[1] - 0.5 / f and nb > prev[3] + 0.5 / f:
                 na = prev[1]                                           # never back into what the clip before shows
         if p.v_speed is not None and abs(p.v_speed - 1.0) > 1e-6 and abs(p.v_speed) > 1e-9:
@@ -700,7 +705,7 @@ def snap_edits(pieces: Sequence[Piece], sm: SpeechMap, fps: Fraction, pad_after:
                 end = nb
                 if shots and prev[0].v_off is not None:                # never a sliver of the next RAW shot
                     _, end = shot_guard(sm, prev[3], nb, [c - prev[0].v_off for c in shots], pad_after, pad_before,
-                                        False, True)
+                                        False, True, m_shot)
                 extra = int(round((min(hi_s, end) - prev[1]) * f))
                 if extra > 0:
                     inserts.append((prev[0].r1, extra, "end", prev[1] * f))

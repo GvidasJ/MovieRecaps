@@ -10,6 +10,13 @@ differences by type) and, where the key is the user's own edit, the cut score (e
 reproduced within 2 frames, and how much longer or shorter the tool's edit is). The criteria c2-c5 (a frame-exact After Effects recreation) are not part of it: real videos
 fail them by design.
 
+Night 6 (the default since): the NEW-STYLE cases (case.json "style": "new" -- made with the user's current rules:
+default frame, the competitor's cuts, 100 %) run thorough and are scored against the user's fixes; the OLD cases (an
+older style of edit) run --fast with the hard checks only (a valid Premiere XML, no flash, the sound in sync, no
+transition ... -- no caption or cut scores). Every run gets --check-determinism, --quick-checks (the After Effects
+recreation checks c2-c5 / 9.9 are not run: the scorecard never used them) and --skip-compare (no compare.mp4). ``--old-way`` runs every case as before
+night 6: thorough with --compare-fast, every check, every score.
+
 The scorecard is saved as ``<out>/scorecard.json`` and appended to ``<out>/history.jsonl``; the previous one is
 shown next to it (+/-). Exit code: 0 when every video's hard checks pass, 1 otherwise.
 """
@@ -38,8 +45,17 @@ def _git_head() -> str:
         return ""
 
 
+def case_args(case: testcases.Case, old_way: bool = False, fast_all: bool = False) -> tuple[list[str], bool]:
+    """(the options check-all gives this case's run, whether it is scored): module docstring."""
+    if old_way:
+        return (["--fast"] if fast_all else ["--compare-fast"]) + ["--check-determinism"], True
+    if case.style == "new":
+        return (["--fast"] if fast_all else []) + ["--check-determinism", "--quick-checks", "--skip-compare"], True
+    return ["--fast", "--check-determinism", "--quick-checks", "--skip-compare"], False
+
+
 def run_case(case: testcases.Case, out_root: Path, work_root: Path, extra: Sequence[str] = (),
-             python: str = sys.executable, cwd: str | None = None) -> dict:
+             python: str = sys.executable, cwd: str | None = None, scored: bool = True) -> dict:
     """One case through the tool (its own process); returns its scorecard row."""
     from . import run_folders
     out, work = out_root / case.name, work_root / case.name
@@ -53,12 +69,14 @@ def run_case(case: testcases.Case, out_root: Path, work_root: Path, extra: Seque
     run_dir = run_folders.newest_run_dir(out)
     (out / "check-all.log").write_text(p.stdout + "\n" + p.stderr, encoding="utf-8")
     row = {"case": case.name, "exit": p.returncode, "seconds": round(secs, 1),
-           "run_dir": str(run_dir) if run_dir else None}
-    return dict(row, **read_run(case, run_dir))
+           "run_dir": str(run_dir) if run_dir else None, "style": case.style,
+           "mode": "fast" if "--fast" in cmd else "thorough", "scored": bool(scored)}
+    return dict(row, **read_run(case, run_dir, scored))
 
 
-def read_run(case: testcases.Case, run_dir: Path | None) -> dict:
-    """The scorecard row of a finished run folder: its checks and (with an answer key) its caption score."""
+def read_run(case: testcases.Case, run_dir: Path | None, scored: bool = True) -> dict:
+    """The scorecard row of a finished run folder: its checks and (with an answer key, when ``scored``) its caption
+    and cut scores."""
     from . import caption_score
     from .run_folders import EXTRAS
     row: dict = {}
@@ -88,13 +106,13 @@ def read_run(case: testcases.Case, run_dir: Path | None) -> dict:
         row["captions_mode"] = c.get("mode")
         row["captions_count"] = c.get("count")
         row["transcriber"] = c.get("transcriber")
-    if case.has_key:
+    if case.has_key and scored:
         try:
             sc = caption_score.score_run(case.name, case.answer_srt, testcases.answer_timeline(case), run_dir)
             row["score"] = sc.to_dict()
         except Exception as e:  # noqa: BLE001 - a broken run scores nothing; the card says why
             row["score_error"] = f"{type(e).__name__}: {e}"
-    if case.has_cut_key:
+    if case.has_cut_key and scored:
         try:
             from . import edit_score
             row["cut_score"] = edit_score.score_run(case.answer_edit, run_dir).to_dict()
@@ -132,6 +150,8 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
             we = f"{sc['wer']:.1f} %" + (f" {sc['wer'] - b['wer']:+.1f}" if b else "")
             rb = f"{len(sc['rule_breaks'])}" + (f" {len(sc['rule_breaks']) - len(b['rule_breaks']):+d}" if b else "")
             diff = ", ".join(f"{k} {v}" for k, v in (sc.get("by_type") or {}).items())
+        elif r.get("scored") is False:
+            ex, we, rb, diff = "hard checks only", "-", "-", f"(old style, {r.get('mode', 'fast')})"
         else:
             ex, we, rb, diff = ("no caption key" if "score_error" not in r else "score failed"), "-", "-", ""
         cs, cb = r.get("cut_score"), (before.get(r["case"]) or {}).get("cut_score")
@@ -139,6 +159,8 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
             cu = f"{cs['reproduced']}/{cs['cuts']} ({cs['reproduced_pct']:.0f} %)" + (
                 f" {cs['reproduced'] - cb['reproduced']:+d}" if cb else "")
             le = f"{cs['length_diff']:+.1f} s ({cs['length_diff_pct']:+.0f} %)"
+        elif r.get("scored") is False:
+            cu, le = "-", "-"
         else:
             cu, le = ("no cut key" if "cut_score_error" not in r else "score failed"), "-"
         lines.append(f"{r['case']:<20} {_fmt_s(r.get('seconds')):>7}  {hc:<12} {ex:<22} {we:<16} {rb:<12} {cu:<20} "
@@ -181,8 +203,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--out", default=str(DEFAULT_OUT / "runs"), help="run folders (one sub-folder per case)")
     ap.add_argument("--work", default=str(DEFAULT_OUT / "work"), help="stage caches (one sub-folder per case)")
     ap.add_argument("--rescore", action="store_true", help="score each case's newest run again without running it")
-    ap.add_argument("--fast", action="store_true", help="pass --fast to every run (quick, less thorough); "
-                                                         "otherwise every run gets --compare-fast")
+    ap.add_argument("--fast", action="store_true", help="pass --fast to every run (quick, less thorough)")
+    ap.add_argument("--old-way", action="store_true",
+                    help="run every case as before night 6: thorough with --compare-fast (or --fast), every check of "
+                         "the run, every score -- instead of the new-style cases thorough and scored and the old ones "
+                         "--fast with the hard checks only")
     ap.add_argument("--full-size", action="store_true",
                     help="run the cases whose full-size originals are on this machine (case.json full_raw: the file "
                          "the committed smaller copy was made from) on those originals, as <case>@full -- a fix that "
@@ -190,12 +215,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--python", default=sys.executable, help=argparse.SUPPRESS)
     ap.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
     a, extra = ap.parse_known_args(argv)
-    if a.fast:
-        extra = ["--fast", *extra]
-    elif "--compare-fast" not in extra:
-        extra = ["--compare-fast", *extra]          # the scorecard runs say what the thoroughness changed
-    if "--check-determinism" not in extra:
-        extra = ["--check-determinism", *extra]     # the hard check 9.7: the cut list re-assembled from the caches
     names = [n for n in a.cases.split(",") if n]
     cases = testcases.cases(names or None, Path(a.cases_dir))
     if a.full_size:
@@ -214,11 +233,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if a.rescore:
             from . import run_folders
             run_dir = run_folders.newest_run_dir(out_root / c.name)
-            row = dict({"case": c.name, "exit": None, "seconds": None, "run_dir": str(run_dir) if run_dir else None},
-                       **read_run(c, run_dir))
+            scored = case_args(c, a.old_way, a.fast)[1]
+            row = dict({"case": c.name, "exit": None, "seconds": None, "run_dir": str(run_dir) if run_dir else None,
+                        "style": c.style, "scored": scored}, **read_run(c, run_dir, scored))
         else:
-            print(f"  {c.name} ...", flush=True)
-            row = run_case(c, out_root, work_root, extra, a.python, a.cwd)
+            args, scored = case_args(c, a.old_way, a.fast)
+            args = [x for x in args if x not in extra] + list(extra)
+            print(f"  {c.name} ({'--fast' if '--fast' in args else 'thorough'}, "
+                  f"{'scored' if scored else 'hard checks only'}) ...", flush=True)
+            row = run_case(c, out_root, work_root, args, a.python, a.cwd, scored)
             print(f"  {c.name}: {_fmt_s(row['seconds'])}, exit {row['exit']}", flush=True)
         rows.append(row)
     total = time.time() - t0
@@ -226,7 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(scorecard(rows, prev))
     print(f"\nTotal {_fmt_s(total)}. Run folders: {out_root}")
     doc = {"when": _dt.datetime.now().isoformat(timespec="seconds"), "git": _git_head(), "seconds": round(total, 1),
-           "extra": list(extra), "rows": rows}
+           "extra": list(extra), "old_way": bool(a.old_way), "rows": rows}
     card.parent.mkdir(parents=True, exist_ok=True)
     card.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     with (card.parent / "history.jsonl").open("a", encoding="utf-8") as f:

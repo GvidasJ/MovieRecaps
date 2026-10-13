@@ -1,0 +1,10 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from laptop013_fixed_relinked.prproj (2026-10-13, night 6; the project's third sequence -- the first two are template sequences of other videos): answer.srt and answer_edit.json are your finished edit (its picture clips; your A1 sits exactly under V1); your run was a --fast laptop run with the default settings -- 100 %, your template (templates/default.png), the competitor's cut points (no --remove-silence)",
+ "learned_from": "finished\\laptop013\\laptop013_fixed_relinked.prproj",
+ "run": "output\\laptop013",
+ "full_raw": "output/laptop013/extras/media/raw.mp4",
+ "raw_offset": 2484.482,
+ "options": []
+}

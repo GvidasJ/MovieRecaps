@@ -46,6 +46,8 @@ class Config:
     comp_size: str = "competitor"          # 'competitor' or 'WxH'
     fps_mode: str = "competitor"           # competitor | source
     force_conform: bool = False            # conform RAW even if AE-safe (testing)
+    force_inputs: bool = False             # --force-inputs: no wrong-input stops (inputs_check; nothing found)
+    quick_checks: bool = False             # check-all: no After Effects recreation checks (c2-c5, 9.9)
     conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
     ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
     ae_slack_tol_frames: float = 0.01      # exact AE floor-rule slack (RAW frames; min over EVERY frame of a layer, from the
@@ -377,6 +379,7 @@ class Config:
         for k in ("competitor", "raw", "out_dir", "work_dir", "deliver_dir", "previous_out_dir", "verbose", "workers",
                   "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
+                  "force_inputs", "quick_checks",
                   "ae_time_mode", "ae_slack_tol_frames", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
@@ -431,6 +434,16 @@ class Config:
     @property
     def media_dir(self) -> Path:
         return Path(self.out_dir) / "media"
+
+
+def cuts_pauses(cfg) -> bool:
+    """The default of a Premiere run with a competitor since night 6: the pauses inside the takes are cut out
+    carefully (silence.pause_ranges: a real pause of 0.15 s or more, never inside a word, the pads kept, never a cut
+    of a few frames), the competitor's cut points and ending stay. --keep-silence: no pause cut; --remove-silence:
+    the full silence removal instead (removes_silence)."""
+    if bool(getattr(cfg, "keep_silence", False)) or removes_silence(cfg):
+        return False
+    return bool(getattr(cfg, "premiere", False)) and bool(str(getattr(cfg, "competitor", "") or ""))
 
 
 def removes_silence(cfg) -> bool:

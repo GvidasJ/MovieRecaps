@@ -252,7 +252,14 @@ def test_main_prints_one_line_per_criterion(monkeypatch, clips, tmp_path, capsys
         seen["cfg"] = cfg
         return _fake_result(ALL_PASS)
     monkeypatch.setattr(pipeline, "run", fake_run)
+    # night 6: two files that look swapped stop the run at once (the wrong-input check) ...
     code = cli.main(["--competitor", str(clips["landscape"]), "--raw", str(clips["portrait"]), "--out", str(tmp_path)])
+    out = capsys.readouterr()
+    assert code == 2 and "cfg" not in seen and "look swapped" in out.err and "--force-inputs" in out.err
+    assert not (tmp_path / "001").exists()                              # nothing made
+    # ... and with --force-inputs they are swapped, as before
+    code = cli.main(["--competitor", str(clips["landscape"]), "--raw", str(clips["portrait"]), "--out", str(tmp_path),
+                     "--force-inputs"])
     out = capsys.readouterr()
     assert code == 0
     assert seen["cfg"].competitor == str(clips["portrait"])            # swapped

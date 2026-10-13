@@ -183,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "for 29.97), RAW audio on A1 (every clip at 0 dB), your template (templates/default.png) on V2. "
                         "Every clip holds ONE fixed Position / Scale (no keyframes, rotation 0): the competitor's framing "
                         "that fills the template's box (--no-frame: the window x 42-1039, y 555-1591). The competitor's "
-                        "cut points and ending are kept (--remove-silence). B-roll follows the audio: every NOT-IN-RAW / "
+                        "cut points and ending are kept and the clear pauses inside its takes are cut out (--keep-silence: "
+                        "none; --remove-silence: every silence). B-roll follows the audio: every NOT-IN-RAW / "
                         "B-roll / uncertain spot shows the RAW video of the audio playing there, else the previous RAW "
                         "clip keeps playing; a marker on each replaced spot. Competitor captions: their on-screen timing, "
                         "the spoken words. The framing changes only where the competitor's moves --min-move px or more")
@@ -228,16 +229,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--remove-silence", action="store_true",
                    help="--premiere: cut out every silence of the RAW audio under my clips, move every cut off speech "
                         "and end the edit after its last word (the default until night 4). Default: the competitor's "
-                        "cut points are kept and the edit ends on the competitor's last RAW moment")
+                        "cut points are kept, the edit ends on the competitor's last RAW moment, and only the clear "
+                        "pauses inside its takes are cut (0.15 s of real silence or more between words, 0.05 s kept "
+                        "after a word and 0.03 s before the next, at least 0.1 s cut; night 6)")
     p.add_argument("--keep-silence", action="store_true",
-                   help="keep every silence (the default of a run with a competitor; without --competitor the RAW "
-                        "alone is cut at its silences unless this is given)")
+                   help="keep every pause: no pause is cut (by default a run with a competitor cuts the clear "
+                        "pauses inside the competitor's takes; without --competitor the RAW alone is cut at its "
+                        "silences unless this is given)")
     p.add_argument("--silence-db", type=_db_arg, default=None, metavar="DB",
                    help="silence = the short-window loudness (50 ms RMS) this many dB below the edit's speech level "
                         "(the loudness of its loudest 5%% of windows); default: set for each video from its speech "
                         "level and its background noise")
     p.add_argument("--min-silence", type=_seconds_arg("--min-silence"), default=0.3, metavar="S",
-                   help="cut only silences longer than this, in the gaps between words (seconds, default 0.3)")
+                   help="--remove-silence: cut only silences longer than this, in the gaps between words (seconds, "
+                        "default 0.3; the default's pause cuts: 0.15)")
     p.add_argument("--pad-before", type=_seconds_arg("--pad-before"), default=0.03, metavar="S",
                    help="a clip starts this long before its first word, and a removed silence keeps this much before "
                         "the word that follows it (seconds, default 0.03)")
@@ -288,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-compare", action="store_true", help="do not render compare.mp4")
     p.add_argument("--no-swap", action="store_true",
                    help="never swap --competitor/--raw even if they look reversed")
+    p.add_argument("--quick-checks", action="store_true", help=argparse.SUPPRESS)   # check-all: no AE recreation checks
+    p.add_argument("--force-inputs", action="store_true",
+                   help="skip the wrong-input check: by default the run stops at once (before converting anything) when "
+                        "the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, the "
+                        "same video, or the two files look swapped; with this option it runs anyway (and swaps two "
+                        "files that look reversed, as before)")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging on the console")
     p.add_argument("--version", action="version", version=f"match_cuts {__version__}")
     return p
@@ -346,6 +357,8 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     if args.seed is not None:
         cfg.seed = int(args.seed)
     cfg.check_determinism = bool(getattr(args, "check_determinism", False))
+    cfg.force_inputs = bool(getattr(args, "force_inputs", False))
+    cfg.quick_checks = bool(getattr(args, "quick_checks", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()
     else:
@@ -676,7 +689,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise InputError(f"raw file not found: {args.raw}")
             comp, raw, notes = "", str(args.raw), []
         else:
-            comp, raw, notes = resolve_inputs(args.competitor, args.raw, args.input_dir, args.no_swap)
+            force = bool(getattr(args, "force_inputs", False))
+            comp, raw, notes = resolve_inputs(args.competitor, args.raw, args.input_dir, args.no_swap or not force)
+            if not force:                       # wrong inputs stop here, before anything is converted (night 6)
+                from . import inputs_check
+                pc, pr = quick_probe(comp), quick_probe(raw)
+                found = inputs_check.problems(pc, pr)
+                if found:
+                    print("match_cuts: " + inputs_check.message(pc, pr, found), file=sys.stderr)
+                    return 2
     except InputError as e:
         print(f"match_cuts: {e}", file=sys.stderr)
         return 2
@@ -732,6 +753,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("match_cuts: interrupted", file=sys.stderr)
         print(f"Run folder: {run_dir}", file=sys.stderr)
         return 130
+    except pipeline.NotInRaw as e:            # night 6: the competitor's scenes are not in this RAW
+        print(f"match_cuts: {e}", file=sys.stderr)
+        print(f"Run folder: {run_dir}", file=sys.stderr)
+        return 2
     except Exception as e:  # noqa: BLE001 - reported to the user with the log location
         print(f"match_cuts: ERROR: {type(e).__name__}: {e}", file=sys.stderr)
         if cfg.verbose:

@@ -81,18 +81,42 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 | `-v` | off | debug logging on the console |
 
 Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--compare-fast` (a thorough run also says what it changed against `--fast`), `--check-determinism` (check 9.7 also re-runs the cut decisions from the caches and compares the cut list byte for byte -- as long as the segments stage again; check-all always), `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
-`--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--version`.
+`--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--force-inputs`, `--version`.
+
+**Wrong inputs stop the run at once** (night 6; `--force-inputs` skips both checks). Right after reading the two
+files' lengths (ffprobe, before anything is converted) the run stops with a plain message naming both files (length,
+picture size, file size) and what to do when the competitor is longer than a Short (3 minutes), almost as long as the
+RAW (a copy of the movie), longer than the RAW, the same video as the RAW, or when the two look swapped (the
+competitor long and landscape, the RAW short and portrait -- before night 6 they were swapped silently; with
+`--force-inputs` they still are). On 12 October a 109-minute copy of the movie given as the competitor took 20+
+minutes to convert before anything failed. And right after the visual search, when under 10 % of the competitor's
+frames were found in the RAW **and** under 10 % of its sound, the run stops instead of finishing an empty edit: "the
+competitor's scenes are not in this RAW: probably a different episode, a different version (4:3 instead of
+widescreen, censored, dubbed) or another language" (a Family Guy clip matched 0 % and still made a full 31.7 s empty
+edit). The log says how much was found on every run ("found in the RAW: 100 % of the competitor's frames, 96 % of its
+sound").
+
+**Time left** (night 6): from its start the log estimates the whole run ("time estimate: the whole run about 12
+min"), and at most every 30 s a stage's progress line ends with how far that stage is and the time left -- `S5.2
+visual search: search 2/3: 148/245 tasks done (30 s) | S5.2 visual search (refined box): 53 % -- under a minute left;
+whole run: about 10 min left` -- also for slow steps without a counter (probe + conform: from the time spent against
+the estimate). The estimate comes from the video lengths (the RAW's for conform, proxies and the visual search's
+index, the competitor's for the rest), the machine (its GPU: the laptop's or the PC's) and the stage times of the
+earlier runs on that machine (`work\run_times.jsonl`, one line per finished run; stages answered from the cache are
+left out), else built-in times measured on the laptop; within a run it corrects itself by how the finished stages
+went.
 
 Captions (see *Captions* below): `--captions auto|competitor|voice` (default `auto`), `--voiceover FILE`,
 `--caption-model NAME` (default `large-v3`), `--caption-check-model NAME` (default `large-v3-turbo`, `none` = off),
 `--caption-recheck-model NAME` (default `large-v3`, `none` = off).
 Premiere-only export: `--premiere` -- every run with your template as its frame (`templates\default.png`; `--frame PNG`
 for another, `--no-frame` for none), the competitor's cut points kept and the edit ending on the competitor's last
-RAW moment (night 4). `--remove-silence` moves the cuts off speech, cuts the silences out and ends after the last
+RAW moment (night 4), the clear pauses inside its takes cut out (night 6; `--keep-silence`: none -- see *Pauses
+inside the takes* under *Premiere*). `--remove-silence` moves the cuts off speech, cuts the silences out and ends after the last
 word (the default until night 4; RAW-only runs always do, unless `--keep-silence`), with `--pad-before S` (default 0.03: a clip starts this long before its first word; 0.05 until video017/018 -- your starts
 sit right on the sound's onset), `--pad-after S` (default 0.05: a clip
 ends this long after its last word; 0.15 until Task 8 -- at the cuts your finished videos and the tool both make you
-leave 0.09-0.12 s earlier than that), `--keep-silence` (a RAW-only run keeps its silences), `--min-silence S` (default 0.3), `--silence-db DB` (default: set
+leave 0.09-0.12 s earlier than that), `--keep-silence` (no pause is cut; a RAW-only run keeps its silences), `--min-silence S` (default 0.3; the default's pause cuts: 0.15), `--silence-db DB` (default: set
 per video from its speech level and background noise; DB under the speech level overrides it). Repeats of RAW footage
 or audio (see *Premiere* below): `--allow-repeats` keeps a moment over 0.5 s that plays twice. No `--competitor`: the
 edit from the RAW alone (see *Without a competitor* below).
@@ -206,8 +230,16 @@ many tiny cuts (laptop009: 48 pieces in 24.8 s) has pieces that meet a RAW frame
 twice (its frame grid against the RAW's), at a speed measured a little off on a short piece -- and pieces of a still
 picture matched anywhere near (the cut list marks them uncertain). Laid out one by one at 100 %, the sound jumped
 17-50 ms or stuttered at every such cut, and the repeat removal trimmed whole frames out of the words. Now, on the
-competitor's cut list: a piece whose RAW time continues the take before it within 0.1 s and 2.5 RAW frames (either way; 83 ms for a 30 fps RAW) plays on that
-take's line, at the take's speed -- from the very moment the take reaches there; a run of short pieces the cut list
+competitor's cut list: a piece whose RAW time continues the take before it within 0.1 s and 1.5 RAW frames (either
+way; 63 ms for a 23.976 fps RAW, 50 ms for 30 fps -- 2.5 frames until night 6: video3's 85 ms was a real cut of the
+competitor) plays on that take's line, at the take's speed -- from the very moment the take reaches there -- except a
+piece that starts on one of the RAW's own shot changes: the competitor cut there because the footage cuts, so it keeps
+the competitor's timing (it starts on its own moment) and the piece before ends exactly there, its length at 100 %
+following (night 6: moved onto the line, laptop004's S03 started 27 ms early and showed 2 frames of the shot before at
+its framing -- `XML FLASH`). A freeze of the competitor's (one RAW frame held) on the frame the take has reached
+plays on as part of the take: Premiere's XML cannot hold a freeze (it played on at 100 % anyway, from its own frame a
+tick off the take's: laptop013's S03 and S11 skipped 17 ms on V1 and A1); your laptop013 fix plays that take straight
+on. With `--audio-lines` freezes stay as the competitor has them. A run of short pieces the cut list
 doubts (uncertain or a measured speed 35 % off, at most 0.25 s each, 1.5 s in all, within 2.5 s of the take's line)
 is played over by the take with its framing (your fix: S03's take runs on to RAW 708.35 s over S04-S11); a real
 jump of the RAW time stays a cut, and a real slow motion inside a take keeps its speed. Every piece of a take plays
@@ -217,9 +249,30 @@ one framing are one clip on V1 and A1 (laptop009: 6 clips -- before the RAW's sh
 16 with 17 ms jumps between). The hard check `XML SYNC` reads the final XML: every A1 clip plays exactly the source
 its own V1 clip shows over the frames they share (an audio line -- one take of sound carried on under a cut picture --
 is listed instead), A1 has no gap under its picture and no overlap, and no cut on V1 or A1 skips or repeats 0.1 s of
-the RAW or less (2.5 RAW frames at most; one take, cut: the run fails). That last part is for the default (the
-competitor's cut points): with `--remove-silence` the cuts move into the quiet on purpose and a pause trimmed at a cut
-may skip a few ms of silence (video1: 83 ms) -- `XML SPEECH` and `XML SILENCE` judge those cuts.
+the RAW or less (1.5 RAW frames at most; one take, cut: the run fails). That last part is for the default (the
+competitor's cut points; a pause the default cuts out of a take always skips 0.1 s or more): with `--remove-silence`
+the cuts move into the quiet on purpose and a pause trimmed at a cut may skip a few ms of silence (video1: 83 ms) --
+`XML SPEECH` and `XML SILENCE` judge those cuts.
+
+**Pauses inside the takes are cut out, carefully** (the default since night 6; `--keep-silence`: none;
+`--remove-silence`: every silence, as before night 4). Learned from your pause cuts of laptop009, mike005, laptop010
+and laptop013 (22 pauses, 0.117 s and longer): a pause is cut when it is a **real pause** -- at least 0.15 s between
+two words (the RAW's speech map: never inside a word) and a **clear silence** (90 % of it at most 12 % of the way from
+the background noise up to the speech level: the quiet you kept had music, a breath or the room in it -- laptop013's
+1.7 s and 1.4 s beats, mike005's 2.3 s); the cut starts 0.05 s after the word before it (a soft tail of more than
+0.1 s after the word stops being loud goes with the pause: laptop010) and ends 0.03 s before the word after it (you
+leave a median 0.013 s / 0.026 s), and only when at least 0.1 s goes (never a cut of a few frames). The
+competitor's cut points stay where they are (a pause that holds or touches a V1 or A1 cut is kept whole), and so do
+the edit's start and its ending (`XML ENDING`). The end summary lists every pause cut (*Silences*) with the settings
+line ("pauses inside the takes ... N of M quiet stretches cut").
+
+**5.1 sound: a clean stereo copy for Premiere** (night 6). A RAW whose sound has more than two channels sounds like it
+has an echo in Premiere (the surround channels are mixed in). `1_edit.xml` then plays `extras\media\raw_stereo.mp4`
+on V1 and A1: the RAW's picture copied as it is (the same frames: every frame number stays valid) and one stereo track
+-- left = front left + centre x 0.707, right = front right + centre x 0.707 (the dialogue is in the centre channel),
+the surround and LFE channels left out; one constant gain only when the mix would clip (peak at most -1 dBFS; laptop009:
+-12.5 dBFS, no gain). The analysis, the caches and `cutlist.json` keep the RAW itself. If the copy cannot be made, the
+RAW is used as it is and the run warns.
 
 **Linked clips.** Every V1 clip imports linked to its own A1 clip (the `<link>`s Premiere writes in its own XML), so
 moving, trimming or cutting a clip takes its audio with it. Each V1 clip is linked to the A1 clip it overlaps most;
@@ -308,6 +361,16 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   back the rule before night 3: every clip whose framing does not show the person speaking is moved onto them, and
   `XML PERSON` fails any clip that does not show them -- for an interview where the competitor shows the listener's
   reaction and you want the speaker (the Zendaya interview: 5 stretches moved that way, most of the edit).
+  **A competitor with one fixed crop, wider than your template** (night 6, your laptop013 fix -- a rule written, OFF
+  by default): laptop013's competitor shows the whole video through one crop (23-77 % of the picture's width, the same
+  on every clip: it chose no subject shot by shot); your template shows 45 % of the width, so centring that crop cut
+  the person in half -- you moved 5 of its 6 clips (-361 px onto the man, +228 px onto the woman's close-ups), each
+  shot on its own person. A competitor that frames each shot itself is right as it is (you kept 12 of laptop010's 13
+  clips as the tool framed them, and every clip of laptop009 and mike005). `export_xml_edl.CENTRE_FIXED_CROP` (off)
+  centres each RAW shot of such a competitor on the single person its crop shows (the shots carried by the clip that
+  plays them: the XML's shot split gives each its framing); on laptop013 the faces found reproduced one of your moves
+  (the man: -276 px for your -361) but also moved your centred wide shot, and the woman's close-ups were not found, so
+  it stays off until the person detection is better.
 * **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
   of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
   size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
@@ -438,6 +501,9 @@ finished videos: hence 0.05.
 
 ### Silence removal (`--remove-silence` turns it on; RAW-only runs: `--keep-silence` turns it off)
 
+(The default since night 6 cuts only the clear pauses inside the competitor's takes and keeps its cut points and
+ending: see *Pauses inside the takes are cut out, carefully* under *Premiere*. This section is the full removal.)
+
 * **Silence across a cut, too.** The end of one clip and the start of the next together never keep more silence
   than `--pad-after` + `--pad-before` (0.08 s): longer, both sides are trimmed, however short the pause (the 0.3 s
   `--min-silence` is for pauses inside a clip). The check on the final XML fails the run on a cut with more
@@ -560,7 +626,21 @@ fewer, at most 20; median 0.53 s on screen; no full stops or commas; 60 % start 
 * **Another video's stretch** (see *B-roll*): the competitor's audio there is transcribed and captioned; the stretch
   is the only gap the captions keep.
 
-**The captions**, one of three ways (chosen per clip, the end summary says which):
+**Never by a one-word competitor's pieces** (night 6). A competitor that captions about one word at a time (under 1.6
+words a caption on average, or more than half single words: mike005, 1.1) is regrouped as before, but its caption
+changes are no longer a hint for the grouping -- they pushed a break between nearly every two words ("fry | cook
+prison | guard maybe" where you wrote "fry cook | prison guard | maybe you're"); the captions are grouped by what is
+said, in your style. A competitor whose captions look like yours is still followed (deadpool: 45 of your 60 captions
+exactly -- grouped from the speech instead, 11; laptop009: 24 of 52 against 7).
+
+**False starts are left out** (night 6, as you do): a phrase of 2-3 words said again right after itself (within
+0.6 s) loses its first copy -- video2's "on the... on the subject" -> "on the subject", "from the the captain" -> "from
+the captain" -- and so does a short or weak word or an interjection said twice in a row within 0.3 s ("And and then"
+-> "And then", mike005's "Yeah, yeah, success" -> "Yeah, success"). Kept: a repeat across a sentence end ("It's a lot.
+It's a lot of pig"), a word said three times or more ("nah | nah | nah"), a longer word said twice ("This | this is",
+"very, very lonely": your keys keep them). Each one is listed under *Caption stutters kept once*.
+
+The three ways (chosen per clip, the end summary says which):
 
 * **follow**: the competitor's captions are already in your style (mixed case, 2–4 words). Its caption breaks and
   timing are kept, with the words heard in place of the words read: a word goes with the caption on screen when it
@@ -769,15 +849,44 @@ existing `3_captions_styled.prproj` (without it the run stops rather than overwr
 **Speed per video:** a `speed.txt` in a video's subfolder holding `125` runs that video with `--speed 125` (it wins
 over a `--speed` after `--`); without one, 100. The summary has a speed column.
 
-`<folder>` holds one subfolder per video with `competitor.mp4` and `raw.mp4` (any video extension). They run one
-after another, each as its own `--premiere --fast` run (`--thorough` for full runs), into a run folder named after
-the subfolder (`<out>\<name>\`, `<name>-2` when that exists) with `1_edit.xml`, `2_captions.srt` and `extras\`. A
-video that fails or crashes never stops the batch. Every run folder works on its own: the RAW and competitor sit in
+`<folder>` holds **one subfolder per RAW**: the RAW and one or more competitors cut from it, **any file names** and
+any video extension (`.mp4`, `.mov`, `.mkv` ...) -- the RAW is the file named `raw.*` if there is one, else the
+**longest** video; every other video in the subfolder is a competitor and gets its own edit:
+
+```
+C:\Users\gvida\Desktop\todo\
+    South Park S13E12\              one RAW, two competitors: two edits
+        South Park S13E12.mkv         (the longest video: the RAW)
+        competitor1.mp4
+        tiktok clip 2.mov
+        speed.txt                     (optional: "125" -- every competitor of this folder at 125 %)
+    Anchorman\                      one RAW, one competitor
+        Anchorman.2004.1080p.mp4
+        short.mp4
+```
+
+Each competitor runs as its own `--premiere --fast` run (`--thorough` for full runs), one after another, into a run
+folder named after the subfolder (`<out>\<subfolder>\`; with several competitors `<out>\<subfolder>_<competitor
+name>\`; `-2` when that exists) with `1_edit.xml`, `2_captions.srt` and `extras\`. **The RAW is analysed once**: the
+runs share the stage caches (`--work`), and a RAW the first run had to convert (`raw_ae.mp4`: a 5.1 AC3 track, an
+odd container) is taken from that run's media folder for the next competitors, so it is not converted again.
+**Before anything runs, every pair gets the wrong-input check** (above) and every problem is listed at the start
+("THESE VIDEOS WILL NOT RUN -- the inputs look wrong ...", the lengths and sizes of both files), so you can fix them
+before you leave; those pairs are skipped, the others run. **A video that fails or crashes never stops the batch.**
+While a video runs the console shows its progress and the whole batch's time left every 30 s (`video 2 of 5
+(Anchorman): S5.2 visual search: 40 % -- about 3 min left; whole run: about 6 min left -- whole batch: about 40 min
+left`; between two of the run's progress lines -- a stage without a counter -- the run's time left counted down),
+estimated from the lengths and the earlier runs on this machine and corrected by how the batch goes. Every run
+folder works on its own: the RAW and competitor sit in
 its `extras\media\` (a hard link on the same drive: no copy, no extra space -- also for a RAW over 2 GB, which was
 referenced in `input\` before), so you can move or delete the input folder afterwards. At the end (and after every
-video) `<out>\batch_summary.md` / `.json`: per video the run folder, the run time, PASS / FAIL (the Premiere
-deliverables' hard checks and coverage, as check-all; the recreation criteria c2-c5 are not part of it), why it
-failed, whether 1_edit.xml uses any media outside its run folder, and what to check by hand.
+video) `<out>\batch_summary.md` / `.json`, in plain words: first *Where your edits are* -- one line per video, "done.
+Your files: `<run folder>` -- import 1_edit.xml and 2_captions.srt into Premiere" or "FAILED: <why>. Its folder: ...
+(log: ...)" -- why in the run's own words ("the run stopped (exit 2): the competitor's scenes are not in this RAW:
+..."; a crash: its last line) --, then what did not run and why, a table (speed, run folder, run time, PASS / FAIL -- the Premiere
+deliverables' hard checks and coverage, as check-all; the recreation criteria c2-c5 are not part of it --, whether
+1_edit.xml uses any media outside its run folder) and per video what to check by hand. The console ends with the
+same list: each video, PASS / FAIL and its folder.
 
 ### Learn from your finished videos (`learn <folder>`)
 
@@ -1228,10 +1337,23 @@ cd tools/match_cuts
 ../../.venv/bin/python -m match_cuts check-all                    # every case (Windows: ..\..\.venv\Scripts\python)
 ../../.venv/bin/python -m match_cuts check-all --cases deadpool   # some of them
 ../../.venv/bin/python -m match_cuts check-all --rescore          # score the newest runs again, no new run
+../../.venv/bin/python -m match_cuts check-all --old-way          # every case thorough + --compare-fast, every check
+#                                                                   and score (as before night 6)
 ../../.venv/bin/python -m match_cuts check-all --full-size        # the cases on their full-size originals (case.json
 #                                                                   full_raw, on this machine): fixes that only work on
 #                                                                   the smaller committed copy fail here
 ```
+
+**New-style and old cases** (the default since night 6; `--old-way` runs everything as before). The cases made with
+your current rules -- the default frame, the competitor's cuts, 100 % (`case.json` `"style": "new"`: mike005-fixed,
+laptop009-fixed, laptop010-fixed, laptop013-fixed, video021-fixed, deadpool, zendaya) -- run **thorough** and are
+**scored** against your fixes (captions and cuts). The older cases (video1-5, video017/018/020-fixed,
+spiderman-school, zendaya-age, laptop004-fixed: made in your older style) run **`--fast` with the hard checks only**
+(a valid Premiere XML, no flash, the sound in sync, no transition ... -- no caption or cut score: their keys follow
+rules you no longer use). Every run gets `--check-determinism`, `--quick-checks` (the After Effects recreation
+checks c2-c5 and 9.9 are not run: the scorecard never used them, and they took 5-10 minutes a video) and
+`--skip-compare` (no compare.mp4: 0.5-1 minute a video); `--old-way`:
+thorough with `--compare-fast`, every check, every score, for every case.
 
 A case is a folder with the competitor and RAW (or `case.json` naming them) and, for a video you corrected, the
 answer key: your `answer.srt` and your edit's timeline (`answer_edit.xml`, or `answer_edit.json` pieces). Each row
@@ -1258,6 +1380,14 @@ the conftest sets `MATCH_CUTS_NO_AE=1` (After Effects counts as not installed: n
 opens the After Effects of the machine), text is drawn with the DejaVu fonts (the system's on Linux, matplotlib's copy
 elsewhere), and what needs fork / `/proc` (Linux), ffmpeg's `flite` source or OpenTimelineIO (no wheel for Python 3.14)
 is skipped where missing.
+
+`tests/test_night6.py` checks night 6: a piece starting on a RAW shot change keeps its own moment while the take's
+sound runs on, the 1.5-frame take limit, the stereo copy of a 6-channel video (every frame kept, two channels), the
+careful pause cuts (a real pause cut with the pads kept; a short pause, a few frames, a cut point, the start and the
+ending left alone), the wrong-input check (a movie as the competitor, swapped files, the same video; every test case
+passes it) and the "not in this RAW" stop, the run clock's time left, a batch folder with one RAW and two competitors
+of any name, the check-all split, the false starts left out of the captions (and the repeats your keys keep), and the
+fixed-crop framing rule (off by default).
 
 `tests/test_caption_spans.py` checks the Premiere competitor captions: exact caption timing on a synthetic clip in
 the real competitor's style (pop-in, highlighted word, word-by-word growth, the same word twice, `*laughs*`), the

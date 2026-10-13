@@ -1324,6 +1324,70 @@ def seq_frame_of(comp_fps: Fraction, seq_fps: Fraction):
     return lambda k: to_frame(float(Fraction(int(k)) / Fraction(comp_fps)), seq_fps)
 
 
+ONE_WORD_MEAN = 1.6        # night 6: a competitor that captions about one word at a time (under this many words a
+ONE_WORD_SHARE = 0.5       # caption on average, or this share of single words: mike005, 1.1) -- its caption changes
+#                            are no hint for the grouping: the captions are grouped by what is said ("fry | cook prison
+#                            | guard maybe" where you wrote "fry cook | prison guard | maybe you're"). A competitor whose
+#                            captions look like yours is still followed (deadpool: 45 of your 60 captions exactly; 11
+#                            when grouped from the speech; laptop009 24 of 52 against 7)
+
+
+STAMMER_GAP_S = 0.6        # a phrase of 2-3 words said again within this: its first copy is a false start ...
+STAMMER_WORD_GAP_S = 0.3   # ... a short / weak word or an interjection said twice within this: a stammer
+
+
+def drop_stammers(words: Sequence[Word]) -> tuple[list[Word], list[dict]]:
+    """Night 6 (your video2: "word on the... on the subject" -> "on the subject"; mike005: "Yeah, yeah, success" ->
+    "yeah | success"): a false start said again is left out of the captions -- the first copy of a phrase of 2-3
+    words said again right after itself (within STAMMER_GAP_S), and of a short or weak word / an interjection said
+    twice in a row (within STAMMER_WORD_GAP_S: "and and then", "as as today's"). Kept: a repeat across a sentence
+    end ("It's a lot. It's a lot of pig"), a word said three times or more ("nah | nah | nah"), a longer word said
+    twice ("This | this is", "very, very lonely": your keys keep them). Returns (the words, [{'time', 'was', 'now',
+    'words'}])."""
+    ws = list(words)
+    rows: list[dict] = []
+
+    def tok(w: Word) -> str:
+        return norm(w.text)
+
+    i = 0
+    while i < len(ws):
+        cut = 0
+        for n in (3, 2, 1):
+            a, b = ws[i:i + n], ws[i + n:i + 2 * n]
+            if len(b) < n or not all(tok(w) for w in a) or [tok(w) for w in a] != [tok(w) for w in b]:
+                continue
+            if any(sentence_end(w.raw or w.text) for w in a):
+                continue                                     # a sentence said again: deliberate
+            gap = float(b[0].start) - float(a[-1].end)
+            if n == 1:
+                x = tok(a[0])
+                short = len(re.sub(r"[^a-z]", "", x)) <= 3 or is_weak(x) or is_interjection(x)
+                thrice = (i + 2 < len(ws) and tok(ws[i + 2]) == x) or (i > 0 and tok(ws[i - 1]) == x)
+                if not short or thrice or gap > STAMMER_WORD_GAP_S:
+                    continue
+            elif gap > STAMMER_GAP_S:
+                continue
+            cut = n
+            break
+        if not cut:
+            i += 1
+            continue
+        ctx_ws = ws[max(0, i - 2):i + 2 * cut + 2]
+        was = " ".join(w.raw or w.text for w in ctx_ws)
+        gone = ws[i:i + cut]
+        first, kept = (gone[0].raw or gone[0].text), ws[i + cut]
+        if first[:1].isupper() and (kept.raw or kept.text)[:1].islower():     # "And and then": "And then"
+            r = kept.raw or kept.text
+            ws[i + cut] = dataclasses.replace(kept, raw=r[:1].upper() + r[1:])
+        del ws[i:i + cut]
+        rows.append({"time": round(float(gone[0].start), 3), "was": was,
+                     "now": " ".join(w.raw or w.text for w in ws[max(0, i - 2):i + cut + 2]),
+                     "words": [w.raw or w.text for w in gone], "start_tc": ms_tc(int(round(gone[0].start * 1000))),
+                     "end_tc": ms_tc(int(round(float(gone[-1].end) * 1000)))})
+    return ws, rows
+
+
 def _caption_dict(c: Caption, fps: Fraction) -> dict:
     d = {"text": c.text, "start": c.start, "end": c.end, "mode": c.mode,
          "start_tc": ms_tc(frame_ms(c.start, fps)), "end_tc": ms_tc(frame_ms(c.end, fps))}
@@ -1594,6 +1658,8 @@ def run_captions(ctx) -> dict:
     if mine and y16 is not None and len(y16):
         words = _time_new_words(y16, words, mine, warn)
     res["words_final"] = [[w.raw or w.text, round(w.start, 3), round(w.end, 3)] for w in words]    # (debug)
+    words, stammers = drop_stammers(words)          # a false start said again: left out, as you do (night 6)
+    res["stammers"] = stammers
 
     # another video's stretches: the words the competitor's audio says there (as said, with their punctuation)
     from . import caption_rules
@@ -1627,21 +1693,26 @@ def run_captions(ctx) -> dict:
                           Timeline.from_xml(xml, [{"a": st["a"], "b": st["b"], "t0": st["t0"]} for st in ov]))
         except Exception as e:  # noqa: BLE001 - the competitor's captions copied the earlier way then
             warn(f"the competitor's captions could not be matched to my edit ({type(e).__name__}: {e})")
-    if follow_tls is not None and res["competitor_style"]["follow"]:
+    follow = mode == "competitor" and bool(res["competitor_style"]["follow"])
+    if follow_tls is not None and follow:
         caps, res["competitor_notes"] = caption_style.follow_competitor(comp_spans, words, follow_tls[0],
                                                                         follow_tls[1], comp_fps, fps)
         clip_to_stretches(caps, ov)
         styled = True
         res["copied"] = [_caption_dict(c, fps) for c in caps]        # before the hard rules (debug)
-    elif mode == "competitor" and (not words or (res["competitor_style"]["follow"] and follow_tls is None)):
+    elif mode == "competitor" and (not words or (follow and follow_tls is None)):
         caps, cnotes = competitor_copy(spans, words, span_fps, span_seq, fps)
         res["competitor_notes"] = cnotes
         clip_to_stretches(caps, ov)
         res["copied"] = [_caption_dict(c, fps) for c in caps]        # before the hard rules (debug)
         res["short"] = [_caption_dict(c, fps) for c in caps if (c.end - c.start) / float(fps) < 0.1]
     elif words:
+        cst = res.get("competitor_style") or {}
+        one_word = "mean_words" in cst and (float(cst.get("mean_words") or 0.0) < ONE_WORD_MEAN or
+                                            float(cst.get("single") or 0.0) > ONE_WORD_SHARE)
+        hint = mode == "competitor" and follow_tls is not None and not one_word      # (night 6: mike005)
         breaks = (caption_style.competitor_breaks(comp_spans, words, follow_tls[0], follow_tls[1], comp_fps)
-                  if mode == "competitor" and follow_tls is not None else set())
+                  if hint else set())
         caps = caption_style.style_captions(words, fps, n_seq,
                                             cuts=sorted(set(cuts) | {st["a"] for st in ov} | {st["b"] for st in ov}),
                                             mode="competitor" if mode == "competitor" else "voice",
@@ -1666,7 +1737,7 @@ def run_captions(ctx) -> dict:
         if mode == "competitor" and not heard_ok:
             res["notes"].append("no transcript: competitor captions are split only where their own text ends a "
                                 "sentence, and garbled readings are listed rather than replaced")
-    res["stutters"] = list((res.get("rules") or {}).get("stutters") or [])
+    res["stutters"] = list(res.get("stammers") or []) + list((res.get("rules") or {}).get("stutters") or [])
     # ---- timed to the speech of the final edit: each caption starts when its first word is spoken ----
     sm = getattr(ctx, "speech", None)
     if caps and sm is not None and not voiceover and xml.exists():

@@ -4382,6 +4382,11 @@ def _box(ctx: Any) -> Box | dict | None:
     return (ctx.cutlist.layout or {}).get("box")
 
 
+QUICK_SKIPPED = frozenset({"s9_2b_temporal", "c2_cuts", "s9_2c_refit", "s9_3_visual", "s9_5_audio",
+                           "c4_speed_framing"})   # --quick-checks (check-all): the frame-exact recreation checks
+#                                               (s9_4 stays: it writes debug/cuts, which s9_8 counts as a deliverable)
+
+
 def _run_check(name: str, fn: Callable[[], dict]) -> dict:
     import time
     t0 = time.perf_counter()
@@ -4509,8 +4514,15 @@ def verify_all(ctx: Any) -> dict:
     raw_name = Path(ctx.raw_info.path).name
     checks: dict[str, dict] = {}
     extra: dict[str, dict] = {}
+    quick = bool(getattr(cfg, "quick_checks", False))
 
-    checks["s9_1_coverage"] = _run_check("s9_1_coverage", lambda: check_coverage(segs, n, cl.layout))
+    def _check(name: str, fn: Callable[[], dict]) -> dict:
+        if quick and name in QUICK_SKIPPED:
+            return {"status": "not_available", "summary": "not run (--quick-checks: check-all scores the Premiere "
+                    "deliverables, not the After Effects recreation)", "failures": []}
+        return _run_check(name, fn)
+
+    checks["s9_1_coverage"] = _check("s9_1_coverage", lambda: check_coverage(segs, n, cl.layout))
 
     box_fn = frame_box_fn(segs, cl.layout, _box(ctx), _full_canvas(cl), n)
     allowed = _allowed_fn(ctx, box_fn)
@@ -4569,10 +4581,10 @@ def verify_all(ctx: Any) -> dict:
             res["raw_only_overlays"] = rov_lines
         return res
 
-    checks["s9_2b_temporal"] = _run_check("s9_2b_temporal", s9_2b)
-    extra["cuts"] = _run_check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg,
+    checks["s9_2b_temporal"] = _check("s9_2b_temporal", s9_2b)
+    extra["cuts"] = _check("c2_cuts", lambda: check_cuts(segs, comp_fps, raw_fps, raw_wh, n_raw, get_scorer(), cfg,
                                                              labels=temporal_state.get("labels"), box_centre=centre))
-    checks["s9_2c_refit"] = _run_check("s9_2c_refit", lambda: check_refit(segs, ctx.fm, comp_fps, raw_fps, raw_wh, n_raw,
+    checks["s9_2c_refit"] = _check("s9_2c_refit", lambda: check_refit(segs, ctx.fm, comp_fps, raw_fps, raw_wh, n_raw,
                                                                            get_scorer_ov(), cfg, n, box_centre=centre))
 
     # s9_2: AE semantics from the plan and from the mock-run record
@@ -4604,7 +4616,7 @@ def verify_all(ctx: Any) -> dict:
                             evidence_memo=ev_memo)
 
     ev_memo: dict = {}
-    p2, m2 = _run_check("s9_2_plan", s9_2_plan), _run_check("s9_2_mock", s9_2_mock)
+    p2, m2 = _check("s9_2_plan", s9_2_plan), _check("s9_2_mock", s9_2_mock)
     checks["s9_2_ae_sim"] = merge_ae_sim(p2, m2)
 
     # s9_3 visual + s9_4 cut images on the match-geometry recreation
@@ -4635,14 +4647,14 @@ def verify_all(ctx: Any) -> dict:
         scores = res.pop("scores")
         np.save(Path(cfg.work) / "verify_zncc.npy", scores.astype(np.float32))
         res["scores_file"] = str(Path(cfg.work) / "verify_zncc.npy")
-        pf = _run_check("s9_3_preview_file", lambda: preview_file(desc))
+        pf = _check("s9_3_preview_file", lambda: preview_file(desc))
         res["preview_file"] = {k: v for k, v in pf.items() if k != "failures"}    # failures listed once, below
         res["failures"] = list(res.get("failures", [])) + [f"delivered preview: {f}" for f in pf.get("failures", [])]
         res["status"] = aggregate([res["status"], pf["status"]])
         res["summary"] = f"{res['summary']}; {pf.get('summary')}"
         return res
 
-    checks["s9_3_visual"] = _run_check("s9_3_visual", s9_3)
+    checks["s9_3_visual"] = _check("s9_3_visual", s9_3)
 
     def s9_4() -> dict:
         src, _desc = get_src()
@@ -4650,7 +4662,7 @@ def verify_all(ctx: Any) -> dict:
         return write_cut_images(cut_frames(segs), n, comp_src.bgr, src.bgr, cfg.debug_dir / "cuts",
                                 frame_label=segment_labeler(segs))
 
-    checks["s9_4_cut_images"] = _run_check("s9_4_cut_images", s9_4)
+    checks["s9_4_cut_images"] = _check("s9_4_cut_images", s9_4)
     if isinstance(src_holder.get("src"), RenderedFrames):
         src_holder["src"].close()
 
@@ -4662,7 +4674,7 @@ def verify_all(ctx: Any) -> dict:
         res["audio_source"] = desc
         return res
 
-    checks["s9_5_audio"] = _run_check("s9_5_audio", s9_5)
+    checks["s9_5_audio"] = _check("s9_5_audio", s9_5)
 
     def c4() -> dict:
         measure = None
@@ -4671,19 +4683,19 @@ def verify_all(ctx: Any) -> dict:
                                       raw_fps, n_raw, cfg)
         return check_speed_framing(segs, ctx.fm, comp_fps, raw_fps, raw_wh, _box(ctx), comp_wh, cfg, measure=measure)
 
-    extra["framing"] = _run_check("c4_speed_framing", c4)
+    extra["framing"] = _check("c4_speed_framing", c4)
 
-    extra["mock"] = dict(PREMIERE_NA) if premiere else _run_check(
+    extra["mock"] = dict(PREMIERE_NA) if premiere else _check(
         "c6_mock", lambda: check_mock(ctx.plan, ctx.mock, main_fps, n_main,
                                       Path(ctx.paths.get("jsx", cfg.out)).parent if ctx.paths.get("jsx") else cfg.out,
                                       raw_name))
     main_w, main_h = ctx.main_size or (int(comp_wh[0]), int(comp_wh[1]))
     small = (360, max(2, int(round(360 * main_h / main_w / 2)) * 2))
-    checks["s9_6_ae_render"] = dict(PREMIERE_NA) if premiere else _run_check("s9_6_ae_render", lambda: check_ae_render(
+    checks["s9_6_ae_render"] = dict(PREMIERE_NA) if premiere else _check("s9_6_ae_render", lambda: check_ae_render(
         ctx.env, ctx.paths.get("aep"), ctx.paths.get("preview"), n_main, main_fps, small,
         Path(cfg.work) / "aerender", cfg, plan=getattr(ctx, "plan", None), time_check_path=_ae_time_check_path(ctx)))
-    checks["s9_7_determinism"] = _run_check("s9_7_determinism", lambda: check_determinism(ctx))
-    checks["s9_8_deliverables"] = _run_check("s9_8_deliverables",
+    checks["s9_7_determinism"] = _check("s9_7_determinism", lambda: check_determinism(ctx))
+    checks["s9_8_deliverables"] = _check("s9_8_deliverables",
                                              lambda: check_deliverables(ctx, n_cuts=len(cut_frames(segs))))
 
     exact_note = "" if main_fps == comp_fps else (

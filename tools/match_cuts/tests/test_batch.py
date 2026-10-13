@@ -71,7 +71,7 @@ def test_every_video_into_its_own_folder_a_crash_does_not_stop_the_batch_and_the
     assert not rows["b second"]["pass"] and rows["b second"]["exit"] == 2
     assert rows["c outside"]["media_outside"] and rows["c outside"]["pass"]
     md = (out / "batch_summary.md").read_text(encoding="utf-8")
-    assert "**2 passed, 1 failed**" in md and "d no raw: no raw.mp4" in md and "OUTSIDE: 1 file(s)" in md
+    assert "**2 passed, 1 failed**" in md and "d no raw: only one video" in md and "OUTSIDE: 1 file(s)" in md
     assert (Path(rows["a first"]["run_dir"]) / "extras" / "batch_console.log").is_file()
 
 

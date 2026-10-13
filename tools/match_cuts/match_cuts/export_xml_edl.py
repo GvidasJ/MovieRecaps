@@ -1275,6 +1275,9 @@ class PremiereClip:
     person_span: tuple[int, int] | None = None   # the source range it plays in the final edit (sequence-rate frames):
                                                  # the speech-safe cuts may extend it (premiere_clips(silence=))
     dissolve_frames: int = -1        # its cross dissolve's length (sequence frames); -1: the event's (ev.dissolve_in)
+    shot_framing: list = field(default_factory=list)   # [(source tick, Sim)]: from that source moment on (a RAW shot
+    #                                                    change the XML splits the clip at) the clip shows this framing
+    #                                                    (night 6: a fixed-crop competitor, each shot on its person)
 
     @property
     def label(self) -> str:
@@ -1705,8 +1708,10 @@ def no_transitions(cl: Cutlist) -> tuple[Cutlist, list[dict]]:
 
 
 TAKE_JUMP_S = 0.1           # --premiere: a piece whose RAW time continues the take before it within this -- and within
-TAKE_JUMP_FRAMES = 2.5      # this many RAW frames (a RAW frame or two skipped or shown twice at the cut) -- plays on
-#                             that take's line (laptop009: +-42 ms at 23.976 fps; take_jump_s)
+TAKE_JUMP_FRAMES = 1.5      # this many RAW frames (a RAW frame skipped or shown twice at the cut) -- plays on that
+#                             take's line (laptop009: +-42 ms at 23.976 fps; take_jump_s). Night 6: 1.5, not 2.5 --
+#                             video3's 85 ms (2 frames at 23.976) was a real cut of the competitor; the cut score too
+#                             calls a jump of more than 1.5 RAW frames a cut
 TAKE_SLIVER_S = 0.25        # a piece this short (at 100 %) the cut list doubts (uncertain, or its measured speed far
 TAKE_NOISE_S = 2.5          # off) showing the RAW this near the take's line (a still picture matched anywhere near:
 TAKE_GAP_S = 1.5            # laptop009's S04-S11, 8 pieces of 1-9 frames over 0.9 s) -- a run of them at most this long
@@ -1716,7 +1721,7 @@ TAKE_SPEED_OFF = 0.35       # a measured speed this far (relative) from the piec
 
 def take_jump_s(raw_fps: Any) -> float:
     """The biggest jump of the RAW time at a cut inside one take: TAKE_JUMP_S, at most TAKE_JUMP_FRAMES RAW frames
-    (0.1 s at 23.976 / 25 fps, 83 ms at 30, 42 ms at 60)."""
+    (63 ms at 23.976 fps, 60 ms at 25, 50 ms at 30, 25 ms at 60)."""
     try:
         rf = float(Fraction(raw_fps))
     except (TypeError, ValueError, ZeroDivisionError):
@@ -1724,7 +1729,8 @@ def take_jump_s(raw_fps: Any) -> float:
     return min(TAKE_JUMP_S, TAKE_JUMP_FRAMES / rf) if rf > 0 else TAKE_JUMP_S
 
 
-def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
+def join_takes(cl: Cutlist, shot_changes_s: Sequence[float] | None = None, freezes: bool = True
+               ) -> tuple[Cutlist, dict[int, int], list[dict]]:
     """--premiere (night 5, laptop009): the pieces of one continuous RAW take play as one take. A sped-up competitor
     full of tiny cuts gives a cut list of short pieces whose RAW times meet a RAW frame or so apart -- skipped or shown
     twice (the competitor's frame grid against the RAW's), at a speed measured a little off on a short piece -- or a
@@ -1735,6 +1741,15 @@ def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
     * a RAW piece whose RAW time continues the take before it within take_jump_s (either way) plays on the take's
       line -- from the very RAW moment the take reaches there, at the take's speed (keep_speed then stretches the
       whole take alike: its sound continues, nothing repeats or skips);
+    * ... except a piece that starts on one of the RAW's own shot changes (``shot_changes_s``, RAW seconds; within a
+      RAW frame): the competitor cut there because the footage cuts, so it keeps the competitor's timing -- it starts
+      on its own RAW moment -- and the piece before ends exactly there (its length at 100 % follows: the sound still
+      runs on, and no framing shows a frame of the other shot; night 6, laptop004's XML FLASH: moved onto the line,
+      S03 started 27 ms early and S01-S02's framing showed 2 frames of the next shot);
+    * a freeze of the competitor (one RAW frame held) on the frame the take has reached, within take_jump_s, plays on
+      as part of the take (``freezes``: the default -- every picture its own sound; Premiere's XML cannot hold a
+      freeze, so it played on at 100 % anyway, from its own frame a tick off the take's: night 6, laptop013's S03 /
+      S11, a 17 ms skip on V1 and A1 at both ends; your fix plays that take straight on);
     * a run of short pieces the cut list doubts (uncertain, or a measured speed TAKE_SPEED_OFF off; TAKE_SLIVER_S
       each, showing the RAW within TAKE_NOISE_S of the take's line, TAKE_GAP_S in all) is played over by the take,
       with the take's framing; a piece after the run that continues the take's line then continues it, else it is
@@ -1794,18 +1809,81 @@ def join_takes(cl: Cutlist) -> tuple[Cutlist, dict[int, int], list[dict]]:
             t.box, t.flip_h = copy.deepcopy(a.box), a.flip_h
         return t
 
+    changes = sorted(float(c) for c in (shot_changes_s or ()))
+    frame_s = 1.0 / rf if rf > 0 else 0.0
+
+    def on_shot_change(t: float) -> bool:       # RAW time t lies on one of the RAW's shot changes (within a RAW frame)
+        j = bisect.bisect_left(changes, t - frame_s - 1e-9)
+        return j < len(changes) and abs(changes[j] - t) <= frame_s + 1e-9
+
+    def ending_at(a: Segment, t: float) -> Segment | None:     # a, its start where it is, ending on RAW time t
+        n = int(a.comp_out) - int(a.comp_in)
+        v = (t - float(a.raw_in_seconds)) * cf / n if n > 0 else 0.0
+        if v <= 0 or abs(v / float(a.speed) - 1.0) > TAKE_SPEED_OFF:
+            return None                         # (a piece too short to take up the difference: on the line instead)
+        t2 = copy.deepcopy(a)
+        t2.speed = v
+        return t2
+
+    def own_start(b: Segment, a: Segment) -> Segment:          # b on its own RAW moment, at the take's speed
+        t = copy.deepcopy(b)
+        if alike(a, b):
+            t.speed = float(a.speed)
+        au = dict(t.audio or {})
+        if au.get("line"):
+            au["line"] = None                   # the take's own sound plays under it
+        t.audio = au
+        return t
+
+    def frozen(s: Segment) -> bool:             # one RAW frame held (time remap keys on one moment / speed 0)
+        if s.type != "raw" or s.raw_in_seconds is None:
+            return False
+        ks = s.time_remap_keys or []
+        if ks:
+            ts = [float(k["raw_seconds"]) for k in ks]
+            return max(ts) - min(ts) < 1e-6
+        return abs(float(s.speed)) <= 1e-6
+
+    def played_on(b: Segment, a: Segment) -> Segment:          # a freeze on the take's frame: the take runs on
+        t = copy.deepcopy(b)
+        t.raw_in_seconds = round(line(a, int(b.comp_in)), 9)
+        t.raw_in_frame = int(math.floor(float(t.raw_in_seconds) * rf + 1e-6))
+        t.raw_in_interval = _line_interval(a, int(b.comp_in), cf)
+        t.speed, t.speed_measured = float(a.speed), float(a.speed)
+        t.time_remap_keys, t.time_mode, t.retime = [], "stretch", "none"
+        au = dict(t.audio or {})
+        if au.get("line"):
+            au["line"] = None                   # the take's own sound plays under it
+        t.audio = au
+        return t
+
     out = list(segs)
     take: dict[int, int] = {}
     done: list[dict] = []
     i = 0
     while i < len(out) - 1:
         a, b = out[i], out[i + 1]
+        if (freezes and plain(a) and float(a.speed) > 0 and frozen(b) and int(b.comp_in) == int(a.comp_out)
+                and abs(float(b.raw_in_seconds) - line(a, int(b.comp_in))) <= tol + 1e-9):
+            jump = float(b.raw_in_seconds) - line(a, int(b.comp_in))
+            out[i + 1] = played_on(b, a)
+            take[int(b.id)] = take.get(int(a.id), int(a.id))
+            done.append({"segment": int(b.id), "take": take[int(b.id)], "jump_s": round(jump, 4),
+                         "how": "freeze played on"})
+            i += 1
+            continue
         if not meets(a, b):
             i += 1
             continue
         jump = float(b.raw_in_seconds) - line(a, int(b.comp_in))
         if abs(jump) <= tol + 1e-9:
-            if (abs(jump) > 1e-6 or (abs(float(b.speed) - float(a.speed)) > 1e-9 and alike(a, b))
+            a2 = (ending_at(a, float(b.raw_in_seconds)) if changes and abs(jump) > 1e-6
+                  and on_shot_change(float(b.raw_in_seconds)) else None)
+            if a2 is not None:                  # b starts on a RAW shot change: the competitor's timing, a ends there
+                out[i], out[i + 1] = a2, own_start(b, a)
+                done.append({"segment": int(b.id), "take": take.get(int(a.id), int(a.id)), "jump_s": round(jump, 4),
+                             "how": "on a shot change"})
+            elif (abs(jump) > 1e-6 or (abs(float(b.speed) - float(a.speed)) > 1e-9 and alike(a, b))
                     or (b.audio or {}).get("line")):     # (zendaya's S20: on the line, its sound 91 ms behind)
                 out[i + 1] = on_line(b, a, False)
                 done.append({"segment": int(b.id), "take": take.get(int(a.id), int(a.id)), "jump_s": round(jump, 4),
@@ -2124,6 +2202,204 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
         c.person_note = (f"re-framed to show {who} (RAW x {cx:.0f}) over the whole take its pieces play -- the "
                          f"picture moved {dx:+.0f} px sideways, zoom kept")
         moved += 1
+    return moved
+
+
+CENTRE_FIXED_CROP = False   # night 6: centre each shot of a fixed-crop competitor on its person (_subject_in_narrow_window)
+#                             -- OFF: on laptop013 the faces found reproduced 1 of your 5 moves (the man, -276 px for
+#                             your -361) and moved your centred wide shot (+286 px); the woman's close-ups were not
+#                             found. Kept for a better person detection.
+NARROW_OVERFLOW = 0.08      # the competitor's window wider than the template window by this share of it ...
+SUBJECT_MOVE_PX = 40.0      # ... a move to centre the person it shows smaller than this is not made
+
+
+def _comp_window_raw_x(c: PremiereClip, layout_box: Box) -> tuple[float, float] | None:
+    """The RAW x range the competitor's own window (its video box) showed of clip ``c`` (rotation 0, unflipped), or
+    None."""
+    if c.seg.flip_h or not c.seg.transform:
+        return None
+    box = _own_box(c.seg) or layout_box
+    try:
+        s = Sim.from_dict(c.seg.transform)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if box is None or s.s <= 0 or abs(float(s.theta_deg)) > 1e-6:
+        return None
+    return (float(box.x) - s.tx) / s.s, (float(box.x + box.w) - s.tx) / s.s
+
+
+FIXED_CROP_SCALE = 0.005    # the competitor's framing of every clip within this share of one zoom ...
+FIXED_CROP_PX = 8.0         # ... and this many of its pixels of one position: one fixed crop for the whole video
+#                             (laptop013: 0.4 px as matched, 4 px in the export plan; mike005, the nearest framed per
+#                             shot: 15 px)
+
+
+def _fixed_competitor_crop(clips: Sequence[PremiereClip]) -> bool:
+    """The competitor shows the whole video through one fixed crop (laptop013: scale 0.693, x -305.6 on every clip) --
+    it chose no subject shot by shot, so its framing says nothing about whom to show. Two clips or more."""
+    sims = []
+    for c in clips:
+        for e in c.events or [c.ev]:
+            if e.seg.transform and not e.seg.flip_h:
+                try:
+                    sims.append(Sim.from_dict(e.seg.transform))
+                except (KeyError, TypeError, ValueError):
+                    return False
+    if len(sims) < 2:
+        return False
+    s = [x.s for x in sims]
+    mean = sum(s) / len(s)
+    dx, dy = max(x.tx for x in sims) - min(x.tx for x in sims), max(x.ty for x in sims) - min(x.ty for x in sims)
+    fixed = (max(s) - min(s) <= FIXED_CROP_SCALE * mean and dx <= FIXED_CROP_PX and dy <= FIXED_CROP_PX)
+    log.debug("premiere framing: the competitor's framings over %d pieces: zoom spread %.2f %%, x %.1f px, y %.1f px "
+              "-- %s", len(sims), 100 * (max(s) - min(s)) / mean, dx, dy, "one fixed crop" if fixed else "framed per shot")
+    return fixed
+
+
+def _subject_in_narrow_window(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                              win: tuple[float, float, float, float], fps: Fraction, layout_box: Box,
+                              min_move: float, raw_fps: Any = None, changes_s: Sequence[float] | None = None,
+                              fac: int = 1) -> int:
+    """Night 6 (your laptop013 fix): a competitor that shows the whole video through ONE fixed crop
+    (_fixed_competitor_crop: it chose no subject shot by shot) whose window is wider than the template's
+    (NARROW_OVERFLOW): centring its window cut the person in half -- you moved 5 of laptop013's 6 clips (-361 px onto
+    the man, +228 px onto the woman's close-ups), the zoom kept. (A competitor that frames each shot itself keeps its
+    framing: you kept 12 of laptop010's 13 clips, and all of laptop009's and mike005's.) Here each run of clips that
+    share one framing inside one RAW shot moves
+    sideways (zoom kept) to centre the person the competitor's window shows -- the speaker when they are inside it,
+    else the biggest face inside it (never a face outside the competitor's window: its choice of whom to show stays),
+    the median over the run -- when that moves the picture SUBJECT_MOVE_PX or more and the framing next to the run
+    inside the same shot stays the same or min_move px away (--min-move). A clip that plays on across the RAW's own
+    shot changes (laptop013: one take of the competitor over 6 shots of the movie) is first split there, as the XML
+    splits it anyway (Scene Edit Detection), so each shot is framed on its own person; the split is kept only when
+    a piece moved. ``clips`` is changed in place. Returns how many clips moved."""
+    from . import speakers
+    W = raw_wh[0]
+    if not _fixed_competitor_crop(clips):
+        return 0                                 # it frames each shot itself: its framing shows its subject (laptop010)
+    work: list[PremiereClip] = []
+    owner: list[int] = []                         # the clip each piece is a part of
+    cs = sorted(float(c) for c in (changes_s or getattr(sp, "shots", None) or ()))
+    for n, cl in enumerate(clips):
+        ticks = (_shot_change_ticks(cl, cs, Fraction(raw_fps), Fraction(fps), cl.rec_start, cl.rec_end)
+                 if cs and raw_fps is not None and cl.start != -1 and cl.end != -1 and float(cl.speed) > 0
+                 and len(cl.keys) == 1 else [])
+        rest = cl
+        for r in ticks:
+            if rest.rec_start + 1 < r < rest.rec_end - 1:
+                piece, rest = _split_clip(rest, r)
+                work.append(dataclasses.replace(piece, person_span=None))
+                owner.append(n)
+                rest = dataclasses.replace(rest, person_span=None)
+        work.append(rest)
+        owner.append(n)
+    why: dict[str, int] = {}
+    moved = _centre_runs(work, sp, raw_wh, win, fps, layout_box, min_move, why, fac)
+    log.info("premiere framing: the competitor shows the whole video through one fixed crop: %d clip(s), %d shot(s) "
+             "of the RAW in them -- %d centred on the person it shows%s", len(clips), len(work), moved,
+             (" (not moved: " + ", ".join(f"{k} {v}" for k, v in sorted(why.items())) + ")") if why else "")
+    if moved:                                     # each clip keeps its range: its first shot's framing as its own,
+        for n, cl in enumerate(clips):            # the later shots' on shot_framing (split_at_shots applies them)
+            mine = [w for w, o in zip(work, owner) if o == n]
+            if not mine or all(_same_framing(w.keys[0][1], cl.keys[0][1]) for w in mine if w.keys):
+                continue
+            first = mine[0]
+            cl.keys = [(cl.keys[0][0], first.keys[0][1])]
+            cl.shot_framing = [(w.src_in, w.keys[0][1]) for w in mine[1:]]
+            notes = [w.person_note for w in mine if w.person_note]
+            if notes:
+                cl.person_note = notes[0] + (f" (and {len(notes) - 1} more shot(s) of this clip)" if len(notes) > 1
+                                             else "")
+    return moved
+
+
+def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                 win: tuple[float, float, float, float], fps: Fraction, layout_box: Box, min_move: float,
+                 why: dict[str, int] | None = None, fac: int = 1) -> int:
+    """_subject_in_narrow_window's moves on ``clips`` (in place): each run of clips sharing one framing inside one RAW
+    shot centred on its person; ``why``: {reason: runs} of the runs left as they are. Returns how many clips moved."""
+    from . import speakers
+    W = raw_wh[0]
+    moved = 0
+    why = why if why is not None else {}
+
+    def skip(reason: str) -> None:
+        why[reason] = why.get(reason, 0) + 1
+    i = 0
+    while i < len(clips):
+        c0 = clips[i]
+        if len(c0.keys) != 1 or abs(float(c0.keys[0][1].theta_deg)) > 1e-9:
+            i += 1
+            continue
+        sim = c0.keys[0][1]
+        j = i + 1
+        while j < len(clips) and len(clips[j].keys) == 1 and _same_framing(clips[j].keys[0][1], sim) and \
+                sp.same_shot(_last_raw_s(clips[j - 1], fps), _clip_raw_s(clips[j], fps)[0]):
+            j += 1
+        run = clips[i:j]
+        i = j
+        mine = [dataclasses.replace(c, events=[e for e in (c.events or [c.ev]) if e.rec_in * fac < c.rec_end and
+                                               e.rec_out * fac > c.rec_start] or [c.ev]) for c in run]
+        if not _own_framing(mine) or any("framed on the person" in str(c.framing_note) or c.seg.flip_h for c in run):
+            skip("not its own framing")              # (each piece judged by the competitor pieces it plays)
+            continue
+        subjects = []
+        for c in run:
+            cw = _comp_window_raw_x(c, layout_box)
+            f = _person_of(c, sp, fps)
+            if cw is None or f is None or f.how == "nobody":
+                skip("nobody found" if f is not None else "not analysed")
+                continue
+            if (cw[1] - cw[0]) * sim.s < win[2] * (1.0 + NARROW_OVERFLOW):
+                skip("window not narrower")
+                continue                             # the template shows all the competitor's window showed
+            inside_cw = lambda b: cw[0] <= 0.5 * (b[0] + b[2]) <= cw[1]                  # noqa: E731
+            cands = [b for b in ([f.box] if f.box else []) + list(f.boxes) + list(f.others) if b and inside_cw(b)]
+            if not cands:
+                skip("nobody inside its window")
+                continue
+            if len(f.others) > 1:
+                skip("several people")               # a wide shot: you kept laptop013's centred
+                continue
+            first = f.box if (f.box and inside_cw(f.box) and f.how in ("speaker", "biggest face")) else \
+                max(cands, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+            subjects.append((c, first))
+        if not subjects:
+            continue
+        import statistics
+        cx = float(statistics.median([0.5 * (b[0] + b[2]) for _, b in subjects]))
+        log.debug("premiere framing: %s: the person the crop shows at RAW x %.0f, face %.0f x %.0f px", run[0].label,
+                  cx, statistics.median([b[2] - b[0] for _, b in subjects]),
+                  statistics.median([b[3] - b[1] for _, b in subjects]))
+        want = win[0] + win[2] / 2.0 - sim.s * cx
+        lo, hi = win[0] + win[2] - sim.s * W, win[0]                         # the picture still covers the window
+        new = Sim(sim.s, 0.0, min(max(want, lo), hi), sim.ty)
+        if abs(new.tx - sim.tx) < SUBJECT_MOVE_PX or not _covers(new, raw_wh, win, tol=1e-6):
+            skip("already centred" if abs(new.tx - sim.tx) < SUBJECT_MOVE_PX else "would not cover")
+            continue
+        if not all(speakers.shown(speakers.on_screen(new, b, W, False), win) or
+                   not speakers.shown(speakers.on_screen(sim, b, W, False), win) for _, b in subjects):
+            skip("would hide a person")
+            continue                                 # (one framing for the run: never hide a subject it showed)
+        ok = True
+        for k in (i - len(run) - 1, i):              # the neighbours inside the same shot: --min-move kept
+            if 0 <= k < len(clips) and len(clips[k].keys) == 1:
+                a, b = (clips[k], run[0]) if k < i - len(run) else (run[-1], clips[k])
+                if sp.same_shot(_last_raw_s(a, fps), _clip_raw_s(b, fps)[0]):
+                    mv = framing_move(clips[k].keys[0][1], new, raw_wh)
+                    if 0.5 < mv < min_move - 0.5:
+                        ok = False
+        if not ok:
+            skip("--min-move")
+            continue
+        dx = new.tx - sim.tx
+        for c in run:
+            c.keys = [(c.keys[0][0], new)]
+            c.covered = True
+            c.person_note = (f"centred on the person the competitor shows (RAW x {cx:.0f}): the template window is "
+                             f"narrower than the competitor's, centred it cut them -- the picture moved {dx:+.0f} px "
+                             "sideways, zoom kept")
+            moved += 1
     return moved
 
 
@@ -2519,6 +2795,15 @@ def merge_mini_clips(clips: list[PremiereClip], changes_s: Sequence[float] | Non
     return out, moves
 
 
+def _shot_framed(cl: PremiereClip) -> PremiereClip:
+    """The clip with the framing of the RAW shot it starts in (its shot_framing: source ticks; a clip without: as it
+    is) -- for the pieces the XML makes of a clip at the RAW's shot changes and around cut pauses."""
+    if not cl.shot_framing or not cl.keys or float(cl.speed) <= 0:
+        return cl
+    own = [sim for at, sim in cl.shot_framing if at <= cl.src_in]
+    return dataclasses.replace(cl, keys=[(cl.keys[0][0], own[-1])]) if own else cl
+
+
 def split_at_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None, raw_fps: Fraction, fps: Fraction,
                    fac: int = 1) -> tuple[list[PremiereClip], list[dict]]:
     """--premiere: Premiere's Scene Edit Detection ("apply a cut at each detected cut point"), as you always run it:
@@ -2532,12 +2817,13 @@ def split_at_shots(clips: list[PremiereClip], changes_s: Sequence[float] | None,
     for cl in clips:
         lo = cl.rec_start + (int(cl.ev.dissolve_in or 0) * fac if cl.start == -1 else 0)   # after a dissolve's frames
         ticks = _shot_change_ticks(cl, changes_s, raw_fps, fps, lo, cl.rec_end)
-        rest = cl
+        rest = _shot_framed(cl)
         for r in ticks:
             if rest.rec_start < r < rest.rec_end:
                 p, rest = _split_clip(rest, r)
                 out.append(p)
                 splits.append({"clip": cl.label, "at": int(r)})
+                rest = _shot_framed(rest)
         out.append(rest)
     # a split one RAW frame or less after a clip's start: that frame is the shot before's last, at this clip's framing
     # (a flash; snap_to_shots moves such a cut only for a clip at 100 %): the clip before, adjacent and still in that
@@ -2747,6 +3033,9 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             _person_after_merge(clips, sp, raw_wh, win, fps, follow)
             if _hold_after_merge(clips, sp, raw_wh, win, fps, st["min_move"]):
                 clips = _merge_continuous(clips)
+            if not follow and CENTRE_FIXED_CROP:     # night 6 (off): the person a fixed competitor crop shows
+                _subject_in_narrow_window(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
+                                          getattr(cfg, "premiere_shots", None), fac)
     return clips, markers, warnings
 
 

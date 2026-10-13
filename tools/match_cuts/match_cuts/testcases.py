@@ -11,6 +11,8 @@ A case folder holds:
   (edit_score.py);
 * ``case.json`` (optional) -- {"options": [extra command-line options], "timeline": "edit" | "competitor" (the key
   is timed on the competitor's own edit: answer_edit.json then holds the competitor's timeline -> RAW), "notes",
+  "style": "new" (made with the user's current rules: check-all runs it thorough and scores it against the answer key)
+  or "old" (the default: an older style of edit -- check-all runs it --fast with the hard checks only),
   "full_raw" / "full_competitor": the full-size original a smaller copy was made from, on the machine that made
   the case (relative to the repository; never committed) -- ``check-all --full-size`` runs on it where it exists,
   so a fix that only works on the smaller copy is caught (output/019: video018's "insurance" ending)}.
@@ -44,6 +46,8 @@ class Case:
     full_raw: Path | None = None             # the full-size original on this machine (None: not here)
     full_competitor: Path | None = None
     raw_offset: float = 0.0                  # raw.mp4 is a window of full_raw starting at this second (window_copy)
+    style: str = "old"                       # "new": made with your current rules (default frame, the competitor's cuts,
+    #                                          100 %) -- check-all runs it thorough and scores it; "old": --fast, hard checks
 
     @property
     def has_key(self) -> bool:
@@ -69,7 +73,8 @@ def load(d: Path) -> Case | None:
     opts = [str(o).replace("{case}", str(d)) for o in meta.get("options") or []]      # {case}: the case's folder
     return Case(d.name, d, comp, raw, opts, srt if srt.is_file() else None, edit,
                 str(meta.get("timeline") or "edit"), str(meta.get("notes") or ""),
-                _here(meta.get("full_raw")), _here(meta.get("full_competitor")), float(meta.get("raw_offset") or 0.0))
+                _here(meta.get("full_raw")), _here(meta.get("full_competitor")), float(meta.get("raw_offset") or 0.0),
+                "new" if str(meta.get("style") or "").lower() == "new" else "old")
 
 
 def _here(p: Any) -> Path | None:

@@ -50,6 +50,20 @@ MAX_IN_WORD_QUIET_S = 0.25  # a word's timing holding a quiet stretch this long 
 SOFT_DB = 3.0             # a sound's soft start / end: the windows next to it still this far above the noise ...
 SOFT_MAX_S = 0.2          # ... for at most this long (the soft "s", "f", "-ty five" a word starts or ends with)
 FADE_FRAMES = 1           # audio fade on each side of a cut (sequence frames)
+PAUSE_MIN_S = 0.15        # the default (night 6): a pause inside a take is cut when its quiet lasts this long ...
+PAUSE_MIN_CUT_S = 0.10    # ... and this much of it goes once the pads are kept -- never a cut of a few frames (your 22
+#                           pause cuts of laptop009 / mike005 / laptop010 / 013: 0.117 s and longer; quiet runs of
+#                           0.10-0.15 s you never cut, 0.15-0.30 s half of them, 0.30 s and longer nearly all)
+PAUSE_LOUD = 0.33         # ... the word before it ends where its loudness drops under this share of the way from the
+#                           silence threshold up to the speech level (you cut a median 0.013 s after that point) ...
+PAUSE_TAIL_S = 0.1        # ... and a soft tail longer than this after that point goes with the pause, --pad-after kept
+#                           (laptop010: the quiet stretch began ~0.2 s after the word's loud end, the clip before each
+#                           pause ended a median 0.20 s after yours; mike005's short tails are left -- trimmed, its cuts
+#                           came 0.04-0.26 s before yours, untrimmed 4 of them were exactly yours)
+PAUSE_CLEAR = 0.12        # ... and only a clear silence: 90 % of it at most this share of the way from the background
+#                           noise up to the speech level (your cut pauses: -0.46-0.10, 0.28 / 0.35 twice with a sound
+#                           in them; the quiet you kept: music under laptop013's 1.7 s and 1.4 s beats 0.18-0.23,
+#                           mike005's 2.3 s 0.21, breaths 0.16-0.40)
 
 
 @dataclass
@@ -247,6 +261,58 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
     if cuts and sum(c.frames for c in cuts) >= n_frames:        # all silent: keep the edit rather than nothing
         cuts = []
     return cuts, lv
+
+
+def pause_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Settings, points: Sequence[int],
+                 protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None, guard: Any = None,
+                 lv: dict | None = None, quiet: Sequence[tuple[float, float]] | None = None,
+                 sound: Sequence[tuple[int, int]] = ()) -> tuple[list[Cut], dict]:
+    """The default's careful pause cuts (night 6): removal_ranges of the pauses INSIDE a take only -- a quiet stretch
+    of at least PAUSE_MIN_S between words (never inside a word: the speech map's words and sounds), a clear silence
+    (PAUSE_CLEAR: music, a breath or the room under it keeps it), the pads kept (--pad-after after the word before
+    it, --pad-before before the word after it), and only when at least PAUSE_MIN_CUT_S goes. A pause that holds or
+    touches one of the edit's cut points (``points``: sequence frames where a V1 or A1 clip starts or ends -- the
+    competitor's cuts stay where they are), or the edit's start or end (the ending stays the competitor's: XML
+    ENDING), is kept whole."""
+    f = float(fps)
+    dur = n_frames / f
+    ps = Settings(st.db, PAUSE_MIN_S, st.pad_before, st.pad_after)
+    cuts, lv = removal_ranges(y, sr, fps, n_frames, ps, protect, words, (), guard, lv, quiet, sound)
+    pts = sorted(int(p) for p in points if 0 < int(p) < n_frames)
+    least = int(math.ceil(PAUSE_MIN_CUT_S * f - 1e-9))
+    t, db = loudness(y, sr)
+    lvl = lv if lv.get("speech_db") is not None and lv.get("noise_db") is not None else (levels(db, st) if len(db)
+                                                                                         else {})
+    span = float(lvl.get("speech_db", 0.0)) - float(lvl.get("noise_db", 0.0)) if lvl else 0.0
+    out, loud = [], 0
+    for c in cuts:
+        if c.s0 <= 1e-6 or c.s1 >= dur - 1e-6:
+            continue                                     # the edit's start / its ending: the competitor's
+        if any(c.s0 * f - 1.0 <= p <= c.s1 * f + 1.0 for p in pts):
+            continue                                     # a cut point of the competitor in or at this pause
+        if c.frames < least:
+            continue                                     # a few frames: no cut
+        sel = db[(t >= c.s0) & (t <= c.s1)] if len(db) else db
+        if span > 0 and len(sel) and (float(np.percentile(sel, 90)) - float(lvl["noise_db"])) / span > PAUSE_CLEAR:
+            loud += 1
+            continue                                     # not a clear silence (music, a breath, the room)
+        if span > 0 and len(db) and lvl.get("threshold_db") is not None:
+            # the word before the pause: a soft tail of more than PAUSE_TAIL_S after its LOUD part (kept by the quiet
+            # stretch, up to SOFT_MAX_S) goes with the pause, --pad-after kept after the loud part
+            thr = float(lvl["threshold_db"])
+            loud_db = thr + PAUSE_LOUD * (float(lvl["speech_db"]) - thr)
+            near = np.flatnonzero((t >= c.s0 - SOFT_MAX_S - 0.05) & (t <= c.s0) & (db >= loud_db))
+            if len(near):
+                a2 = int(math.ceil((float(t[near[-1]]) + HOP_S / 2.0 + st.pad_after) * f - 1e-9))
+                if guard is not None and a2 < c.a:
+                    a2 = guard(a2, c.b)[0]
+                if 0 < a2 < c.a - PAUSE_TAIL_S * f and not any(p0 < c.a and p1 > a2 for p0, p1 in protect) and \
+                        not any(a2 - 1 <= p <= c.a + 1 for p in pts):
+                    c = Cut(a2, c.b, c.s0, c.s1)
+        out.append(c)
+    lv = dict(lv, pauses={"min_s": PAUSE_MIN_S, "min_cut_s": PAUSE_MIN_CUT_S, "clear": PAUSE_CLEAR,
+                          "found": len(cuts), "cut": len(out), "not_clear": loud})
+    return out, lv
 
 
 def tail_after_last_word(words: Sequence[Any] | None, quiet: Sequence[tuple[float, float]] | None, n_frames: int,
@@ -606,7 +672,8 @@ def a1_audio(audio: list[dict], raw_audio: np.ndarray, sr: int, fps: Fraction, n
 
 def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any = None,
                   words_of: Any = None, speech: Any = None, remove: bool = True,
-                  shots: Sequence[float] | None = None, keep: Sequence[tuple[int, int]] = ()) -> dict:
+                  shots: Sequence[float] | None = None, keep: Sequence[tuple[int, int]] = (),
+                  pauses: bool = False) -> dict:
     """The cuts of the Premiere export of ``cutlist`` before it is written: {cuts, ripple, threshold_db, levels,
     rows, removed_s, old_s, new_s, settings, speech}. First the speech-safe cuts (``speech``: the RAW's
     speech.SpeechMap -- every audio cut moved into the quiet, clips trimmed or extended: speech.plan_cuts), then
@@ -616,7 +683,9 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     A1), else ``words_of(y)`` -> the words heard in that audio, or None: then the cuts follow the loudness alone.
     ``shots``: the RAW's shot changes (s) -- no cut leaves a sliver of a shot (shots.py). ``keep``: sequence frames
     [a, b) of the edit before these cuts that stay whatever is heard there -- the beats the competitor shows an action
-    caption over ("*looks over*", "*dying*": a reaction, kept like speech; 021)."""
+    caption over ("*looks over*", "*dying*": a reaction, kept like speech; 021). ``pauses`` (the default since night
+    6): no cut moves, only the pauses inside the takes go (pause_ranges: the competitor's cut points, its start and
+    its ending stay)."""
     from .export_xml_edl import premiere_audio, premiere_clips, premiere_factor, premiere_settings
     st = Settings.from_cfg(cfg)
     pst = premiere_settings(cfg)
@@ -627,7 +696,7 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
     other = [(int(m["in"]), int(m["out"])) for m in markers if m.get("other_video")]     # another video's stretches
     audio = premiere_audio(cutlist, clips, cfg) if bool(cutlist.raw.get("has_audio", True)) else []
     snap, snap_rows = None, []
-    if speech is not None and audio:
+    if speech is not None and audio and not pauses:
         from .speech import plan_cuts
         src_max = int(math.floor(int(cutlist.raw["frames"]) * float(fps) / float(cutlist.raw_fps)))
         snap, snap_rows = plan_cuts(clips, audio, speech, fps, st, n_frames, src_max, fac, shots, keep)
@@ -656,8 +725,14 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
             if speech is not None else None
         quiet = (a1_quiet(audio, speech, fps, n_frames, bool(getattr(cfg, "silence_breaths", False)))
                  if speech is not None else None)
-        cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
-        tail = tail_after_last_word(words, quiet, n_frames, fps, st, protect + other, guard)
+        if pauses:
+            points = sorted({cl.rec_start for cl in clips} | {cl.rec_end for cl in clips} | set(at))
+            cuts, lv = pause_ranges(y, sr, fps, n_frames, st, points, protect, words, guard, fixed, quiet,
+                                    sound=other)
+            tail = None                              # the competitor's ending stays (XML ENDING)
+        else:
+            cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
+            tail = tail_after_last_word(words, quiet, n_frames, fps, st, protect + other, guard)
         if tail is not None:                         # your ending: nothing plays after the last line
             first = min([c.a for c in cuts if c.b > tail.a] + [tail.a])
             from .shots import MIN_SHOT_S
@@ -757,6 +832,13 @@ def settings_line(plan: dict) -> str:
     n = lv.get("words")
     words = (f"cuts only between words ({n} words timed)" if n else
              "word timings not available: cuts from loudness alone" if n is None else "no words heard")
+    pz = lv.get("pauses")
+    if pz:                                       # the default's careful pause cuts (pause_ranges)
+        return (f"pauses inside the takes (the default; --keep-silence: none): a clear silence {pz['min_s']:g} s or "
+                f"longer between words, at least {pz['min_cut_s']:g} s cut; kept {st.get('pad_before', 0):g} s "
+                f"before / {st.get('pad_after', 0):g} s after each word; the competitor's cut points, start and ending "
+                f"kept; {pz['cut']} of {pz['found']} quiet stretches cut ({pz.get('not_clear', 0)} not a clear "
+                f"silence: music / a breath / the room); {words}")
     return (f"settings for this video: speech {lv['speech_db']:.1f} dBFS, background {lv['noise_db']:.1f} dBFS -> "
             f"silence below {lv['threshold_db']:.1f} dBFS ({lv['how']}), longer than {st.get('min_s', 0):g} s; "
             f"kept {st.get('pad_before', 0):g} s before / {st.get('pad_after', 0):g} s after each word; {words}")

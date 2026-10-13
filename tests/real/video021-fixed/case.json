@@ -1,4 +1,5 @@
 {
+ "style": "new",
  "timeline": "edit",
  "notes": "learned from 021_fixed.prproj (2026-10-10): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); run with your channel's frame (frame.png, a copy of input/frame.png); night 4: run with --remove-silence (the default until night 4): this answer key is an edit made with the silences removed, so check-all compares like with like",
  "learned_from": "output\\021\\021_fixed.prproj",

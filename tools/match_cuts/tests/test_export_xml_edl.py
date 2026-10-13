@@ -1094,20 +1094,20 @@ def test_s21_comes_out_face_centred_near_the_users_fix_and_nothing_leaves_a_gap(
     d = json.loads(RAW_TEST_CUTLIST.read_text(encoding="utf-8"))
     d["raw"]["file_abs"] = str(RAW_TEST)
     cl = Cutlist.from_dict(d)
-    cl, _, _ = ex.join_takes(cl)                     # as the pipeline (night 5): S27 continues S26's take (83 ms skip)
+    cl, _, _ = ex.join_takes(cl)                     # as the pipeline: S27 is 83 ms off S26's take -- a cut (night 6)
     cfg = Config(out_dir=str(tmp_path), premiere=True)
     xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
     from match_cuts import repeats
     plan = repeats.add_to_plan({}, cl, cfg)          # as the pipeline: S26 starts on S25's last 6 RAW frames (a stutter)
     assert [(r["removed"], r["kept"], r["a"], r["b"], r["kind"]) for r in plan["repeats"]["rows"]] == [
-        ("S26+S27", "S25", 1192, 1198, "stutter")]          # S27 continues S26: one clip
+        ("S26", "S25", 1192, 1198, "stutter")]              # (2.5 RAW frames: more than a take joins)
     ex.write_premiere_xml(cl, xml, cfg, plan["ripple"])
     ex.write_edl(cl, edl, cfg)
     v = ex.validate_premiere_exports(cl, xml, edl, cfg, plan["ripple"])
     assert v["ok"] and v["gaps"] == [] and v["repeat_problems"] == [] and v["item_problems"] == [], v["errors"]
     ex.write_premiere_xml(cl, tmp_path / "uncut.xml", cfg)             # without the trim: the hard check fails
     assert ex.premiere_repeat_problems(tmp_path / "uncut.xml") == [
-        "V1 S25 at 00:00:19:46 and S26+S27 at 00:00:19:52 both play RAW 103.27-103.37 s: a stutter at a cut"]
+        "V1 S25 at 00:00:19:46 and S26 at 00:00:19:52 both play RAW 103.27-103.37 s: a stutter at a cut"]
     x = ex.parse_premiere_xml(xml)
 
     def position(c: dict) -> tuple[float, float]:

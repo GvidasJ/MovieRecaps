@@ -191,10 +191,11 @@ def test_laptop009_takes_play_straight_through_at_100_percent(tmp_path):
     assert v["ok"], v["errors"]
 
 
-def test_a_take_joins_jumps_of_at_most_two_and_a_half_raw_frames_and_0_1_s():
-    assert ex.take_jump_s("24000/1001") == pytest.approx(0.1)            # 2.5 frames = 104 ms: 0.1 s caps it
-    assert ex.take_jump_s("30000/1001") == pytest.approx(2.5 * 1.001 / 30)
-    assert ex.take_jump_s(60) == pytest.approx(2.5 / 60)
+def test_a_take_joins_jumps_of_at_most_one_and_a_half_raw_frames_and_0_1_s():
+    # night 6 (your answer B): 1.5 RAW frames, not 2.5 -- video3's 85 ms (2 frames) was a real cut of the competitor
+    assert ex.take_jump_s("24000/1001") == pytest.approx(1.5 * 1.001 / 24)          # 63 ms
+    assert ex.take_jump_s("30000/1001") == pytest.approx(1.5 * 1.001 / 30)
+    assert ex.take_jump_s(60) == pytest.approx(1.5 / 60)
     assert ex.take_jump_s(None) == pytest.approx(ex.TAKE_JUMP_S)
 
 

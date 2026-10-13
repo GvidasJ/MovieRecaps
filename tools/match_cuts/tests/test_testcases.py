@@ -89,24 +89,35 @@ def test_read_run_and_scorecard(tmp_path):
 
 def test_check_all_runs_every_video_with_the_fast_comparison(tmp_path, monkeypatch):
     """A normal run makes no --fast comparison (off by default: --compare-fast) and does not re-assemble its cut list
-    from the caches (--check-determinism); check-all asks for both on every run (its scorecard says what the
-    thoroughness changed; 9.7 is a hard check), and --fast runs never make the comparison."""
-    d = tmp_path / "cases" / "one"
-    d.mkdir(parents=True)
-    (d / "competitor.mp4").write_bytes(b"c")
-    (d / "raw.mp4").write_bytes(b"r")
+    from the caches (--check-determinism). check-all (night 6): a new-style case thorough, an old one --fast, both
+    with --check-determinism and --quick-checks; --old-way as before night 6: --compare-fast on every thorough run
+    (--fast runs never make the comparison)."""
+    import json
+    for name, style in (("new", "new"), ("old", None)):
+        d = tmp_path / "cases" / name
+        d.mkdir(parents=True)
+        (d / "competitor.mp4").write_bytes(b"c")
+        (d / "raw.mp4").write_bytes(b"r")
+        if style:
+            (d / "case.json").write_text(json.dumps({"style": style}), encoding="utf-8")
     seen = []
 
-    def fake_run(case, out_root, work_root, extra=(), python=None, cwd=None):
-        seen.append(list(extra))
+    def fake_run(case, out_root, work_root, extra=(), python=None, cwd=None, scored=True):
+        seen.append((case.name, list(extra), scored))
         return {"case": case.name, "exit": 0, "seconds": 1.0}
     monkeypatch.setattr(check_all, "run_case", fake_run)
     monkeypatch.setattr(check_all, "scorecard", lambda rows, prev=None: "")
-    check_all.main(["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"),
-                    "--work", str(tmp_path / "w")])
-    check_all.main(["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"),
-                    "--work", str(tmp_path / "w"), "--fast"])
-    assert seen == [["--check-determinism", "--compare-fast"], ["--check-determinism", "--fast"]]
+    base = ["--cases-dir", str(tmp_path / "cases"), "--out", str(tmp_path / "o" / "runs"), "--work", str(tmp_path / "w")]
+    check_all.main(base)
+    assert seen == [("new", ["--check-determinism", "--quick-checks", "--skip-compare"], True),
+                    ("old", ["--fast", "--check-determinism", "--quick-checks", "--skip-compare"], False)]
+    seen.clear()
+    check_all.main(base + ["--old-way"])
+    assert seen == [("new", ["--compare-fast", "--check-determinism"], True),
+                    ("old", ["--compare-fast", "--check-determinism"], True)]
+    seen.clear()
+    check_all.main(base + ["--old-way", "--fast"])
+    assert seen == [("new", ["--fast", "--check-determinism"], True), ("old", ["--fast", "--check-determinism"], True)]
     from match_cuts import cli
     parse = cli.build_parser().parse_args
     assert not cli.config_from_args(parse([]), "c.mp4", "r.mp4").compare_fast

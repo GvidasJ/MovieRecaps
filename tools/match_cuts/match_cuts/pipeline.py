@@ -131,6 +131,7 @@ class Context:
     premiere_xml: Any = None                          # write_premiere_xml's result (the re-framed clips ...)
     frame: Any = None                                 # --frame: frame.Frame (the PNG and its hole)
     premiere_cutlist: Any = None                      # the cut list 1_edit.xml was written from (premiere_plan's)
+    stereo: dict = field(default_factory=dict)        # the stereo copy 1_edit.xml plays (a 5.1 RAW; stereo.py)
     unmirrored: int = 0                               # segments whose competitor mirror the Premiere edit took off
     finish: dict = field(default_factory=dict)        # --speed / --frame: what the last step did (stage_finish)
     verify: dict = field(default_factory=dict)
@@ -2345,12 +2346,13 @@ def refine_layout_from_raw(ctx: Context) -> bool:
                         if not callable(fn) else "no layout / FrameMap")
         return False
     old = ctx.layout
+    fm, stills = refine_frame_map(ctx, layout_mod, old)
     key = stage_key("layout_refine", ctx.keys.get("frame_map"), layout_key(old),
-                    "algo", getattr(layout_mod, "LAYOUT_ALGO_VERSION", 0))
+                    "algo", getattr(layout_mod, "LAYOUT_ALGO_VERSION", 0), *(("stills", stills) if stills else ()))
     ctx.keys["layout_refine"] = key
     try:
         res = self_cached_stage(ctx, "layout_refine", key, lambda: fn(
-            old, ctx.overlays, ctx.comp_proxy, ctx.raw_proxy, ctx.fm_pre, ctx.cfg, ctx.cache, ctx.dlog,
+            old, ctx.overlays, ctx.comp_proxy, ctx.raw_proxy, fm, ctx.cfg, ctx.cache, ctx.dlog,
             ctx.cfg.debug_dir))
     except Exception as e:  # noqa: BLE001 - the unrefined box is still a valid (if possibly small) layout
         log.error("box refinement against RAW failed: %s\n%s", e, traceback.format_exc())
@@ -2371,6 +2373,124 @@ def refine_layout_from_raw(ctx: Context) -> bool:
                     old_background=old.background, new_background=new.background,
                     action="re-run S5.2 + S5.3 with the refined layout" if changed else "keep the FrameMap")
     return changed
+
+
+NOT_FOUND_PICTURE = 0.10    # under this share of the competitor's frames matched in the RAW ...
+NOT_FOUND_SOUND = 0.10      # ... and of its sound found in the RAW's sound: its scenes are not in this RAW
+
+
+class NotInRaw(RuntimeError):
+    """The competitor's scenes are not in this RAW (picture and sound): the run stops; cli prints the message."""
+
+
+def stop_if_not_in_raw(ctx: Context) -> None:
+    """Night 6 (a Family Guy clip matched 0 % and the tool still made a full, empty 31.7 s edit): right after the
+    visual search, when under NOT_FOUND_PICTURE of the competitor's frames matched a RAW frame and under
+    NOT_FOUND_SOUND of its sound windows were found in the RAW's sound (S5.1; a competitor without sound: the picture
+    alone), the run stops with a plain message instead of finishing an empty edit. --force-inputs goes on."""
+    from .model import Status
+    if getattr(ctx.cfg, "force_inputs", False) or ctx.fm_pre is None:
+        return
+    st = np.asarray(ctx.fm_pre.status)
+    if not len(st):
+        return
+    pic = float(np.mean(st == Status.MATCH))
+    snd = None
+    h = getattr(ctx, "hints", None)
+    if h is not None and len(getattr(h, "comp_t", ())):
+        snd = float(np.mean(h.confident(ctx.cfg.audio_min_conf)))
+    ctx.dlog.record("inputs", "found_in_raw", picture=round(pic, 4), sound=None if snd is None else round(snd, 4))
+    log.info("found in the RAW: %.0f %% of the competitor's frames, %s of its sound", 100 * pic,
+             "no sound to compare" if snd is None else f"{100 * snd:.0f} %")
+    if pic >= NOT_FOUND_PICTURE or (snd is not None and snd >= NOT_FOUND_SOUND):
+        return
+    log.error("STOPPED: almost nothing of the competitor is in this RAW (%.0f %% of its frames%s found)", 100 * pic,
+              "" if snd is None else f", {100 * snd:.0f} % of its sound")
+    raise NotInRaw(
+        f"the competitor's scenes are not in this RAW: only {100 * pic:.0f} % of its frames"
+        + ("" if snd is None else f" and {100 * snd:.0f} % of its sound") + " were found in it, so I stopped instead "
+        "of making an empty edit. Probably a different episode, a different version of it (4:3 instead of widescreen, "
+        "censored, dubbed) or another language. Check that the RAW is the episode or movie the competitor was cut "
+        f"from ({Path(ctx.cfg.competitor).name} / {Path(ctx.cfg.raw).name}); to make the edit anyway, run again with "
+        "--force-inputs.")
+
+
+STILL_SHARE = 0.25          # the box re-measurement against RAW: one RAW moment gives at most this share of its frames
+STILL_RAW_S = 0.5           # ... one moment: RAW frames within this many seconds of each other
+STILL_RATIO = 3.0           # ... and a still: the competitor plays on this many times longer than the RAW moves there
+STILL_MIN_FRAMES = 8        # ... left alone when fewer frames than this would remain
+
+
+def refine_frame_map(ctx: Context, layout_mod: Any, old: Layout) -> tuple[FrameMap, list[list[int]]]:
+    """The frame map the box re-measurement against RAW reads, and the stills left out of it ([]: ctx.fm_pre as it is).
+
+    The re-measurement compares ~16 confidently matched frames spread over the edit with their RAW frames
+    (layout._refine_frames: consecutive groups of the confident frames). When more than STILL_SHARE of them show ONE
+    moment of the RAW for far longer on the competitor -- a still it holds, or a static-looking take the first pass
+    matched to one RAW frame throughout because its box held only a small part of the picture (laptop009, thorough:
+    9 of 16 frames, 8.5 s of the competitor on 0.3 s of RAW, the frames wrong; the box came out 1017 px high instead
+    of 1333 and the clips framed at 148 % instead of 119 %) -- that one picture's differences (its captions, a wrong
+    RAW frame) decide every edge. Such a moment keeps its best frame; its other frames are left out of the
+    measurement (UNRESOLVED in a copy of the frame map), so the frames come from distinct RAW moments, as a --fast
+    run's do. Nothing changes (the same cache key) when no moment holds more than STILL_SHARE of the frames, or when
+    fewer than STILL_MIN_FRAMES frames would be left."""
+    fm0 = ctx.fm_pre
+    pick = getattr(layout_mod, "_refine_frames", None)
+    if fm0 is None or not callable(pick) or old is None or old.box is None or old.mode != "boxed":
+        return fm0, []
+    try:
+        fm, stills = _left_out_stills(ctx, pick, old, fm0)
+    except Exception as e:  # noqa: BLE001 - the measurement then reads every frame, as before
+        log.warning("layout: the stills check before the box re-measurement failed (%s: %s); every frame is read",
+                    type(e).__name__, e)
+        return fm0, []
+    if stills:
+        log.info("layout: the box re-measurement against RAW leaves out %s (one RAW moment held by most of its "
+                 "frames: a still)", "; ".join(f"{n} frames on RAW frames {lo}-{hi} ({m} of {t} picked)"
+                                               for lo, hi, n, m, t in stills))
+        ctx.dlog.record("layout", "refine_stills_left_out", stills=stills, share=STILL_SHARE, raw_s=STILL_RAW_S,
+                        ratio=STILL_RATIO)
+    return fm, stills
+
+
+def _left_out_stills(ctx: Context, pick: Callable, old: Layout, fm0: FrameMap) -> tuple[FrameMap, list[list[int]]]:
+    """refine_frame_map's search: up to 3 stills, each left out in a new copy of the frame map."""
+    raw_fps, comp_fps = float(ctx.raw_fps), float(ctx.comp_fps)
+    w = STILL_RAW_S * raw_fps
+    fm, stills = fm0, []
+    for _ in range(3):
+        ks, _ev = pick(old, ctx.comp_proxy, ctx.raw_proxy, fm, ctx.cfg)
+        if len(ks) < STILL_MIN_FRAMES:
+            break
+        ks = np.asarray(ks, np.int64)
+        j = np.asarray(fm.raw, np.int64)[ks]
+        order = np.argsort(j, kind="stable")
+        js, kss = j[order], ks[order]
+        a, b = 0, 0
+        for i in range(js.size):                     # the most frames within STILL_RAW_S of one RAW moment
+            e = int(np.searchsorted(js, js[i] + w, side="right"))
+            if e - i > b - a:
+                a, b = i, e
+        kk, jj = kss[a:b], js[a:b]
+        comp_span = float(kk.max() - kk.min()) / comp_fps
+        raw_span = max(float(jj.max() - jj.min()) / raw_fps, 1.0 / raw_fps)
+        if b - a <= STILL_SHARE * ks.size or comp_span < STILL_RATIO * raw_span:
+            break
+        lo, hi = int(jj.min() - w), int(jj.max() + w)
+        rr = np.asarray(fm.raw, np.int64)
+        same = np.flatnonzero((np.asarray(fm.status) == Status.MATCH) & (rr >= lo) & (rr <= hi))
+        sc = np.asarray(fm.score, np.float64)[same]
+        keep = int(same[int(np.nanargmax(sc))]) if np.isfinite(sc).any() else -1
+        drop = same[same != keep]
+        if drop.size == 0:
+            break
+        trial = FrameMap(fm.n, {c: np.array(v, copy=True) for c, v in fm.d.items()})
+        trial.d["status"][drop] = Status.UNRESOLVED
+        if len(pick(old, ctx.comp_proxy, ctx.raw_proxy, trial, ctx.cfg)[0]) < STILL_MIN_FRAMES:
+            break
+        fm = trial
+        stills.append([lo, hi, int(drop.size), int(b - a), int(ks.size)])
+    return fm, stills
 
 
 def stage_visual_refine(ctx: Context) -> None:
@@ -2817,14 +2937,10 @@ def stage_exports(ctx: Context) -> None:
     rp = None
     if premiere:
         ex, rp = premiere_plan(ctx, ex)
+        ex = stereo_for_premiere(ctx, ex)       # 5.1 / 7.1 sound: 1_edit.xml plays a clean stereo copy of the RAW
         ctx.premiere_cutlist = ex
         produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
                                                   lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
-        n_ch = int(cl.raw.get("audio_channels") or 0) if bool(cl.raw.get("has_audio", True)) else 0
-        if n_ch > 2:                  # every test RAW so far is stereo: how Premiere maps the channels is unchecked
-            ctx.warn(f"the RAW's audio has {n_ch} channels (5.1?): 1_edit.xml puts it on A1 as one {n_ch}-channel "
-                     "clip -- check in Premiere that A1 plays the dialogue (the centre channel), not only the front "
-                     "left / right")
     else:
         produced["xml"], _ = _soft(ctx, "S8 FCP7 XML", lambda: export_xml_edl.write_fcp7_xml(ex, xml, cfg))
     produced["edl"], _ = _soft(ctx, "S8 EDL", lambda: export_xml_edl.write_edl(ex, edl, cfg))
@@ -2901,6 +3017,32 @@ def stage_exports(ctx: Context) -> None:
     ctx.exports.update(collect_deliverables(ctx, produced))
 
 
+def stereo_for_premiere(ctx: Context, ex: Cutlist) -> Cutlist:
+    """A RAW whose sound has more than two channels (5.1, 7.1: an echo in Premiere -- the surround channels mixed in;
+    your laptop009 fix used a stereo file): 1_edit.xml plays ``media/raw_stereo.<ext>`` instead -- the RAW's picture
+    copied as it is and one stereo track of its dialogue (front left / right + centre; stereo.py). The analysis, the
+    cut list and the caches keep the RAW itself. A copy that fails: the RAW as it is, with the old warning."""
+    import copy as _copy
+    n_ch = int(ex.raw.get("audio_channels") or 0) if bool(ex.raw.get("has_audio", True)) else 0
+    if n_ch <= 2 or getattr(ctx, "raw_conform", None) is None:
+        return ex
+    from . import stereo
+    src = Path(ctx.raw_conform.path)
+    try:
+        res = stereo.stereo_copy(src, Path(ctx.cfg.media_dir) / (stereo.NAME + (src.suffix.lower() or ".mp4")))
+    except Exception as e:  # noqa: BLE001 - the edit is still made, on the RAW's own sound
+        log.error("stereo copy failed: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"the RAW's audio has {n_ch} channels (5.1?) and its stereo copy failed ({type(e).__name__}: {e}): "
+                 f"1_edit.xml puts it on A1 as one {n_ch}-channel clip -- check in Premiere that A1 plays the dialogue "
+                 "(the centre channel) without an echo")
+        return ex
+    ctx.dlog.record("premiere", "stereo_copy", **res)
+    ctx.stereo = res
+    out = _copy.copy(ex)
+    out.raw = stereo.stereo_block(ex.raw, res["path"], ctx.cfg.out_dir)
+    return out
+
+
 def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     """The Premiere export's plan of the export cut list ``ex``: a speed-change sliver inside one take plays on
     (export_xml_edl.play_on_slivers), then the RAW's speech map, shot changes and people, the speech-safe cuts and the
@@ -2915,14 +3057,19 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
         else:
             log.info("Premiere: the %d-frame dissolve S%02d|S%02d is a hard cut at competitor frame %d (no "
                      "transitions)", d["frames"], d["segments"][0], d["segments"][1], d["cut"])
-    # the pieces of one continuous RAW take play as one (night 5, laptop009): no jump or stutter inside a take
-    ex, takes, joined = join_takes(ex)
+    # the pieces of one continuous RAW take play as one (night 5, laptop009): no jump or stutter inside a take; a
+    # piece that starts on a RAW shot change keeps the competitor's timing there (night 6, laptop004's flash)
+    ex, takes, joined = join_takes(ex, take_shot_changes(ctx, ex), getattr(ctx.cfg, "premiere_normal_audio", True))
     for d in joined:
         ctx.dlog.record("premiere", "take_joined", **d)
     if joined:
         log.info("Premiere: %d piece(s) of one continuous RAW take play on its line (%d within %.0f ms of it, %d "
-                 "doubted slivers played over): %s", len(joined), sum(1 for d in joined if d["how"] == "continues"),
-                 1000 * take_jump_s(ex.raw_fps), sum(1 for d in joined if d["how"] == "played over"),
+                 "starting on a RAW shot change at their own moment, %d freezes of the take's frame played on, %d "
+                 "doubted slivers played over): %s", len(joined),
+                 sum(1 for d in joined if d["how"] == "continues"), 1000 * take_jump_s(ex.raw_fps),
+                 sum(1 for d in joined if d["how"] == "on a shot change"),
+                 sum(1 for d in joined if d["how"] == "freeze played on"),
+                 sum(1 for d in joined if d["how"] == "played over"),
                  ", ".join(f"S{d['segment']:02d} ({1000 * d['jump_s']:+.0f} ms)" for d in joined))
     if getattr(ctx.cfg, "keep_speed", False):
         from .keep_speed import keep_speed
@@ -3103,19 +3250,21 @@ def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     ends on its last RAW moment). A failure warns and keeps every silence (and every cut where the plan put it: the
     speech check then decides)."""
     from . import silence
-    from .config import removes_silence
+    from .config import cuts_pauses, removes_silence
     remove = removes_silence(ctx.cfg)
-    beats = action_beats(ctx) if remove else []
+    pauses = cuts_pauses(ctx.cfg)             # the default (night 6): the pauses inside the takes, carefully
+    beats = action_beats(ctx) if (remove or pauses) else []
     try:
         plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx),
-                                     ctx.speech if remove else None, remove=remove, shots=ctx.shots, keep=beats)
+                                     ctx.speech if (remove or pauses) else None, remove=remove or pauses,
+                                     shots=ctx.shots, keep=beats, pauses=pauses)
         if not remove:
-            plan["off"] = ("--keep-silence" if getattr(ctx.cfg, "keep_silence", False) else
-                           "the default: the competitor's cut points, no cut moved off speech; --remove-silence cuts "
-                           "the silences out")
+            if not pauses:
+                plan["off"] = "--keep-silence"
             plan["speech"] = dict(plan.get("speech") or {}, off="the competitor's cut points are kept (the default; "
                                                                 "--remove-silence moves the cuts off speech)")
             plan = with_ending(ctx, cl, plan)
+        plan["pauses"] = pauses
         plan["beats"] = beats
     except Exception as e:  # noqa: BLE001 - the uncut edit is still a valid deliverable
         log.error("silence removal failed: %s\n%s", e, traceback.format_exc())
@@ -3262,6 +3411,27 @@ def people_of(ctx: Context, cl: Cutlist) -> Any:
         ctx.unchecked.append(f"the person speaking in the picture (who speaks could not be found: {type(e).__name__}: "
                              f"{e})")
         return None
+
+
+def take_shot_changes(ctx: Context, cl: Cutlist) -> list[float]:
+    """The RAW's shot changes (RAW seconds) where the competitor's cut list ``cl`` plays it, for join_takes: a piece
+    starting on one keeps the competitor's timing. [] when they cannot be found (logged; shots_of warns later)."""
+    from . import shots
+    try:
+        cf = float(Fraction(cl.comp_fps))
+        ranges = []
+        for s in cl.segments:
+            if s.type == "raw" and s.raw_in_seconds is not None and not s.time_remap_keys:
+                t0 = float(s.raw_in_seconds)
+                t1 = t0 + float(s.speed) * (int(s.comp_out) - int(s.comp_in)) / cf
+                ranges.append((min(t0, t1), max(t0, t1)))
+        if not ranges:
+            return []
+        ks = shots.raw_shot_changes(ctx.raw_info, ranges, ctx.cache, getattr(ctx, "raw_proxy", None))
+        return shots.seconds(ks, Fraction(ctx.raw_info.fps))
+    except Exception as e:  # noqa: BLE001 - the takes are then joined on their lines (the flash check still runs)
+        log.error("RAW shot changes for the takes failed: %s\n%s", e, traceback.format_exc())
+        return []
 
 
 def shots_of(ctx: Context, cl: Cutlist | None = None) -> list[float] | None:
@@ -3595,8 +3765,8 @@ def full_res_check(ctx: Context) -> dict | None:
     on the GPU, with verification's own layout masks. None when the pass does not run (--fast / no GPU)."""
     from . import fullres
     from . import verify as verify_mod
-    if fullres.available(ctx.cfg) or not ctx.segments:
-        return None
+    if fullres.available(ctx.cfg) or not ctx.segments or getattr(ctx.cfg, "quick_checks", False):
+        return None                                  # (--quick-checks: check-all does not score it)
     try:
         workers = gpu_workers(ctx.cfg, "9.9 full resolution")
         comp_st, raw_st = _full_frames(ctx)
@@ -3917,6 +4087,8 @@ def run(cfg: Config) -> dict:
     stats = {p: _input_stat(p) for p in (cfg.competitor, cfg.raw)}
     ctx.input_stats = dict(stats)
     seed_everything(cfg.seed)
+    from . import eta
+    clock = eta.install(cfg, cfg.competitor, cfg.raw)     # "40 % -- about 6 min left; whole run: ..." (night 6)
     t_all = time.perf_counter()
     try:
         with _stage(ctx, "S0 env"):
@@ -3933,6 +4105,7 @@ def run(cfg: Config) -> dict:
             stage_layout(ctx)
         start = analysis_start(ctx)
         stage_visual_refine(ctx)
+        stop_if_not_in_raw(ctx)         # night 6: almost nothing of the competitor in this RAW -- stop, say why
         layout_warnings(ctx)
         with _stage(ctx, "S5.5 full-res re-check"):
             stage_full_res(ctx)
@@ -3963,6 +4136,8 @@ def run(cfg: Config) -> dict:
             for key in ("report", "verify"):
                 ctx.exports["files"][key] = ctx.paths.get(key)
     finally:
+        eta.uninstall(clock, ctx.timings if "total" in ctx.timings and not getattr(cfg, "quick_checks", False)
+                      else None)              # a finished run's times: the history (not check-all's: its caches)
         for p, st in stats.items():
             if Path(p).exists() and _input_stat(p) != st:
                 log.error("INPUT FILE CHANGED DURING THE RUN: %s", p)

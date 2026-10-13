@@ -28,7 +28,13 @@ captions to graphics, save, then style them all at once with
 `python -m match_cuts restyle "<project>.prproj"` (writes `3_captions_styled.prproj` into the newest run folder; see
 [Restyle the captions](tools/match_cuts/README.md#restyle-the-captions-in-premiere-restyle)).
 
-While it runs, the console prints a line at least every 30 seconds. At the end, read `output/<NNN>/extras/report.md`:
+Many videos unattended: `python -m match_cuts batch C:\Users\you\Desktop\todo --out output` -- one subfolder per RAW
+with one or more competitors, any names (the longest video is the RAW); see
+[Many videos unattended](tools/match_cuts/README.md#many-videos-unattended-batch-folder).
+
+While it runs, the console prints a line at least every 30 seconds, with how far the run is and the time left. Wrong
+inputs (a movie given as the competitor, two files swapped, a competitor not cut from this RAW) stop the run at once
+with a plain message (`--force-inputs` skips the check). At the end, read `output/<NNN>/extras/report.md`:
 the first table says which checks passed. Amber `UNCERTAIN` solids and `MISSING - not in RAW` solids in the AE
 project mark the frames you still have to fill by hand (see *What the layers mean* in the
 [tool README](tools/match_cuts/README.md#running-the-result-in-after-effects)). Windows: use PowerShell, and close
