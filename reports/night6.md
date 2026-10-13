@@ -37,7 +37,7 @@ nothing got worse in the edits: more of your cuts reproduced and every new-style
 captions the same or better except laptop009's first sentence, which the speech model heard differently on the
 pause-cut sound (section 1.6).
 
-**Disk** (section 5): 26.7 GiB free (24.4 GiB before the cleanup; 5.0 GiB freed in `work\`, the same safe way as last
+**Disk** (section 5): 26.6 GiB free (24.4 GiB before the cleanup; 5.4 GiB freed in `work\`, the same safe way as last
 night). Still under 40 GiB: 27.5 GiB more are stage caches no current code can use -- one command frees them, if you
 agree.
 
@@ -496,21 +496,22 @@ real time here (14 min for 6); after the first video it corrected itself. `batch
 
 ## 5. Disk space
 
-**Freed: 5.0 GiB in `work\`**, the same safe way as last night: only what tonight left behind, every file counted
-once however many hard links it has.
+**Freed: 5.4 GiB in `work\`**, the same safe way as last night: only what tonight left behind, every file counted
+once however many hard links it has. (The drive's free space also moves with other programs: it fell 0.1 GiB while the
+last 0.4 GiB were deleted.)
 
 | | free on the drive |
 |---|---|
 | this morning, before tonight's runs | about 32 GiB |
 | 08:40, before the cleanup (tonight's test runs and the first check-all) | 24.4 GiB |
 | after the first cleanup | 27.3 GiB |
-| now: after the final check-all, the batch demo and the second cleanup | **26.7 GiB** |
+| now: after the final check-all, the batch demo and the second cleanup | **26.6 GiB** |
 
 **Deleted** (all inside `work\`, none of it tracked by git): tonight's test runs (`work\t21\test1` ... `test11`,
 `warm`, `l004`, the video020 runs), the layout-fix experiments (`work\t21\layoutfix`, 11 GiB listed but nearly all hard
 links of the stage caches, which stay), the unit tests' temporary folders (`pt_*`), the first final check-all (the
-final one replaced it) and tonight's frozen code copies (`work\snapBase`, `work\snapF`): 2.8 + 2.2 GiB freed of
-18.5 GiB listed.
+final one replaced it) and tonight's frozen code copies (`work\snapBase`, `work\snapF`): 2.8 + 2.2 + 0.4 GiB freed
+of 18.9 GiB listed.
 
 **Kept:** the final check-all's run folders (`work\t21\final2`: 1.2 GiB of their own -- for your checks in section 4),
 the batch demo (`work\t21\batchdemo`: 1.1 GiB -- delete both once you have looked), the code the check-all ran
