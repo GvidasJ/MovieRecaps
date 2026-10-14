@@ -219,8 +219,11 @@ a 48 fps grid, 29.97 a 59.94 one), exactly as before; every check below reads th
 (`rerate_edit`): every cut on the nearest frame of the new rate; every clip **starts on the RAW frame the 60 fps edit
 starts it on** (at the RAW's rate one sequence frame is one RAW frame, so the clip after a competitor cut shows the
 competitor's first RAW frame there); the pieces of one take stay seamless (each continues exactly where the one before
-ends); a cut at one of the RAW's own shot changes lands **exactly** on it (no frame of the other shot at either side),
-and a clip never shows a frame of a RAW shot the 60 fps clip does not reach; A1 takes the same frames as its picture
+ends); a cut at one of the RAW's own shot changes lands **exactly** on it (no frame of the other shot at either side:
+a frame at a shot change goes to the clip that shows the larger part of it in the 60 fps edit -- video021's cut one
+tick after a shot change had shown 0.4 of the new shot's first frame at the old framing), a clip never shows a frame
+of a RAW shot the 60 fps clip does not reach, and a piece of a take left one frame long goes into its take (no
+framing for a single frame); A1 takes the same frames as its picture
 (in sync, still linked); markers, the frame on V2 and `2_captions.srt` move with the cuts (a caption that starts on a
 cut still does; captions stay back to back). The new XML gets the hard checks again on its own numbers -- `XML ITEM`,
 `REPEAT`, `FLASH`, `AUDIO`, `TRANSITION`, `LINK`, `SYNC` -- and `XML RATE`: on every frame of every V1 and A1 clip the

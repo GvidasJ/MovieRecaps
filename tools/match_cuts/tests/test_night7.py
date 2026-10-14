@@ -346,3 +346,52 @@ def test_check_all_scores_the_60_fps_copies_when_the_edit_was_delivered_at_the_r
     for n in ("edit_100pct.xml", "captions_100pct.srt", "edit_125pct_60fps.xml", "captions_125pct_60fps.srt"):
         (fast / "extras" / n).write_text("x", encoding="utf-8")
     assert planned_files(fast) == (fast / "extras" / "edit_125pct_60fps.xml", fast / "extras" / "captions_125pct_60fps.srt")
+
+
+def test_a_framing_piece_left_one_frame_long_at_the_raws_rate_goes_into_its_take():
+    from match_cuts.geometry import Sim
+    from match_cuts.model import Segment
+    seg = Segment(id=1, type="raw", comp_in=0, comp_out=300, raw_in_seconds=10.0, speed=1.0, confidence=.9)
+    ev = SimpleNamespace(seg=seg, rec_in=0, rec_out=300, seg_name="S01", dissolve_in=0)
+    a_sim, b_sim = Sim(0.5, 0.0, 100.0, 0.0), Sim(0.6, 0.0, -50.0, 0.0)
+
+    def clip(r0, r1, s0, sim):
+        return ex.PremiereClip(seg, ev, r0, r1, r0, r1, s0, s0 + (r1 - r0), 1.0, True, 0.0, 1.0, True, [(s0, sim)],
+                               None, [ev])
+    # one take at 60 fps: 2 s, then a 3-tick piece at another framing (the competitor's reframe), then 2 s more
+    clips = [clip(0, 120, 600, a_sim), clip(120, 123, 720, b_sim), clip(123, 243, 723, a_sim)]
+    R = Fraction(24000, 1001)
+    out, _, _, n, _ = ex.rerate_edit(clips, [], [], 243, Fraction(60), R, R)
+    assert [c.rec_end - c.rec_start for c in out] != [48, 1, 48]           # no framing shown for a single frame
+    assert all(c.rec_end - c.rec_start > 1 for c in out) and sum(c.rec_end - c.rec_start for c in out) == n
+    assert all(p.rec_end == q.rec_start and p.src_out == q.src_in for p, q in zip(out, out[1:]))   # seamless
+    # ... but not across a RAW shot change at that frame: there the piece starts a new shot and stays with the next
+    shot_s = float(Fraction(int(math.floor(Fraction(720, 60) * R + Fraction(1, 10)))) / R)
+    out2, _, _, _, _ = ex.rerate_edit(clips, [], [], 243, Fraction(60), R, R, [shot_s])
+    assert all(c.rec_end - c.rec_start > 1 for c in out2)
+
+
+def test_a_cut_a_tick_after_a_raw_shot_change_lands_on_it_at_the_raws_rate():
+    """video021 (29.97 RAW): the 60 fps edit cut one tick (17 ms) after the RAW's shot change at frame 1609, so the
+    clip before showed 0.4 of the new shot's first frame -- at 29.97 fps a whole frame at its framing (XML FLASH).
+    A frame at a shot change goes to the clip that shows the larger part of it."""
+    from match_cuts.geometry import Sim
+    from match_cuts.model import Segment
+    seg = Segment(id=1, type="raw", comp_in=0, comp_out=300, raw_in_seconds=10.0, speed=1.0, confidence=.9)
+    ev = SimpleNamespace(seg=seg, rec_in=0, rec_out=300, seg_name="S01", dissolve_in=0)
+    R = Fraction(30000, 1001)
+
+    def clip(r0, r1, s0, sim):
+        return ex.PremiereClip(seg, ev, r0, r1, r0, r1, s0, s0 + (r1 - r0), 1.0, True, 0.0, 1.0, True, [(s0, sim)],
+                               None, [ev])
+    clips = [clip(0, 66, 3156, Sim(0.5, 0.0, 100.0, 0.0)), clip(66, 126, 3222, Sim(0.6, 0.0, -50.0, 0.0))]
+    shot = float(Fraction(1609) / R)                         # RAW frame 1609 (53.687 s); the cut at 53.700 s
+    out, _, _, _, _ = ex.rerate_edit(clips, [], [], 126, Fraction(60), R, R, [shot])
+    assert out[0].src_out == out[1].src_in == 1609 and out[0].rec_end == out[1].rec_start
+    # a new take starting a tick before a shot change (the plan shows less than half of the frame before): on it
+    other = [clip(0, 66, 3156, Sim(0.5, 0.0, 100.0, 0.0)), clip(66, 126, 4001, Sim(0.6, 0.0, -50.0, 0.0))]
+    assert Fraction(4001) * R / 60 == Fraction(4001 * 1000, 2002)          # 1998.50: half a frame of 1998 shown
+    out2, _, _, _, _ = ex.rerate_edit(other, [], [], 126, Fraction(60), R, R, [float(Fraction(1999) / R)])
+    assert out2[1].src_in == 1999                                          # not 1998, the shot before's last frame
+    out3, _, _, _, _ = ex.rerate_edit(other, [], [], 126, Fraction(60), R, R, [])
+    assert out3[1].src_in == 1998                                          # no shot change there: as the plan shows

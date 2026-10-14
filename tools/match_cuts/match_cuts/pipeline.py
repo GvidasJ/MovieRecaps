@@ -3717,6 +3717,7 @@ def stage_finish(ctx: Context) -> None:
             ctx.warn(f"1_edit.xml at {what}: {len(probs)} problem(s) -- the run fails: " + "; ".join(probs[:6]))
             if isinstance(ctx.exports, dict):
                 ctx.exports["ok"] = False
+                ctx.exports["validation_ok"] = False   # what the deliverables check reads ("exports NOT validated")
                 ctx.exports.setdefault("speed_problems", []).extend(probs)
                 ctx.exports.setdefault("errors", []).extend(probs[:10])
     if ctx.frame is not None and not cfg.skip_preview and xml.exists():

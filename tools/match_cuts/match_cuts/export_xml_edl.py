@@ -1417,8 +1417,10 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
     def plan_first(c: PremiereClip) -> int:
         return int(math.floor(pos(c.src_in) + ON_FRAME))
 
-    def plan_last(c: PremiereClip) -> int:
-        return int(math.ceil(pos(c.src_in) + vf(c.speed) * (c.rec_end - c.rec_start) * r - ON_FRAME)) - 1
+    def plan_last(c: PremiereClip, part: Fraction = ON_FRAME) -> int:   # the last frame it shows more than ``part`` of
+        return int(math.ceil(pos(c.src_in) + vf(c.speed) * (c.rec_end - c.rec_start) * r - part)) - 1
+
+    half = Fraction(1, 2)          # at a RAW shot change a frame goes to the clip that shows the larger part of it
 
     def shown(s0: int, a: int, k: int, v: float) -> int:
         return int(math.floor(Fraction(s0) + Fraction(k - a) * vf(v) + Fraction(1, 1_000_000)))
@@ -1443,12 +1445,14 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
             s0 = prev_end_src                              # the take runs on
         elif v > 0:
             s0 = plan_first(cl)
+            if pos(cl.src_in) - s0 > half and Fraction(s0 + 1) in shots:
+                s0 += 1                                    # the plan shows less than half of the shot before's last
         else:
             s0 = int(round(pos(cl.src_in)))
         b = at(cl.rec_end)
         nxt = src[i + 1] if i + 1 < len(src) else None
         if v > 0 and b > a:
-            last = plan_last(cl)
+            last = plan_last(cl, half)
             s = next((x for x in shots if last < x <= shown(s0, a, b - 1, v)), None)
             if s is not None:                              # a frame of the next RAW shot: end on the change
                 b = max(a, ends_at(s0, a, s, v))
@@ -1470,6 +1474,29 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
             person_span=(None if cl.person_span is None else
                          (int(round(pos(cl.person_span[0]))), int(round(pos(cl.person_span[1]))))),
             dissolve_frames=cl.dissolve_frames if cl.dissolve_frames < 0 else max(1, int(round(cl.dissolve_frames * r)))))
+    # a piece of one take left one frame long (the plan's 2-3 ticks at its own framing, rounded down) would show its
+    # framing for a single frame (XML FLASH: video021 / video5 / laptop004 in night 7's first check-all): it goes into
+    # the piece of its take in the same RAW shot -- the same frames, that piece's framing
+    shot_at = {int(s) for s in shots if Fraction(s).denominator == 1}
+    i = 0
+    while i < len(out_c):
+        c = out_c[i]
+        if c.rec_end - c.rec_start != 1 or float(c.speed) <= 0:
+            i += 1
+            continue
+        p = out_c[i - 1] if i > 0 else None
+        n = out_c[i + 1] if i + 1 < len(out_c) else None
+        if p is not None and runs_on(p, c) and int(c.src_in) not in shot_at:
+            out_c[i - 1] = dataclasses.replace(p, end=c.end, rec_end=c.rec_end, src_out=c.src_out,
+                                               events=(p.events or [p.ev]) + (c.events or [c.ev]))
+            del out_c[i]
+            continue
+        if n is not None and runs_on(c, n) and int(n.src_in) not in shot_at:
+            out_c[i + 1] = dataclasses.replace(n, start=c.start, rec_start=c.rec_start, src_in=c.src_in,
+                                               events=(c.events or [c.ev]) + (n.events or [n.ev]))
+            del out_c[i]
+            continue
+        i += 1
     out_a: list[dict] = []
     prev_a: dict | None = None
     prev_a_end: int | None = None
