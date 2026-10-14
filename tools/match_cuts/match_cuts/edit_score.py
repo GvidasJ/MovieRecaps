@@ -354,10 +354,11 @@ def for_run(comp_path: str | Path, comp_hash: str, run_dir: str | Path,
 
 
 def score_run(answer_edit: str | Path, run_dir: str | Path) -> CutScore:
-    """A run folder's 1_edit.xml against an answer key's timeline (its track: picture or sound)."""
-    from .run_folders import EDIT_XML
+    """A run folder's 1_edit.xml against an answer key's timeline (its track: picture or sound) -- the 60 fps version
+    when the run delivered it at the RAW's rate (run_folders.planned_files: night 7)."""
+    from .run_folders import planned_files
     key = Edit.from_answer(answer_edit)
-    got = Edit.from_xml(Path(run_dir) / EDIT_XML, "sound" if key.what == "sound" else "picture")
+    got = Edit.from_xml(planned_files(run_dir)[0], "sound" if key.what == "sound" else "picture")
     if key.raw_fps == key.fps and got.raw_fps:
         key.raw_fps = got.raw_fps
     return score(key, got)

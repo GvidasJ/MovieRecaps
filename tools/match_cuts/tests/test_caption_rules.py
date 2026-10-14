@@ -218,10 +218,12 @@ def test_weak_words_move_to_the_next_words_but_never_across_a_sentence_end():
     assert rep["flagged"][7] == 1 and rep["left"][7] == 0
 
 
-def test_srt_writer_refuses_a_file_that_breaks_rules_1_to_4(tmp_path):
-    for text in ("How are you? Thanks", "How are yoU", "it WAS him"):
-        with pytest.raises(ValueError, match="rule"):
-            C.write_srt([C.Caption(text, 0, 30)], tmp_path / "x.srt", FPS)
+def test_srt_writer_always_writes_and_lists_a_line_that_breaks_rules_1_to_4(tmp_path):
+    # night 7: the file is written anyway (laptop video2 got none); the line is listed as doubtful
+    for text, rule in (("How are you? Thanks", 1), ("How are yoU", 3), ("it WAS him", 4)):
+        p = C.write_srt([C.Caption(text, 0, 30)], tmp_path / "x.srt", FPS)
+        assert text in p.read_text(encoding="utf-8")
+        assert rule in {d["rule"] for d in C.doubtful_lines([C.Caption(text, 0, 30)], FPS)}
     p = C.write_srt([C.Caption("How are you?", 0, 30), C.Caption("the MCU", 30, 60)], tmp_path / "ok.srt", FPS)
     assert p.read_text(encoding="utf-8").count("-->") == 2
 

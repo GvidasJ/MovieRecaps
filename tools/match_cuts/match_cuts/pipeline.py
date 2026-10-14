@@ -2188,8 +2188,20 @@ def stage_probe_conform(ctx: Context) -> None:
         seq = sequence_fps(Fraction(ctx.comp_fps), want)
         if seq != want:
             cfg.premiere_fps = fps_str(seq)
-            ctx.warn(f"the competitor runs at {fps_str(Fraction(ctx.comp_fps))} fps: the Premiere sequence is "
-                     f"{fps_str(seq)} fps instead of {fps_str(want)}, so every cut lands on a competitor frame")
+            log.info("the competitor runs at %s fps: the edit is planned on a %s fps grid instead of %s, so every cut "
+                     "lands on a competitor frame", fps_str(Fraction(ctx.comp_fps)), fps_str(seq), fps_str(want))
+        from .config import rate_text
+        from .export_xml_edl import sequence_rate_for_raw
+        sf = str(getattr(cfg, "sequence_fps", "raw") or "raw").strip().lower()
+        rate = sequence_rate_for_raw(ctx.raw_fps) if sf == "raw" else Fraction(sf)
+        cfg.premiere_seq_rate = fps_str(rate)        # night 7: 1_edit.xml at the RAW's own rate
+        vfr = bool(getattr(ctx.raw_info, "vfr", False))
+        log.info("Premiere sequence: %s fps (%s; the edit is planned on the %s fps grid and written at the sequence's "
+                 "rate in the last step)", rate_text(rate),
+                 ("--sequence-fps " + rate_text(Fraction(sf))) if sf != "raw" else
+                 ("the RAW's own rate" if abs(float(rate) - float(Fraction(ctx.raw_fps))) < 1e-6 else
+                  f"the normal Premiere rate nearest the RAW's {float(Fraction(ctx.raw_fps)):.3f} fps"
+                  + (" (a variable rate)" if vfr else "")), rate_text(Fraction(str(cfg.premiere_fps))))
     ctx.main_size = resolve_main_size(ctx.cfg, (ctx.comp_info.display_width or ctx.comp_info.width,
                                                 ctx.comp_info.display_height or ctx.comp_info.height),
                                       (ctx.raw_info.display_width or ctx.raw_info.width,
@@ -3683,15 +3695,30 @@ def stage_finish(ctx: Context) -> None:
     cfg = ctx.cfg
     k = float(getattr(cfg, "premiere_speed", 1.0) or 1.0)
     xml = cfg.deliver / run_folders.EDIT_XML
-    if abs(k - 1.0) > 1e-9 and xml.exists():
-        ok, res = _soft(ctx, "S8 --speed", lambda: apply_speed(ctx, k))
-        ctx.finish["speed"] = res if ok and isinstance(res, dict) else {"error": "the speed step failed", "speed": k}
-        probs = (ctx.finish["speed"].get("problems") or []) if ok else ["the speed step failed"]
+    plan = Fraction(str(cfg.premiere_fps or "60"))
+    rate = Fraction(str(getattr(cfg, "premiere_seq_rate", None) or plan))
+    if (abs(k - 1.0) > 1e-9 or rate != plan) and xml.exists():
+        from .config import rate_text
+        what = " and ".join(([f"--speed {100 * k:g}"] if abs(k - 1.0) > 1e-9 else []) +
+                            ([f"the RAW's {rate_text(rate)} fps"] if rate != plan else []))
+        ok, res = _soft(ctx, "S8 --speed / frame rate", lambda: apply_final(ctx, k, rate))
+        ctx.finish["speed"] = res if ok and isinstance(res, dict) else {"error": f"1_edit.xml at {what} failed",
+                                                                         "speed": k}
+        probs = (ctx.finish["speed"].get("problems") or []) if ok else [f"writing 1_edit.xml at {what} failed"]
+        if ok and rate != plan and isinstance(ctx.exports, dict):
+            # the checks run again on the delivered XML speak for it (its own timecodes); the others (speech, silence,
+            # person, gap, other video, ending) read the 60 fps plan
+            redo = ("XML ITEM", "XML REPEAT", "XML FLASH", "XML AUDIO", "XML TRANSITION", "XML LINK", "XML SYNC")
+            kept = [e for e in ctx.exports.get("errors") or [] if not str(e).startswith(redo)]
+            ctx.exports["errors"] = kept
+            ctx.exports["ok"] = not kept
+            ctx.exports["validation_ok"] = not kept
         if probs:
-            ctx.warn(f"--speed {100 * k:g}: {len(probs)} problem(s) in 1_edit.xml -- the run fails: " + "; ".join(probs[:6]))
+            ctx.warn(f"1_edit.xml at {what}: {len(probs)} problem(s) -- the run fails: " + "; ".join(probs[:6]))
             if isinstance(ctx.exports, dict):
                 ctx.exports["ok"] = False
                 ctx.exports.setdefault("speed_problems", []).extend(probs)
+                ctx.exports.setdefault("errors", []).extend(probs[:10])
     if ctx.frame is not None and not cfg.skip_preview and xml.exists():
         from . import premiere_preview
         dst = cfg.out / "preview_recreation.mp4"
@@ -3702,44 +3729,109 @@ def stage_finish(ctx: Context) -> None:
 
 
 def apply_speed(ctx: Context, k: float) -> dict:
-    """--speed: 1_edit.xml written again from the same plan with every clip k times as fast (export_xml_edl.retime_edit)
-    and 2_captions.srt timed to it (every caption's start and end / k, on whole sequence frames); the 100 % files kept
-    in extras/. Checked: the new XML's items (premiere_item_problems), its frame track, and every clip against the
-    100 % one (the same RAW, k times as fast, at its place / k: speed_problems)."""
+    """--speed alone (the sequence at the planning rate): apply_final."""
+    return apply_final(ctx, k, None)
+
+
+def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
+    """The finished edit as you get it: 1_edit.xml written again from the same plan -- every clip k times as fast
+    (--speed: export_xml_edl.retime_edit) and the sequence at ``rate`` (night 7: the RAW's own rate,
+    export_xml_edl.rerate_edit) -- and 2_captions.srt timed to it (each caption's start and end / k, onto the new
+    frames the cuts went to); the checked files kept in extras/ (edit_100pct.xml / captions_100pct.srt with --speed,
+    else edit_60fps.xml / captions_60fps.srt). Checked: the new XML's items, its frame track, every clip against the
+    checked edit (speed_problems at the planning rate; at another rate final_xml_problems: the hard checks on its own
+    numbers and every frame against the checked edit)."""
     import shutil
     from . import export_xml_edl as X
     from .captions import read_srt
     cfg = ctx.cfg
     xml = cfg.deliver / run_folders.EDIT_XML
-    base = cfg.out / "edit_100pct.xml"
+    plan = Fraction(str(X.premiere_settings(cfg)["fps"]))
+    rate = Fraction(rate) if rate is not None else plan
+    tag = "100pct" if abs(k - 1.0) > 1e-9 else f"{X.rate_text(plan)}fps"
+    base = cfg.out / f"edit_{tag}.xml"
     shutil.copyfile(xml, base)
     ex = ctx.premiere_cutlist
     rp = (ctx.silence or {}).get("ripple") if isinstance(ctx.silence, dict) else None
-    res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k)
+    res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k, seq_rate=rate if rate != plan else None)
+    if isinstance(ctx.premiere_xml, dict):      # the end summary's times: the delivered edit's (its re-framed clips)
+        ctx.premiere_xml = dict(ctx.premiere_xml, reframed=res.get("reframed") or [], fps=res.get("fps"))
     probs = X.premiere_item_problems(xml)
     if str(getattr(cfg, "frame_png", "") or ""):
         probs += X.frame_track_problems(xml, X.parse_premiere_xml(xml)["duration"])
-    probs += X.speed_problems(base, xml, k)
+    if rate == plan:
+        probs += X.speed_problems(base, xml, k)
+    elif not probs:
+        from .config import removes_silence
+        probs += X.final_xml_problems(base, xml, k, getattr(cfg, "premiere_shots", None), ctx.raw_fps,
+                                      removes_silence(cfg), bool(getattr(cfg, "allow_repeats", False)))
     srt = cfg.deliver / run_folders.CAPTIONS_SRT
+    both = abs(k - 1.0) > 1e-9 and rate != plan     # --speed at the RAW's rate: the fast edit on the 60 fps grid kept too
+    sped = f"{100 * k:g}pct_{X.rate_text(plan)}fps"  # (check-all scores it: run_folders.planned_files)
+    if both:
+        X.write_premiere_xml(ex, cfg.out / f"edit_{sped}.xml", cfg, rp, speed=k)
     caps_n = 0
     if srt.exists():
-        shutil.copyfile(srt, cfg.out / "captions_100pct.srt")
-        fps = float(X.premiere_settings(cfg)["fps"])
+        shutil.copyfile(srt, cfg.out / f"captions_{tag}.srt")
         rows = read_srt(srt)
         caps_n = len(rows)
-        srt.write_text(scaled_srt(rows, k, fps), encoding="utf-8", newline="\n")
+        if both:
+            (cfg.out / f"captions_{sped}.srt").write_text(scaled_srt(rows, k, float(plan)), encoding="utf-8",
+                                                          newline="\n")
+        pos_map = {int(a): int(b) for a, b in (res.get("pos_map") or {}).items()}
+        srt.write_text(scaled_srt(rows, k, float(plan)) if rate == plan else final_srt(rows, k, plan, rate, pos_map),
+                       encoding="utf-8", newline="\n")
         if ctx.captions.get("path"):
             ctx.paths["captions"] = str(srt)
     x0, x1 = X.parse_premiere_xml(base), X.parse_premiere_xml(xml)
-    f = float(X.premiere_settings(cfg)["fps"])
-    out = {"speed": k, "clips": res.get("clips"), "captions": caps_n, "problems": probs,
-           "seconds_100": round(x0["duration"] / f, 3), "seconds": round(x1["duration"] / f, 3),
-           "base_xml": str(base)}
-    log.info("--speed %g: 1_edit.xml plays the %d clips at %g %% -- %.2f s instead of %.2f s; %d captions timed to it; "
-             "%s", 100 * k, res.get("clips") or 0, 100 * k, out["seconds"], out["seconds_100"], caps_n,
-             "every check OK" if not probs else f"{len(probs)} problem(s)")
+    out = {"speed": k, "fps": fps_str(rate), "plan_fps": fps_str(plan), "clips": res.get("clips"), "captions": caps_n,
+           "problems": probs, "seconds_100": round(x0["duration"] / float(plan), 3),
+           "seconds": round(x1["duration"] / float(rate), 3), "base_xml": str(base)}
+    log.info("1_edit.xml: %d clips%s%s -- %.2f s (the checked edit: %.2f s); %d captions timed to it; %s",
+             res.get("clips") or 0, f" at {100 * k:g} %" if abs(k - 1.0) > 1e-9 else "",
+             f" on a {X.rate_text(rate)} fps sequence (the RAW's rate)" if rate != plan else "", out["seconds"],
+             out["seconds_100"], caps_n, "every check OK" if not probs else f"{len(probs)} problem(s)")
     ctx.dlog.record("premiere", "speed", **{kk: v for kk, v in out.items() if kk != "problems"}, problems=probs[:20])
     return out
+
+
+def final_srt(rows: list[dict], k: float, plan: Fraction, rate: Fraction, pos_map: dict[int, int] | None = None
+              ) -> str:
+    """The SRT (captions.read_srt rows) on the finished sequence: each caption's start and end on the planning grid
+    (``plan`` fps), / k as retime_edit rounds the cuts, then onto the frame of ``rate`` the cut at that place went to
+    (``pos_map``: write_premiere_xml's, a caption starting on a cut still does), else the nearest; back to back stays
+    back to back; a caption left shorter than 2 frames goes into the one before (captions.MIN_CAPTION_FRAMES)."""
+    from .captions import MIN_CAPTION_FRAMES, frame_ms, ms_tc
+    plan, rate = Fraction(plan), Fraction(rate)
+    r = rate / plan
+    pm = pos_map or {}
+
+    def at(x: int) -> int:
+        if rate == plan:
+            return int(x)
+        return pm[x] if x in pm else int(math.floor(Fraction(int(x)) * r + Fraction(1, 2)))
+    caps = []
+    for row in rows:
+        f0 = int(round(float(row["start_ms"]) * float(plan) / 1000.0))
+        f1 = int(round(float(row["end_ms"]) * float(plan) / 1000.0))
+        if abs(k - 1.0) > 1e-9:
+            f0, f1 = int(round(f0 / k)), int(round(f1 / k))
+        text = "\n".join(line.strip() for line in str(row["text"]).splitlines() if line.strip())
+        caps.append([at(f0), at(f1), text])
+    out: list[list] = []
+    prev_end = 0
+    for a, b, text in caps:
+        a = max(a, prev_end)
+        b = max(b, a)
+        if b - a < (MIN_CAPTION_FRAMES if rate != plan else 1):
+            if out and out[-1][1] == a:
+                out[-1][1] = b
+            prev_end = max(prev_end, b)
+            continue
+        out.append([a, b, text])
+        prev_end = b
+    return "\n".join(f"{i}\n{ms_tc(frame_ms(a, rate))} --> {ms_tc(frame_ms(b, rate))}\n{text}\n"
+                     for i, (a, b, text) in enumerate(out, start=1))
 
 
 def scaled_srt(rows: list[dict], k: float, fps: float) -> str:
@@ -3864,10 +3956,12 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {"broll": [], "spots": [], "captions": []}
     xml = ctx.paths.get("xml")
     if getattr(cfg, "premiere", False) and xml and Path(xml).exists():
-        from .export_xml_edl import OTHER_VIDEO, parse_premiere_xml, premiere_settings
+        from .export_xml_edl import OTHER_VIDEO, _seq_rate, parse_premiere_xml, premiere_settings
         fps = Fraction(premiere_settings(cfg)["fps"])
         try:
-            markers = parse_premiere_xml(xml)["markers"]
+            x_ = parse_premiere_xml(xml)
+            markers = x_["markers"]
+            fps = _seq_rate(x_)                 # the delivered sequence's own timecodes (night 7: the RAW's rate)
         except Exception as e:  # noqa: BLE001 - the summary lists what it can
             markers = []
             out["spots"].append(f"(the markers of {Path(xml).name} could not be read: {type(e).__name__}: {e})")
@@ -3958,9 +4052,14 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
                                   [f"{rc.get('rechecked', 0)} word{'' if rc.get('rechecked') == 1 else 's'} "
                                    f"rechecked against the {rc.get('source', 'RAW')} ({rc.get('model')}), "
                                    f"{rc.get('changed', 0)} changed"])
+    rows += [f"{tc(c)}  '{c['text']}': shorter than 2 frames -- left out" for c in cap.get("too_short_dropped") or []]
+    if cap.get("doubtful") is not None:                # night 7: written anyway, listed for a look
+        out["caption_doubtful"] = [f"{d['line']}: rule {d['rule']} ({d['name']})" for d in cap.get("doubtful") or []]
     if cap.get("error"):
         rows.append(f"{run_folders.CAPTIONS_SRT} was not written: {cap['error']}")
     out["captions"] = rows
+    if cap.get("censored"):
+        out["caption_censored"] = [f"{r['tc']}  '{r['was']}' -> '{r['now']}'" for r in cap["censored"]]
     if cap.get("stutters") is not None:
         out["caption_stutters"] = [f"{r['start_tc']}-{r['end_tc']}  '{r['was']}' -> '{r['now']}'"
                                    for r in cap.get("stutters") or []]

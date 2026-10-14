@@ -21,6 +21,17 @@ EXTRAS = "extras"
 RUN_RE = re.compile(r"^\d{3,}$")
 
 
+def planned_files(run_dir: str | Path) -> tuple[Path, Path]:
+    """(edit XML, captions) as planned and checked on the 60 fps grid: extras/edit_<rate>fps.xml and
+    extras/captions_<rate>fps.srt (with --speed: edit_125pct_60fps.xml ...) when 1_edit.xml / 2_captions.srt were
+    delivered at the RAW's own rate (night 7), else those two -- what check-all scores against your keys (made on 60
+    fps sequences), so its numbers stay comparable with the earlier nights'."""
+    run = Path(run_dir)
+    ex = sorted((run / EXTRAS).glob("edit_*fps.xml"))
+    cs = sorted((run / EXTRAS).glob("captions_*fps.srt"))
+    return (ex[0] if ex else run / EDIT_XML), (cs[0] if cs else run / CAPTIONS_SRT)
+
+
 def run_dirs(base: str | Path) -> list[tuple[int, Path]]:
     """The numbered run folders in base, oldest (lowest number) first."""
     b = Path(base)

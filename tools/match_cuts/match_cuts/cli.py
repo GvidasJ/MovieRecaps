@@ -107,6 +107,23 @@ def _speed_arg(value: str) -> float:
     return v
 
 
+SEQUENCE_RATES = {"23.976": "24000/1001", "23.98": "24000/1001", "24": "24", "25": "25", "29.97": "30000/1001",
+                  "30": "30", "50": "50", "59.94": "60000/1001", "60": "60"}
+
+
+def _seq_fps_arg(value: str) -> str:
+    """--sequence-fps: "raw", or one of Premiere's normal rates (as a fraction string)."""
+    v = str(value).strip().lower()
+    if v == "raw":
+        return v
+    if v in SEQUENCE_RATES:
+        return SEQUENCE_RATES[v]
+    if v in SEQUENCE_RATES.values():
+        return v
+    raise argparse.ArgumentTypeError(f"--sequence-fps must be raw or one of {', '.join(list(SEQUENCE_RATES)[:1] + list(SEQUENCE_RATES)[2:])}, "
+                                     f"got {value!r}")
+
+
 def _db_arg(value: str) -> float:
     try:
         v = float(str(value).lower().removesuffix("db"))
@@ -197,6 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "competitor used: the edit is made at 100 %% (cuts off speech, silences and repeats out, the "
                         "captions transcribed), then every clip of 1_edit.xml plays PERCENT %% fast and every cut and "
                         "caption moves with it (default 100; batch: a speed.txt in a video's folder)")
+    p.add_argument("--sequence-fps", default="raw", type=_seq_fps_arg, metavar="RATE",
+                   help="--premiere: the frame rate of 1_edit.xml's sequence (and 2_captions.srt): raw = the RAW's own "
+                        "rate (default; a rate Premiere does not use -- or a variable one -- the nearest of 23.976, 24, "
+                        "25, 29.97, 30, 50, 59.94, 60), or one of those (60 = the sequence as before night 7)")
     p.add_argument("--frame", default=None, metavar="PNG",
                    help="--premiere: your channel's overlay, a PNG with a TRANSPARENT hole where the video goes "
                         "(header and headline around it): the video fills the hole completely (cropped as needed, "
@@ -326,6 +347,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.keep_silence = bool(getattr(args, "keep_silence", False))
     cfg.keep_speed = True                   # every run: the edit is made at 100 % (--keep-speed: the old switch)
     cfg.premiere_speed = float(getattr(args, "speed", 100.0) or 100.0) / 100.0
+    cfg.sequence_fps = str(getattr(args, "sequence_fps", "raw") or "raw")
     cfg.premiere_mirror = bool(getattr(args, "mirror", False))
     cfg.premiere_follow_speaker = bool(getattr(args, "follow_speaker", False))
     if getattr(args, "frame", None):
@@ -535,9 +557,13 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
     if rcfg is not None and getattr(rcfg, "premiere", False):
         k = float(getattr(rcfg, "premiere_speed", 1.0) or 1.0)
         fr = getattr(result.get("context"), "frame", None)
+        from .config import rate_text
+        sr = str(getattr(rcfg, "premiere_seq_rate", "") or "")
         lines.append(f"  Speed: {100 * k:g} %" + (" (the default)" if abs(k - 1.0) < 1e-9 else
                                                   " (--speed: made at 100 %, 1_edit.xml plays it this fast)")
-                     + (f"; frame: {Path(fr.path).name} on V2, {rcfg.premiere_size} sequence" if fr is not None else ""))
+                     + (f"; frame: {Path(fr.path).name} on V2, {rcfg.premiere_size} sequence" if fr is not None else "")
+                     + (f"; sequence {rate_text(sr)} fps" + (" (the RAW's rate)" if str(getattr(
+                         rcfg, "sequence_fps", "raw")) == "raw" else " (--sequence-fps)") if sr else ""))
     for key, label in [] if result.get("raw_only") else CRITERIA_LABELS:
         c = crit.get(key) or {}
         st = STATUS_TEXT.get(c.get("status"), (c.get("status") or "not run").upper())
@@ -563,7 +589,11 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
     premiere = bool(getattr(getattr(ctx, "cfg", None), "premiere", False))
     lines.append("Files:")
     lines.append(f"  {run_folders.EDIT_XML:<26} {paths.get('xml') or 'not written'}")
-    lines.append(f"  {run_folders.CAPTIONS_SRT:<26} {paths.get('captions') or 'not written'}")
+    cap = getattr(ctx, "captions", None) or {}
+    no_caps = ("NOT WRITTEN -- this edit has no captions: "
+               + str(cap.get("error") or next((w for w in cap.get("warnings") or [] if "not written" in str(w)),
+                                               "see extras/report.md")))
+    lines.append(f"  {run_folders.CAPTIONS_SRT:<26} {paths.get('captions') or no_caps}")
     if premiere:
         lines.append(f"  {run_folders.STYLED_PRPROJ:<26} import both into Premiere, upgrade the captions to graphics, "
                      'save, then: python -m match_cuts restyle "<project>.prproj"')
@@ -621,6 +651,16 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
                 lines += [f"    {r}" for r in unheard[:max_rows]]
         for r in hc.get("caption_rules") or []:
             lines.append(f"  Caption rules (captions changed / flagged per rule): {r}")
+        if "caption_doubtful" in hc:
+            rows = list(hc.get("caption_doubtful") or [])
+            lines.append(f"  Doubtful caption lines (written as they are -- check them): {len(rows) if rows else 'none'}")
+            lines += [f"    {r}" for r in rows[:30]]
+            if len(rows) > 30:
+                lines.append(f"    ... {len(rows) - 30} more in {run_folders.EXTRAS}/debug/captions.json")
+        if hc.get("caption_censored"):
+            rows = list(hc["caption_censored"])
+            lines.append(f"  Captions censored (caption_censor.txt): {len(rows)}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
         for r in hc.get("asr") or []:
             lines.append(f"  Speech recognition: {r}")
         if hc.get("caption_score"):

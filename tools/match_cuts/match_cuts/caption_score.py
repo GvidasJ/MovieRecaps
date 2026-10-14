@@ -444,15 +444,17 @@ def load_captions(srt: str | Path) -> list[Cap]:
 
 def score_run(name: str, key_srt: str | Path, key_tl: Timeline, run_dir: str | Path) -> Score:
     """A run folder's 2_captions.srt (on its 1_edit.xml; another video's stretches from extras/debug/captions.json)
-    against the user's key_srt on key_tl."""
-    from .run_folders import CAPTIONS_SRT, EDIT_XML, EXTRAS
+    against the user's key_srt on key_tl -- the 60 fps versions when the run delivered them at the RAW's rate
+    (run_folders.planned_files: night 7)."""
+    from .run_folders import EXTRAS, planned_files
     run = Path(run_dir)
     ov: list[dict] = []
     dbg = run / EXTRAS / "debug" / "captions.json"
     if dbg.is_file():
         ov = list(json.loads(dbg.read_text(encoding="utf-8")).get("other_video") or [])
-    got_tl = Timeline.from_xml(run / EDIT_XML, ov)
-    got = load_captions(run / CAPTIONS_SRT) if (run / CAPTIONS_SRT).is_file() else []
+    xml, srt = planned_files(run)
+    got_tl = Timeline.from_xml(xml, ov)
+    got = load_captions(srt) if srt.is_file() else []
     gaps = [(int(o["a"]) / SEQ_FPS, int(o["b"]) / SEQ_FPS) for o in ov]
     return score(name, load_captions(key_srt), key_tl, got, got_tl, gaps)
 

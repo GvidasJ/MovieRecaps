@@ -170,7 +170,9 @@ count the retimed clip -- output/020's bug), and the pieces of one take stay sea
 `extras\edit_100pct.xml` / `captions_100pct.srt`; the check `XML SPEED` compares every clip of the fast edit with
 its 100 % twin (the same RAW, 1.25 x as fast, at its place / 1.25). No clip is shorter than `--min-clip` frames
 after the speed-up (the planned minimum is scaled by the speed). The speed is the first line of `report.md` and of
-the end summary.
+the end summary. Since night 7 the same last step also writes the sequence at the RAW's own frame rate (*Premiere*):
+with a RAW at another rate than the planning grid's, `XML RATE` (every frame against the 100 % edit, at its moment /
+1.25) checks the fast edit instead of `XML SPEED`.
 
 ```
 ..\..\.venv\Scripts\python -m match_cuts --premiere --speed 125
@@ -204,12 +206,30 @@ the competitor-timed recreation the checks read is `extras\debug\recreation_chec
 
 ### Premiere (`--premiere`)
 
-`1_edit.xml` is a 1080×1920 sequence (with a frame: the frame's own size) at exactly 60.00 fps with the edit on V1,
-the RAW audio on A1 (every clip at 0 dB) and your template on V2 (`--frame`: that PNG; `--no-frame`: V2 and above
-empty). (A competitor whose frame rate does not divide 60 gets the whole multiple of its rate nearest to
-it, so every cut lands on one of its frames: a 24 fps competitor a 48 fps sequence, 25 fps a 50 fps one, and an NTSC
-competitor the NTSC version of that -- 29.97 fps a 59.94 fps sequence, 23.976 fps 47.952; the end summary says
-so.) A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or hold
+`1_edit.xml` is a 1080×1920 sequence (with a frame: the frame's own size) **at the RAW's own frame rate** (night 7:
+a 23.976 RAW gives a 23.976 sequence, 29.97 a 29.97 one, and so on; a RAW at a rate Premiere does not use -- 15, 20,
+48 fps, or a variable rate -- the nearest of 23.976, 24, 25, 29.97, 30, 50, 59.94, 60; `--sequence-fps 60` gives the
+old 60 fps sequence) with the edit on V1, the RAW audio on A1 (every clip at 0 dB) and your template on V2 (`--frame`:
+that PNG; `--no-frame`: V2 and above empty).
+
+How (night 7): the edit is still **planned and checked on the 60 fps grid** (every competitor frame a whole number of
+sequence frames: a competitor whose rate does not divide 60 gets the whole multiple of its rate nearest to it -- 24 fps
+a 48 fps grid, 29.97 a 59.94 one), exactly as before; every check below reads that edit (kept as
+`extras\edit_60fps.xml`, its captions `extras\captions_60fps.srt`). The **last step** writes it again at the RAW's rate
+(`rerate_edit`): every cut on the nearest frame of the new rate; every clip **starts on the RAW frame the 60 fps edit
+starts it on** (at the RAW's rate one sequence frame is one RAW frame, so the clip after a competitor cut shows the
+competitor's first RAW frame there); the pieces of one take stay seamless (each continues exactly where the one before
+ends); a cut at one of the RAW's own shot changes lands **exactly** on it (no frame of the other shot at either side),
+and a clip never shows a frame of a RAW shot the 60 fps clip does not reach; A1 takes the same frames as its picture
+(in sync, still linked); markers, the frame on V2 and `2_captions.srt` move with the cuts (a caption that starts on a
+cut still does; captions stay back to back). The new XML gets the hard checks again on its own numbers -- `XML ITEM`,
+`REPEAT`, `FLASH`, `AUDIO`, `TRANSITION`, `LINK`, `SYNC` -- and `XML RATE`: on every frame of every V1 and A1 clip the
+RAW plays what the checked 60 fps edit plays at that moment (within a frame of the new rate), and every clip of it is
+still there. A problem fails the run like any other hard check. (`--speed` works the same way: made at 100 % on the 60
+fps grid, then played faster and written at the RAW's rate in the same step.) check-all scores the 60 fps files
+against your keys (made on 60 fps sequences), so its numbers stay comparable with the earlier nights'.
+
+A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or hold
 sliver, a frame-rate artifact rather than an edit -- plays at 100 % here, so the take runs on as one and its
 sound is never slowed inside a word; so does a picture glitch of at most 0.25 s inside one take, its picture at
 most 0.1 s off the take (it plays on the take's line, picture and sound) -- unless the competitor's sound there
@@ -265,6 +285,12 @@ leave a median 0.013 s / 0.026 s), and only when at least 0.1 s goes (never a cu
 competitor's cut points stay where they are (a pause that holds or touches a V1 or A1 cut is kept whole), and so do
 the edit's start and its ending (`XML ENDING`). The end summary lists every pause cut (*Silences*) with the settings
 line ("pauses inside the takes ... N of M quiet stretches cut").
+
+**A pause at one of the RAW's own shot changes** (night 7, your video6 fix): the picture cuts there anyway, so such a
+pause (at most 1 s) is cut even with a faint sound in it -- up to 25 % of the way from the background noise to the
+speech level instead of 12 %. Your video6 cut 0.5 s across the shot change at RAW 334.38 s, after the high five
+(a faint sound in it: 20 %); laptop010's three pauses at shot changes you cut too; laptop013's 1.4 s music beat at a
+shot change (23 %) you kept -- the 1 s limit keeps it. The settings line says how many were cut that way.
 
 **5.1 sound: a clean stereo copy for Premiere** (night 6). A RAW whose sound has more than two channels sounds like it
 has an echo in Premiere (the surround channels are mixed in). `1_edit.xml` then plays `extras\media\raw_stereo.mp4`
@@ -591,8 +617,9 @@ with its competitor and 60 fps sequence timecodes.
 
 ### Captions
 
-`2_captions.srt` is written on every run, timed frame-exactly on the 60.00 fps Premiere sequence
-(competitor frame k = sequence frame 2k for a 30 fps competitor), **in your caption style**, learned from your own
+`2_captions.srt` is written on every run -- **always** (night 7: one line that broke a rule used to hold the whole
+file back; laptop video2 got none) --, made on the 60 fps planning grid and delivered on the sequence's own frames
+(the RAW's rate: *Premiere*), **in your caption style**, learned from your own
 SRTs in `srt/` (`match_cuts/caption_style.json`; after adding SRTs, rebuild it with `python -m match_cuts.caption_style`;
 the SRTs of the answer-key videos are left out of it, so check-all scores videos the style has not seen). Your style
 (618 captions in 15 SRTs): 1 word 24 %, 2 words 41 %, 3 words 27 %, 4 words 8 %; median 10 characters, 90 % at 16 or
@@ -677,7 +704,23 @@ capitalised (`Bronx`, `Parker`), unknown capitalised words (`Keanu`), and a capi
 and listed (*Caption stutters kept once*); a word repeated as separate captions (`no` | `no` | `no`) stays.
 
 **The hard rules** (`caption-generator-prompt.md`, *Hard rules*) are a final check on every caption file before it
-is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4 is never written:
+is written (`match_cuts/caption_rules.py`). **The file is always written** (night 7): a line that still breaks rule
+1–5 is written as it is and listed as *doubtful* -- in the end summary (*Doubtful caption lines (written as they are --
+check them)*), in `extras/debug/captions.json` and in the batch's console and `batch_summary.md`. A word **spelled out
+letter by letter** (`A-N`, `O-N`, `R-E`, `T-H-E`) is a real word, written in capitals with dashes, and a lone capital
+letter (`N`) is not flagged; a single letter is never an allowlist entry (an `A` there would write every "a" as "A":
+the allowlist reader skips every single letter but `I`). A caption **shorter than 2 frames** of the delivered sequence
+(laptop video2's 1-frame `wh****`) is left out -- the caption before runs on over its frames -- and listed.
+
+**Censored words** (night 7, your answer 2a): the words of `caption_censor.txt` (next to this README; edit it as you
+like, each run reads it) are written with one letter as `*`, as you wrote them in laptop010 / laptop013: `p*rn`,
+`se*ual`, `perv*rt`, `d*ck`. One word per line; `word = f*rm` says how to write it, a word alone gets its first vowel
+after the first letter starred (`boobs` -> `b*obs`). Whole words, any case (`Porn` -> `P*rn`), a word's `'s` form too.
+A word not listed is never changed: `gay`, `fag` (laptop009 kept them written out), `pissed`, swear words. The list
+holds your four forms and their variants plus other sexual / crude words in the same style (cock, pussy, boobs, tits,
+horny, slut, whore, cum, orgasm, ...). The end summary lists every censored caption (*Captions censored*).
+
+The rules:
 
 | rule | check | fixed (counted as *changed*) | otherwise (counted as *flagged*, listed) |
 |---|---|---|---|
@@ -686,7 +729,7 @@ is written (`match_cuts/caption_rules.py`); a file that still breaks rules 1–4
 | 3 casing inside a word | no `yoU` | `you` (the transcript's casing, else the word list's) | — |
 | 4 capitals | no ALL-CAPS word but acronyms; capitals only for `I`, names, acronyms, after a pause | lower case (`WAS` → `was`, `PETER PARKER` → `Peter Parker`) | — |
 | 5 real words | every token in the word list, a name, a number or an interjection | competitor mode: a reading that is not a word and was not read clearly takes the word the transcript clearly heard; screen noise (`1`, `V`, `_`) is left out | listed, never guessed (deliberate misspellings stay) |
-| 6 length | spoken: 20 characters / 5 words; `*actions*`: 24 | split at a word (no weak ending) | one word over 20 characters |
+| 6 length | spoken: 20 characters / 5 words; `*actions*`: 24; night 7: a caption of 2+ words grouped in your style at most 1.5 s on screen (your 990 captions of 2+ words: one over 1.5 s; 3 words at most 1.47 s) | split at a word (no weak ending); too long on screen: before the word that leaves the longer piece shortest, never inside a pair kept together (video6: "you mean succeed?", 2.4 s -> "you mean" / "succeed?", as you did) | one word over 20 characters |
 | 7 weak words | no caption of a single weak word; no weak last word where it can move | joined / moved to the next words | kept where it ends a sentence, a silence / interjection follows, it is kept together with the word before it, or the caption already gave one |
 | 8 no gaps | `end[i] == start[i+1]`, no overlap | closed in every mode (a pause over 1 s: a `*...*` placeholder) | another video's stretch stays a gap |
 | 9 kept together | no pair kept together split between two captions (copied captions; the style grouping decides its own breaks) | regrouped (copied one-word captions) | split only where the cap or a video cut forces it |
@@ -887,6 +930,15 @@ Your files: `<run folder>` -- import 1_edit.xml and 2_captions.srt into Premiere
 deliverables' hard checks and coverage, as check-all; the recreation criteria c2-c5 are not part of it --, whether
 1_edit.xml uses any media outside its run folder) and per video what to check by hand. The console ends with the
 same list: each video, PASS / FAIL and its folder.
+
+**OK with a note** (night 7): when every file is there and the only problem is "exports NOT validated" -- a hard
+check of `1_edit.xml` found something (laptop video1: one RAW frame of the next shot at the very end, `XML FLASH`) --
+the video is **OK (with a note)**, not FAIL: the note says what the check found, to look at in Premiere; it counts as
+passed. **No captions is said in capitals**: a run whose `2_captions.srt` is missing shows `NO CAPTIONS:
+2_captions.srt was not written -- <why>` in the console, the summary's line for it and a *captions* column (MISSING /
+written / N doubtful lines), and it fails its deliverables check (`9.8 deliverables ... (2_captions.srt MISSING)` --
+never "8/8 deliverables present"). The caption lines written although doubtful (*Captions*) are listed under each
+video in the console and in `batch_summary.md`.
 
 ### Learn from your finished videos (`learn <folder>`)
 
@@ -1346,8 +1398,10 @@ cd tools/match_cuts
 
 **New-style and old cases** (the default since night 6; `--old-way` runs everything as before). The cases made with
 your current rules -- the default frame, the competitor's cuts, 100 % (`case.json` `"style": "new"`: mike005-fixed,
-laptop009-fixed, laptop010-fixed, laptop013-fixed, video021-fixed, deadpool, zendaya) -- run **thorough** and are
-**scored** against your fixes (captions and cuts). The older cases (video1-5, video017/018/020-fixed,
+laptop009-fixed, laptop010-fixed, laptop013-fixed, video021-fixed, deadpool, zendaya, and since night 7 video6-fixed
+-- your fix of the laptop's video1 batch run) -- run **thorough** and are **scored** against your fixes (captions and
+cuts; a run delivered at the RAW's own rate is scored on its checked 60 fps copies in `extras\`, as your keys were
+made on 60 fps sequences). The older cases (video1-5, video017/018/020-fixed,
 spiderman-school, zendaya-age, laptop004-fixed: made in your older style) run **`--fast` with the hard checks only**
 (a valid Premiere XML, no flash, the sound in sync, no transition ... -- no caption or cut score: their keys follow
 rules you no longer use). Every run gets `--check-determinism`, `--quick-checks` (the After Effects recreation

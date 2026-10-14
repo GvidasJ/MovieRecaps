@@ -1,0 +1,10 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video6_fixed_relinked.prproj (2026-10-14, night 7; the project's fifth sequence -- the first four are template sequences of other videos): answer.srt and answer_edit.json are your finished edit (its picture clips; your A1 sits exactly under V1); your run was the laptop's --fast batch run output\\video1-2 (the laptop's input\\videos\\video1) with the default settings -- 100 %, your template (templates/default.png), the competitor's cut points (no --remove-silence)",
+ "learned_from": "finished\\video6\\video6_fixed_relinked.prproj",
+ "run": "output\\video1-2",
+ "full_raw": "output/video1-2/extras/media/raw.mp4",
+ "raw_offset": 301.55125,
+ "options": []
+}

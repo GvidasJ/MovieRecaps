@@ -14,11 +14,13 @@ Each run folder works on its own: its RAW and competitor are placed in its ``ext
 no extra space -- on the same drive, else a copy; conform.py), and 1_edit.xml points there, so you can move or delete
 the input folder afterwards. The summary checks that: every media file 1_edit.xml uses lies inside the run folder.
 
-At the end ``<out>/batch_summary.md`` (and ``.json``): per video the run folder, the run time, PASS / FAIL (the
-Premiere deliverables' hard checks -- 1_edit.xml's item / gap / speech / flash / link / person ... checks and the
-captions file -- and coverage; the recreation criteria c2-c5 are not part of it, as in check-all), why it failed,
-and what to check by hand (the run's own end summary). Exit code: 0 when every video passed, 1 otherwise, 2 when
-there was nothing to run.
+At the end ``<out>/batch_summary.md`` (and ``.json``): per video the run folder, the run time, PASS / OK (with a
+note) / FAIL (the Premiere deliverables' hard checks -- 1_edit.xml's item / gap / speech / flash / link / person ...
+checks and the captions file -- and coverage; the recreation criteria c2-c5 are not part of it, as in check-all; night
+7: every file there and only 1_edit.xml's checks finding something is OK with a note, not FAIL), why it failed, a
+missing 2_captions.srt said in capitals, the caption lines written although doubtful, and what to check by hand (the
+run's own end summary). Exit code: 0 when every video passed (OK with a note included), 1 otherwise, 2 when there was
+nothing to run.
 """
 from __future__ import annotations
 
@@ -245,24 +247,40 @@ def hand_checks(stdout: str) -> list[str]:
     return out
 
 
+VALIDATION_FAIL = "XML/EDL re-parse validation did not pass"     # verify.check_deliverables' "exports NOT validated"
+
+
 def checks_of(run_dir: Path | None) -> dict:
-    """The run's hard checks (check_all.read_run): {'pass', 'failures', 'row'}."""
+    """The run's hard checks (check_all.read_run): {'pass', 'failures', 'notes', 'row'}. Night 7: when every
+    deliverable is there and the only problem is "exports NOT validated" (a hard check of 1_edit.xml -- a flash frame,
+    say), the video is OK with a note (``notes``: what the check found, to look at in Premiere), not FAIL."""
     from .check_all import read_run
     row = read_run(types.SimpleNamespace(has_key=False, has_cut_key=False, name=""), run_dir)
     ok = lambda k: str((row.get(k) or {}).get("status")) in ("pass", "pass_with_exceptions")   # noqa: E731
-    fails = []
+    fails, notes = [], []
     if "error" in row:
         fails.append(row["error"])
     for k in ("deliverables", "coverage"):
         if not ok(k):
             c = row.get(k) or {}
+            fl = [str(f) for f in (c.get("failures") or [])]
+            if k == "deliverables" and fl and all(f.startswith(VALIDATION_FAIL) for f in fl) and \
+                    "MISSING" not in str(c.get("summary", "")):
+                notes.append("every file is there, but a check of 1_edit.xml found something to look at in "
+                             "Premiere: " + "; ".join(f[len(VALIDATION_FAIL):].strip(" :") for f in fl)[:900])
+                continue
             fails.append(f"{k}: {c.get('status', 'not run')} -- {c.get('summary', '')}".strip(" -"))
-            fails += [f"  {f}" for f in (c.get("failures") or [])[:8]]
+            fails += [f"  {f}" for f in fl[:8]]
     if row.get("not_checked"):
         fails.append("1_edit.xml hard checks not run: " + "; ".join(row["not_checked"][:5]))
     if (row.get("inputs") or {}).get("status") == "fail":
         fails.append("an input changed during the run")
-    return {"pass": not fails, "failures": fails, "row": row}
+    return {"pass": not fails, "failures": fails, "notes": notes, "row": row}
+
+
+def verdict(r: dict) -> str:
+    """PASS, OK (with a note: night 7) or FAIL."""
+    return ("OK (with a note)" if r.get("notes") else "PASS") if r["pass"] else "FAIL"
 
 
 SPEED_FILE = "speed.txt"
@@ -317,30 +335,49 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
     """batch_summary.md, in plain words: where each video's files are, what passed, what failed and why, what did not
     run; then each video's details (its checks to do by hand)."""
     n_ok = sum(1 for r in rows if r["pass"])
+    n_note = sum(1 for r in rows if r["pass"] and r.get("notes"))
     out = [f"# Batch: {folder}", "",
-           f"Started {started}, {len(rows)} video(s) in {_fmt_s(total_s)}: **{n_ok} passed, {len(rows) - n_ok} "
-           f"failed**" + (f", {len(skipped)} not run" if skipped else "") + ".", "",
+           f"Started {started}, {len(rows)} video(s) in {_fmt_s(total_s)}: **{n_ok} passed"
+           + (f" ({n_note} with a note)" if n_note else "") + f", {len(rows) - n_ok} failed**"
+           + (f", {len(skipped)} not run" if skipped else "") + ".", "",
            "## Where your edits are", ""]
     for k, r in enumerate(rows, 1):
+        caps = "" if r.get("captions", True) else (f" **NO CAPTIONS: `{run_folders.CAPTIONS_SRT}` was not written** "
+                                                     "-- see below.")
         if r["pass"]:
             out.append(f"{k}. **{r['name']}** -- done. Your files: `{r['run_dir']}` -- import "
-                       f"`{run_folders.EDIT_XML}` and `{run_folders.CAPTIONS_SRT}` into Premiere.")
+                       f"`{run_folders.EDIT_XML}` and `{run_folders.CAPTIONS_SRT}` into Premiere."
+                       + (f" Note: {r['notes'][0]}" if r.get("notes") else "") + caps)
         else:
             why = (r["failures"] or ["see the log"])[0].strip()
-            out.append(f"{k}. **{r['name']}** -- FAILED: {why}. Its folder: `{r['run_dir']}` (log: `{r['log']}`).")
+            out.append(f"{k}. **{r['name']}** -- FAILED: {why}. Its folder: `{r['run_dir']}` (log: `{r['log']}`)."
+                       + caps)
     if skipped:
         out += ["", "## Not run", ""] + [f"- {s_}" for s_ in skipped]
     out += ["", "## In short", "",
-            "| video | speed | run folder | run time | result | 1_edit.xml media |", "|---|---|---|---|---|---|"]
+            "| video | speed | run folder | run time | result | captions | 1_edit.xml media |",
+            "|---|---|---|---|---|---|---|"]
     for r in rows:
         media = "inside the run folder" if not r["media_outside"] else f"OUTSIDE: {len(r['media_outside'])} file(s)"
+        dl = r.get("doubtful") or []
+        capc = ("**MISSING**" if not r.get("captions", True) else
+                f"{len(dl)} doubtful line(s)" if dl else "written")
         out.append(f"| {r['name']} | {float(r.get('speed') or 100):g} % | `{r['run_dir']}` | {_fmt_s(r['seconds'])} | "
-                   f"{'PASS' if r['pass'] else 'FAIL'} (exit {r['exit']}) | {media} |")
+                   f"{verdict(r)} (exit {r['exit']}) | {capc} | {media} |")
     for r in rows:
-        out += ["", f"## {r['name']}: {'PASS' if r['pass'] else 'FAIL'}", "",
+        out += ["", f"## {r['name']}: {verdict(r)}", "",
                 f"- competitor: `{r.get('competitor', '')}`; RAW: `{r.get('raw', '')}`",
                 f"- run folder: `{r['run_dir']}` (import `{run_folders.EDIT_XML}` and `{run_folders.CAPTIONS_SRT}`)",
                 f"- run time: {_fmt_s(r['seconds'])}; log: `{r['log']}`"]
+        if not r.get("captions", True):
+            out.append(f"- **NO CAPTIONS**: `{run_folders.CAPTIONS_SRT}` was not written -- "
+                       + (r.get("captions_why") or "see the log"))
+        if r.get("notes"):
+            out.append("- note:")
+            out += [f"  - {n_}" for n_ in r["notes"]]
+        if r.get("doubtful"):
+            out.append(f"- doubtful caption lines (written as they are -- check them): {len(r['doubtful'])}")
+            out += [f"  - {d}" for d in r["doubtful"]]
         if r["failures"]:
             out.append("- why it failed:")
             out += [f"  - {f.strip()}" for f in r["failures"]]
@@ -479,13 +516,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             failures = [f"the run stopped (exit {code}): {stop_message(stderr)}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
+        cap = captions_of(run_dir)
         row = {"name": name, "competitor": str(comp), "raw": str(raw), "run_dir": str(run_dir), "exit": code,
                "speed": speed, "speed_from": why.strip("; ") or "default",
                "seconds": round(secs, 1), "pass": not failures and code in (0, 1), "failures": failures,
+               "notes": list(chk.get("notes") or []) if not failures and code in (0, 1) else [],
+               "captions": cap["written"], "captions_why": cap["why"], "doubtful": cap["doubtful"],
                "media_outside": outside, "hand": hand_checks(stdout), "log": str(log)}
         rows.append(row)
-        print(f"    {'PASS' if row['pass'] else 'FAIL'} in {_fmt_s(secs)}" + (f": {failures[0]}" if failures else ""),
+        print(f"    {verdict(row)} in {_fmt_s(secs)}" + (f": {failures[0]}" if failures else
+                                                       f": {row['notes'][0][:300]}" if row["notes"] else ""),
               flush=True)
+        if not cap["written"]:
+            print(f"    NO CAPTIONS: {run_folders.CAPTIONS_SRT} was not written -- {cap['why']}", flush=True)
+        elif cap["doubtful"]:
+            print(f"    captions: {len(cap['doubtful'])} doubtful line(s), written as they are -- check them:", flush=True)
+            for d in cap["doubtful"][:20]:
+                print(f"      {d}", flush=True)
         md = summary_md(rows, folder, skipped, started, time.time() - t_all)     # written after every video
         (out / f"{SUMMARY}.md").write_text(md, encoding="utf-8")
         (out / f"{SUMMARY}.json").write_text(json.dumps({"folder": str(folder), "started": started, "rows": rows,
@@ -495,5 +542,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"match_cuts batch: {n_ok} of {len(rows)} passed in {_fmt_s(time.time() - t_all)}"
           + (f"; {len(wrong)} not run (wrong inputs)" if wrong else "") + f"; summary: {out / (SUMMARY + '.md')}")
     for r in rows:
-        print(f"  {r['name']}: {'PASS' if r['pass'] else 'FAIL'} -- {r['run_dir']}")
+        print(f"  {r['name']}: {verdict(r)} -- {r['run_dir']}"
+              + ("" if r.get("captions", True) else f" -- NO CAPTIONS ({run_folders.CAPTIONS_SRT} missing)"))
     return 0 if n_ok == len(rows) and not wrong else 1
+
+
+def captions_of(run_dir: Path) -> dict:
+    """{'written': 2_captions.srt is in the run folder, 'why': why not (the run's captions report), 'doubtful': the
+    lines written although they break a caption rule (night 7)}."""
+    srt = Path(run_dir) / run_folders.CAPTIONS_SRT
+    out = {"written": srt.is_file(), "why": "", "doubtful": []}
+    cj = Path(run_dir) / run_folders.EXTRAS / "debug" / "captions.json"
+    try:
+        d = json.loads(cj.read_text(encoding="utf-8")) if cj.is_file() else {}
+    except (OSError, ValueError):
+        d = {}
+    out["doubtful"] = [f"{x.get('line')}: rule {x.get('rule')} ({x.get('name')})" for x in d.get("doubtful") or []]
+    if not out["written"]:
+        out["why"] = str(d.get("error") or next((w for w in d.get("warnings") or [] if "not written" in str(w)), "")
+                         or ("the run stopped before its captions" if not d else "the captions stage wrote no file"))
+    return out

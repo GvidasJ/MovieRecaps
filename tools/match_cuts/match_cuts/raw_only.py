@@ -1,6 +1,7 @@
 """No competitor (``--raw`` without ``--competitor``): the edit is made from the RAW alone -- its speech kept, its
-silences cut out (silence.py), in the usual numbered run folder: 1_edit.xml (the 1080x1920 / 60.00 fps Premiere
-sequence) and 2_captions.srt, everything else in extras/.
+silences cut out (silence.py), in the usual numbered run folder: 1_edit.xml (the 1080x1920 Premiere sequence at the
+RAW's own rate -- night 7: planned on the 60 fps grid, then written at that rate like a competitor run, --speed too)
+and 2_captions.srt, everything else in extras/.
 
 The RAW is laid out as an edit of itself on the sequence's own 60 fps grid (competitor frame k = RAW second k / 60):
 one segment per stretch of speech and one per silence to remove, so the Premiere export, its fixed framing and
@@ -113,6 +114,9 @@ def run_raw_only(cfg: Any) -> dict:
                 ctx.warn("the RAW has no audio: nothing to tell speech from silence -- the whole RAW is the edit")
         st = export_xml_edl.premiere_settings(cfg)
         win, seq_wh = st["window"], st["size"]
+        sf = str(getattr(cfg, "sequence_fps", "raw") or "raw").strip().lower()     # night 7: delivered at the RAW's
+        cfg.premiere_seq_rate = fps_str(export_xml_edl.sequence_rate_for_raw(Fraction(ctx.raw_info.fps)) if sf == "raw"
+                                        else Fraction(sf))                        # rate (planned on the 60 fps grid)
         raw_block = pipeline.media_block(ctx.raw_info, ctx.raw_conform, ctx.raw_input)
         n_frames = int(ctx.raw_info.nb_frames / float(Fraction(ctx.raw_info.fps)) * float(SEQ_FPS))
         with pipeline._stage(ctx, "R3 silences"):
@@ -183,6 +187,17 @@ def run_raw_only(cfg: Any) -> dict:
                 ctx.warn(f"Premiere XML check failed: {'; '.join(ctx.exports.get('errors') or [])[:500]}")
         with pipeline._stage(ctx, "R6 captions"):
             pipeline.stage_captions(ctx)
+        k = float(getattr(cfg, "premiere_speed", 1.0) or 1.0)
+        rate = Fraction(str(cfg.premiere_seq_rate or SEQ_FPS))
+        if (rate != SEQ_FPS or abs(k - 1.0) > 1e-9) and xml.exists():
+            with pipeline._stage(ctx, "R7 speed + frame rate"):    # night 7: as a competitor run's last step
+                ctx.premiere_cutlist = ctx.cutlist
+                res7 = pipeline.apply_final(ctx, k, rate)
+                ctx.finish["speed"] = res7
+                if res7.get("problems"):
+                    ctx.exports["ok"] = False
+                    ctx.exports.setdefault("errors", []).extend(res7["problems"][:10])
+                    ctx.warn("1_edit.xml at the RAW's rate: " + "; ".join(res7["problems"][:6]))
         ctx.cutlist.save(cfg.out / "cutlist.json")
         ctx.paths["cutlist"] = str(cfg.out / "cutlist.json")
         report = cfg.out / "report.md"

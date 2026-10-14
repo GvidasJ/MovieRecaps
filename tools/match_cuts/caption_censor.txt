@@ -1,0 +1,64 @@
+# Caption censor list: these words are written in 2_captions.srt with one letter replaced by *.
+# One word per line. "word = f*rm" says exactly how to write it; a word alone gets the first vowel after its
+# first letter replaced (porn -> p*rn, dick -> d*ck). Whole words only, any case ("Porn" -> "P*rn"); a word's
+# "'s" form follows it. A word that is not listed is never changed (gay, fag, damn, pissed stay as they are).
+# Add or remove lines as you like; each run reads this file.
+
+# your own forms (laptop010 / laptop013)
+porn = p*rn
+porno = p*rno
+porns = p*rns
+pornography = p*rnography
+pornographic = p*rnographic
+sex = s*x
+sexy = s*xy
+sexual = se*ual
+sexually = se*ually
+sexuality = se*uality
+pervert = perv*rt
+perverts = perv*rts
+perverted = perv*rted
+perv = p*rv
+pervy = p*rvy
+dick = d*ck
+dicks = d*cks
+dickhead = d*ckhead
+
+# more sexual / crude words in the same style
+cock = c*ck
+cocks = c*cks
+pussy = p*ssy
+pussies = p*ssies
+penis = p*nis
+penises = p*nises
+vagina = v*gina
+vaginas = v*ginas
+boob = b*ob
+boobs = b*obs
+boobies = b*obies
+tits = t*ts
+titties = t*tties
+horny = h*rny
+slut = sl*t
+sluts = sl*ts
+slutty = sl*tty
+whore = wh*re
+whores = wh*res
+cum = c*m
+cumming = c*mming
+orgasm = org*sm
+orgasms = org*sms
+masturbate = mast*rbate
+masturbating = mast*rbating
+masturbation = mast*rbation
+blowjob = bl*wjob
+handjob = h*ndjob
+dildo = d*ldo
+boner = b*ner
+erection = er*ction
+nude = n*de
+nudes = n*des
+hooker = h*oker
+hookers = h*okers
+stripper = str*pper
+strippers = str*ppers

@@ -1110,6 +1110,10 @@ def _verification(ctx: Any) -> list[str]:
 def _how_to_open(ctx: Any) -> list[str]:
     cl = getattr(ctx, "cutlist", None)
     raw_file = (cl.raw.get("file") if cl else "") or "media/…"
+    cfg_ = getattr(ctx, "cfg", None)
+    from .config import rate_text
+    seq_rate = rate_text(str(getattr(cfg_, "premiere_seq_rate", "") or getattr(cfg_, "premiere_fps", "") or "60"))
+    seq_size = str(getattr(cfg_, "premiere_size", "") or "1080x1920").replace("x", "×")
     if getattr(getattr(ctx, "cfg", None), "premiere", False):
         xv = ((getattr(ctx, "exports", None) or {}).get("xml") or {})
         framing = (f" {xv['clips']} V1 clips with {xv['framing_changes']} framing changes: the framing changes only "
@@ -1123,7 +1127,8 @@ def _how_to_open(ctx: Any) -> list[str]:
             "1. Premiere Pro → **File → Import…** → `1_edit.xml` in the run folder (this report sits in its `extras/`; "
             f"the XML points at `extras/{raw_file}` by its full path — keep the run folder together; relink if Premiere "
             "asks).",
-            "2. The sequence `Recreated Edit (Premiere)` is 1080×1920 at 60.00 fps: the edit on V1 (each clip framed into "
+            f"2. The sequence `Recreated Edit (Premiere)` is {seq_size} at {seq_rate} fps (the RAW's own rate; planned "
+            "and checked on the 60 fps grid, that copy in `extras/`): the edit on V1 (each clip framed into "
             "your template window), the RAW audio on A1 with the same cuts, V2 and above empty — put your overlay template "
             "and captions there." + framing,
             "3. Sequence markers name the UNCERTAIN and NOT-IN-RAW spots (and RETIME spots Premiere's XML cannot carry). "
@@ -1193,11 +1198,29 @@ def _captions(ctx: Any) -> list[str]:
     out.append(f"- Transcript: {cap.get('source', '?')} — {tr.get('engine', 'faster-whisper')} `{tr.get('model', '')}`, "
                f"{tr.get('words', 0)} words with word timestamps" + (f" (**not available**: {tr['error']})"
                                                                      if tr.get("error") else "") + ".")
+    final = str(getattr(getattr(ctx, "cfg", None), "premiere_seq_rate", "") or "")
     if cap.get("path"):
-        out.append(f"- File: `2_captions.srt` (run folder) — {cap.get('count', 0)} captions on the {fps} fps sequence "
-                   f"({cap.get('frames', 0)} frames), frame-exact (competitor frame k = sequence frame "
-                   f"{'2k' if str(fps) == '60' else 'k x ratio'} for a 30 fps competitor). Premiere: File → Import → "
-                   "2_captions.srt, then drag it onto the sequence (a caption track above V2).")
+        from .config import rate_text
+        out.append(f"- File: `2_captions.srt` (run folder) — {cap.get('count', 0)} captions, made on the {fps} fps "
+                   f"planning grid ({cap.get('frames', 0)} frames)" +
+                   (f" and delivered on the {rate_text(final)} fps sequence's frames (the RAW's rate; the 60 fps "
+                    "copy: `extras/captions_60fps.srt`)" if final and Fraction(final) != Fraction(str(fps)) else "")
+                   + ". Premiere: File → Import → 2_captions.srt, then drag it onto the sequence (a caption track "
+                   "above V2).")
+    else:
+        out.append("- **2_captions.srt was NOT written** — this edit has no captions"
+                   + "".join(f": {w}" for w in (cap.get("warnings") or []) if "not written" in str(w))[:300] + ".")
+    dl = cap.get("doubtful") or []
+    out += ["", f"**Doubtful lines** (written as they are -- they still break a hard rule; check them): "
+                f"{len(dl) if dl else 'none'}"]
+    out += [f"- {d['line']}: rule {d['rule']} ({d['name']})" for d in dl]
+    if cap.get("censored"):
+        out += ["", f"**Censored** (caption_censor.txt): {len(cap['censored'])}"]
+        out += [f"- {r['tc']} `{r['was']}` → `{r['now']}`" for r in cap["censored"]]
+    if cap.get("too_short_dropped"):
+        out += ["", f"**Left out: shorter than 2 frames**: {len(cap['too_short_dropped'])}"]
+        out += [f"- {_tc(c)} `{c['text']}`" for c in cap["too_short_dropped"]]
+    out.append("")
     for w in cap.get("warnings") or []:
         out.append(f"- Warning: {w}")
     for n in cap.get("notes") or []:

@@ -12,10 +12,11 @@ Two modes, chosen per clip (``--captions auto|competitor|voice``, pipeline.stage
   CUT edit's audio, or ``--voiceover FILE``), the grouping walk, the weak-word fix, back-to-back timing and ``*...*``
   placeholders for silences.
 
-Both end with caption_rules.enforce (the prompt's "Hard rules": fixed where mechanical, else listed), and write_srt
-refuses a file that still breaks rules 1-4. This module holds the text rules, grouping, timing, SRT I/O and the
-report data (no heavy imports); transcribe.py (faster-whisper) and caption_ocr.py (RapidOCR) hold the optional
-engines.
+Both end with caption_rules.enforce (the prompt's "Hard rules": fixed where mechanical, else listed); the file is
+always written (night 7) -- a line that still breaks rule 1-5 is listed as doubtful (doubtful_lines), a caption shorter
+than 2 frames of the delivered sequence is left out (drop_short), and the words of caption_censor.txt are written with
+one letter as ``*`` (censor_text). This module holds the text rules, grouping, timing, SRT I/O and the report data
+(no heavy imports); transcribe.py (faster-whisper) and caption_ocr.py (RapidOCR) hold the optional engines.
 """
 from __future__ import annotations
 
@@ -825,20 +826,120 @@ def srt_text(caps: Sequence[Caption], fps: Fraction) -> str:
 
 
 def write_srt(caps: Sequence[Caption], path: str | Path, fps: Fraction) -> Path:
-    """Write the SRT -- never one that still breaks hard rules 1-4 (one sentence, one speaker, no capital inside a
-    word, no ALL CAPS but acronyms: caption_rules.check); ValueError then."""
-    from .caption_rules import RULES, check
+    """Write the SRT -- always (night 7: one odd line held laptop video2's whole file back); the lines that still
+    break a hard rule are listed by doubtful_lines, not withheld."""
     from .common import replace_file
-    bad = {r: v for r, v in check(caps, fps, rules=(1, 2, 3, 4)).items() if v}
-    if bad:
-        raise ValueError("captions still break " + "; ".join(f"rule {r} ({RULES[r]}): {', '.join(v[:3])}"
-                                                             for r, v in bad.items()))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_bytes(srt_text(caps, fps).encode("utf-8"))
     replace_file(tmp, p)
     return p
+
+
+DOUBTFUL_RULES = (1, 2, 3, 4, 5)     # the hard rules a finished line may still break: listed for a look
+
+
+def doubtful_lines(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: Any = None,
+                   cuts: Sequence[int] = ()) -> list[dict]:
+    """The lines of a finished caption file that still break hard rule 1-5 (caption_rules.check: one sentence, one
+    speaker, casing inside a word, capitals, real words): [{'rule', 'name', 'line'}] -- the line as
+    "HH:MM:SS,mmm 'text'". Listed in the report and the batch log; the file is written anyway."""
+    from .caption_rules import RULES, check
+    out = []
+    for r, rows in check(caps, fps, mode, lex, rules=DOUBTFUL_RULES, cuts=cuts).items():
+        out += [{"rule": int(r), "name": RULES[r], "line": str(x)} for x in rows]
+    return sorted(out, key=lambda d: (d["line"], d["rule"]))
+
+
+MIN_CAPTION_FRAMES = 2       # a caption shorter than this many frames of the delivered sequence is dropped (night 7:
+#                              laptop video2's 1-frame 'wh****')
+
+
+def drop_short(caps: Sequence[Caption], min_frames: int) -> tuple[list[Caption], list[Caption]]:
+    """(the captions without those shorter than ``min_frames`` sequence frames, the dropped ones). A caption that
+    ended where a dropped one started runs on to where the dropped one ended (the captions stay back to back)."""
+    keep: list[Caption] = []
+    gone: list[Caption] = []
+    for c in sorted(caps, key=lambda c: (c.start, c.end)):
+        if c.end - c.start >= int(min_frames):
+            keep.append(c)
+            continue
+        gone.append(c)
+        if keep and keep[-1].end == c.start:
+            keep[-1] = dataclasses.replace(keep[-1], end=c.end)
+    return keep, gone
+
+
+CENSOR_FILE_NAME = "caption_censor.txt"     # next to caption_allowlist.txt: the words written with one letter as *
+
+
+def censor_table(path: str | Path | None = None) -> dict[str, str]:
+    """caption_censor.txt: {word (lower case): how it is written}. One word per line, ``#`` notes; ``word = f*rm``
+    gives the written form (one letter replaced by ``*``, as the user writes them: p*rn, se*ual, perv*rt, d*ck), a
+    word alone gets the default (censor_word). Words only -- a word the file does not list is never changed (night
+    7: laptop009 kept "gay" and "fag" written out)."""
+    from .caption_rules import ALLOWLIST_FILE
+    p = Path(path) if path else ALLOWLIST_FILE.with_name(CENSOR_FILE_NAME)
+    out: dict[str, str] = {}
+    if not p.is_file():
+        return out
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
+        body = line.split("#", 1)[0].strip()
+        if not body:
+            continue
+        word, _, form = (x.strip() for x in body.partition("="))
+        word = word.lower().replace("’", "'")
+        if not word or " " in word:
+            continue
+        form = form.lower() if form and len(form) == len(word) and "*" in form else censor_word(word)
+        out[word] = form
+    return out
+
+
+def censor_word(word: str) -> str:
+    """The default censored form: the first vowel after the first letter replaced by ``*`` (porn -> p*rn, dick ->
+    d*ck, slut -> sl*t), else the second letter."""
+    w = str(word)
+    for i, ch in enumerate(w[1:], start=1):
+        if ch.lower() in "aeiouy":
+            return w[:i] + "*" + w[i + 1:]
+    return w[:1] + "*" + w[2:] if len(w) > 1 else w
+
+
+_CENSOR_TOKEN = re.compile(r"[A-Za-z']+")
+
+
+def censor_text(text: str, table: dict[str, str]) -> str:
+    """``text`` with every listed word censored (whole words, any case: "Porn" -> "P*rn", "DICK" -> "D*CK"); the
+    letters kept as written, punctuation kept."""
+    if not table:
+        return text
+
+    def one(m: re.Match) -> str:
+        w = m.group(0)
+        form = table.get(w.lower())
+        if form is None and w.lower().endswith("'s"):
+            base = table.get(w.lower()[:-2])
+            return (_censor_as(w[:-2], base) + w[-2:]) if base else w
+        return _censor_as(w, form) if form else w
+    return _CENSOR_TOKEN.sub(one, str(text))
+
+
+def _censor_as(w: str, form: str) -> str:
+    return "".join("*" if f == "*" else ch for ch, f in zip(w, form))
+
+
+def censor_captions(caps: Sequence[Caption], table: dict[str, str], fps: Fraction) -> tuple[list[Caption], list[dict]]:
+    """(the captions with the listed words censored, [{'tc', 'was', 'now'}] for the report)."""
+    out, rows = [], []
+    for c in caps:
+        new = censor_text(c.text, table) if c.mode != "placeholder" else c.text
+        if new != c.text:
+            rows.append({"tc": ms_tc(frame_ms(c.start, fps)), "was": c.text, "now": new})
+            c = dataclasses.replace(c, text=new)
+        out.append(c)
+    return out, rows
 
 
 _TC_RE = re.compile(r"(\d+):(\d{2}):(\d{2})[,.](\d{1,3})")
@@ -1726,12 +1827,13 @@ def run_captions(ctx) -> dict:
         warn(f"{CAPTIONS_SRT} not written: no competitor captions and no transcribed speech")
     res["styled"] = styled
     # ---- the hard rules: the final check before the file is written ----
+    rules_mode = "voice"
     if caps:
         lex = caption_rules.lexicon()
         follow = mode == "competitor" and any(c.info.get("style") == "follow" for c in caps)
+        rules_mode = "competitor" if (mode == "competitor" and (follow or not styled)) else "voice"
         caps, res["rules"] = caption_rules.enforce(
-            caps, fps, "competitor" if (mode == "competitor" and (follow or not styled)) else "voice",
-            words if heard_ok else None, lex, cuts=cuts, keep_groups=styled,
+            caps, fps, rules_mode, words if heard_ok else None, lex, cuts=cuts, keep_groups=styled,
             open_gaps=[(st["a"], st["b"]) for st in ov])
         res["rules"]["allowlist"] = lex.allow_file
         if mode == "competitor" and not heard_ok:
@@ -1778,6 +1880,15 @@ def run_captions(ctx) -> dict:
                                    "captions": len(mine), "how": dict(how), "words": len(st["words"]),
                                    "text": " ".join(c.text.replace("\n", " ") for c in mine)})
     caps = no_overlaps(caps)                         # whatever was added late: never two captions at once
+    # night 7: no caption shorter than 2 frames of the sequence you get (1_edit.xml's rate: the RAW's)
+    final = Fraction(str(getattr(cfg, "premiere_seq_rate", None) or fps))
+    caps, short = drop_short(caps, int(math.ceil(MIN_CAPTION_FRAMES * float(fps) / float(final) - 1e-9)))
+    res["too_short_dropped"] = [_caption_dict(c, fps) for c in short]
+    if short:
+        warn(f"{len(short)} caption(s) shorter than {MIN_CAPTION_FRAMES} frames left out: "
+             + "; ".join(f"{ms_tc(frame_ms(c.start, fps))} '{c.text}'" for c in short[:10]))
+    res["doubtful"] = doubtful_lines(caps, fps, rules_mode, caption_rules.lexicon(), cuts=cuts) if caps else []
+    caps, res["censored"] = censor_captions(caps, censor_table(), fps)
     res["weak_kept"] = list((res.get("rules") or {}).get("kept_weak") or [])
     res["captions"] = [_caption_dict(c, fps) for c in caps]
     res["count"] = len(caps)
@@ -1787,16 +1898,18 @@ def run_captions(ctx) -> dict:
     res["over_cap"] = [_caption_dict(c, fps) for c in caps if len(c.text.replace("\n", " ")) >= HARD_CAP]
     res["stats"] = caption_stats(caps, fps) if caps else {}
     if caps:
-        try:
-            p = write_srt(caps, cfg.deliver / CAPTIONS_SRT, fps)
-        except ValueError as e:                     # a hard rule 1-4 still broken: no file rather than a wrong one
-            warn(f"{CAPTIONS_SRT} not written: {e}")
-            dump_json(res, cfg.debug_dir / "captions.json")
-            return res
+        p = write_srt(caps, cfg.deliver / CAPTIONS_SRT, fps)      # always written (night 7)
         res["path"] = str(p)
+        if res["doubtful"]:                         # listed (end summary, report, batch), not a run warning
+            log.info("captions: %s written, %d line(s) break a caption rule -- check them: %s", CAPTIONS_SRT,
+                     len(res["doubtful"]), "; ".join(f"rule {d['rule']} ({d['name']}): {d['line']}"
+                                                     for d in res["doubtful"][:10]))
         dump_json(res, cfg.debug_dir / "captions.json")
-        log.info("captions: %d captions (%s) -> %s; %s", len(caps), mode, p,
-                 caption_rules.summary_line(res.get("rules") or {}))
+        log.info("captions: %d captions (%s) -> %s; %s%s", len(caps), mode, p,
+                 caption_rules.summary_line(res.get("rules") or {}),
+                 f"; censored: {len(res['censored'])}" if res["censored"] else "")
+    else:
+        dump_json(res, cfg.debug_dir / "captions.json")
     return res
 
 

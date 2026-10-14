@@ -56,6 +56,8 @@ PAUSE_MIN_CUT_S = 0.10    # ... and this much of it goes once the pads are kept 
 #                           0.10-0.15 s you never cut, 0.15-0.30 s half of them, 0.30 s and longer nearly all)
 PAUSE_LOUD = 0.33         # ... the word before it ends where its loudness drops under this share of the way from the
 #                           silence threshold up to the speech level (you cut a median 0.013 s after that point) ...
+PAUSE_TAIL_WORD_S = 0.3   # (night 7) ... only the tail of a WORD (one ending this close to the loud part's end): after a
+#                           sound with no word in it (video6's high five) you kept its soft end
 PAUSE_TAIL_S = 0.1        # ... and a soft tail longer than this after that point goes with the pause, --pad-after kept
 #                           (laptop010: the quiet stretch began ~0.2 s after the word's loud end, the clip before each
 #                           pause ended a median 0.20 s after yours; mike005's short tails are left -- trimmed, its cuts
@@ -64,6 +66,10 @@ PAUSE_CLEAR = 0.12        # ... and only a clear silence: 90 % of it at most thi
 #                           noise up to the speech level (your cut pauses: -0.46-0.10, 0.28 / 0.35 twice with a sound
 #                           in them; the quiet you kept: music under laptop013's 1.7 s and 1.4 s beats 0.18-0.23,
 #                           mike005's 2.3 s 0.21, breaths 0.16-0.40)
+PAUSE_SHOT_CLEAR = 0.25   # night 7: a pause holding one of the RAW's own shot changes -- the picture cuts there anyway --
+PAUSE_SHOT_MAX_S = 1.0    # is cut up to this share (a faint sound in it), when at most this long: your video6 cut 0.5 s
+#                           across the shot change at RAW 334.38 s, share 0.20 (after a high five); laptop010's three
+#                           pauses at shot changes were all cut; laptop013's 1.4 s music beat at one (0.23) you kept
 
 
 @dataclass
@@ -266,14 +272,15 @@ def removal_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Set
 def pause_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Settings, points: Sequence[int],
                  protect: Sequence[tuple[int, int]] = (), words: Sequence[Any] | None = None, guard: Any = None,
                  lv: dict | None = None, quiet: Sequence[tuple[float, float]] | None = None,
-                 sound: Sequence[tuple[int, int]] = ()) -> tuple[list[Cut], dict]:
+                 sound: Sequence[tuple[int, int]] = (), shot_in: Any = None) -> tuple[list[Cut], dict]:
     """The default's careful pause cuts (night 6): removal_ranges of the pauses INSIDE a take only -- a quiet stretch
     of at least PAUSE_MIN_S between words (never inside a word: the speech map's words and sounds), a clear silence
-    (PAUSE_CLEAR: music, a breath or the room under it keeps it), the pads kept (--pad-after after the word before
-    it, --pad-before before the word after it), and only when at least PAUSE_MIN_CUT_S goes. A pause that holds or
-    touches one of the edit's cut points (``points``: sequence frames where a V1 or A1 clip starts or ends -- the
-    competitor's cuts stay where they are), or the edit's start or end (the ending stays the competitor's: XML
-    ENDING), is kept whole."""
+    (PAUSE_CLEAR: music, a breath or the room under it keeps it; PAUSE_SHOT_CLEAR for one of at most PAUSE_SHOT_MAX_S
+    that holds a RAW shot change: ``shot_in(s0, s1)``, sequence seconds -- night 7), the pads kept (--pad-after after
+    the word before it, --pad-before before the word after it), and only when at least PAUSE_MIN_CUT_S goes. A pause
+    that holds or touches one of the edit's cut points (``points``: sequence frames where a V1 or A1 clip starts or
+    ends -- the competitor's cuts stay where they are), or the edit's start or end (the ending stays the
+    competitor's: XML ENDING), is kept whole."""
     f = float(fps)
     dur = n_frames / f
     ps = Settings(st.db, PAUSE_MIN_S, st.pad_before, st.pad_after)
@@ -284,7 +291,7 @@ def pause_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Setti
     lvl = lv if lv.get("speech_db") is not None and lv.get("noise_db") is not None else (levels(db, st) if len(db)
                                                                                          else {})
     span = float(lvl.get("speech_db", 0.0)) - float(lvl.get("noise_db", 0.0)) if lvl else 0.0
-    out, loud = [], 0
+    out, loud, at_shot = [], 0, 0
     for c in cuts:
         if c.s0 <= 1e-6 or c.s1 >= dur - 1e-6:
             continue                                     # the edit's start / its ending: the competitor's
@@ -293,15 +300,23 @@ def pause_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Setti
         if c.frames < least:
             continue                                     # a few frames: no cut
         sel = db[(t >= c.s0) & (t <= c.s1)] if len(db) else db
-        if span > 0 and len(sel) and (float(np.percentile(sel, 90)) - float(lvl["noise_db"])) / span > PAUSE_CLEAR:
+        share = (float(np.percentile(sel, 90)) - float(lvl["noise_db"])) / span if span > 0 and len(sel) else None
+        shot = (shot_in is not None and c.s1 - c.s0 <= PAUSE_SHOT_MAX_S + 1e-9 and share is not None
+                and PAUSE_CLEAR < share <= PAUSE_SHOT_CLEAR and bool(shot_in(c.s0, c.s1)))
+        if share is not None and share > PAUSE_CLEAR and not shot:
             loud += 1
             continue                                     # not a clear silence (music, a breath, the room)
+        at_shot += int(shot)
         if span > 0 and len(db) and lvl.get("threshold_db") is not None:
             # the word before the pause: a soft tail of more than PAUSE_TAIL_S after its LOUD part (kept by the quiet
             # stretch, up to SOFT_MAX_S) goes with the pause, --pad-after kept after the loud part
             thr = float(lvl["threshold_db"])
             loud_db = thr + PAUSE_LOUD * (float(lvl["speech_db"]) - thr)
             near = np.flatnonzero((t >= c.s0 - SOFT_MAX_S - 0.05) & (t <= c.s0) & (db >= loud_db))
+            tl = float(t[near[-1]]) + HOP_S / 2.0 if len(near) else 0.0
+            if len(near) and words is not None and not any(
+                    float(w.start) < tl + 0.05 and float(w.end) > tl - PAUSE_TAIL_WORD_S for w in words):
+                near = near[:0]                          # night 7: not a word's tail (video6's high five): it stays
             if len(near):
                 a2 = int(math.ceil((float(t[near[-1]]) + HOP_S / 2.0 + st.pad_after) * f - 1e-9))
                 if guard is not None and a2 < c.a:
@@ -311,8 +326,29 @@ def pause_ranges(y: np.ndarray, sr: int, fps: Fraction, n_frames: int, st: Setti
                     c = Cut(a2, c.b, c.s0, c.s1)
         out.append(c)
     lv = dict(lv, pauses={"min_s": PAUSE_MIN_S, "min_cut_s": PAUSE_MIN_CUT_S, "clear": PAUSE_CLEAR,
-                          "found": len(cuts), "cut": len(out), "not_clear": loud})
+                          "found": len(cuts), "cut": len(out), "not_clear": loud, "at_shot_change": at_shot})
     return out, lv
+
+
+def shot_inside(clips: Sequence[Any] | None, changes_s: Sequence[float], fps: Fraction) -> Any:
+    """``shot_in(s0, s1)`` for pause_ranges: a V1 clip at 100 % plays one of the RAW's shot changes (``changes_s``,
+    RAW s) between sequence seconds s0 and s1 (the picture cuts there anyway)."""
+    f = float(fps)
+    cs = sorted(float(c) for c in changes_s or ())
+
+    def shot_in(s0: float, s1: float) -> bool:
+        for cl in clips or []:
+            if abs(float(cl.speed) - 1.0) > 1e-6:
+                continue
+            a, b = max(s0, cl.rec_start / f), min(s1, cl.rec_end / f)
+            if b <= a:
+                continue
+            r0 = cl.src_in / f + (a - cl.rec_start / f)
+            r1 = r0 + (b - a)
+            if any(r0 + 1e-6 < c < r1 - 1e-6 for c in cs):
+                return True
+        return False
+    return shot_in
 
 
 def tail_after_last_word(words: Sequence[Any] | None, quiet: Sequence[tuple[float, float]] | None, n_frames: int,
@@ -728,7 +764,7 @@ def plan_premiere(cutlist: Any, raw_audio: np.ndarray | None, sr: int, cfg: Any 
         if pauses:
             points = sorted({cl.rec_start for cl in clips} | {cl.rec_end for cl in clips} | set(at))
             cuts, lv = pause_ranges(y, sr, fps, n_frames, st, points, protect, words, guard, fixed, quiet,
-                                    sound=other)
+                                    sound=other, shot_in=shot_inside(clips, shots or [], fps))
             tail = None                              # the competitor's ending stays (XML ENDING)
         else:
             cuts, lv = removal_ranges(y, sr, fps, n_frames, st, protect, words, at, guard, fixed, quiet, sound=other)
@@ -838,7 +874,9 @@ def settings_line(plan: dict) -> str:
                 f"longer between words, at least {pz['min_cut_s']:g} s cut; kept {st.get('pad_before', 0):g} s "
                 f"before / {st.get('pad_after', 0):g} s after each word; the competitor's cut points, start and ending "
                 f"kept; {pz['cut']} of {pz['found']} quiet stretches cut ({pz.get('not_clear', 0)} not a clear "
-                f"silence: music / a breath / the room); {words}")
+                f"silence: music / a breath / the room"
+                + (f"; {pz['at_shot_change']} with a faint sound in it cut at a RAW shot change"
+                   if pz.get("at_shot_change") else "") + f"); {words}")
     return (f"settings for this video: speech {lv['speech_db']:.1f} dBFS, background {lv['noise_db']:.1f} dBFS -> "
             f"silence below {lv['threshold_db']:.1f} dBFS ({lv['how']}), longer than {st.get('min_s', 0):g} s; "
             f"kept {st.get('pad_before', 0):g} s before / {st.get('pad_after', 0):g} s after each word; {words}")

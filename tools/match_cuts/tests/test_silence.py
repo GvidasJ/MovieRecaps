@@ -163,10 +163,11 @@ def test_raw_only_run_cuts_the_silences_of_the_raw(tmp_path, monkeypatch, capsys
     assert code == 0, out
     run = tmp_path / "out" / "001"
     x = ex.parse_premiere_xml(run / "1_edit.xml")
-    assert (x["width"], x["height"], x["timebase"]) == (1080, 1920, 60)
+    assert (x["width"], x["height"], x["timebase"]) == (1080, 1920, 30)     # night 7: the RAW's own rate
     # 6 s minus about 2 s of silence (the 0.3 s pause kept; 0.05 s kept after each stretch of speech, 0.03 s before
     # it, and the soft edges the AAC encoding gives each burst count as sound)
-    assert 222 <= x["duration"] <= 236
+    assert 111 <= x["duration"] <= 118
+    assert ex.parse_premiere_xml(run / "extras" / "edit_60fps.xml")["timebase"] == 60     # the plan, kept
     assert len(x["clips"]) == 2 and not ex.premiere_gaps(run / "1_edit.xml")    # two pieces, the window covered
     assert "Silences: 3 removed" in out and "length 00:06.00 -> " in out
     assert out.count(" s  (cut at ") == 3 and "RAW-only edit" in out

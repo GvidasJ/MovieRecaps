@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from .common import atomic_write_text, fps_str, log, replace_file, timecode
+from .config import rate_text  # noqa: F401 - (night 7) a rate as Premiere names it (callers use X.rate_text)
 from .geometry import Sim, sim_to_ae
 from .model import Box, Cutlist, Segment
 
@@ -1359,6 +1360,148 @@ def retime_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
     out_m = [dict(m, **{"in": at(m["in"]), "out": (at(m["out"]) if int(m["out"]) >= 0 else m["out"])})
              for m in markers]
     return out_c, out_a, out_m, at(n_frames)
+
+
+# ---------------------------------------------------------------------------------------------
+# The sequence at the RAW's own frame rate (night 7)
+# ---------------------------------------------------------------------------------------------
+#
+# The edit is planned and checked on the 60 fps grid (every competitor frame a whole number of sequence frames);
+# 1_edit.xml is then written at the RAW's own rate: every cut on the nearest frame of that rate, every clip starting
+# on the RAW frame the plan starts it on (at the RAW's rate one sequence frame is one RAW frame), the pieces of one
+# take seamless (each continues where the one before ends), a cut at one of the RAW's own shot changes exactly on it
+# (no frame of the other shot at either side), A1 on the same frames as V1 where they play in sync.
+
+STANDARD_RATES = (Fraction(24000, 1001), Fraction(24), Fraction(25), Fraction(30000, 1001), Fraction(30),
+                  Fraction(50), Fraction(60000, 1001), Fraction(60))     # Premiere's normal sequence rates
+ON_FRAME = Fraction(1, 10)    # a source position this little (frames of the new rate) past a frame's start is on it
+
+
+def sequence_rate_for_raw(raw_fps: Any) -> Fraction:
+    """The sequence rate for a RAW (night 7): its own rate when that is a normal Premiere rate (23.976, 24, 25, 29.97,
+    30, 50, 59.94, 60), else the nearest of them (a 15 / 20 / 48 fps RAW; a variable rate's average)."""
+    r = Fraction(str(raw_fps)) if isinstance(raw_fps, str) else Fraction(raw_fps)
+    for s in STANDARD_RATES:
+        if abs(float(r) - float(s)) < 1e-6:
+            return s
+    return min(STANDARD_RATES, key=lambda s: (abs(float(s) - float(r)), float(s)))
+
+
+def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: Sequence[dict], n_frames: int,
+                f_from: Fraction, f_to: Fraction, raw_fps: Any = None, changes_s: Sequence[float] | None = None
+                ) -> tuple[list[PremiereClip], list[dict], list[dict], int, dict[int, int]]:
+    """The finished edit (sequence frames at ``f_from``) on a sequence at ``f_to`` (the section comment above). A V1
+    clip: its cuts on the nearest new frame; a new take starts on the source frame the plan shows first (a frame the
+    plan's in-point lies a tick before counts as the next one: ON_FRAME), a piece continuing the piece before in one
+    take starts exactly where that one ends; a clip never shows a frame of a RAW shot (``changes_s``, s) the plan's
+    clip does not reach -- its end moves onto the shot change -- and a split of one take at a shot change lands
+    exactly on it. A1: the same new cut positions; an item in sync with a V1 clip (the same speed and source offset in
+    the plan) the same source frames; else continued or started like a V1 clip. A clip left without a frame goes.
+    Markers, framing keys and the sequence's length follow. Returns (clips, audio, markers, frames, {old position:
+    new} of every V1 clip edge)."""
+    F, R = Fraction(f_from), Fraction(f_to)
+    r = R / F
+    rawf = Fraction(raw_fps).limit_denominator(1_000_000) if raw_fps else R
+    shots = sorted({Fraction(int(round(Fraction(c).limit_denominator(1_000_000) * rawf))) * R / rawf
+                    for c in (changes_s or ())})                     # RAW shot changes, in source frames at R
+
+    def at(x: int) -> int:
+        return int(math.floor(Fraction(int(x)) * r + Fraction(1, 2)))
+
+    def pos(tick: float) -> Fraction:
+        return Fraction(tick).limit_denominator(1_000_000) * r
+
+    def vf(v: float) -> Fraction:
+        return Fraction(v).limit_denominator(1_000_000)
+
+    def plan_first(c: PremiereClip) -> int:
+        return int(math.floor(pos(c.src_in) + ON_FRAME))
+
+    def plan_last(c: PremiereClip) -> int:
+        return int(math.ceil(pos(c.src_in) + vf(c.speed) * (c.rec_end - c.rec_start) * r - ON_FRAME)) - 1
+
+    def shown(s0: int, a: int, k: int, v: float) -> int:
+        return int(math.floor(Fraction(s0) + Fraction(k - a) * vf(v) + Fraction(1, 1_000_000)))
+
+    def ends_at(s0: int, a: int, s: Fraction, v: float) -> int:      # the first new frame showing source frame s
+        return a + int(math.ceil((s - Fraction(s0)) / vf(v) - Fraction(1, 1_000_000)))
+
+    def runs_on(p: PremiereClip | None, q: PremiereClip) -> bool:
+        return (p is not None and p.rec_end == q.rec_start and float(q.speed) > 0
+                and abs(float(p.speed) - float(q.speed)) < 1e-9 and int(p.src_out) == int(q.src_in))
+
+    newpos: dict[int, int] = {}
+    out_c: list[PremiereClip] = []
+    line: dict[int, tuple[int, int, float]] = {}       # id(old clip) -> (new start, new source start, speed)
+    src = list(clips)
+    prev: PremiereClip | None = None
+    prev_end_src: int | None = None
+    for i, cl in enumerate(src):
+        v = float(cl.speed)
+        a = newpos.get(cl.rec_start, at(cl.rec_start))
+        if runs_on(prev, cl) and prev_end_src is not None:
+            s0 = prev_end_src                              # the take runs on
+        elif v > 0:
+            s0 = plan_first(cl)
+        else:
+            s0 = int(round(pos(cl.src_in)))
+        b = at(cl.rec_end)
+        nxt = src[i + 1] if i + 1 < len(src) else None
+        if v > 0 and b > a:
+            last = plan_last(cl)
+            s = next((x for x in shots if last < x <= shown(s0, a, b - 1, v)), None)
+            if s is not None:                              # a frame of the next RAW shot: end on the change
+                b = max(a, ends_at(s0, a, s, v))
+            if nxt is not None and runs_on(cl, nxt):
+                s = next((x for x in shots if last < x <= plan_first(nxt)), None)
+                if s is not None:                          # a split of one take at a shot change: exactly on it
+                    b = max(a, ends_at(s0, a, s, v))
+        newpos[cl.rec_start] = a
+        newpos[cl.rec_end] = b
+        n_src = int(round((b - a) * v))
+        prev, prev_end_src = cl, s0 + n_src
+        line[id(cl)] = (a, s0, v)
+        if b <= a:
+            continue                                       # no frame left at the new rate
+        out_c.append(dataclasses.replace(
+            cl, start=a, end=b, rec_start=a, rec_end=b, src_in=s0, src_out=s0 + n_src,
+            keys=[(int(round(pos(w))), sim) for w, sim in cl.keys],
+            shot_framing=[(int(round(pos(t))), sim) for t, sim in cl.shot_framing],
+            person_span=(None if cl.person_span is None else
+                         (int(round(pos(cl.person_span[0]))), int(round(pos(cl.person_span[1]))))),
+            dissolve_frames=cl.dissolve_frames if cl.dissolve_frames < 0 else max(1, int(round(cl.dissolve_frames * r)))))
+    out_a: list[dict] = []
+    prev_a: dict | None = None
+    prev_a_end: int | None = None
+    for it in audio:
+        v = float(it["speed"])
+        a = newpos.get(int(it["start"]), at(int(it["start"])))
+        b = newpos.get(int(it["end"]), at(int(it["end"])))
+        off = Fraction(int(it["in"])) - Fraction(int(it["start"])) * vf(v)
+        grid = 0 if abs(abs(v) - 1.0) < 1e-9 else 2           # (a retimed in-point grid rounds a tick or two)
+        twin = next((c for c in src if abs(float(c.speed) - v) < 1e-9 and c.rec_start < int(it["end"])
+                     and int(it["start"]) < c.rec_end
+                     and abs(Fraction(int(c.src_in)) - Fraction(int(c.rec_start)) * vf(v) - off) <= grid), None)
+        if twin is not None:
+            ca, cs0, _ = line[id(twin)]
+            s0 = int(round(Fraction(cs0) + Fraction(a - ca) * vf(v)))       # the picture's own frames
+        elif prev_a is not None and int(prev_a["end"]) == int(it["start"]) and int(prev_a["out"]) == int(it["in"]) \
+                and abs(float(prev_a["speed"]) - v) < 1e-9 and prev_a_end is not None:
+            s0 = prev_a_end
+        elif v > 0:
+            s0 = int(math.floor(pos(int(it["in"])) + ON_FRAME))
+        else:
+            s0 = int(round(pos(int(it["in"]))))
+        n_src = int(round((b - a) * v))
+        prev_a, prev_a_end = it, s0 + n_src
+        if b <= a:
+            continue
+        out_a.append(dict(it, start=a, end=b, **{"in": s0, "out": s0 + n_src}))
+    out_m = [dict(m, **{"in": newpos.get(int(m["in"]), at(int(m["in"]))),
+                        "out": (newpos.get(int(m["out"]), at(int(m["out"]))) if int(m["out"]) >= 0 else m["out"])})
+             for m in markers]
+    n_new = newpos.get(int(n_frames), at(int(n_frames)))
+    return out_c, out_a, out_m, n_new, dict(newpos)
 
 
 def _split_audio(it: dict, at: int) -> tuple[dict, dict]:
@@ -3109,16 +3252,17 @@ PREMIERE_MASTERCLIP = "masterclip-raw"
 
 
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,
-                       speed: float = 1.0) -> dict:
+                       speed: float = 1.0, seq_rate: Any = None) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
     silence.Ripple: the repeats, and with --remove-silence the speech-safe cuts and the silences): its ranges are cut
     out -- everything after them moves earlier -- and clips are extended where their speech must finish. Every A1
     clip stays at 0 dB: no Audio Levels, no keyframes (premiere_audio_problems). ``speed`` (--speed /
-    100): the finished edit played that fast (retime_edit). With --frame (cfg.frame_png) the sequence is the frame's
-    (frame.py), the window its hole, and V2 holds the PNG over the whole edit. Returns {'clips', 'markers', 'warnings',
-    'factor'}."""
+    100): the finished edit played that fast (retime_edit). ``seq_rate`` (night 7: the RAW's rate, pipeline.stage_finish):
+    the finished edit written on a sequence at that rate (rerate_edit) instead of the planning rate. With --frame
+    (cfg.frame_png) the sequence is the frame's (frame.py), the window its hole, and V2 holds the PNG over the whole
+    edit. Returns {'clips', 'markers', 'warnings', 'factor', 'fps', 'pos_map' ...}."""
     from . import silence as sil
     cutlist, _ = no_transitions(cutlist)     # never a transition (night 5; premiere_plan made them hard cuts already)
     st = premiere_settings(cfg)
@@ -3148,6 +3292,15 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     clips, audio_items, pairs = link_pairs(clips, audio_items)       # V1 + A1 as linked clips
     if abs(float(speed) - 1.0) > 1e-9:                                # --speed: the whole edit that much faster
         clips, audio_items, markers, N = retime_edit(clips, audio_items, markers, N, float(speed), fac)
+    pos_map: dict[int, int] = {}
+    plan_fps = fps
+    want = Fraction(str(seq_rate)) if seq_rate not in (None, "") else fps
+    if want != fps:                       # night 7: the sequence at the RAW's own rate
+        clips, audio_items, markers, N, pos_map = rerate_edit(clips, audio_items, markers, N, fps, want, raw_fps,
+                                                              getattr(cfg, "premiere_shots", None))
+        clips, audio_items, pairs = link_pairs(clips, audio_items)
+        fps = want
+        src_dur = int(math.floor(raw_frames * float(fps) / float(raw_fps)))
     a_of = {v: a for v, a in pairs}
     v_of = {a: v for v, a in pairs}
     if str((cutlist.settings or {}).get("audio_sync") or "raw") == "competitor":
@@ -3219,9 +3372,13 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         cm = _sub(ci, "comments")
         _sub(cm, "mastercomment1", f"{cl.label} speed {cl.speed:.6f} conf {float(cl.seg.confidence or 0):.2f}")
         _sub(cm, "mastercomment2", note + (f"; {cl.person_note}" if cl.person_note else ""))
-        _sub(cm, "mastercomment3", ("source in inside the frame-exact interval" if cl.in_exact else
-                                    "source in = nearest 1/60 s (outside the frame-exact interval)")
-             + f" ({cl.in_error_ms:+.2f} ms from the plan)")
+        if fps != plan_fps:
+            _sub(cm, "mastercomment3", f"source in = frame {cl.src_in} of the RAW at {fps_str(fps)} fps (the sequence "
+                                       "runs at the RAW's rate; planned on the 60 fps grid)")
+        else:
+            _sub(cm, "mastercomment3", ("source in inside the frame-exact interval" if cl.in_exact else
+                                        "source in = nearest 1/60 s (outside the frame-exact interval)")
+                 + f" ({cl.in_error_ms:+.2f} ms from the plan)")
     if str(getattr(cfg, "frame_png", "") or ""):                      # --frame: the PNG on V2, over everything
         _frame_track(video, str(cfg.frame_png), N, fps, W, H)
     # A1: the RAW audio at the SAME record ranges as V1 (picture-synced; an audio line where FX-14 found one)
@@ -3274,6 +3431,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             s0 = cl.start if cl.start != -1 else cl.rec_start
             reframed.append({"label": cl.label, "start": int(s0), "tc": _tc(int(s0), fps), "note": cl.person_note})
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
+            "fps": fps_str(fps), "plan_fps": fps_str(plan_fps), "frames": int(N),
+            "pos_map": {str(k): v for k, v in sorted(pos_map.items())},
             "reframed": reframed, "snapped": snapped, "scene_cuts": scene,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
@@ -3312,6 +3471,93 @@ def speed_problems(base_xml: str | os.PathLike, fast_xml: str | os.PathLike, k: 
             if abs(int(q["in"]) - int(p["in"])) > tol * 2 or abs(int(q["out"]) - int(p["out"])) > tol * 2:
                 out.append(f"XML SPEED {what}: plays RAW {int(q['in']) / f:.3f}-{int(q['out']) / f:.3f} s, the 100 % "
                            f"edit {int(p['in']) / f:.3f}-{int(p['out']) / f:.3f} s")
+    return out
+
+
+def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0) -> list[str]:
+    """Night 7: 1_edit.xml at the RAW's rate (``final_xml``; --speed k too) against the edit every other check read
+    (``base_xml``: the 60 fps grid, 100 %): the sequence lasts its length / k (within a frame of the new rate); every
+    V1 clip and A1 item plays, on each of its frames, the RAW its twin in the checked edit (the clip it overlaps most)
+    plays at that moment -- within a frame of the new rate (and the ticks of a retimed grid) --, at its twin's speed;
+    at most one frame at each end lies where the checked edit already shows another clip (a cut on the nearest frame,
+    or moved onto a RAW shot change); every clip of the checked edit a frame long or more is still there. One line
+    per item."""
+    a, b = parse_premiere_xml(base_xml), parse_premiere_xml(final_xml)
+    fa, fb = float(_seq_rate(a)), float(_seq_rate(b))
+    k = float(k)
+    out: list[str] = []
+    if abs(b["duration"] / fb - a["duration"] / fa / k) > 1.0 / fb + 1e-6:
+        out.append(f"XML RATE: the sequence lasts {b['duration'] / fb:.3f} s, the checked edit {a['duration'] / fa / k:.3f} "
+                   f"s{'' if abs(k - 1.0) < 1e-9 else f' / {k:g}'}")
+    for kind, name in (("clips", "V1"), ("audio", "A1")):
+        base = sorted((c for c in a[kind] if int(c["start"]) >= 0), key=lambda c: int(c["start"]))
+
+        def twin(t0: float, t1: float) -> dict | None:   # the checked edit's clip a final clip overlaps most
+            best = max(base, key=lambda c: min(t1, int(c["end"]) / fa / k) - max(t0, int(c["start"]) / fa / k),
+                       default=None)
+            if best is None or min(t1, int(best["end"]) / fa / k) - max(t0, int(best["start"]) / fa / k) <= 0:
+                return None
+            return best
+        for q in sorted((c for c in b[kind] if int(c["start"]) >= 0), key=lambda c: int(c["start"])):
+            v = abs(float(q["speed"]))
+            q0, q1 = int(q["start"]), int(q["end"])
+            p = twin(q0 / fb, q1 / fb)
+            if p is None:
+                out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(q0, _seq_rate(b))}: the checked edit plays "
+                           "nothing there")
+                continue
+            if abs(float(q["speed"]) - float(p["speed"]) * k) > 2e-4 * max(1.0, abs(float(p["speed"]) * k)):
+                out.append(f"XML RATE {name} {q.get('label') or '?'}: speed {float(q['speed']):.4f}, the checked edit's "
+                           f"{float(p['speed']) * k:.4f}")
+            bad, moved = [], 0
+            p0, p1 = int(p["start"]) / fa / k, int(p["end"]) / fa / k
+            for fr in range(q0, q1):                     # each frame: the RAW its twin's line plays at that moment
+                t = (fr + 0.5) / fb                      # (a cut moved a frame -- onto a shot change -- included)
+                want = (int(p["in"]) + (t * k * fa - int(p["start"])) * float(p["speed"])) / fa
+                got = (int(q["in"]) + (fr + 0.5 - q0) * float(q["speed"])) / fb
+                tol = (1.0 * max(1.0, v) + 0.5) / fb + 2.0 * max(1.0, v) / fa
+                if abs(got - want) > tol:
+                    bad.append((fr, got, want))
+                elif not p0 - 1e-9 <= t <= p1 + 1e-9:   # past its twin's cut: the checked edit shows another clip there
+                    r = next((c for c in base if int(c["start"]) / fa / k <= t < int(c["end"]) / fa / k), None)
+                    if r is not None and abs(got - (int(r["in"]) + (t * k * fa - int(r["start"])) * float(r["speed"]))
+                                             / fa) > tol:
+                        moved += 1
+            if bad:
+                fr, got, want = bad[0]
+                out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(fr, _seq_rate(b))}: plays RAW {got:.3f} s where "
+                           f"the checked edit plays {want:.3f} s ({len(bad)} of its {q1 - q0} frames)")
+            if moved > 2:                                # a frame at each end: the nearest frame / a shot change
+                out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(q0, _seq_rate(b))}: {moved} of its frames "
+                           "play where the checked edit already shows the next / previous clip (a cut moved)")
+        fin = sorted((int(c["start"]) / fb, int(c["end"]) / fb) for c in b[kind] if int(c["start"]) >= 0)
+        for c in base:
+            t0, t1 = int(c["start"]) / fa / k, int(c["end"]) / fa / k
+            if t1 - t0 >= 1.0 / fb and not any(min(t1, y1) - max(t0, y0) > 1e-9 for y0, y1 in fin):
+                out.append(f"XML RATE {name} {c.get('label') or '?'}: the checked edit's clip at {t0:.3f}-{t1:.3f} s "
+                           "is missing")
+    return out
+
+
+def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0,
+                       shots: Sequence[float] | None = None, raw_fps: Any = None, moving: bool = False,
+                       allow_repeats: bool = False) -> list[str]:
+    """The hard checks of 1_edit.xml written again at the RAW's rate (night 7; pipeline.apply_final), on its own
+    numbers: ITEM, REPEAT, FLASH (with the RAW's shot changes), AUDIO, TRANSITION, LINK, SYNC -- and XML RATE against
+    the checked edit (rate_problems). The checks on what was cut where (SPEECH, SILENCE, PERSON, GAP, OTHER VIDEO,
+    ENDING) read the checked edit: the new rate moves no cut by more than a frame."""
+    items = premiere_item_problems(final_xml)
+    out = [f"XML ITEM {p}" for p in items]
+    if items:
+        return out
+    out += [f"XML REPEAT {p}" for p in premiere_repeat_problems(final_xml, allow_repeats)]
+    if shots is not None:
+        out += [f"XML FLASH {p}" for p in premiere_flash_problems(final_xml, shots, raw_fps)]
+    out += [f"XML AUDIO {p}" for p in premiere_audio_problems(final_xml)]
+    out += [f"XML TRANSITION {p}" for p in premiere_transition_problems(final_xml)]
+    out += [f"XML LINK {p}" for p in premiere_link_problems(final_xml)[0]]
+    out += [f"XML SYNC {p}" for p in premiere_sync_problems(final_xml, moving)[0]]
+    out += rate_problems(base_xml, final_xml, k)
     return out
 
 

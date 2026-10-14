@@ -76,6 +76,10 @@ class Config:
                                            #   the default since night 3 (--keep-speed was the switch)
     premiere_speed: float = 1.0            # --speed PERCENT / 100: 1_edit.xml plays the whole edit (made at 100 %) this
                                            #   fast -- every clip, cut and caption -- whatever the competitor's speed
+    sequence_fps: str = "raw"              # --sequence-fps: the rate 1_edit.xml / 2_captions.srt are delivered at (night
+                                           #   7): "raw" = the RAW's own (the nearest normal Premiere rate); a rate
+                                           #   ("60") = that -- the planning grid's rate writes the plan as it is
+    premiere_seq_rate: str = ""            # (the pipeline sets it from sequence_fps and the RAW's rate)
     frame_png: str = ""                    # --frame PNG: the channel's overlay (frame.py): the video fills its
                                            #   transparent hole, the PNG on the top video track, the preview framed
     frame_size: str = ""                   # --frame-size: the sequence 1_edit.xml is made for (the PNG scaled to it);
@@ -388,7 +392,8 @@ class Config:
                   "premiere", "premiere_size", "premiere_fps", "premiere_window", "premiere_max_zoom",
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
                   "remove_silence", "keep_speed",
-                  "premiere_speed", "frame_png", "frame_size", "premiere_mirror", "premiere_follow_speaker",
+                  "premiere_speed", "sequence_fps", "premiere_seq_rate",
+                  "frame_png", "frame_size", "premiere_mirror", "premiere_follow_speaker",
                   "premiere_scene_cuts", "premiere_normal_audio", "premiere_min_clip_frames",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
@@ -453,3 +458,12 @@ def removes_silence(cfg) -> bool:
     if bool(getattr(cfg, "keep_silence", False)):
         return False
     return bool(getattr(cfg, "remove_silence", False)) or not str(getattr(cfg, "competitor", "") or "")
+
+
+def rate_text(fps) -> str:
+    """A frame rate as Premiere names it (night 7: the sequence at the RAW's rate): 23.976, 29.97, 59.94, 24, 60."""
+    from fractions import Fraction
+    f = Fraction(str(fps)) if isinstance(fps, str) else Fraction(fps)
+    if f.denominator == 1:
+        return str(f.numerator)
+    return f"{float(f):.3f}".rstrip("0").rstrip(".")

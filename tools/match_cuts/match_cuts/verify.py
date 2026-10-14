@@ -4235,8 +4235,16 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
         need("media_competitor", _media_file(cl.competitor, out), "competitor reference media")
     need("cutlist", Path(paths.get("cutlist") or out / "cutlist.json"), "cutlist.json")
     need("csv", Path(paths.get("csv") or out / "cutlist.csv"), "cutlist.csv")
-    from .run_folders import EDIT_XML
+    from .run_folders import CAPTIONS_SRT, EDIT_XML
     need("xml", Path(paths.get("xml") or Path(getattr(cfg, "deliver", out)) / EDIT_XML), EDIT_XML)
+    if getattr(cfg, "premiere", False):         # night 7: the captions are one of your two files -- never "all present"
+        srt = Path(getattr(cfg, "deliver", out)) / CAPTIONS_SRT      # without them (the stage deletes an older copy)
+        need("captions", srt, CAPTIONS_SRT)
+        if not srt.exists():
+            cap = getattr(ctx, "captions", None) or {}
+            why = cap.get("error") or next((str(w) for w in (cap.get("warnings") or []) if "not written" in str(w)),
+                                           "the captions stage wrote no file")
+            failures[-1] = f"{CAPTIONS_SRT} MISSING -- no captions for this edit ({why})"
     need("edl", Path(paths.get("edl") or out / "recreated_edit.edl"), "recreated_edit.edl")
     val_ok = exports.get("validation_ok", exports.get("ok"))
     if val_ok is not True:
@@ -4267,7 +4275,9 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
     for e in errors:
         failures.append(f"stage error {e.get('stage')}: {e.get('error')}")
     status = "fail" if failures else "pass"
+    gone = [i["deliverable"] for i in items if not i["exists"]]
     summary = (f"{sum(1 for i in items if i['exists'])}/{len(items)} deliverables present"
+               + (f" ({', '.join(gone)} MISSING)" if gone else "")
                + (f", {len(skipped)} skipped ({'; '.join(skipped.values())})" if skipped else "")
                + f", exports {'validated' if val_ok is True else 'NOT validated'}, {len(errors)} stage errors")
     return {"status": status, "summary": summary, "failures": failures, "warnings": warnings,

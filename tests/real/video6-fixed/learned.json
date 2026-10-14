@@ -1,0 +1,92 @@
+{
+ "video": "video6-fixed",
+ "date": "2026-10-14",
+ "project": "finished\\video6\\video6_fixed_relinked.prproj",
+ "run": "output\\video1-2",
+ "edit": {
+  "clips": 11,
+  "starts": [
+   0.267,
+   0.15,
+   0.0,
+   0.0,
+   0.0,
+   -1.933,
+   0.35,
+   0.0,
+   0.0,
+   0.0,
+   -2.383
+  ],
+  "ends": [
+   -0.35,
+   0.0,
+   0.0,
+   -0.0,
+   0.817,
+   -0.083,
+   -0.0,
+   0.0,
+   0.0,
+   0.033,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "moved": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.959,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 4,
+   "of": 5,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 60.0
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 5,
+  "rewritten": 0,
+  "changes": []
+ }
+}

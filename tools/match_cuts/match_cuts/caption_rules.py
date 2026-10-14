@@ -1,6 +1,6 @@
 """The hard rules of caption-generator-prompt.md ("Hard rules -- check your own output before you emit it"): a final
-check on every caption file before it is written (captions.run_captions; captions.write_srt refuses a file that still
-breaks rules 1-4).
+check on every caption file before it is written (captions.run_captions). The file is always written (night 7): a
+line that still breaks a rule is listed as doubtful (captions.doubtful_lines) in the report and the batch log.
 
   1 one utterance per caption: no ``?`` / ``!`` / ``.`` with more text after it
   2 one speaker per caption: the transcriber has no speaker labels, but a reply always starts a new sentence in the
@@ -8,9 +8,10 @@ breaks rules 1-4).
     "How are you Thanks") is a speaker / sentence boundary
   3 no capital inside a word (``yoU``)
   4 no ALL CAPS except genuine acronyms: ``caption_allowlist.txt`` (AI, MJ, MCU, extend it) and the acronyms the word
-    list writes in capitals (FBI, NASA, TV) -- never a word that is also an ordinary word (AS, WAS, SHOULD, IT)
+    list writes in capitals (FBI, NASA, TV) -- never a word that is also an ordinary word (AS, WAS, SHOULD, IT); a
+    word spelled out letter by letter is written in capitals with dashes ("A-N", "T-H-E")
   5 every token a real word: the word list (wordlist/, SCOWL), the allowlist, numbers, names (a capitalised word),
-    interjections (``ohhh``, ``ummm``)
+    interjections (``ohhh``, ``ummm``), spelled-out letters ("A-N", a lone capital "N")
   6 length: spoken captions at most 20 characters and 5 words, ``*actions*`` 24
   7 no weak last word (a, the, to, of, ...) where the word can move to the next caption
   8 no gaps: ``end[i] == start[i+1]`` (voice mode; competitor mode keeps the competitor's timing, gaps included)
@@ -85,14 +86,16 @@ _LEX: dict[str, Lexicon] = {}
 
 def read_allowlist(path: str | Path | None = None) -> list[str]:
     """The entries of caption_allowlist.txt: one word or phrase per line ("Bronx High School of Science"; commas
-    also separate entries), ``#`` notes; the defaults when it is missing."""
+    also separate entries), ``#`` notes; the defaults when it is missing. A single letter other than "I" is never
+    an entry (night 7: "A" would write every "a" as "A"; a spelled-out letter needs no entry: is_spelled)."""
     p = Path(path) if path else ALLOWLIST_FILE
     if not p.is_file():
         return list(DEFAULT_ALLOW)
     out = []
     for line in p.read_text(encoding="utf-8-sig").splitlines():
         line = line.split("#", 1)[0]
-        out += [" ".join(w.split()) for w in re.split(r"[,;]", line) if w.strip()]
+        out += [" ".join(w.split()) for w in re.split(r"[,;]", line) if w.strip()
+                and not (len(w.strip()) == 1 and w.strip() != "I")]
     return out
 
 
@@ -164,10 +167,26 @@ def is_interjection_word(lw: str) -> bool:
     return lw in INTERJECTIONS or bool(INTERJECTION_RE.match(lw)) or any(w in INTERJECTIONS for w in _stretched(lw))
 
 
+_SPELLED = re.compile(r"[A-Za-z](?:-[A-Za-z])+")
+
+
+def is_spelled(c: str) -> bool:
+    """A word spelled out letter by letter: single letters joined by dashes ("A-N", "O-N", "R-E", "T-H-E"). Allowed
+    by rules 4 and 5 and written in capitals (night 7: laptop video2's file was held back for them)."""
+    return bool(_SPELLED.fullmatch(str(c).replace("’", "'")))
+
+
+def lone_letter(c: str) -> bool:
+    """A single capital letter ("N" of a spelled word): no word, but not flagged by rule 5 either -- the screen noise
+    rules still drop a stray letter where nothing was heard."""
+    return len(c) == 1 and c.isascii() and c.isalpha() and c.isupper()
+
+
 def is_real(c: str, lex: Lexicon) -> bool:
     """Rule 5: a word of the list (any case), of the allowlist, a number, an interjection; a hyphenated word whose
-    parts are (single letters allowed: "P-P-Peter", "X-Men"); a possessive or contraction of one. Words of one or two
-    letters only from SHORT_WORDS ("I", "a", "of"), so a stray "V" or "ou" read off the screen is not a word."""
+    parts are (single letters allowed: "P-P-Peter", "X-Men"); a possessive or contraction of one; a word spelled out
+    ("A-N"). Words of one or two letters only from SHORT_WORDS ("I", "a", "of"), so a stray "V" or "ou" read off the
+    screen is not a word."""
     c = c.replace("’", "'")
     if not c:
         return False
@@ -175,6 +194,8 @@ def is_real(c: str, lex: Lexicon) -> bool:
         return True
     lw = c.lower()
     if lw in lex.allow:
+        return True
+    if is_spelled(c):
         return True
     if "-" in c:
         parts = [p for p in c.split("-") if p]
@@ -224,6 +245,8 @@ def case_ok(c: str, lex: Lexicon) -> bool:
     letters = _letters(c)
     if len(letters) <= 1:
         return True
+    if is_spelled(c):
+        return letters.isupper()                        # spelled out: in capitals ("A-N")
     lw = c.lower()
     if lw in lex.allow:
         return c == lex.allow[lw] or (c == lw and lex.known(lw))
@@ -533,6 +556,37 @@ def _too_long(c: Cap) -> bool:
     return len(c.text) > MAX_CHARS or len(c.toks) > MAX_SPOKEN_WORDS
 
 
+MAX_ON_SCREEN_S = 1.5     # rule 6 (night 7): a caption of two or more words on screen longer than this is split -- of
+#                           your 990 captions of 2+ words (srt/ and the answer keys) one stays longer (2.03 s, "of
+#                           £7.63"); 3 words at most 1.47 s. The tool's video6 "you mean succeed?" stayed 2.4 s: you
+#                           made it "you mean | succeed?"
+
+
+def _long_on_screen(c: Cap, fps: Fraction) -> bool:
+    return (c.spoken and len(c.toks) >= 2 and c.info.get("style") != "follow"
+            and (c.end - c.start) / float(fps) > MAX_ON_SCREEN_S + 1e-9)
+
+
+def _screen_split(c: Cap, fps: Fraction) -> list[int] | None:
+    """Where a caption on screen too long splits: before the word that leaves the longer piece shortest -- never
+    between two words kept together (captions.compute_bonds: "you mean", "the car") nor after a weak word when
+    another place does as well; None when no split makes it shorter."""
+    ws = [Word(t.text, 0.1 * i, 0.1 * i + 0.1, 1.0, t.raw) for i, t in enumerate(c.toks)]
+    bonds = compute_bonds(ws)
+    best = None
+    for k in range(1, len(c.toks)):
+        f = _split_frame(c, k, fps)
+        if f is None or not c.start < f < c.end:
+            continue
+        bonded = bool(bonds[k - 1]) if k - 1 < len(bonds) else False
+        score = (bonded, max(f - c.start, c.end - f), is_weak(c.toks[k - 1].text))
+        if best is None or score < best[0]:
+            best = (score, k)
+    if best is None or best[0][1] >= c.end - c.start:
+        return None
+    return [best[1]]
+
+
 def _weak_tail(toks: Sequence[Tok]) -> int:
     """Where the words kept together with the last token start (captions.compute_bonds: "of the", "it was", "didn't
     get it"): a weak last word moves to the next caption with them."""
@@ -689,6 +743,8 @@ def _recase(caps: list[Cap], words: Sequence[Word] | None, lex: Lexicon, rep: Re
             lw = cw.lower()
             if lw == "i" or lw.startswith("i'"):
                 new = "I" + lw[1:]
+            elif is_spelled(cw):
+                new = cw.upper()                         # a word spelled out: "A-N" (night 7)
             elif lw in lex.allow and not (cw == lw and lex.known(lw)):
                 new = lex.allow[lw]
             elif len(_letters(cw)) > 1 and _letters(cw).isupper() and is_acronym(cw, lex):
@@ -1207,9 +1263,24 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
         if a.end == b.start:
             rep.change(a, 8)
     cs = filled
+    # rule 6 on screen (night 7): no caption of two or more words longer than MAX_ON_SCREEN_S -- measured after the
+    # gaps closed (a caption stays until the next one starts)
+    out = []
+    for c in cs:
+        ks = _screen_split(c, fps) if keep_groups and _long_on_screen(c, fps) else None
+        if ks:
+            pieces = _split(c, ks, fps, 6, rep)
+            if len(pieces) > 1:
+                rep.row(6, "changed", c.start, c.end, c.text, f"on screen {(c.end - c.start) / float(fps):.2f} s: "
+                        f"split into '{pieces[0].text}' | '{' '.join(p.text for p in pieces[1:])}'")
+            out += pieces
+        else:
+            out.append(c)
+    cs = out
     # rule 5: what is still not a word
     for c in cs:
-        bad = [x for x in _cores5(c) if c.mode != "placeholder" and x and not is_real(x, lex) and not is_name(x)]
+        bad = [x for x in _cores5(c) if c.mode != "placeholder" and x and not is_real(x, lex) and not is_name(x)
+               and not lone_letter(x)]
         if bad:
             rep.flagged[5] += 1
             heard = " ".join(t.word.text for t in c.toks if t.word is not None)
@@ -1301,7 +1372,7 @@ def check(caps: Sequence[Caption], fps: Fraction, mode: str | None = None, lex: 
         if 4 in out and any(x and len(_letters(x)) > 1 and _letters(x).isupper() and not case_ok(x, lex)
                             for x in cores):
             out[4].append(tc)
-        if 5 in out and any(x and not is_real(x, lex) and not is_name(x) for x in _cores5(c)):
+        if 5 in out and any(x and not is_real(x, lex) and not is_name(x) and not lone_letter(x) for x in _cores5(c)):
             out[5].append(tc)
         if 6 in out and _too_long(c):
             out[6].append(tc)
