@@ -19,8 +19,11 @@ same words written two ways ("gonna" / "going to") are no difference; a competit
 read clearly is a third opinion, and it decides when exactly one version agrees with it -- the version and the words
 kept on either side of it, in that order, so one common word cannot agree on its own. A word only the source
 heard is added when it is clear (CLEAR_PROB) or the caption has it; a word only the edit's transcript heard is never
-dropped. Nothing is guessed: when the version kept is still unsure (a word below LOW_PROB that no second opinion
-backs), it is kept and listed with the alternatives heard. Unsure words that cannot be rechecked (no source audio
+dropped. A version heard on one side of a cut never replaces, on confidence alone, edit words that run on past that cut
+with more syllables than it: the rest is the next piece's sound, which that part of the source never had (the edit's
+"succeed", glued from the RAW's "suck... seed" with the pause cut out: the RAW's "suck" alone would lose "seed"; such
+spots are listed as "held"). Nothing is guessed: when the version kept is still unsure (a word below LOW_PROB that no
+second opinion backs), it is kept and listed with the alternatives heard. Unsure words that cannot be rechecked (no source audio
 there) are listed the same way.
 """
 from __future__ import annotations
@@ -221,7 +224,8 @@ def recheck(words: Sequence[Word], y16: np.ndarray | None, pieces: Sequence[Piec
     seconds, or None. ``extra``: more unsure words {index: why} -- e.g. where a second speech model heard something
     else (captions.run_captions)."""
     end = len(y16) / SR if y16 is not None else max((w.end for w in words), default=0.0)
-    unsure = unsure_words(words, y16, cut_times(pieces, end), only)
+    cuts = cut_times(pieces, end)
+    unsure = unsure_words(words, y16, cuts, only)
     for i, why in (extra or {}).items():
         if 0 <= int(i) < len(words):
             unsure.setdefault(int(i), []).extend(why)
@@ -277,7 +281,8 @@ def recheck(words: Sequence[Word], y16: np.ndarray | None, pieces: Sequence[Piec
              and piece_at(pieces, 0.5 * (w.start + w.end)) is p]
         B = [b for b in heard if e0 <= 0.5 * (b.start + b.end) < e1]
         done.update(i for i in A if i in unsure)
-        _decide(words, A, B, unsure, probs, swaps, rep, captions, source_name, edit_model, model)
+        edges = tuple(t if any(abs(c - t) < 1e-3 for c in cuts) else None for t in (p.t0, p.t1))
+        _decide(words, A, B, unsure, probs, swaps, rep, captions, source_name, edit_model, model, edges)
     rep["rechecked"] = len(done)
     for i in sorted(set(lost) - done):
         w = words[i]
@@ -327,10 +332,28 @@ def _said_beside(b: Word, words: Sequence[Word]) -> bool:
                for w in words)
 
 
+def _syllables(ws: Sequence[Word]) -> int:
+    return sum(len(re.findall(r"[aeiouy]+", norm(w.text))) for w in ws)
+
+
+def _runs_past_a_cut(a_ws: Sequence[Word], b_ws: Sequence[Word], edges: tuple) -> bool:
+    """The edit's words a_ws hold sound from past a cut that the source's words b_ws -- heard for the piece before
+    (after) it -- never had: they run on more than CUT_TOL_S past the cut, the source's words stop short of it (not a
+    word the cut cuts off), and the edit's version has more syllables (night 7, video6: the edit's "succeed" over the
+    cut of "suck... seed"; the RAW's "suck")."""
+    t0, t1 = edges
+    past = ((t1 is not None and max(w.end for w in a_ws) > t1 + CUT_TOL_S and max(b.end for b in b_ws) < t1 - 1e-6)
+            or (t0 is not None and min(w.start for w in a_ws) < t0 - CUT_TOL_S
+                and min(b.start for b in b_ws) > t0 + 1e-6))
+    return past and _syllables(a_ws) > _syllables(b_ws)
+
+
 def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int, list[str]], probs: dict[int, float],
-            swaps: list, rep: dict, captions: Any, source_name: str, edit_model: str, model: str) -> None:
+            swaps: list, rep: dict, captions: Any, source_name: str, edit_model: str, model: str,
+            edges: tuple = (None, None)) -> None:
     """One recheck window: align the edit's words A (indices) with the source's words B and settle every place they
-    differ around an unsure word (see the module docstring)."""
+    differ around an unsure word (see the module docstring). ``edges``: the edit seconds where the piece the source
+    was heard for starts / ends at a cut (None: no cut there)."""
     sm = difflib.SequenceMatcher(None, [norm(words[i].text) for i in A], [norm(b.text) for b in B], autojunk=False)
     for tag, i1, i2, j1, j2 in _blocks(sm.get_opcodes()):
         a_idx, b_ws = A[i1:i2], B[j1:j2]
@@ -390,6 +413,11 @@ def _decide(words: Sequence[Word], A: list[int], B: list[Word], unsure: dict[int
             use_b, why = agree_b, "the competitor's caption agrees"
         else:
             use_b, why = conf_b >= conf_a + MARGIN, "more confident"
+            if use_b and _runs_past_a_cut(a_ws, b_ws, edges):
+                use_b = False                             # the source heard only one side of the cut
+                rep.setdefault("held", []).append({"time": round(t0, 3), "end": round(t1, 3), "kept": _text(a_ws),
+                                                   "heard": _text(b_ws), "why": "the edit's words run on past a cut: "
+                                                   f"the {source_name} there heard only its own side of it"})
         kept = b_ws if use_b else a_ws
         backed = agree_b if use_b else agree_a
         if use_b:

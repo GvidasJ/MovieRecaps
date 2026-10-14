@@ -487,3 +487,20 @@ def test_the_start_of_the_next_word_heard_again_never_replaces_a_word():
                   ("call.", 10.6, 10.7, 0.9)])
     out, rep = R.recheck(words, None, PIECES, src.get, src.transcribe)
     assert [w.text for w in out] == ["hallway", "I", "gotta", "call"] and rep["changed"] == 0
+
+
+def test_a_word_the_edit_glues_over_a_cut_keeps_the_edits_version():
+    """Night 7, video6: the edit cuts the pause out of "suck... seed" and its transcript hears "succeed" over the cut;
+    the RAW heard for the piece before the cut has only "suck" -- taking it would lose "seed"."""
+    pieces = [R.Piece(0.0, 2.0, 10.0), R.Piece(2.0, 4.0, 12.5)]                # the take's 0.5 s pause cut out
+    words = [W("not", 1.3, 1.45), W("succeed", 1.5, 2.1, 0.68), W("no", 2.4, 2.6)]
+    src = Source([("not", 11.3, 11.45, 0.99), ("suck", 11.55, 11.9, 0.96), ("seed", 12.55, 12.85, 0.9),
+                  ("no", 12.9, 13.1, 0.99)])
+    out, rep = R.recheck(words, None, pieces, src.get, src.transcribe)
+    assert [w.text for w in out] == ["not", "succeed", "no"] and rep["changed"] == 0
+    assert [(h["kept"], h["heard"]) for h in rep["held"]] == [("succeed", "suck")]
+    # a misheard word of as many syllables is still corrected, though the edit's timing runs past the cut
+    words = [W("not", 1.3, 1.45), W("sad", 1.5, 2.1, 0.3), W("no", 2.4, 2.6)]
+    src = Source([("not", 11.3, 11.45, 0.99), ("sat", 11.55, 11.9, 0.96), ("no", 12.9, 13.1, 0.99)])
+    out, rep = R.recheck(words, None, pieces, src.get, src.transcribe)
+    assert [w.text for w in out] == ["not", "sat", "no"] and "held" not in rep

@@ -220,8 +220,9 @@ a 48 fps grid, 29.97 a 59.94 one), exactly as before; every check below reads th
 starts it on** (at the RAW's rate one sequence frame is one RAW frame, so the clip after a competitor cut shows the
 competitor's first RAW frame there); the pieces of one take stay seamless (each continues exactly where the one before
 ends); a cut at one of the RAW's own shot changes lands **exactly** on it (no frame of the other shot at either side:
-a frame at a shot change goes to the clip that shows the larger part of it in the 60 fps edit -- video021's cut one
-tick after a shot change had shown 0.4 of the new shot's first frame at the old framing), a clip never shows a frame
+when a shot change lies within a frame of both sides of a cut -- or of a split of one take -- the clip before ends
+before it and the one after starts on it; video021's cut one tick after a shot change had shown 0.4 of the new shot's
+first frame at the old framing, laptop004's two sides at 125 % each held half of it), a clip never shows a frame
 of a RAW shot the 60 fps clip does not reach, and a piece of a take left one frame long goes into its take (no
 framing for a single frame); A1 takes the same frames as its picture
 (in sync, still linked); markers, the frame on V2 and `2_captions.srt` move with the cuts (a caption that starts on a
@@ -757,7 +758,10 @@ timeline and the versions are compared word by word: where they agree (or say th
 "going to") the word is confirmed; where they differ the RAW's version is used when it is clearly more confident, and
 a competitor caption read clearly at that spot decides when exactly one version agrees with it, together with the
 words on either side. A word the RAW repeats at the edge of its window (the same word the edit's transcript has right
-there) is not added twice. Nothing is guessed: a spot still unsure after that keeps the best version and is listed
+there) is not added twice. The RAW is heard piece by piece, so where the edit glues two pieces into one word, being
+more confident is not enough: edit words that run on past a cut with more syllables than the RAW's version of their
+side are kept (night 7: the edit's "succeed", with the pause of "suck... seed" cut out, had become the RAW's "suck"
+alone and "seed" was lost; such spots are listed as `held` in `captions.json`). Nothing is guessed: a spot still unsure after that keeps the best version and is listed
 under *Captions worth a look* with its time and the alternatives heard (edit, RAW, caption). The end summary says how
 many words were rechecked and how many changed; the report lists every change, every second-model decision and every
 reading of the screen that was scored. With `--voiceover`, the voice-over file itself is the source.
