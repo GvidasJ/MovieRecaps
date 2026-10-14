@@ -395,3 +395,20 @@ def test_a_cut_a_tick_after_a_raw_shot_change_lands_on_it_at_the_raws_rate():
     assert out2[1].src_in == 1999                                          # not 1998, the shot before's last frame
     out3, _, _, _, _ = ex.rerate_edit(other, [], [], 126, Fraction(60), R, R, [])
     assert out3[1].src_in == 1998                                          # no shot change there: as the plan shows
+
+
+def test_at_125_percent_a_clip_never_starts_on_the_frame_before_its_first():
+    """laptop004 (--speed 125, 23.976 RAW): S03 starts on the RAW's shot change (frame 813), but Premiere starts a
+    retimed clip only every 1.25 RAW frames: <in> 650 is RAW 812.5 -- frame 812, the shot before's last, at S03's
+    framing (XML FLASH). The in-point is rounded up on that grid."""
+    from match_cuts.geometry import Sim
+    from match_cuts.model import Segment
+    seg = Segment(id=1, type="raw", comp_in=0, comp_out=300, raw_in_seconds=10.0, speed=1.25, confidence=.9)
+    ev = SimpleNamespace(seg=seg, rec_in=0, rec_out=300, seg_name="S03", dissolve_in=0)
+    R = Fraction(24000, 1001)
+    src = int(math.ceil(Fraction(813) / R * 60))                  # the plan's in-point: just inside RAW frame 813
+    c = ex.PremiereClip(seg, ev, 0, 120, 0, 120, src, src + 150, 1.25, True, 0.0, 1.0, True,
+                        [(src, Sim(0.5, 0.0, 0.0, 0.0))], None, [ev])
+    out, _, _, _, _ = ex.rerate_edit([c], [], [], 120, Fraction(60), R, R, [float(Fraction(813) / R)])
+    x_in = ex.remap_encode(out[0].src_in, out[0].src_out, 1.25, out[0].rec_end - out[0].rec_start)[0]
+    assert math.floor(Fraction(x_in) * Fraction(5, 4)) == 813      # what Premiere shows first: the new shot's frame

@@ -229,7 +229,9 @@ cut still does; captions stay back to back). The new XML gets the hard checks ag
 `REPEAT`, `FLASH`, `AUDIO`, `TRANSITION`, `LINK`, `SYNC` -- and `XML RATE`: on every frame of every V1 and A1 clip the
 RAW plays what the checked 60 fps edit plays at that moment (within a frame of the new rate), and every clip of it is
 still there. A problem fails the run like any other hard check. (`--speed` works the same way: made at 100 % on the 60
-fps grid, then played faster and written at the RAW's rate in the same step.) check-all scores the 60 fps files
+fps grid, then played faster and written at the RAW's rate in the same step; Premiere starts a sped-up clip only on
+its own grid -- every 1.25 RAW frames at 125 % -- so its in-point is rounded up on it, never onto the frame before its
+first: laptop004's S03 started on the previous shot's last frame before that.) check-all scores the 60 fps files
 against your keys (made on 60 fps sequences), so its numbers stay comparable with the earlier nights'.
 
 A speed change of at most 0.25 s inside one continuous take of the competitor's -- a slow-motion or hold

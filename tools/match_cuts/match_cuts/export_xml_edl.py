@@ -1447,6 +1447,9 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
             s0 = plan_first(cl)
             if pos(cl.src_in) - s0 > half and Fraction(s0 + 1) in shots:
                 s0 += 1                                    # the plan shows less than half of the shot before's last
+            sf = _remap_factor(v)
+            if sf != 1.0:     # --speed: Premiere starts a retimed clip on its grid (<in> x speed): rounded up, never on
+                s0 = _source_tick(int(math.ceil(Fraction(s0) / vf(sf) - Fraction(1, 1_000_000))), sf)  # the frame before
         else:
             s0 = int(round(pos(cl.src_in)))
         b = at(cl.rec_end)
