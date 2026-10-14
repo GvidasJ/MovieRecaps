@@ -412,3 +412,26 @@ def test_at_125_percent_a_clip_never_starts_on_the_frame_before_its_first():
     out, _, _, _, _ = ex.rerate_edit([c], [], [], 120, Fraction(60), R, R, [float(Fraction(813) / R)])
     x_in = ex.remap_encode(out[0].src_in, out[0].src_out, 1.25, out[0].rec_end - out[0].rec_start)[0]
     assert math.floor(Fraction(x_in) * Fraction(5, 4)) == 813      # what Premiere shows first: the new shot's frame
+
+
+def test_a_competitor_cut_on_a_raw_shot_change_at_125_percent_lands_on_it():
+    """laptop004 (--speed 125, 23.976 RAW): the plan's S03 ends at RAW 998.50 and S04 starts at 998.60 -- both hold part
+    of the shot change's first frame (998). S03 must end before it and S04 start on it (no repeat, no flash)."""
+    from match_cuts.geometry import Sim
+    from match_cuts.model import Segment
+    seg = Segment(id=1, type="raw", comp_in=0, comp_out=300, raw_in_seconds=10.0, speed=1.25, confidence=.9)
+    ev = SimpleNamespace(seg=seg, rec_in=0, rec_out=300, seg_name="S03", dissolve_in=0)
+    R = Fraction(24000, 1001)
+
+    def clip(r0, r1, s0, n, sim):
+        return ex.PremiereClip(seg, ev, r0, r1, r0, r1, s0, s0 + n, 1.25, True, 0.0, 1.0, True, [(s0, sim)], None,
+                               [ev])
+    shots = [float(Fraction(813) / R), float(Fraction(998) / R)]
+    for n3 in (463, 464):            # the plan's S03 ends a tick before S04 (two takes: laptop004) or on it (one take)
+        clips = [clip(186, 557, 2035, n3, Sim(0.5, 0.0, 0.0, 0.0)), clip(557, 596, 2499, 49, Sim(0.6, 0.0, 9.0, 0.0))]
+        s3, s4 = ex.rerate_edit(clips, [], [], 596, Fraction(60), R, R, shots)[0]
+        x3 = ex.remap_encode(s3.src_in, s3.src_out, 1.25, s3.rec_end - s3.rec_start)[0]
+        x4 = ex.remap_encode(s4.src_in, s4.src_out, 1.25, s4.rec_end - s4.rec_start)[0]
+        last3 = math.floor(Fraction(x3 + s3.rec_end - s3.rec_start - 1) * Fraction(5, 4))   # what Premiere shows
+        first4 = math.floor(Fraction(x4) * Fraction(5, 4))
+        assert last3 < 998 == first4 and s3.rec_end == s4.rec_start, (n3, last3, first4)

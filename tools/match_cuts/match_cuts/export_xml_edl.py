@@ -1432,9 +1432,13 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
         return (p is not None and p.rec_end == q.rec_start and float(q.speed) > 0
                 and abs(float(p.speed) - float(q.speed)) < 1e-9 and int(p.src_out) == int(q.src_in))
 
+    def end_src(c: PremiereClip) -> Fraction:                       # where the plan's clip ends in the source
+        return pos(c.src_in) + vf(c.speed) * (c.rec_end - c.rec_start) * r
+
     newpos: dict[int, int] = {}
     out_c: list[PremiereClip] = []
     line: dict[int, tuple[int, int, float]] = {}       # id(old clip) -> (new start, new source start, speed)
+    first_at: dict[int, Fraction] = {}                 # id(old clip) -> the RAW shot change it starts exactly on
     src = list(clips)
     prev: PremiereClip | None = None
     prev_end_src: int | None = None
@@ -1445,7 +1449,9 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
             s0 = prev_end_src                              # the take runs on
         elif v > 0:
             s0 = plan_first(cl)
-            if pos(cl.src_in) - s0 > half and Fraction(s0 + 1) in shots:
+            if id(cl) in first_at:
+                s0 = int(first_at[id(cl)])                 # a cut on a RAW shot change: the new shot's first frame
+            elif pos(cl.src_in) - s0 > half and Fraction(s0 + 1) in shots:
                 s0 += 1                                    # the plan shows less than half of the shot before's last
             sf = _remap_factor(v)
             if sf != 1.0:     # --speed: Premiere starts a retimed clip on its grid (<in> x speed): rounded up, never on
@@ -1459,10 +1465,16 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
             s = next((x for x in shots if last < x <= shown(s0, a, b - 1, v)), None)
             if s is not None:                              # a frame of the next RAW shot: end on the change
                 b = max(a, ends_at(s0, a, s, v))
-            if nxt is not None and runs_on(cl, nxt):
-                s = next((x for x in shots if last < x <= plan_first(nxt)), None)
-                if s is not None:                          # a split of one take at a shot change: exactly on it
+            if nxt is not None and nxt.rec_start == cl.rec_end and float(nxt.speed) > 0:
+                # a cut -- or a split of one take -- on the RAW's own shot change (the plan's two sides within a frame
+                # of it; at --speed both may hold a part of its first frame: laptop004 S03 | S04): this clip ends
+                # before it, the next starts on it
+                s = next((x for x in shots if abs(x - end_src(cl)) <= 1 and abs(x - pos(nxt.src_in)) <= 1
+                          and x > s0), None)
+                if s is not None:
                     b = max(a, ends_at(s0, a, s, v))
+                    if not runs_on(cl, nxt):
+                        first_at[id(nxt)] = s
         newpos[cl.rec_start] = a
         newpos[cl.rec_end] = b
         n_src = int(round((b - a) * v))
@@ -3522,16 +3534,25 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
     for kind, name in (("clips", "V1"), ("audio", "A1")):
         base = sorted((c for c in a[kind] if int(c["start"]) >= 0), key=lambda c: int(c["start"]))
 
-        def twin(t0: float, t1: float) -> dict | None:   # the checked edit's clip a final clip overlaps most
-            best = max(base, key=lambda c: min(t1, int(c["end"]) / fa / k) - max(t0, int(c["start"]) / fa / k),
-                       default=None)
-            if best is None or min(t1, int(best["end"]) / fa / k) - max(t0, int(best["start"]) / fa / k) <= 0:
+        def line_at(c: dict, t: float) -> float:          # the RAW second clip c's line plays at final time t
+            return (int(c["in"]) + (t * k * fa - int(c["start"])) * float(c["speed"])) / fa
+
+        def twin(q: dict) -> dict | None:
+            """The checked edit's clip a final clip stands for: of those it overlaps (within a frame), the one whose
+            line plays its middle frame's RAW (a piece one frame long overlaps its neighbour almost as much)."""
+            t0, t1 = int(q["start"]) / fb, int(q["end"]) / fb
+            near = [c for c in base if min(t1 + 1.0 / fb, int(c["end"]) / fa / k)
+                    - max(t0 - 1.0 / fb, int(c["start"]) / fa / k) > 0]
+            if not near:
                 return None
-            return best
+            tm = (int(q["start"]) + int(q["end"])) / 2.0 / fb
+            got = (int(q["in"]) + (tm * fb - int(q["start"])) * float(q["speed"])) / fb
+            return min(near, key=lambda c: (abs(line_at(c, tm) - got),
+                                            -(min(t1, int(c["end"]) / fa / k) - max(t0, int(c["start"]) / fa / k))))
         for q in sorted((c for c in b[kind] if int(c["start"]) >= 0), key=lambda c: int(c["start"])):
             v = abs(float(q["speed"]))
             q0, q1 = int(q["start"]), int(q["end"])
-            p = twin(q0 / fb, q1 / fb)
+            p = twin(q)
             if p is None:
                 out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(q0, _seq_rate(b))}: the checked edit plays "
                            "nothing there")
