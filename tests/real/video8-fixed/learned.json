@@ -1,0 +1,130 @@
+{
+ "video": "video8-fixed",
+ "date": "2026-10-15",
+ "project": "finished\\video8\\video8_fixed_relinked.prproj",
+ "run": "output\\laptop_video8",
+ "edit": {
+  "clips": 25,
+  "starts": [
+   0.125,
+   0.0,
+   0.0,
+   0.0,
+   -1.21,
+   0.0,
+   0.042,
+   0.0,
+   -1.335,
+   -1.418,
+   -1.501,
+   0.0,
+   0.0,
+   0.0,
+   -0.918,
+   -1.001,
+   0.0,
+   0.0,
+   -0.083,
+   -0.167
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   0.0,
+   0.042,
+   0.0,
+   0.083,
+   -0.25,
+   0.834,
+   0.751,
+   0.667,
+   -0.167,
+   0.0,
+   0.0,
+   0.167,
+   0.083,
+   -0.0,
+   0.0,
+   1.084,
+   1.001,
+   0.918
+  ],
+  "removed": 5,
+  "added": 0,
+  "moved": [
+   178.0,
+   178.0,
+   178.0,
+   178.0,
+   178.0,
+   178.0,
+   178.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "zoomed": [
+   -5.0,
+   -5.0,
+   -5.0,
+   -5.0,
+   -5.0,
+   -5.0,
+   -5.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.752,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 6,
+   "of": 8,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 0,
+  "added": 3,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "This'll",
+    "written": "this will",
+    "kind": "words",
+    "before": "spell water",
+    "after": "cool you",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

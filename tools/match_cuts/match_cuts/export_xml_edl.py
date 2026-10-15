@@ -2394,6 +2394,14 @@ CENTRE_FIXED_CROP = False   # night 6: centre each shot of a fixed-crop competit
 #                             -- OFF: on laptop013 the faces found reproduced 1 of your 5 moves (the man, -276 px for
 #                             your -361) and moved your centred wide shot (+286 px); the woman's close-ups were not
 #                             found. Kept for a better person detection.
+SHOW_CUT_PERSON = True      # night 8 (your video7 fix): the template window, narrower than the competitor's, cut the
+#                             only people the competitor shows -- slide it onto the person (_subject_in_narrow_window,
+#                             cut_only)
+CUT_PEOPLE_MAX = 2          # ... at most this many faces inside the competitor's window (more: a wide shot, kept)
+CUT_MARGIN = 0.1            # ... the window slides only until the face is inside it with this share of its width to
+#                             spare (never onto the face's centre: a slide, not a jump -- video021 S54 / S56 jumped
+#                             54 % / 45 % of the window's width when centred)
+CUT_SLIDE_MAX = 0.5         # ... and at most this share of the window's width (video7: 28 %)
 NARROW_OVERFLOW = 0.08      # the competitor's window wider than the template window by this share of it ...
 SUBJECT_MOVE_PX = 40.0      # ... a move to centre the person it shows smaller than this is not made
 
@@ -2419,9 +2427,16 @@ FIXED_CROP_PX = 8.0         # ... and this many of its pixels of one position: o
 #                             shot: 15 px)
 
 
-def _fixed_competitor_crop(clips: Sequence[PremiereClip]) -> bool:
+ONE_CROP_SCALE = 0.03       # night 8 (SHOW_CUT_PERSON): a competitor whose framing moves less than this share of
+ONE_CROP_PX = 30.0          # one zoom and this many of its pixels over the whole video chose nobody shot by shot
+#                             (video6: 1.8 % / 8 px, its measuring noise; video7 moves 190 px, laptop010 586 px)
+
+
+def _fixed_competitor_crop(clips: Sequence[PremiereClip], max_scale: float = FIXED_CROP_SCALE,
+                           max_px: float = FIXED_CROP_PX) -> bool:
     """The competitor shows the whole video through one fixed crop (laptop013: scale 0.693, x -305.6 on every clip) --
-    it chose no subject shot by shot, so its framing says nothing about whom to show. Two clips or more."""
+    it chose no subject shot by shot, so its framing says nothing about whom to show. Two clips or more.
+    ``max_scale`` / ``max_px``: how alike the framings must be (night 8's rule asks less: ONE_CROP_*)."""
     sims = []
     for c in clips:
         for e in c.events or [c.ev]:
@@ -2435,7 +2450,7 @@ def _fixed_competitor_crop(clips: Sequence[PremiereClip]) -> bool:
     s = [x.s for x in sims]
     mean = sum(s) / len(s)
     dx, dy = max(x.tx for x in sims) - min(x.tx for x in sims), max(x.ty for x in sims) - min(x.ty for x in sims)
-    fixed = (max(s) - min(s) <= FIXED_CROP_SCALE * mean and dx <= FIXED_CROP_PX and dy <= FIXED_CROP_PX)
+    fixed = (max(s) - min(s) <= max_scale * mean and dx <= max_px and dy <= max_px)
     log.debug("premiere framing: the competitor's framings over %d pieces: zoom spread %.2f %%, x %.1f px, y %.1f px "
               "-- %s", len(sims), 100 * (max(s) - min(s)) / mean, dx, dy, "one fixed crop" if fixed else "framed per shot")
     return fixed
@@ -2444,7 +2459,7 @@ def _fixed_competitor_crop(clips: Sequence[PremiereClip]) -> bool:
 def _subject_in_narrow_window(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
                               win: tuple[float, float, float, float], fps: Fraction, layout_box: Box,
                               min_move: float, raw_fps: Any = None, changes_s: Sequence[float] | None = None,
-                              fac: int = 1) -> int:
+                              fac: int = 1, cut_only: bool = False) -> int:
     """Night 6 (your laptop013 fix): a competitor that shows the whole video through ONE fixed crop
     (_fixed_competitor_crop: it chose no subject shot by shot) whose window is wider than the template's
     (NARROW_OVERFLOW): centring its window cut the person in half -- you moved 5 of laptop013's 6 clips (-361 px onto
@@ -2457,11 +2472,22 @@ def _subject_in_narrow_window(clips: list[PremiereClip], sp: Any, raw_wh: tuple[
     inside the same shot stays the same or min_move px away (--min-move). A clip that plays on across the RAW's own
     shot changes (laptop013: one take of the competitor over 6 shots of the movie) is first split there, as the XML
     splits it anyway (Scene Edit Detection), so each shot is framed on its own person; the split is kept only when
-    a piece moved. ``clips`` is changed in place. Returns how many clips moved."""
+    a piece moved. ``clips`` is changed in place. Returns how many clips moved.
+
+    ``cut_only`` (night 8, your video7 fix: SHOW_CUT_PERSON): a competitor that frames each shot itself (it chose
+    whom to show, shot by shot -- not one fixed crop: video6 / laptop013, where you kept video6's middle on all 9
+    clips) -- only a run whose framing shows NOBODY inside the competitor's window whole (every face there cut by the
+    narrower template window, speakers.shown) moves, never past the competitor's own window, at most CUT_SLIDE_MAX of
+    the window's width, and only when the move then shows the person: video7's competitor showed the man and the
+    woman, the template window half of each (you moved it +267 px onto the man, to the competitor's edge). A run that shows someone whole keeps its framing (the
+    competitor's choice: laptop010's close-ups), a wide shot of three or more faces too (video7's restaurant: you
+    zoomed in there, which no rule does)."""
     from . import speakers
     W = raw_wh[0]
-    if not _fixed_competitor_crop(clips):
+    if not cut_only and not _fixed_competitor_crop(clips):
         return 0                                 # it frames each shot itself: its framing shows its subject (laptop010)
+    if cut_only and _fixed_competitor_crop(clips, ONE_CROP_SCALE, ONE_CROP_PX):
+        return 0                                 # one crop chose nobody shot by shot: you kept video6's middle
     work: list[PremiereClip] = []
     owner: list[int] = []                         # the clip each piece is a part of
     cs = sorted(float(c) for c in (changes_s or getattr(sp, "shots", None) or ()))
@@ -2479,9 +2505,10 @@ def _subject_in_narrow_window(clips: list[PremiereClip], sp: Any, raw_wh: tuple[
         work.append(rest)
         owner.append(n)
     why: dict[str, int] = {}
-    moved = _centre_runs(work, sp, raw_wh, win, fps, layout_box, min_move, why, fac)
-    log.info("premiere framing: the competitor shows the whole video through one fixed crop: %d clip(s), %d shot(s) "
-             "of the RAW in them -- %d centred on the person it shows%s", len(clips), len(work), moved,
+    moved = _centre_runs(work, sp, raw_wh, win, fps, layout_box, min_move, why, fac, cut_only=cut_only)
+    log.info("premiere framing: %s: %d clip(s), %d shot(s) of the RAW in them -- %d centred on the person it shows%s",
+             "the narrower template window cut every person the competitor shows" if cut_only else
+             "the competitor shows the whole video through one fixed crop", len(clips), len(work), moved,
              (" (not moved: " + ", ".join(f"{k} {v}" for k, v in sorted(why.items())) + ")") if why else "")
     if moved:                                     # each clip keeps its range: its first shot's framing as its own,
         for n, cl in enumerate(clips):            # the later shots' on shot_framing (split_at_shots applies them)
@@ -2500,9 +2527,11 @@ def _subject_in_narrow_window(clips: list[PremiereClip], sp: Any, raw_wh: tuple[
 
 def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
                  win: tuple[float, float, float, float], fps: Fraction, layout_box: Box, min_move: float,
-                 why: dict[str, int] | None = None, fac: int = 1) -> int:
+                 why: dict[str, int] | None = None, fac: int = 1, cut_only: bool = False) -> int:
     """_subject_in_narrow_window's moves on ``clips`` (in place): each run of clips sharing one framing inside one RAW
-    shot centred on its person; ``why``: {reason: runs} of the runs left as they are. Returns how many clips moved."""
+    shot centred on its person; ``why``: {reason: runs} of the runs left as they are. Returns how many clips moved.
+    ``cut_only``: only a run that shows nobody inside the competitor's window whole, and only when the move shows the
+    person (_subject_in_narrow_window)."""
     from . import speakers
     W = raw_wh[0]
     moved = 0
@@ -2529,6 +2558,8 @@ def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float]
             skip("not its own framing")              # (each piece judged by the competitor pieces it plays)
             continue
         subjects = []
+        crops: list[tuple[float, float]] = []        # the competitor's windows (RAW x) of those clips
+        whole = False                                # cut_only: the run shows someone inside its window whole
         for c in run:
             cw = _comp_window_raw_x(c, layout_box)
             f = _person_of(c, sp, fps)
@@ -2543,12 +2574,19 @@ def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float]
             if not cands:
                 skip("nobody inside its window")
                 continue
-            if len(f.others) > 1:
+            if (len({tuple(b) for b in cands}) > CUT_PEOPLE_MAX) if cut_only else len(f.others) > 1:
                 skip("several people")               # a wide shot: you kept laptop013's centred
                 continue
+            if cut_only and any(speakers.shown(speakers.on_screen(sim, b, W, False), win) for b in cands):
+                whole = True                         # someone shown whole: the competitor's choice stays
+                break
             first = f.box if (f.box and inside_cw(f.box) and f.how in ("speaker", "biggest face")) else \
                 max(cands, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
             subjects.append((c, first))
+            crops.append(cw)
+        if whole:
+            skip("shows a person whole")
+            continue
         if not subjects:
             continue
         import statistics
@@ -2557,7 +2595,21 @@ def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float]
                   cx, statistics.median([b[2] - b[0] for _, b in subjects]),
                   statistics.median([b[3] - b[1] for _, b in subjects]))
         want = win[0] + win[2] / 2.0 - sim.s * cx
+        if cut_only:
+            # night 8: slide only as far as it takes to show them whole (with a margin), not onto their centre: a
+            # person cut at the edge needs a slide, not a jump to another part of the picture (video021 S54 / S56)
+            req_lo = max(win[0] + CUT_MARGIN * (b[2] - b[0]) * sim.s - sim.s * b[0] for _, b in subjects)
+            req_hi = min(win[0] + win[2] - CUT_MARGIN * (b[2] - b[0]) * sim.s - sim.s * b[2] for _, b in subjects)
+            if req_lo <= req_hi:
+                want = min(max(sim.tx, req_lo), req_hi)
         lo, hi = win[0] + win[2] - sim.s * W, win[0]                         # the picture still covers the window
+        if cut_only and crops:
+            # night 8: never past the competitor's own window (video7 S01: the man's face measured from RAW x 170 to
+            # 781 over the clip -- centred, the window went 280 px past yours; yours starts at the competitor's edge)
+            c_lo = win[0] + win[2] - sim.s * min(c[1] for c in crops)
+            c_hi = win[0] - sim.s * max(c[0] for c in crops)
+            if c_lo <= c_hi:
+                lo, hi = max(lo, c_lo), min(hi, c_hi)
         new = Sim(sim.s, 0.0, min(max(want, lo), hi), sim.ty)
         if abs(new.tx - sim.tx) < SUBJECT_MOVE_PX or not _covers(new, raw_wh, win, tol=1e-6):
             skip("already centred" if abs(new.tx - sim.tx) < SUBJECT_MOVE_PX else "would not cover")
@@ -2566,6 +2618,12 @@ def _centre_runs(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float]
                    not speakers.shown(speakers.on_screen(sim, b, W, False), win) for _, b in subjects):
             skip("would hide a person")
             continue                                 # (one framing for the run: never hide a subject it showed)
+        if cut_only and not all(speakers.shown(speakers.on_screen(new, b, W, False), win) for _, b in subjects):
+            skip("would still cut them")
+            continue
+        if cut_only and abs(new.tx - sim.tx) > CUT_SLIDE_MAX * win[2]:
+            skip("too far")                          # not a slide onto someone at the edge: another part of the picture
+            continue
         ok = True
         for k in (i - len(run) - 1, i):              # the neighbours inside the same shot: --min-move kept
             if 0 <= k < len(clips) and len(clips[k].keys) == 1:
@@ -3221,6 +3279,9 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             if not follow and CENTRE_FIXED_CROP:     # night 6 (off): the person a fixed competitor crop shows
                 _subject_in_narrow_window(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
                                           getattr(cfg, "premiere_shots", None), fac)
+            if not follow and SHOW_CUT_PERSON:       # night 8: the person the narrower template window cut in half
+                _subject_in_narrow_window(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
+                                          getattr(cfg, "premiere_shots", None), fac, cut_only=True)
     return clips, markers, warnings
 
 
@@ -3601,6 +3662,7 @@ def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike
     out = [f"XML ITEM {p}" for p in items]
     if items:
         return out
+    out += [f"XML EMPTY {p}" for p in premiere_empty_problems(final_xml)]
     out += [f"XML REPEAT {p}" for p in premiere_repeat_problems(final_xml, allow_repeats)]
     if shots is not None:
         out += [f"XML FLASH {p}" for p in premiere_flash_problems(final_xml, shots, raw_fps)]
@@ -4223,6 +4285,19 @@ def _inv(sim: Sim, q: tuple[float, float]) -> tuple[float, float]:
 
 
 _WHOLE = re.compile(r"-?\d+")
+
+
+def premiere_empty_problems(xml_path: str | os.PathLike) -> list[str]:
+    """Night 8 (a laptop run delivered an edit with no clip -- the picture was not found, the sound was): V1 must
+    hold at least one clip of a video file. [] when it does."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    tracks = seq.findall("media/video/track") if seq is not None else []
+    v1 = [e for e in (tracks[0] if tracks else []) if e.tag == "clipitem"]
+    if v1:
+        return []
+    return ["V1 holds no clip: the edit shows nothing of the RAW (an empty edit is never a normal one -- the picture "
+            "was not found)"]
 
 
 def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
@@ -4957,6 +5032,11 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         bad_items = premiere_item_problems(xml_path)
     except Exception as e:  # noqa: BLE001 - an unreadable XML cannot be shown to be importable
         bad_items = [f"the item check could not read the XML: {type(e).__name__}: {e}"]
+    try:                                   # night 8: never an empty edit delivered as a normal one
+        empty = premiere_empty_problems(xml_path) if not bad_items else []
+    except Exception as e:  # noqa: BLE001
+        empty = [f"the empty-edit check could not read the XML: {type(e).__name__}: {e}"]
+    errors += [f"XML EMPTY {t}" for t in empty]
     try:
         reps = premiere_repeat_problems(xml_path, bool(getattr(cfg, "allow_repeats", False))) if not bad_items else []
     except Exception as e:  # noqa: BLE001
@@ -5026,6 +5106,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     out["person_problems"] = persons if sp is not None else None
     out["other_video_problems"], out["link_problems"] = ov, links
     out["item_problems"], out["repeat_problems"], out["speech_problems"] = bad_items, reps, talk
+    out["empty_problems"] = empty
     out["flash_problems"], out["silence_problems"] = flash, hush
     out["speech_checked"], out["flash_checked"] = speech is not None and moving, shots is not None
     out["silence_checked"] = speech is not None and moving

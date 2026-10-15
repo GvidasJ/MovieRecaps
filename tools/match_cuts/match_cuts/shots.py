@@ -28,12 +28,20 @@ THUMB = (64, 36)          # thumbnail size (gray) the shot changes are found on
 CHANGE_ABS = 8.0          # a shot change: the mean absolute difference to the frame before at least this ...
 CHANGE_RATIO = 4.0        # ... and this many times the frame-to-frame difference around it (camera moves, noise)
 AROUND = 6                # frames on each side the "around" level is taken from
+HELD = 1.0                # a frame-to-frame difference under this: the same picture held (a cartoon drawn on twos)
 MARGIN_S = 2.0            # the RAW looked at this far around what the edit plays (an edge may move that far)
-VERSION = 2
+VERSION = 3
 
 
 def changes_of(thumbs: np.ndarray) -> list[int]:
-    """Indices k (into ``thumbs``, frames in order) where frame k starts a new shot."""
+    """Indices k (into ``thumbs``, frames in order) where frame k starts a new shot.
+
+    Night 8 (your video8, a DVD cartoon drawn on twos): every drawing is held for two frames, so half the differences
+    around a new drawing are ~0 and their median was too -- each new drawing of a fast move then looked like a shot
+    change (34 in 14 s where the edit plays; the clips split at each, 6 false flash frames failed the run). When both
+    sides hold at least two frames that change (HELD or more), the level around is the median of those changing
+    frames only; otherwise (a still shot before or after the change, live action) it is the median of all, as before
+    -- the 21 other check-all RAWs give exactly the same shot changes either way."""
     f = np.asarray(thumbs, np.float32)
     if len(f) < 2:
         return []
@@ -42,8 +50,12 @@ def changes_of(thumbs: np.ndarray) -> list[int]:
     for k in range(1, len(d)):
         if d[k] < CHANGE_ABS:
             continue
-        around = np.concatenate([d[max(1, k - AROUND):k], d[k + 1:k + 1 + AROUND]])
-        level = float(np.median(around)) if len(around) else 0.0
+        before, after = d[max(1, k - AROUND):k], d[k + 1:k + 1 + AROUND]
+        around = np.concatenate([before, after])
+        if (before >= HELD).sum() >= 2 and (after >= HELD).sum() >= 2:
+            level = float(np.median(around[around >= HELD]))
+        else:
+            level = float(np.median(around)) if len(around) else 0.0
         if d[k] >= CHANGE_RATIO * max(level, 1.0):
             out.append(k)
     return out

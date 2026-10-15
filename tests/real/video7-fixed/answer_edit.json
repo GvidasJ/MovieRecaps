@@ -1,0 +1,142 @@
+{
+ "what": "your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio by hand, so the picture is the key): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 261.928 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 0.583917,
+   "kind": "raw",
+   "src_in": 30.155125,
+   "speed": 1.0
+  },
+  {
+   "start": 0.583917,
+   "end": 1.418083,
+   "kind": "raw",
+   "src_in": 31.197834,
+   "speed": 1.0
+  },
+  {
+   "start": 1.418083,
+   "end": 2.293958,
+   "kind": "raw",
+   "src_in": 32.032,
+   "speed": 1.0
+  },
+  {
+   "start": 2.293958,
+   "end": 3.086417,
+   "kind": "raw",
+   "src_in": 32.907875,
+   "speed": 1.0
+  },
+  {
+   "start": 3.086417,
+   "end": 4.421083,
+   "kind": "raw",
+   "src_in": 33.700334,
+   "speed": 1.0
+  },
+  {
+   "start": 4.421083,
+   "end": 5.714042,
+   "kind": "raw",
+   "src_in": 35.035,
+   "speed": 1.0
+  },
+  {
+   "start": 5.714042,
+   "end": 7.549208,
+   "kind": "raw",
+   "src_in": 36.327959,
+   "speed": 1.0
+  },
+  {
+   "start": 7.549208,
+   "end": 8.842167,
+   "kind": "raw",
+   "src_in": 38.163125,
+   "speed": 1.0
+  },
+  {
+   "start": 8.842167,
+   "end": 10.885875,
+   "kind": "raw",
+   "src_in": 39.456084,
+   "speed": 1.0
+  },
+  {
+   "start": 10.885875,
+   "end": 19.144125,
+   "kind": "raw",
+   "src_in": 41.499792,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.155125,
+   "src_out": 30.739042,
+   "dx": 267.226,
+   "scale": 113.0
+  },
+  {
+   "src_in": 31.197834,
+   "src_out": 32.032,
+   "dx": 267.226,
+   "scale": 113.0
+  },
+  {
+   "src_in": 32.032,
+   "src_out": 32.907875,
+   "dx": 270.545,
+   "scale": 112.4761
+  },
+  {
+   "src_in": 32.907875,
+   "src_out": 33.700334,
+   "dx": -74.479,
+   "scale": 112.437
+  },
+  {
+   "src_in": 33.700334,
+   "src_out": 35.035,
+   "dx": 270.357,
+   "scale": 112.4394
+  },
+  {
+   "src_in": 35.035,
+   "src_out": 36.327959,
+   "dx": 97.357,
+   "scale": 112.4394
+  },
+  {
+   "src_in": 36.327959,
+   "src_out": 38.163125,
+   "dx": -70.643,
+   "scale": 112.4394
+  },
+  {
+   "src_in": 38.163125,
+   "src_out": 39.456084,
+   "dx": 97.357,
+   "scale": 112.4394
+  },
+  {
+   "src_in": 39.456084,
+   "src_out": 41.499792,
+   "dx": 97.357,
+   "scale": 112.4394
+  },
+  {
+   "src_in": 41.499792,
+   "src_out": 49.758042,
+   "dx": -64.48,
+   "scale": 135.0
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

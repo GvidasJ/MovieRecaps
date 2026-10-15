@@ -1,0 +1,72 @@
+{
+ "video": "video9-fixed",
+ "date": "2026-10-15",
+ "project": "finished\\video9\\video9_fixed_relinked.prproj",
+ "run": "output\\laptop_video9",
+ "edit": {
+  "clips": 4,
+  "starts": [
+   0.0,
+   0.0,
+   0.042,
+   0.042
+  ],
+  "ends": [
+   0.0,
+   0.042,
+   0.0,
+   0.542
+  ],
+  "removed": 0,
+  "added": 0,
+  "moved": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.932,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 7,
+   "of": 8,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 0,
+  "added": 11,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "ah There's",
+    "written": "ahh Lose",
+    "kind": "words",
+    "before": "be Italian",
+    "after": "the candle",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

@@ -634,14 +634,23 @@ def raw_window(raw: Path, spans: Sequence[tuple[float, float]], window: str = "a
     return max(0.0, lo - WINDOW_MARGIN_S), hi + WINDOW_MARGIN_S
 
 
+def framing_rows(clips: Sequence[Clip], offset: float = 0.0) -> list[dict]:
+    """The user's picture clips as answer_edit.json "framing" rows (framing_score.py): RAW seconds on the case's
+    raw.mp4 (``offset``: its start in the RAW), the sideways offset (sequence px) and scale -- None where keyframed."""
+    return [{"src_in": round(min(c.r0, c.r1) - offset, 6), "src_out": round(max(c.r0, c.r1) - offset, 6),
+             "dx": None if c.dx is None else round(float(c.dx), 3),
+             "scale": None if c.scale is None else round(float(c.scale), 4)} for c in clips]
+
+
 def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name: str, caps: Sequence[PR.Item],
                meta: dict, no_caps_why: str = "", picture: Sequence[Clip] | None = None,
-               window: tuple[float, float] | None = None) -> dict[str, str]:
+               window: tuple[float, float] | None = None, framing: Sequence[Clip] | None = None) -> dict[str, str]:
     """The test case's files (module docstring, 4); returns {file: what it is}. Without captions there is no
     answer.srt (an empty key would score every run against nothing): an old one is removed, ``no_caps_why`` says
     why. ``picture``: the user's picture clips -- the answer key is then the picture (V1), not the sound (A1): for a
     project whose audio the user moved by hand (021, laptop004). ``window``: raw.mp4 is that part of the RAW
-    (testcases.window_copy), the key timed on it (case.json raw_offset, full_raw)."""
+    (testcases.window_copy), the key timed on it (case.json raw_offset, full_raw). ``framing``: the user's picture
+    clips whose framing check-all scores (night 8: answer_edit.json "framing", framing_score.py)."""
     from .testcases import WINDOW_MARGIN_S, small_copy, window_copy
     case_dir.mkdir(parents=True, exist_ok=True)
     done: dict[str, str] = {}
@@ -694,8 +703,11 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
                 "timed on")
     if window is not None:
         what += f"; RAW times on raw.mp4, the RAW from {offset:.3f} s"
-    (case_dir / "answer_edit.json").write_text(json.dumps({"what": what, "fps": seq.fps, "audio": pieces}, indent=1),
-                                               encoding="utf-8", newline="\n")
+    doc: dict = {"what": what, "fps": seq.fps, "audio": pieces}
+    if framing:
+        doc["framing"] = framing_rows(framing, offset)
+        doc["framing_size"] = [seq.width, seq.height]
+    (case_dir / "answer_edit.json").write_text(json.dumps(doc, indent=1), encoding="utf-8", newline="\n")
     done["answer_edit.json"] = (f"your timeline ({len(pieces)} {'picture clips' if picture else 'pieces'} of the "
                                 "RAW)")
     old.pop("timeline", None)
@@ -1565,7 +1577,7 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
              + list(tool_snd)]
     win = raw_window(raw, spans, window)
     files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta, no_caps_why,
-                       picture=user_pic if picture else None, window=win)
+                       picture=user_pic if picture else None, window=win, framing=user_pic or None)
     record = {"video": video, "date": dt.date.today().isoformat(), "project": str(project), "run": str(rf["dir"]),
               "edit": edit, "captions": {**ccount, "changes": [c.__dict__ for c in changes]}}
     (case_dir / "learned.json").write_text(json.dumps(record, indent=1), encoding="utf-8", newline="\n")

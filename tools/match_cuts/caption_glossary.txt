@@ -11,3 +11,5 @@ color everything's -> and everything	# video5
 cross-eyed -> cross eyed	# video017-fixed
 Vr -> VR	# video018-fixed
 Ishould -> I should	# video021-fixed
+This'll -> this will	# video8-fixed
+ah There's -> ahh Lose	# video9-fixed

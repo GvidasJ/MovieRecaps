@@ -118,6 +118,14 @@ def read_run(case: testcases.Case, run_dir: Path | None, scored: bool = True) ->
             row["cut_score"] = edit_score.score_run(case.answer_edit, run_dir).to_dict()
         except Exception as e:  # noqa: BLE001
             row["cut_score_error"] = f"{type(e).__name__}: {e}"
+    if getattr(case, "answer_edit", None) is not None and scored:
+        try:                               # night 8: the user's framing, where the key holds it (framing_score.py)
+            from . import framing_score
+            fs = framing_score.score_run(case.answer_edit, run_dir)
+            if fs is not None:
+                row["framing_score"] = fs
+        except Exception as e:  # noqa: BLE001
+            row["framing_score_error"] = f"{type(e).__name__}: {e}"
     return row
 
 
@@ -138,7 +146,7 @@ def _fmt_s(s: float | None) -> str:
 def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
     before = {r["case"]: r for r in (prev or {}).get("rows") or []}
     lines = [f"{'video':<20} {'time':>7}  {'hard checks':<12} {'captions exactly':<22} {'word errors':<16} "
-             f"{'rule breaks':<12} {'cuts reproduced':<20} {'length':<16} differences"]
+             f"{'rule breaks':<12} {'cuts reproduced':<20} {'length':<16} {'framing':<16} differences"]
     for r in rows:
         hc = "PASS" if hard_ok(r) else "FAIL"
         sc = r.get("score")
@@ -163,8 +171,13 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
             cu, le = "-", "-"
         else:
             cu, le = ("no cut key" if "cut_score_error" not in r else "score failed"), "-"
+        fs, fb = r.get("framing_score"), (before.get(r["case"]) or {}).get("framing_score")
+        if fs:
+            fr = f"{fs['same']}/{fs['clips']} ({fs['same_pct']:.0f} %)" + (f" {fs['same'] - fb['same']:+d}" if fb else "")
+        else:
+            fr = "-" if "framing_score_error" not in r else "score failed"
         lines.append(f"{r['case']:<20} {_fmt_s(r.get('seconds')):>7}  {hc:<12} {ex:<22} {we:<16} {rb:<12} {cu:<20} "
-                     f"{le:<16} {diff}")
+                     f"{le:<16} {fr:<16} {diff}")
         if not hard_ok(r):
             for k in ("deliverables", "determinism", "coverage"):
                 st = (r.get(k) or {})
@@ -192,6 +205,12 @@ def scorecard(rows: Sequence[dict], prev: dict | None = None) -> str:
         d = sum(s["length_diff"] for s in cut)
         lines.append(f"{'all cut keys':<20} {'':>7}  {'':<12} {'':<22} {'':<16} {'':<12} "
                      f"{f'{ex}/{n} ({100 * ex / max(1, n):.0f} %)':<20} {d:+.1f} s ({100 * d / max(1e-9, k):+.0f} %)")
+    fr = [r["framing_score"] for r in rows if r.get("framing_score")]
+    if fr:
+        n = sum(s["clips"] for s in fr)
+        ex = sum(s["same"] for s in fr)
+        lines.append(f"{'all framing keys':<20} {'':>7}  {'':<12} {'':<22} {'':<16} {'':<12} {'':<20} {'':<16} "
+                     f"{ex}/{n} ({100 * ex / max(1, n):.0f} %)")
     return "\n".join(lines)
 
 

@@ -106,6 +106,7 @@ class Context:
     anchors: list = field(default_factory=list)
     fm_pre: FrameMap | None = None            # refine output, as cached (input of S5.4)
     fm: FrameMap | None = None                # after segmentation (saved to <work>/frame_map.npz)
+    picture_retry: dict | None = None         # night 8: the picture searched again (picture_retry.retry's result)
     full_res: dict = field(default_factory=dict)      # fullres.py: the re-check (S5.5) and the verification (S9)
     fast_compare: dict = field(default_factory=dict)  # what the thorough default changed against --fast (S6)
     full_frames: Any = None                   # (competitor, RAW) fullres.FrameStore, decoded once for both
@@ -2295,10 +2296,13 @@ def _extend_raw(ctx: Context, base: Any, windows: list[tuple[int, int]]) -> Any:
     return proxies.extend_proxy(base, windows, ctx.cfg, ctx.cache)
 
 
-def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str, *extra: Any) -> None:
+def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str, *extra: Any,
+                       index_raw: Any = None) -> None:
     """One S5.2 + S5.3 pass (skipped on a FrameMap cache hit, whose decisions are replayed). The RAW
     proxy the later stages see is ``base_raw`` extended by windows derived from the CACHED FrameMap on
-    BOTH branches, so a cached re-run exposes the same RAW frames as the first run (real-world F5)."""
+    BOTH branches, so a cached re-run exposes the same RAW frames as the first run (real-world F5).
+    ``index_raw``: the proxy whose frames the RAW index holds (night 8's denser search: only where the
+    competitor's sound was found; ``extra`` must then say so); default ``base_raw``."""
     cfg = ctx.cfg
     fm_path, ov_path = frame_map_cache_paths(ctx, *extra)
     key = ctx.keys["frame_map"]
@@ -2312,7 +2316,7 @@ def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str
         with ctx.dlog.capture("frame_map") as cap:
             with _stage(ctx, f"S5.2 visual search{label}"):
                 seed_everything(cfg.seed)
-                ctx.index = visual_match.RawIndex.build(base_raw, cfg, ctx.cache)
+                ctx.index = visual_match.RawIndex.build(base_raw if index_raw is None else index_raw, cfg, ctx.cache)
                 ctx.anchors = cached_anchors(ctx, lambda: visual_match.sparse_search(
                     ctx.comp_proxy, base_raw, ctx.layout, overlays, ctx.index, ctx.hints, cfg, ctx.dlog), *extra)
                 ctx.dlog.record("visual_match", "summary", anchors=len(ctx.anchors))
@@ -2393,6 +2397,42 @@ NOT_FOUND_SOUND = 0.10      # ... and of its sound found in the RAW's sound: its
 
 class NotInRaw(RuntimeError):
     """The competitor's scenes are not in this RAW (picture and sound): the run stops; cli prints the message."""
+
+
+class PictureNotFound(NotInRaw):
+    """Night 8: the competitor's sound is in the RAW but its picture is not, even after searching it again
+    (picture_retry): the run stops instead of delivering an empty edit; cli and the batch print the message."""
+
+
+def stop_if_picture_not_found(ctx: Context) -> None:
+    """Night 8 (a --fast run on the laptop: 100 % of the competitor's sound found in the RAW, 0 % of its picture --
+    an edit with no clip, delivered as a normal one): after picture_retry searched the picture again, when it still
+    finds under NOT_FOUND_PICTURE of the competitor's frames, the run stops with the PICTURE NOT FOUND (sound found)
+    message. --force-inputs goes on, with that message as the first warning. Between NOT_FOUND_PICTURE and
+    picture_retry.PICTURE_RETRY_BELOW the run goes on with a warning (most of the edit is missing)."""
+    from . import picture_retry as PRT
+    res = getattr(ctx, "picture_retry", None)
+    if not res:
+        return
+    if res["share"] >= NOT_FOUND_PICTURE:
+        if res["share"] < PRT.PICTURE_RETRY_BELOW:
+            ctx.warn(f"only {100 * res['share']:.0f} % of the competitor's picture was found in the RAW although "
+                     f"{100 * res['sound']:.0f} % of its sound is there, even after searching again: most of the edit "
+                     "is missing -- the RAW may be a different version (for example credits squeezed at the end), "
+                     "mirrored, or heavily zoomed", analysis=True)
+        elif res.get("used") != "the first search":
+            ctx.warn(f"the competitor's picture was found only after searching it again ({res['used']}: "
+                     f"{100 * res['share']:.0f} % of its frames; the first search {100 * res['picture']:.0f} %, its "
+                     "picture area was probably measured wrong) -- check the framing in Premiere", analysis=True)
+        return
+    msg = PRT.not_found_message(ctx, res)
+    ctx.dlog.record("inputs", "picture_not_found", picture=round(res["share"], 4), sound=round(res["sound"], 4),
+                    attempts=res.get("attempts"), forced=bool(getattr(ctx.cfg, "force_inputs", False)))
+    if getattr(ctx.cfg, "force_inputs", False):
+        ctx.warn(msg, analysis=True)
+        return
+    log.error("STOPPED: %s", msg)
+    raise PictureNotFound(msg)
 
 
 def stop_if_not_in_raw(ctx: Context) -> None:
@@ -2516,6 +2556,10 @@ def stage_visual_refine(ctx: Context) -> None:
         overlays_pass2 = initial_overlays(ctx.layout, overlays_pass1)
         visual_refine_pass(ctx, base_raw, overlays_pass2, " (refined box)",
                            *visual_pass_key_parts(ctx.layout, overlays_pass2))
+    from . import picture_retry
+    if picture_retry.needs_retry(picture_retry.matched_share(ctx.fm_pre), picture_retry.sound_share(ctx)):
+        with _stage(ctx, "S5.2b picture search again"):   # night 8: the sound found, (almost) none of the picture
+            ctx.picture_retry = picture_retry.retry(ctx, base_raw)
     # later stages do not use the worker pool; free spawn workers (and their kd-trees) now
     try:
         from . import visual_match
@@ -3708,7 +3752,8 @@ def stage_finish(ctx: Context) -> None:
         if ok and rate != plan and isinstance(ctx.exports, dict):
             # the checks run again on the delivered XML speak for it (its own timecodes); the others (speech, silence,
             # person, gap, other video, ending) read the 60 fps plan
-            redo = ("XML ITEM", "XML REPEAT", "XML FLASH", "XML AUDIO", "XML TRANSITION", "XML LINK", "XML SYNC")
+            redo = ("XML ITEM", "XML EMPTY", "XML REPEAT", "XML FLASH", "XML AUDIO", "XML TRANSITION", "XML LINK",
+                    "XML SYNC")
             kept = [e for e in ctx.exports.get("errors") or [] if not str(e).startswith(redo)]
             ctx.exports["errors"] = kept
             ctx.exports["ok"] = not kept
@@ -4206,6 +4251,7 @@ def run(cfg: Config) -> dict:
         start = analysis_start(ctx)
         stage_visual_refine(ctx)
         stop_if_not_in_raw(ctx)         # night 6: almost nothing of the competitor in this RAW -- stop, say why
+        stop_if_picture_not_found(ctx)  # night 8: its sound found, its picture not even after searching again
         layout_warnings(ctx)
         with _stage(ctx, "S5.5 full-res re-check"):
             stage_full_res(ctx)

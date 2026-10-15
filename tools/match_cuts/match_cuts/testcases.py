@@ -259,6 +259,10 @@ def shifted_answer(path: Path, shift: float, out_dir: Path) -> Path:
     for it in d.get("audio") or []:
         if it.get("kind", "raw") == "raw" and it.get("src_in") is not None:
             it["src_in"] = round(float(it["src_in"]) + float(shift), 6)
+    for it in d.get("framing") or []:                    # night 8: the user's framing (framing_score)
+        for k in ("src_in", "src_out"):
+            if it.get(k) is not None:
+                it[k] = round(float(it[k]) + float(shift), 6)
     out_dir.mkdir(parents=True, exist_ok=True)
     q = out_dir / f"answer_edit_shift{shift:+.3f}.json"
     q.write_text(json.dumps(d, indent=1), encoding="utf-8", newline="\n")

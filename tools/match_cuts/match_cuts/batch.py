@@ -265,7 +265,8 @@ def checks_of(run_dir: Path | None) -> dict:
             c = row.get(k) or {}
             fl = [str(f) for f in (c.get("failures") or [])]
             if k == "deliverables" and fl and all(f.startswith(VALIDATION_FAIL) for f in fl) and \
-                    "MISSING" not in str(c.get("summary", "")):
+                    "MISSING" not in str(c.get("summary", "")) and not any("XML EMPTY" in f for f in fl):
+                # (night 8: an edit with no clip is a FAIL, never "OK with a note")
                 notes.append("every file is there, but a check of 1_edit.xml found something to look at in "
                              "Premiere: " + "; ".join(f[len(VALIDATION_FAIL):].strip(" :") for f in fl)[:900])
                 continue

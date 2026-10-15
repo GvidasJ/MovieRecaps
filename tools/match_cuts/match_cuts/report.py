@@ -1450,6 +1450,7 @@ def _environment(ctx: Any) -> list[str]:
 
 PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, what it checks)
     ("XML ITEM", "item_problems", "every item imports: whole frames, in < out, inside its media, no overlap"),
+    ("XML EMPTY", "empty_problems", "the edit holds at least one clip (never an empty edit delivered as a normal one)"),
     ("XML GAP", "gaps", "every clip covers the template window"),
     ("XML REPEAT", "repeat_problems", "no RAW footage or audio plays twice"),
     ("XML AUDIO", "audio_problems", "every A1 clip at 0 dB: enabled, no level / gain / pitch / effect but its speed, no keyframes"),

@@ -1,0 +1,10 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video8_fixed_relinked.prproj (2026-10-15, night 8; the project's seventh sequence): answer.srt and answer_edit.json are your finished edit (its picture clips); your run was the laptop's --fast batch run output\\video1-3 (here output\\laptop_video8; the laptop's input\\videos\\video1) with the default settings -- 100 %, your template, the competitor's cut points; the RAW is a 720x480 DVD cartoon with non-square pixels (the run's raw_ae.mov, 720x540, is the case's RAW)",
+ "learned_from": "finished\\video8\\video8_fixed_relinked.prproj",
+ "run": "output\\laptop_video8",
+ "full_raw": "output/laptop_video8/extras/media/raw_ae.mov",
+ "raw_offset": 255.380125,
+ "options": []
+}
