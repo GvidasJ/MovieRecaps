@@ -3,5 +3,5 @@ Convert come later). It only runs the tools as they are -- every Match cuts job 
 ``python -m match_cuts batch`` runs for a video, and its result is read with the batch's own checks."""
 
 APP_NAME = "MovieRecaps"
-APP_ID = "MovieRecaps.Desktop.1"          # Windows: the taskbar icon and the notifications' sender
+APP_ID = "MovieRecaps"                    # Windows: the taskbar icon and the notifications' sender (shown on them)
 VERSION = "1.0"
