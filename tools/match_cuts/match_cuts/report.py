@@ -1241,7 +1241,7 @@ def _captions(ctx: Any) -> list[str]:
         out += ["", f"**Copied captions the OCR was unsure of** (check the text): {len(unsure) if unsure else 'none'}"]
         out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
                 f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
-        return out + _rules(cap) + _recheck(cap)
+        return out + _placeholders(cap) + _rules(cap) + _recheck(cap)
     out.append("- Speaker changes: the transcriber has no speaker labels, but a reply starts a new sentence, so a new "
                "caption starts after every sentence end the transcript heard (hard rules 1 and 2).")
     st = cap.get("stats") or {}
@@ -1262,8 +1262,19 @@ def _captions(ctx: Any) -> list[str]:
     oc = cap.get("over_cap") or []
     out += ["", f"**Captions at the 24-character cap**: {len(oc) if oc else 'none'}"]
     out += [f"- {_tc(c)} `{c['text']}` ({len(c['text'])} characters, {c['mode']})" for c in oc]
+    out += _placeholders(cap)
+    fl = cap.get("flags") or []
+    out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
+            f"{len(fl) if fl else 'none'}"]
+    out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
+    return out + _rules(cap) + _recheck(cap)
+
+
+def _placeholders(cap: dict) -> list[str]:
+    """The `*...*` placeholders left, and the ones filled with a suggested action (night 9) -- in every caption mode
+    (the copied competitor's captions get placeholders in their silences too)."""
     ph = cap.get("placeholders") or []
-    out += ["", f"**`*...*` placeholders** (silences over ~1 s — write the action there): {len(ph) if ph else 'none'}"]
+    out = ["", f"**`*...*` placeholders** (silences over ~1 s — write the action there): {len(ph) if ph else 'none'}"]
     out += [f"- {_tc(c)}" for c in ph]
     act = cap.get("actions") or {}
     if act.get("suggested") or act.get("kept") or act.get("error"):
@@ -1276,11 +1287,7 @@ def _captions(ctx: Any) -> list[str]:
                 for r in act.get("kept") or []]
         if act.get("error"):
             out += [f"- not run: {act['error']}"]
-    fl = cap.get("flags") or []
-    out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
-            f"{len(fl) if fl else 'none'}"]
-    out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
-    return out + _rules(cap) + _recheck(cap)
+    return out
 
 
 def _rules(cap: dict) -> list[str]:

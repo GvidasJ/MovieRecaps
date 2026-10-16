@@ -170,6 +170,20 @@ def test_the_end_summary_lists_the_suggestions_to_check():
     assert any("Suggested actions" in ln for ln in lines) and any("`*claps hands*` (sure 0.90)" in ln for ln in lines)
 
 
+def test_the_report_lists_the_suggestions_also_when_the_competitors_captions_are_copied():
+    from types import SimpleNamespace
+    from match_cuts import report
+    act = {"model": "m", "kept": [], "suggested": [{"start_tc": "00:00:18,367", "end_tc": "00:00:19,733",
+                                                     "text": "*walks away*", "confidence": 0.7, "check": 0.81,
+                                                     "answer": "walks away", "why": ""}]}
+    for mode in ("competitor", "voice"):
+        cap = {"mode": mode, "reason": "test", "by_mode": {mode: 3, "placeholder": 1}, "fps": "60",
+               "placeholders": [{"start_tc": "00:00:20,233", "end_tc": "00:00:23,300"}], "actions": act}
+        text = "\n".join(report._captions(SimpleNamespace(captions=cap)))
+        assert "**Suggested actions**" in text and "`*walks away*` (sure 0.70, asked again: yes 0.81)" in text, mode
+        assert "**`*...*` placeholders** (silences over ~1 s — write the action there): 1" in text, mode
+
+
 def test_a_suggestion_the_model_doubts_when_asked_again_keeps_the_placeholder():
     from types import SimpleNamespace
     from match_cuts import action_captions as A, report
