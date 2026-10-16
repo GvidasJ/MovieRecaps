@@ -1269,7 +1269,8 @@ def _captions(ctx: Any) -> list[str]:
     if act.get("suggested") or act.get("kept") or act.get("error"):
         out += ["", f"**Suggested actions** (the `*...*` placeholders filled by {act.get('model', 'a vision model')} "
                     f"from the picture -- suggestions: check them): {len(act.get('suggested') or []) or 'none'}"]
-        out += [f"- {r['start_tc']}-{r['end_tc']} `{r['text']}` (sure {r['confidence']:.2f})"
+        out += [f"- {r['start_tc']}-{r['end_tc']} `{r['text']}` (sure {r['confidence']:.2f}"
+                + (f", asked again: yes {r['check']:.2f}" if r.get("check") is not None else "") + ")"
                 for r in act.get("suggested") or []]
         out += [f"- {r['start_tc']}-{r['end_tc']} left as `*...*`: {r['why']} (it said '{r['answer']}')"
                 for r in act.get("kept") or []]

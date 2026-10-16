@@ -6,9 +6,10 @@ and just after it go to a vision model, which answers in your style -- the rules
 (caption_actions.txt: the action captions of your finished projects and SRTs; ``learn`` adds the new ones of every
 fix): 1-4 words, lower case, a verb in its -s form first, a feeling as one word. The answer is tidied to it (no
 subject, no full stop, between asterisks). When the model is unsure -- it says so, its answer is no action or a
-generic one (GENERIC: 'looks up', 'stares ahead'), or its words were unlikely to it -- the placeholder stays. The
-suggestions are listed under "Captions worth a look" ("a suggested action -- check it"), in the report and in
-captions.json ``actions``. ``--no-action-captions`` keeps every placeholder.
+generic one (GENERIC: 'looks up', 'stares ahead'), its words were unlikely to it, or, asked again in other words
+whether its suggestion is what the pictures show (CHECKS), it says no -- the placeholder stays. The suggestions are
+listed under "Captions worth a look" ("a suggested action -- check it"), in the report and in captions.json
+``actions``. ``--no-action-captions`` keeps every placeholder.
 
 The model is a plug-in (ActionModel: ``describe(images, examples, context) -> (text, confidence)``): ``local`` runs
 Qwen3-VL-2B (Apache-2.0; ``big``: the 4B) on this computer's graphics card -- free, nothing leaves the PC; an online
@@ -36,9 +37,10 @@ MODEL_BIG = "Qwen/Qwen3-VL-4B-Instruct"        # --action-model big (8.9 GB): as
 FRAMES = 6                   # pictures of the placeholder's stretch (spread over it, the edges left out)
 FRAME_W = 640                # each picture at most this wide
 MIN_CONFIDENCE = 0.5         # the answer's words this likely to the model (mean token probability), else unsure
+MIN_CHECK = 0.5              # asked again (CHECKS), the model's yes against its no at least this each time, else unsure
 MAX_WORDS = 4                # your action captions: 1-4 words (*gets closer to friends*)
 MAX_CHARS = 24               # ... the hard cap of every caption (captions.HARD_CAP)
-PROMPT_VERSION = 4
+PROMPT_VERSION = 5
 NOT_ACTIONS = {"unsure", "unknown", "nothing", "none", "no action", "n/a", "na", "unclear", "nothing happens",
                "no", "yes", "person", "someone", "people", "man", "woman", "a person", "the person", "video", "scene",
                "image", "picture", "frame", "frames"}
@@ -62,6 +64,15 @@ PROMPT = (
     "action (the form is like \"opens the door\" or \"sits down\").\nIf the person only shows a feeling, answer with "
     "one word for the feeling. If nothing clear happens, answer: unsure.\nAnswer with the words only.")
 CONTEXT = " Just before it, someone says: \"{before}\". Just after it: \"{after}\"."
+# The suggestion checked: the model asked twice, in other words, whether it is what the pictures show -- both answers
+# must be yes. Night 9, on your 47 moments, the 2B's 27 suggestions -> 11: wrong 13 -> 2 (its fallback when lost,
+# 'sits down', 6 -> 0), right or close 11 -> 8 (lost: 'walks in', and actions the frames do not show yet -- 'leaves
+# the room' while the party still stands, 'puts out the candle' before it is out).
+CHECKS = (
+    "These pictures are frames of one short moment of a video, in order. Does the main person in them {action}? "
+    "Answer yes or no.",
+    "These pictures are frames of one short moment of a video, in order. Is this a good short caption for what "
+    "happens: \"{action}\"? Answer yes or no.")
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -163,7 +174,9 @@ class ActionModel(Protocol):
 
     def describe(self, images: Sequence[np.ndarray], examples: Sequence[str], context: str = "") -> tuple[str, float]:
         """(the answer, its confidence 0-1) for RGB pictures (uint8, H x W x 3) of one moment; ``examples``: your
-        action captions (the style), ``context``: what is said just before and after it."""
+        action captions (the style), ``context``: what is said just before and after it. A model may also have
+        ``check(images, action) -> 0-1``: how sure it is, asked again, that the action is what the pictures show
+        (LocalVLM.check); a model without it: its suggestions are not checked."""
         ...
 
 
@@ -226,6 +239,26 @@ class LocalVLM:
             probs.append(torch.softmax(sc[0].float(), dim=-1)[tok].item())
         conf = float(np.mean(probs)) if probs else 0.0
         return text, conf
+
+    def check(self, images: Sequence[np.ndarray], action: str) -> float:
+        """The model asked again, in other words (CHECKS), whether ``action`` ('claps hands') is what the pictures
+        show: the smaller of its two yes-against-no probabilities of the answer's first word."""
+        import torch
+        from PIL import Image
+        self._load()
+        pics = [Image.fromarray(np.asarray(im)) for im in images]
+        ids = lambda ws: {self._tok.encode(w, add_special_tokens=False)[0] for w in ws}   # noqa: E731
+        yes_ids, no_ids = ids(("Yes", "yes", " Yes", " yes")), ids(("No", "no", " No", " no"))
+        got = []
+        for q in CHECKS:
+            inputs = {k: v.to(self.device) for k, v in self.inputs(pics, q.format(action=action)).items()}
+            with torch.inference_mode():        # (generate, one word: it makes the pictures' position ids itself)
+                out = self._m.generate(**inputs, max_new_tokens=1, do_sample=False, return_dict_in_generate=True,
+                                       output_scores=True)
+            pr = torch.softmax(out.scores[0][0].float(), dim=-1)
+            y, n = sum(pr[i].item() for i in yes_ids), sum(pr[i].item() for i in no_ids)
+            got.append(y / (y + n) if y + n > 0 else 0.0)
+        return float(min(got))
 
     def close(self) -> None:
         if self._m is not None:
@@ -314,6 +347,20 @@ class Suggestion:
     answer: str
     confidence: float
     why: str = ""
+    check: float | None = None    # the model's yes when asked again (CHECKS); None: not asked
+
+
+def decide(answer: str, confidence: float, check: float | None = None) -> tuple[str | None, str]:
+    """(the suggestion in your style, '') -- or (None, why the placeholder stays): no clear action (none, unsure, a
+    generic one: tidy), its words unlikely to the model, or the model doubting it when asked again (``check``)."""
+    text = tidy(answer)
+    if not text:
+        return None, "no clear action"
+    if confidence < MIN_CONFIDENCE:
+        return None, "the model was unsure"
+    if check is not None and check < MIN_CHECK:
+        return None, f"the model doubted it when asked again (yes {check:.2f})"
+    return text, ""
 
 
 def context_of(before: str, after: str) -> str:
@@ -350,20 +397,22 @@ def suggest(spots: Sequence[tuple[int, int]], fps: Fraction, xml: Path, model: A
             if len(imgs) < 2:
                 return {"answer": "", "confidence": 0.0, "why": "the RAW's frames could not be read"}
             ans, conf = model.describe(imgs, ex, ctx_text)
-            return {"answer": ans, "confidence": round(float(conf), 4), "why": ""}
+            chk = None
+            if decide(ans, conf)[0] and callable(getattr(model, "check", None)):   # a suggestion: asked again
+                chk = round(float(model.check(imgs, decide(ans, conf)[0].strip("*"))), 4)
+            return {"answer": ans, "confidence": round(float(conf), 4), "check": chk, "why": ""}
         if cache is not None and raw_hash:
             # the key holds this module's own code fingerprint (``code``), the model, the prompt and its examples --
             # not common.STAGE_CODE: that is for the analysis stages, and editing common.py recomputes them all
             key = hashlib.sha1(json.dumps(["action_captions", raw_hash, ts, model.name, PROMPT, list(ex), ctx_text,
-                                           PROMPT_VERSION, code]).encode("utf-8")).hexdigest()[:40]
+                                           list(CHECKS), PROMPT_VERSION, code]).encode("utf-8")).hexdigest()[:40]
             got = cache.json("action_captions", key, ask)
         else:
             got = ask()
         ans, conf = str(got.get("answer") or ""), float(got.get("confidence") or 0.0)
-        text = tidy(ans)
-        why = got.get("why") or ("" if text and conf >= MIN_CONFIDENCE else
-                                 "the model was unsure" if text else "no clear action")
-        out.append(Suggestion(a, b, text if text and conf >= MIN_CONFIDENCE else None, ans, conf, why))
+        chk = None if got.get("check") is None else float(got["check"])
+        text, why = decide(ans, conf, chk)
+        out.append(Suggestion(a, b, text, ans, conf, got.get("why") or why, chk))
     return out
 
 
@@ -437,7 +486,8 @@ def fill_run(ctx: Any) -> dict:
     filled = {(s.start, s.end): s.text for s in got if s.text}
     for s in got:
         row = {"start_tc": ms_tc(frame_ms(s.start, fps)), "end_tc": ms_tc(frame_ms(s.end, fps)), "text": s.text,
-               "answer": s.answer, "confidence": round(s.confidence, 3), "why": s.why}
+               "answer": s.answer, "confidence": round(s.confidence, 3), "why": s.why,
+               "check": None if s.check is None else round(s.check, 3)}
         (info["suggested"] if s.text else info["kept"]).append(row)
     if filled and srt.is_file():
         rewrite_srt(srt, filled, fps)

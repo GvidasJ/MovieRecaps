@@ -170,6 +170,61 @@ def test_the_end_summary_lists_the_suggestions_to_check():
     assert any("Suggested actions" in ln for ln in lines) and any("`*claps hands*` (sure 0.90)" in ln for ln in lines)
 
 
+def test_a_suggestion_the_model_doubts_when_asked_again_keeps_the_placeholder():
+    from types import SimpleNamespace
+    from match_cuts import action_captions as A, report
+    assert A.decide("Claps hands.", 0.9, 0.8) == ("*claps hands*", "")
+    assert A.decide("claps hands", 0.9, None) == ("*claps hands*", "")      # a model without check(): not asked
+    text, why = A.decide("sits down", 0.74, 0.03)                            # the 2B's fallback when it is lost
+    assert text is None and why == "the model doubted it when asked again (yes 0.03)"
+    assert A.decide("claps hands", 0.3, 0.9) == (None, "the model was unsure")
+    assert A.decide("looks up", 0.9, 0.9) == (None, "no clear action")
+    assert len(A.CHECKS) == 2 and all("{action}" in q and "yes or no" in q for q in A.CHECKS)
+    cap = {"placeholders": [], "mode": "voice", "reason": "test", "by_mode": {"voice": 3}, "fps": "60",
+           "actions": {"model": "m", "suggested": [{"start_tc": "00:00:03,467", "end_tc": "00:00:04,550",
+                                                     "text": "*claps hands*", "confidence": 0.94, "check": 0.73,
+                                                     "answer": "claps hands", "why": ""}],
+                       "kept": [{"start_tc": "00:00:07,000", "end_tc": "00:00:08,000", "text": None,
+                                 "confidence": 0.74, "check": 0.03, "answer": "sits down",
+                                 "why": "the model doubted it when asked again (yes 0.03)"}]}}
+    lines = report._captions(SimpleNamespace(captions=cap))
+    assert any("`*claps hands*` (sure 0.94, asked again: yes 0.73)" in ln for ln in lines)
+    assert any("left as `*...*`: the model doubted it when asked again (yes 0.03) (it said 'sits down')" in ln
+               for ln in lines)
+
+
+def test_suggest_asks_the_model_again_only_about_a_suggestion(tmp_path, monkeypatch):
+    from fractions import Fraction
+    from match_cuts import action_captions as A, caption_score
+    raw = tmp_path / "raw.mp4"
+    raw.write_bytes(b"x")
+
+    class TL:
+        def at(self, t):
+            return ("raw", 100.0 + t)
+    monkeypatch.setattr(caption_score.Timeline, "from_xml", staticmethod(lambda xml: TL()))
+    monkeypatch.setattr(A, "raw_frames", lambda raw, ts: [object() for _ in ts])
+    asked = []
+
+    class Fake:
+        name = "fake"
+
+        def __init__(self, answers):
+            self.answers = list(answers)
+
+        def describe(self, images, examples, context=""):
+            return self.answers.pop(0)
+
+        def check(self, images, action):
+            asked.append(action)
+            return {"claps hands": 0.9, "sits down": 0.1}[action]
+    got = A.suggest([(0, 60), (60, 120), (120, 180)], Fraction(60), tmp_path / "1_edit.xml",
+                    Fake([("claps hands", 0.9), ("sits down", 0.8), ("looks up", 0.9)]), [], raw=raw)
+    assert [g.text for g in got] == ["*claps hands*", None, None]
+    assert asked == ["claps hands", "sits down"]                             # 'looks up' was never a suggestion
+    assert got[1].check == 0.1 and "doubted" in got[1].why and got[2].why == "no clear action"
+
+
 def test_a_generic_answer_keeps_the_placeholder():
     from match_cuts import action_captions as A
     for generic in ("looks up", "Stares ahead.", "leans forward", "smiles at the camera", "gestures with hands"):

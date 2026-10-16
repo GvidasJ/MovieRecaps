@@ -713,10 +713,12 @@ right on your fixes, twice the memory). It answers in your style, the rules take
 (`caption_actions.txt`: collected from your finished projects and SRTs; `learn` adds the new ones of each fix): 1-4
 words, lower case, a verb in its -s form first, a feeling as one word; the answer is tidied to it (no subject, no full
 stop, between asterisks). When the model is unsure -- it says so, its answer is no action or a generic one (`looks
-up`, `stares ahead`, `leans forward`), or its words were unlikely to it -- the placeholder stays. The suggestions are
-listed under "Captions worth a look" ("a suggested action ... -- check it") and in the report ("Suggested actions").
-Another model (an online one) is one more class in `action_captions.MODELS`; it gets your action captions as examples
-too.
+up`, `stares ahead`, `leans forward`), its words were unlikely to it, or, asked again in two other ways whether its
+suggestion is what the frames show, it does not say yes both times -- the placeholder stays (on your 47 action
+captions that check took the 2B's suggestions from 27, about half of them right, to 11, 8 of them right or close).
+The suggestions are listed under "Captions worth a look" ("a suggested action ... -- check it") and in the report
+("Suggested actions"). Another model (an online one) is one more class in `action_captions.MODELS`; it gets your
+action captions as examples too.
 
 With no transcript at all (no speech model can run here), the competitor's captions are copied as read and the older
 rules apply (a caption split at a sentence end and on every video cut, never a lone weak word, pairs like `a joke` /
