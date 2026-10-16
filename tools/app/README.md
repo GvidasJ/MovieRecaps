@@ -45,8 +45,12 @@ result is read with the batch's own checks.
    | **NOT IN THIS RAW** | neither its picture nor its sound: another episode? |
    | **STOPPED** | you pressed Stop |
 
-   with **Open folder**, **Open in Premiere** (opens `1_edit.xml` in Premiere Pro) and **Show report** (why it
-   failed, what to check by hand, doubtful captions; buttons for `report.md` and the run's log).
+   with **Open folder**, **Open in Premiere** and **Show report** (why it failed, what to check by hand, doubtful
+   captions; buttons for `report.md` and the run's log). **Open in Premiere** starts Premiere Pro when it is not
+   running (Premiere opens an XML only while it runs -- about 15 s), then hands it the run's edit as
+   `<run>_edit.xml`: it opens as a new project named after the run (`video10_edit`), which Premiere saves in the
+   folder of the last project you opened. Your usual way -- importing `1_edit.xml` into your template project -- is
+   unchanged.
 5. When the queue is done, Windows shows a notification.
 
 ## Learn from your fix
