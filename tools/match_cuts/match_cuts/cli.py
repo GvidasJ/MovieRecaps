@@ -238,9 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--frame-size", type=_comp_size, default=None, metavar="WxH",
                    help="--frame: the sequence size 1_edit.xml is made for (default: the PNG's own size -- 1080x1920 "
                         "for the default template, 2160x3840 for input/frame.png; the PNG is scaled to it)")
-    p.add_argument("--no-scene-cuts", action="store_true",
-                   help="--premiere: do not split V1 / A1 at the RAW's own shot changes (default: a cut at every shot "
-                        "change a clip plays, like Premiere's Scene Edit Detection)")
+    p.add_argument("--no-scene-split", dest="no_scene_split", action="store_true",
+                   help="--premiere: do not split V1 / A1 at the RAW's own shot changes (default: every RAW shot is its "
+                        "own clip, like Premiere's Scene Edit Detection -- the pieces play on seamlessly; the splits "
+                        "are not cuts: learn and check-all do not count them)")
+    p.add_argument("--no-scene-cuts", dest="no_scene_split", action="store_true", help=argparse.SUPPRESS)  # old name
     p.add_argument("--audio-lines", action="store_true",
                    help="--premiere: let A1 play another moment's sound (an audio line), mute a cutaway or leave a "
                         "freeze silent where the competitor did (default: every picture plays its own sound at 0 dB)")
@@ -359,7 +361,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     if cfg.frame_png and getattr(args, "frame_size", None):
         cfg.frame_size = str(args.frame_size)
     cfg.remove_silence = bool(getattr(args, "remove_silence", False))
-    cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_cuts", False))
+    cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_split", False))
     cfg.premiere_normal_audio = not bool(getattr(args, "audio_lines", False))
     cfg.premiere_min_clip_frames = max(0, int(getattr(args, "min_clip", 10)))
     db = getattr(args, "silence_db", None)

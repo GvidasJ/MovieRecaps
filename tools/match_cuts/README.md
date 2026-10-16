@@ -343,11 +343,17 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   (the next starts on the very source frame the previous ends on, same speed, no transition) that end up with the
   same framing become one clip, with no cut on V1 or A1; a jump in RAW time stays a cut. Each clip's comment says when its framing was
   kept from an earlier clip and which pieces it joins. `--min-move 0` gives every piece its own framing.
-* **A cut at every RAW shot change (`--no-scene-cuts` turns it off).** Like Premiere's Scene Edit Detection ("apply
-  a cut at each detected cut point"), which you always run: every V1 clip, and its A1 clip with it, is split at each
-  shot change of the RAW it plays (`shots.py`), on the frame the new shot first shows. The pieces play on seamlessly
-  (the same source, speed and framing), each linked to its own audio. Checked on your fixed projects: every detected
-  change inside a played stretch was split (video018: 3, video020: 2), none left unsplit.
+* **Scene Edit Detection, always on: every RAW shot is its own clip (`--no-scene-split` turns it off; the old name
+  `--no-scene-cuts` still works).** Like Premiere's Scene Edit Detection ("apply a cut at each detected cut point"),
+  which you always run: every V1 clip, and its A1 clip with it, is split at each shot change of the RAW it plays
+  (`shots.py`), on the frame the new shot first shows. The pieces play on seamlessly (the same source, speed and
+  framing -- unless the competitor frames the new shot otherwise), each linked to its own audio; the captions do not
+  change. **The splits are not cuts**: check-all's "cuts reproduced" counts only jumps in the RAW, and `learn` joins
+  the pieces of one take (yours and the tool's) before it compares the cuts -- a cut of yours inside a take is listed
+  on its own ("1 cut(s) of yours inside one of the run's clips"). Checked on your fixed projects: every detected
+  change inside a played stretch was split (video018: 3, video020: 2), none left unsplit; night 9: on all 23 test
+  videos every RAW shot change inside a clip is split, seamless (no frame skipped or shown twice), A1 split and linked
+  the same.
 * **Every audio clip has its own sound at normal volume (`--audio-lines` for the earlier A1).** A1 under each V1 clip
   is that clip's own RAW sound at 0 dB: no muted cutaway, no silent freeze (it plays at 100 % with its RETIME
   marker, and so does its sound), no sound of another moment put under the picture -- except an audio line that

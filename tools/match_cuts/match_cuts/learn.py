@@ -25,6 +25,7 @@ The project is a run's edit (1_edit.xml and 2_captions.srt imported into Premier
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as dt
 import difflib
 import json
@@ -476,6 +477,27 @@ def _overlap(a: Clip, b: Clip) -> float:
     return max(0.0, min(a.r1, b.r1) - max(a.r0, b.r0))
 
 
+SPLIT_RAW_S = 0.06          # night 9: a clip starting within this of the RAW second the clip before ends, back to back at
+SPLIT_SPEED = 0.01          # the same speed (within this share): one take split at a RAW shot change (the tool's Scene
+#                             Edit Detection, or Premiere's) -- not a cut: such pieces are one clip for the cut changes
+
+
+def join_splits(clips: Sequence[Clip]) -> list[Clip]:
+    """The clips with every scene split undone (SPLIT_RAW_S): each run of pieces that play on seamlessly becomes one
+    clip (the first piece's framing) -- the cuts learn compares are where the RAW jumps, as check-all's cut score."""
+    out: list[Clip] = []
+    for c in sorted(clips, key=lambda c: (c.t0, c.t1)):
+        p = out[-1] if out else None
+        if p is not None and abs(c.t0 - p.t1) < 1e-3 and abs(c.r0 - p.r1) <= SPLIT_RAW_S and c.t1 > c.t0 and \
+                p.t1 > p.t0:
+            vp, vc = (p.r1 - p.r0) / (p.t1 - p.t0), (c.r1 - c.r0) / (c.t1 - c.t0)
+            if abs(vc - vp) <= SPLIT_SPEED * max(abs(vp), 1e-9) and vp > 0:
+                out[-1] = dataclasses.replace(p, t1=c.t1, r1=c.r1)
+                continue
+        out.append(c)
+    return out
+
+
 def edit_changes(tool: Sequence[Clip], user: Sequence[Clip], tool_pic: Sequence[Clip] = (),
                  user_pic: Sequence[Clip] = ()) -> dict:
     """What the user did to the run's clips (module docstring, 3), the clips matched by the RAW they play: {starts,
@@ -497,6 +519,10 @@ def edit_changes(tool: Sequence[Clip], user: Sequence[Clip], tool_pic: Sequence[
         starts.append(round(min(u.r0 for u in mine) - c.r0, 3))
         ends.append(round(max(u.r1 for u in mine) - c.r1, 3))
     added = sum(1 for u in user if not any(shared(c, u) for c in tool))
+    # a cut of yours inside one of the run's clips (a pause cut out of a take): two of your clips back to back, both in it
+    us = sorted(user, key=lambda u: u.t0)
+    inner = [round(b.r0 - a.r1, 3) for a, b in zip(us, us[1:]) if abs(b.t0 - a.t1) < 1e-3 and abs(b.r0 - a.r1) > SPLIT_RAW_S
+             and any(min(c.r0, c.r1) - 1e-3 <= a.r1 and b.r0 <= max(c.r0, c.r1) + 1e-3 for c in tool)]
     total = sum(u.r1 - u.r0 for u in user)
     played = sum(max((_overlap(c, u) for c in tool), default=0.0) for u in user) / total if total > 0 else 0.0
     moved, zoomed = [], []
@@ -512,8 +538,8 @@ def edit_changes(tool: Sequence[Clip], user: Sequence[Clip], tool_pic: Sequence[
     framing = ("compared" if tool_pic and user_pic else
                "not compared: your picture is not the RAW's clips (an After Effects comp?)" if tool_pic else
                "not compared: the run's edit has no picture clips")
-    return {"clips": len(tool), "starts": starts, "ends": ends, "removed": removed, "added": added, "moved": moved,
-            "zoomed": zoomed, "framing": framing, "played": round(played, 3)}
+    return {"clips": len(tool), "starts": starts, "ends": ends, "removed": removed, "added": added, "inner": inner,
+            "moved": moved, "zoomed": zoomed, "framing": framing, "played": round(played, 3)}
 
 
 # the kinds of change a suggestion may come from: (name, how to read a video's values, what to suggest)
@@ -1541,8 +1567,9 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
         raise LearnError(f"{project.name}: no clip plays the run's RAW ({raw_name})")
     if picture and not user_pic:
         raise LearnError(f"{project.name}: --picture-key but no picture clip plays the run's RAW ({raw_name})")
-    edit = (edit_changes(tool_pic, user_pic, tool_pic, user_pic) if picture else
-            edit_changes(tool_snd or tool_pic, user_snd or user_pic, tool_pic, user_pic))
+    js = join_splits                   # the cuts: where the RAW jumps (a scene split is no cut); framing per piece
+    edit = (edit_changes(js(tool_pic), js(user_pic), tool_pic, user_pic) if picture else
+            edit_changes(js(tool_snd or tool_pic), js(user_snd or user_pic), tool_pic, user_pic))
     sp_t, sp_u = speeds(tool_pic or tool_snd), speeds(user_pic or user_snd)
     edit["speed"] = {"tool": statistics.median(sp_t) if sp_t else None,
                      "user": statistics.median(sp_u) if sp_u else None}
@@ -1629,8 +1656,11 @@ def summary(res: dict) -> list[str]:
         out.append(f"    ({c['removed']} word(s) removed, {c['added']} added, {c['rewritten']} longer passage(s) "
                    "rewritten: kept in learned.json, not in the glossary)")
     moved = [v for v in e["starts"] if abs(v) >= TRIM_S] + [v for v in e["ends"] if abs(v) >= TRIM_S]
+    inner = e.get("inner") or []
     out.append(f"  Cuts: {len(moved)} of {2 * len(e['starts'])} clip edges moved, {e['removed']} clip(s) removed, "
-               f"{e['added']} added")
+               f"{e['added']} added" + (f", {len(inner)} cut(s) of yours inside one of the run's clips (" +
+                                        ", ".join(f"{v:.2f} s" for v in inner) + " of the RAW left out)" if inner else "")
+               + " -- the RAW's shot changes inside a take are no cuts (scene splits)")
     re_f = [v for v in e["moved"] if abs(v) >= FRAMING_PX]
     re_z = [v for v in e["zoomed"] if abs(v) >= ZOOM_PCT]
     if e.get("framing", "compared") != "compared":
