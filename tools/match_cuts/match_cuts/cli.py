@@ -304,6 +304,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the second speech model: where it hears a word differently from --caption-model, the word "
                         "is rechecked from the RAW (and against the competitor's caption) and listed if still unclear "
                         "(default large-v3-turbo, the second most accurate; none = off)")
+    p.add_argument("--no-action-captions", action="store_true",
+                   help="keep every *...* placeholder (default: each filled with a suggested action in your style -- "
+                        "a vision model looks at the frames there; listed as suggestions to check)")
+    p.add_argument("--action-model", default="local", metavar="NAME",
+                   help="the model of the action suggestions: local (Qwen3-VL-2B on this computer's GPU, the "
+                        "default), big (Qwen3-VL-4B: twice the memory), none, or a Hugging Face model id")
     p.add_argument("--caption-recheck-model", default="large-v3", metavar="NAME",
                    help="words the transcription is unsure of (low confidence, music / noise under them, cut at an "
                         "edit point, heard otherwise by --caption-check-model) are transcribed again from the RAW with "
@@ -378,6 +384,8 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.caption_model = str(getattr(args, "caption_model", None) or "large-v3")
     cfg.caption_check_model = str(getattr(args, "caption_check_model", None) or "large-v3-turbo")
     cfg.caption_recheck_model = str(getattr(args, "caption_recheck_model", None) or "large-v3")
+    cfg.action_captions = not bool(getattr(args, "no_action_captions", False))
+    cfg.action_model = str(getattr(args, "action_model", None) or "local")
     if args.seed is not None:
         cfg.seed = int(args.seed)
     cfg.check_determinism = bool(getattr(args, "check_determinism", False))

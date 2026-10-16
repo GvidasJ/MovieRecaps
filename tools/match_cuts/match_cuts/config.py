@@ -111,6 +111,9 @@ class Config:
     caption_check_model: str = "large-v3-turbo"   # the second model: where it hears otherwise, the word is rechecked
     caption_recheck_model: str = "large-v3"    # unclear words transcribed again from the RAW with this ("none": off)
     caption_language: str = "en"
+    action_captions: bool = True           # night 9: the *...* placeholders filled with a suggested action (a vision
+                                           #   model on the frames; action_captions.py); --no-action-captions: kept
+    action_model: str = "local"            # --action-model: "local" (Qwen3-VL-2B here), "big" (4B), "none", a model id
     no_broll: bool = False                 # --no-broll: cutaways over continuous RAW audio -> the main clip plays through
                                            #   (XML / EDL / cutlist.csv only; cutlist.json + verification stay faithful)
     conform_h264_preset: str = "veryfast"  # libx264 preset for raw_ae.mp4 (RAW > 10 min or conform_codec=h264)
@@ -398,6 +401,7 @@ class Config:
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",
                   "caption_language", "fast", "compare_fast", "check_determinism", "speech_map_model",
+                  "action_captions", "action_model",
                   "no_broll",
                   "pool_stall_timeout_s", "pool_max_failures", "progress_log_s", "full_res_workers",
                   *VERIFY_ONLY_PARAMS):

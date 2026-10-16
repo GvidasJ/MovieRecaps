@@ -1265,6 +1265,16 @@ def _captions(ctx: Any) -> list[str]:
     ph = cap.get("placeholders") or []
     out += ["", f"**`*...*` placeholders** (silences over ~1 s — write the action there): {len(ph) if ph else 'none'}"]
     out += [f"- {_tc(c)}" for c in ph]
+    act = cap.get("actions") or {}
+    if act.get("suggested") or act.get("kept") or act.get("error"):
+        out += ["", f"**Suggested actions** (the `*...*` placeholders filled by {act.get('model', 'a vision model')} "
+                    f"from the picture -- suggestions: check them): {len(act.get('suggested') or []) or 'none'}"]
+        out += [f"- {r['start_tc']}-{r['end_tc']} `{r['text']}` (sure {r['confidence']:.2f})"
+                for r in act.get("suggested") or []]
+        out += [f"- {r['start_tc']}-{r['end_tc']} left as `*...*`: {r['why']} (it said '{r['answer']}')"
+                for r in act.get("kept") or []]
+        if act.get("error"):
+            out += [f"- not run: {act['error']}"]
     fl = cap.get("flags") or []
     out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
             f"{len(fl) if fl else 'none'}"]

@@ -25,6 +25,9 @@ if str(TESTS_DIR) not in sys.path:                     # `import synth` from any
     sys.path.insert(0, str(TESTS_DIR))
 # never the After Effects of this machine: also for the CLI runs the end-to-end tests start (they inherit it)
 os.environ["MATCH_CUTS_NO_AE"] = "1"
+# nor the vision model of the action suggestions (night 9: a 4 GB model per run with a *...* placeholder); the tests
+# of the suggestions use a stand-in model
+os.environ["MATCH_CUTS_NO_ACTION_MODEL"] = "1"
 
 
 def _slow_enabled(config) -> bool:

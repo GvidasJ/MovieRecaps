@@ -1,0 +1,78 @@
+# Your action captions (*...*), the examples the action suggestions follow (action_captions.py).
+# Collected on night 9 from your finished projects (tests/real/*/answer.srt) and your SRTs (srt/);
+# `learn` adds the new ones of every fix. One per line; '#' starts a comment.
+
+*laughter*
+*shocked*
+*awkward silence*
+*thinks*
+*confused*
+*realizes it*
+*can't believe it*
+*realizes*
+*laughs*
+*can't keep up*
+*exhaling the smoke*
+*knocks on the door*
+*comes in*
+*gets caught*
+*starts spraying*
+*coughs again*
+*takes a cigarette*
+*prepares to smoke*
+*tries to help him*
+*lights the lighter*
+*eats the cigarette*
+*looks over*
+*disgusted*
+*laughing*
+*grabs the kid*
+*applause*
+*high five*
+*dying*
+*gets closer to friends*
+*understands it*
+*claps hands*
+*everyone leaves*
+*kisses him*
+*hugs him*
+*gives high five*
+*sits down*
+*spills petrol*
+*explodes*
+*lights the candle*
+*takes it out*
+*tries to blow it out*
+*doesn't let him*
+*returns to interviewer*
+*man disappears*
+*slaps sticker on*
+*places them correctly*
+*sudden stop*
+*automatic audi braking*
+*escalade in front*
+*screams*
+*stops it in time*
+*looks at Peter*
+*cruising along*
+*passing cars*
+*AI audi button*
+*autopilot activates*
+*motions to him*
+*gets ready*
+*speeding ahead*
+*angrily points at him*
+*presses a button*
+*hands off wheel*
+*wheel turning*
+*instructor ain't happy*
+*bank robbery*
+*unbuckles seatbelt*
+*Spider-Man swings by*
+*looks at him*
+*gets scared*
+*chokes on the water*
+*dances in*
+*starts jumping*
+*smashes him*
+*moves him away*

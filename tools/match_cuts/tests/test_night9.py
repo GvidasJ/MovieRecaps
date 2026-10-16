@@ -65,3 +65,153 @@ def test_check_all_cut_score_does_not_count_a_scene_split():
     split = edit_score.Edit([P(0.0, 2.0, 100.0), P(2.0, 3.0, 102.0), P(3.0, 5.0, 110.0)], fps=60.0, raw_fps=24.0)
     whole = edit_score.Edit([P(0.0, 3.0, 100.0), P(3.0, 5.0, 110.0)], fps=60.0, raw_fps=24.0)
     assert [round(c.t, 3) for c in split.cuts()] == [round(c.t, 3) for c in whole.cuts()] == [3.0]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 5. action captions: the *...* placeholders filled with a suggested action
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_the_models_answer_becomes_an_action_caption_in_your_style_or_nothing():
+    from match_cuts import action_captions as A
+    assert A.tidy("Claps hands.") == "*claps hands*"
+    assert A.tidy("He sits down") == "*sits down*"                       # yours have no subject
+    assert A.tidy("*gives high five*") == "*gives high five*"
+    assert A.tidy("Caption: laughing") == "*laughing*"
+    for unsure in ("unsure", "Unsure.", "", "person", "The man is walking towards the door slowly",
+                   "I cannot tell", "shakes hands, smiles"):
+        assert A.tidy(unsure) is None, unsure
+
+
+def test_your_action_captions_are_the_examples_and_learn_adds_new_ones(tmp_path):
+    from match_cuts import action_captions as A
+    f = tmp_path / "caption_actions.txt"
+    f.write_text("# yours\n*claps hands*\n*sits down*\n*um*\n", encoding="utf-8")
+    assert A.read_examples(f) == ["claps hands", "sits down"]               # a sound is no action to see
+    assert A.add_examples(["*claps hands*", "*understands it*", "*ummm*", "*Everyone leaves*"], "video10", f) == \
+        ["understands it", "Everyone leaves"]
+    assert A.read_examples(f)[-2:] == ["understands it", "Everyone leaves"]
+    assert A.action_texts("1\n00:00:00,000 --> 00:00:01,000\n*claps hands*\n\n2\n00:00:01,000 --> "
+                          "00:00:02,000\n*...*\n") == ["claps hands"]
+    assert len(A.read_examples()) >= 70                                    # the file collected tonight
+    ex = A.pick_examples(A.read_examples())
+    assert 10 <= len(ex) <= 30 and len({e.split()[0] for e in ex}) == len(ex)
+
+
+def test_the_frames_of_a_placeholder_are_spread_over_it():
+    from fractions import Fraction
+    from match_cuts import action_captions as A
+    assert A.frame_times(60, 120, Fraction(60), 4) == [1.125, 1.375, 1.625, 1.875]
+
+
+def _srt(tmp_path):
+    p = tmp_path / "2_captions.srt"
+    p.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello there\n\n2\n00:00:01,000 --> 00:00:02,500\n*...*\n\n"
+                 "3\n00:00:02,500 --> 00:00:03,000\nbye\n\n4\n00:00:03,000 --> 00:00:04,500\n*...*\n", encoding="utf-8")
+    return p
+
+
+def test_a_sure_suggestion_replaces_its_placeholder_and_an_unsure_one_keeps_it(tmp_path, monkeypatch):
+    from fractions import Fraction
+    from types import SimpleNamespace
+    from match_cuts import action_captions as A
+    srt = _srt(tmp_path)
+    (tmp_path / "1_edit.xml").write_text("<xmeml/>", encoding="utf-8")
+    caps = [{"text": "hello there", "start": 0, "end": 60, "mode": "voice"},
+            {"text": "*...*", "start": 60, "end": 150, "mode": "placeholder"},
+            {"text": "bye", "start": 150, "end": 180, "mode": "voice"},
+            {"text": "*...*", "start": 180, "end": 270, "mode": "placeholder"}]
+    ctx = SimpleNamespace(cfg=SimpleNamespace(deliver=tmp_path, debug_dir=tmp_path, action_model="local"),
+                          captions={"fps": "60", "captions": caps, "placeholders": [caps[1], caps[3]]}, cache=None)
+
+    class Fake:
+        name = "fake"
+
+        def close(self):
+            pass
+    monkeypatch.setattr(A, "make_model", lambda name: Fake())
+    monkeypatch.setattr(A, "suggest", lambda spots, fps, xml, model, ex, cache=None, raw=None, contexts=None: [
+        A.Suggestion(60, 150, "*claps hands*", "Claps hands.", 0.91),
+        A.Suggestion(180, 270, None, "unsure", 0.88, "no clear action")])
+    info = A.fill_run(ctx)
+    text = srt.read_text(encoding="utf-8")
+    assert "*claps hands*" in text and text.count("*...*") == 1          # the unsure one stays a placeholder
+    assert [r["text"] for r in info["suggested"]] == ["*claps hands*"] and info["kept"][0]["why"] == "no clear action"
+    assert caps[1]["mode"] == "action" and caps[1]["suggested"] and caps[3]["mode"] == "placeholder"
+    assert ctx.captions["placeholders"] == [caps[3]]
+    assert (tmp_path / "captions.json").is_file()
+
+
+def test_no_action_captions_keeps_every_placeholder(monkeypatch):
+    from types import SimpleNamespace
+    from match_cuts import action_captions as A, captions, pipeline
+    called = []
+    monkeypatch.setattr(captions, "run_captions", lambda ctx: {"path": "x.srt", "placeholders": [{"start": 1}]})
+    monkeypatch.setattr(A, "fill_run", lambda ctx: called.append(1))
+    for on, want in ((False, []), (True, [1])):
+        called.clear()
+        ctx = SimpleNamespace(cfg=SimpleNamespace(action_captions=on), captions={}, paths={}, warn=lambda m: None)
+        pipeline.stage_captions(ctx)
+        assert called == want
+    args = cli.build_parser().parse_args(["--no-action-captions", "--action-model", "none"])
+    cfg = cli.config_from_args(args)
+    assert not cfg.action_captions and cfg.action_model == "none"
+    assert "action_captions" not in cfg.analysis_params()                   # no cache key changes
+    assert A.make_model("none") is None
+
+
+def test_the_end_summary_lists_the_suggestions_to_check():
+    from types import SimpleNamespace
+    from match_cuts import report
+    cap = {"placeholders": [], "actions": {"model": "Qwen/Qwen3-VL-2B-Instruct", "kept": [], "suggested": [
+        {"start_tc": "00:00:03,467", "end_tc": "00:00:04,550", "text": "*claps hands*", "confidence": 0.9,
+         "answer": "claps hands", "why": ""}]}}
+    cap.update(mode="voice", reason="test", by_mode={"voice": 3}, fps="60")
+    lines = report._captions(SimpleNamespace(captions=cap))
+    assert any("Suggested actions" in ln for ln in lines) and any("`*claps hands*` (sure 0.90)" in ln for ln in lines)
+
+
+def test_a_generic_answer_keeps_the_placeholder():
+    from match_cuts import action_captions as A
+    for generic in ("looks up", "Stares ahead.", "leans forward", "smiles at the camera", "gestures with hands"):
+        assert A.tidy(generic) is None, generic
+    assert A.tidy("laughs hard") == "*laughs hard*" and A.tidy("enters the room") == "*enters the room*"
+
+
+def test_the_model_hears_what_is_said_around_the_moment(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from match_cuts import action_captions as A
+    assert A.context_of("lady doesn't go", "The lady's fifteen") == \
+        " Just before it, someone says: \"lady doesn't go\". Just after it: \"The lady's fifteen\"."
+    assert A.context_of("", "") == ""
+    _srt(tmp_path)
+    (tmp_path / "1_edit.xml").write_text("<xmeml/>", encoding="utf-8")
+    caps = [{"text": "hello there", "start": 0, "end": 60, "mode": "voice"},
+            {"text": "*...*", "start": 60, "end": 150, "mode": "placeholder"},
+            {"text": "bye", "start": 150, "end": 180, "mode": "voice"},
+            {"text": "*...*", "start": 180, "end": 270, "mode": "placeholder"}]
+    ctx = SimpleNamespace(cfg=SimpleNamespace(deliver=tmp_path, debug_dir=tmp_path, action_model="local"),
+                          captions={"fps": "60", "captions": caps, "placeholders": [caps[1], caps[3]]}, cache=None)
+    seen = {}
+
+    class Fake:
+        name = "fake"
+    monkeypatch.setattr(A, "make_model", lambda name: Fake())
+
+    def fake_suggest(spots, fps, xml, model, ex, cache=None, raw=None, contexts=None):
+        seen["contexts"] = contexts
+        return [A.Suggestion(a, b, None, "unsure", 0.9, "no clear action") for a, b in spots]
+    monkeypatch.setattr(A, "suggest", fake_suggest)
+    A.fill_run(ctx)
+    assert seen["contexts"] == [A.context_of("hello there", "bye"), A.context_of("bye", "")]
+
+
+def test_the_2b_model_on_every_computer_and_the_4b_on_request(monkeypatch):
+    """The same suggestions on the PC and the laptop (the 2B fits both; the 4B next to a second run spilled out of the
+    PC's card: 9 minutes for 3 placeholders)."""
+    from match_cuts import action_captions as A
+    monkeypatch.delenv("MATCH_CUTS_NO_ACTION_MODEL", raising=False)
+    assert A.make_model("local").name == A.MODEL_ID == "Qwen/Qwen3-VL-2B-Instruct"
+    assert A.make_model("big").name == A.MODEL_BIG == "Qwen/Qwen3-VL-4B-Instruct"
+    assert A.make_model("Qwen/Qwen3-VL-8B-Instruct").name == "Qwen/Qwen3-VL-8B-Instruct"
+    monkeypatch.setenv("MATCH_CUTS_NO_ACTION_MODEL", "1")
+    assert A.make_model("local") is None                                    # the unit tests

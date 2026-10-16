@@ -1529,10 +1529,12 @@ def folder_summary(res: dict) -> list[str]:
 
 def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | Path | None = None,
           name: str | None = None, glossary: str | Path | None = None, picture: bool = False,
-          window: str = "auto") -> dict:
+          window: str = "auto", actions: str | Path | None = None) -> dict:
     """Everything above for one finished project; returns {case, updated, files, glossary, glossary_new, changes,
-    captions, edit, tendencies, suggestions, run, git}. ``picture``: the cuts and the answer key from the picture (V1)
-    -- the user moved audio by hand; ``window``: raw_window."""
+    captions, edit, tendencies, suggestions, run, git, actions_new}. ``picture``: the cuts and the answer key from the
+    picture (V1) -- the user moved audio by hand; ``window``: raw_window; ``actions``: the action-caption examples file
+    (action_captions.EXAMPLES_FILE; default: next to ``glossary`` when that is given) -- your new *...* captions are
+    added to it (night 9)."""
     from .common import file_hash
     from .testcases import CASES_DIR
     project = Path(project)
@@ -1597,6 +1599,9 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     video = case_dir.name
     gpath = Path(glossary) if glossary else glossary_path()
     new_words = add_to_glossary(changes, video, gpath) if changes else []
+    from . import action_captions
+    apath = Path(actions) if actions else (gpath.with_name("caption_actions.txt") if glossary else None)
+    new_actions = action_captions.add_examples([c.text for c in caps if c.text.strip().startswith("*")], video, apath)
     meta = {"notes": f"learned from {project.name} ({dt.date.today().isoformat()}): answer.srt and answer_edit.json "
                      "are your finished edit" + (" (its picture: you moved the audio by hand)" if picture else ""),
             "learned_from": str(project), "run": str(rf["dir"])}
@@ -1617,7 +1622,8 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
             continue
     return {"case": case_dir, "updated": updated, "files": files, "glossary": gpath, "glossary_new": new_words,
             "changes": changes, "captions": ccount, "edit": edit, "tendencies": tendencies(edit),
-            "suggestions": suggestions(records), "run": rf["dir"], "git": git_commands(case_dir, gpath)}
+            "suggestions": suggestions(records), "run": rf["dir"], "git": git_commands(case_dir, gpath),
+            "actions_new": new_actions}
 
 
 def summary(res: dict) -> list[str]:
@@ -1655,6 +1661,9 @@ def summary(res: dict) -> list[str]:
     if c.get("removed") or c.get("added") or c.get("rewritten"):
         out.append(f"    ({c['removed']} word(s) removed, {c['added']} added, {c['rewritten']} longer passage(s) "
                    "rewritten: kept in learned.json, not in the glossary)")
+    if res.get("actions_new"):
+        out.append(f"  Action captions: {len(res['actions_new'])} new, added to caption_actions.txt (the examples of "
+                   "the action suggestions): " + ", ".join(f"*{t}*" for t in res["actions_new"]))
     moved = [v for v in e["starts"] if abs(v) >= TRIM_S] + [v for v in e["ends"] if abs(v) >= TRIM_S]
     inner = e.get("inner") or []
     out.append(f"  Cuts: {len(moved)} of {2 * len(e['starts'])} clip edges moved, {e['removed']} clip(s) removed, "

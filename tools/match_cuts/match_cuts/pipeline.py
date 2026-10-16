@@ -3704,6 +3704,16 @@ def stage_captions(ctx: Context) -> None:
         ctx.warn(f"captions.srt not written: {type(e).__name__}: {e}")
     if ctx.captions.get("path"):
         ctx.paths["captions"] = ctx.captions["path"]
+    if ctx.captions.get("placeholders") and bool(getattr(ctx.cfg, "action_captions", True)):
+        # night 9: each *...* placeholder filled with a suggested action (a vision model on the frames the edit shows
+        # there and the lines said around it, in your style; unsure: the placeholder stays) -- never fails the run
+        from . import action_captions
+        try:
+            action_captions.fill_run(ctx)
+        except Exception as e:  # noqa: BLE001 - the placeholders stay
+            log.error("action captions failed: %s\n%s", e, traceback.format_exc())
+            ctx.captions["actions"] = {"error": f"{type(e).__name__}: {e}", "suggested": [], "kept": []}
+            ctx.warn(f"no action suggested for the *...* placeholders ({type(e).__name__}: {e}) -- they stay")
 
 
 def prepare_frame(ctx: Context) -> Any:
@@ -4066,6 +4076,9 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     def tc(c: dict) -> str:
         return f"{c.get('start_tc', '?')}-{c.get('end_tc', '?')}"
     rows = [f"{tc(c)}  *...* placeholder: write the action there" for c in cap.get("placeholders") or []]
+    act_model = (cap.get("actions") or {}).get("model", "a vision model")
+    rows += [f"{tc(r)}  '{r['text']}': a suggested action (what the picture shows, {act_model}) -- check it"
+             for r in (cap.get("actions") or {}).get("suggested") or []]
     rules = cap.get("rules") or {}
     if rules:
         from .caption_rules import RULES
