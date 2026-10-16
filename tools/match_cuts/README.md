@@ -708,8 +708,8 @@ In every mode the captions are **back to back**: a caption ends where the next o
 short action in your style -- `*claps hands*`, `*enters the room*`, `*laughs hard*` -- as a **suggestion**: six frames
 of what the edit shows there, and the line said just before and just after it, go to a vision model on this
 computer's graphics card (`--action-model local`: Qwen3-VL-2B, the same on the PC and the laptop; free, nothing
-leaves the PC; 4 GB, downloaded once, next to the speech models; `--action-model big`: the 4B, 9 GB -- as often
-right on your fixes, twice the memory). It answers in your style, the rules taken from your own action captions
+leaves the PC; 4 GB, downloaded once, next to the speech models; `--action-model big`: the 4B, 9 GB -- not better
+on your fixes, twice the memory). It answers in your style, the rules taken from your own action captions
 (`caption_actions.txt`: collected from your finished projects and SRTs; `learn` adds the new ones of each fix): 1-4
 words, lower case, a verb in its -s form first, a feeling as one word; the answer is tidied to it (no subject, no full
 stop, between asterisks). When the model is unsure -- it says so, its answer is no action or a generic one (`looks

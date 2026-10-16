@@ -30,8 +30,8 @@ import numpy as np
 
 EXAMPLES_FILE = Path(__file__).resolve().parents[1] / "caption_actions.txt"
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"         # --action-model local (the default; 4.3 GB): every computer the same
-MODEL_BIG = "Qwen/Qwen3-VL-4B-Instruct"        # --action-model big (8.9 GB): as often right on your 47 moments
-#                                                 (night 9: 48 % of its suggestions right or close, the 2B's 48 %), but
+MODEL_BIG = "Qwen/Qwen3-VL-4B-Instruct"        # --action-model big (8.9 GB): not better on your 47 moments (night 9,
+#                                                 asked again: 8 suggestions, 5 right or close; the 2B 11 and 8), and
 #                                                 twice the memory -- next to a second run on the 16 GB card it spilled
 #                                                 into shared memory: 9 min for 3 placeholders
 FRAMES = 6                   # pictures of the placeholder's stretch (spread over it, the edges left out)
