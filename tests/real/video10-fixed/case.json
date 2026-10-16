@@ -1,0 +1,10 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video10_fixed_relinked.prproj (2026-10-16, night 9; the project's first sequence -- the other seven are template sequences): answer.srt and answer_edit.json are your finished edit (its picture clips; your A1 sits exactly under V1); your run was the laptop's --fast batch run output\\video4 (here output\\laptop_video10; the laptop's input\\videos\\video4) with the default settings -- 100 %, your template, the competitor's cut points; the RAW is a 21-minute episode with a variable frame rate (the run's conformed raw_ae.mp4 is the case's RAW; the case keeps RAW 684.1-757.5 s); your captions include four action captions (*gets closer to friends*, *understands it*, *claps hands*, *everyone leaves*)",
+ "learned_from": "finished\\video10\\video10_fixed_relinked.prproj",
+ "run": "output\\laptop_video10",
+ "full_raw": "output/laptop_video10/extras/media/raw_ae.mp4",
+ "raw_offset": 684.141792,
+ "options": []
+}

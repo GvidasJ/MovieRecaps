@@ -1,0 +1,90 @@
+{
+ "what": "your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio by hand, so the picture is the key): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 684.142 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 4.75475,
+   "kind": "raw",
+   "src_in": 30.03,
+   "speed": 1.0
+  },
+  {
+   "start": 4.75475,
+   "end": 5.839167,
+   "kind": "raw",
+   "src_in": 35.076708,
+   "speed": 1.0
+  },
+  {
+   "start": 5.839167,
+   "end": 7.75775,
+   "kind": "raw",
+   "src_in": 36.870166,
+   "speed": 1.0
+  },
+  {
+   "start": 7.75775,
+   "end": 9.384375,
+   "kind": "raw",
+   "src_in": 38.78875,
+   "speed": 1.0
+  },
+  {
+   "start": 9.384375,
+   "end": 10.051708,
+   "kind": "raw",
+   "src_in": 40.665625,
+   "speed": 1.0
+  },
+  {
+   "start": 10.051708,
+   "end": 11.26125,
+   "kind": "raw",
+   "src_in": 42.083708,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.03,
+   "src_out": 34.78475,
+   "dx": 8.575,
+   "scale": 115.31
+  },
+  {
+   "src_in": 35.076708,
+   "src_out": 36.161125,
+   "dx": 8.575,
+   "scale": 115.31
+  },
+  {
+   "src_in": 36.870166,
+   "src_out": 38.78875,
+   "dx": 8.575,
+   "scale": 115.31
+  },
+  {
+   "src_in": 38.78875,
+   "src_out": 40.415375,
+   "dx": 8.575,
+   "scale": 115.31
+  },
+  {
+   "src_in": 40.665625,
+   "src_out": 41.332958,
+   "dx": 8.575,
+   "scale": 115.31
+  },
+  {
+   "src_in": 42.083708,
+   "src_out": 43.29325,
+   "dx": 8.575,
+   "scale": 115.31
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

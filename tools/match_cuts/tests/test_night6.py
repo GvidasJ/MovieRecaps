@@ -331,7 +331,8 @@ def test_check_all_runs_new_style_cases_thorough_and_old_ones_fast_with_the_hard
     assert {n for n, s in styles.items() if s == "new"} == {"mike005-fixed", "laptop009-fixed", "laptop010-fixed",
                                                            "laptop013-fixed", "video021-fixed", "deadpool", "zendaya",
                                                            "video6-fixed",     # night 7: your video6 fix
-                                                           "video7-fixed", "video8-fixed", "video9-fixed"}   # night 8
+                                                           "video7-fixed", "video8-fixed", "video9-fixed",   # night 8
+                                                           "video10-fixed"}                                  # night 9
     card = check_all.scorecard([{"case": "video1", "seconds": 60.0, "deliverables": {"status": "pass"},
                                  "determinism": {"status": "pass"}, "coverage": {"status": "pass"},
                                  "scored": False, "mode": "fast"}])
