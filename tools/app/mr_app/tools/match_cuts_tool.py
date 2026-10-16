@@ -459,6 +459,7 @@ class MatchCutsPage(QWidget):
         self.jobs: list[J.Job] = []
         self.rows: dict[int, JobRow] = {}
         self.waiting: Path | None = None
+        self.drops: list[list] = []               # drops not read yet: one after the other (add_paths)
         self.running = False
         self.current: JobThread | None = None
         self.converted: dict = {}
@@ -537,9 +538,18 @@ class MatchCutsPage(QWidget):
             self.add_paths([Path(d)])
 
     def add_paths(self, items: list) -> None:
-        """A drop: sorted into jobs in the background (the videos' lengths are read)."""
+        """A drop: sorted into jobs in the background (the videos' lengths are read). Drops are read one after the
+        other, so a video waiting for its partner meets the next drop even when it comes before this one is read."""
+        self.drops.append(list(items))
+        if len(self.drops) == 1:
+            self._read_drop()
+
+    def _read_drop(self) -> None:
+        """The oldest unread drop, with the video waiting now."""
+        if not self.drops:
+            return
         from match_cuts import batch
-        waiting = self.waiting
+        items, waiting = self.drops[0], self.waiting
         self.say("reading the videos ...")
 
         def work():
@@ -547,11 +557,21 @@ class MatchCutsPage(QWidget):
                                     speed_of=lambda folder: batch.video_speed(folder))
         w = Worker(work)
         w.finished_with.connect(self._added)
-        w.failed.connect(lambda e: self.say(f"could not read the drop: {e}"))
+        w.failed.connect(self._drop_failed)
         self.workers.append(w)
         w.start()
 
+    def _drop_failed(self, err: str) -> None:
+        self.say(f"could not read the drop: {err}")
+        self.drops.pop(0)
+        self._read_drop()
+
     def _added(self, res: J.DropResult) -> None:
+        self.drops.pop(0)
+        self._added_jobs(res)
+        self._read_drop()
+
+    def _added_jobs(self, res: J.DropResult) -> None:
         J.name_jobs(res.jobs, [j.name for j in self.jobs])
         for j in res.jobs:
             self.jobs.append(j)
@@ -630,7 +650,9 @@ class MatchCutsPage(QWidget):
 
     def _checked(self, probs: list, tool: dict) -> None:
         for name, found in (tool or {}).items():
-            probs += [f"{name}: {p}" for p in found]
+            mine = [p for p in probs if p.startswith(f"{name}: ")]
+            probs += [f"{name}: {p}" for p in found      # (the competitor longer than the RAW: said once, the app's way)
+                      if not ("longer than the RAW" in p and any("longer than the RAW" in m for m in mine))]
         if probs:
             box = QMessageBox(self)
             box.setWindowTitle("The inputs look wrong")
