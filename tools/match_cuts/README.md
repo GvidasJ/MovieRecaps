@@ -716,6 +716,9 @@ stop, between asterisks). When the model is unsure -- it says so, its answer is 
 up`, `stares ahead`, `leans forward`), its words were unlikely to it, or, asked again in two other ways whether its
 suggestion is what the frames show, it does not say yes both times -- the placeholder stays (on your 47 action
 captions that check took the 2B's suggestions from 27, about half of them right, to 11, 8 of them right or close).
+When no action is sure, it is asked for the main person's reaction: a laugh becomes `*laughing*` (checked the same
+way; 3 of its 4 on your fixes were yours, the 4th a giggle); other reactions keep the placeholder (its "shocked" was
+right once in 8).
 The suggestions are listed under "Captions worth a look" ("a suggested action ... -- check it") and in the report
 ("Suggested actions"). Another model (an online one) is one more class in `action_captions.MODELS`; it gets your
 action captions as examples too.

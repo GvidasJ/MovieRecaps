@@ -239,6 +239,46 @@ def test_suggest_asks_the_model_again_only_about_a_suggestion(tmp_path, monkeypa
     assert got[1].check == 0.1 and "doubted" in got[1].why and got[2].why == "no clear action"
 
 
+def test_with_no_sure_action_a_laugh_is_suggested_and_other_reactions_are_not(tmp_path, monkeypatch):
+    from fractions import Fraction
+    from match_cuts import action_captions as A, caption_score
+    assert A.decide_reaction("laughing", 0.9, 0.9) == ("*laughing*", "")
+    assert A.decide_reaction("Shocked.", 0.9, 0.9) == (None, "no clear action")   # 'shocked': its fallback when lost
+    assert A.decide_reaction("laughing", 0.9, 0.2)[0] is None and A.decide_reaction("laughing", 0.3, 0.9)[0] is None
+    raw = tmp_path / "raw.mp4"
+    raw.write_bytes(b"x")
+
+    class TL:
+        def at(self, t):
+            return ("raw", 100.0 + t)
+    monkeypatch.setattr(caption_score.Timeline, "from_xml", staticmethod(lambda xml: TL()))
+    monkeypatch.setattr(A, "raw_frames", lambda raw, ts: [object() for _ in ts])
+    calls = []
+
+    class Fake:
+        name = "fake"
+
+        def __init__(self):
+            self.answers = [("looks up", 0.9), ("looks up", 0.9), ("claps hands", 0.9)]
+            self.reactions = [("laughing", 0.95), ("shocked", 0.9)]
+
+        def describe(self, images, examples, context=""):
+            return self.answers.pop(0)
+
+        def react(self, images, context=""):
+            calls.append("react")
+            return self.reactions.pop(0)
+
+        def check(self, images, action, questions=None):
+            calls.append((action, questions is A.REACTION_CHECKS))
+            return 0.9
+    got = A.suggest([(0, 60), (60, 120), (120, 180)], Fraction(60), tmp_path / "1_edit.xml", Fake(), [], raw=raw)
+    assert [g.text for g in got] == ["*laughing*", None, "*claps hands*"]
+    assert got[0].answer == "laughing" and got[0].check == 0.9 and got[1].why == "no clear action"
+    # the reaction is asked only with no sure action; only 'laughing' is asked again (with its own questions)
+    assert calls == ["react", ("laughing", True), "react", ("claps hands", False)]
+
+
 def test_a_generic_answer_keeps_the_placeholder():
     from match_cuts import action_captions as A
     for generic in ("looks up", "Stares ahead.", "leans forward", "smiles at the camera", "gestures with hands"):
