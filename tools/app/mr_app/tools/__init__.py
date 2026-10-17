@@ -17,4 +17,5 @@ def tools() -> list[Tool]:
     from .convert_tool import ConvertTool
     from .download_tool import DownloadTool
     from .match_cuts_tool import MatchCutsTool
-    return [DownloadTool(), ConvertTool(), MatchCutsTool()]
+    from .template_tool import TemplateTool
+    return [DownloadTool(), ConvertTool(), TemplateTool(), MatchCutsTool()]
