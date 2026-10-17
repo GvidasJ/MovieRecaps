@@ -61,7 +61,7 @@ NAMES = {"h264": "H.264", "hevc": "HEVC", "vp9": "VP9", "av1": "AV1", "vp8": "VP
          "aac": "AAC", "mp3": "MP3", "opus": "Opus", "vorbis": "Vorbis", "ac3": "AC-3", "eac3": "E-AC-3",
          "flac": "FLAC", "dts": "DTS", "truehd": "TrueHD", "alac": "ALAC"}
 
-# the encodes (night 10's measurement, work\t25\download_convert\NOTES.md: three samples -- a grainy 1080p film RAW,
+# the encodes (night 10's measurement, work\t25\download_convert\NOTES.md: three samples -- a 1080p movie RAW,
 # a VP9 1080x1920 60 fps Short, a 4K VP9 RAW -- each encoded both ways and compared with its source)
 X264 = ["-c:v", "libx264", "-preset", "slow", "-crf", "13", "-profile:v", "high", "-pix_fmt", "yuv420p"]
 X264_10BIT = ["-c:v", "libx264", "-preset", "slow", "-crf", "13", "-profile:v", "high10", "-pix_fmt", "yuv420p10le"]
@@ -77,6 +77,8 @@ AAC_STEREO = "320k"
 AAC_SURROUND = "640k"                # 3-6 channels (5.1)
 AAC_71 = "768k"
 CHECK_AUDIO_S = 0.15                 # the sound's length may differ this much (AAC's start/end padding)
+LOW_PRIORITY = True                  # FFmpeg at below-normal priority: the window, Premiere and the matching tool
+BELOW_NORMAL_PRIORITY_CLASS = 0x4000 # stay quick (on an idle PC it is just as fast)
 GRID_TOLERANCE = 0.3                 # frame times spread less than this share of a frame around the grid -> CFR
 
 
@@ -578,8 +580,9 @@ def _target(src: Path, out_dir: Path, delete_original: bool) -> Path:
 def _run_ffmpeg(cmd: list[str], duration: float | None, label: str, say: Progress,
                 cancel: threading.Event | None, log_f) -> int:
     """Run FFmpeg hidden: its log -> ``log_f``, its progress (stdout) -> ``say``; cancel kills it (Cancelled)."""
+    flags = CREATE_NO_WINDOW | (BELOW_NORMAL_PRIORITY_CLASS if LOW_PRIORITY else 0)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log_f, stdin=subprocess.DEVNULL, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1, creationflags=CREATE_NO_WINDOW)
+                            encoding="utf-8", errors="replace", bufsize=1, creationflags=flags)
     state: dict[str, str] = {}
     stop = threading.Event()
 

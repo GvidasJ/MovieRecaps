@@ -174,10 +174,21 @@ def test_keeping_the_original_of_an_mp4_gives_the_copy_another_name(media, tmp_p
     assert res2.path == src and res2.deleted_original and _probe(src, "stream=codec_name", "a:0") == "aac"
 
 
-def test_out_dir(media, tmp_path):
+def test_out_dir_and_ffmpeg_runs_hidden_at_below_normal_priority(media, tmp_path, monkeypatch):
     src = _copy(media, "vp9_opus.webm", tmp_path / "in")
+    flags = []
+    real_popen = subprocess.Popen
+
+    def spy(*a, **k):
+        cmd = a[0] if a else k.get("args")
+        flags.append((cmd[0], "-progress" in cmd, k.get("creationflags", 0)))
+        return real_popen(*a, **k)
+    monkeypatch.setattr(C.subprocess, "Popen", spy)
     res = C.convert_file(src, out_dir=tmp_path / "out", gpu="off")
     assert res.path == tmp_path / "out" / "vp9_opus.mp4" and not src.exists()
+    assert all(f & 0x08000000 for _, _, f in flags)                      # every FFmpeg / ffprobe hidden
+    encodes = [f for _, enc, f in flags if enc]
+    assert encodes and all(f & 0x4000 for f in encodes)                   # the encode at below-normal priority
 
 
 def test_51_sound_stays_51_as_aac_640(media, tmp_path):

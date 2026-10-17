@@ -4,7 +4,6 @@ the daily yt-dlp update, a project's download step. Nothing here goes to the int
 Run: python -m pytest tools/app/tests/test_download.py"""
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
