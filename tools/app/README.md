@@ -57,8 +57,10 @@ Drop any video (or many, or a folder). Like Shutter Encoder, with FFmpeg:
 | ProRes / DNxHD / CineForm in MOV | kept (Premiere edits them well) |
 
 The new file is **checked** (the same number of frames and the same length) before the original is deleted ("Delete
-the original when the new file is checked", on by default). Encoder: Auto = the graphics card (NVENC) when it gives
-the same quality as the processor, else the processor (measured, see reports\night10.md).
+the original when the new file is checked", on by default). Encoder: **Auto = the processor** (x264 CRF 13, slow):
+measured on night 10, the graphics card (NVENC) reaches the same quality only at about twice the file size
+(reports\night10.md, section 3); "Graphics card" uses it anyway (never worse, about twice as big). FFmpeg runs at
+below-normal priority, so an edit running at the same time keeps its speed.
 
 ## Template
 
