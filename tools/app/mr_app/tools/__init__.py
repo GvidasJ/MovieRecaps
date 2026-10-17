@@ -14,10 +14,7 @@ class Tool:
 
 
 def tools() -> list[Tool]:
-    from .coming_soon import ComingSoon
+    from .convert_tool import ConvertTool
     from .download_tool import DownloadTool
     from .match_cuts_tool import MatchCutsTool
-    return [DownloadTool(),
-            ComingSoon("convert", "Convert", "Change a video's format with FFmpeg, with no quality loss "
-                                             "(like Shutter Encoder)."),
-            MatchCutsTool()]
+    return [DownloadTool(), ConvertTool(), MatchCutsTool()]
