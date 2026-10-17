@@ -235,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="--premiere: move every clip whose framing does not show the person speaking onto them, as "
                         "before night 3 (an interview where the competitor shows the listener). Default: the "
                         "competitor's own framing is kept -- your finished 020 / 021 / laptop004 framed such clips back")
+    p.add_argument("--watermark", default=None, metavar="PNG",
+                   help="--premiere: your channel's watermark (night 10: assets\\channels\\<channel>\\watermark.png) on "
+                        "its own track above the frame for the whole edit, as in your channel projects: Scale filling "
+                        "the sequence (50 %% for a 2160x3840 PNG on the 1080x1920 sequence), Opacity 75 %%, Blend Mode "
+                        "Overlay")
+    p.add_argument("--watermark-opacity", type=float, default=75.0, help=argparse.SUPPRESS)
     p.add_argument("--frame-size", type=_comp_size, default=None, metavar="WxH",
                    help="--frame: the sequence size 1_edit.xml is made for (default: the PNG's own size -- 1080x1920 "
                         "for the default template, 2160x3840 for input/frame.png; the PNG is scaled to it)")
@@ -366,6 +372,9 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
         cfg.frame_png = str(d) if d is not None else ""
     if cfg.frame_png and getattr(args, "frame_size", None):
         cfg.frame_size = str(args.frame_size)
+    if getattr(args, "watermark", None):
+        cfg.watermark_png = str(args.watermark)
+        cfg.watermark_opacity = float(getattr(args, "watermark_opacity", 75.0) or 75.0)
     cfg.remove_silence = bool(getattr(args, "remove_silence", False))
     cfg.premiere_scene_cuts = not bool(getattr(args, "no_scene_split", False))
     cfg.premiere_normal_audio = not bool(getattr(args, "audio_lines", False))
@@ -770,6 +779,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             load_frame(args.frame)                       # a readable PNG with a transparent hole, or stop here
         except Exception as e:  # noqa: BLE001 - said to the user
             print(f"match_cuts: --frame {args.frame}: {e}", file=sys.stderr)
+            return 2
+    if getattr(args, "watermark", None):
+        if not args.premiere or raw_only:
+            print("match_cuts: --watermark goes into the Premiere edit (1_edit.xml): add --premiere (and a competitor)",
+                  file=sys.stderr)
+            return 2
+        try:
+            from PIL import Image
+            with Image.open(args.watermark) as im:      # a readable picture, or stop here
+                im.load()
+        except Exception as e:  # noqa: BLE001 - said to the user
+            print(f"match_cuts: --watermark {args.watermark}: not a readable PNG ({type(e).__name__}: {e})",
+                  file=sys.stderr)
             return 2
     for n in notes:
         print(f"match_cuts: WARNING: {n}", file=sys.stderr)

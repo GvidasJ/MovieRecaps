@@ -204,13 +204,31 @@ the competitor-timed recreation the checks read is `extras\debug\recreation_chec
 ..\..\.venv\Scripts\python -m match_cuts --premiere --frame input\frame.png --speed 125
 ```
 
+### Your channel's watermark (`--watermark PNG`, night 10)
+
+`--watermark assets\channels\LouLaughs\watermark.png` puts the channel's watermark on **its own track above the
+frame** (V3; V2 without a frame) **over the whole edit**, exactly as in your channel projects
+(`WTAERMARK_FLICK707_V2`): **Scale 50 %** (the 2160x3840 PNG filling the 1080x1920 sequence -- in general the PNG
+scaled to fill the sequence), centred, **Opacity 75 %**, **Blend Mode Overlay**. FCP7 XML calls Overlay
+`texturize` (`<compositemode>texturize</compositemode>`): Premiere Pro's XML import turns exactly that into its
+Overlay -- tested by importing `1_edit.xml` into Premiere Pro 2024, saving the project and reading the clip's Blend
+Mode back (the same values your own Overlay watermark has; `overlay` or a blend setting inside the Opacity effect
+came in as Normal). The PNG is copied into `extras\media\watermark.png`; the hard check `XML WATERMARK` fails the run
+when the top track does not hold exactly the watermark over the whole edit with Overlay, 75 % and that scale (also
+at `--speed 125`). `preview_recreation.mp4` shows it the same way (Overlay at 75 %). The app (Match cuts tab) adds it
+for the channel you pick.
+
+```
+..\..\.venv\Scripts\python -m match_cuts --premiere --frame template.png --watermark ..\..\assets\channels\Flick707\watermark.png
+```
+
 ### Premiere (`--premiere`)
 
 `1_edit.xml` is a 1080×1920 sequence (with a frame: the frame's own size) **at the RAW's own frame rate** (night 7:
 a 23.976 RAW gives a 23.976 sequence, 29.97 a 29.97 one, and so on; a RAW at a rate Premiere does not use -- 15, 20,
 48 fps, or a variable rate -- the nearest of 23.976, 24, 25, 29.97, 30, 50, 59.94, 60; `--sequence-fps 60` gives the
 old 60 fps sequence) with the edit on V1, the RAW audio on A1 (every clip at 0 dB) and your template on V2 (`--frame`:
-that PNG; `--no-frame`: V2 and above empty).
+that PNG; `--no-frame`: V2 and above empty), and with `--watermark` the channel's watermark on the track above it.
 
 How (night 7): the edit is still **planned and checked on the 60 fps grid** (every competitor frame a whole number of
 sequence frames: a competitor whose rate does not divide 60 gets the whole multiple of its rate nearest to it -- 24 fps

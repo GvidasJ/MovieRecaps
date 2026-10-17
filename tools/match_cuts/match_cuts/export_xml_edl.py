@@ -3484,6 +3484,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                  + f" ({cl.in_error_ms:+.2f} ms from the plan)")
     if str(getattr(cfg, "frame_png", "") or ""):                      # --frame: the PNG on V2, over everything
         _frame_track(video, str(cfg.frame_png), N, fps, W, H)
+    if str(getattr(cfg, "watermark_png", "") or ""):                  # --watermark: its own track above the frame
+        _watermark_track(video, str(cfg.watermark_png), N, fps, W, H,
+                         float(getattr(cfg, "watermark_opacity", WATERMARK_OPACITY) or WATERMARK_OPACITY))
     # A1: the RAW audio at the SAME record ranges as V1 (picture-synced; an audio line where FX-14 found one)
     if has_audio:
         audio = _sub(media, "audio")
@@ -3542,6 +3545,15 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
 
 
 FRAME_CLIP = "clipitem-frame"
+# --watermark (night 10): the channel's watermark.png on its own track above the frame for the whole edit, as in your
+# WTAERMARK_FLICK707_V2 project: Scale 50 % (the 2160x3840 PNG filling the 1080x1920 sequence -- in general the
+# PNG scaled to fill the sequence, like the frame), Opacity 75 %, Blend Mode Overlay. FCP7 XML names Overlay
+# "texturize": Premiere's XML import turns <compositemode>texturize</compositemode> into Overlay (tested in Premiere
+# Pro 2024: imported and saved, the clip's Opacity "Blend Mode" holds 19 / 15 -- the values your own Overlay
+# watermark has; "overlay" and a blend parameter in the Opacity filter came in as Normal).
+WATERMARK_CLIP = "clipitem-watermark"
+WATERMARK_COMPOSITE = "texturize"     # FCP7's composite mode name for Overlay
+WATERMARK_OPACITY = 75.0
 
 
 def speed_problems(base_xml: str | os.PathLike, fast_xml: str | os.PathLike, k: float) -> list[str]:
@@ -3696,6 +3708,113 @@ def frame_track_problems(xml_path: str | os.PathLike, n: int) -> list[str]:
     if not path or not Path(path).is_file():
         out.append(f"XML FRAME: the frame file {url} does not exist")
     return out
+
+
+def watermark_track_problems(xml_path: str | os.PathLike, n: int, opacity: float = WATERMARK_OPACITY) -> list[str]:
+    """--watermark: the TOP video track must hold exactly the watermark PNG over the whole edit (``n`` frames), above
+    the frame, with straight alpha, an existing file, Blend Mode Overlay (texturize), its opacity and a scale that
+    fills the sequence -- otherwise part of the edit is shown without it, or it looks unlike your channel's."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    tracks = seq.findall("media/video/track") if seq is not None else []
+    if len(tracks) < 2:
+        return ["XML WATERMARK: no track with the watermark"]
+    items = tracks[-1].findall("clipitem")
+    if len(items) != 1 or items[0].get("id") != WATERMARK_CLIP:
+        return [f"XML WATERMARK: the top video track holds {len(items)} item(s), want the watermark alone"]
+    ci = items[0]
+    out = []
+    if (int(_text(ci, "start", -9)), int(_text(ci, "end", -9))) != (0, int(n)):
+        out.append(f"XML WATERMARK: the watermark covers {_text(ci, 'start')}-{_text(ci, 'end')}, want 0-{n} (the whole "
+                   "edit)")
+    if str(_text(ci, "alphatype", "")).lower() != "straight":
+        out.append("XML WATERMARK: alphatype is not straight")
+    if str(_text(ci, "compositemode", "")).lower() != WATERMARK_COMPOSITE:
+        out.append(f"XML WATERMARK: compositemode is {_text(ci, 'compositemode', 'none')!r}, want "
+                   f"{WATERMARK_COMPOSITE!r} (Premiere's Overlay)")
+    vals = {(eff.findtext("effectid") or "", p.findtext("parameterid") or ""): p.findtext("value")
+            for eff in ci.iter("effect") for p in eff.findall("parameter")}
+    try:
+        op = float(vals.get(("opacity", "opacity")) or "nan")
+    except ValueError:
+        op = float("nan")
+    if not abs(op - float(opacity)) < 1e-6:
+        out.append(f"XML WATERMARK: opacity {vals.get(('opacity', 'opacity'))}, want {opacity:g}")
+    url = str(_text(ci, "file/pathurl", "") or "")
+    if not url:                                   # the <file> is written once; a later reference has no pathurl
+        fid = (ci.find("file").get("id") if ci.find("file") is not None else "") or ""
+        fe = next((f for f in root.iter("file") if f.get("id") == fid and f.findtext("pathurl")), None)
+        url = fe.findtext("pathurl") if fe is not None else ""
+    path = urllib.parse.unquote(url.replace("file://localhost/", "", 1)) if url.startswith("file://localhost/") else ""
+    if not path or not Path(path).is_file():
+        out.append(f"XML WATERMARK: the watermark file {url} does not exist")
+    else:
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+            W = int(_text(seq, "media/video/format/samplecharacteristics/width", 0))
+            H = int(_text(seq, "media/video/format/samplecharacteristics/height", 0))
+            want = 100.0 * max(W / float(w), H / float(h))
+            got = float(vals.get(("basic", "scale")) or "nan")
+            if not abs(got - want) < 0.01:
+                out.append(f"XML WATERMARK: scale {got:g} %, want {want:g} % (the PNG filling the {W}x{H} sequence)")
+        except Exception as e:  # noqa: BLE001 - an unreadable PNG
+            out.append(f"XML WATERMARK: the watermark PNG cannot be read ({type(e).__name__}: {e})")
+    return out
+
+
+def _watermark_track(video: ET.Element, png: str, n: int, fps: Fraction, W: int, H: int,
+                     opacity: float = WATERMARK_OPACITY) -> None:
+    """--watermark (night 10, see WATERMARK_CLIP): the channel's watermark PNG on its own track above everything for
+    the whole edit -- one still clip, straight alpha, scaled to fill the W x H sequence (50 % for a 2160x3840 PNG on
+    1080x1920), centred, Opacity ``opacity`` %, Blend Mode Overlay (FCP7's "texturize")."""
+    from PIL import Image
+    with Image.open(png) as im:
+        pw, ph = im.size
+    scale = 100.0 * max(W / float(pw), H / float(ph))
+    name = Path(png).name
+    tr = _sub(video, "track")
+    ci = _sub(tr, "clipitem", id=WATERMARK_CLIP)
+    _sub(ci, "masterclipid", "masterclip-watermark")
+    _sub(ci, "name", name)
+    _sub(ci, "enabled", "TRUE")
+    _sub(ci, "duration", int(n))
+    _rate_el(ci, fps)
+    _sub(ci, "start", 0)
+    _sub(ci, "end", int(n))
+    _sub(ci, "in", 0)
+    _sub(ci, "out", int(n))
+    _sub(ci, "alphatype", "straight")
+    _sub(ci, "pixelaspectratio", "square")
+    _sub(ci, "anamorphic", "FALSE")
+    _sub(ci, "compositemode", WATERMARK_COMPOSITE)
+    fe = _sub(ci, "file", id="file-watermark")
+    _sub(fe, "name", name)
+    _sub(fe, "pathurl", _file_url(str(Path(png).resolve())))
+    _rate_el(fe, fps)
+    _sub(fe, "duration", int(n))
+    sc = _sub(_sub(_sub(fe, "media"), "video"), "samplecharacteristics")
+    _rate_el(sc, fps)
+    _sub(sc, "width", int(pw))
+    _sub(sc, "height", int(ph))
+    _sub(sc, "anamorphic", "FALSE")
+    _sub(sc, "pixelaspectratio", "square")
+    _sub(sc, "fielddominance", "none")
+    e = _effect(_sub(ci, "filter"), "Basic Motion", "basic", "motion", "motion")
+    _param(e, "scale", "Scale", _fmt(scale), 0, 1000)
+    _param(e, "rotation", "Rotation", "0", -8640, 8640)
+    _param(e, "center", "Center", (0.0, 0.0))
+    _param(e, "centerOffset", "Anchor Point", (0.0, 0.0))
+    o = _effect(_sub(ci, "filter"), "Opacity", "opacity", "motion", "motion")
+    _param(o, "opacity", "opacity", _fmt(opacity), 0, 100)
+    st = _sub(ci, "sourcetrack")
+    _sub(st, "mediatype", "video")
+    _sub(st, "trackindex", 1)
+    cm = _sub(ci, "comments")
+    _sub(cm, "mastercomment1", "WATERMARK")
+    _sub(cm, "mastercomment2", f"--watermark {name} ({pw}x{ph}): Scale {scale:g} %, Opacity {opacity:g} %, Blend Mode "
+                               "Overlay (FCP7 XML: texturize), over the whole edit")
 
 
 def _frame_track(video: ET.Element, png: str, n: int, fps: Fraction, W: int, H: int) -> None:
@@ -5168,11 +5287,18 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
                 any(a.rec_out != b.rec_in for a, b in zip(evs, evs[1:])):
             errors.append(f"XML {cl.label}: record range {cl.rec_start}-{cl.rec_end} is not the competitor cut x {fac}")
     framed = bool(str(getattr(cfg, "frame_png", "") or ""))
-    if x["video_tracks"] != (2 if framed else 1):
-        errors.append(f"XML: {x['video_tracks']} video tracks (" + ("V1 and the frame on V2" if framed else
+    marked = bool(str(getattr(cfg, "watermark_png", "") or ""))
+    if x["video_tracks"] != 1 + int(framed) + int(marked):
+        want = "V1" + (", the frame on V2" if framed else "") + (", the watermark on top" if marked else "")
+        errors.append(f"XML: {x['video_tracks']} video tracks (" + (want if framed or marked else
                                                                      "V1 only; V2+ must stay empty") + ")")
-    elif framed:
-        errors += frame_track_problems(xml_path, x["duration"])
+    else:
+        if framed:
+            errors += frame_track_problems(xml_path, x["duration"])
+        if marked:
+            errors += watermark_track_problems(xml_path, x["duration"],
+                                               float(getattr(cfg, "watermark_opacity", WATERMARK_OPACITY) or
+                                                     WATERMARK_OPACITY))
     if x["audio_tracks"] > 1:
         errors.append(f"XML: {x['audio_tracks']} audio tracks (A1 only)")
     if x.get("generators"):

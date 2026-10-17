@@ -3741,6 +3741,25 @@ def prepare_frame(ctx: Context) -> Any:
     return fr
 
 
+def prepare_watermark(ctx: Context) -> str:
+    """--watermark (night 10): the channel's watermark PNG copied into the run's media folder as watermark.png
+    (1_edit.xml points at the copy: the run folder holds its own media); its path, or '' without --watermark."""
+    cfg = ctx.cfg
+    if not getattr(cfg, "premiere", False) or not str(getattr(cfg, "watermark_png", "") or ""):
+        return ""
+    import shutil
+    src = Path(cfg.watermark_png)
+    cfg.media_dir.mkdir(parents=True, exist_ok=True)
+    dst = cfg.media_dir / ("watermark" + (src.suffix.lower() or ".png"))
+    if src.resolve() != dst.resolve():
+        shutil.copyfile(src, dst)
+    cfg.watermark_png = str(dst.resolve())
+    log.info("--watermark %s: on its own track above the frame for the whole edit -- Scale filling the sequence, "
+             "Opacity %g %%, Blend Mode Overlay", src.name, float(getattr(cfg, "watermark_opacity", 75.0)))
+    ctx.paths["watermark"] = str(dst)
+    return str(dst)
+
+
 def stage_finish(ctx: Context) -> None:
     """The Premiere edit's last step, after it was made, checked and captioned at 100 %: --speed (1_edit.xml and
     2_captions.srt played that fast -- the 100 % versions stay in extras/ as edit_100pct.xml / captions_100pct.srt) and
@@ -3815,6 +3834,10 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
     probs = X.premiere_item_problems(xml)
     if str(getattr(cfg, "frame_png", "") or ""):
         probs += X.frame_track_problems(xml, X.parse_premiere_xml(xml)["duration"])
+    if str(getattr(cfg, "watermark_png", "") or ""):
+        probs += X.watermark_track_problems(xml, X.parse_premiere_xml(xml)["duration"],
+                                            float(getattr(cfg, "watermark_opacity", X.WATERMARK_OPACITY) or
+                                                  X.WATERMARK_OPACITY))
     if rate == plan:
         probs += X.speed_problems(base, xml, k)
     elif not probs:
@@ -4239,6 +4262,7 @@ def run(cfg: Config) -> dict:
     for note in resolve_gpu(cfg):
         ctx.warn(note)
     ctx.frame = prepare_frame(ctx)
+    prepare_watermark(ctx)
     if abs(float(getattr(cfg, "premiere_speed", 1.0) or 1.0) - 1.0) > 1e-9:
         log.info("--speed %g: the edit is made at 100 %%, then 1_edit.xml plays it at %g %%",
                  100.0 * cfg.premiere_speed, 100.0 * cfg.premiere_speed)

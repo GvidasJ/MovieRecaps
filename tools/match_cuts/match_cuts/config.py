@@ -84,6 +84,10 @@ class Config:
                                            #   transparent hole, the PNG on the top video track, the preview framed
     frame_size: str = ""                   # --frame-size: the sequence 1_edit.xml is made for (the PNG scaled to it);
                                            #   "" = the frame PNG's own size (frame.sequence_size)
+    watermark_png: str = ""                # --watermark PNG (night 10): the channel's watermark on its own track above
+                                           #   the frame for the whole edit -- Scale filling the sequence (50 % for a
+                                           #   2160x3840 PNG on 1080x1920), Opacity 75 %, Blend Mode Overlay
+    watermark_opacity: float = 75.0        # --watermark-opacity: its Opacity (%)
     premiere_mirror: bool = False          # --mirror: keep the competitor's horizontal mirror in 1_edit.xml (default:
                                            #   the RAW the right way round, as in your finished 020 / laptop004)
     premiere_follow_speaker: bool = False  # --follow-speaker: move every framing that does not show the person speaking
@@ -397,7 +401,8 @@ class Config:
                   "premiere_static_framing", "premiere_follow_audio", "premiere_min_move", "keep_silence",
                   "remove_silence", "keep_speed",
                   "premiere_speed", "sequence_fps", "premiere_seq_rate",
-                  "frame_png", "frame_size", "premiere_mirror", "premiere_follow_speaker",
+                  "frame_png", "frame_size", "watermark_png", "watermark_opacity", "premiere_mirror",
+                  "premiere_follow_speaker",
                   "premiere_scene_cuts", "premiere_normal_audio", "premiere_min_clip_frames",
                   "silence_db", "min_silence", "pad_before", "pad_after", "silence_breaths", "allow_repeats",
                   "captions", "voiceover", "caption_model", "caption_check_model", "caption_recheck_model",

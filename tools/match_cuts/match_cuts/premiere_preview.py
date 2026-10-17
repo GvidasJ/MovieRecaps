@@ -20,6 +20,18 @@ PREVIEW_WIDTH = 1080        # the preview's width (a wider sequence is scaled do
 SR = 48000
 
 
+def _watermark_graph(src: str, idx: int, OW: int, OH: int, opacity: float) -> str:
+    """The ffmpeg filters that put the watermark (input ``idx``) over ``src`` the way Premiere shows it (night 10):
+    Blend Mode Overlay -- the video decides (dark parts darker, light parts lighter: ffmpeg's blend takes its first
+    input as the one whose value chooses, so the video goes first) -- at ``opacity`` % times the PNG's own alpha.
+    Ends in the label [out]."""
+    a = max(0.0, min(1.0, float(opacity) / 100.0))
+    return (f"[{src}]format=gbrp,split[wb1][wb2];[{idx}:v]scale={OW}:{OH},format=rgba,split[wc][wa];"
+            f"[wc]format=gbrp[wrgb];[wa]alphaextract,lut=y=val*{a:.4f}[wam];"
+            f"[wb1][wrgb]blend=all_mode=overlay[wbl];[wbl][wam]alphamerge[wbla];"
+            f"[wb2][wbla]overlay=0:0:format=gbrp,format=yuv420p[out]")
+
+
 def _raw_file(xml_path: Path) -> tuple[str, int, int, Fraction]:
     """(path, width, height, frame rate) of the RAW the V1 clips play (its <file> entry in the XML)."""
     root = ET.parse(str(xml_path)).getroot()
@@ -75,6 +87,8 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
     raw, rw, rh, raw_fps = _raw_file(xml_path)
     n_total = int(x["duration"])
     ff = ffmpeg_bin()
+    wm = str(getattr(cfg, "watermark_png", "") or "")          # --watermark: Overlay over the frame (night 10)
+    wm_op = float(getattr(cfg, "watermark_opacity", 75.0) or 75.0)
     with tempfile.TemporaryDirectory(prefix="mc_preview_", dir=str(out_path.parent)) as td:
         tdir = Path(td)
         parts: list[Path] = []
@@ -82,7 +96,7 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
         cursor = 0
         for i, (c, (a, b)) in enumerate(zip(x["clips"], spans)):
             if a > cursor:                                    # a gap on V1: black under the frame
-                parts.append(_still(ff, tdir / f"gap{i:03d}.mp4", frame.path, a - cursor, fps, OW, OH))
+                parts.append(_still(ff, tdir / f"gap{i:03d}.mp4", frame.path, a - cursor, fps, OW, OH, wm, wm_op))
             n = b - max(a, cursor)
             if n <= 0:
                 continue
@@ -97,16 +111,19 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
             flip = ",hflip" if c.get("flip") else ""
             graph = (f"[0:v]setpts=(PTS-STARTPTS)/{v:.6f},fps={fps},scale={sw}:{sh}{flip},setsar=1[v];"
                      f"color=c=black:s={OW}x{OH}:r={fps}[bg];[bg][v]overlay=x={ox}:y={oy}:eof_action=repeat[base];"
-                     f"[1:v]scale={OW}:{OH},format=rgba[fr];[base][fr]overlay=0:0,format=yuv420p[out]")
+                     f"[1:v]scale={OW}:{OH},format=rgba[fr];" +
+                     ("[base][fr]overlay=0:0,format=yuv420p[out]" if not wm else
+                      "[base][fr]overlay=0:0[framed];" + _watermark_graph("framed", 2, OW, OH, wm_op)))
             p = tdir / f"clip{i:03d}.mp4"
             cmd = [ff, "-v", "error", "-y", "-ss", f"{max(0.0, s0):.6f}", "-i", raw, "-loop", "1", "-i", str(frame.path),
+                   *(["-loop", "1", "-i", wm] if wm else []),
                    "-filter_complex", graph, "-map", "[out]", "-frames:v", str(n), "-r", str(fps), "-an",
                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(p)]
             subprocess.run(cmd, check=True)
             parts.append(p)
             cursor = b
         if n_total > cursor:
-            parts.append(_still(ff, tdir / "tail.mp4", frame.path, n_total - cursor, fps, OW, OH))
+            parts.append(_still(ff, tdir / "tail.mp4", frame.path, n_total - cursor, fps, OW, OH, wm, wm_op))
         lst = tdir / "parts.txt"
         lst.write_text("".join(f"file '{q.as_posix()}'\n" for q in parts), encoding="utf-8")
         video = tdir / "video.mp4"
@@ -121,11 +138,14 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
             "seconds": round(time.perf_counter() - t_start, 1), "path": str(out_path)}
 
 
-def _still(ff: str, path: Path, png: str, n: int, fps: Fraction, OW: int, OH: int) -> Path:
-    """n frames of black under the frame (a gap on V1, or after the last clip)."""
-    graph = (f"color=c=black:s={OW}x{OH}:r={fps}[bg];[0:v]scale={OW}:{OH},format=rgba[fr];"
-             f"[bg][fr]overlay=0:0,format=yuv420p[out]")
-    subprocess.run([ff, "-v", "error", "-y", "-loop", "1", "-i", png, "-filter_complex", graph, "-map", "[out]",
+def _still(ff: str, path: Path, png: str, n: int, fps: Fraction, OW: int, OH: int, wm: str = "",
+           wm_op: float = 75.0) -> Path:
+    """n frames of black under the frame (a gap on V1, or after the last clip), the watermark over it (--watermark)."""
+    graph = (f"color=c=black:s={OW}x{OH}:r={fps}[bg];[0:v]scale={OW}:{OH},format=rgba[fr];" +
+             ("[bg][fr]overlay=0:0,format=yuv420p[out]" if not wm else
+              "[bg][fr]overlay=0:0[framed];" + _watermark_graph("framed", 1, OW, OH, wm_op)))
+    subprocess.run([ff, "-v", "error", "-y", "-loop", "1", "-i", png, *(["-loop", "1", "-i", wm] if wm else []),
+                    "-filter_complex", graph, "-map", "[out]",
                     "-frames:v", str(int(n)), "-r", str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                     str(path)], check=True)
     return path
