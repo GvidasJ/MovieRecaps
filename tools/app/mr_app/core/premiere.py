@@ -75,8 +75,13 @@ def window_up() -> bool:
 
 
 def named_copy(xml: Path) -> Path:
-    """The run's 1_edit.xml as <run folder name>_edit.xml next to it (Premiere names the new project after it)."""
-    out = xml.with_name(f"{xml.parent.name}_edit.xml")
+    """The run's 1_edit.xml as <run folder name>_edit.xml next to it (Premiere names the new project after it); a
+    project's edit (<project>\\edit, edit-2 ...) is named after the project (night 10)."""
+    run = xml.parent
+    name = f"{run.name}_edit"
+    if re.fullmatch(r"(?i)edit(-\d+)?", run.name) and (run.parent / "project.json").is_file():
+        name = f"{run.parent.name}_{run.name}"              # 2026-10-17_a-lot-to-catch-up-on_edit(-2)
+    out = xml.with_name(f"{name}.xml")
     if not out.is_file() or out.stat().st_mtime < xml.stat().st_mtime:
         shutil.copy2(xml, out)
     return out

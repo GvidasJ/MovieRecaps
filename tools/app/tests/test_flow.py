@@ -182,6 +182,15 @@ def test_learning_from_a_projects_edit_takes_the_projects_name(tmp_path):
     assert learnkit.name_from(None, tmp_path / "output" / "video4-2") == "video4"
 
 
+def test_open_in_premiere_names_a_projects_edit_after_the_project(tmp_path):
+    from mr_app.core import premiere
+    p = _project(tmp_path)
+    for run in ("edit", "edit-2"):
+        (p.folder / run).mkdir()
+        (p.folder / run / "1_edit.xml").write_text("<xmeml/>", encoding="utf-8")
+        assert premiere.named_copy(p.folder / run / "1_edit.xml").name == f"{p.folder.name}_{run}.xml"
+
+
 def test_steps_status_lists_the_projects(tmp_path, monkeypatch, capsys):
     import importlib
     p = _project(tmp_path)

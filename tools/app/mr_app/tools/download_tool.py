@@ -54,11 +54,14 @@ class Item:
 
 
 def estimate_bytes(li) -> int:
-    """The download's size from a probe (download.LinkInfo): the chosen formats' sizes (or bitrate x length)."""
+    """The room a link needs (download.LinkInfo): its chosen formats' size (or bitrate x length) -- about 4x that
+    when the picture is VP9 / AV1 and will be converted (the original and a visually lossless H.264 up to ~3x as
+    big sit side by side until the check: a 1.08 GB 4K VP9 became 2.9 GB tonight), else 1.1x."""
     try:
         from ..core import download as D
         ch = D.pick_formats(li.info.get("formats") or ([li.info] if li.info.get("url") else []))
-        return int(sum(D._expected(f, li.duration) for f in ch.parts))       # noqa: SLF001 - the same package
+        size = sum(D._expected(f, li.duration) for f in ch.parts)        # noqa: SLF001 - the same package
+        return int(size * (1.1 if ch.video_kind in ("h264", "hevc") else 4.0))
     except Exception:  # noqa: BLE001
         return 0
 
@@ -132,11 +135,18 @@ class PrepareThread(QThread):
             need += estimate_bytes(lr)
             say("raw", 0.0, f"{lr.title[:70]} -- {D.clock(lr.duration)} ({lr.why})")
         elif it.raw_file is not None:
-            need += 0 if space.same_drive(it.raw_file, paths.projects_root()) else space.size(it.raw_file)
-            say("raw", 0.0, f"the file {Path(it.raw_file).name} ({D.size_text(space.size(it.raw_file))})")
+            n = space.size(it.raw_file)
+            need += 0 if space.same_drive(it.raw_file, paths.projects_root()) else n     # copied, not linked
+            try:                                              # converted next to it first: room for the new file
+                from ..core import convert as C
+                how = C.plan(C.inspect(it.raw_file)).how
+                need += {"encode": 3 * n, "rewrap": n}.get(how, 0)
+            except Exception:  # noqa: BLE001 - not readable: the convert step says so
+                pass
+            say("raw", 0.0, f"the file {Path(it.raw_file).name} ({D.size_text(n)})")
         root = paths.projects_root()
         free = space.free_bytes(root)
-        want = int(need * 2.1) + space.GB                  # a converted copy sits next to its original for a moment
+        want = int(need) + space.GB                        # (estimate_bytes counts the conversion's copy too)
         if free is not None and need and free < want:
             raise flow.StepError(f"not enough free space on {space.drive_name(root)}: these videos need about "
                                  f"{want / space.GB:.1f} GB while they are downloaded and converted, only "
