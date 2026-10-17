@@ -115,9 +115,12 @@ def test_ae_safe_raw_linked_unchanged(clips, tmp_path):
     assert any(e["decision"] == "copy" and e["role"] == "raw" for e in lines)
 
 
-def test_large_ae_safe_raw_is_hard_linked_into_media_else_referenced_by_path(clips, tmp_path, monkeypatch):
+def test_large_ae_safe_raw_is_hard_linked_into_media_else_copied(clips, tmp_path, monkeypatch, caplog):
     """A big RAW (output/020's 3 GB 4K) goes into media/ as a hard link -- no copy, and the run keeps working when the
-    input folder is moved or deleted; only where the drive cannot link is it referenced where it lies."""
+    input folder is moved or deleted. Night 10: where the drive cannot link (another drive, a network folder like
+    D:\\Shared over Wi-Fi, a USB drive) it is COPIED there -- never referenced where it lies -- and the log says
+    "copied, not linked: <reason>"."""
+    import logging
     import os
     from match_cuts import conform as C
     cfg = make_cfg(tmp_path, large_file_bytes=1000)
@@ -126,11 +129,43 @@ def test_large_ae_safe_raw_is_hard_linked_into_media_else_referenced_by_path(cli
     dst = tmp_path / "out" / "media" / "raw.mp4"
     assert not res.conformed and res.file_rel == "media/raw.mp4" and os.path.samefile(dst, clips["safe"])
     dst.unlink()
-    monkeypatch.setattr(C.os, "link", lambda a, b: (_ for _ in ()).throw(OSError("another drive")))
+    err = OSError(17, "The system cannot move the file to a different disk drive")
+    monkeypatch.setattr(C.os, "link", lambda a, b: (_ for _ in ()).throw(err))
     cfg2 = make_cfg(tmp_path / "b", large_file_bytes=1000)
-    res = conform(probe(clips["safe"], "raw", cfg2.work_dir), "raw", cfg2, None)
-    assert not res.conformed and res.file_rel == "" and res.path == res.file_abs == str(clips["safe"].resolve())
-    assert not (tmp_path / "b" / "out" / "media" / "raw.mp4").exists()
+    before = file_hash(clips["safe"])
+    with caplog.at_level(logging.INFO, logger="match_cuts"):
+        res = conform(probe(clips["safe"], "raw", cfg2.work_dir), "raw", cfg2, None)
+    copy = tmp_path / "b" / "out" / "media" / "raw.mp4"
+    assert not res.conformed and res.file_rel == "media/raw.mp4" and Path(res.path) == copy.resolve()
+    assert copy.is_file() and not os.path.samefile(copy, clips["safe"]) and file_hash(copy) == before
+    assert "copied, not linked: " in res.reason and "different disk drive" in res.reason
+    assert any("copied, not linked: " in r.getMessage() for r in caplog.records)
+    assert file_hash(clips["safe"]) == before and not list(copy.parent.glob("*.tmp"))
+
+
+def test_copy_into_media_needs_the_free_space_and_says_why_not_linked(tmp_path, monkeypatch):
+    """Not enough free space for the copy: a plain stop (NoSpaceError) that names the sizes and why it was not linked,
+    and no half-written file left in media/. The reasons in plain words: another drive, a network folder, a drive that
+    cannot hard-link."""
+    import shutil as _sh
+    from match_cuts import conform as C
+    src = tmp_path / "in" / "raw.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"x" * 4096)
+    dst = tmp_path / "media" / "raw.mp4"
+    dst.parent.mkdir()
+    err = OSError(17, "The system cannot move the file to a different disk drive")
+    monkeypatch.setattr(C.os, "link", lambda a, b: (_ for _ in ()).throw(err))
+    monkeypatch.setattr(C.shutil, "disk_usage", lambda p: _sh._ntuple_diskusage(10 ** 12, 10 ** 12, 1000))
+    with pytest.raises(C.NoSpaceError, match="not enough free space to copy raw.mp4"):
+        C._link_or_copy(src, dst)
+    assert not dst.exists() and not list(dst.parent.iterdir())
+    assert C.link_failure(Path("C:/in/raw.mp4"), Path("D:/out/raw.mp4"), err).startswith("another drive (C: -> D:)")
+    unc = "\\\\pc\\Shared\\Projects\\raw.mp4"
+    assert C.link_failure(Path("C:/in/raw.mp4"), Path(unc), OSError(1, "Incorrect function")).startswith(
+        "a network folder")
+    assert C.link_failure(Path("E:/a.mp4"), Path("E:/b/a.mp4"), OSError(1, "Incorrect function")).startswith(
+        "this drive cannot hard-link")
 
 
 def test_vfr_competitor_shows_frame_displayed_at_tk(clips, tmp_path):

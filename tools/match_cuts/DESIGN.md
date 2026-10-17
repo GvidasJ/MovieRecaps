@@ -268,8 +268,8 @@ def ae_issues(info) -> list[str]
 ```python
 @dataclass class ConformResult: path, conformed: bool, reason: str, verification: dict, source_path: str, file_rel: str, file_abs: str
 def conform(info: StreamInfo, role, cfg, dlog) -> ConformResult
-    # RAW AE-safe -> copy into output/media/ unchanged (hardlink if possible), or reference the absolute
-    #   path if > cfg.large_file_bytes (file_rel empty; the JSX offers a relink dialog).
+    # RAW AE-safe -> into output/media/ unchanged: a hard link if possible, else a copy, whatever its size
+    #   (night 10: every run folder holds its own media; "copied, not linked: <reason>"; NoSpaceError).
     # RAW not AE-safe -> output/media/raw_ae.mov: ProRes 422 LT via `-c:v prores -profile:v 1`
     #   (prores_aw, ~50 fps; prores_ks only on request) for <= 10 min, else output/media/raw_ae.mp4
     #   H.264 CRF 12; SAME resolution (display orientation, square pixels) & SAME nominal fps, CFR,

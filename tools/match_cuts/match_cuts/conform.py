@@ -1,12 +1,14 @@
 """Stage 2b — conform inputs to AE-safe media (DESIGN.md §5 conform.py, prompt Stage 2).
 
 RAW:
-  * AE-safe            -> hard-linked (or copied) into ``output/media/`` unchanged, or referenced by
-                          absolute path when larger than ``cfg.large_file_bytes`` (the JSX relinks).
+  * AE-safe            -> placed into ``output/media/`` unchanged: a hard link when the drive allows it (no copy,
+                          no extra space), else a copy -- another drive, a network folder, a USB drive (night 10:
+                          every run folder holds its own media, whatever its size; the log says "copied, not
+                          linked: <reason>"; not enough free space for the copy stops the run with that said).
   * not AE-safe        -> ``output/media/raw_ae.mov`` (ProRes 422 LT, prores_aw profile 1, PCM s16le
                           48 kHz) for <= 10 min, else ``raw_ae.mp4`` (H.264 CRF 12, AAC 48 kHz).
 COMPETITOR (reference layer + analysis): always ``output/media/competitor_ref.mp4`` (H.264 + AAC):
-  copied when AE-safe mp4/H.264/AAC, else transcoded.
+  placed the same way when AE-safe mp4/H.264/AAC, else transcoded.
 
 Every transcode keeps the resolution (display orientation, square pixels — rotation and SAR are baked
 in, odd sizes cropped by one px) and the NOMINAL frame rate, is CFR and starts at 0:
@@ -668,43 +670,61 @@ def _save_state(media: Path, state: dict) -> None:
     atomic_write_text(media / CONFORM_JSON, json.dumps(state, indent=1, sort_keys=True))
 
 
-def _hardlink(src: Path, dst: Path) -> bool:
-    """A big RAW hard-linked into media/ (no copy: the same file under a second name, so the run keeps working when
-    the input folder is moved or deleted); False when the drive cannot (another volume, FAT)."""
-    try:
-        if dst.exists() and os.path.samefile(src, dst):
-            return True
-    except OSError:
-        pass
-    tmp = dst.with_name(".link_" + dst.name)
-    try:
-        if tmp.exists():
-            tmp.unlink()
-        os.link(src, tmp)
-    except OSError:
-        return False
-    replace_file(tmp, dst)
-    return True
+COPY_RESERVE = 512 * 1024 ** 2        # a copy into media/ leaves at least this much free on its drive
 
 
-def _link_or_copy(src: Path, dst: Path) -> str:
-    """Place ``src`` at ``dst`` without ever writing into an existing inode (dst may be a hard link to an
-    input file: it is unlinked, never truncated). Returns 'same' | 'hardlink' | 'copy'."""
+class NoSpaceError(RuntimeError):
+    """Not enough free space on the run folder's drive to copy an input into its media/ folder."""
+
+
+def link_failure(src: Path, dst: Path, err: OSError) -> str:
+    """Why ``src`` could not be hard-linked at ``dst``, in plain words (the log's "copied, not linked: <reason>")."""
+    sd = os.path.splitdrive(os.path.abspath(src))[0]
+    dd = os.path.splitdrive(os.path.abspath(dst))[0]
+    if sd.startswith(("\\\\", "//")) or dd.startswith(("\\\\", "//")):
+        where = "a network folder"
+    elif sd.upper() != dd.upper():
+        where = f"another drive ({sd or '?'} -> {dd or '?'})"
+    else:
+        where = "this drive cannot hard-link (a USB drive formatted FAT / exFAT, or a network drive)"
+    return f"{where}: {err.strerror or err}"
+
+
+def _link_or_copy(src: Path, dst: Path) -> tuple[str, str]:
+    """Place ``src`` at ``dst`` -- every run folder holds its own media (night 10): a hard link when the drive allows
+    it (the same file under a second name: no copy, no extra space, the run keeps working when the input folder is
+    moved or deleted), else a copy (another drive, a network folder, a USB drive). Never writes into an existing
+    inode (dst may be a hard link to an input file: it is unlinked, never truncated). Returns (how, why): how 'same' |
+    'hardlink' | 'copy', why the reason a copy was made ('' otherwise). NoSpaceError when the copy would not fit."""
     if dst.exists():
         try:
             if os.path.samefile(src, dst):
-                return "same"
+                return "same", ""
+            s, d = src.stat(), dst.stat()
+            if s.st_size == d.st_size and s.st_mtime_ns == d.st_mtime_ns:     # our own earlier copy (copy2 keeps
+                return "same", ""                                              # the time): not copied again
         except OSError:
             pass
         dst.unlink()
     try:
         os.link(src, dst)
-        return "hardlink"
-    except OSError:
-        tmp = dst.with_name(dst.name + ".tmp")
+        return "hardlink", ""
+    except OSError as e:
+        why = link_failure(src, dst, e)
+    need, free = src.stat().st_size, shutil.disk_usage(dst.parent).free
+    if free < need + COPY_RESERVE:
+        raise NoSpaceError(f"not enough free space to copy {src.name} ({need / 1024 ** 3:.1f} GB) into the run "
+                           f"folder's media ({dst.parent}): {free / 1024 ** 3:.1f} GB free -- {why}. Free some space "
+                           "or choose an output folder on the RAW's own drive (there it is linked, not copied)")
+    log.info("copying %s (%.1f GB) into %s -- copied, not linked: %s", src.name, need / 1024 ** 3, dst.parent, why)
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
         shutil.copy2(src, tmp)
-        replace_file(tmp, dst)
-        return "copy"
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    replace_file(tmp, dst)
+    return "copy", why
 
 
 def _media_name_for_raw(src: Path) -> str:
@@ -747,31 +767,22 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
 
     # ------------------------------------------------------------------ untouched placement
     if not need:
-        big = role != "competitor" and info.file_size > int(getattr(cfg, "large_file_bytes", 2 * 1024 ** 3))
-        if big and not _hardlink(src, media / _media_name_for_raw(src)):
-            # another drive: no free link -- referenced where it is (the run then needs the input left in place)
-            params = {"mode": "reference", "version": STAGE_VERSION.get("conform", 1)}
-            res = ConformResult(str(src), False, f"AE-safe; {info.file_size / 1e9:.2f} GB > large_file_bytes: "
-                                "referenced by absolute path (the JSX offers a relink dialog)",
-                                {"method": "reference", "ok": True}, str(src), "", str(src))
-            state[role] = {"src_hash": src_hash, "params": params, "out_hash": src_hash, "out_file": "",
-                           "result": res.to_dict()}
-            _save_state(media, state)
-            dlog.record("conform", "reference", role=role, evidence={"file": str(src), "bytes": info.file_size})
-            log.info("conform %s: AE-safe, referenced by absolute path (%s)", role, src)
-            return res
+        # every run folder holds its own media, whatever its size (night 10): linked when the drive allows it, else
+        # copied -- never referenced where it lies (the run would break when the input folder moves)
         name = "competitor_ref.mp4" if role == "competitor" else _media_name_for_raw(src)
         dst = media / name
-        how = _link_or_copy(src, dst)
+        how, why = _link_or_copy(src, dst)
+        what = f"copied, not linked: {why}" if how == "copy" else how
         params = {"mode": "copy", "name": name, "version": STAGE_VERSION.get("conform", 1)}
-        res = ConformResult(str(dst.resolve()), False, f"AE-safe; {how} into media/ unchanged",
+        res = ConformResult(str(dst.resolve()), False, f"AE-safe; {what} into media/ unchanged",
                             {"method": "copy", "ok": True, "identical": True, "frames": int(info.nb_frames)},
                             str(src), os.path.relpath(dst.resolve(), out_root).replace(os.sep, "/"), str(dst.resolve()))
         state[role] = {"src_hash": src_hash, "params": params, "out_hash": src_hash, "out_file": name,
                        "result": res.to_dict()}
         _save_state(media, state)
-        dlog.record("conform", "copy", role=role, evidence={"file": str(src), "method": how, "ae_issues": []})
-        log.info("conform %s: AE-safe -> %s (%s)", role, dst, how)
+        dlog.record("conform", "copy", role=role, evidence={"file": str(src), "method": how, "why": why,
+                                                           "ae_issues": []})
+        log.info("conform %s: AE-safe -> %s (%s)", role, dst, what)
         return res
 
     # ------------------------------------------------------------------ transcode

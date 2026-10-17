@@ -127,7 +127,8 @@ class Config:
     compare_height: int = 960
     compare_crf: int = 18
     compare_preset: str = "veryfast"
-    large_file_bytes: int = 2 * 1024 ** 3  # RAW above this is referenced by absolute path, not copied
+    large_file_bytes: int = 2 * 1024 ** 3  # not used since night 10 (every run folder holds its own media: a hard
+                                           # link, else a copy -- conform._link_or_copy); kept for old settings
     workers: int = 0                       # 0 = one per physical core (physical_cores(); else os.cpu_count())
     pool_stall_timeout_s: float = 300.0    # hang protection (DESIGN D7): a worker pool that delivers no result for this
                                            # long (or loses a worker process) is stopped and its remaining tasks run in

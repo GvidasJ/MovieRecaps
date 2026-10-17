@@ -90,7 +90,7 @@ def test_no_module_opens_image_files_through_opencv():
 
 
 def test_media_urls_of_network_and_long_paths():
-    """A RAW over large_file_bytes is referenced where it lies: a network share keeps its server (file://server/...);
+    """A run folder on a network share (its media too, night 10): the share keeps its server (file://server/...);
     file://localhost/server/... was a folder of the current drive -- the clip offline in Premiere."""
     from match_cuts.export_xml_edl import _file_url
     bs = chr(92)

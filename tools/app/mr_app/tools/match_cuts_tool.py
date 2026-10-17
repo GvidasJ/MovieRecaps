@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame, QHBox
 
 from . import Tool
 from ..core import jobs as J
-from ..core import learnkit, paths, premiere
+from ..core import learnkit, paths, premiere, space
 from ..core import progress as P
 from ..core import results as R
 from ..ui import theme
@@ -642,22 +642,24 @@ class MatchCutsPage(QWidget):
         self.b_start.setEnabled(False)
         from match_cuts import batch
         pairs = [(j.name, Path(j.competitor), Path(j.raw)) for j in jobs if j.complete]
-        w = Worker(lambda: batch.input_problems(pairs))
-        w.finished_with.connect(lambda tool: self._checked(probs, tool))
-        w.failed.connect(lambda _e: self._checked(probs, {}))
+        runs = [(j.name, Path(j.competitor), Path(j.raw), self.out_dir / j.name) for j in jobs if j.complete]
+        w = Worker(lambda: (batch.input_problems(pairs), space.problems(runs)))
+        w.finished_with.connect(lambda r: self._checked(probs, r[0], r[1]))
+        w.failed.connect(lambda _e: self._checked(probs, {}, []))
         self.workers.append(w)
         w.start()
 
-    def _checked(self, probs: list, tool: dict) -> None:
+    def _checked(self, probs: list, tool: dict, room: list | None = None) -> None:
         for name, found in (tool or {}).items():
             mine = [p for p in probs if p.startswith(f"{name}: ")]
             probs += [f"{name}: {p}" for p in found      # (the competitor longer than the RAW: said once, the app's way)
                       if not ("longer than the RAW" in p and any("longer than the RAW" in m for m in mine))]
+        probs += list(room or [])                         # night 10: a copy into another drive's run folder needs room
         if probs:
             box = QMessageBox(self)
-            box.setWindowTitle("The inputs look wrong")
+            box.setWindowTitle("Before the start")
             box.setIcon(QMessageBox.Icon.Warning)
-            box.setText("Some videos look wrong:")
+            box.setText("Some videos look wrong:" if len(probs) > len(room or []) else "Not enough free space:")
             box.setInformativeText("\n".join(f"- {p}" for p in probs[:20]) + "\n\nStart anyway?")
             start = box.addButton("Start anyway", QMessageBox.ButtonRole.AcceptRole)
             box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)

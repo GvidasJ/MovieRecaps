@@ -956,8 +956,9 @@ While a video runs the console shows its progress and the whole batch's time lef
 left`; between two of the run's progress lines -- a stage without a counter -- the run's time left counted down),
 estimated from the lengths and the earlier runs on this machine and corrected by how the batch goes. Every run
 folder works on its own: the RAW and competitor sit in
-its `extras\media\` (a hard link on the same drive: no copy, no extra space -- also for a RAW over 2 GB, which was
-referenced in `input\` before), so you can move or delete the input folder afterwards. At the end (and after every
+its `extras\media\` (a hard link on the same drive: no copy, no extra space; on another drive, a network folder
+or a USB drive a copy -- the log says "copied, not linked: <reason>"), so you can move or delete the input folder
+afterwards. At the end (and after every
 video) `<out>\batch_summary.md` / `.json`, in plain words: first *Where your edits are* -- one line per video, "done.
 Your files: `<run folder>` -- import 1_edit.xml and 2_captions.srt into Premiere" or "FAILED: <why>. Its folder: ...
 (log: ...)" -- why in the run's own words ("the run stopped (exit 2): the competitor's scenes are not in this RAW:
@@ -1266,9 +1267,9 @@ the script again.
 copy, `$env:PYTHONUTF8 = "1"` in PowerShell before the run works around it.
 
 **Media not found / relink** — the script looks for the media next to itself (`media/…`), then at the
-absolute path recorded at export time, then opens *Locate the RAW video*. RAW files above
-`large_file_bytes` (2 GB) are not copied into `media/`; they are referenced by absolute path, so keep
-them where they are or relink when asked.
+absolute path recorded at export time, then opens *Locate the RAW video*. Every run folder holds its
+own media in `media/` (night 10: a hard link on the same drive, else a copy -- big RAWs too), so this
+is only needed when the run folder itself was taken apart.
 
 **VFR, start offsets, WebM/VP9/AV1/HEVC/Opus** — these are conformed automatically to
 `media/raw_ae.mov` (ProRes 422 LT, same resolution and frame rate, CFR, start 0, PCM audio; H.264
@@ -1320,8 +1321,9 @@ with `--workers 2` (fewer processes, less memory). `--workers 1` never starts wo
 - Paths with spaces or non-English letters (`C:\Users\Žygimantas\…`) work. Keep the whole project path short
   (well under 260 characters), e.g. `C:\work\MovieRecaps`, because some Windows tools still fail on long
   paths.
-- A RAW on another drive than the output folder is fine: it is copied (or referenced by its absolute path when
-  it is larger than 2 GB) into the run folder's `extras\media\`.
+- A RAW on another drive than the output folder is fine: it is copied into the run folder's `extras\media\`
+  (on the same drive it is hard-linked: no extra space). A copy needs the free space on the output folder's drive;
+  when there is not enough, the run stops at once and says so (the app warns before it starts).
 
 **AE shows a different frame rate than expected** — AE sometimes misreads the rate of a file; the JSX
 compares the imported `frameRate` with the exact rate from the cut list and sets
@@ -1367,7 +1369,7 @@ changed, update this table with the reason.
 | group | parameter | default | meaning |
 |---|---|---|---|
 | export | `ae_slack_tol_frames` | 0.01 | exact AE floor-rule slack (RAW frames, every frame of a layer) below which `--ae-time-mode auto` exports the layer frame-exact (AE's time resolution is unverified; FX-10, replaces `ae_min_margin_ms` = 1 ms, which measured only the interval edges) |
-| export | `large_file_bytes` | 2 GiB | RAW above this is referenced by absolute path instead of copied |
+| export | `large_file_bytes` | 2 GiB | not used since night 10 (every run folder holds its own media: linked, else copied) |
 | proxies | `raw_proxy_width` / `comp_proxy_scale` / `comp_proxy_max_width` | 640 / 0.5 / 640 | analysis proxy sizes |
 | proxies | `proxy_budget_bytes` / `min_proxy_width` / `long_raw_s` | 3 GiB / 256 / 2700 s | long-RAW handling (sparse proxies around audio hints) |
 | layout | `static_std_thresh` / `dynamic_frac_thresh` | 2.0 / 0.5 | static-pixel and video-box detection |
