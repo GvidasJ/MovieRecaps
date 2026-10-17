@@ -42,7 +42,13 @@ class Job:
     result: dict = field(default_factory=dict)
     progress: str = ""
     percent: float = 0.0
-    source: str = "drop"            # "drop" | "folder <name>"
+    source: str = "drop"            # "drop" | "folder <name>" | "project <name>"
+    channel: str = ""               # night 10: the channel's template (its headline: ``title``) as the frame and its
+    title: str = ""                 #   watermark on top; "" = the default template, no watermark
+    headline: str | None = None     # the competitor's headline (title check), once read
+    project: Path | None = None     # a project folder (Download tab): the run goes into it, its status is written
+    out_dir: Path | None = None     # where its run folder goes (None: the app's output folder)
+    run_name: str = ""              # the run folder's name ("" = the job's name)
     id: int = field(default_factory=lambda: next(_ids))
 
     @property

@@ -56,19 +56,33 @@ class JobThread(QThread):
         self.estimate = 0.0
 
     def run(self) -> None:
+        from ..core import flow
         from ..core.run import JobRun
         try:
             from match_cuts import batch
             self.estimate = batch.estimate_s(Path(self.job.competitor), Path(self.job.raw), self.job.mode == J.FAST)
         except Exception:  # noqa: BLE001
             self.estimate = 0.0
+        try:                         # night 10: the channel's template with the title as the frame, its watermark
+            frame, watermark = flow.template_for_job(self.job)
+        except Exception as e:  # noqa: BLE001
+            self.done.emit(self.job.id, {"label": R.FAIL, "failures": [f"the template could not be made: {e}"]})
+            return
         try:
-            self.run_ = JobRun(self.job, out_dir=self.out_dir, converted=self.converted)
+            self.run_ = JobRun(self.job, out_dir=self.out_dir, converted=self.converted, frame=frame,
+                               watermark=watermark)
             self.job.run_dir = self.run_.run_dir
             self.run_.start()
         except Exception as e:  # noqa: BLE001
             self.done.emit(self.job.id, {"label": R.FAIL, "failures": [f"the tool could not start: {e}"]})
             return
+        if self.job.project is not None:
+            try:
+                from ..core import projects as PJ
+                PJ.load(self.job.project).set_step("edit", PJ.RUNNING, run_dir=str(self.run_.run_dir),
+                                                   mode=self.job.mode, speed=self.job.speed)
+            except Exception:  # noqa: BLE001 - the status is a convenience
+                pass
 
         def poll(r) -> None:
             pr = P.parse(r.progress_text())
@@ -77,6 +91,12 @@ class JobThread(QThread):
             res = self.run_.wait(poll)
         except Exception as e:  # noqa: BLE001
             res = {"label": R.FAIL, "failures": [f"{type(e).__name__}: {e}"]}
+        if self.job.project is not None:
+            try:
+                from ..core import projects as PJ
+                flow.record_edit(PJ.load(self.job.project), res)
+            except Exception:  # noqa: BLE001
+                pass
         self.done.emit(self.job.id, res)
 
     def stop(self) -> None:
@@ -106,6 +126,42 @@ def fmt_s(s: float | None) -> str:
         return ""
     s = int(round(s))
     return f"{s // 60}m {s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def template_line(j: J.Job) -> str:
+    """The row's template line: 'Template: LouLaughs -- "my title" (+ watermark) -- 42 % the same words ...'."""
+    if not j.channel:
+        return "Template: default (templates\\default.png), no watermark"
+    t = f"Template: {j.channel} -- “{j.title}”" if j.title else f"Template: {j.channel} -- NO TITLE yet (press Template)"
+    t += " + watermark"
+    if j.headline:
+        try:
+            from ..core import title_check as T
+            c = T.check(j.title, j.headline)
+            t += f"  ·  {c.message}" + ("  !!" if c.warn else "")
+        except Exception:  # noqa: BLE001
+            pass
+    if j.project is not None:
+        t += f"  ·  project {Path(j.project).name}"
+    return t
+
+
+def template_problems(j: J.Job) -> list[str]:
+    """What looks wrong with a job's template before the start: no title, a title too close to the competitor's
+    headline."""
+    if not j.channel:
+        return []
+    if not (j.title or "").strip():
+        return ["the channel's template has no title yet: press Template on its row and type it"]
+    if j.headline:
+        try:
+            from ..core import title_check as T
+            c = T.check(j.title, j.headline)
+            if c.warn:
+                return [f"your title is too close to the competitor's headline: {c.message}"]
+        except Exception:  # noqa: BLE001
+            pass
+    return []
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -142,12 +198,19 @@ class JobRow(W.Card):
         self.swap.setObjectName("Small")
         self.swap.setToolTip("The RAW and the competitor change places")
         self.swap.clicked.connect(self._swap)
+        self.tpl = QPushButton("Template")
+        self.tpl.setObjectName("Small")
+        self.tpl.setToolTip("Night 10: your channel's template with your title (a live preview, the competitor's "
+                            "headline next to it) -- the edit's frame, with the channel's watermark on top")
+        self.tpl.clicked.connect(self._template)
         self.remove = QPushButton("Remove")
         self.remove.setObjectName("Ghost")
         self.remove.clicked.connect(lambda: self.page.remove_job(self.job))
-        for w in (self.mode, self.speed, self.swap, self.remove):
+        for w in (self.mode, self.speed, self.tpl, self.swap, self.remove):
             top.addWidget(w, 0, Qt.AlignmentFlag.AlignTop)
         self.lay.addLayout(top)
+        self.tpl_line = W.label("", "Small", wrap=True, select=True)
+        self.lay.addWidget(self.tpl_line)
         self.state = W.StateLabel()
         self.time = W.label("", "Small")
         st = QHBoxLayout()
@@ -189,6 +252,22 @@ class JobRow(W.Card):
         self.job.swap()
         self.refresh()
 
+    def _template(self) -> None:
+        from ..ui.template_editor import TemplateDialog
+        j = self.job
+        d = TemplateDialog(self, j.channel, j.title, j.headline, Path(j.competitor) if j.competitor else None, j.name)
+        d.ed.headline_found.connect(lambda h: setattr(j, "headline", h))
+        if d.exec():
+            j.channel, j.title = d.ed.channel(), d.ed.title()
+            j.headline = d.ed.headline() if d.ed.headline() is not None else j.headline
+            if j.project is not None:
+                try:
+                    from ..core import projects as PJ
+                    PJ.load(j.project).update(channel=j.channel or None, title=j.title or None)
+                except Exception:  # noqa: BLE001
+                    pass
+            self.refresh()
+
     def _open_folder(self) -> None:
         d = self.job.run_dir
         if d is not None and Path(d).exists():
@@ -222,6 +301,8 @@ class JobRow(W.Card):
         self.speed.setText(f"{j.speed:g} %")
         self.speed.setEnabled(not busy)
         self.swap.setEnabled(not busy and j.complete)
+        self.tpl.setEnabled(not busy)
+        self.tpl_line.setText(template_line(j))
         self.remove.setEnabled(j.state != J.RUNNING)
         res = j.result or {}
         if j.state == J.READY:
@@ -631,31 +712,45 @@ class MatchCutsPage(QWidget):
         self.status.setText(text)
         self.status.setVisible(bool(text))
 
-    def start(self) -> None:
+    def run_dir_of(self, j: J.Job) -> Path:
+        """Where a job's run folder goes (a project's: its own folder, 'edit')."""
+        return Path(j.out_dir or self.out_dir) / (j.run_name or j.name)
+
+    def add_project_job(self, job: J.Job, autostart: bool = False) -> None:
+        """A video from the Download tab (its project folder ready: downloaded and converted) joins the queue; with
+        ``autostart`` the queue starts (no question asked: what looks wrong is said on the status line)."""
+        J.name_jobs([job], [j.name for j in self.jobs])
+        job.comp_s = seconds_of(Path(job.competitor)) if job.competitor else None
+        job.raw_s = seconds_of(Path(job.raw)) if job.raw else None
+        self._added_jobs(J.DropResult([job], self.waiting, []))
+        if autostart and not self.running:
+            self.start(confirm=False)
+
+    def start(self, confirm: bool = True) -> None:
         jobs = self.ready()
         if not jobs:
             return
-        probs = [f"{j.name}: {p}" for j in jobs for p in j.problems()]
+        probs = [f"{j.name}: {p}" for j in jobs for p in j.problems() + template_problems(j)]
         if self.waiting is not None:
             probs.append(f"{self.waiting.name}: one video alone -- no RAW (or no competitor) for it; it will not run")
         self.say("checking the videos ...")
         self.b_start.setEnabled(False)
         from match_cuts import batch
         pairs = [(j.name, Path(j.competitor), Path(j.raw)) for j in jobs if j.complete]
-        runs = [(j.name, Path(j.competitor), Path(j.raw), self.out_dir / j.name) for j in jobs if j.complete]
+        runs = [(j.name, Path(j.competitor), Path(j.raw), self.run_dir_of(j)) for j in jobs if j.complete]
         w = Worker(lambda: (batch.input_problems(pairs), space.problems(runs)))
-        w.finished_with.connect(lambda r: self._checked(probs, r[0], r[1]))
-        w.failed.connect(lambda _e: self._checked(probs, {}, []))
+        w.finished_with.connect(lambda r: self._checked(probs, r[0], r[1], confirm))
+        w.failed.connect(lambda _e: self._checked(probs, {}, [], confirm))
         self.workers.append(w)
         w.start()
 
-    def _checked(self, probs: list, tool: dict, room: list | None = None) -> None:
+    def _checked(self, probs: list, tool: dict, room: list | None = None, confirm: bool = True) -> None:
         for name, found in (tool or {}).items():
             mine = [p for p in probs if p.startswith(f"{name}: ")]
             probs += [f"{name}: {p}" for p in found      # (the competitor longer than the RAW: said once, the app's way)
                       if not ("longer than the RAW" in p and any("longer than the RAW" in m for m in mine))]
         probs += list(room or [])                         # night 10: a copy into another drive's run folder needs room
-        if probs:
+        if probs and confirm:                             # started by itself (Download tab): said, not asked
             box = QMessageBox(self)
             box.setWindowTitle("Before the start")
             box.setIcon(QMessageBox.Icon.Warning)
@@ -675,7 +770,8 @@ class MatchCutsPage(QWidget):
                 self.rows[j.id].refresh()
         self.running = True
         self.t_start = time.time()
-        self.say("running -- you can add more videos; they join the queue")
+        self.say("running -- you can add more videos; they join the queue" +
+                 ("" if confirm or not probs else "  ·  worth a look: " + "; ".join(probs[:4])))
         self._next()
 
     def _next(self) -> None:

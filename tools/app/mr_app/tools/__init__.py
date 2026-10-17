@@ -1,5 +1,6 @@
-"""The app's tools, one tab each. To add one (the video downloader, the converter): write a class with ``key``,
-``title``, ``ready`` and ``page(ctx)`` (a QWidget) in a module here and add it to ``tools()``."""
+"""The app's tools, one tab each, in the order of the work (night 10): Download -> Convert -> Template -> Match cuts.
+To add one: write a class with ``key``, ``title``, ``ready`` and ``page(ctx)`` (a QWidget) in a module here and add it
+to ``tools()``. A page with ``busy()`` / ``stop()`` is asked before the window closes."""
 from __future__ import annotations
 
 
@@ -14,8 +15,9 @@ class Tool:
 
 def tools() -> list[Tool]:
     from .coming_soon import ComingSoon
+    from .download_tool import DownloadTool
     from .match_cuts_tool import MatchCutsTool
-    return [MatchCutsTool(),
-            ComingSoon("download", "Download", "Download a video (yt-dlp): the best picture and sound, one click."),
+    return [DownloadTool(),
             ComingSoon("convert", "Convert", "Change a video's format with FFmpeg, with no quality loss "
-                                             "(like Shutter Encoder).")]
+                                             "(like Shutter Encoder)."),
+            MatchCutsTool()]

@@ -17,10 +17,13 @@ from .jobs import FAST, Job
 CREATE_NO_WINDOW = 0x08000000
 
 
-def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast: bool, speed: float) -> list[str]:
-    """The batch's command line for one video (match_cuts.batch.main)."""
+def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast: bool, speed: float,
+            frame: Path | None = None, watermark: Path | None = None) -> list[str]:
+    """The batch's command line for one video (match_cuts.batch.main); night 10: a channel's template as the frame
+    and its watermark on top (``--frame`` / ``--watermark``) when the job has a channel."""
     return [str(python), "-m", "match_cuts", "--competitor", str(comp), "--raw", str(raw), "--run-dir", str(run_dir),
-            "--work", str(work), "--premiere", *(["--fast"] if fast else []), "--speed", f"{speed:g}"]
+            "--work", str(work), "--premiere", *(["--fast"] if fast else []), "--speed", f"{speed:g}",
+            *(["--frame", str(frame)] if frame else []), *(["--watermark", str(watermark)] if watermark else [])]
 
 
 def kill_tree(pid: int) -> None:
@@ -36,18 +39,20 @@ class JobRun:
     """Runs one job; ``converted``: RAW -> the copy an earlier run of the queue converted (shared by the queue)."""
 
     def __init__(self, job: Job, out_dir: Path | None = None, work_dir: Path | None = None,
-                 python: Path | None = None, converted: dict | None = None):
+                 python: Path | None = None, converted: dict | None = None, frame: Path | None = None,
+                 watermark: Path | None = None):
         from match_cuts import batch
         self.job = job
-        self.out = Path(out_dir or paths.output_dir())
+        self.out = Path(getattr(job, "out_dir", None) or out_dir or paths.output_dir())
         self.work = Path(work_dir or paths.work_dir())
         self.python = Path(python or paths.python_exe())
         self.converted = converted if converted is not None else {}
-        self.run_dir = batch.run_folder_for(self.out, job.name)
+        self.run_dir = batch.run_folder_for(self.out, getattr(job, "run_name", "") or job.name)
         raw = Path(job.raw)
         self.use_raw = self.converted.get(raw.resolve(), raw)
+        self.frame, self.watermark = frame, watermark
         self.cmd = command(self.python, Path(job.competitor), self.use_raw, self.run_dir, self.work,
-                           job.mode == FAST, float(job.speed))
+                           job.mode == FAST, float(job.speed), frame, watermark)
         self.proc: subprocess.Popen | None = None
         self.stopped = False
         self.t0 = 0.0

@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyleSheet(theme.qss(fam))
     win = MainWindow(tools())
     win.show()
+    if "--tab" in argv:                      # open on that tab (download, convert, template, match_cuts)
+        win.select(argv[argv.index("--tab") + 1])
     if "--screenshot" in argv:               # (tests: a picture of the window, then quit)
         from PySide6.QtCore import QTimer
         out = argv[argv.index("--screenshot") + 1]

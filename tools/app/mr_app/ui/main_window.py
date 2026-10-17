@@ -120,6 +120,14 @@ class MainWindow(QMainWindow):
         self.set_strip_queue(0, False)
 
     # -- for the tools --
+    def select(self, key: str) -> None:
+        """Show the tab of that tool (its key: download, convert, template, match_cuts)."""
+        keys = list(self.pages)
+        if key in keys:
+            i = keys.index(key)
+            self.group.button(i).setChecked(True)
+            self.stack.setCurrentIndex(i)
+
     def set_strip_queue(self, n: int, running: bool) -> None:
         self.strip_items[3].setText(f"Queue  {n} video(s)" + ("  ·  running" if running else ""))
 
@@ -136,13 +144,15 @@ class MainWindow(QMainWindow):
         super().showEvent(e)
 
     def closeEvent(self, e) -> None:                      # noqa: N802
-        mc = self.pages.get("match_cuts")
-        if mc is not None and getattr(mc, "busy", lambda: False)():
-            r = QMessageBox.question(self, "A video is running",
-                                     "A video is still running. Stop it and close the app?")
+        busy = [p for p in self.pages.values() if getattr(p, "busy", lambda: False)()]
+        if busy:                                          # a run, a download or a conversion still going
+            r = QMessageBox.question(self, "Still working",
+                                     "A video is still being made, downloaded or converted. Stop it and close the "
+                                     "app?")
             if r != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
-            mc.stop()
+            for p in busy:
+                p.stop()
         self.tray.hide()
         super().closeEvent(e)

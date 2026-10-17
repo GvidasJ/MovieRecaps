@@ -27,7 +27,10 @@ def name_from(project: Path | None, run: Path | None) -> str:
         if n and n.lower() not in ("untitled", "project", "new project"):
             return safe(n)
     if run is not None:
-        n = re.sub(r"(?i)^laptop_", "", run.name)
+        base = run
+        if re.fullmatch(r"(?i)edit(-\d+)?", run.name) and (run.parent / "project.json").is_file():
+            base = run.parent                            # night 10: a project's edit -> the project's name
+        n = re.sub(r"(?i)^laptop_", "", base.name)
         n = re.sub(r"-\d+$", "", n)
         if n:
             return safe(n)

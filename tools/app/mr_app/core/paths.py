@@ -1,7 +1,9 @@
 """Where things are: the project folder (this file is tools/app/mr_app/core/paths.py), its venv's Python, and the
-folders the tool uses (output, work, finished)."""
+folders the tool uses (output, work, finished), the channels (assets/channels) and the video projects (night 10:
+input/downloads for now; MOVIERECAPS_PROJECTS moves them, e.g. to D:\\Shared\\Projects)."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +31,29 @@ def work_dir() -> Path:
 
 def finished_dir() -> Path:
     return REPO / "finished"
+
+
+def assets_dir() -> Path:
+    return REPO / "assets"
+
+
+def channels_dir() -> Path:
+    """One folder per channel (template.psd + watermark.png [+ channel.json]): a new folder is a new channel."""
+    return REPO / "assets" / "channels"
+
+
+def fonts_dir() -> Path:
+    return REPO / "assets" / "fonts"
+
+
+PROJECTS_ENV = "MOVIERECAPS_PROJECTS"
+
+
+def projects_root() -> Path:
+    """Where the video projects go (one folder per video: <date>_<short name>, its videos and project.json): the
+    MOVIERECAPS_PROJECTS environment variable, else input/downloads of the project folder."""
+    env = os.environ.get(PROJECTS_ENV, "").strip()
+    return Path(env) if env else REPO / "input" / "downloads"
 
 
 def python_exe() -> Path:
