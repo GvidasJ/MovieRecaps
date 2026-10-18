@@ -368,9 +368,10 @@ class BoardColumn(QFrame):
     def set_cards(self, cards: list, fade: set | None = None) -> None:
         while self.cards_lay.count():
             it = self.cards_lay.takeAt(0)
-            if it.widget():
-                it.widget().setParent(None)
-                it.widget().deleteLater()
+            w = it.widget()
+            if w is not None and w is not self.spacer:     # the drop slot is the column's own: kept
+                w.setParent(None)
+                w.deleteLater()
         self.widgets = []
         for c in cards:
             w = BoardCard(self.page, c)
@@ -378,6 +379,11 @@ class BoardColumn(QFrame):
             self.widgets.append(w)
             if fade and str(c.folder) in fade:
                 w.fade_in()
+        if self.slot.target > 0.0:                         # a card is being dragged over it: the slot stays open
+            self.cards_lay.insertWidget(min(self._slot_at, self.cards_lay.count()), self.spacer)
+        else:
+            self.spacer.hide()
+            self.spacer.setFixedHeight(0)
         self.n.setText(str(len(cards)))
 
     def _slot_grow(self) -> None:
