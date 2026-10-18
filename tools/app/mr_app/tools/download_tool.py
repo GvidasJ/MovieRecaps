@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLineEdit,
                                QVBoxLayout, QWidget)
 
 from . import Tool
@@ -50,7 +50,19 @@ class Item:
     headline: str | None = None
     message: str = ""
     error: str = ""
+    upload_title: str = ""                  # night 11: the title the Short is uploaded with (optional)
     id: int = field(default_factory=lambda: next(_ids))
+
+
+def save_title(folder, title: str | None) -> None:
+    """The title in the project's title.txt too (night 11: "I forget titles" -- the board and every row show it)."""
+    if not folder or not (title or "").strip():
+        return
+    try:
+        from ..core import board
+        board.set_title(Path(folder), title)
+    except Exception:  # noqa: BLE001 - the title is in project.json anyway
+        pass
 
 
 def estimate_bytes(li) -> int:
@@ -154,6 +166,13 @@ class PrepareThread(QThread):
         p = flow.new_project(it.competitor_url, it.raw_url or None, it.raw_file, it.channel or None,
                              it.title or None, root=root, name=li.title)
         it.project = p.folder
+        save_title(p.folder, it.title)
+        if it.upload_title:
+            try:
+                from ..core import board
+                board.set_upload_title(p.folder, it.upload_title)
+            except Exception:  # noqa: BLE001 - kept in the row; Edit on the board sets it again
+                pass
         self.named.emit(it.id, str(p.folder))
         return p
 
@@ -169,18 +188,18 @@ class FileLine(QWidget):
         name = W.label(ROLE_NAMES[role], "Small")
         name.setFixedWidth(84)
         lay.addWidget(name)
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 1000)
-        self.bar.setTextVisible(False)
+        self.bar = W.GlideBar(3)
         self.bar.setFixedWidth(220)
         lay.addWidget(self.bar, 0, Qt.AlignmentFlag.AlignVCenter)
         self.text = W.label("", "Muted", wrap=True, select=True)
         lay.addWidget(self.text, 1)
 
     def set(self, share: float, text: str) -> None:
-        self.bar.setValue(int(1000 * max(0.0, min(1.0, share))))
-        self.text.setText(text)
+        share = max(0.0, min(1.0, share))
         bad = text.startswith("FAILED")
+        self.bar.state("fail" if bad else ("pass" if share >= 1.0 else ("running" if share > 0 else "waiting")))
+        self.bar.set(share)
+        self.text.setText(text)
         self.text.setStyleSheet(f"color: {theme.RED};" if bad else "")
 
 
@@ -205,20 +224,20 @@ class ItemRow(W.Card):
         self.lay.addWidget(self.head)
         self.tpl = W.label("", "Small", wrap=True, select=True)
         self.lay.addWidget(self.tpl)
+        self.title_box = W.TitleBox(item.title)
+        self.title_box.copied.connect(lambda _t: getattr(self.page.ctx, "toast", lambda *a: None)("Title copied ✓"))
+        self.lay.addWidget(self.title_box)
         btns = QHBoxLayout()
         btns.setSpacing(8)
-        self.b_tpl = QPushButton("Template")
-        self.b_folder = QPushButton("Open folder")
-        self.b_edit = QPushButton("Make the edit")
-        self.b_retry = QPushButton("Try again")
-        self.b_stop = QPushButton("Stop")
-        self.b_remove = QPushButton("Remove")
+        self.b_tpl = W.Button("Template", "Small")
+        self.b_folder = W.Button("Open folder", "Small")
+        self.b_edit = W.Button("Make the edit", "Small")
+        self.b_retry = W.Button("Try again", "Small")
+        self.b_stop = W.Button("Stop", "Small")
+        self.b_remove = W.Button("Remove", "Ghost")
         for b in (self.b_tpl, self.b_folder, self.b_edit, self.b_retry, self.b_stop):
-            b.setObjectName("Small")
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
             btns.addWidget(b)
         btns.addStretch(1)
-        self.b_remove.setObjectName("Ghost")
         btns.addWidget(self.b_remove)
         self.b_tpl.clicked.connect(self._template)
         self.b_folder.clicked.connect(self._folder)
@@ -252,6 +271,7 @@ class ItemRow(W.Card):
                 try:
                     from ..core import projects as PJ
                     PJ.load(it.project).update(channel=it.channel or None, title=it.title or None)
+                    save_title(it.project, it.title)
                 except Exception:  # noqa: BLE001
                     pass
             self.refresh()
@@ -283,6 +303,7 @@ class ItemRow(W.Card):
         self.tpl.setText(f"Template: {it.channel} -- “{it.title}”" if it.channel and it.title else
                          (f"Template: {it.channel} -- NO TITLE yet (press Template)" if it.channel else
                           "Template: default (templates\\default.png), no watermark"))
+        self.title_box.set(it.title)
         busy = it.state == WORKING
         self.b_stop.setVisible(busy)
         self.b_retry.setVisible(it.state in (FAILED, STOPPED))
@@ -301,16 +322,13 @@ class DownloadPage(QWidget):
         self.current: PrepareThread | None = None
         self.raw_file: Path | None = None
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 34, 0, 40)
+        lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
-        title = QLabel(f"Down<span style='color:{theme.RED}'>load</span>")
-        title.setObjectName("Title")
-        title.setFont(W.font(44, 800, -3))
-        lay.addWidget(title)
+        lay.addWidget(W.SectionHeader("Download"))
         lay.addWidget(W.label("Paste the competitor's link and the RAW's link (or drop the RAW file). Both are "
                               "downloaded in the best quality (H.264 MP4; VP9 / AV1 only when bigger, then converted "
                               "without visible loss), checked, and put in one folder per video -- then your template "
-                              "and the edit.", "Lead", wrap=True))
+                              "and the edit. Ctrl+V anywhere pastes a link here.", "Muted", wrap=True))
         form = W.Card(hover=False)
         self.comp = QLineEdit()
         self.comp.setPlaceholderText("https://www.youtube.com/shorts/...")
@@ -322,7 +340,7 @@ class DownloadPage(QWidget):
         form.lay.addWidget(W.label("RAW's link -- or its file", "Small"))
         rr = QHBoxLayout()
         rr.addWidget(self.raw, 1)
-        pick = QPushButton("Choose the RAW file...")
+        pick = W.Button("Choose the RAW file...")
         pick.clicked.connect(self._pick_raw)
         rr.addWidget(pick)
         form.lay.addLayout(rr)
@@ -345,6 +363,13 @@ class DownloadPage(QWidget):
         self.title.setPlaceholderText("your headline (emojis allowed) -- or later, with the Template button")
         row2.addWidget(self.title, 1)
         form.lay.addLayout(row2)
+        row2b = QHBoxLayout()
+        row2b.addWidget(W.label("YouTube title", "Small"))
+        self.yt = QLineEdit()
+        self.yt.setPlaceholderText("optional: the title you upload the Short with -- Copy shows it everywhere, and "
+                                   "the Uploaded check finds it")
+        row2b.addWidget(self.yt, 1)
+        form.lay.addLayout(row2b)
         row3 = QHBoxLayout()
         row3.setSpacing(12)
         self.auto = QCheckBox("Then make the edit by itself (the Match cuts queue starts)")
@@ -355,9 +380,7 @@ class DownloadPage(QWidget):
         self.speed = W.Segmented([("100", "100 %"), ("125", "125 %")], "100")
         row3.addWidget(self.speed)
         row3.addStretch(1)
-        add = QPushButton("Add to the queue")
-        add.setObjectName("Primary")
-        add.setCursor(Qt.CursorShape.PointingHandCursor)
+        add = W.Button("Add to the queue", "Primary")
         add.clicked.connect(self.add)
         row3.addWidget(add)
         form.lay.addLayout(row3)
@@ -380,15 +403,42 @@ class DownloadPage(QWidget):
 
     # -- the form --
     def _where(self) -> None:
-        from ..core import space
+        """Where the folders go, the free space and yt-dlp's version -- read in the background (a subprocess and a
+        disk: never in the window's thread)."""
         root = paths.projects_root()
-        try:
-            from ..core import download as D
-            v = D.installed_version()
-        except Exception:  # noqa: BLE001
-            v = "?"
-        self.where.setText(f"The video folders go to {root} ({space.summary([root])})  ·  yt-dlp {v} (updated at most "
-                           "once a day before a download)")
+        self.where.setText(f"The video folders go to {root}")
+
+        def work():
+            from ..core import space
+            try:
+                from ..core import download as D
+                v = D.installed_version()
+            except Exception:  # noqa: BLE001
+                v = "?"
+            return space.summary([root]), v
+
+        def got(r) -> None:
+            self.where.setText(f"The video folders go to {root} ({r[0]})  ·  yt-dlp {r[1]} (updated at most once a day "
+                               "before a download)")
+        from ..ui import background as BG
+        BG.call(work, got)
+
+    def paste_link(self, text: str) -> bool:
+        """Ctrl+V anywhere: a link goes into the competitor's field (the RAW's when that one is filled already).
+        False when the text is not a link."""
+        t = (text or "").strip().strip('"')
+        if not (t.startswith("http://") or t.startswith("https://") or t.startswith("www.") or "youtu" in t):
+            return False
+        if not self.comp.text().strip():
+            self.comp.setText(t)
+            self.comp.setFocus()
+        elif not self.raw.text().strip():
+            self.raw.setText(t)
+            self.raw.setFocus()
+        else:
+            self.comp.setText(t)
+        self.msg.setText("link pasted -- add the other link (or drop the RAW file), pick the channel, type the title")
+        return True
 
     def _raw_typed(self, _t: str) -> None:
         if self.raw_file is not None and self.raw.text() != str(self.raw_file):
@@ -431,6 +481,7 @@ class DownloadPage(QWidget):
         self.msg.setStyleSheet("")
         it = Item(comp, raw, raw_file, self.ch.value, self.title.text().strip(), self.mode.value,
                   float(self.speed.value), self.auto.isChecked())
+        it.upload_title = self.yt.text().strip()
         self.items.append(it)
         row = ItemRow(self, it)
         self.rows[it.id] = row
@@ -439,6 +490,7 @@ class DownloadPage(QWidget):
         self.raw.clear()
         self.raw_file = None
         self.title.clear()
+        self.yt.clear()
         self.msg.setText("added -- you can paste the next one")
         self._counts()
         self._next()
@@ -511,8 +563,10 @@ class DownloadPage(QWidget):
         try:
             p = PJ.load(it.project)
             p.update(channel=it.channel or None, title=it.title or None)
+            save_title(p.folder, it.title)
             job = flow.edit_job(p, it.mode == J.FAST, it.speed)
             job.channel, job.title, job.headline = it.channel, it.title, it.headline
+            job.upload_title = it.upload_title
         except Exception as e:  # noqa: BLE001
             it.state, it.error = FAILED, f"could not make the edit's job: {e}"
             self.rows[it.id].refresh()

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from . import theme
@@ -274,10 +274,9 @@ class TemplateDialog(QDialog):
         lay.addWidget(self.ed, 1)
         row = QHBoxLayout()
         row.addStretch(1)
-        cancel = QPushButton("Cancel")
+        cancel = W.Button("Cancel")
         cancel.clicked.connect(self.reject)
-        ok = QPushButton("Use this template")
-        ok.setObjectName("Primary")
+        ok = W.Button("Use this template", "Primary")
         ok.clicked.connect(self.accept)
         row.addWidget(cancel)
         row.addWidget(ok)

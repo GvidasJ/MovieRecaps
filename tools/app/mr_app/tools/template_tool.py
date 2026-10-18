@@ -9,11 +9,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from . import Tool
 from ..core import paths
-from ..ui import theme
 from ..ui import widgets as W
 from ..ui.template_editor import TemplateEditor
 
@@ -24,21 +23,17 @@ class TemplatePage(QWidget):
         self.setObjectName("Page")
         self.ctx = ctx
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 34, 0, 40)
+        lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
-        title = QLabel(f"Channel <span style='color:{theme.RED}'>template</span>")
-        title.setObjectName("Title")
-        title.setFont(W.font(44, 800, -3))
-        lay.addWidget(title)
+        lay.addWidget(W.SectionHeader("Channel template"))
         lay.addWidget(W.label("Your channel's template with your headline, in the exact style of its Photoshop file "
                               "(NeueMontreal Bold 122 pt, Faux Bold, 2 lines, emojis). It replaces the frame in the "
-                              "edit (V2), with the channel's watermark on top (Overlay, 75 %).", "Lead", wrap=True))
+                              "edit (V2), with the channel's watermark on top (Overlay, 75 %).", "Muted", wrap=True))
         card = W.Card(hover=False)
         self.ed = TemplateEditor(drop_competitor=True)
         card.lay.addWidget(self.ed)
         row = QHBoxLayout()
-        self.save = QPushButton("Save the PNG...")
-        self.save.setObjectName("Primary")
+        self.save = W.Button("Save the PNG...", "Primary")
         self.save.clicked.connect(self._save)
         row.addWidget(self.save)
         self.msg = W.label("", "Muted", wrap=True, select=True)

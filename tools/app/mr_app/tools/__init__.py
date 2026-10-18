@@ -1,6 +1,7 @@
-"""The app's tools, one tab each, in the order of the work (night 10): Download -> Convert -> Template -> Match cuts.
-To add one: write a class with ``key``, ``title``, ``ready`` and ``page(ctx)`` (a QWidget) in a module here and add it
-to ``tools()``. A page with ``busy()`` / ``stop()`` is asked before the window closes."""
+"""The app's tools, one page each (night 11): Match cuts (its Queue and Learn), Board, Progress (Download, Convert,
+Template) and History -- main_window.TABS puts them on the four tabs. To add one: write a class with ``key``,
+``title``, ``ready`` and ``page(ctx)`` (a QWidget) in a module here, add it to ``tools()`` and to a tab in TABS. A
+page with ``busy()`` / ``stop()`` is asked before the window closes."""
 from __future__ import annotations
 
 
@@ -14,8 +15,11 @@ class Tool:
 
 
 def tools() -> list[Tool]:
+    from .board_tool import BoardTool
     from .convert_tool import ConvertTool
     from .download_tool import DownloadTool
+    from .history_tool import HistoryTool
+    from .learn_tool import LearnTool
     from .match_cuts_tool import MatchCutsTool
     from .template_tool import TemplateTool
-    return [DownloadTool(), ConvertTool(), TemplateTool(), MatchCutsTool()]
+    return [MatchCutsTool(), LearnTool(), BoardTool(), DownloadTool(), ConvertTool(), TemplateTool(), HistoryTool()]

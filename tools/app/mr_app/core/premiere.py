@@ -105,6 +105,6 @@ def open_xml(xml: Path, wait_s: float = START_WAIT_S) -> str:
                 return "Premiere Pro did not start in time -- open it, then press Open in Premiere again"
             time.sleep(3.0)
         time.sleep(SETTLE_S)
-    subprocess.Popen([str(exe), str(xml)], cwd=str(xml.parent))
+    subprocess.Popen([str(exe), str(xml)], cwd=str(exe.parent))     # (never a network folder as the working folder)
     return (("Premiere Pro started; " if started else "") + f"{xml.name} is opening in {exe.parent.name} as a new "
             "project (Premiere saves it in the folder of the last project you opened)")

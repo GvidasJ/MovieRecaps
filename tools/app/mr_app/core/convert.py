@@ -644,8 +644,9 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
     err_f = log_f if log_f is not None else tempfile.TemporaryFile()   # FFmpeg's own messages (why it failed)
 
     def log(text: str) -> None:
-        if log_f is not None:
-            log_f.write(text.rstrip("\n") + "\n")
+        if log_f is not None:                       # (night 11: the date and time on every line)
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            log_f.write("".join(f"{stamp}  {ln}\n" for ln in text.rstrip("\n").split("\n")))
             log_f.flush()
 
     def ffmpeg_tail() -> str:

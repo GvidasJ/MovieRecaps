@@ -695,8 +695,10 @@ class _Log:
             self.f = open(path, "a", encoding="utf-8", errors="replace")
 
     def write(self, line: str) -> None:
+        """One line, with the date and time first (night 11: dates on everything, the logs too)."""
         if self.f is not None:
-            self.f.write(line.rstrip("\r\n") + "\n")
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            self.f.write("".join(f"{stamp}  {ln}\n" for ln in line.rstrip("\r\n").split("\n")))
             self.f.flush()
 
     def close(self) -> None:

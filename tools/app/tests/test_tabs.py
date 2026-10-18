@@ -45,13 +45,18 @@ class _Ctx:
         self.strip = (n, running)
 
 
-def test_the_window_has_the_tabs_in_the_order_of_the_work(qapp):
+def test_the_window_has_the_four_tabs_and_every_page_under_one(qapp):
+    """Night 11: Match cuts (Queue, Learn) · Board · Progress (Download, Convert, Template) · History."""
     from mr_app.tools import tools
-    from mr_app.ui.main_window import MainWindow
-    win = MainWindow(tools())
-    assert list(win.pages) == ["download", "convert", "template", "match_cuts"]
+    from mr_app.ui import main_window as MW
+    win = MW.MainWindow(tools())
+    assert [t.text for t in win.tabbar.tabs] == ["Match cuts", "Board", "Progress", "History"]
+    assert set(win.pages) == {"match_cuts", "learn", "board", "download", "convert", "template", "history"}
     win.select("template")
-    assert win.stack.currentIndex() == 2 and win.group.button(2).isChecked()
+    assert win.tabbar.index == 2 and win.stack.currentIndex() == 2
+    assert win.areas[2].current_key() == "template" and win.areas[2].sub.index == 2
+    win.select("learn")
+    assert win.tabbar.index == 0 and win.areas[0].current_key() == "learn"
     win.close()
 
 

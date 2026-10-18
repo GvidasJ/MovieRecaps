@@ -37,6 +37,10 @@ def main() -> int:
                   "winget install DenoLand.Deno")
     from mr_app.core import shortcut
     p = shortcut.make()
+    try:                                     # Windows keeps old icons in a cache: show the new logo now (night 11)
+        subprocess.run(["ie4uinit.exe", "-show"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
     print(f"done: the shortcut is on the desktop ({p}) -- double-click MovieRecaps")
     return 0
 

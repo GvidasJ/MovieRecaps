@@ -1,0 +1,206 @@
+"""Settings (night 11): where finished projects are saved ("Save projects to": PC D:\\Shared\\Projects, laptop
+\\\\192.168.101.11\\Shared\\Projects by default), which computer this is, animations on/off, the intro, the daily and
+monthly goals, how often the Shorts are checked. Saved per computer (core/settings.py)."""
+from __future__ import annotations
+
+import copy
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QSpinBox, QVBoxLayout)
+
+from . import background as BG
+from . import theme
+from . import widgets as W
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, win, settings):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("Settings")
+        self.resize(760, 560)
+        self.s = copy.deepcopy(settings)
+        self.result_settings = settings
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(26, 22, 26, 22)
+        lay.setSpacing(14)
+        lay.addWidget(W.SectionHeader("Settings"))
+        g = QGridLayout()
+        g.setHorizontalSpacing(16)
+        g.setVerticalSpacing(14)
+        r = 0
+        # where finished projects go
+        g.addWidget(W.label("Save projects to", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
+        box = QVBoxLayout()
+        row = QHBoxLayout()
+        self.save = QLineEdit(str(getattr(self.s, "save_to", "") or ""))
+        self.save.setPlaceholderText(str(self._default_root()))
+        self.save.textChanged.connect(lambda _t: self._check_root())
+        row.addWidget(self.save, 1)
+        pick = W.Button("Browse…", "Small")
+        pick.clicked.connect(self._browse)
+        row.addWidget(pick)
+        dflt = W.Button("This computer's default", "Small")
+        dflt.clicked.connect(lambda: self.save.setText(""))
+        row.addWidget(dflt)
+        box.addLayout(row)
+        self.root_note = W.label("", "Dim", wrap=True)
+        box.addWidget(self.root_note)
+        box.addWidget(W.label("Only finished projects go there (the edit, template.png, project.json, logs, "
+                              "title.txt); downloads, conversions and caches stay on this computer. When the folder "
+                              "cannot be reached, a project is kept here and moved there when it is back.", "Dim",
+                              wrap=True))
+        g.addLayout(box, r, 1)
+        r += 1
+        # which computer
+        g.addWidget(W.label("This computer", "Small"), r, 0)
+        mrow = QHBoxLayout()
+        self.machine = W.Segmented([("auto", "Auto"), ("pc", "PC"), ("laptop", "Laptop")],
+                                   str(getattr(self.s, "machine", "auto") or "auto"))
+        self.machine.changed.connect(lambda _v: self._machine_changed())
+        mrow.addWidget(self.machine)
+        mrow.addSpacing(12)
+        self.machine_note = W.label("", "Dim")
+        mrow.addWidget(self.machine_note, 1)
+        g.addLayout(mrow, r, 1)
+        r += 1
+        # motion
+        g.addWidget(W.label("Animations", "Small"), r, 0)
+        arow = QHBoxLayout()
+        self.anim = W.Segmented([("on", "On"), ("off", "Off")], "on" if getattr(self.s, "animations", True) else "off")
+        arow.addWidget(self.anim)
+        arow.addSpacing(18)
+        arow.addWidget(W.label("Intro at the start", "Small"))
+        self.intro = W.Segmented([("on", "On"), ("off", "Off")], "on" if getattr(self.s, "intro", True) else "off")
+        arow.addWidget(self.intro)
+        replay = W.Button("Replay intro", "Small")
+        replay.clicked.connect(self._replay)
+        arow.addWidget(replay)
+        arow.addStretch(1)
+        g.addLayout(arow, r, 1)
+        r += 1
+        # goals
+        g.addWidget(W.label("Goals", "Small"), r, 0)
+        grow = QHBoxLayout()
+        self.daily = QSpinBox()
+        self.daily.setRange(1, 50)
+        self.daily.setValue(int(getattr(self.s, "daily_goal", 6) or 6))
+        self.monthly = QSpinBox()
+        self.monthly.setRange(1, 2000)
+        self.monthly.setValue(int(getattr(self.s, "monthly_goal", 150) or 150))
+        grow.addWidget(W.label("Shorts a day", "Dim"))
+        grow.addWidget(self.daily)
+        grow.addSpacing(18)
+        grow.addWidget(W.label("Shorts a month", "Dim"))
+        grow.addWidget(self.monthly)
+        grow.addStretch(1)
+        g.addLayout(grow, r, 1)
+        r += 1
+        g.addWidget(W.label("Uploaded check", "Small"), r, 0)
+        urow = QHBoxLayout()
+        self.every = QSpinBox()
+        self.every.setRange(5, 600)
+        self.every.setValue(int(getattr(self.s, "upload_check_minutes", 30) or 30))
+        urow.addWidget(W.label("read the three Shorts tabs every", "Dim"))
+        urow.addWidget(self.every)
+        urow.addWidget(W.label("minutes (and at the start)", "Dim"))
+        urow.addStretch(1)
+        g.addLayout(urow, r, 1)
+        lay.addLayout(g)
+        lay.addStretch(1)
+        self.where = W.label("", "Dim", wrap=True, select=True)
+        lay.addWidget(self.where)
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        cancel = W.Button("Cancel")
+        cancel.clicked.connect(self.reject)
+        ok = W.Button("Save", "Primary")
+        ok.clicked.connect(self._ok)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        lay.addLayout(btns)
+        self._machine_changed()
+        try:
+            from ..core import settings as S
+            self.where.setText(f"These settings are this computer's own: {S.path()}")
+        except Exception:  # noqa: BLE001
+            self.where.setText("")
+
+    def _default_root(self):
+        try:
+            from ..core import machine
+            kind = self.machine.value if hasattr(self, "machine") and self.machine.value != "auto" else None
+            return machine.default_save_root(kind or machine.which(self.s))
+        except Exception:  # noqa: BLE001
+            from ..core import paths
+            return paths.projects_root()
+
+    def _machine_changed(self) -> None:
+        self.s.machine = self.machine.value
+        try:
+            from ..core import machine
+            self.machine_note.setText(machine.describe(self.s))
+        except Exception:  # noqa: BLE001
+            self.machine_note.setText("")
+        self.save.setPlaceholderText(str(self._default_root()))
+        self._check_root()
+
+    def _root(self):
+        from pathlib import Path
+        t = self.save.text().strip().strip('"')
+        return Path(t) if t else self._default_root()
+
+    def _check_root(self) -> None:
+        root = self._root()
+        self.root_note.setText(f"checking {root} …")
+        self.root_note.setStyleSheet(f"color: {theme.DIM};")
+
+        def work():
+            from ..core import publish
+            return publish.reachable(root, 4.0)
+
+        def got(ok) -> None:
+            if str(self._root()) != str(root):
+                return
+            if ok:
+                self.root_note.setText(f"{root} -- reachable")
+                self.root_note.setStyleSheet(f"color: {theme.GREEN};")
+            else:
+                self.root_note.setText(f"{root} -- not reachable now: finished projects stay on this computer and "
+                                       "move there when it is back")
+                self.root_note.setStyleSheet(f"color: {theme.AMBER};")
+        BG.call(work, got, lambda e: self.root_note.setText(f"could not check it: {e}"))
+
+    def _browse(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Save projects to", str(self._root()))
+        if d:
+            self.save.setText(d)
+
+    def _replay(self) -> None:
+        try:
+            self.win.play_intro()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _ok(self) -> None:
+        s = self.s
+        s.save_to = self.save.text().strip().strip('"')
+        s.machine = self.machine.value
+        s.animations = self.anim.value == "on"
+        s.intro = self.intro.value == "on"
+        s.daily_goal = int(self.daily.value())
+        s.monthly_goal = int(self.monthly.value())
+        s.upload_check_minutes = int(self.every.value())
+        try:
+            from ..core import settings as S
+            S.save(s)
+        except Exception as e:  # noqa: BLE001
+            self.where.setText(f"could not save the settings: {e}")
+            self.where.setStyleSheet(f"color: {theme.RED};")
+            return
+        self.result_settings = s
+        self.accept()
+
+    def showEvent(self, e) -> None:                       # noqa: N802
+        W.dark_title_bar(self)
+        super().showEvent(e)

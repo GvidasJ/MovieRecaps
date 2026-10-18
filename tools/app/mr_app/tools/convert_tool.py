@@ -12,13 +12,12 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QCheckBox, QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from . import Tool
 from ..core import jobs as J
 from ..core import paths
-from ..ui import theme
 from ..ui import widgets as W
 
 _ids = itertools.count(1)
@@ -91,19 +90,14 @@ class ConvRow(W.Card):
         self.state = W.StateLabel()
         top.addWidget(self.state)
         self.lay.addLayout(top)
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 1000)
-        self.bar.setTextVisible(False)
+        self.bar = W.GlideBar(3)
         self.lay.addWidget(self.bar)
         btns = QHBoxLayout()
-        self.b_folder = QPushButton("Open folder")
-        self.b_folder.setObjectName("Small")
+        self.b_folder = W.Button("Open folder", "Small")
         self.b_folder.clicked.connect(lambda: os.startfile(str(self.item.path.parent)))   # noqa: S606
-        self.b_stop = QPushButton("Stop")
-        self.b_stop.setObjectName("Small")
+        self.b_stop = W.Button("Stop", "Small")
         self.b_stop.clicked.connect(lambda: self.page.stop_item(self.item))
-        self.b_remove = QPushButton("Remove")
-        self.b_remove.setObjectName("Ghost")
+        self.b_remove = W.Button("Remove", "Ghost")
         self.b_remove.clicked.connect(lambda: self.page.remove_item(self.item))
         btns.addWidget(self.b_folder)
         btns.addWidget(self.b_stop)
@@ -117,8 +111,9 @@ class ConvRow(W.Card):
         word = {"waiting": "waiting", "running": "running", "done": "PASS", "failed": "FAIL",
                 "stopped": "STOPPED"}[it.state]
         self.state.set(word, it.text)
-        self.bar.setValue(int(1000 * it.share))
-        self.bar.setVisible(it.state == "running")
+        self.bar.state(word)
+        self.bar.set(it.share)
+        self.bar.setVisible(it.state in ("running", "done"))
         self.b_stop.setVisible(it.state == "running")
         self.b_remove.setEnabled(it.state != "running")
 
@@ -132,16 +127,13 @@ class ConvertPage(QWidget):
         self.rows: dict[int, ConvRow] = {}
         self.current: ConvertThread | None = None
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 34, 0, 40)
+        lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
-        title = QLabel(f"Con<span style='color:{theme.RED}'>vert</span>")
-        title.setObjectName("Title")
-        title.setFont(W.font(44, 800, -3))
-        lay.addWidget(title)
+        lay.addWidget(W.SectionHeader("Convert"))
         lay.addWidget(W.label("Drop any video: H.264 is only rewrapped to MP4 (no re-encode, lossless); VP9, AV1 and "
                               "other codecs Premiere handles badly become visually lossless H.264 -- the same "
                               "resolution, frame rate, colours and sound. The new file is checked (frames and "
-                              "length) before the original goes.", "Lead", wrap=True))
+                              "length) before the original goes.", "Muted", wrap=True))
         self.drop = W.DropZone("Drop videos here", ["one or many, or a folder (every video in it) -- converted one "
                                                     "after the other, next to the original"],
                                [("Choose videos...", self._pick)])
