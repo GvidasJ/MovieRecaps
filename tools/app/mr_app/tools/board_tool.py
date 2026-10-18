@@ -502,7 +502,7 @@ class BoardPage(QWidget):
         self.b_refresh.clicked.connect(self.reload)
         self.b_check = W.Button("Check the Shorts now", "Small")
         self.b_check.clicked.connect(lambda: self.check_uploads(force=True))
-        self.b_clean = W.Button("Clean up")
+        self.b_clean = W.Button("Clean up", "Small")
         self.b_clean.clicked.connect(self.clean_up)
         lay.addWidget(W.SectionHeader("Projects", [self.note, self.b_refresh, self.b_check, self.b_clean]))
         self.status = W.label("", "Dim", wrap=True, select=True)

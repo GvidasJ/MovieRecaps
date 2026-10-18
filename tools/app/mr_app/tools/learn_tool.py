@@ -157,7 +157,7 @@ class LearnPage(QWidget):
         self.b_rules.clicked.connect(self.save_rules)
         lay.addWidget(W.SectionHeader("Standing rules", [W.label("always apply, every night", "Small"), self.b_rules]))
         self.rules = QPlainTextEdit()
-        self.rules.setPlaceholderText("Rules that always apply, one per line -- e.g. never touch my audio")
+        self.rules.setPlaceholderText("Rules that always apply, one per line -- e.g. keep the competitor's cut points")
         self.rules.setFixedHeight(120)
         lay.addWidget(self.rules)
         self.b_wish = W.Button("Add to requests.md", "Small")
