@@ -83,6 +83,15 @@ python -m match_cuts --competitor X --raw Y --out Z [--layout match|fill|source]
 Extra flags: `--fast` (a quick run: see *Thorough by default* below), `--compare-fast` (a thorough run also says what it changed against `--fast`), `--check-determinism` (check 9.7 also re-runs the cut decisions from the caches and compares the cut list byte for byte -- as long as the segments stage again; check-all always), `--input-dir DIR` (auto-detection folder, default `./input`), `--seed N`,
 `--skip-preview`, `--skip-compare`, `--no-swap`, `--no-ae`, `--ae-timeout SECONDS`, `--force-inputs`, `--version`.
 
+**A wrong pair is caught in seconds** (night 11, stage `S1 pair check`, before anything else is done): does the
+competitor come from this RAW at all? Short pieces of the competitor's sound are looked for in the whole RAW at once
+(also as if sped up to 125 %); when the sound cannot decide (music or a voice over it, no sound), 16 low-resolution
+frames of the competitor are looked for among the RAW's keyframes (mirrored too). Only when both clearly fail does
+the run stop -- exit 2, `WRONG PAIR: This competitor doesn't seem to come from this RAW (sound: 0 of 9 pieces found;
+picture: 0 of 16 frames found ...)` -- in about 16 s for a 90-minute RAW (4.5 s when the pair is right; remembered
+per pair in the work folder). Checked on 65 real pairs (42 right ones all go on, 23 wrong ones -- other episodes of
+the same show among them -- all stopped). `--force-inputs` skips it; the batch's summary says WRONG PAIR.
+
 **Wrong inputs stop the run at once** (night 6; `--force-inputs` skips both checks). Right after reading the two
 files' lengths (ffprobe, before anything is converted) the run stops with a plain message naming both files (length,
 picture size, file size) and what to do when the competitor is longer than a Short (3 minutes), almost as long as the
@@ -227,7 +236,8 @@ for the channel you pick.
 `1_edit.xml` is a 1080×1920 sequence (with a frame: the frame's own size) **at the RAW's own frame rate** (night 7:
 a 23.976 RAW gives a 23.976 sequence, 29.97 a 29.97 one, and so on; a RAW at a rate Premiere does not use -- 15, 20,
 48 fps, or a variable rate -- the nearest of 23.976, 24, 25, 29.97, 30, 50, 59.94, 60; `--sequence-fps 60` gives the
-old 60 fps sequence) with the edit on V1, the RAW audio on A1 (every clip at 0 dB) and your template on V2 (`--frame`:
+old 60 fps sequence) with the edit on V1, the RAW audio on A1 (every clip with your audio chain: night 11, below)
+and your template on V2 (`--frame`:
 that PNG; `--no-frame`: V2 and above empty), and with `--watermark` the channel's watermark on the track above it.
 
 How (night 7): the edit is still **planned and checked on the 60 fps grid** (every competitor frame a whole number of
@@ -376,10 +386,16 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   is that clip's own RAW sound at 0 dB: no muted cutaway, no silent freeze (it plays at 100 % with its RETIME
   marker, and so does its sound), no sound of another moment put under the picture -- except an audio line that
   carries on the sound already playing (one take of sound under stuttering pictures: video018's "insurance").
-  **Every A1 clip imports at 0 dB, unmuted** (night 4): no Audio Levels, gain, pan, pitch or any effect but its speed,
-  no keyframes -- the fades at removed silences are gone too (their keyframes made the 125 % A1 of the laptop's
-  output/005 import muted). The hard check `XML AUDIO` fails the run otherwise. Your projects' -inf levels and pitch
-  effects are your own sound work: never learned or copied.
+  **Every A1 clip carries your audio chain** (night 11; it replaced night 4's "every A1 clip at 0 dB, no effect"):
+  its own Normalize All Peaks to 0 dB (the loudest sample the clip plays of the RAW's first channel, brought to
+  0 dB -- in Premiere a Volume after the clip's own, since an XML cannot set a clip's Audio Gain; split into equal
+  Volumes above +15 dB), Volume 0 dB, Panner 0 -- in this order, after its speed, unmuted, no keyframes (keyframes
+  made the 125 % A1 of the laptop's output/005 import muted). An XML cannot carry the Hard Limiter and Amplify
+  (Premiere: "not translated"), so they come from `assets\premiere\MovieRecaps audio chain.prfpset` (Hard Limiter
+  0 dB / 0 dB / 7 ms / 100 ms / 1.00, Amplify +4.5 dB; your LoudVOGOOOD preset has the same values): select all A1
+  clips in Premiere and apply it. Don't use Audio Gain > Normalize again. The hard check `XML AUDIO` fails the run
+  when a clip's chain is not exactly this (and re-measures each gain). Your projects' -inf levels and pitch effects
+  are your own sound work: never learned or copied.
 * **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)
   -- output/020 had S06, S07, S09, S10 and S13 of 3-9 frames; your own clips are 0.3 s or longer -- goes into its
   neighbour: the clip before plays on over it (its take runs on), else the clip after starts that much earlier,
@@ -868,11 +884,12 @@ exception.
   two frames off) -- is exported as one continuous audio-only layer (`Sxx-Syy  audio (audio line: …)`) instead of
   silence.
 
-**Input auto-detection** (prompt Configuration): the competitor is the *portrait* file, failing that the
-*shorter* one. If `--competitor`/`--raw` look reversed they are swapped with a warning (`--no-swap`
-disables this). If the default files do not exist, `./input` is scanned for exactly two videos. Two files
-with the same orientation and duration are genuinely ambiguous: the tool stops and asks you to pass both
-flags.
+**Input auto-detection** (night 11, `pairing.py` -- the same rule as the batch and the app): **names win** -- a file
+named `raw*` is the RAW, `comp*` / `competitor*` the competitor; when the names don't say, the longer video is the
+RAW, but only when the shorter is under 80 % of it; two videos within 20 %: a portrait one next to a landscape one is
+the competitor (said in a warning); else the tool stops and asks you to name the RAW `raw.mp4` or pass both flags.
+If `--competitor`/`--raw` look reversed they are swapped with a warning (`--no-swap` disables this). If the default
+files do not exist, `./input` is scanned for its videos.
 
 **Exit code** (DESIGN §7 D5):
 
@@ -946,8 +963,10 @@ existing `3_captions_styled.prproj` (without it the run stops rather than overwr
 over a `--speed` after `--`); without one, 100. The summary has a speed column.
 
 `<folder>` holds **one subfolder per RAW**: the RAW and one or more competitors cut from it, **any file names** and
-any video extension (`.mp4`, `.mov`, `.mkv` ...) -- the RAW is the file named `raw.*` if there is one, else the
-**longest** video; every other video in the subfolder is a competitor and gets its own edit:
+any video extension (`.mp4`, `.mov`, `.mkv` ...) -- the RAW is the file named `raw*` if there is one (night 11:
+`comp*` / `competitor*` names a competitor), else the **longest** video when the others are under 80 % of its
+length (a subfolder whose two videos are within 20 % and say nothing by name or orientation is skipped with a note:
+name its RAW `raw.mp4`); every other video in the subfolder is a competitor and gets its own edit:
 
 ```
 C:\Users\gvida\Desktop\todo\
