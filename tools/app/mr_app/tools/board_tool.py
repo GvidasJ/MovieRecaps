@@ -225,9 +225,16 @@ class BoardCard(QFrame):
             if text is not None:
                 save_upload_title(self.page.ctx, c.folder, text)
 
+        page = self.page                                  # (this card may be rebuilt while Premiere opens)
+
+        def said(msg) -> None:
+            msg = str(msg)
+            page.status.setText(msg)                      # the whole sentence (what to do next) ...
+            page.toast(msg.split(" -- ")[0][:150], "info")   # ... and its first part
+
         def premiere() -> None:
-            BG.call(lambda: open_in_premiere(edit[-1]), lambda msg: self.page.toast(str(msg)[:120], "info"),
-                    lambda err: self.page.toast(f"Premiere could not be opened: {err}", "fail"))
+            BG.call(lambda: open_in_premiere(edit[-1]), said,
+                    lambda err: page.toast(f"Premiere could not be opened: {err}", "fail"))
         items = [("Open folder", lambda: os.startfile(str(c.folder)), False, Path(c.folder).exists()),  # noqa: S606
                  ("Open in Premiere", premiere, False, bool(edit)),
                  ("Copy title", self._copy, False, bool(c.title or getattr(c, "upload_title", ""))),

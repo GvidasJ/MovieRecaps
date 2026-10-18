@@ -61,8 +61,14 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    once instead of 20 minutes later. If you know the two belong together, right-click the row: **Run anyway (skip
    the pair check)**.
 4. Results: **PASS** (green), **OK with a note** (amber), **FAIL**, **WRONG PAIR**, **PICTURE NOT FOUND**, **NOT IN
-   THIS RAW** (red), **STOPPED**. A finished row: Open folder, Open in Premiere (the XML pointed at its media as this
-   computer sees it), Show report.
+   THIS RAW** (red), **STOPPED**. A finished row: Open folder, Open in Premiere, Show report.
+
+   **Open in Premiere** (the XML pointed at its media as this computer sees it): with a project open in Premiere,
+   the edit is imported into it (your usual template project); with Premiere closed or on its Home screen, the
+   edit gets **its own project next to it** (`<name>_edit.prproj`, made from an empty Premiere 2024 project), which
+   Premiere opens and imports the edit into -- save it with Ctrl+S. Pressed again later, a saved project just opens
+   (nothing is imported twice). Then select all A1 clips and apply the preset `assets\premiere\MovieRecaps audio
+   chain.prfpset` (or your LoudVOGOOOD): the Hard Limiter and Amplify an XML cannot carry.
 5. Drag rows to change the order. Right-click a row: Open folder, Open in Premiere, Copy title, Run again
    (Thorough), Remove.
 6. A finished project's edit goes to the shared folder by itself (Settings). The taskbar button fills with the
