@@ -1,0 +1,11 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video11_fixed_relinked.prproj (2026-10-18, night 11; the project's only sequence): answer.srt and answer_edit.json are your finished edit (its picture clips; learn --picture-key); your run was the PC's --fast run output\\Super Troopers (2001) [1080p] (made here, RTX 5080; the same files as output\\laptop_video11) with the default settings -- 100 %, your template, the competitor's cut points; the RAW is the 100-minute film (the case keeps RAW 3776.2-3855.2 s); the competitor shows one crop of the whole picture; your captions include two action captions (*burst out laughing*, *hands him the pistol*)",
+ "learned_from": "finished\\video11\\video11_fixed_relinked.prproj",
+ "run": "output\\laptop_video11",
+ "full_raw": "output/laptop_video11/extras/media/raw.mp4",
+ "raw_offset": 3776.189083,
+ "options": [],
+ "srt_rate": "24000/1001"
+}

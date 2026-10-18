@@ -1,0 +1,116 @@
+{
+ "what": "your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio by hand, so the picture is the key): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 3776.189 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 2.794458,
+   "kind": "raw",
+   "src_in": 30.03,
+   "speed": 1.0
+  },
+  {
+   "start": 2.794458,
+   "end": 3.586917,
+   "kind": "raw",
+   "src_in": 32.824459,
+   "speed": 1.0
+  },
+  {
+   "start": 3.586917,
+   "end": 4.295958,
+   "kind": "raw",
+   "src_in": 36.161125,
+   "speed": 1.0
+  },
+  {
+   "start": 4.295958,
+   "end": 5.672333,
+   "kind": "raw",
+   "src_in": 37.454084,
+   "speed": 1.0
+  },
+  {
+   "start": 5.672333,
+   "end": 8.75875,
+   "kind": "raw",
+   "src_in": 38.830459,
+   "speed": 1.0
+  },
+  {
+   "start": 8.75875,
+   "end": 10.051708,
+   "kind": "raw",
+   "src_in": 42.751042,
+   "speed": 1.0
+  },
+  {
+   "start": 10.051708,
+   "end": 12.595917,
+   "kind": "raw",
+   "src_in": 44.044,
+   "speed": 1.0
+  },
+  {
+   "start": 12.595917,
+   "end": 15.015,
+   "kind": "raw",
+   "src_in": 46.588209,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.03,
+   "src_out": 32.824459,
+   "dx": 187.797,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 32.824459,
+   "src_out": 33.616917,
+   "dx": -465.203,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 36.161125,
+   "src_out": 36.870167,
+   "dx": -465.203,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 37.454084,
+   "src_out": 38.830459,
+   "dx": 426.797,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 38.830459,
+   "src_out": 41.916875,
+   "dx": -342.203,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 42.751042,
+   "src_out": 44.044,
+   "dx": -14.203,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 44.044,
+   "src_out": 46.588209,
+   "dx": -424.203,
+   "scale": 118.9223
+  },
+  {
+   "src_in": 46.588209,
+   "src_out": 49.007292,
+   "dx": 221.797,
+   "scale": 118.9223
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

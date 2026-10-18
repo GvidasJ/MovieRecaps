@@ -1,0 +1,75 @@
+{
+ "video": "chocolate-fixed",
+ "date": "2026-10-18",
+ "project": "finished\\chocolate\\chocolate_fixed.prproj",
+ "run": "D:\\Shared\\2026-10-18_where-the-nestle-crunch-meme-originated\\edit",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.0,
+   0.0,
+   0.0,
+   -3.733,
+   0.0,
+   -2.367
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   0.8,
+   -0.133,
+   7.633,
+   0.633
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.842,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 2,
+   "of": 3,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 30.0
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 29,
+  "added": 24,
+  "rewritten": 0,
+  "changes": []
+ }
+}

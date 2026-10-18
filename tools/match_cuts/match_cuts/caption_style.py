@@ -373,6 +373,8 @@ def _screen_noise_out(rows: list, cf: float) -> list:
     return res
 
 
+FUZZY_SCREEN = 0.6              # night 11 (R-C4): a heard word this alike (letters, 0-1) a word on the screen counts
+#                                 as that word when a caption boundary is settled by the screen (_by_screen)
 CLEAR_AGREEMENT = 0.9           # a competitor caption read the same on this share of its frames (and twice or more): its
 #                                 words are trusted where the transcript lacks them (follow_competitor)
 
@@ -452,9 +454,25 @@ def _by_screen(words, owner: list, screens: Sequence[str]) -> None:
     from .caption_recheck import _tokens
     toks = [_tokens([t]) for t in screens]
 
+    def alike(x: str, y: str) -> bool:
+        # night 11 (learn-analysis, R-C4): a heard word written otherwise on the screen -- a sung / made-up word
+        # ("scrumptious" heard, "scrunchous" shown: chocolate), a censored one ("fag" / "Fa*"), an OCR slip
+        # ("anywhere" / "anwwharo") -- is that word when deciding where a boundary goes (never a small word)
+        lx, ly = re.sub(r"[^a-z]", "", x), re.sub(r"[^a-z]", "", y)
+        return (len(lx) >= 3 and len(ly) >= 2 and x not in _KIND and y not in _KIND
+                and SequenceMatcher(None, lx, ly).ratio() >= FUZZY_SCREEN)
+
+    def as_screen(a: list[str], k: int) -> list[str]:
+        return [x if x in toks[k] else next((y for y in toks[k] if alike(x, y)), x) for x in a]
+
     def match(ws, k) -> int:
-        a = _tokens([w.text for w in ws])
+        a = as_screen(_tokens([w.text for w in ws]), k)
         return sum(b.size for b in SequenceMatcher(None, a, toks[k], autojunk=False).get_matching_blocks())
+
+    def stray(ws, k) -> int:
+        # heard words the caption's screen does not show (a repeat of the word before aside: written once)
+        a = as_screen(_tokens([w.text for w in ws]), k)
+        return sum(1 for i, x in enumerate(a) if x not in toks[k] and not (i and a[i - 1] == x))
     for k in range(len(screens) - 1):
         idx = [j for j, o in enumerate(owner) if o in (k, k + 1)]
         if not idx or not toks[k] or not toks[k + 1] or idx != list(range(idx[0], idx[-1] + 1)):
@@ -462,7 +480,8 @@ def _by_screen(words, owner: list, screens: Sequence[str]) -> None:
         cur = sum(1 for j in idx if owner[j] == k)
         best, best_n = None, cur
         for n in range(len(idx) + 1):
-            sc = match([words[j] for j in idx[:n]], k) + match([words[j] for j in idx[n:]], k + 1)
+            left, right = [words[j] for j in idx[:n]], [words[j] for j in idx[n:]]
+            sc = (match(left, k) + match(right, k + 1), -(stray(left, k) + stray(right, k + 1)))
             if best is None or sc > best or (sc == best and n == cur):
                 best, best_n = sc, n
         for i, j in enumerate(idx):

@@ -108,7 +108,8 @@ def read_run(case: testcases.Case, run_dir: Path | None, scored: bool = True) ->
         row["transcriber"] = c.get("transcriber")
     if case.has_key and scored:
         try:
-            sc = caption_score.score_run(case.name, case.answer_srt, testcases.answer_timeline(case), run_dir)
+            sc = caption_score.score_run(case.name, case.answer_srt, testcases.answer_timeline(case), run_dir,
+                                         getattr(case, "srt_rate", None))
             row["score"] = sc.to_dict()
         except Exception as e:  # noqa: BLE001 - a broken run scores nothing; the card says why
             row["score_error"] = f"{type(e).__name__}: {e}"

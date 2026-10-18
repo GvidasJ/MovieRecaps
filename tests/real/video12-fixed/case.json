@@ -1,0 +1,11 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video12_fixed_relinked.prproj (2026-10-18, night 11; the project's only sequence): answer.srt and answer_edit.json are your finished edit (its picture clips; learn --picture-key); your run was the laptop's --fast run output\\Video1-2 (here output\\laptop_video12) with the default settings -- 100 %, your template, the competitor's cut points; the RAW is a 22-minute episode (the case keeps RAW 998.5-1092.5 s); your captions include one action caption (*got it*)",
+ "learned_from": "finished\\video12\\video12_fixed_relinked.prproj",
+ "run": "output\\laptop_video12",
+ "full_raw": "output/laptop_video12/extras/media/raw.mp4",
+ "raw_offset": 998.539208,
+ "options": [],
+ "srt_rate": "24000/1001"
+}

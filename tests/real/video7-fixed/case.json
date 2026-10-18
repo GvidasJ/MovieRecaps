@@ -6,5 +6,6 @@
  "run": "output\\laptop_video7",
  "full_raw": "output/laptop_video7/extras/media/raw.mp4",
  "raw_offset": 261.928333,
- "options": []
+ "options": [],
+ "srt_rate": "24000/1001"
 }

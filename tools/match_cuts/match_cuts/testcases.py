@@ -48,6 +48,8 @@ class Case:
     raw_offset: float = 0.0                  # raw.mp4 is a window of full_raw starting at this second (window_copy)
     style: str = "old"                       # "new": made with your current rules (default frame, the competitor's cuts,
     #                                          100 %) -- check-all runs it thorough and scores it; "old": --fast, hard checks
+    srt_rate: float | None = None            # night 11: the rate of the sequence the key's captions were imported into
+    #                                          (caption_score.premiere_placed); None: compared as written
 
     @property
     def has_key(self) -> bool:
@@ -74,7 +76,19 @@ def load(d: Path) -> Case | None:
     return Case(d.name, d, comp, raw, opts, srt if srt.is_file() else None, edit,
                 str(meta.get("timeline") or "edit"), str(meta.get("notes") or ""),
                 _here(meta.get("full_raw")), _here(meta.get("full_competitor")), float(meta.get("raw_offset") or 0.0),
-                "new" if str(meta.get("style") or "").lower() == "new" else "old")
+                "new" if str(meta.get("style") or "").lower() == "new" else "old",
+                _rate(meta.get("srt_rate")))
+
+
+def _rate(v: Any) -> float | None:
+    """case.json "srt_rate": a number or a fraction ("24000/1001"); None when absent."""
+    if v in (None, ""):
+        return None
+    from fractions import Fraction
+    try:
+        return float(Fraction(str(v)))
+    except (ValueError, ZeroDivisionError):
+        return None
 
 
 def _here(p: Any) -> Path | None:

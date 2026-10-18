@@ -1,0 +1,13 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from chocolate_fixed.prproj (2026-10-18, night 11; a copy of Desktop\\chocolate.prproj, its third sequence -- the first two are other videos): answer.srt and answer_edit.json are your finished edit (its picture clips; learn --picture-key); your run was the app's --fast run on the laptop (D:\\Shared\\2026-10-18_where-the-nestle-crunch-meme-originated\\edit) with the LouLaughs channel template (frame.png = the project's template.png) and its watermark (watermark.png), 100 %, the competitor's cut points; the RAW is a 31-second 640x480 commercial (copied whole)",
+ "learned_from": "finished\\chocolate\\chocolate_fixed.prproj",
+ "run": "D:\\Shared\\2026-10-18_where-the-nestle-crunch-meme-originated\\edit",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

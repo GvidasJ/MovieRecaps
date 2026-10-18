@@ -442,10 +442,30 @@ def load_captions(srt: str | Path) -> list[Cap]:
     return [Cap(c["text"], c["start_ms"] / 1000.0, c["end_ms"] / 1000.0) for c in read_srt(srt)]
 
 
-def score_run(name: str, key_srt: str | Path, key_tl: Timeline, run_dir: str | Path) -> Score:
+def premiere_placed(t: float, rate: float) -> float:
+    """Night 11 (learn-analysis): where Premiere places a caption the tool means to start at plan second ``t`` (60 fps)
+    when it reaches the user as an SRT delivered on a ``rate`` sequence (the nearest frame of ``rate``, written to
+    the ms), imported into that sequence: Premiere floors the SRT time to frames of the NOMINAL rate (24 for 23.976)
+    and lays those on the real frames -- one frame early on every caption of a 23.976 delivery (the user's keys made
+    from one: video7 21 of 23 captions, video12 26 of 33 sit there), on the captions whose ms fell just below their
+    frame at 30 / 60 fps."""
+    import math
+    if not rate or rate <= 0:
+        return t
+    k = math.floor(round(t * SEQ_FPS) / SEQ_FPS * rate + 0.5)
+    ms = math.floor(k * 1000.0 / rate + 0.5)
+    nominal = round(rate)
+    n = math.floor(ms / 1000.0 * nominal + 1e-9)
+    return math.floor(n / nominal * rate + 1e-9) / rate
+
+
+def score_run(name: str, key_srt: str | Path, key_tl: Timeline, run_dir: str | Path,
+              srt_rate: float | None = None) -> Score:
     """A run folder's 2_captions.srt (on its 1_edit.xml; another video's stretches from extras/debug/captions.json)
     against the user's key_srt on key_tl -- the 60 fps versions when the run delivered them at the RAW's rate
-    (run_folders.planned_files: night 7)."""
+    (run_folders.planned_files: night 7). ``srt_rate`` (night 11): the rate of the sequence the key's own captions
+    were imported into (case.json "srt_rate") -- the tool's captions are compared where Premiere would have put them
+    (premiere_placed), as the user's were."""
     from .run_folders import EXTRAS, planned_files
     run = Path(run_dir)
     ov: list[dict] = []
@@ -455,6 +475,9 @@ def score_run(name: str, key_srt: str | Path, key_tl: Timeline, run_dir: str | P
     xml, srt = planned_files(run)
     got_tl = Timeline.from_xml(xml, ov)
     got = load_captions(srt) if srt.is_file() else []
+    if srt_rate:
+        got = [Cap(c.text, premiere_placed(c.start, float(srt_rate)), premiere_placed(c.end, float(srt_rate)))
+               for c in got]
     gaps = [(int(o["a"]) / SEQ_FPS, int(o["b"]) / SEQ_FPS) for o in ov]
     return score(name, load_captions(key_srt), key_tl, got, got_tl, gaps)
 

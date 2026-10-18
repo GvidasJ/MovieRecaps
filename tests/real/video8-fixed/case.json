@@ -6,5 +6,6 @@
  "run": "output\\laptop_video8",
  "full_raw": "output/laptop_video8/extras/media/raw_ae.mov",
  "raw_offset": 255.380125,
- "options": []
+ "options": [],
+ "srt_rate": "24000/1001"
 }

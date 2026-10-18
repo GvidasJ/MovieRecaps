@@ -1055,6 +1055,27 @@ def _cut_split(cs: list[Cap], cuts: Sequence[int], fps: Fraction, rep: Report) -
     return out
 
 
+def _strip_exclaims(caps: list[Cap], rep: Report) -> None:
+    """Night 11 (learn-analysis, R-C5): no "!" in captions grouped from the heard words -- the speech model's
+    exclamation marks: you took out 10 of the 11 the tool wrote in your fixes (laptop013 "a perv*rt!", "members!",
+    "of d*ck!"; video7 "you!" three times; video6 "popcorn!"; video9 "ah!" (you wrote "ahh"), "on meat cake!";
+    video11 "put those away!"), keeping only video9's "up!"; your own SRTs have a "!" on 8 of 617 captions, mostly
+    a call ("whoa!"). A lone name or interjection called out keeps it (laptop010 "Ron!", kept in your fix). The
+    competitor's own text, followed, keeps its "!" (that is not this mode)."""
+    for c in caps:
+        if c.mode == "placeholder" or not c.toks or not any("!" in t.text for t in c.toks):
+            continue
+        if len(c.toks) == 1 and (c.toks[0].text[:1].isupper() or is_interjection_word(norm(core(c.toks[0].text)))):
+            continue
+        out = []
+        for t in c.toks:
+            s = t.text.replace("!", "")
+            if s:
+                out.append(Tok(s, t.raw, t.word, t.sent))   # the sentence start _recase marked stays
+        c.toks = out
+        rep.notes["exclaims"] = rep.notes.get("exclaims", 0) + 1
+
+
 def _strip_stops(caps: list[Cap], rep: Report) -> None:
     """Text cleanup: full stops and commas off, not inside numbers (after the sentence splits used them)."""
     for c in caps:
@@ -1210,6 +1231,9 @@ def enforce(caps: Sequence[Caption], fps: Fraction, mode: str, words: Sequence[W
     _strip_stops(cs, rep)
     cs = [c for c in cs if c.toks]
     _recase(cs, words, lex, rep, fps)
+    if mode == "voice":                       # night 11 (R-C5): captions grouped from the heard words -- after the
+        _strip_exclaims(cs, rep)              # capitals are settled (a sentence's "You!" is "you!" by then)
+        cs = [c for c in cs if c.toks]
     if mode == "competitor" and not keep_groups:
         cs = _regroup(cs, fps, rep, cuts)
     # rule 6: length
