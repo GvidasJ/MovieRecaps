@@ -875,10 +875,13 @@ def cannot_link(src: Path, dest_dir: Path) -> str | None:
 
 
 def take_local(file: str | os.PathLike, project_folder: str | os.PathLike, progress: Progress | None = None,
-               cancel: threading.Event | None = None, log_path: str | os.PathLike | None = None) -> Path:
+               cancel: threading.Event | None = None, log_path: str | os.PathLike | None = None,
+               link: bool = True) -> Path:
     """A dropped RAW file into the project folder under its own name: a hard link when the folder is on the same
     drive (instant, no space used; the file you dropped stays where it is), else a copy -- the log says
-    'copied, not linked: <reason>'. A file already in the folder is used as it is."""
+    'copied, not linked: <reason>'. A file already in the folder is used as it is. ``link=False`` (night 11): always a
+    copy of its own -- a hard link is the very same file under a second name, so a file later copied over the original
+    (Explorer's "Replace", copy /Y: they write into the existing file) would change the project's too."""
     src, dest_dir = Path(file), Path(project_folder)
     if not src.is_file():
         raise DownloadError(f"{src.name} is not there any more")
@@ -901,7 +904,7 @@ def take_local(file: str | os.PathLike, project_folder: str | os.PathLike, progr
                 pass
             dest = dest_dir / f"{src.stem}-{k}{src.suffix}"
             k += 1
-        reason = cannot_link(src, dest_dir)
+        reason = cannot_link(src, dest_dir) if link else "a copy of its own (the original can be replaced or deleted)"
         if reason is None:
             try:
                 os.link(src, dest)

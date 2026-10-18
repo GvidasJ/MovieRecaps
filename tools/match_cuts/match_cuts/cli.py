@@ -2,10 +2,12 @@
 [--comp-size WxH|competitor] [--fps competitor|source] [--work DIR] [--workers N] [--force-conform]
 [--ae-time-mode auto|stretch|remap|frames] [--audio-sync raw|competitor] [-v]`` (DESIGN.md §5 cli.py, prompt Configuration).
 
-Input auto-detection (prompt Configuration): the competitor is the portrait file, failing that the
-shorter one. Explicit arguments that look reversed are swapped with a warning; if the defaults do not
-exist, ``./input`` (or --input-dir) is scanned for exactly two videos. Genuinely ambiguous inputs
-(same orientation, same duration) stop with a question instead of guessing.
+Input auto-detection: if the defaults do not exist, ``./input`` (or --input-dir) is scanned for exactly two
+videos and pairing.py decides (night 11: names win over length -- raw* is the RAW, comp* / competitor* the
+competitor; else the longer one when the lengths are more than 20 % apart; else a portrait one next to a landscape
+one is the competitor). Undecided inputs stop with the question instead of guessing ("name the RAW raw.mp4").
+Explicit arguments that look reversed (the portrait file, failing that the shorter one, is the competitor) are
+swapped with a warning when --force-inputs lets them run.
 
 Prints the overall headline ('PASS', 'PASS (criterion 6 not verified: <reason>)' or 'FAIL'), one line
 per acceptance criterion c1..c6 (+ determinism and deliverables), the output paths and the warnings.
@@ -330,10 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="never swap --competitor/--raw even if they look reversed")
     p.add_argument("--quick-checks", action="store_true", help=argparse.SUPPRESS)   # check-all: no AE recreation checks
     p.add_argument("--force-inputs", action="store_true",
-                   help="skip the wrong-input check: by default the run stops at once (before converting anything) when "
-                        "the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, the "
-                        "same video, or the two files look swapped; with this option it runs anyway (and swaps two "
-                        "files that look reversed, as before)")
+                   help="skip the wrong-input checks: by default the run stops at once (before converting anything) "
+                        "when the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, "
+                        "the same video, or the two files look swapped -- and (night 11) when a quick look at their sound "
+                        "and picture, in seconds, finds that the competitor does not come from this RAW (WRONG PAIR); "
+                        "with this option it runs anyway (and swaps two files that look reversed, as before)")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging on the console")
     p.add_argument("--version", action="version", version=f"match_cuts {__version__}")
     return p
@@ -497,13 +500,17 @@ def resolve_inputs(competitor: str | None, raw: str | None, input_dir: str | Pat
     if len(vids) != 2:
         raise InputError(f"expected {DEFAULTS['competitor']} and {DEFAULTS['raw']}, or exactly two videos in {d} "
                          f"(found {len(vids)}: {[v.name for v in vids]}); pass --competitor and --raw")
-    a, b = quick_probe(vids[0]), quick_probe(vids[1])
-    order = order_pair(a, b)
-    if order is None:
-        raise InputError(f"cannot tell competitor from raw: {vids[0].name} and {vids[1].name} have the same "
-                         "orientation and duration; pass --competitor and --raw")
-    notes.append(f"auto-detected by the {order[2]} rule: competitor={order[0]['path']}, raw={order[1]['path']}")
-    return order[0]["path"], order[1]["path"], notes
+    # night 11 (pairing.py): names win over length -- raw* is the RAW, comp* / competitor* the competitor; else the
+    # longer one when the lengths are more than 20 % apart; else a portrait one next to a landscape one is the
+    # competitor; else it stops with the question (name the RAW raw.mp4, or pass --competitor and --raw)
+    from .pairing import pick_pair
+    probes = {v: quick_probe(v) for v in vids}
+    p = pick_pair(vids, lambda v: probes[v]["duration"] or None,
+                  lambda v: (probes[v]["width"], probes[v]["height"]))
+    if p.raw is None or len(p.competitors) != 1:
+        raise InputError(f"{p.why}; or pass --competitor and --raw")
+    notes.append(f"auto-detected ({p.why}): competitor={p.competitors[0]}, raw={p.raw}")
+    return str(p.competitors[0]), str(p.raw), notes
 
 
 # ---------------------------------------------------------------------------------------------

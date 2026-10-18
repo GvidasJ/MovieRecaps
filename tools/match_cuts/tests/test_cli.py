@@ -132,16 +132,16 @@ def test_input_dir_autodetect_and_ambiguity(clips, tmp_path):
     shutil.copy(clips["portrait"], d / "their_short.mp4")
     c, r, notes = cli.resolve_inputs(None, None, d)
     assert Path(c).name == "their_short.mp4" and Path(r).name == "source video.mp4"
-    assert "portrait" in notes[0]
+    assert "the longer video is the RAW" in notes[0]          # night 11: names, then lengths, then portrait
     # one given, the other found
     c, r, notes = cli.resolve_inputs(str(d / "their_short.mp4"), None, d)
     assert Path(r).name == "source video.mp4"
-    # genuinely ambiguous: same orientation and duration -> ask
+    # genuinely ambiguous: same orientation and duration, the names don't say -> ask
     amb = tmp_path / "amb"
     amb.mkdir()
     shutil.copy(clips["landscape_short"], amb / "a.mp4")
     shutil.copy(clips["landscape_short"], amb / "b.mp4")
-    with pytest.raises(cli.InputError, match="cannot tell"):
+    with pytest.raises(cli.InputError, match="can't tell which one is the RAW"):
         cli.resolve_inputs(None, None, amb)
     with pytest.raises(cli.InputError, match="exactly two"):
         cli.resolve_inputs(None, None, tmp_path / "missing")

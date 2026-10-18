@@ -2,6 +2,8 @@
 (match_cuts.batch.checks_of / verdict / stop_message), plus the two stops the tool names itself:
 
 * PASS / OK with a note (every file there, a check of 1_edit.xml found something to look at) / FAIL;
+* WRONG PAIR -- the quick check before the long run (seconds) found that the competitor does not come from this RAW
+  (night 11: "This competitor doesn't seem to come from this RAW"; red, like PICTURE NOT FOUND);
 * PICTURE NOT FOUND -- the competitor's sound is in the RAW but its picture is not (night 8);
 * NOT IN THIS RAW -- neither its picture nor its sound (night 6: "the competitor's scenes are not in this RAW");
 * STOPPED -- you pressed Stop.
@@ -12,7 +14,9 @@ from pathlib import Path
 
 PASS, OK_NOTE, FAIL = "PASS", "OK with a note", "FAIL"
 PICTURE_NOT_FOUND, NOT_IN_RAW, STOPPED = "PICTURE NOT FOUND", "NOT IN THIS RAW", "STOPPED"
+WRONG_PAIR = "WRONG PAIR"
 GOOD = (PASS, OK_NOTE)
+RED = (FAIL, WRONG_PAIR, PICTURE_NOT_FOUND, NOT_IN_RAW)      # the labels shown red
 
 
 def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = False) -> str:
@@ -21,6 +25,8 @@ def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = F
         return STOPPED
     low = (stop or "").lower()
     if code not in (0, 1):
+        if low.lstrip().startswith("wrong pair"):
+            return WRONG_PAIR
         if "picture not found" in low:
             return PICTURE_NOT_FOUND
         if "not in this raw" in low:
@@ -57,6 +63,10 @@ def short(result: dict) -> str:
     """One line under the result word: why it failed, or the note."""
     if result.get("label") == STOPPED:
         return "stopped by you"
+    if result.get("label") == WRONG_PAIR:              # the stop message without "WRONG PAIR:" (the pill says it)
+        s = str(result.get("stop") or "").strip()
+        s = s[len(WRONG_PAIR):].lstrip(" :-") if s.upper().startswith(WRONG_PAIR) else s
+        return (s or "This competitor doesn't seem to come from this RAW")[:220]
     if result.get("failures"):
         return str(result["failures"][0])[:220]
     if result.get("notes"):

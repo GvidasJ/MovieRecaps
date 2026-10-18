@@ -1,9 +1,13 @@
 """``python -m match_cuts batch <folder>``: every video of a folder, one after another, unattended.
 
 ``<folder>`` holds one subfolder per RAW: the RAW and one or more competitors cut from it, any names and any video
-extension (.mp4 / .mov / .mkv ...): the RAW is ``raw.*`` when there is one, else the LONGEST video; every other video
-is a competitor and gets its own edit (run folder ``<subfolder>`` -- with several competitors
-``<subfolder>_<competitor name>``). The RAW is analysed once: the stage caches are shared, and a RAW the first run
+extension (.mp4 / .mov / .mkv ...). Names win over length (night 11, pairing.py): a video named ``raw*`` is the RAW
+(``comp*`` / ``competitor*`` videos are competitors); else the longer video when the lengths are more than 20 % apart;
+else a portrait video next to a landscape one is the competitor (said in the console); else the folder is skipped with
+why ("can't tell which one is the RAW ... -- name the RAW raw.mp4"). Every other video is a competitor and gets its
+own edit (run folder ``<subfolder>`` -- with several competitors ``<subfolder>_<competitor name>``). A competitor
+that does not come from its RAW at all is stopped by the run's quick check within seconds (pair_check.py) and listed
+as WRONG PAIR. The RAW is analysed once: the stage caches are shared, and a RAW the first run
 had to convert is taken from that run's media folder for the next competitors (night 6). Before anything runs every
 pair gets the wrong-input check (inputs_check.py) and every problem is listed at the start (those pairs are not
 run); while a video runs the console shows its progress and the whole batch's time left every 30 s. Each runs as its own ``python -m match_cuts --premiere --fast`` process (a crash or a failed
@@ -44,50 +48,76 @@ VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".mts", ".m2ts", 
 SUMMARY = "batch_summary"
 
 
-def find_videos(folder: Path) -> tuple[list[tuple[str, Path, Path]], list[str]]:
+def find_videos(folder: Path, notes: list[str] | None = None,
+                asks: list[tuple[str, list[Path], str]] | None = None) -> tuple[list[tuple[str, Path, Path]], list[str]]:
     """([(name, competitor, raw)] in name order, [why a subfolder was skipped]): every subfolder's RAW and each of its
-    competitors (one job per competitor; module docstring)."""
+    competitors (one job per competitor; module docstring). ``notes``: gets the decisions worth saying (a portrait
+    video taken as the competitor of a RAW about as long); ``asks``: gets the subfolders where it cannot tell which
+    video is the RAW, as (name, the candidates, why) -- instead of skipping them (the app asks you)."""
     out, skipped = [], []
     for d in sorted((p for p in folder.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
         vids = sorted((f for f in d.iterdir() if f.is_file() and f.suffix.lower() in VIDEO_EXTS),
                       key=lambda f: f.name.lower())
-        raw, comps, why = split_folder(vids)
-        if raw is None or not comps:
-            skipped.append(f"{d.name}: {why}")
+        p = folder_pair(vids)
+        if p.raw is None and p.ask and asks is not None and len(p.candidates) >= 2:
+            asks.append((d.name, list(p.candidates), p.why))
             continue
+        raw, comps = p.raw, p.competitors
+        if raw is None or not comps:
+            skipped.append(f"{d.name}: {p.why if raw is None else 'a raw video but no competitor'}")
+            continue
+        if p.rule == "portrait" and notes is not None:
+            notes.append(f"{d.name}: {p.why}")
         for c in comps:
             out.append((d.name if len(comps) == 1 else f"{d.name}_{c.stem}", c, raw))
     return out, skipped
 
 
-def _seconds(f: Path) -> float | None:
+_PROBES: dict[tuple, dict | None] = {}
+
+
+def _probe(f: Path) -> dict | None:
+    """cli.quick_probe of a video (its length and picture size), read once per file version; None: not readable."""
     try:
-        from .cli import quick_probe
-        return float(quick_probe(f)["duration"])
-    except Exception:  # noqa: BLE001 - not a readable video
+        st = f.stat()
+        key = (str(f), st.st_size, st.st_mtime_ns)
+    except OSError:
         return None
+    if key not in _PROBES:
+        try:
+            from .cli import quick_probe
+            _PROBES[key] = quick_probe(f)
+        except Exception:  # noqa: BLE001 - not a readable video
+            _PROBES[key] = None
+    return _PROBES[key]
+
+
+def _seconds(f: Path) -> float | None:
+    d = _probe(f)
+    return float(d["duration"]) if d and d.get("duration") else None
+
+
+def _size(f: Path) -> tuple[int, int] | None:
+    d = _probe(f)
+    return (int(d["width"]), int(d["height"])) if d and d.get("width") and d.get("height") else None
+
+
+def folder_pair(vids: Sequence[Path]):
+    """pairing.pick_pair of one subfolder's videos (names first, then the lengths, then a portrait one next to a
+    landscape one; night 11)."""
+    from .pairing import pick_pair
+    return pick_pair(vids, _seconds, _size)
 
 
 def split_folder(vids: Sequence[Path]) -> tuple[Path | None, list[Path], str]:
-    """(the RAW, the competitors, why not) of one subfolder's videos: ``raw.*`` is the RAW (``competitor*`` files are
-    competitors), else the longest video is the RAW and the shorter ones are the competitors."""
-    if not vids:
-        return None, [], "no video in it"
-    named = [v for v in vids if v.stem.lower() == "raw"]
-    if len(named) == 1:
-        comps = [v for v in vids if v != named[0]]
-        return named[0], comps, "" if comps else "a raw video but no competitor"
-    if len(vids) < 2:
-        return None, [], f"only one video ({vids[0].name}): it needs the RAW and at least one competitor"
-    secs = {v: _seconds(v) for v in vids}
-    unread = [v.name for v, s in secs.items() if s is None]
-    if unread:
-        comp_named = [v for v in vids if v.stem.lower().startswith("competitor")]
-        if len(vids) == 2 and len(comp_named) == 1:
-            return next(v for v in vids if v not in comp_named), comp_named, ""
-        return None, [], f"cannot read the length of {', '.join(unread)} (name the RAW raw.mp4)"
-    raw = max(vids, key=lambda v: (secs[v], v.stat().st_size))
-    return raw, [v for v in vids if v != raw], ""
+    """(the RAW, the competitors, why not) of one subfolder's videos by pairing.py's rule (night 11: names win over
+    length -- raw* is the RAW, comp* / competitor* are competitors; else the longer one when the lengths are more
+    than 20 % apart; else a portrait one next to a landscape one is the competitor; else not decided: why not says
+    so and the folder is skipped)."""
+    p = folder_pair(vids)
+    if p.raw is None:
+        return None, [], p.why
+    return p.raw, p.competitors, "" if p.competitors else "a raw video but no competitor"
 
 
 def input_problems(jobs: Sequence[tuple[str, Path, Path]]) -> dict[str, list[str]]:
@@ -279,8 +309,18 @@ def checks_of(run_dir: Path | None) -> dict:
     return {"pass": not fails, "failures": fails, "notes": notes, "row": row}
 
 
+WRONG_PAIR = "WRONG PAIR"      # night 11: the run's quick check found the competitor does not come from this RAW
+
+
+def is_wrong_pair(stop: str) -> bool:
+    """A stopped run's message (stop_message) is the quick check's WRONG PAIR stop (pipeline.WrongPair)."""
+    return str(stop or "").lstrip().upper().startswith(WRONG_PAIR)
+
+
 def verdict(r: dict) -> str:
-    """PASS, OK (with a note: night 7) or FAIL."""
+    """PASS, OK (with a note: night 7), FAIL -- or WRONG PAIR (night 11)."""
+    if r.get("wrong_pair"):
+        return WRONG_PAIR
     return ("OK (with a note)" if r.get("notes") else "PASS") if r["pass"] else "FAIL"
 
 
@@ -337,9 +377,11 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
     run; then each video's details (its checks to do by hand)."""
     n_ok = sum(1 for r in rows if r["pass"])
     n_note = sum(1 for r in rows if r["pass"] and r.get("notes"))
+    n_wrong = sum(1 for r in rows if r.get("wrong_pair"))
     out = [f"# Batch: {folder}", "",
            f"Started {started}, {len(rows)} video(s) in {_fmt_s(total_s)}: **{n_ok} passed"
            + (f" ({n_note} with a note)" if n_note else "") + f", {len(rows) - n_ok} failed**"
+           + (f" ({n_wrong} {WRONG_PAIR})" if n_wrong else "")
            + (f", {len(skipped)} not run" if skipped else "") + ".", "",
            "## Where your edits are", ""]
     for k, r in enumerate(rows, 1):
@@ -349,6 +391,10 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
             out.append(f"{k}. **{r['name']}** -- done. Your files: `{r['run_dir']}` -- import "
                        f"`{run_folders.EDIT_XML}` and `{run_folders.CAPTIONS_SRT}` into Premiere."
                        + (f" Note: {r['notes'][0]}" if r.get("notes") else "") + caps)
+        elif r.get("wrong_pair"):
+            why = str(r.get("stop") or (r["failures"] or ["see the log"])[0]).strip()
+            why = why[len(WRONG_PAIR):].lstrip(" :-") if why.upper().startswith(WRONG_PAIR) else why
+            out.append(f"{k}. **{r['name']}** -- **{WRONG_PAIR}**: {why} (log: `{r['log']}`).")
         else:
             why = (r["failures"] or ["see the log"])[0].strip()
             out.append(f"{k}. **{r['name']}** -- FAILED: {why}. Its folder: `{r['run_dir']}` (log: `{r['log']}`)."
@@ -361,7 +407,7 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
     for r in rows:
         media = "inside the run folder" if not r["media_outside"] else f"OUTSIDE: {len(r['media_outside'])} file(s)"
         dl = r.get("doubtful") or []
-        capc = ("**MISSING**" if not r.get("captions", True) else
+        capc = ("-- (not run)" if r.get("wrong_pair") else "**MISSING**" if not r.get("captions", True) else
                 f"{len(dl)} doubtful line(s)" if dl else "written")
         out.append(f"| {r['name']} | {float(r.get('speed') or 100):g} % | `{r['run_dir']}` | {_fmt_s(r['seconds'])} | "
                    f"{verdict(r)} (exit {r['exit']}) | {capc} | {media} |")
@@ -370,7 +416,7 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
                 f"- competitor: `{r.get('competitor', '')}`; RAW: `{r.get('raw', '')}`",
                 f"- run folder: `{r['run_dir']}` (import `{run_folders.EDIT_XML}` and `{run_folders.CAPTIONS_SRT}`)",
                 f"- run time: {_fmt_s(r['seconds'])}; log: `{r['log']}`"]
-        if not r.get("captions", True):
+        if not r.get("captions", True) and not r.get("wrong_pair"):
             out.append(f"- **NO CAPTIONS**: `{run_folders.CAPTIONS_SRT}` was not written -- "
                        + (r.get("captions_why") or "see the log"))
         if r.get("notes"):
@@ -423,9 +469,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not folder.is_dir():
         print(f"match_cuts batch: not a folder: {folder}", file=sys.stderr)
         return 2
-    videos, skipped = find_videos(folder)
+    decided: list[str] = []
+    videos, skipped = find_videos(folder, decided)
     for s_ in skipped:
         print(f"match_cuts batch: skipped {s_}", file=sys.stderr)
+    for d_ in decided:                                   # night 11: a portrait one taken as the competitor -- said
+        print(f"match_cuts batch: {d_}", file=sys.stderr)
     if not videos:
         print(f"match_cuts batch: no subfolder of {folder} has a RAW and a competitor video", file=sys.stderr)
         return 2
@@ -513,13 +562,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
         chk = checks_of(run_dir if (run_dir / run_folders.EXTRAS).is_dir() else None)
         failures = list(chk["failures"])
+        stop = stop_message(stderr) if code not in (0, 1) else ""
         if code not in (0, 1):                            # 1: a recreation criterion failed (real videos: always)
-            failures = [f"the run stopped (exit {code}): {stop_message(stderr)}"] + \
+            failures = [f"the run stopped (exit {code}): {stop}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
         cap = captions_of(run_dir)
         row = {"name": name, "competitor": str(comp), "raw": str(raw), "run_dir": str(run_dir), "exit": code,
-               "speed": speed, "speed_from": why.strip("; ") or "default",
+               "speed": speed, "speed_from": why.strip("; ") or "default", "stop": stop,
+               "wrong_pair": code == 2 and is_wrong_pair(stop),
                "seconds": round(secs, 1), "pass": not failures and code in (0, 1), "failures": failures,
                "notes": list(chk.get("notes") or []) if not failures and code in (0, 1) else [],
                "captions": cap["written"], "captions_why": cap["why"], "doubtful": cap["doubtful"],
@@ -528,7 +579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"    {verdict(row)} in {_fmt_s(secs)}" + (f": {failures[0]}" if failures else
                                                        f": {row['notes'][0][:300]}" if row["notes"] else ""),
               flush=True)
-        if not cap["written"]:
+        if not cap["written"] and not row["wrong_pair"]:
             print(f"    NO CAPTIONS: {run_folders.CAPTIONS_SRT} was not written -- {cap['why']}", flush=True)
         elif cap["doubtful"]:
             print(f"    captions: {len(cap['doubtful'])} doubtful line(s), written as they are -- check them:", flush=True)
@@ -544,7 +595,8 @@ def main(argv: Sequence[str] | None = None) -> int:
           + (f"; {len(wrong)} not run (wrong inputs)" if wrong else "") + f"; summary: {out / (SUMMARY + '.md')}")
     for r in rows:
         print(f"  {r['name']}: {verdict(r)} -- {r['run_dir']}"
-              + ("" if r.get("captions", True) else f" -- NO CAPTIONS ({run_folders.CAPTIONS_SRT} missing)"))
+              + ("" if r.get("captions", True) or r.get("wrong_pair") else
+                 f" -- NO CAPTIONS ({run_folders.CAPTIONS_SRT} missing)"))
     return 0 if n_ok == len(rows) and not wrong else 1
 
 

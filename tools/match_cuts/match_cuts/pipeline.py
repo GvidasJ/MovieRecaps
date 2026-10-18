@@ -2404,6 +2404,12 @@ class PictureNotFound(NotInRaw):
     (picture_retry): the run stops instead of delivering an empty edit; cli and the batch print the message."""
 
 
+class WrongPair(NotInRaw):
+    """Night 11: the quick check before the long run (pair_check.py, seconds) found that the competitor does not come
+    from this RAW -- neither its sound nor its picture: the run stops before anything is converted; the message
+    starts with "WRONG PAIR" (cli prints it, exit 2; the batch and the app show WRONG PAIR). --force-inputs skips it."""
+
+
 def stop_if_picture_not_found(ctx: Context) -> None:
     """Night 8 (a --fast run on the laptop: 100 % of the competitor's sound found in the RAW, 0 % of its picture --
     an edit with no clip, delivered as a normal one): after picture_retry searched the picture again, when it still
@@ -4275,6 +4281,9 @@ def run(cfg: Config) -> dict:
     try:
         with _stage(ctx, "S0 env"):
             stage_env(ctx)
+        with _stage(ctx, "S1 pair check"):        # night 11: a competitor from another RAW stops here, in seconds
+            from . import pair_check
+            pair_check.stop_if_wrong_pair(ctx)
         with _stage(ctx, "S2 probe+conform"):
             stage_probe_conform(ctx)
         with _stage(ctx, "S3 audio"):
