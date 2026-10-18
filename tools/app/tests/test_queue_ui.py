@@ -94,6 +94,44 @@ def test_a_finished_row_shows_its_result_and_a_wrong_pair_is_red(page, tmp_path)
     assert not row.mode.isVisibleTo(row) and not row.tpl.isVisibleTo(row)    # a finished row: no edit buttons
 
 
+def test_dropped_files_go_into_a_project_and_the_job_waits_for_it(page, tmp_path, monkeypatch):
+    """Night 11: a RAW and a competitor dropped from anywhere end up in a project folder (core.jobs.project_for_job,
+    in the background); until they are there the job does not start."""
+    import time
+    proj = tmp_path / "projects" / "2026-10-18_clip"
+
+    def fake_project_for_job(job, root=None, progress=None, cancel=None):
+        proj.mkdir(parents=True)
+        for f in (job.competitor, job.raw):
+            (proj / Path(f).name).write_bytes(b"x")
+        job.competitor, job.raw = proj / Path(job.competitor).name, proj / Path(job.raw).name
+        job.project, job.out_dir, job.run_name = proj, proj, "edit"
+        if progress is not None:
+            progress("raw", 1.0, "linked")
+        return proj
+    monkeypatch.setattr(J, "project_for_job", fake_project_for_job, raising=False)
+    started = []
+    monkeypatch.setattr(M, "JobThread", lambda *a, **k: started.append(a) or SimpleNamespace(
+        progress=SimpleNamespace(connect=lambda f: None), done=SimpleNamespace(connect=lambda f: None),
+        start=lambda: None))
+    d = tmp_path / "anywhere"
+    d.mkdir()
+    (d / "comp.mp4").write_bytes(b"x")
+    (d / "raw.mp4").write_bytes(b"x")
+    j = J.Job("clip", d / "comp.mp4", d / "raw.mp4")
+    page._added_jobs(J.DropResult([j], None, []))           # noqa: SLF001
+    assert j.preparing                                      # the files are being put into the project ...
+    page.running = True
+    page._next()                                            # noqa: SLF001
+    assert not started and page.running                     # ... so it waits (not "the queue is done")
+    t0 = time.perf_counter()
+    while j.preparing and time.perf_counter() - t0 < 5:
+        QtWidgets.QApplication.processEvents()
+        time.sleep(0.01)
+    assert j.project == proj and j.raw == proj / "raw.mp4" and j.run_name == "edit"
+    assert started                                          # and then it ran
+
+
 def test_the_question_card_makes_the_job_you_pick(page, tmp_path):
     d = tmp_path / "pair"
     d.mkdir()

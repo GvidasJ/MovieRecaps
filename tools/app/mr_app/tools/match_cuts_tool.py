@@ -967,8 +967,9 @@ class MatchCutsPage(QWidget):
         with both files (a hard link on the same drive, else a copy: core.jobs.project_for_job), the edit into its
         edit folder, the board showing it. Done in the background on a copy of the job; the row says so and the job
         waits for it. Folder-of-folders (batch) drops and projects stay as they are."""
-        if j.project is not None or not j.complete or not str(j.source).startswith("drop") \
-                or not hasattr(J, "project_for_job"):
+        in_project = j.complete and (Path(j.competitor).parent / "project.json").is_file()   # a project folder dropped
+        if j.project is not None or not j.complete or not hasattr(J, "project_for_job") \
+                or not (str(j.source).startswith("drop") or in_project):
             return
         j.preparing = "putting both files into the video's project folder ..."
         prog = {"text": ""}

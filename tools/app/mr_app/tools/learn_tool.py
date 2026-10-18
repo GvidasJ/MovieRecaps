@@ -166,7 +166,8 @@ class LearnPage(QWidget):
         self._watch.timeout.connect(self.watch)
         self._watch.start(WATCH_MS)
         QTimer.singleShot(3000, self.watch)
-        QTimer.singleShot(500, self.refresh_hub)
+        if getattr(ctx, "hub", None) is not None or not hasattr(ctx, "hub_folder"):
+            QTimer.singleShot(500, self.refresh_hub)      # (else: hub_changed() comes once the window found it)
 
     # -- the hub (learn_queue.md, requests.md, standing_rules.md) --
     def hub(self) -> Path:
