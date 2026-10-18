@@ -2,3 +2,6 @@
 # never convert their line ends. Git's Windows default (core.autocrlf true) would check them out with CRLF, and 11
 # caption tests then fail on a fresh clone (Task 10).
 srt/*.srt -text
+
+# The Premiere preset (assets/premiere/*.prfpset) was saved by Premiere and checked byte for byte: kept as it is.
+*.prfpset -text
