@@ -100,6 +100,18 @@ def load_fonts() -> str:
     return fam or "Segoe UI"
 
 
+WARM_TEXT = "\U0001F62D\U0001F36B ★ ▲ → ✓ ·"     # an emoji and the symbols the app draws
+
+
+def warm_fonts(f) -> None:
+    """Windows looks up its fallback fonts (emoji, symbols) the first time such a character is drawn: about half a
+    second, on the window's thread -- a visible stall on the first page that shows a title with an emoji. A background
+    thread cannot do it for the window (the lookup holds it up all the same), so app.py does it once here, before the
+    window shows."""
+    from PySide6.QtGui import QFontMetrics
+    QFontMetrics(f).horizontalAdvance(WARM_TEXT)
+
+
 def qss(font: str) -> str:
     """Only what stays still: inputs, scroll bars, tooltips, plain dialogs. Nothing here changes on hover (a hover
     must fade, and a style sheet cannot fade) -- the buttons, cards and rows paint themselves (widgets.py)."""

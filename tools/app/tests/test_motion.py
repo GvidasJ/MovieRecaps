@@ -126,6 +126,50 @@ def test_fades_still_run_when_windows_animation_effects_are_off(qapp):
             QtWidgets.QApplication.setEffectEnabled(e, on)
 
 
+def test_the_app_looks_up_the_emoji_font_before_the_window_exists(qapp, monkeypatch):
+    """The first emoji drawn makes Windows look up its fallback fonts (~0.5 s on the window's thread: the Template
+    page stalled on its first show) -- app.main does it before the window is made."""
+    import PySide6.QtWidgets as QW
+
+    from mr_app import app as A
+    from mr_app.ui import main_window, theme
+    calls = []
+
+    class FakeApp:
+        def __init__(self, *_a):
+            self.f = None
+
+        def setApplicationName(self, *_a):                                 # noqa: N802
+            pass
+
+        def setFont(self, f):                                              # noqa: N802
+            self.f = f
+
+        def font(self):
+            return self.f
+
+        def setStyleSheet(self, *_a):                                      # noqa: N802
+            pass
+
+        def exec(self):
+            return 0
+
+    class FakeWindow:
+        def __init__(self, *_a):
+            calls.append("window")
+
+        def show(self):
+            calls.append("show")
+
+    real = theme.warm_fonts
+    monkeypatch.setattr(QW, "QApplication", FakeApp)
+    monkeypatch.setattr(main_window, "MainWindow", FakeWindow)
+    monkeypatch.setattr(theme, "warm_fonts", lambda f: (calls.append("warm"), real(f))[1])
+    assert A.main([]) == 0
+    assert calls == ["warm", "window", "show"]
+    assert "\U0001F62D" in theme.WARM_TEXT
+
+
 def test_animations_off_changes_everything_at_once(qapp):
     M.set_enabled(False)
     b = W.Button("Start")

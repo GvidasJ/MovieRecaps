@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     theme.FONT = fam
     app.setFont(W.font(13, 400, family=fam))
     app.setStyleSheet(theme.qss(fam))
+    theme.warm_fonts(app.font())             # the emoji font's first lookup (~0.5 s) before the window, not on a page
     win = MainWindow(tools())
     win.show()
     if "--tab" in argv:                      # open on that tab (download, convert, template, match_cuts)
