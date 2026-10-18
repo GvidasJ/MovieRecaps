@@ -21,7 +21,8 @@ from test_night3 import _frame_png
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# A1: 0 dB, no keyframes, no effect but the speed
+# A1: no keyframes; night 11: your audio chain (normalisation, Volume 0 dB, Panner 0) and nothing else but the speed --
+# it replaced night 4's "0 dB, no effect but the speed" (test_night11_audio.py has the chain's own tests)
 # ---------------------------------------------------------------------------------------------------------------------
 
 def _xml(tmp_path, k: float = 1.0, ripple=None) -> Path:
@@ -45,7 +46,9 @@ def test_every_a1_clip_imports_at_0_db_without_keyframes(tmp_path, k):
     for ci in items:
         assert ci.findtext("enabled") == "TRUE"
         assert ci.find(".//keyframe") is None
-        assert {e.findtext("effectid") for e in ci.findall(".//effect")} <= {"timeremap"}
+        chain = [(k, v) for k, v in ex.audio_chain_of(ci) if k != "speed"]        # night 11: the chain
+        assert chain[-2:] == [("volume", 1.0), ("pan", 0.0)]                      # Volume 0 dB, Panner 0
+        assert chain[:-2] and all(k == "gain" and v > 0 for k, v in chain[:-2])  # the normalisation stage(s)
     assert ex.premiere_audio_problems(xml) == []
     assert all(a["levels"] == [] for a in ex.parse_premiere_xml(xml)["audio"])
 

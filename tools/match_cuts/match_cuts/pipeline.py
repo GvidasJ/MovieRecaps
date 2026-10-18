@@ -3034,9 +3034,9 @@ def stage_exports(ctx: Context) -> None:
             ctx.warn(f"Premiere XML: {len(validation['person_problems'])} clip(s) do not show the person speaking -- "
                      "the run fails: " + "; ".join(validation["person_problems"]))
         if validation.get("audio_problems"):
-            ctx.warn(f"Premiere XML: {len(validation['audio_problems'])} A1 problem(s) -- every audio clip must import "
-                     "at 0 dB, unmuted, without keyframes or effects; the run fails: "
-                     + "; ".join(validation["audio_problems"]))
+            ctx.warn(f"Premiere XML: {len(validation['audio_problems'])} A1 problem(s) -- every audio clip must carry "
+                     "the audio chain (its normalisation, Volume 0 dB, Panner 0, nothing else but its speed), unmuted, "
+                     "without keyframes; the run fails: " + "; ".join(validation["audio_problems"]))
         if validation.get("transition_problems"):
             ctx.warn(f"Premiere XML: {len(validation['transition_problems'])} transition(s) -- every cut must be a hard "
                      "cut; the run fails: " + "; ".join(validation["transition_problems"]))

@@ -1471,7 +1471,9 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML EMPTY", "empty_problems", "the edit holds at least one clip (never an empty edit delivered as a normal one)"),
     ("XML GAP", "gaps", "every clip covers the template window"),
     ("XML REPEAT", "repeat_problems", "no RAW footage or audio plays twice"),
-    ("XML AUDIO", "audio_problems", "every A1 clip at 0 dB: enabled, no level / gain / pitch / effect but its speed, no keyframes"),
+    ("XML AUDIO", "audio_problems", "every A1 clip enabled with your audio chain as far as an XML carries it: its own "
+                                    "Normalize All Peaks to 0 dB (as Volume), Volume 0 dB, Panner 0 -- in this order, "
+                                    "nothing else but its speed, no keyframes"),
     ("XML ENDING", "ending_problems", "the edit ends on the competitor's last RAW moment (the default: no --remove-silence)"),
     ("XML SPEECH", "speech_problems", "no audio cut inside speech (--remove-silence)"),
     ("XML FLASH", "flash_problems", "no piece of a RAW shot under 0.25 s at a cut"),
@@ -1482,6 +1484,31 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML SYNC", "sync_problems", "A1 is each picture's own RAW sound: in sync, no gap or overlap, no jump or stutter at a cut"),
     ("XML PERSON", "person_problems", "the person speaking in the window, at most 15 % of the face cut off (nobody speaking: one person)"),
 ]
+
+
+def _audio_chain_lines(ctx: Any) -> list[str]:
+    """Night 11: the audio chain 1_edit.xml gives every A1 clip, and what you add in Premiere (an XML cannot carry the
+    Hard Limiter and Amplify: export_xml_edl's audio chain section)."""
+    px = getattr(ctx, "premiere_xml", None)
+    chain = px.get("audio_chain") if isinstance(px, dict) else None
+    if not chain:
+        return []
+    from .export_xml_edl import NOT_IN_XML, PRESET_FILE, PRESET_NAME
+    gains = [float(c.get("gain_db") or 0.0) for c in chain if c.get("read", True)]
+    unread = [str(c.get("label")) for c in chain if not c.get("read", True)]
+    split = sum(1 for c in chain if int(c.get("stages") or 1) > 1)
+    lines = ["", f"**Audio chain** on all {len(chain)} A1 clips: each normalised to its own peak (Normalize All Peaks "
+             "to 0 dB" + (f": {min(gains):+.1f} to {max(gains):+.1f} dB" if gains else "") + " -- in Premiere a Volume "
+             "after the clip's own, an XML cannot set its Audio Gain"
+             + (f"; {split} clip(s) need more than +15 dB, so two or more equal Volumes" if split else "")
+             + "), Volume 0 dB, Panner 0.",
+             f"- In Premiere: select all A1 clips and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
+             "your LoudVOGOOOD has the same values) -- Premiere cannot import those two from an XML.",
+             "- Don't use Audio Gain > Normalize again: the tool already normalised (as a Volume). A clip you trim later "
+             "keeps the gain measured on its first range (the Hard Limiter then catches anything over 0 dB)."]
+    if unread:
+        lines.append(f"- **Not normalised** (their sound could not be read): {', '.join(unread)}")
+    return lines
 
 
 def _premiere_checks(ctx: Any) -> list[str]:
@@ -1500,6 +1527,7 @@ def _premiere_checks(ctx: Any) -> list[str]:
                   "OK" if not probs else f"**FAIL** ({len(probs)})")
         rows.append([f"`{name}`", what, status])
     out = [md_table(["check", "what it checks", "result"], rows)]
+    out += _audio_chain_lines(ctx)
     if v.get("speech_notes"):
         out += ["", f"**Cuts inside speech, kept** (the competitor's own cut points -- the default; `--remove-silence` "
                 f"moves them into the quiet): {len(v['speech_notes'])}"] + [f"- {r}" for r in v["speech_notes"]]

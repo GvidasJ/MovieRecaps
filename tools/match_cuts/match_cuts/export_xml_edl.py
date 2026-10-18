@@ -3354,6 +3354,226 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
 PREMIERE_MASTERCLIP = "masterclip-raw"
 
 
+# ---------------------------------------------------------------------------------------------
+# The audio chain on every A1 clip (night 11, item 5 -- it replaces the old rule "the tool never adjusts audio")
+# ---------------------------------------------------------------------------------------------
+#
+# Your chain, in this order: Audio Gain "Normalize All Peaks to 0 dB", Volume 0 dB, Hard Limiter (Maximum Amplitude
+# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +4.5 dB, Panner 0. What Premiere
+# Pro 2024's FCP7 XML import really makes of each form (tested on this PC: test XMLs imported, the project saved and its
+# .prproj read back, every form on all five A1 clips of a real 1_edit.xml -- work\t26\audio\NOTES.md):
+#   * Audio Levels (audiolevels, its level linear: 1 = 0 dB) -> the clip's own Volume (of several, the last one).
+#   * FCP's "Gain" audio unit -- what Premiere's own XML export writes for a clip's Audio Gain (Gain(dB) 13.1274 for a
+#     clip normalised by +13.13 dB) -- does NOT come back as the Audio Gain: it becomes one more Volume effect after the
+#     clip's own, its value read as a LINEAR factor (4.5 -> +13.06 dB; 13.1274 -> clamped, "+6 dB" in its report, +15 dB
+#     in the panel), at most +15 dB (5.623413); each Gain filter one more Volume, in the XML's order.
+#   * Audio Pan (audiopan, parameter "pan", -1 .. 1) -> the clip's Panner (0 = centre, Premiere's default). With a
+#     parameter id "level" the import HANGS (twice).
+#   * Hard Limiter and Amplify -- written with Premiere's names or with its filter match names: "not translated"
+#     (dropped, listed in an "FCP Translation Results" report and a dialog on every import). No XML form sets a clip's
+#     Audio Gain.
+# So every A1 clip gets what an XML can carry, each with its real value: the normalisation as Gain filters (each at most
+# +15 dB: as many as its gain needs, all equal), Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0). In Premiere:
+# Volume 0 dB, Volume +N dB (once or more: the Audio Gain's normalisation -- a gain is a gain, the same sound before
+# or after the clip's Volume), Panner 0. The Hard Limiter and Amplify +4.5 dB cannot come through an XML at all, and
+# nothing stands in for them (a Volume +4.5 dB would look like something else, and double the +4.5 dB once your own
+# preset with both -- "LoudVOGOOOD" -- is put on the clips): each A1 clip's comment and the report name them; select all
+# A1 clips and apply your preset (and do not normalise again: that is done).
+# The normalisation is measured like Premiere's own: the loudest sample the clip plays -- the media's first channel
+# (A1 takes the file's audio track 1: Premiere makes it a mono clip of that channel) over the clip's source range
+# (Premiere's Audio Gain dialog read -13.1 / -14.2 dB on two clips of video10 where this reads -13.13 / -14.23 dB; its
+# normalisation +13.12743 dB, this +13.12767 dB).
+
+AUDIO_GAIN_ID = "{61756678, 4761696e, 4b657947}"     # FCP's Gain audio unit ('aufx' 'Gain' 'KeyG'), Premiere's own id
+NORMALIZE_TO_DB = 0.0                                # Normalize All Peaks to 0 dB
+NORMALIZE_MAX_DB = 96.0                              # the most Premiere's Audio Gain gives (a quieter clip: this much)
+GAIN_STAGE_MAX = 5.623413                            # +15 dB: the most one imported Volume holds (a larger value: +15)
+GAIN_STAGE_SPLIT_DB = 14.99                          # a normalisation over this is split into equal stages
+VOLUME_LEVEL = 1.0                                   # Volume 0 dB (Audio Levels, linear)
+PANNER = 0.0                                         # centre
+HARD_LIMITER = ("Hard Limiter (Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
+                "1.00)")
+AMPLIFY = "Amplify +4.5 dB"
+NOT_IN_XML = f"{HARD_LIMITER} and {AMPLIFY}"          # your chain's two effects no XML can bring into Premiere
+AUDIO_CHAIN_TEXT = f"Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, {HARD_LIMITER}, {AMPLIFY}, Panner 0"
+AUDIO_CHAIN_XML = "Audio Gain (Normalize All Peaks to 0 dB, as Volume), Volume 0 dB, Panner 0"   # what an XML carries
+PRESET_NAME = "MovieRecaps audio chain"              # the Premiere effect preset with the Hard Limiter + Amplify
+PRESET_FILE = "assets\\premiere\\MovieRecaps audio chain.prfpset"     # in the repository (import it once in Premiere)
+_PEAK_WINDOW_S = 120.0       # a1_peaks: one ffmpeg decode covers at most this much sound (a longer clip: in pieces)
+_AUDIO_WINDOWS: dict[tuple, Any] = {}      # decoded windows (one channel) kept for this run's next XML / its check
+_AUDIO_WINDOWS_BYTES = 256 << 20           # ... at most this much of them (the oldest go first)
+
+
+def db_factor(db: float) -> float:
+    return 10.0 ** (float(db) / 20.0)
+
+
+def factor_db(f: float) -> float:
+    return 20.0 * math.log10(float(f)) if f > 0 else float("-inf")
+
+
+def normalize_gain_db(peak: float | None) -> float:
+    """The gain (dB) "Normalize All Peaks to 0 dB" gives a clip whose loudest sample is ``peak`` (linear): what brings
+    it to NORMALIZE_TO_DB, at most NORMALIZE_MAX_DB; 0 when the peak is unknown or the clip silent."""
+    if peak is None or not peak > 0 or not math.isfinite(peak):
+        return 0.0
+    return min(NORMALIZE_MAX_DB, NORMALIZE_TO_DB - factor_db(peak))
+
+
+def normalize_stages(gain_db: float) -> list[float]:
+    """The normalisation as Gain-filter factors -- one imported Volume each, at most +15 dB (GAIN_STAGE_MAX): one stage
+    up to GAIN_STAGE_SPLIT_DB, else as many equal stages as it needs (+18.4 dB: two of +9.2 dB)."""
+    g = float(gain_db)
+    k = max(1, math.ceil(g / GAIN_STAGE_SPLIT_DB - 1e-9)) if g > 0 else 1
+    f = round(db_factor(g / k), 6)
+    return [min(f, GAIN_STAGE_MAX)] * k
+
+
+def _audio_stream(path: str) -> tuple[int, int] | None:
+    """(sample rate, channels) of a media file's first audio stream (ffprobe), or None."""
+    import json
+    import subprocess
+    from .common import ffprobe_bin
+    try:
+        r = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", "a:0", "-show_entries",
+                            "stream=sample_rate,channels", "-of", "json", str(path)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60)
+        s = (json.loads(r.stdout or "{}").get("streams") or [None])[0]
+        return (int(s["sample_rate"]), int(s["channels"])) if s and int(s.get("channels") or 0) > 0 else None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return None
+
+
+def _audio_window(path: str, stat: tuple[int, int], w0: int, w1: int, sr: int, channels: int, channel: int) -> Any:
+    """Samples [w0, w1) (at the file's own rate, ffmpeg's accurate input seek) of one channel as float32, or None."""
+    import subprocess
+    import numpy as np
+    from .common import ffmpeg_bin
+    key = (path, stat, w0, w1, sr, channels, channel)
+    if key in _AUDIO_WINDOWS:
+        return _AUDIO_WINDOWS[key]
+    cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-accurate_seek", "-ss", f"{w0 / sr:.9f}", "-i", path,
+           "-map", "0:a:0", "-vn", "-t", f"{(w1 - w0) / sr:.9f}", "-f", "f32le", "-acodec", "pcm_f32le", "-"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or len(r.stdout) % (4 * channels):
+        return None
+    y = np.frombuffer(r.stdout, dtype=np.float32).reshape(-1, channels)[:, min(channel, channels - 1)].copy()
+    _AUDIO_WINDOWS[key] = y
+    while len(_AUDIO_WINDOWS) > 1 and sum(v.nbytes for v in _AUDIO_WINDOWS.values()) > _AUDIO_WINDOWS_BYTES:
+        _AUDIO_WINDOWS.pop(next(iter(_AUDIO_WINDOWS)))
+    return y
+
+
+def a1_peaks(path: str, items: Sequence[dict], fps: Any, track: int = 1) -> list[float | None]:
+    """The loudest sample (linear) each A1 item plays: audio track ``track`` (1: the media's first channel -- what
+    Premiere's mono A1 clip plays) over its source range [in, out) (source frames at ``fps``; either direction).
+    The items close together share one ffmpeg decode (whole seconds, a window at most _PEAK_WINDOW_S; a longer item in
+    pieces). None for an item whose sound -- or a piece of it -- cannot be read (no file, no audio, ffmpeg failing)."""
+    out: list[float | None] = [None] * len(items)
+    if not path or not items:
+        return out
+    try:
+        st = os.stat(path)
+    except OSError:
+        return out
+    info = _audio_stream(path)
+    if info is None:
+        return out
+    sr, channels = info
+    f = float(Fraction(fps)) if not isinstance(fps, float) else fps
+    spans = []
+    step = max(1, int(_PEAK_WINDOW_S * sr))
+    for i, it in enumerate(items):
+        a, b = sorted((float(it["in"]), float(it["out"])))
+        s0, s1 = max(0, int(math.floor(a / f * sr))), int(math.ceil(b / f * sr))
+        spans += [(c0, min(s1, c0 + step), i) for c0 in range(s0, s1, step)]       # a long clip in pieces
+    windows: list[list] = []                       # [w0, w1, [(s0, s1, i)]] in whole seconds
+    for s0, s1, i in sorted(spans):
+        w0, w1 = (s0 // sr) * sr, -(-s1 // sr) * sr
+        if windows and w0 <= windows[-1][1] and max(w1, windows[-1][1]) - windows[-1][0] <= _PEAK_WINDOW_S * sr:
+            windows[-1][1] = max(windows[-1][1], w1)
+            windows[-1][2].append((s0, s1, i))
+        else:
+            windows.append([w0, w1, [(s0, s1, i)]])
+    failed: set[int] = set()
+    for w0, w1, members in windows:
+        y = _audio_window(str(path), (st.st_mtime_ns, st.st_size), w0, w1, sr, channels, max(0, int(track) - 1))
+        for s0, s1, i in members:
+            seg = y[s0 - w0:s1 - w0] if y is not None else []
+            if not len(seg):
+                failed.add(i)
+                continue
+            p = float(abs(seg).max())
+            out[i] = p if out[i] is None else max(out[i], p)
+    return [None if i in failed else p for i, p in enumerate(out)]
+
+
+def _played(it: dict) -> dict:
+    """The source an A1 item plays as Premiere reads the <in> / <out> written for it: ascending, a retimed item on
+    Premiere's grid (what audio_gain_problems reads back from the XML)."""
+    lo, hi = remap_decode(*remap_encode(*xml_in_out(it["in"], it["out"]), it["speed"],
+                                        item_length(it["start"], it["end"])), it["speed"])
+    return {"in": lo, "out": hi}
+
+
+def _gain_filter(parent: ET.Element, factor: float) -> None:
+    """FCP's Gain audio unit, as Premiere's own XML export writes a clip's Audio Gain -- which its import turns into a
+    Volume effect, reading the value as a linear factor (see the section comment)."""
+    e = _sub(_sub(parent, "filter"), "effect")
+    _sub(e, "name", "Gain")
+    _sub(e, "effectid", AUDIO_GAIN_ID)
+    _sub(e, "effecttype", "filter")
+    _sub(e, "mediatype", "audio")
+    p = _sub(e, "parameter", authoringApp="PremierePro")
+    _sub(p, "parameterid", "Gain(dB)")
+    _sub(p, "name", "Gain(dB)")
+    _sub(p, "valuemin", -96)
+    _sub(p, "valuemax", 96)
+    _sub(p, "value", _fmt(factor))
+
+
+def _audio_filter(parent: ET.Element, name: str, kind: str, pid: str, pname: str, vmin: Any, vmax: Any,
+                  value: float) -> None:
+    """Audio Levels / Audio Pan, as Premiere's own XML export writes them."""
+    e = _effect(_sub(parent, "filter"), name, kind, kind, kind, "audio")
+    p = _sub(e, "parameter", authoringApp="PremierePro")
+    _sub(p, "parameterid", pid)
+    _sub(p, "name", pname)
+    _sub(p, "valuemin", vmin)
+    _sub(p, "valuemax", vmax)
+    _sub(p, "value", _fmt(value))
+
+
+def _audio_chain(parent: ET.Element, gain_db: float) -> list[float]:
+    """The chain on one A1 clip item, as far as an XML carries it (see the section comment): the normalisation
+    (``gain_db``, as Gain filters), Volume 0 dB, Panner 0. Returns the normalisation's stage factors."""
+    stages = normalize_stages(gain_db)
+    for f in stages:
+        _gain_filter(parent, f)
+    _audio_filter(parent, "Audio Levels", "audiolevels", "level", "Level", 0, 3.98109, VOLUME_LEVEL)
+    _audio_filter(parent, "Audio Pan", "audiopan", "pan", "Pan", -1, 1, PANNER)
+    return stages
+
+
+def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]) -> str:
+    """The A1 clip's comment: its chain, in your words -- what the XML gives it and what you add."""
+    if peak is None:
+        norm = "Audio Gain 0 dB (its sound could not be read: not normalised -- check it)"
+    elif not peak > 0:
+        norm = "Audio Gain 0 dB (silent: nothing to normalise)"
+    else:
+        norm = (f"Audio Gain {gain_db:+.2f} dB (Normalize All Peaks to 0 dB: its peak {factor_db(peak):.2f} dBFS"
+                + (f", Premiere's +{NORMALIZE_MAX_DB:g} dB at most" if gain_db >= NORMALIZE_MAX_DB - 1e-9 else "")
+                + "; in Premiere " + ("a Volume" if len(stages) == 1 else f"{len(stages)} Volumes of "
+                                      f"{factor_db(stages[0]):+.2f} dB") + ")")
+    return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: select all A1 "
+            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + Amplify +4.5 dB); don't use Audio Gain > Normalize "
+            "again, the tool already normalised (as a Volume)")
+
+
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,
                        speed: float = 1.0, seq_rate: Any = None) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
@@ -3361,7 +3581,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
     silence.Ripple: the repeats, and with --remove-silence the speech-safe cuts and the silences): its ranges are cut
     out -- everything after them moves earlier -- and clips are extended where their speech must finish. Every A1
-    clip stays at 0 dB: no Audio Levels, no keyframes (premiere_audio_problems). ``speed`` (--speed /
+    clip carries your audio chain (night 11: the section comment above -- its normalisation measured on the media this
+    XML plays), no keyframes (premiere_audio_problems). ``speed`` (--speed /
     100): the finished edit played that fast (retime_edit). ``seq_rate`` (night 7: the RAW's rate, pipeline.stage_finish):
     the finished edit written on a sequence at that rate (rerate_edit) instead of the planning rate. With --frame
     (cfg.frame_png) the sequence is the frame's (frame.py), the window its hole, and V2 holds the PNG over the whole
@@ -3488,7 +3709,13 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _watermark_track(video, str(cfg.watermark_png), N, fps, W, H,
                          float(getattr(cfg, "watermark_opacity", WATERMARK_OPACITY) or WATERMARK_OPACITY))
     # A1: the RAW audio at the SAME record ranges as V1 (picture-synced; an audio line where FX-14 found one)
+    chain: list[dict] = []
     if has_audio:
+        peaks = a1_peaks(raw_abs, [_played(it) for it in audio_items], fps) if audio_items else []
+        unread = sum(1 for p in peaks if p is None)
+        if unread:
+            warnings.append(f"the audio chain: the sound of {unread} A1 clip(s) could not be read from {raw_name} -- "
+                            "their Audio Gain stays 0 dB (not normalised)")
         audio = _sub(media, "audio")
         _sub(audio, "numOutputChannels", 2)
         afmt = _sub(audio, "format")
@@ -3511,8 +3738,14 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
             if abs(it["speed"] - 1.0) > 1e-9:
                 _time_remap(ai, it["speed"], "audio")
-            # no Audio Levels: every A1 clip at 0 dB, no keyframes (a fade's keyframes imported the 125 % A1 of
+            # night 11: your audio chain -- static values, never a keyframe (a fade's keyframes imported the 125 % A1 of
             # output\005 muted: Premiere read them off the retimed clip -- XML AUDIO checks it)
+            peak = peaks[n_a - 1]
+            g = normalize_gain_db(peak)
+            stages = _audio_chain(ai, g)
+            chain.append({"label": _seg_label(it["seg"]), "start": int(it["start"]), "read": peak is not None,
+                          "peak_db": round(factor_db(peak), 3) if peak else None, "gain_db": round(g, 3),
+                          "stages": len(stages)})
             sta = _sub(ai, "sourcetrack")
             _sub(sta, "mediatype", "audio")
             _sub(sta, "trackindex", 1)
@@ -3520,6 +3753,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                 _links(ai, v_of[n_a - 1] + 1, n_a)
             cm = _sub(ai, "comments")
             _sub(cm, "mastercomment1", f"{_seg_label(it['seg'])} {it['what']}")
+            _sub(cm, "mastercomment2", audio_chain_note(g, peak, stages))
     for m in markers:
         mk = _sub(seq, "marker")
         _sub(mk, "name", other_video_name(m["in"], m["out"], fps) if m.get("other_video") else m["name"])
@@ -3539,7 +3773,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
             "fps": fps_str(fps), "plan_fps": fps_str(plan_fps), "frames": int(N),
             "pos_map": {str(k): v for k, v in sorted(pos_map.items())},
-            "reframed": reframed, "snapped": snapped, "scene_cuts": scene,
+            "reframed": reframed, "snapped": snapped, "scene_cuts": scene, "audio_chain": chain,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
                              "name": other_video_name(m["in"], m["out"], fps)} for m in markers if m.get("other_video")]}
 
@@ -4521,14 +4755,174 @@ def premiere_speech_problems(xml_path: str | os.PathLike, speech: Any) -> list[s
     return out
 
 
-AUDIO_EFFECTS_OK = {"timeremap"}        # an A1 clip's only filter: its speed (Premiere's Speed / Duration)
+AUDIO_SPEED_ID = "timeremap"            # an A1 clip's speed (Premiere's Speed / Duration): allowed next to the chain
+
+
+def _effect_value(e: ET.Element, pid: str) -> float | None:
+    """The static value of an effect's parameter ``pid`` (None when it has none or it is not a number)."""
+    for p in e.findall("parameter"):
+        if str(_text(p, "parameterid", "")).strip() == pid:
+            try:
+                return float(str(_text(p, "value", "")).strip())
+            except ValueError:
+                return None
+    return None
+
+
+def audio_chain_of(ci: ET.Element) -> list[tuple[str, float | None]]:
+    """An audio clip item's filters in order, as the chain reads them: ('gain', factor) for FCP's Gain audio unit,
+    ('volume', level) for Audio Levels, ('pan', pan) for Audio Pan, ('speed', None) for its Time Remap, (effect id or
+    name, None) for anything else."""
+    out: list[tuple[str, float | None]] = []
+    for e in ci.findall("filter/effect"):
+        eid = str(_text(e, "effectid", "") or _text(e, "name", "") or "?").strip()
+        if eid == AUDIO_GAIN_ID:
+            out.append(("gain", _effect_value(e, "Gain(dB)")))
+        elif eid == "audiolevels":
+            out.append(("volume", _effect_value(e, "level")))
+        elif eid == "audiopan":
+            out.append(("pan", _effect_value(e, "pan")))
+        elif eid.lower() == AUDIO_SPEED_ID:
+            out.append(("speed", None))
+        else:
+            out.append((eid, None))
+    return out
+
+
+def _chain_words(chain: Sequence[tuple[str, float | None]]) -> str:
+    def level(v: float | None) -> str:
+        return "(no value)" if v is None else "-inf dB (muted)" if v <= 0 else f"{factor_db(v):+.2f} dB"
+
+    def word(kind: str, v: float | None) -> str:          # FCP's names: Gain (the audio unit), audiolevels, audiopan
+        if kind == "gain":
+            return "Gain " + level(v)
+        if kind == "volume":
+            return "audiolevels " + level(v)
+        if kind == "pan":
+            return "audiopan " + (f"{v:g}" if v is not None else "(no value)")
+        return kind
+    return ", ".join(word(k, v) for k, v in chain if k != "speed") or "no effect"
+
+
+def _chain_parts(chain: Sequence[tuple[str, float | None]]
+                 ) -> tuple[list[float | None], float | None, float | None] | None:
+    """(normalisation stages, Volume level, pan) of an audio_chain_of chain in your chain's form -- Gain filter(s),
+    Audio Levels, Audio Pan, in this order, nothing else but its speed -- else None."""
+    body = [(k, v) for k, v in chain if k != "speed"]
+    kinds = "".join({"gain": "G", "volume": "L", "pan": "P"}.get(k, "X") for k, _ in body)
+    if not re.fullmatch(r"G+LP", kinds):
+        return None
+    return [v for _, v in body[:-2]], body[-2][1], body[-1][1]
+
+
+def audio_chain_problems(ci: ET.Element) -> list[str]:
+    """What is wrong with one audio clip item's chain (none: []): your chain as far as an XML carries it, as
+    1_edit.xml writes it (the section comment above) -- the normalisation (one or more Gain filters, each at most
+    +15 dB, all equal, as few as it needs, at most +96 dB in all), Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0)
+    -- in this order, nothing else but its speed (one Time Remap), each value static (keyframes:
+    premiere_audio_problems). Nothing may stand in for the Hard Limiter or Amplify (Premiere cannot import them)."""
+    chain = audio_chain_of(ci)
+    out: list[str] = []
+    if sum(1 for k, _ in chain if k == "speed") > 1:
+        out.append("two speed filters (Time Remap) on it")
+    body = [(k, v) for k, v in chain if k != "speed"]
+    want = f"want {AUDIO_CHAIN_XML} -- in this order, nothing else"
+    others = sorted({k for k, _ in body if k not in ("gain", "volume", "pan")})
+    if others:
+        out.append(f"{', '.join(others)} on it ({want})")
+    parts = _chain_parts(chain)
+    if parts is None:
+        if not others:
+            out.append(f"its chain is {_chain_words(body)} ({want})")
+        return out
+    stages, level, pan = parts
+    if any(v is None or not v > 0 for v in stages):
+        out.append("its Audio Gain (normalisation) has a Gain filter without a positive value")
+    else:
+        if any(v > GAIN_STAGE_MAX + 1e-6 for v in stages):
+            out.append(f"its Audio Gain has a stage over +15 dB ({', '.join(f'{factor_db(v):+.2f}' for v in stages)} "
+                       "dB): Premiere's import clamps each one at +15 dB")
+        if any(abs(v - stages[0]) > 1e-6 for v in stages):
+            out.append(f"its Audio Gain stages differ ({', '.join(f'{factor_db(v):+.2f}' for v in stages)} dB)")
+        total = sum(factor_db(v) for v in stages)
+        if total > NORMALIZE_MAX_DB + 0.01:
+            out.append(f"its Audio Gain is {total:+.2f} dB (Premiere's Audio Gain gives +{NORMALIZE_MAX_DB:g} dB at most)")
+        if len(stages) > 1 and total <= GAIN_STAGE_SPLIT_DB * (len(stages) - 1) + 1e-6:
+            out.append(f"its Audio Gain {total:+.2f} dB is split into {len(stages)} stages (want as few as it needs)")
+    if level is None or abs(level - VOLUME_LEVEL) > 1e-6:
+        out.append(f"Volume {_chain_words([('volume', level)]).split(' ', 1)[-1]} (want 0 dB: Audio Levels 1)")
+    if pan is None or abs(pan - PANNER) > 1e-9:
+        out.append(f"Panner {pan if pan is not None else '(no value)'} (want 0, the centre)")
+    return out
+
+
+AUDIO_GAIN_TOL_DB = 0.01      # audio_gain_problems: the written normalisation against the measured one
+
+
+def _url_path(url: str) -> str:
+    """The file a <pathurl> names (the inverse of _file_url: file://localhost/C%3A/... -> C:/...; a network share's
+    file://server/share/... -> \\\\server\\share\\...); '' for anything else."""
+    if url.startswith("file://localhost/"):
+        rest = urllib.parse.unquote(url[len("file://localhost/"):])
+        return rest if re.match(r"[A-Za-z]:", rest) else "/" + rest
+    if url.startswith("file://") and len(url) > len("file://"):
+        return "\\\\" + urllib.parse.unquote(url[len("file://"):]).replace("/", "\\")
+    return ""
+
+
+def audio_gain_problems(xml_path: str | os.PathLike) -> list[str]:
+    """The chain's value that depends on the sound: every audio clip's Audio Gain (its normalisation stages together)
+    must be the gain that brings the loudest sample it plays to 0 dB -- measured again on the media the XML names
+    (a1_peaks: the channel of its source track over its source range). A clip whose sound cannot be read is not judged
+    (write_premiere_xml warned about it); one whose chain is not your chain is audio_chain_problems'."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    if seq is None:
+        return []
+    fps = _xml_rate(seq) or Fraction(60)
+    urls = {f.get("id"): str(f.findtext("pathurl") or "") for f in root.iter("file") if f.findtext("pathurl")}
+    out: list[str] = []
+    for n, tr in enumerate(seq.findall("media/audio/track"), start=1):
+        els = tr.findall("clipitem")
+        played: list[dict | None] = []           # the source each item plays as Premiere reads <in> / <out>
+        groups: dict[tuple[str, int], list[int]] = {}
+        for i, ci in enumerate(els):
+            try:
+                lo, hi = remap_decode(int(_text(ci, "in")), int(_text(ci, "out")), _remap_speed(ci))
+                played.append({"in": lo, "out": hi})
+            except (TypeError, ValueError):
+                played.append(None)              # not whole frames: XML ITEM's
+                continue
+            fe = ci.find("file")
+            url = str(fe.findtext("pathurl") or "") if fe is not None else ""
+            url = url or urls.get(fe.get("id") if fe is not None else None, "")
+            path = _url_path(url)
+            track = int(_text(ci, "sourcetrack/trackindex", 1) or 1)
+            if path:
+                groups.setdefault((path, track), []).append(i)
+        for (path, track), idx in groups.items():
+            peaks = a1_peaks(path, [played[i] for i in idx], fps, track)
+            for i, peak in zip(idx, peaks):
+                parts = _chain_parts(audio_chain_of(els[i]))
+                if peak is None or parts is None or any(v is None or not v > 0 for v in parts[0]):
+                    continue
+                stages = parts[0]
+                have, want = sum(factor_db(v) for v in stages), normalize_gain_db(peak)
+                if abs(have - want) > AUDIO_GAIN_TOL_DB:
+                    loud = f"{factor_db(peak):.2f} dBFS" if peak > 0 else "silence"
+                    out.append(f"A{n} {item_label(els[i]) or els[i].get('id')} at {_text(els[i], 'start')}: its Audio "
+                               f"Gain is {have:+.2f} dB, but the loudest sample it plays is at {loud} -- Normalize All "
+                               f"Peaks to 0 dB wants {want:+.2f} dB")
+    return out
 
 
 def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
-    """The hard audio check of the final XML: every A1 clip imports at 0 dB and plays -- enabled, no Audio Levels /
-    gain / pan / pitch or any other effect but its speed (Time Remap), no keyframe of any kind -- and no audio track is
-    switched off or locked. Your projects often have audio at -inf because you do the sound yourself: the tool never
-    copies that (a fade's level keyframes imported the 125 % A1 of the laptop's output\\005 muted)."""
+    """The hard audio check of the final XML (night 11: it replaces "every A1 clip at 0 dB, no effect but its speed"):
+    every audio clip plays -- enabled, no audio track switched off or locked -- and carries exactly your audio chain as
+    far as an XML carries it (audio_chain_problems: the normalisation, Volume 0 dB, Panner 0, in this order, nothing
+    else but its speed), its normalisation the one its own sound wants (audio_gain_problems), with no
+    keyframe of any kind (a fade's level keyframes imported the 125 % A1 of the laptop's output\\005 muted). Your
+    projects' own -inf / pitch audio stays yours: the tool never copies it."""
     root = ET.parse(str(xml_path)).getroot()
     seq = root.find("sequence")
     out: list[str] = []
@@ -4541,13 +4935,10 @@ def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
             what = f"A{n} {item_label(ci) or ci.get('id')} at {_text(ci, 'start')}"
             if str(_text(ci, "enabled", "TRUE")).upper() == "FALSE":
                 out.append(f"{what}: switched off (enabled FALSE)")
-            effects = [str(_text(e, "effectid", "") or _text(e, "name", "") or "?") for e in ci.findall(".//effect")]
-            extra = [e for e in effects if e.lower() not in AUDIO_EFFECTS_OK]
-            if extra:
-                out.append(f"{what}: {', '.join(extra)} on it (want 0 dB, no effect but its speed)")
+            out += [f"{what}: {p}" for p in audio_chain_problems(ci)]
             if ci.find(".//keyframe") is not None:
-                out.append(f"{what}: keyframes on it (want none: 0 dB throughout)")
-    return out
+                out.append(f"{what}: keyframes on it (want none: every value of the chain static)")
+    return out + audio_gain_problems(xml_path)
 
 
 def premiere_transition_problems(xml_path: str | os.PathLike) -> list[str]:
@@ -5449,7 +5840,7 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
         if it["what"] == "picture" and cl is not None and not it.get("piece") and \
                 abs(got["in"] - (cl.src_in + int(round((got["start"] - cl.rec_start) * cl.speed)))) > tick +                 (0 if _remap_factor(cl.speed) == 1.0 else 1):
             errors.append(f"XML A1 {_seg_label(it['seg'])}: source in {got['in']} is not V1's at that point")
-        # its level: 0 dB, no keyframes -- premiere_audio_problems (XML AUDIO) checks every A1 item
+        # its audio chain, no keyframes -- premiere_audio_problems (XML AUDIO) checks every A1 item
     # every V1 clip has its audio on A1 (the XML's own A1 items), unless it was removed on purpose: listed
     out["audio_exceptions"] = []
     if not bool(cutlist.raw.get("has_audio", True)):
