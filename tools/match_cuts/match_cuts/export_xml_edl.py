@@ -1422,11 +1422,18 @@ def rerate_edit(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: S
 
     half = Fraction(1, 2)          # at a RAW shot change a frame goes to the clip that shows the larger part of it
 
+    def exact(s0: int, v: float) -> Fraction:
+        # where Premiere really starts a clip: a retimed one on its grid, <in> x speed (remap_encode) -- source tick
+        # 881 at 125 % is <in> 705, played from 881.25; counted as 881, a 40-frame clip of video10 seemed to end
+        # before the RAW shot change at frame 930 but showed it, and the next piece showed it again (XML REPEAT)
+        sf = _remap_factor(v)
+        return Fraction(s0) if sf == 1.0 or v <= 0 else Fraction(int(round(s0 / sf))) * vf(sf)
+
     def shown(s0: int, a: int, k: int, v: float) -> int:
-        return int(math.floor(Fraction(s0) + Fraction(k - a) * vf(v) + Fraction(1, 1_000_000)))
+        return int(math.floor(exact(s0, v) + Fraction(k - a) * vf(v) + Fraction(1, 1_000_000)))
 
     def ends_at(s0: int, a: int, s: Fraction, v: float) -> int:      # the first new frame showing source frame s
-        return a + int(math.ceil((s - Fraction(s0)) / vf(v) - Fraction(1, 1_000_000)))
+        return a + int(math.ceil((s - exact(s0, v)) / vf(v) - Fraction(1, 1_000_000)))
 
     def runs_on(p: PremiereClip | None, q: PremiereClip) -> bool:
         return (p is not None and p.rec_end == q.rec_start and float(q.speed) > 0

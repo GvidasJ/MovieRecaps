@@ -435,3 +435,26 @@ def test_a_competitor_cut_on_a_raw_shot_change_at_125_percent_lands_on_it():
         last3 = math.floor(Fraction(x3 + s3.rec_end - s3.rec_start - 1) * Fraction(5, 4))   # what Premiere shows
         first4 = math.floor(Fraction(x4) * Fraction(5, 4))
         assert last3 < 998 == first4 and s3.rec_end == s4.rec_start, (n3, last3, first4)
+
+
+def test_at_125_percent_a_clip_ends_before_a_shot_change_where_premiere_really_plays_it():
+    """video10 (night 11, --speed 125, 23.976 RAW): S02's pieces at 60 fps ticks 2206-2328 | 2329-2428 with a RAW shot
+    change at frame 930. The first piece's <in> 705 plays from RAW 881.25, not 881: counted from 881 its 40 frames
+    seemed to end at 929.75, but Premiere showed 930.0 -- and the next piece started on 930 again (XML REPEAT A1 S02).
+    Counted where Premiere really starts it, the piece ends a frame earlier and the next starts on the shot change."""
+    from match_cuts.geometry import Sim
+    from match_cuts.model import Segment
+    seg = Segment(id=1, type="raw", comp_in=0, comp_out=500, raw_in_seconds=30.0, speed=1.25, confidence=.9)
+    ev = SimpleNamespace(seg=seg, rec_in=0, rec_out=500, seg_name="S02", dissolve_in=0)
+    R = Fraction(24000, 1001)
+
+    def clip(r0, r1, s0, n, sim):
+        return ex.PremiereClip(seg, ev, r0, r1, r0, r1, s0, s0 + n, 1.25, True, 0.0, 1.0, True, [(s0, sim)], None,
+                               [ev])
+    clips = [clip(231, 329, 2206, 122, Sim(0.5, 0.0, 0.0, 0.0)), clip(329, 408, 2329, 99, Sim(0.6, 0.0, 9.0, 0.0))]
+    s3, s4 = ex.rerate_edit(clips, [], [], 408, Fraction(60), R, R, [float(Fraction(930) / R)])[0]
+    x3 = ex.remap_encode(s3.src_in, s3.src_out, 1.25, s3.rec_end - s3.rec_start)
+    x4 = ex.remap_encode(s4.src_in, s4.src_out, 1.25, s4.rec_end - s4.rec_start)
+    last3 = math.floor(Fraction(x3[1] - 1) * Fraction(5, 4))                 # what Premiere shows last / first
+    first4 = math.floor(Fraction(x4[0]) * Fraction(5, 4))
+    assert last3 < 930 == first4 and s3.rec_end == s4.rec_start and x3[1] <= x4[0], (last3, first4, x3, x4)
