@@ -47,7 +47,8 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    * a RAW and a competitor = one video. **Names win**: a file named `raw*` is the RAW, `comp*` / `competitor*` the
      competitor; when the names don't say, the longer one is the RAW; when the two are about as long (within 20 %),
      a portrait video next to a landscape one is the competitor, else a small card asks **"Which one is the RAW?"**.
-   * the two files always end up in a **project folder** (like a Download): linked on the same drive, else copied.
+   * the two files always end up in a **project folder** (like a Download), as copies of their own (a hard link
+     would change with your file if another video were later copied over its name).
    * a folder of folders = one video per folder (the batch's rule; a folder whose two videos cannot be told apart
      asks too -- on the command line, `batch` skips it with a note instead).
    * one video alone waits until you drop the other one.

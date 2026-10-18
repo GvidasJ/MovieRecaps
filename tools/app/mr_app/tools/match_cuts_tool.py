@@ -944,7 +944,9 @@ class MatchCutsPage(QWidget):
         msg = []
         if res.jobs:
             msg.append(f"{len(res.jobs)} video(s) added")
-        msg += res.notes
+        asked = {(f"{q.name}: " if getattr(q, "name", "") else "") + str(getattr(q, "why", ""))
+                 for q in (getattr(res, "ask", None) or [])}
+        msg += [n for n in res.notes if n not in asked]         # a question is on its card, not said twice
         self.say("; ".join(msg) if msg else "")
         self.update_counts()
         if self.running and self.current is None:
@@ -964,9 +966,10 @@ class MatchCutsPage(QWidget):
 
     def _projectify(self, j: J.Job) -> None:
         """Night 11: a RAW and a competitor dropped from anywhere always end up in a project -- a project folder
-        with both files (a hard link on the same drive, else a copy: core.jobs.project_for_job), the edit into its
-        edit folder, the board showing it. Done in the background on a copy of the job; the row says so and the job
-        waits for it. Folder-of-folders (batch) drops and projects stay as they are."""
+        with both files (copies of their own: core.jobs.project_for_job -- a hard link would change with your file if
+        another video were later copied over its name), the edit into its edit folder, the board showing it. Done in
+        the background on a copy of the job; the row says so and the job waits for it. Folder-of-folders (batch)
+        drops and projects stay as they are."""
         in_project = j.complete and (Path(j.competitor).parent / "project.json").is_file()   # a project folder dropped
         if j.project is not None or not j.complete or not hasattr(J, "project_for_job") \
                 or not (str(j.source).startswith("drop") or in_project):

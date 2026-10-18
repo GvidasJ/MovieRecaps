@@ -144,3 +144,17 @@ def test_the_question_card_makes_the_job_you_pick(page, tmp_path):
     pick = [b for b in card.findChildren(QtWidgets.QPushButton) if b.text().startswith("clip two.mp4")][0]
     pick.click()                                            # "clip two" is the RAW
     assert len(page.jobs) == 1 and page.jobs[0].raw == two and page.jobs[0].competitor == one
+
+
+def test_a_question_is_on_its_card_and_not_said_twice(page, tmp_path):
+    d = tmp_path / "pair"
+    d.mkdir()
+    one, two = d / "a.mp4", d / "b.mp4"
+    one.write_bytes(b"x")
+    two.write_bytes(b"x")
+    why = "can't tell which one is the RAW: a.mp4 (2:13) and b.mp4 (2:41) are about as long"
+    q = SimpleNamespace(videos=[one, two], why=why, name="video7", source="folder video7")
+    page._added_jobs(SimpleNamespace(jobs=[], waiting=None, ask=[q],              # noqa: SLF001
+                                     notes=["x.txt: not a video", f"video7: {why}"]))
+    assert isinstance(page.asks.itemAt(0).widget(), M.AskCard)
+    assert page.status.text() == "x.txt: not a video"
