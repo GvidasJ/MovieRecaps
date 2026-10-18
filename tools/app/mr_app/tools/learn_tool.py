@@ -42,6 +42,17 @@ def _roots(ctx) -> list[Path]:
         return [paths.output_dir(), paths.projects_root()]
 
 
+def _to_fixed(project) -> bool:
+    """A learned fix's project card to Fixed -- only forwards (a card already Rendered or Uploaded stays)."""
+    from ..core import board
+    card = board.card_of(project)
+    keys = [k for k, _ in board.COLUMNS]
+    if card.error or keys.index(card.column) >= keys.index("fixed"):
+        return False
+    board.move(project, "fixed")
+    return True
+
+
 class Offer(W.Card):
     """A new fixed project found in a project: "Learn from this?"."""
 
@@ -340,6 +351,7 @@ class LearnPage(QWidget):
         hub = self.hub()
         item = learnkit.queue_item(pl, f.card)
         prproj = f.prproj
+        project = f.project_folder
 
         def work():
             return learnkit.copy_and_queue(pl, lambda a, b: prog.__setitem__("v", a / b if b else 1.0), hub=hub,
@@ -368,6 +380,9 @@ class LearnPage(QWidget):
             except Exception:  # noqa: BLE001
                 pass
             self.refresh_hub()
+            if project is not None:                       # the project's card to Fixed (never backwards)
+                BG.call(lambda: _to_fixed(project), lambda moved: self._board_reload() if moved else None,
+                        lambda _e: None)
         BG.call(work, done, lambda e: done(f"the copy failed: {e}"))
 
     # -- new fixes appearing in projects --
@@ -409,6 +424,11 @@ class LearnPage(QWidget):
             except Exception:  # noqa: BLE001
                 pass
         self._badge()
+
+    def _board_reload(self) -> None:
+        b = (getattr(self.ctx, "pages", None) or {}).get("board")
+        if b is not None and hasattr(b, "reload"):
+            b.reload()
 
     def _badge(self) -> None:
         fn = getattr(self.ctx, "set_badge", None)

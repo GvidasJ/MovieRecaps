@@ -106,6 +106,26 @@ def test_a_hovered_button_card_and_drop_zone_fade_and_never_move_or_grow(qapp):
     box.close()
 
 
+def test_fades_still_run_when_windows_animation_effects_are_off(qapp):
+    """Windows' "Animation effects" off switches Qt's own UI effects off (menus, tooltips, combo boxes); the app's
+    fades are its own QVariantAnimations and keep running."""
+    from PySide6.QtCore import Qt
+    was = {e: QtWidgets.QApplication.isEffectEnabled(e) for e in (Qt.UIEffect.UI_General, Qt.UIEffect.UI_AnimateMenu,
+                                                                   Qt.UIEffect.UI_FadeMenu, Qt.UIEffect.UI_AnimateTooltip)}
+    try:
+        for e in was:
+            QtWidgets.QApplication.setEffectEnabled(e, False)
+        b = W.Button("Start")
+        enter(b)
+        pump(qapp, 120)
+        assert 0.1 < b.hover.value < 0.95
+        pump(qapp, 400)
+        assert b.hover.value == pytest.approx(1.0)
+    finally:
+        for e, on in was.items():
+            QtWidgets.QApplication.setEffectEnabled(e, on)
+
+
 def test_animations_off_changes_everything_at_once(qapp):
     M.set_enabled(False)
     b = W.Button("Start")
