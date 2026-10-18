@@ -176,12 +176,16 @@ def _problem(what: str, path: Path, e: BaseException) -> str:
 
 
 def _change(path: Path, fn: Callable[[str | None], str]) -> str:
-    """Re-read ``path`` under its lock, write ``fn(old text or None)`` back atomically; "" or the problem."""
+    """Re-read ``path`` under its lock, write ``fn(old text or None)`` back atomically -- not at all when nothing
+    changes (the shared file keeps its time, and the other computer sees no write); "" or the problem."""
     from .projects import _locked
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with _locked(path):
-            _write_text(path, fn(_read_text(path)))
+            old = _read_text(path)
+            new = fn(old)
+            if new != old:
+                _write_text(path, new)
         return ""
     except OSError as e:
         return _problem("could not save", path, e)
@@ -357,8 +361,15 @@ def add_wish(folder: str | os.PathLike, text: str, computer: str | None = None) 
 
 
 def ensure_wishes(folder: str | os.PathLike) -> str:
-    """Make requests.md with its header and night 11's two "Later" items when it is not there; "" or the problem."""
-    return _change(wishes_path(folder), lambda old: old if old else _seed())
+    """Make requests.md with its header and night 11's two "Later" items when it is not there; "" or the problem.
+    (Called at every start: a requests.md that is there is not even locked.)"""
+    p = wishes_path(folder)
+    try:
+        if p.is_file() and p.stat().st_size > 0:
+            return ""
+    except OSError:
+        pass
+    return _change(p, lambda old: old if old else _seed())
 
 
 # ---------------------------------------------------------------------------------------------------------------------

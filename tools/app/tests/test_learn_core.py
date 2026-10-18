@@ -235,6 +235,23 @@ def test_requests_md_starts_with_night_11s_two_later_items_word_for_word(tmp_pat
     assert len(H.read_wishes(hub)) == 3
 
 
+def test_a_start_leaves_a_requests_md_that_is_there_untouched(tmp_path):
+    """ensure_wishes runs at every start, on both computers: an existing requests.md is not rewritten (its time
+    stays), and a change that changes nothing writes nothing."""
+    hub = tmp_path / "hub"
+    assert H.ensure_wishes(hub) == ""
+    f = hub / H.WISHES_FILE
+    old = time.time() - 3600
+    os.utime(f, (old, old))
+    assert H.ensure_wishes(hub) == ""
+    assert f.stat().st_mtime == pytest.approx(old, abs=1)
+    assert H.save_rules(hub, "keep the cut points") == ""
+    r = hub / H.RULES_FILE
+    os.utime(r, (old, old))
+    assert H.save_rules(hub, "keep the cut points") == ""                  # the same rules again: no write
+    assert r.stat().st_mtime == pytest.approx(old, abs=1)
+
+
 def test_a_wish_of_several_lines_and_a_bullet_written_by_hand_are_read(tmp_path):
     hub = tmp_path / "hub"
     assert H.add_wish(hub, "First line\nsecond line", computer="PC") == ""
