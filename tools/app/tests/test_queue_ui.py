@@ -75,6 +75,40 @@ def test_run_again_thorough_is_the_next_take_of_the_same_video(page, tmp_path):
     assert "TAKE <span style='color:#ff7a59'>2" in _slate(page.rows[again.id])
 
 
+def test_a_wrong_pair_row_can_run_anyway_with_the_pair_check_skipped(page, tmp_path, monkeypatch):
+    from mr_app.core import run as RN
+    from mr_app.ui import menu as MN
+    a = _job(page, tmp_path, "video5")
+    a.state = J.DONE
+    a.result = {"label": "WRONG PAIR", "stop": "WRONG PAIR: This competitor doesn't seem to come from this RAW"}
+    shown = []
+
+    class Menu:                                                             # the menu's items, not a real popup
+        def __init__(self, _parent, items):
+            self.items = list(items)
+
+        def popup(self, _pos):
+            shown.append(self)
+    monkeypatch.setattr(MN, "FadeMenu", Menu)
+    row = page.rows[a.id]
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+    row.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(5, 5), QPoint(5, 5)))
+    texts = [it[0] for it in shown[0].items if it]
+    assert "Run anyway (skip the pair check)" in texts
+    page.run_again(a, a.mode, force=True)
+    again = page.jobs[-1]
+    assert again.force_inputs and again.mode == a.mode and again.take == 2
+    assert ("Queued again -- the pair check skipped", "ok") in page.toasts
+    cmd = RN.command(Path("py"), Path("c"), Path("r"), Path("o"), Path("w"), True, 100.0,
+                     force_inputs=again.force_inputs)
+    assert cmd[-1] == "--force-inputs"
+    a.result = {"label": "PASS"}                                            # a PASS row: no such item
+    shown.clear()
+    row.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(5, 5), QPoint(5, 5)))
+    assert "Run anyway (skip the pair check)" not in [it[0] for it in shown[0].items if it]
+
+
 def test_remove_never_takes_the_running_row(page, tmp_path):
     a, b = _job(page, tmp_path, "a"), _job(page, tmp_path, "b")
     a.state = J.RUNNING

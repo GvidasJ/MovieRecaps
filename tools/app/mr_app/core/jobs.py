@@ -55,6 +55,7 @@ class Job:
     project: Path | None = None     # a project folder (Download tab): the run goes into it, its status is written
     out_dir: Path | None = None     # where its run folder goes (None: the app's output folder)
     run_name: str = ""              # the run folder's name ("" = the job's name)
+    force_inputs: bool = False      # night 11: run it although the quick check said WRONG PAIR (--force-inputs)
     id: int = field(default_factory=lambda: next(_ids))
 
     @property

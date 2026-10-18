@@ -444,6 +444,9 @@ class JobRow(QFrame):
                   bool(yt or j.title)),
                  ("Run again (Thorough)", lambda: self.page.run_again(j), False, j.complete), None,
                  ("Remove", lambda: self.page.remove_job(j), True, j.state != J.RUNNING)]
+        if (j.result or {}).get("label") == R.WRONG_PAIR:          # the quick check can be wrong: your call
+            items.insert(4, ("Run anyway (skip the pair check)", lambda: self.page.run_again(j, j.mode, force=True),
+                             False, j.complete))
         FadeMenu(self, items).popup(e.globalPos())
 
     # -- actions --
@@ -1101,16 +1104,17 @@ class MatchCutsPage(QWidget):
         self._renumber()
         _toast(self.ctx, "Order changed ✓")
 
-    def run_again(self, job: J.Job) -> None:
-        """Right-click "Run again (Thorough)": the same video once more, thorough, as its next take."""
-        j = J.Job(job.name, job.competitor, job.raw, mode=J.THOROUGH, speed=job.speed, comp_s=job.comp_s,
+    def run_again(self, job: J.Job, mode: str | None = None, force: bool = False) -> None:
+        """Right-click "Run again (Thorough)": the same video once more, thorough, as its next take. "Run anyway"
+        after a WRONG PAIR (``force``): the same mode, the quick pair check skipped (--force-inputs)."""
+        j = J.Job(job.name, job.competitor, job.raw, mode=mode or J.THOROUGH, speed=job.speed, comp_s=job.comp_s,
                   raw_s=job.raw_s, source=job.source, channel=job.channel, title=job.title, headline=job.headline,
-                  project=job.project, out_dir=job.out_dir, run_name=job.run_name)
+                  project=job.project, out_dir=job.out_dir, run_name=job.run_name, force_inputs=force)
         j.take = getattr(job, "take", 1) + 1
         J.name_jobs([j], [x.name for x in self.jobs])
         self._add_row(j)
         self.update_counts()
-        _toast(self.ctx, "Queued again (Thorough)")
+        _toast(self.ctx, "Queued again -- the pair check skipped" if force else "Queued again (Thorough)")
         if self.running and self.current is None:
             self._next()
 

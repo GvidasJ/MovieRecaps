@@ -58,7 +58,8 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    125 %, Template, Swap.
 3. **Start** (Space). Before the long run the tool checks in seconds that the competitor really comes from this
    RAW; when it does not, the row says **WRONG PAIR** ("This competitor doesn't seem to come from this RAW") at
-   once instead of 20 minutes later.
+   once instead of 20 minutes later. If you know the two belong together, right-click the row: **Run anyway (skip
+   the pair check)**.
 4. Results: **PASS** (green), **OK with a note** (amber), **FAIL**, **WRONG PAIR**, **PICTURE NOT FOUND**, **NOT IN
    THIS RAW** (red), **STOPPED**. A finished row: Open folder, Open in Premiere (the XML pointed at its media as this
    computer sees it), Show report.
