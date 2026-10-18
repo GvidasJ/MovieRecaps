@@ -737,6 +737,11 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
     done["answer_edit.json"] = (f"your timeline ({len(pieces)} {'picture clips' if picture else 'pieces'} of the "
                                 "RAW)")
     old.pop("timeline", None)
+    if "srt_rate" not in old and "srt_rate" not in meta and seq.fps and abs(float(seq.fps) - 24000 / 1001) < 1e-3:
+        # night 11 (S-1): your captions came in through Premiere's SRT import, which puts every one a frame early on a
+        # 23.976 sequence -- check-all compares the tool's where Premiere would have put them (caption_score
+        # .premiere_placed; while the delivered SRT is not adjusted for that import: night 11's report, R-D1)
+        meta = {**meta, "srt_rate": "24000/1001"}
     (case_dir / "case.json").write_text(json.dumps({**old, "timeline": "edit", **meta}, indent=1), encoding="utf-8",
                                         newline="\n")
     done["case.json"] = "the case's notes"

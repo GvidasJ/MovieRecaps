@@ -68,6 +68,21 @@ def test_s_1_places_a_caption_where_premieres_srt_import_puts_it(rate, frame, pl
     assert round(got * float(rate)) == placed
 
 
+def test_learn_marks_a_key_from_a_23_976_sequence_for_the_premiere_placed_scoring(tmp_path, monkeypatch):
+    import json
+    from match_cuts import learn
+    from match_cuts import prproj as PR
+    monkeypatch.setattr(testcases, "small_copy", lambda s, d: (Path(d).write_bytes(b"x"), {"bytes": 1})[1])
+    comp, raw = tmp_path / "c.mp4", tmp_path / "r.mp4"
+    comp.write_bytes(b"c")
+    raw.write_bytes(b"r")
+    for name, fps, want in (("ntsc", 24000 / 1001, "24000/1001"), ("thirty", 30.0, None)):
+        learn.write_case(tmp_path / name, comp, raw, PR.Sequence("s", fps, 1080, 1920), "r.mp4", [], {"style": "new"},
+                         no_caps_why="a test")
+        meta = json.loads((tmp_path / name / "case.json").read_text(encoding="utf-8"))
+        assert meta.get("srt_rate") == want, name
+
+
 def test_s_1_is_read_from_case_json_and_only_the_23_976_keys_have_it():
     assert testcases._rate("24000/1001") == pytest.approx(23.976, abs=1e-3)          # noqa: SLF001
     assert testcases._rate(None) is None and testcases._rate("fast") is None           # noqa: SLF001
