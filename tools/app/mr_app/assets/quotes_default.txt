@@ -1,0 +1,26 @@
+# MovieRecaps quotes: the line under the top bar.
+# One quote per line:   Part | the quote | who said it      (who said it can be left out)
+# Parts: Morning (05:00-12:00), Afternoon (12:00-18:00), Evening (18:00-05:00) and Goal (shown when the daily goal
+# is hit). Each part of the day shows one quote of its list, the same one until the part ends; a click shows the
+# next. Lines starting with # are notes. Save the file and the app shows your changes.
+
+Morning | I just never thought I couldn't. | McQueen
+Morning | Amateurs sit and wait for inspiration, the rest of us just get up and go to work. | Stephen King
+Morning | First Short of the day is the hardest. Start it.
+Morning | Discipline equals freedom. | Jocko Willink
+
+Afternoon | Be so good they can't ignore you. | Steve Martin
+Afternoon | You miss 100% of the shots you don't take. | Wayne Gretzky
+Afternoon | The algorithm can't push a Short that doesn't exist.
+Afternoon | Done beats perfect. Upload it.
+
+Evening | Hard work beats talent when talent doesn't work hard. | Tim Notke
+Evening | One more Short could be the one that blows up.
+Evening | Every upload is a lottery ticket you print yourself.
+Evening | Consistency beats going viral once.
+Evening | Queue it up. Let the PC work while you sleep.
+Evening | Tomorrow's views are made tonight.
+Evening | Small daily wins, big monthly numbers.
+
+Goal | Goal hit. Now the bonus ones are pure profit.
+Goal | That's 6. The ones who win do one more.

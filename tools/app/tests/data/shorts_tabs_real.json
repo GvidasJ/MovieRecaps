@@ -1,0 +1,82 @@
+{
+ "_about": "yt-dlp 2026.08.19 --flat-playlist -J --playlist-end 100 of the three Shorts tabs, read on 2026-10-18 08:00 (read-only); trimmed: the thumbnails and yt-dlp's own bookkeeping fields left out, every entry kept.",
+ "LouLaughs": {
+  "id": "UCLMChnHMkHAdAeDVPftk_rQ", "channel": "Lou Laughs", "channel_id": "UCLMChnHMkHAdAeDVPftk_rQ",
+  "title": "Lou Laughs - Shorts", "uploader_id": "@LouLaughs", "uploader_url": "https://www.youtube.com/@LouLaughs",
+  "playlist_count": 10, "_type": "playlist", "extractor_key": "YoutubeTab",
+  "webpage_url": "https://www.youtube.com/@LouLaughs/shorts",
+  "entries": [
+   {"title": "The Commercial Behind The Nestle Crunch Meme 🍫😭", "view_count": 9200, "ie_key": "Youtube", "id": "omBq76V5wQQ", "_type": "url", "url": "https://www.youtube.com/shorts/omBq76V5wQQ", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Tough Guy of All Time 📞😭", "view_count": 1500, "ie_key": "Youtube", "id": "4v3FsM0BzWQ", "_type": "url", "url": "https://www.youtube.com/shorts/4v3FsM0BzWQ", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Family Road Trip of All Time 🚗😭", "view_count": 1200, "ie_key": "Youtube", "id": "Uhnno_cBJsk", "_type": "url", "url": "https://www.youtube.com/shorts/Uhnno_cBJsk", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Marriage Talk of All Time 💍😭", "view_count": 2300, "ie_key": "Youtube", "id": "WGIr8o0q9q4", "_type": "url", "url": "https://www.youtube.com/shorts/WGIr8o0q9q4", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Breaking Bad Scene of All Time 🧪😭", "view_count": 1900, "ie_key": "Youtube", "id": "3ywswKnncmk", "_type": "url", "url": "https://www.youtube.com/shorts/3ywswKnncmk", "__x_forwarded_for_ip": null},
+   {"title": "The Most Brutal Comeback of All Time 💀😭", "view_count": 2400, "ie_key": "Youtube", "id": "0_-gShi3T-g", "_type": "url", "url": "https://www.youtube.com/shorts/0_-gShi3T-g", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Age Guess of All Time 🎂😭", "view_count": 10000, "ie_key": "Youtube", "id": "EGIIvltTZB0", "_type": "url", "url": "https://www.youtube.com/shorts/EGIIvltTZB0", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Misunderstanding of All Time 👜😭", "view_count": 8500, "ie_key": "Youtube", "id": "ZWh9n0J1UW0", "_type": "url", "url": "https://www.youtube.com/shorts/ZWh9n0J1UW0", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Pool Announcement of All Time 🏊‍♂️😭", "view_count": 1500, "ie_key": "Youtube", "id": "HTfBU1YEw5g", "_type": "url", "url": "https://www.youtube.com/shorts/HTfBU1YEw5g", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Allergic Reaction of All Time 🥜😭", "view_count": 15000, "ie_key": "Youtube", "id": "z02sVAeC4wM", "_type": "url", "url": "https://www.youtube.com/shorts/z02sVAeC4wM", "__x_forwarded_for_ip": null}
+  ]
+ },
+ "MikeMemesYou": {
+  "id": "UC4CuAoY_f6uQiD0Vu8DRj0w", "channel": "Mike Memes", "channel_id": "UC4CuAoY_f6uQiD0Vu8DRj0w",
+  "title": "Mike Memes - Shorts", "uploader_id": "@MikeMemesYou", "uploader_url": "https://www.youtube.com/@MikeMemesYou",
+  "playlist_count": 33, "_type": "playlist", "extractor_key": "YoutubeTab",
+  "webpage_url": "https://www.youtube.com/@MikeMemesYou/shorts",
+  "entries": [
+   {"title": "The Funniest Police Station Prank of All Time 🚔😭", "view_count": 347000, "ie_key": "Youtube", "id": "jRCqaGZ1JT4", "_type": "url", "url": "https://www.youtube.com/shorts/jRCqaGZ1JT4", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Diversity Training of All Time 🤦‍♂️😭", "view_count": 82000, "ie_key": "Youtube", "id": "Y_QvArZrq8o", "_type": "url", "url": "https://www.youtube.com/shorts/Y_QvArZrq8o", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Prison Transformation of All Time 🔒😭", "view_count": 39000, "ie_key": "Youtube", "id": "0N95mZPUcgE", "_type": "url", "url": "https://www.youtube.com/shorts/0N95mZPUcgE", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Family Introduction of All Time 😏😭", "view_count": 44000, "ie_key": "Youtube", "id": "4Ov_rXDWS98", "_type": "url", "url": "https://www.youtube.com/shorts/4Ov_rXDWS98", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest School Lesson of All Time 📚😭", "view_count": 92000, "ie_key": "Youtube", "id": "o-XDzyBnYqQ", "_type": "url", "url": "https://www.youtube.com/shorts/o-XDzyBnYqQ", "__x_forwarded_for_ip": null},
+   {"title": "When He Knew It Was Time To Leave 🏃‍♂️😭", "view_count": 150000, "ie_key": "Youtube", "id": "CO5XnBuyZIU", "_type": "url", "url": "https://www.youtube.com/shorts/CO5XnBuyZIU", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Way To Ask For Directions 🏰😭", "view_count": 57000, "ie_key": "Youtube", "id": "E-n0cNdm4TM", "_type": "url", "url": "https://www.youtube.com/shorts/E-n0cNdm4TM", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Word Choice of All Time 👉😭", "view_count": 12000, "ie_key": "Youtube", "id": "VGjbW9pq5t4", "_type": "url", "url": "https://www.youtube.com/shorts/VGjbW9pq5t4", "__x_forwarded_for_ip": null},
+   {"title": "The Most Awkward Joke In Sitcom History 💀😭", "view_count": 2300000, "ie_key": "Youtube", "id": "bjxJaYGgmdM", "_type": "url", "url": "https://www.youtube.com/shorts/bjxJaYGgmdM", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Cop Duo of All Time 👮‍♂️😭", "view_count": 1300000, "ie_key": "Youtube", "id": "EZ-Ex7eYx2I", "_type": "url", "url": "https://www.youtube.com/shorts/EZ-Ex7eYx2I", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Improvised Scene of All Time 🎬😭", "view_count": 5100000, "ie_key": "Youtube", "id": "H9Q26tZQ-zU", "_type": "url", "url": "https://www.youtube.com/shorts/H9Q26tZQ-zU", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Father Son Talk of All Time 👨‍👦😭", "view_count": 834000, "ie_key": "Youtube", "id": "SWWn90KnmeI", "_type": "url", "url": "https://www.youtube.com/shorts/SWWn90KnmeI", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Friend Group Roast of All Time 📞😭", "view_count": 4800000, "ie_key": "Youtube", "id": "UJRWfcaCj00", "_type": "url", "url": "https://www.youtube.com/shorts/UJRWfcaCj00", "__x_forwarded_for_ip": null},
+   {"title": "The Luckiest Husband of All Time 🤗😭", "view_count": 8400, "ie_key": "Youtube", "id": "6ltIGF8Pi6U", "_type": "url", "url": "https://www.youtube.com/shorts/6ltIGF8Pi6U", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Smoking Scene In Comedy History 😭🚬", "view_count": 2400000, "ie_key": "Youtube", "id": "HUmV9uo2Rb4", "_type": "url", "url": "https://www.youtube.com/shorts/HUmV9uo2Rb4", "__x_forwarded_for_ip": null},
+   {"title": "The World's Toughest Job? Long-Haul Trucking in the North", "view_count": 18000, "ie_key": "Youtube", "id": "kJnUwFWQMHk", "_type": "url", "url": "https://www.youtube.com/shorts/kJnUwFWQMHk", "__x_forwarded_for_ip": null},
+   {"title": "How a tractor became one of the most versatile Mercedes ever", "view_count": 2200, "ie_key": "Youtube", "id": "zRB8W-yECGY", "_type": "url", "url": "https://www.youtube.com/shorts/zRB8W-yECGY", "__x_forwarded_for_ip": null},
+   {"title": "The tractor that saved lives in the Far North", "view_count": 2600, "ie_key": "Youtube", "id": "dfa6D3OAq24", "_type": "url", "url": "https://www.youtube.com/shorts/dfa6D3OAq24", "__x_forwarded_for_ip": null},
+   {"title": "The Craziest Off-Road Truck Sport", "view_count": 21000, "ie_key": "Youtube", "id": "FfcXC1gnkQM", "_type": "url", "url": "https://www.youtube.com/shorts/FfcXC1gnkQM", "__x_forwarded_for_ip": null},
+   {"title": "Why did the USSR rely on German trucks at -50°C?", "view_count": 100000, "ie_key": "Youtube", "id": "scNvxV0RABU", "_type": "url", "url": "https://www.youtube.com/shorts/scNvxV0RABU", "__x_forwarded_for_ip": null},
+   {"title": "Why did the Soviet Union rely on German trucks to build the BAM?", "view_count": 10000, "ie_key": "Youtube", "id": "By4wRosmZig", "_type": "url", "url": "https://www.youtube.com/shorts/By4wRosmZig", "__x_forwarded_for_ip": null},
+   {"title": "Why is an old Soviet tractor still working on German fields today?", "view_count": 79000, "ie_key": "Youtube", "id": "RaXNmNubaAQ", "_type": "url", "url": "https://www.youtube.com/shorts/RaXNmNubaAQ", "__x_forwarded_for_ip": null},
+   {"title": "They were paid in gold. But why did the Soviet Union need thousands of trucks from West Germany?", "view_count": 210000, "ie_key": "Youtube", "id": "xsNuaVq2SRo", "_type": "url", "url": "https://www.youtube.com/shorts/xsNuaVq2SRo", "__x_forwarded_for_ip": null},
+   {"title": "Why did the Soviet Union buy ten thousand German trucks in the middle of the Cold War?", "view_count": 46000, "ie_key": "Youtube", "id": "RYzWD7y6bsY", "_type": "url", "url": "https://www.youtube.com/shorts/RYzWD7y6bsY", "__x_forwarded_for_ip": null},
+   {"title": "Why was the Tatra so beloved in the far north?", "view_count": 56000, "ie_key": "Youtube", "id": "LUuPqKfOBOE", "_type": "url", "url": "https://www.youtube.com/shorts/LUuPqKfOBOE", "__x_forwarded_for_ip": null},
+   {"title": "Why did Soviet drivers call the German IFA W50 truck \"revenge for Stalingrad\"?", "view_count": 461000, "ie_key": "Youtube", "id": "gU8M5MDHX1o", "_type": "url", "url": "https://www.youtube.com/shorts/gU8M5MDHX1o", "__x_forwarded_for_ip": null},
+   {"title": "Why did half of the USSR rely on German trucks — and not their own? #IFAvsGAZ66 #SovietTech", "view_count": 2200, "ie_key": "Youtube", "id": "yC08nhqO-YQ", "_type": "url", "url": "https://www.youtube.com/shorts/yC08nhqO-YQ", "__x_forwarded_for_ip": null},
+   {"title": "The story behind the first 6x6 pickup", "view_count": 6300, "ie_key": "Youtube", "id": "ob5HiWFOW08", "_type": "url", "url": "https://www.youtube.com/shorts/ob5HiWFOW08", "__x_forwarded_for_ip": null},
+   {"title": "The most beautiful Porsche of all time", "view_count": 5200, "ie_key": "Youtube", "id": "wpQsZ1L3G8k", "_type": "url", "url": "https://www.youtube.com/shorts/wpQsZ1L3G8k", "__x_forwarded_for_ip": null},
+   {"title": "m10 vs cr7? #formula1", "view_count": 17000, "ie_key": "Youtube", "id": "zWi51-r6c9Q", "_type": "url", "url": "https://www.youtube.com/shorts/zWi51-r6c9Q", "__x_forwarded_for_ip": null},
+   {"title": "Warum leben die F1-Fahrer in Monaco?!", "view_count": 2700, "ie_key": "Youtube", "id": "Pv2yA6Np-3E", "_type": "url", "url": "https://www.youtube.com/shorts/Pv2yA6Np-3E", "__x_forwarded_for_ip": null},
+   {"title": "f1", "view_count": 22000, "ie_key": "Youtube", "id": "LEzOTI41Tuc", "_type": "url", "url": "https://www.youtube.com/shorts/LEzOTI41Tuc", "__x_forwarded_for_ip": null},
+   {"title": "Warum dauert ein Formel-1-Boxenstopp nur 2 Sekunden?", "view_count": 2500, "ie_key": "Youtube", "id": "7BW4iIjiWo0", "_type": "url", "url": "https://www.youtube.com/shorts/7BW4iIjiWo0", "__x_forwarded_for_ip": null}
+  ]
+ },
+ "Flick707": {
+  "id": "UCMirYAMpoogf-7hSmZqdTaQ", "channel": "Flick707", "channel_id": "UCMirYAMpoogf-7hSmZqdTaQ",
+  "title": "Flick707 - Shorts", "uploader_id": "@Flick707", "uploader_url": "https://www.youtube.com/@Flick707",
+  "playlist_count": 12, "_type": "playlist", "extractor_key": "YoutubeTab",
+  "webpage_url": "https://www.youtube.com/@Flick707/shorts",
+  "entries": [
+   {"title": "When Grandpa Wants You To Lie For Him 💀😭", "view_count": 4300, "ie_key": "Youtube", "id": "pXBgisZ34JQ", "_type": "url", "url": "https://www.youtube.com/shorts/pXBgisZ34JQ", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Family Trip of All Time 🗽😭", "view_count": 63000, "ie_key": "Youtube", "id": "fmpdQoibTEc", "_type": "url", "url": "https://www.youtube.com/shorts/fmpdQoibTEc", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Job Advice of All Time 💼😭", "view_count": 495000, "ie_key": "Youtube", "id": "KdZE21qhyRY", "_type": "url", "url": "https://www.youtube.com/shorts/KdZE21qhyRY", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Way To Win a Man Over 🍫😭", "view_count": 180000, "ie_key": "Youtube", "id": "o_AgPvIjO08", "_type": "url", "url": "https://www.youtube.com/shorts/o_AgPvIjO08", "__x_forwarded_for_ip": null},
+   {"title": "The Man Who Couldn’t Read The Room 🎤😭", "view_count": 60000, "ie_key": "Youtube", "id": "Y1OByxLfODo", "_type": "url", "url": "https://www.youtube.com/shorts/Y1OByxLfODo", "__x_forwarded_for_ip": null},
+   {"title": "The Most Clueless Character of All Time 🧨😭", "view_count": 37000, "ie_key": "Youtube", "id": "1BmTiz6syeI", "_type": "url", "url": "https://www.youtube.com/shorts/1BmTiz6syeI", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Spelling Lesson of All Time ⛽😭", "view_count": 33000, "ie_key": "Youtube", "id": "GgFw_WDjQnI", "_type": "url", "url": "https://www.youtube.com/shorts/GgFw_WDjQnI", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Word Mix-Up of All Time 👑😭", "view_count": 31000, "ie_key": "Youtube", "id": "6Cxw8QyBYNQ", "_type": "url", "url": "https://www.youtube.com/shorts/6Cxw8QyBYNQ", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Would You Rather Question of All Time 🤔😭", "view_count": 512000, "ie_key": "Youtube", "id": "uXn9_hsijWM", "_type": "url", "url": "https://www.youtube.com/shorts/uXn9_hsijWM", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Courtroom Speech of All Time ⚖️😭 #usa", "view_count": 438000, "ie_key": "Youtube", "id": "N5UVbT06J0g", "_type": "url", "url": "https://www.youtube.com/shorts/N5UVbT06J0g", "__x_forwarded_for_ip": null},
+   {"title": "The Slowest Student of All Time 😭🐌 #usa", "view_count": 601, "ie_key": "Youtube", "id": "oyZ44SkOqrA", "_type": "url", "url": "https://www.youtube.com/shorts/oyZ44SkOqrA", "__x_forwarded_for_ip": null},
+   {"title": "The Funniest Adoption Scene of All Time 🐼😭 #usa", "view_count": 71000, "ie_key": "Youtube", "id": "6iFgDmlwUXU", "_type": "url", "url": "https://www.youtube.com/shorts/6iFgDmlwUXU", "__x_forwarded_for_ip": null}
+  ]
+ }
+}
