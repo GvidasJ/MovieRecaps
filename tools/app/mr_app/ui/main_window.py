@@ -347,18 +347,22 @@ class MainWindow(QMainWindow):
         and move there later)."""
         def work():
             root = _save_root(self.settings)
-            ok = None
+            ok, why = None, ""
             try:
                 from ..core import publish
                 ok = publish.reachable(root, 4.0)
+                if not ok:
+                    why = publish.why_unreachable(root, 4.0) or ""
             except Exception:  # noqa: BLE001 - the module may be missing on an old checkout
                 ok = None
-            return str(root), ok
+            return str(root), ok, why
 
         def got(r) -> None:
-            root, ok = r
+            root, ok, why = r
             if ok is False:
                 self.strip_save.setText(f"Save to {root} -- not reachable, saving here")
+                self.strip_save.setToolTip(why or "the shared folder cannot be reached now: finished projects stay on "
+                                                  "this computer and move there when it is back")
                 self.strip_save.setStyleSheet(f"color: {theme.AMBER};")
             else:
                 self.strip_save.setText(f"Save to {root}")

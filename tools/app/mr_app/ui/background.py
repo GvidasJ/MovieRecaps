@@ -25,9 +25,16 @@ class _Run(QRunnable):
         try:
             res = self.fn()
         except Exception as e:  # noqa: BLE001 - said to the caller in plain words
-            self.sig.failed.emit(f"{type(e).__name__}: {e}")
+            self._say(self.sig.failed, f"{type(e).__name__}: {e}")
             return
-        self.sig.done.emit(res)
+        self._say(self.sig.done, res)
+
+    @staticmethod
+    def _say(signal, value) -> None:
+        try:
+            signal.emit(value)
+        except RuntimeError:          # the window closed while this ran: nobody to tell
+            pass
 
 
 def call(fn: Callable[[], Any], done: Callable[[Any], None] | None = None,
