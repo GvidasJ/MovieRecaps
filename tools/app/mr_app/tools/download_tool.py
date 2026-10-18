@@ -113,6 +113,12 @@ class PrepareThread(QThread):
                 tc = flow.title_check_step(p, title=it.title or "")
             except Exception as e:  # noqa: BLE001 - a help, never a stop
                 tc = {"competitor_headline": "", "message": f"the headline could not be read ({e})"}
+            if it.channel and (it.title or "").strip():   # night 11: the template now (the board's Template column)
+                say("competitor", 1.0, "making your channel's template ...")
+                try:
+                    flow.template_step(p, it.channel, it.title)
+                except Exception:  # noqa: BLE001 - the edit makes it again at its start
+                    pass
             conv = p.reload().get("steps", {}).get("convert") or {}
             for role in ROLE_NAMES:
                 st = conv.get(role) or {}
