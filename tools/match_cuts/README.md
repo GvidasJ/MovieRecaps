@@ -334,6 +334,13 @@ the surround and LFE channels left out; one constant gain only when the mix woul
 -12.5 dBFS, no gain). The analysis, the caches and `cutlist.json` keep the RAW itself. If the copy cannot be made, the
 RAW is used as it is and the run warns.
 
+**One RAW file per 5.1 run** (day 12). The run folder used to hold the RAW twice: the analysis copy (`raw.mp4` /
+`raw_ae.mp4`) and `raw_stereo`. Now only `raw_stereo.<ext>` stays: its picture is the analysed one, copied as it is
+(the same frames), with the stereo sound. The analysis copy is removed at the very end of the run, after the checks
+and the report, and only when `raw_stereo` has the same number of frames, no XML of the run plays the copy, and the
+copy is not the file you gave. The log says what was removed or why it was kept. Learn finds the RAW by the name
+`raw_stereo`. (The app's Board **Clean up** does the same for older runs.)
+
 **Linked clips.** Every V1 clip imports linked to its own A1 clip (the `<link>`s Premiere writes in its own XML), so
 moving, trimming or cutting a clip takes its audio with it. Each V1 clip is linked to the A1 clip it overlaps most;
 audio shifted a few frames from its picture (an A1 cut moved to close a jump) stays linked to that picture. Where one
@@ -443,6 +450,10 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   plays them: the XML's shot split gives each its framing); on laptop013 the faces found reproduced one of your moves
   (the man: -276 px for your -361) but also moved your centred wide shot, and the woman's close-ups were not found, so
   it stays off until the person detection is better.
+  **The person speaking, cut off** (day 12, the laptop's Rush Hour run): a clip whose window shows nobody whole while
+  the person speaking -- inside the competitor's own, wider window -- is cut off now slides sideways until they are in
+  (the zoom is kept, at most half the window's width). A competitor close-up, or a speaker the tool is not sure of,
+  keeps its framing. `MATCH_CUTS_SPEAKER_CUT_OFF=0` switches the rule off for one run (`1` on).
 * **Every clip covers the window — checked on the final XML.** Premiere reads a clip's Motion `<center>` in units
   of the *source* frame (1920×1080 for the RAW), not the sequence: Position = sequence centre + center × source
   size. (Writing it in sequence units put S21 at Position 1735.8 instead of 1212.6, its left edge at x 431.) After
@@ -633,6 +644,19 @@ in view), one fixed framing per clip, and `--min-move` holds the framing until i
 mode with the RAW recheck, transcribed from the cut edit. (Before, `--raw` without `--competitor` looked for the
 competitor in `--input-dir`; now it means "no competitor".)
 
+### Just cuts (day 12: a video with no competitor, cut at every scene change)
+
+```
+.venv\Scripts\python -m match_cuts.just_cuts --raw RAW.mp4 --run-dir ..\..\output\cuts [--frame PNG] [--watermark PNG]
+```
+
+Run it from `tools\match_cuts`. It cuts the whole RAW at every scene change (no cut leaves a shot shorter than 0.5 s:
+a flash plays on), each shot framed on its main face, and writes the usual Premiere edit: `1_edit.xml` at the RAW's own
+rate, your audio chain on every audio clip, the frame (`--frame`, else `templates\default.png`) and the
+`--watermark`. No captions, no competitor, no WRONG PAIR check. `extras\just_cuts.json` lists the cuts. Exit `0`: made
+and checked; `1`: made, a check found something to look at; `2`: not made (the reason on stderr). `--work` is where
+the caches go (optional). The app's New video form runs it for you (Just cuts).
+
 ### B-roll cutaways (`--no-broll`)
 
 A cutaway is a piece whose picture leaves the main clip — B-roll from another moment of the RAW, a
@@ -784,7 +808,11 @@ like, each run reads it) are written with one letter as `*`, as you wrote them i
 after the first letter starred (`boobs` -> `b*obs`). Whole words, any case (`Porn` -> `P*rn`), a word's `'s` form too.
 A word not listed is never changed: `gay`, `fag` (laptop009 kept them written out), `pissed`, swear words. The list
 holds your four forms and their variants plus other sexual / crude words in the same style (cock, pussy, boobs, tits,
-horny, slut, whore, cum, orgasm, ...). The end summary lists every censored caption (*Captions censored*).
+horny, slut, whore, cum, orgasm, ...). The end summary lists every censored caption (*Captions censored*). Since
+day 12 `fuck` is written `fu*k` (and its forms), as you wrote all five in video14; `shit` stays as it was.
+
+**A doubled action caption is joined** (day 12): two neighbouring action captions filled with the same action become
+one caption (video15's *gives the ultrasound*). Words said twice (nah nah) stay.
 
 The rules:
 
@@ -901,7 +929,8 @@ files do not exist, `./input` is scanned for its videos.
 | `3` | nothing failed, but a criterion could not be verified (`not_available`, e.g. no Node.js for the JSX mock), or a hard check of `1_edit.xml` could not run because its analysis failed (the speech map, the RAW's shot changes, who speaks) | `PASS (criterion 6 not verified: …)` / `PASS (not checked: …)` |
 
 A wrapper script should treat `0` and `3` as "the recreation is correct as far as it could be checked"
-(`3` is the normal result on a machine without Node.js / After Effects). Ctrl-C exits with `130`.
+(`3` is the normal result on a machine without Node.js / After Effects, and for every Premiere-only run). Ctrl-C
+exits with `130`. The app shows exit `3` as a finished run (PASS), not a stop.
 
 The final summary prints one line per acceptance criterion, the output paths and the warnings:
 
