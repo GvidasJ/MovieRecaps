@@ -170,11 +170,24 @@ def load_cutlist(rf: dict[str, Path]) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
 
 
+STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")    # a 5.1 RAW's one file for Premiere (stereo.py)
+
+
+def played_raw_name(pr: Any, *names: str) -> str:
+    """The name the project ``pr`` plays the run's RAW under: the first of ``names`` (the cut list's analysis copy,
+    raw.mp4 / raw_ae.mp4 ...) or of the stereo copy's names (a 5.1 RAW: 1_edit.xml plays raw_stereo.mp4 since
+    night 6) that a clip of it plays; the first name when none is played."""
+    want = [n for n in dict.fromkeys([*names, *STEREO_NAMES]) if n]
+    played = {PR.file_name(it.media) for s in pr.sequences for it in s.items if it.media}
+    return next((n for n in want if n in played), want[0] if want else "")
+
+
 def run_media(rf: dict[str, Path], cutlist: dict, kind: str) -> Path | None:
     """The run's input ``kind`` ('competitor' / 'raw'): the run's own copy in its media folder (the file it analysed:
     a hard link of the input, or its conformed copy), else the file the run read when it is still there and still that
     video (its length as the cut list says: a run made on another PC names that PC's input\\raw.mp4 -- laptop004 named
-    the path that holds 021's RAW here)."""
+    the path that holds 021's RAW here), else -- the RAW of a run whose analysis copy was removed (day 12: one RAW file
+    per run) -- its media/raw_stereo.<ext> (the same picture, stereo sound)."""
     info = cutlist.get(kind) or {}
     rel = info.get("file") or info.get("file_rel")
     if rel and (rf["dir"] / EXTRAS / rel).is_file():
@@ -194,6 +207,21 @@ def run_media(rf: dict[str, Path], cutlist: dict, kind: str) -> Path | None:
                 except Exception:  # noqa: BLE001 - cannot tell: not this one
                     continue
             return Path(p)
+    if kind == "raw":
+        # day 12, one RAW file per run: a 5.1 RAW's analysis copy is removed at the end of the run -- its stereo copy
+        # (the same picture; what 1_edit.xml plays) stands for it
+        for ext in (".mp4", ".mov"):
+            p = Path(rf["media"]) / f"raw_stereo{ext}"
+            if not p.is_file():
+                continue
+            if want:
+                try:
+                    from .cli import quick_probe
+                    if abs(float(quick_probe(str(p))["duration"]) - float(want)) > max(1.0, 0.01 * float(want)):
+                        continue
+                except Exception:  # noqa: BLE001 - cannot tell: not this one
+                    continue
+            return p
     return None
 
 
@@ -1554,7 +1582,7 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     comp, raw = run_media(rf, cl, "competitor"), run_media(rf, cl, "raw")
     if comp is None or raw is None:
         raise LearnError(f"{rf['dir']}: the run's competitor or RAW cannot be found (moved or deleted?)")
-    raw_name = PR.file_name(str((cl.get("raw") or {}).get("file") or raw.name))
+    raw_name = played_raw_name(pr, PR.file_name(str((cl.get("raw") or {}).get("file") or raw.name)), raw.name)
     seq = sequence_of(pr, raw_name, cl) or sequence_of(pr, raw_name) or PR.main_sequence(pr)
     played = {it.media for it in seq.items if it.media and PR.file_name(it.media) == raw_name}
     cands = {k: v for k, v in pr.media.items() if PR.file_name(k) == raw_name}

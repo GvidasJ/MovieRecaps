@@ -6,6 +6,10 @@ the picture copied as it is (the same frames and timing, so every frame number o
 stereo track -- left = front left + centre x 0.707, right = front right + centre x 0.707 (the dialogue sits in the
 centre channel); the surround and LFE channels are left out. One constant gain keeps the peak at PEAK_DB at most
 (measured first; never raised, no compression). The analysis keeps reading the RAW itself: no stage cache changes.
+
+Day 12, one RAW file per run: raw_stereo is the run's ONE RAW file -- V1 and A1 of 1_edit.xml and the Premiere project
+play it. The analysis copy (media/raw.<ext> or the conform media/raw_ae.<ext>) is removed at the end of the run
+(``one_raw_file``); the Board's Clean up does the same for older runs (the app's core/rawfiles.py).
 """
 from __future__ import annotations
 
@@ -120,6 +124,72 @@ def stereo_copy(src: str | Path, dst: str | Path) -> dict:
              "?" if peak is None else f"{peak:.1f}", n1, d1)
     return {"path": str(dst), "channels": lay["channels"], "layout": lay["layout"], "pan": pan,
             "gain_db": round(gain, 2), "peak_db": None if peak is None else round(peak, 2)}
+
+
+_PATHURL = re.compile(r"<pathurl>(.*?)</pathurl>", re.S | re.I)
+
+
+def xml_media_names(xml: str | Path) -> set[str]:
+    """'media/<file name>' (lower case) of every <pathurl> of an XML that names a file in a ``media`` folder."""
+    import urllib.parse
+    try:
+        text = Path(xml).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    out = set()
+    for m in _PATHURL.finditer(text):
+        u = urllib.parse.unquote(m.group(1).strip().replace("&amp;", "&")).replace("\\", "/").lower()
+        parts = u.rstrip("/").split("/")
+        if len(parts) >= 2 and parts[-2] == "media":
+            out.add("media/" + parts[-1])
+    return out
+
+
+def one_raw_file(analysed: str | Path, single: str | Path, xmls: list[str | Path], raw_input: str | Path | None = None,
+                 ) -> dict:
+    """Day 12, one RAW file per run: once 1_edit.xml plays ``single`` (raw_stereo.<ext>: the picture copied as it is,
+    stereo sound), the run's analysis copy of the RAW (``analysed``: media/raw.<ext>, a hard link or copy of the RAW,
+    or media/raw_ae.<ext>, its conform) is not needed any more and is removed -- only when ``single`` is there with
+    the same number of video frames, no XML of ``xmls`` plays ``analysed``, and ``analysed`` is not the input file
+    itself (``raw_input``: a run made from a run folder's own media). A re-run of the folder places / converts the RAW
+    again. Returns {removed, path, bytes, freed (0 for a hard link: another name of the downloaded RAW), why}."""
+    a, s = Path(analysed), Path(single)
+    out: dict[str, Any] = {"removed": False, "path": str(a), "bytes": 0, "freed": 0, "why": ""}
+    if not a.is_file():
+        out["why"] = "not there"
+        return out
+    if not s.is_file():
+        out["why"] = f"{s.name} is not there"
+        return out
+    try:
+        if a.resolve() == s.resolve() or (raw_input is not None and a.resolve() == Path(raw_input).resolve()):
+            out["why"] = "it is the run's input file itself"
+            return out
+    except OSError:
+        out["why"] = "cannot tell"
+        return out
+    if a.parent.name.lower() != "media":
+        out["why"] = "not in the run's media folder"
+        return out
+    key = "media/" + a.name.lower()
+    users = [Path(x).name for x in xmls if key in xml_media_names(x)]
+    if users:
+        out["why"] = "played by " + ", ".join(users)
+        return out
+    try:
+        n_a, n_s = _frames(a)[0], _frames(s)[0]
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        out["why"] = f"could not count the frames ({e})"
+        return out
+    if n_a != n_s or n_a <= 0:
+        out["why"] = f"{s.name} has {n_s} video frames, {a.name} {n_a}"
+        return out
+    st = a.stat()
+    out["bytes"] = int(st.st_size)
+    out["freed"] = 0 if st.st_nlink > 1 else int(st.st_size)
+    a.unlink()
+    out["removed"] = True
+    return out
 
 
 def stereo_block(raw: dict, path: str | Path, out_dir: str | Path | None = None) -> dict:
