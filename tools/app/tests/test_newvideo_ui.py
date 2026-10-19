@@ -460,3 +460,24 @@ def test_a_download_row_that_changes_state_glides_and_a_new_row_scrolls_to_the_t
     assert sa.verticalScrollBar().value() == 0
     sa.takeWidget()
     sa.deleteLater()
+
+
+def test_an_edit_that_waits_in_the_queue_for_your_pick_of_the_raw_says_so_on_the_row(page):
+    # the e2e run (day 12): a 30 s commercial and its 26 s Short are about as long, their names say nothing -> the
+    # queue's amber "Check which is the RAW" card waits for you; the Download row said "it starts when the queue gets
+    # to it" for ever
+    page.auto.click()
+    _fill(page, YT, COMP, "a headline")
+    it = page.add()
+    job, _ = page.queue_page.jobs[-1]
+    job.competitor, job.raw = Path("Short [f18B0Accoig].mp4"), Path("Toby Maguire Twister Juice 1991.mp4")
+    job.comp_s, job.raw_s = 25.6, 30.3
+    assert J.needs_check(job) and D.waits_for_pick(it)
+    page._poll()                                                  # noqa: SLF001
+    row = page.rows[it.id]
+    assert "Which one is the RAW?" in page.now_text(it) and "Match cuts tab" in page.now_text(it)
+    assert row.pill.word() == "Check which is the RAW" and "color" in row.now.styleSheet()
+    J.choose_raw(job, job.raw)                                    # you picked on the queue's row
+    page._poll()                                                  # noqa: SLF001
+    assert not D.waits_for_pick(it) and row.pill.word() != "Check which is the RAW"
+    assert "In the Match cuts queue" in page.now_text(it)

@@ -308,3 +308,24 @@ def test_a_project_without_a_competitor_is_just_cuts(tmp_path):
     q = flow.new_project("", "https://youtu.be/AbCdEf12345", root=tmp_path, competitor_file=f)
     assert flow.roles_of(q) == ("competitor", "raw")
     assert os.path.samefile(q.data["competitor"]["source_file"], f)
+
+
+def test_a_tweet_style_headline_loses_the_account_and_the_models_stutter():
+    # the e2e run (day 12, youtube.com/shorts/f18B0Accoig, Qwen3-VL-2B for real): the account's name and @handle
+    # copied as line 1, and the small model stuttered ("Tobeyey", "had had", "one one", "time time")
+    ans = TT.tidy_headline("History Exposed\n@HistoryyExposed\nIn 1996, Tobeyey Maguire had had exactly one one "
+                           "second of screen time time in a Tropicana Twister commercial.")
+    assert ans == "In 1996, Tobeyey Maguire had exactly one second of screen time in a Tropicana Twister commercial."
+    assert TT.tidy_headline("History Exposed @HistoryyExposed In 1996, he had") == "In 1996, he had"
+    assert TT.tidy_headline("Watch this, @someone did it 😭") == "Watch this, did it 😭"      # a text: kept
+    ocr = ["In 1996, Tobey Maguire had", "exactly one second of", "screen time in a Tropicana", "Twister commercial."]
+    assert TT.settle(ans, ocr) == ("In 1996, Tobey Maguire had exactly one second of screen time in a Tropicana "
+                                   "Twister commercial.")                 # the OCR's words win when they are close
+    assert TT.settle("He did NOT just say that 😭", ["He did NOT just", "say thatt"]) == \
+        "He did NOT just\nsay thatt 😭"                                    # the model's emoji kept
+    assert TT.settle("They stopped making comedy like this", ["They stopped making", "comedy like this"]) == \
+        "They stopped making\ncomedy like this"
+    assert TT.settle("Something else entirely", ["a caption", "the OCR read"]) == "Something else entirely"
+    assert TT.settle("", ["They stopped making", "comedy like this"]) == "They stopped making\ncomedy like this"
+    assert TT.settle("", ocr).startswith("In 1996, Tobey") and "\n" not in TT.settle("", ocr)
+    assert TT.settle("", []) == "" and TT.settle("Just this", None) == "Just this"

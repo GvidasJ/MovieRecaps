@@ -125,8 +125,9 @@ def tidy_headline(answer: str | None) -> str:
     t = re.sub(r"^(?:headline|text|answer)\s*:\s*", "", t, flags=re.I)
     if not t or re.fullmatch(r"(?i)none\.?|no headline\.?|n/?a", t):
         return ""
-    lines = [" ".join(x.split()) for x in t.splitlines()]
-    lines = [x.strip('"“”') for x in lines if x and not re.fullmatch(r"(?i)none\.?", x)]
+    t = _drop_account(t)
+    lines = [" ".join(_destutter(_HANDLE.sub(" ", x)).split()) for x in t.splitlines()]
+    lines = [x.strip('"“”') for x in lines if x and re.search(r"\w", x) and not re.fullmatch(r"(?i)none\.?", x)]
     # the model going on after the headline ("... like this\nThis", the one real run on finished\video3): a last line
     # that repeats the start of the text before it, or is one word of it, is dropped
     while len(lines) >= 2 and _fold(lines[-1]):
@@ -145,6 +146,54 @@ def tidy_headline(answer: str | None) -> str:
 
 def _fold(text: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", (text or "").lower()).split())
+
+
+def _drop_account(text: str) -> str:
+    """A tweet-style headline ("History Exposed ✔ / @HistoryyExposed / In 1996, ..."): the account's name and @handle
+    above the text are not the headline -- dropped (e2e run, day 12: the model copied them as line 1)."""
+    m = _HANDLE.search(text)
+    if not m:
+        return text
+    before = text[:m.start()].strip()
+    if not before or (len(before.split()) <= 4 and not re.search(r"[.!?,:;]", before) and "\n" not in before):
+        return text[m.end():].strip()
+    return text
+
+
+def _destutter(line: str) -> str:
+    """The small model's stutter ("had had exactly one one second of screen time time"): a word said twice in a row
+    once."""
+    out: list[str] = []
+    for w in line.split(" "):
+        if out and _fold(w) and _fold(w) == _fold(out[-1]) and not re.search(r"\d", w):
+            out[-1] = w if len(w) > len(out[-1]) else out[-1]           # "time time." keeps the stop
+            continue
+        out.append(w)
+    return " ".join(out)
+
+
+def _emoji_of(text: str) -> str:
+    return "".join(ch for ch in text if _is_emoji(ch))
+
+
+def settle(model_text: str, ocr_lines: Sequence[str] | None) -> str:
+    """The headline on the video from both readers: the vision model's answer and the title check's OCR lines.
+    When both read the same text (close, not equal: the 2B model stutters -- "Tobeyey Maguire had had") the OCR's
+    words win and the model's emoji are kept at the end; then broken where the video breaks it (``with_break``).
+    The model alone / the OCR alone when the other read nothing; the model's text as it is when they differ (a
+    different text, e.g. the OCR read a caption)."""
+    import difflib
+    ocr = tidy_headline(" ".join(" ".join(x.split()) for x in (ocr_lines or []) if x and x.strip()))
+    if not model_text:
+        return tidy_headline("\n".join(ocr_lines)) if ocr_lines and len(ocr_lines) == 2 else ocr
+    if not ocr:
+        return model_text
+    a, b = _fold(model_text), _fold(ocr)
+    if a != b and difflib.SequenceMatcher(None, a, b).ratio() >= 0.8:
+        emo = _emoji_of(model_text)
+        fixed = ocr if not emo or emo in ocr else f"{ocr} {emo}"
+        return with_break(fixed, ocr_lines) if "\n" not in fixed else fixed
+    return with_break(model_text, ocr_lines)
 
 
 def with_break(text: str, lines: Sequence[str] | None) -> str:
