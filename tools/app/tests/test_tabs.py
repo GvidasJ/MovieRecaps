@@ -64,16 +64,16 @@ def test_download_says_what_is_wrong_with_a_link_and_queues_a_right_one(qapp, mo
     from mr_app.tools import download_tool as D
     started = []
 
-    class FakeThread:
-        def __init__(self, item):
-            self.item = item
+    class FakeThread:                       # day 12: one stage (or several) of a video at a time
+        def __init__(self, item, stages=("download",), default_template=False):
+            self.item, self.stages, self.stage = item, stages, stages[0]
             self.named = SimpleNamespace(connect=lambda f: None)
             self.progress = SimpleNamespace(connect=lambda f: None)
             self.done = SimpleNamespace(connect=lambda f: None)
 
         def start(self):
             started.append(self.item)
-    monkeypatch.setattr(D, "PrepareThread", FakeThread)
+    monkeypatch.setattr(D, "StageThread", FakeThread)
     page = D.DownloadPage(_Ctx())
     page.comp.setText("youtube.com/shorts/short")                         # an id must have 11 characters
     page.raw.setText("https://www.youtube.com/watch?v=ABCDEFGHIJK")
@@ -82,14 +82,14 @@ def test_download_says_what_is_wrong_with_a_link_and_queues_a_right_one(qapp, mo
     page.comp.setText("https://www.youtube.com/shorts/abcdefghijk")
     page.raw.setText("")
     page.add()
-    assert "RAW: paste the RAW's link or drop its file" in page.msg.text()
+    assert "paste the RAW first" in page.msg.text()
     raw = _video(tmp_path / "raw.mp4", 2)
     page._set_raw_file(raw)                                                # noqa: SLF001 - as a drop does
-    page.ch.set("LouLaughs") if "LouLaughs" in page.ch._b else None       # noqa: SLF001
-    page.title.setText("The fact that dad became the tour guide is hilarious 😭")
+    page.ch.set("LouLaughs")
+    page.head.setPlainText("The fact that dad became the tour guide is hilarious 😭")
     page.add()
     assert len(page.items) == 1 and started and started[0].raw_file == raw and not started[0].raw_url
-    assert started[0].title.endswith("😭") and page.comp.text() == "" and page.title.text() == ""
+    assert started[0].title.endswith("😭") and page.comp.text() == "" and page.head.text() == ""
 
 
 def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing(qapp, tmp_path, monkeypatch):
@@ -108,18 +108,15 @@ def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing
     it = D.Item("https://youtu.be/abcdefghijk", channel="LouLaughs", title="My title", project=p.folder,
                 name=p.folder.name, state=D.READY, headline="Their headline")
     page.items.append(it)
-    page.rows[it.id] = D.ItemRow(page, it)
+    page.rows[it.id] = D.VideoRow(page, it)
     page.send_to_edit(it, start=True)
     job = mc.jobs[-1]
     assert it.state == D.SENT and starts == [False]                        # started by itself, no question asked
     assert job.project == p.folder and job.out_dir == p.folder and job.run_name == "edit"
     assert (job.channel, job.title, job.headline) == ("LouLaughs", "My title", "Their headline")
     assert P.load(p.folder).data["title"] == "My title"
-    it2 = D.Item("https://youtu.be/abcdefghijk", channel="LouLaughs", title="", project=p.folder, state=D.READY)
-    page.items.append(it2)
-    page.rows[it2.id] = D.ItemRow(page, it2)
-    page.send_to_edit(it2, start=True)
-    assert starts == [False] and "type the title" in it2.message           # a channel without a title waits
+    assert it.steps["edit"].state == D.S_RUN and it.job is job              # (day 12: a title-less one never gets
+    #                                                                          here -- the row asks for its headline)
 
 
 def test_convert_queues_the_videos_of_a_drop_and_shows_the_result(qapp, tmp_path, monkeypatch):
