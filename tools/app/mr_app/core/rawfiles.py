@@ -338,6 +338,9 @@ def remove(items: Iterable[TwoFiles], say: Say | None = None) -> tuple[int, list
         if again:
             errors.append(f"kept {it.where}'s files: " + "; ".join(again))
             continue
+        if _busy(Path(it.project)):          # someone started work on it after you said yes
+            errors.append(f"kept {it.where}'s files: someone is working on this project now")
+            continue
         for f in it.old:
             why = _safe_to_delete(f, it)
             if why:

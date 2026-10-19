@@ -144,6 +144,20 @@ def test_remove_checks_again_first(tmp_path, media_files):
     assert freed == 0 and errors and "your project" in errors[0] and r.old.is_file()
 
 
+def test_remove_keeps_the_files_when_work_on_the_project_started_after_the_yes(tmp_path, media_files):
+    from mr_app.core import locks
+    r = old_run(tmp_path, media_files)
+    items = RF.plan([r.folder])
+    assert items[0].ok
+    lock = locks.WorkLock(r.folder, "edit")                   # an edit started on it meanwhile
+    lock.acquire()
+    try:
+        freed, errors = RF.remove(items)
+    finally:
+        lock.release()
+    assert freed == 0 and errors and "working on this project" in errors[0] and r.old.is_file()
+
+
 def test_a_stereo_raw_run_or_an_unfinished_one_is_not_offered(tmp_path, media_files):
     r = old_run(tmp_path, media_files)
     r.one.unlink()                                             # a stereo RAW: raw_ae / raw.mp4 is its one file
