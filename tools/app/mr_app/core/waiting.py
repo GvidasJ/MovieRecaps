@@ -143,8 +143,13 @@ def add(folder: str | os.PathLike, e: Entry) -> str:
 
 
 def _same_project(a: Entry, b: Entry) -> bool:
-    return H._same_path(a.project, b.project) or (Path(a.project).name.lower() == Path(b.project).name.lower()
-                                                   and bool(Path(a.project).name))
+    """The same project: the same path (relative to the hub), or -- moved meanwhile (published to the shared
+    folder) -- the same folder name made on the same computer (two computers can give the same fallback name)."""
+    if H._same_path(a.project, b.project):                                         # noqa: SLF001
+        return True
+    name = Path(a.project).name.lower()
+    return bool(name) and name == Path(b.project).name.lower() and bool(a.computer) and \
+        a.computer.strip().lower() == (b.computer or "").strip().lower()
 
 
 def set_state(folder: str | os.PathLike, eid: str, state: str) -> str:

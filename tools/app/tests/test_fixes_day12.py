@@ -396,3 +396,29 @@ def test_exit_3_with_its_result_line_or_verify_json_is_finished_else_a_stop(tmp_
     assert res["label"] == R.PASS and res["stop"] == ""
     assert R.label_of(3, "", {"pass": True}, finished=False) == R.FAIL
     assert R.label_of(3, "", {"pass": True, "notes": []}) == R.PASS          # by the code alone, as before
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 8. waiting cards: the same project by its path, or its name on the same computer -- never another computer's
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_two_computers_projects_with_the_same_name_keep_their_own_waiting_cards(tmp_path):
+    from mr_app.core import waiting as WA
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    name = "project_2026-10-19"                                 # the same fallback name on both computers
+    WA.add(hub, WA.Entry(name=name, project=str(tmp_path / "pc" / name), run=str(tmp_path / "pc" / name / "edit"),
+                         result="PASS", computer="PC"))
+    WA.add(hub, WA.Entry(name=name, project=str(tmp_path / "laptop" / name),
+                         run=str(tmp_path / "laptop" / name / "edit"), result="PASS", computer="LAPTOP"))
+    assert sorted(e.computer for e in WA.read(hub)) == ["LAPTOP", "PC"]
+    # the PC's project moved to the hub (published) and edited again: it replaces the PC's own card only
+    WA.add(hub, WA.Entry(name=name, project=str(hub / name), run=str(hub / name / "edit-2"), result="PASS",
+                         computer="PC"))
+    items = WA.read(hub)
+    assert len(items) == 2 and sorted(e.computer for e in items) == ["LAPTOP", "PC"]
+    assert any(e.computer == "PC" and e.run.replace("\\", "/").endswith("edit-2") for e in items)
+    # the same path from either computer is the same project
+    WA.add(hub, WA.Entry(name=name, project=str(tmp_path / "laptop" / name),
+                         run=str(tmp_path / "laptop" / name / "edit-3"), result="PASS", computer="PC"))
+    assert len(WA.read(hub)) == 2
