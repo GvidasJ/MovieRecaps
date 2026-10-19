@@ -112,7 +112,7 @@ restart. `TP.shutdown()` runs by itself on `aboutToQuit`.
 
 ## Tests
 
-`tools/app/tests/test_torrent.py`, 27 tests:
+`tools/app/tests/test_torrent.py`, 26 tests:
 - a fake aria2c covers:
   - the file list and the biggest video
   - single-file torrents
