@@ -235,6 +235,25 @@ def crash_words(code: int | None) -> str:
     return CRASH_CODES.get(code, "") if code is not None else ""
 
 
+_DUMP_LINE = re.compile(r"^(\s|$|Thread 0x|Current thread 0x|Extension modules:|Windows fatal exception|"
+                        r"<no Python frame>|Stack \(most recent call first\))")
+
+
+def _without_fatal_dump(lines: list[str]) -> list[str]:
+    """The lines without each "Fatal Python error: ..." line and the thread dump Python prints under it."""
+    out: list[str] = []
+    dump = False
+    for ln in lines:
+        if ln.startswith("Fatal Python error:"):
+            dump = True
+            continue
+        if dump and _DUMP_LINE.match(ln):
+            continue
+        dump = False
+        out.append(ln)
+    return out
+
+
 def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
     """What a stopped run said in plain words: its last message that is not a log line ("the competitor's scenes are
     not in this RAW: ...", "The inputs look wrong ..."), a crash's last line, else its last ERROR line -- not its
@@ -243,8 +262,8 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
     instead."""
     lines = [ln.rstrip() for ln in (stderr or "").splitlines()]
     fatal = next((ln.strip() for ln in reversed(lines) if ln.startswith("Fatal Python error:")), "")
-    if fatal:                                    # the thread dump under it is never the message
-        return fatal if len(fatal) <= limit else fatal[:limit - 3].rstrip() + "..."
+    if fatal:                                    # the thread dump under it is never the message (day 12 review 2:
+        lines = _without_fatal_dump(lines)       # nor does it hide a real stop message -- WRONG PAIR stays WRONG PAIR)
     block: list[str] = []                      # raw lines, the message's own, in order
     for ln in reversed(lines):
         if _NOISE_LINE.match(ln):                # a warning: it and the indented source line Python prints under it
@@ -262,10 +281,12 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
     crash = crash_words(code)
     if block:
         text = block[-1] if block[0].startswith("Traceback") else " ".join(block)
+    elif fatal:                                  # nothing better: the crash's own line
+        text = fatal
     else:
         errs = [_LOG_LINE.sub("", ln) for ln in lines if _LOG_LINE.match(ln) and " ERROR " in ln[:30]]
         text = errs[-1].strip() if errs else (crash or (ABORT_WORDS if code == 3 else "see the log"))
-    if crash and text != crash and not block:
+    if crash and text != crash and not block and not (fatal and text == fatal):
         text = f"{crash}; its last error: {text}"
     text = text.replace("match_cuts: ", "", 1)
     return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."

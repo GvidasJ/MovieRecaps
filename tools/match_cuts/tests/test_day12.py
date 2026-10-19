@@ -187,6 +187,22 @@ def test_only_the_raw_shot_that_cuts_the_speaker_off_moves():
     assert "moved onto the person speaking" in clip.person_note
 
 
+def test_a_fatal_error_line_never_hides_the_real_stop_message():
+    """Day 12 review 2: a "Fatal Python error" at the end (a library aborting while the run closes) does not win over
+    the real stop message; it is the message only when nothing better is there (its thread dump never is)."""
+    dump = ("Fatal Python error: Aborted\n\nThread 0x000012ac (most recent call first):\n"
+            "  File \"C:\\x\\threading.py\", line 320 in wait\n\nCurrent thread 0x00001f00 (most recent call first):\n"
+            "  File \"C:\\x\\pipeline.py\", line 99 in run\n\nExtension modules: numpy.core._multiarray_umath (total: 3)\n")
+    wrong = ("12:00:01 INFO == S1 probe\n12:00:09 ERROR match_cuts STOPPED: wrong pair\n"
+             "match_cuts: WRONG PAIR: the competitor's pictures are not in this RAW (0 of 16 frames found)\n")
+    assert batch.stop_message(wrong + dump, code=3) == \
+        "WRONG PAIR: the competitor's pictures are not in this RAW (0 of 16 frames found)"
+    inputs = "match_cuts: The inputs look wrong, so I stopped before converting anything:\n"
+    assert batch.stop_message(dump + inputs, code=2).startswith("The inputs look wrong")
+    assert batch.stop_message("12:00:01 INFO == S1 probe\n" + dump, code=3) == "Fatal Python error: Aborted"
+    assert batch.stop_message(dump, code=3221226505) == "Fatal Python error: Aborted"
+
+
 def test_allow_short_raw_skips_only_the_almost_as_long_check(tmp_path):
     """Day 12 review 2: the app's New video form chose the RAW of a 30 s RAW / 28 s Short: --allow-short-raw skips
     only "almost as long as the RAW" (not the other input checks, not the WRONG PAIR check like --force-inputs)."""
