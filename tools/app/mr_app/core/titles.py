@@ -278,6 +278,30 @@ def save(project: Any, post: str | None, headline: str | None) -> None:
         pass
 
 
+def _keep_name(project: Any) -> str:
+    """Why the project's folder must keep its name ('' = it may be renamed): it was published to the shared folder,
+    it has an edit (a run folder, the queue's job), or someone holds its work lock (an edit, a publish ...)."""
+    folder = Path(project.folder)
+    data = getattr(project, "data", None) or {}
+    if data.get("published"):
+        return "the project is already in the shared folder"
+    edit = (data.get("steps") or {}).get("edit") or {}
+    if isinstance(edit, dict) and (edit.get("state") not in (None, "", "waiting") or edit.get("started")):
+        return "the project has an edit"
+    try:
+        if any(d.is_dir() and (d.name == "edit" or d.name.startswith("edit-")) for d in folder.iterdir()):
+            return "the project has an edit"
+    except OSError:
+        return "the project's folder cannot be read"
+    try:
+        from . import locks
+        if locks.holder(folder) is not None:
+            return "someone is working on the project"
+    except Exception:  # noqa: BLE001 - cannot tell: leave the name alone
+        return "the project's lock cannot be read"
+    return ""
+
+
 def rename_folder(project: Any, headline: str | None, post: str | None) -> tuple[Any, str]:
     """The project folder named from the headline / post title (date kept: '2026-10-19_<name>', -2 ... when taken),
     when its name came from a useless title or a link id. Returns (the project -- reloaded when moved, what was
@@ -287,6 +311,9 @@ def rename_folder(project: Any, headline: str | None, post: str | None) -> tuple
     want = name_from(headline, post)
     if not want:
         return project, "no title could be read from the post or the video -- the folder keeps its name"
+    why = _keep_name(project)
+    if why:
+        return project, f"{why} -- the folder keeps its name"
     day = folder.name.split("_", 1)[0] if re.match(r"^\d{4}-\d{2}-\d{2}_", folder.name) else ""
     base = f"{day}_{want}" if day else want
     if folder.name == base or folder.name.startswith(base + "-"):

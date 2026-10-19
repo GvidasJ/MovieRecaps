@@ -422,3 +422,41 @@ def test_two_computers_projects_with_the_same_name_keep_their_own_waiting_cards(
     WA.add(hub, WA.Entry(name=name, project=str(tmp_path / "laptop" / name),
                          run=str(tmp_path / "laptop" / name / "edit-3"), result="PASS", computer="PC"))
     assert len(WA.read(hub)) == 2
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 9. a project folder is never renamed once published, with an edit, or while its work lock is held
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_rename_folder_leaves_published_edited_and_locked_projects_alone(tmp_path):
+    from mr_app.core import locks
+    from mr_app.core import projects as P
+    from mr_app.core import titles as TT
+    url = "https://www.instagram.com/reel/C0abcdEFgh/"
+    p = P.create(tmp_path / "a", competitor_url=url)
+    p2, note = TT.rename_folder(p, "He finally told her", "")
+    assert p2.folder != p.folder and "named after" in note                    # a fresh project: renamed, as before
+
+    p = P.create(tmp_path / "b", competitor_url=url)
+    p.update(published={"to": "D:/hub", "when": "now"})
+    p2, note = TT.rename_folder(p, "He finally told her", "")
+    assert p2.folder == p.folder and p.folder.is_dir() and "shared folder" in note
+
+    p = P.create(tmp_path / "c", competitor_url=url)
+    (p.folder / "edit").mkdir()
+    p2, note = TT.rename_folder(p, "He finally told her", "")
+    assert p2.folder == p.folder and "has an edit" in note
+
+    p = P.create(tmp_path / "d", competitor_url=url)
+    p.set_step("edit", P.RUNNING)                                              # the queue's job started
+    p2, note = TT.rename_folder(p, "He finally told her", "")
+    assert p2.folder == p.folder and "has an edit" in note
+
+    p = P.create(tmp_path / "e", competitor_url=url)
+    lock = locks.WorkLock(p.folder, "edit")
+    lock.acquire()
+    try:
+        p2, note = TT.rename_folder(p, "He finally told her", "")
+        assert p2.folder == p.folder and "working on the project" in note
+    finally:
+        lock.release()
