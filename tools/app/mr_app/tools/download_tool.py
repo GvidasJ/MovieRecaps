@@ -410,17 +410,46 @@ class DetLabel(QLabel):
 
     def __init__(self, text: str = "EMPTY"):
         super().__init__(text)
-        self.setFont(W.mono(9.5, 600, 1.0))
+        self.setFont(W.mono(10, 600, 10))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumWidth(84)
+        # the box is painted (its colours fade 0.3 s to a new kind, like the reference's .det transition); the
+        # stylesheet only keeps the padding and the 1 px border's room, so the size never changes
+        self.setStyleSheet("border: 1px solid transparent; background: transparent; padding: 3px 8px;")
         self.kind = None
+        self._from = self._to = DET_COLOURS[""]
+        self.fade = M.Fader(self, self._faded)
         self.set_kind("")
+        self.fade.set(1.0)
+
+    def colours(self) -> tuple[QColor, QColor, QColor]:
+        """(text, border, background) now -- part-way while it fades."""
+        t = self.fade.value
+        return tuple(M.mix(QColor(a), QColor(b), t) for a, b in zip(self._from, self._to))  # type: ignore[return-value]
 
     def set_kind(self, kind: str, text: str | None = None) -> None:
         self.kind = kind
-        fg, line, bg = DET_COLOURS.get(kind, DET_COLOURS[""])
+        new = DET_COLOURS.get(kind, DET_COLOURS[""])
         self.setText(text if text is not None else NV.LABELS.get(kind, "EMPTY"))
-        self.setStyleSheet(f"color: {fg}; border: 1px solid {line}; background-color: {bg}; padding: 3px 8px;")
+        if new != self._to:
+            self._from = tuple(c.name(QColor.NameFormat.HexArgb) for c in self.colours())
+            self._to = new
+            self.fade.set(0.0)
+            self.fade.to(1.0)
+
+    def _faded(self) -> None:
+        fg = self.colours()[0]
+        if self.styleSheet().find(fg.name(QColor.NameFormat.HexArgb)) < 0:
+            self.setStyleSheet(f"color: {fg.name(QColor.NameFormat.HexArgb)}; border: 1px solid transparent; "
+                               "background: transparent; padding: 3px 8px;")
+        self.update()
+
+    def paintEvent(self, e) -> None:                      # noqa: N802
+        _fg, line, bg = self.colours()
+        p = QPainter(self)
+        W.box(p, QRectF(self.rect()), bg, line)
+        p.end()
+        super().paintEvent(e)
 
 
 class HeadlineBox(QPlainTextEdit):
@@ -559,7 +588,7 @@ class StepCell(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
         self.name = QLabel(label.upper())
-        self.name.setFont(W.mono(9.5, 600, 1.0))
+        self.name.setFont(W.mono(9.5, 600, 10))
         lay.addWidget(self.name)
         self.bar = W.GlideBar(4)
         lay.addWidget(self.bar)
@@ -742,8 +771,15 @@ class VideoRow(W.Card):
         self.page.set_upload_title(self.item, text)
 
     def _folder(self) -> None:
-        if self.item.project is not None and Path(self.item.project).exists():
-            os.startfile(str(self.item.project))                  # noqa: S606
+        """Opens the project folder -- in the background (it may be on the shared folder over the network)."""
+        folder = self.item.project
+        if folder is None:
+            return
+
+        def work() -> None:
+            if Path(folder).exists():
+                os.startfile(str(folder))                         # noqa: S606
+        off_thread(work, None, lambda e: self.page.toast(f"The folder could not be opened: {e}", "fail"))
 
     # -- what it shows --
     def refresh(self) -> None:
@@ -1076,7 +1112,7 @@ class DownloadPage(QWidget):
         mode = QVBoxLayout()
         mode.setSpacing(2)
         k = QLabel("WILL MAKE")
-        k.setFont(W.mono(9.5, 600, 1.0))
+        k.setFont(W.mono(9.5, 600, 10))
         k.setStyleSheet(f"color: {theme.DIM};")
         mode.addWidget(k)
         self.will = QLabel("—")
@@ -1116,7 +1152,7 @@ class DownloadPage(QWidget):
         row = QHBoxLayout()
         row.setSpacing(10)
         k = QLabel(name.upper() if "(" not in name else name.split("(")[0].upper() + "(" + name.split("(", 1)[1])
-        k.setFont(W.mono(9.5, 600, 1.0))
+        k.setFont(W.mono(9.5, 600, 10))
         k.setStyleSheet(f"color: {theme.MUTED};")
         k.setFixedWidth(150)
         k.setWordWrap(True)
@@ -2023,24 +2059,48 @@ class DownloadPage(QWidget):
         self._order()
         self._counts()
 
-    def xml_of(self, it: Item) -> Path | None:
+    def _xml_path(self, it: Item) -> Path | None:
         rd = it.result.get("run_dir") if it.result else None
         if not rd and it.job is not None and getattr(it.job, "run_dir", None):
             rd = it.job.run_dir
-        if rd and (Path(rd) / "1_edit.xml").is_file():
-            return Path(rd) / "1_edit.xml"
-        return None
+        return Path(rd) / "1_edit.xml" if rd else None
+
+    def xml_of(self, it: Item) -> Path | None:
+        """The finished edit's 1_edit.xml, when it is there. Never a disk look on the window's thread (the row's
+        refresh asks often and the run folder may be on the shared folder over the network): the first ask looks in
+        the background and refreshes the row; the answer is remembered."""
+        f = self._xml_path(it)
+        if f is None:
+            return None
+        seen = getattr(self, "_xml_seen", None)
+        if seen is None:
+            seen = self._xml_seen = {}
+        key = str(f)
+        if key in seen:
+            return f if seen[key] else None
+        seen[key] = False                                   # asked once; "there" when the look says so
+
+        def got(there) -> None:
+            seen[key] = bool(there)
+            if there:
+                self._refresh(it)
+        off_thread(f.is_file, got, lambda _e: seen.pop(key, None))
+        return f if seen.get(key) else None                 # (a test's off_thread answers at once)
 
     def open_premiere(self, it: Item) -> None:
-        xml = self.xml_of(it)
+        xml = self._xml_path(it)
         if xml is None:
             self.toast("The edit's 1_edit.xml is not there", "fail")
             return
-        from ..ui import background as BG
         from .match_cuts_tool import open_in_premiere
+
+        def work():
+            if not xml.is_file():
+                return "The edit's 1_edit.xml is not there"
+            return open_in_premiere(xml)
         self.toast("Opening in Premiere…")
-        BG.call(lambda: open_in_premiere(xml), lambda r: self.toast(str(r)) if r else None,
-                lambda e: self.toast(f"Premiere: {e}", "fail"))
+        off_thread(work, lambda r: self.toast(str(r)) if r else None,
+                   lambda e: self.toast(f"Premiere: {e}", "fail"))
 
     # -- Automatic, turn off the PC --
     def _auto_toggled(self, on: bool) -> None:

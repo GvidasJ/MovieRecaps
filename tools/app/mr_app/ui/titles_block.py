@@ -28,7 +28,7 @@ NOTHING_VIDEO = "no headline readable on the video"
 
 def _key(text: str, width: int | None = 150) -> QLabel:
     k = QLabel(text.upper())
-    k.setFont(W.mono(9.5, 600, 1.0))
+    k.setFont(W.mono(9.5, 600, 10))
     k.setStyleSheet(f"color: {M.alpha(theme.CORAL, 0.9).name(QColor.NameFormat.HexArgb)};")
     if width:
         k.setFixedWidth(width)
@@ -114,7 +114,7 @@ class TitlesBlock(QWidget):
             if n:
                 v.addSpacing(4)
             k = _key(key, None)                            # the key on its own line (a card is ~120 px wide) ...
-            k.setFont(W.mono(8.5, 600, 0.5))
+            k.setFont(W.mono(8.5, 600, 5))
             k.setWordWrap(True)
             v.addWidget(k)
             text.setWordWrap(True)                         # ... the text under it ...
