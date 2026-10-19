@@ -114,8 +114,8 @@ def post_title(info: dict | None) -> str:
 # ---------------------------------------------------------------------------------------------------------------------
 
 PROMPT = ("These are frames from the first seconds of a short video. Copy the headline text that is written on the "
-          "video (the big caption, usually at the top), exactly as written, with its line break: answer with line 1, "
-          "a new line, then line 2 (one line if it has one line). Keep its emoji. Do not add anything else. If there "
+          "video (the big caption, usually at the top), exactly as written. Write each of its lines on its own line, "
+          "broken where the video breaks it. Keep its emoji. Write it once and do not add anything else. If there "
           "is no headline written on the video, answer NONE.")
 
 
@@ -127,10 +127,44 @@ def tidy_headline(answer: str | None) -> str:
         return ""
     lines = [" ".join(x.split()) for x in t.splitlines()]
     lines = [x.strip('"“”') for x in lines if x and not re.fullmatch(r"(?i)none\.?", x)]
+    # the model going on after the headline ("... like this\nThis", the one real run on finished\video3): a last line
+    # that repeats the start of the text before it, or is one word of it, is dropped
+    while len(lines) >= 2 and _fold(lines[-1]):
+        before = " ".join(_fold(x) for x in lines[:-1])
+        last = _fold(lines[-1])
+        if before.startswith(last) or (len(last.split()) == 1 and last in before.split() and
+                                       len(before.split()) >= 3):
+            lines.pop()
+        else:
+            break
     if len(lines) > 2:
         lines = [lines[0], " ".join(lines[1:])]
     out = "\n".join(_limit_emoji(x, keep=4) for x in lines)
     return out if re.search(r"[^\W\d_]", out) else ""
+
+
+def _fold(text: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", (text or "").lower()).split())
+
+
+def with_break(text: str, lines: Sequence[str] | None) -> str:
+    """The model's headline on one line + the OCR's lines of it (title_check: where the video breaks it) -> the same
+    text broken where the video breaks it (the emoji kept where the model put them). Unchanged when it has a break
+    already, when the OCR did not read two lines, or when their words do not match."""
+    if not text or "\n" in text or not lines or len(lines) != 2:
+        return text
+    n = len(_fold(lines[0]).split())
+    toks = text.split(" ")
+    seen = 0
+    for i, tok in enumerate(toks):
+        if _fold(tok):
+            seen += 1
+        if seen == n:
+            head, tail = " ".join(toks[:i + 1]), " ".join(toks[i + 1:])
+            if tail.strip() and _fold(head) == _fold(lines[0]):
+                return head + "\n" + tail
+            return text
+    return text
 
 
 def frames(video: str | Path, times_s: Sequence[float] = FRAME_TIMES, width: int = 720) -> list:

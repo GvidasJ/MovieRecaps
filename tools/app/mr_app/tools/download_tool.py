@@ -228,20 +228,22 @@ class StageThread(QThread):
                 tc = {"competitor_headline": "", "message": f"the headline could not be read ({e})"}
             out["headline"], out["check"] = tc.get("competitor_headline"), tc.get("message", "")
             if comp is not None and comp.is_file():
-                self._titles(p, comp, out)
+                self._titles(p, comp, out, list(tc.get("lines") or []))
         conv = self._project().data.get("steps", {}).get("convert") or {}
         for role in ROLE_NAMES:
             st = conv.get(role) or {}
             if isinstance(st, dict) and st:
                 self._say(role, 1.0, flow.convert_text(st))
 
-    def _titles(self, p, comp: Path, out: dict) -> None:
-        """Section 7: the headline written on the competitor's video (the vision model, its own process), saved with
-        the post's title; the folder named from them when its name says nothing."""
+    def _titles(self, p, comp: Path, out: dict, ocr_lines: list | None = None) -> None:
+        """Section 7: the headline written on the competitor's video (the vision model, its own process; broken
+        where the video breaks it -- the title check's OCR lines say where; the OCR's lines when the model reads
+        nothing), saved with the post's title; the folder named from them when its name says nothing."""
         from ..core import titles as TT
         it = self.item
         self._say("competitor", 1.0, "reading the headline on the video ...")
         head = TT.read_on_video(comp)
+        head = TT.with_break(head, ocr_lines) if head else TT.tidy_headline("\n".join(ocr_lines or []))
         post = it.post_title if it.post_title is not None else (p.data.get("post_title") or "")
         out["video_headline"], out["post_title"] = head, post
         try:
@@ -399,8 +401,10 @@ class HeadlineBox(QPlainTextEdit):
         self.setPlaceholderText(placeholder)
         self.setTabChangesFocus(True)
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         fm = self.fontMetrics()
-        self.setFixedHeight(fm.lineSpacing() * 2 + 18)
+        self.setFixedHeight(fm.lineSpacing() * 2 + 22)
         self.textChanged.connect(lambda: self.changed.emit(self.text()))
 
     def keyPressEvent(self, e) -> None:                    # noqa: N802
@@ -999,8 +1003,7 @@ class DownloadPage(QWidget):
         self.yt = QLineEdit()
         self.yt.setPlaceholderText("the title you'll upload with")
         form.lay.addLayout(self._field("YouTube title (optional)", self.yt, []))
-        self.drop = W.DropZone("Drop a video file or a .torrent here", ["the first goes into RAW, the next into "
-                                                                         "Competitor"], big=False)
+        self.drop = W.DropZone("Drop a video file or a .torrent here", ["RAW first, then the competitor"], big=False)
         self.drop.dropped.connect(self._dropped)
         form.lay.addWidget(self.drop)
         bot = QHBoxLayout()

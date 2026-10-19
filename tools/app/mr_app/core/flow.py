@@ -205,11 +205,14 @@ def title_check_step(p: P.Project, title: str | None = None, progress: Progress 
         why = "" if rd is not None else T.last_reason()
         sure = bool(getattr(rd, "sure", True)) if rd is not None else True
         where = getattr(rd, "where", "") if rd is not None else ""
+        lines = list(getattr(rd, "lines", None) or []) if rd is not None else []
     else:
         why, sure, where = st.get("why_none", ""), st.get("sure", True), st.get("where", "")
+        lines = list(st.get("lines") or [])
     mine = title if title is not None else (p.data.get("title") or "")
     chk = T.check(mine, headline)
-    res = {"competitor_headline": headline, "why_none": why, "sure": sure, "where": where, "title": mine,
+    res = {"competitor_headline": headline, "lines": lines, "why_none": why, "sure": sure, "where": where,
+           "title": mine,
            "share": round(chk.share, 3), "percent": chk.percent, "warn": chk.warn, "common": chk.common,
            "message": chk.message}
     p.set_step("title_check", P.DONE, **res)

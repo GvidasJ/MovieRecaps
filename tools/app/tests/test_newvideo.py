@@ -142,12 +142,24 @@ def test_the_headline_on_the_video_keeps_its_line_break(tmp_path, monkeypatch):
     assert TT.read_on_video(tmp_path / "c.mp4") == ""                # a help, never a stop
 
 
+def test_the_models_one_line_is_broken_where_the_video_breaks_it():
+    # the one real run (finished\video3, Qwen3-VL-2B): it wrote the headline on one line and started over
+    ans = TT.tidy_headline("They stopped making comedy like this\nThis")
+    assert ans == "They stopped making comedy like this"
+    ocr = ["They stopped making", "comedy like this"]                 # title_check's lines (no emoji)
+    assert TT.with_break(ans, ocr) == "They stopped making\ncomedy like this"
+    assert TT.with_break("When she finally got 😭 the part 💀", ["When she finally got", "the part"]) == \
+        "When she finally got\n😭 the part 💀"
+    assert TT.with_break("one two three", ["other words", "here"]) == "one two three"     # words differ: as it is
+    assert TT.with_break("a\nb", ocr) == "a\nb"
+
+
 def test_the_child_reader_answers_one_json_line_with_a_fake_model(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(TT, "frames", lambda video: [object(), object()])
 
     class Fake:
         def ask(self, images, prompt):
-            assert "line break" in prompt and len(images) == 2
+            assert "breaks it" in prompt and len(images) == 2
             return "Headline: line one\nline two 😭"
     assert TT.read_in_this_process(tmp_path / "c.mp4", Fake()) == "line one\nline two 😭"
 
