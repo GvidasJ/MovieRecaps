@@ -718,10 +718,13 @@ class LearnPage(QWidget):
         BG.call(work, done, lambda e: QMessageBox.warning(self, "Could not build it", e))
 
 
-def after_edit(ctx, job, res: dict) -> None:
-    """The Match cuts queue's one hook (day 12), called once a job's result word is decided: a FAIL or an "OK with a
-    note" goes into problems_queue.md (wrong input -- WRONG PAIR, the input checks -- does not), a PASS or an OK with
-    a note waits for your fix in the Learn tab. All in the background; the Learn tab is refreshed after."""
+def after_edit(ctx, job, res: dict, waiting_card: bool = True) -> None:
+    """The hook every finished edit calls (day 12), once its result word is decided -- the Match cuts queue's
+    ``_done`` (every full edit, the ones sent from Download / New video too: they run in the same queue) and the
+    Download page's Just cuts: a FAIL or an "OK with a note" goes into problems_queue.md (wrong input -- WRONG PAIR,
+    the input checks -- does not), a PASS or an OK with a note waits for your fix in the Learn tab
+    (``waiting_card=False`` for Just cuts: no competitor, nothing to learn). All in the background; the Learn tab is
+    refreshed after."""
     from types import SimpleNamespace
     try:
         fn = getattr(ctx, "hub_folder", None)
@@ -737,7 +740,8 @@ def after_edit(ctx, job, res: dict) -> None:
 
     def work():
         from ..core import problems, waiting
-        return [e for e in (problems.record(hub, name, res), waiting.record(hub, snap, res)) if e]
+        return [e for e in (problems.record(hub, name, res),
+                            waiting.record(hub, snap, res) if waiting_card else "") if e]
 
     def done(_errs) -> None:
         page = (getattr(ctx, "pages", None) or {}).get("learn")

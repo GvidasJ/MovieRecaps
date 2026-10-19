@@ -1563,6 +1563,8 @@ class DownloadPage(QWidget):
                     self._step(it, self._display_step(it, stage), S_WAIT, None, "stopped")
                 else:
                     self._fail(it, stage, res.get("error") or "failed")
+                    if stage == "cuts" and isinstance(res.get("result"), dict):
+                        self._learn_hook(it, res["result"])     # a Just cuts run that failed: problems_queue.md
             self._refresh(it)
         self._order()
         self._counts()
@@ -1787,8 +1789,24 @@ class DownloadPage(QWidget):
             self._step(it, key, S_WAIT, None, "stopped")
         else:
             self._fail(it, key, (res.get("failures") or [lab])[0])
+        if it.kind == NV.JUST_CUTS and lab != "STOPPED":
+            self._learn_hook(it, res)
         self._refresh(it)
         self._order()
+
+    def _learn_hook(self, it: Item, res: dict) -> None:
+        """A Just cuts run ended (the full edits end in the Match cuts queue, which calls the same hook): a FAIL or an
+        OK with a note goes into problems_queue.md like every run; no "Waiting for your fix" card (no competitor:
+        nothing to learn)."""
+        try:
+            from types import SimpleNamespace
+
+            from .learn_tool import after_edit
+            snap = SimpleNamespace(project=it.project, name=it.name, run_dir=res.get("run_dir"), raw=it.raw_file,
+                                   competitor=None, channel=it.channel, title=it.title)
+            after_edit(self.ctx, snap, dict(res), waiting_card=False)
+        except Exception:  # noqa: BLE001 - the hook never breaks the row
+            pass
 
     # -- the row's buttons --
     def retry(self, it: Item) -> None:

@@ -431,3 +431,114 @@ def test_the_main_window_restores_torrents_at_start():
 
     from mr_app.ui import main_window as MW
     assert "restore_torrents" in inspect.getsource(MW.MainWindow)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# sections 8 + 2: every way an edit finishes reaches the Learn hook
+# ---------------------------------------------------------------------------------------------------------------------
+
+class QueueThread:
+    """JobThread without the tool (the queue's), ``finish(res)`` ends it."""
+    made: list = []
+
+    def __init__(self, job, converted, out_dir):
+        from PySide6.QtCore import QObject, Signal
+
+        class Sig(QObject):
+            progress = Signal(int, str, float)
+            done = Signal(int, dict)
+        self._sig = Sig()
+        self.progress, self.done = self._sig.progress, self._sig.done
+        self.job = job
+        QueueThread.made.append(self)
+
+    def start(self) -> None:
+        pass
+
+    def wait(self, _ms=0) -> bool:
+        return True
+
+    def stop(self) -> None:
+        self.done.emit(self.job.id, {"label": "STOPPED"})
+
+
+def test_an_edit_sent_from_new_video_finishing_in_the_queue_gets_its_waiting_card(tmp_path, monkeypatch):
+    import json
+
+    from mr_app.core import waiting
+    from mr_app.tools import download_tool as D
+    from mr_app.tools import match_cuts_tool as M
+    app()
+    Mo.set_enabled(False)
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    QueueThread.made = []
+    monkeypatch.setattr(M, "JobThread", QueueThread)
+    monkeypatch.setattr(M, "seconds_of", lambda p: 1300.0 if "raw" in Path(p).name else 50.0)
+    ctx = SimpleNamespace(set_strip_queue=lambda n, running: None, notify=lambda t, x: None,
+                          toast=lambda text, kind="ok": None, hub_folder=lambda: hub, pages={})
+    mc = M.MatchCutsPage(ctx)
+    dl = D.DownloadPage(ctx)
+    ctx.pages.update(match_cuts=mc, download=dl)
+    try:
+        p = project(tmp_path / "projects", channel="LouLaughs")
+        it = D.Item("https://www.tiktok.com/@a/video/1", raw_url="https://youtu.be/AbCdEf12345",
+                    channel="LouLaughs", title="my\nheadline")
+        it.project, it.name = p.folder, p.folder.name
+        dl.items.append(it)
+        dl.rows[it.id] = D.VideoRow(dl, it)
+        dl.send_to_edit(it, start=True)
+        assert it.state == D.SENT
+        assert pump_until(lambda: len(QueueThread.made) == 1)
+        th = QueueThread.made[0]
+        run = p.folder / "edit"
+        (run / "extras").mkdir(parents=True)
+        th.done.emit(th.job.id, {"label": "PASS", "run_dir": str(run), "seconds": 3.0})
+        assert pump_until(lambda: (hub / waiting.FILE).is_file())
+        items = json.loads((hub / waiting.FILE).read_text(encoding="utf-8"))["items"]
+        assert len(items) == 1 and items[0]["channel"] == "LouLaughs" and items[0]["state"] == "waiting"
+        dl._poll()                                                             # noqa: SLF001 - the row follows
+        assert it.state == D.DONE
+    finally:
+        dl.poll.stop()
+        for w in (mc, dl):
+            w.deleteLater()
+        Mo.set_enabled(True)
+        app().processEvents()
+
+
+def test_a_just_cuts_run_that_fails_goes_into_the_problems_list_but_never_waits_for_a_fix(tmp_path, monkeypatch):
+    from mr_app.core import problems, waiting
+    from mr_app.tools import download_tool as D
+    from mr_app.core import newvideo as NV
+    app()
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    ctx = SimpleNamespace(notify=lambda t, x: None, toast=lambda text, kind="ok": None, hub_folder=lambda: hub,
+                          pages={})
+    dl = D.DownloadPage(ctx)
+    try:
+        p = PJ.create(tmp_path / "projects", name="cutsonly")
+        run = p.folder / "cuts"
+        (run / "extras").mkdir(parents=True)
+        (run / "extras" / "just_cuts_console.log").write_text("ERROR the RAW could not be read\n", encoding="utf-8")
+        it = D.Item("", raw_url="https://youtu.be/AbCdEf12345", kind=NV.JUST_CUTS)
+        it.project, it.name = p.folder, p.folder.name
+        dl.items.append(it)
+        dl.rows[it.id] = D.VideoRow(dl, it)
+        dl._done(it.id, {"ok": False, "stage": "cuts", "error": "the RAW could not be read",           # noqa: SLF001
+                         "result": {"label": "FAIL", "failures": ["the RAW could not be read"], "run_dir": str(run)}})
+        assert it.state == D.FAILED
+        assert pump_until(lambda: (hub / problems.FILE).is_file())
+        assert "cutsonly" in (hub / problems.FILE).read_text(encoding="utf-8")
+        it2 = D.Item("", raw_url="https://youtu.be/AbCdEf12345", kind=NV.JUST_CUTS)
+        it2.project, it2.name = p.folder, p.folder.name
+        dl.items.append(it2)
+        dl.rows[it2.id] = D.VideoRow(dl, it2)
+        dl._finish(it2, {"label": "PASS", "cuts": 12, "run_dir": str(run)})                          # noqa: SLF001
+        pump_until(lambda: False, 0.5)
+        assert not (hub / waiting.FILE).is_file()                              # nothing to learn from Just cuts
+    finally:
+        dl.poll.stop()
+        dl.deleteLater()
+        app().processEvents()
