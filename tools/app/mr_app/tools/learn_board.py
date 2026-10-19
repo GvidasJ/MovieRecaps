@@ -55,6 +55,7 @@ class LCard(QWidget):
         lay.addWidget(self.title)
         self.chan_box = QHBoxLayout()
         self.chan_box.setContentsMargins(0, 0, 0, 0)
+        self.chan_box.addStretch(1)
         lay.addLayout(self.chan_box)
         self.chan: QWidget | None = None
         self.small = W.label("", wrap=True, select=True)
@@ -81,8 +82,8 @@ class LCard(QWidget):
             self.chan = None
         if channel:
             self.chan = W.channel_chip(channel, 11.5, theme.MUTED)
-            self.chan_box.addWidget(self.chan)
-            self.chan_box.addStretch(1)
+            self.chan.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.chan_box.insertWidget(0, self.chan, 0, Qt.AlignmentFlag.AlignLeft)
         self.small.setText("\n".join(x for x in lines if x))
         self.small.setStyleSheet(f"color: {theme.AMBER if warn else theme.DIM};")
         while self.btns.count():
@@ -179,6 +180,8 @@ class LCol(QWidget):
     def __init__(self, title: str, empty: str):
         super().__init__()
         self.setObjectName("Transparent")
+        # (the width follows the page: the columns never hold the window wider -- narrow, they stack instead)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)

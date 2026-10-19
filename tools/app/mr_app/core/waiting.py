@@ -276,7 +276,8 @@ def cards(folder: str | os.PathLike, repo: str | os.PathLike | None = None) -> l
             c.name = f"{m.group(1)}{int(m.group(2)) + k}" if m else first
     except Exception:  # noqa: BLE001 - a name is never worth an error
         pass
-    out.sort(key=lambda c: (c.entry.finished, out.index(c)), reverse=True)
+    order = {id(c): i for i, c in enumerate(out)}
+    out.sort(key=lambda c: (c.entry.finished, order[id(c)]), reverse=True)
     return out
 
 
