@@ -41,12 +41,16 @@ def read_result(run_dir: Path, code: int | None, stdout: str, stderr: str, stopp
     """{label, failures, notes, hand, doubtful, stop, run_dir, report, log} of a finished run (the batch's checks)."""
     from match_cuts import batch, run_folders
     extras = run_dir / run_folders.EXTRAS
-    stop = batch.stop_message(stderr) if code not in (0, 1) and not stopped else ""
     try:
         chk = batch.checks_of(run_dir if extras.is_dir() else None) if not stopped else None
     except Exception as e:  # noqa: BLE001 - a run that wrote nothing readable
         chk = {"pass": False, "failures": [f"the run's files could not be read ({type(e).__name__}: {e})"],
                "notes": []}
+    closed = batch.closed_after_finish(code, stdout, chk) if not stopped else ""
+    if closed:                       # the edit was made and checked, then the tool crashed while closing (day 12)
+        chk = dict(chk or {}, notes=[closed] + list((chk or {}).get("notes") or []))
+        code = 0 if not chk.get("failures") else 1
+    stop = batch.stop_message(stderr, code=code) if code not in (0, 1) and not stopped else ""
     failures = list((chk or {}).get("failures") or [])
     if code not in (0, 1) and not stopped:
         failures = [f"the run stopped (exit {code}): {stop}"] + [f for f in failures if "no verify.json" not in f]

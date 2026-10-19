@@ -149,6 +149,21 @@ def test_the_result_words():
     assert R.label_of(None, "", None, stopped=True) == R.STOPPED
 
 
+def test_a_crash_while_closing_keeps_the_finished_edit(tmp_path, monkeypatch):
+    """Day 12, darkhumor: the edit was made and checked (PASS printed), then exit 3 while closing -- not a FAIL with
+    OpenCV's warning as the reason."""
+    from match_cuts import batch
+    warn = "[ WARN:0@720.058] global net_impl_backend.cpp:345 cv::dnn::Net::Impl::setPreferableTarget Targets ...\n"
+    run = tmp_path / "edit"
+    (run / "extras").mkdir(parents=True)
+    monkeypatch.setattr(batch, "checks_of", lambda d: {"pass": True, "failures": [], "notes": []})
+    monkeypatch.setattr(batch, "captions_of", lambda d: {"written": True, "why": "", "doubtful": []})
+    res = R.read_result(run, 3, "match_cuts result: PASS\n", warn)
+    assert res["label"] == R.OK_NOTE and "finished and checked" in res["notes"][0] and "WARN" not in R.short(res)
+    res = R.read_result(run, 3, "", warn)                    # it never printed its result: a crash, in plain words
+    assert res["label"] == R.FAIL and "WARN" not in res["failures"][0] and "exit code 3" in res["failures"][0]
+
+
 def test_a_finished_run_folder_is_read_with_the_batchs_checks(tmp_path):
     res = R.read_result(tmp_path / "nothing", 2, "", "match_cuts: PICTURE NOT FOUND (sound found) -- the RAW ...")
     assert res["label"] == R.PICTURE_NOT_FOUND and res["failures"][0].startswith("the run stopped (exit 2)")

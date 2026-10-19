@@ -193,25 +193,70 @@ def latest_progress(run_dir: Path, now: float | None = None) -> str:
 
 
 _LOG_LINE = re.compile(r"^\d\d:\d\d:\d\d(?:,\d+)? (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
+# a library's own console noise, never the reason a run stopped (day 12: a laptop run that crashed while closing was
+# shown as "[ WARN:0@720.058] global net_impl_backend.cpp:345 cv::dnn::...": OpenCV's warning, its last stderr line)
+_NOISE_LINE = re.compile(r"^\s*(?:\[ ?(?:WARN|INFO|DEBUG)\b|\S+\.py:\d+: \w*Warning:|warnings\.warn\(|"
+                         r"\S*Warning: |W\d{4} |I\d{4} )")
+# Windows' exit codes of a process that crashed (no Python error to show)
+CRASH_CODES = {
+    3: "the tool stopped suddenly (Windows exit code 3: a program library inside it aborted)",
+    -1073741819: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
+    3221225477: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
+    -1073740791: "the tool crashed (a program library stopped it, 0xC0000409)",
+    3221226505: "the tool crashed (a program library stopped it, 0xC0000409)",
+    -1073741571: "the tool crashed (it ran out of stack memory, 0xC00000FD)",
+    3221225725: "the tool crashed (it ran out of stack memory, 0xC00000FD)",
+    -1073741801: "the tool ran out of memory (0xC0000017)",
+    3221225495: "the tool ran out of memory (0xC0000017)",
+}
 
 
-def stop_message(stderr: str, limit: int = 600) -> str:
+def closed_after_finish(code: int | None, stdout: str, chk: dict | None) -> str:
+    """A run that made and checked its edit (it printed its "match_cuts result:" and its files are there) and then
+    crashed while closing (an exit code other than 0 / 1 / 2): the note to show -- '' for any other run. Day 12: a
+    laptop run printed PASS, then Windows ended the process with exit code 3 (a library aborted while it closed)."""
+    if code in (0, 1, 2, None) or "match_cuts result:" not in (stdout or ""):
+        return ""
+    if chk is None or any("no verify.json" in f or "missing" in f.lower() for f in chk.get("failures") or []):
+        return ""
+    why = crash_words(code) or f"the tool ended with exit code {code}"
+    return f"The edit was finished and checked; then {why} while closing -- the edit is complete, nothing to redo"
+
+
+def crash_words(code: int | None) -> str:
+    """A crash's exit code in plain words ('' for an ordinary exit code)."""
+    return CRASH_CODES.get(code, "") if code is not None else ""
+
+
+def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
     """What a stopped run said in plain words: its last message that is not a log line ("the competitor's scenes are
     not in this RAW: ...", "The inputs look wrong ..."), a crash's last line, else its last ERROR line -- not its
-    whole console (the demo batch's summary held the run's log from its first line)."""
+    whole console (the demo batch's summary held the run's log from its first line). A library's warning (OpenCV's
+    "[ WARN:...]", Python's "...Warning:") is never the message: a crash (``code``, crash_words) says what happened
+    instead."""
     lines = [ln.rstrip() for ln in (stderr or "").splitlines()]
-    block: list[str] = []
+    block: list[str] = []                        # raw lines, the message's own, in order
     for ln in reversed(lines):
+        if _NOISE_LINE.match(ln):                # a warning: it and the indented source line Python prints under it
+            if block and block[0].startswith((" ", "\t")):
+                block.pop(0)
+            if block:
+                break
+            continue
         if not ln.strip() or ln.startswith("Run folder") or _LOG_LINE.match(ln):
             if block:
                 break
             continue
-        block.insert(0, ln.strip())
+        block.insert(0, ln)
+    block = [b.strip() for b in block]
+    crash = crash_words(code)
     if block:
         text = block[-1] if block[0].startswith("Traceback") else " ".join(block)
     else:
         errs = [_LOG_LINE.sub("", ln) for ln in lines if _LOG_LINE.match(ln) and " ERROR " in ln[:30]]
-        text = errs[-1].strip() if errs else "see the log"
+        text = errs[-1].strip() if errs else (crash or "see the log")
+    if crash and text != crash and not block:
+        text = f"{crash}; its last error: {text}"
     text = text.replace("match_cuts: ", "", 1)
     return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
 
@@ -562,8 +607,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
         chk = checks_of(run_dir if (run_dir / run_folders.EXTRAS).is_dir() else None)
         failures = list(chk["failures"])
-        stop = stop_message(stderr) if code not in (0, 1) else ""
-        if code not in (0, 1):                            # 1: a recreation criterion failed (real videos: always)
+        closed = closed_after_finish(code, stdout, chk)
+        stop = stop_message(stderr, code=code) if code not in (0, 1) and not closed else ""
+        if closed:                                        # the edit was made and checked, then the process crashed
+            chk = dict(chk, notes=[closed] + list(chk.get("notes") or []))
+            code = 0 if not failures else 1
+        elif code not in (0, 1):                          # 1: a recreation criterion failed (real videos: always)
             failures = [f"the run stopped (exit {code}): {stop}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
