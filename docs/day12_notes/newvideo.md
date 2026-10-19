@@ -39,7 +39,9 @@ bottom line that says what the row waits for, and the buttons.
   as the reason. A failed step stops the row with a red FAIL pill, the step's bar red, and **Try again** continues
   from that step (the done steps are kept: nothing is downloaded again).
 - **History**: everything comes from project.json as before; new: "Just cuts made · PASS" (with "37 cuts"), "Just cuts
-  failed", "Template made — default template (no headline)" in amber.
+  failed", "Template made — default template (no headline)" in amber. A video that fails before its folder exists
+  (a broken / private link at the first read) has no project.json, so it goes into a small log on this computer
+  (`%APPDATA%\MovieRecaps\history_log.jsonl`, the last 500) that `history.events()` adds (``log=True`` by default).
 - **Turn off the PC when everything is done** tick box (not remembered on purpose: it must be ticked each time).
   When nothing runs or waits to run by itself in the whole app (this page, the Match cuts queue, every page's
   busy()), after something ran: a 60 s warning with Cancel, then `core/shutdown.turn_off()` — which never turns the

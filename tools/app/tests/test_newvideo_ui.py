@@ -45,6 +45,7 @@ def page(tmp_path, monkeypatch):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     Mo.set_enabled(False)
     monkeypatch.setenv("MOVIERECAPS_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))       # History's own log: this test's
     calls: list = []
     fail: dict = {}
 
@@ -200,6 +201,16 @@ def test_a_failed_step_stops_the_row_red_and_try_again_continues_from_that_step(
     assert it.state == D.SENT and it.steps["convert"].state == D.S_DONE
 
 
+def test_a_video_that_fails_before_its_folder_is_made_is_still_in_history_with_its_date(page):
+    from mr_app.core import history as H
+    page.fail["download"] = True
+    _fill(page, YT, COMP)
+    it = page.add()
+    assert it.state == D.FAILED and it.project is None
+    evs = [e for e in H.events([]) if e.what == "Download failed"]
+    assert evs and evs[0].name == YT and "disk is full" in evs[0].detail and evs[0].kind == H.FAIL
+
+
 def test_just_cuts_then_add_a_competitor_makes_it_a_full_run_without_a_new_download(page, tmp_path):
     page.auto.click()
     _fill(page, YT)
@@ -270,6 +281,42 @@ def test_without_the_torrent_part_a_magnet_says_so_plainly(page, monkeypatch):
     _fill(page, "magnet:?xt=urn:btih:EXAMPLE", COMP)
     it = page.add()
     assert it.state == D.FAILED and "torrent support is coming" in page.now_text(it)
+
+
+def test_the_real_stages_name_the_folder_from_the_post_then_the_headline_on_the_video(tmp_path, monkeypatch):
+    """StageThread's own download / convert (the links read, the folder made, the titles read and saved, the
+    folder renamed) with the slow parts faked."""
+    from mr_app.core import download as DL
+    from mr_app.core import titles as TT
+    root = tmp_path / "projects"
+    monkeypatch.setattr(D.paths, "projects_root", lambda: root)
+    li = SimpleNamespace(title="Video by darkhumor", duration=40.0, why="best", info={
+        "title": "Video by darkhumor", "description": "#fyp #viral @darkhumor"})
+    lr = SimpleNamespace(title="Family Guy S10E18", duration=1300.0, why="best", info={})
+    monkeypatch.setattr(DL, "probe_link", lambda url, cancel=None: li if "shorts" in url else lr)
+    monkeypatch.setattr(D, "estimate_bytes", lambda li: 0)
+
+    def fake_download(p, say, cancel, roles=None):
+        for role in ("competitor", "raw"):
+            (p.folder / f"{role}.mp4").write_bytes(b"x")
+            p.update(**{role: {"file": f"{role}.mp4"}})
+    monkeypatch.setattr(flow, "download_step", fake_download)
+    monkeypatch.setattr(flow, "convert_step", lambda p, say, cancel, roles=None: None)
+    monkeypatch.setattr(flow, "title_check_step", lambda p, title="": {
+        "competitor_headline": "They stopped making comedy like this",
+        "lines": ["They stopped making", "comedy like this"], "message": ""})
+    monkeypatch.setattr(TT, "READER", lambda video: "They stopped making comedy like this 😭\nThis")
+    it = D.Item(COMP, raw_url=YT, channel="Flick707")
+    got = []
+    th = D.StageThread(it, ("download", "convert"))
+    th.done.connect(lambda i, res: got.append(res))
+    th.run()
+    assert got and got[0]["ok"], got
+    assert got[0]["post_title"] == "" and got[0]["video_headline"] == "They stopped making\ncomedy like this 😭"
+    assert it.project.name.endswith("_they-stopped-making-comedy-like-this")
+    d = P.load(it.project).data
+    assert d["video_headline"].startswith("They stopped making\n") and d["generic_name"] is True
+    assert (it.project / TT.TITLES_TXT).is_file() and len(list(root.iterdir())) == 1
 
 
 def test_newest_on_top_running_first_then_waiting_then_finished(page):

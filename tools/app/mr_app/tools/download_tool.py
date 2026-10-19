@@ -249,7 +249,7 @@ class StageThread(QThread):
         out["video_headline"], out["post_title"] = head, post
         try:
             TT.save(p, post, head)
-            if TT.useless(it.name.split("_", 1)[-1].replace("-", " ")) or p.data.get("generic_name"):
+            if p.data.get("generic_name") or TT.useless(p.folder.name.split("_", 1)[-1].replace("-", " ")):
                 p2, note = TT.rename_folder(p, head, post)
                 out["rename"] = note
                 if p2.folder != p.folder:
@@ -1497,6 +1497,10 @@ class DownloadPage(QWidget):
             self.ctx.notify("New video: " + (it.name or "a video"), f"failed: {it.error}")
         except Exception:  # noqa: BLE001
             pass
+        if it.project is None:                 # no project.json to keep it: History's own log (a small append)
+            from ..core import history as H
+            H.log_event(f"{stage.capitalize()} failed", it.raw_url or str(it.raw_file or it.raw_torrent or "")[:120],
+                        it.error, H.FAIL, NV.one_line(it.title), it.channel)
         self._order()
 
     # -- what comes after a step: wait for the button, or go on by itself (Automatic) --
