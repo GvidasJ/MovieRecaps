@@ -144,3 +144,30 @@ def test_the_rule_can_be_switched_off_for_one_run(monkeypatch):
     assert ex.SPEAKER_CUT_OFF is True and ex._speaker_cut_off_on()
     monkeypatch.setenv("MATCH_CUTS_SPEAKER_CUT_OFF", "0")
     assert not ex._speaker_cut_off_on()
+
+
+def test_only_the_raw_shot_that_cuts_the_speaker_off_moves():
+    """mindculpt S01+..+S23: one clip over two RAW shots -- Jackie whole in the first, Chris (speaking) cut off by
+    the window in the second: the second shot slides (shot_framing), the first keeps the competitor's framing."""
+    from types import SimpleNamespace
+    from fractions import Fraction
+    from match_cuts import export_xml_edl as ex, speakers
+    from tests.test_night8 import _view
+    W, H = 1920.0, 1080.0
+    clip, sim, win, box = _letterbox_clip()                 # RAW 10-20 s, a shot change at 15 s (sequence frame 300)
+    v0, v1 = _view(sim, win)
+    chris = (v1 - 120.0, 150.0, v1 + 260.0, 700.0)
+    jackie = (0.5 * (v0 + v1) - 100.0, 200.0, 0.5 * (v0 + v1) + 100.0, 600.0)
+
+    def faces(a, b):
+        if a >= 15.0 - 1e-6:
+            return speakers.Faces("speaker", True, chris, [chris], others=[chris])
+        return speakers.Faces("speaker", True, chris, [chris], others=[chris, jackie])
+    sp = SimpleNamespace(same_shot=lambda a, b: (a < 15.0) == (b < 15.0), faces=faces, shots=[15.0])
+    assert ex._speaker_cut_off([clip], sp, (W, H), win, Fraction(60), box, 250.0) == 0      # judged whole: Jackie
+    assert ex._speaker_cut_off([clip], sp, (W, H), win, Fraction(60), box, 250.0, Fraction(24), [15.0]) == 1
+    assert clip.keys[0][1] is sim or ex._same_framing(clip.keys[0][1], sim)                 # the first shot kept
+    assert len(clip.shot_framing) == 1
+    at, new = clip.shot_framing[0]
+    assert at == 900 and new.tx < sim.tx and speakers.passes(new, faces(15, 20), W, False, win)
+    assert "moved onto the person speaking" in clip.person_note

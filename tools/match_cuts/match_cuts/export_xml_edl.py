@@ -2410,7 +2410,7 @@ def _speaker_cut_off_on() -> bool:
 
 def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
                      win: tuple[float, float, float, float], fps: Fraction, layout_box: Box | None,
-                     min_move: float) -> int:
+                     min_move: float, raw_fps: Any = None, changes_s: Sequence[float] | None = None) -> int:
     """Day 12 (mindculpt, Rush Hour on a letterboxed competitor: the whole 2.39:1 picture, the template window a
     near-square middle of it): the final clips the XML PERSON check would fail -- the person speaking (Light-ASD:
     'speaker', never only "the biggest face") is not shown, and the window shows nobody else whole either -- slide
@@ -2422,24 +2422,59 @@ def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, fl
     from . import speakers
     W = raw_wh[0]
     moved = 0
+    why: dict[str, int] = {}
+
+    def skip(reason: str) -> None:
+        why[reason] = why.get(reason, 0) + 1
+    # each RAW shot inside a clip judged on its own (mindculpt S01+..+S23: Jackie whole in the first shot, Chris cut
+    # off in the second): the pieces between the RAW's shot changes, written back as the clip's framing + its
+    # shot_framing (split_at_shots applies them), as _subject_in_narrow_window does
+    whole = list(clips)
+    owner: list[int] = []
+    pieces: list[PremiereClip] = []
+    cs = sorted(float(x) for x in (changes_s or getattr(sp, "shots", None) or ()))
+    for n, cl in enumerate(whole):
+        ticks = (_shot_change_ticks(cl, cs, Fraction(raw_fps), Fraction(fps), cl.rec_start, cl.rec_end)
+                 if cs and raw_fps is not None and cl.start != -1 and cl.end != -1 and float(cl.speed) > 0
+                 and len(cl.keys) == 1 and not cl.shot_framing else [])
+        rest = cl
+        for r in ticks:
+            if rest.rec_start + 1 < r < rest.rec_end - 1:
+                piece, rest = _split_clip(rest, r)
+                pieces.append(dataclasses.replace(piece, person_span=None))
+                owner.append(n)
+                rest = dataclasses.replace(rest, person_span=None)
+        pieces.append(rest)
+        owner.append(n)
+    clips = pieces
     for i, c in enumerate(clips):
         if len(c.keys) != 1 or abs(float(c.keys[0][1].theta_deg)) > 1e-9 or c.seg.flip_h:
             continue
         old = c.keys[0][1]
-        f = _person_of(c, sp, fps)
-        if f is None or f.how != "speaker" or f.box is None:
+        if (len(c.events or [c.ev]) > 1 or c.person_span is None) and sp is not None:
+            # a clip joined from several pieces (_merge_continuous) is judged on the frames it plays, as the XML
+            # PERSON check judges it (mindculpt S01+..+S23: over its wider person span someone else showed whole)
+            a, b = _clip_raw_s(c, fps)
+            f = sp.faces(min(a, b), max(a, b))
+        else:
+            f = _person_of(c, sp, fps)
+        if f is None or f.how != "speaker" or f.box is None or speakers.passes(old, f, W, False, win):
             continue
-        if speakers.passes(old, f, W, False, win) or speakers.shows_anyone(old, f, W, False, win):
+        if speakers.shows_anyone(old, f, W, False, win):
+            skip("shows someone else whole")
             continue
         cw = _comp_window_raw_x(c, layout_box) if layout_box is not None or _own_box(c.seg) else None
         cx = 0.5 * (f.box[0] + f.box[2])
         if cw is None or not (cw[0] <= cx <= cw[1]):
+            skip("not in the competitor's window")
             continue                                 # the competitor did not show them either (or unknown)
         if (cw[1] - cw[0]) * old.s < win[2] * (1.0 + NARROW_OVERFLOW):
+            skip("the competitor's own close-up")
             continue                                 # the template shows all the competitor showed: its own close-up
             #                                          (021: a laughing man the face detection missed) stays
         xr = speakers.x_range(old, f.box, raw_wh, False, win)
         if xr is None:
+            skip("too big for the window")
             continue                                 # too big for the window at this zoom
         m = CUT_MARGIN * (f.box[2] - f.box[0]) * old.s
         lo, hi = (xr[0] + m, xr[1] - m) if xr[0] + m <= xr[1] - m else xr
@@ -2463,6 +2498,7 @@ def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, fl
                     if 0.5 < mv < min_move - 0.5:
                         ok = False
         if not ok:
+            skip("--min-move")
             continue
         c.keys = [(c.keys[0][0], new)]
         c.covered = True
@@ -2473,9 +2509,22 @@ def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, fl
                          + ", zoom kept")
         c.framing_note = (c.framing_note + "; " if c.framing_note else "") + "framed on the person speaking (day 12)"
         moved += 1
-    if moved:
+    for n, cl in enumerate(whole):                # the pieces back into their clips
+        mine = [w for w, o in zip(pieces, owner) if o == n]
+        if len(mine) < 2 or all(_same_framing(w.keys[0][1], cl.keys[0][1]) for w in mine if w.keys):
+            continue
+        cl.keys = [(cl.keys[0][0], mine[0].keys[0][1])]
+        cl.shot_framing = [(w.src_in, w.keys[0][1]) for w in mine[1:]]
+        cl.covered = True
+        cl.framing_note = (cl.framing_note + "; " if cl.framing_note else "") + "framed on the person speaking (day 12)"
+        notes = [w.person_note for w in mine if w.person_note and "moved onto the person speaking" in w.person_note]
+        if notes:
+            cl.person_note = notes[0] + (f" (and {len(notes) - 1} more shot(s) of this clip)" if len(notes) > 1
+                                         else " (in one RAW shot of this clip)")
+    if moved or why:
         log.info("premiere framing: %d clip(s) showed nobody while the person speaking was cut off by the template "
-                 "window -- moved sideways until they are in (zoom kept)", moved)
+                 "window -- moved sideways until they are in (zoom kept)%s", moved,
+                 (" (not moved: " + ", ".join(f"{k} {v}" for k, v in sorted(why.items())) + ")") if why else "")
     return moved
 
 
@@ -3372,7 +3421,8 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
                 _subject_in_narrow_window(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
                                           getattr(cfg, "premiere_shots", None), fac, cut_only=True)
             if not follow and _speaker_cut_off_on():  # day 12: the window shows nobody, the person speaking is cut
-                _speaker_cut_off(clips, sp, raw_wh, win, fps, layout_box, st["min_move"])
+                _speaker_cut_off(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
+                                 getattr(cfg, "premiere_shots", None))
     return clips, markers, warnings
 
 
