@@ -137,6 +137,13 @@ class Item:
         return NV.WAITING
 
 
+def off_thread(fn, done, failed=None) -> None:
+    """``ui.background.call`` -- the one way this page runs a disk write off the window's thread (tests replace it to
+    run at once)."""
+    from ..ui import background as BG
+    BG.call(fn, done, failed)
+
+
 def save_title(folder, title: str | None) -> None:
     """The title in the project's title.txt too (night 11: "I forget titles" -- the board and every row show it)."""
     if not folder or not (title or "").strip():
@@ -1155,6 +1162,8 @@ class DownloadPage(QWidget):
     def _raw_typed(self, _t: str) -> None:
         if self.raw_file is not None and self.raw.text() != str(self.raw_file):
             self.raw_file = None
+        if self.msg.text().startswith("RAW: ") and not self.raw.text().endswith(self.msg.text()[5:]):
+            self.msg.setText("")                          # the dropped file's note, now that something else is typed
 
     def _comp_typed(self, _t: str) -> None:
         if self.comp_file is not None and self.comp.text() != str(self.comp_file):
@@ -1188,8 +1197,10 @@ class DownloadPage(QWidget):
                 self.comp.setText(str(f))
 
     def _set_raw_file(self, f: Path) -> None:
-        self.raw_file = f
+        # a .torrent is the torrent's source (its path in the RAW field: TORRENT), not a video file to copy
+        self.raw_file = None if str(f).lower().endswith(".torrent") else f
         self.raw.setText(str(f))
+        self.msg.setStyleSheet("")
         self.msg.setText(f"RAW: {f.name}")
 
     # -- adding --
@@ -1776,24 +1787,43 @@ class DownloadPage(QWidget):
         """The ready video into the Match cuts queue (its run folder: the project's 'edit'), started by itself."""
         from ..core import flow
         from ..core import projects as PJ
-        try:
-            p = PJ.load(it.project)
-            p.update(channel=it.channel or None, title=it.title or None)
-            save_title(p.folder, it.title)
-            job = flow.edit_job(p, it.mode == J.FAST, it.speed)
-            job.channel, job.title, job.headline = it.channel, it.title, it.headline
-            job.upload_title = it.upload_title
-        except Exception as e:  # noqa: BLE001
-            self._fail(it, "edit", f"could not make the edit's job: {NV.plain_error(e)}")
-            return
         mc = self.ctx.pages.get("match_cuts") if hasattr(self.ctx, "pages") else None
         if mc is None:
             self._fail(it, "edit", "the Match cuts queue is not there")
             return
-        it.job = job
+        if it.state == SENT and it.job is None:
+            return                                        # being sent already (a second press)
+        # project.json + title.txt written and read back (a network folder on the laptop): off the window's thread
+        # (day 12 click-through: 60-140 ms here). SENT at once: "Turn off the PC" counts it as work meanwhile.
         it.state = SENT
-        self._step(it, "edit", S_RUN, 0.0, "in the Match cuts queue")
-        mc.add_project_job(job, autostart=start)
+        it.job = None
+        self._step(it, "edit", S_RUN, 0.0, "going into the Match cuts queue")
+        folder, channel, title, fast, speed = it.project, it.channel, it.title, it.mode == J.FAST, it.speed
+
+        def work():
+            try:
+                p = PJ.load(folder)
+                p.update(channel=channel or None, title=title or None)
+                save_title(p.folder, title)
+                return flow.edit_job(p, fast, speed)
+            except Exception as e:  # noqa: BLE001 - said on the row in plain words
+                return NV.plain_error(e)
+
+        def done(job) -> None:
+            if it.state != SENT or it.job is not None or it not in self.items:
+                return                                    # removed or changed meanwhile
+            if isinstance(job, str):
+                self._fail(it, "edit", f"could not make the edit's job: {job}")
+                return
+            job.channel, job.title, job.headline = it.channel, it.title, it.headline
+            job.upload_title = it.upload_title
+            it.job = job
+            self._step(it, "edit", S_RUN, 0.0, "in the Match cuts queue")
+            mc.add_project_job(job, autostart=start)
+            self._order()
+
+        off_thread(work, done, lambda e: self._fail(it, "edit", f"could not make the edit's job: "
+                                                               f"{NV.plain_error(e)}"))
         self._order()
 
     def _poll(self) -> None:

@@ -110,12 +110,13 @@ def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing
     page.items.append(it)
     page.rows[it.id] = D.VideoRow(page, it)
     page.send_to_edit(it, start=True)
-    job = mc.jobs[-1]
+    assert it.state == D.SENT                      # at once (project.json is written in the background, then queued)
     import time
     t0 = time.perf_counter()                       # day 12: it starts once its lengths are read (in the background)
     while not starts and time.perf_counter() - t0 < 10:
         qapp.processEvents()
         time.sleep(0.01)
+    job = mc.jobs[-1]
     assert it.state == D.SENT and starts == [False]                        # started by itself, no question asked
     assert job.project == p.folder and job.out_dir == p.folder and job.run_name == "edit"
     assert (job.channel, job.title, job.headline) == ("LouLaughs", "My title", "Their headline")

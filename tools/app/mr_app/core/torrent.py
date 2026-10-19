@@ -314,14 +314,18 @@ def read_torrent(data: bytes | str | Path) -> Meta:
     ih = hashlib.sha1(data[s:e]).hexdigest()
     files: list[TFile] = []
     single = False
-    if b"files" in info:
-        for i, f in enumerate(info[b"files"]):
-            parts = f.get(b"path.utf-8", f.get(b"path", []))
-            files.append(TFile(i, "/".join(_text(p) for p in parts), int(f.get(b"length", 0))))
-    elif b"length" in info:
-        single = True
-        files.append(TFile(0, name, int(info[b"length"])))
-    else:
+    try:
+        if b"files" in info:
+            for i, f in enumerate(info[b"files"]):
+                parts = f.get(b"path.utf-8", f.get(b"path", []))
+                files.append(TFile(i, "/".join(_text(p) for p in parts), int(f.get(b"length", 0))))
+        elif b"length" in info:
+            single = True
+            files.append(TFile(0, name, int(info[b"length"])))
+    except Exception as e:  # noqa: BLE001 - a file list that is not one: the same plain words as a broken file
+        raise TorrentError("This is not a working .torrent file — its file list is broken. Download the .torrent "
+                           "again.") from e
+    if not files and b"files" not in info:
         raise TorrentError("This .torrent uses a newer format (v2 only) that the app cannot read yet.")
     trackers: list[str] = []
     if b"announce" in top:
