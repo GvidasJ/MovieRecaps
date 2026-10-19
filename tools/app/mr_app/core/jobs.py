@@ -17,6 +17,7 @@ import itertools
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -56,6 +57,11 @@ class Job:
     out_dir: Path | None = None     # where its run folder goes (None: the app's output folder)
     run_name: str = ""              # the run folder's name ("" = the job's name)
     force_inputs: bool = False      # night 11: run it although the quick check said WRONG PAIR (--force-inputs)
+    roles_chosen: bool = False      # day 12: YOU said which file is the RAW (the check card, or Swap): never swapped
+    #                                 back, and a pair about as long runs with the input checks skipped (forced())
+    take: int = 1
+    added: datetime | None = None   # when it joined the queue (the newest-first order of waiting rows)
+    edited: datetime | None = None  # when its run ended (the newest-first order of finished rows)
     id: int = field(default_factory=lambda: next(_ids))
 
     @property
@@ -68,10 +74,13 @@ class Job:
         self.comp_s, self.raw_s = self.raw_s, self.comp_s
 
     def problems(self) -> list[str]:
-        """What looks wrong before the start (plain words): no RAW, the competitor longer than the RAW."""
+        """What looks wrong before the start (plain words): no RAW, the competitor longer than the RAW (not said
+        once you chose which one is the RAW)."""
         out = []
         if self.competitor is None or self.raw is None:
             out.append("only one video: drop its RAW (or its competitor) too")
+        elif self.roles_chosen:
+            pass
         elif self.comp_s is not None and self.raw_s is not None and self.comp_s > self.raw_s + 0.5:
             out.append(f"the competitor ({clock(self.comp_s)}) is longer than the RAW ({clock(self.raw_s)}) -- "
                        "swapped? (the swap button changes them)")
@@ -88,6 +97,128 @@ def clock(s: float | None) -> str:
     s = int(round(float(s)))
     h, m, sec = s // 3600, (s % 3600) // 60, s % 60
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# day 12: RAW vs competitor is always your choice
+# ---------------------------------------------------------------------------------------------------------------------
+
+CLOSE = 0.7         # the app's rule: the shorter at least 70 % of the longer ("within 30 %") = about as long
+
+
+def _named_raw(p: Path | None) -> bool:
+    return p is not None and Path(p).stem.lower().startswith("raw")
+
+
+def _named_comp(p: Path | None) -> bool:
+    return p is not None and Path(p).stem.lower().startswith("comp")
+
+
+def names_say(job: Job) -> bool:
+    """The file names say which one is which: one of them is named raw* or comp* / competitor* (the tool's names
+    rule, match_cuts.pairing)."""
+    return any(_named_raw(p) or _named_comp(p) for p in (job.competitor, job.raw))
+
+
+def about_as_long(a: float | None, b: float | None, close: float = CLOSE) -> bool:
+    """Two lengths within 30 % of each other (the shorter at least ``close`` x the longer); False when one is not
+    known."""
+    if a is None or b is None:
+        return False
+    lo, hi = sorted((float(a), float(b)))
+    return hi > 0 and lo >= close * hi
+
+
+def needs_check(job: Job) -> bool:
+    """The row must wait for YOU (the amber "Check which is the RAW" card): both videos there, their lengths known
+    and within 30 % of each other, the names not saying, and you have not chosen yet. Such a row never starts by
+    itself -- not with Automatic ON, not with Start."""
+    return (job.complete and not job.roles_chosen and job.state == READY and not names_say(job)
+            and about_as_long(job.comp_s, job.raw_s))
+
+
+def forced(job: Job) -> bool:
+    """Run with ``--force-inputs``: "Run anyway" was pressed, or you chose the RAW of a pair about as long (night 6's
+    input check would stop a 47 s RAW for a 45 s Short as "almost as long as the RAW" -- your choice counts as Run
+    anyway)."""
+    return bool(job.force_inputs) or (job.roles_chosen and about_as_long(job.comp_s, job.raw_s))
+
+
+def choose_raw(job: Job, raw: Path) -> bool:
+    """You said ``raw`` is the RAW: the two change places when needed, and the choice is remembered on the job
+    (``roles_chosen``). True when they changed places."""
+    raw = Path(raw)
+    if job.complete and Path(job.competitor) == raw:
+        job.swap()
+        swapped = True
+    elif job.complete and Path(job.raw) == raw:
+        swapped = False
+    else:
+        raise ValueError(f"{raw.name} is not one of this row's videos")
+    job.roles_chosen = True
+    return swapped
+
+
+def ordinal(n: int) -> str:
+    """1 -> '1st', 2 -> '2nd', 11 -> '11th', 23 -> '23rd'."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def runnable(job: Job) -> bool:
+    """Waiting, both videos there, its files placed, its lengths read, and nothing for you to check."""
+    return (job.state == READY and job.complete and not getattr(job, "preparing", "")
+            and not getattr(job, "reading_lengths", False) and not needs_check(job))
+
+
+def run_order(jobs: Sequence[Job]) -> list[Job]:
+    """The waiting jobs in the order they will run: the queue's order (as added, or as you dragged them)."""
+    return [j for j in jobs if j.state in (READY, WAITING)]
+
+
+def display_order(jobs: Sequence[Job]) -> list[Job]:
+    """Newest on top (day 12) -- the ORDER SHOWN, never the order run:
+
+    1. running rows at the very top;
+    2. then the waiting rows, newest first: the run order upside down -- so the next one to run is the lowest waiting
+       row, and a row you drag stays exactly where you dropped it (its run place changes with it; each waiting row
+       says "RUNS 1ST", "RUNS 2ND" ...);
+    3. then the finished rows, the one finished last on top."""
+    running = [j for j in jobs if j.state == RUNNING]
+    waiting = list(reversed(run_order(jobs)))
+    done = [j for j in jobs if j.state in (DONE, STOPPED)]
+    order = {j.id: k for k, j in enumerate(jobs)}
+    done.sort(key=lambda j: (j.edited or j.added or datetime.min, order[j.id]), reverse=True)
+    return running + waiting + done
+
+
+def run_places(jobs: Sequence[Job]) -> dict[int, int]:
+    """{job id: 1, 2, ...}: when each waiting job runs (1 = next); jobs waiting for your check are left out."""
+    out: dict[int, int] = {}
+    for j in run_order(jobs):
+        if j.state == READY and not needs_check(j):
+            out[j.id] = len(out) + 1
+    return out
+
+
+def move_in_display(jobs: Sequence[Job], job_id: int, slot: int) -> list[Job]:
+    """The queue's new run order after a waiting row was dropped at ``slot`` among the waiting rows AS SHOWN (0 = the
+    top of the waiting rows): the waiting rows shown are the run order upside down, so the dragged row lands where it
+    was dropped. Running and finished jobs keep their places in the list (only the waiting ones are re-filled)."""
+    jobs = list(jobs)
+    shown = list(reversed(run_order(jobs)))
+    j = next((x for x in shown if x.id == job_id), None)
+    if j is None:
+        return jobs
+    old = shown.index(j)
+    slot = max(0, min(int(slot), len(shown)))
+    if slot > old:
+        slot -= 1
+    shown.pop(old)
+    shown.insert(slot, j)
+    new_run = iter(reversed(shown))
+    return [next(new_run) if x.state in (READY, WAITING) else x for x in jobs]
 
 
 def is_video(p: Path) -> bool:
@@ -322,6 +453,14 @@ def project_for_job(job: Job, root: Path | None = None, progress: Callable[[str,
         placed = {"competitor": comp, "raw": raw}
         if pj.file("competitor") is None or pj.file("raw") is None:
             pj.update(competitor={"file": comp.name}, raw={"file": raw.name})
+        chosen = flow.chosen_roles(pj.data)            # day 12: you chose the RAW of this project before
+        if chosen and chosen.get("raw") in (comp.name, raw.name):
+            if chosen["raw"] == comp.name:
+                placed = {"competitor": raw, "raw": comp}
+                job.comp_s, job.raw_s = job.raw_s, job.comp_s
+            job.roles_chosen = True
+        elif job.roles_chosen:                         # chosen on the row before the project was made
+            flow.set_roles(pj.folder, raw.name, "picked")
     else:
         pj = P.create(root, raw_file=raw, name=job.name or comp.stem)
         pj.set_step("download", P.RUNNING)
@@ -341,6 +480,9 @@ def project_for_job(job: Job, root: Path | None = None, progress: Callable[[str,
             pj.set_step("download", P.FAILED, error=f"the dropped files could not be placed: {e}", **details)
             raise
         pj.set_step("download", P.DONE, dropped=True, **details)
+        if job.roles_chosen:                           # day 12: you chose the RAW on the row: remembered
+            flow.set_roles(pj.folder, placed["raw"].name, "picked")
+            pj.reload()
     pj.update(channel=job.channel or pj.data.get("channel") or None, title=job.title or pj.data.get("title") or None)
     job.project = pj.folder
     job.out_dir = pj.folder

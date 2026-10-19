@@ -135,9 +135,49 @@ def convert_text(r: dict) -> str:
     return "ready"
 
 
+def _swap_roles(d: dict) -> None:
+    """project.json's two files change roles, and what the steps say about each of them."""
+    d["competitor"], d["raw"] = d.get("raw"), d.get("competitor")
+    for s in ("download", "convert"):
+        st = (d.get("steps") or {}).get(s)
+        if isinstance(st, dict) and ("competitor" in st or "raw" in st):
+            st["competitor"], st["raw"] = st.get("raw"), st.get("competitor")
+
+
+def chosen_roles(data: dict) -> dict | None:
+    """Day 12: your choice of which file is the RAW, as project.json keeps it ({'raw': file name, 'competitor': file
+    name, 'how': 'picked' | 'swapped', 'at': time}), or None when you have not chosen."""
+    r = (data or {}).get("roles")
+    return r if isinstance(r, dict) and r.get("chosen") and r.get("raw") else None
+
+
+def set_roles(folder: str | Path, raw_name: str, how: str = "picked") -> bool:
+    """Day 12: you said the file ``raw_name`` (a file of the project folder) is the RAW -- project.json's roles switch
+    when needed (the files stay where they are: nothing is copied again) and your choice is kept ("roles"), so later
+    steps never swap them back. True when the roles switched."""
+    p = P.load(folder)
+    out = {"swapped": False}
+
+    def change(d: dict) -> None:
+        comp = (d.get("competitor") or {}).get("file") if isinstance(d.get("competitor"), dict) else None
+        raw = (d.get("raw") or {}).get("file") if isinstance(d.get("raw"), dict) else None
+        if comp == raw_name and raw != raw_name:
+            _swap_roles(d)
+            out["swapped"] = True
+            comp, raw = raw, comp
+        elif raw != raw_name:
+            raise StepError(f"{raw_name} is not one of the project's two videos")
+        d["roles"] = {"chosen": True, "raw": raw, "competitor": comp, "how": how, "at": P.now()}
+        d.pop("swapped", None)                         # the app's own swap note no longer applies
+    p.change(change)
+    return out["swapped"]
+
+
 def _longer_is_raw(p: P.Project) -> bool:
     """The tool's rule: the longer video is the RAW. Swaps the two in project.json when the competitor's is longer
-    (a link pasted in the other field); True when it swapped."""
+    (a link pasted in the other field); True when it swapped. Never when you chose the RAW yourself (day 12)."""
+    if chosen_roles(p.data):
+        return False
     try:
         from match_cuts.cli import quick_probe
         c, r = p.file("competitor"), p.file("raw")
@@ -148,11 +188,7 @@ def _longer_is_raw(p: P.Project) -> bool:
         return False
 
     def swap(d: dict) -> None:                    # the two files, and what the steps say about each
-        d["competitor"], d["raw"] = d.get("raw"), d.get("competitor")
-        for s in ("download", "convert"):
-            st = (d.get("steps") or {}).get(s)
-            if isinstance(st, dict) and ("competitor" in st or "raw" in st):
-                st["competitor"], st["raw"] = st.get("raw"), st.get("competitor")
+        _swap_roles(d)
         d["swapped"] = (f"the competitor's link gave the longer video ({dc:.0f} s against {dr:.0f} s): it is the RAW "
                         "(the tool's rule), so the two were swapped")
     p.change(swap)
@@ -252,6 +288,7 @@ def edit_job(p: P.Project, fast: bool = True, speed: float = 100.0):
     j.run_name = EDIT_NAME
     j.channel = p.data.get("channel") or ""
     j.title = p.data.get("title") or ""
+    j.roles_chosen = chosen_roles(p.data) is not None      # day 12: you said which one is the RAW
     return j
 
 

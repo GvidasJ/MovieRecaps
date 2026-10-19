@@ -12,20 +12,22 @@ from pathlib import Path
 from typing import Callable
 
 from . import paths
-from .jobs import FAST, Job
+from .jobs import FAST, Job, forced
 
 CREATE_NO_WINDOW = 0x08000000
 
 
 def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast: bool, speed: float,
-            frame: Path | None = None, watermark: Path | None = None, force_inputs: bool = False) -> list[str]:
+            frame: Path | None = None, watermark: Path | None = None, force_inputs: bool = False,
+            no_swap: bool = False) -> list[str]:
     """The batch's command line for one video (match_cuts.batch.main); night 10: a channel's template as the frame
     and its watermark on top (``--frame`` / ``--watermark``) when the job has a channel; night 11: ``force_inputs``
-    ("Run anyway" after a WRONG PAIR) skips the quick pair check."""
+    ("Run anyway" after a WRONG PAIR) skips the quick pair check. Day 12: ``no_swap`` -- you chose which file is the
+    RAW, so the tool never swaps them (with --force-inputs alone it swaps two files that look reversed)."""
     return [str(python), "-m", "match_cuts", "--competitor", str(comp), "--raw", str(raw), "--run-dir", str(run_dir),
             "--work", str(work), "--premiere", *(["--fast"] if fast else []), "--speed", f"{speed:g}",
             *(["--frame", str(frame)] if frame else []), *(["--watermark", str(watermark)] if watermark else []),
-            *(["--force-inputs"] if force_inputs else [])]
+            *(["--force-inputs"] if force_inputs else []), *(["--no-swap"] if no_swap else [])]
 
 
 def kill_tree(pid: int) -> None:
@@ -55,7 +57,7 @@ class JobRun:
         self.frame, self.watermark = frame, watermark
         self.cmd = command(self.python, Path(job.competitor), self.use_raw, self.run_dir, self.work,
                            job.mode == FAST, float(job.speed), frame, watermark,
-                           bool(getattr(job, "force_inputs", False)))
+                           forced(job), bool(getattr(job, "roles_chosen", False)))
         self.proc: subprocess.Popen | None = None
         self.stopped = False
         self.t0 = 0.0
