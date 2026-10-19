@@ -33,11 +33,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import (QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, QThread, QTimer,
-                            Signal)
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                               QSizePolicy, QVBoxLayout, QWidget)
 
 from . import Tool
 from ..core import jobs as J
@@ -46,6 +45,7 @@ from ..core import paths
 from ..ui import motion as M
 from ..ui import theme
 from ..ui import widgets as W
+from ..ui.glide_list import GlideList, scroll_to_top
 from ..ui.titles_block import TitlesBlock
 
 _ids = itertools.count(1)
@@ -117,6 +117,15 @@ class Item:
 
     def step_list(self) -> list[tuple[str, str]]:
         return STEPS_JUST if self.kind == NV.JUST_CUTS else STEPS_FULL
+
+    def order_time(self) -> float:
+        """When it counts as new for the order shown: a finished row when its last step finished (the one finished
+        last on top, as the queue), any other row when it was added."""
+        if self.group() == NV.FINISHED:
+            ends = [s.finished.timestamp() for s in self.steps.values() if isinstance(s.finished, datetime)]
+            if ends:
+                return max(ends)
+        return float(self.added)
 
     def group(self) -> int:
         if self.state == WORKING or any(s.state == S_RUN for s in self.steps.values()):
@@ -795,79 +804,29 @@ def theme_month(dt: datetime) -> str:
 # the list: newest on top, rows glide to their places
 # ---------------------------------------------------------------------------------------------------------------------
 
-class GlideList(QWidget):
-    """Rows stacked top to bottom in a given order; a row that changes place glides there (0.45 s, the app's GLIDE
-    curve), a new one fades in at its place. Heights follow the rows' own (word-wrapped) layouts."""
-    GAP = 12
+class RowList(GlideList):
+    """The Download / New video rows (day 12, integrated): the Match cuts queue's own ``ui.glide_list.GlideList``, so
+    both lists behave the same -- a new row appears at its place, the others glide (0.45 s on the soft curve), a row
+    that changes state glides to its new place, a row that grows or shrinks moves the rows under it smoothly.
+    ``set_rows(rows)`` = the rows in the order shown (rows not given leave the list, new ones join at their place)."""
 
     def __init__(self):
-        super().__init__()
+        super().__init__(spacing=12)
         self.setObjectName("Transparent")
-        self.rows: list[QWidget] = []
-        self._anims: dict[int, QPropertyAnimation] = {}
-        self._pending = False
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def set_rows(self, rows: list[QWidget], animate: bool = True) -> None:
-        new = [r for r in rows if r not in self.rows]
-        for r in self.rows:
+    @property
+    def rows(self) -> list[QWidget]:
+        return self.items()
+
+    def set_rows(self, rows: list[QWidget]) -> None:
+        for r in self.items():
             if r not in rows:
-                r.removeEventFilter(self)
-        self.rows = list(rows)
-        for r in new:
-            r.setParent(self)
-            r.installEventFilter(self)
-            r.show()
-        self.relayout(animate, fresh=new)
-
-    def eventFilter(self, obj, e) -> bool:                # noqa: N802
-        if e.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Show, QEvent.Type.Hide) and obj in self.rows:
-            self._later()
-        return False
-
-    def _later(self) -> None:
-        if not self._pending:
-            self._pending = True
-            QTimer.singleShot(0, lambda: self.relayout(True))
-
-    def _height(self, r: QWidget, w: int) -> int:
-        lay = r.layout()
-        if lay is not None and lay.hasHeightForWidth():
-            return max(lay.totalHeightForWidth(w), r.minimumSizeHint().height())
-        return r.sizeHint().height()
-
-    def relayout(self, animate: bool = True, fresh: list | None = None) -> None:
-        self._pending = False
-        w = max(100, self.width())
-        y = 0
-        for r in self.rows:
-            h = self._height(r, w)
-            r.resize(w, h)
-            target = QPoint(0, y)
-            if r.pos() != target:
-                if animate and M.enabled() and r not in (fresh or []) and r.isVisible():
-                    a = self._anims.get(id(r))
-                    if a is None:
-                        a = QPropertyAnimation(r, b"pos", self)
-                        a.setDuration(M.GLIDE_MS)
-                        a.setEasingCurve(QEasingCurve(M.GLIDE))
-                        self._anims[id(r)] = a
-                    if a.endValue() != target or a.state() != a.State.Running:
-                        a.stop()
-                        a.setStartValue(r.pos())
-                        a.setEndValue(target)
-                        a.start()
-                else:
-                    a = self._anims.get(id(r))
-                    if a is not None:
-                        a.stop()
-                    r.move(target)
-            y += h + self.GAP
-        self.setFixedHeight(max(0, y - self.GAP))
-
-    def resizeEvent(self, e) -> None:                     # noqa: N802
-        super().resizeEvent(e)
-        self.relayout(False)
+                self.remove(r)
+        for k, r in enumerate(rows):
+            if r not in self.items():
+                self.insert(r, k)
+        self.set_order(rows)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -975,7 +934,8 @@ class DownloadPage(QWidget):
         lay.addSpacing(10)
         self.count = W.label("", "Small")
         lay.addWidget(W.SectionHeader("Videos", [self.count]))
-        self.list = GlideList()
+        self.list = RowList()
+        self.list.inserted.connect(lambda _w: scroll_to_top(self))      # a new row -> the list's top (as the queue)
         lay.addWidget(self.list)
         self.empty = W.label("Nothing here yet. Paste a link above.", "Dim")
         lay.addWidget(self.empty)
@@ -1866,14 +1826,13 @@ class DownloadPage(QWidget):
             row.refresh()
 
     def _order(self, scroll_top: bool = False) -> None:
-        ordered = NV.order(self.items)
+        """The rows in the order shown -- the queue's rules: running on top, then waiting newest first, then finished
+        with the one finished last on top (Item.order_time); they glide there. A new row scrolls the page to the top
+        (the list's ``inserted``, as in the queue; ``scroll_top`` does it anyway)."""
+        ordered = NV.order(self.items, added=lambda i: i.order_time())
         self.list.set_rows([self.rows[i.id] for i in ordered if i.id in self.rows])
         if scroll_top:
-            sa = self.parent()
-            while sa is not None and not isinstance(sa, QScrollArea):
-                sa = sa.parent()
-            if sa is not None:
-                sa.verticalScrollBar().setValue(0)
+            scroll_to_top(self)
 
     def _counts(self) -> None:
         n = len(self.items)

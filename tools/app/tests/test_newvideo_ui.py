@@ -387,3 +387,70 @@ def test_the_titles_block_fills_the_headline_box_and_the_youtube_title(page):
     t.b_use.click()
     t.b_title.click()
     assert got == [("h", "Line one\nline two 😭"), ("t", "Line one line two 😭")]
+
+
+# day 12, integrated: the Download / New video rows use the queue's GlideList and the queue's order rules
+
+def test_the_rows_use_the_queues_glide_list_and_a_finished_row_is_on_top_by_its_finish(page):
+    from datetime import datetime, timedelta
+
+    from mr_app.ui.glide_list import GlideList
+    assert isinstance(page.list, GlideList)
+    _fill(page, YT, COMP)
+    a = page.add()
+    _fill(page, YT.replace("Ab", "Bb"), COMP)
+    b = page.add()
+    _fill(page, YT.replace("Ab", "Cb"), COMP)
+    c = page.add()
+    assert [r.item.id for r in page.list.rows] == [c.id, b.id, a.id]          # waiting: newest first
+    now = datetime.now()
+    for it, mins in ((a, 1), (b, 5)):                                          # b finished before a
+        it.state = D.DONE
+        it.steps["download"].finished = now - timedelta(minutes=mins)
+    c.state = D.WORKING                                                        # c runs
+    page._order()                                                              # noqa: SLF001
+    assert [r.item.id for r in page.list.rows] == [c.id, a.id, b.id]          # running, then finished last on top
+    assert page.list.target_y(page.rows[c.id]) == 0
+
+
+def test_a_download_row_that_changes_state_glides_and_a_new_row_scrolls_to_the_top(page):
+    import time
+
+    from PySide6.QtWidgets import QScrollArea
+    sa = QScrollArea()
+    sa.setWidgetResizable(True)
+    sa.setWidget(page)
+    sa.resize(1000, 500)
+    sa.show()
+    for k in ("Ab", "Bb", "Cb"):
+        _fill(page, YT.replace("Ab", k), COMP)
+        page.add()
+    app = QtWidgets.QApplication.instance()
+    app.processEvents()
+    first = page.items[0]
+    row = page.rows[first.id]
+    y0 = row.y()
+    assert y0 > 0
+    Mo.set_enabled(True)
+    first.state = D.WORKING                                                    # it runs: to the top, gliding
+    page._order()                                                              # noqa: SLF001
+    seen = []
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 0.9:
+        app.processEvents()
+        seen.append(row.y())
+        time.sleep(0.004)
+    assert seen[-1] == 0
+    assert len({y for y in seen if 0 < y < y0}) >= 5                           # many places in between: a glide
+    first.state = D.GATED
+    sa.verticalScrollBar().setValue(sa.verticalScrollBar().maximum())
+    assert sa.verticalScrollBar().value() > 0
+    _fill(page, YT.replace("Ab", "Db"), COMP)
+    page.add()                                                                 # a new row: the list's top
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 0.9 and sa.verticalScrollBar().value() > 0:
+        app.processEvents()
+        time.sleep(0.004)
+    assert sa.verticalScrollBar().value() == 0
+    sa.takeWidget()
+    sa.deleteLater()
