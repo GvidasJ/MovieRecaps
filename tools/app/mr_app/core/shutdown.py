@@ -11,14 +11,29 @@ import subprocess
 from typing import Callable
 
 WARNING_S = 60
+STOPPED_BY_WORK = "new work started -- the PC turns off after it"
 AME_EXES = ("adobe media encoder.exe",)
 AME_BUSY_CPU = 8.0               # % of one core over the sample: AME encoding (idle it sits near 0)
 RENDER_WORDS = re.compile(r"\b(export(?:ing)?|encod(?:e|ing)|render(?:ing)?)\b", re.I)
 
 
-def _real_shutdown() -> None:
-    subprocess.run(["shutdown", "/s", "/t", "0"], capture_output=True, timeout=30,
-                   creationflags=0x08000000 if os.name == "nt" else 0)
+class ShutdownFailed(RuntimeError):
+    """Windows did not take the "turn off" order; its words (plain) are the message."""
+
+
+def _real_shutdown(run: Callable | None = None) -> None:
+    """``shutdown /s /t 0``; raises ShutdownFailed (plain words) when Windows refuses it (no right to, a shutdown
+    already under way, ...), so the warning says so and tries again instead of "Turning the PC off ..." for ever."""
+    run = run or subprocess.run
+    try:
+        r = run(["shutdown", "/s", "/t", "0"], capture_output=True, text=True, timeout=30,
+                creationflags=0x08000000 if os.name == "nt" else 0)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ShutdownFailed(f"Windows could not be asked to turn off ({e})") from e
+    code = getattr(r, "returncode", 0)
+    if code:
+        said = " ".join(str(getattr(r, "stderr", "") or getattr(r, "stdout", "") or "").split())
+        raise ShutdownFailed(f"Windows did not turn off (code {code}{': ' + said[:200] if said else ''})")
 
 
 SHUTDOWN: Callable[[], None] = _real_shutdown       # tests replace this
@@ -31,6 +46,23 @@ def premiere_unsaved() -> bool:
         return bool(premiere.state().changed)
     except Exception:  # noqa: BLE001 - cannot tell: not a blocker by itself
         return False
+
+
+def premiere_unreadable() -> bool:
+    """Premiere runs but what it shows cannot be read (its windows not readable, no main window yet): it may have
+    unsaved work, so this stops the PC from turning off too."""
+    try:
+        from . import premiere
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        st = premiere.state()
+    except Exception:  # noqa: BLE001 - the windows could not be read: is Premiere running at all?
+        try:
+            return bool(premiere._pids())                                       # noqa: SLF001
+        except Exception:  # noqa: BLE001 - cannot even tell that: not a blocker
+            return False
+    return bool(st.running and st.title is None)
 
 
 def premiere_rendering() -> bool:
@@ -72,6 +104,8 @@ def media_encoder_busy(sample_s: float = 1.0) -> bool:
 
 CHECKS: list[tuple[str, Callable[[], bool]]] = [
     ("Premiere has unsaved work -- save it, then the PC turns off", premiere_unsaved),
+    ("can't tell whether Premiere has unsaved work -- save it or close Premiere, then the PC turns off",
+     premiere_unreadable),
     ("a render is running in Premiere", premiere_rendering),
     ("Adobe Media Encoder is rendering", media_encoder_busy),
 ]
@@ -90,10 +124,14 @@ def blockers() -> list[str]:
     return out
 
 
-def turn_off() -> list[str]:
-    """Turn the PC off now unless something stops it; returns what stopped it (empty: it was turned off)."""
+def turn_off(stop: Callable[[], bool] | None = None) -> list[str]:
+    """Turn the PC off now unless something stops it; returns what stopped it (empty: it was turned off).
+    ``stop()`` is asked last, right before the PC is turned off (the app's own work started again meanwhile): True
+    -> not turned off, [STOPPED_BY_WORK] returned. Raises ShutdownFailed when Windows refuses."""
     b = blockers()
     if b:
         return b
+    if stop is not None and stop():
+        return [STOPPED_BY_WORK]
     SHUTDOWN()
     return []

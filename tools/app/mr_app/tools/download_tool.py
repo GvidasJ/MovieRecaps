@@ -862,13 +862,20 @@ class RowList(GlideList):
 
 class ShutdownWarning(QDialog):
     """"Everything is done -- the PC turns off in 60 s" with Cancel. At 0 it asks core.shutdown (in the background)
-    and turns the PC off, or -- Premiere unsaved, a render running -- says so and asks again every 30 s."""
+    and turns the PC off, or -- Premiere unsaved, a render running -- says so and asks again every 30 s. Work that
+    starts again meanwhile (``working()``: the page's anything_working) closes it without turning anything off --
+    at each second, at each retry and once more right before the PC is turned off; ``stopped_for_work`` tells the
+    page, which shows a fresh 60 s warning when that work is done."""
+    stopped_for_work = Signal()
 
-    def __init__(self, parent: QWidget, seconds: int = 60):
+    def __init__(self, parent: QWidget, seconds: int = 60, working=None):
         super().__init__(parent)
         self.setWindowTitle("Turn off the PC")
         self.setModal(False)
         self.left = int(seconds)
+        self.working = working if working is not None else getattr(parent, "anything_working", None)
+        self.stop_now = False           # read by the background turn_off right before the PC is turned off
+        self.for_work = False           # closed because work started again
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(12)
@@ -899,10 +906,29 @@ class ShutdownWarning(QDialog):
 
     def _cancel(self) -> None:
         self.cancelled = True
+        self.stop_now = True
         self.timer.stop()
 
+    def _busy(self) -> bool:
+        try:
+            return bool(self.working and self.working())
+        except Exception:  # noqa: BLE001 - cannot tell: count it as work (never turn off in doubt)
+            return True
+
+    def stop_for_work(self) -> None:
+        """New work started: closed without turning the PC off ("Turn off the PC" stays ticked)."""
+        if self.cancelled or self.for_work:
+            return
+        self.for_work = self.stop_now = True
+        self.timer.stop()
+        self.hide()                     # (hide, not reject: Cancel would untick "Turn off the PC")
+        self.stopped_for_work.emit()
+
     def _tick(self) -> None:
-        if self.cancelled:
+        if self.cancelled or self.stop_now:
+            return
+        if self._busy():
+            self.stop_for_work()
             return
         self.left -= 1
         if self.left > 0:
@@ -912,10 +938,20 @@ class ShutdownWarning(QDialog):
         self.text.setText("Turning the PC off ...")
         from ..core import shutdown as SD
         from ..ui import background as BG
-        BG.call(SD.turn_off, self._after, lambda e: self._after([f"it could not be turned off ({e})"]))
+        BG.call(lambda: SD.turn_off(stop=lambda: self.stop_now), self._after, self._failed)
+
+    def _failed(self, err: str) -> None:
+        kind, _, msg = str(err).partition(": ")
+        if not (msg and kind.isidentifier()):            # plain words only: no "SomeError:" in front
+            msg = str(err)
+        self._after([f"the PC could not be turned off: {msg}"])
 
     def _after(self, blockers: list) -> None:
         if self.cancelled or not blockers:
+            return
+        from ..core import shutdown as SD
+        if self.for_work or SD.STOPPED_BY_WORK in blockers:
+            self.stop_for_work()
             return
         self.text.setText("Not turned off yet")
         self.note.setText("; ".join(blockers) + ". It tries again every 30 s -- press Cancel to keep it on.")
@@ -923,7 +959,7 @@ class ShutdownWarning(QDialog):
         QTimer.singleShot(30000, self._retry)
 
     def _retry(self) -> None:
-        if self.cancelled:
+        if self.cancelled or self.stop_now:
             return
         self.left = 1
         self._tick()
@@ -2017,13 +2053,23 @@ class DownloadPage(QWidget):
             return
         if self.anything_working():
             self._worked = True
+            stop = getattr(self.warning, "stop_for_work", None)
+            if stop is not None and self.warning.isVisible():
+                stop()                                  # work started again during the warning: not now
             return
         if not self._worked or (self.warning is not None and self.warning.isVisible()):
             return
         self._worked = False
         self.warning = self.shutdown_dialog(self)
         self.warning.rejected.connect(lambda: self.offpc.setChecked(False))
+        sig = getattr(self.warning, "stopped_for_work", None)
+        if sig is not None:
+            sig.connect(self._stopped_for_work)
         self.warning.start()
+
+    def _stopped_for_work(self) -> None:
+        """The warning closed because work started again: a fresh 60 s warning once that work is done."""
+        self._worked = True
 
     # -- what the rows show, their order --
     def now_text(self, it: Item) -> str:
