@@ -731,12 +731,12 @@ class BoardPage(QWidget):
             ch = card.channel
             BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch),
                     lambda _r: (self.toast("New template made and swapped into the edit ✓"), self.reload()),
-                    lambda e: self.toast(f"The template could not be made: {e}", "fail"))
+                    lambda e: self.toast(f"The template could not be made: {e}", "fail"), work=True)
             return flow.USE_CHANGE
         BG.call(lambda: flow.set_headline(folder, text),
                 lambda r: (self.toast("Headline set ✓" + (" -- template made again" if (r or {}).get("template")
                                                           else "")), self.reload()),
-                lambda e: self.toast(f"The headline could not be saved: {e}", "fail"))
+                lambda e: self.toast(f"The headline could not be saved: {e}", "fail"), work=True)
         return flow.USE_SET
 
     def ask_yes(self, title: str, text: str) -> bool:
@@ -896,7 +896,7 @@ class BoardPage(QWidget):
                            + (f" ({len(res2[1])} could not be removed)" if res2[1] else ""))
                 self.reload()
             BG.call(work2, done, lambda e: (self.b_clean.setEnabled(True), self.status.setText(""),
-                                            self.toast(f"Clean up failed: {e}", "fail")))
+                                            self.toast(f"Clean up failed: {e}", "fail")), work=True)
         BG.call(work, got, lambda e: (self.b_clean.setEnabled(True), self.status.setText(before),
                                       self.toast(f"Clean up failed: {e}", "fail")))
 

@@ -1457,7 +1457,7 @@ class MatchCutsPage(QWidget):
                 _toast(self.ctx, "New template made and swapped into the edit ✓")
                 self._reload_board()
             BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch), changed,
-                    lambda e: _toast(self.ctx, f"The template could not be made: {e}", "fail"))
+                    lambda e: _toast(self.ctx, f"The template could not be made: {e}", "fail"), work=True)
             return flow.USE_CHANGE
         job.title = text
         self._refresh_job(job)
@@ -1469,7 +1469,7 @@ class MatchCutsPage(QWidget):
                                                      " -- the template uses it"))
                 self._reload_board()
             BG.call(lambda: flow.set_headline(folder, text), done,
-                    lambda e: _toast(self.ctx, f"The headline could not be saved: {e}", "fail"))
+                    lambda e: _toast(self.ctx, f"The headline could not be saved: {e}", "fail"), work=True)
         else:
             _toast(self.ctx, "Headline set ✓ -- the template uses it")
         return flow.USE_SET

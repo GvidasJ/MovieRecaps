@@ -860,6 +860,15 @@ class RowList(GlideList):
 # turn off the PC
 # ---------------------------------------------------------------------------------------------------------------------
 
+def _torrent_active(job) -> bool:
+    """A torrent download under way: just started, downloading or waiting for peers (paused by you, finished, failed
+    or removed: not)."""
+    if job is None:
+        return False
+    st = str((getattr(job, "status", None) or {}).get("state") or "")
+    return st in ("", "downloading", "stalled")
+
+
 class ShutdownWarning(QDialog):
     """"Everything is done -- the PC turns off in 60 s" with Cancel. At 0 it asks core.shutdown (in the background)
     and turns the PC off, or -- Premiere unsaved, a render running -- says so and asks again every 30 s. Work that
@@ -1760,7 +1769,7 @@ class DownloadPage(QWidget):
             self._refresh(it)
 
         BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch), done,
-                lambda e: self.toast(f"The template could not be made: {NV.plain_error(e)}", "fail"))
+                lambda e: self.toast(f"The template could not be made: {NV.plain_error(e)}", "fail"), work=True)
         return True
 
     def add_competitor(self, it: Item, text: str) -> bool:
@@ -2033,6 +2042,11 @@ class DownloadPage(QWidget):
         if self.current is not None or any(i.state in (QUEUED, WORKING) for i in self.items):
             return True
         if any(i.state == SENT for i in self.items):
+            return True
+        if any(_torrent_active(i.torrent_job) for i in self.items):
+            return True
+        from ..ui import background as BG
+        if BG.working():                # publishing to the shared folder, Clean up, Change headline ... (work=True)
             return True
         pages = getattr(self.ctx, "pages", {}) or {}
         for k, p in pages.items():

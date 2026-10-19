@@ -184,3 +184,61 @@ def test_premiere_running_but_not_readable_blocks_the_shutdown(monkeypatch):
     assert SD.premiere_unreadable() is False
     words = [w for w, fn in SD.CHECKS if fn is SD.premiere_unreadable]
     assert words and words[0].startswith("can't tell whether Premiere has unsaved work")
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 2. background jobs flagged as work count for "Turn off the PC"
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_a_background_job_flagged_as_work_is_counted_until_it_returns():
+    import threading
+
+    from PySide6.QtCore import QThreadPool
+
+    from mr_app.ui import background as BG
+    _app()
+    go = threading.Event()
+    before = BG.working()
+    BG.call(lambda: go.wait(10), None, None, work=True)
+    assert BG.working() == before + 1
+    BG.call(lambda: None)                                        # not flagged: never counted
+    assert BG.working() == before + 1
+    go.set()
+    QThreadPool.globalInstance().waitForDone(10000)
+    assert BG.working() == before
+
+    def broken():
+        raise OSError("the shared folder went away")
+    BG.call(broken, None, None, work=True)                       # a failed job is not counted for ever
+    QThreadPool.globalInstance().waitForDone(10000)
+    assert BG.working() == before
+
+
+def test_anything_working_counts_background_work_and_a_running_torrent(page, monkeypatch):  # noqa: F811
+    from mr_app.ui import background as BG
+    assert page.anything_working() is False
+    monkeypatch.setattr(BG, "working", lambda: 1)                # e.g. a project being copied to the shared folder
+    assert page.anything_working() is True
+    monkeypatch.setattr(BG, "working", lambda: 0)
+    it = SimpleNamespace(state=D.READY, torrent_job=None)
+    page.items.append(it)
+    for state, busy in (("", True), ("downloading", True), ("stalled", True), ("paused", False),
+                        ("finished", False), ("failed", False), ("removed", False)):
+        it.torrent_job = SimpleNamespace(status={"state": state} if state else {})
+        assert page.anything_working() is busy, state
+    page.items.remove(it)
+
+
+def test_publishing_clean_up_and_change_headline_are_flagged_as_work():
+    """The calls that copy or change project files for a while pass work=True (read from the source: the windows
+    that make them need a whole app)."""
+    root = Path(__file__).resolve().parents[1] / "mr_app"
+    mw = (root / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert mw.count("BG.call(work, done, failed, work=True)") == 1                       # project_done -> publish
+    assert mw.count("BG.call(work, done, lambda _e: None, work=True)") == 1              # retry_pending -> publish
+    board = (root / "tools" / "board_tool.py").read_text(encoding="utf-8")
+    assert board.count("work=True)") == 3                         # Clean up, Change headline, Set headline
+    mc = (root / "tools" / "match_cuts_tool.py").read_text(encoding="utf-8")
+    assert mc.count("work=True)") == 2
+    dl = (root / "tools" / "download_tool.py").read_text(encoding="utf-8")
+    assert dl.count("\"fail\"), work=True)") == 1                  # the row's Change headline

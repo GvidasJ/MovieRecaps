@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
             self.toast(f"Not saved to the shared folder yet ({msg}) -- tried again later", "note")
-        BG.call(work, done, failed)
+        BG.call(work, done, failed, work=True)
 
     def retry_pending(self) -> None:
         """Projects kept here while the shared folder was away: moved there now when it is back."""
@@ -243,7 +243,7 @@ class MainWindow(QMainWindow):
                 b = self.pages.get("board")
                 if b is not None:
                     b.reload()
-        BG.call(work, done, lambda _e: None)
+        BG.call(work, done, lambda _e: None, work=True)
 
     def find_hub(self) -> None:
         """Where the shared files are (the save folder, else this computer's): looked up in the background (a network
