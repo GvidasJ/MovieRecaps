@@ -510,7 +510,9 @@ def just_cuts_step(p: P.Project, progress: Progress | None = None, cancel: threa
                             frame, watermark)
     p.set_step("edit", P.RUNNING, run_dir=str(run_dir), kind="just_cuts")
     _say(progress, "raw", 0.02, "finding the scene changes ...")
-    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONUNBUFFERED="1",
+               PYTHONPATH=os.pathsep.join(x for x in (str(paths.repo() / "tools" / "match_cuts"),
+                                                      os.environ.get("PYTHONPATH", "")) if x))
     t0 = time.time()
     proc = subprocess.Popen(cmd, cwd=str(paths.repo()), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace", env=env, creationflags=CREATE_NO_WINDOW)

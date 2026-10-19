@@ -241,6 +241,35 @@ def test_just_cuts_result_reads_its_json_and_says_a_stop_in_plain_words(tmp_path
     assert cmd[1:3] == ["-m", "match_cuts.just_cuts"] and "--frame" in cmd and "--watermark" not in cmd
 
 
+def test_the_just_cuts_step_makes_the_edit_with_the_channels_template_end_to_end(tmp_path):
+    """The real tool on a short synthetic RAW (three shots and a 0.2 s flash): the cuts' run folder, the template
+    as its frame, the result in project.json."""
+    import subprocess
+    from mr_app.core import flow
+    from match_cuts.common import ffmpeg_bin
+    if flow.find_channel("Flick707") is None:
+        pytest.skip("no channel templates in this checkout")
+    p = P.create(tmp_path, raw_url="https://youtu.be/AbCdEf12345")
+    raw = p.folder / "raw.mp4"
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:d=2",
+                    "-f", "lavfi", "-i", "color=c=red:size=640x360:rate=30:d=2",
+                    "-f", "lavfi", "-i", "color=c=blue:size=640x360:rate=30:d=0.2",
+                    "-f", "lavfi", "-i", "smptebars=size=640x360:rate=30:d=2",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=6.2",
+                    "-filter_complex", "[0:v][1:v][2:v][3:v]concat=n=4:v=1:a=0,format=yuv420p[v]",
+                    "-map", "[v]", "-map", "4:a", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(raw)], check=True)
+    p.update(raw={"file": "raw.mp4"}, channel="Flick707", title="When she finally\ngot the part 💀😭", kind="just_cuts")
+    said = []
+    res = flow.just_cuts_step(P.load(p.folder), lambda r, s, t: said.append(t), work=tmp_path / "work")
+    assert res["label"] == "PASS", res
+    assert res["cuts"] == 2 and Path(res["run_dir"]).name == "cuts"
+    assert (p.folder / "cuts" / "1_edit.xml").is_file() and (p.folder / "cuts" / "extras" / "media" / "frame.png").is_file()
+    d = P.load(p.folder).data
+    assert d["steps"]["edit"]["state"] == "done" and d["steps"]["edit"]["kind"] == "just_cuts"
+    assert d["steps"]["template"]["state"] == "done"
+    assert said and said[0].startswith("making your channel's template")
+
+
 def test_a_project_without_a_competitor_is_just_cuts(tmp_path):
     from mr_app.core import flow
     p = flow.new_project("", "https://youtu.be/AbCdEf12345", root=tmp_path, just_cuts=True)
