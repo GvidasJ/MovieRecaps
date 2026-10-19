@@ -3083,7 +3083,8 @@ def stereo_for_premiere(ctx: Context, ex: Cutlist) -> Cutlist:
     """A RAW whose sound has more than two channels (5.1, 7.1: an echo in Premiere -- the surround channels mixed in;
     your laptop009 fix used a stereo file): 1_edit.xml plays ``media/raw_stereo.<ext>`` instead -- the RAW's picture
     copied as it is and one stereo track of its dialogue (front left / right + centre; stereo.py). The analysis, the
-    cut list and the caches keep the RAW itself. A copy that fails: the RAW as it is, with the old warning."""
+    cut list and the caches keep the RAW itself. A copy that fails: the RAW as it is, with the old warning. Day 12:
+    raw_stereo is the run's one RAW file -- the analysis copy is removed when the run is done (one_raw_file)."""
     import copy as _copy
     n_ch = int(ex.raw.get("audio_channels") or 0) if bool(ex.raw.get("has_audio", True)) else 0
     if n_ch <= 2 or getattr(ctx, "raw_conform", None) is None:
@@ -3103,6 +3104,37 @@ def stereo_for_premiere(ctx: Context, ex: Cutlist) -> Cutlist:
     out = _copy.copy(ex)
     out.raw = stereo.stereo_block(ex.raw, res["path"], ctx.cfg.out_dir)
     return out
+
+
+def one_raw_file(ctx: Context) -> dict:
+    """Day 12: one RAW file per run. A 5.1 RAW's 1_edit.xml plays media/raw_stereo.<ext> (stereo_for_premiere: the
+    picture copied as it is, stereo sound) -- once the run is finished (checked, report written), the analysis copy
+    (media/raw.<ext>: a hard link / copy of the RAW, or media/raw_ae.<ext>: its conform) is removed, so the run folder
+    holds the RAW once (stereo.one_raw_file says when it is kept). Premiere runs only (an After Effects project imports
+    the analysis copy). Never fails the run."""
+    st = getattr(ctx, "stereo", None) or {}
+    conf = getattr(ctx, "raw_conform", None)
+    if not getattr(ctx.cfg, "premiere", False) or not st.get("path") or conf is None:
+        return {}
+    from . import stereo
+    try:
+        xmls = sorted({p for d in (Path(ctx.cfg.deliver), Path(ctx.cfg.out_dir)) if d.is_dir()
+                       for p in d.glob("*.xml")})
+        res = stereo.one_raw_file(conf.path, st["path"], xmls, getattr(ctx.cfg, "raw", None))
+    except Exception as e:  # noqa: BLE001 - the run is done; at worst the copy stays
+        log.warning("one RAW file: could not remove the analysis copy %s (%s: %s)", Path(conf.path).name,
+                    type(e).__name__, e)
+        return {}
+    name, single = Path(conf.path).name, Path(st["path"]).name
+    if res.get("removed"):
+        gb = res["bytes"] / 1024 ** 3
+        log.info("one RAW file: media/%s removed (%.2f GB%s) -- 1_edit.xml plays media/%s, the same picture with "
+                 "stereo sound; the run folder holds the RAW once", name, gb,
+                 ", a hard link of the downloaded RAW: no space freed" if not res["freed"] else "", single)
+    else:
+        log.info("one RAW file: media/%s kept (%s)", name, res.get("why") or "?")
+    ctx.dlog.record("premiere", "one_raw_file", **res)
+    return res
 
 
 def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
@@ -4327,6 +4359,7 @@ def run(cfg: Config) -> dict:
         if isinstance(ctx.exports, dict) and isinstance(ctx.exports.get("files"), dict):
             for key in ("report", "verify"):
                 ctx.exports["files"][key] = ctx.paths.get(key)
+        one_raw_file(ctx)              # day 12: a 5.1 RAW leaves one RAW file in the run folder (raw_stereo)
     finally:
         eta.uninstall(clock, ctx.timings if "total" in ctx.timings and not getattr(cfg, "quick_checks", False)
                       else None)              # a finished run's times: the history (not check-all's: its caches)
