@@ -46,8 +46,10 @@ def has_titles(data: dict | None) -> bool:
 def is_just_cuts(data: dict | None) -> bool:
     """project.json says Just cuts (``kind`` or the edit step's ``kind``)."""
     data = data or {}
+    if data.get("kind") in ("just_cuts", "full"):       # the project's kind now (Add a competitor makes it "full";
+        return data["kind"] == "just_cuts"              # its edit step still says "just_cuts" from the cuts run)
     edit = (data.get("steps") or {}).get("edit") or {}
-    return data.get("kind") == "just_cuts" or (isinstance(edit, dict) and edit.get("kind") == "just_cuts")
+    return isinstance(edit, dict) and edit.get("kind") == "just_cuts"
 
 
 class TitlesBlock(QWidget):

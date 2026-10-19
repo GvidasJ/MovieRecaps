@@ -325,6 +325,22 @@ def test_the_real_stages_name_the_folder_from_the_post_then_the_headline_on_the_
     assert (it.project / TT.TITLES_TXT).is_file() and len(list(root.iterdir())) == 1
 
 
+def test_add_a_competitor_still_gets_the_title_from_the_post(tmp_path, monkeypatch):
+    # the e2e run (day 12): a competitor added to a Just cuts row is not read by _create -> "nothing readable in the
+    # post"; the title yt-dlp gave it (project.json competitor.title) is used
+    from mr_app.core import titles as TT
+    p = P.create(tmp_path / "projects", raw_url=YT)
+    p.update(competitor={"url": COMP, "title": "Before Tobey Maguire Was Spider-Man He Had One Job #shorts"})
+    comp = p.folder / "competitor.mp4"
+    comp.write_bytes(b"x")
+    monkeypatch.setattr(TT, "READER", lambda video: "NONE")
+    it = D.Item(COMP, raw_url=YT, project=p.folder, post_title=None)
+    out: dict = {}
+    D.StageThread(it, ("convert",))._titles(P.load(p.folder), comp, out, [])      # noqa: SLF001
+    assert out["post_title"] == "Before Tobey Maguire Was Spider-Man He Had One Job"
+    assert P.load(it.project).data["post_title"] == out["post_title"]          # (renamed: its id said nothing)
+
+
 def test_newest_on_top_running_first_then_waiting_then_finished(page):
     _fill(page, YT, COMP)
     a = page.add()                                               # waits for Convert
@@ -460,3 +476,24 @@ def test_a_download_row_that_changes_state_glides_and_a_new_row_scrolls_to_the_t
     assert sa.verticalScrollBar().value() == 0
     sa.takeWidget()
     sa.deleteLater()
+
+
+def test_an_edit_that_waits_in_the_queue_for_your_pick_of_the_raw_says_so_on_the_row(page):
+    # the e2e run (day 12): a 30 s commercial and its 26 s Short are about as long, their names say nothing -> the
+    # queue's amber "Check which is the RAW" card waits for you; the Download row said "it starts when the queue gets
+    # to it" for ever
+    page.auto.click()
+    _fill(page, YT, COMP, "a headline")
+    it = page.add()
+    job, _ = page.queue_page.jobs[-1]
+    job.competitor, job.raw = Path("Short [f18B0Accoig].mp4"), Path("Toby Maguire Twister Juice 1991.mp4")
+    job.comp_s, job.raw_s = 25.6, 30.3
+    assert J.needs_check(job) and D.waits_for_pick(it)
+    page._poll()                                                  # noqa: SLF001
+    row = page.rows[it.id]
+    assert "Which one is the RAW?" in page.now_text(it) and "Match cuts tab" in page.now_text(it)
+    assert row.pill.word() == "Check which is the RAW" and "color" in row.now.styleSheet()
+    J.choose_raw(job, job.raw)                                    # you picked on the queue's row
+    page._poll()                                                  # noqa: SLF001
+    assert not D.waits_for_pick(it) and row.pill.word() != "Check which is the RAW"
+    assert "In the Match cuts queue" in page.now_text(it)

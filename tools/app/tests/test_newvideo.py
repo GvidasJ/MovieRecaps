@@ -308,3 +308,58 @@ def test_a_project_without_a_competitor_is_just_cuts(tmp_path):
     q = flow.new_project("", "https://youtu.be/AbCdEf12345", root=tmp_path, competitor_file=f)
     assert flow.roles_of(q) == ("competitor", "raw")
     assert os.path.samefile(q.data["competitor"]["source_file"], f)
+
+
+def test_a_tweet_style_headline_loses_the_account_and_the_models_stutter():
+    # the e2e run (day 12, youtube.com/shorts/f18B0Accoig, Qwen3-VL-2B for real): the account's name and @handle
+    # copied as line 1, and the small model stuttered ("Tobeyey", "had had", "one one", "time time")
+    ans = TT.tidy_headline("History Exposed\n@HistoryyExposed\nIn 1996, Tobeyey Maguire had had exactly one one "
+                           "second of screen time time in a Tropicana Twister commercial.")
+    assert ans == "In 1996, Tobeyey Maguire had exactly one second of screen time in a Tropicana Twister commercial."
+    assert TT.tidy_headline("History Exposed @HistoryyExposed In 1996, he had") == "In 1996, he had"
+    assert TT.tidy_headline("Watch this, @someone did it 😭") == "Watch this, did it 😭"      # a text: kept
+    ocr = ["In 1996, Tobey Maguire had", "exactly one second of", "screen time in a Tropicana", "Twister commercial."]
+    assert TT.settle(ans, ocr) == ("In 1996, Tobey Maguire had exactly one second of screen time in a Tropicana "
+                                   "Twister commercial.")                 # the OCR's words win when they are close
+    assert TT.settle("He did NOT just say that 😭", ["He did NOT just", "say thatt"]) == \
+        "He did NOT just\nsay thatt 😭"                                    # the model's emoji kept
+    assert TT.settle("They stopped making comedy like this", ["They stopped making", "comedy like this"]) == \
+        "They stopped making\ncomedy like this"
+    assert TT.settle("Something else entirely", ["a caption", "the OCR read"]) == "Something else entirely"
+    assert TT.settle("", ["They stopped making", "comedy like this"]) == "They stopped making\ncomedy like this"
+    assert TT.settle("", ocr).startswith("In 1996, Tobey") and "\n" not in TT.settle("", ocr)
+    assert TT.settle("", []) == "" and TT.settle("Just this", None) == "Just this"
+
+
+def test_add_a_competitor_keeps_the_just_cuts_apart_and_the_full_edit_is_not_called_just_cuts(tmp_path):
+    # the e2e run (day 12): the steps merge their details, so the full edit's step kept "kind: just_cuts" and the
+    # 11 cuts of the cuts run -- History said "Just cuts made" for it, the queue row and the board "Just cuts"
+    from mr_app.core import history as H
+    from mr_app.ui.titles_block import is_just_cuts
+    p = P.create(tmp_path / "projects", raw_url="https://youtu.be/0IKJEnLg7G8")
+    p.update(kind=NV.JUST_CUTS)
+    p.set_step("edit", P.DONE, kind="just_cuts", cuts=11, result="PASS", run_dir=str(p.folder / "cuts"))
+    p.update(competitor={"url": "https://youtube.com/shorts/f18B0Accoig"}, kind=NV.FULL)
+    NV.keep_just_cuts(p)
+    d = P.load(p.folder).data
+    assert d["steps"]["edit"]["state"] == P.WAITING and "kind" not in d["steps"]["edit"]
+    assert "cuts" not in d["steps"]["edit"] and d[NV.JUST_CUTS_BEFORE]["cuts"] == 11
+    assert not is_just_cuts(d)
+    whats = [(e.what, e.detail) for e in H.project_events(d)]
+    assert ("Just cuts made · PASS", "11 cuts") in whats and not any(w.startswith("Edit made") for w, _ in whats)
+    P.load(p.folder).set_step("edit", P.DONE, result="PASS")
+    whats = [e.what for e in H.project_events(P.load(p.folder).data)]
+    assert "Just cuts made · PASS" in whats and "Edit made · PASS" in whats
+    NV.keep_just_cuts(P.load(p.folder))                             # a second time: nothing moves
+    assert P.load(p.folder).data["steps"]["edit"]["result"] == "PASS"
+    assert is_just_cuts({"kind": "full", "steps": {"edit": {"kind": "just_cuts"}}}) is False
+
+
+def test_a_project_without_a_headline_says_its_default_template_on_the_queue_row():
+    pytest.importorskip("PySide6.QtWidgets")
+    from mr_app.core import jobs as J
+    from mr_app.tools import match_cuts_tool as M
+    j = J.Job("v", Path("c.mp4"), Path("r.mp4"))
+    j.channel, j.project = "LouLaughs", Path("some project")
+    assert "default template" in M.template_line(j) and "NO TITLE" not in M.template_line(j)
+    assert M.template_problems(j) == []                             # used as it is: nothing to warn about

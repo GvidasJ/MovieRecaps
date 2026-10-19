@@ -311,3 +311,24 @@ def unfinished_torrents() -> bool:
         return False
     jobs = d.get("jobs", []) if isinstance(d, dict) else []
     return any(isinstance(j, dict) and j.get("state") in ("downloading", "paused", "stalled") for j in jobs)
+
+
+JUST_CUTS_BEFORE = "just_cuts_before"
+
+
+def keep_just_cuts(project: Any) -> None:
+    """Add a competitor on a finished Just cuts project: its edit step (``kind`` just_cuts, ``cuts``) is kept apart as
+    ``just_cuts_before`` (History still shows "Just cuts made") and the edit step starts empty for the full edit --
+    the steps merge their details, so before the e2e run of day 12 the full edit's step kept ``kind: just_cuts`` and
+    11 cuts (History said "Just cuts made" for the full edit, the board and queue showed "Just cuts")."""
+    from . import projects as P
+
+    def change(d: dict) -> None:
+        steps = d.get("steps") if isinstance(d.get("steps"), dict) else None
+        e = steps.get("edit") if steps else None
+        if isinstance(e, dict) and e.get("kind") == "just_cuts":
+            d[JUST_CUTS_BEFORE] = dict(e)
+            steps.pop("edit", None)
+    project.change(change)
+    if project.data.get(JUST_CUTS_BEFORE) and "edit" not in (project.data.get("steps") or {}):
+        project.set_step("edit", P.WAITING)

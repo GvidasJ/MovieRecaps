@@ -112,6 +112,7 @@ class Item:
     rename_note: str = ""
     torrent_job: Any = None                 # the torrent part's TorrentJob while the RAW downloads
     torrent_widget: Any = None              # its picker / progress card inside the row
+    said_pick: bool = False                 # the row says the queue asks which is the RAW
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -135,6 +136,14 @@ class Item:
         if self.state in (DONE, FAILED, STOPPED):
             return NV.FINISHED
         return NV.WAITING
+
+
+def waits_for_pick(it: "Item") -> bool:
+    """The full edit sent to the Match cuts queue waits for YOU there: the two videos are about as long and their
+    names do not say which is the RAW (section 4, the amber "Check which is the RAW" card). Found in the e2e run of
+    day 12: the row said "it starts when the queue gets to it" for ever."""
+    j = it.job
+    return it.state == SENT and j is not None and J.needs_check(j)
 
 
 def off_thread(fn, done, failed=None) -> None:
@@ -262,8 +271,11 @@ class StageThread(QThread):
         it = self.item
         self._say("competitor", 1.0, "reading the headline on the video ...")
         head = TT.read_on_video(comp)
-        head = TT.with_break(head, ocr_lines) if head else TT.tidy_headline("\n".join(ocr_lines or []))
+        head = TT.settle(head, ocr_lines)
         post = it.post_title if it.post_title is not None else (p.data.get("post_title") or "")
+        if not post:            # "Add a competitor" (its link was not read by _create): the title yt-dlp gave it
+            comp_info = p.data.get("competitor") if isinstance(p.data.get("competitor"), dict) else {}
+            post = TT.post_title({"title": comp_info.get("title") or ""}) if comp_info.get("url") else ""
         out["video_headline"], out["post_title"] = head, post
         try:
             TT.save(p, post, head)
@@ -768,7 +780,8 @@ class VideoRow(W.Card):
                              if it.started else "")
         self.now.setText(self.page.now_text(it))
         self.now.setStyleSheet(f"color: {theme.RED};" if it.state == FAILED else
-                               (f"color: {theme.AMBER};" if it.gate == G_HEADLINE or it.default_template else ""))
+                               (f"color: {theme.AMBER};" if it.gate == G_HEADLINE or it.default_template or
+                                waits_for_pick(it) else ""))
         busy = it.state == WORKING
         gate_word = {G_CONVERT: "Convert", G_SEND: "Make the cuts" if just else "Send to Match cuts"}.get(it.gate)
         self.b_go.setVisible(bool(gate_word) and it.state == GATED)
@@ -798,8 +811,9 @@ class VideoRow(W.Card):
             return word, theme.pill_colours(lab)
         if it.gate == G_HEADLINE:
             return "needs a headline", theme.pill_colours("note")
-        if it.state == GATED:
-            return "waiting for you", None
+        if it.state == GATED or waits_for_pick(it):
+            return ("Check which is the RAW", theme.pill_colours("note")) if waits_for_pick(it) else \
+                ("waiting for you", None)
         if it.group() == NV.RUNNING:
             return "running", None
         return "waiting", None
@@ -1803,7 +1817,9 @@ class DownloadPage(QWidget):
         def work() -> str:                                # project.json written off the window's thread
             try:
                 from ..core import projects as PJ
-                PJ.load(folder).update(competitor=upd, kind=NV.FULL)
+                p = PJ.load(folder)
+                p.update(competitor=upd, kind=NV.FULL)
+                NV.keep_just_cuts(p)                      # its edit step is the full edit's from now on
                 return ""
             except Exception as e:  # noqa: BLE001
                 return NV.plain_error(e)
@@ -1900,6 +1916,9 @@ class DownloadPage(QWidget):
                 self._finish(it, dict(j.result))
             elif j.state == J.STOPPED:                   # stopped in the queue before it ran
                 self._finish(it, {"label": "STOPPED"})
+            elif waits_for_pick(it) != it.said_pick:     # the queue asks which is the RAW (or you picked):
+                it.said_pick = waits_for_pick(it)        # said on the row
+                self._refresh(it)
             self._order()
         self._check_shutdown()
 
@@ -2111,6 +2130,9 @@ class DownloadPage(QWidget):
                 text += " · default template used"
             return text
         if it.state == SENT:
+            if waits_for_pick(it):
+                return ("Which one is the RAW? The two videos are about as long -- pick the RAW on its row in the "
+                        "Match cuts tab, then the edit starts")
             return "The edit runs in the Match cuts queue" if it.job is not None and it.job.state == J.RUNNING else \
                 "In the Match cuts queue — it starts when the queue gets to it"
         if it.state == QUEUED:
