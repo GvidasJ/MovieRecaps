@@ -111,6 +111,11 @@ def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing
     page.rows[it.id] = D.ItemRow(page, it)
     page.send_to_edit(it, start=True)
     job = mc.jobs[-1]
+    import time
+    t0 = time.perf_counter()                       # day 12: it starts once its lengths are read (in the background)
+    while not starts and time.perf_counter() - t0 < 10:
+        qapp.processEvents()
+        time.sleep(0.01)
     assert it.state == D.SENT and starts == [False]                        # started by itself, no question asked
     assert job.project == p.folder and job.out_dir == p.folder and job.run_name == "edit"
     assert (job.channel, job.title, job.headline) == ("LouLaughs", "My title", "Their headline")
@@ -119,6 +124,10 @@ def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing
     page.items.append(it2)
     page.rows[it2.id] = D.ItemRow(page, it2)
     page.send_to_edit(it2, start=True)
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 1.0:
+        qapp.processEvents()
+        time.sleep(0.01)
     assert starts == [False] and "type the title" in it2.message           # a channel without a title waits
 
 

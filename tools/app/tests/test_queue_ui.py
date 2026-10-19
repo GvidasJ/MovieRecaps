@@ -55,9 +55,11 @@ def _slate(row) -> str:
 def test_a_row_dropped_higher_changes_the_order_and_the_scene_numbers(page, tmp_path):
     a, b, c = (_job(page, tmp_path, n) for n in ("a", "b", "c"))
     assert "SCENE <span style='color:#ff7a59'>03" in _slate(page.rows[c.id])
-    page.move_job(c.id, 0)                                  # c dropped above a
+    page.move_job(c.id, 0)                                  # c first in the run order
     assert [j.name for j in page.jobs] == ["c", "a", "b"]
-    assert [page.list.itemAt(i).widget().job.name for i in range(page.list.count())] == ["c", "a", "b"]
+    # day 12: the waiting rows are shown newest first = the run order upside down; each says when it runs
+    assert [r.job.name for r in page.queue.rows()] == ["b", "a", "c"]
+    assert page.rows[c.id].runs_text() == "runs 1st" and page.rows[b.id].runs_text() == "runs 3rd"
     assert ">01<" in _slate(page.rows[c.id]) and ">03<" in _slate(page.rows[b.id])
     page.move_job(c.id, 3)                                  # ... and back to the end
     assert [j.name for j in page.jobs] == ["a", "b", "c"]
@@ -171,21 +173,26 @@ def test_dropped_files_go_into_a_project_and_the_job_waits_for_it(page, tmp_path
     assert started                                          # and then it ran
 
 
-def test_the_question_card_makes_the_job_you_pick(page, tmp_path):
+def test_two_videos_about_as_long_make_an_amber_row_and_the_button_you_click_decides(page, tmp_path):
+    """Day 12: the question is the row itself -- amber, "Check which is the RAW", one button per file."""
     d = tmp_path / "pair"
     d.mkdir()
     one, two = d / "episode one.mp4", d / "clip two.mp4"
     one.write_bytes(b"x")
     two.write_bytes(b"x")
     page._added_jobs(SimpleNamespace(jobs=[], waiting=None, notes=[], ask=[(one, two)]))   # noqa: SLF001
-    card = page.asks.itemAt(0).widget()
-    assert isinstance(card, M.AskCard)
-    pick = [b for b in card.findChildren(QtWidgets.QPushButton) if b.text().startswith("clip two.mp4")][0]
+    assert page.asks.count() == 0 and len(page.jobs) == 1
+    j = page.jobs[0]
+    row = page.rows[j.id]
+    assert J.needs_check(j) and row.check.isVisibleTo(row) and row.pill.text() == "Check which is the RAW"
+    pick = [b for b in row.check.findChildren(QtWidgets.QPushButton) if b.text().startswith("clip two.mp4")][0]
+    assert pick.text() == "clip two.mp4 (15:00) is the RAW"
     pick.click()                                            # "clip two" is the RAW
-    assert len(page.jobs) == 1 and page.jobs[0].raw == two and page.jobs[0].competitor == one
+    assert j.raw == two and j.competitor == one and j.roles_chosen and not J.needs_check(j)
+    assert not row.check.isVisibleTo(row) and row.pill.text() == "WAITING"
 
 
-def test_a_question_is_on_its_card_and_not_said_twice(page, tmp_path):
+def test_a_question_is_on_its_row_and_not_said_twice(page, tmp_path):
     d = tmp_path / "pair"
     d.mkdir()
     one, two = d / "a.mp4", d / "b.mp4"
@@ -195,5 +202,16 @@ def test_a_question_is_on_its_card_and_not_said_twice(page, tmp_path):
     q = SimpleNamespace(videos=[one, two], why=why, name="video7", source="folder video7")
     page._added_jobs(SimpleNamespace(jobs=[], waiting=None, ask=[q],              # noqa: SLF001
                                      notes=["x.txt: not a video", f"video7: {why}"]))
-    assert isinstance(page.asks.itemAt(0).widget(), M.AskCard)
     assert page.status.text() == "x.txt: not a video"
+    assert len(page.jobs) == 1 and J.needs_check(page.jobs[0]) and page.jobs[0].name == "video7"
+
+
+def test_three_videos_nobody_can_tell_apart_still_get_the_question_card(page, tmp_path):
+    d = tmp_path / "three"
+    d.mkdir()
+    vids = [d / f"{n}.mp4" for n in ("a", "b", "c")]
+    for v in vids:
+        v.write_bytes(b"x")
+    q = SimpleNamespace(videos=vids, why="all named raw*", name="", source="drop")
+    page._added_jobs(SimpleNamespace(jobs=[], waiting=None, ask=[q], notes=[]))    # noqa: SLF001
+    assert isinstance(page.asks.itemAt(0).widget(), M.AskCard) and not page.jobs
