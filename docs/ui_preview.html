@@ -83,6 +83,7 @@ h2::before{content:"";width:7px;height:7px;background:var(--red)}
 .tag::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;vertical-align:1px;background:currentColor;opacity:.9}
 .tag.run::before{animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25}}
+.bar{grid-column:1/-1;height:6px;background:#1f1f1f;overflow:hidden;transition:background-color .45s cubic-bezier(.4,0,.2,1)}
 .bar i{display:block;height:100%;width:0;background:var(--red);transition:background-color .5s var(--soft)}
 .bar.live i{transition:background-color .5s var(--soft);background:var(--info);position:relative;overflow:hidden}
 .bar.live.running i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);transform:translateX(-100%);animation:sheen 1.6s ease-in-out infinite}
@@ -218,7 +219,8 @@ kbd{font:500 10px var(--mono);color:var(--muted);border:1px solid var(--line2);p
 .wk{border:1px solid var(--line);background-color:var(--panel);padding:10px 12px;display:grid;gap:8px}
 .wk h4{margin:0;font:600 12px var(--ui);display:flex;justify-content:space-between;align-items:center}
 .wk h4 span:last-child{font:11px var(--mono);color:var(--muted)}
-.wk .wk .bars i{display:block;background:var(--c);opacity:.85;min-height:2px;transform-origin:bottom;animation:grow .9s cubic-bezier(.22,1,.36,1) both}
+.wk .bars{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:end;height:38px}
+.wk .bars i{display:block;background:var(--c);opacity:.85;min-height:2px;transform-origin:bottom;animation:grow .9s cubic-bezier(.22,1,.36,1) both}
 .wk .days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font:9.5px var(--mono);color:var(--dim);text-align:center}
 @keyframes grow{from{transform:scaleY(0)}}
 .card .pin{position:absolute;top:6px;right:8px;background:none;border:0;color:var(--dim);font-size:13px;cursor:pointer;padding:2px;transition:color .4s var(--soft)}
@@ -275,6 +277,80 @@ kbd{font:500 10px var(--mono);color:var(--muted);border:1px solid var(--line2);p
 .quote .q,.quote .who{transition:opacity .6s var(--soft),filter .6s var(--soft)}
 .quote.swap .q,.quote.swap .who{opacity:0;filter:blur(2px)}
 .quote .when-tag{font:600 9.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);padding:2px 6px;align-self:center}
+
+/* ===== torrent preview ===== */
+.tadd{display:flex;gap:8px;flex-wrap:wrap}.tadd .tin{flex:1;min-width:0;width:auto}
+#tarea{display:grid;gap:10px;margin-bottom:22px}
+.tcard{border:1px solid var(--line);background-color:var(--panel);padding:14px 16px;display:grid;gap:10px;animation:slideIn .35s var(--ease) both;transition:border-color .45s var(--soft)}
+.tcard:hover{border-color:var(--line2)}
+.tcard h3{margin:0;font:600 14px var(--ui);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.tcard h3 small{font:11px var(--mono);color:var(--dim);font-weight:400}
+.files{display:grid;gap:4px}
+.files label{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:center;font-size:12.5px;padding:6px 8px;border:1px solid transparent;cursor:pointer;transition:background-color .3s var(--soft),border-color .3s var(--soft)}
+.files label:hover{background-color:#181818;border-color:var(--line)}
+.files input{accent-color:var(--red)}
+.files .sz{font:11px var(--mono);color:var(--muted)}
+.files .big{color:var(--coral);font:600 9.5px var(--mono);letter-spacing:.1em;margin-left:6px}
+.tstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.tstats div{display:grid;gap:2px}.tstats span{font:600 9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.tstats b{font:400 22px/1 'Bebas Neue',var(--ui);letter-spacing:.03em}
+.tstats b.seed{color:var(--ok)}.tstats b.peer{color:var(--info)}
+.tstats .health{display:flex;gap:2px;align-items:end;height:14px}.health i{width:4px;background:#2a2a2a}.health i.on{background:var(--ok)}
+.tbtns{display:flex;gap:8px;flex-wrap:wrap}
+.tfoot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font:11px var(--mono);color:var(--dim)}
+.after{display:grid;gap:6px}.seg2{display:flex;flex-wrap:wrap;border:1px solid var(--line2);width:max-content;max-width:100%}
+.seg2 button{background:none;border:0;border-right:1px solid var(--line2);color:var(--muted);font:600 12px var(--ui);padding:7px 12px;cursor:pointer;transition:color .3s var(--soft),background-color .3s var(--soft)}
+.seg2 button:last-child{border-right:0}.seg2 button:hover{color:var(--fg);background-color:#1a1a1a}.seg2 button.on{color:#fff;background-color:var(--red)}
+.tdone{border-color:rgba(63,185,80,.45)}
+
+/* ===== new video form ===== */
+.nv{border:1px solid var(--line);background-color:var(--panel);padding:14px 16px;display:grid;gap:12px}
+.nvf{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center}
+@media (max-width:640px){.nvf{grid-template-columns:1fr}}
+.nvf .search{width:auto}.nvf em{font-style:normal;color:var(--dim);text-transform:none;letter-spacing:0}
+.det{font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border:1px solid var(--line2);color:var(--dim);min-width:84px;text-align:center;transition:color .3s var(--soft),border-color .3s var(--soft),background-color .3s var(--soft)}
+.det.yt{color:#ff8a8d;border-color:#5a2226;background-color:var(--redsoft)}.det.mg{color:#c4b5fd;border-color:#3b2f63;background-color:#1a1530}.det.fl{color:var(--info);border-color:#22406b;background-color:var(--infosoft)}
+.nvbot{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.mode{display:grid;gap:2px}.mode b{font:400 22px/1 'Bebas Neue',var(--ui);letter-spacing:.03em;color:var(--coral)}
+.seg2 .dot{display:inline-block;width:7px;height:7px;background:var(--c);margin-right:6px}
+.det.ok2{color:var(--ok);border-color:#24502c;background-color:var(--oksoft)}
+.hl{width:auto;resize:none;font:13px/1.5 var(--ui);flex:1}
+.two{display:grid;gap:6px}.two .search{width:auto}
+.tadd .two{flex:1}.tadd .btn{align-self:center}
+.autobar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#autoBtn{display:inline-flex;align-items:center;gap:8px;padding:6px 12px}
+.sw{width:26px;height:14px;background:#2a2a2a;position:relative;display:inline-block;transition:background-color .35s var(--soft)}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;background:#888;transition:transform .35s var(--soft),background-color .35s var(--soft)}
+#autoBtn.on .sw{background:var(--ok)}#autoBtn.on .sw::after{transform:translateX(12px);background:#fff}
+#autoBtn.on{color:var(--ok);border-color:#24502c;background-color:var(--oksoft)}
+.offpc{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer}.offpc input{accent-color:var(--red)}
+.nvex{display:flex;gap:6px;flex-wrap:wrap}
+.pipe{border:1px solid var(--line);background-color:var(--panel);padding:14px 16px;display:grid;gap:10px;animation:slideIn .35s var(--ease) both;transition:border-color .45s var(--soft)}
+.pipe:hover{border-color:var(--line2)}
+.pipe h3{margin:0;font:600 14px var(--ui);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.steps{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:6px}
+.st{display:grid;gap:5px}.st span{font:600 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);transition:color .4s var(--soft)}
+.st .bar{height:4px}.st.now span{color:var(--info)}.st.ok span{color:var(--ok)}.st.ok .bar i{background:var(--ok)}
+.st small{font:10.5px var(--mono);color:var(--dim);min-height:13px}
+.pipe .tstats{grid-template-columns:repeat(auto-fit,minmax(80px,1fr))}
+
+/* ===== final extras ===== */
+.pair{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font:11.5px var(--mono);color:var(--muted);grid-column:1/-1}
+.pair em{font-style:normal;font-weight:600;color:var(--coral);letter-spacing:.08em;margin-right:4px}.pair em.c{color:var(--info)}
+.pair i{font-style:normal;color:var(--dim)}.pair b{color:var(--fg);font-weight:500}
+.ttl2{display:grid;gap:4px;grid-column:1/-1}
+.ttl2>div{display:grid;grid-template-columns:150px 1fr auto auto;gap:8px;align-items:center;font-size:12.5px}
+.ttl2 .k{font:600 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--coral)}
+.ttl2 .tx{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+@media (max-width:640px){.ttl2>div{grid-template-columns:1fr auto auto}.ttl2 .k{grid-column:1/-1}}
+.chk{border:1px solid #5a4513;background-color:var(--warnsoft);padding:12px 14px;display:grid;gap:8px;animation:slideIn .35s var(--ease) both}
+.lgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}
+.lcol{display:grid;gap:8px;align-content:start}
+.lcol h4{margin:0;font:600 10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);display:flex;gap:8px;align-items:center}
+.lcol h4 b{background:var(--red);color:#fff;font-size:10px;padding:1px 6px}
+.lc{border:1px solid var(--line);background-color:var(--panel);padding:10px 12px;display:grid;gap:5px;transition:border-color .45s var(--soft),opacity .4s}
+.lc:hover{border-color:var(--line2)}.lc.warn{border-color:#5a4513}.lc b{font-weight:600;font-size:13px}.lc small{font-size:11.5px;color:var(--dim)}
+.lc .tbtns{gap:6px}
 @media (prefers-reduced-motion:reduce){.pane,.job{animation:none!important}}
 @media (max-width:640px){.board{grid-template-columns:repeat(4,160px)}}
 </style>
@@ -315,7 +391,23 @@ kbd{font:500 10px var(--mono);color:var(--muted);border:1px solid var(--line2);p
       <div class="drop vf"><b>Drop videos here</b><p class="note">a RAW and a competitor = one video · a folder of folders = one video each</p>
         <div><button class="btn" id="add">Add example video</button></div></div>
       <div class="row"><h2>Queue</h2><div style="display:flex;gap:8px"><button class="btn" id="copy">Copy LEARN line</button><button class="btn" id="copy2" hidden></button><button class="btn primary" id="start">Start <kbd>Space</kbd></button></div></div>
-      <div class="queue" id="queue"></div>
+      <div class="queue" id="queue"><div class="chk" id="chk"><div class="name">1019 · <span class="chan" style="--c:var(--lou)">LouLaughs</span> <span class="tag note2" style="float:right">Check which is the RAW</span></div>
+        <p class="note">The two videos are almost the same length, so I need you to say which is which.</p>
+        <div class="tbtns"><button class="btn" type="button" data-r="raw.mp4">raw.mp4 (0:47) is the RAW</button><button class="btn" type="button" data-r="1019.mp4">1019.mp4 (0:45) is the RAW</button></div></div></div>
+      <div class="row"><h2>Learn</h2><span class="note">drop your fixed .prproj on a card — that's all</span></div>
+      <div class="lgrid">
+        <div class="lcol"><h4>Waiting for your fix <b>2</b></h4>
+          <div class="lc warn"><b>my-daddy-was-a-cop</b><span class="chan" style="--c:var(--lou)">LouLaughs</span><small>Rendered — add your project file · edit 19 Oct 03:02</small><div class="tbtns"><button class="mini" type="button">Drop .prproj here</button><button class="mini" type="button">Skip</button></div></div>
+          <div class="lc"><b>the-part-is-hers</b><span class="chan" style="--c:var(--flick)">Flick707</span><small>edit made 19 Oct 01:40 · will be video16</small><div class="tbtns"><button class="mini" type="button">Drop .prproj here</button><button class="mini" type="button">Skip</button></div></div></div>
+        <div class="lcol"><h4>Problems to fix tonight <b>2</b></h4>
+          <div class="lc"><b>video-by-mindculpt</b><small>FAIL · the person speaking is outside the window at 00:00:07 and 00:00:27 · 19 Oct 02:44 · laptop</small><div class="tbtns"><button class="mini" type="button">Open log</button><button class="mini" type="button">Skip (my mistake)</button></div></div>
+          <div class="lc"><b>video-by-darkhumor</b><small>stopped (exit 3) · 19 Oct 03:06 · laptop</small><div class="tbtns"><button class="mini" type="button">Open log</button><button class="mini" type="button">Skip (my mistake)</button></div></div></div>
+        <div class="lcol"><h4>Suggestions from last night <b>3</b></h4>
+          <div class="lc sug"><b>Re-frame onto the speaker automatically</b><small>when the face is outside the window · saves ~3 min per video · half a night</small><div class="tbtns"><button class="mini" type="button" data-want>I want this</button><button class="mini" type="button" data-no>No</button></div></div>
+          <div class="lc sug"><b>Join word pairs split across two captions</b><small>fewer caption fixes · small</small><div class="tbtns"><button class="mini" type="button" data-want>I want this</button><button class="mini" type="button" data-no>No</button></div></div>
+          <div class="lc sug"><b>Warn before a download fills the disk</b><small>no failed nights · small</small><div class="tbtns"><button class="mini" type="button" data-want>I want this</button><button class="mini" type="button" data-no>No</button></div></div></div>
+      </div>
+      <div class="tbtns" style="margin-top:4px"><button class="btn primary" type="button" id="copyTonight">Copy tonight's prompt</button><span class="note" style="align-self:center">2 fixes to learn · 2 problems · 0 wishes</span></div>
       <p class="legend">Drag rows to change the order · right-click a row for more · <kbd>Space</kbd> start · <kbd>Del</kbd> remove the row under the mouse · <kbd>Ctrl</kbd>+<kbd>V</kbd> paste a link</p>
     </section>
 
@@ -326,6 +418,18 @@ kbd{font:500 10px var(--mono);color:var(--muted);border:1px solid var(--line2);p
     </section>
 
     <section class="pane" id="compare" hidden>
+      <div class="row"><h2>New video</h2><div class="autobar"><button class="mini" id="autoBtn" type="button"><i class="sw"></i>Automatic: OFF</button><label class="offpc"><input type="checkbox" id="offPc"> Turn off the PC when everything is done</label></div></div>
+      <div class="nv">
+        <label class="nvf"><span class="k">RAW</span><input class="search" id="nvRaw" placeholder="YouTube link, magnet link, or drop a .torrent / video file"><span class="det" id="dRaw"></span></label>
+        <label class="nvf"><span class="k">Competitor <em>(optional)</em></span><input class="search" id="nvComp" placeholder="Competitor Short link or file"><span class="det" id="dComp"></span></label>
+        <div class="nvf"><span class="k">Channel</span><div class="seg2" id="nvCh"><button type="button" class="on" data-c="MikeMemesYou"><i class="dot" style="--c:var(--mike)"></i>MikeMemesYou</button><button type="button" data-c="LouLaughs"><i class="dot" style="--c:var(--lou)"></i>LouLaughs</button><button type="button" data-c="Flick707"><i class="dot" style="--c:var(--flick)"></i>Flick707</button></div><span></span></div>
+        <div class="nvf"><span class="k">Headline <em>(Enter = line 2)</em></span><textarea class="search hl" id="nvHead" rows="2" placeholder="The fact that prison changed&#10;him this much is hilarious 🔒😭"></textarea><span class="det" id="dHead">empty</span></div>
+        <label class="nvf"><span class="k">YouTube title <em>(optional)</em></span><input class="search" id="nvYt" placeholder="the title you'll upload with"><span></span></label>
+        <div class="nvbot"><div class="mode" id="nvMode"><span class="k">Will make</span><b>—</b></div>
+          <div class="nvex"><button class="mini" type="button" data-ex="1">Example: YouTube + comp</button><button class="mini" type="button" data-ex="2">Magnet + comp</button><button class="mini" type="button" data-ex="3">Only YouTube</button></div>
+          <button class="btn primary" id="nvGo" type="button">Make the video</button></div>
+      </div>
+      <div id="tarea"></div>
       <div class="row"><h2>Every line glides</h2><button class="btn primary" id="run2">Run both</button></div>
       <div class="compare">
         <div class="cmp"><small>Download</small><div class="bar"><i id="j"></i></div><span class="note" id="jt">0 %</span></div>
@@ -366,13 +470,18 @@ function addJob(){
   const el=document.createElement('div');el.className='job';
   const k=n++%names.length;const [nm,chn]=names[k].split(' · ');const cc=chn.startsWith('Lou')?'lou':chn.startsWith('Mike')?'mike':'flick';el.innerHTML=`<span class="ring"></span><span class="wrapfx"></span><div class="slate"><span>Scene <b>${String(k+1).padStart(2,'0')}</b></span><span>Take <b>1</b></span><span>${new Date().toLocaleDateString('en-GB').replace(/\//g,'.')}</span></div><div class="name">${nm} <span class="chan ${cc}" style="font-size:12px;color:var(--muted);margin-left:6px">${chn}</span></div><span class="tag">waiting</span><div class="title"><small>Title</small><span>${titles[k]}</span><button class="copy" type="button">Copy</button></div><div class="bar live"><i></i></div><div class="step"><span>waiting for Start</span><span>Fast</span></div><div class="when"><span>Downloaded <b>${stamp(-95)}</b></span><span>Converted <b>${stamp(-93)}</b></span><span>Template <b>${stamp(-90)}</b></span><span class="e">Edit <b>—</b></span></div>`;
   el.querySelector('.copy').onclick=()=>{const t=titles[k];try{navigator.clipboard.writeText(t).catch(()=>{});}catch(e){}toast('Title copied ✓');};
-  $('#queue').appendChild(el);return el;
+  const lens=[['episode.mkv','22:41'],['short.mp4','0:58']];
+  el.querySelector('.title').insertAdjacentHTML('afterend',`<div class="pair"><span><em>RAW</em> <b class="pr">${lens[0][0]}</b> <i>${lens[0][1]}</i></span><span><em class="c">COMP</em> <b class="pc">${lens[1][0]}</b> <i>${lens[1][1]}</i></span><button class="mini swap" type="button" title="Swap RAW and competitor">⇄ Swap</button></div>
+  <div class="ttl2"><div><span class="k">Title from the post</span><span class="tx">${titles[k].replace(/ [^ ]+$/,'')} #funny #shorts</span><button class="mini" type="button" data-cp>Copy</button></div><div><span class="k">Headline on the video</span><span class="tx">${titles[k]}</span><button class="mini" type="button" data-cp>Copy</button><button class="mini" type="button" data-use>Use as my headline</button></div></div>`);
+  el.querySelector('.swap').onclick=()=>{const a=el.querySelector('.pr'),b=el.querySelector('.pc'),ai=a.nextElementSibling,bi=b.nextElementSibling;[a.textContent,b.textContent]=[b.textContent,a.textContent];[ai.textContent,bi.textContent]=[bi.textContent,ai.textContent];toast('Swapped — RAW and competitor switched');};
+  el.querySelectorAll('[data-cp]').forEach(b=>b.onclick=()=>toast('Copied ✓'));el.querySelector('[data-use]').onclick=()=>toast('Put into your headline — edit it if you want');
+  const firstDone=[...$('#queue').children].find(x=>!x.classList.contains('is-running'));$('#queue').insertBefore(el,firstDone||null);$('#queue').scrollTop=0;return el;
 }
 function stamp(mins){const d=new Date(Date.now()+mins*60000);return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}
 const steps=['S2 probe','S3 proxies','S5.2 visual search','S5.3 refine','S8 captions','S9 verify'];
 function run(el){
   const barBox=el.querySelector('.bar'),bar=barBox.querySelector('i'),tag=el.querySelector('.tag'),st=el.querySelector('.step span');
-  tag.className='tag run';tag.textContent='running';barBox.classList.add('running');el.classList.add('is-running');
+  tag.className='tag run';tag.textContent='running';barBox.classList.add('running');el.classList.add('is-running');$('#queue').prepend(el);
   let target=0,shown=0,finished=false;
   const tick=setInterval(()=>{target=Math.min(100,target+7+Math.random()*12);if(target>=100)clearInterval(tick);},450);
   (function frame(){
@@ -381,8 +490,8 @@ function run(el){
     bar.style.width=shown+'%';
     st.textContent=`${steps[Math.min(steps.length-1,Math.floor(shown/17))]} · ${Math.round(shown)} % · about ${Math.max(0,Math.round((100-shown)/12))} min left`;
     if(shown<100){requestAnimationFrame(frame);return;}
-    if(finished)return;finished=true;barBox.classList.remove('running');el.classList.remove('is-running');el.classList.add('wrapped');bumpToday();log(ok?'Edit made · PASS':'Edit made · OK with a note',el.querySelector('.name').firstChild.textContent.trim(),el.querySelector('.chan').textContent);
-    const ok=Math.random()>.35;const cls=ok?'pass':'note2';
+    if(finished)return;finished=true;barBox.classList.remove('running');el.classList.remove('is-running');el.classList.add('wrapped');
+    const ok=Math.random()>.35;const cls=ok?'pass':'note2';bumpToday();log(ok?'Edit made · PASS':'Edit made · OK with a note',el.querySelector('.name').firstChild.textContent.trim(),el.querySelector('.chan').textContent);
     tag.className='tag '+cls;barBox.classList.add(cls);
     tag.textContent=ok?'PASS':'OK with a note';el.querySelector('.when .e').innerHTML='Edit <b>'+stamp(0)+'</b>';st.textContent=ok?'done':'done · one spot to look at in Premiere';
     const left=[...document.querySelectorAll('.job .tag')].filter(t=>/running|waiting/.test(t.className+t.textContent)&&!/pass|note2/.test(t.className));
@@ -460,6 +569,95 @@ function showQuote(){const el=$('#quote');el.classList.add('swap');setTimeout(()
 $('#quote').addEventListener('click',showQuote);
 setInterval(()=>{if($('#qtag').textContent!==part()&&!qForce){qi=0;showQuote();}},60000);
 $('#qtag').textContent=part();
+
+/* torrent preview */
+function toMatch(msg){addJob();toast(msg||'Sent to Match cuts ✓');setTimeout(()=>$('#t-match').click(),700);}
+
+const TEX='magnet:?xt=urn:btih:EXAMPLE&dn=Example.Movie.2016.1080p.BluRay';
+function fmt(gb){return gb>=1?gb.toFixed(2)+' GB':gb*1024>=1?Math.round(gb*1024)+' MB':Math.max(1,Math.round(gb*1048576))+' KB';}
+function tPick(cb){const files=[['Example.Movie.2016.1080p.BluRay.mkv',7.21,1],['Sample.mkv',0.06,0],['Subs/English.srt',0.0001,0],['Cover.jpg',0.0002,0],['Info.nfo',0.00001,0]];
+ const c=document.createElement('div');c.className='tcard';c.innerHTML=`<h3>Example.Movie.2016.1080p.BluRay <small>5 files · 7.27 GB · <span style="color:var(--ok)">412 seeders</span> · free on D: 412 GB</small></h3>
+ <div class="files">${files.map(([n,g,on])=>`<label><input type="checkbox" ${on?'checked':''} data-g="${g}"><span>${n}${on?'<span class="big">BIGGEST VIDEO</span>':''}</span><span class="sz">${fmt(g)}</span></label>`).join('')}</div>
+ <div class="tfoot"><span>Save to D:\\Shared\\Downloads\\Torrents</span><span id="tsel">7.21 GB selected</span></div>
+ <div class="after"><span class="k">When it's downloaded</span><div class="seg2">${['Ask me','Use as RAW','Only convert','Keep as it is'].map((t,i)=>`<button type="button" class="${i?'':'on'}">${t}</button>`).join('')}</div></div>
+ <div class="tbtns"><button class="btn primary" type="button">Start download</button><button class="btn" type="button">Cancel</button></div>`;
+ $('#tarea').prepend(c);
+ c.querySelectorAll('input').forEach(i=>i.onchange=()=>{let t=0;c.querySelectorAll('input:checked').forEach(x=>t+=+x.dataset.g);c.querySelector('#tsel').textContent=fmt(t)+' selected';});
+ if(cb){const af=c.querySelector('.after');af&&af.remove();}
+ c.querySelectorAll('.seg2 button').forEach(b=>b.onclick=()=>{c.querySelectorAll('.seg2 button').forEach(x=>x.classList.toggle('on',x===b));});
+ const [go,cancel]=c.querySelectorAll('.tbtns .btn');cancel.onclick=()=>c.remove();go.onclick=()=>{if(cb){cb(c);return;}c._after=c.querySelector('.seg2 .on').textContent;tRun(c);};}
+function tRun(c){const total=7.21;c.innerHTML=`<h3>Example.Movie.2016.1080p.BluRay.mkv <span class="tag run">Downloading</span></h3>
+ <div class="bar live running"><i></i></div>
+ <div class="tstats"><div><span>Seeders</span><b class="seed" data-k="s">0</b></div><div><span>Peers</span><b class="peer" data-k="p">0</b></div><div><span>Speed</span><b data-k="v">0</b></div><div><span>Done</span><b data-k="d">0 %</b></div><div><span>Time left</span><b data-k="e">—</b></div><div><span>Health</span><div class="health">${'<i></i>'.repeat(5).split('</i>').slice(0,5).map((x,i)=>x+'</i>').join('').replace(/<i>/g,(m,o)=>m)}</div></div></div>
+ <div class="tfoot"><span>7.21 GB · Added ${stamp(0)}</span><span>then: <b style="color:var(--coral)">${c._after}</b> · stops sharing when finished</span></div>
+ <div class="tbtns"><button class="btn" type="button">Pause</button><button class="btn" type="button">Remove</button></div>`;
+ c.querySelectorAll('.health i').forEach((h,i)=>h.style.height=(4+i*2.5)+'px');
+ const q=k=>c.querySelector(`[data-k="${k}"]`);const bar=c.querySelector('.bar i');let p=0,paused=false,last=performance.now();
+ const [pb,rb]=c.querySelectorAll('.tbtns .btn');pb.onclick=()=>{paused=!paused;pb.textContent=paused?'Resume':'Pause';c.querySelector('.tag').textContent=paused?'Paused':'Downloading';};rb.onclick=()=>{p=-1;c.remove();};
+ function tick(now){if(p<0)return;const dt=(now-last)/1000;last=now;
+  if(!paused){const mbs=38+Math.sin(now/900)*9+Math.random()*4;p=Math.min(100,p+dt*6.5);
+   q('v').textContent=mbs.toFixed(1)+' MB/s';q('d').textContent=Math.floor(p)+' %';const left=(100-p)/6.5*14;q('e').textContent=left>60?Math.ceil(left/60)+' min':Math.ceil(left)+' s';
+   q('s').textContent=Math.round(398+Math.sin(now/1300)*12);q('p').textContent=Math.round(61+Math.cos(now/1100)*8);}
+  else{q('v').textContent='0 MB/s';}
+  const hs=c.querySelectorAll('.health i');hs.forEach((h,i)=>h.classList.toggle('on',i<5));
+  bar.style.width=p+'%';if(p>=100){tDone(c);return;}requestAnimationFrame(tick);}
+ requestAnimationFrame(tick);}
+function tDone(c){const a=c._after||'Ask me';if(a!=='Ask me'){c.classList.add('tdone');c.innerHTML=`<h3>Example.Movie.2016.1080p.BluRay.mkv <span class="tag ${a==='Keep as it is'?'pass':'run'}">${a==='Keep as it is'?'Downloaded':a==='Use as RAW'?'Waiting for the competitor':'Converting'}</span></h3><div class="tfoot"><span>7.21 GB · finished ${stamp(0)} · sharing stopped</span><span>chosen before: ${a}</span></div>${a==='Use as RAW'?'<div class="tadd"><input class="search tin" placeholder="Competitor link or drop the file"><button class="btn primary" type="button">Convert and send to Match cuts</button></div>':''}<div class="tbtns">${a==='Only convert'?'<button class="btn primary" type="button">Send to Match cuts</button>':''}<button class="btn" type="button">Open folder</button></div>`;c.querySelectorAll('.btn.primary').forEach(b=>b.onclick=()=>toMatch(a==='Use as RAW'?'Converted — added to the Match cuts queue ✓':'Added to the Match cuts queue — add the competitor there'));toast(a==='Keep as it is'?'Torrent downloaded ✓':a==='Only convert'?'Downloaded — converting now':'Downloaded — add the competitor');log('Torrent downloaded · '+a,'Example.Movie.2016.1080p','Flick707');return;}c.classList.add('tdone');c.innerHTML=`<h3>Example.Movie.2016.1080p.BluRay.mkv <span class="tag pass">Downloaded</span></h3>
+ <div class="tfoot"><span>7.21 GB · finished ${stamp(0)} · sharing stopped</span><span>D:\\Shared\\Downloads\\Torrents</span></div>
+ <div class="note" style="color:var(--fg)">What next?</div>
+ <div class="tbtns"><button class="btn primary" type="button">Use as RAW</button><button class="btn" type="button">Only convert</button><button class="btn" type="button">Keep as it is</button><button class="btn" type="button">Open folder</button></div>`;
+ toast('Torrent downloaded ✓');log('Torrent downloaded','Example.Movie.2016.1080p','Flick707');
+ const b=c.querySelectorAll('.tbtns .btn');b[0].onclick=()=>toMatch('Converting — then it goes to the Match cuts queue ✓');b[1].onclick=()=>{b[1].textContent='Converting…';toast('Converting like a RAW (CRF 13)');};b[2].onclick=()=>toast('Kept as it is');b[3].onclick=()=>toast('Opening the folder…');}
+
+/* new video form */
+let autoMode=false;const gates=new Set();
+$('#autoBtn').onclick=()=>{autoMode=!autoMode;$('#autoBtn').classList.toggle('on',autoMode);$('#autoBtn').lastChild.textContent='Automatic: '+(autoMode?'ON':'OFF');
+ if(autoMode){toast('Automatic ON — every step runs by itself');[...gates].forEach(g=>g());}else toast('Automatic OFF — it waits for your buttons');};
+$('#offPc').onchange=e=>toast(e.target.checked?'The PC turns off when every video is done (60 s warning)':'The PC stays on');
+
+function kind(v){v=v.trim();if(!v)return'';if(/^magnet:|\.torrent$/i.test(v))return'mg';if(/youtu\.?be/i.test(v))return'yt';if(/^https?:\/\//.test(v))return'yt';return'fl';}
+const KN={yt:'YouTube',mg:'Torrent',fl:'File','':'—'};
+function nvMode(){const r=kind($('#nvRaw').value),c=kind($('#nvComp').value);
+ ['Raw','Comp'].forEach((k,i)=>{const d=$('#d'+k),t=i?c:r;d.className='det '+t;d.textContent=t?KN[t]:'empty';});
+ const m=!r?'—':c?'Full Match cuts edit':r==='mg'?'Needs a competitor':'Just cuts (every scene change)';$('#nvMode b').textContent=m;return{r,c,m};}
+['#nvRaw','#nvComp'].forEach(id=>$(id).addEventListener('input',nvMode));nvMode();
+function headDet(){const v=($('#nvHead').value).trim();const d=$('#dHead');d.className='det '+(v?'ok2':'');d.textContent=v?'ready':'empty';}$('#nvHead').addEventListener('input',headDet);
+document.querySelectorAll('#nvCh button').forEach(b=>b.onclick=e=>{e.preventDefault();document.querySelectorAll('#nvCh button').forEach(x=>x.classList.toggle('on',x===b));});
+const EX={1:['https://youtu.be/AbCdEf12345','https://youtube.com/shorts/Zx9Yw8Vu7Ts'],2:['magnet:?xt=urn:btih:EXAMPLE&dn=Example.Movie.2016.1080p','https://youtube.com/shorts/Zx9Yw8Vu7Ts'],3:['https://youtu.be/AbCdEf12345','']};
+document.querySelectorAll('[data-ex]').forEach(b=>b.onclick=()=>{const [a,c]=EX[b.dataset.ex];$('#nvRaw').value=a;$('#nvComp').value=c;nvMode();});
+$('#nvGo').onclick=()=>{const {r,c,m}=nvMode();if(!r){toast('Paste a RAW link first');return;}if(r==='mg'&&!c){toast('A torrent needs a competitor — add its link');return;}
+ const ch=$('#nvCh .on').dataset.c,head=($('#nvHead').value).trim();$('#nvRaw').value='';$('#nvComp').value='';$('#nvHead').value='';$('#nvYt').value='';nvMode();headDet();
+ if(r==='mg'){tPick(card=>pipeline(r,!!c,card,ch,head));}else pipeline(r,!!c,null,ch,head);};
+function pipeline(r,hasComp,reuse,ch,head){ch=ch||'MikeMemesYou';const full=hasComp;const steps=['Download',...(full?['Convert ×2','Template','Edit']:['Convert','Cuts'])];
+ const c=reuse||document.createElement('div');c.className='pipe';c.style.setProperty('--n',steps.length);
+ const name=r==='mg'?'Example.Movie.2016.1080p':'new-video-'+String(Math.floor(Math.random()*90+10));
+ c.innerHTML=`<h3><span>${name} <span class="chan" style="--c:${chC[ch]}">${ch}</span></span><span class="tag run">${full?'Full Match cuts':'Just cuts'}</span></h3>
+ <div class="steps">${steps.map(t=>`<div class="st"><span>${t}</span><div class="bar live"><i></i></div><small></small></div>`).join('')}</div>
+ ${r==='mg'?'<div class="tstats"><div><span>Seeders</span><b class="seed" data-k="s">0</b></div><div><span>Peers</span><b class="peer" data-k="p">0</b></div><div><span>Speed</span><b data-k="v">—</b></div><div><span>Time left</span><b data-k="e">—</b></div></div>':''}
+ <div class="tfoot"><span>Started ${stamp(0)}</span><span class="now-step">Downloading…</span></div>`;
+ if(!reuse)$('#tarea').prepend(c);
+ const st=[...c.querySelectorAll('.st')];const dur=[r==='mg'?7:3,3,1.5,full?5:2.5].slice(0,steps.length);let i=0,p=0,last=performance.now();
+ let waiting=false;function tick(now){const dt=(now-last)/1000;last=now;if(waiting){requestAnimationFrame(tick);return;}const s0=st[i];
+  if(steps[i]==='Template'&&!head&&autoMode&&!s0._def){s0._def=1;head='(default)';c._defHead=1;s0.querySelector('small').textContent='default template';}
+  if(steps[i]==='Template'&&!head&&!s0._asked){s0._asked=1;waiting=true;s0.querySelector('span').style.color='var(--warn)';s0.querySelector('small').textContent='needs a headline';c.querySelector('.now-step').textContent='Waiting for the headline — download and convert are done';const box=document.createElement('div');box.className='tadd';box.innerHTML='<textarea class="search hl" rows="2" placeholder="Headline — press Enter for line 2 (emoji OK)"></textarea><button class="btn primary" type="button">Make the template</button>';c.insertBefore(box,c.querySelector('.tfoot'));box.querySelector('.btn').onclick=()=>{head=box.querySelector('textarea').value.trim()||'Example headline 😭';box.remove();s0.querySelector('span').style.color='';waiting=false;last=performance.now();toast('Template being made');};toast('Needs the headline for the template');requestAnimationFrame(tick);return;}s0.classList.add('now');s0.querySelector('.bar').classList.add('running');p=Math.min(100,p+dt/dur[i]*100);s0.querySelector('i').style.width=p+'%';s0.querySelector('small').textContent=Math.floor(p)+' %';
+  if(r==='mg'&&i===0){c.querySelector('[data-k="s"]').textContent=Math.round(398+Math.sin(now/1300)*12);c.querySelector('[data-k="p"]').textContent=Math.round(61+Math.cos(now/1100)*8);c.querySelector('[data-k="v"]').textContent=(38+Math.sin(now/900)*9).toFixed(1)+' MB/s';c.querySelector('[data-k="e"]').textContent=Math.ceil((100-p)/100*dur[0]*20)+' s';}
+  if(p>=100){s0.classList.remove('now');s0.classList.add('ok');s0.querySelector('.bar').classList.remove('running');s0.querySelector('small').textContent=stamp(0).split(' ').slice(-1)[0]||'done';i++;p=0;
+   if(r==='mg'&&i===1){const ts=c.querySelector('.tstats');ts.style.transition='opacity .5s';ts.style.opacity=0;setTimeout(()=>ts.remove(),500);}
+   if(i>=steps.length){const tg=c.querySelector('.tag');tg.className='tag pass';tg.textContent=full?'PASS':'Cuts ready';c.querySelector('.now-step').textContent=full?'Edit made — open it in Premiere':'Cut at 37 scene changes — open it in Premiere';
+    if(c._defHead){c.querySelector('.now-step').textContent+=' · default template used';const t=c.querySelector('.tag');t.className='tag note2';t.textContent=full?'PASS · default template':'Cuts ready · default template';}
+    c.insertAdjacentHTML('beforeend',`<div class="tbtns"><button class="btn primary" type="button">Open in Premiere</button>${c._defHead?'<button class="btn" type="button">Change headline</button>':''}${full?'':'<button class="btn" type="button">Add a competitor</button>'}<button class="btn" type="button">Open folder</button></div>`);
+    c.querySelectorAll('.tbtns .btn').forEach(b=>b.onclick=()=>toast(b.textContent==='Change headline'?'Type the headline — only the template is made again, the edit stays':b.textContent==='Add a competitor'?'Paste the competitor — no new download':b.textContent==='Open folder'?'Opening the folder…':'Opening in Premiere…'));
+    toast(full?"That's a wrap — edit made ✓":'Cuts ready ✓');if($('#offPc').checked&&!document.querySelector('.pipe .tag.run'))setTimeout(()=>toast('Everything done — the PC turns off in 60 s (Cancel)'),1600);log(full?'Edit made · PASS':'Just cuts made',name,ch);try{bumpToday&&full&&0}catch(_){}return;}
+   const prev=steps[i-1];if(/^Download|^Convert/.test(prev)&&!autoMode){waiting=true;const label=/^Download/.test(prev)?'Convert':(full?'Send to Match cuts':'Make the cuts');c.querySelector('.now-step').textContent=/^Download/.test(prev)?'Downloaded — press Convert when you want':'Converted — press '+label+' when you want';const bx=document.createElement('div');bx.className='tbtns gate';bx.innerHTML='<button class="btn primary" type="button">'+label+'</button><button class="btn" type="button">Open folder</button>';c.insertBefore(bx,c.querySelector('.tfoot'));const go=()=>{if(!bx.isConnected)return;gates.delete(go);bx.remove();waiting=false;last=performance.now();c.querySelector('.now-step').textContent=steps[i]+'…';if(label==='Send to Match cuts')toast('Sent to Match cuts ✓');};gates.add(go);bx.querySelector('.btn.primary').onclick=go;bx.querySelectorAll('.btn')[1].onclick=()=>toast('Opening the folder…');requestAnimationFrame(tick);return;}
+   c.querySelector('.now-step').textContent=steps[i]+'…';}
+  requestAnimationFrame(tick);}
+ requestAnimationFrame(tick);}
+
+/* final extras */
+document.querySelectorAll('#chk [data-r]').forEach(b=>b.onclick=()=>{const c=$('#chk');c.style.transition='opacity .4s';c.style.opacity=0;setTimeout(()=>c.remove(),400);toast(b.dataset.r+' is the RAW — starting');});
+document.querySelectorAll('[data-want]').forEach(b=>b.onclick=()=>{const c=b.closest('.lc');c.style.opacity=.4;b.textContent='Added to wishes ✓';toast('Goes into tonight\'s prompt');});
+document.querySelectorAll('[data-no]').forEach(b=>b.onclick=()=>{const c=b.closest('.lc');c.style.opacity=0;setTimeout(()=>c.remove(),400);});
+$('#copyTonight').onclick=()=>toast('Tonight\'s prompt copied — paste it into Claude Code');
 $('#add').onclick=()=>addJob();
 $('#start').onclick=()=>{let q=[...document.querySelectorAll('.job')].filter(j=>j.querySelector('.tag').textContent==='waiting');if(!q.length)q=[addJob()];q.forEach((j,k)=>setTimeout(()=>run(j),k*600));};
 $('#copy').onclick=()=>toast('Copied ✓');
