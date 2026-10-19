@@ -173,6 +173,10 @@ def project_events(data: Mapping) -> list[Event]:
             add(s.get("finished"), done, detail, NOTE if s.get("default") else INFO, column=column)
         elif s.get("state") == "failed":
             add(s.get("finished"), failed, s.get("error") or "", FAIL)
+    jb = data.get("just_cuts_before")                   # Just cuts made before "Add a competitor" (newvideo)
+    if isinstance(jb, Mapping) and jb.get("state") == "done":
+        add(jb.get("finished"), f"Just cuts made · {jb.get('result') or 'PASS'}",
+            f"{jb.get('cuts')} cuts" if jb.get("cuts") is not None else "", OK)
     e = step("edit")
     result = str(e.get("result") or "")
     made = "Just cuts made" if e.get("kind") == "just_cuts" else "Edit made"     # day 12: Just cuts

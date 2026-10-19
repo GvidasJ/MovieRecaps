@@ -325,6 +325,22 @@ def test_the_real_stages_name_the_folder_from_the_post_then_the_headline_on_the_
     assert (it.project / TT.TITLES_TXT).is_file() and len(list(root.iterdir())) == 1
 
 
+def test_add_a_competitor_still_gets_the_title_from_the_post(tmp_path, monkeypatch):
+    # the e2e run (day 12): a competitor added to a Just cuts row is not read by _create -> "nothing readable in the
+    # post"; the title yt-dlp gave it (project.json competitor.title) is used
+    from mr_app.core import titles as TT
+    p = P.create(tmp_path / "projects", raw_url=YT)
+    p.update(competitor={"url": COMP, "title": "Before Tobey Maguire Was Spider-Man He Had One Job #shorts"})
+    comp = p.folder / "competitor.mp4"
+    comp.write_bytes(b"x")
+    monkeypatch.setattr(TT, "READER", lambda video: "NONE")
+    it = D.Item(COMP, raw_url=YT, project=p.folder, post_title=None)
+    out: dict = {}
+    D.StageThread(it, ("convert",))._titles(P.load(p.folder), comp, out, [])      # noqa: SLF001
+    assert out["post_title"] == "Before Tobey Maguire Was Spider-Man He Had One Job"
+    assert P.load(it.project).data["post_title"] == out["post_title"]          # (renamed: its id said nothing)
+
+
 def test_newest_on_top_running_first_then_waiting_then_finished(page):
     _fill(page, YT, COMP)
     a = page.add()                                               # waits for Convert

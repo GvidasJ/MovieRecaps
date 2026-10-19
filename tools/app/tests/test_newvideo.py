@@ -329,3 +329,37 @@ def test_a_tweet_style_headline_loses_the_account_and_the_models_stutter():
     assert TT.settle("", ["They stopped making", "comedy like this"]) == "They stopped making\ncomedy like this"
     assert TT.settle("", ocr).startswith("In 1996, Tobey") and "\n" not in TT.settle("", ocr)
     assert TT.settle("", []) == "" and TT.settle("Just this", None) == "Just this"
+
+
+def test_add_a_competitor_keeps_the_just_cuts_apart_and_the_full_edit_is_not_called_just_cuts(tmp_path):
+    # the e2e run (day 12): the steps merge their details, so the full edit's step kept "kind: just_cuts" and the
+    # 11 cuts of the cuts run -- History said "Just cuts made" for it, the queue row and the board "Just cuts"
+    from mr_app.core import history as H
+    from mr_app.ui.titles_block import is_just_cuts
+    p = P.create(tmp_path / "projects", raw_url="https://youtu.be/0IKJEnLg7G8")
+    p.update(kind=NV.JUST_CUTS)
+    p.set_step("edit", P.DONE, kind="just_cuts", cuts=11, result="PASS", run_dir=str(p.folder / "cuts"))
+    p.update(competitor={"url": "https://youtube.com/shorts/f18B0Accoig"}, kind=NV.FULL)
+    NV.keep_just_cuts(p)
+    d = P.load(p.folder).data
+    assert d["steps"]["edit"]["state"] == P.WAITING and "kind" not in d["steps"]["edit"]
+    assert "cuts" not in d["steps"]["edit"] and d[NV.JUST_CUTS_BEFORE]["cuts"] == 11
+    assert not is_just_cuts(d)
+    whats = [(e.what, e.detail) for e in H.project_events(d)]
+    assert ("Just cuts made · PASS", "11 cuts") in whats and not any(w.startswith("Edit made") for w, _ in whats)
+    P.load(p.folder).set_step("edit", P.DONE, result="PASS")
+    whats = [e.what for e in H.project_events(P.load(p.folder).data)]
+    assert "Just cuts made · PASS" in whats and "Edit made · PASS" in whats
+    NV.keep_just_cuts(P.load(p.folder))                             # a second time: nothing moves
+    assert P.load(p.folder).data["steps"]["edit"]["result"] == "PASS"
+    assert is_just_cuts({"kind": "full", "steps": {"edit": {"kind": "just_cuts"}}}) is False
+
+
+def test_a_project_without_a_headline_says_its_default_template_on_the_queue_row():
+    pytest.importorskip("PySide6.QtWidgets")
+    from mr_app.core import jobs as J
+    from mr_app.tools import match_cuts_tool as M
+    j = J.Job("v", Path("c.mp4"), Path("r.mp4"))
+    j.channel, j.project = "LouLaughs", Path("some project")
+    assert "default template" in M.template_line(j) and "NO TITLE" not in M.template_line(j)
+    assert M.template_problems(j) == []                             # used as it is: nothing to warn about

@@ -190,7 +190,12 @@ def template_line(j: J.Job) -> str:
     """The row's template line: 'Template: LouLaughs -- "my title" (+ watermark) -- 42 % the same words ...'."""
     if not j.channel:
         return "Template: default (templates\\default.png), no watermark"
-    t = f"Template: {j.channel}" if j.title else f"Template: {j.channel} -- NO TITLE yet (press Template)"
+    if j.title:
+        t = f"Template: {j.channel}"
+    elif getattr(j, "project", None) is not None:      # day 12: a project without a headline -> the channel's default
+        t = f"Template: {j.channel} -- its default template (no headline; press Template to type one)"
+    else:
+        t = f"Template: {j.channel} -- NO TITLE yet (press Template)"
     t += " + watermark"                      # (the title itself is in the row's title box)
     if j.headline:
         try:
@@ -246,6 +251,8 @@ def template_problems(j: J.Job) -> list[str]:
     if not j.channel:
         return []
     if not (j.title or "").strip():
+        if getattr(j, "project", None) is not None:     # day 12: the channel's default template is used, as it is
+            return []
         return ["the channel's template has no title yet: press Template on its row and type it"]
     if j.headline:
         try:

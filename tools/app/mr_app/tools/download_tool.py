@@ -273,6 +273,9 @@ class StageThread(QThread):
         head = TT.read_on_video(comp)
         head = TT.settle(head, ocr_lines)
         post = it.post_title if it.post_title is not None else (p.data.get("post_title") or "")
+        if not post:            # "Add a competitor" (its link was not read by _create): the title yt-dlp gave it
+            comp_info = p.data.get("competitor") if isinstance(p.data.get("competitor"), dict) else {}
+            post = TT.post_title({"title": comp_info.get("title") or ""}) if comp_info.get("url") else ""
         out["video_headline"], out["post_title"] = head, post
         try:
             TT.save(p, post, head)
@@ -1769,7 +1772,9 @@ class DownloadPage(QWidget):
         def work() -> str:                                # project.json written off the window's thread
             try:
                 from ..core import projects as PJ
-                PJ.load(folder).update(competitor=upd, kind=NV.FULL)
+                p = PJ.load(folder)
+                p.update(competitor=upd, kind=NV.FULL)
+                NV.keep_just_cuts(p)                      # its edit step is the full edit's from now on
                 return ""
             except Exception as e:  # noqa: BLE001
                 return NV.plain_error(e)
