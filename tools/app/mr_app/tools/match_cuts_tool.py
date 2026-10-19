@@ -1293,6 +1293,8 @@ class MatchCutsPage(QWidget):
             fn = getattr(self.ctx, "project_done", None)
             if fn is not None and j.project is not None and lab in R.GOOD:
                 fn(j)
+            from .learn_tool import after_edit        # day 12: problems_queue.md / "Waiting for your fix"
+            after_edit(self.ctx, j, res)
         self._taskbar()
         if self.running:
             self._next()

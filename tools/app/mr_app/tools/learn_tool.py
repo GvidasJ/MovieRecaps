@@ -10,9 +10,14 @@
 * New fixed.prproj (or *_fixed.prproj) files appearing in a project are found by themselves: "Learn from this?".
 * Standing rules (always apply) and Wishes (requests.md) are saved in the shared folder with learn_queue.md;
   "Copy tonight's prompt" builds a ready-to-paste Claude Code prompt from them.
+* Day 12: three columns (learn_board.py) -- "Waiting for your fix" (every finished edit waits by itself: drop your
+  .prproj on its card, or save one into the project; amber once the project is rendered), "Problems to fix tonight"
+  (problems_queue.md: Open log, Skip (my mistake)) and "Suggestions from last night" (suggestions.md: I want this ->
+  requests.md, No). ``after_edit`` is the Match cuts queue's one hook into all this.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -20,6 +25,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, Q
                                QPlainTextEdit, QVBoxLayout, QWidget)
 
 from . import Tool
+from . import learn_board as LB
 from ..core import learnkit, paths
 from ..ui import background as BG
 from ..ui import theme
@@ -93,6 +99,15 @@ class LearnPage(QWidget):
                                  "your wishes (requests.md)")
         self.b_prompt.clicked.connect(self.copy_prompt)
         lay.addWidget(W.SectionHeader("Learn from your fix", [self.b_prompt]))
+        # day 12: waiting for your fix / problems / suggestions
+        self.columns = LB.LearnColumns()
+        lay.addWidget(self.columns)
+        self._wait: dict = {}                 # waiting card id -> waiting.Card
+        self._probs: dict = {}                # problem id -> problems.Problem
+        self._sugs: dict = {}                 # suggestion title -> suggestions.Suggestion
+        self._amber = 0
+        self._via_card = None                 # (token, run) of a fix dropped on a waiting card
+        self._cols_busy = self._cols_again = False
         self.offers = QVBoxLayout()
         self.offers.setSpacing(10)
         lay.addLayout(self.offers)
@@ -212,6 +227,7 @@ class LearnPage(QWidget):
                                 if wishes else "No wishes yet.")
             self.where.setText(f"learn_queue.md, standing_rules.md and requests.md are in {hub}")
         BG.call(work, got, lambda e: self.where.setText(f"the shared files could not be read: {e}"))
+        self.refresh_columns()
 
     def _show_queue(self, items) -> None:
         if not items:
@@ -304,6 +320,9 @@ class LearnPage(QWidget):
             return
         card = self.form.card if keep_card and self.form is not None and f.card is None else f.card
         f.card = card
+        via = self._via_card
+        if via is not None and via[0] == token and f.run is not None and via[1] is not None                 and learnkit._key(f.run) == learnkit._key(via[1]):
+            f.run_how = "the run of its waiting card"
         self.form = f
         self.prproj, self.run, self.card = f.prproj, f.run, card
         self.name.blockSignals(True)
@@ -380,6 +399,12 @@ class LearnPage(QWidget):
             except Exception:  # noqa: BLE001
                 pass
             self.refresh_hub()
+            run = getattr(pl, "run", None) or f.run
+
+            def unwait():                                 # its "Waiting for your fix" card goes
+                from ..core import waiting
+                return waiting.learned(hub, run=run, project=project)
+            BG.call(unwait, lambda _e: self.refresh_columns(), lambda _e: None)
             if project is not None:                       # the project's card to Fixed (never backwards)
                 BG.call(lambda: _to_fixed(project), lambda moved: self._board_reload() if moved else None,
                         lambda _e: None)
@@ -399,10 +424,11 @@ class LearnPage(QWidget):
             return list(learnkit.new_fixed(roots, learnkit.default_state_path(), queue_folder=hub) or [])
 
         def got(found) -> None:
+            mine = {learnkit._key(c.project) for c in self._wait.values() if c.project is not None}
             for project, prproj in found:
                 key = str(prproj)
-                if key in self._offers:
-                    continue
+                if key in self._offers or learnkit._key(project) in mine:
+                    continue                              # (a waiting card shows its own fix)
                 o = Offer(self, Path(project), Path(prproj))
                 self._offers[key] = o
                 self.offers.addWidget(o)
@@ -411,6 +437,7 @@ class LearnPage(QWidget):
                     fn(f"New fix found in {Path(project).name} -- Learn from this?", "info")
             self._badge()
         BG.call(work, got, lambda _e: None)
+        self.refresh_columns()
 
     def offer_answer(self, offer: Offer, yes: bool) -> None:
         self._offers.pop(str(offer.prproj), None)
@@ -431,9 +458,216 @@ class LearnPage(QWidget):
             b.reload()
 
     def _badge(self) -> None:
+        """The Learn tab's small count: new fixes found, and waiting cards whose project is rendered."""
         fn = getattr(self.ctx, "set_badge", None)
+        n = len(self._offers) + self._amber
         if fn is not None:
-            fn("learn", str(len(self._offers)) if self._offers else "")
+            fn("learn", str(n) if n else "")
+
+    # -- day 12: the three columns --
+    def refresh_columns(self) -> None:
+        """Read the waiting cards, the problems and the suggestions (in the background) and show them; a fix saved
+        into a waiting project is noticed here too (every minute, with watch())."""
+        if self._cols_busy:
+            self._cols_again = True
+            return
+        self._cols_busy, self._cols_again = True, False
+        hub, repo = self.hub(), paths.repo()
+
+        def work():
+            from ..core import problems, suggestions, waiting
+            cards = waiting.cards(hub, repo)
+            fixes = waiting.find_fixes(cards, learnkit.default_state_path())
+            probs = problems.newest_first(problems.read(hub))
+            sugs = suggestions.newest_first(suggestions.read(hub))
+            return cards, fixes, probs, sugs
+
+        def end() -> None:
+            self._cols_busy = False
+            if self._cols_again:
+                self.refresh_columns()
+
+        def got(r) -> None:
+            self._show_columns(*r)
+            end()
+        BG.call(work, got, lambda _e: end())
+
+    def _show_columns(self, cards, fixes, probs, sugs) -> None:
+        from ..core import learn_hub as H
+        self._wait = {c.id: c for c in cards}
+        self._amber = sum(1 for c in cards if c.rendered)
+        specs = []
+        for c in cards:
+            e = c.entry
+            when = H.nice_date(e.finished) if e.finished else ""
+            lines = [(f"Rendered — add your project file · edit {when}" if c.rendered else
+                      f"edit made {when}" + (f" · will be {c.name}" if c.name else "")).strip(" ·")]
+            media = " · ".join(x for x in (f"RAW: {e.raw}" if e.raw else "", f"COMP: {e.competitor}"
+                                           if e.competitor else "") if x)
+            if media:
+                lines.append(media)
+            if c.fix is not None:
+                lines.append(f"your fix: {c.fix.name}")
+            buttons = []
+            if c.fix is not None:
+                buttons.append(("Check it", lambda c=c: self.take_waiting(c.id, [c.fix])))
+            buttons += [("Drop .prproj here", lambda c=c: self._pick_for(c.id)),
+                        ("Skip", lambda c=c: self.skip_waiting(c.id))]
+            specs.append(dict(key=c.id, title=e.name, channel=e.channel, lines=lines, warn=c.rendered,
+                              buttons=buttons, on_drop=lambda files, c=c: self.take_waiting(c.id, files)))
+        self.columns.waiting.show_cards(specs)
+        self._probs = {p.key(): p for p in probs}
+        specs = []
+        for p in probs:
+            bits = [p.check or p.result, H.nice_date(p.date) if p.date else "", p.computer]
+            lines = [" · ".join(b for b in bits if b)]
+            if p.state == "not fixed":
+                lines.append(p.status)
+            specs.append(dict(key=p.key(), title=p.name, lines=lines,
+                              buttons=[("Open log", lambda p=p: self.open_log(p.key())),
+                                       ("Skip (my mistake)", lambda p=p: self.skip_problem(p.key()))]))
+        self.columns.problems.show_cards(specs)
+        self._sugs = {s.title: s for s in sugs}
+        specs = []
+        for s in sugs:
+            line = " · ".join(x for x in (s.why, s.size) if x)
+            specs.append(dict(key="s:" + s.title.lower(), title=s.title, lines=[line],
+                              buttons=[("I want this", lambda s=s: self.want(s.title)),
+                                       ("No", lambda s=s: self.no(s.title))]))
+        self.columns.suggestions.show_cards(specs)
+        self._badge()
+        for c, prproj in fixes:                           # a fix saved into a waiting project
+            if self.form is None and c.id in self._wait:
+                self.take_waiting(c.id, [prproj])
+                try:
+                    learnkit.mark_seen(learnkit.default_state_path(), prproj)
+                except Exception:  # noqa: BLE001
+                    pass
+                fn = getattr(self.ctx, "toast", None)
+                if fn is not None:
+                    fn(f"Your fix of {c.entry.name} was found -- check it, then Learn this one", "info")
+                break
+
+    def take_waiting(self, wid: str, files: list) -> None:
+        """Your fix for a waiting card (dropped on it, chosen, or found in its project): the check card at once, with
+        the card's run already chosen."""
+        c = self._wait.get(wid)
+        prs = [Path(f) for f in files if Path(f).suffix.lower() == ".prproj"]
+        if c is None or not prs:
+            fn = getattr(self.ctx, "toast", None)
+            if fn is not None and c is not None:
+                fn("Drop your fixed .prproj (a Premiere project) on the card", "note")
+            return
+        items = [prs[0]] + ([c.run] if c.run is not None else [])
+        self.take(items)
+        self._via_card = (self._token, c.run)
+        self._show_check()
+
+    def _show_check(self) -> None:
+        p = self.parentWidget()
+        while p is not None:
+            if hasattr(p, "ensureWidgetVisible"):
+                p.ensureWidgetVisible(self.check)
+                return
+            p = p.parentWidget()
+
+    def _pick_for(self, wid: str) -> None:
+        c = self._wait.get(wid)
+        start = str(c.project) if c is not None and c.project is not None else str(Path.home() / "Desktop")
+        f, _ = QFileDialog.getOpenFileName(self, "Your fixed project", start, "Premiere project (*.prproj)")
+        if f:
+            self.take_waiting(wid, [Path(f)])
+
+    def _close(self, col, key: str, work, ok_text: str = "") -> None:
+        """Close a card at once (it folds away) and write the change in the background; a failure says so and the
+        next look brings the card back."""
+        col.remove(key)
+        if col is self.columns.waiting:
+            c = self._wait.pop(key, None)
+            if c is not None and c.rendered:
+                self._amber = max(0, self._amber - 1)
+                self._badge()
+
+        def done(err) -> None:
+            fn = getattr(self.ctx, "toast", None)
+            if err:
+                if fn is not None:
+                    fn(f"Not saved: {err}"[:140], "fail")
+            elif ok_text and fn is not None:
+                fn(ok_text)
+            self.refresh_columns()
+        BG.call(work, done, lambda e: done(str(e)))
+
+    def skip_waiting(self, wid: str) -> None:
+        hub = self.hub()
+
+        def work():
+            from ..core import waiting
+            return waiting.skip(hub, wid)
+        self._close(self.columns.waiting, wid, work)
+
+    def skip_problem(self, pid: str) -> None:
+        hub = self.hub()
+
+        def work():
+            from ..core import problems
+            return problems.skip(hub, pid)
+        self._close(self.columns.problems, pid, work, "Skipped -- marked as your mistake in problems_queue.md")
+
+    def open_log(self, pid: str) -> None:
+        p = self._probs.get(pid)
+        if p is None:
+            return
+        hub = self.hub()
+
+        def work():
+            from ..core import problems
+            f = problems.log_to_open(p, hub)
+            if f:
+                os.startfile(f)                           # noqa: S606 - the user's own log, in their editor
+            return f
+
+        def done(f) -> None:
+            fn = getattr(self.ctx, "toast", None)
+            if not f and fn is not None:
+                fn("The log is not on this computer (the run was made on the other one) -- "
+                   + (f"it is in {p.run}" if p.run else "no run folder known"), "note")
+        BG.call(work, done, lambda e: done(""))
+
+    def want(self, title: str) -> None:
+        """"I want this": into requests.md (the card stays faded until the next look takes it away)."""
+        s = self._sugs.get(title)
+        if s is None:
+            return
+        hub = self.hub()
+        card = self.columns.suggestions.cards.get("s:" + title.lower())
+        if card is not None:
+            card.dim("Added to your wishes ✓")
+
+        def work():
+            from ..core import suggestions
+            return suggestions.want(hub, s)
+
+        def done(err) -> None:
+            fn = getattr(self.ctx, "toast", None)
+            if fn is not None:
+                if err:
+                    fn(f"Not saved: {err}"[:140], "fail")
+                else:
+                    fn("In your wishes -- it goes into tonight's prompt ✓")
+            self.refresh_hub()
+        BG.call(work, done, lambda e: done(str(e)))
+
+    def no(self, title: str) -> None:
+        s = self._sugs.get(title)
+        if s is None:
+            return
+        hub = self.hub()
+
+        def work():
+            from ..core import suggestions
+            return suggestions.no(hub, s)
+        self._close(self.columns.suggestions, "s:" + title.lower(), work)
 
     # -- the rules, the wishes, tonight's prompt --
     def save_rules(self) -> None:
@@ -481,6 +715,34 @@ class LearnPage(QWidget):
             if fn is not None:
                 fn("Tonight's prompt copied ✓ -- paste it into Claude Code")
         BG.call(work, done, lambda e: QMessageBox.warning(self, "Could not build it", e))
+
+
+def after_edit(ctx, job, res: dict) -> None:
+    """The Match cuts queue's one hook (day 12), called once a job's result word is decided: a FAIL or an "OK with a
+    note" goes into problems_queue.md (wrong input -- WRONG PAIR, the input checks -- does not), a PASS or an OK with
+    a note waits for your fix in the Learn tab. All in the background; the Learn tab is refreshed after."""
+    from types import SimpleNamespace
+    try:
+        fn = getattr(ctx, "hub_folder", None)
+        hub = Path(fn()) if fn is not None else paths.projects_root()
+        snap = SimpleNamespace(project=getattr(job, "project", None), name=getattr(job, "name", ""),
+                               run_dir=getattr(job, "run_dir", None), raw=getattr(job, "raw", None),
+                               competitor=getattr(job, "competitor", None), channel=getattr(job, "channel", ""),
+                               title=getattr(job, "title", ""))
+        res = dict(res or {})
+    except Exception:  # noqa: BLE001 - the hook never breaks the queue
+        return
+    name = Path(snap.project).name if snap.project is not None else str(snap.name or "")
+
+    def work():
+        from ..core import problems, waiting
+        return [e for e in (problems.record(hub, name, res), waiting.record(hub, snap, res)) if e]
+
+    def done(_errs) -> None:
+        page = (getattr(ctx, "pages", None) or {}).get("learn")
+        if page is not None and hasattr(page, "refresh_columns"):
+            page.refresh_columns()
+    BG.call(work, done, lambda _e: None)
 
 
 class LearnTool(Tool):
