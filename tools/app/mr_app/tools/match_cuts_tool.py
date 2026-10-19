@@ -1422,7 +1422,7 @@ class MatchCutsPage(QWidget):
         j = J.Job(job.name, job.competitor, job.raw, mode=mode or J.THOROUGH, speed=job.speed, comp_s=job.comp_s,
                   raw_s=job.raw_s, source=job.source, channel=job.channel, title=job.title, headline=job.headline,
                   project=job.project, out_dir=job.out_dir, run_name=job.run_name, force_inputs=force,
-                  roles_chosen=job.roles_chosen)
+                  roles_chosen=job.roles_chosen, roles_how=getattr(job, "roles_how", ""))
         j.take = getattr(job, "take", 1) + 1
         if swap:                                          # day 12: Swap on a finished row
             J.choose_raw(j, Path(j.competitor))
@@ -1568,7 +1568,8 @@ class MatchCutsPage(QWidget):
         from match_cuts import batch
         pairs = [(j.name, Path(j.competitor), Path(j.raw)) for j in jobs if j.complete and not J.forced(j)]
         runs = [(j.name, Path(j.competitor), Path(j.raw), self.run_dir_of(j)) for j in jobs if j.complete]
-        w = Worker(lambda: (batch.input_problems(pairs), space.problems(runs)))
+        short = [j.name for j in jobs if j.complete and J.short_raw(j)]      # the form chose the RAW (day 12)
+        w = Worker(lambda: (batch.input_problems(pairs, short), space.problems(runs)))
         w.finished_with.connect(lambda r: self._checked(probs, r[0], r[1], confirm))
         w.failed.connect(lambda _e: self._checked(probs, {}, [], confirm))
         self.workers.append(w)

@@ -334,6 +334,33 @@ def test_your_pick_runs_with_the_input_checks_skipped_and_never_swapped_back(tmp
     assert not [x for x in j.problems() if "longer" in x]   # (your pick of two about as long: nothing to say)
 
 
+def test_the_forms_raw_field_never_skips_the_wrong_pair_check(tmp_path):
+    """Day 12 review 2: the New video form's RAW field is your choice for the amber check and --no-swap, but never
+    --force-inputs (that would skip the quick WRONG PAIR check): a wrong link in the form still stops as WRONG PAIR.
+    Only "almost as long as the RAW" is skipped (--allow-short-raw), for a pair within 30 %."""
+    from mr_app.core import flow
+    from mr_app.core import run as RN
+    p = PJ.create(tmp_path, name="clip")
+    (p.folder / "short.mp4").write_bytes(b"c")
+    (p.folder / "raw.mp4").write_bytes(b"r")
+    p.update(competitor={"file": "short.mp4"}, raw={"file": "raw.mp4"})
+    flow.set_roles(p.folder, "raw.mp4", "form")
+    j = flow.edit_job(PJ.load(p.folder))
+    assert j.roles_chosen and j.roles_how == "form"
+    j.comp_s, j.raw_s = 28.0, 30.0                                          # within 30 % (and >= 90 %)
+    assert not J.needs_check(j) and not J.forced(j) and J.short_raw(j)
+    run = RN.JobRun(j, out_dir=tmp_path / "o", work_dir=tmp_path / "w", python=Path("py"))
+    assert "--force-inputs" not in run.cmd and run.cmd[-2:] == ["--no-swap", "--allow-short-raw"]
+    j.comp_s = 10.0                                                         # not about as long: nothing to skip
+    assert not J.short_raw(j) and not J.forced(j)
+    j.comp_s = 28.0
+    J.choose_raw(j, j.raw)                                                  # picked on the row: your pick (as before)
+    assert J.forced(j) and not J.short_raw(j)
+    j2 = J.Job("y", j.competitor, j.raw, roles_chosen=True, roles_how="form", force_inputs=True)
+    j2.comp_s, j2.raw_s = 28.0, 30.0                                        # Run anyway after a WRONG PAIR: forced
+    assert J.forced(j2) and not J.short_raw(j2)
+
+
 def _video(path: Path, seconds_: float, size: str) -> Path:
     from match_cuts.common import ffmpeg_bin
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,7 +384,7 @@ def test_the_tool_keeps_your_roles_with_no_swap(tmp_path):
 def test_the_pre_start_check_leaves_out_a_pair_you_chose(page, tmp_path, monkeypatch):
     from match_cuts import batch
     asked = []
-    monkeypatch.setattr(batch, "input_problems", lambda pairs: asked.append([n for n, _c, _r in pairs]) or {})
+    monkeypatch.setattr(batch, "input_problems", lambda pairs, short=(): asked.append([n for n, _c, _r in pairs]) or {})
     a = add(page, tmp_path, "mine", "clip a.mp4", "clip b.mp4")
     page.pick_raw(a, a.raw)
     b = add(page, tmp_path, "other", "short.mp4", "episode.mp4")

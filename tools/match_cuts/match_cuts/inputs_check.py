@@ -37,8 +37,10 @@ def describe(p: dict) -> str:
     return f"{Path(p['path']).name} ({mmss(p['duration'])}, {p['width']}x{p['height']}, {size})"
 
 
-def problems(comp: dict, raw: dict) -> list[str]:
-    """What looks wrong about a (competitor, RAW) pair of cli.quick_probe results, in plain words ([] = fine)."""
+def problems(comp: dict, raw: dict, allow_short_raw: bool = False) -> list[str]:
+    """What looks wrong about a (competitor, RAW) pair of cli.quick_probe results, in plain words ([] = fine).
+    ``allow_short_raw`` (``--allow-short-raw``, day 12: you said which file is the RAW) skips only the "almost as long
+    as the RAW" check -- a 30 s RAW for a 28 s Short runs; every other check stays."""
     out: list[str] = []
     dc, dr = float(comp.get("duration") or 0.0), float(raw.get("duration") or 0.0)
     try:
@@ -63,7 +65,7 @@ def problems(comp: dict, raw: dict) -> list[str]:
     if dc > dr + 0.5:
         out.append(f"the competitor ({mmss(dc)}) is longer than the RAW ({mmss(dr)}): the RAW must be the full "
                    "episode or movie the competitor was cut from")
-    elif dr > 0 and dc >= SAME_LENGTH * dr:
+    elif dr > 0 and dc >= SAME_LENGTH * dr and not allow_short_raw:
         out.append(f"the competitor ({mmss(dc)}) is almost as long as the RAW ({mmss(dr)}): it looks like a copy of "
                    "the RAW, not a Short cut from it")
     return out

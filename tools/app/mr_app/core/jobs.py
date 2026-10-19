@@ -59,6 +59,8 @@ class Job:
     force_inputs: bool = False      # night 11: run it although the quick check said WRONG PAIR (--force-inputs)
     roles_chosen: bool = False      # day 12: YOU said which file is the RAW (the check card, or Swap): never swapped
     #                                 back, and a pair about as long runs with the input checks skipped (forced())
+    roles_how: str = ""             # how you chose: "form" = only the New video form's RAW field (short_raw(), not
+    #                                 forced(): a wrong link in the form still stops as WRONG PAIR)
     take: int = 1
     added: datetime | None = None   # when it joined the queue (the newest-first order of waiting rows)
     edited: datetime | None = None  # when its run ended (the newest-first order of finished rows)
@@ -141,7 +143,16 @@ def forced(job: Job) -> bool:
     """Run with ``--force-inputs``: "Run anyway" was pressed, or you chose the RAW of a pair about as long (night 6's
     input check would stop a 47 s RAW for a 45 s Short as "almost as long as the RAW" -- your choice counts as Run
     anyway)."""
-    return bool(job.force_inputs) or (job.roles_chosen and about_as_long(job.comp_s, job.raw_s))
+    return bool(job.force_inputs) or (job.roles_chosen and getattr(job, "roles_how", "") != "form"
+                                      and about_as_long(job.comp_s, job.raw_s))
+
+
+def short_raw(job: Job) -> bool:
+    """Run with ``--allow-short-raw`` (day 12): the RAW was chosen in the New video form's RAW field and the two are
+    about as long -- only the input check "almost as long as the RAW" is skipped; the other input checks and the
+    quick WRONG PAIR check still run (a wrong link in the form stops as WRONG PAIR)."""
+    return (not forced(job) and job.roles_chosen and getattr(job, "roles_how", "") == "form"
+            and about_as_long(job.comp_s, job.raw_s))
 
 
 def choose_raw(job: Job, raw: Path) -> bool:
@@ -156,6 +167,7 @@ def choose_raw(job: Job, raw: Path) -> bool:
     else:
         raise ValueError(f"{raw.name} is not one of this row's videos")
     job.roles_chosen = True
+    job.roles_how = ""                               # chosen on the row: your pick, not the form's field
     return swapped
 
 
@@ -459,6 +471,7 @@ def project_for_job(job: Job, root: Path | None = None, progress: Callable[[str,
                 placed = {"competitor": raw, "raw": comp}
                 job.comp_s, job.raw_s = job.raw_s, job.comp_s
             job.roles_chosen = True
+            job.roles_how = str(chosen.get("how") or "")
         elif job.roles_chosen:                         # chosen on the row before the project was made
             flow.set_roles(pj.folder, raw.name, "picked")
     else:

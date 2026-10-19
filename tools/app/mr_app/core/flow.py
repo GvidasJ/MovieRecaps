@@ -317,6 +317,7 @@ def edit_job(p: P.Project, fast: bool = True, speed: float = 100.0):
     j.channel = p.data.get("channel") or ""
     j.title = p.data.get("title") or ""
     j.roles_chosen = chosen_roles(p.data) is not None      # day 12: you said which one is the RAW
+    j.roles_how = str((chosen_roles(p.data) or {}).get("how") or "")     # "form": the New video form's RAW field
     return j
 
 

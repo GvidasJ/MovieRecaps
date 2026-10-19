@@ -63,7 +63,8 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    with the two files switched; nothing is copied again). When the two videos are within 30 % of each other in length
    and their names don't say, the row turns amber, **Check which is the RAW**, and does not start (not with Start, not
    with Automatic) until you click one of its two buttons. Your pick runs with the input checks skipped. A video made
-   with the **New video** form needs no click: what you put in its RAW field is your choice.
+   with the **New video** form needs no click: what you put in its RAW field is your choice (only the check "almost
+   as long as the RAW" is skipped for it -- a wrong link in the form still stops as WRONG PAIR).
    **Newest on top:** the running row first, then the waiting rows (newest first), then the finished rows (the one
    finished last on top); rows glide to their place. The run order does not change: a waiting row says **RUNS 1ST,
    RUNS 2ND ...** (drag a waiting row to change it).

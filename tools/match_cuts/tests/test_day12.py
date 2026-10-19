@@ -185,3 +185,21 @@ def test_only_the_raw_shot_that_cuts_the_speaker_off_moves():
     at, new = clip.shot_framing[0]
     assert at == 900 and new.tx < sim.tx and speakers.passes(new, faces(15, 20), W, False, win)
     assert "moved onto the person speaking" in clip.person_note
+
+
+def test_allow_short_raw_skips_only_the_almost_as_long_check(tmp_path):
+    """Day 12 review 2: the app's New video form chose the RAW of a 30 s RAW / 28 s Short: --allow-short-raw skips
+    only "almost as long as the RAW" (not the other input checks, not the WRONG PAIR check like --force-inputs)."""
+    from match_cuts import cli, inputs_check
+    c, r = tmp_path / "c.mp4", tmp_path / "r.mp4"
+    c.write_bytes(b"c")
+    r.write_bytes(b"rr")
+    pc = {"path": str(c), "duration": 28.0, "width": 1080, "height": 1920}
+    pr = {"path": str(r), "duration": 30.0, "width": 1920, "height": 1080}
+    assert "almost as long as the RAW" in inputs_check.problems(pc, pr)[0]
+    assert inputs_check.problems(pc, pr, allow_short_raw=True) == []
+    long_c = dict(pc, duration=31.0)                                        # longer than the RAW: still said
+    assert "longer than the RAW" in " ".join(inputs_check.problems(long_c, pr, allow_short_raw=True))
+    args = cli.build_parser().parse_args(["--competitor", str(c), "--raw", str(r), "--allow-short-raw"])
+    assert args.allow_short_raw and not args.force_inputs
+    assert not cli.config_from_args(args).force_inputs

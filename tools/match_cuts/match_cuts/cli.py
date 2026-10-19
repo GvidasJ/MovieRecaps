@@ -337,6 +337,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "the same video, or the two files look swapped -- and (night 11) when a quick look at their sound "
                         "and picture, in seconds, finds that the competitor does not come from this RAW (WRONG PAIR); "
                         "with this option it runs anyway (and swaps two files that look reversed, as before)")
+    p.add_argument("--allow-short-raw", action="store_true",
+                   help="skip only the input check \"the competitor is almost as long as the RAW\" (you know which "
+                        "file is the RAW: a short RAW for a Short about as long); every other input check and the "
+                        "quick WRONG PAIR check still run (unlike --force-inputs)")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging on the console")
     p.add_argument("--version", action="version", version=f"match_cuts {__version__}")
     return p
@@ -760,7 +764,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not force:                       # wrong inputs stop here, before anything is converted (night 6)
                 from . import inputs_check
                 pc, pr = quick_probe(comp), quick_probe(raw)
-                found = inputs_check.problems(pc, pr)
+                found = inputs_check.problems(pc, pr, bool(getattr(args, "allow_short_raw", False)))
                 if found:
                     print("match_cuts: " + inputs_check.message(pc, pr, found), file=sys.stderr)
                     return 2

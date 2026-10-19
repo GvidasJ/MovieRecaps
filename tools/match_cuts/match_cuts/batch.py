@@ -120,9 +120,10 @@ def split_folder(vids: Sequence[Path]) -> tuple[Path | None, list[Path], str]:
     return p.raw, p.competitors, "" if p.competitors else "a raw video but no competitor"
 
 
-def input_problems(jobs: Sequence[tuple[str, Path, Path]]) -> dict[str, list[str]]:
+def input_problems(jobs: Sequence[tuple[str, Path, Path]], allow_short_raw: Sequence[str] = ()) -> dict[str, list[str]]:
     """The wrong-input check (inputs_check) of every (competitor, RAW) pair before anything runs: {name: problems}
-    (a pair whose lengths cannot be read is left to the run itself)."""
+    (a pair whose lengths cannot be read is left to the run itself). The names in ``allow_short_raw`` run with
+    ``--allow-short-raw`` (not told "almost as long as the RAW")."""
     from . import inputs_check
     from .cli import quick_probe
     out: dict[str, list[str]] = {}
@@ -131,7 +132,7 @@ def input_problems(jobs: Sequence[tuple[str, Path, Path]]) -> dict[str, list[str
             pc, pr = quick_probe(comp), quick_probe(raw)
         except Exception:  # noqa: BLE001 - not readable here: the run says what is wrong
             continue
-        found = inputs_check.problems(pc, pr)
+        found = inputs_check.problems(pc, pr, name in allow_short_raw)
         if found:
             out[name] = found + [f"competitor {inputs_check.describe(pc)}, RAW {inputs_check.describe(pr)}"]
     return out

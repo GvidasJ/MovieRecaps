@@ -154,7 +154,7 @@ def test_the_new_video_forms_raw_field_is_your_choice_of_raw(qapp, tmp_path, mon
     job = mc.jobs[-1]
     assert starts == [False] and job.roles_chosen and not JB.needs_check(job)
     roles = flow.chosen_roles(P.load(p.folder).data)
-    assert roles and P.load(p.folder).data["roles"]["how"] == "form"
+    assert roles and P.load(p.folder).data["roles"]["how"] == "form" and job.roles_how == "form"
     assert Path(job.raw).name == "episode.mp4" and Path(job.competitor).name == "short.mp4"
 
 
