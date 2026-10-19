@@ -164,7 +164,8 @@ the page, off at first, remembered) is ON; then everything goes on by itself. Ne
 * **Just cuts** rows can get **Add a competitor**: only the competitor is downloaded and the full edit is made.
 * **Turn off the PC when everything is done** (tick box, not remembered): when nothing is running or going to run by
   itself, a 60 s warning (Cancel), then the PC turns off -- never while Premiere has unsaved work or a render runs; it
-  tries again every 30 s.
+  tries again every 30 s. A project still being copied to the shared folder, Clean up, Change headline and a running
+  torrent count as work too, and work that starts during the warning stops it (a fresh warning comes when it is done).
 
 **Torrents.** A magnet or `.torrent` opens a list of the files (the biggest video ticked, seeders, free space), then
 a progress card in the row. The engine is **aria2c** (libtorrent has no build for Python 3.14); `setup_app.py`

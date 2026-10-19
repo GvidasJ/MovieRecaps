@@ -97,7 +97,10 @@ files' lengths (ffprobe, before anything is converted) the run stops with a plai
 picture size, file size) and what to do when the competitor is longer than a Short (3 minutes), almost as long as the
 RAW (a copy of the movie), longer than the RAW, the same video as the RAW, or when the two look swapped (the
 competitor long and landscape, the RAW short and portrait -- before night 6 they were swapped silently; with
-`--force-inputs` they still are). On 12 October a 109-minute copy of the movie given as the competitor took 20+
+`--force-inputs` they still are). `--allow-short-raw` (day 12) skips only "almost as long as the RAW" -- for a RAW
+you know is right that is just a little longer than the Short (a 30 s clip for a 26 s Short); the other checks and
+WRONG PAIR still run (the app passes it when you chose the RAW in its New video form). On 12 October a 109-minute
+copy of the movie given as the competitor took 20+
 minutes to convert before anything failed. And right after the visual search, when under 10 % of the competitor's
 frames were found in the RAW **and** under 10 % of its sound, the run stops instead of finishing an empty edit: "the
 competitor's scenes are not in this RAW: probably a different episode, a different version (4:3 instead of
