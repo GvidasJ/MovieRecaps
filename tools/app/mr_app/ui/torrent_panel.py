@@ -439,6 +439,9 @@ class TorrentJob(QObject):
             job.poll()
 
         def bad(e: str) -> None:
+            # the start failed: the job's state says so (else "" reads as "just starting" -- busy for ever, and
+            # "Turn off the PC" would never fire)
+            job.status = {"state": "failed", "error": _plain(e), "name": job.name}
             job._tell("failed", _plain(e))
         job._run(work, ok, bad)
         return job

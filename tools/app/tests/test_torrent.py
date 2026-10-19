@@ -463,6 +463,21 @@ def test_a_start_with_no_space_fails_on_the_card(qt, sess, tor, tmp_path):
     assert card.pill.word() == "FAILED" and card.pause_btn.isHidden()
 
 
+def test_a_start_that_fails_is_not_counted_as_work_for_ever(qt, sess, tor, tmp_path):
+    """Day 12 review 2: a torrent whose start fails (no space, a path outside the folder, aria2c not starting) says
+    "failed" in its state -- "" would read as "just starting" and keep "Turn off the PC" from ever firing."""
+    from mr_app.tools import download_tool as D
+    from mr_app.ui import torrent_panel as TP
+    sess.free = lambda d: 10
+    job = TP.TorrentJob.begin(T.read_torrent(tor), [0], tmp_path / "dl", sess=sess, run=_sync)
+    assert job.status.get("state") == "failed" and job.status["error"].startswith("Not enough free space")
+    assert not D._torrent_active(job)                                                  # noqa: SLF001
+    card = TP.TorrentCard(job)
+    assert card.pill.word() == "FAILED"
+    pending = TP.TorrentJob(sess=sess, run=_sync)                                      # still starting: work
+    assert D._torrent_active(pending)                                                  # noqa: SLF001
+
+
 def test_restore_jobs_gives_back_the_unfinished(qt, sess, tor, tmp_path):
     from mr_app.ui import torrent_panel as TP
     jid = sess.start(T.read_torrent(tor), [0], tmp_path / "dl")
