@@ -123,7 +123,7 @@ class JobRun:
             log.write_text(" ".join(self.cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
         except OSError:
             pass
-        if code in (0, 1) and not self.stopped:
+        if code in (0, 1, 3) and not self.stopped:     # finished (results.FINISHED)
             raw = Path(self.job.raw).resolve()
             if raw not in self.converted:
                 cr = batch.converted_raw(self.run_dir)

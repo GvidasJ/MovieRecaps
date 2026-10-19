@@ -192,6 +192,11 @@ def latest_progress(run_dir: Path, now: float | None = None) -> str:
     return (f"{stage} -- " if stage else "") + f"whole run: {duration_text(max(0.0, left - age))} left"
 
 
+# the exit codes of a run that went to its end (cli.py): 0 every criterion passed, 1 something failed, 3 nothing
+# failed but a criterion could not be checked -- every Premiere-only run (--premiere: no After Effects export) whose
+# other criteria all pass (day 12: the laptop's darkhumor run passed everything, exited 3 and was shown as a stop)
+FINISHED = (0, 1, 3)
+
 _LOG_LINE = re.compile(r"^\d\d:\d\d:\d\d(?:,\d+)? (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
 # a library's own console noise, never the reason a run stopped (day 12: a laptop run that crashed while closing was
 # shown as "[ WARN:0@720.058] global net_impl_backend.cpp:345 cv::dnn::...": OpenCV's warning, its last stderr line)
@@ -199,7 +204,6 @@ _NOISE_LINE = re.compile(r"^\s*(?:\[ ?(?:WARN|INFO|DEBUG)\b|\S+\.py:\d+: \w*Warn
                          r"\S*Warning: |W\d{4} |I\d{4} )")
 # Windows' exit codes of a process that crashed (no Python error to show)
 CRASH_CODES = {
-    3: "the tool stopped suddenly (Windows exit code 3: a program library inside it aborted)",
     -1073741819: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
     3221225477: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
     -1073740791: "the tool crashed (a program library stopped it, 0xC0000409)",
@@ -209,18 +213,6 @@ CRASH_CODES = {
     -1073741801: "the tool ran out of memory (0xC0000017)",
     3221225495: "the tool ran out of memory (0xC0000017)",
 }
-
-
-def closed_after_finish(code: int | None, stdout: str, chk: dict | None) -> str:
-    """A run that made and checked its edit (it printed its "match_cuts result:" and its files are there) and then
-    crashed while closing (an exit code other than 0 / 1 / 2): the note to show -- '' for any other run. Day 12: a
-    laptop run printed PASS, then Windows ended the process with exit code 3 (a library aborted while it closed)."""
-    if code in (0, 1, 2, None) or "match_cuts result:" not in (stdout or ""):
-        return ""
-    if chk is None or any("no verify.json" in f or "missing" in f.lower() for f in chk.get("failures") or []):
-        return ""
-    why = crash_words(code) or f"the tool ended with exit code {code}"
-    return f"The edit was finished and checked; then {why} while closing -- the edit is complete, nothing to redo"
 
 
 def crash_words(code: int | None) -> str:
@@ -596,9 +588,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except OSError:
             pass
         secs = time.time() - t
-        if est[name] > 0 and code in (0, 1):
+        if est[name] > 0 and code in FINISHED:
             took, guessed = took + secs, guessed + est[name]
-        if code in (0, 1) and raw.resolve() not in converted:
+        if code in FINISHED and raw.resolve() not in converted:
             cr = converted_raw(run_dir)
             if cr is not None:
                 converted[raw.resolve()] = cr
@@ -607,12 +599,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
         chk = checks_of(run_dir if (run_dir / run_folders.EXTRAS).is_dir() else None)
         failures = list(chk["failures"])
-        closed = closed_after_finish(code, stdout, chk)
-        stop = stop_message(stderr, code=code) if code not in (0, 1) and not closed else ""
-        if closed:                                        # the edit was made and checked, then the process crashed
-            chk = dict(chk, notes=[closed] + list(chk.get("notes") or []))
-            code = 0 if not failures else 1
-        elif code not in (0, 1):                          # 1: a recreation criterion failed (real videos: always)
+        stop = stop_message(stderr, code=code) if code not in FINISHED else ""
+        if code not in FINISHED:                          # 1: a recreation criterion failed (real videos: always)
             failures = [f"the run stopped (exit {code}): {stop}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
@@ -620,8 +608,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         row = {"name": name, "competitor": str(comp), "raw": str(raw), "run_dir": str(run_dir), "exit": code,
                "speed": speed, "speed_from": why.strip("; ") or "default", "stop": stop,
                "wrong_pair": code == 2 and is_wrong_pair(stop),
-               "seconds": round(secs, 1), "pass": not failures and code in (0, 1), "failures": failures,
-               "notes": list(chk.get("notes") or []) if not failures and code in (0, 1) else [],
+               "seconds": round(secs, 1), "pass": not failures and code in FINISHED, "failures": failures,
+               "notes": list(chk.get("notes") or []) if not failures and code in FINISHED else [],
                "captions": cap["written"], "captions_why": cap["why"], "doubtful": cap["doubtful"],
                "media_outside": outside, "hand": hand_checks(stdout), "log": str(log)}
         rows.append(row)

@@ -17,6 +17,9 @@ PICTURE_NOT_FOUND, NOT_IN_RAW, STOPPED = "PICTURE NOT FOUND", "NOT IN THIS RAW",
 WRONG_PAIR = "WRONG PAIR"
 GOOD = (PASS, OK_NOTE)
 RED = (FAIL, WRONG_PAIR, PICTURE_NOT_FOUND, NOT_IN_RAW)      # the labels shown red
+# a run that went to its end (match_cuts.batch.FINISHED): 0 / 1 / 3 -- 3 = nothing failed, a criterion not verified
+# (every Premiere-only run: no After Effects check); day 12: darkhumor passed everything, exited 3, showed as FAIL
+FINISHED = (0, 1, 3)
 
 
 def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = False) -> str:
@@ -24,7 +27,7 @@ def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = F
     if stopped:
         return STOPPED
     low = (stop or "").lower()
-    if code not in (0, 1):
+    if code not in FINISHED:
         if low.lstrip().startswith("wrong pair"):
             return WRONG_PAIR
         if "picture not found" in low:
@@ -46,13 +49,9 @@ def read_result(run_dir: Path, code: int | None, stdout: str, stderr: str, stopp
     except Exception as e:  # noqa: BLE001 - a run that wrote nothing readable
         chk = {"pass": False, "failures": [f"the run's files could not be read ({type(e).__name__}: {e})"],
                "notes": []}
-    closed = batch.closed_after_finish(code, stdout, chk) if not stopped else ""
-    if closed:                       # the edit was made and checked, then the tool crashed while closing (day 12)
-        chk = dict(chk or {}, notes=[closed] + list((chk or {}).get("notes") or []))
-        code = 0 if not chk.get("failures") else 1
-    stop = batch.stop_message(stderr, code=code) if code not in (0, 1) and not stopped else ""
+    stop = batch.stop_message(stderr, code=code) if code not in FINISHED and not stopped else ""
     failures = list((chk or {}).get("failures") or [])
-    if code not in (0, 1) and not stopped:
+    if code not in FINISHED and not stopped:
         failures = [f"the run stopped (exit {code}): {stop}"] + [f for f in failures if "no verify.json" not in f]
     label = label_of(code, stop, chk, stopped)
     caps = batch.captions_of(run_dir) if extras.is_dir() else {"written": False, "why": "", "doubtful": []}
