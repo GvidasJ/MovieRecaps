@@ -52,6 +52,20 @@ def test_exit_3_is_a_finished_run():
     assert pipeline.EXIT_NOT_VERIFIED == 3
 
 
+def test_exit_3_counts_as_finished_only_with_its_result_line_or_verify_json(tmp_path):
+    """3 also comes from abort() / "Fatal Python error" on Windows: then it is a stop, said in plain words."""
+    assert batch.finished(0) and batch.finished(1) and not batch.finished(2) and not batch.finished(None)
+    assert batch.finished(3, "...\nmatch_cuts result: PASS (criterion 6 not verified: c6_after_effects)\n")
+    assert not batch.finished(3, "", tmp_path)                                   # nothing printed, nothing written
+    (tmp_path / "extras").mkdir()
+    assert not batch.finished(3, "", tmp_path)
+    (tmp_path / "extras" / "verify.json").write_text("{}", encoding="utf-8")
+    assert batch.finished(3, "", tmp_path)
+    assert batch.stop_message("", code=3) == batch.ABORT_WORDS
+    assert batch.stop_message("Fatal Python error: Aborted\n", code=3) == "Fatal Python error: Aborted"
+    assert batch.stop_message("", code=7) == "see the log"
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # learned from video14 / video15 (day 12)
 # ---------------------------------------------------------------------------------------------------------------------

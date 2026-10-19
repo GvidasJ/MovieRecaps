@@ -22,12 +22,14 @@ RED = (FAIL, WRONG_PAIR, PICTURE_NOT_FOUND, NOT_IN_RAW)      # the labels shown 
 FINISHED = (0, 1, 3)
 
 
-def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = False) -> str:
-    """The queue's result word from the run's exit code, its stop message and its hard checks."""
+def label_of(code: int | None, stop: str, checks: dict | None, stopped: bool = False,
+             finished: bool | None = None) -> str:
+    """The queue's result word from the run's exit code, its stop message and its hard checks (``finished``: the
+    run went to its end -- match_cuts.batch.finished; None = by the exit code alone)."""
     if stopped:
         return STOPPED
     low = (stop or "").lower()
-    if code not in FINISHED:
+    if not (code in FINISHED if finished is None else finished):
         if low.lstrip().startswith("wrong pair"):
             return WRONG_PAIR
         if "picture not found" in low:
@@ -49,11 +51,12 @@ def read_result(run_dir: Path, code: int | None, stdout: str, stderr: str, stopp
     except Exception as e:  # noqa: BLE001 - a run that wrote nothing readable
         chk = {"pass": False, "failures": [f"the run's files could not be read ({type(e).__name__}: {e})"],
                "notes": []}
-    stop = batch.stop_message(stderr, code=code) if code not in FINISHED and not stopped else ""
+    done = batch.finished(code, stdout, run_dir)       # exit 3 only with its result line / verify.json
+    stop = batch.stop_message(stderr, code=code) if not done and not stopped else ""
     failures = list((chk or {}).get("failures") or [])
-    if code not in FINISHED and not stopped:
+    if not done and not stopped:
         failures = [f"the run stopped (exit {code}): {stop}"] + [f for f in failures if "no verify.json" not in f]
-    label = label_of(code, stop, chk, stopped)
+    label = label_of(code, stop, chk, stopped, finished=done)
     caps = batch.captions_of(run_dir) if extras.is_dir() else {"written": False, "why": "", "doubtful": []}
     return {"label": label, "failures": failures if label not in GOOD else [],
             "notes": list((chk or {}).get("notes") or []) if label in GOOD else [],

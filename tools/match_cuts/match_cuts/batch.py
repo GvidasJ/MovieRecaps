@@ -196,6 +196,20 @@ def latest_progress(run_dir: Path, now: float | None = None) -> str:
 # failed but a criterion could not be checked -- every Premiere-only run (--premiere: no After Effects export) whose
 # other criteria all pass (day 12: the laptop's darkhumor run passed everything, exited 3 and was shown as a stop)
 FINISHED = (0, 1, 3)
+RESULT_LINE = "match_cuts result:"          # cli.py's summary headline (stdout): the run reached its end
+ABORT_WORDS = "the tool stopped by itself (exit code 3 without a result: an abort or a fatal Python error)"
+
+
+def finished(code: int | None, stdout: str = "", run_dir: str | Path | None = None) -> bool:
+    """The run went to its end (FINISHED). Exit code 3 also comes from abort() / "Fatal Python error" on Windows, so
+    3 counts only when the run printed its "match_cuts result:" line or wrote extras/verify.json."""
+    if code not in FINISHED:
+        return False
+    if code != 3:
+        return True
+    if RESULT_LINE in (stdout or ""):
+        return True
+    return run_dir is not None and (Path(run_dir) / run_folders.EXTRAS / "verify.json").is_file()
 
 _LOG_LINE = re.compile(r"^\d\d:\d\d:\d\d(?:,\d+)? (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
 # a library's own console noise, never the reason a run stopped (day 12: a laptop run that crashed while closing was
@@ -227,7 +241,10 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
     "[ WARN:...]", Python's "...Warning:") is never the message: a crash (``code``, crash_words) says what happened
     instead."""
     lines = [ln.rstrip() for ln in (stderr or "").splitlines()]
-    block: list[str] = []                        # raw lines, the message's own, in order
+    fatal = next((ln.strip() for ln in reversed(lines) if ln.startswith("Fatal Python error:")), "")
+    if fatal:                                    # the thread dump under it is never the message
+        return fatal if len(fatal) <= limit else fatal[:limit - 3].rstrip() + "..."
+    block: list[str] = []                      # raw lines, the message's own, in order
     for ln in reversed(lines):
         if _NOISE_LINE.match(ln):                # a warning: it and the indented source line Python prints under it
             if block and block[0].startswith((" ", "\t")):
@@ -246,7 +263,7 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
         text = block[-1] if block[0].startswith("Traceback") else " ".join(block)
     else:
         errs = [_LOG_LINE.sub("", ln) for ln in lines if _LOG_LINE.match(ln) and " ERROR " in ln[:30]]
-        text = errs[-1].strip() if errs else (crash or "see the log")
+        text = errs[-1].strip() if errs else (crash or (ABORT_WORDS if code == 3 else "see the log"))
     if crash and text != crash and not block:
         text = f"{crash}; its last error: {text}"
     text = text.replace("match_cuts: ", "", 1)
@@ -588,9 +605,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         except OSError:
             pass
         secs = time.time() - t
-        if est[name] > 0 and code in FINISHED:
+        done = finished(code, stdout, run_dir)
+        if est[name] > 0 and done:
             took, guessed = took + secs, guessed + est[name]
-        if code in FINISHED and raw.resolve() not in converted:
+        if done and raw.resolve() not in converted:
             cr = converted_raw(run_dir)
             if cr is not None:
                 converted[raw.resolve()] = cr
@@ -599,8 +617,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
         chk = checks_of(run_dir if (run_dir / run_folders.EXTRAS).is_dir() else None)
         failures = list(chk["failures"])
-        stop = stop_message(stderr, code=code) if code not in FINISHED else ""
-        if code not in FINISHED:                          # 1: a recreation criterion failed (real videos: always)
+        stop = stop_message(stderr, code=code) if not done else ""
+        if not done:                                      # 1: a recreation criterion failed (real videos: always)
             failures = [f"the run stopped (exit {code}): {stop}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
@@ -608,8 +626,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         row = {"name": name, "competitor": str(comp), "raw": str(raw), "run_dir": str(run_dir), "exit": code,
                "speed": speed, "speed_from": why.strip("; ") or "default", "stop": stop,
                "wrong_pair": code == 2 and is_wrong_pair(stop),
-               "seconds": round(secs, 1), "pass": not failures and code in FINISHED, "failures": failures,
-               "notes": list(chk.get("notes") or []) if not failures and code in FINISHED else [],
+               "seconds": round(secs, 1), "pass": not failures and done, "failures": failures,
+               "notes": list(chk.get("notes") or []) if not failures and done else [],
                "captions": cap["written"], "captions_why": cap["why"], "doubtful": cap["doubtful"],
                "media_outside": outside, "hand": hand_checks(stdout), "log": str(log)}
         rows.append(row)

@@ -370,3 +370,29 @@ def test_a_torrent_whose_names_leave_the_save_folder_is_refused(sess, tor, tmp_p
     m2.name = "C:\\Windows"
     with pytest.raises(T.TorrentError, match="outside the save folder"):
         m2.disk_path(tmp_path / "dl", 0)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 5. exit code 3 without a result: a stop (abort / Fatal Python error), not a finished run
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_exit_3_with_its_result_line_or_verify_json_is_finished_else_a_stop(tmp_path, monkeypatch):
+    from match_cuts import batch
+
+    from mr_app.core import results as R
+    run = tmp_path / "edit"
+    (run / "extras").mkdir(parents=True)
+    monkeypatch.setattr(batch, "checks_of", lambda d: {"pass": True, "failures": [], "notes": []})
+    monkeypatch.setattr(batch, "captions_of", lambda d: {"written": True, "why": "", "doubtful": []})
+    res = R.read_result(run, 3, "match_cuts result: PASS (criterion 6 not verified)\n", "")
+    assert res["label"] == R.PASS and res["stop"] == ""
+    res = R.read_result(run, 3, "", "Fatal Python error: Aborted\n\nThread 0x01 (most recent call first):\n")
+    assert res["label"] == R.FAIL and res["stop"].startswith("Fatal Python error")
+    assert res["failures"][0].startswith("the run stopped (exit 3)")
+    res = R.read_result(run, 3, "", "")                                       # abort(): nothing said at all
+    assert res["label"] == R.FAIL and res["stop"] == batch.ABORT_WORDS
+    (run / "extras" / "verify.json").write_text("{}", encoding="utf-8")       # it wrote its result: finished
+    res = R.read_result(run, 3, "", "")
+    assert res["label"] == R.PASS and res["stop"] == ""
+    assert R.label_of(3, "", {"pass": True}, finished=False) == R.FAIL
+    assert R.label_of(3, "", {"pass": True, "notes": []}) == R.PASS          # by the code alone, as before
