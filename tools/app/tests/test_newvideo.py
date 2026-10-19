@@ -282,6 +282,21 @@ def test_the_just_cuts_step_makes_the_edit_with_the_channels_template_end_to_end
     assert said and said[0].startswith("making your channel's template")
 
 
+def test_history_says_just_cuts_and_the_default_template_with_their_dates():
+    from mr_app.core import history as H
+    data = {"name": "2026-10-19_x", "created": "2026-10-19T08:00:00+03:00", "competitor": {}, "raw": {},
+            "steps": {"template": {"state": "done", "finished": "2026-10-19T08:05:00+03:00", "default": True},
+                      "edit": {"state": "done", "finished": "2026-10-19T08:06:00+03:00", "result": "PASS",
+                               "kind": "just_cuts", "cuts": 37}}}
+    evs = {e.what: e for e in H.project_events(data)}
+    assert evs["Template made"].detail == "default template (no headline)" and evs["Template made"].kind == H.NOTE
+    assert evs["Just cuts made · PASS"].detail == "37 cuts"
+    data["steps"]["edit"] = {"state": "failed", "finished": "2026-10-19T08:06:00+03:00", "result": "FAIL",
+                             "kind": "just_cuts", "failures": ["the RAW has no picture that can be read"]}
+    evs = {e.what: e for e in H.project_events(data)}
+    assert evs["Just cuts failed"].detail.startswith("the RAW has no picture")
+
+
 def test_a_project_without_a_competitor_is_just_cuts(tmp_path):
     from mr_app.core import flow
     p = flow.new_project("", "https://youtu.be/AbCdEf12345", root=tmp_path, just_cuts=True)

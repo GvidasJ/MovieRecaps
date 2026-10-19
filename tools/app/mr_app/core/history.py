@@ -168,19 +168,23 @@ def project_events(data: Mapping) -> list[Event]:
         s = step(key)
         if s.get("state") == "done":
             detail = (_download_detail(data) if key == "download" else _convert_detail(s) if key == "convert"
+                      else "default template (no headline)" if s.get("default")
                       else (s.get("why") or "") if s.get("shrunk") else "")
-            add(s.get("finished"), done, detail, column=column)
+            add(s.get("finished"), done, detail, NOTE if s.get("default") else INFO, column=column)
         elif s.get("state") == "failed":
             add(s.get("finished"), failed, s.get("error") or "", FAIL)
     e = step("edit")
     result = str(e.get("result") or "")
+    made = "Just cuts made" if e.get("kind") == "just_cuts" else "Edit made"     # day 12: Just cuts
+    cuts = f"{e.get('cuts')} cuts" if e.get("kind") == "just_cuts" and e.get("cuts") is not None else ""
     if e.get("state") == "done":
         if result == "OK with a note":
-            add(e.get("finished"), "Edit made · OK with a note", _first(e.get("notes")), NOTE, "edit")
+            add(e.get("finished"), f"{made} · OK with a note", _first(e.get("notes")), NOTE, "edit")
         else:
-            add(e.get("finished"), f"Edit made · {result}" if result else "Edit made", "", OK, "edit")
+            add(e.get("finished"), f"{made} · {result}" if result else made, cuts, OK, "edit")
     elif e.get("state") == "failed":
-        what = "Edit failed" if result in ("", "FAIL") else f"Edit failed · {result}"
+        base = "Just cuts failed" if e.get("kind") == "just_cuts" else "Edit failed"
+        what = base if result in ("", "FAIL") else f"{base} · {result}"
         add(e.get("finished"), what, _first(e.get("failures")) or e.get("error") or "", FAIL)
     up = board.get("uploaded") if isinstance(board.get("uploaded"), Mapping) else {}
     if up and parse_time(up.get("at")) is not None:
