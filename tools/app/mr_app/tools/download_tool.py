@@ -588,6 +588,9 @@ class VideoRow(W.Card):
         self._build_steps()
         self.pair = W.label("", "Dim", wrap=True, select=True)
         self.lay.addWidget(self.pair)
+        self.extras = QVBoxLayout()                 # the torrent's file picker / progress card, while there
+        self.extras.setSpacing(8)
+        self.lay.addLayout(self.extras)
         self.titles = TitlesBlock()
         self.titles.use_headline.connect(self._use_headline)
         self.titles.use_title.connect(self._use_title)
@@ -661,6 +664,15 @@ class VideoRow(W.Card):
             c = StepCell(label)
             self.cells[k] = c
             self.steps_row.addWidget(c, 1)
+
+    def add_extra(self, w: QWidget | None, remove: QWidget | None = None) -> None:
+        """A card shown inside the row for a while (the torrent's picker, then its progress card)."""
+        if remove is not None:
+            self.extras.removeWidget(remove)
+            remove.setParent(None)
+            remove.deleteLater()
+        if w is not None:
+            self.extras.addWidget(w)
 
     # -- asking (the headline box, Change headline, Add a competitor) --
     def _start_ask(self, what: str) -> None:
@@ -1250,8 +1262,9 @@ class DownloadPage(QWidget):
         if added and not probs:
             self.batch_box.clear()
         self.msg.setStyleSheet(f"color: {theme.RED};" if probs else "")
-        self.msg.setText(("; ".join(probs[:6]) + ("  ·  " if added else "")) if probs else "" +
-                         (f"{len(added)} video(s) added" if added else ""))
+        bits = ["; ".join(probs[:6])] if probs else []
+        bits += [f"{len(added)} video(s) added"] if added else []
+        self.msg.setText("  ·  ".join(bits) or "nothing to add: write one video per line")
         return added
 
     def _add_item(self, it: Item) -> None:
@@ -1267,11 +1280,12 @@ class DownloadPage(QWidget):
 
     # -- torrents (6c is another part's: its engine is called here) --
     def start_torrent(self, it: Item) -> None:
-        """A torrent RAW: the torrent part's file picker and download (mr_app.ui.torrent_panel / core.torrent);
-        when it has finished, its video is the RAW's file and the row goes on like a dropped file. Without that
-        part in this app, said plainly."""
+        """A torrent RAW: the torrent part's file picker inside the row (ui.torrent_panel.TorrentPicker: the files,
+        sizes, seeders, free space, the biggest video ticked, Start), then its progress card (TorrentCard of the
+        TorrentJob); when the download has finished, its video is the RAW's file and the row goes on like a dropped
+        file (placed into the project folder, then Convert ...). Without that part in this app, said plainly."""
         try:
-            from ..ui import torrent_panel as TP                          # noqa: F401
+            from ..ui import torrent_panel as TP
         except Exception:  # noqa: BLE001 - not in this build
             self._fail(it, "download", "torrent support is coming -- for now download it yourself and drop the video "
                                        "file into RAW")
@@ -1283,26 +1297,63 @@ class DownloadPage(QWidget):
             self._fail(it, "download", f"the torrent could not be opened: {NV.plain_error(e)}")
             return
         row = self.rows[it.id]
-        row.lay.insertWidget(2, picker)
+        row.add_extra(picker)
+        it.state = WORKING
+        it.started = it.started or datetime.now()
+        it.message = "Choose the video in the torrent, then press Start"
         self._step(it, "download", S_RUN, 0.0, "choose the file")
-        it.message = "choose the video in the torrent, then Start"
+        self._order()
 
-        def chosen(files) -> None:
+        def gone(w) -> None:
+            row.add_extra(None, remove=w)
+
+        def failed(text: str) -> None:
+            gone(picker)
+            self._fail(it, "download", text or "the torrent could not be read")
+
+        def cancelled() -> None:
+            gone(picker)
+            it.state, it.failed_step, it.error = STOPPED, "download", "stopped by you"
+            self._step(it, "download", S_WAIT, 0.0, "stopped")
+            self._order()
+
+        def chosen(indexes) -> None:
             try:
-                job = TP.start_job(it.raw_torrent, save_dir, files) if hasattr(TP, "start_job") else None
+                job = picker.start_job(list(indexes))
             except Exception as e:  # noqa: BLE001
-                self._fail(it, "download", NV.plain_error(e))
+                failed(NV.plain_error(e))
                 return
-            if job is None:
-                return
-            prog = getattr(job, "progress", None)
-            if prog is not None:
-                prog.connect(lambda share, *_a: self._step(it, "download", S_RUN, float(share), "downloading"))
-            fin = getattr(job, "finished", None)
-            if fin is not None:
-                fin.connect(lambda path: self.torrent_finished(it, Path(path)))
-        if hasattr(picker, "chosen"):
-            picker.chosen.connect(chosen)
+            gone(picker)
+            card = TP.TorrentCard(job) if hasattr(TP, "TorrentCard") else None
+            if card is not None:
+                row.add_extra(card)
+            it.message = "Downloading the torrent"
+            job.progress.connect(lambda st: self._torrent_progress(it, st))
+            job.failed.connect(lambda text: self._fail(it, "download", text or "the torrent stopped"))
+
+            def finished(path: str) -> None:
+                if card is not None:
+                    QTimer.singleShot(4000, lambda: gone(card))        # its green "done" seen for a moment
+                if path:
+                    self.torrent_finished(it, Path(path))
+                else:
+                    self._fail(it, "download", "the torrent finished but holds no video file")
+            job.finished.connect(finished)
+        picker.chosen.connect(chosen)
+        for sig, fn in (("failed", failed), ("cancelled", cancelled)):
+            s = getattr(picker, sig, None)
+            if s is not None:
+                s.connect(fn)
+
+    def _torrent_progress(self, it: Item, st: dict) -> None:
+        try:
+            share = float(st.get("share", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            share = 0.0
+        self._worked = True
+        it.message = " · ".join(x for x in (f"{st.get('percent', int(share * 100))} %", st.get("speed_text", ""),
+                                             f"{st.get('seeders', 0)} seeders", st.get("eta_text", "")) if x)
+        self._step(it, "download", S_RUN, share * 0.98, "downloading")
 
     def torrent_finished(self, it: Item, video: Path) -> None:
         """The torrent's video is downloaded: it is the RAW's file (placed into the project like a dropped file)."""
@@ -1312,8 +1363,13 @@ class DownloadPage(QWidget):
 
     @staticmethod
     def _torrent_dir() -> Path:
-        v = NV.get_pref("torrent_dir", "")
-        return Path(v) if v else Path(r"D:\Shared\Downloads\Torrents")
+        """Where torrents are saved (the torrent part's Settings -> "Save torrents to"; this computer's default)."""
+        try:
+            from ..core import torrent as T
+            return Path(T.default_dir())
+        except Exception:  # noqa: BLE001 - that part not in this build
+            v = NV.get_pref("torrent_dir", "")
+            return Path(v) if v else Path(r"D:\Shared\Downloads\Torrents")
 
     # -- the work queue: one stage of one video at a time, in the order they were asked --
     def queue(self, it: Item, stages: tuple[str, ...], default_template: bool = False) -> None:

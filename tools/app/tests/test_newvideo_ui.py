@@ -217,6 +217,61 @@ def test_just_cuts_then_add_a_competitor_makes_it_a_full_run_without_a_new_downl
     assert P.load(it.project).data["competitor"]["url"] == COMP
 
 
+def test_a_magnet_uses_the_torrent_parts_picker_and_its_video_becomes_the_raw(page, tmp_path, monkeypatch):
+    from PySide6.QtCore import QObject, Signal
+    import mr_app.ui as UI
+
+    class Picker(QtWidgets.QWidget):
+        chosen = Signal(list)
+        cancelled = Signal()
+        failed = Signal(str)
+
+        def __init__(self, source, save_dir):
+            super().__init__()
+            self.source, self.save_dir = source, save_dir
+
+        def start_job(self, indexes):
+            return Job()
+
+    class Job(QObject):
+        progress = Signal(dict)
+        finished = Signal(str)
+        failed = Signal(str)
+
+    class Card(QtWidgets.QWidget):
+        def __init__(self, job):
+            super().__init__()
+    fake = SimpleNamespace(TorrentPicker=Picker, TorrentCard=Card)
+    monkeypatch.setitem(sys.modules, "mr_app.ui.torrent_panel", fake)
+    monkeypatch.setattr(UI, "torrent_panel", fake, raising=False)
+    page.auto.click()
+    _fill(page, "magnet:?xt=urn:btih:EXAMPLE&dn=Example.Movie", COMP, "a headline")
+    it = page.add()
+    row = page.rows[it.id]
+    picker = row.extras.itemAt(0).widget()
+    assert isinstance(picker, Picker) and picker.source.startswith("magnet:")
+    assert it.state == D.WORKING and it.steps["download"].state == D.S_RUN and not page.calls
+    jobs = []
+    orig = Picker.start_job
+    monkeypatch.setattr(Picker, "start_job", lambda self, ix: jobs.append(orig(self, ix)) or jobs[-1])
+    picker.chosen.emit([0])
+    assert isinstance(row.extras.itemAt(0).widget(), Card)
+    jobs[0].progress.emit({"share": 0.5, "percent": 50, "speed_text": "38 MB/s", "seeders": 398})
+    assert it.steps["download"].share == pytest.approx(0.49) and "398 seeders" in page.now_text(it)
+    video = tmp_path / "Example.Movie.mkv"
+    video.write_bytes(b"x")
+    jobs[0].finished.emit(str(video))
+    assert it.raw_file == video and not it.raw_torrent
+    assert [c[0] for c in page.calls] == ["download", "convert", "template"] and it.state == D.SENT
+
+
+def test_without_the_torrent_part_a_magnet_says_so_plainly(page, monkeypatch):
+    monkeypatch.setitem(sys.modules, "mr_app.ui.torrent_panel", None)       # an import of it fails
+    _fill(page, "magnet:?xt=urn:btih:EXAMPLE", COMP)
+    it = page.add()
+    assert it.state == D.FAILED and "torrent support is coming" in page.now_text(it)
+
+
 def test_newest_on_top_running_first_then_waiting_then_finished(page):
     _fill(page, YT, COMP)
     a = page.add()                                               # waits for Convert

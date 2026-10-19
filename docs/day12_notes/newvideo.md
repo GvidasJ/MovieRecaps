@@ -88,12 +88,14 @@ and makes the full edit — the RAW is not downloaded again.
 ## Hooks left for the lead
 
 - **Torrents (6c)**: `DownloadPage.start_torrent(item)` imports `mr_app.ui.torrent_panel`; without it the row fails
-  with "torrent support is coming -- for now download it yourself and drop the video file into RAW". With it, it
-  expects `torrent_panel.TorrentPicker(magnet_or_torrent_path, save_dir)` (a widget with `chosen(files)`) and
-  `torrent_panel.start_job(magnet, save_dir, files)` returning an object with `progress(share, ...)` and
-  `finished(path_of_video)` signals; on finished it calls `DownloadPage.torrent_finished(item, path)` which makes the
-  video the RAW's file and continues like a dropped file. Adjust the two names to the torrent helper's real API.
-  The save folder is settings.json `torrent_dir` (default D:\Shared\Downloads\Torrents).
+  with "torrent support is coming -- for now download it yourself and drop the video file into RAW". With it (written
+  against the torrent helper's API as it stood at 08:30 in worktree agent-ac1e3672...): `TorrentPicker(source,
+  save_dir)` is shown inside the row (`chosen(list)`, `cancelled()`, `failed(str)`), then `picker.start_job(indexes)`
+  and a `TorrentCard(job)` inside the row; `job.progress(dict)` (share, percent, speed_text, seeders, eta_text) moves
+  the Download bar, `job.failed(str)` stops the row red, `job.finished(video_path)` calls
+  `DownloadPage.torrent_finished(item, path)`: the video becomes the RAW's file and the row goes on like a dropped
+  file (into the project folder, Convert ...). The save folder: `core.torrent.default_dir()`. Tested with a fake
+  panel (test_newvideo_ui.py); check it once with the real one after the merge.
 - **Queue rows / board cards**: `ui/titles_block.TitlesBlock` — `from_project(project_json_dict)` shows both titles;
   connect `use_headline` / `use_title`. A board card can show "Just cuts" from project.json `kind == "just_cuts"`
   (or `steps.edit.kind`).
