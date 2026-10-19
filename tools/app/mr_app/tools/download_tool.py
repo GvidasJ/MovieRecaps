@@ -742,8 +742,15 @@ class VideoRow(W.Card):
         self.page.set_upload_title(self.item, text)
 
     def _folder(self) -> None:
-        if self.item.project is not None and Path(self.item.project).exists():
-            os.startfile(str(self.item.project))                  # noqa: S606
+        """Opens the project folder -- in the background (it may be on the shared folder over the network)."""
+        folder = self.item.project
+        if folder is None:
+            return
+
+        def work() -> None:
+            if Path(folder).exists():
+                os.startfile(str(folder))                         # noqa: S606
+        off_thread(work, None, lambda e: self.page.toast(f"The folder could not be opened: {e}", "fail"))
 
     # -- what it shows --
     def refresh(self) -> None:
@@ -2023,24 +2030,48 @@ class DownloadPage(QWidget):
         self._order()
         self._counts()
 
-    def xml_of(self, it: Item) -> Path | None:
+    def _xml_path(self, it: Item) -> Path | None:
         rd = it.result.get("run_dir") if it.result else None
         if not rd and it.job is not None and getattr(it.job, "run_dir", None):
             rd = it.job.run_dir
-        if rd and (Path(rd) / "1_edit.xml").is_file():
-            return Path(rd) / "1_edit.xml"
-        return None
+        return Path(rd) / "1_edit.xml" if rd else None
+
+    def xml_of(self, it: Item) -> Path | None:
+        """The finished edit's 1_edit.xml, when it is there. Never a disk look on the window's thread (the row's
+        refresh asks often and the run folder may be on the shared folder over the network): the first ask looks in
+        the background and refreshes the row; the answer is remembered."""
+        f = self._xml_path(it)
+        if f is None:
+            return None
+        seen = getattr(self, "_xml_seen", None)
+        if seen is None:
+            seen = self._xml_seen = {}
+        key = str(f)
+        if key in seen:
+            return f if seen[key] else None
+        seen[key] = False                                   # asked once; "there" when the look says so
+
+        def got(there) -> None:
+            seen[key] = bool(there)
+            if there:
+                self._refresh(it)
+        off_thread(f.is_file, got, lambda _e: seen.pop(key, None))
+        return f if seen.get(key) else None                 # (a test's off_thread answers at once)
 
     def open_premiere(self, it: Item) -> None:
-        xml = self.xml_of(it)
+        xml = self._xml_path(it)
         if xml is None:
             self.toast("The edit's 1_edit.xml is not there", "fail")
             return
-        from ..ui import background as BG
         from .match_cuts_tool import open_in_premiere
+
+        def work():
+            if not xml.is_file():
+                return "The edit's 1_edit.xml is not there"
+            return open_in_premiere(xml)
         self.toast("Opening in Premiere…")
-        BG.call(lambda: open_in_premiere(xml), lambda r: self.toast(str(r)) if r else None,
-                lambda e: self.toast(f"Premiere: {e}", "fail"))
+        off_thread(work, lambda r: self.toast(str(r)) if r else None,
+                   lambda e: self.toast(f"Premiere: {e}", "fail"))
 
     # -- Automatic, turn off the PC --
     def _auto_toggled(self, on: bool) -> None:
