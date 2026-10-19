@@ -35,6 +35,13 @@ def main() -> int:
         if subprocess.run([sys.executable, "-m", "pip", "install", "deno"]).returncode != 0:
             print("note: deno could not be installed -- YouTube downloads may miss formats; install it once with: "
                   "winget install DenoLand.Deno")
+    if importlib.util.find_spec("scenedetect") is None or importlib.util.find_spec("scenedetect.output") is None:
+        # the tool's cut cross-check needs PySceneDetect 0.7 (day 12: the laptop's older one logged "No module
+        # named 'scenedetect.output'" on every run) -- without its own dependencies (the tool has OpenCV already)
+        print("installing PySceneDetect 0.7.1 (the tool's cut cross-check) ...", flush=True)
+        if subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "scenedetect==0.7.1", "click",
+                           "platformdirs"]).returncode != 0:
+            print("note: PySceneDetect could not be installed -- the tool skips its cross-check of the cuts")
     from mr_app.core import shortcut
     p = shortcut.make()
     try:                                     # Windows keeps old icons in a cache: show the new logo now (night 11)
