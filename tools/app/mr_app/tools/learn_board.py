@@ -257,8 +257,12 @@ class LCol(QWidget):
             self.body.removeWidget(c)
             c.setParent(None)
             c.deleteLater()
+            self._show_empty()                            # the last card has folded away: "Nothing waiting ..."
         c.close_card(gone)
         self.set_count(self.count())
+        self._show_empty()
+
+    def _show_empty(self) -> None:
         self.empty.setVisible(self.count() == 0 and not any(
             getattr(self.body.itemAt(i).widget(), "closing", False) for i in range(self.body.count())))
 

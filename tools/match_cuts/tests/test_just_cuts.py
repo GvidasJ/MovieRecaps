@@ -21,6 +21,32 @@ def test_no_cut_leaves_a_shot_shorter_than_the_minimum():
     assert JC.shot_bounds([2.0, 4.0], 372) == [(0, 120), (120, 240), (240, 372)]
 
 
+def test_build_cutlist_one_segment_per_shot_framed_on_its_face():
+    """(day 12 extra) The RAW as an edit of itself: each shot one segment at its own frames, centred when no face is
+    found, else moved onto the face; the face finder is told what the shot before showed (the same person)."""
+    bounds = JC.shot_bounds([2.0, 4.0], 372)
+    win, seq = (0.0, 300.0, 1080.0, 1000.0), (1080, 1920)
+    asked = []
+
+    def face_x(t0, t1, view):
+        asked.append((round(t0, 3), round(t1, 3), view))
+        return 1500.0 if len(asked) == 2 else None
+    cl, notes = JC.build_cutlist({"file": "raw.mp4", "width": 1920, "height": 1080}, 372, bounds, win, seq, face_x)
+    assert [(s.id, s.comp_in, s.comp_out, s.label) for s in cl.segments] == \
+        [(1, 0, 120, "shot 1"), (2, 120, 240, "shot 2"), (3, 240, 372, "shot 3")]
+    assert [s.raw_in_seconds for s in cl.segments] == [0.0, 2.0, 4.0]
+    assert [n["face_x"] for n in notes] == [None, 1500.0, None]
+    assert asked[0][2] is None and asked[1][2] is not None                 # the first shot has nothing before it
+    centred, on_face = cl.segments[0].transform, cl.segments[1].transform
+    assert centred != on_face and cl.segments[2].transform == centred
+    s = centred["s"] if "s" in centred else centred["scale"]
+    assert s * 1920 >= 1080 and s * 1080 >= 1000 - 1e-6                   # the RAW covers the window
+    assert cl.competitor["frames"] == 372 and (cl.competitor["width"], cl.competitor["height"]) == seq
+    assert cl.layout["box"]["y"] == 300.0 and cl.layout["captions"] == []
+    plain, _ = JC.build_cutlist({"width": 1920, "height": 1080}, 120, [(0, 120)], win, seq)    # no face finder
+    assert len(plain.segments) == 1 and plain.segments[0].transform == centred
+
+
 @pytest.fixture(scope="module")
 def raw(tmp_path_factory) -> Path:
     d = tmp_path_factory.mktemp("jc")
