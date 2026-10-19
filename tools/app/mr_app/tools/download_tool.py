@@ -57,6 +57,7 @@ GATED, DONE = "gated", "done"
 
 # step states
 S_WAIT, S_RUN, S_DONE, S_FAIL, S_NOTE, S_SKIP = "waiting", "running", "done", "failed", "note", "skipped"
+S_ASK = "ask"                     # amber, the bar empty: the step needs something from you (the headline)
 
 STEPS_FULL = [("download", "Download"), ("convert", "Convert ×2"), ("template", "Template"), ("edit", "Edit")]
 STEPS_JUST = [("download", "Download"), ("convert", "Convert"), ("cuts", "Cuts")]
@@ -538,12 +539,16 @@ class StepCell(QWidget):
         lay.addWidget(self.small)
 
     def set(self, st: Step) -> None:
-        colour = {S_RUN: theme.BLUE, S_DONE: theme.GREEN, S_FAIL: theme.RED, S_NOTE: theme.AMBER}.get(st.state,
-                                                                                                      theme.DIM)
+        colour = {S_RUN: theme.BLUE, S_DONE: theme.GREEN, S_FAIL: theme.RED, S_NOTE: theme.AMBER,
+                  S_ASK: theme.AMBER}.get(st.state, theme.DIM)
         self.name.setStyleSheet(f"color: {colour};")
-        self.bar.state({S_RUN: "running", S_DONE: "pass", S_FAIL: "fail", S_NOTE: "note"}.get(st.state, "waiting"))
-        self.bar.set(1.0 if st.state in (S_DONE, S_NOTE) and st.share <= 0 else st.share)
-        if st.state == S_RUN:
+        self.bar.state({S_RUN: "running", S_DONE: "pass", S_FAIL: "fail", S_NOTE: "note", S_ASK: "note"}.get(
+            st.state, "waiting"))
+        self.bar.set(0.0 if st.state == S_ASK else
+                     1.0 if st.state in (S_DONE, S_NOTE) and st.share <= 0 else st.share)
+        if st.state == S_ASK:
+            txt = st.text
+        elif st.state == S_RUN:
             txt = f"{int(round(100 * st.share))} %" if st.share > 0 else (st.text or "starting")
         elif st.state in (S_DONE, S_NOTE):
             txt = (st.text + " · " if st.text else "") + _hm(st.finished) if st.text or st.finished else "done"
@@ -750,7 +755,8 @@ class VideoRow(W.Card):
     def _pill(self) -> tuple[str, tuple[str, str, str] | None]:
         it = self.item
         if it.state == FAILED:
-            return "FAIL", None
+            lab = (it.result or {}).get("label", "")
+            return (lab if lab in ("WRONG PAIR", "PICTURE NOT FOUND", "NOT IN THIS RAW") else "FAIL"), None
         if it.state == STOPPED:
             return "STOPPED", None
         if it.state == DONE:
@@ -1486,8 +1492,7 @@ class DownloadPage(QWidget):
         elif self.auto.isChecked():
             self.queue(it, ("template",), default_template=True)
         else:
-            self._step(it, "template", S_NOTE, 0.0, "needs a headline")
-            it.steps["template"].share = 0.0
+            self._step(it, "template", S_ASK, 0.0, "needs a headline")
             self._gate(it, G_HEADLINE)
 
     def make_template(self, it: Item, text: str) -> None:
@@ -1615,6 +1620,8 @@ class DownloadPage(QWidget):
                 self._worked = True
             elif j.state in (J.DONE, J.STOPPED) and j.result:
                 self._finish(it, dict(j.result))
+            elif j.state == J.STOPPED:                   # stopped in the queue before it ran
+                self._finish(it, {"label": "STOPPED"})
             self._order()
         self._check_shutdown()
 
@@ -1648,6 +1655,7 @@ class DownloadPage(QWidget):
         """Try again: continues from the step that failed (the done ones are kept)."""
         stage = it.failed_step or "download"
         it.error = ""
+        it.result = {}
         if stage == "edit":
             self._step(it, "edit", S_WAIT, 0.0, "")
             self.send_to_edit(it, start=True)

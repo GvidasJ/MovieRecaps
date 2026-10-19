@@ -128,7 +128,8 @@ def test_automatic_off_every_step_waits_for_its_button_and_the_headline_is_asked
     assert it.gate == D.G_SEND and row.b_go.text() == "Send to Match cuts"
     assert it.video_headline == "Line one\nline two 😭" and not row.titles.isHidden()
     row.b_go.click()                                             # no headline, Automatic OFF: asked on the row
-    assert it.gate == D.G_HEADLINE and it.steps["template"].state == D.S_NOTE
+    assert it.gate == D.G_HEADLINE and it.steps["template"].state == D.S_ASK
+    assert row.cells["template"].small.text() == "needs a headline" and row.cells["template"].bar.target == 0.0
     assert not row.ask.isHidden() and row.b_ask.text() == "Make the template"
     assert "Waiting for the headline" in page.now_text(it)
     row.ask_head.setPlainText("When she finally\ngot the part 💀😭")
@@ -155,6 +156,22 @@ def test_automatic_on_runs_by_itself_and_no_headline_uses_the_default_template(p
     page._poll()                                                 # noqa: SLF001
     row = page.rows[it.id]
     assert "default template" in row.pill.word() and "default template used" in page.now_text(it)
+
+
+def test_an_edit_that_ends_wrong_pair_is_red_with_its_own_word_and_a_stopped_one_says_so(page):
+    page.auto.click()
+    _fill(page, YT, COMP, "a headline")
+    a = page.add()
+    _fill(page, YT.replace("Ab", "Bb"), COMP, "a headline")
+    b = page.add()
+    ja, jb = page.queue_page.jobs[0][0], page.queue_page.jobs[1][0]
+    ja.state, ja.result = J.DONE, {"label": "WRONG PAIR", "failures": ["This competitor doesn't seem to come from "
+                                                                      "this RAW"]}
+    jb.state = J.STOPPED                                          # stopped in the queue before it ran
+    page._poll()                                                  # noqa: SLF001
+    assert a.state == D.FAILED and page.rows[a.id].pill.word() == "WRONG PAIR"
+    assert "doesn't seem to come from this RAW" in page.now_text(a) and not page.rows[a.id].b_retry.isHidden()
+    assert b.state == D.STOPPED and page.rows[b.id].pill.word() == "STOPPED"
 
 
 def test_turning_automatic_on_lets_the_waiting_rows_go_on_at_once(page):
