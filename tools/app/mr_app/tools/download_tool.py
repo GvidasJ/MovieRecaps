@@ -410,17 +410,46 @@ class DetLabel(QLabel):
 
     def __init__(self, text: str = "EMPTY"):
         super().__init__(text)
-        self.setFont(W.mono(9.5, 600, 1.0))
+        self.setFont(W.mono(10, 600, 10))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumWidth(84)
+        # the box is painted (its colours fade 0.3 s to a new kind, like the reference's .det transition); the
+        # stylesheet only keeps the padding and the 1 px border's room, so the size never changes
+        self.setStyleSheet("border: 1px solid transparent; background: transparent; padding: 3px 8px;")
         self.kind = None
+        self._from = self._to = DET_COLOURS[""]
+        self.fade = M.Fader(self, self._faded)
         self.set_kind("")
+        self.fade.set(1.0)
+
+    def colours(self) -> tuple[QColor, QColor, QColor]:
+        """(text, border, background) now -- part-way while it fades."""
+        t = self.fade.value
+        return tuple(M.mix(QColor(a), QColor(b), t) for a, b in zip(self._from, self._to))  # type: ignore[return-value]
 
     def set_kind(self, kind: str, text: str | None = None) -> None:
         self.kind = kind
-        fg, line, bg = DET_COLOURS.get(kind, DET_COLOURS[""])
+        new = DET_COLOURS.get(kind, DET_COLOURS[""])
         self.setText(text if text is not None else NV.LABELS.get(kind, "EMPTY"))
-        self.setStyleSheet(f"color: {fg}; border: 1px solid {line}; background-color: {bg}; padding: 3px 8px;")
+        if new != self._to:
+            self._from = tuple(c.name(QColor.NameFormat.HexArgb) for c in self.colours())
+            self._to = new
+            self.fade.set(0.0)
+            self.fade.to(1.0)
+
+    def _faded(self) -> None:
+        fg = self.colours()[0]
+        if self.styleSheet().find(fg.name(QColor.NameFormat.HexArgb)) < 0:
+            self.setStyleSheet(f"color: {fg.name(QColor.NameFormat.HexArgb)}; border: 1px solid transparent; "
+                               "background: transparent; padding: 3px 8px;")
+        self.update()
+
+    def paintEvent(self, e) -> None:                      # noqa: N802
+        _fg, line, bg = self.colours()
+        p = QPainter(self)
+        W.box(p, QRectF(self.rect()), bg, line)
+        p.end()
+        super().paintEvent(e)
 
 
 class HeadlineBox(QPlainTextEdit):
@@ -559,7 +588,7 @@ class StepCell(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
         self.name = QLabel(label.upper())
-        self.name.setFont(W.mono(9.5, 600, 1.0))
+        self.name.setFont(W.mono(9.5, 600, 10))
         lay.addWidget(self.name)
         self.bar = W.GlideBar(4)
         lay.addWidget(self.bar)
@@ -1083,7 +1112,7 @@ class DownloadPage(QWidget):
         mode = QVBoxLayout()
         mode.setSpacing(2)
         k = QLabel("WILL MAKE")
-        k.setFont(W.mono(9.5, 600, 1.0))
+        k.setFont(W.mono(9.5, 600, 10))
         k.setStyleSheet(f"color: {theme.DIM};")
         mode.addWidget(k)
         self.will = QLabel("—")
@@ -1123,7 +1152,7 @@ class DownloadPage(QWidget):
         row = QHBoxLayout()
         row.setSpacing(10)
         k = QLabel(name.upper() if "(" not in name else name.split("(")[0].upper() + "(" + name.split("(", 1)[1])
-        k.setFont(W.mono(9.5, 600, 1.0))
+        k.setFont(W.mono(9.5, 600, 10))
         k.setStyleSheet(f"color: {theme.MUTED};")
         k.setFixedWidth(150)
         k.setWordWrap(True)

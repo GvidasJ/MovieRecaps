@@ -226,3 +226,27 @@ def test_download_row_disk_looks_are_off_the_window_thread(qapp, monkeypatch, tm
     assert refreshed == [it]
     assert D.DownloadPage.xml_of(page, it) == run / "1_edit.xml"
     assert pending == []
+
+
+def test_the_forms_detected_kind_label_fades_to_its_new_colours_and_keeps_its_size(qapp):
+    """The reference's .det: a new kind (YOUTUBE / TORRENT / FILE ...) fades its colours in 0.3 s, never jumps;
+    Animations off: at once."""
+    from PySide6.QtGui import QColor
+
+    from mr_app.core import newvideo as NV
+    from mr_app.tools import download_tool as D
+    d = D.DetLabel()
+    d.resize(d.sizeHint())
+    size = d.size()
+    assert d.colours()[0] == QColor(D.DET_COLOURS[""][0])
+    d.set_kind(NV.YOUTUBE)
+    pump(qapp, 110)
+    fg = d.colours()[0]
+    assert fg != QColor(D.DET_COLOURS[""][0]) and fg != QColor(D.DET_COLOURS[NV.YOUTUBE][0])   # part-way
+    pump(qapp, 300)
+    assert d.colours()[0] == QColor(D.DET_COLOURS[NV.YOUTUBE][0])
+    assert d.size() == size
+    d.grab()                                                 # it paints
+    M.set_enabled(False)
+    d.set_kind(NV.TORRENT)
+    assert d.colours()[1] == QColor(D.DET_COLOURS[NV.TORRENT][1])
