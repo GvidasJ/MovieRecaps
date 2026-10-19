@@ -17,3 +17,56 @@ if "MOVIERECAPS_SETTINGS" not in os.environ:
     os.environ["MOVIERECAPS_SETTINGS"] = str(_TMP / "settings.json")
     (_TMP / "settings.json").write_text(json.dumps({"save_to": str(_TMP / "shared"), "intro": False}),
                                         encoding="utf-8")
+
+
+import sys  # noqa: E402
+
+import pytest  # noqa: E402
+
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+class _NoShutdown(AssertionError):
+    pass
+
+
+def _is_shutdown_command(args) -> bool:
+    if isinstance(args, (str, bytes)):
+        first = (args.decode() if isinstance(args, bytes) else args).strip().split(" ", 1)[0]
+    else:
+        try:
+            first = str(list(args)[0])
+        except (IndexError, TypeError):
+            return False
+    name = first.replace("\\", "/").rsplit("/", 1)[-1].strip('"').lower()
+    return name in ("shutdown", "shutdown.exe")
+
+
+@pytest.fixture(autouse=True)
+def _never_turn_the_pc_off(monkeypatch):
+    """No test can ever turn this PC off: core.shutdown.SHUTDOWN (and its real command) raise, and any process
+    started as "shutdown ..." through subprocess is refused. A test that wants turn_off to "work" replaces SHUTDOWN
+    with its own fake, as before."""
+    import subprocess
+
+    from mr_app.core import shutdown as SD
+
+    def refuse(*_a, **_k):
+        raise _NoShutdown("a test tried to turn the PC off")
+    monkeypatch.setattr(SD, "SHUTDOWN", refuse)
+    real_run, real_popen = subprocess.run, subprocess.Popen
+
+    def run(args, *a, **k):
+        if _is_shutdown_command(args):
+            refuse()
+        return real_run(args, *a, **k)
+
+    class Popen(real_popen):                        # type: ignore[misc, valid-type]
+        def __init__(self, args, *a, **k):
+            if _is_shutdown_command(args):
+                refuse()
+            super().__init__(args, *a, **k)
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", Popen)
+    yield

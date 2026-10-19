@@ -76,9 +76,18 @@ def test_blockers_say_each_reason_in_plain_words_and_a_broken_check_is_skipped(m
 
 
 def test_the_real_shutdown_is_never_the_one_the_tests_see():
-    """conftest-free guard: every test that reaches turn_off replaces SHUTDOWN; the default is the real command,
-    so this test only checks it is named and not called here."""
-    assert SD.SHUTDOWN.__name__ in ("_real_shutdown", "<lambda>")
+    """conftest's autouse guard: SHUTDOWN raises in every test, and so does any "shutdown ..." process started
+    through subprocess -- no test can turn this PC off, even one that forgets to replace SHUTDOWN."""
+    import subprocess
+    assert SD.SHUTDOWN is not SD._real_shutdown                                     # noqa: SLF001
+    with pytest.raises(AssertionError):
+        SD.SHUTDOWN()
+    with pytest.raises(AssertionError):
+        subprocess.run(["shutdown", "/s", "/t", "0"])
+    with pytest.raises(AssertionError):
+        subprocess.Popen(r"C:\Windows\System32\shutdown.exe /s /t 0")
+    with pytest.raises(AssertionError):                     # the real command itself is refused by the guard too
+        SD._real_shutdown()                                                          # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------------------------------------------------
