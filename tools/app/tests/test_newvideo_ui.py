@@ -280,7 +280,9 @@ def test_a_magnet_uses_the_torrent_parts_picker_and_its_video_becomes_the_raw(pa
 
 
 def test_without_the_torrent_part_a_magnet_says_so_plainly(page, monkeypatch):
+    import mr_app.ui as UI
     monkeypatch.setitem(sys.modules, "mr_app.ui.torrent_panel", None)       # an import of it fails
+    monkeypatch.delattr(UI, "torrent_panel", raising=False)                # (also after another test imported it)
     _fill(page, "magnet:?xt=urn:btih:EXAMPLE", COMP)
     it = page.add()
     assert it.state == D.FAILED and "torrent support is coming" in page.now_text(it)

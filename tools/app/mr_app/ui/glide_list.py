@@ -122,6 +122,10 @@ class GlideList(QWidget):
             self._place(w, y, animate)
             y += h + self.spacing
         total = max(0, y - self.spacing) if self._items else 0
+        for w in self._items:                             # a row still gliding up (the one above it shrank) is not
+            a = self._anims.get(id(w))                    # cut off at the list's new end: the list shrinks after it
+            if a is not None and a.state() == QVariantAnimation.State.Running:
+                total = max(total, w.y() + w.height())
         if total != self._height:
             self._height = total
             self.setFixedHeight(total)
@@ -147,6 +151,7 @@ class GlideList(QWidget):
             a = QVariantAnimation(self)
             a.setEasingCurve(self.curve)
             a.valueChanged.connect(lambda v, ww=w: self._step(ww, v))
+            a.finished.connect(self._later)               # then the list's height to its end (see relayout)
             self._anims[key] = a
         a.stop()
         a.setStartValue(float(w.y()))

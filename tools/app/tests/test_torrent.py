@@ -493,7 +493,9 @@ def test_settings_dialog_saves_the_torrent_folder_and_the_switch(qt, tmp_path):
 # ---------------------------------------------------------------------------------------------------------------------
 
 @pytest.mark.skipif(T.find_aria2c() is None, reason="aria2c.exe is not installed (run setup_app.py)")
-def test_real_aria2c_shares_and_downloads_a_tiny_torrent_on_localhost(tmp_path):
+def test_real_aria2c_shares_and_downloads_a_tiny_torrent_on_localhost(tmp_path, monkeypatch):
     from mr_app.core import torrent_selftest
+    monkeypatch.setattr(T, "margin", lambda _n: 0)     # 200 KB, not +512 MB to spare (a nearly full C: in a day run;
+    #                                                    the free-space refusal has its own tests)
     out = torrent_selftest.run(tmp_path, size=200 * 1024, timeout=90, log=lambda *_a: None)
     assert out.is_file() and out.stat().st_size == 200 * 1024

@@ -51,15 +51,20 @@ class TwoFiles:
     ok: bool = False                  # checked and safe to remove
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    tag: str = ""                     # "this computer" / "shared folder" when a project and its twin are both listed
+    linked: bool = False              # its old copy is the same file as one listed before it (a hard link)
 
     @property
     def where(self) -> str:
-        return f"{self.project.name}\\{self.edit.name}"
+        return f"{self.project.name}\\{self.edit.name}" + (f" ({self.tag})" if self.tag else "")
 
     def line(self) -> str:
         """'2.1 GB  family-guy\\edit: raw_ae.mp4 (1_edit.xml plays raw_stereo.mp4)' -- for the question."""
         names = ", ".join(p.name for p in self.old)
-        extra = " -- a hard link of the downloaded RAW, frees no space" if self.size and not self.freed else ""
+        extra = ""
+        if self.size and not self.freed:
+            extra = (" -- the same file as the copy above (a hard link): counted once" if self.linked else
+                     " -- a hard link of the downloaded RAW, frees no space")
         return f"{PB.plain_size(self.freed)}  {self.where}: {names} (1_edit.xml plays {self.single.name}){extra}"
 
 
@@ -129,16 +134,49 @@ def find(items: Iterable[Any], local_root: str | os.PathLike | None = None) -> l
                 single, old = _edit_media(edit)
                 if single is None or not old:
                     continue
-                size = freed = 0
+                size = 0
                 for f in old:
                     try:
-                        st = os.stat(f)
+                        size += int(os.stat(f).st_size)
                     except OSError:
                         continue
-                    size += int(st.st_size)
-                    freed += 0 if st.st_nlink > 1 else int(st.st_size)
-                out.append(TwoFiles(edit, folder, single, old, size, freed))
+                out.append(TwoFiles(edit, folder, single, old, size, 0))
+    _count_freed(out)
+    names = [it.where for it in out]                      # a project and its twin copy: say which one is which
+    for it in out:
+        if names.count(it.where) > 1:
+            it.tag = "this computer" if lroot is not None and _under(it.project, lroot) else "shared folder"
     return out
+
+
+def _under(p: Path, root: Path) -> bool:
+    try:
+        return PB._norm(p).startswith(PB._norm(root).rstrip("\\/") + os.sep) or PB._norm(p) == PB._norm(root)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _count_freed(items: list[TwoFiles]) -> None:
+    """What deleting really frees, counted once per file: a file with several names (hard links) frees its size only
+    when every one of its names is in the list (a published twin copy hard-linked on the same drive: its two names
+    are both listed, so the size counts once); a hard link of the downloaded RAW frees nothing."""
+    names: dict[tuple, list[tuple[TwoFiles, int, int]]] = {}
+    for it in items:
+        it.freed = 0
+        for f in it.old:
+            try:
+                st = os.stat(f)
+            except OSError:
+                continue
+            names.setdefault((st.st_dev, st.st_ino) if st.st_ino else (str(f),), []).append(
+                (it, int(st.st_size), int(st.st_nlink)))
+    for group in names.values():
+        it, size, nlink = group[0]
+        if len(group) >= max(1, nlink):
+            it.freed += size
+        for other, _s, _n in group[1:]:
+            if other is not it:
+                other.linked = True
 
 
 # ---------------------------------------------------------------------------------------------------------------------

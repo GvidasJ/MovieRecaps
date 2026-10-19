@@ -104,22 +104,26 @@ class TitlesBlock(QWidget):
 
     def _build_compact(self) -> None:
         v = QVBoxLayout(self)
-        v.setContentsMargins(0, 2, 0, 0)
-        v.setSpacing(2)
-        for key, text, btns in (("Title from the post", self.post_text, [self.copy_post]),
-                                ("Headline on the video", self.head_text, [self.copy_head, self.b_more])):
-            row = QHBoxLayout()
-            row.setSpacing(4)
-            k = _key(key, None)
-            k.setFont(W.mono(8.5, 600, 1.0))
+        v.setContentsMargins(0, 4, 0, 0)
+        v.setSpacing(3)
+        for n, (key, text, btns) in enumerate((("Title from the post", self.post_text, [self.copy_post]),
+                                               ("Headline on the video", self.head_text,
+                                                [self.copy_head, self.b_more]))):
+            if n:
+                v.addSpacing(4)
+            k = _key(key, None)                            # the key on its own line (a card is ~120 px wide) ...
+            k.setFont(W.mono(8.5, 600, 0.5))
             k.setWordWrap(True)
-            row.addWidget(k, 1)
-            for b in btns:
-                row.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
-            v.addLayout(row)
-            text.setWordWrap(True)
+            v.addWidget(k)
+            text.setWordWrap(True)                         # ... the text under it ...
             text.setFont(W.font(11))
             v.addWidget(text)
+            row = QHBoxLayout()                            # ... and its buttons under that
+            row.setSpacing(4)
+            for b in btns:
+                row.addWidget(b)
+            row.addStretch(1)
+            v.addLayout(row)
 
     def set(self, post: str | None, headline: str | None) -> None:
         self._post, self._head = post or "", headline or ""

@@ -731,7 +731,7 @@ class VideoRow(W.Card):
         it = self.item
         if set(self.cells) != {k for k, _ in it.step_list()}:
             self._build_steps()
-        self.name.setText(it.name or (it.raw_url or str(it.raw_file or it.raw_torrent or ""))[:90])
+        self.name.setText(it.name or (it.raw_url or str(it.raw_file or "") or torrent_name(it.raw_torrent))[:90])
         self.chan.setText(it.channel or "")
         self.chan.setStyleSheet(f"color: {theme.channel_colour(it.channel)};")
         just = it.kind == NV.JUST_CUTS
@@ -740,7 +740,8 @@ class VideoRow(W.Card):
         self.pill.set(word, cols)
         for k, c in self.cells.items():
             c.set(it.steps.get(k) or Step())
-        raw = it.raw_url or (Path(it.raw_file).name if it.raw_file else "") or it.raw_torrent[:60]
+        raw = it.raw_url or (Path(it.raw_file).name if it.raw_file else "") or \
+            ("torrent " + torrent_name(it.raw_torrent))
         comp = it.competitor_url or (Path(it.comp_file).name if it.comp_file else "")
         self.pair.setText(f"RAW: {raw}" + (f"  ·  COMP: {comp}" if comp else "  ·  no competitor (Just cuts)"))
         has_comp = bool(comp)
@@ -795,6 +796,23 @@ class VideoRow(W.Card):
         if it.group() == NV.RUNNING:
             return "running", None
         return "waiting", None
+
+
+def torrent_name(source: str | None) -> str:
+    """A torrent RAW as a row shows it: a magnet's own name (dn=, "Some.Show.S01E02"), a .torrent file's name --
+    never the whole magnet link."""
+    s = (source or "").strip().strip('"')
+    if not s:
+        return ""
+    if s.lower().startswith("magnet:"):
+        import urllib.parse
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(s).query)
+        dn = (q.get("dn") or [""])[0].strip()
+        if dn:
+            return dn[:90]
+        bt = next((x for x in q.get("xt", []) if x.lower().startswith("urn:btih:")), "")
+        return f"magnet {bt[9:21]}…" if bt else "magnet link"
+    return Path(s).name[:90]
 
 
 def theme_month(dt: datetime) -> str:

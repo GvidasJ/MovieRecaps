@@ -200,12 +200,18 @@ class MainWindow(QMainWindow):
                 b.reload()
 
         def failed(err: str) -> None:
+            kind, _, msg = str(err).partition(": ")
+            if not (msg and kind.isidentifier()):            # plain words only: no "SomeError:" in front
+                kind, msg = "", str(err)
+            if kind == "NothingToPublish":                   # no finished edit (yet): nothing to try again
+                self.toast(f"Not saved to the shared folder: {msg}", "note")
+                return
             try:
                 from ..core import publish
-                publish.queue_pending(local, folder, root, err)
+                publish.queue_pending(local, folder, root, msg)
             except Exception:  # noqa: BLE001
                 pass
-            self.toast(f"Not saved to the shared folder yet ({err}) -- tried again later", "note")
+            self.toast(f"Not saved to the shared folder yet ({msg}) -- tried again later", "note")
         BG.call(work, done, failed)
 
     def retry_pending(self) -> None:

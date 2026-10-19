@@ -318,7 +318,8 @@ def test_a_real_local_torrent_goes_through_the_new_video_row(tmp_path, monkeypat
         seeder.call("aria2.addTorrent", base64.b64encode(tor).decode(), [],
                     {"dir": str(tmp_path), "check-integrity": "true", "seed-ratio": "0.0",
                      "bt-tracker-interval": "2"})
-        TP.set_session(T.TorrentSession(get_state, engine=getter, probe_minutes=1.5))
+        TP.set_session(T.TorrentSession(get_state, engine=getter, probe_minutes=1.5,       # (this PC's C: is
+                                        free=lambda _p: 50 * 2 ** 30))               # nearly full today)
         page = _new_video_page(tmp_path, monkeypatch)
         if page.auto.isChecked():
             page.auto.click()
@@ -542,3 +543,44 @@ def test_a_just_cuts_run_that_fails_goes_into_the_problems_list_but_never_waits_
         dl.poll.stop()
         dl.deleteLater()
         app().processEvents()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# found in the click-through: Clean up and a published twin, a Just cuts project and the shared folder
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_clean_up_counts_a_hard_linked_twin_once_and_says_which_copy_is_which(tmp_path):
+    import os
+    import shutil
+
+    from mr_app.core import rawfiles as RF
+    hub, local = tmp_path / "hub", tmp_path / "local"
+    p = PJ.create(hub, name="old-run")
+    media = p.folder / "edit" / "extras" / "media"
+    media.mkdir(parents=True)
+    (p.folder / "edit" / "extras" / "report.md").write_text("PASS", encoding="utf-8")
+    (media / "raw_stereo.mp4").write_bytes(b"s" * 1000)
+    (media / "raw_ae.mp4").write_bytes(b"a" * 5000)
+    twin = local / p.folder.name
+    shutil.copytree(p.folder, twin)
+    for n in ("raw_stereo.mp4", "raw_ae.mp4"):                                 # published on one drive: hard links
+        (twin / "edit" / "extras" / "media" / n).unlink()
+        os.link(media / n, twin / "edit" / "extras" / "media" / n)
+    found = RF.find([p.folder], local)
+    assert len(found) == 2
+    assert sorted(it.tag for it in found) == ["shared folder", "this computer"]
+    assert found[0].where != found[1].where
+    assert sum(it.freed for it in found) == 5000                              # both names go: its size, once
+    assert [it.linked for it in found] == [False, True]
+    assert "counted once" in found[1].line() and "downloaded RAW" not in found[1].line()
+    alone = RF.find([twin], None)                                            # only one of its two names listed
+    assert len(alone) == 1 and alone[0].freed == 0 and "downloaded RAW" in alone[0].line()
+
+
+def test_a_just_cuts_project_can_be_published_to_the_shared_folder(tmp_path):
+    from mr_app.core import publish as PB
+    p = PJ.create(tmp_path, name="cutsonly")
+    for d in ("cuts", "edit-2", "cuts-2", "other"):
+        (p.folder / d / "extras").mkdir(parents=True)
+        (p.folder / d / "extras" / "report.md").write_text("ok", encoding="utf-8")
+    assert [e.name for e in PB.finished_edits(p.folder)] == ["cuts", "cuts-2", "edit-2"]

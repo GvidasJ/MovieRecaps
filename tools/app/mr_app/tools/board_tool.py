@@ -136,7 +136,8 @@ class BoardCard(QFrame):
         lay.setSpacing(4)
         top = QHBoxLayout()
         top.setSpacing(6)
-        name = QLabel(card.name if len(card.name) < 40 else card.name[:38] + "…")
+        short = card.name if len(card.name) < 40 else card.name[:38] + "…"
+        name = QLabel(short.replace("_", "_​").replace("-", "-​"))   # it may break after _ and - (narrow)
         name.setFont(W.font(13, 700))
         name.setWordWrap(True)
         name.setToolTip(str(card.folder))
@@ -149,16 +150,15 @@ class BoardCard(QFrame):
         lay.addLayout(top)
         from ..ui.titles_block import TitlesBlock, has_titles, is_just_cuts
         data = getattr(card, "data", None) or {}
-        chips = QHBoxLayout()
-        chips.setSpacing(6)
-        chips.addWidget(W.channel_chip(card.channel or "no channel", 11))
-        chips.addStretch(1)
+        lay.addWidget(W.channel_chip(card.channel or "no channel", 11))
         self.kind = None
-        if is_just_cuts(data):                            # day 12: a Just cuts project
+        if is_just_cuts(data):                            # day 12: a Just cuts project (its own line: cards are narrow)
             self.kind = W.Pill("Just cuts")
             self.kind.set("Just cuts", (theme.CORAL, "#2a1812", "#5a2f22"))
-            chips.addWidget(self.kind, 0, Qt.AlignmentFlag.AlignVCenter)
-        lay.addLayout(chips)
+            kl = QHBoxLayout()
+            kl.addWidget(self.kind)
+            kl.addStretch(1)
+            lay.addLayout(kl)
         title = (card.title or "").strip()
         yt = (getattr(card, "upload_title", "") or "").strip()
         tl = QHBoxLayout()
@@ -271,6 +271,16 @@ class BoardCard(QFrame):
                  None,
                  ("Unpin" if getattr(c, "pinned", False) else "Pin to the top ★", lambda: self.page.pin(c))]
         FadeMenu(self, items).popup(e.globalPos())
+
+    def resizeEvent(self, e) -> None:                     # noqa: N802
+        """Tall enough for its word-wrapped lines at the width it got (the column's layouts do not pass the height
+        for a width down by themselves: the dates and titles were cut off at the bottom)."""
+        super().resizeEvent(e)
+        lay = self.layout()
+        if lay is not None and lay.hasHeightForWidth():
+            h = lay.totalHeightForWidth(self.width())
+            if h > 0 and self.minimumHeight() != h:
+                self.setMinimumHeight(h)
 
     def _hot(self) -> None:
         self.update()

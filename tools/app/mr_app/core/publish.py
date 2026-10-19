@@ -57,7 +57,8 @@ REACH_TIMEOUT_S = 5.0             # reachable(): a sleeping PC makes a network p
 CHUNK = 8 << 20
 MTIME_SLACK_S = 2.0               # the same time within this (FAT / exFAT keep file times to 2 s)
 PENDING_FILE = "_pending_publish.json"
-EDIT_RE = re.compile(r"(?i)^edit(-\d+)?$")       # a project's run folders: edit, edit-2 ... (flow.EDIT_NAME)
+EDIT_RE = re.compile(r"(?i)^(edit|cuts)(-\d+)?$")   # a project's run folders: edit, edit-2 ... (flow.EDIT_NAME);
+#                                                    day 12: Just cuts' cuts, cuts-2 ... (flow.CUTS_NAME) too
 REPORT = ("extras", "report.md")                  # a finished run has it
 TITLE_TXT = "title.txt"
 TOP_FILES = ("template.png",)                     # title.txt is written from the merged titles (with project.json)
@@ -331,7 +332,7 @@ def finished_edits(project_folder: str | os.PathLike) -> list[Path]:
         subs = [p for p in folder.iterdir() if p.is_dir() and EDIT_RE.match(p.name)]
     except OSError:
         return []
-    key = lambda p: (int(p.name.split("-")[1]) if "-" in p.name else 1)   # noqa: E731
+    key = lambda p: (p.name.split("-")[0].lower(), int(p.name.split("-")[1]) if "-" in p.name else 1)  # noqa: E731
     return sorted((p for p in subs if p.joinpath(*REPORT).is_file()), key=key)
 
 
