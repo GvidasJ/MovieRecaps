@@ -1635,7 +1635,7 @@ class MatchCutsPage(QWidget):
         if th is not None:
             th.wait(2000)
         if j is not None and getattr(j, "restart_swapped", False):
-            self._restart_swapped(j)
+            self._restart_when_free(j, th)
             return
         if j is not None:
             j.result = res
@@ -1666,6 +1666,18 @@ class MatchCutsPage(QWidget):
         else:
             self.update_counts()
 
+    RESTART_POLL_MS = 250
+    RESTART_TRIES = 2400                            # 10 min: the old run's thread always ends long before
+
+    def _restart_when_free(self, j: J.Job, th, tries: int = 0) -> None:
+        """The swapped run starts again only once the old run's thread has ended -- it releases the project's edit
+        lock last, so a restart before that could find the lock still there."""
+        done = getattr(th, "isFinished", None)
+        if th is not None and done is not None and not done() and tries < self.RESTART_TRIES:
+            QTimer.singleShot(self.RESTART_POLL_MS, lambda: self._restart_when_free(j, th, tries + 1))
+            return
+        self._restart_swapped(j)
+
     def _restart_swapped(self, j: J.Job) -> None:
         """Swap pressed while it ran: its run has stopped -- the same row starts again at once with the RAW and the
         competitor switched (the same files: nothing copied again; project.json's roles switched)."""
@@ -1679,10 +1691,10 @@ class MatchCutsPage(QWidget):
             row.refresh()
         self._reorder()
         self._taskbar()
-        if self.running:
+        if self.running and self.current is None:
             self._next(first=j)
         else:
-            self.update_counts()
+            self.update_counts()        # (another video started meanwhile: this one runs after it)
 
     def _finished(self) -> None:
         was = self.running

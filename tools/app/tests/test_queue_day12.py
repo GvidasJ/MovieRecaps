@@ -218,6 +218,30 @@ def test_swap_during_a_run_stops_it_and_starts_again_with_the_same_files_switche
     assert job.state == J.DONE and not page.running
 
 
+def test_swap_during_a_run_waits_for_the_old_runs_thread_to_end_before_starting_again(page, tmp_path, monkeypatch):
+    """The old run releases the project's edit lock last (after its result): the restart waits for its thread to
+    end, so it never finds the lock still held by this computer."""
+    monkeypatch.setattr(J, "project_for_job", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(M.MatchCutsPage, "RESTART_POLL_MS", 10)
+    job, p = project_job(tmp_path, "comp.mp4", "raw.mp4")
+    job.comp_s, job.raw_s = 45.0, 47.0
+    page._added_jobs(J.DropResult([job], None, []))         # noqa: SLF001
+    page.start(confirm=False)
+    assert pump_until(lambda: len(FakeThread.made) == 1)
+    first = FakeThread.made[0]
+    ended = {"yes": False}
+    first.isFinished = lambda: ended["yes"]                  # noqa: N815 - its lock is not released yet
+    page.swap_job(job)
+    assert first.stopped and len(FakeThread.made) == 1      # not started again while the old thread runs
+    QtWidgets.QApplication.processEvents()
+    assert len(FakeThread.made) == 1
+    ended["yes"] = True
+    assert pump_until(lambda: len(FakeThread.made) == 2)    # ... then at once
+    assert job.state == J.RUNNING and job.take == 2
+    FakeThread.made[1].finish("PASS")
+    assert job.state == J.DONE
+
+
 def test_the_right_click_menu_has_swap(page, tmp_path, monkeypatch):
     from PySide6.QtCore import QPoint
     from PySide6.QtGui import QContextMenuEvent
