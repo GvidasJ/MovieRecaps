@@ -95,8 +95,8 @@ class LearnPage(QWidget):
         lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
         self.b_prompt = W.Button("Copy tonight's prompt", "Primary")
-        self.b_prompt.setToolTip("A ready-to-paste Claude Code prompt from learn_queue.md, your standing rules and "
-                                 "your wishes (requests.md)")
+        self.b_prompt.setToolTip("A ready-to-paste Claude Code prompt from learn_queue.md, your standing rules, the "
+                                 "open problems (problems_queue.md) and your wishes (requests.md)")
         self.b_prompt.clicked.connect(self.copy_prompt)
         lay.addWidget(W.SectionHeader("Learn from your fix", [self.b_prompt]))
         # day 12: waiting for your fix / problems / suggestions
@@ -225,7 +225,8 @@ class LearnPage(QWidget):
             self._show_queue(items)
             self.wishes.setText("\n".join(f"· {getattr(w, 'date', '')}  {getattr(w, 'text', w)}" for w in wishes[-12:])
                                 if wishes else "No wishes yet.")
-            self.where.setText(f"learn_queue.md, standing_rules.md and requests.md are in {hub}")
+            self.where.setText(f"learn_queue.md, problems_queue.md, suggestions.md, standing_rules.md and "
+                               f"requests.md are in {hub}")
         BG.call(work, got, lambda e: self.where.setText(f"the shared files could not be read: {e}"))
         self.refresh_columns()
 
