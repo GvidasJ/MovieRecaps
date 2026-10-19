@@ -1,0 +1,96 @@
+{
+ "video": "video14-fixed",
+ "date": "2026-10-19",
+ "project": "finished\\video14\\video14_fixed.prproj",
+ "run": "output\\laptop_video14",
+ "edit": {
+  "clips": 4,
+  "starts": [
+   0.0,
+   -0.375,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   2.419,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.209
+  ],
+  "moved": [
+   -0.0,
+   -514.0,
+   -514.0,
+   -579.0,
+   437.0,
+   -390.0,
+   -0.0,
+   -368.0,
+   -368.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.983,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 0,
+  "removed": 0,
+  "added": 0,
+  "rewritten": 3,
+  "changes": [
+   {
+    "heard": "fuck",
+    "written": "fu k",
+    "kind": "words",
+    "before": "what the",
+    "after": "do you",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "fuck",
+    "written": "fu k",
+    "kind": "words",
+    "before": "what the",
+    "after": "is wrong",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

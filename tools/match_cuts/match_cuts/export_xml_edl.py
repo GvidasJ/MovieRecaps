@@ -2397,6 +2397,88 @@ def _person_after_merge(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float,
     return moved
 
 
+SPEAKER_CUT_OFF = True      # day 12 (the laptop's Rush Hour run, mindculpt): a clip whose window shows nobody whole
+#                             while the person speaking -- inside the competitor's own window -- is cut off by the
+#                             narrower template window slides sideways until they are in (_speaker_cut_off)
+#                             (MATCH_CUTS_SPEAKER_CUT_OFF=0 / 1 overrides it for one run)
+
+
+def _speaker_cut_off_on() -> bool:
+    v = os.environ.get("MATCH_CUTS_SPEAKER_CUT_OFF", "").strip()
+    return SPEAKER_CUT_OFF if v not in ("0", "1") else v == "1"
+
+
+def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                     win: tuple[float, float, float, float], fps: Fraction, layout_box: Box | None,
+                     min_move: float) -> int:
+    """Day 12 (mindculpt, Rush Hour on a letterboxed competitor: the whole 2.39:1 picture, the template window a
+    near-square middle of it): the final clips the XML PERSON check would fail -- the person speaking (Light-ASD:
+    'speaker', never only "the biggest face") is not shown, and the window shows nobody else whole either -- slide
+    sideways, zoom kept, only until that face is inside with CUT_MARGIN of its width to spare (a slide, not a jump
+    onto its centre), at most CUT_SLIDE_MAX of the window's width, the picture still covering the window, and only
+    when the competitor's own window showed that face (never a person the competitor did not show: its choice). A
+    clip that shows someone whole keeps its framing (the competitor's choice of whom to show: 021, laptop004). The
+    neighbours inside the same RAW shot keep --min-move. Returns how many clips moved."""
+    from . import speakers
+    W = raw_wh[0]
+    moved = 0
+    for i, c in enumerate(clips):
+        if len(c.keys) != 1 or abs(float(c.keys[0][1].theta_deg)) > 1e-9 or c.seg.flip_h:
+            continue
+        old = c.keys[0][1]
+        f = _person_of(c, sp, fps)
+        if f is None or f.how != "speaker" or f.box is None:
+            continue
+        if speakers.passes(old, f, W, False, win) or speakers.shows_anyone(old, f, W, False, win):
+            continue
+        cw = _comp_window_raw_x(c, layout_box) if layout_box is not None or _own_box(c.seg) else None
+        cx = 0.5 * (f.box[0] + f.box[2])
+        if cw is None or not (cw[0] <= cx <= cw[1]):
+            continue                                 # the competitor did not show them either (or unknown)
+        if (cw[1] - cw[0]) * old.s < win[2] * (1.0 + NARROW_OVERFLOW):
+            continue                                 # the template shows all the competitor showed: its own close-up
+            #                                          (021: a laughing man the face detection missed) stays
+        xr = speakers.x_range(old, f.box, raw_wh, False, win)
+        if xr is None:
+            continue                                 # too big for the window at this zoom
+        m = CUT_MARGIN * (f.box[2] - f.box[0]) * old.s
+        lo, hi = (xr[0] + m, xr[1] - m) if xr[0] + m <= xr[1] - m else xr
+        tx = min(max(old.tx, lo), hi)
+        ty = old.ty
+        if not (old.s * f.box[1] + ty >= win[1] - speakers.INSIDE_TOL_PX and
+                old.s * f.box[3] + ty <= win[1] + win[3] + speakers.INSIDE_TOL_PX):
+            yr = speakers.y_range(old, f.box, raw_wh, win)
+            if yr is not None:
+                ty = min(max(ty, yr[0]), yr[1])
+        new = Sim(old.s, 0.0, tx, ty)
+        if abs(new.tx - old.tx) > CUT_SLIDE_MAX * win[2] or not _covers(new, raw_wh, win, tol=1e-6) or \
+                not speakers.passes(new, f, W, False, win):
+            continue
+        ok = True
+        for k in (i - 1, i + 1):                     # the neighbours inside the same shot: --min-move kept
+            if 0 <= k < len(clips) and len(clips[k].keys) == 1 and sp is not None:
+                a, b = (clips[k], c) if k < i else (c, clips[k])
+                if sp.same_shot(_last_raw_s(a, fps), _clip_raw_s(b, fps)[0]):
+                    mv = framing_move(clips[k].keys[0][1], new, raw_wh)
+                    if 0.5 < mv < min_move - 0.5:
+                        ok = False
+        if not ok:
+            continue
+        c.keys = [(c.keys[0][0], new)]
+        c.covered = True
+        dx = new.tx - old.tx
+        c.person_note = (f"moved onto the person speaking (RAW x {cx:.0f}): the template window, narrower than the "
+                         f"competitor's, showed nobody and cut them off -- the picture moved {dx:+.0f} px sideways"
+                         + (f", {new.ty - old.ty:+.0f} px up/down" if abs(new.ty - old.ty) >= 0.5 else "")
+                         + ", zoom kept")
+        c.framing_note = (c.framing_note + "; " if c.framing_note else "") + "framed on the person speaking (day 12)"
+        moved += 1
+    if moved:
+        log.info("premiere framing: %d clip(s) showed nobody while the person speaking was cut off by the template "
+                 "window -- moved sideways until they are in (zoom kept)", moved)
+    return moved
+
+
 CENTRE_FIXED_CROP = False   # night 6: centre each shot of a fixed-crop competitor on its person (_subject_in_narrow_window)
 #                             -- OFF: on laptop013 the faces found reproduced 1 of your 5 moves (the man, -276 px for
 #                             your -361) and moved your centred wide shot (+286 px); the woman's close-ups were not
@@ -3289,6 +3371,8 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             if not follow and SHOW_CUT_PERSON:       # night 8: the person the narrower template window cut in half
                 _subject_in_narrow_window(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
                                           getattr(cfg, "premiere_shots", None), fac, cut_only=True)
+            if not follow and _speaker_cut_off_on():  # day 12: the window shows nobody, the person speaking is cut
+                _speaker_cut_off(clips, sp, raw_wh, win, fps, layout_box, st["min_move"])
     return clips, markers, warnings
 
 

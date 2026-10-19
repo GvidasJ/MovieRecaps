@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video14_fixed.prproj (2026-10-19, day 12; the project's only sequence): answer.srt and answer_edit.json are your finished edit (its picture clips; learn --picture-key); your run was the laptop's --fast app run of the AQO Short against Meet the Blacks (2016), 94 minutes (here output\\laptop_video14; the case keeps RAW 303.6-386.7 s), with its channel template (frame.png) and watermark, 100 %, the competitor's cut points. video13 was an earlier version of this fix with a rendered video on V1: only its captions were read (the same text as here). Your captions write fuck as fu*k (5 of 5)",
+ "learned_from": "finished\\video14\\video14_fixed.prproj",
+ "run": "output\\laptop_video14",
+ "full_raw": "output/laptop_video14/extras/media/raw_ae.mp4",
+ "raw_offset": 303.594958,
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ],
+ "srt_rate": "24000/1001"
+}

@@ -75,3 +75,97 @@ def test_python_m_match_cuts_returns_its_exit_code(tmp_path):
                         str(tmp_path / "missing2.mp4")], capture_output=True, text=True, env=env, cwd=tmp_path,
                        timeout=120)
     assert p.returncode not in (0, 3)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# learned from video14 / video15 (day 12)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_fuck_is_written_fu_star_k_as_you_did_and_shit_stays():
+    from match_cuts import captions
+    table = captions.censor_table()
+    assert captions.censor_text("what the fuck", table) == "what the fu*k"
+    assert captions.censor_text("you fucking red-boned", table) == "you fu*king red-boned"
+    assert captions.censor_text("Fuck!", table).lower() == "fu*k!"
+    assert captions.censor_text("you think this shit", table) == "you think this shit"
+
+
+def test_a_repeated_action_caption_is_joined_but_words_said_twice_stay(tmp_path):
+    from match_cuts import action_captions as A
+    srt = tmp_path / "2_captions.srt"
+    srt.write_text("1\n00:00:08,440 --> 00:00:09,560\non my ultrasound\n\n"
+                   "2\n00:00:09,800 --> 00:00:10,360\n*gives the ultrasound*\n\n"
+                   "3\n00:00:10,360 --> 00:00:10,920\n*gives the ultrasound*\n\n"
+                   "4\n00:00:10,920 --> 00:00:11,200\nnah\n\n"
+                   "5\n00:00:11,200 --> 00:00:11,500\nnah\n\n"
+                   "6\n00:00:11,500 --> 00:00:12,000\n*...*\n\n"
+                   "7\n00:00:12,000 --> 00:00:12,500\n*...*\n", encoding="utf-8")
+    assert A.join_repeated_actions(srt) == 1
+    blocks = srt.read_text(encoding="utf-8").strip().split("\n\n")
+    assert len(blocks) == 6
+    assert blocks[1].splitlines() == ["2", "00:00:09,800 --> 00:00:10,920", "*gives the ultrasound*"]
+    assert [b.splitlines()[0] for b in blocks] == ["1", "2", "3", "4", "5", "6"]
+    assert [b.splitlines()[2] for b in blocks][2:] == ["nah", "nah", "*...*", "*...*"]
+    assert A.join_repeated_actions(srt) == 0                                  # nothing more to join
+
+
+def test_two_actions_far_apart_are_two_captions(tmp_path):
+    from match_cuts import action_captions as A
+    srt = tmp_path / "a.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n*laughs*\n\n2\n00:00:04,000 --> 00:00:05,000\n*laughs*\n",
+                   encoding="utf-8")
+    assert A.join_repeated_actions(srt) == 0
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# mindculpt (Rush Hour, letterboxed competitor): the person speaking cut off, the window showing nobody
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _letterbox_clip():
+    from tests.test_night8 import _narrow_clip
+    return _narrow_clip(tx=0.0, scale=720.0 / 1920.0, band=True)       # the whole 16:9 RAW in a band: no choice
+
+
+def test_the_speaker_cut_off_by_the_window_is_slid_in():
+    from types import SimpleNamespace
+    from fractions import Fraction
+    from match_cuts import export_xml_edl as ex, speakers
+    from tests.test_night8 import _view
+    W, H = 1920.0, 1080.0
+    clip, sim, win, box = _letterbox_clip()
+    v0, v1 = _view(sim, win)
+    chris = (v1 - 120.0, 150.0, v1 + 260.0, 700.0)                    # most of his face past the window's right edge
+    sp = SimpleNamespace(same_shot=lambda a, b: True,
+                         faces=lambda a, b: speakers.Faces("speaker", True, chris, [chris], others=[chris]))
+    assert not speakers.passes(sim, sp.faces(0, 1), W, False, win)
+    assert ex._speaker_cut_off([clip], sp, (W, H), win, Fraction(60), box, 250.0) == 1
+    new = clip.keys[0][1]
+    assert new.s == sim.s and new.tx < sim.tx                          # slid towards him, zoom kept
+    assert speakers.passes(new, sp.faces(0, 1), W, False, win)
+    assert abs(new.tx - sim.tx) <= ex.CUT_SLIDE_MAX * win[2] + 1e-6
+    assert "moved onto the person speaking" in clip.person_note
+
+
+def test_the_rule_leaves_a_window_that_shows_someone_and_an_unsure_speaker():
+    from types import SimpleNamespace
+    from fractions import Fraction
+    from match_cuts import export_xml_edl as ex, speakers
+    from tests.test_night8 import _view
+    W, H = 1920.0, 1080.0
+    clip, sim, win, box = _letterbox_clip()
+    v0, v1 = _view(sim, win)
+    chris = (v1 - 120.0, 150.0, v1 + 260.0, 700.0)
+    jackie = (0.5 * (v0 + v1) - 100.0, 200.0, 0.5 * (v0 + v1) + 100.0, 600.0)     # whole in the middle
+    sp = SimpleNamespace(same_shot=lambda a, b: True,
+                         faces=lambda a, b: speakers.Faces("speaker", True, chris, [chris], others=[chris, jackie]))
+    assert ex._speaker_cut_off([clip], sp, (W, H), win, Fraction(60), box, 250.0) == 0   # the competitor's choice
+    sp.faces = lambda a, b: speakers.Faces("biggest face", True, chris, [chris], others=[chris])
+    assert ex._speaker_cut_off([clip], sp, (W, H), win, Fraction(60), box, 250.0) == 0   # who speaks is unclear
+    assert clip.keys[0][1] is sim
+
+
+def test_the_rule_can_be_switched_off_for_one_run(monkeypatch):
+    from match_cuts import export_xml_edl as ex
+    assert ex.SPEAKER_CUT_OFF is True and ex._speaker_cut_off_on()
+    monkeypatch.setenv("MATCH_CUTS_SPEAKER_CUT_OFF", "0")
+    assert not ex._speaker_cut_off_on()

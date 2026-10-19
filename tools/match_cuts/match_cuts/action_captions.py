@@ -497,6 +497,42 @@ def rewrite_srt(srt: Path, filled: dict[tuple[int, int], str], fps: Fraction) ->
     return n
 
 
+JOIN_GAP_MS = 60                 # two action captions this close (or touching) with the same text are one action
+
+
+def join_repeated_actions(srt: Path) -> int:
+    """Day 12 (your video15 fix: '*gives the ultrasound*' twice in a row became one caption): neighbouring action
+    captions with the same text (two placeholders the model filled alike) joined into one over both; the SRT
+    renumbered. Spoken words said twice stay (you kept "nah" "nah", "Pam" "Pam"); the *...* placeholder too.
+    Returns how many captions were joined away."""
+    text = srt.read_text(encoding="utf-8")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    rows = []
+    for bl in re.split(r"\r?\n\r?\n", text.strip()):
+        lines = bl.splitlines()
+        m = re.match(r"(\d+):(\d+):(\d+),(\d+)\s*-->\s*(\d+):(\d+):(\d+),(\d+)", lines[1].strip()) if len(lines) >= 3 \
+            else None
+        if not m:
+            return 0                     # not an SRT this reads: left as it is
+        g = [int(x) for x in m.groups()]
+        rows.append([((g[0] * 60 + g[1]) * 60 + g[2]) * 1000 + g[3], ((g[4] * 60 + g[5]) * 60 + g[6]) * 1000 + g[7],
+                     lines[1].strip(), lines[2:]])
+    out: list[list] = []
+    joined = 0
+    for r in rows:
+        t = " ".join(r[3]).strip()
+        if out and t == " ".join(out[-1][3]).strip() and len(t) > 2 and t.startswith("*") and t.endswith("*") and \
+                t != "*...*" and r[0] - out[-1][1] <= JOIN_GAP_MS:
+            out[-1][1] = r[1]
+            out[-1][2] = out[-1][2].split("-->")[0].strip() + " --> " + r[2].split("-->")[1].strip()
+            joined += 1
+            continue
+        out.append(r)
+    if joined:
+        srt.write_text(nl.join(nl.join([str(i), r[2], *r[3]]) + nl for i, r in enumerate(out, 1)), encoding="utf-8")
+    return joined
+
+
 def fill_run(ctx: Any) -> dict:
     """The run's placeholders (ctx.captions, written 2_captions.srt) filled with suggestions; captions.json and the
     SRT rewritten. Returns {model, suggested: [...], kept: [...], error?}."""
@@ -552,6 +588,24 @@ def fill_run(ctx: Any) -> dict:
             if c.get("mode") == "placeholder" and t:
                 c.update(text=t, mode="action", suggested=True)
         cap["placeholders"] = [c for c in cap.get("captions") or [] if c.get("mode") == "placeholder"]
+        info["joined"] = join_repeated_actions(srt)
+        if info["joined"]:                 # captions.json the same: the second of each pair into the first
+            kept: list[dict] = []
+            for c in sorted(cap.get("captions") or [], key=lambda c: int(c["start"])):
+                p = kept[-1] if kept else None
+                t = str(c.get("text", ""))
+                if p is not None and t == str(p.get("text", "")) and c.get("mode") == "action" and \
+                        p.get("mode") == "action" and t != "*...*" and int(c["start"]) - int(p["end"]) <= \
+                        max(1, int(round(JOIN_GAP_MS / 1000.0 * float(fps)))):
+                    p["end"] = c["end"]
+                    for k in ("end_tc", "end_ms"):
+                        if k in c:
+                            p[k] = c[k]
+                    continue
+                kept.append(c)
+            cap["captions"] = kept
+            log.info("captions: %d repeated action caption(s) joined into the one before (the same action)",
+                     info["joined"])
     cap["actions"] = info
     dump_json(cap, cfg.debug_dir / "captions.json")
     log.info("captions: %d of %d *...* placeholder(s) filled with a suggested action (%s): %s", len(filled),

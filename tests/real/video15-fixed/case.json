@@ -1,0 +1,13 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video15_fixed.prproj (2026-10-19, day 12; a copy of Desktop\\doritos_ad.prproj): answer.srt and answer_edit.json are your finished edit (its picture clips; learn --picture-key); your run was the laptop's --fast app run D:\\Shared\\1018(1) (here output\\laptop_video15) with its channel template (frame.png) and watermark, 100 %, the competitor's cut points; the RAW is a 22-second Doritos commercial (copied whole); you filled the *...* placeholders with your own actions and joined the doubled *gives the ultrasound*",
+ "learned_from": "finished\\video15\\video15_fixed.prproj",
+ "run": "output\\laptop_video15",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

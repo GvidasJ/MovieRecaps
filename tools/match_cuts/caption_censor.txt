@@ -62,3 +62,15 @@ hooker = h*oker
 hookers = h*okers
 stripper = str*pper
 strippers = str*ppers
+
+# your own forms (video14, day 12: all 5 written fu*k / fu*king; "shit" you keep)
+fuck = fu*k
+fucks = fu*ks
+fucked = fu*ked
+fucking = fu*king
+fuckin = fu*kin
+fucker = fu*ker
+fuckers = fu*kers
+motherfucker = motherfu*ker
+motherfuckers = motherfu*kers
+motherfucking = motherfu*king
