@@ -125,6 +125,39 @@ def test_a_ready_video_goes_to_match_cuts_and_starts_unless_its_title_is_missing
     #                                                                          here -- the row asks for its headline)
 
 
+def test_the_new_video_forms_raw_field_is_your_choice_of_raw(qapp, tmp_path, monkeypatch):
+    """Day 12 (the e2e run: a 30 s RAW for a 26 s Short waited amber in the queue for ever): the form's RAW field
+    counts as your pick -- the row starts, project.json keeps roles 'form', the job never needs the check."""
+    from mr_app.core import flow, jobs as JB
+    from mr_app.tools import download_tool as D
+    from mr_app.tools.match_cuts_tool import MatchCutsPage
+    ctx = _Ctx()
+    mc = MatchCutsPage(ctx)
+    starts = []
+    monkeypatch.setattr(mc, "start", lambda confirm=True: starts.append(confirm))
+    ctx.pages["match_cuts"] = mc
+    page = D.DownloadPage(ctx)
+    p = P.create(tmp_path, competitor_url="https://youtu.be/abcdefghijk", raw_url="https://youtu.be/ABCDEFGHIJK")
+    _video(p.folder / "short.mp4", 2.6)
+    _video(p.folder / "episode.mp4", 3.0)                           # within 30 %, the names don't say
+    p.update(competitor={"file": "short.mp4"}, raw={"file": "episode.mp4"})
+    it = D.Item("https://youtu.be/abcdefghijk", channel="LouLaughs", title="My title", project=p.folder,
+                name=p.folder.name, state=D.READY, headline="Their headline")
+    page.items.append(it)
+    page.rows[it.id] = D.VideoRow(page, it)
+    page.send_to_edit(it, start=True)
+    import time
+    t0 = time.perf_counter()
+    while not starts and time.perf_counter() - t0 < 10:
+        qapp.processEvents()
+        time.sleep(0.01)
+    job = mc.jobs[-1]
+    assert starts == [False] and job.roles_chosen and not JB.needs_check(job)
+    roles = flow.chosen_roles(P.load(p.folder).data)
+    assert roles and P.load(p.folder).data["roles"]["how"] == "form"
+    assert Path(job.raw).name == "episode.mp4" and Path(job.competitor).name == "short.mp4"
+
+
 def test_convert_queues_the_videos_of_a_drop_and_shows_the_result(qapp, tmp_path, monkeypatch):
     from mr_app.tools import convert_tool as C
     runs = []

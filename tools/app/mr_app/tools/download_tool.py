@@ -1882,6 +1882,13 @@ class DownloadPage(QWidget):
                 p = PJ.load(folder)
                 p.update(channel=channel or None, title=title or None)
                 save_title(p.folder, title)
+                raw_name = (p.data.get("raw") or {}).get("file") if isinstance(p.data.get("raw"), dict) else None
+                if raw_name and not flow.chosen_roles(p.data):
+                    # the New video form's RAW field is your choice (day 12, section 4): a 30 s RAW for a 26 s Short
+                    # runs instead of waiting amber in the queue (the conversion already made the longer one the RAW
+                    # when the two links were in the wrong fields)
+                    flow.set_roles(p.folder, raw_name, "form")
+                    p = PJ.load(folder)
                 return flow.edit_job(p, fast, speed)
             except Exception as e:  # noqa: BLE001 - said on the row in plain words
                 return NV.plain_error(e)
