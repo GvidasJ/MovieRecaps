@@ -314,7 +314,7 @@ def test_a_tweet_style_headline_loses_the_account_and_the_models_stutter():
     # the e2e run (day 12, youtube.com/shorts/f18B0Accoig, Qwen3-VL-2B for real): the account's name and @handle
     # copied as line 1, and the small model stuttered ("Tobeyey", "had had", "one one", "time time")
     ans = TT.tidy_headline("History Exposed\n@HistoryyExposed\nIn 1996, Tobeyey Maguire had had exactly one one "
-                           "second of screen time time in a Tropicana Twister commercial.")
+                           "second of screen time time in a Tropicana Twister commercial.", model=True)
     assert ans == "In 1996, Tobeyey Maguire had exactly one second of screen time in a Tropicana Twister commercial."
     assert TT.tidy_headline("History Exposed @HistoryyExposed In 1996, he had") == "In 1996, he had"
     assert TT.tidy_headline("Watch this, @someone did it 😭") == "Watch this, did it 😭"      # a text: kept
@@ -327,8 +327,24 @@ def test_a_tweet_style_headline_loses_the_account_and_the_models_stutter():
         "They stopped making\ncomedy like this"
     assert TT.settle("Something else entirely", ["a caption", "the OCR read"]) == "Something else entirely"
     assert TT.settle("", ["They stopped making", "comedy like this"]) == "They stopped making\ncomedy like this"
-    assert TT.settle("", ocr).startswith("In 1996, Tobey") and "\n" not in TT.settle("", ocr)
+    assert TT.settle("", ocr) == ("In 1996, Tobey Maguire had\nexactly one second of screen time in a Tropicana "
+                                  "Twister commercial.")             # the OCR alone: its break kept, as before
     assert TT.settle("", []) == "" and TT.settle("Just this", None) == "Just this"
+
+
+def test_only_the_models_answer_is_destuttered():
+    """Day 12 review 2: "had had" can be meant -- the OCR's text and a real headline keep it; only the vision
+    model's answer (read_on_video) loses its stutter."""
+    assert TT.tidy_headline("What she had had was enough") == "What she had had was enough"
+    assert TT.tidy_headline("he had had exactly one one second", model=True) == "he had exactly one second"
+    assert TT.settle("", ["What she had had", "was enough"]) == "What she had had\nwas enough"
+    assert TT.settle("", ["What she had had", "was", "enough"]) == "What she had had\nwas enough"     # any count
+    old = TT.READER
+    try:
+        TT.READER = lambda _v: "it had had one one job"
+        assert TT.read_on_video("x.mp4") == "it had one job"
+    finally:
+        TT.READER = old
 
 
 def test_add_a_competitor_keeps_the_just_cuts_apart_and_the_full_edit_is_not_called_just_cuts(tmp_path):

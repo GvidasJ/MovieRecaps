@@ -119,14 +119,16 @@ PROMPT = ("These are frames from the first seconds of a short video. Copy the he
           "is no headline written on the video, answer NONE.")
 
 
-def tidy_headline(answer: str | None) -> str:
-    """The model's answer -> the headline: quotes and labels off, at most two lines (the break kept), '' for NONE."""
+def tidy_headline(answer: str | None, model: bool = False) -> str:
+    """The model's answer -> the headline: quotes and labels off, at most two lines (the break kept), '' for NONE.
+    ``model``: the vision model's answer -- its stutter ("had had") said once (never for OCR text or a real
+    headline, where a doubled word can be meant)."""
     t = unicodedata.normalize("NFC", answer or "").strip().strip('"“”\'`').strip()
     t = re.sub(r"^(?:headline|text|answer)\s*:\s*", "", t, flags=re.I)
     if not t or re.fullmatch(r"(?i)none\.?|no headline\.?|n/?a", t):
         return ""
     t = _drop_account(t)
-    lines = [" ".join(_destutter(_HANDLE.sub(" ", x)).split()) for x in t.splitlines()]
+    lines = [" ".join((_destutter if model else str)(_HANDLE.sub(" ", x)).split()) for x in t.splitlines()]
     lines = [x.strip('"“”') for x in lines if x and re.search(r"\w", x) and not re.fullmatch(r"(?i)none\.?", x)]
     # the model going on after the headline ("... like this\nThis", the one real run on finished\video3): a last line
     # that repeats the start of the text before it, or is one word of it, is dropped
@@ -185,7 +187,7 @@ def settle(model_text: str, ocr_lines: Sequence[str] | None) -> str:
     import difflib
     ocr = tidy_headline(" ".join(" ".join(x.split()) for x in (ocr_lines or []) if x and x.strip()))
     if not model_text:
-        return tidy_headline("\n".join(ocr_lines)) if ocr_lines and len(ocr_lines) == 2 else ocr
+        return tidy_headline("\n".join(ocr_lines)) if ocr_lines else ocr      # the OCR's breaks, as before
     if not ocr:
         return model_text
     a, b = _fold(model_text), _fold(ocr)
@@ -248,7 +250,7 @@ def read_in_this_process(video: str | Path, model: Any = None) -> str:
     if not pics:
         return ""
     if model is not None:
-        return tidy_headline(model.ask(pics, PROMPT))
+        return tidy_headline(model.ask(pics, PROMPT), model=True)
     import torch
     from PIL import Image
 
@@ -262,7 +264,7 @@ def read_in_this_process(video: str | Path, model: Any = None) -> str:
         text = vlm._tok.decode(out[0][ins["input_ids"].shape[1]:], skip_special_tokens=True)  # noqa: SLF001
     finally:
         vlm.close()
-    return tidy_headline(text)
+    return tidy_headline(text, model=True)
 
 
 def _child_command(video: Path) -> list[str]:
@@ -295,7 +297,7 @@ READER: Callable[[Path], str] = _run_child          # tests put a fake here: the
 def read_on_video(video: str | Path) -> str:
     """The headline written on the video ('' when there is none or it cannot be read; never raises)."""
     try:
-        return tidy_headline(READER(Path(video)))
+        return tidy_headline(READER(Path(video)), model=True)
     except Exception:  # noqa: BLE001 - a help, never a stop
         return ""
 
