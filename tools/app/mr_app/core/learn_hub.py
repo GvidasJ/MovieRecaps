@@ -540,21 +540,32 @@ LEARN_RULES = (
     "If a project or one of its files is missing, write that in the report and continue with the next one.",
 )
 
-_NIGHT = re.compile(r"(?i)^night(\d+)\.md$")
+_NIGHT = re.compile(r"(?i)^(?:night|day)(\d+)\.md$")      # reports\nightN.md, and a day run's reports\dayN.md
 
 
-def next_night(repo: str | os.PathLike | None = None) -> int:
-    """The next night's number: one after the newest reports\\nightN.md (1 when there is none)."""
+def _reports(repo: str | os.PathLike | None = None) -> list[tuple[int, str]]:
+    """(number, file name) of every reports\\nightN.md / dayN.md (day 12 was a day run: reports\\day12.md)."""
     d = Path(repo or paths.repo()) / "reports"
-    nums = []
+    out = []
     try:
         for e in os.scandir(d):
             m = _NIGHT.match(e.name)
             if m and e.is_file():
-                nums.append(int(m.group(1)))
+                out.append((int(m.group(1)), e.name))
     except OSError:
         pass
-    return max(nums, default=0) + 1
+    return out
+
+
+def next_night(repo: str | os.PathLike | None = None) -> int:
+    """The next night's number: one after the newest reports\\nightN.md or dayN.md (1 when there is none)."""
+    return max((n for n, _ in _reports(repo)), default=0) + 1
+
+
+def last_report(repo: str | os.PathLike | None = None) -> str:
+    """The newest report's file name (the highest number; a night's before a day's of the same number), or ""."""
+    rs = sorted(_reports(repo), key=lambda r: (r[0], r[1].lower().startswith("night")))
+    return rs[-1][1] if rs else ""
 
 
 def current_branch(repo: str | os.PathLike | None = None) -> str:
@@ -613,7 +624,8 @@ def _tonight_prompt(folder: Path, repo: Path, hours: int) -> str:
     backup = (hours + 1) * 3600
     out = [f"# Night {n} — MovieRecaps ({hours} hours, PC)", "", INTRO, "",
            f"Repo: `{repo}`." + (f" Branch: `{branch}`." if branch else ""), ""]
-    last = f"reports\\night{n - 1}.md" if n > 1 and (repo / "reports" / f"night{n - 1}.md").is_file() else ""
+    newest = last_report(repo)
+    last = f"reports\\{newest}" if newest else ""
     start = [f"Run `shutdown /a`, then `shutdown /s /t {backup}`. That's a {hours + 1}-hour backup, so the PC turns off "
              "even if you get stuck.",
              (f"Read `{last}` so you know where things stand." if last else

@@ -343,6 +343,10 @@ def test_the_next_night_comes_after_the_newest_report(tmp_path):
     for n in ("night9.md", "night10.md", "overnight2.md", "night10-notes.md"):
         (tmp_path / "reports" / n).write_text("x")
     assert H.next_night(tmp_path) == 11
+    assert H.last_report(tmp_path) == "night10.md"
+    (tmp_path / "reports" / "day11.md").write_text("x")                    # day 12 was a day run: reports\day12.md
+    assert H.next_night(tmp_path) == 12 and H.last_report(tmp_path) == "day11.md"
+    assert "reports\\day11.md" in H.tonight_prompt(tmp_path / "hub", tmp_path)
     assert H.next_night(REPO) >= 11                                        # this repository
 
 
