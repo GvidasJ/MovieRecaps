@@ -577,6 +577,24 @@ def test_clean_up_counts_a_hard_linked_twin_once_and_says_which_copy_is_which(tm
     assert len(alone) == 1 and alone[0].freed == 0 and "downloaded RAW" in alone[0].line()
 
 
+def test_the_new_video_form_reads_the_channels_folder_in_the_background(tmp_path, monkeypatch):
+    from mr_app.tools import download_tool as D
+    from mr_app.ui import theme
+    called = []
+    monkeypatch.setattr(D.DownloadPage, "_channel_names",
+                        staticmethod(lambda: called.append(1) or ["Flick707", "LouLaughs", "NewChannel"]))
+    page = _new_video_page(tmp_path, monkeypatch)
+    try:
+        assert set(page.ch.buttons) == set(theme.CHANNEL_COLOURS)              # at once, without the disk
+        assert pump_until(lambda: "NewChannel" in page.ch.buttons)              # then the folder's own names
+        assert called and page.ch.isVisibleTo(page)
+    finally:
+        page.poll.stop()
+        page.close()
+        page.deleteLater()
+        Mo.set_enabled(True)
+
+
 def test_a_just_cuts_project_can_be_published_to_the_shared_folder(tmp_path):
     from mr_app.core import publish as PB
     p = PJ.create(tmp_path, name="cutsonly")

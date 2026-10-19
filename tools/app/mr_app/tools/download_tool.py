@@ -990,10 +990,11 @@ class DownloadPage(QWidget):
         pick2 = W.Button("File...", "Small")
         pick2.clicked.connect(self._pick_comp)
         form.lay.addLayout(self._field("Competitor (optional)", self.comp, [pick2, self.d_comp]))
-        names = self._channel_names()
-        self.ch = ChannelButtons(names, NV.last_channel(names))
-        self.ch.changed.connect(NV.set_last_channel)
+        names = sorted(theme.CHANNEL_COLOURS, key=str.lower)   # the three channels at once; the channels folder is
+        self.ch = ChannelButtons(names, NV.last_channel(names))  # read in the background (_check_channels: importing
+        self.ch.changed.connect(NV.set_last_channel)            # it and reading the disk took ~150 ms here)
         form.lay.addLayout(self._field("Channel", self.ch, []))
+        self._check_channels()
         self.head = HeadlineBox()
         self.head.changed.connect(lambda _t: self._head_ready())
         self.d_head = DetLabel()
@@ -1058,6 +1059,32 @@ class DownloadPage(QWidget):
         for r in right:
             row.addWidget(r, 0, Qt.AlignmentFlag.AlignVCenter)
         return row
+
+    def _check_channels(self) -> None:
+        """The channels folder's own names (read in the background); the buttons are made again only when they
+        differ from the three built in."""
+        from ..ui import background as BG
+
+        def got(names) -> None:
+            names = list(names or [])
+            if not names or set(names) == set(self.ch.buttons):
+                return
+            old = self.ch
+            new = ChannelButtons(names, NV.last_channel(names) if old.value not in names else old.value)
+            new.changed.connect(NV.set_last_channel)
+            lay = old.parentWidget().layout() if old.parentWidget() is not None else None
+            if lay is None:
+                return
+            for i in range(lay.count()):
+                sub = lay.itemAt(i).layout()
+                if sub is not None and sub.indexOf(old) >= 0:
+                    sub.replaceWidget(old, new)
+                    new.show()
+                    break
+            old.setParent(None)
+            old.deleteLater()
+            self.ch = new
+        BG.call(self._channel_names, got, lambda _e: None)
 
     @staticmethod
     def _channel_names() -> list[str]:
