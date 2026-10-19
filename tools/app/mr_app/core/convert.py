@@ -772,7 +772,8 @@ def _unlink(p: Path, tries: int = 30) -> None:
 # ---------------------------------------------------------------------------------------------------------------------
 
 def convert_project(project, progress: Callable[[str, float, str], None] | None = None,
-                    cancel: threading.Event | None = None, gpu: str | bool = "auto") -> dict:
+                    cancel: threading.Event | None = None, gpu: str | bool = "auto",
+                    roles: tuple[str, ...] | None = None) -> dict:
     """The project's competitor and RAW made Premiere-ready (convert_file, the originals deleted after the check);
     project.json gets the convert step (with what was done to each file) and the new file names.
     ``progress(role, fraction, text)``. Returns {role: ConvertResult}."""
@@ -784,7 +785,10 @@ def convert_project(project, progress: Callable[[str, float, str], None] | None 
     try:
         for role in P.ROLES:
             f = project.file(role)
-            if f is None:
+            if f is None or (roles is not None and role not in roles):    # day 12: only these (Add a competitor)
+                old = project.step("convert").get(role)
+                if f is not None and isinstance(old, dict):
+                    details[role] = old                                     # the one converted before stays said
                 continue
             if not f.is_file():
                 raise ConvertError(f"{f.name} is not in the project folder")

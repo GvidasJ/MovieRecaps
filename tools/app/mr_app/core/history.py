@@ -168,19 +168,23 @@ def project_events(data: Mapping) -> list[Event]:
         s = step(key)
         if s.get("state") == "done":
             detail = (_download_detail(data) if key == "download" else _convert_detail(s) if key == "convert"
+                      else "default template (no headline)" if s.get("default")
                       else (s.get("why") or "") if s.get("shrunk") else "")
-            add(s.get("finished"), done, detail, column=column)
+            add(s.get("finished"), done, detail, NOTE if s.get("default") else INFO, column=column)
         elif s.get("state") == "failed":
             add(s.get("finished"), failed, s.get("error") or "", FAIL)
     e = step("edit")
     result = str(e.get("result") or "")
+    made = "Just cuts made" if e.get("kind") == "just_cuts" else "Edit made"     # day 12: Just cuts
+    cuts = f"{e.get('cuts')} cuts" if e.get("kind") == "just_cuts" and e.get("cuts") is not None else ""
     if e.get("state") == "done":
         if result == "OK with a note":
-            add(e.get("finished"), "Edit made · OK with a note", _first(e.get("notes")), NOTE, "edit")
+            add(e.get("finished"), f"{made} · OK with a note", _first(e.get("notes")), NOTE, "edit")
         else:
-            add(e.get("finished"), f"Edit made · {result}" if result else "Edit made", "", OK, "edit")
+            add(e.get("finished"), f"{made} · {result}" if result else made, cuts, OK, "edit")
     elif e.get("state") == "failed":
-        what = "Edit failed" if result in ("", "FAIL") else f"Edit failed · {result}"
+        base = "Just cuts failed" if e.get("kind") == "just_cuts" else "Edit failed"
+        what = base if result in ("", "FAIL") else f"{base} · {result}"
         add(e.get("finished"), what, _first(e.get("failures")) or e.get("error") or "", FAIL)
     up = board.get("uploaded") if isinstance(board.get("uploaded"), Mapping) else {}
     if up and parse_time(up.get("at")) is not None:
@@ -196,9 +200,10 @@ def project_events(data: Mapping) -> list[Event]:
     return out
 
 
-def events(projects: Iterable[Any]) -> list[Event]:
+def events(projects: Iterable[Any], log: bool = True) -> list[Event]:
     """Every project's events, newest first (one moment: the later step first). ``projects``: project.json data dicts,
-    projects.Project objects, or project folders (read now)."""
+    projects.Project objects, or project folders (read now). ``log``: also what never got a project folder (day 12:
+    a New video that failed before its folder was made -- a broken link, a private video), from LOG_FILE."""
     keyed = []
     for i, p in enumerate(projects):
         data = _data(p)
@@ -206,8 +211,60 @@ def events(projects: Iterable[Any]) -> list[Event]:
             continue
         for k, ev in enumerate(project_events(data)):
             keyed.append(((ev.at, k, -i), ev))
+    if log:
+        for k, ev in enumerate(logged_events()):
+            keyed.append(((ev.at, k, 1), ev))
     keyed.sort(key=lambda x: x[0], reverse=True)
     return [ev for _, ev in keyed]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# day 12: what never got a project folder
+# ---------------------------------------------------------------------------------------------------------------------
+
+LOG_FILE = "history_log.jsonl"          # in the app's folder on this computer (settings.app_dir())
+LOG_KEEP = 500
+
+
+def _log_path() -> Path:
+    from .settings import app_dir
+    return app_dir() / LOG_FILE
+
+
+def log_event(what: str, name: str, detail: str = "", kind: str = INFO, title: str = "", channel: str = "",
+              at: datetime | None = None) -> None:
+    """One event that has no project.json to live in (it shows in History with its date); never raises."""
+    import json
+    rec = {"at": (at or datetime.now().astimezone()).isoformat(timespec="seconds"), "what": what, "name": name,
+           "detail": _short(detail), "kind": kind, "title": title, "channel": channel}
+    try:
+        p = _log_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def logged_events() -> list[Event]:
+    """The logged events (the last LOG_KEEP), oldest first; a broken line is skipped."""
+    import json
+    try:
+        lines = _log_path().read_text(encoding="utf-8").splitlines()[-LOG_KEEP:]
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            d = json.loads(line)
+            t = parse_time(d.get("at"))
+        except (ValueError, AttributeError):
+            continue
+        if t is None:
+            continue
+        out.append(Event(t, str(d.get("what") or ""), str(d.get("name") or ""), str(d.get("title") or ""),
+                         str(d.get("channel") or ""), str(d.get("detail") or ""), str(d.get("kind") or INFO)))
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------------

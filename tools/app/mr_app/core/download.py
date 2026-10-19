@@ -1065,9 +1065,9 @@ def download_project(project, progress: Callable[[str, float, str], None] | None
                                  "size": res.size, "seconds": res.seconds, "width": res.width,
                                  "height": res.height, "duration": res.duration}
                 out[role] = res
-            elif role == "raw" and entry.get("source_file"):
+            elif entry.get("source_file"):              # a dropped RAW (day 12: or a competitor's file)
                 p = take_local(entry["source_file"], project.folder, progress=say, cancel=cancel, log_path=log)
-                project.update(raw={"file": p.name, "title": entry.get("title") or Path(p).stem})
+                project.update(**{role: {"file": p.name, "title": entry.get("title") or Path(p).stem}})
                 details[role] = {"file": p.name, "from": entry["source_file"]}
                 out[role] = p
             else:
