@@ -267,11 +267,18 @@ class Meta:
         return sum(f.size for f in self.files if f.index in ix)
 
     def disk_path(self, save_dir: str | Path, index: int) -> Path:
-        """Where aria2c writes file ``index``: <save>\\<file> for one file, <save>\\<name>\\<path> for a folder."""
+        """Where aria2c writes file ``index``: <save>\\<file> for one file, <save>\\<name>\\<path> for a folder (the
+        names as the torrent gives them -- aria2c may escape some characters on disk; TorrentSession asks it for
+        the real paths). TorrentError when the torrent's names lead outside the save folder ("..", a drive, a full
+        path)."""
         f = self.files[index]
         base = Path(save_dir)
         parts = [p for p in f.path.split("/") if p]
-        return base.joinpath(*parts) if self.single else base.joinpath(_safe(self.name), *parts)
+        out = base.joinpath(*parts) if self.single else base.joinpath(_safe(self.name), *parts)
+        if not inside(base, out):
+            raise TorrentError("This torrent's file names point outside the save folder -- it is not safe to "
+                               "download.")
+        return out
 
     def chosen_video(self, indexes: Iterable[int]) -> int | None:
         ix = sorted(set(indexes))
@@ -282,6 +289,17 @@ class Meta:
 
 def _safe(name: str) -> str:
     return name
+
+
+def inside(base: str | Path, path: str | Path) -> bool:
+    """``path`` is inside the folder ``base`` (after "..", drive letters and full paths are resolved): a torrent's
+    names never lead out of the save folder."""
+    try:
+        b = os.path.normcase(os.path.abspath(str(base)))
+        p = os.path.normcase(os.path.abspath(os.path.join(str(base), str(path))))
+        return p != b and os.path.commonpath([b, p]) == b
+    except (TypeError, ValueError, OSError):
+        return False
 
 
 def _text(b: Any) -> str:
@@ -581,7 +599,7 @@ class Aria2:
             args = [str(exe), "--enable-rpc=true", f"--rpc-listen-port={self.port}", "--rpc-listen-all=false",
                     f"--rpc-secret={self.secret}", f"--stop-with-process={os.getpid()}",
                     "--continue=true", "--file-allocation=none", "--auto-save-interval=15",
-                    "--bt-save-metadata=false", "--bt-remove-unselected-file=true", "--bt-detach-seed-only=true",
+                    "--bt-save-metadata=false", "--bt-detach-seed-only=true",
                     "--enable-dht=true", "--bt-enable-lpd=true", "--enable-peer-exchange=true",
                     "--max-concurrent-downloads=8", "--summary-interval=0", "--console-log-level=error",
                     "--check-certificate=false", "--disable-ipv6=false",
@@ -900,7 +918,7 @@ class TorrentSession:
 
     def _options(self, job: Job, paused: bool = False) -> dict:
         o = {"dir": job.save_dir, "select-file": ",".join(str(i + 1) for i in sorted(job.indexes)),
-             "gid": job.id, "bt-remove-unselected-file": "true", "continue": "true"}
+             "gid": job.id, "continue": "true"}
         if job.sharing:
             o["seed-ratio"] = "1.0"
         else:
@@ -928,6 +946,8 @@ class TorrentSession:
         self.folder.mkdir(parents=True, exist_ok=True)
         self._torrent_file(meta.info_hash).write_bytes(meta.torrent)
         vi = meta.chosen_video(ix)
+        for i in ix:
+            meta.disk_path(save_dir, i)          # TorrentError: a name that leads outside the save folder
         job = Job(id=secrets.token_hex(8), name=meta.name, info_hash=meta.info_hash, indexes=ix,
                   save_dir=str(save_dir), video=str(meta.disk_path(save_dir, vi)) if vi is not None else "",
                   size=meta.size_of(ix), sharing=keep_sharing(self.settings), seeders_max=int(meta.seeders or 0))
@@ -1026,6 +1046,7 @@ class TorrentSession:
         """Stop and forget a job. An unfinished job's part-downloaded files are deleted (``delete_files``: None =
         only when it did not finish); a finished download is never deleted."""
         j = self._need(job_id)
+        real = self._real_paths(j) if j.state != "finished" else {}     # asked before aria2c forgets the job
         for m in ("aria2.forceRemove", "aria2.removeDownloadResult"):
             try:
                 self.engine.call(m, j.id)
@@ -1035,7 +1056,7 @@ class TorrentSession:
         if delete_files is None:
             delete_files = unfinished
         if delete_files and unfinished:
-            self._delete_parts(j)
+            self._delete_parts(j, real)
         j.state = "removed"
         with self._lock:
             self._jobs.pop(j.id, None)
@@ -1047,18 +1068,65 @@ class TorrentSession:
                 pass
         self._save()
 
-    def _delete_parts(self, j: Job) -> None:
+    def _real_paths(self, j: Job) -> dict[int, Path]:
+        """aria2c's own paths of this job's chosen files (0-based index -> path; only those inside the save
+        folder). Empty when aria2c cannot say (the job is gone)."""
+        try:
+            files = self.engine.call("aria2.getFiles", j.id) or []
+        except Exception:  # noqa: BLE001 - not known to aria2c (any more)
+            return {}
+        out = {}
+        for f in files:
+            try:
+                i = int(f.get("index")) - 1
+                path = str(f.get("path") or "")
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if i in j.indexes and path and not path.startswith("[METADATA]") and inside(j.save_dir, path):
+                out[i] = Path(os.path.abspath(os.path.join(j.save_dir, path)))
+        return out
+
+    def _guess(self, j: Job, i: int) -> str:
+        try:
+            meta = read_torrent(self._torrent_file(j.info_hash).read_bytes())
+            return str(meta.disk_path(j.save_dir, i))
+        except (OSError, TorrentError, IndexError):
+            return ""
+
+    def _delete_parts(self, j: Job, real: dict[int, Path] | None = None) -> None:
+        """The part-downloaded files of THIS job's chosen files (aria2c's own paths when known, else the torrent's
+        names) and its .aria2 progress file -- never a file another known job of the same torrent and folder uses,
+        never anything outside the save folder. Unselected files are not touched (aria2c leaves at most small
+        piece-overlap stubs of them)."""
         try:
             meta = read_torrent(self._torrent_file(j.info_hash).read_bytes())
         except (OSError, TorrentError):
             return
         base = Path(j.save_dir)
+        here = os.path.normcase(os.path.abspath(j.save_dir))
+        with self._lock:
+            others = [x for x in self._jobs.values() if x.id != j.id and x.state != "removed"
+                      and x.info_hash == j.info_hash and os.path.normcase(os.path.abspath(x.save_dir)) == here]
+        theirs = {i for x in others for i in x.indexes}
+        real = real or {}
+        paths: list[Path] = []
+        for i in j.indexes:
+            if i in theirs or not 0 <= i < len(meta.files):
+                continue
+            for p in (real.get(i), None):
+                try:
+                    p = p or meta.disk_path(base, i)
+                except TorrentError:
+                    continue
+                if inside(base, p) and p not in paths:
+                    paths.append(p)
         ctl = base / (meta.files[0].path if meta.single else meta.name)
-        paths = [meta.disk_path(base, i) for i in range(len(meta.files))]
+        if not others and inside(base, ctl):
+            paths.append(Path(str(ctl) + ".aria2"))
         # give aria2c a moment to close the files it had open
         for _ in range(20):
             busy = False
-            for p in paths + [Path(str(ctl) + ".aria2")]:
+            for p in paths:
                 try:
                     p.unlink()
                 except FileNotFoundError:
@@ -1123,6 +1191,12 @@ class TorrentSession:
         complete = (status == "complete") or (total > 0 and done >= total and st.get("seeder") == "true")
         if complete and j.state != "finished":
             j.state, j.finished_at, j.error = "finished", time.time(), ""
+            real = self._real_paths(j)
+            vi = next((i for i in real if self._guess(j, i) == j.video), None)
+            if vi is None and len(real) == 1:
+                vi = next(iter(real))
+            if vi is not None:
+                j.video = str(real[vi])          # where aria2c really wrote it (it escapes ':' and the like)
             j.done = max(j.done, j.size)
             changed = True
             sharing = j.sharing and keep_sharing(self.settings)

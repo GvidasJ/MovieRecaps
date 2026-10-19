@@ -242,3 +242,131 @@ def test_publishing_clean_up_and_change_headline_are_flagged_as_work():
     assert mc.count("work=True)") == 2
     dl = (root / "tools" / "download_tool.py").read_text(encoding="utf-8")
     assert dl.count("\"fail\"), work=True)") == 1                  # the row's Change headline
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 3. / 4. torrents: only this job's files are deleted; the real paths from aria2c; never outside the save folder
+# ---------------------------------------------------------------------------------------------------------------------
+
+from mr_app.core import torrent as T  # noqa: E402
+
+from test_torrent import FakeAria2, sess, tor  # noqa: E402,F401 - the fake aria2c and its fixtures
+
+
+class FilesAria2(FakeAria2):
+    """The fake aria2c that also answers aria2.getFiles (``paths[gid] = {0-based index: path}``)."""
+
+    def __init__(self):
+        super().__init__()
+        self.paths: dict[str, dict[int, str]] = {}
+
+    def call(self, method, *p):
+        if method == "aria2.getFiles":
+            self.calls.append((method, *p))
+            gid = p[0]
+            if gid not in self.d:
+                raise T.RpcError(1, f"GID {gid} is not found")
+            sel = [int(x) - 1 for x in self.d[gid]["opts"]["select-file"].split(",")]
+            return [{"index": str(i + 1), "path": path, "selected": "true" if i in sel else "false"}
+                    for i, path in sorted(self.paths.get(gid, {}).items())]
+        return super().call(method, *p)
+
+
+def _with_files(sess):  # noqa: F811
+    eng = FilesAria2()
+    sess.engine = sess.eng = eng
+    return eng
+
+
+def test_aria2_never_removes_unselected_files():
+    src = (Path(T.__file__)).read_text(encoding="utf-8")
+    assert "bt-remove-unselected-file" not in src
+
+
+def test_remove_deletes_only_this_jobs_files_never_another_jobs_or_unselected_ones(sess, tor, tmp_path):  # noqa: F811
+    m = T.read_torrent(tor)
+    dl = tmp_path / "dl"
+    first = sess.start(m, [0], dl)                               # the season pack's first episode ...
+    sess.eng.set(first, completedLength=9000, status="complete")
+    sess.poll(first)
+    assert sess.job(first).state == "finished"
+    second = sess.start(m, [1], dl)                              # ... then a second job on the same torrent
+    files = {i: m.disk_path(dl, i) for i in range(len(m.files))}
+    for p in files.values():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    ctl = dl / "Example.Movie.2016.aria2"
+    ctl.write_bytes(b"ctl")
+    sess.remove(second)
+    assert not files[1].exists()                                 # its own part file: gone
+    assert files[0].exists()                                     # the first job's finished video: kept
+    assert files[2].exists() and files[3].exists()               # files nobody chose: left alone
+    assert ctl.exists()                                          # the first job still knows this torrent
+
+
+def test_remove_skips_a_file_another_running_job_also_chose(sess, tor, tmp_path):  # noqa: F811
+    m = T.read_torrent(tor)
+    dl = tmp_path / "dl"
+    a = sess.start(m, [0, 2], dl)
+    sess.job(a).state = "paused"
+    with sess._lock:                                             # noqa: SLF001 - a second known job, same folder
+        b = T.Job(id="b" * 16, name=m.name, info_hash=m.info_hash, indexes=[2], save_dir=str(dl), video="", size=1,
+                  state="paused")
+        sess._jobs[b.id] = b                                     # noqa: SLF001
+    for i in (0, 2):
+        m.disk_path(dl, i).parent.mkdir(parents=True, exist_ok=True)
+        m.disk_path(dl, i).write_bytes(b"x")
+    sess.remove(a)
+    assert not m.disk_path(dl, 0).exists() and m.disk_path(dl, 2).exists()
+
+
+def test_the_finished_video_is_where_aria2_really_wrote_it(sess, tor, tmp_path):  # noqa: F811
+    eng = _with_files(sess)
+    m = T.read_torrent(tor)
+    dl = tmp_path / "dl"
+    jid = sess.start(m, [0, 2], dl)
+    real = dl / "Example.Movie.2016" / "Spider-Man%3A Example.1080p.mkv"           # aria2c escaped a ':'
+    eng.paths[jid] = {0: str(real), 2: str(dl / "Example.Movie.2016" / "Subs" / "English.srt")}
+    eng.set(jid, completedLength=9050, status="complete")
+    st = sess.poll(jid)
+    assert st["state"] == "finished" and st["video"] == str(real)
+
+
+def test_a_path_from_aria2_outside_the_save_folder_is_ignored(sess, tor, tmp_path):  # noqa: F811
+    eng = _with_files(sess)
+    m = T.read_torrent(tor)
+    dl = tmp_path / "dl"
+    jid = sess.start(m, [0], dl)
+    guess = sess.job(jid).video
+    eng.paths[jid] = {0: str(tmp_path / "elsewhere" / "x.mkv")}
+    eng.set(jid, completedLength=9000, status="complete")
+    assert sess.poll(jid)["video"] == guess
+    jid2 = sess.start(m, [1], dl)
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"keep me")
+    eng.paths[jid2] = {1: r"..\victim.txt"}
+    sess.remove(jid2)
+    assert victim.exists()
+
+
+def test_inside_refuses_dots_drives_and_full_paths(tmp_path):
+    base = tmp_path / "dl"
+    assert T.inside(base, "a/b.mkv") and T.inside(base, base / "a.mkv")
+    assert not T.inside(base, "../a.mkv") and not T.inside(base, "a/../../a.mkv")
+    assert not T.inside(base, "C:/Windows/a.mkv") and not T.inside(base, str(tmp_path / "x.mkv"))
+    assert not T.inside(base, "") and not T.inside(base, ".")
+    if os.name == "nt":
+        assert not T.inside(base, "D:a.mkv") or str(base).upper().startswith("D:")
+
+
+def test_a_torrent_whose_names_leave_the_save_folder_is_refused(sess, tor, tmp_path):  # noqa: F811
+    m = T.read_torrent(tor)
+    m.files[0].path = "../../evil.mkv"
+    with pytest.raises(T.TorrentError, match="outside the save folder"):
+        m.disk_path(tmp_path / "dl", 0)
+    with pytest.raises(T.TorrentError, match="outside the save folder"):
+        sess.start(m, [0], tmp_path / "dl")
+    m2 = T.read_torrent(tor)
+    m2.name = "C:\\Windows"
+    with pytest.raises(T.TorrentError, match="outside the save folder"):
+        m2.disk_path(tmp_path / "dl", 0)
