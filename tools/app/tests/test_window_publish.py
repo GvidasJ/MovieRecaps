@@ -81,3 +81,26 @@ def test_the_start_up_pass_publishes_finished_projects_never_published(win, tmp_
     assert _wait(lambda: win.toasts)
     assert went == [done.folder.name] and waiting.folder.name not in went
     assert "moved to" in win.toasts[-1][0]
+
+
+def test_the_5_minute_retry_counts_as_work_only_while_it_publishes(win, tmp_path, monkeypatch):
+    """Day 12 review 2: the retry every 5 min with nothing waiting (only the reachability probe, up to 5 s) is not
+    work -- it must not bounce the 60 s "Turn off the PC" warning; publishing something is."""
+    from mr_app.ui import background as BG
+    seen = []
+    monkeypatch.setattr(publish, "reachable", lambda root, t=5.0: seen.append(("probe", BG.working())) or True)
+    monkeypatch.setattr(publish, "pending", lambda local_root: [])
+    win.retry_pending()
+    assert _wait(lambda: len(seen) >= 1)
+    assert _wait(lambda: BG.working() == 0)
+    assert seen and set(seen) == {("probe", 0)}                 # nothing to publish: never counted as work
+    done = P.create(tmp_path / "local", competitor_url="https://youtu.be/abcdefghijk", name="done one")
+    done.set_step("edit", P.DONE, result="PASS")
+    monkeypatch.setattr(publish, "publish_or_queue",
+                        lambda folder, root, local_root=None: seen.append(("publish", BG.working())) or
+                        (SimpleNamespace(summary=lambda: "ok"), ""))
+    win.retry_pending()
+    assert _wait(lambda: win.toasts)
+    assert [x for x in seen if x[0] == "publish"] == [("publish", 1)]   # publishing: counted
+    assert all(x == ("probe", 0) for x in seen if x[0] == "probe")
+    assert BG.working() == 0

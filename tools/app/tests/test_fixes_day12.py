@@ -235,7 +235,7 @@ def test_publishing_clean_up_and_change_headline_are_flagged_as_work():
     root = Path(__file__).resolve().parents[1] / "mr_app"
     mw = (root / "ui" / "main_window.py").read_text(encoding="utf-8")
     assert mw.count("BG.call(work, done, failed, work=True)") == 1                       # project_done -> publish
-    assert mw.count("BG.call(work, done, lambda _e: None, work=True)") == 1              # retry_pending -> publish
+    assert mw.count("with BG.counted_work():") == 2              # retry_pending: only while it publishes (review 2)
     board = (root / "tools" / "board_tool.py").read_text(encoding="utf-8")
     assert board.count("work=True)") == 3                         # Clean up, Change headline, Set headline
     mc = (root / "tools" / "match_cuts_tool.py").read_text(encoding="utf-8")

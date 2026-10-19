@@ -224,12 +224,16 @@ class MainWindow(QMainWindow):
             from ..core import publish
             if not publish.reachable(root, 5.0):
                 return None
-            done = list(publish.retry_pending(local, root)) if publish.pending(local) else []
+            done = []
+            if publish.pending(local):                # work ("Turn off the PC" waits) only while it publishes
+                with BG.counted_work():
+                    done = list(publish.retry_pending(local, root))
             for p in PJ.list_projects(local):         # finished before (or on another night) but never published
                 edit = (p.data.get("steps") or {}).get("edit") or {}
                 if edit.get("state") == PJ.DONE and not p.data.get("published"):
                     try:
-                        res, _note = publish.publish_or_queue(p.folder, root, local)
+                        with BG.counted_work():
+                            res, _note = publish.publish_or_queue(p.folder, root, local)
                     except Exception:  # noqa: BLE001 - the next pass tries again
                         continue
                     if res is not None:
@@ -243,7 +247,7 @@ class MainWindow(QMainWindow):
                 b = self.pages.get("board")
                 if b is not None:
                     b.reload()
-        BG.call(work, done, lambda _e: None, work=True)
+        BG.call(work, done, lambda _e: None)          # counted as work only while it publishes (counted_work)
 
     def find_hub(self) -> None:
         """Where the shared files are (the save folder, else this computer's): looked up in the background (a network

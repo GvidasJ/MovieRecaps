@@ -3,6 +3,7 @@ Qt's thread pool and hands its result to ``done`` (or the error, in plain words,
 window's thread. Anything that reads a disk, a network folder, a video or the internet goes through here."""
 from __future__ import annotations
 
+import contextlib
 import threading
 from typing import Any, Callable
 
@@ -44,6 +45,20 @@ def working() -> int:
     """How many background jobs flagged ``work=True`` are running now ("Turn off the PC" waits for them)."""
     with _work_lock:
         return _work
+
+
+@contextlib.contextmanager
+def counted_work():
+    """Inside a background job: count only this part as work (``working()``) -- e.g. the 5-minute retry of waiting
+    projects counts while it publishes something, not while it only looks whether there is anything to do."""
+    global _work
+    with _work_lock:
+        _work += 1
+    try:
+        yield
+    finally:
+        with _work_lock:
+            _work -= 1
 
 
 def _counted(fn: Callable[[], Any]) -> Callable[[], Any]:
