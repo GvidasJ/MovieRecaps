@@ -236,3 +236,198 @@ def test_board_card_use_as_my_headline(board, monkeypatch):
     page.ask_yes = lambda *_a: True
     assert page.use_headline(card, "y") == flow.USE_CHANGE
     assert pump_until(lambda: called == ["y"])
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# section 6c: a REAL torrent through the New video form (aria2c on 127.0.0.1 only, a tracker run here)
+# ---------------------------------------------------------------------------------------------------------------------
+
+class FakeQueue:
+    def __init__(self):
+        self.jobs = []
+        self.running = False
+
+    def add_project_job(self, job, autostart=False):
+        self.jobs.append((job, autostart))
+
+    def busy(self):
+        return False
+
+
+def _tiny_video(path: Path, seconds_: float = 2.0, size: str = "320x240") -> Path:
+    import subprocess
+
+    from match_cuts.common import ffmpeg_bin
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i",
+                    f"testsrc=size={size}:rate=10:d={seconds_}", "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def _new_video_page(tmp_path, monkeypatch):
+    from mr_app.tools import download_tool as D
+    app()
+    Mo.set_enabled(False)
+    monkeypatch.setattr(D.DownloadPage, "_torrent_dir", staticmethod(lambda: tmp_path / "torrents"))
+    toasts = []
+    ctx = SimpleNamespace(pages={"match_cuts": FakeQueue()}, notify=lambda t, x: None,
+                          toast=lambda text, kind="ok": toasts.append((text, kind)))
+    page = D.DownloadPage(ctx)
+    page.toasts = toasts
+    page.resize(1000, 900)
+    page.show()
+    return page
+
+
+def _aria2c_missing() -> bool:
+    try:
+        from mr_app.core import torrent as T
+        return T.find_aria2c() is None
+    except Exception:  # noqa: BLE001
+        return True
+
+
+@pytest.mark.skipif(_aria2c_missing(), reason="aria2c.exe is not installed (run setup_app.py)")
+def test_a_real_local_torrent_goes_through_the_new_video_row(tmp_path, monkeypatch):
+    """A magnet of a tiny real video, shared by one aria2c on 127.0.0.1: the picker inside the row (BIGGEST VIDEO
+    ticked) -> Start -> the progress card in the row -> finished -> the video is the RAW, placed into the project ->
+    the row waits for Convert (Automatic OFF); Automatic ON then lets it go on to Convert at once."""
+    import base64
+    import urllib.parse
+
+    from mr_app.core import torrent as T
+    from mr_app.core import torrent_selftest as TS
+    from mr_app.tools import download_tool as D
+    from mr_app.ui import torrent_panel as TP
+    monkeypatch.setenv("MOVIERECAPS_TORRENTS", str(tmp_path / "tstate"))
+    seed_dir, seed_state, get_state = tmp_path / "seed", tmp_path / "ss", tmp_path / "gs"
+    for d in (seed_dir, seed_state, get_state):
+        d.mkdir()
+    raw = _tiny_video(seed_dir / "Tiny.Episode.mp4", 3.0)
+    (seed_dir / "notes.txt").write_text("a small extra file", encoding="utf-8")
+    comp = _tiny_video(tmp_path / "comp" / "short.mp4", 1.0, "180x320")
+    tracker = TS.LocalTracker()
+    off = ["--enable-dht=false", "--bt-enable-lpd=false", "--bt-tracker-interval=2"]
+    seeder = T.Aria2(seed_state, listen_port=T._free_port(), extra_args=off)   # noqa: SLF001
+    getter = T.Aria2(get_state, listen_port=T._free_port(), extra_args=off)    # noqa: SLF001
+    page = None
+    try:
+        tor = T.make_torrent(seed_dir, [tracker.url])
+        meta0 = T.read_torrent(tor)
+        seeder.start()
+        seeder.call("aria2.addTorrent", base64.b64encode(tor).decode(), [],
+                    {"dir": str(tmp_path), "check-integrity": "true", "seed-ratio": "0.0",
+                     "bt-tracker-interval": "2"})
+        TP.set_session(T.TorrentSession(get_state, engine=getter, probe_minutes=1.5))
+        page = _new_video_page(tmp_path, monkeypatch)
+        if page.auto.isChecked():
+            page.auto.click()
+        magnet = f"magnet:?xt=urn:btih:{meta0.info_hash}&dn=tiny&tr={urllib.parse.quote(tracker.url, safe='')}"
+        page.raw.setText(magnet)
+        page.comp.setText(str(comp))
+        assert page.d_raw.text() == "TORRENT" and page.will.text() == "Full Match cuts edit"
+        it = page.add()
+        assert it is not None and it.state == D.WORKING
+        row = page.rows[it.id]
+        picker = it.torrent_widget
+        assert isinstance(picker, TP.TorrentPicker) and picker.parentWidget() is not None
+        assert row.isAncestorOf(picker)                                        # inside the row
+        assert pump_until(lambda: picker.meta is not None, 60), picker.note.text()
+        ticked = [r.file.path for r in picker.rows if r.checked()]
+        assert len(ticked) == 1 and ticked[0].endswith("Tiny.Episode.mp4")     # the biggest video, ticked
+        assert len(picker.rows) == 2
+        picker.start_btn.click()
+        assert pump_until(lambda: isinstance(it.torrent_widget, TP.TorrentCard), 20)
+        card = it.torrent_widget
+        assert row.isAncestorOf(card)
+        assert pump_until(lambda: it.raw_file is not None, 60), page.now_text(it)
+        assert Path(it.raw_file).read_bytes() == raw.read_bytes()
+        assert pump_until(lambda: it.state == D.GATED, 60), (it.state, page.now_text(it), it.error)
+        assert it.gate == D.G_CONVERT and not row.b_go.isHidden() and row.b_go.text() == "Convert"
+        assert it.project is not None and (Path(it.project) / "project.json").is_file()
+        assert "Tiny.Episode" in str(PJ.load(it.project).data.get("raw"))
+        assert pump_until(lambda: it.torrent_widget is None, 8)               # the green card goes after a moment
+        converted = []
+        monkeypatch.setattr(D.StageThread, "_convert", lambda self, out: converted.append(self.item.id))
+        page.auto.click()                                                      # Automatic ON: it goes on at once
+        assert pump_until(lambda: bool(converted), 20)
+        assert converted == [it.id]
+    finally:
+        if page is not None:
+            if page.auto.isChecked():
+                page.auto.click()
+            page.poll.stop()
+            page.close()
+            page.deleteLater()
+        TP.set_session(None)
+        getter.stop()
+        seeder.stop()
+        tracker.close()
+        Mo.set_enabled(True)
+
+
+def test_torrent_rows_come_back_after_a_restart(tmp_path, monkeypatch):
+    """The main window asks the Download page to restore the torrents at start: each unfinished download gets its
+    row back with the video it belonged to (competitor, channel, headline) and its progress card."""
+    import sys as _sys
+
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QWidget
+
+    from mr_app.core import newvideo as NV
+    from mr_app.tools import download_tool as D
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))
+    NV.keep_torrent_row("abcd1234abcd1234", {"competitor_url": "https://www.tiktok.com/@a/video/9",
+                                            "channel": "LouLaughs", "title": "Line one\nline two",
+                                            "kind": NV.FULL, "raw_torrent": "magnet:?xt=urn:btih:AA", "x": 1})
+    assert NV.torrent_rows()["abcd1234abcd1234"]["channel"] == "LouLaughs"
+
+    class Job(QObject):
+        progress = Signal(dict)
+        finished = Signal(str)
+        failed = Signal(str)
+        removed = Signal()
+
+        def __init__(self, jid, name):
+            super().__init__()
+            self.id, self.name, self.status = jid, name, {}
+
+    class Card(QWidget):
+        def __init__(self, job):
+            super().__init__()
+            self.job = job
+    made = [Job("abcd1234abcd1234", "Some.Movie"), Job("ffff0000ffff0000", "Other.Movie")]
+    fake = SimpleNamespace(TorrentCard=Card, restore_jobs=lambda cb: cb(made))
+    monkeypatch.setitem(_sys.modules, "mr_app.ui.torrent_panel", fake)
+    import mr_app.ui as UI
+    monkeypatch.setattr(UI, "torrent_panel", fake, raising=False)
+    monkeypatch.setattr(NV, "unfinished_torrents", lambda: True)
+    page = _new_video_page(tmp_path, monkeypatch)
+    try:
+        page.restore_torrents()
+        assert pump_until(lambda: len(page.items) == 2)
+        by = {i.torrent_job.id: i for i in page.items}
+        a, b = by["abcd1234abcd1234"], by["ffff0000ffff0000"]
+        assert a.channel == "LouLaughs" and a.title == "Line one\nline two" and a.kind == NV.FULL
+        assert a.competitor_url.endswith("/video/9") and a.state == D.WORKING
+        assert isinstance(a.torrent_widget, Card) and page.rows[a.id].isAncestorOf(a.torrent_widget)
+        assert b.kind == NV.JUST_CUTS and b.name == "Other.Movie"              # no row kept: a row of its own
+        made[0].progress.emit({"share": 0.25, "percent": 25, "seeders": 3, "state": "downloading"})
+        assert a.steps["download"].share == pytest.approx(0.245)
+        made[0].removed.emit()                                                 # Remove on the card: the row stops
+        assert a.state == D.STOPPED and a.torrent_widget is None
+        assert pump_until(lambda: "abcd1234abcd1234" not in NV.torrent_rows())
+        made[1].failed.emit("disk full")
+        assert b.state == D.FAILED
+    finally:
+        page.poll.stop()
+        page.close()
+        page.deleteLater()
+        Mo.set_enabled(True)
+
+
+def test_the_main_window_restores_torrents_at_start():
+    import inspect
+
+    from mr_app.ui import main_window as MW
+    assert "restore_torrents" in inspect.getsource(MW.MainWindow)

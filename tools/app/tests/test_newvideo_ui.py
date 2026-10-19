@@ -244,10 +244,13 @@ def test_a_magnet_uses_the_torrent_parts_picker_and_its_video_becomes_the_raw(pa
         def start_job(self, indexes):
             return Job()
 
-    class Job(QObject):
+    class Job(QObject):                                          # the real TorrentJob's API (ui/torrent_panel.py)
         progress = Signal(dict)
         finished = Signal(str)
         failed = Signal(str)
+        removed = Signal()
+        id = ""
+        status: dict = {}
 
     class Card(QtWidgets.QWidget):
         def __init__(self, job):

@@ -110,6 +110,8 @@ class Item:
     result: dict = field(default_factory=dict)
     roles: tuple = ()                       # only these files (Add a competitor: ("competitor",))
     rename_note: str = ""
+    torrent_job: Any = None                 # the torrent part's TorrentJob while the RAW downloads
+    torrent_widget: Any = None              # its picker / progress card inside the row
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -1250,6 +1252,15 @@ class DownloadPage(QWidget):
             self._fail(it, "download", "torrent support is coming -- for now download it yourself and drop the video "
                                        "file into RAW")
             return
+        job = it.torrent_job
+        if job is not None and (job.status or {}).get("state") in ("failed", "stalled", "paused"):
+            it.state, it.error = WORKING, ""                 # Try again on a download that stopped: the same job
+            it.message = "Trying the torrent again"
+            self._step(it, "download", S_RUN, None, "downloading")
+            job.resume()
+            self._order()
+            return
+        self._drop_torrent(it)
         save_dir = self._torrent_dir()
         try:
             picker = TP.TorrentPicker(it.raw_torrent, save_dir)
@@ -1258,23 +1269,22 @@ class DownloadPage(QWidget):
             return
         row = self.rows[it.id]
         row.add_extra(picker)
+        it.torrent_widget = picker
         it.state = WORKING
         it.started = it.started or datetime.now()
         it.message = "Choose the video in the torrent, then press Start"
         self._step(it, "download", S_RUN, 0.0, "choose the file")
         self._order()
 
-        def gone(w) -> None:
-            row.add_extra(None, remove=w)
-
         def failed(text: str) -> None:
-            gone(picker)
+            self._drop_torrent(it)
             self._fail(it, "download", text or "the torrent could not be read")
 
         def cancelled() -> None:
-            gone(picker)
+            self._drop_torrent(it)
             it.state, it.failed_step, it.error = STOPPED, "download", "stopped by you"
             self._step(it, "download", S_WAIT, 0.0, "stopped")
+            self._refresh(it)
             self._order()
 
         def chosen(indexes) -> None:
@@ -1283,27 +1293,87 @@ class DownloadPage(QWidget):
             except Exception as e:  # noqa: BLE001
                 failed(NV.plain_error(e))
                 return
-            gone(picker)
-            card = TP.TorrentCard(job) if hasattr(TP, "TorrentCard") else None
-            if card is not None:
-                row.add_extra(card)
-            it.message = "Downloading the torrent"
-            job.progress.connect(lambda st: self._torrent_progress(it, st))
-            job.failed.connect(lambda text: self._fail(it, "download", text or "the torrent stopped"))
-
-            def finished(path: str) -> None:
-                if card is not None:
-                    QTimer.singleShot(4000, lambda: gone(card))        # its green "done" seen for a moment
-                if path:
-                    self.torrent_finished(it, Path(path))
-                else:
-                    self._fail(it, "download", "the torrent finished but holds no video file")
-            job.finished.connect(finished)
+            self._drop_torrent(it)
+            self._attach_torrent(it, job, TP)
         picker.chosen.connect(chosen)
-        for sig, fn in (("failed", failed), ("cancelled", cancelled)):
-            s = getattr(picker, sig, None)
-            if s is not None:
-                s.connect(fn)
+        picker.failed.connect(failed)
+        picker.cancelled.connect(cancelled)
+
+    def _drop_torrent(self, it: Item) -> None:
+        """The torrent's picker / progress card out of the row (a new try, a cancel, a removed download)."""
+        w, it.torrent_widget = it.torrent_widget, None
+        row = self.rows.get(it.id)
+        if w is not None and row is not None:
+            try:
+                row.add_extra(None, remove=w)
+            except RuntimeError:                           # already deleted
+                pass
+
+    def _attach_torrent(self, it: Item, job, TP) -> None:
+        """A running torrent download on its row: the progress card inside the row; its numbers move the Download
+        bar; finished -> its video is the RAW's file and the row goes on (Convert waits for the button unless
+        Automatic is ON); "nobody sharing" (stalled) only pauses it -- the card's Resume tries again; a failure stops
+        the row red (Try again resumes the same download); Remove on the card stops the row. The row's video is kept
+        in the app's folder under the job's id, so after a restart the download continues on a row again."""
+        card = TP.TorrentCard(job)
+        self.rows[it.id].add_extra(card)
+        it.torrent_job, it.torrent_widget = job, card
+        it.message = "Downloading the torrent"
+        self._refresh(it)
+
+        def keep() -> None:
+            if job.id:
+                fields = {k: getattr(it, k) for k in NV.ROW_FIELDS}
+                from ..ui import background as BG
+                BG.call(lambda: NV.keep_torrent_row(job.id, fields))
+
+        def forget() -> None:
+            if job.id:
+                from ..ui import background as BG
+                jid = job.id
+                BG.call(lambda: NV.forget_torrent_row(jid))
+
+        def progress(st: dict) -> None:
+            if not getattr(job, "_mr_kept", False) and job.id:
+                job._mr_kept = True                        # noqa: SLF001 - once the id is known
+                keep()
+            if it.torrent_job is job and it.state == WORKING:
+                self._torrent_progress(it, st)
+
+        def failed(text: str) -> None:
+            if it.torrent_job is not job:
+                return
+            if (job.status or {}).get("state") == "stalled":
+                it.message = (text or NV.NO_PEERS) + " -- press Resume on the card to try again"
+                self._step(it, "download", S_RUN, None, "nobody sharing")
+                return
+            self._fail(it, "download", text or "the torrent stopped")
+
+        def finished(path: str) -> None:
+            if it.torrent_job is not job:
+                return
+            forget()
+            QTimer.singleShot(4000, lambda: self._drop_torrent(it) if it.torrent_widget is card else None)
+            if path:
+                self.torrent_finished(it, Path(path))
+            else:
+                self._fail(it, "download", "the torrent finished but holds no video file")
+
+        def removed() -> None:
+            if it.torrent_job is not job:
+                return
+            forget()
+            it.torrent_job = None
+            self._drop_torrent(it)
+            if it.state == WORKING:
+                it.state, it.failed_step, it.error = STOPPED, "download", "the download was removed"
+                self._step(it, "download", S_WAIT, 0.0, "removed")
+                self._refresh(it)
+                self._order()
+        job.progress.connect(progress)
+        job.failed.connect(failed)
+        job.finished.connect(finished)
+        job.removed.connect(removed)
 
     def _torrent_progress(self, it: Item, st: dict) -> None:
         try:
@@ -1311,15 +1381,65 @@ class DownloadPage(QWidget):
         except (TypeError, ValueError):
             share = 0.0
         self._worked = True
-        it.message = " · ".join(x for x in (f"{st.get('percent', int(share * 100))} %", st.get("speed_text", ""),
-                                             f"{st.get('seeders', 0)} seeders", st.get("eta_text", "")) if x)
-        self._step(it, "download", S_RUN, share * 0.98, "downloading")
+        if st.get("state") == "paused":
+            it.message = "Paused -- press Resume on the card"
+        else:
+            it.message = " · ".join(x for x in (f"{st.get('percent', int(share * 100))} %", st.get("speed_text", ""),
+                                                 f"{st.get('seeders', 0)} seeders", st.get("eta_text", "")) if x)
+        self._step(it, "download", S_RUN, share * 0.98, "paused" if st.get("state") == "paused" else "downloading")
 
     def torrent_finished(self, it: Item, video: Path) -> None:
         """The torrent's video is downloaded: it is the RAW's file (placed into the project like a dropped file)."""
         it.raw_file = video
         it.raw_torrent = ""
+        it.torrent_job = None
         self.queue(it, ("download",))
+
+    def restore_torrents(self) -> None:
+        """At the app's start (the main window calls it once): the torrent downloads that were not finished go on,
+        each on a row again (its video -- competitor, channel, headline ... -- from the app's small torrent_rows.json;
+        a download with no row kept becomes a row of its own, Just cuts unless a competitor is added). Nothing is
+        started when there is no unfinished torrent (aria2c is not even started)."""
+        from ..ui import background as BG
+
+        def work():
+            return NV.torrent_rows() if NV.unfinished_torrents() else None
+
+        def got(rows) -> None:
+            if rows is None:
+                return
+            try:
+                from ..ui import torrent_panel as TP
+            except Exception:  # noqa: BLE001 - not in this build
+                return
+            TP.restore_jobs(lambda jobs: self._restored(jobs, rows, TP))
+        BG.call(work, got, lambda _e: None)
+
+    def _restored(self, jobs: list, rows: dict, TP) -> None:
+        for job in jobs:
+            if any(i.torrent_job is not None and i.torrent_job.id == job.id for i in self.items):
+                continue
+            f = dict(rows.get(job.id) or {})
+            comp_file = f.get("comp_file")
+            it = Item(f.get("competitor_url") or "", raw_torrent=f.get("raw_torrent") or job.name or "torrent",
+                      channel=f.get("channel") or "", title=f.get("title") or "", mode=f.get("mode") or J.FAST,
+                      speed=float(f.get("speed") or 100.0), upload_title=f.get("upload_title") or "",
+                      comp_file=Path(comp_file) if comp_file else None,
+                      kind=f.get("kind") or (NV.FULL if (f.get("competitor_url") or comp_file) else NV.JUST_CUTS),
+                      edit=bool(f.get("edit", True)))
+            if f.get("added"):
+                it.added = float(f["added"])
+            it.name = job.name or ""
+            it.state, it.started = WORKING, datetime.now()
+            self.items.append(it)
+            self.rows[it.id] = VideoRow(self, it)
+            self._step(it, "download", S_RUN, 0.0, "continues after the restart")
+            job._mr_kept = True                             # noqa: SLF001 - already kept
+            self._attach_torrent(it, job, TP)
+        if jobs:
+            self._order(scroll_top=True)
+            self._counts()
+            self.toast(f"{len(jobs)} torrent download(s) continue ✓")
 
     @staticmethod
     def _torrent_dir() -> Path:
@@ -1696,6 +1816,16 @@ class DownloadPage(QWidget):
         self.queue(it, (stage,), default_template=it.default_template)
 
     def stop_item(self, it: Item) -> None:
+        w = it.torrent_widget
+        if it.torrent_job is None and w is not None and hasattr(w, "cancel"):     # the torrent's file list: Cancel
+            w.cancel()
+            return
+        mine = self.current is not None and self.current.item.id == it.id
+        if it.torrent_job is not None and not mine:
+            it.torrent_job.pause()                    # a torrent download: paused (Resume on its card goes on)
+            it.message = "Paused -- press Resume on the card"
+            self._refresh(it)
+            return
         if self.current is not None and self.current.item.id == it.id:
             self.current.cancel.set()
             it.message = "stopping ..."

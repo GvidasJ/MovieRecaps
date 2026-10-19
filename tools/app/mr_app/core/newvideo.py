@@ -247,3 +247,67 @@ def order(rows: Iterable[Any], group=lambda r: r.group(), added=lambda r: r.adde
     """Running rows first, then waiting rows (newest first), then finished rows (newest first). The run order is
     not this (it stays the order the videos were added)."""
     return sorted(rows, key=lambda r: (group(r), -float(added(r))))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# torrent rows kept across an app restart (the download continues in aria2c; its row needs the rest of the video:
+# the competitor, the channel, the headline ...) -- a small file in the app's folder, written in the background
+# ---------------------------------------------------------------------------------------------------------------------
+
+TORRENT_ROWS = "torrent_rows.json"
+ROW_FIELDS = ("competitor_url", "comp_file", "channel", "title", "mode", "speed", "upload_title", "kind",
+              "raw_torrent", "edit", "added")
+
+
+def torrent_rows_file() -> Path:
+    from . import settings as S
+    return S.app_dir() / TORRENT_ROWS
+
+
+def torrent_rows() -> dict:
+    """{torrent job id: the row's fields} (empty when there is none or it cannot be read)."""
+    import json
+    try:
+        d = json.loads(torrent_rows_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _write_rows(rows: dict) -> None:
+    import json
+    import os
+    f = torrent_rows_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f".{TORRENT_ROWS}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def keep_torrent_row(job_id: str, fields: dict) -> None:
+    """Remember a torrent row's video (``ROW_FIELDS``) under its torrent job's id (the id stays the same across a
+    restart)."""
+    if not job_id:
+        return
+    rows = torrent_rows()
+    rows[str(job_id)] = {k: (str(v) if isinstance(v, Path) else v) for k, v in fields.items() if k in ROW_FIELDS}
+    _write_rows(rows)
+
+
+def forget_torrent_row(job_id: str) -> None:
+    rows = torrent_rows()
+    if rows.pop(str(job_id), None) is not None:
+        _write_rows(rows)
+
+
+def unfinished_torrents() -> bool:
+    """Whether the torrent part has downloads that were not finished (its jobs file) -- read before it is asked to
+    restore them, so a start-up with no torrents never starts aria2c."""
+    import json
+    try:
+        from . import torrent as T
+        d = json.loads((T.state_dir() / "jobs.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no torrents yet
+        return False
+    jobs = d.get("jobs", []) if isinstance(d, dict) else []
+    return any(isinstance(j, dict) and j.get("state") in ("downloading", "paused", "stalled") for j in jobs)

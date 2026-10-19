@@ -148,6 +148,17 @@ class MainWindow(QMainWindow):
         self._pending_timer.timeout.connect(self.retry_pending)
         self._pending_timer.start(5 * 60_000)
         QTimer.singleShot(8000, self.retry_pending)
+        QTimer.singleShot(1500, self.restore_torrents)    # day 12: unfinished torrent downloads go on, on their rows
+
+    def restore_torrents(self) -> None:
+        """Once at the start: the Download page gives every unfinished torrent download its row back (nothing -- not
+        even aria2c -- is started when there is none)."""
+        dl = self.pages.get("download")
+        if dl is not None and hasattr(dl, "restore_torrents"):
+            try:
+                dl.restore_torrents()
+            except Exception:  # noqa: BLE001 - never a crash at the start
+                pass
 
     # -- the board feeds the motivation strip and the history --
     def _board_changed(self, cards: list) -> None:
