@@ -6,7 +6,10 @@ Fixed → Rendered → Uploaded -- for the PC and the laptop at once (the shared
   every step ("Downloaded 18 Oct 02:44").
 * Above the board, a small chart per channel: uploads per day this week (Mon-Sun), "N this week".
 * Clean up removes finished junk (temp files, leftover copies) -- it asks first and shows the size; it never touches
-  an edit, template.png, project.json or title.txt.
+  an edit, template.png, project.json or title.txt. Day 12, one RAW file per run: an older run that holds a 5.1 RAW
+  twice (raw_ae.mp4 / raw.mp4 next to raw_stereo.mp4, which its 1_edit.xml plays) is checked in the background
+  (core.rawfiles: raw_stereo opens as the same video, nothing plays the old copy -- your projects are only read) and
+  the old copy is offered with the space it frees; it goes only on Yes.
 * Every 30 minutes (and at the start) the three channels' Shorts tabs are read (core.uploads): a Short with the same
   title moves its card to Uploaded with the date; a near match asks first ("Is this the same video?").
 """
@@ -495,6 +498,7 @@ class AskUpload(W.Card):
 
 class BoardPage(QWidget):
     changed = Signal(list)                 # the cards, after every load
+    cleanup_progress = Signal(str)         # Clean up's progress, said from its worker thread
 
     def __init__(self, ctx):
         super().__init__()
@@ -520,6 +524,7 @@ class BoardPage(QWidget):
         lay.addWidget(W.SectionHeader("Projects", [self.note, self.b_refresh, self.b_check, self.b_clean]))
         self.status = W.label("", "Dim", wrap=True, select=True)
         lay.addWidget(self.status)
+        self.cleanup_progress.connect(self.status.setText)
         self.asks = QVBoxLayout()
         self.asks.setSpacing(10)
         lay.addLayout(self.asks)
@@ -748,39 +753,84 @@ class BoardPage(QWidget):
         BG.call(work, lambda _r: (self.toast("Uploaded ✓" if yes else "Noted: not the same video"), self.reload()))
 
     # -- clean up --
+    def _cleanup_say(self, text: str) -> None:
+        """Clean up's progress, from its worker thread (a queued signal: the label changes in the window's thread)."""
+        try:
+            self.cleanup_progress.emit(str(text))
+        except RuntimeError:                   # the page closed meanwhile
+            pass
+
     def clean_up(self) -> None:
         cards = list(self.cards)
         local = paths.projects_root()
         self.b_clean.setEnabled(False)
+        before = self.status.text()
+        self.status.setText("Clean up: looking for leftovers ...")
+        say = self._cleanup_say
 
         def work():
-            from ..core import board
-            return board.cleanup_plan(cards, local_root=local)
+            from ..core import board, rawfiles
+            junk = board.cleanup_plan(cards, local_root=local)
+            # day 12: older runs of a 5.1 RAW hold the RAW twice -- checked here, removed only after you say yes
+            raws = rawfiles.plan(cards, local_root=local, say=say)
+            return junk, raws
 
-        def got(junk) -> None:
+        def got(res) -> None:
             self.b_clean.setEnabled(True)
-            if not junk:
-                self.toast("Nothing to clean up ✓")
+            self.status.setText(before)
+            junk, raws = res
+            ok = [r for r in raws if r.ok]
+            kept = [r for r in raws if not r.ok]
+            if not junk and not ok:
+                self.toast("Nothing to clean up ✓" + (f" ({len(kept)} old run(s) keep two RAW files: see above)"
+                                                        if kept else ""))
+                if kept:
+                    self.status.setText(self._kept_text(kept))
                 return
             from ..core import publish
-            total = sum(int(getattr(j, "size", 0) or 0) for j in junk)
+            total = sum(int(getattr(j, "size", 0) or 0) for j in junk) + sum(r.freed for r in ok)
             lines = [f"{publish.plain_size(getattr(j, 'size', 0))}  {Path(j.path).name}  ({getattr(j, 'why', '')})"
                      for j in junk[:25]]
             more = f"\n... and {len(junk) - 25} more" if len(junk) > 25 else ""
-            r = QMessageBox.question(self, "Clean up",
-                                     f"Remove {len(junk)} finished leftover file(s), {publish.plain_size(total)} in "
-                                     "all?\n\nNever touched: the edit folders, template.png, project.json, title.txt."
-                                     "\n\n" + "\n".join(lines) + more)
+            text = ""
+            if junk:
+                text += f"Remove {len(junk)} finished leftover file(s)?\n\n" + "\n".join(lines) + more + "\n\n"
+            if ok:
+                text += ("One RAW file per run -- these older runs hold the RAW twice. Their raw_stereo file opens "
+                         "and is the same video (the same frames, stereo sound), and nothing plays the old copy, so "
+                         "the old copy can go:\n\n" + "\n".join(r.line() for r in ok[:25])
+                         + (f"\n... and {len(ok) - 25} more" if len(ok) > 25 else "") + "\n\n")
+            if kept:
+                text += self._kept_text(kept) + "\n\n"
+            text += (f"Space saved: {publish.plain_size(total)}.\n\nNever touched: the edits themselves (their XMLs, "
+                     "raw_stereo, the captions), your Premiere projects, template.png, project.json, title.txt.")
+            r = QMessageBox.question(self, "Clean up", text)
             if r != QMessageBox.StandardButton.Yes:
                 return
+            self.b_clean.setEnabled(False)
 
             def work2():
-                from ..core import board
-                return board.cleanup(junk)
-            BG.call(work2, lambda res: (self.toast(f"Freed {publish.plain_size(res[0])} ✓"
-                                                   + (f" ({len(res[1])} could not be removed)" if res[1] else "")),
-                                        self.reload()))
-        BG.call(work, got, lambda e: (self.b_clean.setEnabled(True), self.toast(f"Clean up failed: {e}", "fail")))
+                from ..core import board, rawfiles
+                freed, errors = board.cleanup(junk) if junk else (0, [])
+                f2, e2 = rawfiles.remove(ok, say=say)
+                return freed + f2, errors + e2
+
+            def done(res2) -> None:
+                self.b_clean.setEnabled(True)
+                self.status.setText("\n".join(res2[1][:6]))
+                self.toast(f"Freed {publish.plain_size(res2[0])} ✓"
+                           + (f" ({len(res2[1])} could not be removed)" if res2[1] else ""))
+                self.reload()
+            BG.call(work2, done, lambda e: (self.b_clean.setEnabled(True), self.status.setText(""),
+                                            self.toast(f"Clean up failed: {e}", "fail")))
+        BG.call(work, got, lambda e: (self.b_clean.setEnabled(True), self.status.setText(before),
+                                      self.toast(f"Clean up failed: {e}", "fail")))
+
+    @staticmethod
+    def _kept_text(kept) -> str:
+        """The old runs that keep both RAW files, and why (plain words)."""
+        return "Kept (both RAW files stay):\n" + "\n".join(f"  {r.where}: " + "; ".join(r.problems[:2])
+                                                          for r in kept[:10])
 
     def settings_changed(self, _s) -> None:
         self._sig = None

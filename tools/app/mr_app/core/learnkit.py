@@ -42,6 +42,7 @@ from . import learn_hub as H
 from . import paths
 
 BS = "\\"
+STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")   # a 5.1 RAW's one file in a run's extras\\media (day 12)
 
 
 def is_run_folder(p: Path) -> bool:
@@ -458,6 +459,7 @@ def project_raw(pr: Any, raw: dict) -> tuple[str, Any, bool] | None:
     PR, L = tool()
     names = {_file_name(str(raw.get(k) or "")).lower() for k in ("file", "file_rel", "file_abs", "source_path")}
     names.discard("")
+    names.update(STEREO_NAMES)        # a 5.1 RAW: 1_edit.xml plays its one file, raw_stereo.mp4 (day 12)
     want = {"raw": raw}
     best, rank = None, None
     for s in pr.sequences:
