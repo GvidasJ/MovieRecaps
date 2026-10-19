@@ -4,8 +4,9 @@
 
 installs what the app needs into the project's venv -- PySide6-Essentials (the window, ~100 MB), yt-dlp (the
 downloader; updated by the app at most once a day), psd-tools (reads the channels' template.psd) and, when the
-computer has no deno, deno (yt-dlp needs a JavaScript runtime to read YouTube) -- only what is missing, and puts
-the MovieRecaps shortcut on the desktop."""
+computer has no deno, deno (yt-dlp needs a JavaScript runtime to read YouTube), aria2c (the torrent engine, from its
+official GitHub release, checksum-checked, into tools\\app\\bin) -- only what is missing, and puts the MovieRecaps
+shortcut on the desktop."""
 import importlib.util
 import shutil
 import subprocess
@@ -35,6 +36,13 @@ def main() -> int:
         if subprocess.run([sys.executable, "-m", "pip", "install", "deno"]).returncode != 0:
             print("note: deno could not be installed -- YouTube downloads may miss formats; install it once with: "
                   "winget install DenoLand.Deno")
+    from mr_app.core import torrent
+    if torrent.find_aria2c() is None:
+        # torrents (day 12): aria2c, because libtorrent has no wheel for this Python (3.14) yet
+        try:
+            print(f"aria2c installed: {torrent.install_aria2c()}")
+        except Exception as e:  # noqa: BLE001
+            print(f"note: aria2c (torrents) could not be installed: {e} -- run this line again later")
     from mr_app.core import shortcut
     p = shortcut.make()
     try:                                     # Windows keeps old icons in a cache: show the new logo now (night 11)

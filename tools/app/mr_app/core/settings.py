@@ -6,6 +6,8 @@ own: the PC and the laptop save the finished projects to different paths of the 
   \\\\192.168.101.11\\Shared\\Projects on the laptop (``save_root``).
 * Which computer this is (``machine``): "auto" (machine.py finds out), "pc" or "laptop"; the host-name table
   (``pc_names`` / ``laptop_names``) for computers whose names differ.
+* Torrents (day 12): "Save torrents to" (`torrent_dir`, "" = D:\\Shared\\Downloads\\Torrents on the PC, the same
+  folder over the network on the laptop) and "Keep sharing after a download" (`torrent_keep_sharing`, off).
 * Animations on/off, the intro, the daily and monthly goals, how often the Shorts are checked for uploads.
 
 A missing file is the defaults. A broken one gives the defaults too and is kept as settings.json.bad, so nothing
@@ -40,6 +42,8 @@ class Settings:
     upload_check_minutes: int = 30     # how often the Shorts tabs are read for uploads
     pc_names: list[str] = field(default_factory=list)       # host names that are the PC ...
     laptop_names: list[str] = field(default_factory=list)   # ... and the laptop (both say "Gvidas" tonight)
+    torrent_dir: str = ""              # "Save torrents to"; "" = this computer's default (torrent.default_dir)
+    torrent_keep_sharing: bool = False  # "Keep sharing after a download" (off: sharing stops when it is finished)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -75,12 +79,12 @@ def _int(v: Any, default: int, lo: int, hi: int) -> int:
 
 
 def _valid(name: str, v: Any, default: Any) -> Any:
-    if name == "save_to":
+    if name in ("save_to", "torrent_dir"):
         return v.strip() if isinstance(v, str) else default
     if name == "machine":
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
-    if name in ("animations", "intro"):
+    if name in ("animations", "intro", "torrent_keep_sharing"):
         return v if isinstance(v, bool) else default
     if name == "daily_goal":
         return _int(v, default, 1, 1000)

@@ -17,3 +17,5 @@ examples/**/*.mp4
 .claude/worktrees/
 # speech / face models downloaded on first use (Hugging Face cache etc.)
 /models/
+# aria2c.exe (torrents), fetched by tools/app/setup_app.py
+/tools/app/bin/

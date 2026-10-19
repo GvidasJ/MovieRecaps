@@ -64,6 +64,29 @@ class SettingsDialog(QDialog):
         mrow.addWidget(self.machine_note, 1)
         g.addLayout(mrow, r, 1)
         r += 1
+        # torrents (day 12)
+        g.addWidget(W.label("Save torrents to", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
+        tbox = QVBoxLayout()
+        trow = QHBoxLayout()
+        self.tdir = QLineEdit(str(getattr(self.s, "torrent_dir", "") or ""))
+        self.tdir.setPlaceholderText(str(self._default_tdir()))
+        trow.addWidget(self.tdir, 1)
+        tpick = W.Button("Browse…", "Small")
+        tpick.clicked.connect(self._browse_tdir)
+        trow.addWidget(tpick)
+        tdflt = W.Button("This computer's default", "Small")
+        tdflt.clicked.connect(lambda: self.tdir.setText(""))
+        trow.addWidget(tdflt)
+        tbox.addLayout(trow)
+        srow = QHBoxLayout()
+        srow.addWidget(W.label("Keep sharing after a download", "Dim"))
+        self.share = W.Segmented([("on", "On"), ("off", "Off")],
+                                 "on" if getattr(self.s, "torrent_keep_sharing", False) else "off")
+        srow.addWidget(self.share)
+        srow.addWidget(W.label("Off: sharing stops as soon as the download is finished.", "Dim"), 1)
+        tbox.addLayout(srow)
+        g.addLayout(tbox, r, 1)
+        r += 1
         # motion
         g.addWidget(W.label("Animations", "Small"), r, 0)
         arow = QHBoxLayout()
@@ -135,6 +158,22 @@ class SettingsDialog(QDialog):
             from ..core import paths
             return paths.projects_root()
 
+    def _default_tdir(self):
+        try:
+            from ..core import machine, torrent
+            kind = self.machine.value if hasattr(self, "machine") and self.machine.value != "auto" else None
+            s = copy.copy(self.s)
+            s.torrent_dir = ""
+            return torrent.default_dir(kind or machine.which(self.s), settings=s)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _browse_tdir(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Save torrents to",
+                                             self.tdir.text().strip() or str(self._default_tdir()))
+        if d:
+            self.tdir.setText(d)
+
     def _machine_changed(self) -> None:
         self.s.machine = self.machine.value
         try:
@@ -143,6 +182,8 @@ class SettingsDialog(QDialog):
         except Exception:  # noqa: BLE001
             self.machine_note.setText("")
         self.save.setPlaceholderText(str(self._default_root()))
+        if hasattr(self, "tdir"):
+            self.tdir.setPlaceholderText(str(self._default_tdir()))
         self._check_root()
 
     def _root(self):
@@ -191,6 +232,8 @@ class SettingsDialog(QDialog):
         s.daily_goal = int(self.daily.value())
         s.monthly_goal = int(self.monthly.value())
         s.upload_check_minutes = int(self.every.value())
+        s.torrent_dir = self.tdir.text().strip().strip('"')
+        s.torrent_keep_sharing = self.share.value == "on"
         try:
             from ..core import settings as S
             S.save(s)
