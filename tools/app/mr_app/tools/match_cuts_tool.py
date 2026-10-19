@@ -276,6 +276,10 @@ def step_dates(j: J.Job) -> list[tuple[str, datetime | None]]:
                 s = st.get(key) or {}
                 out.append((name, _iso(s.get("finished")) if s.get("state") == "done" else None))
             j.upload_title = data.get("upload_title") or ""
+            from ..ui.titles_block import has_titles, is_just_cuts
+            j.titles_known = has_titles(data)              # day 12: the competitor's two real titles
+            j.post_title, j.video_headline = data.get("post_title"), data.get("video_headline")
+            j.just_cuts = is_just_cuts(data)
         except Exception:  # noqa: BLE001 - shown without them
             pass
     else:
@@ -343,6 +347,10 @@ class JobRow(QFrame):
         self.chan_box = QHBoxLayout()
         top.addLayout(self.chan_box)
         top.addStretch(1)
+        self.kind = W.Pill("Just cuts")          # day 12: a Just cuts project (project.json kind == "just_cuts")
+        self.kind.set("Just cuts", (theme.CORAL, "#2a1812", "#5a2f22"))
+        self.kind.hide()
+        top.addWidget(self.kind, 0, Qt.AlignmentFlag.AlignTop)
         self.pill = W.Pill("ready")
         top.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(top)
@@ -353,6 +361,13 @@ class JobRow(QFrame):
         self.yt_box.copied.connect(lambda _t: _toast(self.page.ctx, "YouTube title copied ✓"))
         self.yt_box.edit_clicked.connect(self._edit_upload_title)
         lay.addWidget(self.yt_box)
+        from ..ui.titles_block import TitlesBlock    # day 12: the competitor's two real titles (project.json)
+        self.titles = TitlesBlock()
+        self.titles.copied.connect(lambda _t: _toast(self.page.ctx, "Copied ✓"))
+        self.titles.use_headline.connect(lambda t: self.page.use_headline(self.job, t))
+        self.titles.use_title.connect(self._use_title)
+        self.titles.hide()
+        lay.addWidget(self.titles)
         pl = QHBoxLayout()                       # day 12: which file is which -- RAW: name (length) · COMP: name (length)
         pl.setSpacing(10)
         self.pair = QLabel()
@@ -561,6 +576,15 @@ class JobRow(QFrame):
         self.yt_box.set(text)
         save_upload_title(self.page.ctx, j.project, text)
 
+    def _use_title(self, text: str) -> None:
+        """Day 12: "Use as YouTube title" from the headline on the competitor's video."""
+        j = self.job
+        if j.project is None or not text:
+            return
+        j.upload_title = text
+        self.yt_box.set(text)
+        save_upload_title(self.page.ctx, j.project, text)
+
     def _open_folder(self) -> None:
         d = self.job.run_dir if self.job.run_dir is not None and Path(self.job.run_dir).exists() else self.job.project
         if d is not None and Path(d).exists():
@@ -704,6 +728,11 @@ class JobRow(QFrame):
             for n, d in self._dates_cache))
         self.yt_box.setVisible(j.project is not None)          # a YouTube title belongs to a project
         self.yt_box.set(getattr(j, "upload_title", "") or "")
+        known = j.project is not None and bool(getattr(j, "titles_known", False))
+        self.titles.setVisible(known)
+        if known:
+            self.titles.set(getattr(j, "post_title", None), getattr(j, "video_headline", None))
+        self.kind.setVisible(bool(getattr(j, "just_cuts", False)))
         done = j.state in (J.DONE, J.STOPPED) and j.run_dir is not None
         for b in (self.b_folder, self.b_prem, self.b_report):
             b.setVisible(done)
@@ -1392,6 +1421,77 @@ class MatchCutsPage(QWidget):
             board.set_title(job.project, job.title)
         except Exception:  # noqa: BLE001 - the board's module (night 11) may be missing
             pass
+
+    def use_headline(self, job: J.Job, text: str) -> str:
+        """Day 12: "Use as my headline" (the headline read on the competitor's video) on a queue row. Before the
+        edit: the row's and the project's headline are set (template.png, when made already, is made again; the
+        edit's start makes it from the headline anyway). While it runs: nothing changes (said). After an edit was
+        made: asked first, then Change headline -- only template.png again, swapped into the edit, no new run.
+        Returns what it did (flow.USE_*, or "" when nothing / cancelled)."""
+        from ..core import flow
+        from ..core import projects as PJ
+        from ..ui import background as BG
+        text = "\n".join(x.strip() for x in (text or "").splitlines() if x.strip())[:200]
+        if not text:
+            return ""
+        if job.state == J.RUNNING:
+            _toast(self.ctx, "The edit is running -- use the headline when it has finished", "note")
+            return flow.USE_RUNNING
+        made = job.state in (J.DONE, J.STOPPED) and (job.result or {}).get("label") in R.GOOD
+        if made and job.project is not None:
+            if not job.channel:
+                _toast(self.ctx, "This video has no channel, so it has no template to change", "note")
+                return ""
+            if not self.ask_yes("Use as my headline",
+                                f"Make the template again with this headline and swap it into the finished edit?\n\n"
+                                f"{text}\n\nNo new run -- only template.png changes."):
+                return ""
+            folder, ch = Path(job.project), job.channel
+
+            def changed(_r) -> None:
+                job.title = text
+                self._refresh_job(job)
+                _toast(self.ctx, "New template made and swapped into the edit ✓")
+                self._reload_board()
+            BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch), changed,
+                    lambda e: _toast(self.ctx, f"The template could not be made: {e}", "fail"))
+            return flow.USE_CHANGE
+        job.title = text
+        self._refresh_job(job)
+        if job.project is not None:
+            folder = Path(job.project)
+
+            def done(r) -> None:
+                _toast(self.ctx, "Headline set ✓" + (" -- template made again" if (r or {}).get("template") else
+                                                     " -- the template uses it"))
+                self._reload_board()
+            BG.call(lambda: flow.set_headline(folder, text), done,
+                    lambda e: _toast(self.ctx, f"The headline could not be saved: {e}", "fail"))
+        else:
+            _toast(self.ctx, "Headline set ✓ -- the template uses it")
+        return flow.USE_SET
+
+    def ask_yes(self, title: str, text: str) -> bool:
+        """A Yes / No question (a test replaces it)."""
+        return QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
+
+    def _refresh_job(self, job: J.Job) -> None:
+        row = self.rows.get(job.id)
+        if row is not None:
+            row.refresh()
+        dl = (getattr(self.ctx, "pages", None) or {}).get("download")     # the same video's Download row, if any
+        for it in getattr(dl, "items", None) or []:
+            if getattr(it, "job", None) is job:
+                it.title = job.title
+                try:
+                    dl.rows[it.id].refresh()
+                except (AttributeError, KeyError, RuntimeError):
+                    pass
+
+    def _reload_board(self) -> None:
+        b = (getattr(self.ctx, "pages", None) or {}).get("board")
+        if b is not None and hasattr(b, "reload"):
+            b.reload()
 
     # -- the queue --
     def ready(self) -> list[J.Job]:

@@ -147,7 +147,18 @@ class BoardCard(QFrame):
         self.pin.clicked.connect(lambda: self.page.pin(self.card))
         top.addWidget(self.pin, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(top)
-        lay.addWidget(W.channel_chip(card.channel or "no channel", 11))
+        from ..ui.titles_block import TitlesBlock, has_titles, is_just_cuts
+        data = getattr(card, "data", None) or {}
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        chips.addWidget(W.channel_chip(card.channel or "no channel", 11))
+        chips.addStretch(1)
+        self.kind = None
+        if is_just_cuts(data):                            # day 12: a Just cuts project
+            self.kind = W.Pill("Just cuts")
+            self.kind.set("Just cuts", (theme.CORAL, "#2a1812", "#5a2f22"))
+            chips.addWidget(self.kind, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addLayout(chips)
         title = (card.title or "").strip()
         yt = (getattr(card, "upload_title", "") or "").strip()
         tl = QHBoxLayout()
@@ -169,6 +180,14 @@ class BoardCard(QFrame):
             ytl.setFont(W.font(11))
             ytl.setStyleSheet(f"color: {theme.MUTED};")
             lay.addWidget(ytl)
+        self.titles = None
+        if has_titles(data):                              # day 12: the competitor's two real titles, compact
+            self.titles = TitlesBlock(compact=True)
+            self.titles.from_project(data)
+            self.titles.copied.connect(lambda _t: self.page.toast("Copied ✓"))
+            self.titles.use_headline.connect(lambda t: self.page.use_headline(self.card, t))
+            self.titles.use_title.connect(self._use_title)
+            lay.addWidget(self.titles)
         dates = QLabel(self._dates())
         dates.setFont(W.mono(10.5))
         dates.setWordWrap(True)
@@ -210,8 +229,14 @@ class BoardCard(QFrame):
             rows.append(f"{names.get(key, key)} {when(d)}{extra}")
         return "<br>".join(rows) or "no step done yet"
 
+    def _use_title(self, text: str) -> None:
+        """Day 12: "Use as YouTube title" from the headline on the competitor's video."""
+        from .match_cuts_tool import save_upload_title
+        if text:
+            save_upload_title(self.page.ctx, self.card.folder, text)
+
     def _copy(self) -> None:
-        yt = (getattr(self.card, "upload_title", "") or "").strip()
+        yt =(getattr(self.card, "upload_title", "") or "").strip()
         t = yt or " ".join(x.strip() for x in (self.card.title or "").splitlines() if x.strip())
         QApplication.clipboard().setText(t)
         self.page.toast("YouTube title copied ✓" if yt else "Title copied ✓")
@@ -242,6 +267,7 @@ class BoardCard(QFrame):
                  ("Open in Premiere", premiere, False, bool(edit)),
                  ("Copy title", self._copy, False, bool(c.title or getattr(c, "upload_title", ""))),
                  ("Set the YouTube title…", set_yt),
+                 *(([None] + self.titles.menu_items()) if self.titles is not None else []),
                  None,
                  ("Unpin" if getattr(c, "pinned", False) else "Pin to the top ★", lambda: self.page.pin(c))]
         FadeMenu(self, items).popup(e.globalPos())
@@ -668,6 +694,44 @@ class BoardPage(QWidget):
             board.pin(Path(card.folder), on)
         BG.call(work, lambda _r: (self.toast("Pinned ★" if on else "Unpinned"), self.reload()),
                 lambda e: self.toast(f"Could not pin it: {e}", "fail"))
+
+    def use_headline(self, card, text: str) -> str:
+        """Day 12: "Use as my headline" on a card (the headline read on the competitor's video), the same rules as a
+        queue row (core.flow.headline_action): no edit made yet -> the project's headline is set (template.png made
+        again when it was made before); the edit running (or another computer working on it) -> nothing changes,
+        said; an edit made -> asked first, then Change headline (only template.png again, swapped into the edit)."""
+        from ..core import flow
+        from ..core import projects as PJ
+        text = "\n".join(x.strip() for x in (text or "").splitlines() if x.strip())[:200]
+        if not text:
+            return ""
+        folder = Path(card.folder)
+        what = flow.headline_action(getattr(card, "data", None) or {})
+        if what == flow.USE_RUNNING or getattr(card, "lock", None):
+            self.toast("The edit is running -- use the headline when it has finished", "note")
+            return flow.USE_RUNNING
+        if what == flow.USE_CHANGE:
+            if not card.channel:
+                self.toast("This video has no channel, so it has no template to change", "note")
+                return ""
+            if not self.ask_yes("Use as my headline",
+                                f"Make the template again with this headline and swap it into the finished edit?\n\n"
+                                f"{text}\n\nNo new run -- only template.png changes."):
+                return ""
+            ch = card.channel
+            BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch),
+                    lambda _r: (self.toast("New template made and swapped into the edit ✓"), self.reload()),
+                    lambda e: self.toast(f"The template could not be made: {e}", "fail"))
+            return flow.USE_CHANGE
+        BG.call(lambda: flow.set_headline(folder, text),
+                lambda r: (self.toast("Headline set ✓" + (" -- template made again" if (r or {}).get("template")
+                                                          else "")), self.reload()),
+                lambda e: self.toast(f"The headline could not be saved: {e}", "fail"))
+        return flow.USE_SET
+
+    def ask_yes(self, title: str, text: str) -> bool:
+        """A Yes / No question (a test replaces it)."""
+        return QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
 
     # -- the automatic "Uploaded" check --
     def check_uploads(self, force: bool = False) -> None:

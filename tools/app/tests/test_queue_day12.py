@@ -62,6 +62,7 @@ def seconds(p) -> float:
 class FakeThread:
     """JobThread without the tool: records what it was asked to run; ``finish(label)`` ends it."""
     made: list = []
+    page = None
 
     def __init__(self, job, converted, out_dir):
         from PySide6.QtCore import QObject, Signal
@@ -74,7 +75,9 @@ class FakeThread:
         self.job = job
         self.files = (Path(job.competitor), Path(job.raw))
         self.stopped = False
-        FakeThread.made.append(self)
+        cur = FakeThread.page                                # a page left over from an earlier test (its background
+        if cur is None or any(x is job for x in cur.jobs):  # start check ending late) is not this test's
+            FakeThread.made.append(self)
 
     def start(self) -> None:
         pass
@@ -101,9 +104,11 @@ def page(tmp_path, monkeypatch):
     FakeThread.made = []
     monkeypatch.setattr(M, "JobThread", FakeThread)
     p = M.MatchCutsPage(ctx)
+    FakeThread.page = p
     p.toasts = toasts
     p.resize(900, 1200)
     yield p
+    FakeThread.page = None
     Mo.set_enabled(True)
     p.deleteLater()
     app.processEvents()

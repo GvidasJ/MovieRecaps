@@ -588,3 +588,45 @@ def just_cuts_step(p: P.Project, progress: Progress | None = None, cancel: threa
     if stopped:
         raise StepError("stopped by you")
     return res
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# day 12, section 7: "Use as my headline" on a Match cuts queue row / a board card
+# ---------------------------------------------------------------------------------------------------------------------
+
+USE_SET, USE_RUNNING, USE_CHANGE = "set", "running", "change"
+
+
+def headline_action(data: dict | None) -> str:
+    """What "Use as my headline" does to a project (its project.json dict):
+
+    * ``USE_SET`` -- no edit made yet (none started, or the last one failed / stopped): the project's headline is
+      simply set; the edit's start makes template.png from it anyway (template_for_job), and a template.png made
+      before is made again at once (set_headline);
+    * ``USE_RUNNING`` -- the edit is running now: nothing is changed (the row says to wait for its end);
+    * ``USE_CHANGE`` -- an edit is made: after a question, Change headline (only template.png again, swapped into the
+      edit -- no new run)."""
+    edit = ((data or {}).get("steps") or {}).get("edit") or {}
+    state = edit.get("state") if isinstance(edit, dict) else None
+    if state == P.RUNNING:
+        return USE_RUNNING
+    if state == P.DONE:
+        return USE_CHANGE
+    return USE_SET
+
+
+def set_headline(folder: str | Path, title: str) -> dict:
+    """``USE_SET``: the project's headline = ``title`` (project.json + title.txt, line break kept); when template.png
+    was already made (and the channel is known) it is made again with it. {'title', 'template': bool, 'error'}."""
+    from . import board
+    board.set_title(Path(folder), title)
+    p = P.load(folder)
+    out = {"title": title, "template": False, "error": ""}
+    if p.step("template").get("state") == P.DONE and (title or "").strip() \
+            and find_channel(p.data.get("channel")) is not None:
+        try:
+            template_step(p, None, title)
+            out["template"] = True
+        except StepError as e:
+            out["error"] = str(e)
+    return out
