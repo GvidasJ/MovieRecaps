@@ -299,8 +299,10 @@ def test_your_pick_runs_with_the_input_checks_skipped_and_never_swapped_back(tmp
                      no_swap=j.roles_chosen)
     assert cmd[-2:] == ["--force-inputs", "--no-swap"]
     far = J.Job("y", tmp_path / "short.mp4", tmp_path / "ep.mp4", roles_chosen=True)
-    far.comp_s, far.raw_s = 58.0, 1361.0                    # a clear pair you swapped: its checks stay on
-    assert not J.forced(far)
+    far.comp_s, far.raw_s = 58.0, 1361.0
+    far.swap()                                              # a clear pair you swapped the wrong way round:
+    assert not J.forced(far) and "longer than the RAW" in far.problems()[0]   # its checks stay on, and it is said
+    assert not [x for x in j.problems() if "longer" in x]   # (your pick of two about as long: nothing to say)
 
 
 def _video(path: Path, seconds_: float, size: str) -> Path:

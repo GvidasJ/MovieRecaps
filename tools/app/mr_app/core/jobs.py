@@ -75,11 +75,11 @@ class Job:
 
     def problems(self) -> list[str]:
         """What looks wrong before the start (plain words): no RAW, the competitor longer than the RAW (not said
-        once you chose which one is the RAW)."""
+        once you chose the RAW of two videos about as long)."""
         out = []
         if self.competitor is None or self.raw is None:
             out.append("only one video: drop its RAW (or its competitor) too")
-        elif self.roles_chosen:
+        elif self.roles_chosen and about_as_long(self.comp_s, self.raw_s):
             pass
         elif self.comp_s is not None and self.raw_s is not None and self.comp_s > self.raw_s + 0.5:
             out.append(f"the competitor ({clock(self.comp_s)}) is longer than the RAW ({clock(self.raw_s)}) -- "
