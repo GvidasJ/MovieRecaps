@@ -69,7 +69,7 @@ def page(tmp_path, monkeypatch):
     for s in ("download", "convert", "template", "cuts"):
         monkeypatch.setattr(D.StageThread, f"_{s}", stage(s))
     monkeypatch.setattr(D.StageThread, "start", lambda self: self.run())       # at once, in this thread
-    monkeypatch.setattr(D, "off_thread", lambda fn, done, failed=None: done(fn()))     # (background.call) at once
+    monkeypatch.setattr(D, "off_thread", lambda fn, done, failed=None: (done or (lambda _r: None))(fn()))  # at once
     monkeypatch.setattr(flow, "edit_job", lambda p, fast, speed: J.Job("x", Path("c.mp4"), Path("r.mp4")))
     queue = FakeQueue()
     toasts: list = []

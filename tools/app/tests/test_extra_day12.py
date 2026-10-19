@@ -380,9 +380,44 @@ def test_send_to_match_cuts_failure_is_red_in_plain_words_and_a_removed_row_is_n
     assert it.state == D.FAILED and page.queue_page.jobs == []
     assert page.now_text(it) == ("Stopped at edit: could not make the edit's job: the competitor and the RAW are not "
                                  "both in the folder (download and convert first)")
-    it2, _p2 = _ready_item(page, tmp_path / "b")
+    it2, _p2 = _ready_item(page, tmp_path / "b")  # (a second video: removed before its write finished)
     page.send_to_edit(it2)
     page.remove_item(it2)                                                  # removed before the write finished
     fn, done = pending.pop()
     done(fn())
     assert page.queue_page.jobs == []
+
+
+def test_the_count_line_follows_every_state_change(page):
+    """Found in the real window: the line said "1 running" after every video had finished or was waiting."""
+    from mr_app.tools import download_tool as D
+    page.raw.setText("https://youtu.be/AbCdEf12345")
+    it = page.add()                                                        # Automatic OFF: downloaded, waits
+    assert it.state == D.GATED and page.count.text() == "1 video(s)  ·  1 waiting for you"
+    page.rows[it.id].b_go.click()                                          # Convert
+    page.rows[it.id].b_go.click()                                          # Make the cuts
+    assert it.state == D.DONE and page.count.text() == "1 video(s)"
+
+
+def test_add_a_competitor_writes_the_project_in_the_background_and_a_failure_is_plain(page, tmp_path, monkeypatch):
+    from mr_app.core import projects as P
+    from mr_app.tools import download_tool as D
+    pending = []
+    monkeypatch.setattr(D, "off_thread", lambda fn, done, failed=None: pending.append((fn, done)))
+    it, p = _ready_item(page, tmp_path)
+    it.kind, it.state, it.competitor_url = NV.JUST_CUTS, D.DONE, ""
+    assert page.add_competitor(it, COMP) is True
+    assert it.kind == NV.JUST_CUTS and P.load(p.folder).data.get("kind") != NV.FULL    # not yet: in the background
+    fn, done = pending.pop()
+    done(fn())
+    assert it.kind == NV.FULL and it.roles == ("competitor",) and P.load(p.folder).data["kind"] == NV.FULL
+    assert page.toasts[-1][0] == "Competitor added -- the RAW is not downloaded again"
+    it2, p2 = _ready_item(page, tmp_path / "b")
+    it2.kind, it2.state = NV.JUST_CUTS, D.DONE
+    import shutil
+    shutil.rmtree(p2.folder)                                               # the project folder is gone meanwhile
+    page.add_competitor(it2, COMP)
+    fn, done = pending.pop()
+    done(fn())
+    assert it2.kind == NV.JUST_CUTS and page.toasts[-1][1] == "fail"
+    assert page.toasts[-1][0].startswith("The project could not be changed: ") and "Error" not in page.toasts[-1][0]

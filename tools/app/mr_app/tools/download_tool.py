@@ -1753,32 +1753,48 @@ class DownloadPage(QWidget):
             it.competitor_url = link
             from ..core.projects import link_id
             upd = {"url": link, "id": link_id(link)}
-        try:
-            from ..core import projects as PJ
-            pj = PJ.load(it.project)
-            pj.update(competitor=upd, kind=NV.FULL)
-        except Exception as e:  # noqa: BLE001
-            self.toast(f"The project could not be changed: {NV.plain_error(e)}", "fail")
-            return False
-        it.kind = NV.FULL
-        it.result = {}
-        it.default_template = False
-        it.post_title = it.video_headline = None
-        it.roles = ("competitor",)
-        it.steps = {k2: Step() for k2, _ in it.step_list()}
-        self.rows[it.id].refresh()
-        self.queue(it, ("download",))
-        self.toast("Competitor added -- the RAW is not downloaded again")
+        folder = it.project
+
+        def work() -> str:                                # project.json written off the window's thread
+            try:
+                from ..core import projects as PJ
+                PJ.load(folder).update(competitor=upd, kind=NV.FULL)
+                return ""
+            except Exception as e:  # noqa: BLE001
+                return NV.plain_error(e)
+
+        def done(err: str) -> None:
+            if err:
+                self.toast(f"The project could not be changed: {err}", "fail")
+                return
+            if it not in self.items or it.kind == NV.FULL:
+                return
+            it.kind = NV.FULL
+            it.result = {}
+            it.default_template = False
+            it.post_title = it.video_headline = None
+            it.roles = ("competitor",)
+            it.steps = {k2: Step() for k2, _ in it.step_list()}
+            self.rows[it.id].refresh()
+            self.queue(it, ("download",))
+            self.toast("Competitor added -- the RAW is not downloaded again")
+
+        off_thread(work, done, lambda e: self.toast(f"The project could not be changed: {NV.plain_error(e)}",
+                                                    "fail"))
         return True
 
     def set_upload_title(self, it: Item, text: str) -> None:
         it.upload_title = " ".join((text or "").split())
         if it.project is not None:
-            try:
-                from ..core import board
-                board.set_upload_title(it.project, it.upload_title)
-            except Exception:  # noqa: BLE001
-                pass
+            folder, text = it.project, it.upload_title
+
+            def work() -> None:                           # project.json + title.txt: off the window's thread
+                try:
+                    from ..core import board
+                    board.set_upload_title(folder, text)
+                except Exception:  # noqa: BLE001
+                    pass
+            off_thread(work, None)
         if it.job is not None:
             it.job.upload_title = it.upload_title
         self.toast("YouTube title set ✓")
@@ -2054,6 +2070,7 @@ class DownloadPage(QWidget):
         (the list's ``inserted``, as in the queue; ``scroll_top`` does it anyway)."""
         ordered = NV.order(self.items, added=lambda i: i.order_time())
         self.list.set_rows([self.rows[i.id] for i in ordered if i.id in self.rows])
+        self._counts()                                    # "N video(s) · N running · N waiting for you" kept true
         if scroll_top:
             scroll_to_top(self)
 

@@ -557,12 +557,15 @@ class JobRow(QFrame):
             j.channel, j.title = d.ed.channel(), d.ed.title()
             j.headline = d.ed.headline() if d.ed.headline() is not None else j.headline
             if j.project is not None:
-                try:
+                from ..ui import background as BG
+                folder, channel, title = j.project, j.channel, j.title
+
+                def work() -> None:                       # project.json + title.txt: off the window's thread
                     from ..core import projects as PJ
-                    PJ.load(j.project).update(channel=j.channel or None, title=j.title or None)
-                    self.page.title_saved(j)
-                except Exception:  # noqa: BLE001
-                    pass
+                    PJ.load(folder).update(channel=channel or None, title=title or None)
+                    from ..core import board
+                    board.set_title(folder, title)                 # (was page.title_saved, on the window thread)
+                BG.call(work, None, lambda _e: None)
             self.refresh()
 
     def _edit_upload_title(self) -> None:
