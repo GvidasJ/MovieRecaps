@@ -211,3 +211,17 @@ def test_the_match_cuts_row_shows_and_edits_the_template(qapp, tmp_path):
     j.state = J.RUNNING
     row.refresh()
     assert not row.tpl.isEnabled()
+
+
+def test_the_command_line_project_step_reads_the_lengths_of_a_chosen_pair(tmp_path):
+    """Day 12 review 3: steps.py edit on a New video project (RAW chosen in the form, 30 s / 28 s) passes the same
+    narrow option as the queue -- it read no lengths before, so the pair stopped as 'almost as long as the RAW'."""
+    from mr_app.core import flow, jobs as JB
+    p = P.create(tmp_path, competitor_url="https://youtu.be/abcdefghijk", raw_url="https://youtu.be/ABCDEFGHIJK")
+    _video(p.folder / "short.mp4", 2.8)
+    _video(p.folder / "episode.mp4", 3.0)
+    p.update(competitor={"file": "short.mp4"}, raw={"file": "episode.mp4"})
+    flow.set_roles(p.folder, "episode.mp4", "form")
+    job = flow.fill_lengths(flow.edit_job(P.load(p.folder)))
+    assert job.comp_s and job.raw_s and abs(job.raw_s - 3.0) < 0.2
+    assert JB.short_raw(job) and not JB.forced(job)

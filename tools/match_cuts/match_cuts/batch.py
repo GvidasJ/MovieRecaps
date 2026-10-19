@@ -273,9 +273,9 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
                 break
             continue
         if not ln.strip() or ln.startswith("Run folder") or _LOG_LINE.match(ln):
-            if block:
-                break
-            continue
+            if block or (fatal and _LOG_LINE.match(ln)):
+                break                            # a crash: only a message printed right before it (no log line
+            continue                             # between them) is the reason, not an older line (review 3)
         block.insert(0, ln)
     block = [b.strip() for b in block]
     crash = crash_words(code)
@@ -556,7 +556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     fast = not a.thorough
     force = "--force-inputs" in extra
-    wrong = {} if force else input_problems(videos)
+    wrong = {} if force else input_problems(videos, [n for n, _, _ in videos] if "--allow-short-raw" in extra else ())
     if wrong:
         print("match_cuts batch: THESE VIDEOS WILL NOT RUN -- the inputs look wrong (fix them and start the batch "
               "again; the others run now):", file=sys.stderr, flush=True)

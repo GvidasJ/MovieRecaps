@@ -321,12 +321,26 @@ def edit_job(p: P.Project, fast: bool = True, speed: float = 100.0):
     return j
 
 
+def fill_lengths(job):
+    """The job's two lengths when you chose its RAW: they decide --force-inputs / --allow-short-raw (jobs.forced /
+    short_raw), as the queue's own thread reads them -- the command line's project step did not (day 12 review 3)."""
+    if job.roles_chosen and (job.comp_s is None or job.raw_s is None):
+        from match_cuts.cli import quick_probe
+        for attr, path in (("comp_s", job.competitor), ("raw_s", job.raw)):
+            if getattr(job, attr) is None:
+                try:
+                    setattr(job, attr, float(quick_probe(Path(path))["duration"]))
+                except Exception:  # noqa: BLE001 - unknown: as before (the tool's own checks decide)
+                    pass
+    return job
+
+
 def edit_step(p: P.Project, fast: bool = True, speed: float = 100.0,
               poll: Callable[[Any], None] | None = None) -> dict:
     """match cuts on the project (the batch's command) with its template and the channel's watermark; waits for it.
     Its result (PASS / OK with a note / FAIL ...) and run folder go into project.json."""
     from .run import JobRun
-    job = edit_job(p, fast, speed)
+    job = fill_lengths(edit_job(p, fast, speed))
     frame, watermark = template_for_job(job)
     run = JobRun(job, frame=frame, watermark=watermark)
     p.set_step("edit", P.RUNNING, run_dir=str(run.run_dir), mode=job.mode, speed=job.speed)

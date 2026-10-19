@@ -219,3 +219,23 @@ def test_allow_short_raw_skips_only_the_almost_as_long_check(tmp_path):
     args = cli.build_parser().parse_args(["--competitor", str(c), "--raw", str(r), "--allow-short-raw"])
     assert args.allow_short_raw and not args.force_inputs
     assert not cli.config_from_args(args).force_inputs
+
+
+def test_a_crash_after_an_unrelated_line_names_the_crash_not_that_line():
+    """Day 12 review 3: a progress bar or an old warning printed long before an abort is not the reason."""
+    err = ("12:00:00 INFO match_cuts == S2 probe\n"
+           "Loading checkpoint shards: 100%|##########| 2/2\n"
+           "12:00:05 INFO match_cuts == S3 proxies\n"
+           "12:09:00 INFO match_cuts == S8 captions\n"
+           "Fatal Python error: Aborted\n\nThread 0x0001 (most recent call first):\n  File \"x.py\", line 1 in f\n")
+    msg = batch.stop_message(err, code=3)
+    assert "Loading checkpoint" not in msg and msg.startswith("Fatal Python error")
+    wp = ("12:00:00 INFO match_cuts pair check: ...\nmatch_cuts: WRONG PAIR: This competitor doesn't seem to come "
+          "from this RAW\nFatal Python error: Aborted\n\nThread 0x0001 (most recent call first):\n")
+    assert batch.stop_message(wp, code=3).startswith("WRONG PAIR")
+
+
+def test_the_batch_passes_allow_short_raw_to_its_check_before_the_start():
+    """Day 12 review 3: `batch FOLDER -- --allow-short-raw` must not skip a 28 s / 30 s pair before the start."""
+    import inspect
+    assert '"--allow-short-raw" in extra' in inspect.getsource(batch.main)
