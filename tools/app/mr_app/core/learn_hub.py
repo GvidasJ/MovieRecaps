@@ -6,7 +6,9 @@ PC and the laptop read and write the same three files:
 * ``requests.md`` -- my wishes for future nights, one dated checkbox bullet each, newest last (the Wishes box):
   ``add_wish`` / ``read_wishes``; a new file starts with night 11's two "Later" items;
 * ``learn_queue.md`` -- the projects waiting to be learned, one checkbox line each: its name, my fixed project, the
-  tool's run, the RAW, the competitor, the date and the computer -- ``queue_add`` / ``queue_items`` / ``queue_done``.
+  tool's run, the RAW, the competitor, the date and the computer -- ``queue_add`` / ``queue_items`` / ``queue_done``;
+* day 12: ``problems_queue.md`` (problems.py), ``learn_waiting.json`` (waiting.py) and ``suggestions.md``
+  (suggestions.py) are in the same folder, written with the helpers here.
 
 ``tonight_prompt`` builds a ready-to-paste Claude Code prompt for the next night from them, in the style of
 docs\\night11_prompt.md.
@@ -634,6 +636,14 @@ def _tonight_prompt(folder: Path, repo: Path, hours: int) -> str:
         out += [""] + [f"- {r}" for r in LEARN_RULES] + [
             f"- When a project is learned, tick it in `learn_queue.md` (`- [x]`).", ""]
         k += 1
+    try:                                   # day 12: the open problems of problems_queue.md
+        from . import problems as PR
+        probs = PR.prompt_section(folder, k)
+    except Exception:  # noqa: BLE001 - the prompt is still built without them
+        probs = []
+    if probs:
+        out += probs
+        k += 1
     if wishes:
         out += [f"## {k}. My wishes (from requests.md)", "",
                 "Do these after the learning, in this order. If one is too big for one night, do a careful first part "
@@ -651,6 +661,7 @@ def _tonight_prompt(folder: Path, repo: Path, hours: int) -> str:
               "   - what's done\n"
               "   - what's not done and why\n" +
               ("   - before → after numbers for every project you learned from\n" if items else "") +
+              ("   - each problem from problems_queue.md: what you found, and fixed or not\n" if probs else "") +
               "   - anything I must check by hand\n"
               "   - **laptop steps** (exact commands)",
               "Commit and push.",
