@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -203,6 +204,20 @@ def template_line(j: J.Job) -> str:
     return t
 
 
+def short_file_name(name: str, limit: int = 48) -> str:
+    """A long downloaded file name ("Before Tobey Maguire Was Spider-Man He Had One Job 🕷️📺 [f18B0Accoig].mp4")
+    shortened in the middle so the row's pick buttons and pair line show its start AND its end (the link id and the
+    type); the full path is in the tooltip. Day 12 e2e run: the pick button showed "fore Tobey ... is the RA"."""
+    if len(name) <= limit:
+        return name
+    tail = name[-min(len(name) // 2, max(14, limit // 3)):]
+    m = re.search(r"\s*\[[^\]]{4,20}\]\.\w{2,4}$", name)       # " [id].mp4" kept whole
+    if m and len(m.group(0)) < limit - 12:
+        tail = m.group(0).lstrip()
+    head = name[:max(8, limit - len(tail) - 1)].rstrip(" -_.,")
+    return f"{head}…{tail}"
+
+
 def pair_text(j: J.Job) -> str:
     """Day 12: which file is which, plain: 'RAW: episode.mp4 (22:41) · COMP: short.mp4 (0:58)' ('…' while a length
     is being read, '?' when it cannot be read)."""
@@ -217,7 +232,7 @@ def pair_html(j: J.Job) -> str:
     """pair_text in the mock-up's colours (.pair): RAW in coral, COMP in the info blue, the names bright, the lengths
     dim."""
     def part(word: str, colour: str, f: Path | None, s: float | None) -> str:
-        n = esc(Path(f).name) if f is not None else "—"
+        n = esc(short_file_name(Path(f).name)) if f is not None else "—"
         ln = "…" if s is None and getattr(j, "reading_lengths", False) else J.clock(s)
         return (f"<span style='color:{colour};font-weight:600;letter-spacing:1px'>{word}</span>&nbsp;"
                 f"<span style='color:{theme.TEXT}'>{n}</span>&nbsp;<span style='color:{theme.DIM}'>({ln})</span>")
@@ -669,7 +684,7 @@ class JobRow(QFrame):
             self._pick_files = sorted([Path(j.raw), Path(j.competitor)], key=lambda f: f.name.lower())
             for b, f in zip((self.pick_a, self.pick_b), self._pick_files):
                 s = j.raw_s if f == Path(j.raw) else j.comp_s
-                b.setText(f"{f.name} ({J.clock(s)}) is the RAW")
+                b.setText(f"{short_file_name(f.name)} ({J.clock(s)}) is the RAW")
                 b.setToolTip(str(f))
         busy = j.state in (J.RUNNING, J.DONE, J.STOPPED)
         self.mode.set(j.mode)

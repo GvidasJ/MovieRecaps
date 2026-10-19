@@ -558,3 +558,14 @@ def test_history_is_newest_first(tmp_path):
     evs = H.events([PJ.load(p.folder).data])
     ats = [e.at for e in evs]
     assert ats == sorted(ats, reverse=True) and len(ats) >= 3
+
+
+def test_long_downloaded_names_are_shortened_in_the_middle_on_the_pick_buttons_and_the_pair_line():
+    # the e2e run (day 12): yt-dlp's names are long -- the pick button showed "fore Tobey Maguire ... is the RA"
+    from mr_app.tools.match_cuts_tool import short_file_name
+    n = "Before Tobey Maguire Was Spider-Man He Had One Job 🕷️📺 [f18B0Accoig].mp4"
+    s = short_file_name(n)
+    assert s.startswith("Before Tobey") and s.endswith("[f18B0Accoig].mp4") and "…" in s and len(s) <= 48
+    assert short_file_name("raw.mp4") == "raw.mp4" and short_file_name("clip a.mp4") == "clip a.mp4"
+    long_plain = "x" * 90 + ".mkv"
+    assert short_file_name(long_plain).endswith(".mkv") and len(short_file_name(long_plain)) <= 48
