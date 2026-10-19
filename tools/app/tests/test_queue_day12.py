@@ -242,6 +242,30 @@ def test_swap_during_a_run_waits_for_the_old_runs_thread_to_end_before_starting_
     assert job.state == J.DONE
 
 
+def test_the_queue_is_not_done_while_a_swapped_video_waits_to_start_again(page, tmp_path, monkeypatch):
+    """Day 12 review 2: while the swap waits for the old run's thread, nothing else is runnable -- a _next() then
+    (a video added, Start) must not say "the queue is done" and leave the swapped video READY for ever."""
+    monkeypatch.setattr(J, "project_for_job", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(M.MatchCutsPage, "RESTART_POLL_MS", 10)
+    job, p = project_job(tmp_path, "comp.mp4", "raw.mp4")
+    job.comp_s, job.raw_s = 45.0, 47.0
+    page._added_jobs(J.DropResult([job], None, []))         # noqa: SLF001
+    page.start(confirm=False)
+    assert pump_until(lambda: len(FakeThread.made) == 1)
+    first = FakeThread.made[0]
+    ended = {"yes": False}
+    first.isFinished = lambda: ended["yes"]                  # noqa: N815
+    page.swap_job(job)
+    assert page.current is None and page.swap_waiting()
+    page._next()                                             # noqa: SLF001 - nothing else runnable
+    assert page.running and page.busy()                     # not "the queue is done"
+    ended["yes"] = True
+    assert pump_until(lambda: len(FakeThread.made) == 2)    # the swapped video starts again
+    assert job.state == J.RUNNING and not page.swap_waiting()
+    FakeThread.made[1].finish("PASS")
+    assert job.state == J.DONE and not page.running
+
+
 def test_the_right_click_menu_has_swap(page, tmp_path, monkeypatch):
     from PySide6.QtCore import QPoint
     from PySide6.QtGui import QContextMenuEvent

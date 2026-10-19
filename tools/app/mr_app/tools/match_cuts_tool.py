@@ -1616,6 +1616,9 @@ class MatchCutsPage(QWidget):
                                                           getattr(j, "reading_lengths", False)) for j in self.jobs):
                 self.update_counts()                  # a video's files are still being put into its project
                 return
+            if self.swap_waiting():
+                self.update_counts()                  # a swapped video waits for its old run to end: not done yet
+                return
             self._finished()
             return
         if nxt.id not in self._run_jobs:
@@ -1749,8 +1752,12 @@ class MatchCutsPage(QWidget):
         self.say("stopped -- the videos not run yet stay in the queue")
         self.update_counts()
 
+    def swap_waiting(self) -> bool:
+        """A video swapped while it ran waits for its old run's thread to end before it starts again."""
+        return any(getattr(j, "restart_swapped", False) for j in self.jobs)
+
     def busy(self) -> bool:
-        return self.running and self.current is not None
+        return self.running and (self.current is not None or self.swap_waiting())
 
 
 class MatchCutsTool(Tool):
