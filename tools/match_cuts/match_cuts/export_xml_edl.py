@@ -5185,16 +5185,36 @@ def premiere_sync_problems(xml_path: str | os.PathLike, moving: bool = False) ->
     return out, exceptions
 
 
-def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None) -> list[str]:
+def _plan_frame_cuts(ripple: Any) -> list[tuple[int, int]]:
+    """The ranges a ripple (silence.Ripple: the silences and repeats, after the speech-safe stage) removes, in the
+    plan's own frames -- only when every stage before it leaves the frames where they are (no cut, no insert: then its
+    frames ARE the plan's); else [] (ending_problems then checks as before)."""
+    stages = ripple.stages() if ripple is not None else []
+    if not stages or any(st.cuts or st.inserts for st in stages[:-1]):
+        return []
+    return [(int(c.a), int(c.b)) for c in stages[-1].cuts]
+
+
+def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None,
+                    removed: Sequence[tuple[int, int]] = ()) -> list[str]:
     """The default (no --remove-silence): the edit ends where the competitor's does -- the last V1 clip of the parsed
     XML ``x`` ends at the sequence's end and plays up to the competitor's last RAW moment, within a RAW frame: the RAW
     the plan plays at its frame ``end`` (pipeline.competitor_ending: where a closing meme / outro not from the RAW was
     cut off), else where the plan's last clip ends. Nothing after the last word is cut (output\\005: the reaction
-    after it is the point of a meme)."""
+    after it is the point of a meme). ``removed``: the ranges (plan frames) the export cut out with the repeats --
+    day 13: a tail cut out as a stutter (Family Guy 1999-present: the competitor's last 0.3 s replay RAW 619.35-619.65 s,
+    played a moment before) is not the competitor's ending any more: the frame before it is."""
     clips = [c for c in x["clips"] if int(c["end"]) >= 0]
     if not plan_clips or not clips:
         return []
     fps = _seq_rate(x)
+    total = max(c.rec_end for c in plan_clips)
+    stop_at = min(int(end), total) if end is not None else total
+    for a, b in sorted(((int(a), int(b)) for a, b in removed), key=lambda r: -r[1]):
+        if a < stop_at <= b:                    # a removed range reaching the end so far: the ending is before it
+            stop_at = a
+    if stop_at < total:
+        end = stop_at
     last_plan = max(plan_clips, key=lambda c: c.rec_end)
     if end is not None:
         last_plan = next((c for c in plan_clips if c.rec_start < int(end) <= c.rec_end), last_plan)
@@ -5813,8 +5833,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     want_n = silence.new_frames if cut else out["total_frames"] * fac
     if x["duration"] != want_n:
         errors.append(f"XML: sequence duration {x['duration']} (want {want_n})")
-    out["ending_problems"] = (ending_problems(plan_clips, x, getattr(cfg, "premiere_ending", None))   # the
-                              if not moving else None)                          # competitor's last RAW moment
+    out["ending_problems"] = (ending_problems(plan_clips, x, getattr(cfg, "premiere_ending", None),   # the
+                                              _plan_frame_cuts(silence) if cut else ())   # competitor's last RAW
+                              if not moving else None)                                    # moment
     errors += [f"XML ENDING {t}" for t in out["ending_problems"] or []]
     for cl in plan_clips:              # the competitor's cuts, before the silences go and a cut moves onto a RAW cut
         evs = cl.events or [cl.ev]

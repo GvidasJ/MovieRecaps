@@ -334,7 +334,9 @@ def test_check_all_runs_new_style_cases_thorough_and_old_ones_fast_with_the_hard
                                                            "video7-fixed", "video8-fixed", "video9-fixed",   # night 8
                                                            "video10-fixed",                                  # night 9
                                                            "video11-fixed", "video12-fixed", "chocolate-fixed",  # 11
-                                                           "video14-fixed", "video15-fixed"}  # day 12
+                                                           "video14-fixed", "video15-fixed",  # day 12
+                                                           "video16-fixed", "video17-fixed", "video18-fixed",
+                                                           "video19-fixed", "video20-fixed"}  # day 13
     card = check_all.scorecard([{"case": "video1", "seconds": 60.0, "deliverables": {"status": "pass"},
                                  "determinism": {"status": "pass"}, "coverage": {"status": "pass"},
                                  "scored": False, "mode": "fast"}])
