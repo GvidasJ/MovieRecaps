@@ -235,7 +235,7 @@ def test_the_window_renames_after_a_title_change_and_retries_what_waited(qapp, t
     lock.acquire()
     try:
         MW.MainWindow.title_changed(win, p.folder)                       # an edit runs in it: it waits
-        assert toasts[-1][1] == "note" and "waits" in toasts[-1][0] and seen == [] and RN.pending()
+        assert toasts[-1][1] == "note" and "Renamed later" in toasts[-1][0] and seen == [] and RN.pending()
     finally:
         lock.release()
     MW.MainWindow.retry_renames(win)                                      # the minute's retry renames it
@@ -262,7 +262,7 @@ def test_a_new_video_rows_folder_follows_the_headline_after_its_template(tmp_pat
     out: dict = {}
     th._template(out)                                                     # noqa: SLF001 - the stage as it runs
     want = p.folder.with_name(f"{NM.day_of(p.folder.name)}_When it finally works 💀")
-    assert it.project == want and want.is_dir() and named == [str(want)] and "renamed" in out.get("rename", "")
+    assert it.project == want and want.is_dir() and named == [str(want)] and "renamed" in out.get("rename", "").lower()
 
 
 def test_the_window_tells_every_page_what_moved(qapp):

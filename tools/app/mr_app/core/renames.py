@@ -477,7 +477,7 @@ def rename(folder: str | os.PathLike, *, hub: str | os.PathLike | None = None,
         try:
             return _rename(Path(folder), *_roots(hub, local_root), explicit, scan, busy)
         except Exception as e:  # noqa: BLE001 - said, never a crash
-            return Result(WAIT, Path(folder), f"it could not be renamed now ({type(e).__name__}: {e}) -- tried again "
+            return Result(WAIT, Path(folder), f"It could not be renamed now ({type(e).__name__}: {e}) -- tried again "
                                               "later")
 
 
@@ -485,13 +485,13 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
             busy: bool = True) -> Result:
     data = _read(folder)
     if data is None:
-        return Result(GONE, folder, "the project folder is not there any more")
+        return Result(GONE, folder, "The project folder is not there any more")
     if not explicit and not NM.uses_titles(data):
-        return Result(OLD, folder, "a project from before: it keeps its name (Rename to title on its card renames it)")
+        return Result(OLD, folder, "A project from before: it keeps its name (Rename to title on its card renames it)")
     d = titles(folder, data)
     t, src = NM.title_of(d)
     if not t:
-        return Result(NO_TITLE, folder, "it has no title yet, so it keeps its name")
+        return Result(NO_TITLE, folder, "It has no title yet, so it keeps its name")
     base = NM.folder_base(t, NM.day_of(folder.name) or None, NM.root_len(folder.parent))
     mark = {**(data.get(NM.KEY) if isinstance(data.get(NM.KEY), dict) else NM.marker(src)), "rule": NM.RULE,
             "from": src}
@@ -508,9 +508,9 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
         if not used:                                  # (nothing is touched while something uses it)
             _share_titles(cps, folder, same)
             files = [f for c, _dd, _sh in cps for r in run_dirs(c) for f in sync_run_files(r, _read(c))]
-        return Result(SAME, folder, f"it is named after {NM.SOURCE_WORDS.get(src, 'its title')} already", files=files)
+        return Result(SAME, folder, f"It is named after {NM.SOURCE_WORDS.get(src, 'its title')} already", files=files)
     if used:
-        return Result(WAIT, folder, f"waits: {used} -- it is renamed when that is done")
+        return Result(WAIT, folder, f"Renamed later, when it is free: {used}")
     for c, dd, _sh in cps:
         if not (_has_runs(c) or dd.get("published") or dd.get("premiere")):
             continue                                  # no edit yet: no Premiere project can use it
@@ -531,7 +531,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
             if NM.uses_titles(_read(folder) or {}):
                 _share_titles(cps, folder, same)
                 files = [f for c2, _d2, _s2 in cps for r in run_dirs(c2) for f in sync_run_files(r, _read(c2))]
-            return Result(KEPT, folder, f"it keeps its name: {why}", files=files)
+            return Result(KEPT, folder, f"It keeps its name: {why}", files=files)
     moved: list[tuple[Path, Path]] = []
     shared_pair: tuple[Path, Path] | None = None
     problem = ""
@@ -557,7 +557,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
         if sh:
             shared_pair = (c, new)
     if problem and not moved:                         # nothing moved: nothing is touched, tried again later
-        return Result(WAIT, folder, f"waits: {problem} -- it is renamed when that is done")
+        return Result(WAIT, folder, f"Renamed later, when it is free: {problem}")
     files = []
     for c, _dd, sh in cps:
         now_at = next((n for o, n in moved if _norm(o) == _norm(c)), c)
@@ -573,8 +573,8 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
         _fix_outside(moved, hub, local_root)
     here = next((n for o, n in moved if _norm(o) == _norm(folder)), folder)
     if problem:
-        return Result(WAIT, here, f"waits: {problem} -- it is renamed when that is done", moved, files)
-    return Result(RENAMED, here, f"renamed to {here.name}", moved, files)
+        return Result(WAIT, here, f"Renamed later, when it is free: {problem}", moved, files)
+    return Result(RENAMED, here, f"Renamed to {here.name}", moved, files)
 
 
 def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[Path, Path] | None, mark: dict,
