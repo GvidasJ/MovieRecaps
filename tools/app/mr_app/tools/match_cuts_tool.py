@@ -268,15 +268,15 @@ def template_problems(j: J.Job) -> list[str]:
 def open_in_premiere(xml: Path) -> str:
     """Open a run's 1_edit.xml in Premiere -- first pointed at its media as THIS computer sees them (a project made on
     the other computer, opened from the shared folder: D:\\Shared on the PC, \\\\192.168.101.11\\Shared on the laptop)."""
+    try:                                     # day 13 (first): from now on a project saved anywhere may play its files:
+        from ..core import renames           # the folder keeps its name after a title change (core.renames)
+        renames.note_premiere(Path(xml))
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from ..core import publish
         publish.relink_edit(Path(xml).parent)
     except Exception:  # noqa: BLE001 - an older checkout without it: the XML as it is
-        pass
-    try:                                     # day 13: from now on a project saved anywhere may play its files: the
-        from ..core import renames           # folder keeps its name after a title change (core.renames)
-        renames.note_premiere(Path(xml))
-    except Exception:  # noqa: BLE001
         pass
     return premiere.open_xml(Path(xml))
 
