@@ -496,7 +496,16 @@ def test_an_edit_sent_from_new_video_finishing_in_the_queue_gets_its_waiting_car
         (run / "extras").mkdir(parents=True)
         th.done.emit(th.job.id, {"label": "PASS", "run_dir": str(run), "seconds": 3.0})
         assert pump_until(lambda: (hub / waiting.FILE).is_file())
-        items = json.loads((hub / waiting.FILE).read_text(encoding="utf-8"))["items"]
+        got: dict = {}
+
+        def readable() -> bool:            # day 13: the app's background write may still be replacing the file
+            try:                           # (Windows locks it for that moment: PermissionError on a busy PC)
+                got["items"] = json.loads((hub / waiting.FILE).read_text(encoding="utf-8"))["items"]
+                return True
+            except (OSError, ValueError, KeyError):
+                return False
+        assert pump_until(readable)
+        items = got["items"]
         assert len(items) == 1 and items[0]["channel"] == "LouLaughs" and items[0]["state"] == "waiting"
         dl._poll()                                                             # noqa: SLF001 - the row follows
         assert it.state == D.DONE
