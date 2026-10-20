@@ -642,9 +642,11 @@ def _share_titles(cps: list[tuple[Path, dict, bool]], folder: Path, same: dict) 
 
 
 def _replace_paths(text: str, pairs: Iterable[tuple[str, str]]) -> str:
+    """Every path inside an old folder (the folder itself at a line's end, or followed by \\ or /) -> the new folder.
+    Never a longer name that starts like it: 'The Truth (2)' or 'The Truth About' (names have spaces now)."""
     for old, new in pairs:
         if old and old in text:
-            text = re.sub(re.escape(old) + r"(?=[\\/\s)\],;]|$)", lambda _m, n=new: n, text, flags=re.M)
+            text = re.sub(re.escape(old) + r"(?=[\\/\r`\"']|$)", lambda _m, n=new: n, text, flags=re.M)
     return text
 
 

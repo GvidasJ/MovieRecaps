@@ -12,8 +12,9 @@ stays exactly as the tool wrote it (every check, check-all and Learn find runs t
   characters, emoji kept, spaces tidied, no space or dot at the end, never a device name (CON, NUL, COM1 ...), at
   most 100 characters, cut at a word and never inside an emoji.
 * Short enough for Windows' 260-character paths (``fit``): the deepest file the tool writes in a run folder and
-  ``<root>\\<date>_<title> (99)\\edit-99\\<title>_edit.xml`` must stay under ``PATH_LIMIT`` -- so a title longer than
-  about 75 characters is cut (at a word) for the folder and the files; the sequence keeps up to 100 characters.
+  ``<root>\\<date>_<title> (99)\\edit-99\\.<title>_edit.xml.<pid>.<tid>.tmp`` (the temp file the copy is written
+  through) must stay under ``PATH_LIMIT`` -- so with the usual projects folder a title longer than about 65
+  characters is cut (at a word) for the folder and the files; the sequence keeps up to 100 characters.
 * A folder name that is taken gets (2), (3) ... (``unique_folder``).
 * project.json "names": {"rule": "title", "from": "youtube" | "headline" | "post" | "video" | "", "at": time} marks a
   project whose names follow its title. Projects made before (no "names") keep their names -- and their old
@@ -39,7 +40,9 @@ ROOT_LEN = 60                       # a projects folder's length at least (the P
 #                                     make the same names
 SUFFIX_ROOM = len(" (99)")          # a taken name's (2), (3) ...
 RUN_TAIL = len("\\edit-99\\extras\\debug\\verify_failures\\k00544.png")   # the deepest file of a run folder (day 13)
-COPY_TAIL = len("\\edit-99\\") + len("_edit.xml")                        # <run>\<stem>_edit.xml
+TEMP_ROOM = len(".") + len(".123456.1234567890.tmp")                     # the temp file an XML is written through
+#                                                                          (publish._write_bytes: .<name>.<pid>.<tid>.tmp)
+COPY_TAIL = len("\\edit-99\\") + len("_edit.xml") + TEMP_ROOM             # <run>\.<stem>_edit.xml.<pid>.<tid>.tmp
 COPY_SUFFIX = "_edit.xml"
 PROJECT_SUFFIX = ".prproj"
 SOURCES = (("upload_title", "youtube"), ("title", "headline"), ("post_title", "post"), ("video_headline", "video"))
@@ -60,7 +63,11 @@ _DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})_")
 
 def utf16_len(text: str) -> int:
     """How long Windows counts a text in a path (UTF-16 units: an emoji is 2)."""
-    return len((text or "").encode("utf-16-le")) // 2
+    return len((text or "").encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _regional(ch: str) -> bool:
+    return 0x1F1E6 <= ord(ch) <= 0x1F1FF                # a flag is two of these
 
 
 def _attaches(ch: str) -> bool:
@@ -95,6 +102,12 @@ def cut(text: str, max_len: int, max_units: int | None = None) -> str:
             i -= 1
     while 0 < i < n and (_attaches(t[i]) or t[i - 1] == "\u200d"):
         i -= 1                                        # (an emoji sequence or a letter with its accent stays whole)
+    if 0 < i < n and _regional(t[i - 1]) and _regional(t[i]):
+        k = i
+        while k > 0 and _regional(t[k - 1]):
+            k -= 1
+        if (i - k) % 2:                               # the cut would split a flag: before it
+            i -= 1
     head = t[:i]
     sp = head.rfind(" ")
     if i < n and not t[i].isspace() and sp > len(head) * 0.5:
@@ -117,8 +130,8 @@ def safe_name(text: Any, max_len: int = MAX_LEN, max_units: int | None = None) -
     out = []
     for ch in t:
         cp = ord(ch)
-        if ch in _FORBIDDEN_GONE or cp in _INVISIBLE:
-            continue
+        if ch in _FORBIDDEN_GONE or cp in _INVISIBLE or 0xD800 <= cp <= 0xDFFF:
+            continue                                  # (a half emoji -- a lone surrogate -- is no character)
         if ch in _FORBIDDEN_SPACE or ch in "\t\r\n\v\f":
             out.append(" ")
         elif cp < 32 or 0x7F <= cp < 0xA0:
@@ -225,12 +238,14 @@ def folder_base(title: Any, day: str | None = None, roots_len: int = ROOT_LEN) -
 
 
 def has_base(folder_name: str, base: str) -> bool:
-    """The folder is named ``base`` already (or ``base (2)``, ``base (3)`` ...: the name was taken)."""
+    """The folder is named ``base`` already (or ``base (2)``, ``base (3)`` ...: the name was taken) -- capitals aside,
+    as Windows compares names (a title changed only in its capitals does not rename the folder)."""
     if not base:
         return False
-    if folder_name == base:
+    a, b = unicodedata.normalize("NFC", folder_name or "").casefold(), unicodedata.normalize("NFC", base).casefold()
+    if a == b:
         return True
-    return re.fullmatch(re.escape(base) + r" \(\d+\)", folder_name or "") is not None
+    return re.fullmatch(re.escape(b) + r" \(\d+\)", a) is not None
 
 
 def unique_folder(root: str | os.PathLike, base: str, current: str | os.PathLike | None = None) -> Path:

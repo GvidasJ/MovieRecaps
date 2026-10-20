@@ -97,9 +97,33 @@ def test_names_fit_windows_path_limit_with_emoji_counted_twice():
     root = "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads"
     folder = f"{root}\\2026-10-20_{t} (99)"
     assert NM.utf16_len(f"{folder}\\edit-99\\{t}_edit.xml") <= NM.PATH_LIMIT
+    assert NM.utf16_len(f"{folder}\\edit-99\\.{t}_edit.xml.123456.1234567890.tmp") <= NM.PATH_LIMIT   # its temp file
     assert NM.utf16_len(f"{folder}\\edit-99\\extras\\debug\\verify_failures\\k00544.png") <= NM.PATH_LIMIT
     assert NM.fit("Short title 😭") == "Short title 😭"                  # a usual title is kept whole
     assert NM.sequence_name(long) == NM.safe_name(long)                # the sequence: not cut for paths
+
+
+def test_a_flag_and_a_half_emoji_never_break_a_name():
+    flags = "🇱🇹" * 60                                                   # each flag is two code points
+    s = NM.safe_name(flags)
+    assert len(s) % 2 == 0 and s == "🇱🇹" * (len(s) // 2)                # never half a flag
+    assert NM.safe_name("abc\ud83d def") == "abc def"                    # a lone surrogate: dropped
+    assert NM.utf16_len("abc\ud83d") == 4 and NM.fit("abc\ud83d def") == "abc def"
+
+
+def test_capitals_alone_do_not_rename_a_folder():
+    assert NM.has_base("2026-10-20_He couldn't stop", "2026-10-20_He Couldn't Stop")
+    assert NM.has_base("2026-10-20_He couldn't stop (2)", "2026-10-20_He Couldn't Stop")
+
+
+def test_paths_that_only_start_like_the_old_folder_are_never_rewritten():
+    text = ("  - run: .\\2026-10-20_The Truth\\edit\n  - run: .\\2026-10-20_The Truth (2)\\edit\n"
+            "  - run: .\\2026-10-20_The Truth About Cats\\edit\n  - copy: D:\\Shared\\Projects\\2026-10-20_The Truth\r\n")
+    out = RN._replace_paths(text, [(".\\2026-10-20_The Truth", ".\\2026-10-20_New Name"),      # noqa: SLF001
+                                   ("D:\\Shared\\Projects\\2026-10-20_The Truth",
+                                    "D:\\Shared\\Projects\\2026-10-20_New Name")])
+    assert ".\\2026-10-20_New Name\\edit\n" in out and "D:\\Shared\\Projects\\2026-10-20_New Name\r\n" in out
+    assert ".\\2026-10-20_The Truth (2)\\edit" in out and ".\\2026-10-20_The Truth About Cats\\edit" in out
 
 
 def test_a_long_projects_folder_makes_the_names_shorter():
