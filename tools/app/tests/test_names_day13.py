@@ -212,6 +212,8 @@ def test_an_old_project_keeps_night_10s_names(tmp_path):
     out = PM.named_copy(xml)
     assert out.name == f"{p.folder.name}_edit.xml" and out.read_bytes() == xml.read_bytes()
     assert PM.project_for(out).name == f"{p.folder.name}_edit.prproj"
+    cuts = PM.named_copy(edit_xml(p.folder / "cuts"))                   # night 10 named a Just cuts run's copy so
+    assert cuts.name == "cuts_edit.xml" and PM.project_for(cuts).name == "cuts_edit.prproj"
 
 
 def test_a_finished_edit_gets_its_title_copy_at_once(tmp_path):

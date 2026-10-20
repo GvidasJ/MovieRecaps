@@ -292,7 +292,8 @@ def copy_name(run_dir: str | os.PathLike, data: Mapping | None = None) -> tuple[
             n = names_of(data, proj, root_len(proj.parent))
             if n.sequence:
                 return f"{n.stem}{COPY_SUFFIX}", n.sequence
-        return f"{proj.name}_{run.name}.xml", None
+        if re.fullmatch(r"(?i)edit(-\d+)?", run.name):
+            return f"{proj.name}_{run.name}.xml", None    # night 10: 2026-10-17_a-lot-to-catch-up-on_edit(-2).xml
     return f"{run.name}_edit.xml", None
 
 
