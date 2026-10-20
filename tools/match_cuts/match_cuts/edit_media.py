@@ -46,6 +46,7 @@ DELIVERY_CRF = 17
 DELIVERY_PRESET = "slow"
 PREMIERE_CONTAINERS = ("mp4", "mov", "m4v")
 REMUX_CONTAINERS = ("mkv",)            # webm holds VP8 / VP9 / AV1: no .mp4 Premiere opens as it is
+REMUX_FIXES = ("start_time:", "edit_list: video", "edit_list: non-benign")   # a remux moves the first frame to 0
 PREMIERE_PIX = {"h264": ("yuv420p", "yuvj420p", "yuv420p10le"),
                 "hevc": ("yuv420p", "yuvj420p", "yuv420p10le"),
                 "prores": None}        # None: any ProRes flavour
@@ -90,9 +91,10 @@ def picture_choice(src: Any, analysis: Any, conformed: bool) -> dict:
         return {"how": "analysis", "why": "the RAW as it is (it needed no conversion)"}
     issues = list(getattr(src, "ae_issues", None) or [])
     blocking = [i for i in issues if issue_kind(i) == "picture"]
-    remuxable = str(src.container) in REMUX_CONTAINERS and src.vcodec in ("h264", "hevc")
-    if remuxable:                         # a picture that starts late in an .mkv starts at 0 in its remux (checked)
-        blocking = [i for i in blocking if not i.startswith("start_time:")]
+    # a picture that starts late (a start time, an empty edit: the x265 web Family Guy RAWs start 21 ms late) starts
+    # at 0 in a remux of its packets -- the conform's frame k is the original's decoded frame k (checked after it)
+    fixable = [i for i in blocking if i.startswith(REMUX_FIXES)] if src.vcodec in ("h264", "hevc") else []
+    blocking = [i for i in blocking if i not in fixable]
     if blocking:
         return {"how": "convert", "why": "; ".join(blocking)}
     if not codec_ok(str(src.vcodec), str(src.pix_fmt)):
@@ -106,6 +108,9 @@ def picture_choice(src: Any, analysis: Any, conformed: bool) -> dict:
                                          f"{src.display_height}) is not frame for frame the analysed copy "
                                          f"({analysis.nb_frames} frames, {analysis.display_width}x"
                                          f"{analysis.display_height})"}
+    if fixable:
+        return {"how": "remux", "why": "its picture starts late (" + "; ".join(fixable) + "): the same video packets "
+                                       "moved into an .mp4 that starts at its first frame (nothing re-encoded)"}
     if str(src.container) in PREMIERE_CONTAINERS:
         return {"how": "original", "why": f"{src.vcodec} {src.pix_fmt} in .{src.container}: Premiere opens it"}
     if str(src.container) in REMUX_CONTAINERS and src.vcodec in ("h264", "hevc"):
@@ -483,8 +488,10 @@ def summary_line(res: dict) -> str:
 
 
 def premiere_block(raw: dict, res: dict, out_dir: str | Path | None = None) -> dict:
-    """The cut list's RAW block for 1_edit.xml: ``file`` = what V1 plays, ``sound_file`` = what A1 plays when it is
-    another file (its frames, size and rate stay the RAW's: the same video)."""
+    """The cut list's RAW block for 1_edit.xml: ``picture_file`` = what V1 plays, ``sound_file`` = what A1 plays when
+    it is another file (their frames, size and rate are the RAW's: the same video). ``file`` stays the analysed copy:
+    whatever the export still reads from the RAW (the faces of a stretch to frame) reads the very frames the analysis
+    read -- the XML's <file> elements alone name the delivered files."""
     def rel(p: Path) -> str:
         if out_dir is None:
             return ""
@@ -493,7 +500,7 @@ def premiere_block(raw: dict, res: dict, out_dir: str | Path | None = None) -> d
         except ValueError:
             return ""
     pic = Path(res["picture"]["path"]).resolve()
-    out = dict(raw, file=rel(pic) or str(pic), file_abs=str(pic), file_rel=rel(pic))
+    out = dict(raw, picture_file=rel(pic) or str(pic), picture_file_abs=str(pic), picture_file_rel=rel(pic))
     snd = res.get("sound") or {}
     out["picture_audio_channels"] = int(raw.get("audio_channels") or 0)
     if snd.get("how") == "wav" and snd.get("path"):

@@ -4169,7 +4169,8 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
     if getattr(cfg, "premiere", False) and getattr(ctx, "people", None) is not None:
         out["people"] = person_lines(ctx)
     em = getattr(ctx, "edit_media", None) or {}
-    if getattr(cfg, "premiere", False) and em.get("line"):       # day 13: which RAW files 1_edit.xml plays
+    as_before = (em.get("picture") or {}).get("how") == "analysis" and (em.get("sound") or {}).get("how") != "wav"
+    if getattr(cfg, "premiere", False) and em.get("line") and not as_before:   # day 13: which RAW files it plays
         out["raw_media"] = [str(em["line"])]
     try:                                         # which speech model ran where (the GPU, or the CPU and why)
         from .transcribe import summary as asr_summary

@@ -243,10 +243,18 @@ def users(item: BigCopy, extra_roots: Iterable[Path] | None = None, cache: dict 
                 out.append(f"I can't read {pp.name} ({e}) -- it might play {item.single.name}")
                 continue
         text = cache[k]
-        if text is not None and RF._mentions(text, item.edit, item.single.name):
+        if text is not None and plays(text, item):
             out.append(f"your project {pp.name} plays {item.single.name} -- it is kept for that project (relink the "
                        "project in Premiere to the original RAW first, then Clean up can replace it)")
     return out
+
+
+def plays(text: str, item: BigCopy) -> bool:
+    """A project / XML text names THIS run's raw_stereo file: '<project>/<edit>/extras/media/<file>' (every run
+    folder is called edit, so the project folder's name is part of it; a path or a file URL, any drive or share)."""
+    import urllib.parse
+    t = urllib.parse.unquote(text).replace("\\", "/").lower()
+    return f"{item.project.name.lower()}/{item.edit.name.lower()}/extras/media/{item.single.name.lower()}" in t
 
 
 def tool_xmls(item: BigCopy) -> list[Path]:

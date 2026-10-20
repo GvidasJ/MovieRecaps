@@ -3500,12 +3500,10 @@ SOUND_FILE_ID = "file-raw-sound"
 SOUND_MASTERCLIP = "masterclip-raw-sound"
 
 
-def sound_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
-    """(name, absolute path) of the file A1 plays when it is not V1's (the cut list's RAW block ``sound_file``:
-    edit_media.premiere_block); None: A1 plays the V1 file, as before day 13."""
+def _delivered(cutlist: Cutlist, cfg: Any, key: str) -> tuple[str, str] | None:
     raw = cutlist.raw or {}
-    ab = str(raw.get("sound_file_abs") or "")
-    f = str(raw.get("sound_file") or raw.get("sound_file_rel") or "")
+    ab = str(raw.get(f"{key}_abs") or "")
+    f = str(raw.get(key) or raw.get(f"{key}_rel") or "")
     if not ab and not f:
         return None
     if not ab:
@@ -3514,6 +3512,18 @@ def sound_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
             p = Path(getattr(cfg, "out_dir", ".") or ".") / p if cfg is not None else p
         ab = str(p.resolve())
     return os.path.basename(ab), ab
+
+
+def sound_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
+    """(name, absolute path) of the file A1 plays when it is not V1's (the cut list's RAW block ``sound_file``:
+    edit_media.premiere_block); None: A1 plays the V1 file, as before day 13."""
+    return _delivered(cutlist, cfg, "sound_file")
+
+
+def picture_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
+    """(name, absolute path) of the file V1 plays when it is not the analysed copy (``picture_file``: day 13, the
+    original RAW); None: the analysed copy, as before day 13."""
+    return _delivered(cutlist, cfg, "picture_file")
 
 
 def picture_audio(cutlist: Cutlist, audio_info: dict | None, snd: tuple[str, str] | None) -> dict | None:
@@ -3846,8 +3856,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                   "channels": cutlist.raw.get("audio_channels") or 2} if has_audio else None
     snd = sound_media(cutlist, cfg)          # day 13: A1 plays the RAW's stereo sound file (raw_stereo.wav)
     pic_audio = picture_audio(cutlist, audio_info, snd)
+    v_name, v_abs = picture_media(cutlist, cfg) or (raw_name, raw_abs)    # day 13: V1 plays the original RAW
     a_name, a_abs, a_fid, a_master = ((snd[0], snd[1], SOUND_FILE_ID, SOUND_MASTERCLIP) if snd else
-                                      (raw_name, raw_abs, "file-raw", PREMIERE_MASTERCLIP))
+                                      (v_name, v_abs, "file-raw", PREMIERE_MASTERCLIP))
     clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
     audio_items = premiere_audio(cutlist, clips, cfg) if has_audio else []
     if silence is not None and silence.active:
@@ -3917,7 +3928,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(e, "reverse", "FALSE")
         ci = _sub(vtrack, "clipitem", id=f"clipitem-{n}")
         _sub(ci, "masterclipid", PREMIERE_MASTERCLIP)         # one master clip: the Project panel shows one RAW
-        _sub(ci, "name", raw_name)                            # the segment ids are in the comments
+        _sub(ci, "name", v_name)                              # the segment ids are in the comments
         _sub(ci, "enabled", "TRUE")
         _sub(ci, "duration", remap_duration(src_dur, cl.speed))
         _rate_el(ci, fps)
@@ -3929,7 +3940,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(ci, "alphatype", "none")
         _sub(ci, "pixelaspectratio", "square")
         _sub(ci, "anamorphic", "FALSE")
-        _file_el(ci, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, pic_audio)
+        _file_el(ci, "file-raw", defined, v_name, v_abs, raw_fps, raw_frames, raw_w, raw_h, pic_audio)
         if abs(cl.speed - 1.0) > 1e-9:
             _time_remap(ci, cl.speed)
         note = _premiere_motion(ci, cl, W, H, (raw_w, raw_h))

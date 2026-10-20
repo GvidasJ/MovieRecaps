@@ -97,6 +97,12 @@ def test_borat_plays_the_original_and_a_vfr_or_rotated_raw_a_converted_copy():
     assert pc(_info(), _info(), False)["how"] == "analysis"                   # an AE-safe RAW: as before
     assert pc(_info(ae_issues=borat + ["vfr: PTS jitter 0.5 frames"]), _info(), True)["how"] == "convert"
     assert pc(_info(ae_issues=["rotation: display rotation 90 deg"]), _info(), True)["how"] == "convert"
+    late = ["vcodec: hevc", "start_time: video stream starts at 0.021000 s",
+            "edit_list: video edit list has 2 entries incl. 1 empty edit(s) (dwell / start offset)"]
+    assert pc(_info(ae_issues=late), _info(), True)["how"] == "remux"           # Family Guy x265: moved to 0
+    assert pc(_info(ae_issues=late + ["vfr: PTS jitter 0.5 frames"]), _info(), True)["how"] == "convert"
+    assert pc(_info(vcodec="prores", pix_fmt="yuv422p10le", container="mov", ae_issues=late[1:]), _info(),
+              True)["how"] == "convert"                                         # ProRes: no .mp4 remux
     mkv = _info(container="mkv", vcodec="h264", pix_fmt="yuv420p", ae_issues=["container: mkv is not mp4/mov"])
     assert pc(mkv, _info(), True)["how"] == "remux"
     webm = _info(container="webm", vcodec="vp9", pix_fmt="yuv420p", ae_issues=["container: webm is not mp4/mov"])
@@ -180,6 +186,27 @@ def test_an_mkv_is_remuxed_frame_for_frame_and_its_sound_goes_to_the_wav(tmp_pat
     assert r.res["sound"]["how"] == "wav" and r.res["sound"]["sync"]["ok"]
 
 
+def test_a_picture_that_starts_late_is_remuxed_to_start_at_its_first_frame(tmp_path):
+    # the x265 web Family Guy RAWs: the video track starts 21 ms late (an empty edit) -- Premiere might place frame k
+    # half a frame late; the remux of the same packets starts at frame 0, as the analysis copy does
+    a = _video(tmp_path / "a.mp4", channels=6)
+    src = tmp_path / "Family Guy S09E11.mp4"
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-itsoffset", "0.05", "-i", str(a), "-i", str(a),
+                    "-map", "0:v", "-map", "1:a", "-c", "copy", str(src)], check=True)
+    r = _prepared(tmp_path, src)
+    assert any(i.startswith("start_time: video") for i in r.info.ae_issues), r.info.ae_issues
+    pic = r.res["picture"]
+    assert pic["how"] == "remux" and pic["name"] == "raw.mp4" and pic["placed"] == "remux"
+    assert not os.path.samefile(pic["path"], src)                              # a new file: its packets moved to 0
+    got = probe.probe(pic["path"], "raw", str(tmp_path / "work"), decode=True)
+    assert got.nb_frames == r.info.nb_frames == r.analysed.nb_frames and abs(got.v_start_time) < 1e-3
+    assert not [i for i in got.ae_issues if edit_media.issue_kind(i) == "picture"]
+    snd = r.res["sound"]
+    assert snd["how"] == "wav" and "atrim=start_sample=" in snd["filter"] and snd["sync"]["ok"]
+    chk = edit_media.same_pictures(r.analysed.path, pic["path"], int(r.analysed.nb_frames))
+    assert chk["ok"], chk["why"]                                               # frame k is the analysed frame k
+
+
 def test_a_vfr_raw_plays_a_crf_17_slow_copy_and_says_why(tmp_path):
     src = _video(tmp_path / "phone.mp4", channels=2, vfr=True)
     r = _prepared(tmp_path, src)
@@ -224,6 +251,7 @@ def two_files(tmp_path):
     res = {"picture": {"how": "original", "path": str(pic)},
            "sound": {"how": "wav", "path": str(wav)}}
     kc.raw = edit_media.premiere_block(dict(kc.raw, audio_channels=6), res, tmp_path / "extras")
+    assert kc.raw["file_abs"] == "/abs/media/raw.mp4"                       # the analysed copy, as the export reads
     xml = tmp_path / "1_edit.xml"
     ex.write_premiere_xml(kc, xml, Config(out_dir=str(tmp_path / "extras"), premiere=True))
     return SimpleNamespace(dir=tmp_path, pic=pic, wav=wav, xml=xml, cl=kc)
@@ -407,8 +435,10 @@ def test_premiere_media_says_why_a_converted_copy_plays(monkeypatch, tmp_path):
     monkeypatch.setattr(edit_media, "prepare", lambda *a, **k: res)
     exl = SimpleNamespace(raw={"file": "media/raw_ae.mp4", "audio_channels": 2, "frames": 10})
     out = pipeline.premiere_media(ctx, exl)
-    assert out.raw["file_abs"].endswith("raw_premiere.mp4") and out.raw["sound_file_abs"].endswith("raw_stereo.wav")
+    assert out.raw["picture_file_abs"].endswith("raw_premiere.mp4")
+    assert out.raw["sound_file_abs"].endswith("raw_stereo.wav")
     assert out.raw["picture_audio_channels"] == 0 and exl.raw["file"] == "media/raw_ae.mp4"   # the input untouched
+    assert out.raw["file"] == "media/raw_ae.mp4"          # what the export still reads (faces): the analysed copy
     assert ctx.edit_media is res
     assert warned and "CRF 17" in warned[0] and "vfr" in warned[0]
     md = "\n".join(edit_media.describe_for_report(res))

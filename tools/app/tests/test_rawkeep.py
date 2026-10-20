@@ -135,9 +135,17 @@ def test_a_project_playing_the_big_copy_keeps_it_and_is_never_changed(tmp_path, 
     fixed = desk / "borat_fixed.prproj"
     fixed.write_bytes(gzip.compress(f"<PremiereData><Media><FilePath>{r.one}</FilePath></Media></PremiereData>"
                                     .encode()))
+    other = desk / "butter.prproj"                       # another run's edit\extras\media\raw_stereo.mp4: not this one
+    other.write_bytes(gzip.compress(r"<PremiereData><FilePath>D:\Shared\Projects\family-guy\edit\extras\media"
+                                    r"\raw_stereo.mp4</FilePath></PremiereData>".encode()))
+    hold = desk.with_name("held.prproj")
+    fixed.replace(hold)
+    assert _plan(r, originals, [desk])[0].ok                                  # only the other run's project there
+    hold.replace(fixed)
     data, when = fixed.read_bytes(), os.stat(fixed).st_mtime_ns
     it = _plan(r, originals, [desk])[0]
     assert not it.ok and any("borat_fixed.prproj plays raw_stereo.mp4" in p for p in it.problems)
+    assert not any("butter.prproj" in p for p in it.problems)
     assert RK.replace([it], extra_roots=[desk]) == (0, [])                    # not ok: nothing done
     assert r.one.is_file() and fixed.read_bytes() == data and os.stat(fixed).st_mtime_ns == when
 
