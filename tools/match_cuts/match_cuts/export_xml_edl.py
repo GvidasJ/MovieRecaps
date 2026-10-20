@@ -3140,8 +3140,7 @@ def end_flash_frames(clips: Sequence[PremiereClip], n: int, changes_s: Sequence[
     new shot (``changes_s``: the RAW's shot changes, s) that lasts under shots.MIN_SHOT_S before the edit ends. The
     competitor's own last frames ran a moment past its last shot (video12: 2 frames at 00:00:32:00; Are We There
     Yet S26: 1 at 00:00:24:22) -- a flash at the end that nothing can cover (XML FLASH). 0 when there is none: the
-    last shot long enough, a clip of another take (a real last cut of the competitor's), a freeze, a reverse, an
-    empty end."""
+    last shot long enough, a clip of another take (a real last cut of the competitor's), a reverse, an empty end."""
     from .shots import MIN_SHOT_S, shot_of
     if not changes_s or n <= 0:
         return 0
@@ -3231,10 +3230,12 @@ def _flash_lines(clips: Sequence[PremiereClip], changes_s: Sequence[float], fps:
 
 def _moved_cut(clips: list[PremiereClip], i: int, to: int) -> list[PremiereClip] | None:
     """The clips with the cut between clips[i] and clips[i + 1] at sequence frame ``to`` -- each on its own source
-    line (the one before ends there, the one after starts there); None where that cannot be: a reverse, a retimed
-    clip, a clip left without a frame, a source before the RAW's start."""
+    line (the one before ends there, the one after starts there); None where that cannot be: a clip not at 100 % (a
+    reverse; --speed: Premiere starts a retimed clip only on its own grid), a freeze, a clip left without a frame, a
+    source before the RAW's start."""
     x, y = clips[i], clips[i + 1]
-    if float(x.speed) <= 0 or float(y.speed) <= 0 or x.retime or y.retime or not x.rec_start < to < y.rec_end:
+    if abs(float(x.speed) - 1.0) > 1e-9 or abs(float(y.speed) - 1.0) > 1e-9 or x.retime or y.retime \
+            or not x.rec_start < to < y.rec_end:
         return None
     d_y = int(round((to - y.rec_start) * float(y.speed)))
     if y.src_in + d_y < 0:
