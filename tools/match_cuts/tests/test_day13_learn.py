@@ -47,3 +47,45 @@ def test_the_new_cases_are_in_the_library_scored_with_their_template_and_waterma
         cj = json.loads((d / "case.json").read_text(encoding="utf-8"))
         assert "learned on day 13" in cj["notes"]
         assert cj.get("srt_rate") in (None, "24000/1001")
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 6.2 Liquid Death: your project played the RAW straight from where it was downloaded, under its own name
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_learn_finds_the_runs_raw_played_under_another_name(tmp_path):
+    from types import SimpleNamespace
+    from match_cuts import learn, prproj as PR
+    raw = tmp_path / "run" / "extras" / "media" / "raw.mp4"
+    raw.parent.mkdir(parents=True)
+    raw.write_bytes(b"x" * 4096)
+    yours = tmp_path / "Shared" / "Liquid Death “Small Ones” Commercial [zUAvOywcPus].mp4"
+    yours.parent.mkdir()
+    yours.write_bytes(b"x" * 4096)                                      # the same file, its YouTube name
+    other = tmp_path / "Shared" / "enhanced.mp4"
+    other.write_bytes(b"y" * 1000)
+    item = lambda m, a, b: PR.Item(PR.VIDEO, 1, a, b, media=str(m))     # noqa: E731
+    seq = PR.Sequence("Recreated Edit (Premiere)", 25.0, 1080, 1920,
+                      [item(yours, 0.0, 5.16), item(yours, 5.16, 6.6), item(other, 6.6, 7.0)])
+    cl = {"raw": {"width": 3840, "height": 2160, "fps": "24000/1001", "duration_s": 46.96}}
+    pr = PR.Project(str(tmp_path / "x.prproj"), [seq],
+                    {str(yours): {"width": 3840, "height": 2160, "fps": 23.976, "duration": 46.96},
+                     str(other): {"width": 1080, "height": 1920, "fps": 30.0, "duration": 0.4}})
+    assert learn.same_file_name(pr, raw, cl) == yours.name
+    # another size (another file under any name) or another length: not the run's RAW
+    yours.write_bytes(b"x" * 4000)
+    assert learn.same_file_name(pr, raw, cl) is None
+    yours.write_bytes(b"x" * 4096)
+    pr.media[str(yours)]["duration"] = 30.0
+    assert learn.same_file_name(pr, raw, cl) is None
+    assert learn.same_file_name(SimpleNamespace(sequences=[], media={}), raw, cl) is None
+
+
+def test_the_liquid_death_case_runs_with_your_pick_of_the_raw():
+    cases = {c.name: c for c in testcases.cases()}
+    c = cases["liquid-death-fixed"]
+    assert c.style == "new" and "--allow-short-raw" in [str(o) for o in c.options]
+    d = REPO / "tests" / "real" / "liquid-death-fixed"
+    key = json.loads((d / "answer_edit.json").read_text(encoding="utf-8"))
+    clips = [x for x in key["audio"] if x["kind"] == "raw"]
+    assert len(clips) == 13 and abs(clips[-1]["end"] - 40.24) < 0.05     # your 13 clips, 40.24 s

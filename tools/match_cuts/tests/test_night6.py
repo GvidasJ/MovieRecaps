@@ -186,7 +186,8 @@ def test_the_wrong_input_check_names_a_movie_given_as_the_competitor(tmp_path):
 def test_every_test_case_passes_the_wrong_input_check():
     from match_cuts.cli import quick_probe
     for c in testcases.cases():
-        assert inputs_check.problems(quick_probe(c.competitor), quick_probe(c.raw)) == [], c.name
+        mine = "--allow-short-raw" in [str(o) for o in c.options]    # day 13: Liquid Death, your pick of the RAW
+        assert inputs_check.problems(quick_probe(c.competitor), quick_probe(c.raw), mine) == [], c.name
 
 
 def test_almost_nothing_found_in_the_raw_stops_the_run():
@@ -336,7 +337,8 @@ def test_check_all_runs_new_style_cases_thorough_and_old_ones_fast_with_the_hard
                                                            "video11-fixed", "video12-fixed", "chocolate-fixed",  # 11
                                                            "video14-fixed", "video15-fixed",  # day 12
                                                            "video16-fixed", "video17-fixed", "video18-fixed",
-                                                           "video19-fixed", "video20-fixed"}  # day 13
+                                                           "video19-fixed", "video20-fixed",
+                                                           "liquid-death-fixed"}  # day 13
     card = check_all.scorecard([{"case": "video1", "seconds": 60.0, "deliverables": {"status": "pass"},
                                  "determinism": {"status": "pass"}, "coverage": {"status": "pass"},
                                  "scored": False, "mode": "fast"}])

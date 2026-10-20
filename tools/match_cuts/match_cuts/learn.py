@@ -184,6 +184,31 @@ def played_raw_name(pr: Any, *names: str) -> str:
     return next((n for n in want if n in played), want[0] if want else "")
 
 
+def same_file_name(pr: Any, raw: Path, cutlist: dict) -> str | None:
+    """Day 13 (Liquid Death): your project plays the run's RAW straight from where it was downloaded, under its own
+    name ('Liquid Death “Small Ones” Commercial [zUAvOywcPus].mp4' is the run's raw.mp4 byte for byte) -- the name of
+    the video file your clips play that IS the run's RAW: the same size, and the same picture size, rate and length
+    (media_mismatch). None when no played file is."""
+    try:
+        size = Path(raw).stat().st_size
+    except OSError:
+        return None
+    seen: dict[str, float] = {}
+    for s in pr.sequences:
+        for it in s.items:
+            if it.media and it.kind == PR.VIDEO and it.enabled:
+                seen[it.media] = seen.get(it.media, 0.0) + (it.end - it.start)
+    for media in sorted(seen, key=lambda m: -seen[m]):
+        try:
+            p = Path(media)
+            if p.is_file() and p.stat().st_size == size and \
+                    media_mismatch(pr.media.get(media) or {}, cutlist) is None:
+                return PR.file_name(media)
+        except OSError:
+            continue
+    return None
+
+
 def played_sound_name(pr: Any, raw_name: str) -> str:
     """The name the project's A1 clips play the run's RAW sound under: ``raw_name`` when a sound clip plays it, else
     day 13's stereo sound file (raw_stereo.wav: 1_edit.xml's A1 when V1 plays the original RAW) when one does."""
@@ -1614,6 +1639,8 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     if comp is None or raw is None:
         raise LearnError(f"{rf['dir']}: the run's competitor or RAW cannot be found (moved or deleted?)")
     raw_name = played_raw_name(pr, PR.file_name(str((cl.get("raw") or {}).get("file") or raw.name)), raw.name)
+    if not any(it.media and PR.file_name(it.media) == raw_name for s in pr.sequences for it in s.items):
+        raw_name = same_file_name(pr, raw, cl) or raw_name       # day 13: the same file under its own name
     seq = sequence_of(pr, raw_name, cl) or sequence_of(pr, raw_name) or PR.main_sequence(pr)
     played = {it.media for it in seq.items if it.media and PR.file_name(it.media) == raw_name}
     cands = {k: v for k, v in pr.media.items() if PR.file_name(k) == raw_name}

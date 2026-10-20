@@ -1,0 +1,15 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from samllones.prproj (2026-10-20): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); the hard case of requests.md (2026-10-19): the Liquid Death \"Small Ones\" commercial (RAW 0:47, 4K) and its LouLaughs Short (1019.mp4, 0:45, portrait) -- the competitor plays the commercial uncut (its only picture changes are the RAW's own 7 shot changes); your edit (Desktop\\samllones.prproj, played the RAW straight from D:\\Shared) leaves out 10 pauses of 0.2-0.84 s (4.8 s) between the lines -- your own tightening, no rule found for it on day 13; the LouLaughs template + watermark; --allow-short-raw (your pick of the RAW, as the New video form passes it)",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\samllones.prproj",
+ "run": "work\\t28\\ld\\run1",
+ "full_raw": "work/t28/ld/run1/extras/media/raw.mp4",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png",
+  "--allow-short-raw"
+ ]
+}
