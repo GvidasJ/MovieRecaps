@@ -495,6 +495,7 @@ class LearnPage(QWidget):
 
     def _show_columns(self, cards, fixes, probs, sugs) -> None:
         from ..core import learn_hub as H
+        from ..core import problems as PR
         self._wait = {c.id: c for c in cards}
         self._amber = sum(1 for c in cards if c.rendered)
         specs = []
@@ -520,7 +521,7 @@ class LearnPage(QWidget):
         self._probs = {p.key(): p for p in probs}
         specs = []
         for p in probs:
-            bits = [p.check or p.result, H.nice_date(p.date) if p.date else "", p.computer]
+            bits = [PR.plain_check(p), H.nice_date(p.date) if p.date else "", p.computer]   # day 13: plain words
             lines = [" · ".join(b for b in bits if b)]
             if p.state == "not fixed":
                 lines.append(p.status)

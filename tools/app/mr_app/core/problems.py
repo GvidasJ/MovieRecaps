@@ -408,6 +408,29 @@ def check_text(res: dict) -> str:
     return _one(f"{word} -- {first}" if first else word)[:300]
 
 
+_TECHNICAL = re.compile(r"details in \S|\bfailed \(-?\d+\)|\w(?:Error|Exception):|\[(?:Errno|WinError) -?\d+\]|"
+                        r"match_cuts_pool_")
+
+
+def plain_check(p: Problem) -> str:
+    """The entry's title in plain words for the Learn tab (day 13): an older entry whose title holds the tool's own
+    technical line ("stopped (exit 2) -- details in ... match_cuts.log", "... ffmpeg failed (4294967268): ...") says
+    why as match_cuts.plain_reason says it, read from the entry's own key log lines and exit code (text only:
+    nothing is read). Other titles stay as they are."""
+    check = str(p.check or p.result or "")
+    m = re.match(r"^stopped \(exit (-?\d+)\) -- (.*)$", check)
+    if not m or not _TECHNICAL.search(m.group(2)):
+        return check
+    try:
+        from match_cuts import plain_reason as PL
+        r = PL.explain(stderr="\n".join([*p.lines, m.group(2)]), code=int(m.group(1)), stop="")
+    except Exception:  # noqa: BLE001 - the tool's module not importable here: as it is
+        return check
+    if r.kind == PL.TOOL_STOP:
+        return check
+    return _one(f"stopped (exit {m.group(1)}) -- {r.line()}")[:300]
+
+
 def from_result(name: str, res: dict, computer: str | None = None) -> Problem:
     """The entry for a finished run (core.results.read_result's dict, plus the app's exit / log): its key log lines
     read from the run's log (batch_console.log, else match_cuts.log). Reads files: call it from a worker thread."""
