@@ -42,7 +42,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Sequence
 
-from . import run_folders
+from . import plain_reason, run_folders
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".mts", ".m2ts", ".ts", ".flv", ".wmv"}
 SUMMARY = "batch_summary"
@@ -198,7 +198,7 @@ def latest_progress(run_dir: Path, now: float | None = None) -> str:
 # other criteria all pass (day 12: the laptop's darkhumor run passed everything, exited 3 and was shown as a stop)
 FINISHED = (0, 1, 3)
 RESULT_LINE = "match_cuts result:"          # cli.py's summary headline (stdout): the run reached its end
-ABORT_WORDS = "the tool stopped by itself (exit code 3 without a result: an abort or a fatal Python error)"
+ABORT_WORDS = plain_reason.ABORT_WORDS
 
 
 def finished(code: int | None, stdout: str = "", run_dir: str | Path | None = None) -> bool:
@@ -217,26 +217,27 @@ _LOG_LINE = re.compile(r"^\d\d:\d\d:\d\d(?:,\d+)? (?:DEBUG|INFO|WARNING|ERROR|CR
 # shown as "[ WARN:0@720.058] global net_impl_backend.cpp:345 cv::dnn::...": OpenCV's warning, its last stderr line)
 _NOISE_LINE = re.compile(r"^\s*(?:\[ ?(?:WARN|INFO|DEBUG)\b|\S+\.py:\d+: \w*Warning:|warnings\.warn\(|"
                          r"\S*Warning: |W\d{4} |I\d{4} )")
-# Windows' exit codes of a process that crashed (no Python error to show)
-CRASH_CODES = {
-    -1073741819: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
-    3221225477: "the tool crashed (a memory access error inside a program library, 0xC0000005)",
-    -1073740791: "the tool crashed (a program library stopped it, 0xC0000409)",
-    3221226505: "the tool crashed (a program library stopped it, 0xC0000409)",
-    -1073741571: "the tool crashed (it ran out of stack memory, 0xC00000FD)",
-    3221225725: "the tool crashed (it ran out of stack memory, 0xC00000FD)",
-    -1073741801: "the tool ran out of memory (0xC0000017)",
-    3221225495: "the tool ran out of memory (0xC0000017)",
-}
+# Windows' exit codes of a process that crashed (no Python error to show): one table with the plain reasons
+# (plain_reason: 0xC0000005 / 0xC0000409 / 0xC00000FD / 0xC0000017 since day 12; day 13 adds a missing or broken
+# library, heap damage, an in-page error, closed from outside ...), both spellings (signed / unsigned)
+CRASH_CODES = plain_reason.CRASH_CODES
 
 
 def crash_words(code: int | None) -> str:
     """A crash's exit code in plain words ('' for an ordinary exit code)."""
-    return CRASH_CODES.get(code, "") if code is not None else ""
+    return plain_reason.crash_words(code)
+
+
+def stop_reason(stderr: str, code: int | None = None, run_dir: str | Path | None = None,
+                stop: str | None = None) -> "plain_reason.Reason":
+    """Why a stopped run stopped, in plain words, with what to do (plain_reason.explain_run: the console, the run's
+    match_cuts.log, the exit code) -- the batch summary's and the app's words for a stop."""
+    return plain_reason.explain_run(run_dir, stderr, code, stop)
 
 
 _DUMP_LINE = re.compile(r"^(\s|$|Thread 0x|Current thread 0x|Extension modules:|Windows fatal exception|"
                         r"<no Python frame>|Stack \(most recent call first\))")
+_DETAILS_IN = re.compile(r"^(?:match_cuts: )?details in \S")
 
 
 def _without_fatal_dump(lines: list[str]) -> list[str]:
@@ -272,6 +273,8 @@ def stop_message(stderr: str, limit: int = 600, code: int | None = None) -> str:
             if block:
                 break
             continue
+        if _DETAILS_IN.match(ln.strip()):        # cli's "details in <the log>" is never the message (day 13: Borat
+            continue                             # on the laptop showed only it; the real line is above it)
         if not ln.strip() or ln.startswith("Run folder") or _LOG_LINE.match(ln):
             if block or (fatal and _LOG_LINE.match(ln)):
                 break                            # a crash: only a message printed right before it (no log line
@@ -636,17 +639,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted[raw.resolve()] = cr
         log_dir = run_dir / run_folders.EXTRAS if (run_dir / run_folders.EXTRAS).is_dir() else out
         log = log_dir / (f"{name}.batch.log" if log_dir == out else "batch_console.log")
-        log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
+        try:                                              # a full disk must not stop the batch here (day 13)
+            log.write_text(" ".join(cmd) + "\n\n" + stdout + "\n" + stderr, encoding="utf-8")
+        except OSError as e:
+            print(f"    (its console could not be saved to {log}: {e})", flush=True)
         chk = checks_of(run_dir if (run_dir / run_folders.EXTRAS).is_dir() else None)
         failures = list(chk["failures"])
         stop = stop_message(stderr, code=code) if not done else ""
+        reason = stop_reason(stderr, code, run_dir, stop) if not done else None
         if not done:                                      # 1: a recreation criterion failed (real videos: always)
-            failures = [f"the run stopped (exit {code}): {stop}"] + \
+            failures = [f"the run stopped (exit {code}): {reason.line()}"] + \
                 [f for f in failures if "no verify.json" not in f]
         outside = media_outside(run_dir)
         cap = captions_of(run_dir)
         row = {"name": name, "competitor": str(comp), "raw": str(raw), "run_dir": str(run_dir), "exit": code,
                "speed": speed, "speed_from": why.strip("; ") or "default", "stop": stop,
+               "reason": reason.line() if reason else "", "reason_kind": reason.kind if reason else "",
                "wrong_pair": code == 2 and is_wrong_pair(stop),
                "seconds": round(secs, 1), "pass": not failures and done, "failures": failures,
                "notes": list(chk.get("notes") or []) if not failures and done else [],
