@@ -14,7 +14,9 @@ stays exactly as the tool wrote it (every check, check-all and Learn find runs t
 * Short enough for Windows' 260-character paths (``fit``): the deepest file the tool writes in a run folder and
   ``<root>\\<date>_<title> (99)\\edit-99\\.<title>_edit.xml.<pid>.<tid>.tmp`` (the temp file the copy is written
   through) must stay under ``PATH_LIMIT`` -- so with the usual projects folder a title longer than about 65
-  characters is cut (at a word) for the folder and the files; the sequence keeps up to 100 characters.
+  characters is cut (at a word) for the folder; the files' name (``file_stem``) also leaves room for what Premiere
+  writes next to <title>.prproj (its Auto-Save and Video Previews folders: ~95 more characters), so a title longer
+  than ~25-40 characters (the longer the folder, the shorter) is cut there; the sequence keeps up to 100 characters.
 * A folder name that is taken gets (2), (3) ... (``unique_folder``).
 * project.json "names": {"rule": "title", "from": "youtube" | "headline" | "post" | "video" | "", "at": time} marks a
   project whose names follow its title. Projects made before (no "names") keep their names -- and their old
@@ -223,6 +225,23 @@ def fit(title: Any, roots_len: int = ROOT_LEN) -> str:
     return safe_name(title, MAX_LEN, max(8, min(twice, once)))
 
 
+PREMIERE_LIMIT = 259                # the longest path Windows takes (260 with its end mark)
+PREMIERE_TAIL = len("\\Adobe Premiere Pro Auto-Save\\") + len("--") + 36 + len("-2026-10-20_18-04-39") + \
+    len(".prproj")                  # Premiere's auto-save next to a project: <stem>--<id>-<date_time>.prproj (95; its
+#                                     video previews, <stem>.PRV\Rendered - <id>.mxf, are 91)
+STEM_MIN = 24                       # the files' name is never cut shorter than this
+
+
+def file_stem(title_part: str, roots_len: int = ROOT_LEN) -> str:
+    """The name of the files the app makes in a run folder (<stem>_edit.xml, <stem>.prproj): the folder's title part,
+    cut further (at a word) when Premiere's own files next to <stem>.prproj -- its Auto-Save, Video Previews (it puts
+    them next to the project) -- would pass Windows' path limit; never under STEM_MIN characters."""
+    t = title_part or ""
+    run_len = roots_len + 1 + len("2026-10-20_") + utf16_len(t) + SUFFIX_ROOM + len("\\edit-99")
+    room = max(STEM_MIN, PREMIERE_LIMIT - run_len - PREMIERE_TAIL)
+    return cut(t, MAX_LEN, room) if utf16_len(t) > room else t
+
+
 def sequence_name(title: Any) -> str:
     """The sequence's name in <title>_edit.xml (Premiere names the render after it): the title, Windows-safe (the
     render's file name), at most MAX_LEN characters -- not cut for paths."""
@@ -284,9 +303,9 @@ def names_of(data: Mapping | None, folder: str | os.PathLike, roots_len: int = R
     t, src = title_of(data)
     if not t:
         return old                                    # no title yet: as it is (the first title names it)
-    stem = fit(t, roots_len)
-    return Names(f"{day_of(folder.name) or day_of(str((data or {}).get('name') or '')) or _today()}_{stem}", stem,
-                 sequence_name(t), t, src)
+    part = fit(t, roots_len)
+    return Names(f"{day_of(folder.name) or day_of(str((data or {}).get('name') or '')) or _today()}_{part}",
+                 file_stem(part, roots_len), sequence_name(t), t, src)
 
 
 def _today() -> str:

@@ -220,7 +220,7 @@ def test_the_window_renames_after_a_title_change_and_retries_what_waited(qapp, t
     monkeypatch.setattr(PM, "state", lambda: PM.State())
     monkeypatch.setattr(RN, "scan_places", lambda hub: [])
     monkeypatch.setattr(NM, "root_len", lambda *roots: NM.ROOT_LEN)
-    monkeypatch.setattr(MW.BG, "call", lambda work, done=None, failed=None, **k: done(work()) if done else work())
+    monkeypatch.setattr(MW.BG, "call", lambda fn, done=None, failed=None, **k: done(fn()) if done else fn())
     base = NM.folder_base("First title", "2026-10-20")
     p = PJ.create(local, competitor_url="https://youtu.be/AbCdEf12345", folder=base, names=NM.marker("headline"))
     B.set_title(p.folder, "First title")
@@ -263,6 +263,61 @@ def test_a_new_video_rows_folder_follows_the_headline_after_its_template(tmp_pat
     th._template(out)                                                     # noqa: SLF001 - the stage as it runs
     want = p.folder.with_name(f"{NM.day_of(p.folder.name)}_When it finally works 💀")
     assert it.project == want and want.is_dir() and named == [str(want)] and "renamed" in out.get("rename", "").lower()
+
+
+def test_a_copy_to_the_shared_folder_makes_the_windows_renames_wait(qapp, tmp_path):
+    from mr_app.ui import main_window as MW
+    win = SimpleNamespace(_publishing=set())
+    folder = tmp_path / "2026-10-20_x"
+    with MW.MainWindow.publishing(win, folder):
+        assert MW.MainWindow.uses_folder(win, folder) == "it is being copied to the shared folder"
+    assert MW.MainWindow.uses_folder(win, folder) == ""
+
+
+def test_the_minutes_retry_follows_a_half_done_rename_quietly(qapp, monkeypatch):
+    from mr_app.ui import main_window as MW
+    seen, toasts, reloads = [], [], []
+    page = SimpleNamespace(moved=lambda o, n: seen.append((o.name, n.name)))
+    board = SimpleNamespace(moved=lambda o, n: None, reload=lambda: reloads.append(1))
+    half = RN.Result(RN.WAIT, Path("C:/p/local/old"), "Renamed later, when it is free: x",
+                     [(Path("C:/p/hub/old"), Path("C:/p/hub/new"))])
+    monkeypatch.setattr(RN, "pending", lambda: [{"folder": "C:/p/local/old"}])
+    monkeypatch.setattr(RN, "retry_pending", lambda hub=None, local_root=None: [half])
+    monkeypatch.setattr(MW.BG, "call", lambda fn, done=None, failed=None, **k: done(fn()) if done else fn())
+    win = SimpleNamespace(settings=SimpleNamespace(save_to="C:/p/hub"), pages={"q": page, "board": board},
+                          toast=lambda t, k="ok": toasts.append(t))
+    win.project_moved = lambda o, n: MW.MainWindow.project_moved(win, o, n)
+    win.renamed = lambda res, said=False: MW.MainWindow.renamed(win, res, said)
+    MW.MainWindow.retry_renames(win)
+    assert seen == [("old", "new")] and reloads and toasts == []          # followed, said nothing (yet)
+
+
+def test_a_new_video_rows_rename_waits_for_another_page_and_goes_on_the_list(tmp_path, monkeypatch):
+    from mr_app.core import flow
+    from mr_app.tools import download_tool as D
+    monkeypatch.setattr(PM, "state", lambda: PM.State())
+    monkeypatch.setattr(NM, "root_len", lambda *roots: NM.ROOT_LEN)
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))
+    p = PJ.create(tmp_path / "local", competitor_url="https://youtu.be/AbCdEf12345", name="Video by darkhumor",
+                  names=NM.marker(""))
+    it = D.Item("https://youtu.be/AbCdEf12345", raw_url="https://youtu.be/ZyXwVu98765", channel="LouLaughs",
+                title="Busy elsewhere 😭")
+    it.project = p.folder
+
+    class Queue:                                                          # the Match cuts queue uses it
+        def uses(self, folder):
+            return "it waits in the Match cuts queue" if Path(folder) == p.folder else ""
+    q = Queue()
+    RN.register_busy(q.uses)
+    try:
+        monkeypatch.setattr(flow, "template_step", lambda proj, ch, title: proj.update(title=title, channel=ch))
+        th = D.StageThread(it, ("template",))
+        out: dict = {}
+        th._template(out)                                                 # noqa: SLF001
+        assert it.project == p.folder and "Match cuts queue" in out["rename"]
+        assert [Path(x["folder"]) for x in RN.pending()] == [p.folder]    # tried again every minute
+    finally:
+        RN.unregister_busy(q.uses)
 
 
 def test_the_window_tells_every_page_what_moved(qapp):

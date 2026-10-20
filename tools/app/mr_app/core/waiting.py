@@ -195,12 +195,24 @@ def _moved_path(p: str, pairs: Iterable[tuple[str, str]]) -> str:
     return p
 
 
-def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, str | os.PathLike]]) -> str:
+def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, str | os.PathLike]],
+           files: dict | None = None) -> str:
     """Day 13: projects renamed after their title (``pairs``: (old folder, new folder)) -- every card's project and
-    run follow them, its name too (the id stays: a skipped or learned card never comes back). "" or the problem."""
+    run follow them, its name too (the id stays: a skipped or learned card never comes back). A card the other
+    computer wrote with its own path follows a renamed shared copy by its folder name -- only when its RAW and
+    competitor file names agree with that project's (``files``: {old folder: (raw file, competitor file)}). "" or
+    the problem."""
     pairs = [(str(a), str(b)) for a, b in pairs]
+    files = {os.path.normcase(os.path.normpath(str(k))): v for k, v in (files or {}).items()}
     hub = os.path.normcase(os.path.normpath(str(folder)))
     in_hub = [(a, b) for a, b in pairs if os.path.normcase(os.path.normpath(str(Path(a).parent))) == hub]
+
+    def agrees(x: Entry, old: str) -> bool:
+        raw, comp = files.get(os.path.normcase(os.path.normpath(old)), ("", ""))
+        if not (x.raw or x.competitor) or not (raw or comp):
+            return True                               # nothing to compare: the folder name decides
+        return (not x.raw or not raw or x.raw.lower() == str(raw).lower()) and \
+            (not x.competitor or not comp or x.competitor.lower() == str(comp).lower())
 
     def apply(items: list[Entry]) -> None:
         for x in items:
@@ -214,7 +226,7 @@ def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, s
                 continue
             for old, new in in_hub:                   # made on the other computer (its own path written): the
                 if x.name and x.name.lower() == Path(old).name.lower() and \
-                        Path(x.project or old).name.lower() == Path(old).name.lower():
+                        Path(x.project or old).name.lower() == Path(old).name.lower() and agrees(x, old):
                     x.id = x.key()                    # shared copy renamed here is found by its new name
                     x.name = Path(new).name
     return _change(folder, apply)

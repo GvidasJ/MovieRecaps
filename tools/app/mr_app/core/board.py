@@ -366,7 +366,8 @@ def load_cards(shared_root: str | os.PathLike | None, local_root: str | os.PathL
         s = by_name.get(c.folder.name.lower())
         if s is not None and (s.error or c.error or PB.same_project(c.data, s.data)):
             continue
-        if to and not c.error and any(PB.same_project(c.data, d) for d in datas):
+        if to and not c.error and any(PB.same_project(c.data, d) and Path(to).name.lower() in
+                                      [str(x).lower() for x in (d.get("old_names") or [])] for d in datas):
             continue                                            # day 13: its shared copy was renamed after its title
         out.append(c)
     return out

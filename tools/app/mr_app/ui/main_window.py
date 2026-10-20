@@ -154,6 +154,12 @@ class MainWindow(QMainWindow):
         self._rename_timer.timeout.connect(self.retry_renames)
         self._rename_timer.start(60_000)
         QTimer.singleShot(12_000, self.retry_renames)
+        self._publishing: set[str] = set()                # folders being copied to the shared folder right now
+        try:                                              # (a rename waits for the whole copy)
+            from ..core import renames
+            renames.register_busy(self.uses_folder)
+        except Exception:  # noqa: BLE001
+            pass
 
     def restore_torrents(self) -> None:
         """Once at the start: the Download page gives every unfinished torrent download its row back (nothing -- not
@@ -190,7 +196,8 @@ class MainWindow(QMainWindow):
 
         def work():
             from ..core import publish
-            return publish.publish_or_queue(folder, root, local)
+            with self.publishing(folder):
+                return publish.publish_or_queue(folder, root, local)
 
         def done(r) -> None:
             res, note = r
@@ -230,15 +237,18 @@ class MainWindow(QMainWindow):
             if not publish.reachable(root, 5.0):
                 return None
             done = []
-            if publish.pending(local):                # work ("Turn off the PC" waits) only while it publishes
+            waiting = publish.pending(local)
+            if waiting:                               # work ("Turn off the PC" waits) only while it publishes
                 with BG.counted_work():
-                    done = list(publish.retry_pending(local, root))
+                    with self.publishing(*[x["folder"] for x in waiting]):     # (day 13: no rename meanwhile)
+                        done = list(publish.retry_pending(local, root))
             for p in PJ.list_projects(local):         # finished before (or on another night) but never published
                 edit = (p.data.get("steps") or {}).get("edit") or {}
                 if edit.get("state") == PJ.DONE and not p.data.get("published"):
                     try:
                         with BG.counted_work():
-                            res, _note = publish.publish_or_queue(p.folder, root, local)
+                            with self.publishing(p.folder):
+                                res, _note = publish.publish_or_queue(p.folder, root, local)
                     except Exception:  # noqa: BLE001 - the next pass tries again
                         continue
                     if res is not None:
@@ -275,7 +285,31 @@ class MainWindow(QMainWindow):
         def failed(err: str) -> None:
             if explicit:
                 self.toast(f"It could not be renamed: {err}", "fail")
-        BG.call(work, done, failed)
+        BG.call(work, done=done, failed=failed, work=True)   # ("Turn off the PC" waits for a rename half-way)
+
+    def publishing(self, *folders):
+        """``with self.publishing(folder): ...`` -- these folders are being copied to the shared folder (a rename
+        waits for the whole copy: core.renames asks ``uses_folder``)."""
+        import contextlib
+        import os
+
+        @contextlib.contextmanager
+        def mark():
+            keys = [os.path.normcase(os.path.abspath(str(f))) for f in folders if f]
+            for k in keys:
+                self._publishing.add(k)
+            try:
+                yield
+            finally:
+                for k in keys:
+                    self._publishing.discard(k)
+        return mark()
+
+    def uses_folder(self, folder) -> str:
+        """Why a project folder must not be renamed now (core.renames.BUSY): it is being copied to the shared folder."""
+        import os
+        k = os.path.normcase(os.path.abspath(str(folder)))
+        return "it is being copied to the shared folder" if k in getattr(self, "_publishing", ()) else ""
 
     def renamed(self, res, said: bool = False) -> None:
         """What a rename did: the pages follow every folder that moved; a toast says it (a rename that waits or keeps
@@ -317,12 +351,21 @@ class MainWindow(QMainWindow):
 
         def work():
             from ..core import renames as RN
-            return RN.retry_pending(hub=hub, local_root=local) if RN.pending() else []
+            if not RN.pending():
+                return []
+            with BG.counted_work() as _renaming:          # (work only while there are renames to try)
+                return RN.retry_pending(hub=hub, local_root=local)
 
         def done(results) -> None:
             for res in results or []:
-                if getattr(res, "state", "") not in ("wait",):
+                if getattr(res, "state", "") != "wait":
                     self.renamed(res)
+                elif getattr(res, "moved", None):         # half done (the shared copy moved): the pages follow,
+                    for old, new in res.moved:            # quietly (it says so when the rest is done)
+                        self.project_moved(old, new)
+                    b = self.pages.get("board")
+                    if b is not None and hasattr(b, "reload"):
+                        b.reload()
         BG.call(work, done, lambda _e: None)
 
     def find_hub(self) -> None:

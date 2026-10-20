@@ -324,6 +324,11 @@ def named_copy(xml: Path) -> Path:
             write_copy(xml, out, seq)
         except (ValueError, UnicodeDecodeError):      # not the tool's XML: an exact copy, as before
             shutil.copy2(xml, out)
+    try:                                              # on the project's list of the app's own copies (a rename
+        from . import renames                         # removes only those, never a copy you made)
+        renames.remember_copy(xml.parent, out.name)
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 

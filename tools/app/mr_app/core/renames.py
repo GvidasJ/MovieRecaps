@@ -200,6 +200,7 @@ def copies(folder: Path, data: dict, hub: Path | None, local_root: Path | None) 
             except OSError:
                 continue
     elif local_root is not None and _norm(local_root) != _norm(hub):
+        names = {_fold_name(folder.name), *(_fold_name(str(x)) for x in (data.get("old_names") or []) if x)}
         cands = [local_root / folder.name]
         try:
             cands += [d for d in local_root.iterdir() if d.is_dir() and d.name != folder.name]
@@ -209,7 +210,12 @@ def copies(folder: Path, data: dict, hub: Path | None, local_root: Path | None) 
             try:
                 if (c / P.FILE).is_file():
                     d = _read(c)
-                    if d is not None and PB.same_project(data, d):
+                    pub = (d or {}).get("published") if isinstance((d or {}).get("published"), dict) else {}
+                    to = str(pub.get("to") or "")
+                    # linked: this computer's folder says it was published to this shared copy (now or under one
+                    # of its old names) -- the same "created" second alone is not enough (a copy made in Explorer,
+                    # two drops prepared at once)
+                    if d is not None and to and _fold_name(Path(to).name) in names and PB.same_project(data, d):
                         twin = (c, d)
                         break
             except OSError:
@@ -299,12 +305,27 @@ def _prefs_projects() -> list[Path]:
             except (ValueError, AttributeError):
                 pass
         for f in found:
-            f = f.strip()
-            if f.startswith("\\\\?\\"):
-                f = f[4:]
+            f = _plain_path(f)
             if f.lower().endswith(".prproj"):
                 out.append(Path(f))
     return out
+
+
+def _plain_path(text: str) -> str:
+    """A path as Premiere writes it in XML: its &amp; ... read back, the long-path prefix off (\\\\?\\UNC\\server\\x ->
+    \\\\server\\x, \\\\?\\D:\\x -> D:\\x)."""
+    import html
+    f = html.unescape(str(text or "")).strip()
+    if f[:8].upper() == "\\\\?\\UNC\\":
+        return "\\\\" + f[8:]
+    if f.startswith("\\\\?\\"):
+        return f[4:]
+    return f
+
+
+def _fold_name(name: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFC", name or "").casefold()
 
 
 def scan_places(hub: Path | None) -> list[Path]:
@@ -353,9 +374,9 @@ def folder_names_in(prproj: Path) -> frozenset[str]:
                 data = gzip.decompress(data)
             text = data.decode("utf-8", "replace")
             for m in _PATH_RX.finditer(text):
-                for part in re.split(r"[\\/]", m.group(0))[:-1]:
+                for part in re.split(r"[\\/]", _plain_path(m.group(0)))[:-1]:
                     if part:
-                        names.add(part.lower())
+                        names.add(_fold_name(part))
         except (OSError, EOFError, gzip.BadGzipFile, ValueError):
             names = set()
     out = frozenset(names)
@@ -388,7 +409,7 @@ def premiere_users(folder: Path, data: dict, hub: Path | None, scan: bool = True
         except Exception:  # noqa: BLE001
             pass
     if scan:
-        name = folder.name.lower()
+        name = _fold_name(folder.name)
         for f in scan_places(hub):
             if name in folder_names_in(f):
                 return f"your Premiere project {f.name} ({f.parent}) plays files from it"
@@ -408,12 +429,65 @@ def _same_edit(a: str, b: str) -> bool:
         return a == b
 
 
+COPIES = "copies"                   # project.json "names": {"copies": ["edit/<name>_edit.xml", ...]}: the XML copies
+#                                     the app wrote -- the only ones a rename ever removes
+
+
+def remember_copy(run: str | os.PathLike, name: str) -> None:
+    """The app wrote the XML copy ``name`` in this run folder of a title-named project: on its list (never raises)."""
+    run = Path(run)
+    key = f"{run.name}/{name}"
+    try:
+        p = P.load(run.parent)
+    except (OSError, ValueError):
+        return
+    n = p.data.get(NM.KEY)
+    if not isinstance(n, dict) or key.lower() in [str(x).lower() for x in (n.get(COPIES) or [])]:
+        return
+
+    def apply(d: dict) -> None:
+        m = d.get(NM.KEY)
+        if isinstance(m, dict):
+            c = [str(x) for x in (m.get(COPIES) or [])]
+            if key.lower() not in [x.lower() for x in c]:
+                m[COPIES] = (c + [key])[-50:]
+    try:
+        p.change(apply)
+    except (OSError, ValueError):
+        pass
+
+
+def _forget_copy(proj: Path, key: str) -> None:
+    def apply(d: dict) -> None:
+        m = d.get(NM.KEY)
+        if isinstance(m, dict) and m.get(COPIES):
+            m[COPIES] = [x for x in m[COPIES] if str(x).lower() != key.lower()]
+    try:
+        P.load(proj).change(apply)
+    except (OSError, ValueError):
+        pass
+
+
+def app_copy_names(run: Path, data: dict | None) -> set[str]:
+    """The XML file names (lower case) in this run folder that the app wrote: the ones on the project's list, and
+    night 10's own copy names (<project>_<run>.xml -- also under the project's old names -- and <run>_edit.xml)."""
+    d = data or {}
+    n = d.get(NM.KEY) if isinstance(d.get(NM.KEY), dict) else {}
+    out = {str(x).split("/", 1)[1].lower() for x in (n.get(COPIES) or [])
+           if "/" in str(x) and str(x).split("/", 1)[0].lower() == run.name.lower()}
+    for o in [run.parent.name, str(d.get("name") or ""), *[str(x) for x in (d.get("old_names") or [])]]:
+        if o:
+            out.add(f"{o}_{run.name}.xml".lower())
+    out.add(f"{run.name}_edit.xml".lower())
+    return out
+
+
 def sync_run_files(run: Path, data: dict | None) -> list[str]:
     """The app's files in a run folder follow the project's names (a project whose names follow its title): its XML
-    copy is ``<title>_edit.xml`` (made now when missing, the sequence called after the title); an older copy of the
-    app's (the same edit: 1_edit.xml with another sequence name) is removed with its empty Premiere project renamed
-    to ``<title>.prproj`` -- both stay when you saved that project (it holds the edit). 1_edit.xml and your own files
-    are never touched. Returns what was done (file names)."""
+    copy is ``<title>_edit.xml`` (made now when missing, the sequence called after the title); an older copy THE APP
+    WROTE (``app_copy_names``, and still the same edit: 1_edit.xml with another sequence name) is removed, with its
+    empty Premiere project renamed to ``<title>.prproj`` -- both stay when you saved that project (it holds the edit).
+    1_edit.xml and your own files (a backup of the XML, any other name) are never touched. Returns what was done."""
     from . import premiere
     xml = run / "1_edit.xml"
     if not xml.is_file() or not NM.uses_titles(data):
@@ -434,16 +508,19 @@ def sync_run_files(run: Path, data: dict | None) -> list[str]:
         base = xml.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return done
+    ours = app_copy_names(run, _read(run.parent) or data)
     new_proj = run / NM.project_name(out)
     for f in sorted(run.iterdir()):
         if f.suffix.lower() != ".xml" or f.name.lower() in ("1_edit.xml", fname.lower()) or not f.is_file():
             continue
+        if f.name.lower() not in ours:
+            continue                                  # not a copy the app wrote: yours, never touched
         try:
             text = f.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         if not _same_edit(text, base):
-            continue                                  # not the app's copy of this edit: yours
+            continue                                  # (changed since: not the app's copy of this edit any more)
         partners = [p for p in {run / NM.project_name(f), f.with_suffix(".prproj")} if p.is_file()]
         if any(premiere.holds_edit(p) for p in partners):
             continue                                  # you saved that project: it and its copy stay as they are
@@ -457,6 +534,7 @@ def sync_run_files(run: Path, data: dict | None) -> list[str]:
         try:
             f.unlink()
             done.append(f"{f.name} removed (now {fname})")
+            _forget_copy(run.parent, f"{run.name}/{f.name}")
         except OSError:
             pass
     return done
@@ -488,7 +566,9 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
         return Result(GONE, folder, "The project folder is not there any more")
     if not explicit and not NM.uses_titles(data):
         return Result(OLD, folder, "A project from before: it keeps its name (Rename to title on its card renames it)")
-    d = titles(folder, data)
+    cps = copies(folder, data, hub, local_root)
+    same = merged_titles(cps)                         # (as publishing merges the two copies' titles)
+    d = {**titles(folder, data), **same}
     t, src = NM.title_of(d)
     if not t:
         return Result(NO_TITLE, folder, "It has no title yet, so it keeps its name")
@@ -496,8 +576,6 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     mark = {**(data.get(NM.KEY) if isinstance(data.get(NM.KEY), dict) else NM.marker(src)), "rule": NM.RULE,
             "from": src}
     mark.pop("kept", None)
-    cps = copies(folder, data, hub, local_root)
-    same = {"title": d.get("title"), "upload_title": d.get("upload_title")}
     todo = [(c, dd, sh) for c, dd, sh in cps if not NM.has_base(c.name, base)]
     used = next((w for w in (in_use(c, dd, busy, hub) for c, dd, _sh in cps) if w), "")
     if not todo:
@@ -506,7 +584,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
                 P.load(c).update(**{NM.KEY: mark})
         files: list[str] = []
         if not used:                                  # (nothing is touched while something uses it)
-            _share_titles(cps, folder, same)
+            _share_titles(cps, same)
             files = [f for c, _dd, _sh in cps for r in run_dirs(c) for f in sync_run_files(r, _read(c))]
         return Result(SAME, folder, f"It is named after {NM.SOURCE_WORDS.get(src, 'its title')} already", files=files)
     if used:
@@ -529,9 +607,10 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
                     pass
             files = []
             if NM.uses_titles(_read(folder) or {}):
-                _share_titles(cps, folder, same)
+                _share_titles(cps, same)
                 files = [f for c2, _d2, _s2 in cps for r in run_dirs(c2) for f in sync_run_files(r, _read(c2))]
             return Result(KEPT, folder, f"It keeps its name: {why}", files=files)
+    _share_titles(cps, same)                          # both copies hold the same titles before they are renamed
     moved: list[tuple[Path, Path]] = []
     shared_pair: tuple[Path, Path] | None = None
     problem = ""
@@ -561,7 +640,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     files = []
     for c, _dd, sh in cps:
         now_at = next((n for o, n in moved if _norm(o) == _norm(c)), c)
-        _fix_json(now_at, moved, shared_pair, mark, None if _norm(c) == _norm(folder) else same)
+        _fix_json(now_at, moved, shared_pair, mark)
         for r in run_dirs(now_at):
             try:
                 from . import publish as PB
@@ -577,26 +656,13 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     return Result(RENAMED, here, f"Renamed to {here.name}", moved, files)
 
 
-def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[Path, Path] | None, mark: dict,
-              same_titles: dict | None = None) -> None:
+def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[Path, Path] | None,
+              mark: dict) -> None:
     """project.json of a copy after the move: its name and old names, the steps' run folders, published.to (the
-    shared copy's new name -- written as that computer sees the shared folder), the names marker; ``same_titles``:
-    the twin of the copy whose title changed takes its titles (and title.txt), as the next publish would merge them
-    -- its files are then named after the same title."""
+    shared copy's new name -- written as that computer sees the shared folder), the names marker."""
     from . import publish as PB
 
     def apply(d: dict) -> None:
-        if same_titles is not None:
-            changed = False
-            for k, v in same_titles.items():
-                if (d.get(k) or "") != (v or ""):
-                    d[k] = v
-                    changed = True
-            if changed:
-                try:
-                    PB.write_title_txt(folder, d)
-                except OSError:
-                    pass
         for old, new in moved:
             if _norm(new) == _norm(folder):
                 d["name"] = new.name
@@ -610,25 +676,44 @@ def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[P
             to = Path(str(pub["to"]))
             if to.name.lower() == shared_pair[0].name.lower():
                 pub["to"] = str(to.parent / shared_pair[1].name)
-        d[NM.KEY] = dict(mark)
+        keep = d.get(NM.KEY) if isinstance(d.get(NM.KEY), dict) else {}
+        d[NM.KEY] = {**dict(mark), **({"copies": keep["copies"]} if keep.get("copies") else {})}
     try:
         P.load(folder).change(apply)
     except (OSError, ValueError):
         pass
 
 
-def _share_titles(cps: list[tuple[Path, dict, bool]], folder: Path, same: dict) -> None:
-    """The copies other than ``folder`` take its titles (and title.txt): the files of both follow one title."""
+def merged_titles(cps: list[tuple[Path, dict, bool]]) -> dict:
+    """The copies' headline and YouTube title merged the way publishing merges them (publish._merge_titles): a title
+    set on one copy only is kept; set differently on both, the copy whose title.txt changed last wins (the app
+    rewrites title.txt with every title change; one you edited by hand counts too). Nothing set: ''."""
+    from . import publish as PB
+    rows = []
+    for c, dd, _sh in cps:
+        t = titles(c, dd)
+        try:
+            m = os.stat(c / PB.TITLE_TXT).st_mtime
+        except OSError:
+            m = _ts(dd.get("updated")) or 0.0
+        rows.append((m, t))
+    out = {}
+    for k in ("title", "upload_title"):
+        have = [(m, t.get(k)) for m, t in rows if PB._set(t.get(k))]                     # noqa: SLF001
+        out[k] = max(have, key=lambda x: x[0])[1] if have else ""
+    return out
+
+
+def _share_titles(cps: list[tuple[Path, dict, bool]], same: dict) -> None:
+    """Every copy holds the merged titles (and its title.txt says them): the files of both follow one title. A copy
+    that has them already is not written."""
     from . import publish as PB
     for c, _dd, _sh in cps:
-        if _norm(c) == _norm(folder):
-            continue
-
-        def apply(d: dict) -> None:
+        def apply(d: dict, c=c) -> None:
             changed = False
             for k, v in same.items():
                 if (d.get(k) or "") != (v or ""):
-                    d[k] = v
+                    d[k] = v if v else (None if d.get(k) is None else "")
                     changed = True
             if changed:
                 try:
@@ -636,17 +721,20 @@ def _share_titles(cps: list[tuple[Path, dict, bool]], folder: Path, same: dict) 
                 except OSError:
                     pass
         try:
-            P.load(c).change(apply)
+            cur = _read(c) or {}
+            if any((titles(c, cur).get(k) or "") != (v or "") for k, v in same.items()):
+                P.load(c).change(apply)
         except (OSError, ValueError):
             pass
 
 
 def _replace_paths(text: str, pairs: Iterable[tuple[str, str]]) -> str:
     """Every path inside an old folder (the folder itself at a line's end, or followed by \\ or /) -> the new folder.
-    Never a longer name that starts like it: 'The Truth (2)' or 'The Truth About' (names have spaces now)."""
+    Never a longer name that starts like it: 'The Truth (2)', 'The Truth About', "The dog's revenge" (names have
+    spaces and apostrophes now)."""
     for old, new in pairs:
         if old and old in text:
-            text = re.sub(re.escape(old) + r"(?=[\\/\r`\"']|$)", lambda _m, n=new: n, text, flags=re.M)
+            text = re.sub(re.escape(old) + r"(?=[\\/\r]|$)", lambda _m, n=new: n, text, flags=re.M)
     return text
 
 
@@ -657,7 +745,12 @@ def _fix_outside(moved: list[tuple[Path, Path]], hub: Path | None, local_root: P
     if hub is not None:
         try:
             from . import waiting
-            waiting.relink(hub, pairs)
+            files = {}
+            for o, n in moved:
+                d = _read(n) or {}
+                files[str(o)] = tuple(str(((d.get(r) or {}) if isinstance(d.get(r), dict) else {}).get("file") or "")
+                                      for r in ("raw", "competitor"))
+            waiting.relink(hub, pairs, files)
         except Exception:  # noqa: BLE001 - a card that does not follow is found again by its folder name
             pass
         try:
@@ -761,8 +854,14 @@ def retry_pending(*, hub: str | os.PathLike | None = None, local_root: str | os.
     for x in pending():
         folder = Path(x["folder"])
         if not (folder / P.FILE).is_file():
-            _set_pending(folder, drop=True)
-            continue
+            try:
+                from . import publish as PB
+                gone = PB.reachable(folder.parent, 3.0) and not folder.exists()
+            except Exception:  # noqa: BLE001
+                gone = False
+            if gone:                                  # really gone (renamed or removed meanwhile): off the list
+                _set_pending(folder, drop=True)
+            continue                                  # (else the shared folder does not answer now: kept)
         res = rename(folder, hub=hub, local_root=local_root, explicit=bool(x.get("explicit")))
         if res.state == WAIT:
             _set_pending(folder, res.text, bool(x.get("explicit")), new=res.folder)

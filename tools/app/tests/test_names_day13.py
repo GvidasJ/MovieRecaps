@@ -212,13 +212,13 @@ def test_the_edit_copy_is_named_after_the_title_with_the_sequence_renamed(tmp_pa
     xml = p.folder / "edit" / "1_edit.xml"
     before = xml.read_bytes()
     out = PM.named_copy(xml)
-    assert out.name == f"{NM.fit(TITLE)}_edit.xml"
+    assert out.name == f"{NM.file_stem(NM.fit(TITLE))}_edit.xml"
     assert PM.sequence_name_in(out.read_text(encoding="utf-8")) == NM.sequence_name(TITLE)
     assert xml.read_bytes() == before                                  # 1_edit.xml exactly as it was
     assert out.read_bytes().replace(NM.sequence_name(TITLE).encode("utf-8"), b"Recreated Edit (Premiere)") == \
         before                                                         # every other byte the same
     assert abs(out.stat().st_mtime - xml.stat().st_mtime) < 0.01       # the edit's time (Open in Premiere compares)
-    assert PM.project_for(out).name == f"{NM.fit(TITLE)}.prproj"
+    assert PM.project_for(out).name == f"{NM.file_stem(NM.fit(TITLE))}.prproj"
     assert PM.named_copy(xml) == out                                   # made once
 
 
@@ -245,7 +245,7 @@ def test_a_finished_edit_gets_its_title_copy_at_once(tmp_path):
     p = title_project(tmp_path / "local", edit=False)
     edit_xml(p.folder / "edit")
     flow.record_edit(p, {"label": "PASS", "run_dir": str(p.folder / "edit")})
-    assert (p.folder / "edit" / f"{NM.fit(TITLE)}_edit.xml").is_file()
+    assert (p.folder / "edit" / f"{NM.file_stem(NM.fit(TITLE))}_edit.xml").is_file()
     old = P.create(tmp_path, competitor_url="https://youtu.be/AbCdEf12345", name="old one")
     edit_xml(old.folder / "edit")
     flow.record_edit(old, {"label": "PASS", "run_dir": str(old.folder / "edit")})
@@ -498,7 +498,7 @@ def test_an_empty_own_project_is_renamed_with_the_folder(tmp_path):
     done = RN.sync_run_files(p.folder / "edit", d)
     names = sorted(f.name for f in (p.folder / "edit").iterdir() if f.is_file())
     assert "Shiny new headline_edit.xml" in names and "Shiny new headline.prproj" in names
-    assert f"{NM.fit(TITLE)}_edit.xml" not in names and done
+    assert f"{NM.file_stem(NM.fit(TITLE))}_edit.xml" not in names and done
 
 
 def test_old_projects_are_renamed_only_by_rename_to_title(tmp_path):
@@ -529,6 +529,114 @@ def test_scanning_a_project_reads_its_folder_names_once(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# the review's findings (day 13)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_renaming_one_copy_keeps_a_title_only_its_twin_has(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local)
+    dest = published(p, hub)
+    B.set_upload_title(dest, "Set on the laptop 🎥")                     # the YouTube title: only the shared copy
+    old = time.time() - 600
+    os.utime(dest / "title.txt", (old, old))
+    B.set_title(p.folder, "A new headline\nfrom the queue row")           # this computer: the headline, later
+    res = RN.rename(p.folder, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED, res.text                             # named after the YouTube title (it wins)
+    assert res.folder.name.endswith("_Set on the laptop 🎥")
+    for c in (res.folder, hub / res.folder.name):
+        d = P.load(c).data
+        assert d["upload_title"] == "Set on the laptop 🎥"               # never wiped by the other copy's ""
+        assert d["title"] == "A new headline\nfrom the queue row"        # the newer headline on both
+        assert (c / "title.txt").read_text(encoding="utf-8") == "Set on the laptop 🎥"
+
+
+def test_the_scan_reads_xml_escaped_paths_and_long_unc_ones(tmp_path):
+    f = tmp_path / "tom.prproj"
+    f.write_bytes(gzip.compress("<P><ActualMediaFilePath>D:\\Shared\\Projects\\2026-10-20_Tom &amp;amp; Jerry"
+                                "\\edit\\extras\\media\\raw.mp4</ActualMediaFilePath>"
+                                "<FilePath>\\\\?\\UNC\\192.168.101.11\\Shared\\Projects\\2026-10-20_It&apos;s Ok"
+                                "\\edit\\x.mp4</FilePath></P>".replace("&amp;amp;", "&amp;").encode("utf-8")))
+    got = RN.folder_names_in(f)
+    assert "2026-10-20_tom & jerry" in got and "2026-10-20_it's ok" in got and "192.168.101.11" in got
+    assert RN._plain_path("\\\\?\\UNC\\pc\\Shared\\a.prproj") == "\\\\pc\\Shared\\a.prproj"      # noqa: SLF001
+    assert RN._plain_path("\\\\?\\D:\\a &amp; b.prproj") == "D:\\a & b.prproj"                  # noqa: SLF001
+
+
+def test_a_rename_never_removes_your_own_copy_of_the_xml(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    p = title_project(local, edit=False)
+    x = edit_xml(p.folder / "edit")
+    PM.named_copy(x)                                                     # the app's copy (on its list)
+    mine = p.folder / "edit" / "1_edit backup.xml"
+    mine.write_bytes(x.read_bytes())                                     # yours: the same edit, another name
+    named = p.folder / "edit" / "my version_edit.xml"
+    named.write_bytes(x.read_bytes().replace(b"Recreated Edit (Premiere)", b"my version"))
+    B.set_upload_title(p.folder, "Brand new title")
+    res = RN.rename(p.folder, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED, res.text
+    files = sorted(f.name for f in (res.folder / "edit").glob("*.xml"))
+    assert files == ["1_edit backup.xml", "1_edit.xml", "Brand new title_edit.xml", "my version_edit.xml"]
+    assert P.load(res.folder).data["names"]["copies"] == ["edit/Brand new title_edit.xml"]
+
+
+def test_paths_with_apostrophes_after_the_old_name_are_another_project(tmp_path):
+    text = "  - run: .\\2026-10-20_The dog's revenge\\edit\n  - run: .\\2026-10-20_The dog\\edit\n"
+    out = RN._replace_paths(text, [(".\\2026-10-20_The dog", ".\\2026-10-20_New")])                 # noqa: SLF001
+    assert out == "  - run: .\\2026-10-20_The dog's revenge\\edit\n  - run: .\\2026-10-20_New\\edit\n"
+
+
+def test_the_files_leave_room_for_premieres_own_files_next_to_the_project():
+    for title in ("The fact that this ad sounds so wrong is hilarious 📻😭",
+                  "Before Tobey Maguire Was Spider-Man He Had One Job And It Was Hilarious To Watch Every Time 🕷️"):
+        part = NM.fit(title)
+        stem = NM.file_stem(part)
+        run = f"{'x' * NM.ROOT_LEN}\\2026-10-20_{part} (99)\\edit-99"
+        auto = f"{run}\\Adobe Premiere Pro Auto-Save\\{stem}--{'0' * 36}-2026-10-20_18-04-39.prproj"
+        assert NM.utf16_len(auto) <= NM.PREMIERE_LIMIT or len(stem) <= NM.STEM_MIN + 2, (len(auto), stem)
+        assert stem and title.startswith(stem.split(" ")[0])
+    assert NM.file_stem("Short title") == "Short title"                  # a usual short title: whole
+
+
+def test_a_twin_is_only_a_folder_linked_by_where_it_was_published(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local)
+    dest = published(p, hub)
+    stray = local / "2026-10-20_a copy made in Explorer"
+    import shutil
+    shutil.copytree(p.folder, stray)                                     # the same "created" second
+    P.load(stray).update(published=None)
+    cps = RN.copies(dest, P.load(dest).data, hub, local)
+    assert [c for c, _d, _s in cps] == [dest, p.folder]                  # the real twin, never the stray copy
+
+
+def test_the_other_computers_card_of_another_video_is_never_re_pointed(tmp_path):
+    hub = tmp_path / "Projects"
+    old = hub / "2026-10-20_video"
+    old.mkdir(parents=True)
+    WT.add(hub, WT.Entry(name=old.name, project=r"C:\elsewhere\2026-10-20_video", run=r"C:\elsewhere\2026-10-20_video"
+                         r"\edit", run_in_project="edit", raw="other raw.mp4", competitor="other comp.mp4",
+                         computer="laptop"))
+    new = hub / "2026-10-20_Renamed"
+    os.rename(old, new)
+    WT.relink(hub, [(old, new)], {str(old): ("raw.mp4", "competitor.mp4")})
+    assert WT.read(hub)[0].name == old.name                              # another video with the same folder name
+
+
+def test_a_waiting_rename_is_kept_while_its_folder_cannot_be_reached(tmp_path, monkeypatch):
+    from mr_app.core import publish as PBm
+    gone = tmp_path / "unreachable" / "2026-10-20_x"
+    RN._set_pending(gone, "it waits")                                     # noqa: SLF001
+    monkeypatch.setattr(PBm, "reachable", lambda root, timeout_s=5.0: False)
+    RN.retry_pending(hub=tmp_path / "hub", local_root=tmp_path / "local")
+    assert [Path(x["folder"]) for x in RN.pending()] == [gone]           # (the PC asleep: kept for later)
+    monkeypatch.setattr(PBm, "reachable", lambda root, timeout_s=5.0: True)
+    RN.retry_pending(hub=tmp_path / "hub", local_root=tmp_path / "local")
+    assert RN.pending() == []                                            # really gone: off the list
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Learn still finds the run from a project made from <title>_edit.xml
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -544,7 +652,7 @@ def test_learn_finds_the_run_of_a_project_made_from_the_title_copy(tmp_path):
     x.write_text(x.read_text(encoding="utf-8").replace(
         "<sequence>", "<sequence id='sequence-1'><name>Recreated Edit (Premiere)</name>", 1), encoding="utf-8")
     copy = PM.named_copy(x)
-    assert copy.name == f"{NM.fit(TITLE)}_edit.xml"
+    assert copy.name == f"{NM.file_stem(NM.fit(TITLE))}_edit.xml"
     # the project Premiere makes from it: <title>.prproj next to it, its sequence called after the title, the media
     # in the run's extras\media
     pr = LC.fake_prproj(PM.project_for(copy), [{"path": str(run / "extras" / "media" / "raw.mp4"), **LC.RAW}],
