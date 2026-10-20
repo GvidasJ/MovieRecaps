@@ -402,7 +402,8 @@ Your video12 fix cut exactly those 2 end frames; in video6 you kept the 1 frame 
    it is -- a hard check is not something to loosen at the end of a day).
 4. **Everything built today, used in the real app** (the real window, scratch folders, nothing of yours written): the
    free-space strip (`C: 79.9 GB`), the amber version line *"aria2c 1.19.0 is too old (1.37.0 needed)"* with Fix now
-   (not pressed: it would have updated packages while check-all ran on them), a board card named after its YouTube
+   (not pressed: it would have updated packages while check-all ran on them; after the final setup_app run the window
+   opened without the line), a board card named after its YouTube
    title with **Rename to title** -- pressed: the folder became `2026-10-20_The Most Questionable Ad of All Time 📻😭`,
    the app's copy `The Most Questionable Ad of All Time_edit.xml` appeared next to `1_edit.xml`, project.json
    followed, the button went; Clean up from the strip and from the board. **Found and fixed**: a long word in a
