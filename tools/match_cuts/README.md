@@ -313,7 +313,14 @@ is listed instead), A1 has no gap under its picture and no overlap, and no cut o
 the RAW or less (1.5 RAW frames at most; one take, cut: the run fails). That last part is for the default (the
 competitor's cut points; a pause the default cuts out of a take always skips 0.1 s or more): with `--remove-silence`
 the cuts move into the quiet on purpose and a pause trimmed at a cut may skip a few ms of silence (video1: 83 ms) --
-`XML SPEECH` and `XML SILENCE` judge those cuts.
+`XML SPEECH` and `XML SILENCE` judge those cuts. Day 13: where the competitor cut about two RAW frames out of one take
+(83 ms -- a real cut in the 60 fps plan), the RAW's rate can round that to a one-frame skip in 1_edit.xml (video14 at
+00:00:20:12, video16 at 00:00:04:13 and 00:00:07:04); your fixes play those takes straight through, so 1_edit.xml now
+plays the skipped frame too -- with the clip whose RAW shot it is (the one before ends its shot, or the one after starts
+on its shot's first frame) -- and everything after the cut comes a frame later (A1, markers, captions). Only at 100 %,
+with every A1 item there its picture's own sound and nothing new for the flash check; the report says *"1 skipped frame
+put back at ..."* under *Fixed in the edit by itself*. The checked 60 fps edit keeps the competitor's jump
+(`export_xml_edl.TAKE_JUMP_FIX`).
 
 **Pauses inside the takes are cut out, carefully** (the default since night 6; `--keep-silence`: none;
 `--remove-silence`: every silence, as before night 4). Learned from your pause cuts of laptop009, mike005, laptop010
