@@ -135,4 +135,13 @@ class JobRun:
                     self.converted[raw] = cr
         res = read_result(self.run_dir, code, stdout, stderr, self.stopped)
         res.update(exit=code, seconds=round(self.elapsed(), 1), log=str(log), command=" ".join(self.cmd))
+        try:                                    # day 13: what the run was given (a stop can be compared with a run)
+            from . import inputs as IN
+            res["inputs"] = IN.given(self.job, Path(self.job.competitor), Path(self.use_raw))
+            if res.get("label") == "WRONG PAIR" and getattr(self.job, "project", None) is not None:
+                hint = IN.copies_hint(self.job.project)          # the project's copies are not your files?
+                if hint:
+                    res["failures"] = list(res.get("failures") or []) + [hint]
+        except Exception:  # noqa: BLE001 - a help, never a stop
+            pass
         return res

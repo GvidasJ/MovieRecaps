@@ -46,7 +46,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .common import ffmpeg_bin, log
+from .common import ffmpeg_bin, ffprobe_bin, log
 
 VERSION = 2
 
@@ -133,6 +133,7 @@ class Result:
     cached: bool = False
     competitor: str = ""
     raw: str = ""
+    inputs: dict = field(default_factory=dict)      # day 13: {"competitor": facts(), "raw": facts()}
 
     def summary(self) -> str:
         """The numbers in one line (the run's log)."""
@@ -145,6 +146,8 @@ class Result:
         """The WRONG PAIR stop, in plain words: what was found, the files, what to do (one line, kept short: the
         batch's summary and the app show it as it is)."""
         comp, raw = Path(self.competitor).name, Path(self.raw).name
+        if self.inputs.get("competitor") and self.inputs.get("raw"):      # day 13: what each file is
+            comp, raw = facts_text(self.inputs["competitor"]), facts_text(self.inputs["raw"])
         sides = [self.sound.text("sound", "pieces", why=False)]
         if self.picture is not None:
             sides.append(self.picture.text("picture", "frames", why=False))
@@ -167,7 +170,7 @@ class Result:
         def side(x: dict | None) -> Side | None:
             return Side(**{k: v for k, v in x.items() if k in names}) if x else None
         return Result(bool(d["wrong"]), side(d["sound"]), side(d.get("picture")), float(d["seconds"]),
-                      True, str(d.get("competitor", "")), str(d.get("raw", "")))
+                      True, str(d.get("competitor", "")), str(d.get("raw", "")), dict(d.get("inputs") or {}))
 
 
 # =====================================================================================================================
@@ -224,6 +227,82 @@ def decode_audio(path: str | Path, duration: float | None = None, timeout: float
 def probe(path: str | Path) -> dict:
     from .cli import quick_probe
     return quick_probe(path)
+
+
+def _clock(s: float) -> str:
+    s = max(0.0, float(s or 0.0))
+    h, m, sec = int(s // 3600), int(s % 3600 // 60), int(round(s % 60))
+    if sec == 60:
+        m, sec = m + 1, 0
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+def _size_text(n: int | None) -> str:
+    if n is None:
+        return "size unknown"
+    return f"{n / 1e9:.2f} GB" if n >= 1e9 else f"{n / 1e6:.1f} MB"
+
+
+def facts(path: str | Path, info: dict | None = None) -> dict:
+    """What a run was given (day 13: the New video form's WRONG PAIR could not be compared with the drop that ran):
+    the file's path, size, change time, length, picture size, frame rate and every sound stream -- one ffprobe call,
+    no decoding. Never raises (what cannot be read is said)."""
+    p = Path(path)
+    out: dict = {"path": str(p), "name": p.name}
+    try:
+        st = p.stat()
+        out.update(size=st.st_size, mtime_ns=st.st_mtime_ns)
+    except OSError as e:
+        out["error"] = f"cannot read the file ({e.strerror or e})"
+        return out
+    if info:
+        out.update(duration=float(info.get("duration") or 0.0), width=info.get("width"), height=info.get("height"))
+    try:
+        r = _run([ffprobe_bin(), "-v", "error", "-show_entries",
+                  "stream=index,codec_type,codec_name,channels,sample_rate,r_frame_rate,start_time:"
+                  "stream_tags=language:format=duration", "-of", "json", str(p)], 60.0)
+        d = json.loads(r.stdout or b"{}") if r.returncode == 0 else {}
+    except Exception:  # noqa: BLE001 - the facts are a help
+        d = {}
+    streams = d.get("streams") or []
+    v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if v is not None:
+        out["video"] = v.get("codec_name")
+        try:
+            from fractions import Fraction
+            fr = float(Fraction(str(v.get("r_frame_rate") or "0/1")))
+            out["fps"] = f"{fr:.3f}".rstrip("0").rstrip(".") if fr > 0 else None
+        except (ValueError, ZeroDivisionError):
+            out["fps"] = None
+    out["sound"] = [{"codec": s.get("codec_name"), "channels": s.get("channels"), "rate": s.get("sample_rate"),
+                     "start": s.get("start_time"), "language": (s.get("tags") or {}).get("language")}
+                    for s in streams if s.get("codec_type") == "audio"]
+    if "duration" not in out:
+        try:
+            out["duration"] = float((d.get("format") or {}).get("duration") or 0.0)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def facts_text(f: dict) -> str:
+    """'name (0:25, 1080x1920, 30/1 fps, vp9, 4.6 MB; sound: opus 2 ch)' -- one file in one line, plain."""
+    if f.get("error"):
+        return f"{f.get('name')} ({f['error']})"
+    bits = [_clock(f["duration"])] if f.get("duration") else []
+    if f.get("width") and f.get("height"):
+        bits.append(f"{f['width']}x{f['height']}")
+    if f.get("fps"):
+        bits.append(f"{f['fps']} fps")
+    if f.get("video"):
+        bits.append(str(f["video"]))
+    bits.append(_size_text(f.get("size")))
+    snd = f.get("sound")
+    if snd is not None:
+        s = ", ".join(f"{x.get('codec')} {x.get('channels')} ch" + (f" {x['language']}" if x.get("language") else "")
+                      for x in snd) or "none"
+        bits[-1] += f"; sound: {s}"
+    return f"{f.get('name')} ({', '.join(bits)})"
 
 
 def _gray_frames(out: bytes, w: int, h: int) -> np.ndarray:
@@ -901,8 +980,9 @@ def check(comp: str | Path, raw: str | Path, work_dir: str | Path | None = None,
             path = cache_path(work_dir, cache_key(comp, raw))
             if path.is_file():
                 res = Result.from_dict(json.loads(path.read_text(encoding="utf-8")))
-                res.cached = True
-                return res
+                if not res.wrong:                   # day 13: a WRONG PAIR is always checked again (seconds): a
+                    res.cached = True               # cached one made every Try again of a project stop at once
+                    return res
         except (OSError, ValueError, KeyError, TypeError):
             pass
     t0 = time.perf_counter()
@@ -944,9 +1024,10 @@ def check(comp: str | Path, raw: str | Path, work_dir: str | Path | None = None,
         finally:
             pts.cancel()
             kfr.cancel()
-    res = Result(False, sound, pic, round(time.perf_counter() - t0, 2), False, str(comp), str(raw))
+    res = Result(False, sound, pic, round(time.perf_counter() - t0, 2), False, str(comp), str(raw),
+                 {"competitor": facts(comp, ci), "raw": facts(raw, ri)})
     res.wrong = decide(sound, pic if sound.state != FOUND else None)
-    if path is not None:
+    if path is not None and not res.wrong:          # day 13: a WRONG PAIR is not kept (checked again next time)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             d = res.to_dict()
@@ -988,6 +1069,11 @@ def stop_if_wrong_pair(ctx: Any) -> Result | None:
     except Exception as e:  # noqa: BLE001 - the long run finds out itself
         log.warning("pair check: could not run (%s: %s) -- the run goes on", type(e).__name__, e)
         return None
+    for role in ("competitor", "raw"):              # day 13: what the run was given, in its log
+        f = res.inputs.get(role)
+        if f:
+            log.info("pair check: the %s: %s -- %s", "competitor" if role == "competitor" else "RAW", facts_text(f),
+                     f.get("path"))
     log.info("pair check: %s -> %s", res.summary(), "WRONG PAIR" if res.wrong else "goes on")
     try:
         ctx.dlog.record("inputs", "pair_check", wrong=res.wrong, cached=res.cached, seconds=res.seconds,
