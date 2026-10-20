@@ -11,9 +11,10 @@ Keys: Space starts the queue, Del removes the queue row under the mouse, Ctrl+V 
 runs in the background (background.py)."""
 from __future__ import annotations
 
+import os
 import subprocess
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
                                QScrollArea, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget)
@@ -22,6 +23,7 @@ from .. import APP_NAME
 from ..core import paths
 from . import background as BG
 from . import chrome
+from . import health
 from . import motion as M
 from . import tabs as T
 from . import theme
@@ -124,6 +126,10 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._strip())
+        self.version_line = health.VersionLine()            # day 13: the programs differ from the project's
+        self.version_line.fix.connect(self.fix_versions)
+        self.version_line.open_log.connect(self.open_versions_log)
+        root.addWidget(self.version_line)
         root.addWidget(self._header(tools))
         self.quote = chrome.QuoteLine()
         self.quote.clicked.connect(self.next_quote)
@@ -149,6 +155,31 @@ class MainWindow(QMainWindow):
         self._pending_timer.start(5 * 60_000)
         QTimer.singleShot(8000, self.retry_pending)
         QTimer.singleShot(1500, self.restore_torrents)    # day 12: unfinished torrent downloads go on, on their rows
+        # day 13: the free space in the strip (every 2 minutes, after each run / download / conversion) and the
+        # versions check once at the start -- both in the background
+        self._space_reading = self._space_again = False
+        self._was_busy = False
+        self._asking_cleanup = False
+        self._fixing = False
+        self._fix_log = None                               # %APPDATA%\MovieRecaps\setup_app.log (made by Fix now)
+        self._space_timer = QTimer(self)
+        self._space_timer.timeout.connect(self.refresh_space)
+        self._space_timer.start(_space_mod().REFRESH_MS)
+        self._busy_timer = QTimer(self)
+        self._busy_timer.timeout.connect(self._watch_busy)
+        self._busy_timer.start(3000)
+        self._soon = QTimer(self)                          # "a run ended": the free space read again, once
+        self._soon.setSingleShot(True)
+        self._soon.timeout.connect(self.refresh_space)
+        self._soon.start(500)
+        self._ver_timer = QTimer(self)
+        self._ver_timer.setSingleShot(True)
+        self._ver_timer.timeout.connect(self.check_versions)
+        self._line_close = QTimer(self)                    # "Fixed ✓" stays 5 s, then the line glides closed
+        self._line_close.setSingleShot(True)
+        self._line_close.timeout.connect(self._close_fixed_line)
+        if _start_checks():
+            self._ver_timer.start(4000)
 
     def restore_torrents(self) -> None:
         """Once at the start: the Download page gives every unfinished torrent download its row back (nothing -- not
@@ -272,20 +303,24 @@ class MainWindow(QMainWindow):
         strip.setStyleSheet(f"QFrame#Strip {{ border-bottom: 1px solid {theme.LINE}; background: transparent; }}")
         sl = QHBoxLayout(strip)
         sl.setContentsMargins(14, 6, 14, 6)
-        sl.setSpacing(24)
-        self.strip_gpu = W.mono_label("GPU …")
-        self.strip_prem = W.mono_label("Premiere …")
-        self.strip_save = W.mono_label("Save to …")
+        sl.setSpacing(12)                                  # (24 between items: 12 + a stretch + 12)
+        self.strip_gpu = health.strip_label("GPU …")       # day 13: shortened with "…" in a narrow window
+        self.strip_prem = health.strip_label("Premiere …")
+        self.strip_save = health.strip_label("Save to …")
         self.clock = chrome.Timecode()
         self.replay = chrome.LinkButton("replay intro")
         self.replay.clicked.connect(self.play_intro)
         self.settings_btn = chrome.LinkButton("settings")
         self.settings_btn.clicked.connect(self.open_settings)
-        for w in (self.strip_gpu, self.strip_prem, self.strip_save):
+        self.strip_space = health.SpaceStrip(self._space_folders())   # day 13: "Free C: 64.2 GB · D: 2.6 TB"
+        self.strip_space.clicked.connect(self.clean_up_now)
+        for w in (self.strip_gpu, self.strip_prem, self.strip_save, self.strip_space):
             sl.addWidget(w)
             sl.addStretch(1)
         sl.addWidget(self.clock)
+        sl.addSpacing(12)
         sl.addWidget(self.replay)
+        sl.addSpacing(12)
         sl.addWidget(self.settings_btn)
         return strip
 
@@ -302,6 +337,7 @@ class MainWindow(QMainWindow):
         il.setSpacing(12)
         il.addWidget(W.brand())
         il.addStretch(1)
+        _preload()                    # (day 13) before any page starts background work: see _preload
         self.pages: dict = {}
         self.tools = {}
         for t in tools:
@@ -389,6 +425,145 @@ class MainWindow(QMainWindow):
                 self.strip_save.setText(f"Save to {root}")
                 self.strip_save.setStyleSheet(f"color: {theme.DIM};")
         BG.call(work, got)
+
+    # -- day 13: the free space (core.space) --
+    def _space_folders(self) -> list:
+        try:
+            return _space_mod().strip_folders(_save_root(self.settings), paths.projects_root())
+        except Exception:  # noqa: BLE001 - never a crash in the strip
+            return [("C:", "C:\\")]
+
+    def refresh_space(self) -> None:
+        """The strip's free space, read in the background (a network folder that does not answer gives up after 8
+        s); one read at a time -- a call while one runs reads again right after it."""
+        if self._space_reading:
+            self._space_again = True
+            return
+        self._space_reading = True
+        folders = list(self.strip_space.folders)
+
+        def got(drives) -> None:
+            self._space_reading = False
+            self.strip_space.set_drives(drives)
+            if self._space_again:
+                self._space_again = False
+                self._soon.start(0)
+
+        def bad(_e) -> None:
+            self._space_reading = False
+        BG.call(lambda: _space_mod().read_strip(folders), got, bad)
+
+    def space_changed(self) -> None:
+        """A run, a download or a conversion ended (the pages call it): the free space read again in a moment."""
+        self._soon.start(1500)
+
+    def _watch_busy(self) -> None:
+        """Every 3 s (no disk, no network: the pages' own flags): when the last run / download / conversion ends,
+        the free space is read again."""
+        busy = any(getattr(p, "busy", lambda: False)() for p in self.pages.values())
+        if self._was_busy and not busy:
+            self.space_changed()
+        self._was_busy = busy
+
+    def offer_cleanup(self, text: str) -> None:
+        """A page did not start something for lack of room: the numbers, and Clean up (the Board's)."""
+        if self._asking_cleanup:
+            return
+        self._asking_cleanup = True
+        try:
+            yes = health.ask_cleanup(self, text)
+        finally:
+            self._asking_cleanup = False
+        self.space_changed()
+        if yes:
+            self.clean_up_now()
+
+    def clean_up_now(self) -> None:
+        """The Board's Clean up (it looks first and asks before it removes anything)."""
+        self.select("board")
+        b = self.pages.get("board")
+        if b is not None and hasattr(b, "clean_up"):
+            b.clean_up()
+
+    # -- day 13: the versions this computer has (core.versions) --
+    def check_versions(self) -> None:
+        """Once at the start, in the background: the check runs in a process of its own (the venv's Python) -- a
+        broken package can never touch the window; anything not as the project expects -> the amber line."""
+        def work():
+            from ..core import versions as V
+            return V.check_in_process(paths.python_exe())
+
+        def got(probs) -> None:
+            if self._fixing:
+                return
+            if probs:
+                self.version_line.show_problems(probs)
+            else:
+                self.version_line.close_line()
+        BG.call(work, got, lambda _e: None)
+
+    def fix_versions(self) -> None:
+        """Fix now: setup_app.py --from-app in the background (its output into setup_app.log), then the check again:
+        "Fixed ✓" or the plain reason (Open log). Not while a video is made, downloaded or converted (pip would
+        replace files a run is using)."""
+        if self._fixing:
+            return
+        busy = [p for p in self.pages.values() if getattr(p, "busy", lambda: False)()]
+        if busy or BG.working():
+            self.version_line.show_failed("Fix now waits: a video is being made, downloaded or converted -- press "
+                                          "Try again when they are done")
+            return
+        self._fixing = True
+        self.version_line.show_fixing()
+        sig = _Said()
+        sig.text.connect(lambda t: self.version_line.show_fixing(t) if self._fixing else None)
+
+        def fix():
+            from ..core import versions as V
+            log = self._fix_log = _app_data() / "setup_app.log"
+            code, why = V.run_setup(paths.python_exe(), log, sig.text.emit)
+            return code, why, V.check_in_process(paths.python_exe())
+
+        def fixed(r) -> None:
+            self._fixing = False
+            _sig_keep.discard(sig)
+            _code, why, probs = r
+            if not probs:
+                self.version_line.show_fixed()
+                self.toast("Fixed ✓ -- this computer has what the project expects")
+                self._line_close.start(5000)
+                return
+            from ..core import versions as V
+            self.version_line.problems = list(probs)
+            hand = next((p.hand for p in probs if p.hand), "")
+            closed = any(p.closed for p in probs)
+            tail = (" -- close MovieRecaps, then run: .venv\\Scripts\\python tools\\app\\setup_app.py" if closed
+                    else f" -- {hand}" if hand else (f" ({why})" if why else ""))
+            self.version_line.show_failed("Not everything could be fixed: " + V.summary(probs, 2) + tail)
+
+        def broke(e: str) -> None:
+            self._fixing = False
+            _sig_keep.discard(sig)
+            self.version_line.show_failed(f"Fix now could not run ({e}) -- see the log")
+        _sig_keep.add(sig)
+        BG.call(fix, fixed, broke, work=True)            # work: "Turn off the PC" waits for pip
+
+    def _close_fixed_line(self) -> None:
+        if self.version_line.state == health.FIXED:
+            self.version_line.close_line()
+
+    def open_versions_log(self) -> None:
+        """Fix now's log in Notepad (opened in the background: starting a program can take a moment)."""
+        log = self._fix_log
+
+        def work():
+            p = log or (_app_data() / "setup_app.log")
+            if not p.is_file():
+                return False
+            os.startfile(str(p))                      # noqa: S606 - the user's own log, in their editor
+            return True
+        BG.call(work, lambda ok: None if ok else self.toast("No log yet: press Fix now first", "note"),
+                lambda _e: None)
 
     # -- for the tools --
     def select(self, key: str) -> None:
@@ -499,6 +674,8 @@ class MainWindow(QMainWindow):
             M.set_enabled(bool(getattr(self.settings, "animations", True)))
             self.clock.restart()
             self.refresh_save_place()
+            self.strip_space.set_folders(self._space_folders())        # another save folder: maybe another drive
+            self.refresh_space()
             self.find_hub()
             for p in self.pages.values():
                 if hasattr(p, "settings_changed"):
@@ -577,6 +754,41 @@ def _hub(s):
     local = paths.projects_root()
     local.mkdir(parents=True, exist_ok=True)
     return local
+
+
+class _Said(QObject):
+    """A line said from a worker thread (Fix now's "installing ...") -- a queued signal: shown in the window's
+    thread."""
+    text = Signal(str)
+
+
+_sig_keep: set = set()
+
+
+def _space_mod():
+    from ..core import space
+    return space
+
+
+def _preload() -> None:
+    """Import -- on the window's thread, before the pages are built -- the modules one page imports in the background
+    while another page imports them on this thread: the Download page reads the channels' names in a worker
+    (template_editor -> core.channels -> core.headline, a slow import) while the Template page imports the same
+    modules here. Day 13: a test froze with the two threads waiting for each other's import locks (Python 3.14),
+    with the window built -- the same race exists at every start of the app. The Template page imports them on this
+    thread anyway, so this costs nothing extra."""
+    try:
+        from ..core import channels  # noqa: F401
+        from . import template_editor  # noqa: F401
+    except Exception:  # noqa: BLE001 - a missing optional package: the pages say so themselves
+        pass
+
+
+def _start_checks() -> bool:
+    """The version check at the start -- not inside the tests (they call it with fake readers)."""
+    import os
+    import sys
+    return "pytest" not in sys.modules and not os.environ.get("MOVIERECAPS_NO_START_CHECKS")
 
 
 def _app_data():

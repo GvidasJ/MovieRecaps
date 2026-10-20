@@ -165,14 +165,12 @@ def save_title(folder, title: str | None) -> None:
 
 
 def estimate_bytes(li) -> int:
-    """The room a link needs (download.LinkInfo): its chosen formats' size (or bitrate x length) -- about 4x that
-    when the picture is VP9 / AV1 and will be converted (the original and a visually lossless H.264 up to ~3x as
-    big sit side by side until the check: a 1.08 GB 4K VP9 became 2.9 GB tonight), else 1.1x."""
+    """The room a link needs (download.LinkInfo) -- core.space.download_bytes (day 13: the one place of every
+    estimate): its chosen formats' size (or bitrate x length, or a guess from its length and height) -- about 4x
+    that when the picture is VP9 / AV1 and will be converted, else 1.1x."""
     try:
-        from ..core import download as D
-        ch = D.pick_formats(li.info.get("formats") or ([li.info] if li.info.get("url") else []))
-        size = sum(D._expected(f, li.duration) for f in ch.parts)        # noqa: SLF001 - the same package
-        return int(size * (1.1 if ch.video_kind in ("h264", "hevc") else 4.0))
+        from ..core import space
+        return space.download_bytes(li)
     except Exception:  # noqa: BLE001
         return 0
 
@@ -325,7 +323,8 @@ class StageThread(QThread):
         from ..core import flow, space
         from ..core import titles as TT
         it = self.item
-        need = 0
+        links: list = []                                  # day 13: what the whole video needs (core.space)
+        how = ""
         name = ""
         info: dict = {}
         if it.competitor_url:
@@ -335,7 +334,7 @@ class StageThread(QThread):
             except D.DownloadError as e:
                 self._say("competitor", 0.0, f"FAILED: {e.plain}")
                 raise flow.StepError(f"competitor: {e.plain}") from e
-            need += estimate_bytes(li)
+            links.append(li)
             info = dict(getattr(li, "info", None) or {})
             info.setdefault("title", li.title)
             self._say("competitor", 0.0, f"{li.title[:70]} -- {D.clock(li.duration)} ({li.why})")
@@ -351,29 +350,26 @@ class StageThread(QThread):
             except D.DownloadError as e:
                 self._say("raw", 0.0, f"FAILED: {e.plain}")
                 raise flow.StepError(f"RAW: {e.plain}") from e
-            need += estimate_bytes(lr)
+            links.append(lr)
             self._say("raw", 0.0, f"{lr.title[:70]} -- {D.clock(lr.duration)} ({lr.why})")
             if not name:
                 name = lr.title
         elif it.raw_file is not None:
             n = space.size(it.raw_file)
-            need += 0 if space.same_drive(it.raw_file, paths.projects_root()) else n     # copied, not linked
             try:                                              # converted next to it first: room for the new file
                 from ..core import convert as C
                 how = C.plan(C.inspect(it.raw_file)).how
-                need += {"encode": 3 * n, "rewrap": n}.get(how, 0)
             except Exception:  # noqa: BLE001 - not readable: the convert step says so
                 pass
             self._say("raw", 0.0, f"the file {Path(it.raw_file).name} ({D.size_text(n)})")
             if not name:
                 name = Path(it.raw_file).stem
         root = paths.projects_root()
-        free = space.free_bytes(root)
-        want = int(need) + space.GB                        # (estimate_bytes counts the conversion's copy too)
-        if free is not None and need and free < want:
-            raise flow.StepError(f"the disk is full: these videos need about {want / space.GB:.1f} GB on "
-                                 f"{space.drive_name(root)} while they are downloaded and converted, only "
-                                 f"{free / space.GB:.1f} GB is free")
+        # day 13: the whole video -- its downloads (or the RAW copied in), their conversions and the edit's run (the
+        # tool's saved analysis, its temporary copy of a RAW it cannot read as it is) -- or it does not start
+        why = space.new_video_problem(links, it.raw_file, root, how, sizer=estimate_bytes)
+        if why:
+            raise flow.StepError(why)
         generic = TT.useless(name)
         p = flow.new_project(it.competitor_url, it.raw_url or None, it.raw_file, it.channel or None,
                              it.title or None, root=root, name=None if generic else name,
@@ -1716,7 +1712,14 @@ class DownloadPage(QWidget):
                     self._fail(it, stage, res.get("error") or "failed")
                     if stage == "cuts" and isinstance(res.get("result"), dict):
                         self._learn_hook(it, res["result"])     # a Just cuts run that failed: problems_queue.md
+                    from ..core import space
+                    if space.is_space_error(it.error):         # day 13: no room -- the numbers, and Clean up
+                        from ..ui import health
+                        QTimer.singleShot(0, self, lambda e=it.error, n=it.name: health.offer_cleanup(
+                            self.ctx, self, f"{n or 'New video'}: {e}"))
             self._refresh(it)
+        from ..ui import health
+        health.space_changed(self.ctx)                          # day 13: the strip's free space read again
         self._order()
         self._counts()
         self._next()
