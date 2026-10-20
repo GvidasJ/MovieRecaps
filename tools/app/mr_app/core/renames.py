@@ -199,6 +199,15 @@ def copies(folder: Path, data: dict, hub: Path | None, local_root: Path | None) 
                         break
             except OSError:
                 continue
+        if twin is None and to and hub is not None:   # renamed on the other computer since it was published here:
+            try:                                      # the shared copy that has its old name among its old names
+                moved = PB.renamed_copy(hub, data)
+                if moved is not None and _norm(moved) != _norm(folder):
+                    d = _read(moved)
+                    if d is not None:
+                        twin = (moved, d)
+            except OSError:
+                pass
     elif local_root is not None and _norm(local_root) != _norm(hub):
         names = {_fold_name(folder.name), *(_fold_name(str(x)) for x in (data.get("old_names") or []) if x)}
         cands = [local_root / folder.name]
@@ -567,7 +576,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     if not explicit and not NM.uses_titles(data):
         return Result(OLD, folder, "A project from before: it keeps its name (Rename to title on its card renames it)")
     cps = copies(folder, data, hub, local_root)
-    same = merged_titles(cps)                         # (as publishing merges the two copies' titles)
+    same = merged_titles(cps, folder)                 # (each title: the copy that changed it wins)
     d = {**titles(folder, data), **same}
     t, src = NM.title_of(d)
     if not t:
@@ -638,9 +647,11 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     if problem and not moved:                         # nothing moved: nothing is touched, tried again later
         return Result(WAIT, folder, f"Renamed later, when it is free: {problem}")
     files = []
+    shared_c = next((c for c, _dd, sh in cps if sh), None)
+    shared_now = next((n for o, n in moved if shared_c is not None and _norm(o) == _norm(shared_c)), shared_c)
     for c, _dd, sh in cps:
         now_at = next((n for o, n in moved if _norm(o) == _norm(c)), c)
-        _fix_json(now_at, moved, shared_pair, mark)
+        _fix_json(now_at, moved, shared_pair, mark, shared_now)
         for r in run_dirs(now_at):
             try:
                 from . import publish as PB
@@ -657,9 +668,11 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
 
 
 def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[Path, Path] | None,
-              mark: dict) -> None:
+              mark: dict, shared_now: Path | None = None) -> None:
     """project.json of a copy after the move: its name and old names, the steps' run folders, published.to (the
-    shared copy's new name -- written as that computer sees the shared folder), the names marker."""
+    shared copy's name now -- written as that computer sees the shared folder; ``shared_now``: the shared copy, also
+    when the other computer renamed it before), the names record (rule and source; its copies list and synced titles
+    kept, a "kept" note dropped)."""
     from . import publish as PB
 
     def apply(d: dict) -> None:
@@ -672,49 +685,93 @@ def _fix_json(folder: Path, moved: list[tuple[Path, Path]], shared_pair: tuple[P
                 d["old_names"] = olds
                 PB._moved_paths(d, old, new)                                       # noqa: SLF001
         pub = d.get("published")
-        if shared_pair is not None and isinstance(pub, dict) and pub.get("to"):
+        if isinstance(pub, dict) and pub.get("to"):
             to = Path(str(pub["to"]))
-            if to.name.lower() == shared_pair[0].name.lower():
+            if shared_pair is not None and to.name.lower() == shared_pair[0].name.lower():
                 pub["to"] = str(to.parent / shared_pair[1].name)
-        keep = d.get(NM.KEY) if isinstance(d.get(NM.KEY), dict) else {}
-        d[NM.KEY] = {**dict(mark), **({"copies": keep["copies"]} if keep.get("copies") else {})}
+            elif shared_now is not None and _norm(shared_now) != _norm(folder) and \
+                    to.name.lower() != shared_now.name.lower():
+                pub["to"] = str(to.parent / shared_now.name)
+        n = dict(d.get(NM.KEY)) if isinstance(d.get(NM.KEY), dict) else {}
+        n.update(rule=NM.RULE, **({"from": mark["from"]} if mark.get("from") is not None else {}))
+        n.setdefault("at", mark.get("at") or P.now())
+        n.pop("kept", None)
+        d[NM.KEY] = n
     try:
         P.load(folder).change(apply)
     except (OSError, ValueError):
         pass
 
 
-def merged_titles(cps: list[tuple[Path, dict, bool]]) -> dict:
-    """The copies' headline and YouTube title merged the way publishing merges them (publish._merge_titles): a title
-    set on one copy only is kept; set differently on both, the copy whose title.txt changed last wins (the app
-    rewrites title.txt with every title change; one you edited by hand counts too). Nothing set: ''."""
+SYNCED = "synced"                   # project.json "names": {"synced": {"title", "upload_title", "at"}}: the titles both
+#                                     copies held when they were last made the same -- the base a change is seen from
+
+
+def merged_titles(cps: list[tuple[Path, dict, bool]], asked: Path | None = None) -> dict:
+    """The headline and the YouTube title both copies should hold, per title (the board's view: a title.txt you
+    edited by hand counts):
+
+    * the copies agree: that;
+    * one copy changed it since they were last made the same (its "synced" base) -- also a title cleared to empty:
+      that copy's;
+    * both changed it: the copy whose title was just changed (``asked``), else the one synced last;
+    * neither changed it (one was changed on the other computer and synced with its own folder there): the copy
+      synced last;
+    * a copy without a base (never synced yet): publishing's rule for that title -- set on one copy only: kept; set
+      differently on both: the copy whose title.txt changed last."""
     from . import publish as PB
     rows = []
     for c, dd, _sh in cps:
-        t = titles(c, dd)
+        n = dd.get(NM.KEY) if isinstance(dd.get(NM.KEY), dict) else {}
+        base = n.get(SYNCED) if isinstance(n.get(SYNCED), dict) else None
         try:
-            m = os.stat(c / PB.TITLE_TXT).st_mtime
+            txt = os.stat(c / PB.TITLE_TXT).st_mtime
         except OSError:
-            m = _ts(dd.get("updated")) or 0.0
-        rows.append((m, t))
-    out = {}
+            txt = 0.0
+        rows.append({"t": titles(c, dd), "base": base, "at": _ts((base or {}).get("at")) or 0.0, "txt": txt,
+                     "asked": asked is not None and _norm(c) == _norm(asked)})
+    out: dict = {}
     for k in ("title", "upload_title"):
-        have = [(m, t.get(k)) for m, t in rows if PB._set(t.get(k))]                     # noqa: SLF001
-        out[k] = max(have, key=lambda x: x[0])[1] if have else ""
+        vals = [(r, str(r["t"].get(k) or "")) for r in rows]
+        if len({v for _r, v in vals}) <= 1:
+            out[k] = vals[0][1] if vals else ""
+            continue
+        known = [(r, v) for r, v in vals if r["base"] is not None]
+        changed = [(r, v) for r, v in known if v != str(r["base"].get(k) or "")]
+        if any(r["base"] is None for r, _v in vals):  # never synced: publishing's rule, per title
+            have = [(r, v) for r, v in vals if v.strip()]
+            if len({v for _r, v in have}) == 1:
+                out[k] = have[0][1]                   # set on one copy only (or alike): kept
+            else:
+                out[k] = max(have or vals, key=lambda x: (x[0]["txt"], x[0]["asked"]))[1]
+        elif len(changed) == 1:
+            out[k] = changed[0][1]
+        elif changed:
+            mine = [x for x in changed if x[0]["asked"]]
+            out[k] = (mine[0] if mine else max(changed, key=lambda x: x[0]["at"]))[1]
+        else:
+            out[k] = max(vals, key=lambda x: x[0]["at"])[1]
     return out
 
 
 def _share_titles(cps: list[tuple[Path, dict, bool]], same: dict) -> None:
-    """Every copy holds the merged titles (and its title.txt says them): the files of both follow one title. A copy
-    that has them already is not written."""
+    """Every copy holds the merged titles in its project.json (a title.txt edited by hand taken in first: the names
+    follow what project.json holds), its title.txt says them, and both remember them as their new base (``SYNCED``).
+    Nothing is written to a copy that has them all already."""
     from . import publish as PB
+    stamp = P.now()
     for c, _dd, _sh in cps:
         def apply(d: dict, c=c) -> None:
+            PB.fold_title_txt(c, d)
             changed = False
             for k, v in same.items():
-                if (d.get(k) or "") != (v or ""):
+                if str(d.get(k) or "") != str(v or ""):
                     d[k] = v if v else (None if d.get(k) is None else "")
                     changed = True
+            n = d.get(NM.KEY)
+            if isinstance(n, dict):
+                n[SYNCED] = {"title": same.get("title") or "", "upload_title": same.get("upload_title") or "",
+                             "at": stamp}
             if changed:
                 try:
                     PB.write_title_txt(c, d)
@@ -722,7 +779,12 @@ def _share_titles(cps: list[tuple[Path, dict, bool]], same: dict) -> None:
                     pass
         try:
             cur = _read(c) or {}
-            if any((titles(c, cur).get(k) or "") != (v or "") for k, v in same.items()):
+            n = cur.get(NM.KEY) if isinstance(cur.get(NM.KEY), dict) else {}
+            base = n.get(SYNCED) if isinstance(n.get(SYNCED), dict) else {}
+            raw_same = all(str(cur.get(k) or "") == str(v or "") for k, v in same.items())
+            view_same = all(str(titles(c, cur).get(k) or "") == str(v or "") for k, v in same.items())
+            base_same = all(str(base.get(k) or "") == str(v or "") for k, v in same.items())
+            if not (raw_same and view_same and base_same):
                 P.load(c).change(apply)
         except (OSError, ValueError):
             pass

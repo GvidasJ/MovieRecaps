@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         self._rename_timer.timeout.connect(self.retry_renames)
         self._rename_timer.start(60_000)
         QTimer.singleShot(12_000, self.retry_renames)
-        self._publishing: set[str] = set()                # folders being copied to the shared folder right now
+        self._publishing: dict[str, int] = {}             # folders being copied to the shared folder right now
         try:                                              # (a rename waits for the whole copy)
             from ..core import renames
             renames.register_busy(self.uses_folder)
@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
                 self.refresh_save_place()
             else:
                 self.toast(f"Saved to {root} ✓")
+                self.synced(folder)                          # day 13: both copies now share one set of titles
             b = self.pages.get("board")
             if b is not None:
                 b.reload()
@@ -258,6 +259,9 @@ class MainWindow(QMainWindow):
         def done(res) -> None:
             if res:
                 self.toast(f"{len(res)} project(s) moved to {root} ✓")
+                for r in res:                                # day 13: both copies share one set of titles
+                    if getattr(r, "dest", None) is not None:
+                        self.synced(r.dest)
                 self.refresh_save_place()
                 b = self.pages.get("board")
                 if b is not None:
@@ -297,19 +301,30 @@ class MainWindow(QMainWindow):
         def mark():
             keys = [os.path.normcase(os.path.abspath(str(f))) for f in folders if f]
             for k in keys:
-                self._publishing.add(k)
+                self._publishing[k] = self._publishing.get(k, 0) + 1     # (two copies of one folder: counted)
             try:
                 yield
             finally:
                 for k in keys:
-                    self._publishing.discard(k)
+                    left = self._publishing.get(k, 1) - 1
+                    if left > 0:
+                        self._publishing[k] = left
+                    else:
+                        self._publishing.pop(k, None)
         return mark()
 
     def uses_folder(self, folder) -> str:
         """Why a project folder must not be renamed now (core.renames.BUSY): it is being copied to the shared folder."""
         import os
         k = os.path.normcase(os.path.abspath(str(folder)))
-        return "it is being copied to the shared folder" if k in getattr(self, "_publishing", ()) else ""
+        return "it is being copied to the shared folder" if getattr(self, "_publishing", {}).get(k) else ""
+
+    def synced(self, folder) -> None:
+        """Day 13: a project was just copied to the shared folder -- its two copies take one set of titles (as
+        publishing merged them) and remember it as the base a later title change is seen from (core.renames); its
+        names follow the title when they can (its edit is not in Premiere yet). Quiet unless it renames something."""
+        if folder is not None and callable(getattr(self, "title_changed", None)):
+            self.title_changed(folder)
 
     def renamed(self, res, said: bool = False) -> None:
         """What a rename did: the pages follow every folder that moved; a toast says it (a rename that waits or keeps

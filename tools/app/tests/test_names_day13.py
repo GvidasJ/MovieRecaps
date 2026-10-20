@@ -551,6 +551,107 @@ def test_renaming_one_copy_keeps_a_title_only_its_twin_has(tmp_path):
         assert (c / "title.txt").read_text(encoding="utf-8") == "Set on the laptop 🎥"
 
 
+def test_a_headline_changed_on_the_shared_card_is_never_reverted_by_the_other_copy(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local, title="First headline")
+    dest = published(p, hub)
+    B.set_upload_title(dest, "The YouTube title 🎥")                       # on the shared card
+    res = RN.rename(dest, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED, res.text
+    shared = res.folder
+    twin = next(n for o, n in res.moved if _n(o) == _n(p.folder))
+    B.set_title(shared, "Second headline")                                 # the headline, on the shared card again
+    res2 = RN.rename(shared, hub=hub, local_root=local)
+    assert res2.state == RN.SAME, res2.text
+    for c in (shared, twin):
+        d = P.load(c).data
+        assert d["title"] == "Second headline" and d["upload_title"] == "The YouTube title 🎥"
+    B.set_title(twin, "Third headline")                                    # and on this computer's queue row
+    RN.rename(twin, hub=hub, local_root=local)
+    assert P.load(shared).data["title"] == P.load(twin).data["title"] == "Third headline"
+
+
+def test_a_cleared_youtube_title_is_cleared_on_both_and_the_headline_names_them(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local, title="The headline")
+    dest = published(p, hub)
+    B.set_upload_title(p.folder, "Upload two")
+    res = RN.rename(p.folder, hub=hub, local_root=local)
+    assert res.folder.name.endswith("_Upload two")
+    B.set_upload_title(res.folder, "")                                     # cleared
+    res2 = RN.rename(res.folder, hub=hub, local_root=local)
+    assert res2.state == RN.RENAMED and res2.folder.name.endswith("_The headline"), res2.text
+    for c in (res2.folder, hub / res2.folder.name):
+        assert not P.load(c).data.get("upload_title")
+
+
+def test_a_local_copy_follows_its_shared_copy_renamed_on_the_other_computer(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local, title="Old headline")
+    dest = published(p, hub)
+    renamed = hub / NM.folder_base("Laptop title", "2026-10-20")
+    os.rename(dest, renamed)                                               # (the laptop renamed the shared copy)
+    P.load(renamed).update(old_names=[dest.name], name=renamed.name)
+    B.set_upload_title(renamed, "Laptop title")                            # (as the laptop's app writes it)
+    B.set_title(p.folder, "Old headline\nwith a second line")              # a title change here, on the queue row
+    res = RN.rename(p.folder, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED, res.text
+    assert res.folder.name == renamed.name                                 # the same name as the shared copy
+    assert P.load(res.folder).data["published"]["to"] == str(renamed)
+
+
+def test_a_hand_edited_title_txt_names_the_folder_and_the_files_alike(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    p = title_project(local, upload="Upload old")
+    (p.folder / "title.txt").write_text("Hand typed title", encoding="utf-8")   # edited by hand: it wins
+    res = RN.rename(p.folder, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED and res.folder.name.endswith("_Hand typed title"), res.text
+    assert P.load(res.folder).data["upload_title"] == "Hand typed title"
+    assert sorted(f.name for f in (res.folder / "edit").glob("*.xml")) == ["1_edit.xml", "Hand typed title_edit.xml"]
+
+
+def test_after_a_publish_the_two_copies_share_a_base_so_a_later_change_on_either_wins(tmp_path):
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    hub.mkdir()
+    p = title_project(local, title="Old headline", upload="Upload U")
+    B.set_upload_title(p.folder, "Upload U")
+    t0 = time.time() - 7200
+    os.utime(p.folder / "title.txt", (t0, t0))
+    dest = published(p, hub)
+    r0 = RN.rename(dest, hub=hub, local_root=local)                      # what the window runs after a publish
+    assert r0.state in (RN.SAME, RN.RENAMED), r0.text                     # (here: named after the YouTube title)
+    shared, mine = hub / r0.folder.name, local / r0.folder.name
+    assert shared.is_dir() and mine.is_dir()
+    t1 = time.time() - 3600
+    os.utime(shared / "title.txt", (t1, t1))                              # (the shared copy's title.txt is newer)
+    os.utime(mine / "title.txt", (t0, t0))
+    B.set_title(mine, "New headline")                                     # title.txt holds the YouTube title: unchanged
+    RN.rename(mine, hub=hub, local_root=local)
+    assert P.load(mine).data["title"] == P.load(shared).data["title"] == "New headline"
+    B.set_upload_title(mine, "")                                          # cleared here
+    res = RN.rename(mine, hub=hub, local_root=local)
+    assert res.state == RN.RENAMED and res.folder.name.endswith("_New headline"), res.text
+    assert not P.load(hub / res.folder.name).data.get("upload_title")
+
+
+def test_the_window_syncs_a_project_right_after_it_was_published(qapp=None):
+    from types import SimpleNamespace
+
+    from mr_app.ui import main_window as MW
+    seen = []
+    win = SimpleNamespace(title_changed=lambda f: seen.append(f))
+    MW.MainWindow.synced(win, Path("C:/p/x"))
+    MW.MainWindow.synced(win, None)
+    assert seen == [Path("C:/p/x")]
+
+
+def _n(p) -> str:
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
 def test_the_scan_reads_xml_escaped_paths_and_long_unc_ones(tmp_path):
     f = tmp_path / "tom.prproj"
     f.write_bytes(gzip.compress("<P><ActualMediaFilePath>D:\\Shared\\Projects\\2026-10-20_Tom &amp;amp; Jerry"

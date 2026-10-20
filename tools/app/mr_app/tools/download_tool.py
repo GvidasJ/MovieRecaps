@@ -113,7 +113,7 @@ class Item:
     torrent_job: Any = None                 # the torrent part's TorrentJob while the RAW downloads
     torrent_widget: Any = None              # its picker / progress card inside the row
     said_pick: bool = False                 # the row says the queue asks which is the RAW
-    renaming: bool = False                  # day 13: this row's own stage renames its project folder now
+    renaming: int = 0                       # day 13: the thread of this row's own stage while it renames its folder
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -349,11 +349,11 @@ class StageThread(QThread):
         row and every page follow what moved."""
         from ..core import renames as RN
         it = self.item
-        it.renaming = True
+        it.renaming = threading.get_ident()
         try:
             res = RN.request(folder)
         finally:
-            it.renaming = False
+            it.renaming = 0
         for old, new in res.moved:
             self.moved.emit(str(old), str(new))
             if it.project is not None and Path(old) == Path(it.project):
@@ -2319,7 +2319,7 @@ class DownloadPage(QWidget):
         for it in list(self.items):
             if it.project is None or not same_folder(it.project, folder):
                 continue
-            if it.renaming:
+            if it.renaming and it.renaming == threading.get_ident():
                 continue                                  # (this row's own stage asks: it renames it itself)
             if it is cur or it.state in (QUEUED, WORKING) or (it.state == SENT and it.job is None):
                 return "a New video row is working on it"

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -205,6 +206,11 @@ def test_the_download_rows_say_their_folder_is_used_and_follow_a_move(tmp_path):
     assert D.DownloadPage.uses_folder(fake, folder) == "a New video row is working on it"
     it.state = D.GATED                                                    # waits for your Convert press: free
     assert D.DownloadPage.uses_folder(fake, folder) == ""
+    it.state, it.renaming = D.WORKING, threading.get_ident() + 1         # its stage renames, asked from elsewhere:
+    assert D.DownloadPage.uses_folder(fake, folder) != ""                # (the minute's retry) -> still in use
+    it.renaming = threading.get_ident()                                  # asked by its own stage: not
+    assert D.DownloadPage.uses_folder(fake, folder) == ""
+    it.renaming, it.state = 0, D.GATED
     new = tmp_path / "2026-10-20_The title"
     D.DownloadPage.moved(fake, folder, new)
     assert it.project == new and it.name == new.name and refreshed == [it]
@@ -267,10 +273,13 @@ def test_a_new_video_rows_folder_follows_the_headline_after_its_template(tmp_pat
 
 def test_a_copy_to_the_shared_folder_makes_the_windows_renames_wait(qapp, tmp_path):
     from mr_app.ui import main_window as MW
-    win = SimpleNamespace(_publishing=set())
+    win = SimpleNamespace(_publishing={})
     folder = tmp_path / "2026-10-20_x"
     with MW.MainWindow.publishing(win, folder):
         assert MW.MainWindow.uses_folder(win, folder) == "it is being copied to the shared folder"
+        with MW.MainWindow.publishing(win, folder):                      # a second copy of it at the same time
+            pass
+        assert MW.MainWindow.uses_folder(win, folder) != ""              # the first one still copies
     assert MW.MainWindow.uses_folder(win, folder) == ""
 
 
