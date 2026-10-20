@@ -68,7 +68,9 @@ day-12 check-all XML and every run in D:\Shared\Projects and output\laptop_video
   the RAW's rate, with `--speed` too; the end cut, its captions and the run's last step `apply_final` with the summary
   and report lines; the cut fixer's 4 cases and the cases it must leave; the burst rule and its limits; nothing with
   `--remove-silence`). Changed: `test_flash_018.py` (A1 now moves with the snapped cuts).
-* Tool suite (GPU hidden): see the counts at the end of this file. App suite: 979 passed, 5 skipped.
+* Tool suite (GPU hidden), final code: **1444 passed, 97 skipped, 0 failed** -- all 1541 tests, run in pieces (the PC
+  was short of memory: the first 1117 in one run, stopped by me under the lead's 20 GB rule, the remaining files in 5
+  batches started only with 25 GB of commit memory free). App suite: **979 passed, 5 skipped**.
 
 ## For the lead (merge / check by hand)
 
