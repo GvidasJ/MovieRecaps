@@ -170,7 +170,7 @@ def test_an_unknown_stop_shows_the_last_error_line_of_match_cuts_log():
     r = P.explain("", log, code=2)
     assert r.text == "the run stopped on a problem the app does not know yet: segments: the cut list is empty"
     assert r.todo == "press Try again; if it stops the same way again, the full log: Open log"
-    assert r.line().endswith("Press Try again; if it stops the same way again, the full log: Open log")
+    assert r.line().endswith("Press Try again; if it stops the same way again, the full log: Open log.")
 
 
 def test_the_exception_that_stopped_the_run_wins_over_an_older_error_in_the_log():
@@ -225,7 +225,9 @@ def test_a_stored_technical_failure_becomes_plain_text():
                 f"{POOL_FILE} match_cuts: details in {RUN}\\edit\\extras\\match_cuts.log")
     assert "temp folder" in P.plain_text(old_pool) and "details in" not in P.plain_text(old_pool)
     only = f"the run stopped (exit 2): details in {RUN}\\edit-2\\extras\\match_cuts.log"
-    assert P.plain_text(only) == "The run stopped; the reason is in its log. Press Try again; the full log: Open log"
+    assert P.plain_text(only) == "The run stopped; the reason is in its log. Press Try again; the full log: Open log."
+    r = P.explain(r"match_cuts: ERROR: RuntimeError: ffprobe failed (3199971767): ffprobe C:\in\clip.mp4" "\n", code=2)
+    assert ") Download" not in r.line() and "(invalid data in the video). Download" in r.line()   # one stop each
     for plain in ("every check passed", "the disk is full: free some space and press Try again",
                   "the run stopped (exit 2): PICTURE NOT FOUND (sound found) -- the RAW may be a different cut"):
         assert P.plain_text(plain) == plain

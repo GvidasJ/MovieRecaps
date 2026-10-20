@@ -77,7 +77,7 @@ def _sentence(s: str) -> str:
     if not s:
         return ""
     s = s[0].upper() + s[1:]
-    return s if s[-1] in ".!?)" or s.endswith("Open log") else s + "."
+    return s if s[-1] in ".!?" else s + "."
 
 
 # ---------------------------------------------------------------------------------------------------------------------
