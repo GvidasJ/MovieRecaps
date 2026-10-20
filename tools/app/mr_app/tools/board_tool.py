@@ -16,6 +16,7 @@ Fixed → Rendered → Uploaded -- for the PC and the laptop at once (the shared
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -50,6 +51,16 @@ def _columns():
 
 def when(dt: datetime | None) -> str:
     return dt.strftime("%d %b %H:%M").lstrip("0") if dt else ""
+
+
+_LONG_WORD = re.compile(r"[^\W_]{11,}")
+
+
+def soft_breaks(text: str) -> str:
+    """Where a card's name may break in a narrow column (zero-width spaces): after _ and -, and inside a word of 11+
+    letters or digits ("Questionable" was cut to "Questional" in a 1280 px window, day 13) -- never inside an emoji."""
+    text = str(text).replace("_", "_​").replace("-", "-​")
+    return _LONG_WORD.sub(lambda m: "​".join(m.group(0)), text)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -138,7 +149,7 @@ class BoardCard(QFrame):
         top.setSpacing(6)
         shown = getattr(card, "display", "") or card.name   # day 13: the video's title is the name
         short = shown if len(shown) < 60 else shown[:58].rstrip() + "…"
-        name = QLabel(short.replace("_", "_​").replace("-", "-​"))   # it may break after _ and - (narrow)
+        name = QLabel(soft_breaks(short))                  # it may break after _ and -, and inside a long word
         name.setFont(W.font(13, 700))
         name.setWordWrap(True)
         name.setToolTip(f"{shown}\nFolder: {card.folder}" if shown != card.name else str(card.folder))
