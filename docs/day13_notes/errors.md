@@ -87,7 +87,11 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
 What aria2c does (tried with real aria2c 1.19 — the one on this PC's PATH — and 1.37 — the one setup_app installs):
 without a .aria2 file, an existing file stops the download with error 13 (1.37's message is the raw one you saw);
 with `check-integrity` a complete file is finished at once (nothing uploaded by the sharer, mtime unchanged), a half
-file fetches only the missing half — but **a bigger file is truncated and overwritten**.
+file fetches only the missing half — but **a bigger file is truncated and overwritten**. Where the error comes from
+in practice: aria2c deletes its `.aria2` when a torrent is complete — a one-file torrent, or all of a folder's files
+chosen — so adding the same torrent again (the next Short of the same film) stopped with error 13; when only some of
+a folder's files were chosen it keeps the `.aria2` and simply goes on (tested for real: both ways now finish at once,
+the film not written, and the card says it was already complete).
 
 So `core/torrent.py` now, before giving a download to aria2c (`_prepare_existing`, also on Resume / restore /
 "aria2c lost it"): when there is no `.aria2` but some of the torrent's files are in the folder —
@@ -167,9 +171,11 @@ internet). My two early experiments (before the request) ran aria2c without it �
 - app: `tools/app/tests/test_errors_day13.py` (14: read_result, short, problems entry, project.json, History, the
   New video words, Just cuts, the app's conversion, the real queue row with Try again, the report dialog),
   `test_errors_day13_newvideo.py` (1: the real New video row), `test_errors_day13_learn.py` (2: the Learn tab's old
-  Borat entries) and `tools/app/tests/test_torrent_day13.py` (20: escaping / old name / piece check, the fake-engine
+  Borat entries) and `tools/app/tests/test_torrent_day13.py` (21: escaping / old name / piece check, the fake-engine
   options and notes, error 13 once, every aria2 code, the card's note, old jobs.json, the space check, the long check,
-  Remove keeps a file that was there, 127.0.0.1-only aria2c; **real aria2c on 127.0.0.1**: a finished file finished at once with
+  Remove keeps a file that was there, 127.0.0.1-only aria2c; **real aria2c on 127.0.0.1**: the next Short of the
+  same film (a folder torrent downloaded once, added again with nobody sharing, with and without its .aria2) finished
+  at once with the film not written, a finished file finished at once with
   bytes and mtime unchanged and nobody sharing, a half file fetching only the missing pieces (the sharer's upload
   ≤ 60 %), a bigger file renamed "(old)" and fetched fresh, error 13 from aria2c checked by itself, a UNC folder
   with the .aria2 next to the download while it runs). The tests use the aria2c the app itself would use
