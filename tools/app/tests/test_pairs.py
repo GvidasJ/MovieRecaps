@@ -144,7 +144,13 @@ def test_a_dropped_raw_and_competitor_get_a_project_folder_with_both_files(tmp_p
     j.channel, j.title = "LouLaughs", "When it finally works 💀"
     root = tmp_path / "projects"
     folder = J.project_for_job(j, root)
-    assert folder.parent == root and folder.name.endswith("_funny-clip-shorts")
+    # day 13: named after the title typed for it ("<date>_<title>"; this test's own folder is very long, so the
+    # title is cut to keep the deepest path under Windows' limit: names.fit)
+    from mr_app.core import names as NM
+    assert folder.parent == root and folder.name == NM.folder_base(j.title, roots_len=NM.root_len(root))
+    assert NM.uses_titles(PJ.load(folder).data)
+    j2 = J.Job(J.job_name(comp, raw), comp, raw)                          # no title yet: named after the file, as before
+    assert J.project_for_job(j2, tmp_path / "projects2").name.endswith("_funny-clip-shorts")
     pj = PJ.load(folder)
     c, r = pj.file("competitor"), pj.file("raw")
     assert c.read_bytes() == b"c" * 100 and r.read_bytes() == b"r" * 1000

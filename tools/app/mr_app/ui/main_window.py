@@ -12,6 +12,7 @@ runs in the background (background.py)."""
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
@@ -149,6 +150,10 @@ class MainWindow(QMainWindow):
         self._pending_timer.start(5 * 60_000)
         QTimer.singleShot(8000, self.retry_pending)
         QTimer.singleShot(1500, self.restore_torrents)    # day 12: unfinished torrent downloads go on, on their rows
+        self._rename_timer = QTimer(self)                 # day 13: renames after a title change that had to wait
+        self._rename_timer.timeout.connect(self.retry_renames)
+        self._rename_timer.start(60_000)
+        QTimer.singleShot(12_000, self.retry_renames)
 
     def restore_torrents(self) -> None:
         """Once at the start: the Download page gives every unfinished torrent download its row back (nothing -- not
@@ -248,6 +253,77 @@ class MainWindow(QMainWindow):
                 if b is not None:
                     b.reload()
         BG.call(work, done, lambda _e: None)          # counted as work only while it publishes (counted_work)
+
+    # -- day 13: a project renamed after its title (core.renames) --
+    def title_changed(self, folder, explicit: bool = False, then=None) -> None:
+        """A title or a headline was saved (``explicit``: Rename to title was pressed): the project's folder and
+        files follow it -- in the background; the pages hear of every folder that moved; a rename that has to wait
+        (an edit running, Premiere using it ...) is tried again every minute."""
+        if not folder:
+            return
+        hub, local = _save_root(self.settings), paths.projects_root()
+
+        def work():
+            from ..core import renames as RN
+            return RN.request(folder, hub=hub, local_root=local, explicit=explicit)
+
+        def done(res) -> None:
+            self.renamed(res, explicit)
+            if then is not None:
+                then(res)
+
+        def failed(err: str) -> None:
+            if explicit:
+                self.toast(f"It could not be renamed: {err}", "fail")
+        BG.call(work, done, failed)
+
+    def renamed(self, res, said: bool = False) -> None:
+        """What a rename did: the pages follow every folder that moved; a toast says it (a rename that waits or keeps
+        the name says why; "nothing to do" only when you pressed Rename to title)."""
+        for old, new in list(getattr(res, "moved", None) or []):
+            self.project_moved(old, new)
+        state = getattr(res, "state", "")
+        text = str(getattr(res, "text", "") or "")
+        if state == "renamed":
+            self.toast(f"Renamed after its title ✓  {Path(res.folder).name}")
+        elif state in ("wait", "kept"):
+            self.toast(text[:220], "note")
+        elif said and text:
+            self.toast(text[:220], "info")
+        for p in self.pages.values():
+            fn = getattr(p, "titles_changed", None)
+            if callable(fn):
+                try:
+                    fn(Path(res.folder))
+                except Exception:  # noqa: BLE001 - a page that cannot follow shows it at its next refresh
+                    pass
+        b = self.pages.get("board")
+        if b is not None and hasattr(b, "reload"):
+            b.reload()
+
+    def project_moved(self, old, new) -> None:
+        """A project folder was renamed: every page's rows point at the new place."""
+        for p in self.pages.values():
+            fn = getattr(p, "moved", None)
+            if callable(fn):
+                try:
+                    fn(Path(old), Path(new))
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def retry_renames(self) -> None:
+        """The renames that waited, tried again (only when there are any)."""
+        hub, local = _save_root(self.settings), paths.projects_root()
+
+        def work():
+            from ..core import renames as RN
+            return RN.retry_pending(hub=hub, local_root=local) if RN.pending() else []
+
+        def done(results) -> None:
+            for res in results or []:
+                if getattr(res, "state", "") not in ("wait",):
+                    self.renamed(res)
+        BG.call(work, done, lambda _e: None)
 
     def find_hub(self) -> None:
         """Where the shared files are (the save folder, else this computer's): looked up in the background (a network

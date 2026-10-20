@@ -50,11 +50,13 @@ def _cancelled(cancel: threading.Event | None) -> bool:
 
 def new_project(competitor_url: str, raw_url: str | None = None, raw_file: str | Path | None = None,
                 channel: str | None = None, title: str | None = None, root: str | Path | None = None,
-                name: str | None = None, just_cuts: bool = False, competitor_file: str | Path | None = None
-                ) -> P.Project:
+                name: str | None = None, just_cuts: bool = False, competitor_file: str | Path | None = None,
+                folder: str | None = None, names: dict | None = None) -> P.Project:
     """A new project folder for a competitor link and a RAW link or file (named after the competitor's title when
     ``name`` gives it, else its link). Day 12: ``just_cuts`` -- a RAW alone ("Just cuts": no competitor);
-    ``competitor_file`` -- the competitor as a file (placed in the folder like a dropped RAW)."""
+    ``competitor_file`` -- the competitor as a file (placed in the folder like a dropped RAW). Day 13: ``folder`` --
+    the folder's exact name ('<date>_<title>', names.py), ``names`` -- project.json's "names" (its names follow its
+    title from now on)."""
     if not (competitor_url or "").strip() and not competitor_file and not just_cuts:
         raise StepError("paste the competitor's link")
     if not (raw_url or "").strip() and not raw_file:
@@ -64,7 +66,7 @@ def new_project(competitor_url: str, raw_url: str | None = None, raw_file: str |
     if competitor_file and not Path(competitor_file).is_file():
         raise StepError(f"the competitor's file is not there: {competitor_file}")
     p = P.create(root, competitor_url=(competitor_url or "").strip() or None, raw_url=(raw_url or "").strip() or None,
-                 raw_file=str(raw_file) if raw_file else None, name=name)
+                 raw_file=str(raw_file) if raw_file else None, name=name, folder=folder or None, names=names)
     p.update(channel=channel or None, title=title or None)
     if just_cuts:
         p.update(kind="just_cuts")
@@ -395,6 +397,22 @@ def record_edit(p: P.Project, res: dict) -> None:
     p.set_step("edit", state, result=label, run_dir=res.get("run_dir"), seconds=res.get("seconds"),
                failures=list(res.get("failures") or [])[:5], notes=list(res.get("notes") or [])[:5],
                **({"error": (res.get("failures") or [label])[0]} if state == P.FAILED else {}))
+    if state == P.DONE and res.get("run_dir"):
+        title_copy(p, Path(res["run_dir"]))
+
+
+def title_copy(p: P.Project, run_dir: Path) -> Path | None:
+    """Day 13: a finished edit of a project named after its title gets ``<title>_edit.xml`` next to its 1_edit.xml at
+    once (the sequence called after the title: Premiere names the render after it) -- 1_edit.xml stays as it is.
+    Projects from before get nothing new here. Never raises."""
+    try:
+        from . import names as NM
+        if not NM.uses_titles(p.data) or not (Path(run_dir) / "1_edit.xml").is_file():
+            return None
+        from .premiere import named_copy
+        return named_copy(Path(run_dir) / "1_edit.xml")
+    except Exception:  # noqa: BLE001 - Open in Premiere makes it anyway
+        return None
 
 
 # ---------------------------------------------------------------------------------------------------------------------

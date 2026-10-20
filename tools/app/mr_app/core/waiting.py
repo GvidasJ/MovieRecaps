@@ -182,6 +182,36 @@ def learned(folder: str | os.PathLike, run: str | os.PathLike | None = None,
     return _change(folder, apply)
 
 
+def _moved_path(p: str, pairs: Iterable[tuple[str, str]]) -> str:
+    """``p`` with an old folder in front of it swapped for its new name (day 13: a project renamed after its title);
+    as it is when it is in none of them."""
+    if not p:
+        return p
+    k = os.path.normcase(os.path.normpath(H._clean(p)))                                        # noqa: SLF001
+    for old, new in pairs:
+        o = os.path.normcase(os.path.normpath(H._clean(old)))                                  # noqa: SLF001
+        if k == o or k.startswith(o + os.sep):
+            return os.path.join(os.path.normpath(H._clean(new)), os.path.normpath(H._clean(p))[len(o):].lstrip("\\/"))  # noqa: SLF001
+    return p
+
+
+def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, str | os.PathLike]]) -> str:
+    """Day 13: projects renamed after their title (``pairs``: (old folder, new folder)) -- every card's project and
+    run follow them, its name too (the id stays: a skipped or learned card never comes back). "" or the problem."""
+    pairs = [(str(a), str(b)) for a, b in pairs]
+
+    def apply(items: list[Entry]) -> None:
+        for x in items:
+            p, r = _moved_path(x.project, pairs), _moved_path(x.run, pairs)
+            if p != x.project or r != x.run:
+                x.id = x.key()                        # (made from the old run before it changes)
+                for old, new in pairs:
+                    if x.name and x.name.lower() == Path(old).name.lower():
+                        x.name = Path(new).name
+                x.project, x.run = p, r
+    return _change(folder, apply)
+
+
 def from_job(job: Any, res: dict) -> Entry:
     """The entry of a finished queue job (core.jobs.Job + its result)."""
     project = getattr(job, "project", None)
@@ -326,11 +356,16 @@ def is_fix(f: Path, finished: float, now: float | None = None) -> bool:
     if now - st.st_mtime < SETTLE_S or st.st_mtime < finished - 60:
         return False
     from . import learnkit
+    made = getattr(st, "st_birthtime", None) or st.st_ctime
+    try:
+        from .premiere import is_own_project          # day 13: also '<title>.prproj' next to its '<title>_edit.xml'
+        own = is_own_project(f)
+    except Exception:  # noqa: BLE001
+        own = f.stem.lower().endswith("_edit")
+    if own:                                           # (before FIXED_RE: a title may end with "fixed")
+        return st.st_mtime - made >= OWN_PROJECT_S
     if learnkit.FIXED_RE.search(f.name):
         return True
-    made = getattr(st, "st_birthtime", None) or st.st_ctime
-    if f.stem.lower().endswith("_edit"):
-        return st.st_mtime - made >= OWN_PROJECT_S
     return True
 
 

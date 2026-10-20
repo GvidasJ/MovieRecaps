@@ -119,6 +119,10 @@ class Card:
     auto_column: str = "link"                # where its steps alone put it
     moved: bool = False                      # a move by hand decides its column
     data: dict = field(default_factory=dict, repr=False)      # its project.json as read
+    display: str = ""                        # day 13: the name shown -- the video's title, else the folder's name
+    rename_to: str = ""                      # day 13: the folder name its title gives when it is not called that yet
+    #                                          (and was not kept on purpose: names.kept) -- "Rename to title"
+    kept: str = ""                           # day 13: why it keeps its name (plain words), '' when it does not
 
     @property
     def label(self) -> str:
@@ -150,11 +154,21 @@ def _fixed_prproj(folder: Path) -> Path | None:
     for d in dirs:
         try:
             for f in d.iterdir():
-                if f.suffix.lower() == ".prproj" and "fixed" in f.stem.lower() and f.is_file():
+                if f.suffix.lower() == ".prproj" and "fixed" in f.stem.lower() and f.is_file() and not _own(f):
                     found.append((f.stat().st_mtime, f))
         except OSError:
             continue
     return max(found)[1] if found else None
+
+
+def _own(f: Path) -> bool:
+    """Day 13: the app's own project ('<title>.prproj' next to its '<title>_edit.xml') is never your fix -- also when
+    the title has "fixed" in it."""
+    try:
+        from .premiere import is_own_project
+        return is_own_project(f)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def auto_dates(data: dict, fixed: Path | None = None) -> dict[str, datetime]:
@@ -283,9 +297,25 @@ def card_of(folder: str | os.PathLike, where: str | None = None) -> Card:
         card.edit_result = str((ed or {}).get("result") or "") if isinstance(ed, dict) else ""
         h = locks.holder(folder)
         card.lock = h if h is not None and not h.get("stale") else None
+        _names(card, folder, data)
     except Exception as e:  # noqa: BLE001 - a strange project.json never breaks the board
         card.error = f"project.json has something unexpected in it ({type(e).__name__}: {e})"
     return card
+
+
+def _names(card: Card, folder: Path, data: dict) -> None:
+    """Day 13: the card's name is its video's title (the YouTube title, else the headline, else the post's title);
+    ``rename_to`` the folder name that title gives when the folder is not called that (old projects keep their names
+    until you press Rename to title) -- unless it kept that very name on purpose (names.kept)."""
+    from . import names as NM
+    d = {**data, "title": card.title, "upload_title": card.upload_title}
+    card.display = NM.display_name(d, folder.name)
+    t, _src = NM.title_of(d)
+    base = NM.folder_base(t, NM.day_of(folder.name) or None, NM.root_len(folder.parent)) if t else ""
+    kept = (data.get(NM.KEY) or {}).get("kept") if isinstance(data.get(NM.KEY), dict) else None
+    kept = kept if isinstance(kept, dict) else {}
+    card.kept = str(kept.get("why") or "") if kept.get("for") == base else ""
+    card.rename_to = base if base and not NM.has_base(folder.name, base) and not card.kept else ""
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -327,6 +357,7 @@ def load_cards(shared_root: str | os.PathLike | None, local_root: str | os.PathL
     local = [] if same else _scan_safely(local_root, "local", timeout_s)
     by_name = {c.folder.name.lower(): c for c in shared}
     there = {PB._norm(c.folder) for c in shared}
+    datas = [c.data for c in shared if not c.error and c.data]
     out = list(shared)
     for c in local:
         to = (c.data.get("published") or {}).get("to") if isinstance(c.data.get("published"), dict) else None
@@ -335,6 +366,8 @@ def load_cards(shared_root: str | os.PathLike | None, local_root: str | os.PathL
         s = by_name.get(c.folder.name.lower())
         if s is not None and (s.error or c.error or PB.same_project(c.data, s.data)):
             continue
+        if to and not c.error and any(PB.same_project(c.data, d) for d in datas):
+            continue                                            # day 13: its shared copy was renamed after its title
         out.append(c)
     return out
 

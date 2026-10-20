@@ -40,6 +40,7 @@ class Event:
     channel: str = ""
     detail: str = ""
     kind: str = INFO        # ok / note / fail / info
+    shown: str = ""         # day 13: the name History shows -- the video's title (names.display_name), '' = title / name
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -143,6 +144,11 @@ def project_events(data: Mapping) -> list[Event]:
     name = str(data.get("name") or "")
     title = str(data.get("title") or "")
     channel = str(data.get("channel") or "")
+    try:                                     # day 13: the video's title (YouTube title, headline, post) is the name
+        from .names import display_name
+        shown_name = display_name(data, name)
+    except Exception:  # noqa: BLE001
+        shown_name = ""
     steps = data.get("steps") if isinstance(data.get("steps"), Mapping) else {}
     board = data.get("board") if isinstance(data.get("board"), Mapping) else {}
     dates = board.get("dates") if isinstance(board.get("dates"), Mapping) else {}
@@ -152,7 +158,7 @@ def project_events(data: Mapping) -> list[Event]:
     def add(when: Any, what: str, detail: str = "", kind: str = INFO, column: str | None = None) -> None:
         t = parse_time(when)
         if t is not None:
-            out.append(Event(t, what, name, title, channel, _short(detail), kind))
+            out.append(Event(t, what, name, title, channel, _short(detail), kind, shown_name))
             if column:
                 shown.add(column)
 
@@ -297,7 +303,7 @@ def search(evs: Iterable[Event], text: str) -> list[Event]:
         return evs
     out = []
     for ev in evs:
-        hay = fold(" ".join((ev.title, ev.channel, ev.name, ev.what, ev.detail)))
+        hay = fold(" ".join((ev.title, ev.channel, ev.name, ev.what, ev.detail, ev.shown)))
         if all(w in hay for w in words):
             out.append(ev)
     return out

@@ -475,7 +475,11 @@ def project_for_job(job: Job, root: Path | None = None, progress: Callable[[str,
         elif job.roles_chosen:                         # chosen on the row before the project was made
             flow.set_roles(pj.folder, raw.name, "picked")
     else:
-        pj = P.create(root, raw_file=raw, name=job.name or comp.stem)
+        from . import names as NM                      # day 13: named after the title when one is typed already
+        from . import paths as _paths
+        t, src = NM.title_of({"upload_title": getattr(job, "upload_title", "") or "", "title": job.title or ""})
+        base = NM.folder_base(t, roots_len=NM.root_len(root or _paths.projects_root())) if t else ""
+        pj = P.create(root, raw_file=raw, name=job.name or comp.stem, folder=base or None, names=NM.marker(src))
         pj.set_step("download", P.RUNNING)
         placed, details = {}, {}
         try:

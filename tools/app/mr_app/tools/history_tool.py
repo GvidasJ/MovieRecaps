@@ -24,10 +24,13 @@ class _Item(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(58)
         t = (getattr(ev, "title", "") or "").replace("\n", " / ")
-        tip = getattr(ev, "detail", "")
+        shown = getattr(ev, "shown", "") or t or getattr(ev, "name", "")     # day 13: the video's title is the name
+        name = getattr(ev, "name", "")
+        tip = "\n".join(x for x in (getattr(ev, "detail", ""), f"Folder: {name}" if name and name != shown else "")
+                        if x)
         if tip:
             self.setToolTip(tip)
-        self.line2 = " · ".join(x for x in (t or getattr(ev, "name", ""), getattr(ev, "channel", "")) if x)
+        self.line2 = " · ".join(x for x in (shown, getattr(ev, "channel", "")) if x)
 
     def sizeHint(self) -> QSize:                          # noqa: N802
         return QSize(600, 58)

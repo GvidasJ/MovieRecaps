@@ -2,9 +2,11 @@
 writes -- else the newest 'Adobe Premiere Pro <year>' in the usual folders), and opening a run's edit in it (open_xml).
 
 Each run's edit gets its own Premiere project next to it: ``<name>.prproj`` -- the name of the run's XML copy
-(video10_edit.prproj; a project's edit: <project>_edit.prproj) -- a copy of an empty project Premiere Pro 2024 made
-itself (assets\\premiere\\empty_project.prproj). What open_xml does depends on what Premiere is doing (each way
-tested with Premiere Pro 2024, night 11):
+(video10_edit.prproj; a project's edit: <project>_edit.prproj; day 13, a project named after its title:
+``<title>_edit.xml`` with the sequence called after the title, and ``<title>.prproj``) -- a copy of an empty project
+Premiere Pro 2024 made itself (assets\\premiere\\empty_project.prproj). A project of the run folder that you saved
+with the edit in it is opened again rather than a new one (after a title change its name is the old title's). What
+open_xml does depends on what Premiere is doing (each way tested with Premiere Pro 2024, night 11):
 
 * not running: Premiere is started WITH that project (as a double-click on it in Explorer does);
 * running on its Home screen (no project open): the project is handed to it and it opens.
@@ -247,22 +249,119 @@ def window_up() -> bool:
 # the run's files
 # ---------------------------------------------------------------------------------------------------------------------
 
+_SEQ_NAME = re.compile(r"(<sequence\b[^>]*>\s*<name>)(.*?)(</name>)", re.S)
+
+
+def sequence_name_in(text: str) -> str | None:
+    """The name of the XML's (first) sequence, as written (None when it has none)."""
+    m = _SEQ_NAME.search(text or "")
+    if m is None:
+        return None
+    from xml.sax.saxutils import unescape
+    return unescape(m.group(2))
+
+
+def rename_sequence(text: str, name: str) -> str:
+    """The XML with its (first) sequence called ``name`` (day 13: Premiere names the render after the sequence) --
+    only that <name>'s text changes, every other byte stays."""
+    from xml.sax.saxutils import escape
+    m = _SEQ_NAME.search(text)
+    if m is None:
+        raise ValueError("the edit's sequence has no name")
+    return text[:m.start(2)] + escape(name) + text[m.end(2):]
+
+
+def _copy_ok(out: Path, xml: Path, sequence: str) -> bool:
+    """The title-named copy is there for this very edit (not older than 1_edit.xml) with this sequence name."""
+    try:
+        if os.stat(out).st_mtime < os.stat(xml).st_mtime:
+            return False
+        with open(out, "rb") as f:
+            head = f.read(8192).decode("utf-8", "replace")
+    except OSError:
+        return False
+    return sequence_name_in(head) == sequence
+
+
+def write_copy(xml: Path, out: Path, sequence: str) -> Path:
+    """``out`` = 1_edit.xml with its sequence called ``sequence``, written atomically, with 1_edit.xml's times (Open
+    in Premiere compares the edit's time with the project's last save: a copy made now must not count as an edit made
+    again)."""
+    st = os.stat(xml)
+    text = Path(xml).read_bytes().decode("utf-8")
+    data = rename_sequence(text, sequence).encode("utf-8")
+    tmp = out.with_name(f".{out.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.replace(tmp, out)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    return out
+
+
 def named_copy(xml: Path) -> Path:
-    """The run's 1_edit.xml as <run folder name>_edit.xml next to it (Premiere names the new project after it); a
-    project's edit (<project>\\edit, edit-2 ...) is named after the project (night 10)."""
-    run = xml.parent
-    name = f"{run.name}_edit"
-    if re.fullmatch(r"(?i)edit(-\d+)?", run.name) and (run.parent / "project.json").is_file():
-        name = f"{run.parent.name}_{run.name}"              # 2026-10-17_a-lot-to-catch-up-on_edit(-2)
-    out = xml.with_name(f"{name}.xml")
-    if not out.is_file() or out.stat().st_mtime < xml.stat().st_mtime:
-        shutil.copy2(xml, out)
+    """The run's 1_edit.xml as a named copy next to it (Premiere names the new project after it; 1_edit.xml itself is
+    never changed). Day 13: a project whose names follow its title gets ``<title>_edit.xml`` with the sequence called
+    after the title (the render is named after it); a project from before keeps night 10's ``<project>_<run>.xml``
+    (an exact copy, "Recreated Edit (Premiere)"), any other run ``<run folder>_edit.xml``."""
+    from . import names
+    xml = Path(xml)
+    fname, seq = names.copy_name(xml.parent)
+    out = xml.with_name(fname)
+    if seq is None:
+        if not out.is_file() or out.stat().st_mtime < xml.stat().st_mtime:
+            shutil.copy2(xml, out)
+        return out
+    if not _copy_ok(out, xml, seq):
+        try:
+            write_copy(xml, out, seq)
+        except (ValueError, UnicodeDecodeError):      # not the tool's XML: an exact copy, as before
+            shutil.copy2(xml, out)
     return out
 
 
 def project_for(xml: Path) -> Path:
-    """The run's own Premiere project: next to its named XML copy, with its name (video10_edit.prproj)."""
-    return Path(xml).with_suffix(".prproj")
+    """The run's own Premiere project, next to its named XML copy: '<title>.prproj' for a title-named copy
+    ('<title>_edit.xml', day 13), else the copy's own name (video10_edit.prproj)."""
+    from . import names
+    xml = Path(xml)
+    fname, seq = names.copy_name(xml.parent)
+    if seq is not None and xml.name == fname:
+        return xml.with_name(names.project_name(xml))
+    return xml.with_suffix(".prproj")
+
+
+def is_own_project(prproj: str | os.PathLike) -> bool:
+    """The app made this .prproj (Open in Premiere: an empty project the edit is imported into): night 10's
+    '<name>_edit.prproj', or day 13's '<title>.prproj' next to its '<title>_edit.xml'."""
+    from . import names
+    p = Path(prproj)
+    if p.stem.lower().endswith("_edit"):
+        return True
+    try:
+        return p.with_name(p.stem + names.COPY_SUFFIX).is_file()
+    except OSError:
+        return False
+
+
+def saved_own_project(run_dir: str | os.PathLike) -> Path | None:
+    """The newest project the app made in the run folder that you saved with the edit in it -- Open in Premiere opens
+    that one again (after a title change its name is not the title's any more), never a new empty one."""
+    found = []
+    try:
+        for f in Path(run_dir).iterdir():
+            if f.suffix.lower() == ".prproj" and f.is_file() and is_own_project(f) and holds_edit(f):
+                found.append((f.stat().st_mtime, f))
+    except OSError:
+        return None
+    return max(found)[1] if found else None
 
 
 def holds_edit(prproj: Path) -> bool:
@@ -389,7 +488,7 @@ def _open(xml: Path, wait_s: float) -> str:
         _show_folder(xml.parent)
         return "Premiere Pro was not found on this computer: the run folder is open -- import 1_edit.xml yourself"
     xml = named_copy(xml)
-    proj = project_for(xml)
+    proj = saved_own_project(xml.parent) or project_for(xml)
     st = state()
     if st.running and st.title is None:                                  # starting (or closing): its window waited for
         st = _wait(lambda s: s.title is not None or not s.running, wait_s)

@@ -136,11 +136,13 @@ class BoardCard(QFrame):
         lay.setSpacing(4)
         top = QHBoxLayout()
         top.setSpacing(6)
-        short = card.name if len(card.name) < 40 else card.name[:38] + "…"
+        shown = getattr(card, "display", "") or card.name   # day 13: the video's title is the name
+        short = shown if len(shown) < 60 else shown[:58].rstrip() + "…"
         name = QLabel(short.replace("_", "_​").replace("-", "-​"))   # it may break after _ and - (narrow)
         name.setFont(W.font(13, 700))
         name.setWordWrap(True)
-        name.setToolTip(str(card.folder))
+        name.setToolTip(f"{shown}\nFolder: {card.folder}" if shown != card.name else str(card.folder))
+        self.name_label = name
         top.addWidget(name, 1)
         self.pin = W.Button("★", "Ghost")
         self.pin.setToolTip("Pin to the top of its column")
@@ -148,6 +150,25 @@ class BoardCard(QFrame):
         self.pin.clicked.connect(lambda: self.page.pin(self.card))
         top.addWidget(self.pin, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(top)
+        self.rename = None
+        target = getattr(card, "rename_to", "") or ""
+        kept = getattr(card, "kept", "") or ""
+        if target or kept:                                # day 13: the folder is not called after the title (yet)
+            fl = QLabel(f"folder: {card.folder.name}".replace("_", "_​").replace("-", "-​"))
+            fl.setFont(W.mono(10))
+            fl.setWordWrap(True)
+            fl.setStyleSheet(f"color: {theme.DIM};")
+            fl.setToolTip(f"keeps its name: {kept}" if kept else f"Rename to title makes it: {target}")
+            lay.addWidget(fl)
+        if target:
+            self.rename = W.Button("Rename to title", "Mini")
+            self.rename.setToolTip(f"Renames the folder and the files the app made to:\n{target}\n(never while an "
+                                   "edit, a copy to the shared folder or Premiere uses them -- then it waits)")
+            self.rename.clicked.connect(lambda: self.page.rename_to_title(self.card))
+            rl = QHBoxLayout()
+            rl.addWidget(self.rename)
+            rl.addStretch(1)
+            lay.addLayout(rl)
         from ..ui.titles_block import TitlesBlock, has_titles, is_just_cuts
         data = getattr(card, "data", None) or {}
         lay.addWidget(W.channel_chip(card.channel or "no channel", 11))
@@ -267,6 +288,8 @@ class BoardCard(QFrame):
                  ("Open in Premiere", premiere, False, bool(edit)),
                  ("Copy title", self._copy, False, bool(c.title or getattr(c, "upload_title", ""))),
                  ("Set the YouTube title…", set_yt),
+                 ("Rename to title", lambda: self.page.rename_to_title(c), False,
+                  bool(getattr(c, "rename_to", ""))),
                  *(([None] + self.titles.menu_items()) if self.titles is not None else []),
                  None,
                  ("Unpin" if getattr(c, "pinned", False) else "Pin to the top ★", lambda: self.page.pin(c))]
@@ -647,7 +670,9 @@ class BoardPage(QWidget):
         self.cards = list(cards)
         sig = tuple((str(c.folder), c.column, c.title, c.pinned, tuple(sorted((k, str(v)) for k, v in
                                                                            (c.dates or {}).items())),
-                     bool(getattr(c, "lock", None)), getattr(c, "edit_result", ""), getattr(c, "error", ""))
+                     bool(getattr(c, "lock", None)), getattr(c, "edit_result", ""), getattr(c, "error", ""),
+                     getattr(c, "display", ""), getattr(c, "rename_to", ""), getattr(c, "kept", ""),
+                     getattr(c, "upload_title", ""))
                     for c in self.cards)
         if sig != self._sig:
             self._sig = sig
@@ -730,14 +755,45 @@ class BoardPage(QWidget):
                 return ""
             ch = card.channel
             BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch),
-                    lambda _r: (self.toast("New template made and swapped into the edit ✓"), self.reload()),
+                    lambda _r: (self.toast("New template made and swapped into the edit ✓"), self.reload(),
+                                self._title_changed(folder)),
                     lambda e: self.toast(f"The template could not be made: {e}", "fail"), work=True)
             return flow.USE_CHANGE
         BG.call(lambda: flow.set_headline(folder, text),
                 lambda r: (self.toast("Headline set ✓" + (" -- template made again" if (r or {}).get("template")
-                                                          else "")), self.reload()),
+                                                          else "")), self.reload(), self._title_changed(folder)),
                 lambda e: self.toast(f"The headline could not be saved: {e}", "fail"), work=True)
         return flow.USE_SET
+
+    # -- day 13: names = the video's title --
+    def _title_changed(self, folder) -> None:
+        from .match_cuts_tool import title_changed
+        title_changed(self.ctx, folder)
+
+    def rename_to_title(self, card) -> None:
+        """"Rename to title" on a card: the folder and the files the app made are renamed after the video's title (an
+        old project too) -- in the background; when something uses them it waits and is done later by itself."""
+        folder = Path(card.folder)
+        fn = getattr(self.ctx, "title_changed", None)
+        if callable(fn):
+            fn(folder, explicit=True)
+            return
+        shared, local = self._roots()                     # (no window: the page does it itself -- the tests)
+
+        def work():
+            from ..core import renames
+            return renames.request(folder, hub=shared, local_root=local, explicit=True)
+
+        def done(res) -> None:
+            self.last_rename = res
+            self.toast(f"Renamed after its title ✓  {Path(res.folder).name}" if res.renamed else res.text,
+                       "ok" if res.renamed else "note")
+            self.reload()
+        BG.call(work, done, lambda e: self.toast(f"It could not be renamed: {e}", "fail"))
+
+    def moved(self, _old, _new) -> None:
+        """A project folder was renamed: the board is read again."""
+        self.reload()
 
     def ask_yes(self, title: str, text: str) -> bool:
         """A Yes / No question (a test replaces it)."""
