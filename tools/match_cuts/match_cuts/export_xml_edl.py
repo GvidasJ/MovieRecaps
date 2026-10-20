@@ -3241,7 +3241,8 @@ def _moved_cut(clips: list[PremiereClip], i: int, to: int) -> list[PremiereClip]
     if y.src_in + d_y < 0:
         return None
     out = list(clips)
-    out[i] = dataclasses.replace(x, end=to, rec_end=to, src_out=x.src_in + int(round((to - x.rec_start) * float(x.speed))))
+    out[i] = dataclasses.replace(x, end=to, rec_end=to,
+                                 src_out=x.src_in + int(round((to - x.rec_start) * float(x.speed))))
     out[i + 1] = dataclasses.replace(y, start=to, rec_start=to, src_in=y.src_in + d_y)
     return out
 
@@ -3385,9 +3386,9 @@ def edit_fix_lines(followed: Sequence[dict], end_cut: dict | None, fps: Fraction
     if end_cut:
         k = int(end_cut["frames"])
         out.append(f"{k} flash frame{'' if k == 1 else 's'} removed at {_tc(int(end_cut['at']), fps)} "
-                   f"({short(end_cut['label'])}): the edit's last {'frame' if k == 1 else f'{k} frames'} showed the first "
-                   f"{'frame' if k == 1 else 'frames'} of the RAW's next shot -- 1_edit.xml now ends on that shot "
-                   "change")
+                   f"({short(end_cut['label'])}): the edit's last {'frame' if k == 1 else f'{k} frames'} showed the "
+                   f"first {'frame' if k == 1 else 'frames'} of the RAW's next shot -- 1_edit.xml now ends on that "
+                   "shot change")
     return out
 
 
@@ -4083,10 +4084,12 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         n_plan = N
         clips, audio_items, markers, N, pos_map = rerate_edit(clips, audio_items, markers, N, fps, want, raw_fps,
                                                               getattr(cfg, "premiere_shots", None))
-        clips, audio_items, markers, N, end_cut = _cut_end_flash(clips, audio_items, markers, N, pos_map, n_plan,
-                                                                 fps, want, getattr(cfg, "premiere_shots", None))
-        clips, audio_items, cut_fixed = fix_cut_flashes(clips, audio_items, getattr(cfg, "premiere_shots", None),
-                                                        want, raw_fps, pos_map)
+        from .config import removes_silence
+        if not removes_silence(cfg):      # day 13 -- the default only: with --remove-silence these cuts sit off speech
+            clips, audio_items, markers, N, end_cut = _cut_end_flash(clips, audio_items, markers, N, pos_map, n_plan,
+                                                                     fps, want, getattr(cfg, "premiere_shots", None))
+            clips, audio_items, cut_fixed = fix_cut_flashes(clips, audio_items, getattr(cfg, "premiere_shots", None),
+                                                            want, raw_fps, pos_map)
         clips, audio_items, pairs = link_pairs(clips, audio_items)
         fps = want
         src_dur = int(math.floor(raw_frames * float(fps) / float(raw_fps)))

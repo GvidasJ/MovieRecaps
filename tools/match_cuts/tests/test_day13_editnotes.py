@@ -6,7 +6,8 @@
 9.1  XML FLASH: (a) the competitor's own last frames show the first frame or two of the RAW's next shot (video12: 2
      frames at 00:00:32:00, you cut them in your fix; Are We There Yet S26: 1 frame at 00:00:24:22): 1_edit.xml ends on
      that shot change; (b) a burst of short shots of the RAW's own (Family Guy S09E11: RAW frames 1 + 2 + 1, played
-     straight through in one take) is no flash -- the check had judged its middle shot alone.
+     straight through in one take) is no flash -- the check had judged its middle shot alone; (c) a flash of 1-2
+     frames at a cut inside the edit: the cut moves onto the RAW's shot change (kept only when the check improves).
 """
 from __future__ import annotations
 
@@ -229,6 +230,12 @@ def test_the_delivered_edit_ends_on_the_raws_shot_change(tmp_path):
                    "RAW's next shot -- 1_edit.xml now ends on that shot change"]
 
 
+def test_with_remove_silence_the_end_is_left_as_the_speech_safe_step_made_it(tmp_path):
+    cfg = config(tmp_path, V12_SHOTS, remove_silence=True, competitor="c.mp4")
+    res = ex.write_premiere_xml(video12_like(), tmp_path / "1_edit.xml", cfg, seq_rate=R24)
+    assert res["end_cut"] is None and res["cut_flashes"] == [] and res["edit_fixes"] == []
+
+
 def test_the_run_writes_and_lists_the_fix(tmp_path):
     """pipeline.apply_final (the S8 'speed + frame' step at the RAW's rate) on the video12-like edit: 1_edit.xml ends
     on the shot change and passes its hard checks (the XML RATE check allows the frames cut on purpose); the SRT's last
@@ -266,7 +273,8 @@ def test_final_srt_ends_the_last_caption_on_the_new_end(tmp_path):
     cfg = config(tmp_path, V12_SHOTS)
     res = ex.write_premiere_xml(cl, tmp_path / "1_edit.xml", cfg, seq_rate=R24)
     pm = {int(k): v for k, v in res["pos_map"].items()}
-    rows = [{"start_ms": 1000.0, "end_ms": 4000.0, "text": "one"}, {"start_ms": 4000.0, "end_ms": 5000.0, "text": "two"}]
+    rows = [{"start_ms": 1000.0, "end_ms": 4000.0, "text": "one"},
+            {"start_ms": 4000.0, "end_ms": 5000.0, "text": "two"}]
     srt = final_srt(rows, 1.0, F60, R24, pm)
     end = srt.strip().splitlines()[-2].split(" --> ")[1]
     from match_cuts.captions import frame_ms, ms_tc
@@ -365,6 +373,11 @@ def test_a_burst_of_short_raw_shots_played_straight_through_is_no_flash():
            {"label": "S30", "start": 182, "end": 241, "in": 20000, "speed": 1.0, "framing": b}]
     assert ex.played_through(cut, R24, FG_SHOTS) != [0.5 * (FG_SHOTS[0] + FG_SHOTS[-1])]
     assert shots.flash_problems(cut, R24, ex.played_through(cut, R24, FG_SHOTS))
+    # a cut from another moment of the RAW straight INTO the burst's first frame: not played through -- as before
+    into = [{"label": "S30", "start": 100, "end": 180, "in": 20000, "speed": 1.0, "framing": a},
+            {"label": "S17", "start": 180, "end": 241, "in": 14520, "speed": 1.0, "framing": b}]
+    assert FG_SHOTS[0] in ex.played_through(into, R24, FG_SHOTS)          # the change at the cut stays
+    assert shots.flash_problems(into, R24, ex.played_through(into, R24, FG_SHOTS))
 
 
 def test_one_short_shot_is_judged_as_before():

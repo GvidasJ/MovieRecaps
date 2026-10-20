@@ -29,7 +29,9 @@ the end summary ("Fixed in the edit by itself: N" under *Check by hand*), at the
   the delivered XML. The XML RATE check knows those frames were cut on purpose (`end_cut`).
 * **video6 vs video12**: in your video12 fix (night 11) you cut exactly those 2 frames -- the tool's 1_edit.xml now ends
   on RAW frame 1530, where your fix ends. In your video6 fix (night 7) you kept the 1 frame. I followed the newer fix and
-  today's wish ("remove them when it's clearly a flash"): video6's 1_edit.xml is now 1 frame shorter than your fix.
+  today's wish ("remove them when it's clearly a flash" -- the example in today's list, "1 flash frame removed at
+  00:00:24:22 (S26)", is exactly such an ending): video6's 1_edit.xml is now 1 frame shorter than your fix. (Your
+  "ignore my trims at the ending" is about what Learn reads from your fixes; nothing here is learned from them.)
 * **A 60 fps RAW** (no re-rate step) keeps an end sliver (it would have to change the checked edit and the captions).
 * **A sliver at the very start** of the edit is not cut (it would move every caption and cut by a frame).
 * **video020-fixed** (`--fast`, the known 12.6 s OTHER VIDEO): not chased -- its flash sits next to another video's
@@ -40,12 +42,18 @@ the end summary ("Fixed in the edit by itself: N" under *Check by hand*), at the
 
 | case | before | after |
 |---|---|---|
-| Are We There Yet (laptop run, published) | 3 × `XML A1 ... is not a V1 cut range`, `XML FLASH S26 at 00:00:24:22` | not re-run (see *Not done*); checked on its own files: the 3 A1 notes are the snapped cuts S11\|S12+S13, S16+S17\|S18+S19+S20, S21+S22\|S23+S24+S25 (A1 a frame before V1 -- now cut with it; the same structure is a unit test); on its delivered 1_edit.xml the end fix cuts 1 frame and the flash check finds nothing |
+| Are We There Yet (laptop run, published) | 3 × `XML A1 ... is not a V1 cut range`, `XML FLASH S26 at 00:00:24:22` | not re-run (see *Not done*); checked on its own files: the 3 A1 notes are the snapped cuts S11\|S12+S13, S16+S17\|S18+S19+S20, S21+S22\|S23+S24+S25 -- in the checked 60 fps edit A1 was cut a frame before V1 there (now cut with it; the same structure is a unit test). Your delivered 23.976 fps 1_edit.xml already had V1 and A1 together (the RAW's rate rounds both onto one frame): the notes came from the 60 fps check, which the last step does not repeat. On the delivered 1_edit.xml the end fix cuts 1 frame (ends 00:00:24:22) and the flash check then finds nothing. |
 | Family Guy 1999-present (laptop run) | 2 × `XML FLASH S17+...` at 00:00:07:12 / 07:13 (and 07:31 / 07:32 at 60 fps) | the old check reproduces both notes exactly on its edit_60fps.xml and 1_edit.xml; the new check finds none on either (XML PERSON / XML ENDING stay) |
 | video12-fixed | FAIL: `XML FLASH S30+S31+S32 at 00:00:32:00: 2 frame(s)` | 1_edit.xml 770 -> 768 frames, ends on RAW 1530 (your fix's end); 0 problems |
 | video6-fixed | FAIL: `XML FLASH S08+S09+S10+S11 at 00:00:21:00: 1 frame(s)` | 1_edit.xml 505 -> 504 frames; 0 problems |
 | laptop013-fixed | -- | edit_60fps.xml: A1 cut at 653 -> 654 with its snapped V1 cut (1_edit.xml unchanged) |
 | laptop004, laptop010, video7, video8, video9, video11, video14, video15 | -- | identical V1 / A1 lists at both rates |
+
+A sweep of every finished run's own files (all 28 day-12 check-all runs, every run in D:\Shared\Projects, output\
+laptop_video10-19): A1 moves only in laptop013 (above) and, among your real runs, in Are We There Yet (its 3 notes),
+Always Sunny "Surviving or Looting" (1 cut), mindculpt (1) and "interesting fact" (1) -- those three had no note (one
+cut each, the sound a frame off its picture in the 60 fps edit); the end cut only in video6, video12 / laptop_video12
+and Are We There Yet; the cut fixer nowhere (no such flash today).
 
 How these were compared: the "framing" helper's pickles of each check-all case's export inputs
 (work\t28\framing\dumps: the cut list, config and ripple of the first write_premiere_xml call of a cached run) replayed
@@ -53,6 +61,22 @@ on the CPU with the code before my change (git HEAD of day 12) and with mine: th
 1_edit.xml at the RAW's rate + its hard checks (scripts in my scratchpad: en_replay.py / en_cmp.py). The replayed old
 code gives exactly day 12's XMLs (checked on video14 and laptop013). The flash check change was swept over every
 day-12 check-all XML and every run in D:\Shared\Projects and output\laptop_video1x: only Family Guy changes.
+
+## For the lead (merge / check by hand)
+
+* Touched: `export_xml_edl.py` (new block after `snap_to_shots`; hooks in `write_premiere_xml` around the snap / re-rate
+  steps and its return dict; `validate_premiere_exports` after its `snap_to_shots`; `played_through`; `rate_problems`
+  and `final_xml_problems` got an `end_cut` argument), `pipeline.py` (`apply_final`: passes `end_cut`, keeps
+  `edit_fixes` in ctx.premiere_xml; `hand_checks`: `edit_fixes`), `cli.py` (one block in the end summary), `report.py`
+  (`_premiere_checks`), `tests/test_flash_018.py` (one expectation: A1 now moves with the snapped cuts).
+* The captions follow the end cut through write_premiere_xml's `pos_map` (apply_final -> final_srt). If the
+  "captions" helper changes how 2_captions.srt is written at the RAW's rate, it must keep reading that `pos_map` (or
+  end the last caption at the result's `frames`).
+* The 60 fps check's warning lines ("Premiere XML: 1 flash frame(s) ... the run fails", "XML/EDL re-parse validation
+  failed: [...]") still name an end flash the delivered 1_edit.xml no longer has -- as they already did before for
+  flashes that vanish at the RAW's rate (Always Sunny's S31). The run's result and its note read the delivered XML.
+* Seen, not mine: `XML SYNC ... the RAW skips 42 ms at the cut: one take, cut` at the RAW's rate (video14-fixed in day
+  12's checkallB run, Always Sunny's laptop run) -- a one-frame skip inside one take after the re-rate.
 
 ## Not done
 
