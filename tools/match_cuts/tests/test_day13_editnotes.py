@@ -229,6 +229,37 @@ def test_the_delivered_edit_ends_on_the_raws_shot_change(tmp_path):
                    "RAW's next shot -- 1_edit.xml now ends on that shot change"]
 
 
+def test_the_run_writes_and_lists_the_fix(tmp_path):
+    """pipeline.apply_final (the S8 'speed + frame' step at the RAW's rate) on the video12-like edit: 1_edit.xml ends
+    on the shot change and passes its hard checks (the XML RATE check allows the frames cut on purpose); the SRT's last
+    caption ends there too; the fix is in the end summary (hand_checks) and in report.md."""
+    from match_cuts import pipeline, report
+    from match_cuts.captions import frame_ms, ms_tc, read_srt
+    from match_cuts.common import DecisionLog
+    cl = video12_like()
+    run = tmp_path / "001"
+    (run / "extras").mkdir(parents=True)
+    cfg = config(tmp_path, V12_SHOTS, out_dir=str(run / "extras"), deliver_dir=str(run), premiere_seq_rate=str(R24))
+    xml = run / "1_edit.xml"
+    r60 = ex.write_premiere_xml(cl, xml, cfg)
+    (run / "2_captions.srt").write_text("1\n00:00:01,000 --> 00:00:03,000\none\n\n2\n00:00:03,000 --> 00:00:05,000\n"
+                                        "two\n", encoding="utf-8")
+    ctx = SimpleNamespace(cfg=cfg, premiere_cutlist=cl, silence={}, premiere_xml=dict(r60), raw_fps=R24,
+                          captions={"path": str(run / "2_captions.srt")}, paths={"xml": str(xml)},
+                          dlog=DecisionLog(run / "extras" / "decisions.jsonl"), exports={"ok": True, "errors": []},
+                          people=None, cutlist=cl, broll=None, comp_fps=Fraction(60))
+    out = pipeline.apply_final(ctx, 1.0, R24)
+    assert out["problems"] == [], out["problems"]
+    end = ex.parse_premiere_xml(xml)["duration"]
+    assert ctx.premiere_xml["end_cut"]["at"] == end and ctx.premiere_xml["edit_fixes"][0].startswith("2 flash frames")
+    rows = read_srt(run / "2_captions.srt")
+    assert rows[-1]["end_ms"] == frame_ms(end, R24) and ms_tc(frame_ms(end, R24))
+    assert (run / "extras" / "edit_60fps.xml").is_file()                 # the checked edit kept (check-all scores it)
+    hc = pipeline.hand_checks(ctx)
+    assert hc["edit_fixes"] == ctx.premiere_xml["edit_fixes"]
+    assert any("Fixed in the edit by itself" in s for s in report._premiere_checks(ctx))
+
+
 def test_final_srt_ends_the_last_caption_on_the_new_end(tmp_path):
     from match_cuts.pipeline import final_srt
     cl = video12_like()
@@ -240,6 +271,73 @@ def test_final_srt_ends_the_last_caption_on_the_new_end(tmp_path):
     end = srt.strip().splitlines()[-2].split(" --> ")[1]
     from match_cuts.captions import frame_ms, ms_tc
     assert end == ms_tc(frame_ms(res["end_cut"]["at"], R24))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 9.1 (c): a flash of 1-2 frames at a cut inside the edit -- the cut moves onto the RAW's shot change
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _framed(c, tx: float):
+    return ex.dataclasses.replace(c, keys=[(c.src_in, Sim(0.5, 0.0, tx, 0.0))])
+
+
+def _a1(clips):
+    return [{"start": c.rec_start, "end": c.rec_end, "in": c.src_in, "out": c.src_out, "speed": 1.0,
+             "what": "picture"} for c in clips]
+
+
+def _shape(clips):
+    return [(c.rec_start, c.rec_end, c.src_in, c.src_out) for c in clips]
+
+
+def test_a_take_running_two_frames_into_its_next_shot_ends_on_the_change():
+    # S01 plays RAW 1000-1049; its next shot starts on RAW 1048: its last 2 frames are a flash before S02 (RAW 5000-)
+    x, y = _framed(_clip24(0, 50, 1000, 1), 0.0), _framed(_clip24(50, 100, 5000, 2), 40.0)
+    changes = shots.seconds([900, 1048, 4900, 6000], R24)
+    assert ex._flash_lines([x, y], changes, R24, R24)                       # the hard check's note
+    clips, audio, done = ex.fix_cut_flashes([x, y], _a1([x, y]), changes, R24, R24)
+    assert _shape(clips) == [(0, 48, 1000, 1048), (48, 100, 4998, 5050)]   # S02 starts 2 frames earlier, on its line
+    assert [(a["start"], a["end"], a["in"]) for a in audio] == [(0, 48, 1000), (48, 100, 4998)]
+    assert done == [{"clips": "S01|S02", "from": 50, "to": 48, "frames": 2}]
+    assert ex._flash_lines(clips, changes, R24, R24) == []
+    line = ex.edit_fix_lines([], None, R24, None, done)[0]
+    assert line.startswith("2 flash frames removed at 00:00:02:00 (S01|S02): the cut moved 2 frames earlier")
+
+
+def test_a_clip_starting_two_frames_before_its_own_shot_starts_on_it():
+    # S02 starts on RAW 4998, its shot starts on 5000: its first 2 frames are the shot before's last
+    x, y = _framed(_clip24(0, 50, 1000, 1), 0.0), _framed(_clip24(50, 100, 4998, 2), 40.0)
+    changes = shots.seconds([900, 3000, 5000, 6000], R24)   # (shots.raw_shot_changes adds each window's edges too)
+    pm = {125: 50}
+    clips, audio, done = ex.fix_cut_flashes([x, y], _a1([x, y]), changes, R24, R24, pm)
+    assert _shape(clips) == [(0, 52, 1000, 1052), (52, 100, 5000, 5048)]   # S01 plays 2 more of its own shot
+    assert [(a["start"], a["end"], a["in"]) for a in audio] == [(0, 52, 1000), (52, 100, 5000)]
+    assert pm == {125: 52} and done[0]["to"] == 52                          # a caption on that cut moves with it
+
+
+def test_a_flash_no_short_move_can_fix_is_left_for_a_look():
+    x, y = _framed(_clip24(0, 50, 1000, 1), 0.0), _framed(_clip24(50, 100, 5000, 2), 40.0)
+    # S02's own shot starts on its first frame: it cannot start earlier without a sliver of the shot before
+    tight = shots.seconds([900, 1048, 5000, 6000], R24)
+    clips, _, done = ex.fix_cut_flashes([x, y], _a1([x, y]), tight, R24, R24)
+    assert done == [] and _shape(clips) == _shape([x, y])
+    # 3 frames: more than a flash frame or two -- the competitor's own short shot, not moved
+    three = shots.seconds([900, 1047, 4900, 6000], R24)
+    assert ex.fix_cut_flashes([x, y], _a1([x, y]), three, R24, R24)[2] == []
+    # a sound cut there that is not the picture's own sound (an audio line): the picture cut stays with it
+    line = [dict(a, what="audio line") for a in _a1([x, y])]
+    assert ex.fix_cut_flashes([x, y], line, shots.seconds([900, 1048, 4900, 6000], R24), R24, R24)[2] == []
+
+
+def test_a_framing_change_one_frame_before_the_raws_shot_change_moves_onto_it():
+    # one take (S02 continues S01's source) reframed at the competitor's cut, one frame before the RAW's shot change:
+    # the new shot's first frame at S01's framing
+    x, y = _framed(_clip24(0, 50, 1000, 1), 0.0), _framed(_clip24(50, 100, 1050, 2), 40.0)
+    changes = shots.seconds([900, 1049, 2000], R24)
+    assert any("at the framing of another clip" in p for p in ex._flash_lines([x, y], changes, R24, R24))
+    clips, audio, done = ex.fix_cut_flashes([x, y], _a1([x, y]), changes, R24, R24)
+    assert _shape(clips) == [(0, 49, 1000, 1049), (49, 100, 1049, 1100)] and done[0]["frames"] == 1
+    assert [(a["start"], a["end"], a["in"]) for a in audio] == [(0, 49, 1000), (49, 100, 1049)]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
