@@ -656,6 +656,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             lines += [f"    {r}" for r in rows[1:max_rows + 1]]
         for r in hc.get("raw_media") or []:       # day 13: the original RAW in Premiere (or why a converted copy)
             lines.append(f"  The RAW in Premiere: {r}")
+        if hc.get("edit_fixes"):                                 # day 13: notes the tool fixed in the edit itself
+            rows = list(hc["edit_fixes"])
+            lines.append(f"  Fixed in the edit by itself: {len(rows)}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
         if hc.get("people"):
             rows = list(hc["people"])
             lines.append(f"  The person speaking in the picture: {rows[0]}")
