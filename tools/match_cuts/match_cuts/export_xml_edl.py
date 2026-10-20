@@ -1,4 +1,4 @@
-"""Stage 8 editorial exports (prompt Stage 8; DESIGN.md §5 export_xml_edl.py).
+"""Stage 8 editorial exports (prompt Stage 8; DESIGN.md Â§5 export_xml_edl.py).
 
 ``write_csv``         cutlist.csv -- one human-readable row per segment (the report's segment-table columns,
                       then machine-readable columns). The human-readable timecodes are ``common.timecode``
@@ -19,7 +19,7 @@ starts and FCP7 XML range markers on the sequence, both named ``'<TYPE> placehol
 
 Segments are sorted by ``comp_in``; each one becomes an event whose RECORD range is its own range trimmed
 at the next segment's ``comp_in`` (``rec_out = min(comp_out, next.comp_in)``), so events tile
-``[0, competitor frames)`` exactly. A crossfade (DESIGN §3: ``B.comp_in = O``, ``A.comp_out = O + D``)
+``[0, competitor frames)`` exactly. A crossfade (DESIGN Â§3: ``B.comp_in = O``, ``A.comp_out = O + D``)
 becomes a dissolve of ``D`` frames that STARTS at the edit point ``O`` (EDL: ``D`` event on B; XML: a
 ``transitionitem`` with ``alignment=start``), i.e. A continues for ``D`` frames under the dissolve using its
 handle -- exactly the linear AE opacity ramp. NOT-IN-RAW placeholders, dips and flashes are black events
@@ -30,8 +30,8 @@ Audio (:func:`audio_items`)
 RAW sync (``cutlist.settings.audio_sync`` = raw, the default) without audio lines: the audio follows the picture
 events (cuts only; J/L offsets are listed in cutlist.csv) -- XML audio clipitems at the video record ranges, EDL
 ``B`` events. Otherwise every audible segment gets its OWN audio event (XML audio clipitem, EDL ``A`` event after
-the video events, which become ``V``): competitor sync (DESIGN §7 D9, ``export_ae.audio_sync_params``) moves the
-range by round(switch baseline x fps) frames (+ the genuine J/L offsets) and plays RAW time tau + v·g (the measured
+the video events, which become ``V``): competitor sync (DESIGN Â§7 D9, ``export_ae.audio_sync_params``) moves the
+range by round(switch baseline x fps) frames (+ the genuine J/L offsets) and plays RAW time tau + vÂ·g (the measured
 A/V offset); a segment whose audio follows an audio line (FX-14: video-only retime / uncertain / placeholder over
 continuous audio) plays that line. Editorial formats address whole frames: the source in is the NEAREST RAW frame
 of the exact RAW time and the remainder (ms, < half a RAW frame) is written next to the event (XML clip comment,
@@ -41,7 +41,7 @@ Time conventions
 ----------------
 * Record timecode: competitor frame index counted at the nominal competitor rate, NDF, from 00:00:00:00.
 * Source timecode: RAW frame index counted at the nominal RAW rate ``round(raw_fps)``, NDF (RAW frame 0 =
-  00:00:00:00). The source-in frame of an event is the AE-rule frame (DESIGN §2.1) at its record-in.
+  00:00:00:00). The source-in frame of an event is the AE-rule frame (DESIGN Â§2.1) at its record-in.
 * EDL speed: ``M2 = v * raw_fps * nominal(comp) / comp_fps`` source-TC frames per record-TC second -- equal
   to DESIGN's ``speed * raw_fps`` for integer competitor rates (the synthetic test and every TikTok/Shorts
   edit); for NTSC competitor rates it keeps same-rate normal speed at the nominal value (30.000, no M2).
@@ -99,7 +99,7 @@ def _nominal(fps: Fraction) -> int:
 
 
 def _ae_frame(raw_in: float, v: float, k: int, comp_in: int, comp_fps: Fraction, raw_fps: Fraction) -> int:
-    """AE sampling rule (DESIGN §2.1) -- phase_solve.ae_frame when available, else the identical expression."""
+    """AE sampling rule (DESIGN Â§2.1) -- phase_solve.ae_frame when available, else the identical expression."""
     try:
         from .phase_solve import ae_frame
     except ImportError:  # pragma: no cover - phase_solve is a sibling module
@@ -415,7 +415,7 @@ def audio_sync_info(cutlist: Cutlist) -> dict:
 def audio_items(cutlist: Cutlist) -> list[AudioItem]:
     """The audio events of the XML / EDL (module docstring): one per segment that plays RAW audio (its own map or
     its audio line, render_preview.audio_segment), in competitor sync over [comp_in + in_offset, comp_out +
-    out_offset) + the switch shift with RAW time tau + v·g, in raw sync over its picture record range; clipped to
+    out_offset) + the switch shift with RAW time tau + vÂ·g, in raw sync over its picture record range; clipped to
     [0, competitor frames). Empty when the audio simply follows the picture events (raw sync, no audio line)."""
     from .render_preview import audio_segment
     info = audio_sync_info(cutlist)
@@ -445,8 +445,8 @@ def audio_items(cutlist: Cutlist) -> list[AudioItem]:
         k0, k1 = max(0, k0), min(n_total, k1)
         if k1 <= k0:
             continue
-        # the RAW time at record frame k0: the segment's own map + v·g (the switch shift moves the RANGE only, exactly
-        # like export_ae's twins and build_audio; a remap curve plays g later: its value at k0 + g·fps)
+        # the RAW time at record frame k0: the segment's own map + vÂ·g (the switch shift moves the RANGE only, exactly
+        # like export_ae's twins and build_audio; a remap curve plays g later: its value at k0 + gÂ·fps)
         if a.time_remap_keys:
             tau = _remap_seconds(a.time_remap_keys, float(k0) + g * float(comp_fps))
             v = seg_speed(a, comp_fps)
@@ -882,7 +882,7 @@ def _fill_transform(sim: Sim, flip: bool, box: Box, raw_wh: tuple[float, float],
 
 
 def _own_box(seg: Segment) -> Box | None:
-    """The segment's own layout box (Segment.box, DESIGN §7 D1) when valid, else None."""
+    """The segment's own layout box (Segment.box, DESIGN Â§7 D1) when valid, else None."""
     if not seg.box:
         return None
     try:
@@ -1228,7 +1228,7 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
 # source <in> x speed); the plan (PremiereClip) keeps source time and only the writer / readers convert.
 #
 # Framing: the region of the RAW the competitor shows inside its box (the segment's own box -- a fullscreen period,
-# DESIGN §7 D1 -- else the layout box) is mapped onto the template window by ONE uniform scale + translation (box
+# DESIGN Â§7 D1 -- else the layout box) is mapped onto the template window by ONE uniform scale + translation (box
 # centre -> window centre, the scale that makes the box cover the window): RAW -> sequence = A o Sim. Where the RAW
 # does not cover the whole window under that map (a shot the competitor letterboxed / showed small) the clip is
 # zoomed about the window centre by the least factor that covers it, at most premiere_max_zoom (1.05); one factor
@@ -2528,6 +2528,262 @@ def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, fl
     return moved
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# day 13: the person speaking centred in the window (your newest fixes: most clips moved sideways onto them)
+# ---------------------------------------------------------------------------------------------------------------------
+
+SPEAKER_CENTRE = False      # day 13 (your video11 / video12 / video14 / video15 / mindculpt / Always Sunny fixes: most
+#                             clips moved sideways onto the person speaking): a RAW shot whose person speaking -- a
+#                             CLEAR speaker by Light-ASD (never just the biggest face) inside the competitor's own,
+#                             wider window -- sits off the window's middle slides sideways (zoom kept) to centre them
+#                             (_speaker_centre; MATCH_CUTS_SPEAKER_CENTRE=1 / 0 switches it for one run)
+CENTRE_SHARE = 0.6          # ... the speaker: the top speaking face on at least this share of the speech frames
+CENTRE_ASD = 0.5            # ... with a mean Light-ASD score of at least this over them (above 0: speaking)
+CENTRE_MARGIN = 1.0         # ... and that much above every other face there (a clear speaker, not a guess: video11
+#                             S01's ASD "speaker" at 44 s, 0.73, only 0.14 above the man next to him, was the wrong man
+#                             -- you framed the shouting one)
+CENTRE_FOUND = 0.98         # ... and the face detected on this share of them (a steady real face: the cartoon faces
+#                             of video6 flicker, 0.82-0.95 -- you kept its middle on every clip)
+CENTRE_WIDE = 0.22          # a speaker's face under this share of the picture's height: a wide shot -- kept (video15's
+#                             delivery room, the whole family in it: you kept the competitor's framing)
+CENTRE_FACE_MAX = 0.5       # a face shown whole and wider than this share of the window is a close-up: it is shown
+CENTRE_MIN_PX = 100.0       # a move under this (sequence px) is not made: centred enough (video11 S01 at 42.8 s: you
+#                             left the man 61 px off the middle)
+CENTRE_MAX = 0.6            # ... nor one over this share of the window's width (another part of the picture)
+
+
+def _speaker_centre_on() -> bool:
+    v = os.environ.get("MATCH_CUTS_SPEAKER_CENTRE", "").strip()
+    return SPEAKER_CENTRE if v not in ("0", "1") else v == "1"
+
+
+def _speaker_strength(sp: Any, f: Any, t0: float, t1: float) -> tuple[float, float, float] | None:
+    """How sure Light-ASD is of ``f``'s speaker over RAW [t0, t1): (their mean speaking score over the speech frames
+    -- all frames when nobody speaks there --, the share of those frames their face was really detected on, how far
+    their mean score is above the best other face's there -- inf when nobody else is there), or None when it cannot
+    be told (no people analysed, no track)."""
+    import numpy as np
+    from . import people as PP
+    p = getattr(sp, "people", None)
+    tid = getattr(f, "track", None)
+    if p is None or tid is None or not hasattr(p, "tracks"):
+        return None
+    ks = p.analysed(p.frames(min(t0, t1), max(t0, t1)))
+    talk = [k for k in ks if any(a <= k / PP.ANALYSIS_FPS < b for a, b in (getattr(sp, "speech", None) or ()))]
+    frames = talk or list(ks)
+
+    def mean_of(t: Any) -> tuple[float, float] | None:
+        idx = [i for i in (t.at(int(k)) for k in frames) if i is not None]
+        sc = np.asarray(t.score, float)[idx] if idx else np.zeros(0)
+        sc = sc[np.isfinite(sc)]
+        return (float(np.mean(sc)), float(np.mean(np.asarray(t.found, bool)[idx]))) if len(sc) else None
+    t = next((x for x in p.tracks if int(x.id) == int(tid)), None)
+    mine = mean_of(t) if t is not None else None
+    if mine is None:
+        return None
+    others = [m[0] for m in (mean_of(x) for x in p.present(np.asarray(frames)) if int(x.id) != int(tid))
+              if m is not None]
+    return mine[0], mine[1], (mine[0] - max(others)) if others else float("inf")
+
+
+def _shot_pieces(clips: list[PremiereClip], changes_s: Sequence[float] | None, raw_fps: Any, fps: Fraction
+                 ) -> tuple[list[PremiereClip], list[int]]:
+    """Each clip cut at the RAW's shot changes inside it (as the XML's Scene Edit Detection cuts it): (pieces, the
+    index of the clip each piece is part of). A clip that is one RAW shot is its own piece. A clip that already shows
+    a framing per shot (shot_framing: the day-12 / night-6 rules) gives each piece the framing of its shot."""
+    pieces: list[PremiereClip] = []
+    owner: list[int] = []
+    cs = sorted(float(x) for x in (changes_s or ()))
+    for n, cl in enumerate(clips):
+        ticks = (_shot_change_ticks(cl, cs, Fraction(raw_fps), Fraction(fps), cl.rec_start, cl.rec_end)
+                 if cs and raw_fps is not None and cl.start != -1 and cl.end != -1 and float(cl.speed) > 0
+                 and len(cl.keys) == 1 else [])
+        if cl.shot_framing and not ticks:            # (its shots not found again: left as it is -- no framing to
+            pieces.append(dataclasses.replace(cl, keys=[], shot_framing=[], person_span=None))   # judge, not its own)
+            owner.append(-1 - n)
+            continue
+        rest = cl if not cl.shot_framing else dataclasses.replace(cl)
+        out = []
+        for r in ticks:
+            if rest.rec_start + 1 < r < rest.rec_end - 1:
+                piece, rest = _split_clip(rest, r)
+                out.append(dataclasses.replace(piece, person_span=None))
+                rest = dataclasses.replace(rest, person_span=None)
+        out.append(rest)
+        if cl.shot_framing:                          # each piece the framing its shot shows (split_at_shots' rule)
+            for i, w in enumerate(out):
+                sim = cl.keys[0][1]
+                for at, s in sorted(cl.shot_framing, key=lambda x: x[0]):
+                    if at <= w.src_in:
+                        sim = s
+                out[i] = dataclasses.replace(w, keys=[(w.keys[0][0], sim)], shot_framing=[])
+        pieces += out
+        owner += [n] * len(out)
+    return pieces, owner
+
+
+def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, float],
+                    win: tuple[float, float, float, float], fps: Fraction, layout_box: Box | None,
+                    min_move: float, raw_fps: Any = None, changes_s: Sequence[float] | None = None,
+                    fac: int = 1) -> int:
+    """Day 13 (SPEAKER_CENTRE): the final clips cut at the RAW's shot changes (as the XML's Scene Edit Detection cuts
+    them), the pieces next to each other in one RAW shot that show one framing taken together (a jump cut inside a
+    take holds its framing: --min-move); each such run whose person speaking is CLEAR -- Light-ASD's top speaking face
+    on CENTRE_SHARE of the speech frames, mean score CENTRE_ASD or more and CENTRE_MARGIN above every other face
+    there, its face steadily detected (CENTRE_FOUND: not a flickering cartoon face) and not small (CENTRE_WIDE: not a
+    wide shot) -- inside the competitor's own window, which is wider than the template's (the competitor showed more
+    than the template can: someone has to choose -- in your fixes, the person speaking), slides sideways (zoom kept)
+    to centre that face, as far as the picture still covers the window. Not moved: a close-up shown whole
+    (CENTRE_FACE_MAX), a move under CENTRE_MIN_PX or over CENTRE_MAX of the window, a competitor whose window is no
+    wider than the template's (its own framing: 021's close-ups), a replaced spot, a flipped or turned clip, a move
+    that would hide the person of one of the run's pieces, a neighbour inside the same RAW shot left under
+    --min-move. Returns how many pieces moved."""
+    from . import speakers
+    W, H = raw_wh
+    moved = 0
+    done: set[int] = set()                         # the pieces moved
+    why: dict[str, int] = {}
+    whole = list(clips)
+    pieces, owner = _shot_pieces(whole, changes_s if changes_s is not None else getattr(sp, "shots", None),
+                                 raw_fps, fps)
+
+    def one_framing(x: PremiereClip) -> bool:
+        return len(x.keys) == 1 and abs(float(x.keys[0][1].theta_deg)) <= 1e-9 and not x.seg.flip_h
+
+    def same_shot(i: int, j: int) -> bool:
+        """Pieces i < j next to each other in one RAW shot (two pieces of one clip were cut apart at a shot
+        change: never)."""
+        return (sp is not None and owner[i] != owner[j] and
+                sp.same_shot(_last_raw_s(pieces[i], fps), _clip_raw_s(pieces[j], fps)[0]))
+    # runs: the pieces next to each other in one RAW shot that show one framing (a jump cut inside a take holds its
+    # framing: --min-move) -- judged and moved together
+    runs: list[list[int]] = []
+    for i, c in enumerate(pieces):
+        j = runs[-1][-1] if runs else -1
+        if j >= 0 and one_framing(c) and one_framing(pieces[j]) and \
+                _same_framing(pieces[j].keys[0][1], c.keys[0][1]) and same_shot(j, i):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    for run in runs:
+        mine = [pieces[i] for i in run]
+        if not all(one_framing(x) for x in mine):
+            continue
+        # the competitor pieces each piece plays (a clip joined from many: only those under it -- laptop013's S01..S16)
+        evs = [[e for e in (x.events or [x.ev]) if e.rec_in * fac < x.rec_end and e.rec_out * fac > x.rec_start]
+               or [x.ev] for x in mine]
+        old = mine[0].keys[0][1]
+        a = min(min(_clip_raw_s(x, fps)) for x in mine)
+        b = max(max(_clip_raw_s(x, fps)) for x in mine)
+        label = mine[0].label + (f"..{mine[-1].label}" if len(mine) > 1 else "")
+
+        f = sp.faces(a, b) if sp is not None else None
+        if f is None or f.how != "speaker" or f.box is None:
+            continue
+        strength = _speaker_strength(sp, f, a, b)
+
+        def skip(reason: str) -> None:
+            why[reason] = why.get(reason, 0) + 1
+            log.debug("premiere framing: %s (RAW %.2f-%.2f s) not centred on the person speaking: %s (speaker: "
+                      "track %s, %.0f %% of the speech, Light-ASD %s, %s above the next face, face found %s, RAW x "
+                      "%.0f-%.0f)", label, a, b, reason, f.track, 100 * f.share,
+                      f"{strength[0]:.2f}" if strength else "-", f"{strength[2]:.2f}" if strength else "-",
+                      f"{strength[1]:.2f}" if strength else "-", f.box[0], f.box[2])
+        if any(_unreliable(dataclasses.replace(x, events=e)) for x, e in zip(mine, evs)):
+            skip("a replaced spot")                       # (the framing there is a neighbour's)
+            continue
+        if f.share < CENTRE_SHARE or strength is None or strength[0] < CENTRE_ASD or \
+                strength[2] < CENTRE_MARGIN:
+            skip("unclear speaker")
+            continue
+        if strength[1] < CENTRE_FOUND:
+            skip("a flickering face")
+            continue
+        if (f.box[3] - f.box[1]) < CENTRE_WIDE * H:
+            skip("a wide shot")
+            continue
+        cx = 0.5 * (f.box[0] + f.box[2])
+        cws = [_comp_window_raw_x(dataclasses.replace(x, seg=ev.seg), layout_box)
+               if layout_box is not None or _own_box(ev.seg) else None
+               for x, e in zip(mine, evs) for ev in e if ev.seg is not None]
+        if not cws or any(cw is None or not (cw[0] <= cx <= cw[1]) for cw in cws):
+            skip("not in the competitor's window")
+            continue
+        if any((cw[1] - cw[0]) * old.s < win[2] * (1.0 + NARROW_OVERFLOW) for cw in cws):
+            skip("the competitor's own framing")
+            continue
+        if (f.box[2] - f.box[0]) * old.s > CENTRE_FACE_MAX * win[2] and \
+                speakers.shown(speakers.on_screen(old, f.box, W, False), win):
+            skip("a close-up")
+            continue
+        lo, hi = win[0] + win[2] - old.s * W, win[0]          # the picture still covers the window
+        tx = min(max(win[0] + win[2] / 2.0 - old.s * cx, lo), hi)
+        ty = old.ty
+        if not (old.s * f.box[1] + ty >= win[1] - speakers.INSIDE_TOL_PX and
+                old.s * f.box[3] + ty <= win[1] + win[3] + speakers.INSIDE_TOL_PX):
+            yr = speakers.y_range(old, f.box, raw_wh, win)
+            if yr is not None:
+                ty = min(max(ty, yr[0]), yr[1])
+        new = Sim(old.s, 0.0, tx, ty)
+        if abs(new.tx - old.tx) < CENTRE_MIN_PX and abs(new.ty - old.ty) < 0.5:
+            skip("centred already")
+            log.debug("premiere framing: %s: centring would move it %+.0f px", label, new.tx - old.tx)
+            continue
+        if abs(new.tx - old.tx) > CENTRE_MAX * win[2]:
+            skip("too far")
+            log.debug("premiere framing: %s: centring would move it %+.0f px", label, new.tx - old.tx)
+            continue
+        if not _covers(new, raw_wh, win, tol=1e-6) or not speakers.passes(new, f, W, False, win):
+            skip("would not show them")
+            continue
+        own = [sp.faces(*sorted(_clip_raw_s(x, fps))) for x in mine] if len(mine) > 1 else []
+        if any(g is not None and speakers.passes(old, g, W, False, win) and not speakers.passes(new, g, W, False, win)
+               for g in own):
+            skip("would hide another piece's person")    # (the XML's person check reads each piece on its own)
+            continue
+        ok = True
+        for i, k in ((run[0] - 1, run[0]), (run[-1], run[-1] + 1)):  # the neighbours in the same shot: --min-move
+            if 0 <= i and k < len(pieces) and len(pieces[i if k in run else k].keys) == 1 and same_shot(i, k):
+                mv = framing_move(pieces[i if k in run else k].keys[0][1], new, raw_wh)
+                if 0.5 < mv < min_move - 0.5:
+                    ok = False
+        if not ok:
+            skip("--min-move")
+            continue
+        dx = new.tx - old.tx
+        for x in mine:
+            x.keys = [(x.keys[0][0], new)]
+            x.covered = True
+            x.person_note = (f"centred on the person speaking (RAW x {cx:.0f}; Light-ASD {strength[0]:.1f}, "
+                             f"{100 * f.share:.0f} % of the speech): the picture moved {dx:+.0f} px sideways"
+                             + (f", {new.ty - old.ty:+.0f} px up/down" if abs(new.ty - old.ty) >= 0.5 else "")
+                             + ", zoom kept")
+            x.framing_note = (x.framing_note + "; " if x.framing_note else "") + \
+                "centred on the person speaking (day 13)"
+        moved += len(mine)
+        done.update(run)
+    for n, cl in enumerate(whole):                # the pieces back into their clips (only those with a moved piece)
+        idx = [i for i, o in enumerate(owner) if o == n]
+        if not any(i in done for i in idx):
+            continue
+        mine = [pieces[i] for i in idx]
+        cl.keys = [(cl.keys[0][0], mine[0].keys[0][1])]
+        cl.shot_framing = [(w.src_in, w.keys[0][1]) for w in mine[1:]]
+        cl.covered = True
+        if "centred on the person speaking" not in str(cl.framing_note):
+            cl.framing_note = (cl.framing_note + "; " if cl.framing_note else "") + \
+                "centred on the person speaking (day 13)"
+        notes = [w.person_note for w in mine if w.person_note and "centred on the person speaking" in w.person_note]
+        if notes:
+            cl.person_note = notes[0] + (f" (and {len(notes) - 1} more shot(s) of this clip)" if len(notes) > 1
+                                         else "" if len(mine) == 1 else " (in one RAW shot of this clip)")
+    if moved or why:
+        log.info("premiere framing: %d RAW shot(s) centred on the person speaking (a clear speaker by Light-ASD inside "
+                 "the competitor's wider window; zoom kept)%s", moved,
+                 (" (not moved: " + ", ".join(f"{k} {v}" for k, v in sorted(why.items())) + ")") if why else "")
+    return moved
+
+
 CENTRE_FIXED_CROP = False   # night 6: centre each shot of a fixed-crop competitor on its person (_subject_in_narrow_window)
 #                             -- OFF: on laptop013 the faces found reproduced 1 of your 5 moves (the man, -276 px for
 #                             your -361) and moved your centred wide shot (+286 px); the woman's close-ups were not
@@ -3423,6 +3679,9 @@ def premiere_clips(cutlist: Cutlist, cfg: Any = None, silence: Any = None
             if not follow and _speaker_cut_off_on():  # day 12: the window shows nobody, the person speaking is cut
                 _speaker_cut_off(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
                                  getattr(cfg, "premiere_shots", None))
+            if not follow and _speaker_centre_on():   # day 13: a clear person speaking centred in the window
+                _speaker_centre(clips, sp, raw_wh, win, fps, layout_box, st["min_move"], raw_fps,
+                                getattr(cfg, "premiere_shots", None), fac)
     return clips, markers, warnings
 
 
