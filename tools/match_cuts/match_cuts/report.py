@@ -1241,7 +1241,7 @@ def _captions(ctx: Any) -> list[str]:
         out += ["", f"**Copied captions the OCR was unsure of** (check the text): {len(unsure) if unsure else 'none'}"]
         out += [f"- {_tc(c)} `{c['text']}` — {c.get('reads')} frames read, agreement {c.get('agreement')}, "
                 f"score {c.get('score')}; readings {c.get('variants')}" for c in unsure]
-        return out + _placeholders(cap) + _rules(cap) + _recheck(cap)
+        return out + _placeholders(cap) + _rules(cap) + _post_captions(cap) + _recheck(cap)
     out.append("- Speaker changes: the transcriber has no speaker labels, but a reply starts a new sentence, so a new "
                "caption starts after every sentence end the transcript heard (hard rules 1 and 2).")
     st = cap.get("stats") or {}
@@ -1267,7 +1267,28 @@ def _captions(ctx: Any) -> list[str]:
     out += ["", "**Possible mis-transcriptions, doubled or missing words** (flagged, not corrected): "
             f"{len(fl) if fl else 'none'}"]
     out += [f"- {_seconds(x['time'])} {x['kind']}: {x['detail']}" for x in fl]
-    return out + _rules(cap) + _recheck(cap)
+    return out + _rules(cap) + _post_captions(cap) + _recheck(cap)
+
+
+def _post_captions(cap: dict) -> list[str]:
+    """Day 13 (post_captions.py): the pairs kept together that were joined (rule 9) and the captions moved onto the
+    sound of the edit, as fixed in this run."""
+    post = cap.get("post") or {}
+    if not post:
+        return []
+    out = []
+    if post.get("error"):
+        return ["", f"**Fixed after the caption rules**: not run ({post['error']}) -- the captions are as the rules "
+                    "wrote them."]
+    pairs, moved = post.get("pairs") or [], post.get("retimed") or []
+    out += ["", f"**Words kept together, fixed by the tool** (rule 9: a word and the word it belongs to were split "
+                f"between two captions): {len(pairs) if pairs else 'none'}"]
+    out += [f"- `{d['was']}` → `{d['now']}`" for d in pairs]
+    out += ["", f"**Captions moved onto the sound** (the transcript they were timed on ran off the sound 1_edit.xml "
+                f"plays there): {len(moved) if moved else 'none'}"]
+    out += [f"- `{d['text']}` moved {abs(d['offset_s']):.2f} s {'earlier' if d['offset_s'] > 0 else 'later'}"
+            for d in moved]
+    return out
 
 
 def _placeholders(cap: dict) -> list[str]:
