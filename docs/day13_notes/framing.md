@@ -107,26 +107,26 @@ check-all had not reached them), so they could not be replayed.
 
 ## Not done
 
-* The exact replays of chocolate, mike005, laptop009, 021 and the unkeyed videos, and a whole cached re-run as a last
-  check: the PC's commit memory was at 0.5-25 GB (of 112) from 08:20 to 10:00 with the lead's check-all and other
-  helpers' test runs; my runs only start at 30 GB free (the lead's rule). The rough previews above stand in for them;
-  the lead's final check-all is the real check.
-* Your newest two fixes (video16 Always Sunny, video20 mindculpt): no stage caches here yet, so not replayed.
+* A whole cached re-run (check-all's own command) with the rule on, as a last check: the PC's commit memory was at
+  0.5-28 GB (of 112) most of the morning with the lead's check-all and other helpers' runs, and my runs only start at
+  30 GB free (the lead's rule). The exact replays above are the same export code on the same inputs; the lead's final
+  check-all is the real check.
+* Your newest two fixes (video16 Always Sunny, video20 mindculpt): no stage caches here, so not replayed. video19
+  (Family Guy) replayed: nothing moves there (1/10 -> 1/10); video18 and the unkeyed videos were still waiting for
+  memory at the end (rough previews: every move onto the person speaking).
 
 ## Tests
 
-* `tools/match_cuts/tests/test_day13_framing.py`: 18 tests with the real layouts' numbers (video11's captain centred
+* `tools/match_cuts/tests/test_day13_framing.py`: 19 tests with the real layouts' numbers (video11's captain centred
   as you did; the unsure "speaker" of video11 at 44 s; the biggest face is never a speaker; centred enough at 61 px;
   video6's flickering cartoon face; video15's wide shot; the competitor's own close framing; a speaker the competitor
   did not show; video14's two pieces of one shot moving together; --min-move against a neighbour; the XML check's
   half-tick reading at a shot change; one RAW shot of a clip moving, a clip already framed per shot keeping its other
-  shots; 021's two-shot and lone face; the switch; on by default).
-* The whole tool suite with the graphics card hidden: 1438 passed, 96 skipped, 8 failed -- all 8 in the worker-pool
-  tests (test_pools, test_refine, test_visual_match: workers that could not start while the PC's memory was full);
-  those three files again a few minutes later: 71 passed, 4 skipped, 0 failed. So: 1446 passed, 96 skipped.
-* test_day12.py, test_night8.py, test_speakers.py, test_export_xml_edl.py, test_keep_speed.py, test_night4.py,
-  test_speech.py with the rule on: 176 passed, 4 skipped.
-
+  shots; 021's two-shot and lone face; a speaker cut off at the edge slid in, not jumped onto; the switch; on by
+  default).
+* The whole tool suite with the graphics card hidden, final code: **1447 passed, 96 skipped, 0 failed** (19 min).
+  (An earlier full run while the PC's memory was full had 8 worker-pool tests fail -- workers that could not start;
+  they pass on their own and in the final run.)
 ## Files
 
 * `tools/match_cuts/match_cuts/export_xml_edl.py`: one new block right after day 12's `_speaker_cut_off` (constants,
