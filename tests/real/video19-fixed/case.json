@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video19_fixed.prproj (2026-10-20): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); your run was the laptop's --fast app run (output/laptop_video19) of Family Guy S11E10 'I Can't Believe It's Not Butter' (x265 5.1), the Flick707 template + watermark, 100 %, the competitor's cut points (learned on day 13)",
+ "learned_from": "finished\\video19\\video19_fixed.prproj",
+ "run": "output\\laptop_video19",
+ "full_raw": "output/laptop_video19/extras/media/raw_stereo.mp4",
+ "raw_offset": 599.223625,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

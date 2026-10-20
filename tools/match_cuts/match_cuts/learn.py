@@ -171,23 +171,69 @@ def load_cutlist(rf: dict[str, Path]) -> dict:
 
 
 STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")    # a 5.1 RAW's one file for Premiere (stereo.py)
+ORIGINAL_NAMES = ("raw.mp4", "raw.mov", "raw.m4v")     # day 13: the original RAW V1 plays (edit_media.py)
+SOUND_NAMES = ("raw_stereo.wav",)                      # day 13: A1's stereo sound of the RAW (edit_media.py)
 
 
 def played_raw_name(pr: Any, *names: str) -> str:
     """The name the project ``pr`` plays the run's RAW under: the first of ``names`` (the cut list's analysis copy,
-    raw.mp4 / raw_ae.mp4 ...) or of the stereo copy's names (a 5.1 RAW: 1_edit.xml plays raw_stereo.mp4 since
-    night 6) that a clip of it plays; the first name when none is played."""
-    want = [n for n in dict.fromkeys([*names, *STEREO_NAMES]) if n]
+    raw.mp4 / raw_ae.mp4 ...), of the stereo copy's names (a 5.1 RAW: 1_edit.xml plays raw_stereo.mp4 since
+    night 6) or of the original's (day 13: raw.<ext>) that a clip of it plays; the first name when none is played."""
+    want = [n for n in dict.fromkeys([*names, *STEREO_NAMES, *ORIGINAL_NAMES]) if n]
     played = {PR.file_name(it.media) for s in pr.sequences for it in s.items if it.media}
     return next((n for n in want if n in played), want[0] if want else "")
 
 
+def same_file_name(pr: Any, raw: Path, cutlist: dict) -> str | None:
+    """Day 13 (Liquid Death): your project plays the run's RAW straight from where it was downloaded, under its own
+    name ('Liquid Death “Small Ones” Commercial [zUAvOywcPus].mp4' is the run's raw.mp4 byte for byte) -- the name of
+    the video file your clips play that IS the run's RAW: the same size, and the same picture size, rate and length
+    (media_mismatch). None when no played file is."""
+    try:
+        size = Path(raw).stat().st_size
+    except OSError:
+        return None
+    seen: dict[str, float] = {}
+    for s in pr.sequences:
+        for it in s.items:
+            if it.media and it.kind == PR.VIDEO and it.enabled:
+                seen[it.media] = seen.get(it.media, 0.0) + (it.end - it.start)
+    for media in sorted(seen, key=lambda m: -seen[m]):
+        try:
+            p = Path(media)
+            if p.is_file() and p.stat().st_size == size and \
+                    media_mismatch(pr.media.get(media) or {}, cutlist) is None:
+                return PR.file_name(media)
+        except OSError:
+            continue
+    return None
+
+
+def played_sound_name(pr: Any, raw_name: str) -> str:
+    """The name the project's A1 clips play the run's RAW sound under: ``raw_name`` when a sound clip plays it, else
+    day 13's stereo sound file (raw_stereo.wav: 1_edit.xml's A1 when V1 plays the original RAW) when one does."""
+    heard = {PR.file_name(it.media) for s in pr.sequences for it in s.items if it.media and it.kind == PR.AUDIO}
+    return next((n for n in (raw_name, *SOUND_NAMES) if n in heard), raw_name)
+
+
+def _same_length(p: Path, want: Any) -> bool:
+    """``p`` lasts ``want`` seconds (the cut list's; within 1 s / 1 %), or the cut list does not say."""
+    if not want:
+        return True
+    try:
+        from .cli import quick_probe
+        return abs(float(quick_probe(str(p))["duration"]) - float(want)) <= max(1.0, 0.01 * float(want))
+    except Exception:  # noqa: BLE001 - cannot tell: not this one
+        return False
+
+
 def run_media(rf: dict[str, Path], cutlist: dict, kind: str) -> Path | None:
     """The run's input ``kind`` ('competitor' / 'raw'): the run's own copy in its media folder (the file it analysed:
-    a hard link of the input, or its conformed copy), else the file the run read when it is still there and still that
-    video (its length as the cut list says: a run made on another PC names that PC's input\\raw.mp4 -- laptop004 named
-    the path that holds 021's RAW here), else -- the RAW of a run whose analysis copy was removed (day 12: one RAW file
-    per run) -- its media/raw_stereo.<ext> (the same picture, stereo sound)."""
+    a hard link of the input, or its conformed copy; day 13, when that was removed: the original RAW V1 plays, its
+    media/raw.<ext>), else the file the run read when it is still there and still that video (its length as the cut
+    list says: a run made on another PC names that PC's input\\raw.mp4 -- laptop004 named the path that holds 021's
+    RAW here), else -- the RAW of a run whose analysis copy was removed (day 12: one RAW file per run) -- its
+    media/raw_stereo.<ext> (the same picture, stereo sound)."""
     info = cutlist.get(kind) or {}
     rel = info.get("file") or info.get("file_rel")
     if rel and (rf["dir"] / EXTRAS / rel).is_file():
@@ -195,6 +241,13 @@ def run_media(rf: dict[str, Path], cutlist: dict, kind: str) -> Path | None:
     if rel and (rf["dir"] / rel).is_file():
         return rf["dir"] / rel
     want = info.get("duration_s")
+    if kind == "raw":
+        # day 13: the analysis copy (raw_ae) is removed at the end of the run -- the original RAW V1 plays, in the
+        # run's own media as raw.<ext> (the same frames: edit_media.py), stands for it
+        for name in ORIGINAL_NAMES:
+            p = Path(rf["media"]) / name
+            if p.is_file() and _same_length(p, want):
+                return p
     for key in ("file_abs", "source_path"):
         p = info.get(key)
         if p and Path(p).is_file():
@@ -477,13 +530,15 @@ def speeds(clips: Sequence[Clip]) -> list[float]:
     return [round((c.r1 - c.r0) / (c.t1 - c.t0), 4) for c in clips if c.t1 - c.t0 > 1e-6]
 
 
-def user_clips(seq: PR.Sequence, raw_name: str) -> tuple[list[Clip], list[Clip]]:
+def user_clips(seq: PR.Sequence, raw_name: str, sound_name: str | None = None) -> tuple[list[Clip], list[Clip]]:
     """The project's clips of the RAW: (the picture clips on the video track that plays it most -- none when the
     picture is something else, an After Effects comp say -- and the sound clips of the audio track that plays it
-    most)."""
+    most). ``sound_name``: the file the sound clips play when it is not the picture's (day 13: raw_stereo.wav, the
+    RAW's stereo sound on the RAW's own clock)."""
+    snd = sound_name or raw_name
     sound = [Clip(p["start"], p["end"], p["src_in"], p["src_in"] + (p["end"] - p["start"]) * float(p["speed"] or 1.0))
-             for p in PR.audio_pieces(seq, raw_name)] if any(
-        it.kind == PR.AUDIO and PR.file_name(it.media) == raw_name for it in seq.items) else []
+             for p in PR.audio_pieces(seq, snd)] if any(
+        it.kind == PR.AUDIO and PR.file_name(it.media) == snd for it in seq.items) else []
     mine = [it for it in seq.items if it.kind == PR.VIDEO and it.enabled and PR.file_name(it.media) == raw_name]
     if not mine:
         return [], sound
@@ -698,7 +753,8 @@ def framing_rows(clips: Sequence[Clip], offset: float = 0.0) -> list[dict]:
 
 def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name: str, caps: Sequence[PR.Item],
                meta: dict, no_caps_why: str = "", picture: Sequence[Clip] | None = None,
-               window: tuple[float, float] | None = None, framing: Sequence[Clip] | None = None) -> dict[str, str]:
+               window: tuple[float, float] | None = None, framing: Sequence[Clip] | None = None,
+               sound_name: str | None = None) -> dict[str, str]:
     """The test case's files (module docstring, 4); returns {file: what it is}. Without captions there is no
     answer.srt (an empty key would score every run against nothing): an old one is removed, ``no_caps_why`` says
     why. ``picture``: the user's picture clips -- the answer key is then the picture (V1), not the sound (A1): for a
@@ -750,7 +806,7 @@ def write_case(case_dir: Path, comp: Path, raw: Path, seq: PR.Sequence, raw_name
         what = ("your finished edit (its Premiere project, the picture clips of the RAW on V1 -- you moved the audio "
                 "by hand, so the picture is the key): the timeline answer.srt is timed on")
     else:
-        for p in PR.audio_pieces(seq, raw_name):
+        for p in PR.audio_pieces(seq, sound_name or raw_name):       # (day 13: A1 may play raw_stereo.wav)
             pieces.append({"start": p["start"], "end": p["end"], "kind": "raw", "src_in": round(p["src_in"] - offset, 6),
                            "speed": p["speed"]})
         what = ("your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is "
@@ -1583,6 +1639,8 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     if comp is None or raw is None:
         raise LearnError(f"{rf['dir']}: the run's competitor or RAW cannot be found (moved or deleted?)")
     raw_name = played_raw_name(pr, PR.file_name(str((cl.get("raw") or {}).get("file") or raw.name)), raw.name)
+    if not any(it.media and PR.file_name(it.media) == raw_name for s in pr.sequences for it in s.items):
+        raw_name = same_file_name(pr, raw, cl) or raw_name       # day 13: the same file under its own name
     seq = sequence_of(pr, raw_name, cl) or sequence_of(pr, raw_name) or PR.main_sequence(pr)
     played = {it.media for it in seq.items if it.media and PR.file_name(it.media) == raw_name}
     cands = {k: v for k, v in pr.media.items() if PR.file_name(k) == raw_name}
@@ -1597,7 +1655,7 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
     flips = project_flips(project)
     tool_pic, tool_snd, _fps, _w = tool_clips(rf["edit"], float((cl.get("raw") or {}).get("width") or 0) or None,
                                               unflip=flips == 0)
-    user_pic, user_snd = user_clips(seq, raw_name)
+    user_pic, user_snd = user_clips(seq, raw_name, played_sound_name(pr, raw_name))
     if not user_pic and not user_snd:
         raise LearnError(f"{project.name}: no clip plays the run's RAW ({raw_name})")
     if picture and not user_pic:
@@ -1642,7 +1700,8 @@ def learn(project: str | Path, run: str | Path | None = None, cases_dir: str | P
              + list(tool_snd)]
     win = raw_window(raw, spans, window)
     files = write_case(case_dir, comp, raw, seq, raw_name, caps, meta, no_caps_why,
-                       picture=user_pic if picture else None, window=win, framing=user_pic or None)
+                       picture=user_pic if picture else None, window=win, framing=user_pic or None,
+                       sound_name=played_sound_name(pr, raw_name))
     record = {"video": video, "date": dt.date.today().isoformat(), "project": str(project), "run": str(rf["dir"]),
               "edit": edit, "captions": {**ccount, "changes": [c.__dict__ for c in changes]}}
     (case_dir / "learned.json").write_text(json.dumps(record, indent=1), encoding="utf-8", newline="\n")

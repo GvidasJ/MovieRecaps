@@ -32,19 +32,29 @@ def _watermark_graph(src: str, idx: int, OW: int, OH: int, opacity: float) -> st
             f"[wb2][wbla]overlay=0:0:format=gbrp,format=yuv420p[out]")
 
 
+def _url_to_path(url: str) -> str:
+    if url.startswith("file://localhost/"):
+        return urllib.parse.unquote(url[len("file://localhost/"):])
+    if url.startswith("file://"):
+        return "//" + urllib.parse.unquote(url[len("file://"):])
+    return urllib.parse.unquote(url)
+
+
+def _sound_file(xml_path: Path, raw: str) -> str:
+    """The file A1 plays: the RAW's stereo sound file when the XML has one (day 13: raw_stereo.wav), else ``raw``."""
+    from .export_xml_edl import SOUND_FILE_ID
+    root = ET.parse(str(xml_path)).getroot()
+    fe = next((f for f in root.iter("file") if f.findtext("pathurl") and f.get("id") == SOUND_FILE_ID), None)
+    return _url_to_path(fe.findtext("pathurl") or "") if fe is not None else raw
+
+
 def _raw_file(xml_path: Path) -> tuple[str, int, int, Fraction]:
     """(path, width, height, frame rate) of the RAW the V1 clips play (its <file> entry in the XML)."""
     root = ET.parse(str(xml_path)).getroot()
     fe = next((f for f in root.iter("file") if f.findtext("pathurl") and f.get("id") == "file-raw"), None)
     if fe is None:
         raise ValueError("no RAW <file> in the XML")
-    url = fe.findtext("pathurl") or ""
-    if url.startswith("file://localhost/"):
-        path = urllib.parse.unquote(url[len("file://localhost/"):])
-    elif url.startswith("file://"):
-        path = "//" + urllib.parse.unquote(url[len("file://"):])
-    else:
-        path = urllib.parse.unquote(url)
+    path = _url_to_path(fe.findtext("pathurl") or "")
     w = int(fe.findtext("media/video/samplecharacteristics/width") or 0)
     h = int(fe.findtext("media/video/samplecharacteristics/height") or 0)
     tb = int(fe.findtext("rate/timebase") or 30)
@@ -129,7 +139,7 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
         video = tdir / "video.mp4"
         subprocess.run([ff, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy",
                         str(video)], check=True)
-        audio = _audio(ff, raw, x, fps, n_total, tdir)
+        audio = _audio(ff, _sound_file(xml_path, raw), x, fps, n_total, tdir)
         cmd = [ff, "-v", "error", "-y", "-i", str(video)] + (["-i", str(audio)] if audio else []) + \
               ["-map", "0:v"] + (["-map", "1:a", "-c:a", "aac", "-b:a", "192k"] if audio else []) + \
               ["-c:v", "copy", "-movflags", "+faststart", "-shortest", str(out_path)]

@@ -74,3 +74,12 @@ fuckers = fu*kers
 motherfucker = motherfu*ker
 motherfuckers = motherfu*kers
 motherfucking = motherfu*king
+
+# your own forms (day 13): video14 "bit*h" (day 12 missed it), video19 "murde*ed", video20 (mindculpt) "cra*kheads";
+# only what your fixes show -- "murder", "kill", "crack" alone and the like stay as they are until a fix of yours
+# writes them censored
+bitch = bit*h
+bitches = bit*hes
+murdered = murde*ed
+crackhead = cra*khead
+crackheads = cra*kheads

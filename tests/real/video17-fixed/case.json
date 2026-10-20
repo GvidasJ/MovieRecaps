@@ -1,0 +1,13 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video17_fixed.prproj (2026-10-20): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); your run was the laptop's --fast app run (output/laptop_video17) of Tobey Maguire's Twister Juice ad (1991, the RAW copied whole), the LouLaughs template + watermark, 100 %, the competitor's cut points (learned on day 13)",
+ "learned_from": "finished\\video17\\video17_fixed.prproj",
+ "run": "output\\laptop_video17",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

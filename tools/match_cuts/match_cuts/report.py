@@ -1503,7 +1503,7 @@ def _audio_chain_lines(ctx: Any) -> list[str]:
              + (f"; {split} clip(s) need more than +15 dB, so two or more equal Volumes" if split else "")
              + "), Volume 0 dB, Panner 0.",
              f"- In Premiere: select all A1 clips and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
-             "your LoudVOGOOOD has the same values) -- Premiere cannot import those two from an XML.",
+             "not your older LoudVOGOOOD: its Amplify is +4.5 dB) -- Premiere cannot import those two from an XML.",
              "- Don't use Audio Gain > Normalize again: the tool already normalised (as a Volume). A clip you trim later "
              "keeps the gain measured on its first range (the Hard Limiter then catches anything over 0 dB)."]
     if unread:
@@ -1720,6 +1720,10 @@ def speed_frame_lines(ctx: Any) -> list[str]:
                    + ("preview_recreation.mp4 is the edit seen through the frame (the competitor-timed recreation the "
                       "checks read: debug/recreation_check.mp4)." if prev.get("path") else
                       f"the framed preview was not rendered ({prev.get('error') or 'skipped'})."))
+    em = getattr(ctx, "edit_media", None) or {}
+    if em:                                  # day 13: the original RAW, not the tool's converted copy
+        from .edit_media import describe_for_report
+        out += ["", "**The RAW in Premiere:**"] + describe_for_report(em)
     return out + [""]
 
 

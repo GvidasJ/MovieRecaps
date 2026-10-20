@@ -17,13 +17,32 @@ also a command of its own (`steps.py`, below) -- the same code, the same `projec
   .venv\Scripts\python tools\app\setup_app.py
   ```
 
-  It installs what is missing (PySide6, yt-dlp, psd-tools, deno, PySceneDetect, aria2c for torrents), puts the shortcut on the desktop and refreshes
-  Windows' icon cache.
+  It installs what is missing, too old or broken (PySide6, yt-dlp, psd-tools, deno, PySceneDetect 0.7.1, the
+  matching tool's packages, PyTorch with CUDA when the computer has an NVIDIA card and PyTorch has none, aria2c 1.37.0
+  for torrents), puts the shortcut on the desktop and refreshes Windows' icon cache. The versions the project expects
+  are one table, `mr_app\core\versions.py` -- the app checks the same table at its start (below).
 * Without the shortcut: `.venv\Scripts\pythonw tools\app\MovieRecaps.pyw`
 
 The top strip shows this computer's graphics card, Premiere, where finished projects are saved (amber when that
-folder cannot be reached), a timecode clock, **replay intro** and **settings**. Under it, the quote of this part of the
+folder cannot be reached), the **free space** of C: and of the save folder's drive (`Free C: 64.2 GB · D: 2.6 TB`;
+amber under 30 GB, red under 10 GB; read every 2 minutes and after each run, download and conversion; a click opens the
+Board's **Clean up**), a timecode clock, **replay intro** and **settings**. Under it, the quote of this part of the
 day (click it for the next one; the quotes are in `quotes.txt` in the shared projects folder -- edit it freely).
+
+**Free space before a start.** A run, a New video (its downloads, conversions and edit) and a conversion are checked
+first: when the drive has not enough room, nothing starts -- the app says how much is needed and how much is free, and
+offers **Clean up** (a torrent checks its chosen files itself before it starts). A run counts the tool's temporary analysis copy of a RAW it cannot read as it is
+(x265 / HEVC, 10-bit, MKV, AC-3 sound ...: ~25 Mbit/s for 1080p -- Borat's 84 minutes = 14 GB, deleted at the end),
+what Premiere plays (the original RAW linked; an .mp4 remux or a CRF 17 copy only when the original cannot be played;
+a stereo WAV for A1 when the sound is 5.1 / not AAC), the tool's saved analysis (`work\cache`, ~6 GB for a feature
+film), a copy of the videos when the run folder is on another drive, and a margin. The numbers are at the top of
+`mr_app\core\space.py`.
+
+**Versions.** At the start the app checks this computer's programs against `mr_app\core\versions.py` (PySceneDetect,
+PyTorch and its CUDA, yt-dlp, aria2c, FFmpeg, PySide6, faster-whisper, the matching tool's packages). Anything old or
+broken shows ONE amber line under the top strip with **Fix now**: `setup_app.py` runs in the background (its output
+in `%APPDATA%\MovieRecaps\setup_app.log`, **open log**), then "Fixed ✓" or the plain reason. Fix now waits while a
+video is being made, downloaded or converted; PySide6 (the window itself) is replaced only with the app closed.
 
 Keys: **Space** starts the queue, **Del** removes the queue row under the mouse, **Ctrl+V** pastes a YouTube link
 into Download (only when you are not typing in a field).
@@ -85,7 +104,8 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    edit gets **its own project next to it** (`<name>_edit.prproj`, made from an empty Premiere 2024 project), which
    Premiere opens and imports the edit into -- save it with Ctrl+S. Pressed again later, a saved project just opens
    (nothing is imported twice). Then select all A1 clips and apply the preset `assets\premiere\MovieRecaps audio
-   chain.prfpset` (or your LoudVOGOOOD): the Hard Limiter and Amplify an XML cannot carry.
+   chain.prfpset` (Hard Limiter + Amplify +3.0 dB since day 13 -- not your older LoudVOGOOOD / GoodAUDIO, they have
+   +4.5 dB): the Hard Limiter and Amplify an XML cannot carry.
 5. Drag rows to change the order. Right-click a row: Open folder, Open in Premiere, Copy title, Run again
    (Thorough), Remove.
 6. A finished project's edit goes to the shared folder by itself (Settings). The taskbar button fills with the

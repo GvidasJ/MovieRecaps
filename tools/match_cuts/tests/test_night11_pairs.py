@@ -283,10 +283,13 @@ def test_a_true_pair_passes_in_seconds_and_a_crossed_pair_is_a_wrong_pair(tmp_pa
     # the picture of the true pair is found too (the sound decided above, so it was not looked at)
     pic = PC.check(comp, raw, None, picture="always").picture
     assert pic.state == PC.FOUND and pic.found >= 6, pic
-    # cached per pair: instant, the same answer
+    # cached per pair: a true pair instant, the same answer; a WRONG PAIR is checked again (day 13: a cached one made
+    # every Try again of a New video project stop at once) -- the same answer, never from the cache
     t = time.perf_counter()
+    again_ok = PC.check(comp, raw, tmp_path / "work")
+    assert again_ok.cached and not again_ok.wrong and time.perf_counter() - t < 2.0
     again = PC.check(comp, other_raw, tmp_path / "work")
-    assert again.cached and again.wrong and time.perf_counter() - t < 2.0
+    assert not again.cached and again.wrong
     assert list((tmp_path / "work" / "cache" / "pair_check").glob("*.json"))
 
 

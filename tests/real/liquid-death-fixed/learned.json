@@ -1,0 +1,139 @@
+{
+ "video": "liquid-death-fixed",
+ "date": "2026-10-20",
+ "project": "C:\\Users\\gvida\\Desktop\\samllones.prproj",
+ "run": "work\\t28\\ld\\run1",
+ "edit": {
+  "clips": 9,
+  "starts": [
+   0.031,
+   0.22,
+   -1.292,
+   0.154,
+   0.401,
+   0.027,
+   -2.309,
+   -1.724,
+   -4.685
+  ],
+  "ends": [
+   0.145,
+   0.232,
+   0.341,
+   0.166,
+   0.086,
+   1.296,
+   3.488,
+   0.444,
+   -0.14
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.2,
+   0.76,
+   0.28,
+   0.36,
+   0.36,
+   0.28,
+   0.84,
+   0.84
+  ],
+  "moved": [
+   10.2,
+   -50.8,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2,
+   10.2
+  ],
+  "zoomed": [
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55,
+   1.55
+  ],
+  "framing": "compared",
+  "played": 0.89,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 25.0
+  }
+ },
+ "captions": {
+  "words": 4,
+  "case": 0,
+  "removed": 3,
+  "added": 0,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "he",
+    "written": "they",
+    "kind": "words",
+    "before": "but then",
+    "after": "let me",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "want a",
+    "written": "wanna",
+    "kind": "words",
+    "before": "drunk I",
+    "after": "big one",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "into",
+    "written": "in the",
+    "kind": "words",
+    "before": "husband's really",
+    "after": "big ones",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "it kind of",
+    "written": "kinda",
+    "kind": "words",
+    "before": "big ones",
+    "after": "weirds me",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

@@ -979,7 +979,7 @@ def _time_remap(parent: ET.Element, speed: float, mediatype: str = "video") -> N
 
 
 def _file_el(parent: ET.Element, fid: str, defined: set[str], name: str, abs_path: str, fps: Fraction,
-             frames: int, w: int, h: int, audio: dict | None) -> None:
+             frames: int, w: int, h: int, audio: dict | None, video: bool = True) -> None:
     fe = _sub(parent, "file", id=fid)
     if fid in defined:
         return
@@ -994,14 +994,15 @@ def _file_el(parent: ET.Element, fid: str, defined: set[str], name: str, abs_pat
     _sub(tc, "frame", 0)
     _sub(tc, "displayformat", "NDF")
     media = _sub(fe, "media")
-    v = _sub(media, "video")
-    sc = _sub(v, "samplecharacteristics")
-    _rate_el(sc, fps)
-    _sub(sc, "width", int(w))
-    _sub(sc, "height", int(h))
-    _sub(sc, "anamorphic", "FALSE")
-    _sub(sc, "pixelaspectratio", "square")
-    _sub(sc, "fielddominance", "none")
+    if video:                              # (day 13: the RAW's stereo sound file has no picture)
+        v = _sub(media, "video")
+        sc = _sub(v, "samplecharacteristics")
+        _rate_el(sc, fps)
+        _sub(sc, "width", int(w))
+        _sub(sc, "height", int(h))
+        _sub(sc, "anamorphic", "FALSE")
+        _sub(sc, "pixelaspectratio", "square")
+        _sub(sc, "fielddominance", "none")
     if audio:
         a = _sub(media, "audio")
         asc = _sub(a, "samplecharacteristics")
@@ -3493,6 +3494,117 @@ def _premiere_motion(parent: ET.Element, clip: PremiereClip, W: int, H: int, raw
 
 
 PREMIERE_MASTERCLIP = "masterclip-raw"
+# day 13 (edit_media.py): V1 plays the original RAW, A1 may play its stereo sound file -- a second <file> of the same
+# RAW (sound only, the RAW's rate and length, sample 0 = the RAW's frame 0) with its own master clip
+SOUND_FILE_ID = "file-raw-sound"
+SOUND_MASTERCLIP = "masterclip-raw-sound"
+
+
+def _delivered(cutlist: Cutlist, cfg: Any, key: str) -> tuple[str, str] | None:
+    raw = cutlist.raw or {}
+    ab = str(raw.get(f"{key}_abs") or "")
+    f = str(raw.get(key) or raw.get(f"{key}_rel") or "")
+    if not ab and not f:
+        return None
+    if not ab:
+        p = Path(f)
+        if not p.is_absolute():
+            p = Path(getattr(cfg, "out_dir", ".") or ".") / p if cfg is not None else p
+        ab = str(p.resolve())
+    return os.path.basename(ab), ab
+
+
+def sound_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
+    """(name, absolute path) of the file A1 plays when it is not V1's (the cut list's RAW block ``sound_file``:
+    edit_media.premiere_block); None: A1 plays the V1 file, as before day 13."""
+    return _delivered(cutlist, cfg, "sound_file")
+
+
+def picture_media(cutlist: Cutlist, cfg: Any) -> tuple[str, str] | None:
+    """(name, absolute path) of the file V1 plays when it is not the analysed copy (``picture_file``: day 13, the
+    original RAW); None: the analysed copy, as before day 13."""
+    return _delivered(cutlist, cfg, "picture_file")
+
+
+def picture_audio(cutlist: Cutlist, audio_info: dict | None, snd: tuple[str, str] | None) -> dict | None:
+    """The sound V1's file itself holds, as its <file> says: the A1 sound when A1 plays it, else its own channels (a
+    5.1 original: 6) or none (a copy without sound)."""
+    if snd is None or audio_info is None:
+        return audio_info
+    n = int((cutlist.raw or {}).get("picture_audio_channels") or 0)
+    return dict(audio_info, channels=n) if n > 0 else None
+
+
+def sound_file_problems(xml_path: str | os.PathLike) -> list[str]:
+    """Day 13: V1 and A1 may play two files of the same RAW -- V1 its picture (file-raw), A1 its stereo sound
+    (file-raw-sound: raw_stereo.wav, made sample-exact on the RAW's own clock: edit_media.py). The sync check's numbers
+    (A1's in = V1's in) are the same moment of the RAW only then: every A1 clip plays file-raw or file-raw-sound and
+    nothing else, an A1 clip on the sound file is linked only to V1 clips of file-raw, the sound file is sound only, at
+    file-raw's rate and as long (within a frame), and on the disk a 2-channel sound that starts at 0. One line per
+    problem (none: [])."""
+    root = ET.parse(str(xml_path)).getroot()
+    seq = root.find("sequence")
+    if seq is None:
+        return []
+    defs = {f.get("id"): f for f in root.iter("file") if f.find("pathurl") is not None}
+    out: list[str] = []
+    vt = seq.find("media/video/track")
+    v_file = {ci.get("id"): (ci.find("file").get("id") if ci.find("file") is not None else None)
+              for ci in (vt.findall("clipitem") if vt is not None else [])}
+    used = False
+    for n, tr in enumerate(seq.findall("media/audio/track"), start=1):
+        for ci in tr.findall("clipitem"):
+            fe = ci.find("file")
+            fid = fe.get("id") if fe is not None else None
+            what = f"A{n} {item_label(ci) or ci.get('id')} at {_text(ci, 'start')}"
+            if fid not in ("file-raw", SOUND_FILE_ID):
+                out.append(f"{what} plays {fid or 'no file'}, which is neither the RAW nor its sound file")
+                continue
+            if fid != SOUND_FILE_ID:
+                continue
+            used = True
+            for ref, kind in _link_refs(ci):
+                if kind == "video" and v_file.get(ref) not in (None, "file-raw"):
+                    out.append(f"{what} (the RAW's sound file) is linked to {ref}, which plays {v_file.get(ref)} -- "
+                               "not the RAW's picture")
+    if not used:
+        return out
+    snd, raw = defs.get(SOUND_FILE_ID), defs.get("file-raw")
+    if snd is None:
+        return out + [f"the A1 clips play {SOUND_FILE_ID}, but the XML never says which file that is"]
+    name = str(_text(snd, "name", "") or SOUND_FILE_ID)
+    if snd.find("media/video") is not None:
+        out.append(f"{name}: the RAW's sound file has a picture in the XML (it must be sound only)")
+    if snd.find("media/audio") is None:
+        out.append(f"{name}: the RAW's sound file has no sound in the XML")
+    if raw is not None:
+        r_a, r_b = _xml_rate(snd), _xml_rate(raw)
+        if r_a is not None and r_b is not None and r_a != r_b:
+            out.append(f"{name} runs at {fps_str(r_a)} fps in the XML, the RAW at {fps_str(r_b)}: A1 would drift")
+        try:
+            d_a, d_b = int(_text(snd, "duration", 0)), int(_text(raw, "duration", 0))
+            if d_a and d_b and abs(d_a - d_b) > 1:
+                out.append(f"{name} lasts {d_a} frames in the XML, the RAW {d_b}: not the same RAW")
+        except (TypeError, ValueError):
+            pass
+    path = _url_path(str(snd.findtext("pathurl") or ""))
+    if path and os.path.isfile(path):
+        try:
+            from .edit_media import wav_info
+            info = wav_info(path)
+        except Exception as e:  # noqa: BLE001 - said, not raised
+            info = {"error": f"{type(e).__name__}: {e}"}
+        want = int(_text(snd, "media/audio/channelcount", 2) or 2)
+        if not info or info.get("error"):
+            out.append(f"{name} cannot be read ({info.get('error') or 'ffprobe found no sound'})")
+        else:
+            if int(info.get("channels") or 0) != want:
+                out.append(f"{name} has {info.get('channels')} channels, the XML says {want}")
+            if abs(float(info.get("start") or 0.0)) > 1e-6:
+                out.append(f"{name}'s sound starts at {float(info['start']):.6f} s, not 0: A1 would be off the picture")
+    elif path:
+        out.append(f"{name} is not there ({path}): A1 would be offline in Premiere")
+    return out
 
 
 # ---------------------------------------------------------------------------------------------
@@ -3500,7 +3612,8 @@ PREMIERE_MASTERCLIP = "masterclip-raw"
 # ---------------------------------------------------------------------------------------------
 #
 # Your chain, in this order: Audio Gain "Normalize All Peaks to 0 dB", Volume 0 dB, Hard Limiter (Maximum Amplitude
-# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +4.5 dB, Panner 0. What Premiere
+# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +3.0 dB (day 13; +4.5 dB on night
+# 11), Panner 0. What Premiere
 # Pro 2024's FCP7 XML import really makes of each form (tested on this PC: test XMLs imported, the project saved and its
 # .prproj read back, every form on all five A1 clips of a real 1_edit.xml -- work\t26\audio\NOTES.md):
 #   * Audio Levels (audiolevels, its level linear: 1 = 0 dB) -> the clip's own Volume (of several, the last one).
@@ -3516,10 +3629,11 @@ PREMIERE_MASTERCLIP = "masterclip-raw"
 # So every A1 clip gets what an XML can carry, each with its real value: the normalisation as Gain filters (each at most
 # +15 dB: as many as its gain needs, all equal), Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0). In Premiere:
 # Volume 0 dB, Volume +N dB (once or more: the Audio Gain's normalisation -- a gain is a gain, the same sound before
-# or after the clip's Volume), Panner 0. The Hard Limiter and Amplify +4.5 dB cannot come through an XML at all, and
-# nothing stands in for them (a Volume +4.5 dB would look like something else, and double the +4.5 dB once your own
-# preset with both -- "LoudVOGOOOD" -- is put on the clips): each A1 clip's comment and the report name them; select all
-# A1 clips and apply your preset (and do not normalise again: that is done).
+# or after the clip's Volume), Panner 0. The Hard Limiter and Amplify +3.0 dB cannot come through an XML at all, and
+# nothing stands in for them (a Volume +3.0 dB would look like something else, and double the +3.0 dB once the preset
+# with both -- MovieRecaps audio chain -- is put on the clips): each A1 clip's comment and the report name them; select
+# all A1 clips and apply the preset (and do not normalise again: that is done). Your older "LoudVOGOOOD" preset has
+# Amplify +4.5 dB (night 11's value): since day 13 the chain is +3.0 dB -- use MovieRecaps audio chain.
 # The normalisation is measured like Premiere's own: the loudest sample the clip plays -- the media's first channel
 # (A1 takes the file's audio track 1: Premiere makes it a mono clip of that channel) over the clip's source range
 # (Premiere's Audio Gain dialog read -13.1 / -14.2 dB on two clips of video10 where this reads -13.13 / -14.23 dB; its
@@ -3534,7 +3648,8 @@ VOLUME_LEVEL = 1.0                                   # Volume 0 dB (Audio Levels
 PANNER = 0.0                                         # centre
 HARD_LIMITER = ("Hard Limiter (Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
                 "1.00)")
-AMPLIFY = "Amplify +4.5 dB"
+AMPLIFY_DB = 3.0                                     # day 13 (night 11: +4.5 dB, = your LoudVOGOOOD)
+AMPLIFY = f"Amplify +{AMPLIFY_DB:.1f} dB"
 NOT_IN_XML = f"{HARD_LIMITER} and {AMPLIFY}"          # your chain's two effects no XML can bring into Premiere
 AUDIO_CHAIN_TEXT = f"Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, {HARD_LIMITER}, {AMPLIFY}, Panner 0"
 AUDIO_CHAIN_XML = "Audio Gain (Normalize All Peaks to 0 dB, as Volume), Volume 0 dB, Panner 0"   # what an XML carries
@@ -3711,7 +3826,7 @@ def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]
                 + "; in Premiere " + ("a Volume" if len(stages) == 1 else f"{len(stages)} Volumes of "
                                       f"{factor_db(stages[0]):+.2f} dB") + ")")
     return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: select all A1 "
-            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + Amplify +4.5 dB); don't use Audio Gain > Normalize "
+            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + {AMPLIFY}); don't use Audio Gain > Normalize "
             "again, the tool already normalised (as a Volume)")
 
 
@@ -3742,6 +3857,11 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     has_audio = bool(cutlist.raw.get("has_audio", True))
     audio_info = {"sample_rate": cutlist.raw.get("audio_sample_rate") or 48000,
                   "channels": cutlist.raw.get("audio_channels") or 2} if has_audio else None
+    snd = sound_media(cutlist, cfg)          # day 13: A1 plays the RAW's stereo sound file (raw_stereo.wav)
+    pic_audio = picture_audio(cutlist, audio_info, snd)
+    v_name, v_abs = picture_media(cutlist, cfg) or (raw_name, raw_abs)    # day 13: V1 plays the original RAW
+    a_name, a_abs, a_fid, a_master = ((snd[0], snd[1], SOUND_FILE_ID, SOUND_MASTERCLIP) if snd else
+                                      (v_name, v_abs, "file-raw", PREMIERE_MASTERCLIP))
     clips, markers, warnings = premiere_clips(cutlist, cfg, silence)
     audio_items = premiere_audio(cutlist, clips, cfg) if has_audio else []
     if silence is not None and silence.active:
@@ -3811,7 +3931,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             _sub(e, "reverse", "FALSE")
         ci = _sub(vtrack, "clipitem", id=f"clipitem-{n}")
         _sub(ci, "masterclipid", PREMIERE_MASTERCLIP)         # one master clip: the Project panel shows one RAW
-        _sub(ci, "name", raw_name)                            # the segment ids are in the comments
+        _sub(ci, "name", v_name)                              # the segment ids are in the comments
         _sub(ci, "enabled", "TRUE")
         _sub(ci, "duration", remap_duration(src_dur, cl.speed))
         _rate_el(ci, fps)
@@ -3823,7 +3943,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         _sub(ci, "alphatype", "none")
         _sub(ci, "pixelaspectratio", "square")
         _sub(ci, "anamorphic", "FALSE")
-        _file_el(ci, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
+        _file_el(ci, "file-raw", defined, v_name, v_abs, raw_fps, raw_frames, raw_w, raw_h, pic_audio)
         if abs(cl.speed - 1.0) > 1e-9:
             _time_remap(ci, cl.speed)
         note = _premiere_motion(ci, cl, W, H, (raw_w, raw_h))
@@ -3852,10 +3972,10 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     # A1: the RAW audio at the SAME record ranges as V1 (picture-synced; an audio line where FX-14 found one)
     chain: list[dict] = []
     if has_audio:
-        peaks = a1_peaks(raw_abs, [_played(it) for it in audio_items], fps) if audio_items else []
+        peaks = a1_peaks(a_abs, [_played(it) for it in audio_items], fps) if audio_items else []
         unread = sum(1 for p in peaks if p is None)
         if unread:
-            warnings.append(f"the audio chain: the sound of {unread} A1 clip(s) could not be read from {raw_name} -- "
+            warnings.append(f"the audio chain: the sound of {unread} A1 clip(s) could not be read from {a_name} -- "
                             "their Audio Gain stays 0 dB (not normalised)")
         audio = _sub(media, "audio")
         _sub(audio, "numOutputChannels", 2)
@@ -3866,8 +3986,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         atrack = _sub(audio, "track")
         for n_a, it in enumerate(audio_items, start=1):
             ai = _sub(atrack, "clipitem", id=f"clipitem-a{n_a}")
-            _sub(ai, "masterclipid", PREMIERE_MASTERCLIP)
-            _sub(ai, "name", raw_name)
+            _sub(ai, "masterclipid", a_master)
+            _sub(ai, "name", a_name)
             _sub(ai, "enabled", "TRUE")
             _sub(ai, "duration", remap_duration(src_dur, it["speed"]))
             _rate_el(ai, fps)
@@ -3876,7 +3996,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             x_in, x_out = remap_encode(*xml_in_out(it["in"], it["out"]), it["speed"], item_length(it["start"], it["end"]))
             _sub(ai, "in", x_in)
             _sub(ai, "out", x_out)
-            _file_el(ai, "file-raw", defined, raw_name, raw_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info)
+            _file_el(ai, a_fid, defined, a_name, a_abs, raw_fps, raw_frames, raw_w, raw_h, audio_info, video=not snd)
             if abs(it["speed"] - 1.0) > 1e-9:
                 _time_remap(ai, it["speed"], "audio")
             # night 11: your audio chain -- static values, never a keyframe (a fade's keyframes imported the 125 % A1 of
@@ -5179,19 +5299,40 @@ def premiere_sync_problems(xml_path: str | os.PathLike, moving: bool = False) ->
                 out.append(f"{name} {p.get('label')} | {q.get('label')} at {tc(q['start'])}: the RAW "
                            f"{'skips' if d > 0 else 'repeats'} {abs(d) / f * 1000.0:.0f} ms at the cut "
                            f"(RAW {int(p['out']) / f:.3f} -> {int(q['in']) / f:.3f} s): one take, cut")
+    out += sound_file_problems(xml_path)            # day 13: V1 and A1 on two files of the same RAW
     return out, exceptions
 
 
-def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None) -> list[str]:
+def _plan_frame_cuts(ripple: Any) -> list[tuple[int, int]]:
+    """The ranges a ripple (silence.Ripple: the silences and repeats, after the speech-safe stage) removes, in the
+    plan's own frames -- only when every stage before it leaves the frames where they are (no cut, no insert: then its
+    frames ARE the plan's); else [] (ending_problems then checks as before)."""
+    stages = ripple.stages() if ripple is not None else []
+    if not stages or any(st.cuts or st.inserts for st in stages[:-1]):
+        return []
+    return [(int(c.a), int(c.b)) for c in stages[-1].cuts]
+
+
+def ending_problems(plan_clips: Sequence[PremiereClip], x: dict, end: int | None = None,
+                    removed: Sequence[tuple[int, int]] = ()) -> list[str]:
     """The default (no --remove-silence): the edit ends where the competitor's does -- the last V1 clip of the parsed
     XML ``x`` ends at the sequence's end and plays up to the competitor's last RAW moment, within a RAW frame: the RAW
     the plan plays at its frame ``end`` (pipeline.competitor_ending: where a closing meme / outro not from the RAW was
     cut off), else where the plan's last clip ends. Nothing after the last word is cut (output\\005: the reaction
-    after it is the point of a meme)."""
+    after it is the point of a meme). ``removed``: the ranges (plan frames) the export cut out with the repeats --
+    day 13: a tail cut out as a stutter (Family Guy 1999-present: the competitor's last 0.3 s replay RAW 619.35-619.65 s,
+    played a moment before) is not the competitor's ending any more: the frame before it is."""
     clips = [c for c in x["clips"] if int(c["end"]) >= 0]
     if not plan_clips or not clips:
         return []
     fps = _seq_rate(x)
+    total = max(c.rec_end for c in plan_clips)
+    stop_at = min(int(end), total) if end is not None else total
+    for a, b in sorted(((int(a), int(b)) for a, b in removed), key=lambda r: -r[1]):
+        if a < stop_at <= b:                    # a removed range reaching the end so far: the ending is before it
+            stop_at = a
+    if stop_at < total:
+        end = stop_at
     last_plan = max(plan_clips, key=lambda c: c.rec_end)
     if end is not None:
         last_plan = next((c for c in plan_clips if c.rec_start < int(end) <= c.rec_end), last_plan)
@@ -5810,8 +5951,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
     want_n = silence.new_frames if cut else out["total_frames"] * fac
     if x["duration"] != want_n:
         errors.append(f"XML: sequence duration {x['duration']} (want {want_n})")
-    out["ending_problems"] = (ending_problems(plan_clips, x, getattr(cfg, "premiere_ending", None))   # the
-                              if not moving else None)                          # competitor's last RAW moment
+    out["ending_problems"] = (ending_problems(plan_clips, x, getattr(cfg, "premiere_ending", None),   # the
+                                              _plan_frame_cuts(silence) if cut else ())   # competitor's last RAW
+                              if not moving else None)                                    # moment
     errors += [f"XML ENDING {t}" for t in out["ending_problems"] or []]
     for cl in plan_clips:              # the competitor's cuts, before the silences go and a cut moves onto a RAW cut
         evs = cl.events or [cl.ev]

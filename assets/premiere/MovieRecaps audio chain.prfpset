@@ -44,7 +44,7 @@
 			<Name>MovieRecaps audio chain</Name>
 			<Node Version="1">
 				<Properties Version="1">
-					<MZ.EffectPresets.PresetUID>d10f98e6-2926-4c19-9d72-5a0e4721da45</MZ.EffectPresets.PresetUID>
+					<MZ.EffectPresets.PresetUID>20a8b1ed-19fc-4ffe-a02e-3bfa70d7e8fa</MZ.EffectPresets.PresetUID>
 				</Properties>
 			</Node>
 			<Data ObjectRef="6"/>
@@ -66,12 +66,12 @@
 		</FilterPresets>
 	</FilterPresetItem>
 	<FilterPreset ObjectID="7" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
 		<Component ObjectRef="8"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">
@@ -127,16 +127,20 @@
 					<Param Index="35" ObjectRef="44"/>
 				</Params>
 				<Intrinsic>false</Intrinsic>
-				<InstanceName></InstanceName>
+				<InstanceName>MovieRecaps audio chain</InstanceName>
 				<ArchivedType>0</ArchivedType>
 				<Node Version="1">
+					<Properties Version="1">
+						<AudioFilterWindow.Targeted>true</AudioFilterWindow.Targeted>
+						<AudioFilterWindow.Visible>false</AudioFilterWindow.Visible>
+					</Properties>
 				</Node>
 				<ID>0</ID>
 			</Component>
 		</AudioComponent>
 		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
 		<FilterIndex>-1</FilterIndex>
-		<OpaqueData Encoding="base64" Checksum="4006868536">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5QYXJhbUxpc3Q8L2tleT4KPGFycmF5Pgo8YXJyYXkudHlwZT48ZmxvYXQvPjwvYXJyYXkudHlwZT4KPGZsb2F0PjAuMDMxMjU8L2Zsb2F0Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjxmbG9hdD4wLjY5NzkxNjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjwvYXJyYXk+CjwvcHJvcC5wYWlyPgo8cHJvcC5wYWlyPgo8a2V5PlR5cGU8L2tleT4KPGludCB0eXBlPSdzaWduZWQnIHNpemU9JzMyJz4wPC9pbnQ+CjwvcHJvcC5wYWlyPgo8cHJvcC5wYWlyPgo8a2V5PlZlcnNpb248L2tleT4KPGZsb2F0PjE8L2Zsb2F0Pgo8L3Byb3AucGFpcj4KPC9wcm9wLmxpc3Q+CjwvcHJvcC5tYXA+Cg==</OpaqueData>
+		<OpaqueData Encoding="base64" Checksum="4263480046">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5QYXJhbUxpc3Q8L2tleT4KPGFycmF5Pgo8YXJyYXkudHlwZT48ZmxvYXQvPjwvYXJyYXkudHlwZT4KPGZsb2F0PjAuMDMxMjU8L2Zsb2F0Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjxmbG9hdD4wLjY4NzU8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4xPC9mbG9hdD4KPC9hcnJheT4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjA8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
 		<ChannelConfigData>{"in":[{"layout":[0],"name":"","type":0}],"out":[{"layout":[0],"name":"","type":0}]}</ChannelConfigData>
 	</AudioFilterComponent>
 	<AudioComponentParam ObjectID="9" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
@@ -187,8 +191,8 @@
 		<Keyframes></Keyframes>
 		<IsTimeVarying>false</IsTimeVarying>
 		<ParameterControlType>2</ParameterControlType>
-		<StartKeyframe>-91445760000000000,0.697916686535,0,0,0,0,0,0</StartKeyframe>
-		<CurrentValue>0.697916686535</CurrentValue>
+		<StartKeyframe>-91445760000000000,0.6875,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.6875</CurrentValue>
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
@@ -644,12 +648,12 @@
 		</Node>
 	</AudioComponentParam>
 	<FilterPreset ObjectID="45" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
 		<Component ObjectRef="46"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">
@@ -770,7 +774,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576291600</Timestamp>
+		<Timestamp>63346568327300</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -784,7 +788,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576304100</Timestamp>
+		<Timestamp>63346568337000</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -798,7 +802,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576308300</Timestamp>
+		<Timestamp>63346568342500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -812,7 +816,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576312300</Timestamp>
+		<Timestamp>63346568350100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -826,7 +830,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576316300</Timestamp>
+		<Timestamp>63346568355400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -840,7 +844,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576318700</Timestamp>
+		<Timestamp>63346568362500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -854,7 +858,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576320700</Timestamp>
+		<Timestamp>63346568366500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -868,7 +872,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576322900</Timestamp>
+		<Timestamp>63346568370400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -882,7 +886,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576325000</Timestamp>
+		<Timestamp>63346568373500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -896,7 +900,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576327600</Timestamp>
+		<Timestamp>63346568380800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -910,7 +914,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576329600</Timestamp>
+		<Timestamp>63346568387700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -924,7 +928,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576332700</Timestamp>
+		<Timestamp>63346568395600</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -938,7 +942,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576334400</Timestamp>
+		<Timestamp>63346568400700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -952,7 +956,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576335900</Timestamp>
+		<Timestamp>63346568404500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -966,7 +970,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576337600</Timestamp>
+		<Timestamp>63346568410300</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -980,7 +984,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576340000</Timestamp>
+		<Timestamp>63346568414800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -994,7 +998,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576341800</Timestamp>
+		<Timestamp>63346568420800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1008,7 +1012,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576343600</Timestamp>
+		<Timestamp>63346568425200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1022,7 +1026,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576346000</Timestamp>
+		<Timestamp>63346568431600</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1036,7 +1040,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576349500</Timestamp>
+		<Timestamp>63346568435700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1050,7 +1054,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576351100</Timestamp>
+		<Timestamp>63346568438600</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1064,7 +1068,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576352700</Timestamp>
+		<Timestamp>63346568561900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1078,7 +1082,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576356600</Timestamp>
+		<Timestamp>63346568568500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1092,7 +1096,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576360100</Timestamp>
+		<Timestamp>63346568574500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1106,7 +1110,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576362800</Timestamp>
+		<Timestamp>63346568578600</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1120,7 +1124,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576369000</Timestamp>
+		<Timestamp>63346568582800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1134,7 +1138,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576371200</Timestamp>
+		<Timestamp>63346568587400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1148,7 +1152,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576375600</Timestamp>
+		<Timestamp>63346568594200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1162,7 +1166,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576377600</Timestamp>
+		<Timestamp>63346568599400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1176,7 +1180,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576381600</Timestamp>
+		<Timestamp>63346568604200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1190,7 +1194,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576384000</Timestamp>
+		<Timestamp>63346568609500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1204,7 +1208,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919576387500</Timestamp>
+		<Timestamp>63346568613200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1222,12 +1226,12 @@
 		</Node>
 	</AudioComponentParam>
 	<FilterPreset ObjectID="83" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
 		<Component ObjectRef="84"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">
@@ -1348,7 +1352,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584273300</Timestamp>
+		<Timestamp>63346574583900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1362,7 +1366,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584275000</Timestamp>
+		<Timestamp>63346574589500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1376,7 +1380,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584278400</Timestamp>
+		<Timestamp>63346574595800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1390,7 +1394,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584283100</Timestamp>
+		<Timestamp>63346574606000</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1404,7 +1408,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584288200</Timestamp>
+		<Timestamp>63346574613400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1418,7 +1422,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584302300</Timestamp>
+		<Timestamp>63346574620700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1432,7 +1436,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584304000</Timestamp>
+		<Timestamp>63346574625200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1446,7 +1450,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584305600</Timestamp>
+		<Timestamp>63346574628100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1460,7 +1464,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584306900</Timestamp>
+		<Timestamp>63346574631200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1474,7 +1478,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584308700</Timestamp>
+		<Timestamp>63346574636100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1488,7 +1492,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584310200</Timestamp>
+		<Timestamp>63346574640400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1502,7 +1506,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584311500</Timestamp>
+		<Timestamp>63346574643100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1516,7 +1520,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584312800</Timestamp>
+		<Timestamp>63346574646300</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1530,7 +1534,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584314700</Timestamp>
+		<Timestamp>63346574649000</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1544,7 +1548,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584316200</Timestamp>
+		<Timestamp>63346574653700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1558,7 +1562,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584318100</Timestamp>
+		<Timestamp>63346574657900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1572,7 +1576,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584319700</Timestamp>
+		<Timestamp>63346574660900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1586,7 +1590,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584320900</Timestamp>
+		<Timestamp>63346574666200</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1600,7 +1604,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584322300</Timestamp>
+		<Timestamp>63346574670800</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1614,7 +1618,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584324000</Timestamp>
+		<Timestamp>63346574673700</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1628,7 +1632,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584325100</Timestamp>
+		<Timestamp>63346574679400</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1642,7 +1646,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584326300</Timestamp>
+		<Timestamp>63346574683300</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1656,7 +1660,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584327400</Timestamp>
+		<Timestamp>63346574686900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1670,7 +1674,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584328700</Timestamp>
+		<Timestamp>63346574690500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1684,7 +1688,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584329900</Timestamp>
+		<Timestamp>63346574696000</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1698,7 +1702,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584331200</Timestamp>
+		<Timestamp>63346574699500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1712,7 +1716,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584332500</Timestamp>
+		<Timestamp>63346574703100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1726,7 +1730,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584333900</Timestamp>
+		<Timestamp>63346574705600</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1740,7 +1744,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584335000</Timestamp>
+		<Timestamp>63346574710100</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1754,7 +1758,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584336000</Timestamp>
+		<Timestamp>63346574714000</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1768,7 +1772,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584337100</Timestamp>
+		<Timestamp>63346574716500</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1782,7 +1786,7 @@
 		<UnitsString>dB</UnitsString>
 		<RangeLocked>true</RangeLocked>
 		<IsInverted>false</IsInverted>
-		<Timestamp>66919584338100</Timestamp>
+		<Timestamp>63346574718900</Timestamp>
 		<Node Version="1">
 		</Node>
 	</AudioComponentParam>
@@ -1800,12 +1804,12 @@
 		</Node>
 	</AudioComponentParam>
 	<FilterPreset ObjectID="121" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
 		<Component ObjectRef="122"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">
@@ -1833,7 +1837,7 @@
 					<Param Index="7" ObjectRef="130"/>
 				</Params>
 				<Intrinsic>false</Intrinsic>
-				<InstanceName></InstanceName>
+				<InstanceName>MovieRecaps audio chain</InstanceName>
 				<ArchivedType>0</ArchivedType>
 				<Node Version="1">
 				</Node>
@@ -1957,12 +1961,12 @@
 		</Node>
 	</AudioComponentParam>
 	<FilterPreset ObjectID="131" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
 		<Component ObjectRef="132"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">
@@ -2115,12 +2119,12 @@
 		</Node>
 	</AudioComponentParam>
 	<FilterPreset ObjectID="141" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
-		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +4.5 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.0 dB. MovieRecaps: put it on every A1 clip of 1_edit.xml.</Description>
 		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
 		<Component ObjectRef="142"/>
 		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
-		<AnchorInPoint>7628100480000</AnchorInPoint>
-		<AnchorOutPoint>8539234704000</AnchorOutPoint>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
 		<Speed>1.</Speed>
 		<TransitionDuration>0</TransitionDuration>
 		<Node Version="1">

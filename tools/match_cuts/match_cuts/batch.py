@@ -517,12 +517,19 @@ def summary_md(rows: Sequence[dict], folder: Path, skipped: Sequence[str], start
 
 def converted_raw(run_dir: Path) -> Path | None:
     """The RAW a finished run converted (extras/media/raw_ae.*: conform.py) -- the next competitor of the same RAW
-    starts from it, so the RAW is converted and analysed once (its caches are keyed by its content)."""
+    starts from it, so the RAW is converted and analysed once (its caches are keyed by its content). Day 13: only for
+    a run whose 1_edit.xml plays that converted copy (before day 13). A run that plays the original RAW removes its
+    copy at the end; one left behind is never another run's RAW -- that run's V1 would play the copy, not the
+    original (and "one converted RAW kept per movie" is not wanted now)."""
+    from . import stereo
     media = run_dir / run_folders.EXTRAS / "media"
+    xmls = [p for d in (run_dir, run_dir / run_folders.EXTRAS) if d.is_dir() for p in d.glob("*.xml")]
     for ext in (".mp4", ".mov"):
         p = media / f"raw_ae{ext}"
         if p.is_file() and p.stat().st_size > 0:
-            return p
+            if any(f"media/raw_ae{ext}" in stereo.xml_media_names(x) for x in xmls):
+                return p
+            return None
     return None
 
 

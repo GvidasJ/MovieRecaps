@@ -1,0 +1,141 @@
+{
+ "video": "video20-fixed",
+ "date": "2026-10-20",
+ "project": "C:\\Users\\gvida\\Desktop\\cop.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-19_video-by-mindculpt\\edit",
+ "edit": {
+  "clips": 16,
+  "starts": [
+   0.25,
+   0.167,
+   -0.834,
+   0.0,
+   0.042,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -7.591
+  ],
+  "ends": [
+   0.083,
+   0.959,
+   0.125,
+   0.167,
+   -0.125,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.667,
+   -1.543
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   378.0,
+   -230.0,
+   -230.0,
+   378.0,
+   -399.0,
+   -399.0,
+   419.0,
+   419.0,
+   419.0,
+   -368.0,
+   -627.0,
+   542.0,
+   -204.0,
+   -0.0,
+   -787.0,
+   -787.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.932,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 3,
+  "case": 0,
+  "removed": 2,
+  "added": 7,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "wants to arrest",
+    "written": "once arrested",
+    "kind": "words",
+    "before": "my daddy",
+    "after": "15 people",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "crackheads",
+    "written": "cra kheads",
+    "kind": "words",
+    "before": "saved 5",
+    "after": "from a",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "ass",
+    "written": "as",
+    "kind": "words",
+    "before": "your daddy's",
+    "after": "all the",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

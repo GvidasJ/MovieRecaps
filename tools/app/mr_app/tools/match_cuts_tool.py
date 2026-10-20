@@ -77,6 +77,16 @@ class JobThread(QThread):
             self.estimate = batch.estimate_s(Path(self.job.competitor), Path(self.job.raw), self.job.mode == J.FAST)
         except Exception:  # noqa: BLE001
             self.estimate = 0.0
+        if j.complete:                       # day 13: room for THIS run on its drives, just before it starts
+            try:
+                raw = Path(j.raw)
+                why = space.run_problem(j.name, Path(j.competitor), self.converted.get(raw.resolve(), raw),
+                                        Path(getattr(j, "out_dir", None) or self.out_dir) / (j.run_name or j.name))
+            except Exception:  # noqa: BLE001 - an estimate that cannot be made never stops a run
+                why = ""
+            if why:
+                self.done.emit(j.id, {"label": R.FAIL, "failures": [why], "no_space": True})
+                return
         lock = None
         if self.job.project is not None:      # night 11: two computers never make one project's edit at once
             try:
@@ -1599,12 +1609,20 @@ class MatchCutsPage(QWidget):
             mine = [p for p in probs if p.startswith(f"{name}: ")]
             probs += [f"{name}: {p}" for p in found      # (the competitor longer than the RAW: said once, the app's way)
                       if not ("longer than the RAW" in p and any("longer than the RAW" in m for m in mine))]
-        probs += list(room or [])                         # night 10: a copy into another drive's run folder needs room
+        room = list(room or [])
+        if room:                      # day 13: not enough free space -- never started (also when started by itself)
+            self.say("not started -- " + room[0])
+            self.update_counts()
+            _toast(self.ctx, "Not started: not enough free space", "fail")
+            from ..ui import health
+            health.offer_cleanup(self.ctx, self, "\n\n".join(room) + (
+                "\n\nAlso worth a look:\n" + "\n".join(f"- {p}" for p in probs[:8]) if probs else ""))
+            return
         if probs and confirm:                             # started by itself (Download tab): said, not asked
             box = QMessageBox(self)
             box.setWindowTitle("Before the start")
             box.setIcon(QMessageBox.Icon.Warning)
-            box.setText("Some videos look wrong:" if len(probs) > len(room or []) else "Not enough free space:")
+            box.setText("Some videos look wrong:")
             box.setInformativeText("\n".join(f"- {p}" for p in probs[:20]) + "\n\nStart anyway?")
             start = box.addButton("Start anyway", QMessageBox.ButtonRole.AcceptRole)
             box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
@@ -1682,6 +1700,11 @@ class MatchCutsPage(QWidget):
         if j is not None and getattr(j, "restart_swapped", False):
             self._restart_when_free(j, th)
             return
+        if j is not None and res.get("no_space"):         # day 13: no room for it -- not started; it waits again
+            self._no_room(j, (res.get("failures") or ["not enough free space"])[0])
+            return
+        from ..ui import health
+        health.space_changed(self.ctx)                    # day 13: the strip's free space read again
         if j is not None:
             j.result = res
             j.state = J.STOPPED if res.get("label") == R.STOPPED else J.DONE
@@ -1710,6 +1733,25 @@ class MatchCutsPage(QWidget):
             self._next()
         else:
             self.update_counts()
+
+    def _no_room(self, j: J.Job, why: str) -> None:
+        """A video the queue was about to run has no room on its drives (checked just before its start): it is not
+        started and waits in the queue again; the queue stops (the next videos need the same drive); Clean up is
+        offered."""
+        j.state, j.progress, j.percent = J.READY, "", 0.0
+        row = self.rows.get(j.id)
+        if row is not None:
+            row.refresh()
+        self.running = False
+        self._reorder()
+        self.say(f"stopped before {j.name} -- {why}")
+        self.update_counts()
+        fn = getattr(self.ctx, "set_progress", None)
+        if fn is not None:
+            fn(None)
+        _toast(self.ctx, f"{j.name} not started: not enough free space", "fail")
+        from ..ui import health
+        health.offer_cleanup(self.ctx, self, f"{j.name}: {why}")
 
     RESTART_POLL_MS = 250
     RESTART_TRIES = 2400                            # 10 min: the old run's thread always ends long before

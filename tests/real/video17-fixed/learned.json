@@ -1,0 +1,95 @@
+{
+ "video": "video17-fixed",
+ "date": "2026-10-20",
+ "project": "finished\\video17\\video17_fixed.prproj",
+ "run": "output\\laptop_video17",
+ "edit": {
+  "clips": 8,
+  "starts": [
+   0.0,
+   0.033,
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.4
+  ],
+  "ends": [
+   0.033,
+   0.0,
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   -0.4,
+   0.1
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   0.0,
+   0.0,
+   214.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   241.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.977,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 29.97
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 3,
+  "rewritten": 1,
+  "changes": []
+ }
+}
