@@ -28,5 +28,5 @@ def test_the_new_video_row_says_why_its_edit_stopped(page, tmp_path):           
     assert it.state == D.FAILED and it.failed_step == "edit"
     assert it.error == res["reason_line"]
     text = page.now_text(it)
-    assert text.startswith("Stopped at edit: The disk C: is full") and text.endswith("then press Try again.")
+    assert text.startswith("Stopped at edit: The disk C: ran out of space") and text.endswith("then press Try again.")
     assert "details in" not in text and "match_cuts.log" not in text and "4294967268" not in text

@@ -56,7 +56,7 @@ def test_old_entries_say_the_plain_reason():
     a, b = PR.parse(BORAT)
     assert PR.plain_check(a).startswith("stopped (exit 2) -- The run crashed: the tool's helper processes lost their "
                                         "working file in the temp folder (C:\\Users\\gvida\\AppData\\Local\\Temp)")
-    assert PR.plain_check(b).startswith("stopped (exit 2) -- The disk C: is full: the run stopped while converting "
+    assert PR.plain_check(b).startswith("stopped (exit 2) -- The disk C: ran out of space: the run stopped while converting "
                                         "the RAW. Free space on C: (Board → Clean up), then press Try again.")
     for p in (a, b):
         assert "details in" not in PR.plain_check(p) and "match_cuts.log" not in PR.plain_check(p)
@@ -73,5 +73,5 @@ def test_the_learn_tabs_problem_cards_say_it(env):
     col = page.columns.problems
     assert pump_until(env.app, lambda: len(cards(col)) == 2)
     text = " | ".join(c.small.text() for c in cards(col))
-    assert "The disk C: is full" in text and "temp folder" in text and "details in" not in text
+    assert "The disk C: ran out of space" in text and "temp folder" in text and "details in" not in text
     assert (env.hub / PR.FILE).read_text(encoding="utf-8") == BORAT              # the shared file is not rewritten

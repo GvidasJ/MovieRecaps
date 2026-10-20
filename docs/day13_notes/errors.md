@@ -40,6 +40,11 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
      last ERROR line — its first line only, never the traceback logged under it, never a library warning, never
      "details in …") in plain form (no time/level/logger, no command line, `RuntimeError:` dropped, other exception
      names in brackets at the end), plus *"Press Try again; if it stops the same way again, the full log: Open log."*
+- **The console decides first**: cli prints the exception that stopped the run only to the console; when it is there
+  it alone decides (an older soft error in match_cuts.log — "speech map failed …" of a step that went on — never
+  wins); the log's ERROR lines count when the console says nothing meaningful (a run read back later).
+- Checked against this PC's real FFmpeg 8.0: a missing input exits 4294967294 (= −2), a junk file AVERROR_INVALIDDATA,
+  an unknown encoder AVERROR_ENCODER_NOT_FOUND — each comes out right.
 - `batch.stop_message` never returns cli's "details in … match_cuts.log" line any more (that was all the laptop
   showed for edit-2/3: the RuntimeError's message ends with ffmpeg's stderr, so a blank line stood between the real
   line and "details in"). Its other answers are unchanged (labels and tests depend on them).
@@ -67,6 +72,10 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
   (`problems.plain_check`, text only; problems_queue.md itself is not rewritten).
 - `newvideo.plain_error` uses the shared words for technical text (an errno, "failed (N)", the pool's file, "details
   in"); plain text stays as it is. The app's own conversion (`convert._ffmpeg_problem`) reads ffmpeg's exit code too.
+- **Just cuts** (`flow.just_cuts_result`): a technical stop line ("the cuts could not be made: RuntimeError: …") gets
+  the shared words; its own plain lines ("raw file not found: …", "the template … cannot be used") stay.
+- cli's own "raw file not found: X" / "competitor file not found: X" → "The RAW file is not there any more (X). Put
+  it back where it was (or drop the video again), then press Try again."
 
 ## 1.6 Torrents: "File exists, but a control file (*.aria2) does not exist"
 
@@ -133,9 +142,10 @@ internet). My two early experiments (before the request) ran aria2c without it �
 
 ## Not done / for the lead
 
-- **This PC's torrent engine is aria2c 1.19.0 (2015)** from `C:\aria2` on PATH: `setup_app.py` installs 1.37 into
-  `tools\app\bin` only when *no* aria2c is found. Everything here works with both (tested), but the versions check
-  (health helper, item 1.5) should flag it.
+- **This PC's torrent engine is aria2c 1.19.0 (2015)** from `C:\aria2` on PATH. Careful: `setup_app.py` (day 12
+  code, unchanged here) installs 1.37.0 into `tools\app\bin` only when `torrent.find_aria2c()` finds **no** aria2c —
+  it finds `C:\aria2`, so it will not download 1.37.0 unless the health helper's version check changed that. (When
+  `tools\app\bin\aria2c.exe` exists, `find_aria2c` prefers it over PATH.) Everything here works with both (tested).
 - The Borat runs' real cause (why C: filled, whether Storage Sense emptied %TEMP%) is the lead's (problems_queue).
 - Not tried on the real laptop share `\\192.168.101.11\Shared` (cannot be reached from the PC); `\\127.0.0.1\C$` was.
 
@@ -149,4 +159,10 @@ internet). My two early experiments (before the request) ran aria2c without it �
   card's note, old jobs.json, the space check; **real aria2c on 127.0.0.1**: a finished file finished at once with
   bytes and mtime unchanged and nobody sharing, a half file fetching only the missing pieces (the sharer's upload
   ≤ 60 %), a bigger file renamed "(old)" and fetched fresh, error 13 from aria2c checked by itself, a UNC folder
-  with the .aria2 next to the download while it runs). Run also with aria2c 1.37 (`MOVIERECAPS_ARIA2C`).
+  with the .aria2 next to the download while it runs). The tests use the aria2c the app itself would use
+  (`find_aria2c`: 1.19.0 from `C:\aria2` on this PC today; 1.37.0 from `tools\app\bin` once setup_app has run). Run
+  both ways today: on 1.19.0 and with `MOVIERECAPS_ARIA2C=<scratch>\aria2_137\aria2c.exe` (the official 1.37.0, the
+  app's real version, fetched with setup_app's own `install_aria2c`): `test_torrent_day13.py`, `test_torrent.py`,
+  `test_integrate_day12.py` — 62 passed on each. Where the two differ, both are handled: 1.19 gives error 13 with an
+  empty errorMessage (the code alone is enough), writes the .aria2 only at its save interval (the UNC test saves every
+  second), and reports no check progress (the stall time by the file's size).

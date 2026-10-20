@@ -43,8 +43,8 @@ def test_ffmpeg_exit_4294967268_is_the_disk_is_full():
     assert P.program_code(4294967268)[0] == P.DISK_FULL
     r = P.explain(BORAT_FFMPEG, code=2)
     assert r.kind == P.DISK_FULL and r.drive == "C:"
-    assert r.text == "the disk C: is full: the run stopped while converting the RAW"
-    assert r.line() == ("The disk C: is full: the run stopped while converting the RAW. Free space on C: "
+    assert r.text == "the disk C: ran out of space: the run stopped while converting the RAW"
+    assert r.line() == ("The disk C: ran out of space: the run stopped while converting the RAW. Free space on C: "
                         "(Board → Clean up), then press Try again.")
     assert "ffmpeg failed (4294967268)" in r.detail          # the technical line is kept for the log / the problems
     for bad in ("details in", "4294967268", "match_cuts.log", "Traceback"):
@@ -61,15 +61,18 @@ def test_the_pool_state_file_missing_is_a_crash_after_c_filled_up():
     assert "state-4.pkl" in sure.detail and "state-4" not in sure.line()
 
 
-def test_explain_run_reads_the_runs_own_log(tmp_path):
+def test_explain_run_reads_the_runs_own_log(tmp_path, monkeypatch):
     run = tmp_path / "edit"
     (run / "extras").mkdir(parents=True)
     (run / "extras" / "match_cuts.log").write_text(FULL_LOG, encoding="utf-8")
     r = batch.stop_reason(BORAT_POOL, 2, run)
     assert r.text.startswith("the run crashed after C: filled up")
     (run / "extras" / "batch_console.log").write_text("python -m match_cuts ...\n\n\n" + BORAT_FFMPEG, encoding="utf-8")
+    monkeypatch.setattr(P, "_free_gb", lambda d: 0.4)
     r2 = P.explain_run(run, "", 2)                            # read back later: the console from batch_console.log
-    assert r2.kind == P.DISK_FULL and r2.text.startswith("the disk C: is full (") and "GB free now)" in r2.text
+    assert r2.kind == P.DISK_FULL and r2.text.startswith("the disk C: ran out of space (only 0.4 GB free now): ")
+    monkeypatch.setattr(P, "_free_gb", lambda d: 92.9)        # room again (its half-written file was removed)
+    assert P.explain_run(run, "", 2).text == "the disk C: ran out of space: the run stopped while converting the RAW"
 
 
 def test_negative_errno_and_averror_codes_of_ffmpeg_and_ffprobe():
@@ -220,7 +223,8 @@ def test_the_tools_own_stops_stay_as_they_are():
 
 def test_a_stored_technical_failure_becomes_plain_text():
     old = f"the run stopped (exit 2): ERROR: RuntimeError: conform raw: ffmpeg failed (4294967268): {FFMPEG_CMD}"
-    assert P.plain_text(old).startswith("The disk C: is full: the run stopped while converting the RAW. Free space")
+    assert P.plain_text(old).startswith("The disk C: ran out of space: the run stopped while converting the RAW. "
+                                        "Free space")
     old_pool = (f"the run stopped (exit 2): ERROR: FileNotFoundError: [Errno 2] No such file or directory: "
                 f"{POOL_FILE} match_cuts: details in {RUN}\\edit\\extras\\match_cuts.log")
     assert "temp folder" in P.plain_text(old_pool) and "details in" not in P.plain_text(old_pool)
@@ -256,7 +260,7 @@ def test_the_batch_summary_says_the_plain_reason(tmp_path, monkeypatch):
                        "--python", sys.executable]) == 1
     md = (out / "batch_summary.md").read_text(encoding="utf-8")
     import re
-    assert re.search(r"FAILED: the run stopped \(exit 2\): The disk C: is full \([\d.]+ GB free now\): the run "
-                     r"stopped while converting the RAW\. Free space on C: \(Board → Clean up\), then press Try "
-                     r"again\.", md), md
+    assert re.search(r"FAILED: the run stopped \(exit 2\): The disk C: ran out of space(?: \(only [\d.]+ GB free "
+                     r"now\))?: the run stopped while converting the RAW\. Free space on C: \(Board → Clean up\), "
+                     r"then press Try again\.", md), md
     assert "details in" not in md

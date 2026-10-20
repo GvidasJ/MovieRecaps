@@ -399,10 +399,14 @@ def _todo_disk(drive: str) -> str:
     return f"free some space on C: and on the project folder's drive ({CLEAN_UP}), then {TRY}"
 
 
+LOW_GB = 30.0          # the free space is said when it is still low (else the run's half-written file was removed
+#                        and the disk has room again: "full (90 GB free now)" would read as nonsense)
+
+
 def _disk_text(drive: str, step: str, free_gb: float | None = None) -> str:
-    left = f" ({free_gb:.1f} GB free now)" if free_gb is not None else ""
-    head = f"the disk {drive} is full{left}" if drive and drive.endswith(":") else \
-        f"the network folder {drive} is full{left}" if drive else "a disk is full"
+    left = f" (only {free_gb:.1f} GB free now)" if free_gb is not None and free_gb < LOW_GB else ""
+    head = f"the disk {drive} ran out of space{left}" if drive and drive.endswith(":") else \
+        f"the network folder {drive} ran out of space{left}" if drive else "a disk ran out of space"
     return head + (f": the run stopped {step}" if step else "")
 
 
@@ -647,9 +651,9 @@ def explain_run(run_dir: str | os.PathLike | None, stderr: str = "", code: int |
         if not stderr:
             stderr = _tail(extras / "batch_console.log")
     r = explain(stderr, log, code, stop)
-    if r.kind == DISK_FULL and r.drive and "free now" not in r.text and not r.text.startswith("the run crashed"):
+    head = f"the disk {r.drive} ran out of space"
+    if r.kind == DISK_FULL and r.drive and r.text.startswith(head) and "free now" not in r.text:
         free = _free_gb(r.drive)
-        if free is not None and r.text.startswith(f"the disk {r.drive} is full"):
-            r = replace(r, text=r.text.replace(f"the disk {r.drive} is full",
-                                               f"the disk {r.drive} is full ({free:.1f} GB free now)", 1))
+        if free is not None and free < LOW_GB:
+            r = replace(r, text=r.text.replace(head, f"{head} (only {free:.1f} GB free now)", 1))
     return r

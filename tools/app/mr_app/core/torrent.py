@@ -315,6 +315,12 @@ def control_file(meta: "Meta", save_dir: str | Path) -> Path:
     return base / f"{top}.aria2"
 
 
+def _sizes(a: int, b: int) -> str:
+    """'4.21 GB instead of 3.70 GB' -- in bytes when the two look the same rounded."""
+    ha, hb = human_size(a), human_size(b)
+    return f"{ha} instead of {hb}" if ha != hb else f"{a:,} bytes instead of {b:,}"
+
+
 def old_name(path: str | Path) -> Path:
     """'<name> (old)<ext>' next to it -- '(old 2)', '(old 3)' ... when that is taken too."""
     p = Path(path)
@@ -1191,7 +1197,7 @@ class TorrentSession:
             want = meta.files[i].size
             why = ""
             if size > want:
-                why = f"it is bigger ({human_size(size)}) than the torrent's file ({human_size(want)})"
+                why = f"it is bigger than the torrent's file, {_sizes(size, want)}"
             elif size > 0:
                 ok = file_matches(meta, i, p, size)
                 if ok is False:
@@ -1209,7 +1215,7 @@ class TorrentSession:
                                    f"({why}), and it could not be renamed ({e.strerror or e}). Move it out of "
                                    f"{p.parent}, then press Resume.") from e
             renamed.append((p, new, why))
-        notes = [f'An older file "{p.name}" was in the download folder but is not this torrent\'s file ({why}): it '
+        notes = [f'An older file "{p.name}" was in the download folder but is not this torrent\'s file: {why}. It '
                  f'was renamed to "{new.name}" and the video is downloaded fresh.' for p, new, why in renamed]
         if renamed:
             job.renamed = " ".join(x for x in (job.renamed, *notes) if x)

@@ -55,11 +55,11 @@ def _run(tmp_path, log: str = "") -> Path:
 def test_a_full_disk_is_said_with_what_to_do_never_details_in(tmp_path):
     res = R.read_result(_run(tmp_path), 2, "", BORAT_FFMPEG)
     assert res["label"] == R.FAIL and res["reason_kind"] == "disk full"
-    assert res["reason"].startswith("the disk C: is full") and "while converting the RAW" in res["reason"]
+    assert res["reason"].startswith("the disk C: ran out of space") and "while converting the RAW" in res["reason"]
     assert res["todo"] == "free space on C: (Board → Clean up), then press Try again"
-    assert res["failures"][0].startswith("the run stopped (exit 2): The disk C: is full")
+    assert res["failures"][0].startswith("the run stopped (exit 2): The disk C: ran out of space")
     line = R.short(res)
-    assert line == res["reason_line"] and line.startswith("The disk C: is full")
+    assert line == res["reason_line"] and line.startswith("The disk C: ran out of space")
     assert line.endswith("Free space on C: (Board → Clean up), then press Try again.")
     for bad in ("details in", "match_cuts.log", "4294967268", "exit 2", "RuntimeError"):
         assert bad not in line
@@ -113,7 +113,7 @@ def test_the_problems_entry_title_carries_the_plain_reason(tmp_path):
     res.update(exit=2, log=str(run / "extras" / "batch_console.log"))
     assert PR.is_tool_problem(res)
     p = PR.from_result("2026-10-19_borat-cultural-learnings-of-america-for", res, computer="laptop")
-    assert p.check.startswith("stopped (exit 2) -- The disk C: is full")
+    assert p.check.startswith("stopped (exit 2) -- The disk C: ran out of space")
     assert "details in" not in p.check and "Board → Clean up" in p.check
     assert any("ffmpeg failed (4294967268)" in ln for ln in p.lines)        # the key line for the night run stays
     assert not any(ln.startswith("match_cuts: details in") for ln in p.lines)
@@ -121,7 +121,7 @@ def test_the_problems_entry_title_carries_the_plain_reason(tmp_path):
     hub.mkdir()
     assert PR.add(hub, p) == ""
     text = (hub / PR.FILE).read_text(encoding="utf-8")
-    assert "· stopped (exit 2) -- The disk C: is full" in text
+    assert "· stopped (exit 2) -- The disk C: ran out of space" in text
 
 
 def test_project_json_keeps_the_plain_reason_and_history_says_it(tmp_path):
@@ -133,7 +133,7 @@ def test_project_json_keeps_the_plain_reason_and_history_says_it(tmp_path):
     step = PJ.load(p.folder).data["steps"]["edit"]
     assert step["state"] == PJ.FAILED and step["error"] == res["reason_line"]
     ev = [e for e in HI.project_events(PJ.load(p.folder).data) if e.what.startswith("Edit failed")][0]
-    assert ev.detail.startswith("The disk C: is full") and "details in" not in ev.detail
+    assert ev.detail.startswith("The disk C: ran out of space") and "details in" not in ev.detail
 
 
 def test_history_says_an_older_runs_technical_line_in_plain_words():
@@ -142,14 +142,14 @@ def test_history_says_an_older_runs_technical_line_in_plain_words():
                                "failures": [f"the run stopped (exit 2): ERROR: RuntimeError: conform raw: ffmpeg "
                                             f"failed (4294967268): {CMD}"]}}}
     ev = [e for e in HI.project_events(data) if e.what.startswith("Edit failed")][0]
-    assert ev.detail.startswith("The disk C: is full: the run stopped while converting the RAW")
+    assert ev.detail.startswith("The disk C: ran out of space: the run stopped while converting the RAW")
     data["steps"]["edit"]["failures"] = [f"the run stopped (exit 2): details in {RUN}\\edit-2\\extras\\match_cuts.log"]
     ev = [e for e in HI.project_events(data) if e.what.startswith("Edit failed")][0]
     assert ev.detail.startswith("The run stopped; the reason is in its log") and "match_cuts.log" not in ev.detail
 
 
 def test_the_new_video_rows_words(tmp_path):
-    assert NV.plain_error(f"conform raw: ffmpeg failed (4294967268): {CMD}").startswith("The disk C: is full")
+    assert NV.plain_error(f"conform raw: ffmpeg failed (4294967268): {CMD}").startswith("The disk C: ran out of space")
     pool = BORAT_POOL.splitlines()[0]
     assert "temp folder" in NV.plain_error(pool) and "state-4" not in NV.plain_error(pool)
     assert NV.plain_error("RAW: this video is private") == "RAW: this video is private"      # plain stays plain
@@ -162,7 +162,7 @@ def test_just_cuts_says_a_full_disk_plainly(tmp_path):
     run = _run(tmp_path)
     err = (f"match_cuts: the cuts could not be made: RuntimeError: conform raw: ffmpeg failed (4294967268): {CMD}\n")
     res = flow.just_cuts_result(run, 2, err)
-    assert res["label"] == "FAIL" and res["failures"][0].startswith("The disk C: is full")
+    assert res["label"] == "FAIL" and res["failures"][0].startswith("The disk C: ran out of space")
     assert res["reason_kind"] == "disk full" and "RuntimeError" not in res["failures"][0]
     res = flow.just_cuts_result(run, 2, "match_cuts: the template x.png cannot be used: no transparent hole\n")
     assert res["failures"][0] == "the template x.png cannot be used: no transparent hole"     # its own words stay
