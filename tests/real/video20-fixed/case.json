@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from cop.prproj (2026-10-20): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); your run was the laptop's --fast app run (D:/Shared/Projects/2026-10-19_video-by-mindculpt/edit) of mindculpt's Rush Hour Short (the whole letterboxed 2.39:1 picture: day 12's XML PERSON problem; your fix Desktop\\cop.prproj, 15 of 16 clips moved sideways), the MikeMemesYou template + watermark, 100 %, the competitor's cut points (learned on day 13)",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\cop.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-19_video-by-mindculpt\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-19_video-by-mindculpt\\edit\\extras\\media\\raw_stereo.mp4",
+ "raw_offset": 3338.293292,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

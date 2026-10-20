@@ -1,0 +1,95 @@
+{
+ "video": "video19-fixed",
+ "date": "2026-10-20",
+ "project": "finished\\video19\\video19_fixed.prproj",
+ "run": "output\\laptop_video19",
+ "edit": {
+  "clips": 7,
+  "starts": [
+   0.0,
+   0.0,
+   -1.21,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   0.0,
+   2.753,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.751,
+   0.292,
+   0.292
+  ],
+  "moved": [
+   60.0,
+   60.0,
+   60.0,
+   158.0,
+   158.0,
+   158.0,
+   158.0,
+   158.0,
+   36.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.946,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 0,
+  "added": 7,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "murdered",
+    "written": "murde ed",
+    "kind": "words",
+    "before": "your husband",
+    "after": "three children",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

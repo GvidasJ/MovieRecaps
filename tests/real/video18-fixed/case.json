@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video18_fixed.prproj (2026-10-20): answer.srt and answer_edit.json are your finished edit (its picture: you moved the audio by hand); your run was the laptop's --fast app run (output/laptop_video18) of Family Guy S10E18 (a 22-min x265 5.1 episode; competitor 'Video by darkhumor'), the Flick707 template + watermark, 100 %, the competitor's cut points (learned on day 13)",
+ "learned_from": "finished\\video18\\video18_fixed.prproj",
+ "run": "output\\laptop_video18",
+ "full_raw": "output/laptop_video18/extras/media/raw_ae.mp4",
+ "raw_offset": 280.154875,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

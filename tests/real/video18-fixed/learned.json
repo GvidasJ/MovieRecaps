@@ -1,0 +1,51 @@
+{
+ "video": "video18-fixed",
+ "date": "2026-10-20",
+ "project": "finished\\video18\\video18_fixed.prproj",
+ "run": "output\\laptop_video18",
+ "edit": {
+  "clips": 1,
+  "starts": [
+   0.0
+  ],
+  "ends": [
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.209
+  ],
+  "moved": [],
+  "zoomed": [],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "picture",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 5,
+  "rewritten": 0,
+  "changes": []
+ }
+}
