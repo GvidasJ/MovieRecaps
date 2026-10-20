@@ -9,10 +9,12 @@ re-transcription.
    delivered audio transcribed again agrees with you there), and in your fixes you dragged exactly those stretches
    onto the words as heard. Each transcript word is paired with the same word of the RAW's own transcript where
    1_edit.xml's A1 plays it (captions.speech_starts: what Premiere plays); a caption whose neighbouring words agree
-   on an offset of at least MIN_SHIFT_S belongs to a stretch, and a stretch whose offset reaches STRETCH_SHIFT_S
-   somewhere moves -- each caption by its offset, start and end, as you drag a block; an edge on a video cut stays
-   on the cut. Captions on the sound or nearly (a smaller offset, words that disagree, too few words) are not
-   touched: in your earlier fixes you kept them where they were.
+   on an offset of at least MIN_SHIFT_S belongs to a stretch, and a stretch of MIN_STRETCH captions whose offset
+   reaches STRETCH_SHIFT_S somewhere moves -- each caption by its offset, start and end, as you drag a block. Nothing
+   moves across a video cut (an edge on a cut stays while its caption stays on its side; a caption heard after the
+   cut starts on it), and a caption the move leaves under SQUEEZED_S joins its neighbour. Captions on the sound or
+   nearly (a smaller offset, words that disagree, too few words) are not touched: in your earlier fixes you kept
+   them where they were.
 2. **Pairs kept together** (day 13, 9.3; caption rule 9): see pairs_fix.
 """
 from __future__ import annotations
@@ -101,10 +103,12 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
     mode, ...}] in order; ``pairs`` pair_words(transcript the captions are timed on, the RAW's words where the
     delivered A1 plays them); spoken captions next to each other whose starts have a local_offset of at least
     ``min_shift`` the same way make a stretch, and a stretch reaching STRETCH_SHIFT_S somewhere moves, each caption by
-    its own offset (start and end, rounded to frames). An edge on a video cut (``cuts``, frames) stays there;
-    captions inside another video's stretch (``stretches``, frames) and action / placeholder captions do not move.
-    Order and back-to-back kept: a caption ends where the next one starts when it did before, never after it; one
-    left shorter than 2 frames keeps its length. Returns new dicts (the input is not changed)."""
+    its own offset (start and end, rounded to frames). Nothing crosses a video cut (``cuts``, frames): an edge on a
+    cut stays there while its caption stays on its side, a caption pushed onto its end cut starts on it and keeps
+    going; one left under SQUEEZED_S joins a neighbour (_join_squeezed). Captions inside another video's stretch
+    (``stretches``, frames) and action / placeholder captions do not move. Order and back-to-back kept: a caption
+    ends where the next one starts when it did before, never after it. Returns new dicts (the input is not
+    changed)."""
     f = float(fps)
     out = [dict(c) for c in caps]
     cut = set(int(x) for x in cuts)
@@ -146,8 +150,10 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
         if not k:
             continue
         a, b = was[i]
-        na = a if a in cut else a + k
-        nb = b if b in cut else b + k
+        # a start on a video cut stays there while the caption before it stays before the cut (once that one moved
+        # past the cut, the two share a clip and the edge between them moves with them)
+        keep_a = a in cut and (i == 0 or int(out[i - 1]["end"]) <= a)
+        na = a if keep_a else a + k
         lo = int(out[i - 1]["start"]) + min_len if i else 0  # the caption before it keeps 2 frames at least
         na = max(na, lo, 0)
         if i + 1 < len(out) and not shift[i + 1]:            # ... and the one after it, when that one stays
@@ -155,6 +161,9 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
         cuts_between = [x for x in cut if min(a, na) < x < max(a, na)]
         if cuts_between:                                       # never across a video cut: up to it
             na = max(cuts_between) if k < 0 else min(cuts_between)
+        # an end on a video cut stays there while the caption stays before the cut ("bread" ending on the cut,
+        # heard after it: it starts on the cut and keeps going -- you put it there, on the cut)
+        nb = b if b in cut and na < b else b + k
         if n_frames is not None:
             nb = min(nb, int(n_frames))
         if nb - na < min_len:
@@ -162,7 +171,7 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
         c["start"], c["end"] = na, nb
         if (na, nb) != (a, b):
             moved.append({"text": c.get("text"), "from": [a, b], "to": [na, nb], "by_frames": na - a,
-                          "offset_s": round(-k / f, 3)})
+                          "offset_s": round(-k / f, 3), "_i": i})
     for i in range(len(out) - 1):                              # order and back to back as before
         p, q = out[i], out[i + 1]
         if int(q["start"]) < int(p["start"]) + min_len:
@@ -173,7 +182,48 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
             q["end"] = int(q["start"]) + min_len
     if n_frames is not None and out and int(out[-1]["end"]) > int(n_frames):
         out[-1]["end"] = max(int(out[-1]["start"]) + 1, int(n_frames))
-    return out, moved
+    return _join_squeezed(out, [b - a for a, b in was], moved, f, shift)
+
+
+SQUEEZED_S = 0.1          # a caption the moves left shorter than this (and shorter than it was) joins a neighbour:
+                          # at 23.976 fps that is under 2.4 frames -- final_srt would drop its words
+
+
+def _join_squeezed(out: list[dict], was_len: Sequence[int], moved: list[dict], f: float, shift: Sequence[int]
+                   ) -> tuple[list[dict], list[dict]]:
+    """A spoken caption left too short to read by its neighbour's move -- it stayed on a video cut while the
+    neighbour moved onto its own words (mindculpt: "by" | "himself" on a cut, "himself" heard before it) -- joins
+    the caption on its other side (the words it shows are heard there: "by himself", as you wrote it; else the
+    other neighbour) when they are back to back and the joined caption keeps the caption rules. A caption that
+    would only show for a frame or two would lose its words when the SRT goes to the RAW's rate (pipeline.final_srt
+    drops a caption under 2 frames into the one before). Otherwise it stays as it is."""
+    short = max(2, int(round(SQUEEZED_S * f)))
+    gone: set[int] = set()
+    for i, c in enumerate(out):
+        n = int(c["end"]) - int(c["start"])
+        if not _spoken(c) or n >= short or n >= was_len[i]:
+            continue
+        later = (i and shift[i - 1] > 0) or (i + 1 < len(out) and shift[i + 1] > 0)
+        for j in ((i + 1, i - 1) if later else (i - 1, i + 1)):
+            if not 0 <= j < len(out) or j in gone or not _spoken(out[j]):
+                continue
+            p, q = (out[j], c) if j < i else (c, out[j])
+            if int(p["end"]) != int(q["start"]):
+                continue
+            toks = _toks(p.get("text", "")) + _toks(q.get("text", ""))
+            if not _fits_text(toks) or (int(q["end"]) - int(p["start"])) / f > MAX_ON_SCREEN_S + 1e-9:
+                continue
+            other = out[j]
+            moved.append({"text": c.get("text"), "joined": other.get("text"), "now": " ".join(toks),
+                          "from": [int(c["start"]), int(c["end"])], "to": [int(p["start"]), int(q["end"])],
+                          "by_frames": 0, "offset_s": 0.0})
+            other.update(text=" ".join(toks), start=int(p["start"]), end=int(q["end"]))
+            gone.add(i)
+            break
+    moved = [m for m in moved if m.get("_i") not in gone]       # a joined caption's own move is in its join
+    for m in moved:
+        m.pop("_i", None)
+    return [c for i, c in enumerate(out) if i not in gone], moved
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -381,8 +431,10 @@ def run(ctx: Any) -> dict:
         log.info("captions: %d pair(s) kept together (rule 9) -- %s", len(info["pairs"]),
                  "; ".join(f"'{d['was']}' -> '{d['now']}'" for d in info["pairs"][:8]))
     if info["retimed"]:
-        off = statistics.median(d["offset_s"] for d in info["retimed"])
+        offs = [d["offset_s"] for d in info["retimed"] if d.get("joined") is None] or [0.0]
+        off = statistics.median(offs)
         log.info("captions: %d caption(s) moved onto the sound of the edit (there the transcript ran %.2f s %s the "
                  "sound 1_edit.xml plays) -- %s", len(info["retimed"]), abs(off), "after" if off > 0 else "before",
-                 "; ".join(f"'{d['text']}' {d['by_frames']:+d} frames" for d in info["retimed"][:8]))
+                 "; ".join(f"'{d['text']}' joined into '{d['now']}'" if d.get("joined") is not None else
+                           f"'{d['text']}' {d['by_frames']:+d} frames" for d in info["retimed"][:8]))
     return info

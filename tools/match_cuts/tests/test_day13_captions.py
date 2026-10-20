@@ -128,6 +128,31 @@ def test_placeholders_actions_and_other_video_do_not_move():
                                                      (867, 900)]
 
 
+def test_a_caption_left_too_short_on_a_cut_joins_the_one_before():
+    """mindculpt: "by" | "himself" split on a video cut, "himself" heard before the cut; after the move "himself"
+    would show for 2 frames -- it joins "by": "by himself", as you wrote it."""
+    own, ref = _late_transcript(n=14, late=0.3, t0=9.7)
+    caps = [_cap("by", 600, 648), _cap("himself", 648, 667), _cap("my daddy", 667, 720), _cap("once caught", 720, 770)]
+    new, moved = P.retime(caps, P.pair_words(own, ref), F60, cuts=[648])
+    assert [(c["text"], c["start"], c["end"]) for c in new] == [("by himself", 582, 650), ("my daddy", 650, 702),
+                                                                ("once caught", 702, 752)]
+    assert [m["now"] for m in moved if m.get("joined") is not None] == ["by himself"]
+    from match_cuts.report import _post_captions
+    lines = _post_captions({"post": {"pairs": [], "retimed": moved}})
+    assert any("`himself` joined into `by himself`" in x for x in lines)
+
+
+def test_a_caption_pushed_onto_its_end_cut_starts_there_and_keeps_going():
+    """video16: "bread" ended on a video cut but is heard after it; moved later it starts on the cut (where you put
+    it) and the caption after it, which started on that cut, moves with the stretch."""
+    own, ref = _late_transcript(n=14, late=-0.27, t0=10.27)
+    caps = [_cap("don't have", 600, 648), _cap("bread", 648, 660), _cap("and no", 660, 690),
+            _cap("speakers", 690, 720)]
+    new, _ = P.retime(caps, P.pair_words(own, ref), F60, cuts=[660])
+    assert [(c["text"], c["start"], c["end"]) for c in new] == [("don't have", 616, 660), ("bread", 660, 676),
+                                                                ("and no", 676, 706), ("speakers", 706, 736)]
+
+
 def test_a_caption_moved_earlier_leaves_the_one_before_two_frames():
     own, ref = _late_transcript(n=14, late=0.45, t0=10.0)
     caps = [_cap("*...*", 600, 627, "placeholder"), _cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723),

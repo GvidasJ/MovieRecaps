@@ -1286,7 +1286,9 @@ def _post_captions(cap: dict) -> list[str]:
     out += [f"- `{d['was']}` → `{d['now']}`" for d in pairs]
     out += ["", f"**Captions moved onto the sound** (the transcript they were timed on ran off the sound 1_edit.xml "
                 f"plays there): {len(moved) if moved else 'none'}"]
-    out += [f"- `{d['text']}` moved {abs(d['offset_s']):.2f} s {'earlier' if d['offset_s'] > 0 else 'later'}"
+    out += [(f"- `{d['text']}` joined into `{d['now']}` (the move next to it left it too short to read)"
+             if d.get("joined") is not None else
+             f"- `{d['text']}` moved {abs(d['offset_s']):.2f} s {'earlier' if d['offset_s'] > 0 else 'later'}")
             for d in moved]
     return out
 
