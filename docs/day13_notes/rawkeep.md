@@ -76,7 +76,8 @@
 ## Decisions (the user is away — the safest sensible option)
 
 * **WAV, not .m4a, for A1.** AAC in .mp4/.m4a starts with 1024 priming samples that every program must skip from the
-  edit list itself. I also measured on Borat's analysis copy that ffmpeg 8's *seek* and *time-based trim* inside AAC
+  edit list itself — the real Borat `raw_stereo.mp4` has exactly that: audio `elst` media_time 1024/48000 = 21.3 ms
+  (video `elst` 2002/24000 = the B-frame delay, benign); a program that ignores it plays A1 21 ms late. I also measured on Borat's analysis copy that ffmpeg 8's *seek* and *time-based trim* inside AAC
   in .mp4 land 8–56 samples off (full decodes agree to the sample). A WAV has no priming and no per-frame timestamps:
   sample k is at k/48000 in every program — provably in sync. Cost: 0.69 GB per hour (Borat: 921 MB) instead of
   ~0.14 GB; still ~13 GB less than before.
@@ -104,6 +105,13 @@
 | Borat `-c copy` cut (`borat_2min.mp4`: the cut made it VFR, jitter 2 frames) | fallback `raw_premiere.mp4` CRF 17 slow (192 MB vs the 365 MB CRF 12 copy, the original 145 MB), A1 WAV | 0 / 0 / 0, and 0 / 0 / 0 |
 | Dude Where's My Car H.264 5.1 (`dude_2min.mp4`) | V1 the RAW itself (AE-safe), A1 WAV | 0 / 0 / 0 (corr 1.0), 0 / 0 / 0 |
 
+**One whole run end to end** (`python -m match_cuts --premiere --fast --no-frame`, the 2-minute Borat piece as the RAW,
+a made-up 11 s portrait competitor of two of its moments; `work\t28\rawkeep\e2e\out\001`): the conform made the
+ProRes analysis copy (0.87 GB); the media step put the original in as `raw.mp4` (a hard link) and `raw_stereo.wav`
+(sync 0 / 0 / 0 samples); "exports validated", "6 of 6 V1 clips linked to their own A1 clip", the 23.976 fps
+`1_edit.xml` "every check OK"; at the end "the analysis copy media/raw_ae.mov removed (0.87 GB)"; the summary's *Check
+by hand* block and `report.md` say which files Premiere plays. (No captions: the made-up competitor has none.)
+
 WAV length = the analysis copy's sound to the sample (Borat 5,760,960 = 5,760,960); start 0; 2 ch; 48 kHz. The mix:
 max |L − (FL + 0.707·FC)| = 0.00002 (one 16-bit step is 0.00003). The full Borat film is **CFR** (the laptop run's
 probe: restamp, 120,553 frames; issues only HEVC + the audio start/edit list), so a real Borat run takes the
@@ -122,7 +130,8 @@ the two Family Guy runs (picture starts 21 ms late). New runs of such films keep
 ## What a run now writes (for the "health" helper's space estimate)
 
 * during the run, on the run folder's drive: the analysis copy as before (AE-safe input: a hard link = 0, else a
-  copy = 1× input; not AE-safe: ≤ 10 min ProRes LT ≈ 0.75 GB/min at 1080p, > 10 min H.264 CRF 12 veryfast ≈ 4× an x265
+  copy = 1× input; not AE-safe: ≤ 10 min ProRes LT ≈ 0.47 GB/min at 1080p (measured: 939 MB for Borat's 2-minute
+  piece), > 10 min H.264 CRF 12 veryfast ≈ 4× an x265
   original, ~10 GB/hour) **plus** the original for V1 (0 when hard-linked on the same drive, else 1× input; a remux:
   1× input) **plus** `raw_stereo.wav` when needed (0.69 GB/hour) **plus**, only in the fallback, `raw_premiere.mp4`
   (CRF 17 slow ≈ 1.3× an x265 original / ~55 % of the CRF 12 copy);
@@ -141,7 +150,9 @@ the two Family Guy runs (picture starts 21 ms late). New runs of such films keep
 4. **Sync** at the first clip, one in the middle and the last: lips on the words. Objective check: import the old
    Borat `1_edit.xml` (it plays `raw_stereo.mp4`) into the same project — at the same sequence time the A1 waveforms of
    the two sequences must be identical (same peaks on the same frame), and the V1 pictures the same frame (the cut
-   points did not move: compare a clip's Source In timecode).
+   points did not move: compare a clip's Source In timecode). If the OLD one is ~21 ms (about half a frame) later than
+   the new one, Premiere ignores the AAC priming edit list of `raw_stereo.mp4` — the new WAV is the right one (it is
+   the tool's analysed sound, sample for sample).
 5. The audio chain: select all A1 clips, apply the preset; the Volume/Gain from the XML is there (XML AUDIO checked it
    on the WAV).
 6. Learn: save the project, then Learn → the waiting card finds the run (V1 `raw.mp4`, A1 `raw_stereo.wav`).
