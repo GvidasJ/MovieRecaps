@@ -106,6 +106,8 @@ So `core/torrent.py` now, before giving a download to aria2c (`_prepare_existing
   permission, a network folder gone, a missing folder, plus "already registered", "piece length", bad magnet /
   .torrent, name lookup, time-out). jobs.json entries saved with day 12's "The download stopped: <aria2c's sentence>"
   are said plainly when loaded.
+- **Remove never deletes a file the job found already in the folder** (it may be your earlier finished download,
+  being checked) — before, Remove on an unfinished job deleted its chosen files whatever they were.
 - the free-space check (`check_space`) does not count what is already in the folder (the next Short of the same film
   on a nearly full disk was refused although nothing had to be downloaded).
 - **The .aria2 next to the download over a network folder**: nothing in the app moves or deletes it (Clean up does
