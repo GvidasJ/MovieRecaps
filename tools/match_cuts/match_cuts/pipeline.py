@@ -3867,8 +3867,9 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
     ex = ctx.premiere_cutlist
     rp = (ctx.silence or {}).get("ripple") if isinstance(ctx.silence, dict) else None
     res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k, seq_rate=rate if rate != plan else None)
-    if isinstance(ctx.premiere_xml, dict):      # the end summary's times: the delivered edit's (its re-framed clips)
-        ctx.premiere_xml = dict(ctx.premiere_xml, reframed=res.get("reframed") or [], fps=res.get("fps"))
+    if isinstance(ctx.premiere_xml, dict):      # the end summary's times: the delivered edit's (its re-framed clips,
+        ctx.premiere_xml = dict(ctx.premiere_xml, reframed=res.get("reframed") or [], fps=res.get("fps"),  # the
+                                edit_fixes=res.get("edit_fixes") or [], end_cut=res.get("end_cut"))  # day-13 fixes)
     probs = X.premiere_item_problems(xml)
     if str(getattr(cfg, "frame_png", "") or ""):
         probs += X.frame_track_problems(xml, X.parse_premiere_xml(xml)["duration"])
@@ -3881,7 +3882,8 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
     elif not probs:
         from .config import removes_silence
         probs += X.final_xml_problems(base, xml, k, getattr(cfg, "premiere_shots", None), ctx.raw_fps,
-                                      removes_silence(cfg), bool(getattr(cfg, "allow_repeats", False)))
+                                      removes_silence(cfg), bool(getattr(cfg, "allow_repeats", False)),
+                                      int((res.get("end_cut") or {}).get("frames") or 0))
     srt = cfg.deliver / run_folders.CAPTIONS_SRT
     both = abs(k - 1.0) > 1e-9 and rate != plan     # --speed at the RAW's rate: the fast edit on the 60 fps grid kept too
     sped = f"{100 * k:g}pct_{X.rate_text(plan)}fps"  # (check-all scores it: run_folders.planned_files)
@@ -4108,6 +4110,9 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         out["links"] = link_lines(exports)
     if getattr(cfg, "premiere", False) and getattr(ctx, "people", None) is not None:
         out["people"] = person_lines(ctx)
+    px = getattr(ctx, "premiere_xml", None)      # day 13: small edit notes the tool fixed by itself
+    if getattr(cfg, "premiere", False) and isinstance(px, dict) and px.get("edit_fixes"):
+        out["edit_fixes"] = list(px["edit_fixes"])
     try:                                         # which speech model ran where (the GPU, or the CPU and why)
         from .transcribe import summary as asr_summary
         out["asr"] = asr_summary()

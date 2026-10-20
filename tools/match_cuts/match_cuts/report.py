@@ -1527,6 +1527,11 @@ def _premiere_checks(ctx: Any) -> list[str]:
                   "OK" if not probs else f"**FAIL** ({len(probs)})")
         rows.append([f"`{name}`", what, status])
     out = [md_table(["check", "what it checks", "result"], rows)]
+    px = getattr(ctx, "premiere_xml", None)          # day 13: small edit notes fixed in the edit itself
+    fixes = list(px.get("edit_fixes") or []) if isinstance(px, dict) else []
+    if fixes:
+        out += ["", f"**Fixed in the edit by itself** ({len(fixes)}; the checks above read the fixed edit):"] + \
+            [f"- {r}" for r in fixes]
     out += _audio_chain_lines(ctx)
     if v.get("speech_notes"):
         out += ["", f"**Cuts inside speech, kept** (the competitor's own cut points -- the default; `--remove-silence` "

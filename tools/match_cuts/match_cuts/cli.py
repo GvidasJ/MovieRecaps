@@ -654,6 +654,10 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             rows = list(hc["links"])
             lines.append(f"  Linked clips: {rows[0]}")
             lines += [f"    {r}" for r in rows[1:max_rows + 1]]
+        if hc.get("edit_fixes"):                                 # day 13: notes the tool fixed in the edit itself
+            rows = list(hc["edit_fixes"])
+            lines.append(f"  Fixed in the edit by itself: {len(rows)}")
+            lines += [f"    {r}" for r in rows[:max_rows]]
         if hc.get("people"):
             rows = list(hc["people"])
             lines.append(f"  The person speaking in the picture: {rows[0]}")

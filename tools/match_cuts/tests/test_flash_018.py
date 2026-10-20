@@ -96,15 +96,15 @@ def test_the_flash_check_reads_the_clips_of_a_cross_dissolve_and_the_framing(tmp
 
 def test_premiere_cuts_at_a_raw_shot_change_land_on_its_first_frame(tmp_path):
     """With the RAW's shot changes known (cfg.premiere_shots) the two cuts move one frame onto the change, as the user
-    moved them: S05|S06 at tick 44111 (735.1833 s), S16|S17 at tick 45011 (750.1833 s). A1 keeps its cuts, the
-    sequence its length, and the export validates (flash check included)."""
+    moved them: S05|S06 at tick 44111 (735.1833 s), S16|S17 at tick 45011 (750.1833 s). The sequence keeps its
+    length, and the export validates (flash check included). Day 13 (9.2): A1 moves with them -- each A1 clip starts
+    and ends with its V1 clip, on its own picture's source line (your A1 cuts there are on the change too)."""
     cfg, xml, x = export(tmp_path, "edit.xml", premiere_shots=CHANGES)
     s05, s06, s16, s17 = (clip(x, s) for s in ("S05", "S06", "S16", "S17"))
     assert (s05["end"], s05["out"], s06["start"], s06["in"]) == (237, 44111, 237, 44111)
     assert (s16["end"], s16["out"], s17["start"], s17["in"]) == (507, 45011, 507, 45011)
     assert x["duration"] == 674
-    # A1 keeps the competitor's cuts and in-points (the takes run on under the moved picture cuts)
     assert [(a["start"], a["end"], a["in"]) for a in x["audio"]] == [
-        (0, 51, 43875), (51, 236, 43926), (236, 437, 44110), (437, 508, 44941), (508, 674, 45012)]
+        (0, 51, 43875), (51, 237, 43926), (237, 437, 44111), (437, 507, 44941), (507, 674, 45011)]
     v = ex.validate_premiere_exports(cutlist(), xml, None, cfg, None, None, CHANGES)
     assert v["flash_problems"] == [] and v["ok"], v["errors"]
