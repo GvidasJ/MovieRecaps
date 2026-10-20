@@ -372,6 +372,22 @@ def test_it_waits_while_something_uses_the_folder_then_renames(tmp_path):
     assert (local / "2026-10-20_Renamed later 😂").is_dir()
 
 
+def test_its_first_copy_to_the_shared_folder_makes_it_wait(tmp_path):
+    from mr_app.core import locks
+    local, hub = tmp_path / "local", tmp_path / "Projects"
+    p = title_project(local)
+    B.set_upload_title(p.folder, "After the copy")
+    dest = hub / p.folder.name                                           # what publish copies into (and locks)
+    dest.mkdir(parents=True)
+    lock = locks.WorkLock(dest, "publish")
+    lock.acquire()
+    try:
+        res = RN.rename(p.folder, hub=hub, local_root=local)
+        assert res.state == RN.WAIT and "copied to the shared folder" in res.text and p.folder.is_dir()
+    finally:
+        lock.release()
+
+
 def test_a_row_of_the_app_or_premiere_using_it_makes_it_wait(tmp_path, monkeypatch):
     local, hub = tmp_path / "local", tmp_path / "Projects"
     p = title_project(local)

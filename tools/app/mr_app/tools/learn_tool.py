@@ -493,6 +493,11 @@ class LearnPage(QWidget):
             end()
         BG.call(work, got, lambda _e: end())
 
+    def moved(self, _old, _new) -> None:
+        """Day 13: a project folder was renamed after its title -- its waiting card followed it in learn_waiting.json:
+        the columns are read again."""
+        self.refresh_columns()
+
     def _show_columns(self, cards, fixes, probs, sugs) -> None:
         from ..core import learn_hub as H
         self._wait = {c.id: c for c in cards}

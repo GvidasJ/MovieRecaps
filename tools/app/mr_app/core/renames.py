@@ -224,14 +224,20 @@ def copies(folder: Path, data: dict, hub: Path | None, local_root: Path | None) 
 # in use (wait) and used by a Premiere project (keep the name)
 # ---------------------------------------------------------------------------------------------------------------------
 
-def in_use(folder: Path, data: dict, busy: bool = True) -> str:
+def in_use(folder: Path, data: dict, busy: bool = True, hub: Path | None = None) -> str:
     """Why the folder cannot be renamed right now, in plain words ('' when it can): a work lock, a step running, a row
-    of this app (``busy``: False for the row that asks itself), Premiere with a project open that is saved in it."""
+    of this app (``busy``: False for the row that asks itself), Premiere with a project open that is saved in it.
+    ``hub``: the shared folder -- a first copy there (publish locks <hub>\\<name> while it copies from here) counts."""
     try:
         from . import locks
         h = locks.holder(folder)
         if h is not None and not h.get("stale"):
             return locks.describe(h).replace("this project", "it")
+        there = hub / folder.name if hub is not None and _norm(folder.parent) != _norm(hub) else None
+        if there is not None and there.is_dir():
+            h = locks.holder(there)
+            if h is not None and not h.get("stale") and h.get("what") == "publish":
+                return "it is being copied to the shared folder"
     except Exception:  # noqa: BLE001 - cannot tell: wait
         return "its work lock cannot be read"
     now = time.time()
@@ -493,7 +499,7 @@ def _rename(folder: Path, hub: Path | None, local_root: Path | None, explicit: b
     cps = copies(folder, data, hub, local_root)
     same = {"title": d.get("title"), "upload_title": d.get("upload_title")}
     todo = [(c, dd, sh) for c, dd, sh in cps if not NM.has_base(c.name, base)]
-    used = next((w for w in (in_use(c, dd, busy) for c, dd, _sh in cps) if w), "")
+    used = next((w for w in (in_use(c, dd, busy, hub) for c, dd, _sh in cps) if w), "")
     if not todo:
         if explicit and not NM.uses_titles(data):
             for c, _dd, _sh in cps:
