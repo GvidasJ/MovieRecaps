@@ -138,6 +138,7 @@ self-check, day 12's real New video torrent test and the day-13 tests; and `test
 aria2c daemon (`--enable-rpc=true`) a test starts through subprocess, so a future test cannot forget it (a test proves
 it on a real aria2c started with the app's own command line). The app's own aria2c is unchanged (it needs the
 internet). My two early experiments (before the request) ran aria2c without it — probably the source of that window.
+Watched live during the final app test run: 9 aria2c processes, 16 listening sockets, every one on 127.0.0.1.
 
 ## Checked on real data, and an independent review
 
@@ -146,6 +147,10 @@ internet). My two early experiments (before the request) ran aria2c without it �
   stopped while converting the RAW …" (day 12's own runs when C: filled), 11 WRONG PAIR and 1 PICTURE NOT FOUND
   exactly as the tool said them, 2 "The run stopped without saying why …" (runs you stopped). It found one bug,
   fixed: a console read back from batch_console.log gave its own command line as the reason.
+- **The real path end to end**: the app's own `JobRun` ran the real tool (GPU hidden) with a junk RAW → the row
+  said "The video raw.mp4 is damaged or not complete, so FFmpeg could not read it. Download or copy that video again
+  (or use another copy), then press Try again."; with a missing competitor → "The competitor's file is not there any
+  more (…nope.mp4). Put it back where it was (or drop the video again), then press Try again."
 - **Rendered offscreen** (the real queue row and torrent card, pictures in `work\t28\errors\shots`): fixed the
   wording "full (90 GB free now)" and a nested-bracket torrent note.
 - **A review sub-agent** read the whole diff (read-only) and found 10 points; all fixed, each with a test: a crash
@@ -175,10 +180,10 @@ internet). My two early experiments (before the request) ran aria2c without it �
 
 ## Not done / for the lead
 
-- **This PC's torrent engine is aria2c 1.19.0 (2015)** from `C:\aria2` on PATH. Careful: `setup_app.py` (day 12
-  code, unchanged here) installs 1.37.0 into `tools\app\bin` only when `torrent.find_aria2c()` finds **no** aria2c —
-  it finds `C:\aria2`, so it will not download 1.37.0 unless the health helper's version check changed that. (When
-  `tools\app\bin\aria2c.exe` exists, `find_aria2c` prefers it over PATH.) Everything here works with both (tested).
+- **This PC's torrent engine today is aria2c 1.19.0 (2015)** from `C:\aria2` on PATH. My branch's base
+  `setup_app.py` installed 1.37.0 only when no aria2c was found; the health helper's version check (already on the
+  main branch) installs it into `tools\app\bin` when the found one is flagged, and `find_aria2c` looks there first.
+  Everything here works with both (tested).
 - The Borat runs' real cause (why C: filled, whether Storage Sense emptied %TEMP%) is the lead's (problems_queue).
 - Not tried on the real laptop share `\\192.168.101.11\Shared` (cannot be reached from the PC); `\\127.0.0.1\C$` was.
 
