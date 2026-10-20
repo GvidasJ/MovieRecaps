@@ -2532,7 +2532,7 @@ def _speaker_cut_off(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, fl
 # day 13: the person speaking centred in the window (your newest fixes: most clips moved sideways onto them)
 # ---------------------------------------------------------------------------------------------------------------------
 
-SPEAKER_CENTRE = False      # day 13 (your video11 / video12 / video14 / video15 / mindculpt / Always Sunny fixes: most
+SPEAKER_CENTRE = True       # day 13 (your video11 / video12 / video14 / video15 / mindculpt / Always Sunny fixes: most
 #                             clips moved sideways onto the person speaking): a RAW shot whose person speaking -- a
 #                             CLEAR speaker by Light-ASD (never just the biggest face) inside the competitor's own,
 #                             wider window -- sits off the window's middle slides sideways (zoom kept) to centre them
@@ -2542,13 +2542,16 @@ CENTRE_ASD = 0.5            # ... with a mean Light-ASD score of at least this o
 CENTRE_MARGIN = 1.0         # ... and that much above every other face there (a clear speaker, not a guess: video11
 #                             S01's ASD "speaker" at 44 s, 0.73, only 0.14 above the man next to him, was the wrong man
 #                             -- you framed the shouting one)
+CENTRE_ALONE_ASD = 1.5      # ... a face with nobody else found next to it (nothing to compare): at least this score --
+#                             the one the competitor shows may be a face the detection missed (021 at 54 s: the
+#                             laughing man in the middle, found by nobody; Light-ASD 0.6 on the man beside him)
 CENTRE_FOUND = 0.98         # ... and the face detected on this share of them (a steady real face: the cartoon faces
 #                             of video6 flicker, 0.82-0.95 -- you kept its middle on every clip)
 CENTRE_WIDE = 0.22          # a speaker's face under this share of the picture's height: a wide shot -- kept (video15's
 #                             delivery room, the whole family in it: you kept the competitor's framing)
 CENTRE_FACE_MAX = 0.5       # a face shown whole and wider than this share of the window is a close-up: it is shown
-CENTRE_MIN_PX = 100.0       # a move under this (sequence px) is not made: centred enough (video11 S01 at 42.8 s: you
-#                             left the man 61 px off the middle)
+CENTRE_MIN = 0.1            # a move under this share of the window's width (104 px in your 1080 template) is not
+#                             made: centred enough (video11 S01 at 42.8 s: you left the man 61 px off the middle)
 CENTRE_MAX = 0.6            # ... nor one over this share of the window's width (another part of the picture)
 
 
@@ -2634,7 +2637,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
     wide shot) -- inside the competitor's own window, which is wider than the template's (the competitor showed more
     than the template can: someone has to choose -- in your fixes, the person speaking), slides sideways (zoom kept)
     to centre that face, as far as the picture still covers the window. Not moved: a close-up shown whole
-    (CENTRE_FACE_MAX), a move under CENTRE_MIN_PX or over CENTRE_MAX of the window, a competitor whose window is no
+    (CENTRE_FACE_MAX), a move under CENTRE_MIN or over CENTRE_MAX of the window, a competitor whose window is no
     wider than the template's (its own framing: 021's close-ups), a replaced spot, a flipped or turned clip, a move
     that would hide the person of one of the run's pieces, a neighbour inside the same RAW shot left under
     --min-move. Returns how many pieces moved."""
@@ -2693,7 +2696,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             skip("a replaced spot")                       # (the framing there is a neighbour's)
             continue
         if f.share < CENTRE_SHARE or strength is None or strength[0] < CENTRE_ASD or \
-                strength[2] < CENTRE_MARGIN:
+                strength[2] < CENTRE_MARGIN or (math.isinf(strength[2]) and strength[0] < CENTRE_ALONE_ASD):
             skip("unclear speaker")
             continue
         if strength[1] < CENTRE_FOUND:
@@ -2725,7 +2728,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             if yr is not None:
                 ty = min(max(ty, yr[0]), yr[1])
         new = Sim(old.s, 0.0, tx, ty)
-        if abs(new.tx - old.tx) < CENTRE_MIN_PX and abs(new.ty - old.ty) < 0.5:
+        if abs(new.tx - old.tx) < CENTRE_MIN * win[2] and abs(new.ty - old.ty) < 0.5:
             skip("centred already")
             log.debug("premiere framing: %s: centring would move it %+.0f px", label, new.tx - old.tx)
             continue
@@ -2741,12 +2744,21 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
                for g in own):
             skip("would hide another piece's person")    # (the XML's person check reads each piece on its own)
             continue
+        if any(o != f.box and speakers.shown(speakers.on_screen(old, o, W, False), win) and
+               not speakers.shown(speakers.on_screen(new, o, W, False), win) for o in f.others):
+            skip("would hide someone it shows")         # the competitor's two-shot stays (021's two women at 82 s)
+            continue
         ok = True
-        for i, k in ((run[0] - 1, run[0]), (run[-1], run[-1] + 1)):  # the neighbours in the same shot: --min-move
-            if 0 <= i and k < len(pieces) and len(pieces[i if k in run else k].keys) == 1 and same_shot(i, k):
-                mv = framing_move(pieces[i if k in run else k].keys[0][1], new, raw_wh)
-                if 0.5 < mv < min_move - 0.5:
-                    ok = False
+        for i, k in ((run[0] - 1, run[0]), (run[-1], run[-1] + 1)):  # the cuts on both sides: --min-move, read as
+            if i < 0 or k >= len(pieces) or sp is None:              # the XML's own check reads it (the same shot
+                continue                                             # by sp.same_shot, the framing before the cut
+            nb = pieces[i if k in run else k]                        # showing the person after it)
+            if len(nb.keys) != 1 or not sp.same_shot(_last_raw_s(pieces[i], fps), _clip_raw_s(pieces[k], fps)[0]):
+                continue
+            fa, fb = (nb.keys[0][1], new) if k in run else (new, nb.keys[0][1])
+            if 0.5 < framing_move(fa, fb, raw_wh) < min_move - 0.5 and \
+                    speakers.passes(fa, _person_of(pieces[k], sp, fps), W, False, win):
+                ok = False
         if not ok:
             skip("--min-move")
             continue

@@ -107,7 +107,7 @@ def test_the_biggest_face_is_never_a_speaker():
 
 
 def test_a_speaker_nearly_in_the_middle_is_left():
-    """video11 S01, RAW 42.75-44.04 s: the man speaking 61 px off the window's middle -- you left it (CENTRE_MIN_PX)."""
+    """video11 S01, RAW 42.75-44.04 s: the man speaking 61 px off the window's middle -- you left it (CENTRE_MIN)."""
     clip, sim = _clip(42.75, 44.04, V11_COMP, V11_BOX)
     sp = _ctx([_track(9, 42.75, 44.04, (823, 120, 1019, 366), 3.14)], V11_RAW, 42.75, 44.04)
     assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 0
@@ -194,19 +194,33 @@ def test_the_pieces_of_one_shot_move_together():
 
 
 def test_a_neighbour_in_the_same_shot_keeps_min_move():
-    """Only one of two neighbours in one RAW shot has the speaker clear, and they show different framings: moving it
-    would leave them under --min-move apart -- not moved."""
+    """Only the first of two neighbours in one RAW shot has the speaker clear, and they show different framings:
+    moving it would leave them under --min-move apart while the moved framing still shows the second one's person --
+    the XML's --min-move check would fail it: not moved. (When the framing before a cut does not show the person
+    after it, a smaller change is the person check's -- allowed, as the XML check allows it.)"""
     a, _ = _clip(45.15, 46.68, V14_COMP, V14_BOX, V14_HELD, sid=12, rec0=900)
     other = Sim(V14_HELD.s, 0.0, V14_HELD.tx - 120.0, V14_HELD.ty)              # 120 px away from the held framing
     b, _ = _clip(46.93, 47.67, V14_COMP, V14_BOX, other, sid=14, rec0=992)
     suit = (986, 162, 1157, 383)
-
-    def faces_tracks(t0, t1):
-        return [_track(12, 45.15, 46.68, suit, 2.0), _track(11, 45.15, 47.67, (436, 60, 606, 329), -1.8)]
-    sp = _ctx(faces_tracks(45.15, 47.67), V14_RAW, 45.15, 47.67, shots=[45.13, 54.8])
+    sp = _ctx([_track(12, 45.15, 46.68, suit, 2.0), _track(13, 46.93, 47.67, suit, -1.0)],    # silent after the cut
+              V14_RAW, 45.15, 47.67, shots=[45.13, 54.8])
     moved = ex._speaker_centre([a, b], sp, V14_RAW, WIN, FPS, V14_BOX, 250.0, Fraction(24000, 1001), [45.13, 54.8])
     assert moved == 0
     assert a.keys[0][1] is V14_HELD and b.keys[0][1] is other
+
+
+def test_a_change_at_a_raw_shot_change_the_xml_check_reads_as_one_shot_keeps_min_move():
+    """video11 S01 at 46.6 s: the RAW changes shot at 46.589 s, the clip is cut there on the tick it first shows -- but
+    the XML's --min-move check reads the clip before as ending half a tick later (export_xml_edl._last_raw_s), i.e.
+    in the same shot. Centring the captain after the cut (+245 px, under --min-move 250) while the framing before
+    shows him would fail that check: not moved (the rule never makes a hard check fail)."""
+    clip, sim = _clip(44.05, 47.85, V11_COMP, V11_BOX)
+    change = 1117 / (24000 / 1001)                                                 # 46.5880 s: RAW frame 1117
+    sp = _ctx([_track(9, 44.05, 46.58, (823, 120, 1019, 366), -2.0),
+               _track(14, 46.60, 47.85, (588, 68, 945, 568), 2.2)], V11_RAW, 44.05, 47.85, shots=[change])
+    assert sp.same_shot(ex._last_raw_s(ex._split_clip(clip, 153)[0], FPS), 46.6)  # 153: the tick of 46.6 s - 44.05 s
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), [change]) == 0
+    assert clip.keys[0][1] is sim and not clip.shot_framing
 
 
 def test_only_the_raw_shot_with_a_clear_speaker_moves():
