@@ -2721,6 +2721,15 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             continue
         lo, hi = win[0] + win[2] - old.s * W, win[0]          # the picture still covers the window
         tx = min(max(win[0] + win[2] / 2.0 - old.s * cx, lo), hi)
+        cut = not speakers.shown(speakers.on_screen(old, f.box, W, False), win)
+        if cut:     # cut off at the window's edge: a slide until the face is in with CUT_MARGIN to spare, not a jump
+            xr = speakers.x_range(old, f.box, raw_wh, False, win)  # onto the face's centre (night 8: 021 S54 / S56
+            if xr is None:                                         # centred jumped 54 % / 45 % of the window)
+                skip("too big for the window")
+                continue
+            m = CUT_MARGIN * (f.box[2] - f.box[0]) * old.s
+            sl, sh = (xr[0] + m, xr[1] - m) if xr[0] + m <= xr[1] - m else xr
+            tx = min(max(old.tx, sl), sh)
         ty = old.ty
         if not (old.s * f.box[1] + ty >= win[1] - speakers.INSIDE_TOL_PX and
                 old.s * f.box[3] + ty <= win[1] + win[3] + speakers.INSIDE_TOL_PX):
@@ -2728,7 +2737,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             if yr is not None:
                 ty = min(max(ty, yr[0]), yr[1])
         new = Sim(old.s, 0.0, tx, ty)
-        if abs(new.tx - old.tx) < CENTRE_MIN * win[2] and abs(new.ty - old.ty) < 0.5:
+        if abs(new.tx - old.tx) < (SUBJECT_MOVE_PX if cut else CENTRE_MIN * win[2]) and abs(new.ty - old.ty) < 0.5:
             skip("centred already")
             log.debug("premiere framing: %s: centring would move it %+.0f px", label, new.tx - old.tx)
             continue
@@ -2766,8 +2775,10 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
         for x in mine:
             x.keys = [(x.keys[0][0], new)]
             x.covered = True
-            x.person_note = (f"centred on the person speaking (RAW x {cx:.0f}; Light-ASD {strength[0]:.1f}, "
-                             f"{100 * f.share:.0f} % of the speech): the picture moved {dx:+.0f} px sideways"
+            x.person_note = ((f"slid onto the person speaking, cut off at the window's edge (RAW x {cx:.0f}; "
+                              if cut else f"centred on the person speaking (RAW x {cx:.0f}; ") +
+                             f"Light-ASD {strength[0]:.1f}, {100 * f.share:.0f} % of the speech): the picture moved "
+                             f"{dx:+.0f} px sideways"
                              + (f", {new.ty - old.ty:+.0f} px up/down" if abs(new.ty - old.ty) >= 0.5 else "")
                              + ", zoom kept")
             x.framing_note = (x.framing_note + "; " if x.framing_note else "") + \
@@ -2785,7 +2796,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
         if "centred on the person speaking" not in str(cl.framing_note):
             cl.framing_note = (cl.framing_note + "; " if cl.framing_note else "") + \
                 "centred on the person speaking (day 13)"
-        notes = [w.person_note for w in mine if w.person_note and "centred on the person speaking" in w.person_note]
+        notes = [pieces[i].person_note for i in idx if i in done and pieces[i].person_note]
         if notes:
             cl.person_note = notes[0] + (f" (and {len(notes) - 1} more shot(s) of this clip)" if len(notes) > 1
                                          else "" if len(mine) == 1 else " (in one RAW shot of this clip)")
