@@ -3957,7 +3957,7 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
         probs += X.final_xml_problems(base, xml, k, getattr(cfg, "premiere_shots", None), ctx.raw_fps,
                                       removes_silence(cfg), bool(getattr(cfg, "allow_repeats", False)),
                                       int((res.get("end_cut") or {}).get("frames") or 0),
-                                      sum(int(j.get("frames") or 0) for j in res.get("take_jumps") or []))
+                                      [(int(j["put"]), int(j["frames"])) for j in res.get("take_jumps") or []])
     srt = cfg.deliver / run_folders.CAPTIONS_SRT
     both = abs(k - 1.0) > 1e-9 and rate != plan     # --speed at the RAW's rate: the fast edit on the 60 fps grid kept too
     sped = f"{100 * k:g}pct_{X.rate_text(plan)}fps"  # (check-all scores it: run_folders.planned_files)

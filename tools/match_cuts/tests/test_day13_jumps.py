@@ -39,7 +39,7 @@ def test_a_skipped_last_frame_of_a_shot_is_played_by_the_clip_before():
                                                                        (101, 151, 5000, 5050)]
     assert [(m["in"], m["out"]) for m in m2] == [(61, 71), (10, -1)]
     assert n == 151
-    assert done == [{"clips": "S01|S02", "at": 51, "was": 50, "frames": 1, "ms": 42, "to": "before"}]
+    assert done == [{"clips": "S01|S02", "at": 51, "was": 50, "frames": 1, "ms": 42, "to": "before", "put": 50}]
     assert at(pm, 125) == 51 and at(pm, 100) == 40                  # captions after the cut a frame later, not before
     assert audio[0]["end"] == 50 and markers[0]["in"] == 60          # the inputs are not changed
     assert ex._flash_lines(got, changes, R24, R24) == []
@@ -114,7 +114,8 @@ def test_the_delivered_edit_plays_the_take_through_and_passes(tmp_path):
             ex.TAKE_JUMP_FIX = True
         res = ex.write_premiere_xml(cl, final, cfg, seq_rate=R24)
         assert [j["frames"] for j in res["take_jumps"]] == [1], (shot_at, res["take_jumps"])
-        assert ex.final_xml_problems(base, final, 1.0, sh, R24, put_back=1) == []
+        puts = [(j["put"], j["frames"]) for j in res["take_jumps"]]
+        assert ex.final_xml_problems(base, final, 1.0, sh, R24, put_back=puts) == []
         x = ex.parse_premiere_xml(final)
         assert x["duration"] == n_old + 1
         v = sorted(x["clips"], key=lambda c: c["start"])

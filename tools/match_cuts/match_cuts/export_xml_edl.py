@@ -3692,7 +3692,7 @@ def fix_take_jumps(clips: list[PremiereClip], audio: list[dict], markers: list[d
         n += d
         clips, before = cand, got
         done.append({"clips": f"{x.label}|{y.label}", "at": r0 if to_y else r0 + d, "was": r0 - added, "frames": d,
-                     "ms": round(1000.0 * d / float(R)), "to": "after" if to_y else "before"})
+                     "ms": round(1000.0 * d / float(R)), "to": "after" if to_y else "before", "put": r0})
         added += d
     return clips, audio, markers, n, done
 
@@ -4818,8 +4818,27 @@ def speed_problems(base_xml: str | os.PathLike, fast_xml: str | os.PathLike, k: 
     return out
 
 
+def _without_put_back(x: dict, puts: Sequence[tuple[int, int]]) -> dict:
+    """The parsed XML ``x`` with the frames fix_take_jumps put back taken out again ([(first frame, frames)] of the
+    final sequence): every item after them that much earlier, an item they lengthen at its end or start as long as
+    before (one they start: its source from its first frame of the plan). The edit as the plan had it, to compare."""
+    if not puts:
+        return x
+
+    def m(fr: int) -> int:
+        return int(fr) - sum(min(d, max(0, int(fr) - s)) for s, d in puts)
+
+    def one(q: dict) -> dict:
+        q0, q1 = int(q["start"]), int(q["end"])
+        if q0 < 0:
+            return q
+        head = sum(d for s, d in puts if s == q0)                   # frames put back at its start
+        return dict(q, start=m(q0), end=m(q1), **{"in": int(q["in"]) + int(round(head * float(q["speed"])))})
+    return dict(x, clips=[one(q) for q in x["clips"]], audio=[one(q) for q in x["audio"]], duration=m(x["duration"]))
+
+
 def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0, end_cut: int = 0,
-                  put_back: int = 0) -> list[str]:
+                  put_back: Sequence[tuple[int, int]] = ()) -> list[str]:
     """Night 7: 1_edit.xml at the RAW's rate (``final_xml``; --speed k too) against the edit every other check read
     (``base_xml``: the 60 fps grid, 100 %): the sequence lasts its length / k (within a frame of the new rate); every
     V1 clip and A1 item plays, on each of its frames, the RAW its twin in the checked edit (the clip it overlaps most)
@@ -4828,15 +4847,16 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
     or moved onto a RAW shot change); every clip of the checked edit a frame long or more is still there. ``end_cut``
     (day 13: write_premiere_xml's end_cut): that many frames of the new rate cut off the end on purpose -- a sliver of
     the RAW's next shot: the sequence that much shorter, the checked edit's clips after its new end not wanted.
-    ``put_back`` (write_premiere_xml's take_jumps): that many skipped frames played again inside a take on purpose --
-    the sequence that much longer (each clip after such a cut a frame later: within the frame every clip may be off).
-    One line per item."""
+    ``put_back`` (day 13: write_premiere_xml's take_jumps, [(first frame, frames)] of the final sequence): skipped
+    frames played again inside a take on purpose -- compared with them taken out again (each one moves everything
+    after it a frame: two of them would put the rest two frames off the plan). One line per item."""
     a, b = parse_premiere_xml(base_xml), parse_premiere_xml(final_xml)
+    b = _without_put_back(b, sorted((int(s), int(d)) for s, d in put_back or ()))
     fa, fb = float(_seq_rate(a)), float(_seq_rate(b))
     k = float(k)
     out: list[str] = []
     end_b = b["duration"] / fb                     # the delivered edit's end (s)
-    if abs((b["duration"] + int(end_cut) - int(put_back)) / fb - a["duration"] / fa / k) > 1.0 / fb + 1e-6:
+    if abs((b["duration"] + int(end_cut)) / fb - a["duration"] / fa / k) > 1.0 / fb + 1e-6:
         out.append(f"XML RATE: the sequence lasts {b['duration'] / fb:.3f} s, the checked edit {a['duration'] / fa / k:.3f} "
                    f"s{'' if abs(k - 1.0) < 1e-9 else f' / {k:g}'}")
     for kind, name in (("clips", "V1"), ("audio", "A1")):
@@ -4902,7 +4922,8 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
 
 def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0,
                        shots: Sequence[float] | None = None, raw_fps: Any = None, moving: bool = False,
-                       allow_repeats: bool = False, end_cut: int = 0, put_back: int = 0) -> list[str]:
+                       allow_repeats: bool = False, end_cut: int = 0,
+                       put_back: Sequence[tuple[int, int]] = ()) -> list[str]:
     """The hard checks of 1_edit.xml written again at the RAW's rate (night 7; pipeline.apply_final), on its own
     numbers: ITEM, REPEAT, FLASH (with the RAW's shot changes), AUDIO, TRANSITION, LINK, SYNC -- and XML RATE against
     the checked edit (rate_problems; ``end_cut``: the frames cut off its end on purpose, write_premiere_xml's
