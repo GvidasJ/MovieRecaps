@@ -572,7 +572,7 @@ def _check(prproj: Path, run: Path, card: CheckCard) -> None:
     flips = L.project_flips(prproj)
     tool_pic, tool_snd, _fps, _w = L.tool_clips(rf["edit"], float(meta.raw.get("width") or 0) or None,
                                                 unflip=flips == 0)
-    user_pic, user_snd = L.user_clips(seq, PR.file_name(media))
+    user_pic, user_snd = L.user_clips(seq, PR.file_name(media), K.sound_name_of(L, seq, PR.file_name(media)))
     card.details["read_s"] = round(time.time() - t0, 3)
     # cuts and position: the picture (your audio is moved by hand); the sound only when the picture is not the RAW's
     key = "picture" if user_pic and tool_pic else "sound"

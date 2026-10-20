@@ -654,6 +654,8 @@ def format_summary(result: dict, out_dir: str | Path, max_warnings: int = 5, max
             rows = list(hc["links"])
             lines.append(f"  Linked clips: {rows[0]}")
             lines += [f"    {r}" for r in rows[1:max_rows + 1]]
+        for r in hc.get("raw_media") or []:       # day 13: the original RAW in Premiere (or why a converted copy)
+            lines.append(f"  The RAW in Premiere: {r}")
         if hc.get("people"):
             rows = list(hc["people"])
             lines.append(f"  The person speaking in the picture: {rows[0]}")

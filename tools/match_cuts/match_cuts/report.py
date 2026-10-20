@@ -1720,6 +1720,10 @@ def speed_frame_lines(ctx: Any) -> list[str]:
                    + ("preview_recreation.mp4 is the edit seen through the frame (the competitor-timed recreation the "
                       "checks read: debug/recreation_check.mp4)." if prev.get("path") else
                       f"the framed preview was not rendered ({prev.get('error') or 'skipped'})."))
+    em = getattr(ctx, "edit_media", None) or {}
+    if em:                                  # day 13: the original RAW, not the tool's converted copy
+        from .edit_media import describe_for_report
+        out += ["", "**The RAW in Premiere:**"] + describe_for_report(em)
     return out + [""]
 
 
