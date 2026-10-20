@@ -174,4 +174,5 @@ the same (a test compares them).
   starts without room (no "Start anyway"); a run without room just before its start waits again and the queue stops.
 * The real window rendered at 1280 / 980 px (offscreen, fake numbers): `work\t28\health\look\look_1280.png`,
   `look_980.png`, `look_fixing.png`.
-* App tests: TOTAL_APP. Tool tests: not run (the tool was not changed).
+* App tests (whole suite, on the committed code): **1015 passed, 5 skipped, 0 failed** (5 min 42 s; an earlier full
+  run while the PC was heavily loaded: 1012 passed). Tool tests: not run -- no file of the tool was changed.
