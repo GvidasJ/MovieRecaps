@@ -90,7 +90,11 @@ frames of the competitor are looked for among the RAW's keyframes (mirrored too)
 the run stop -- exit 2, `WRONG PAIR: This competitor doesn't seem to come from this RAW (sound: 0 of 9 pieces found;
 picture: 0 of 16 frames found ...)` -- in about 16 s for a 90-minute RAW (4.5 s when the pair is right; remembered
 per pair in the work folder). Checked on 65 real pairs (42 right ones all go on, 23 wrong ones -- other episodes of
-the same show among them -- all stopped). `--force-inputs` skips it; the batch's summary says WRONG PAIR.
+the same show among them -- all stopped). `--force-inputs` skips it; the batch's summary says WRONG PAIR. Day 13: a
+WRONG PAIR answer is never kept -- the next run checks again (a kept stop made every Try again of a New video stop at
+once); a pair that goes on is still remembered. The run's log and the stop name both files as they were given
+(length, picture size, frame rate, codec, file size, every sound stream), so a stop can be compared with a run that
+went on.
 
 **Wrong inputs stop the run at once** (night 6; `--force-inputs` skips both checks). Right after reading the two
 files' lengths (ffprobe, before anything is converted) the run stops with a plain message naming both files (length,
@@ -518,7 +522,9 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
 
 **The default since night 4 keeps the competitor's cut points** (a cut inside a word is the competitor's: listed in
 `report.md`, not moved) and **ends on the competitor's last RAW moment** -- the reaction after the last line stays
-(the hard check `XML ENDING`: the last clip ends where the competitor's does, within a RAW frame). When the
+(the hard check `XML ENDING`: the last clip ends where the competitor's does, within a RAW frame; day 13: a tail cut
+out as a repeat -- the competitor's last 0.3 s replaying a moment it showed just before, Family Guy 1999-present -- is
+not its ending any more, the frame before it is). When the
 competitor closes on something that is not from the RAW -- a meme or outro over its own sound -- that closing piece
 is cut off instead of letting the last clip play on over it (your mike005: the competitor's last 1 s meme; you
 deleted the tool's two clips there). Where the competitor shows such an insert in the middle, the clip before still
@@ -825,7 +831,9 @@ after the first letter starred (`boobs` -> `b*obs`). Whole words, any case (`Por
 A word not listed is never changed: `gay`, `fag` (laptop009 kept them written out), `pissed`, swear words. The list
 holds your four forms and their variants plus other sexual / crude words in the same style (cock, pussy, boobs, tits,
 horny, slut, whore, cum, orgasm, ...). The end summary lists every censored caption (*Captions censored*). Since
-day 12 `fuck` is written `fu*k` (and its forms), as you wrote all five in video14; `shit` stays as it was.
+day 12 `fuck` is written `fu*k` (and its forms), as you wrote all five in video14; `shit` stays as it was. Since day
+13 also `bit*h` (video14), `murde*ed` (video19) and `cra*kheads` (mindculpt), exactly as you wrote them; `murder`,
+`kill`, `crack` alone stay until a fix of yours writes them starred.
 
 **A doubled action caption is joined** (day 12): two neighbouring action captions filled with the same action become
 one caption (video15's *gives the ultrasound*). Words said twice (nah nah) stay.
@@ -1110,6 +1118,9 @@ After you finish a video in Premiere:
 ```
 
 It compares your finished project with what the tool generated for that run (`1_edit.xml` and `2_captions.srt`).
+Day 13: a project that plays the RAW straight from where it was downloaded, under its own name (Liquid Death's
+`samllones.prproj`), is matched to the run's `raw.mp4` when it is the very same file (the same size, picture size,
+rate and length).
 
 - **The run** is found from your project: its clips play the RAW from the run's `extras\media\` folder (the older
   flat `output\media\` layout too). `--run <folder>` names it when the media moved.
