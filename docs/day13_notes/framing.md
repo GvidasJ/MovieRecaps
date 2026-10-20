@@ -85,6 +85,18 @@ Pictures: `work\t28\framing\pics\final\<case>_moves.png` (every move, three mome
 red, after = blue, yours = green, faces with their Light-ASD mean), the overviews of your own moves in
 `pics\<case>.png`, rough previews of the videos without a key in `pics\approx2\`.
 
+The other test videos, replayed the same (fast) way -- the person in each moved clip checked on the pictures (`pics\fast_rest\`):
+
+| video | clips the rule moved | who |
+|---|---|---|
+| video018 | 724.4-730.2 (one shot, 2 clips): +162 -> -35 | the man on the phone, the only person: centred |
+| video1 | 555.7-558.4: -233 -> -441 | the man in the cap speaking (Light-ASD 4.1); the other man (face down, not found) was outside the window before too |
+| video5 | 2.5-5.2 (one shot, 2 clips): +1245 -> +1105 | the man speaking (4.7), the only face: centred |
+| zendaya-age | 13.0-15.8 (3 clips): -869 -> -753 | Tom Holland speaking (2.9), centred; the last 0.27 s is the interviewer's shot the shot detection did not split -- nobody is in that window before or after |
+| video19 (Family Guy, new), video18, video017, video020, video2, video4, spiderman-school | none | -- |
+
+(deadpool, zendaya, video3: not replayed -- their competitor conform was not in the cache, so the run was stopped at once, as the lead asked; the rough preview moves nothing there.) No hard check changes on any of them.
+
 Your newest fixes as test cases (video16 Always Sunny, video20 mindculpt) had no stage caches on this PC (the lead's
 check-all had not reached them), so they could not be replayed.
 
@@ -111,9 +123,8 @@ check-all had not reached them), so they could not be replayed.
   0.5-28 GB (of 112) most of the morning with the lead's check-all and other helpers' runs, and my runs only start at
   30 GB free (the lead's rule). The exact replays above are the same export code on the same inputs; the lead's final
   check-all is the real check.
-* Your newest two fixes (video16 Always Sunny, video20 mindculpt): no stage caches here, so not replayed. video19
-  (Family Guy) replayed: nothing moves there (1/10 -> 1/10); video18 and the unkeyed videos were still waiting for
-  memory at the end (rough previews: every move onto the person speaking).
+* Your newest two fixes (video16 Always Sunny, video20 mindculpt): no stage caches here, so not replayed (video18 and
+  video19, the Family Guy ones, were: nothing moves there). deadpool, zendaya, video3 not replayed (see above).
 
 ## Tests
 
