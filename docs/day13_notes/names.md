@@ -34,9 +34,11 @@
     linked by where it was published); in each run folder the XML copies the app wrote (project.json `names.copies`,
     night 10's own names -- never a copy or backup you made) and their still-empty own .prproj; 1_edit.xml keeps its
     name, only its media paths are pointed at the new folder (publish.relink_edit, as publishing does);
-  * kept linked: project.json (`name`, `old_names`, `published.to`, the steps' `run_dir`; both copies hold the titles
-    merged the way publishing merges them -- a title set on one copy only is kept, set on both the newer title.txt
-    wins), the Learn waiting card (`learn_waiting.json`; a card the other computer wrote with its own path follows by
+  * kept linked: project.json (`name`, `old_names`, `published.to`, the steps' `run_dir`; both copies hold one set of
+    titles: each copy remembers the titles both held when they were last made the same (`names.synced`, set right
+    after every copy to the shared folder and at every rename), and per title the copy that changed it since wins --
+    also a title you cleared; never synced yet: publishing's own rule), the Learn waiting card (`learn_waiting.json`;
+    a card the other computer wrote with its own path follows by
     the new name when its RAW / competitor names agree), `_pending_publish.json`, the paths in `problems_queue.md`
     (only paths; each entry keeps its heading and id), the queue's / New video rows' paths (`moved(old, new)` on the
     pages), the board, the Learn tab's columns (read again);
@@ -128,6 +130,15 @@ It found 13 problems; 12 are fixed with tests, 1 is left:
 * left: a queue row reads its project.json on the window thread when it refreshes (also after a rename) -- the
   pattern the queue already had (a small local file; on the laptop the project is local too).
 
+A second review of the fixes found 6 more, all fixed with tests: one timestamp per copy could not decide two titles
+(title.txt holds only the YouTube title when one is set) -- a headline changed on the shared card was undone, and a
+cleared YouTube title came back -> the per-title merge from the last synced base, and the copies synced right after
+each publish; a local copy did not find its shared copy renamed on the other computer; a New video row counted as
+"not in use" for every thread while its stage renamed (now only for its own thread); two copies of one folder at once
+could clear each other's "being copied" mark (now counted); a hand-edited title.txt could name the folder and the XML
+copy after different titles. The reviewer's own probes of these cases now give the right answers (the cases without a
+synced base -- which the app now sets at the first publish -- follow publishing's rule, as before today).
+
 ## Not done / check by hand
 
 * **Premiere with the new names** (I did not open Premiere today -- the lead's GPU / timing runs): press Open in
@@ -144,7 +155,12 @@ It found 13 problems; 12 are fixed with tests, 1 is left:
 
 ## How I tested it
 
-* `tools/app/tests/test_names_day13.py` (core, 29 tests): forbidden characters, emoji kept, 100 characters, cutting
+* **Counts**: the app **1036 passed**, 5 skipped (the full suite: 1035 passed, and one animation test -- a row's glide
+  -- missed its frames on this PC at 96-100 % CPU and passes alone; earlier full runs had the same with other
+  animation-timing tests of test_motion / test_motion_day12 / test_extra_day12_ui: all pass alone, none touched by
+  me). The tool: test_day13_names.py + test_night10.py (the framed preview's tests) **9 passed** (the full tool suite
+  not run: 14 CPU minutes on a loaded PC for a one-function change outside every cached stage).
+* `tools/app/tests/test_names_day13.py` (core, 46 tests): forbidden characters, emoji kept, 100 characters, cutting
   never inside an emoji, trailing dots / spaces, CON / NUL / COM1, the path budget (also a long projects folder), the
   choice order, (2) / (3), new projects, the title copy (1_edit.xml byte for byte, the times, `&` escaped), old
   projects keep night 10's names, the copy written at the edit's end, the own project never a fix, renaming both
@@ -153,8 +169,11 @@ It found 13 problems; 12 are fixed with tests, 1 is left:
   renamed copy (and the board showing it once), waiting for a work lock / a row / Premiere / Windows and the retry,
   keeping the name (a Desktop project, a saved project in the folder, Open in Premiere before), the empty own project
   renamed, old projects only by Rename to title, no title, the .prproj scan, and **Learn finding the run** of a
-  project made from `<title>_edit.xml` (learnkit.search_run and the tool's own learn.find_run).
-* `tools/app/tests/test_names_day13_ui.py` (real widgets, 8 tests): the board card's name / tooltip / folder line,
+  project made from `<title>_edit.xml` (learnkit.search_run and the tool's own learn.find_run); and every review
+  finding (the title merge in its cases, your own XML copies never removed, escaped / UNC paths in the scan, names
+  that only start like the old one, Premiere's files in the budget, linked twins, the other computer's card, a
+  waiting rename kept while the shared folder is away, the first publish waited for).
+* `tools/app/tests/test_names_day13_ui.py` (real widgets, 11 tests): the board card's name / tooltip / folder line,
   Rename to title (fades only, nothing moves, renames in the background, the button goes), a kept card says why, the
   queue row (title as the name, its folder in use, following a move), History rows, the New video rows (in use,
   following a move, the folder following the headline after the template step), the window (a rename that waits for
