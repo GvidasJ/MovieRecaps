@@ -553,6 +553,10 @@ def destination(project_folder: str | os.PathLike, root: str | os.PathLike, loca
     before = (local.get("published") or {}).get("to") if isinstance(local.get("published"), dict) else None
     if before and _norm(Path(before).parent) == _norm(root):
         there = _read_or_none(Path(before) / P.FILE)
+        if there is None and not os.path.isdir(before):
+            moved = renamed_copy(root, local)              # day 13: renamed after its title on the other computer
+            if moved is not None:
+                return moved
         if there is None or same_project(local, there):
             return Path(before)
     k = 1
@@ -563,6 +567,26 @@ def destination(project_folder: str | os.PathLike, root: str | os.PathLike, loca
         if same_project(local, _read_or_none(cand / P.FILE)):
             return cand
         k += 1
+
+
+def renamed_copy(root: str | os.PathLike, local: dict) -> Path | None:
+    """The shared copy of this project under another name (day 13: renamed after its title, on this or the other
+    computer, since it was published): the folder in ``root`` whose project.json is the same project (its "created"
+    stamp) and says it was called the old name ("old_names"); None when there is none."""
+    before = (local.get("published") or {}).get("to") if isinstance(local.get("published"), dict) else None
+    old = Path(before).name.lower() if before else ""
+    try:
+        subs = [p for p in Path(root).iterdir() if p.is_dir()]
+    except OSError:
+        return None
+    for d in sorted(subs, key=lambda p: p.name.lower()):
+        there = _read_or_none(d / P.FILE)
+        if not isinstance(there, dict) or not same_project(local, there):
+            continue
+        names = [str(x).lower() for x in (there.get("old_names") or []) if x]
+        if not old or old in names:
+            return d
+    return None
 
 
 def merge_project(local: dict, shared: dict | None) -> dict:

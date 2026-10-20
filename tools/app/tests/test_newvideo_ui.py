@@ -319,7 +319,13 @@ def test_the_real_stages_name_the_folder_from_the_post_then_the_headline_on_the_
     th.run()
     assert got and got[0]["ok"], got
     assert got[0]["post_title"] == "" and got[0]["video_headline"] == "They stopped making\ncomedy like this 😭"
-    assert it.project.name.endswith("_they-stopped-making-comedy-like-this")
+    # day 13: named after the video's title as it is written (spaces, capitals, emoji kept: names.py) -- here the
+    # headline on the competitor's video, the only title there is ("Video by darkhumor" says nothing); cut only
+    # when the projects folder is very long (this test's own: Windows' path limit)
+    from mr_app.core import names as NM
+    want = NM.folder_base("They stopped making comedy like this 😭", NM.day_of(it.project.name),
+                          NM.root_len(root))
+    assert it.project.name == want and want.split("_", 1)[1].startswith("They")
     d = P.load(it.project).data
     assert d["video_headline"].startswith("They stopped making\n") and d["generic_name"] is True
     assert (it.project / TT.TITLES_TXT).is_file() and len(list(root.iterdir())) == 1

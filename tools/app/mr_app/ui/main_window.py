@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
@@ -180,6 +181,16 @@ class MainWindow(QMainWindow):
         self._line_close.timeout.connect(self._close_fixed_line)
         if _start_checks():
             self._ver_timer.start(4000)
+        self._rename_timer = QTimer(self)                 # day 13: renames after a title change that had to wait
+        self._rename_timer.timeout.connect(self.retry_renames)
+        self._rename_timer.start(60_000)
+        QTimer.singleShot(12_000, self.retry_renames)
+        self._publishing: dict[str, int] = {}             # folders being copied to the shared folder right now
+        try:                                              # (a rename waits for the whole copy)
+            from ..core import renames
+            renames.register_busy(self.uses_folder)
+        except Exception:  # noqa: BLE001
+            pass
 
     def restore_torrents(self) -> None:
         """Once at the start: the Download page gives every unfinished torrent download its row back (nothing -- not
@@ -216,7 +227,8 @@ class MainWindow(QMainWindow):
 
         def work():
             from ..core import publish
-            return publish.publish_or_queue(folder, root, local)
+            with self.publishing(folder):
+                return publish.publish_or_queue(folder, root, local)
 
         def done(r) -> None:
             res, note = r
@@ -226,6 +238,7 @@ class MainWindow(QMainWindow):
                 self.refresh_save_place()
             else:
                 self.toast(f"Saved to {root} ✓")
+                self.synced(folder)                          # day 13: both copies now share one set of titles
             b = self.pages.get("board")
             if b is not None:
                 b.reload()
@@ -256,15 +269,18 @@ class MainWindow(QMainWindow):
             if not publish.reachable(root, 5.0):
                 return None
             done = []
-            if publish.pending(local):                # work ("Turn off the PC" waits) only while it publishes
+            waiting = publish.pending(local)
+            if waiting:                               # work ("Turn off the PC" waits) only while it publishes
                 with BG.counted_work():
-                    done = list(publish.retry_pending(local, root))
+                    with self.publishing(*[x["folder"] for x in waiting]):     # (day 13: no rename meanwhile)
+                        done = list(publish.retry_pending(local, root))
             for p in PJ.list_projects(local):         # finished before (or on another night) but never published
                 edit = (p.data.get("steps") or {}).get("edit") or {}
                 if edit.get("state") == PJ.DONE and not p.data.get("published"):
                     try:
                         with BG.counted_work():
-                            res, _note = publish.publish_or_queue(p.folder, root, local)
+                            with self.publishing(p.folder):
+                                res, _note = publish.publish_or_queue(p.folder, root, local)
                     except Exception:  # noqa: BLE001 - the next pass tries again
                         continue
                     if res is not None:
@@ -274,11 +290,129 @@ class MainWindow(QMainWindow):
         def done(res) -> None:
             if res:
                 self.toast(f"{len(res)} project(s) moved to {root} ✓")
+                for r in res:                                # day 13: both copies share one set of titles
+                    if getattr(r, "dest", None) is not None:
+                        self.synced(r.dest)
                 self.refresh_save_place()
                 b = self.pages.get("board")
                 if b is not None:
                     b.reload()
         BG.call(work, done, lambda _e: None)          # counted as work only while it publishes (counted_work)
+
+    # -- day 13: a project renamed after its title (core.renames) --
+    def title_changed(self, folder, explicit: bool = False, then=None) -> None:
+        """A title or a headline was saved (``explicit``: Rename to title was pressed): the project's folder and
+        files follow it -- in the background; the pages hear of every folder that moved; a rename that has to wait
+        (an edit running, Premiere using it ...) is tried again every minute."""
+        if not folder:
+            return
+        hub, local = _save_root(self.settings), paths.projects_root()
+
+        def work():
+            from ..core import renames as RN
+            return RN.request(folder, hub=hub, local_root=local, explicit=explicit)
+
+        def done(res) -> None:
+            self.renamed(res, explicit)
+            if then is not None:
+                then(res)
+
+        def failed(err: str) -> None:
+            if explicit:
+                self.toast(f"It could not be renamed: {err}", "fail")
+        BG.call(work, done=done, failed=failed, work=True)   # ("Turn off the PC" waits for a rename half-way)
+
+    def publishing(self, *folders):
+        """``with self.publishing(folder): ...`` -- these folders are being copied to the shared folder (a rename
+        waits for the whole copy: core.renames asks ``uses_folder``)."""
+        import contextlib
+        import os
+
+        @contextlib.contextmanager
+        def mark():
+            keys = [os.path.normcase(os.path.abspath(str(f))) for f in folders if f]
+            for k in keys:
+                self._publishing[k] = self._publishing.get(k, 0) + 1     # (two copies of one folder: counted)
+            try:
+                yield
+            finally:
+                for k in keys:
+                    left = self._publishing.get(k, 1) - 1
+                    if left > 0:
+                        self._publishing[k] = left
+                    else:
+                        self._publishing.pop(k, None)
+        return mark()
+
+    def uses_folder(self, folder) -> str:
+        """Why a project folder must not be renamed now (core.renames.BUSY): it is being copied to the shared folder."""
+        import os
+        k = os.path.normcase(os.path.abspath(str(folder)))
+        return "it is being copied to the shared folder" if getattr(self, "_publishing", {}).get(k) else ""
+
+    def synced(self, folder) -> None:
+        """Day 13: a project was just copied to the shared folder -- its two copies take one set of titles (as
+        publishing merged them) and remember it as the base a later title change is seen from (core.renames); its
+        names follow the title when they can (its edit is not in Premiere yet). Quiet unless it renames something."""
+        if folder is not None and callable(getattr(self, "title_changed", None)):
+            self.title_changed(folder)
+
+    def renamed(self, res, said: bool = False) -> None:
+        """What a rename did: the pages follow every folder that moved; a toast says it (a rename that waits or keeps
+        the name says why; "nothing to do" only when you pressed Rename to title)."""
+        for old, new in list(getattr(res, "moved", None) or []):
+            self.project_moved(old, new)
+        state = getattr(res, "state", "")
+        text = str(getattr(res, "text", "") or "")
+        if state == "renamed":
+            self.toast(f"Renamed after its title ✓  {Path(res.folder).name}")
+        elif state in ("wait", "kept"):
+            self.toast(text[:220], "note")
+        elif said and text:
+            self.toast(text[:220], "info")
+        for p in self.pages.values():
+            fn = getattr(p, "titles_changed", None)
+            if callable(fn):
+                try:
+                    fn(Path(res.folder))
+                except Exception:  # noqa: BLE001 - a page that cannot follow shows it at its next refresh
+                    pass
+        b = self.pages.get("board")
+        if b is not None and hasattr(b, "reload"):
+            b.reload()
+
+    def project_moved(self, old, new) -> None:
+        """A project folder was renamed: every page's rows point at the new place."""
+        for p in self.pages.values():
+            fn = getattr(p, "moved", None)
+            if callable(fn):
+                try:
+                    fn(Path(old), Path(new))
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def retry_renames(self) -> None:
+        """The renames that waited, tried again (only when there are any)."""
+        hub, local = _save_root(self.settings), paths.projects_root()
+
+        def work():
+            from ..core import renames as RN
+            if not RN.pending():
+                return []
+            with BG.counted_work() as _renaming:          # (work only while there are renames to try)
+                return RN.retry_pending(hub=hub, local_root=local)
+
+        def done(results) -> None:
+            for res in results or []:
+                if getattr(res, "state", "") != "wait":
+                    self.renamed(res)
+                elif getattr(res, "moved", None):         # half done (the shared copy moved): the pages follow,
+                    for old, new in res.moved:            # quietly (it says so when the rest is done)
+                        self.project_moved(old, new)
+                    b = self.pages.get("board")
+                    if b is not None and hasattr(b, "reload"):
+                        b.reload()
+        BG.call(work, done, lambda _e: None)
 
     def find_hub(self) -> None:
         """Where the shared files are (the save folder, else this computer's): looked up in the background (a network

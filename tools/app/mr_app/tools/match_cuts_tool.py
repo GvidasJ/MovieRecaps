@@ -278,12 +278,28 @@ def template_problems(j: J.Job) -> list[str]:
 def open_in_premiere(xml: Path) -> str:
     """Open a run's 1_edit.xml in Premiere -- first pointed at its media as THIS computer sees them (a project made on
     the other computer, opened from the shared folder: D:\\Shared on the PC, \\\\192.168.101.11\\Shared on the laptop)."""
+    try:                                     # day 13 (first): from now on a project saved anywhere may play its files:
+        from ..core import renames           # the folder keeps its name after a title change (core.renames)
+        renames.note_premiere(Path(xml))
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from ..core import publish
         publish.relink_edit(Path(xml).parent)
     except Exception:  # noqa: BLE001 - an older checkout without it: the XML as it is
         pass
     return premiere.open_xml(Path(xml))
+
+
+def title_changed(ctx, folder) -> None:
+    """Day 13: a project's title or headline was saved -- the window renames its folder and files after it (in the
+    background; ui.main_window.title_changed). Nothing happens without a window (the tests' pages)."""
+    fn = getattr(ctx, "title_changed", None)
+    if callable(fn) and folder:
+        try:
+            fn(Path(folder))
+        except Exception:  # noqa: BLE001 - a rename is never worth an error here
+            pass
 
 
 def _toast(ctx, text: str, kind: str = "ok") -> None:
@@ -343,6 +359,7 @@ def save_upload_title(ctx, folder, text: str, then=None) -> None:
         b = (getattr(ctx, "pages", None) or {}).get("board")
         if b is not None and hasattr(b, "reload"):
             b.reload()
+        title_changed(ctx, folder)                   # day 13: the folder and files follow the title
     BG.call(work, done, lambda e: _toast(ctx, f"Could not save it: {e}", "fail"))
 
 
@@ -608,7 +625,8 @@ class JobRow(QFrame):
                     PJ.load(folder).update(channel=channel or None, title=title or None)
                     from ..core import board
                     board.set_title(folder, title)                 # (was page.title_saved, on the window thread)
-                BG.call(work, None, lambda _e: None)
+                ctx = self.page.ctx
+                BG.call(work, lambda _r: title_changed(ctx, folder), lambda _e: None)
             self.refresh()
 
     def _edit_upload_title(self) -> None:
@@ -693,7 +711,14 @@ class JobRow(QFrame):
 
     def refresh(self) -> None:
         j = self.job
-        self.name.setText(j.name)
+        if self._last_state != j.state or self._dates_cache is None:     # (the project's titles are read with them)
+            self._dates_cache = step_dates(j)
+            self._last_state = j.state
+        shown = display_of(j)                    # day 13: the video's title as the name; the folder in the tooltip
+        self.name.setText(shown if len(shown) <= 70 else shown[:68].rstrip() + "…")
+        self.name.setToolTip("\n".join(x for x in (shown if len(shown) > 70 else "",
+                                                   f"Folder: {Path(j.project).name}" if j.project is not None else "")
+                                       if x))
         if getattr(self, "_chan", None) != j.channel:
             self._chan = j.channel
             while self.chan_box.count():
@@ -997,6 +1022,11 @@ class MatchCutsPage(QWidget):
         self.out_dir = paths.output_dir()
         self.hovered: JobRow | None = None
         self._run_jobs: list[int] = []            # the jobs of this Start (the taskbar's progress)
+        try:                                      # day 13: a project of a waiting / running video is not renamed
+            from ..core import renames
+            renames.register_busy(self.uses_folder)
+        except Exception:  # noqa: BLE001
+            pass
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 18, 0, 40)
         lay.setSpacing(18)
@@ -1507,6 +1537,7 @@ class MatchCutsPage(QWidget):
                 self._refresh_job(job)
                 _toast(self.ctx, "New template made and swapped into the edit ✓")
                 self._reload_board()
+                title_changed(self.ctx, folder)          # day 13: the folder and files follow the title
             BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch), changed,
                     lambda e: _toast(self.ctx, f"The template could not be made: {e}", "fail"), work=True)
             return flow.USE_CHANGE
@@ -1519,6 +1550,7 @@ class MatchCutsPage(QWidget):
                 _toast(self.ctx, "Headline set ✓" + (" -- template made again" if (r or {}).get("template") else
                                                      " -- the template uses it"))
                 self._reload_board()
+                title_changed(self.ctx, folder)          # day 13: the folder and files follow the title
             BG.call(lambda: flow.set_headline(folder, text), done,
                     lambda e: _toast(self.ctx, f"The headline could not be saved: {e}", "fail"), work=True)
         else:
@@ -1819,6 +1851,82 @@ class MatchCutsPage(QWidget):
 
     def busy(self) -> bool:
         return self.running and (self.current is not None or self.swap_waiting())
+
+    # -- day 13: a project renamed after its title (core.renames) --
+    def uses_folder(self, folder) -> str:
+        """Why a project folder must not be renamed now: a video of the queue waits or runs in it ('' when none does).
+        Asked from a worker thread (it only reads the list)."""
+        for j in list(self.jobs):
+            if j.project is not None and j.state in (J.READY, J.WAITING, J.RUNNING) and same_folder(j.project, folder):
+                return ("its edit is running in the Match cuts queue" if j.state == J.RUNNING else
+                        "it waits in the Match cuts queue")
+        return ""
+
+    def moved(self, old: Path, new: Path) -> None:
+        """A project folder was renamed: its videos point at the new place (the project, the run folder, the two
+        videos, the result's run folder) and their rows show it."""
+        for j in self.jobs:
+            changed = False
+            for attr in ("project", "out_dir", "run_dir", "competitor", "raw"):
+                nv = rebased(getattr(j, attr, None), old, new)
+                if nv is not None:
+                    setattr(j, attr, nv)
+                    changed = True
+            res = j.result if isinstance(j.result, dict) else {}
+            if res.get("run_dir"):
+                nv = rebased(res["run_dir"], old, new)
+                if nv is not None:
+                    res["run_dir"] = str(nv)
+                    changed = True
+            if changed:
+                if j.name == Path(old).name:
+                    j.name = Path(new).name
+                row = self.rows.get(j.id)
+                if row is not None:
+                    row._dates_cache = None                        # (its titles are read again with the dates)
+                    row.refresh()
+
+    def titles_changed(self, folder: Path) -> None:
+        """A project's titles changed: its rows read them again (the name shown is the video's title)."""
+        for j in self.jobs:
+            if j.project is not None and same_folder(j.project, folder):
+                row = self.rows.get(j.id)
+                if row is not None:
+                    row._dates_cache = None
+                    row.refresh()
+
+
+def same_folder(a, b) -> bool:
+    try:
+        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+    except (TypeError, ValueError):
+        return False
+
+
+def rebased(p, old: Path, new: Path):
+    """``p`` (a path) moved with its folder ``old`` -> ``new`` (the same type as given: Path or str), or None when it
+    is not inside ``old``."""
+    if p is None or str(p) == "":
+        return None
+    a, o = os.path.normcase(os.path.abspath(str(p))), os.path.normcase(os.path.abspath(str(old)))
+    if a != o and not a.startswith(o.rstrip("\\/") + os.sep):
+        return None
+    rest = os.path.abspath(str(p))[len(os.path.abspath(str(old))):].lstrip("\\/")
+    out = Path(new) / rest if rest else Path(new)
+    return out if isinstance(p, Path) else str(out)
+
+
+def display_of(j) -> str:
+    """Day 13: the name a queue row shows -- its video's title (the YouTube title, the headline, the post's title, the
+    headline on the competitor's video), else the job's name."""
+    try:
+        from ..core import names as NM
+        t, _src = NM.title_of({"upload_title": getattr(j, "upload_title", "") or "", "title": j.title or "",
+                               "post_title": getattr(j, "post_title", "") or "",
+                               "video_headline": getattr(j, "video_headline", "") or ""})
+    except Exception:  # noqa: BLE001
+        t = ""
+    return t if (t and j.project is not None) else j.name
 
 
 class MatchCutsTool(Tool):

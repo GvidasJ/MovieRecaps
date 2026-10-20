@@ -84,8 +84,14 @@ def main(argv: list[str] | None = None) -> int:
             from mr_app.core import download as D
             raw_file = Path(args.raw) if Path(args.raw).is_file() else None
             li = D.probe_link(args.competitor)
+            from mr_app.core import names as NM, titles as TT   # day 13: the folder named after the title
+            post = TT.post_title({**(getattr(li, "info", None) or {}), "title": li.title})
+            t, src = NM.title_of({"title": args.title or "", "post_title": post})
             p = flow.new_project(args.competitor, None if raw_file else args.raw, raw_file, args.channel or None,
-                                 args.title or None, name=li.title)
+                                 args.title or None, name=li.title, folder=NM.folder_base(t) if t else None,
+                                 names=NM.marker(src))
+            if post:
+                p.update(post_title=post)
             print(f"project: {p.folder}")
             res = flow.prepare(p, _progress)
             print(json.dumps(res, indent=1, ensure_ascii=False, default=str))

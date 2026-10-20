@@ -113,6 +113,7 @@ class Item:
     torrent_job: Any = None                 # the torrent part's TorrentJob while the RAW downloads
     torrent_widget: Any = None              # its picker / progress card inside the row
     said_pick: bool = False                 # the row says the queue asks which is the RAW
+    renaming: int = 0                       # day 13: the thread of this row's own stage while it renames its folder
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -136,6 +137,17 @@ class Item:
         if self.state in (DONE, FAILED, STOPPED):
             return NV.FINISHED
         return NV.WAITING
+
+
+def row_title(it: "Item") -> str:
+    """Day 13: the video's title a New video row shows as its name (the YouTube title, the headline, the post's
+    title, the headline on the competitor's video), '' before there is one."""
+    try:
+        from ..core import names as NM
+        return NM.title_of({"upload_title": it.upload_title, "title": it.title, "post_title": it.post_title or "",
+                            "video_headline": it.video_headline or ""})[0]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def waits_for_pick(it: "Item") -> bool:
@@ -186,6 +198,7 @@ class StageThread(QThread):
     default template as it is), "cuts" (Just cuts). Signals: ``named(id, folder)``, ``progress(id, role, share,
     text)``, ``done(id, result)`` -- {'ok', 'stage' (the failed one), 'error' (plain words), 'headline' ...}."""
     named = Signal(int, str)
+    moved = Signal(str, str)                # day 13: a project folder renamed after its title (old, new)
     progress = Signal(int, str, float, str)
     done = Signal(int, dict)
 
@@ -277,7 +290,11 @@ class StageThread(QThread):
         out["video_headline"], out["post_title"] = head, post
         try:
             TT.save(p, post, head)
-            if p.data.get("generic_name") or TT.useless(p.folder.name.split("_", 1)[-1].replace("-", " ")):
+            from ..core import names as NM
+            if NM.uses_titles(p.data):                # day 13: the folder follows the video's title (names.py)
+                res = self._rename_row(p.folder)
+                out["rename"] = res.text
+            elif p.data.get("generic_name") or TT.useless(p.folder.name.split("_", 1)[-1].replace("-", " ")):
                 p2, note = TT.rename_folder(p, head, post)
                 out["rename"] = note
                 if p2.folder != p.folder:
@@ -302,10 +319,45 @@ class StageThread(QThread):
                     return                                  # (night 11: the edit makes it again at its start)
                 raise
             out["template"] = "made"
+            self._follow_title(out)
         elif self.default_template:
             self._say("raw", 1.0, "no headline: the channel's default template ...")
             flow.default_template_step(p, it.channel)
             out["template"] = "default"
+
+    def _follow_title(self, out: dict) -> None:
+        """Day 13: the headline just went into the project (the template step) -- its folder follows the title now,
+        before the edit (this row is the one using it; nothing else can yet)."""
+        it = self.item
+        try:
+            from ..core import names as NM
+            from ..core import renames as RN
+            if it.project is None or not NM.uses_titles(self._project().data):
+                return
+            res = self._rename_row(it.project)
+            if res.state != RN.SAME:
+                out["rename"] = res.text
+        except Exception:  # noqa: BLE001 - the name is a help, never a stop
+            pass
+
+    def _rename_row(self, folder):
+        """Day 13: this row's project folder renamed after its title (core.renames.request: every other row and page
+        is asked whether it uses the folder -- only this row is not, it is the one asking; a Premiere project that
+        plays its files keeps the name; a rename that has to wait goes on the window's list, tried every minute). The
+        row and every page follow what moved."""
+        from ..core import renames as RN
+        it = self.item
+        it.renaming = threading.get_ident()
+        try:
+            res = RN.request(folder)
+        finally:
+            it.renaming = 0
+        for old, new in res.moved:
+            self.moved.emit(str(old), str(new))
+            if it.project is not None and Path(old) == Path(it.project):
+                it.project = Path(new)
+                self.named.emit(it.id, str(new))
+        return res
 
     def _cuts(self, out: dict) -> None:
         from ..core import flow
@@ -371,9 +423,13 @@ class StageThread(QThread):
         if why:
             raise flow.StepError(why)
         generic = TT.useless(name)
+        from ..core import names as NM               # day 13: the folder is named after the video's title
+        t, src = NM.title_of({"upload_title": it.upload_title, "title": it.title, "post_title": it.post_title or ""})
+        base = NM.folder_base(t, roots_len=NM.root_len(root)) if t else ""
         p = flow.new_project(it.competitor_url, it.raw_url or None, it.raw_file, it.channel or None,
                              it.title or None, root=root, name=None if generic else name,
-                             just_cuts=it.kind == NV.JUST_CUTS, competitor_file=it.comp_file)
+                             just_cuts=it.kind == NV.JUST_CUTS, competitor_file=it.comp_file,
+                             folder=base or None, names=NM.marker(src))
         p.update(post_title=it.post_title, generic_name=generic, kind=it.kind)
         it.project = p.folder
         save_title(p.folder, it.title)
@@ -782,7 +838,10 @@ class VideoRow(W.Card):
         it = self.item
         if set(self.cells) != {k for k, _ in it.step_list()}:
             self._build_steps()
-        self.name.setText(it.name or (it.raw_url or str(it.raw_file or "") or torrent_name(it.raw_torrent))[:90])
+        shown = row_title(it)                              # day 13: the video's title is the name when known
+        self.name.setText((shown or it.name or (it.raw_url or str(it.raw_file or "") or
+                                                torrent_name(it.raw_torrent)))[:90])
+        self.name.setToolTip(f"Folder: {it.project.name}" if it.project is not None and shown else "")
         self.chan.setText(it.channel or "")
         self.chan.setStyleSheet(f"color: {theme.channel_colour(it.channel)};")
         just = it.kind == NV.JUST_CUTS
@@ -1038,6 +1097,11 @@ class DownloadPage(QWidget):
         self._worked = False            # something ran since "Turn off the PC" was ticked
         self.warning: ShutdownWarning | None = None
         self.shutdown_dialog = ShutdownWarning          # (a test puts a fake here)
+        try:                            # day 13: a project a row works on is not renamed meanwhile
+            from ..core import renames
+            renames.register_busy(self.uses_folder)
+        except Exception:  # noqa: BLE001
+            pass
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
@@ -1624,6 +1688,8 @@ class DownloadPage(QWidget):
             self._worked = True
             th = StageThread(it, stages, default)
             th.named.connect(self._named)
+            if getattr(th, "moved", None) is not None:      # (day 13: a stage that renamed its project folder)
+                th.moved.connect(self._moved_by_row)
             th.progress.connect(self._progress)
             th.done.connect(self._done)
             self.current = th
@@ -1804,6 +1870,7 @@ class DownloadPage(QWidget):
         it.title = text
         if it.project is not None:
             save_title(it.project, text)
+            self._title_changed(it.project)             # day 13: renamed after it once the row is free
         self._step(it, "template", S_WAIT, 0.0, "")
         self.queue(it, ("template",))
 
@@ -1824,6 +1891,7 @@ class DownloadPage(QWidget):
             self._step(it, "template" if it.kind == NV.FULL else "cuts", S_DONE, 1.0, "")
             self.toast("New template made and swapped into the edit ✓")
             self._refresh(it)
+            self._title_changed(folder)                 # day 13: the folder and files follow the title
 
         BG.call(lambda: flow.change_headline(PJ.load(folder), text, ch), done,
                 lambda e: self.toast(f"The template could not be made: {NV.plain_error(e)}", "fail"), work=True)
@@ -1898,10 +1966,14 @@ class DownloadPage(QWidget):
                     board.set_upload_title(folder, text)
                 except Exception:  # noqa: BLE001
                     pass
-            off_thread(work, None)
+            off_thread(work, lambda _r: self._title_changed(folder))     # day 13: the names follow the title
         if it.job is not None:
             it.job.upload_title = it.upload_title
         self.toast("YouTube title set ✓")
+
+    def _title_changed(self, folder) -> None:
+        from .match_cuts_tool import title_changed
+        title_changed(self.ctx, folder)
 
     def send_to_edit(self, it: Item, start: bool = False) -> None:
         """The ready video into the Match cuts queue (its run folder: the project's 'edit'), started by itself."""
@@ -2244,6 +2316,47 @@ class DownloadPage(QWidget):
     def stop(self) -> None:
         if self.current is not None:
             self.current.cancel.set()
+
+    # -- day 13: a project renamed after its title (core.renames) --
+    def uses_folder(self, folder) -> str:
+        """Why a project folder must not be renamed now: a row's step runs or waits to run in it, or it is on its way
+        into the Match cuts queue ('' when none). Asked from a worker thread (it only reads the rows)."""
+        from .match_cuts_tool import same_folder
+        cur = self.current.item if self.current is not None else None
+        for it in list(self.items):
+            if it.project is None or not same_folder(it.project, folder):
+                continue
+            if it.renaming and it.renaming == threading.get_ident():
+                continue                                  # (this row's own stage asks: it renames it itself)
+            if it is cur or it.state in (QUEUED, WORKING) or (it.state == SENT and it.job is None):
+                return "a New video row is working on it"
+        return ""
+
+    def _moved_by_row(self, old: str, new: str) -> None:
+        """A row's stage renamed its project folder: every page follows (the window's project_moved)."""
+        fn = getattr(self.ctx, "project_moved", None)
+        if callable(fn):
+            try:
+                fn(Path(old), Path(new))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def moved(self, old, new) -> None:
+        """A project folder was renamed: its rows point at the new place."""
+        from .match_cuts_tool import rebased
+        for it in self.items:
+            nv = rebased(it.project, Path(old), Path(new))
+            if nv is None:
+                continue
+            it.project = Path(nv)
+            if it.name == Path(old).name:
+                it.name = Path(new).name
+            for attr in ("raw_file", "comp_file"):
+                f = rebased(getattr(it, attr, None), Path(old), Path(new))
+                if f is not None:
+                    setattr(it, attr, Path(f))
+            if it.id in self.rows:
+                self._refresh(it)
 
 
 class DownloadTool(Tool):

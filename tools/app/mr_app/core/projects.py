@@ -325,21 +325,27 @@ class Project:
 
 
 def create(root: str | os.PathLike | None = None, *, competitor_url: str | None = None, raw_url: str | None = None,
-           raw_file: str | os.PathLike | None = None, name: str | None = None) -> Project:
+           raw_file: str | os.PathLike | None = None, name: str | None = None, folder: str | None = None,
+           names: dict | None = None) -> Project:
     """A new project folder ``<root>\\<YYYY-MM-DD>_<short name>`` (-2, -3 ... when taken) with its project.json.
-    ``name``: the competitor's title when known (download.probe_link); else the competitor's link id is used."""
+    ``name``: the competitor's title when known (download.probe_link); else the competitor's link id is used.
+    Day 13: ``folder`` -- the folder's exact name ('<date>_<title>', names.folder_base), (2), (3) ... when taken;
+    ``names`` -- project.json's "names" (names.marker: the project's names follow its title)."""
     root = Path(root) if root is not None else paths.projects_root()
     root.mkdir(parents=True, exist_ok=True)
-    base = folder_name(name, competitor_url=competitor_url, raw_url=raw_url, raw_file=raw_file)
+    base = folder or folder_name(name, competitor_url=competitor_url, raw_url=raw_url, raw_file=raw_file)
     k = 1
     while True:
-        folder = root / (base if k == 1 else f"{base}-{k}")
+        cand = root / (base if k == 1 else (f"{base} ({k})" if folder else f"{base}-{k}"))
         try:
-            folder.mkdir()                                         # atomic: two programs never get one folder
+            cand.mkdir()                                           # atomic: two programs never get one folder
             break
         except FileExistsError:
             k += 1
+    folder = cand
     data = _new_data(folder.name, competitor_url, raw_url, str(raw_file) if raw_file else None)
+    if names:
+        data["names"] = dict(names)
     with _locked(folder / FILE):
         write_json(folder / FILE, data)
     return Project(folder)
