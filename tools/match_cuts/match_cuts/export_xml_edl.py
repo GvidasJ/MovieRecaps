@@ -2730,14 +2730,8 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             m = CUT_MARGIN * (f.box[2] - f.box[0]) * old.s
             sl, sh = (xr[0] + m, xr[1] - m) if xr[0] + m <= xr[1] - m else xr
             tx = min(max(old.tx, sl), sh)
-        ty = old.ty
-        if not (old.s * f.box[1] + ty >= win[1] - speakers.INSIDE_TOL_PX and
-                old.s * f.box[3] + ty <= win[1] + win[3] + speakers.INSIDE_TOL_PX):
-            yr = speakers.y_range(old, f.box, raw_wh, win)
-            if yr is not None:
-                ty = min(max(ty, yr[0]), yr[1])
-        new = Sim(old.s, 0.0, tx, ty)
-        if abs(new.tx - old.tx) < (SUBJECT_MOVE_PX if cut else CENTRE_MIN * win[2]) and abs(new.ty - old.ty) < 0.5:
+        new = Sim(old.s, 0.0, tx, old.ty)               # sideways only: the height stays the competitor's (a face
+        if abs(new.tx - old.tx) < (SUBJECT_MOVE_PX if cut else CENTRE_MIN * win[2]):     # it cuts there: not shown)
             skip("centred already")
             log.debug("premiere framing: %s: centring would move it %+.0f px", label, new.tx - old.tx)
             continue
@@ -2778,9 +2772,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
             x.person_note = ((f"slid onto the person speaking, cut off at the window's edge (RAW x {cx:.0f}; "
                               if cut else f"centred on the person speaking (RAW x {cx:.0f}; ") +
                              f"Light-ASD {strength[0]:.1f}, {100 * f.share:.0f} % of the speech): the picture moved "
-                             f"{dx:+.0f} px sideways"
-                             + (f", {new.ty - old.ty:+.0f} px up/down" if abs(new.ty - old.ty) >= 0.5 else "")
-                             + ", zoom kept")
+                             f"{dx:+.0f} px sideways, zoom and height kept")
             x.framing_note = (x.framing_note + "; " if x.framing_note else "") + \
                 "centred on the person speaking (day 13)"
         moved += len(mine)
