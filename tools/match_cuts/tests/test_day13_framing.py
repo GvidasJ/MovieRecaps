@@ -270,3 +270,36 @@ def test_nothing_moved_leaves_a_clip_framed_per_shot_untouched():
     assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), [32.83]) == 0
     assert clip.keys[0][1] is sim and clip.shot_framing == [(int(round(32.83 * 60)), second)]
     assert clip.framing_note == note and not clip.person_note
+
+
+def test_a_two_shot_the_window_shows_keeps_its_framing():
+    """021 at 82.5 s: two women in the pool, the one on the left shown whole, the one on the right speaking (Light-ASD
+    3.9) cut at the window's edge. Centring her would push the other out of the window -- you kept the two-shot."""
+    clip, sim = _clip(30.05, 32.83, V11_COMP, V11_BOX)
+    v0, v1 = (WIN[0] - sim.tx) / sim.s, (WIN[0] + WIN[2] - sim.tx) / sim.s
+    left = (v0 + 25.0, 100.0, v0 + 225.0, 400.0)                                 # shown whole
+    right = (v1 - 160.0, 100.0, v1 + 40.0, 400.0)                                 # 20 % past the right edge
+    sp = _ctx([_track(1, 30.05, 32.83, left, -1.0), _track(2, 30.05, 32.83, right, 3.9)], V11_RAW, 30.05, 32.83)
+    f = sp.faces(30.05, 32.83)
+    assert f.track == 2 and speakers.shown(speakers.on_screen(sim, left, V11_RAW[0], False), WIN)
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 0
+    assert clip.keys[0][1] is sim
+    sp = _ctx([_track(2, 30.05, 32.83, right, 3.9)], V11_RAW, 30.05, 32.83)        # alone: centred on her
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 1
+
+
+def test_a_lone_face_needs_a_sure_speaker():
+    """021 at 54 s: three men laughing, only one face found (the one in the middle, laughing with his mouth wide open,
+    was missed) -- Light-ASD 0.6 on the face found. A face with nobody else found next to it needs CENTRE_ALONE_ASD:
+    the one the competitor shows may be the face the detection missed."""
+    clip, sim = _clip(30.05, 32.83, V11_COMP, V11_BOX)
+    face = (1100.0, 100.0, 1300.0, 400.0)
+    sp = _ctx([_track(5, 30.05, 32.83, face, 0.6)], V11_RAW, 30.05, 32.83)
+    assert sp.faces(30.05, 32.83).how == "speaker"
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 0
+    sp = _ctx([_track(5, 30.05, 32.83, face, 2.0)], V11_RAW, 30.05, 32.83)
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 1
+
+
+def test_the_rule_is_on_by_default():
+    assert ex.SPEAKER_CENTRE is True

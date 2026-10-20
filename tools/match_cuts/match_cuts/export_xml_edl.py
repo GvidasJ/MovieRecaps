@@ -2781,7 +2781,7 @@ def _speaker_centre(clips: list[PremiereClip], sp: Any, raw_wh: tuple[float, flo
         mine = [pieces[i] for i in idx]
         cl.keys = [(cl.keys[0][0], mine[0].keys[0][1])]
         cl.shot_framing = [(w.src_in, w.keys[0][1]) for w in mine[1:]]
-        cl.covered = True
+        cl.covered = all(_covers(w.keys[0][1], raw_wh, win, tol=1e-6) for w in mine)
         if "centred on the person speaking" not in str(cl.framing_note):
             cl.framing_note = (cl.framing_note + "; " if cl.framing_note else "") + \
                 "centred on the person speaking (day 13)"
