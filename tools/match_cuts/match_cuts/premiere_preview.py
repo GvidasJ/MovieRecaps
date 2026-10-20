@@ -20,6 +20,13 @@ PREVIEW_WIDTH = 1080        # the preview's width (a wider sequence is scaled do
 SR = 48000
 
 
+def concat_line(path: str | Path) -> str:
+    """One line of ffmpeg's concat list for ``path``: the path in single quotes, a quote in it written '\\'' (day 13:
+    the app's project folders are named after the video's title -- "He couldn't get ..." -- and an apostrophe ended
+    the quotes: "Error opening input files", the framed preview failed)."""
+    return "file '" + Path(path).as_posix().replace("'", "'\\''") + "'\n"
+
+
 def _watermark_graph(src: str, idx: int, OW: int, OH: int, opacity: float) -> str:
     """The ffmpeg filters that put the watermark (input ``idx``) over ``src`` the way Premiere shows it (night 10):
     Blend Mode Overlay -- the video decides (dark parts darker, light parts lighter: ffmpeg's blend takes its first
@@ -125,7 +132,7 @@ def render(xml_path: str | Path, out_path: str | Path, cfg: Any, frame: Any) -> 
         if n_total > cursor:
             parts.append(_still(ff, tdir / "tail.mp4", frame.path, n_total - cursor, fps, OW, OH, wm, wm_op))
         lst = tdir / "parts.txt"
-        lst.write_text("".join(f"file '{q.as_posix()}'\n" for q in parts), encoding="utf-8")
+        lst.write_text("".join(concat_line(q) for q in parts), encoding="utf-8")
         video = tdir / "video.mp4"
         subprocess.run([ff, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy",
                         str(video)], check=True)
