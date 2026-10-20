@@ -765,6 +765,19 @@ The three ways (chosen per clip, the end summary says which):
 In every mode the captions are **back to back**: a caption ends where the next one starts, a pause over 1 s gets a
 `*...*` placeholder (the action goes there), and no caption ever overlaps the next.
 
+**On the sound you get (day 13).** follow / regroup / voice captions are timed on the transcript of the caption
+step's own rendering of the edit's audio (the cut list, each piece at the competitor's speed); `1_edit.xml` plays
+every RAW clip at 100 %, and where the competitor changed the speed the two can run apart (your video16: 0.27 s
+early from 4.8 s on; mindculpt: up to 0.47 s late in its second half -- in your fixes you dragged exactly those
+stretches onto the words). After the caption rules (`post_captions.py`, in no cached stage) every transcript word is
+paired with the same word of the RAW's own transcript where `1_edit.xml`'s A1 plays it; a caption whose
+neighbouring words agree on an offset of 0.15 s or more belongs to a stretch, and a stretch of 3 captions or more
+moves -- each caption by its offset, start and end, as you drag a block -- when its offset reaches 0.25 s somewhere.
+Nothing moves across a video cut: an edge on a cut stays there while its caption stays on its side, a caption heard
+after the cut starts on it (your "bread"), and one the move leaves under 0.1 s joins its neighbour ("by" + "himself"
+-> "by himself", as you wrote it: at the RAW's rate it would lose its words). Captions on the sound or nearly stay
+where they are (your earlier fixes kept them). The report's *Captions moved onto the sound* lists every move.
+
 **Suggested actions (night 9; `--no-action-captions` turns them off).** Each `*...*` placeholder is filled with a
 short action in your style -- `*claps hands*`, `*enters the room*`, `*laughs hard*` -- as a **suggestion**: six frames
 of what the edit shows there, and the line said just before and just after it, go to a vision model on this
@@ -829,7 +842,7 @@ The rules:
 | 6 length | spoken: 20 characters / 5 words; `*actions*`: 24; night 7: a caption of 2+ words grouped in your style at most 1.5 s on screen (your 990 captions of 2+ words: one over 1.5 s; 3 words at most 1.47 s) | split at a word (no weak ending); too long on screen: before the word that leaves the longer piece shortest, never inside a pair kept together (video6: "you mean succeed?", 2.4 s -> "you mean" / "succeed?", as you did) | one word over 20 characters |
 | 7 weak words | no caption of a single weak word; no weak last word where it can move | joined / moved to the next words | kept where it ends a sentence, a silence / interjection follows, it is kept together with the word before it, or the caption already gave one |
 | 8 no gaps | `end[i] == start[i+1]`, no overlap | closed in every mode (a pause over 1 s: a `*...*` placeholder) | another video's stretch stays a gap |
-| 9 kept together | no pair kept together split between two captions (copied captions; the style grouping decides its own breaks) | regrouped (copied one-word captions) | split only where the cap or a video cut forces it |
+| 9 kept together | no pair kept together split between two captions (copied captions; the style grouping decides its own breaks) | regrouped (copied one-word captions); day 13, after the rules (`post_captions.pairs_fix`): a determiner split from its word or a name split in two is joined the way your fixes do -- `still in the` / `water?` -> `still in` / `the water?`, `my` / `daddy saved` -> `my daddy` / `saved`, `on the` / `island together` -> `on the island` / `together`, `all over Hong` / `Kong` -> `all over` / `Hong Kong` -- only where no pause, comma or video cut is there and every caption keeps rule 6 | split only where the cap or a video cut forces it; other pairs listed (you keep about two in three of them split) |
 | 10 video cuts | no caption across a cut of `1_edit.xml` (V1 clip boundaries) | split on the cut / its edge moved onto the cut | — |
 
 **Acronyms** (`caption_allowlist.txt` next to this README; one word or phrase per line, extend it): `AI`, `MJ`, `MCU`, plus

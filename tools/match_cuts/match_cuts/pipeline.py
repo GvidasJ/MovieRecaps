@@ -3802,6 +3802,7 @@ def stage_captions(ctx: Context) -> None:
         ctx.warn(f"captions.srt not written: {type(e).__name__}: {e}")
     if ctx.captions.get("path"):
         ctx.paths["captions"] = ctx.captions["path"]
+        post_captions_step(ctx)
     if ctx.captions.get("placeholders") and bool(getattr(ctx.cfg, "action_captions", True)):
         # night 9: each *...* placeholder filled with a suggested action (a vision model on the frames the edit shows
         # there and the lines said around it, in your style; unsure: the placeholder stays) -- never fails the run
@@ -3812,6 +3813,18 @@ def stage_captions(ctx: Context) -> None:
             log.error("action captions failed: %s\n%s", e, traceback.format_exc())
             ctx.captions["actions"] = {"error": f"{type(e).__name__}: {e}", "suggested": [], "kept": []}
             ctx.warn(f"no action suggested for the *...* placeholders ({type(e).__name__}: {e}) -- they stay")
+
+
+def post_captions_step(ctx: Context) -> None:
+    """Day 13 (post_captions.py, in no cached stage): the pairs kept together joined (caption rule 9, where it is
+    safe) and the captions timed on the edit's transcript moved onto the sound 1_edit.xml plays where the two
+    disagree -- never fails the run (a problem: the captions stay as written, and the report says why)."""
+    from . import post_captions
+    try:
+        post_captions.run(ctx)
+    except Exception as e:  # noqa: BLE001 - the captions as the caption step wrote them
+        log.error("captions after-pass failed: %s\n%s", e, traceback.format_exc())
+        ctx.captions["post"] = {"error": f"{type(e).__name__}: {e}", "pairs": [], "retimed": []}
 
 
 def prepare_frame(ctx: Context) -> Any:
