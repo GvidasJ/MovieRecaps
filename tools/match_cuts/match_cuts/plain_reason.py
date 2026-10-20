@@ -195,13 +195,14 @@ def program_code(code: int | None, program: str = "ffmpeg") -> tuple[str, str]:
         return AVERROR[s]
     if -200 < s < 0 and -s in ERRNO:
         return ERRNO[-s]
+    shown = {"ffmpeg": "FFmpeg", "ffprobe": "FFprobe"}.get(str(program).lower(), str(program))
     if s == 69:
         return BROKEN_VIDEO, "too many errors while reading the video (exit 69)"
     if s == 255:
-        return CLOSED, f"{program} was stopped (exit 255)"
+        return CLOSED, f"{shown} was stopped (exit 255)"
     w = crash_words(int(code))
     if w:
-        return CRASH_KIND.get(int(code), CRASH), w.replace("the tool", program, 1)
+        return CRASH_KIND.get(int(code), CRASH), w.replace("the tool", shown, 1)
     return "", ""
 
 
@@ -228,6 +229,7 @@ _DRIVE = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]):[\\/]")
 _UNC = re.compile(r"(\\\\[A-Za-z0-9_.$-]+\\[A-Za-z0-9_.$ -]+)")
 _QUOTED_PATH = re.compile(r"""['"](?P<p>(?:[A-Za-z]:|\\\\)[^'"\n]+)['"]""")
 _TOOL_STOP = re.compile(r"^\s*(?:wrong pair\b|the inputs look wrong\b)|picture not found|not in this raw", re.I)
+_INPUT_MISSING = re.compile(r"^(raw|competitor|voice-over) file not found:\s*(.+)$", re.I)
 _PY_ERROR = re.compile(r"^(?:match_cuts: )?(?:ERROR: )?(?P<type>[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|"
                        r"Warning|Fault))(?::\s*(?P<msg>.*))?$")
 
@@ -353,10 +355,9 @@ def plain_line(line: str) -> str:
     return s if len(s) <= MAX_TEXT else s[:MAX_TEXT - 3].rstrip() + "..."
 
 
-def _error_lines(stderr: str, log: str) -> list[str]:
-    """The lines that may say why it stopped, oldest first: the console's error lines (cli's "match_cuts: ERROR: ..."
-    and any line that is not a log line, a library warning, a traceback frame or "details in ..."), then the
-    log's ERROR lines (their first line only: never the traceback logged under them)."""
+def _console_errors(stderr: str) -> list[str]:
+    """The console's lines that may say why it stopped, oldest first: cli's "match_cuts: ERROR: ..." and any line
+    that is not a log line, a library warning, a traceback frame or "details in ..."."""
     out: list[str] = []
     for ln in _lines(stderr):
         s = ln.strip()
@@ -367,10 +368,25 @@ def _error_lines(stderr: str, log: str) -> list[str]:
         if _TS.match(s) and not _LOG_ERROR.match(s):
             continue
         out.append(s)
-    for ln in _lines(log):
-        if _LOG_ERROR.match(ln.strip()):
-            out.append(ln.strip())
     return out
+
+
+def _log_errors(log: str) -> list[str]:
+    """match_cuts.log's ERROR lines, oldest first (their first line only: never the traceback logged under them)."""
+    return [ln.strip() for ln in _lines(log) if _LOG_ERROR.match(ln.strip())]
+
+
+def _meaningful(line: str) -> bool:
+    """A console line that says why the run stopped: an exception (cli's "match_cuts: ERROR: X: ..."), a fatal error,
+    an ffmpeg / ffprobe failure."""
+    return bool(_PY_ERROR.match(_clean(line)) or line.startswith(("match_cuts: ERROR:", "Fatal Python error"))
+                or _FFMPEG_CODE.search(line) or _COMMAND_CODE.search(line))
+
+
+def _error_lines(stderr: str, log: str) -> list[str]:
+    """The lines that may say why it stopped, NEWEST FIRST: the console's (the exception that stopped the run is
+    printed there, and only there), then the log's ERROR lines (older soft errors of steps that went on)."""
+    return list(reversed(_console_errors(stderr))) + list(reversed(_log_errors(log)))
 
 
 def _tool_stop(stop: str) -> bool:
@@ -433,7 +449,7 @@ def _kind_reason(kind: str, line: str, extra: str = "") -> Reason:
         text = f"Windows did not let the run open {name} (another program has it open, or the folder is read-only)"
     elif kind == BROKEN_VIDEO and name:
         text = f"the video {name} is damaged or not complete, so FFmpeg could not read it"
-    elif kind == SETUP:
+    elif kind == SETUP and not extra:
         what = re.sub(r"\s*\((?:\w+Error|\w+Exception)\)$", "", plain_line(line))
         if what and len(what) < 140:
             text = f"{text} ({what})"
@@ -466,11 +482,20 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
     stop = (stop or "").strip()
     if _tool_stop(stop):                                     # WRONG PAIR ... -- plain already, with what to do
         return Reason(stop, "", TOOL_STOP, stop)
-    errs = _error_lines(stderr, log)
+    missing = _INPUT_MISSING.match(_clean(stop))             # cli's own "raw file not found: <path>"
+    if missing:
+        who = {"raw": "the RAW file", "competitor": "the competitor's file"}.get(missing.group(1).lower(),
+                                                                              "the voice-over file")
+        return Reason(f"{who} is not there any more ({missing.group(2).strip()})",
+                      f"put it back where it was (or drop the video again), then {TRY}", FILE_MISSING, stop)
+    # the newest first. The exception that stopped the run is printed only to the console ("match_cuts: ERROR: ..."):
+    # when it is there, it alone decides; the log's ERROR lines (soft errors of steps that went on) only otherwise
+    cons = list(reversed(_console_errors(stderr)))
+    errs = cons if any(_meaningful(ln) for ln in cons) else cons + list(reversed(_log_errors(log)))
     every = _lines(stderr) + _lines(log)
     # ffmpeg / ffprobe exit codes in the error lines (the newest first)
     prog: tuple[str, str, str] | None = None                # (kind, words, line)
-    for ln in reversed(errs):
+    for ln in errs:
         m = _FFMPEG_CODE.search(ln) or _COMMAND_CODE.search(ln)
         if not m:
             continue
@@ -495,8 +520,8 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
             return Reason(text, _todo_disk(drive or "C:"), DISK_FULL, _clean(pool)[:600], drive or "C:")
         step = _step(prog[2] if prog else disk_line)
         if not step:
-            step = _step(next((ln for ln in reversed(errs) if _step(ln)), ""))
-        nospace = next((ln for ln in reversed(errs) if "nospaceerror" in ln.lower()), "")
+            step = _step(next((ln for ln in errs if _step(ln)), ""))
+        nospace = next((ln for ln in errs if "nospaceerror" in ln.lower()), "")
         if nospace:
             return Reason(plain_line(nospace), _todo_disk(drive), DISK_FULL, _clean(nospace)[:600], drive)
         return Reason(_disk_text(drive, step), _todo_disk(drive), DISK_FULL, _clean(disk_line)[:600], drive)
@@ -509,14 +534,18 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
         return Reason(text, _todo_disk(drive), DISK_FULL, _clean(pool)[:600], drive)
     if prog and prog[0]:
         k, w, ln = prog
-        r = _kind_reason(k, ln, w)
+        # what FFmpeg's code adds, in words (its code name is for the log only); the kinds that say it all, without
+        extra = re.sub(r"\s*\((?:AVERROR_\w+|E[A-Z]+|exit -?\d+|0x[0-9A-Fa-f]+)\)$", "", w) \
+            if k in (BROKEN_VIDEO, SETUP, BAD_SETTING) else ""
+        r = _kind_reason(k, ln, extra)
+        r = replace(r, detail=f"{w}: {r.detail}"[:600])
         if k == CRASH:
             r = replace(r, text=f"{w} {_step(ln)}".strip(), todo=_TODO[CRASH])
         elif k == CLOSED:
             r = replace(r, text=f"FFmpeg was stopped {_step(ln)}".strip(), todo=_TODO[CLOSED])
         return r
     # Python / Windows errors in the error lines (the newest first); FFmpeg's own words for its exit code 1
-    for ln in reversed(errs):
+    for ln in errs:
         for kind, rx in _RULES:
             if rx.search(ln):
                 if kind == FILE_MISSING and re.search(r"\[winerror 2\] the system cannot find the file specified\s*$",
@@ -533,7 +562,7 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
     if code == 130 or any(_clean(ln).lower() in ("interrupted", "keyboardinterrupt") for ln in errs):
         return Reason(INTERRUPTED, TRY, CLOSED, "interrupted")
     fatal = next((ln.strip() for ln in reversed(_lines(stderr)) if ln.startswith("Fatal Python error:")), "")
-    best = next((ln for ln in reversed(errs) if _PY_ERROR.match(_clean(ln)) or _LOG_ERROR.match(ln)
+    best = next((ln for ln in errs if _PY_ERROR.match(_clean(ln)) or _LOG_ERROR.match(ln)
                  or _clean(ln).lower().startswith("stopped:")), "")
     if not best and stop and stop not in ("see the log", ABORT_WORDS) and not stop.startswith("Fatal Python error"):
         best = stop

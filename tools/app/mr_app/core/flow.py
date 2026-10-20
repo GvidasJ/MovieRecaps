@@ -531,10 +531,12 @@ def just_cuts_result(run_dir: Path, code: int | None, stderr: str = "", stopped:
         mine = [x for x in lines if x.lower().startswith("match_cuts:") and " details in " not in f" {x} "]
         stop = (mine[-1].split(":", 1)[1].strip() if mine else
                 plain_error("\n".join(lines)) if lines else f"the cuts were not made (exit {code})")
-        try:                                  # day 13: a full disk, a crash ... in plain words with what to do
-            from match_cuts import plain_reason
+        try:                                  # day 13: a full disk, a crash ... in plain words with what to do --
+            from match_cuts import plain_reason          # only for a technical line (its own plain words stay)
+            from .newvideo import _TECHNICAL
             why = plain_reason.explain(stderr=stderr or "", code=code, stop="")
-            if why.kind in (plain_reason.UNKNOWN, plain_reason.TOOL_STOP):
+            if why.kind in (plain_reason.UNKNOWN, plain_reason.TOOL_STOP) or not (
+                    _TECHNICAL.search(stop) or plain_reason.crash_words(code)):
                 why = None
         except Exception:  # noqa: BLE001 - the tool's module not importable here: its own line
             why = None

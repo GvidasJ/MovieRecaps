@@ -173,6 +173,42 @@ def test_an_unknown_stop_shows_the_last_error_line_of_match_cuts_log():
     assert r.line().endswith("Press Try again; if it stops the same way again, the full log: Open log")
 
 
+def test_the_exception_that_stopped_the_run_wins_over_an_older_error_in_the_log():
+    """cli prints the exception that stopped the run only to the console; the log's ERROR lines are older soft
+    errors of steps that went on."""
+    log = ("2026-10-20 00:11:00,123 ERROR match_cuts.pipeline people analysis failed: shape mismatch 3 vs 4\n"
+           "2026-10-20 00:11:02,000 ERROR match_cuts.pipeline speech map failed: [WinError 32] in use\n")
+    err = "match_cuts: ERROR: ValueError: the frame map is empty\nmatch_cuts: details in C:\\x\\match_cuts.log\n"
+    r = P.explain(err, log, code=2)
+    assert r.text == "the run stopped on a problem the app does not know yet: the frame map is empty (ValueError)"
+
+
+def test_the_words_have_no_technical_brackets_and_ffmpeg_is_spelled_right():
+    r = P.explain("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (4294967284): ffmpeg -i C:\\a.mp4 "
+                  "C:\\w\\b.mp4\n", code=2)
+    assert r.text == "the computer ran out of memory (RAM) while converting the RAW"
+    assert "ENOMEM" not in r.line() and "ENOMEM" in r.detail
+    r = P.explain("match_cuts: ERROR: RuntimeError: ffprobe failed (3199971767): ffprobe C:\\in\\clip.mp4\n", code=2)
+    assert r.text == ("a video file is damaged or not complete, so FFmpeg could not read it while reading a video "
+                      "(invalid data in the video)")
+    r = P.explain("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (3221225477): ffmpeg -i C:\\a.mp4 "
+                  "C:\\w\\b.mp4\n", code=2)
+    assert r.kind == P.CRASH and r.text.startswith("FFmpeg crashed (a memory access error") and \
+        r.text.endswith("while converting the RAW")
+    r = P.explain("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (3165764104): ffmpeg -c:v libx264 "
+                  "-i C:\\a.mp4 C:\\w\\b.mp4\n", code=2)
+    assert r.kind == P.SETUP and r.text == ("a part of the tool is missing or broken on this computer (an encoder "
+                                            "missing in this FFmpeg)")
+
+
+def test_a_missing_input_file_says_which_and_what_to_do():
+    r = P.explain("match_cuts: raw file not found: D:\\in\\Borat.mp4\n", code=2)
+    assert r.kind == P.FILE_MISSING and r.text == "the RAW file is not there any more (D:\\in\\Borat.mp4)"
+    assert r.todo.startswith("put it back where it was")
+    r = P.explain("match_cuts: competitor file not found: C:\\c\\short.mp4\n", code=2)
+    assert r.text.startswith("the competitor's file is not there any more")
+
+
 def test_the_tools_own_stops_stay_as_they_are():
     for stop in ("WRONG PAIR: the competitor's pictures are not in this RAW (0 of 16 frames found)",
                  "PICTURE NOT FOUND (sound found) -- the RAW may be a different cut",
