@@ -10,8 +10,12 @@ A new framing rule in `tools/match_cuts/match_cuts/export_xml_edl.py`, in its ow
 In plain words: every clip is looked at one RAW shot at a time (as the XML's Scene Edit Detection cuts it); the pieces
 of one take inside one RAW shot that show one framing are judged and moved together. When the person speaking there is
 **clear**, the picture slides sideways -- zoom kept, the window always covered -- so this person's face sits in the
-middle of the window. Each moved clip says so in its XML comment and in the run's end summary ("centred on the person
-speaking (RAW x ..., Light-ASD ..., ...% of the speech): the picture moved ... px sideways, zoom kept").
+middle of the window; when their face is cut off at the window's edge, only until it is inside with a little margin
+(a slide, not a jump onto another part of the picture: night 8's lesson from 021 S54 / S56, and video19's Family Guy
+doctor -- 85 px instead of 466 px, which would have pushed Lois, a face the detection does not find, out). Each moved
+clip says so in its XML comment and in the run's end summary ("centred on the person speaking (RAW x ..., Light-ASD
+..., ...% of the speech): the picture moved ... px sideways, zoom kept" / "slid onto the person speaking, cut off at
+the window's edge ...").
 
 "Clear" (Light-ASD, the person SPEAKING -- never just the biggest face) means all of:
 
@@ -40,8 +44,7 @@ replaced spot (B-roll / not in the RAW).
    speech / shots context, silence plan). Re-writing the XML from those inputs with the rule off gives check-all's
    day-12 framing scores exactly (all cases), so the replay with the rule on is what check-all will see. The XML's own
    hard checks (validate_premiere_exports, without the EDL and the speech map) were run on both XMLs: the rule adds no
-   hard-check failure anywhere. (Later cases were dumped faster: the cut list read from their day-12 run instead of
-   computing the segments stage again -- checked to replay the same scores.)
+   hard-check failure anywhere. (Four were dumped the fast way, see below.)
 2. **Pictures of every move** (RAW frame, the tool's window before = red, after = blue, yours = green, faces with
    their Light-ASD score): `work\t28\framing\pics\<tag>\<case>_moves.png`. Every move is onto the person speaking; none
    onto another person.
@@ -53,40 +56,37 @@ replaced spot (B-roll / not in the RAW).
 
 ## Results: check-all's framing column (clips framed as you did, within 40 px / 3 %)
 
-Exact replays (the planned XML written again from each case's saved inputs, rule on vs off; "hard checks" = the XML's
-own checks on both):
+All 15 keyed videos, replayed exactly (the planned XML written again from each case's saved inputs, rule on vs off;
+"hard checks" = the XML's own checks on both XMLs):
 
 | video | framing before -> after | clips the rule moved (RAW s: tool's px -> new; yours) | hard checks |
 |---|---|---|---|
 | video11 | 1/8 -> **2/8** | 30.1-32.8: -15 -> +211 (you +188: same) | unchanged |
 | video14 | 0/10 -> **4/10** | 45.1-53.2 (one shot, 4 clips): +0 -> -169 (you -154: same x4); 36.7-41.6: +402 -> +610 (you +651, closer); 30.1-32.7: +348 -> +476 (you +214: you left room on his right; the same man, now centred) | unchanged |
 | laptop013 | 1/6 -> **2/6** | 38.0-40.3: +0 -> +244 (you +228: same); 33.8-38.0: +0 -> -276 (you -361, closer); 41.3-41.9: +0 -> -394 (the man; next to yours in the picture, but check-all compares your clip there at a moment the tool cut out) | unchanged |
+| video021 | 8/21 -> 8/21 | none (wide shots, unclear speakers, replaced spots; the two-shot at 82 s and the laughing men at 54 s stay) | unchanged |
 | video6 | 9/9 -> 9/9 | none (a cartoon: the faces flicker) | unchanged (1 known FAIL) |
 | video12 | 4/16 -> 4/16 | none (long whip-pan takes: no clear speaker per take) | unchanged (1 known FAIL) |
 | video15 | 12/21 -> 12/21 | none (wide shots; the husband alone at Light-ASD 1.0) | unchanged |
 | video7 | 5/10 -> 5/10 | none (close-ups shown whole) | unchanged |
 | laptop010 | 11/13 -> 11/13 | none (the competitor centres its speakers already) | unchanged |
-| video8 / video9 / video10 | 4/11, 4/4, 5/6 -> the same | none | unchanged |
-| laptop004 (no key in the case; your project read) | 1/7 -> 1/7 | none (a cartoon, no clear speaker) | unchanged |
+| mike005 | 0/14 -> 0/14 | none | unchanged |
+| laptop009, chocolate, video8, video9, video10 | 15/16, 5/5, 4/11, 4/4, 5/6 -> the same | none | unchanged |
+| laptop004 (no framing key in the case: your project read) | 1/7 -> 1/7 | none (a cartoon, no clear speaker) | unchanged |
 
-**Together: 57 -> 63** clips framed as you did on these 12 (on check-all's keyed videos: +6, none worse).
+**check-all's keyed videos: 84/170 -> 90/170** (72/139 -> 74/139 on the 13 it had before video14 / video15); no clip of
+any video worse; no new hard-check failure.
 
-Not replayed exactly (the PC's memory was full from 08:20 on -- the lead's rule: a run of mine only with 30 GB free --
-so their saved inputs could not be made in time); a rough preview from their day-12 runs (the rule's guards on the
-day-12 XML, the captions as the speech, the competitor's window from the cut list) instead:
+(chocolate, laptop009, mike005 and 021 were dumped the fast way -- the PC's memory was full most of the morning and my
+runs only start with 30 GB free, the lead's rule: their cut list read from the day-12 run instead of computing the
+segments stage again; checked on video14, whose fast and full dumps replay identically.)
 
-| video | preview |
-|---|---|
-| chocolate, laptop009, video10 | nothing moves |
-| mike005 | 2 clips (10.7 s, 32.1 s) move 105-174 px onto the only person (the same person; you kept the middle there and zoomed to 62 %, so the score cannot change: 0/14 either way) |
-| 021 | 3 clips move, each onto the person speaking: 48.7 s the woman in the pool (you +104, the rule -101: still not yours), 50.6 s the man with the boy (you -470, the rule -266: closer), 70.9 s (not in your edit); the two-shot at 82 s and the laughing men at 54 s stay (the new guards). 8/21 either way |
-| unkeyed (video1, video5, video018, spiderman-school, zendaya-age) | 1-2 clips each, every one onto the person speaking (pictures) |
+Pictures: `work\t28\framing\pics\final\<case>_moves.png` (every move, three moments of each: the tool's window before =
+red, after = blue, yours = green, faces with their Light-ASD mean), the overviews of your own moves in
+`pics\<case>.png`, rough previews of the videos without a key in `pics\approx2\`.
 
-Pictures: `work\t28\framing\pics\v9\<case>_moves.png` (every exact move, three moments of each), the previews in
-`work\t28\framing\pics\approx2\` and `pics\approx2_sheet.png`, the overviews of your moves in `pics\<case>.png`.
-
-Your newest fixes as test cases (video16 Always Sunny, video20 mindculpt) had no stage caches on this PC yet (the
-lead's check-all had not reached them), so they could not be replayed; video18 / video19 (Family Guy) were queued.
+Your newest fixes as test cases (video16 Always Sunny, video20 mindculpt) had no stage caches on this PC (the lead's
+check-all had not reached them), so they could not be replayed.
 
 ## What I decided on my own (the user is away)
 
