@@ -303,3 +303,20 @@ def test_a_lone_face_needs_a_sure_speaker():
 
 def test_the_rule_is_on_by_default():
     assert ex.SPEAKER_CENTRE is True
+
+
+def test_a_speaker_cut_off_at_the_edge_is_slid_in_not_jumped_onto():
+    """The person speaking cut off at the window's edge (video19, Family Guy: the doctor at the right edge, Lois -- a
+    face the detection did not find -- at the left): the picture slides only until the face is inside with CUT_MARGIN
+    of its width to spare (85 px there), never a jump onto the face's centre (466 px there: Lois out of the window)."""
+    clip, sim = _clip(30.05, 32.83, V11_COMP, V11_BOX)
+    v0, v1 = (WIN[0] - sim.tx) / sim.s, (WIN[0] + WIN[2] - sim.tx) / sim.s
+    face = (v1 - 160.0, 100.0, v1 + 40.0, 400.0)                                  # 20 % past the right edge
+    sp = _ctx([_track(2, 30.05, 32.83, face, 3.6)], V11_RAW, 30.05, 32.83)
+    assert ex._speaker_centre([clip], sp, V11_RAW, WIN, FPS, V11_BOX, 250.0, Fraction(24000, 1001), []) == 1
+    new = clip.keys[0][1]
+    on = speakers.on_screen(new, face, V11_RAW[0], False)
+    margin = ex.CUT_MARGIN * (face[2] - face[0]) * sim.s
+    assert on[2] == pytest.approx(WIN[0] + WIN[2] - margin, abs=0.01)             # just inside, the margin kept
+    assert abs(new.tx - sim.tx) < 0.2 * WIN[2]                                     # a slide (71 px), not a jump
+    assert clip.person_note.startswith("slid onto the person speaking")
