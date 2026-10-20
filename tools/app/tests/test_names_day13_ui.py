@@ -210,6 +210,61 @@ def test_the_download_rows_say_their_folder_is_used_and_follow_a_move(tmp_path):
     assert it.project == new and it.name == new.name and refreshed == [it]
 
 
+def test_the_window_renames_after_a_title_change_and_retries_what_waited(qapp, tmp_path, monkeypatch):
+    from mr_app.core import locks
+    from mr_app.ui import main_window as MW
+    local, hub = tmp_path / "local", tmp_path / "hub"
+    hub.mkdir()
+    monkeypatch.setenv("MOVIERECAPS_PROJECTS", str(local))
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(PM, "state", lambda: PM.State())
+    monkeypatch.setattr(RN, "scan_places", lambda hub: [])
+    monkeypatch.setattr(NM, "root_len", lambda *roots: NM.ROOT_LEN)
+    monkeypatch.setattr(MW.BG, "call", lambda work, done=None, failed=None, **k: done(work()) if done else work())
+    base = NM.folder_base("First title", "2026-10-20")
+    p = PJ.create(local, competitor_url="https://youtu.be/AbCdEf12345", folder=base, names=NM.marker("headline"))
+    B.set_title(p.folder, "First title")
+    seen, toasts = [], []
+    page = SimpleNamespace(moved=lambda o, n: seen.append((o.name, n.name)), titles_changed=lambda f: None)
+    win = SimpleNamespace(settings=SimpleNamespace(save_to=str(hub)), pages={"match_cuts": page},
+                          toast=lambda t, k="ok": toasts.append((t, k)))
+    win.renamed = lambda res, said=False: MW.MainWindow.renamed(win, res, said)
+    win.project_moved = lambda o, n: MW.MainWindow.project_moved(win, o, n)
+    B.set_upload_title(p.folder, "The YouTube title 🎥")
+    lock = locks.WorkLock(p.folder, "edit")
+    lock.acquire()
+    try:
+        MW.MainWindow.title_changed(win, p.folder)                       # an edit runs in it: it waits
+        assert toasts[-1][1] == "note" and "waits" in toasts[-1][0] and seen == [] and RN.pending()
+    finally:
+        lock.release()
+    MW.MainWindow.retry_renames(win)                                      # the minute's retry renames it
+    want = "2026-10-20_The YouTube title 🎥"
+    assert seen == [(base, want)] and (local / want).is_dir() and RN.pending() == []
+    assert any("Renamed after its title" in t for t, _k in toasts)
+
+
+def test_a_new_video_rows_folder_follows_the_headline_after_its_template(tmp_path, monkeypatch):
+    from mr_app.core import flow
+    from mr_app.tools import download_tool as D
+    monkeypatch.setattr(PM, "state", lambda: PM.State())
+    monkeypatch.setattr(NM, "root_len", lambda *roots: NM.ROOT_LEN)
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))
+    p = PJ.create(tmp_path / "local", competitor_url="https://youtu.be/AbCdEf12345", name="Video by darkhumor",
+                  names=NM.marker(""))                                    # no title yet: the old way's name
+    it = D.Item("https://youtu.be/AbCdEf12345", raw_url="https://youtu.be/ZyXwVu98765", channel="LouLaughs",
+                title="When it finally\nworks 💀")
+    it.project = p.folder
+    monkeypatch.setattr(flow, "template_step", lambda proj, ch, title: proj.update(title=title, channel=ch))
+    named = []
+    th = D.StageThread(it, ("template",))
+    th.named.connect(lambda i, f: named.append(f))
+    out: dict = {}
+    th._template(out)                                                     # noqa: SLF001 - the stage as it runs
+    want = p.folder.with_name(f"{NM.day_of(p.folder.name)}_When it finally works 💀")
+    assert it.project == want and want.is_dir() and named == [str(want)] and "renamed" in out.get("rename", "")
+
+
 def test_the_window_tells_every_page_what_moved(qapp):
     from mr_app.ui import main_window as MW
     seen: list = []
