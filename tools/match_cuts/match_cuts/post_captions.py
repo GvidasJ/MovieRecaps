@@ -372,6 +372,68 @@ def pairs_fix(caps: Sequence[dict], words: Sequence[Sequence[Any]], fps: Fractio
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# a caption split only by the speaker rule's re-frame (day 13, the lead's final check-all: video14 16 -> 15)
+# ---------------------------------------------------------------------------------------------------------------------
+
+SPEAKER_RULE_NOTES = ("centred on the person speaking (RAW x", "slid onto the person speaking, cut off at the window's")
+
+
+def rule_cuts(xml: Any, fps: Fraction) -> set[int]:
+    """The caption cuts (captions.edit_cuts, rule 10) that are only day 13's speaker rule re-framing one competitor
+    clip at a RAW shot change inside its take: the same clip (label) on both sides, the source running on, one side
+    moved by the rule (its XML comment says so: export_xml_edl._speaker_centre). Your video14 fix re-frames at that
+    very shot change and keeps "in my face" whole across it; rule 10 had split it there (captions 16 -> 15 of 42).
+    Frames of ``fps``, as edit_cuts gives them; an empty set when the XML cannot be read."""
+    import math
+    import xml.etree.ElementTree as ET
+
+    from .export_xml_edl import parse_premiere_xml
+    try:
+        x = parse_premiere_xml(xml)
+        root = ET.parse(str(xml)).getroot()
+    except (OSError, ET.ParseError, KeyError, ValueError):
+        return set()
+    rate = Fraction(int(x.get("timebase") or 0)) * (Fraction(1000, 1001) if str(x.get("ntsc")).upper() == "TRUE" else 1)
+    if rate <= 0:
+        return set()
+    moved = set()
+    for ci in root.iter("clipitem"):
+        note = " ".join(str(e.text or "") for e in ci.iter() if str(e.tag).startswith("mastercomment"))
+        if any(s in note for s in SPEAKER_RULE_NOTES):
+            moved.add(str(ci.get("id")))
+    clips = sorted(x["clips"], key=lambda c: c["start"])
+    out = set()
+    for a, b in zip(clips, clips[1:]):
+        if (a["name"] == b["name"] and a["out"] == b["in"] and a["speed"] == b["speed"] and a["flip"] == b["flip"]
+                and a["motion"] != b["motion"] and a.get("label") == b.get("label")
+                and (str(a.get("id")) in moved or str(b.get("id")) in moved)):
+            out.add(int(math.floor(float(Fraction(b["start"]) * Fraction(fps) / rate) + 0.5)))
+    return out
+
+
+def rejoin(caps: Sequence[dict], at: set[int], fps: Fraction) -> tuple[list[dict], list[dict]]:
+    """Two spoken captions meeting exactly on one of ``at`` (rule_cuts) are one caption again -- as the caption step
+    made them before the speaker rule re-framed there -- when it keeps the caption rules (at most 20 characters and 4
+    words, 5 starting with a weak word; 2+ words at most 1.5 s on screen). Returns (the captions, what changed)."""
+    f = float(fps)
+    out = [dict(c) for c in caps]
+    done: list[dict] = []
+    i = 0
+    while i < len(out) - 1:
+        a, b = out[i], out[i + 1]
+        if int(a["end"]) == int(b["start"]) and int(a["end"]) in at and _spoken(a) and _spoken(b):
+            toks = _toks(a.get("text", "")) + _toks(b.get("text", ""))
+            if _fits_text(toks) and (len(toks) < 2 or (int(b["end"]) - int(a["start"])) / f <= MAX_ON_SCREEN_S + 1e-9):
+                was = f"{a.get('text')} | {b.get('text')}"
+                a.update(text=" ".join(toks), end=int(b["end"]))
+                out.pop(i + 1)
+                done.append({"was": was, "now": a["text"], "start": int(a["start"]), "end": int(a["end"])})
+                continue
+        i += 1
+    return out, done
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # the run's step (pipeline.stage_captions)
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -395,9 +457,13 @@ def run(ctx: Any) -> dict:
     fps = Fraction(str(cap.get("fps") or 60))
     xml = ctx.cfg.deliver / EDIT_XML
     words = cap.get("words_final") or cap.get("transcript") or []
-    cuts = edit_cuts(xml, fps) if xml.exists() else []
+    reframed = rule_cuts(xml, fps) if xml.exists() else set()
+    cuts = [c for c in (edit_cuts(xml, fps) if xml.exists() else []) if c not in reframed]
     stretches = [(int(o["a"]), int(o["b"])) for o in cap.get("other_video") or []]
     rows = sorted((dict(c) for c in cap["captions"]), key=lambda c: int(c["start"]))
+    rows, rejoined = rejoin(rows, reframed, fps)
+    if rejoined:
+        info["rejoined"] = rejoined
     rows, info["pairs"] = pairs_fix(rows, words, fps, cuts, stretches)
     voice_over = str(cap.get("source") or "").startswith("voice-over")
     sm = getattr(ctx, "speech", None)
@@ -407,7 +473,7 @@ def run(ctx: Any) -> dict:
         if pairs:
             info["offset_s"] = {"median": round(statistics.median(o - r for o, r in pairs), 3), "words": len(pairs)}
         rows, info["retimed"] = retime(rows, pairs, fps, cuts, stretches, int(cap.get("frames") or 0) or None)
-    if not info["pairs"] and not info["retimed"]:
+    if not info["pairs"] and not info["retimed"] and not info.get("rejoined"):
         cap["post"] = info
         return info
     keep = ("text", "start", "end", "mode", "start_tc", "end_tc")
@@ -423,6 +489,10 @@ def run(ctx: Any) -> dict:
     cap["placeholders"] = [c for c in cap["captions"] if c.get("mode") == "placeholder"]
     cap["post"] = info
     dump_json(cap, ctx.cfg.debug_dir / "captions.json")
+    if info.get("rejoined"):
+        log.info("captions: %d caption(s) whole again across a re-frame of the speaker rule inside one take (rule 10 "
+                 "had split them there; your video14 keeps them whole) -- %s", len(info["rejoined"]),
+                 "; ".join(f"'{d['was']}' -> '{d['now']}'" for d in info["rejoined"][:8]))
     if info["pairs"]:
         log.info("captions: %d pair(s) kept together (rule 9) -- %s", len(info["pairs"]),
                  "; ".join(f"'{d['was']}' -> '{d['now']}'" for d in info["pairs"][:8]))
