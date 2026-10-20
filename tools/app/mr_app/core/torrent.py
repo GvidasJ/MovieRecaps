@@ -1377,7 +1377,8 @@ class TorrentSession:
 
     def remove(self, job_id: str, delete_files: bool | None = None) -> None:
         """Stop and forget a job. An unfinished job's part-downloaded files are deleted (``delete_files``: None =
-        only when it did not finish); a finished download is never deleted."""
+        only when it did not finish); a finished download is never deleted -- nor (day 13) the files a job found
+        already in the folder (``checked``: maybe your earlier finished download, being checked)."""
         j = self._need(job_id)
         real = self._real_paths(j) if j.state != "finished" else {}     # asked before aria2c forgets the job
         for m in ("aria2.forceRemove", "aria2.removeDownloadResult"):
@@ -1387,8 +1388,8 @@ class TorrentSession:
                 pass
         unfinished = j.state != "finished"
         if delete_files is None:
-            delete_files = unfinished
-        if delete_files and unfinished:
+            delete_files = unfinished and not j.checked
+        if delete_files and unfinished and not j.checked:
             self._delete_parts(j, real)
         j.state = "removed"
         with self._lock:

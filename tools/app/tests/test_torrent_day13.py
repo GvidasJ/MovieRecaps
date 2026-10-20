@@ -190,6 +190,27 @@ def test_a_long_check_of_a_file_already_there_is_not_no_one_sharing(sess, tmp_pa
     assert st["state"] == "stalled" and st["error"].startswith("No one is sharing")
 
 
+def test_remove_never_deletes_a_file_that_was_already_there(sess, tmp_path):
+    """Remove during the check of a video found in the folder (maybe your earlier finished download): the job goes,
+    the file stays. A download this job started itself is still cleaned up as before."""
+    data = _data()
+    m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    f = dl / "Movie.2020.1080p.mkv"
+    f.write_bytes(data)
+    jid = sess.start(m, [0], dl)
+    assert sess.job(jid).checked
+    sess.remove(jid)
+    assert f.read_bytes() == data and sess.jobs() == []
+    dl2 = tmp_path / "dl2"
+    jid2 = sess.start(m, [0], dl2)                                            # nothing there: its own part file
+    part = dl2 / "Movie.2020.1080p.mkv"
+    part.write_bytes(b"half")
+    sess.remove(jid2)
+    assert not part.exists()
+
+
 def test_a_file_with_its_aria2_goes_on_as_before(sess, tmp_path):
     data = _data()
     m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])

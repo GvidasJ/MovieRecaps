@@ -15,7 +15,8 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
      (112), the tool's `NoSpaceError`, and an ffmpeg / ffprobe exit code that is −28 as unsigned 32-bit
      (**4294967268 = ENOSPC**; ffmpeg 7 exits with its own error code). The drive comes from the line — for an
      ffmpeg command line, the last path (the file it writes). Borat edit-2/3:
-     *"The disk C: is full (… GB free now): the run stopped while converting the RAW. Free space on C: (Board →
+     *"The disk C: ran out of space (only … GB free now — said while it is under 30 GB): the run stopped while
+     converting the RAW. Free space on C: (Board →
      Clean up), then press Try again."*
   3. **the worker pool's lost file** (`FileNotFoundError …\match_cuts_pool_…\state-4.pkl`): `visual_match._spawn_map`
      writes the pickled state of every parallel call into `%TEMP%\match_cuts_pool_*\state-N.pkl`, its spawn worker
@@ -65,7 +66,7 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
 - **History**: the plain line; older project.json entries with the tool's technical line are translated when shown
   (`plain_reason.plain_text`, text only — nothing is read on the window's thread); an old "details in …" alone
   becomes "The run stopped; the reason is in its log. Press Try again; the full log: Open log."
-- **problems_queue.md**: the entry's title carries the plain line ("stopped (exit 2) -- The disk C: is full …"); the
+- **problems_queue.md**: the entry's title carries the plain line ("stopped (exit 2) -- The disk C: ran out of space …"); the
   key log lines keep the technical lines for the night run, without the "details in" line.
 - the **Learn tab's "Problems to fix" cards**: older entries (the three Borat ones written by day 12's app, titled
   "details in …" / "ERROR: FileNotFoundError …") show the plain reason read from each entry's own key log lines
