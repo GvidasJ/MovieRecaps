@@ -1,4 +1,4 @@
-"""Stage 8 editorial exports (prompt Stage 8; DESIGN.md Â§5 export_xml_edl.py).
+"""Stage 8 editorial exports (prompt Stage 8; DESIGN.md §5 export_xml_edl.py).
 
 ``write_csv``         cutlist.csv -- one human-readable row per segment (the report's segment-table columns,
                       then machine-readable columns). The human-readable timecodes are ``common.timecode``
@@ -19,7 +19,7 @@ starts and FCP7 XML range markers on the sequence, both named ``'<TYPE> placehol
 
 Segments are sorted by ``comp_in``; each one becomes an event whose RECORD range is its own range trimmed
 at the next segment's ``comp_in`` (``rec_out = min(comp_out, next.comp_in)``), so events tile
-``[0, competitor frames)`` exactly. A crossfade (DESIGN Â§3: ``B.comp_in = O``, ``A.comp_out = O + D``)
+``[0, competitor frames)`` exactly. A crossfade (DESIGN §3: ``B.comp_in = O``, ``A.comp_out = O + D``)
 becomes a dissolve of ``D`` frames that STARTS at the edit point ``O`` (EDL: ``D`` event on B; XML: a
 ``transitionitem`` with ``alignment=start``), i.e. A continues for ``D`` frames under the dissolve using its
 handle -- exactly the linear AE opacity ramp. NOT-IN-RAW placeholders, dips and flashes are black events
@@ -30,8 +30,8 @@ Audio (:func:`audio_items`)
 RAW sync (``cutlist.settings.audio_sync`` = raw, the default) without audio lines: the audio follows the picture
 events (cuts only; J/L offsets are listed in cutlist.csv) -- XML audio clipitems at the video record ranges, EDL
 ``B`` events. Otherwise every audible segment gets its OWN audio event (XML audio clipitem, EDL ``A`` event after
-the video events, which become ``V``): competitor sync (DESIGN Â§7 D9, ``export_ae.audio_sync_params``) moves the
-range by round(switch baseline x fps) frames (+ the genuine J/L offsets) and plays RAW time tau + vÂ·g (the measured
+the video events, which become ``V``): competitor sync (DESIGN §7 D9, ``export_ae.audio_sync_params``) moves the
+range by round(switch baseline x fps) frames (+ the genuine J/L offsets) and plays RAW time tau + v·g (the measured
 A/V offset); a segment whose audio follows an audio line (FX-14: video-only retime / uncertain / placeholder over
 continuous audio) plays that line. Editorial formats address whole frames: the source in is the NEAREST RAW frame
 of the exact RAW time and the remainder (ms, < half a RAW frame) is written next to the event (XML clip comment,
@@ -41,7 +41,7 @@ Time conventions
 ----------------
 * Record timecode: competitor frame index counted at the nominal competitor rate, NDF, from 00:00:00:00.
 * Source timecode: RAW frame index counted at the nominal RAW rate ``round(raw_fps)``, NDF (RAW frame 0 =
-  00:00:00:00). The source-in frame of an event is the AE-rule frame (DESIGN Â§2.1) at its record-in.
+  00:00:00:00). The source-in frame of an event is the AE-rule frame (DESIGN §2.1) at its record-in.
 * EDL speed: ``M2 = v * raw_fps * nominal(comp) / comp_fps`` source-TC frames per record-TC second -- equal
   to DESIGN's ``speed * raw_fps`` for integer competitor rates (the synthetic test and every TikTok/Shorts
   edit); for NTSC competitor rates it keeps same-rate normal speed at the nominal value (30.000, no M2).
@@ -99,7 +99,7 @@ def _nominal(fps: Fraction) -> int:
 
 
 def _ae_frame(raw_in: float, v: float, k: int, comp_in: int, comp_fps: Fraction, raw_fps: Fraction) -> int:
-    """AE sampling rule (DESIGN Â§2.1) -- phase_solve.ae_frame when available, else the identical expression."""
+    """AE sampling rule (DESIGN §2.1) -- phase_solve.ae_frame when available, else the identical expression."""
     try:
         from .phase_solve import ae_frame
     except ImportError:  # pragma: no cover - phase_solve is a sibling module
@@ -415,7 +415,7 @@ def audio_sync_info(cutlist: Cutlist) -> dict:
 def audio_items(cutlist: Cutlist) -> list[AudioItem]:
     """The audio events of the XML / EDL (module docstring): one per segment that plays RAW audio (its own map or
     its audio line, render_preview.audio_segment), in competitor sync over [comp_in + in_offset, comp_out +
-    out_offset) + the switch shift with RAW time tau + vÂ·g, in raw sync over its picture record range; clipped to
+    out_offset) + the switch shift with RAW time tau + v·g, in raw sync over its picture record range; clipped to
     [0, competitor frames). Empty when the audio simply follows the picture events (raw sync, no audio line)."""
     from .render_preview import audio_segment
     info = audio_sync_info(cutlist)
@@ -445,8 +445,8 @@ def audio_items(cutlist: Cutlist) -> list[AudioItem]:
         k0, k1 = max(0, k0), min(n_total, k1)
         if k1 <= k0:
             continue
-        # the RAW time at record frame k0: the segment's own map + vÂ·g (the switch shift moves the RANGE only, exactly
-        # like export_ae's twins and build_audio; a remap curve plays g later: its value at k0 + gÂ·fps)
+        # the RAW time at record frame k0: the segment's own map + v·g (the switch shift moves the RANGE only, exactly
+        # like export_ae's twins and build_audio; a remap curve plays g later: its value at k0 + g·fps)
         if a.time_remap_keys:
             tau = _remap_seconds(a.time_remap_keys, float(k0) + g * float(comp_fps))
             v = seg_speed(a, comp_fps)
@@ -882,7 +882,7 @@ def _fill_transform(sim: Sim, flip: bool, box: Box, raw_wh: tuple[float, float],
 
 
 def _own_box(seg: Segment) -> Box | None:
-    """The segment's own layout box (Segment.box, DESIGN Â§7 D1) when valid, else None."""
+    """The segment's own layout box (Segment.box, DESIGN §7 D1) when valid, else None."""
     if not seg.box:
         return None
     try:
@@ -1228,7 +1228,7 @@ def write_fcp7_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None) -
 # source <in> x speed); the plan (PremiereClip) keeps source time and only the writer / readers convert.
 #
 # Framing: the region of the RAW the competitor shows inside its box (the segment's own box -- a fullscreen period,
-# DESIGN Â§7 D1 -- else the layout box) is mapped onto the template window by ONE uniform scale + translation (box
+# DESIGN §7 D1 -- else the layout box) is mapped onto the template window by ONE uniform scale + translation (box
 # centre -> window centre, the scale that makes the box cover the window): RAW -> sequence = A o Sim. Where the RAW
 # does not cover the whole window under that map (a shot the competitor letterboxed / showed small) the clip is
 # zoomed about the window centre by the least factor that covers it, at most premiere_max_zoom (1.05); one factor
