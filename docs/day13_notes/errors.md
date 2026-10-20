@@ -118,7 +118,9 @@ So `core/torrent.py` now, before giving a download to aria2c (`_prepare_existing
   sharing": aria2c 1.37's `verifiedLength` counts as progress, and for an aria2c that says nothing while it checks
   the stall time grows by the file's size at 20 MB/s (`CHECK_BPS`).
 - **Remove never deletes a file the job found already in the folder** (it may be your earlier finished download,
-  being checked) — before, Remove on an unfinished job deleted its chosen files whatever they were.
+  being checked: `Job.found`, with its .aria2) — before, Remove on an unfinished job deleted its chosen files
+  whatever they were; a part file the job started itself is still deleted.
+- Resume after aria2c's error 13 checks again (with aria2c's own paths), so the advice "press Resume" works.
 - the free-space check (`check_space`) does not count what is already in the folder (the next Short of the same film
   on a nearly full disk was refused although nothing had to be downloaded).
 - **The .aria2 next to the download over a network folder**: nothing in the app moves or deletes it (Clean up does
@@ -137,6 +139,22 @@ aria2c daemon (`--enable-rpc=true`) a test starts through subprocess, so a futur
 it on a real aria2c started with the app's own command line). The app's own aria2c is unchanged (it needs the
 internet). My two early experiments (before the request) ran aria2c without it — probably the source of that window.
 
+## Checked on real data, and an independent review
+
+- **Real logs on this PC** (read-only: 742 consoles in output\, input\downloads\, D:\Shared\Projects,
+  D:\Shared\problems and earlier nights' work\t2*): 25 stopped runs — 11 "The disk C: ran out of space: the run
+  stopped while converting the RAW …" (day 12's own runs when C: filled), 11 WRONG PAIR and 1 PICTURE NOT FOUND
+  exactly as the tool said them, 2 "The run stopped without saying why …" (runs you stopped). It found one bug,
+  fixed: a console read back from batch_console.log gave its own command line as the reason.
+- **Rendered offscreen** (the real queue row and torrent card, pictures in `work\t28\errors\shots`): fixed the
+  wording "full (90 GB free now)" and a nested-bracket torrent note.
+- **A review sub-agent** read the whole diff (read-only) and found 10 points; all fixed, each with a test: a crash
+  code beat by an older soft error; Try again dropping "Run anyway" (`--force-inputs`); an older pool line counted;
+  Python's exit noise after "Run folder:" taken as the reason; UNC paths losing a backslash; download errors given
+  the edit's advice; "(NoSpaceError)" in the words and History re-explaining a plain line; the torrent space check
+  counting a same-name other file; Remove keeping a job's own part file when only a sample was there (now: it keeps
+  exactly the chosen files that were in the folder before the job); Resume after error 13 not checking again.
+
 ## Decisions (the user is away)
 
 1. The shared function lives in the tool (`match_cuts/plain_reason.py`), not in the app: the batch summary needs the
@@ -147,7 +165,8 @@ internet). My two early experiments (before the request) ran aria2c without it �
 4. A disk-full line anywhere in the console or log wins over a later error (it is the root of the cascade: lost
    pool files, ffmpeg failures, logging errors).
 5. Queue rows get a **Try again** button only for stops that are not the input's fault (not WRONG PAIR / the input
-   checks — those have Run anyway), so the "press Try again" advice is true everywhere.
+   checks — those have Run anyway), so the "press Try again" advice is true everywhere; it runs the same video in
+   the same mode as its next take, and a row you had run anyway is run anyway again.
 6. A same-size or smaller file whose sampled pieces are all wrong counts as "not this torrent's" → renamed, never
    overwritten; a smaller file with nothing checkable (shorter than one piece) is renamed too; a same-size file with
    nothing checkable (under 2 pieces) is checked by aria2c.
@@ -165,13 +184,13 @@ internet). My two early experiments (before the request) ran aria2c without it �
 
 ## Tests
 
-- tool: `tools/match_cuts/tests/test_day13_errors.py` (17 tests: the Borat lines, errno/AVERROR/crash codes, tool
+- tool: `tools/match_cuts/tests/test_day13_errors.py` (22 tests: the Borat lines, errno/AVERROR/crash codes, tool
   stops kept, never a traceback / library warning, the stopping message decides, the log's last ERROR line, no
-  technical brackets, a missing input, plain_text, the batch summary).
-- app: `tools/app/tests/test_errors_day13.py` (14: read_result, short, problems entry, project.json, History, the
-  New video words, Just cuts, the app's conversion, the real queue row with Try again, the report dialog),
-  `test_errors_day13_newvideo.py` (1: the real New video row), `test_errors_day13_learn.py` (2: the Learn tab's old
-  Borat entries) and `tools/app/tests/test_torrent_day13.py` (21: escaping / old name / piece check, the fake-engine
+  technical brackets, a missing input, a console read back, the review's cases, plain_text, the batch summary).
+- app: `tools/app/tests/test_errors_day13.py` (15: read_result, short, problems entry, project.json, History, the
+  New video words, Just cuts, the app's conversion, the real queue row with Try again (also after Run anyway), the
+  report dialog), `test_errors_day13_newvideo.py` (1: the real New video row), `test_errors_day13_learn.py` (2: the
+  Learn tab's old Borat entries) and `tools/app/tests/test_torrent_day13.py` (24: escaping / old name / piece check, the fake-engine
   options and notes, error 13 once, every aria2 code, the card's note, old jobs.json, the space check, the long check,
   Remove keeps a file that was there, 127.0.0.1-only aria2c; **real aria2c on 127.0.0.1**: the next Short of the
   same film (a folder torrent downloaded once, added again with nobody sharing, with and without its .aria2) finished
@@ -182,6 +201,6 @@ internet). My two early experiments (before the request) ran aria2c without it �
   (`find_aria2c`: 1.19.0 from `C:\aria2` on this PC today; 1.37.0 from `tools\app\bin` once setup_app has run). Run
   both ways today: on 1.19.0 and with `MOVIERECAPS_ARIA2C=<scratch>\aria2_137\aria2c.exe` (the official 1.37.0, the
   app's real version, fetched with setup_app's own `install_aria2c`): `test_torrent_day13.py`, `test_torrent.py`,
-  `test_integrate_day12.py` — 62 passed on each. Where the two differ, both are handled: 1.19 gives error 13 with an
+  `test_integrate_day12.py` — all passed on each (67 with the final code on 1.37.0). Where the two differ, both are handled: 1.19 gives error 13 with an
   empty errorMessage (the code alone is enough), writes the .aria2 only at its save interval (the UNC test saves every
   second), and reports no check progress (the stall time by the file's size).
