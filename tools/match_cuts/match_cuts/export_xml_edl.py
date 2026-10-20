@@ -3379,8 +3379,9 @@ def edit_fix_lines(followed: Sequence[dict], end_cut: dict | None, fps: Fraction
     if followed:
         at = ", ".join(f"{short(m['clips'])} at {_tc(where(int(m['to'])) if where else int(m['to']), fps)}"
                        for m in followed)
-        out.append(f"A1 starts and ends with its V1 clip at {len(followed)} cut(s) moved onto the RAW's shot change "
-                   f"(the sound was cut a frame off the picture there): {at}")
+        out.append(f"A1 now starts and ends with its V1 clip at {len(followed)} cut(s) moved a frame onto the RAW's "
+                   f"shot change (before: the sound cut a frame off its picture, the note \"A1 range is not a V1 cut "
+                   f"range\"): {at}")
     if end_cut:
         k = int(end_cut["frames"])
         out.append(f"{k} flash frame{'' if k == 1 else 's'} removed at {_tc(int(end_cut['at']), fps)} "
