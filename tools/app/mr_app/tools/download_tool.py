@@ -1488,6 +1488,10 @@ class DownloadPage(QWidget):
             if not getattr(job, "_mr_kept", False) and job.id:
                 job._mr_kept = True                        # noqa: SLF001 - once the id is known
                 keep()
+            note = str(st.get("note") or "")
+            if "renamed to" in note and getattr(job, "_mr_note", "") != note:
+                job._mr_note = note                        # noqa: SLF001 - day 13: an old file renamed "(old)":
+                self.toast(note, "note")                   # said once (the card inside the row says it too)
             if it.torrent_job is job and it.state == WORKING:
                 self._torrent_progress(it, st)
 

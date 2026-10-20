@@ -603,7 +603,7 @@ class TorrentCard(W.Card):
             self.pill.set("PAUSED", theme.pill_colours("waiting"))
             self.bar.state("waiting")
             self.pause_btn.setText("Resume")
-            self.note.hide()
+            self._say(st.get("note", ""), theme.MUTED)      # day 13: a file already there, checked / renamed
         elif state in ("stalled", "failed"):
             self.pill.set("STOPPED" if state == "stalled" else "FAILED",
                           theme.pill_colours("note" if state == "stalled" else "FAIL"))
@@ -614,7 +614,7 @@ class TorrentCard(W.Card):
             self.pill.set("DOWNLOADING", theme.pill_colours("running"))
             self.bar.state("running")
             self.pause_btn.setText("Pause")
-            self.note.hide()
+            self._say(st.get("note", ""), theme.MUTED)
 
     def _finished(self, st: dict) -> None:
         if self._done:
@@ -633,6 +633,7 @@ class TorrentCard(W.Card):
         folder = str(st.get("save_dir", ""))
         self.foot_right.setToolTip(folder)
         self.foot_right.setText(folder if len(folder) <= 48 else folder[:20] + "…" + folder[-27:])
+        self._say(st.get("note", ""), theme.MUTED)          # day 13: "already complete -- nothing downloaded again"
         self._line, self._line_hot = theme.GREEN_LINE, theme.GREEN
         self.update()
 

@@ -291,6 +291,85 @@ def _safe(name: str) -> str:
     return name
 
 
+_WIN_BAD = set('"*:<>?\\|')
+
+
+def aria2_escape(part: str) -> str:
+    """One name of a torrent's path as aria2c writes it on Windows (its util::escapePath): control characters and
+    the characters Windows forbids in names ( " * : < > ? \\ | ) become %XX."""
+    return "".join(f"%{ord(c):02X}" if ord(c) < 0x20 or ord(c) == 0x7F or c in _WIN_BAD else c for c in part)
+
+
+def aria2_path(meta: "Meta", save_dir: str | Path, index: int) -> Path:
+    """Where aria2c itself writes file ``index`` on Windows (names escaped like aria2c does: 'a:b' -> 'a%3Ab')."""
+    f = meta.files[index]
+    parts = [aria2_escape(p) for p in f.path.split("/") if p]
+    base = Path(save_dir)
+    return base.joinpath(*parts) if meta.single else base.joinpath(aria2_escape(meta.name), *parts)
+
+
+def control_file(meta: "Meta", save_dir: str | Path) -> Path:
+    """aria2c's progress file of a download: <save>\\<file>.aria2 for one file, <save>\\<name>.aria2 for a folder."""
+    base = Path(save_dir)
+    top = aria2_escape(meta.files[0].path if meta.single and meta.files else meta.name)
+    return base / f"{top}.aria2"
+
+
+def old_name(path: str | Path) -> Path:
+    """'<name> (old)<ext>' next to it -- '(old 2)', '(old 3)' ... when that is taken too."""
+    p = Path(path)
+    k = 1
+    while True:
+        cand = p.with_name(f"{p.stem} (old){p.suffix}" if k == 1 else f"{p.stem} (old {k}){p.suffix}")
+        if not cand.exists():
+            return cand
+        k += 1
+
+
+def _pieces(meta: "Meta") -> tuple[int, bytes]:
+    """(piece length, the 20-byte SHA-1 of every piece) of the torrent; (0, b'') when it cannot be read."""
+    try:
+        info = bdecode(meta.torrent)[b"info"]
+        return int(info[b"piece length"]), bytes(info[b"pieces"])
+    except Exception:  # noqa: BLE001 - no piece list: nothing can be checked here
+        return 0, b""
+
+
+SAMPLE_PIECES = 32                      # pieces read to tell whether a file on disk is this torrent's (a part of it)
+SAMPLE_BYTES = 256 * 1024 ** 2          # ... at most this much read
+
+
+def file_matches(meta: "Meta", index: int, path: str | Path, size: int | None = None) -> bool | None:
+    """Is the file at ``path`` (``size`` bytes of it, from its start) torrent file ``index`` or a part of it? Up to
+    SAMPLE_PIECES of the pieces that lie whole inside it are read and compared with the torrent's own SHA-1s:
+    True at the first one that matches, False when none does, None when no piece lies whole inside it (too short
+    to tell). A part-downloaded file has holes (zeros) where pieces are missing: one right piece is enough."""
+    plen, hashes = _pieces(meta)
+    if plen <= 0 or not hashes:
+        return None
+    off = sum(f.size for f in meta.files[:index])
+    total = meta.total
+    have = int(size if size is not None else Path(path).stat().st_size)
+    end = off + min(have, meta.files[index].size)
+    first = -(-off // plen)
+    cands = [k for k in range(first, len(hashes) // 20) if min((k + 1) * plen, total) <= end]
+    if not cands:
+        return None
+    n = min(len(cands), SAMPLE_PIECES, max(1, SAMPLE_BYTES // plen))
+    pick = sorted({cands[round(i * (len(cands) - 1) / max(1, n - 1))] for i in range(n)})
+    try:
+        with open(path, "rb") as fh:
+            for k in pick:
+                a = k * plen
+                fh.seek(a - off)
+                chunk = fh.read(min((k + 1) * plen, total) - a)
+                if hashlib.sha1(chunk).digest() == hashes[20 * k:20 * k + 20]:
+                    return True
+    except OSError:
+        return None
+    return False
+
+
 def inside(base: str | Path, path: str | Path) -> bool:
     """``path`` is inside the folder ``base`` (after "..", drive letters and full paths are resolved): a torrent's
     names never lead out of the save folder."""
@@ -603,6 +682,7 @@ class Aria2:
                     "--enable-dht=true", "--bt-enable-lpd=true", "--enable-peer-exchange=true",
                     "--max-concurrent-downloads=8", "--summary-interval=0", "--console-log-level=error",
                     "--check-certificate=false", "--disable-ipv6=false",
+                    "--allow-overwrite=false", "--auto-file-renaming=false",     # never truncate a file there
                     f"--log={self.folder / 'aria2.log'}", "--log-level=notice",
                     f"--dir={self.folder}"]
             if lp:
@@ -669,11 +749,132 @@ class Aria2:
         self.proc = None
 
 
-# aria2's error codes -> plain words
-_ARIA2_ERRORS = {
-    9: "disk", 17: "io", 16: "create", 18: "folder", 26: "corrupt", 27: "magnet", 12: "duplicate",
-    13: "exists", 2: "timeout", 6: "network",
+# aria2's error codes (its manual, "EXIT STATUS"; the same numbers are a download's errorCode) -> what happened, what
+# to do -- in plain words. {folder} is the save folder, {drive} its drive. Resume = the card's button (the New video
+# row's Try again resumes the same download).
+RESUME = "then press Resume"
+ARIA2_ERRORS: dict[int, tuple[str, str]] = {
+    1: ("The torrent program hit a problem it could not name", f"Press Resume to try again; if it stops again, "
+                                                               f"Remove the download and add the torrent again."),
+    2: ("The other computers stopped answering (a time-out)", f"Check the internet connection, {RESUME}."),
+    3: ("The file was not found on the other side (it is not shared any more)",
+        "Try again later, or use another torrent."),
+    4: ("The file was not found on the other side, again and again (it is not shared any more)",
+        "Try again later, or use another torrent."),
+    5: ("The download was too slow, so it was stopped", "Press Resume; if it stays slow, use a torrent with more "
+                                                        "seeders."),
+    6: ("A network problem stopped the download", f"Check the internet connection, {RESUME}."),
+    7: ("The torrent program was closed before the download finished", "Press Resume: it goes on from where it was."),
+    8: ("The other side cannot go on with a half download", "Remove the download and add the torrent again."),
+    9: ("The disk is full{free}", f"Free some space on {{drive}} (Board → Clean up), {RESUME}."),
+    10: ("The progress file next to the download (.aria2) belongs to another torrent with the same name",
+         "Move the old file and its .aria2 file out of {folder} (or Remove this download), then add the torrent "
+         "again."),
+    11: ("This file is already being downloaded by another download in the list",
+         "Wait for that one to finish, or Remove one of the two."),
+    12: ("This torrent is already downloading in the list", "Use the one already in the list, or Remove one of the "
+                                                            "two."),
+    13: ("The video is already in the download folder, but its progress file (.aria2) is missing, so it could not be "
+         "checked", "Press Resume: the app checks the file against the torrent first (the right parts are kept)."),
+    14: ("A file with the same name is in the way and could not be renamed",
+         f"Move or rename it in {{folder}}, {RESUME}."),
+    15: ("The file already in the download folder could not be opened (another program has it open, or it is "
+         "read-only)", f"Close the program that uses it (Premiere, a video player), {RESUME}."),
+    16: ("The download's file could not be made in {folder} (no permission, or the folder is read-only)",
+         f"Check that the folder can be written (and the network, for a shared folder), {RESUME}."),
+    17: ("The download could not be written to {folder} (a disk or network error)",
+         f"Check the disk (and the network, for a shared folder), {RESUME}."),
+    18: ("The download's folder could not be made in {folder}",
+         f"Check that the folder can be written (and the network, for a shared folder), {RESUME}."),
+    19: ("The trackers' addresses could not be looked up (no internet, or a name-lookup problem)",
+         f"Check the internet connection, {RESUME}."),
+    20: ("The download list (Metalink) is broken", "Add the torrent again."),
+    21: ("An FTP server refused a command", "Try again later."),
+    22: ("A web server answered in a way that could not be read", "Try again later."),
+    23: ("A web address led to too many other addresses", "Use another link."),
+    24: ("A web server asked for a login", "Use another link."),
+    25: ("This .torrent file is broken", "Download the .torrent again."),
+    26: ("This .torrent file is broken or not complete", "Download the .torrent again."),
+    27: ("This magnet link is broken", "Copy the whole link again."),
+    28: ("The app gave the torrent program a setting it does not know (an old aria2c?)",
+         r"Run setup_app.py again (in PowerShell: .venv\Scripts\python tools\app\setup_app.py), then press Resume."),
+    29: ("The other side is busy (overloaded or in maintenance)", "Try again later."),
+    30: ("The app and the torrent program could not understand each other", "Restart the app, then press Resume."),
+    31: ("The torrent program hit a problem it could not name", "Press Resume to try again."),
+    32: ("The downloaded file did not pass its check (its checksum is wrong)",
+         "Press Resume to download the bad parts again; if it happens again, use another torrent."),
 }
+# what aria2c's errorMessage says (the Windows cause it quotes) wins over the bare code -> the code it means
+_EXISTS_RX = re.compile(r"control file\s*\(\*\.aria2\) does not exist|exists, but a control file", re.I)
+_ARIA2_MESSAGES: list[tuple[re.Pattern, int | str]] = [
+    (re.compile(r"not enough (?:disk )?space|no space left|disk (?:is )?full|there is not enough space", re.I), 9),
+    (_EXISTS_RX, 13),
+    (re.compile(r"being used by another process|locked a portion of the file", re.I), "busy"),
+    (re.compile(r"network path was not found|network name is no longer available|unexpected network error|"
+                r"network name cannot be found|semaphore timeout", re.I), "network"),
+    (re.compile(r"access is denied|permission denied|read-only", re.I), "denied"),
+    (re.compile(r"cannot find the path specified|no such file or directory", re.I), "path"),
+    (re.compile(r"already registered|same info ?hash", re.I), 12),
+    (re.compile(r"piece length", re.I), 10),
+    (re.compile(r"bad magnet|magnet uri", re.I), 27),
+    (re.compile(r"bencode|bad \.torrent|torrent file", re.I), 26),
+    (re.compile(r"name resolution|could not resolve|getaddrinfo", re.I), 19),
+    (re.compile(r"timeout|timed out", re.I), 2),
+]
+_ARIA2_CAUSE = {
+    "busy": ("Windows did not let the download open its file in {folder}: another program has it open",
+             f"Close the program that uses it (Premiere, a video player, an Explorer preview), {RESUME}."),
+    "network": ("The shared folder {folder} could not be reached (the network connection dropped)",
+                f"Check that the PC is on and the shared folder opens in Explorer, {RESUME}."),
+    "denied": ("Windows did not allow writing the download into {folder} (no permission, or it is read-only)",
+               f"Choose another folder in Settings → \"Save torrents to\" (or fix the folder's permissions), {RESUME}."),
+    "path": ("The download folder {folder} is not there any more (moved, renamed, or a network folder that dropped)",
+             f"Check the folder (Settings → \"Save torrents to\"), {RESUME}."),
+}
+
+
+def plain_aria2(code: int | None, message: str = "", folder: str | Path | None = None) -> str:
+    """One aria2c error (its errorCode 1-32 and errorMessage) as what happened + what to do, in plain words -- never
+    aria2c's own sentence. The Windows cause it quotes (no space, a file in use, no permission, a network folder
+    gone) wins over the bare code."""
+    msg = str(message or "")
+    key: int | str | None = None
+    for rx, k in _ARIA2_MESSAGES:
+        if rx.search(msg):
+            key = k
+            break
+    if key is None:
+        try:
+            key = int(code or 0) or None
+        except (TypeError, ValueError):
+            key = None
+    where = str(folder) if folder else "the download folder"
+    drive = drive_name(folder) if folder else "the disk"
+    if key == 9:
+        free = free_space(folder) if folder else None
+        what, todo = ARIA2_ERRORS[9]
+        return (what.format(free=f" (only {human_size(free)} free)" if free is not None else "") + ". " +
+                todo.format(drive=drive))
+    if isinstance(key, str):
+        what, todo = _ARIA2_CAUSE[key]
+    elif key in ARIA2_ERRORS:
+        what, todo = ARIA2_ERRORS[key]
+    else:
+        what, todo = ("The download stopped" + (f" (aria2 error {code})" if code else ""), "Press Resume to try "
+                                                                                          "again.")
+    return f"{what.format(folder=where)}. {todo.format(folder=where, drive=drive)}"
+
+
+_OLD_STOPPED = "The download stopped: "         # day 12's fallback: "The download stopped: <aria2c's message>. ..."
+
+
+def _exists_error(st: dict) -> bool:
+    """aria2c's "File exists, but a control file (*.aria2) does not exist" (error 13)."""
+    try:
+        code = int(st.get("errorCode", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return code == 13 or bool(_EXISTS_RX.search(str(st.get("errorMessage", "") or "")))
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -700,6 +901,11 @@ class Job:
     sharing: bool = False           # Settings -> keep sharing, when it started
     done: int = 0                   # bytes, last seen
     seeders_max: int = 0
+    note: str = ""                  # day 13: what happened to files already in the folder, in plain words
+    checked: bool = False           # added with check-integrity (its files were there without their .aria2)
+    rechecked: bool = False         # aria2c said "File exists, but a control file does not exist": added again
+    fetched: bool = False           # something was downloaded (peers / speed seen) -- else a check found it complete
+    renamed: str = ""               # the "(old)" renames of the note, kept when the note changes
 
 
 class TorrentSession:
@@ -745,6 +951,8 @@ class TorrentSession:
                 job = Job(**{k: v for k, v in j.items() if k in Job.__dataclass_fields__})
             except TypeError:
                 continue
+            if job.error.startswith(_OLD_STOPPED):       # day 12's words kept aria2c's own sentence: said plainly
+                job.error = plain_aria2(None, job.error[len(_OLD_STOPPED):], job.save_dir)
             self._jobs[job.id] = job
 
     def _save(self) -> None:
@@ -899,33 +1107,117 @@ class TorrentSession:
 
     def check_space(self, meta: Meta, indexes: Iterable[int], save_dir: str | Path) -> int:
         """The bytes free on the save folder's disk; TorrentError in plain words when the chosen files + a margin
-        do not fit (or nothing is chosen, or the folder cannot be reached)."""
+        do not fit (or nothing is chosen, or the folder cannot be reached). What is already in the folder (day 13:
+        checked in place, not downloaded again) is not counted; nothing left to download needs no space."""
         ix = [i for i in indexes if 0 <= i < len(meta.files)]
         if not ix:
             raise TorrentError("Tick at least one file to download.")
-        need = meta.size_of(ix)
+        need = max(0, meta.size_of(ix) - self._already_there(meta, ix, save_dir))
         free = self.free(Path(save_dir))
         if free is None:
             raise TorrentError(f"The save folder {save_dir} cannot be reached. Check the network or choose another "
                                "folder in Settings.")
-        if need + margin(need) > free:
+        if need and need + margin(need) > free:
             raise TorrentError(f"Not enough free space on {drive_name(save_dir)}: the chosen files need "
                                f"{human_size(need)} (+{human_size(margin(need))} to spare), but only "
                                f"{human_size(free)} is free. Free some space or choose fewer files.")
         return free
 
+    @staticmethod
+    def _already_there(meta: Meta, indexes: Iterable[int], save_dir: str | Path) -> int:
+        """Bytes of the chosen files already in the save folder (a download that finished before, or a part of it):
+        they are checked in place, not downloaded again (day 13) -- the free-space check does not count them. A file
+        bigger than the torrent's counts 0 (it is renamed "(old)" and the video fetched fresh)."""
+        have = 0
+        for i in indexes:
+            try:
+                p = aria2_path(meta, save_dir, i)
+                if p.is_file():
+                    s = p.stat().st_size
+                    have += s if s <= meta.files[i].size else 0
+            except (OSError, IndexError):
+                continue
+        return have
+
     # -- the download --------------------------------------------------------------------------------------------------
 
-    def _options(self, job: Job, paused: bool = False) -> dict:
+    def _options(self, job: Job, paused: bool = False, check: bool = False) -> dict:
         o = {"dir": job.save_dir, "select-file": ",".join(str(i + 1) for i in sorted(job.indexes)),
-             "gid": job.id, "continue": "true"}
+             "gid": job.id, "continue": "true", "allow-overwrite": "false", "auto-file-renaming": "false"}
         if job.sharing:
             o["seed-ratio"] = "1.0"
         else:
             o["seed-time"] = "0"
+        if check:                         # day 13: files there without their .aria2 -- checked, never truncated
+            o["check-integrity"] = "true"
+            o["bt-hash-check-seed"] = "true" if job.sharing else "false"     # complete: finished, no sharing
         if paused:
             o["pause"] = "true"
         return o
+
+    def _prepare_existing(self, job: Job, meta: Meta, real: dict[int, Path] | None = None) -> bool:
+        """Files of this torrent already in the save folder WITHOUT aria2c's progress file (.aria2): a download that
+        finished before (aria2c deletes its .aria2 then -- the next Short of the same film), or one whose .aria2 was
+        lost. aria2c alone would stop with "File exists, but a control file (*.aria2) does not exist". Instead
+        (day 13): a chosen file that cannot be this torrent's -- bigger than its file, or none of its pieces right
+        (file_matches) -- is renamed "<name> (old)<ext>" and downloaded fresh (aria2c would truncate it); everything
+        else is checked against the torrent (check-integrity): the right pieces are kept, only the missing ones are
+        downloaded, a complete file is finished at once. A finished file is never truncated or overwritten.
+        ``real``: aria2c's own paths (index -> path) when known. -> True when aria2c must check; ``job.note`` says
+        what happens, in plain words. Reads the disk (maybe a network folder): call it from a worker thread."""
+        base = Path(job.save_dir)
+        real = real or {}
+        try:
+            if control_file(meta, base).is_file():
+                return False                 # aria2c goes on from its own progress file
+        except OSError:
+            return False
+        renamed: list[tuple[Path, Path, str]] = []
+        kept: list[Path] = []
+        for i in range(len(meta.files)):
+            p = real.get(i) or aria2_path(meta, base, i)
+            try:
+                if not p.is_file():
+                    continue
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if i not in job.indexes:
+                kept.append(p)               # not chosen: left as it is (aria2c checks the pieces it shares)
+                continue
+            want = meta.files[i].size
+            why = ""
+            if size > want:
+                why = f"it is bigger ({human_size(size)}) than the torrent's file ({human_size(want)})"
+            elif size > 0:
+                ok = file_matches(meta, i, p, size)
+                if ok is False:
+                    why = "none of the parts checked match the torrent"
+                elif ok is None and size != want:
+                    why = "it is too short to be checked"
+            if not why:
+                kept.append(p)
+                continue
+            new = old_name(p)
+            try:
+                os.replace(p, new)
+            except OSError as e:
+                raise TorrentError(f'"{p.name}" is already in the download folder but is not this torrent\'s file '
+                                   f"({why}), and it could not be renamed ({e.strerror or e}). Move it out of "
+                                   f"{p.parent}, then press Resume.") from e
+            renamed.append((p, new, why))
+        notes = [f'An older file "{p.name}" was in the download folder but is not this torrent\'s file ({why}): it '
+                 f'was renamed to "{new.name}" and the video is downloaded fresh.' for p, new, why in renamed]
+        if renamed:
+            job.renamed = " ".join(x for x in (job.renamed, *notes) if x)
+        if kept:
+            notes.append("The video was already in the download folder (without its progress file), so it is "
+                         "checked against the torrent first: the right parts are kept and only what is missing is "
+                         "downloaded.")
+        if notes:
+            job.note = " ".join(notes)
+        job.checked = job.checked or bool(kept)
+        return bool(kept)
 
     def start(self, meta: Meta, indexes: Iterable[int], save_dir: str | Path | None = None) -> str:
         """Start downloading the chosen files (0-based ``indexes``). Checks the free space first. -> the job id."""
@@ -958,14 +1250,46 @@ class TorrentSession:
         self._save()
         return job.id
 
-    def _add(self, job: Job, torrent: bytes, paused: bool = False) -> None:
+    def _add(self, job: Job, torrent: bytes, paused: bool = False, check: bool = False,
+             real: dict[int, Path] | None = None) -> None:
+        """Give aria2c the job (its files already in the folder prepared first: _prepare_existing)."""
+        try:
+            meta = read_torrent(torrent)
+        except TorrentError:
+            meta = None
+        if meta is not None:
+            check = self._prepare_existing(job, meta, real) or check
         b64 = base64.b64encode(torrent).decode("ascii")
         try:
-            self.engine.call("aria2.addTorrent", b64, [], self._options(job, paused))
+            self.engine.call("aria2.addTorrent", b64, [], self._options(job, paused, check))
         except RpcError as e:
             if "already" in e.message.lower() or e.code == 12:
                 return
             raise TorrentError(_plain_rpc(e, "add")) from e
+
+    def _check_again(self, j: Job) -> bool:
+        """aria2c stopped with "File exists, but a control file (*.aria2) does not exist" (error 13: a file this app
+        did not see -- a name it escapes another way): the file is prepared as on a start (_prepare_existing, with
+        aria2c's own paths) and the job is given back with check-integrity. Once per job. -> it was added again."""
+        if j.rechecked:
+            return False
+        j.rechecked = True
+        real = self._real_paths(j)
+        try:
+            data = self._torrent_file(j.info_hash).read_bytes()
+        except OSError:
+            return False
+        try:
+            self.engine.call("aria2.removeDownloadResult", j.id)
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+        try:
+            self._add(j, data, check=True, real=real)
+        except TorrentError as e:
+            j.state, j.error = "failed", str(e)
+            return True
+        self._last_alive[j.id] = self.clock()
+        return True
 
     def restore(self) -> list[str]:
         """After an app restart: give aria2c back every job that was not finished (paused ones stay paused). ->
@@ -1185,12 +1509,20 @@ class TorrentSession:
         changed = False
         if done > j.done or conns > 0:
             self._last_alive[j.id] = now
+        if conns > 0 or int(st.get("downloadSpeed", 0) or 0) > 0:
+            j.fetched = True
         if done != j.done:
             j.done = done
         j.seeders_max = max(j.seeders_max, seeds)
         complete = (status == "complete") or (total > 0 and done >= total and st.get("seeder") == "true")
         if complete and j.state != "finished":
             j.state, j.finished_at, j.error = "finished", time.time(), ""
+            if j.checked:                        # day 13: what the check of the files already there found
+                said = ("The video was already complete in the download folder: it was checked against the torrent "
+                        "and every part is right, so nothing was downloaded again." if not j.fetched else
+                        "The video was already partly in the download folder: the right parts were kept and only "
+                        "the missing parts were downloaded.")
+                j.note = " ".join(x for x in (j.renamed, said) if x)
             real = self._real_paths(j)
             vi = next((i for i in real if self._guess(j, i) == j.video), None)
             if vi is None and len(real) == 1:
@@ -1207,7 +1539,8 @@ class TorrentSession:
                     except Exception:  # noqa: BLE001
                         pass
         elif status == "error" and j.state != "failed":
-            j.state, j.error = "failed", _plain_status(st, Path(j.save_dir))
+            if not (_exists_error(st) and self._check_again(j)):   # day 13: "File exists, but a control file ..."
+                j.state, j.error = "failed", _plain_status(st, Path(j.save_dir))
             changed = True
         elif status == "paused" and j.state not in ("paused", "stalled"):
             j.state = "paused"
@@ -1252,7 +1585,7 @@ class TorrentSession:
                                                                        j.seeders_max),
                 "eta": eta, "eta_text": human_eta(eta), "video": j.video, "save_dir": j.save_dir,
                 "error": error or j.error, "sharing": bool(j.sharing and st.get("seeder") == "true"),
-                "will_share": bool(j.sharing),
+                "will_share": bool(j.sharing), "note": j.note,
                 "added": j.added, "finished_at": j.finished_at}
 
     def close(self) -> None:
@@ -1273,27 +1606,12 @@ def _plain_rpc(e: RpcError, what: str) -> str:
         return "This magnet link is broken — copy the whole link again."
     if "torrent" in msg or "bencode" in msg:
         return "This .torrent file is broken — download it again."
-    return f"The torrent could not be added ({e.message})."
+    if "not unique" in msg or "already" in msg:
+        return "This torrent is already in the torrent program's list. Remove it from the list, then add it again."
+    return (f"The torrent program refused this download ({e.message or 'no reason given'}). Press Resume to try "
+            "again; if it happens again, restart the app.")
 
 
 def _plain_status(st: dict, folder: Path) -> str:
-    try:
-        code = int(st.get("errorCode", 0) or 0)
-    except ValueError:
-        code = 0
-    msg = str(st.get("errorMessage", "") or "")
-    kind = _ARIA2_ERRORS.get(code, "")
-    if kind == "disk" or "space" in msg.lower():
-        free = free_space(folder)
-        tail = f" (only {human_size(free)} free)" if free is not None else ""
-        return f"The disk is full{tail}. Free some space on {drive_name(folder)}, then press Resume."
-    if kind in ("io", "create", "folder"):
-        return f"The download could not be written to {folder}. Check the folder (and the network for a shared " \
-               f"folder), then press Resume."
-    if kind == "corrupt":
-        return "This .torrent file is broken — download it again."
-    if kind == "magnet":
-        return "This magnet link is broken — copy the whole link again."
-    if kind in ("timeout", "network"):
-        return "The network stopped answering. Check the internet connection, then press Resume."
-    return f"The download stopped: {msg or 'unknown problem'}. Press Resume to try again."
+    """A download that stopped with an error, in plain words with what to do (plain_aria2)."""
+    return plain_aria2(st.get("errorCode"), str(st.get("errorMessage", "") or ""), folder)
