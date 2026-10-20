@@ -199,6 +199,8 @@ def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, s
     """Day 13: projects renamed after their title (``pairs``: (old folder, new folder)) -- every card's project and
     run follow them, its name too (the id stays: a skipped or learned card never comes back). "" or the problem."""
     pairs = [(str(a), str(b)) for a, b in pairs]
+    hub = os.path.normcase(os.path.normpath(str(folder)))
+    in_hub = [(a, b) for a, b in pairs if os.path.normcase(os.path.normpath(str(Path(a).parent))) == hub]
 
     def apply(items: list[Entry]) -> None:
         for x in items:
@@ -209,6 +211,12 @@ def relink(folder: str | os.PathLike, pairs: Iterable[tuple[str | os.PathLike, s
                     if x.name and x.name.lower() == Path(old).name.lower():
                         x.name = Path(new).name
                 x.project, x.run = p, r
+                continue
+            for old, new in in_hub:                   # made on the other computer (its own path written): the
+                if x.name and x.name.lower() == Path(old).name.lower() and \
+                        Path(x.project or old).name.lower() == Path(old).name.lower():
+                    x.id = x.key()                    # shared copy renamed here is found by its new name
+                    x.name = Path(new).name
     return _change(folder, apply)
 
 

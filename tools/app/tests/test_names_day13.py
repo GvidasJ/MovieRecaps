@@ -300,9 +300,44 @@ def test_a_new_youtube_title_renames_both_copies_with_everything_linked(tmp_path
     assert Path(e.project) == new_local and Path(e.run) == new_local / "edit" and e.name == new_name
     assert Path(PB.pending(local)[0]["folder"]) == new_local
     pq = (hub / "problems_queue.md").read_text(encoding="utf-8")
-    assert f"**{new_name}**" in pq and f"{new_hub}\\edit\\extras\\batch_console.log" in pq
+    assert f"{new_hub}\\edit\\extras\\batch_console.log" in pq and f"run: {new_hub}\\edit\n" in pq
+    assert f"**{old_hub.name}**" in pq                                   # the entry's heading (and id) as it was
     assert f"{old_hub}-2\\edit" in pq                                    # another project's path: untouched
     assert B.card_of(new_local).rename_to == "" and B.card_of(new_local).display == "Nobody expected this radio ad 📻"
+
+
+def test_the_other_computers_waiting_card_finds_the_shared_copy_renamed_here(tmp_path):
+    hub = tmp_path / "Projects"
+    old = hub / "2026-10-20_borat"
+    old.mkdir(parents=True)
+    laptop = r"C:\Users\nobody-names\Desktop\bh\MovieRecaps\input\downloads\2026-10-20_borat"   # its own path
+    WT.add(hub, WT.Entry(name=old.name, project=laptop, run=laptop + "\\edit", run_in_project="edit",
+                         computer="laptop", result="PASS"))
+    eid = WT.read(hub)[0].id
+    new = hub / "2026-10-20_The fact that he asked them to teach him slang 🗣️😭"
+    os.rename(old, new)
+    (new / "edit").mkdir()
+    assert WT.relink(hub, [(old, new)]) == ""
+    e = WT.read(hub)[0]
+    assert e.id == eid and e.name == new.name and e.project == laptop     # the laptop still finds its own copy
+    proj, run = WT._where(e, hub)                                          # noqa: SLF001 - and this computer the new
+    assert proj == new and run == new / "edit"
+
+
+def test_learns_watcher_never_offers_the_apps_own_project_for_a_title_ending_in_fixed(tmp_path):
+    from mr_app.core import learnkit as K
+    root = tmp_path / "Projects"
+    p = title_project(root, title="Finally fixed")
+    out = PM.named_copy(p.folder / "edit" / "1_edit.xml")
+    own = saved(PM.project_for(out))
+    old = time.time() - 120
+    os.utime(own, (old, old))
+    assert own.name == "Finally fixed.prproj" and K.FIXED_RE.search(own.name)
+    assert K.new_fixed([root], tmp_path / "seen.json") == []
+    mine = saved(p.folder / "edit" / "my fixed.prproj")
+    os.utime(mine, (old, old))
+    assert [f for _p, f in K.new_fixed([root], tmp_path / "seen.json")] == [mine]
+    assert K.prproj_of_folder(p.folder) == mine
 
 
 def test_the_other_computer_publishes_into_the_renamed_shared_copy(tmp_path):

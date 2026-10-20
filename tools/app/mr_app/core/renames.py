@@ -644,7 +644,7 @@ def _replace_paths(text: str, pairs: Iterable[tuple[str, str]]) -> str:
 
 def _fix_outside(moved: list[tuple[Path, Path]], hub: Path | None, local_root: Path | None) -> None:
     """What points into the moved folders: the Learn waiting cards, the projects waiting for the shared folder,
-    problems_queue.md (its paths, and the project's name in it)."""
+    problems_queue.md's paths."""
     pairs = [(str(o), str(n)) for o, n in moved]
     if hub is not None:
         try:
@@ -658,14 +658,9 @@ def _fix_outside(moved: list[tuple[Path, Path]], hub: Path | None, local_root: P
             pf = hub / problems.FILE
             if pf.is_file():
                 rel = [(f".\\{o.name}", f".\\{n.name}") for o, n in moved if _norm(o.parent) == _norm(hub)]
-                named = [(f"**{o.name}**", f"**{n.name}**") for o, n in moved]
 
-                def change(old: str | None) -> str:
-                    t = old or ""
-                    t = _replace_paths(t, pairs + rel)
-                    for a, b in named:
-                        t = t.replace(a, b)
-                    return t
+                def change(old: str | None) -> str:          # only the paths: each entry keeps its heading and id
+                    return _replace_paths(old or "", pairs + rel)
                 H._change(pf, change)                                              # noqa: SLF001
         except Exception:  # noqa: BLE001
             pass

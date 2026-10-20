@@ -874,11 +874,24 @@ def prproj_of_folder(folder: str | os.PathLike) -> Path | None:
                 t = e.stat().st_mtime
             except OSError:
                 continue
-            (fixed if FIXED_RE.search(e.name) else every).append((t, Path(e.path)))
+            (fixed if FIXED_RE.search(e.name) and not _own_project(e.path) else every).append((t, Path(e.path)))
     if fixed:
         return max(fixed)[1]
     top = [p for _t, p in every if p.parent == d]
     return top[0] if len(top) == 1 else None
+
+
+def _own_project(path: str | os.PathLike) -> bool:
+    """Day 13: the app's own '<title>.prproj' (next to its '<title>_edit.xml') is never "your fix" because of its name
+    -- a title may end with "fixed"."""
+    p = Path(path)
+    if p.stem.lower().endswith("_edit"):
+        return False                                  # (night 10's own <name>_edit.prproj never matched FIXED_RE)
+    try:
+        from .premiere import is_own_project
+        return is_own_project(p)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _scandir(d: Path) -> list[os.DirEntry]:
@@ -976,7 +989,7 @@ def _new_fixed(roots: Iterable[str | os.PathLike], state_path: Path, queue_folde
             subs = [proj] + [proj / x.name for x in _scandir(proj) if _edit_no(x.name) is not None and _isdir(x)]
             for sub in subs:
                 for f in _scandir(sub):
-                    if not FIXED_RE.search(f.name):
+                    if not FIXED_RE.search(f.name) or _own_project(f.path):
                         continue
                     try:
                         if not f.is_file():
