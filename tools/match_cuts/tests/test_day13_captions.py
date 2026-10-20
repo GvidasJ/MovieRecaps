@@ -190,6 +190,11 @@ def test_no_lone_weak_word_is_left_behind():
     words = _words(("on", 10.0, 10.2), ("the", 10.3, 10.6), ("island", 10.7, 10.95), ("together", 11.0, 11.4))
     new, _ = P.pairs_fix(caps, words, F60)
     assert [c["text"] for c in new] == ["on the island", "together"] and new[1]["start"] == 660
+    # video021 / video15: when the noun was all the next caption held, the three go together
+    caps = [_cap("from the", 600, 640), _cap("children", 640, 680)]
+    words = _words(("from", 10.0, 10.2), ("the", 10.3, 10.6), ("children", 10.7, 11.2))
+    new, _ = P.pairs_fix(caps, words, F60)
+    assert [(c["text"], c["start"], c["end"]) for c in new] == [("from the children", 600, 680)]
 
 
 def test_a_name_split_in_two_is_joined():

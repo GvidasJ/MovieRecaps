@@ -234,8 +234,6 @@ PAIR_DETERMINERS = frozenset("a an the my your".split())   # the words whose nou
 PAUSE_S = 0.25            # captions.PAUSE_S: a pause this long between two captions lets them split anywhere
 CUT_NEAR_S = 0.25         # a video cut this near the boundary: rule 10 decides there, not this
 MAX_ON_SCREEN_S = 1.5     # caption_rules.MAX_ON_SCREEN_S: a caption of 2+ words at most this long on screen
-LONE_WEAK = "other way"   # moving the determiner on would leave one weak word ("on" | "the island"): the noun comes
-                          # back instead ("on the island" | "together", your video18)
 
 
 def _toks(text: str) -> list[str]:
@@ -336,22 +334,20 @@ def pairs_fix(caps: Sequence[dict], words: Sequence[Sequence[Any]], fps: Fractio
             i += 1
             continue
         from .captions import is_weak
+        # moving the determiner on would leave one weak word alone ("on" | "the island"): the noun comes back
+        # instead, or -- when the noun was all the next caption held -- all three go together ("from the
+        # children", "on my ultrasound": your video021 / video15)
         alone = len(ta) == 2 and (is_weak(ta[0]) or norm_word(ta[0]) in PREPOSITIONS)
-        if len(ta) >= 2 and not (alone and LONE_WEAK == "other way" and len(tb) >= 2):
+        if len(ta) >= 2 and not alone:
             na, nb = ta[:-1], [ta[-1]] + tb    # "still in the" | "water?" -> "still in" | "the water?"
             t = hx[0] if hx is not None else _share_time(a, ta, len(ta) - 1, f)
             merged = False
-        elif len(ta) >= 2:                     # "on the" | "island together" -> "on the island" | "together"
-            na, nb = ta + [tb[0]], tb[1:]
+        elif len(tb) >= 2:                     # "on the" | "island together" -> "on the island" | "together";
+            na, nb = ta + [tb[0]], tb[1:]      # "my" | "daddy saved" -> "my daddy" | "saved"
             t = _word_time(words, tb[1], b0 / f, b1 / f, b0 / f)
             t = _share_time(b, tb, 1, f) if t is None else t
             merged = False
-        elif len(tb) >= 2:                     # "my" | "daddy saved" -> "my daddy" | "saved"
-            na, nb = ta + [tb[0]], tb[1:]
-            t = _word_time(words, tb[1], b0 / f, b1 / f, b0 / f)
-            t = _share_time(b, tb, 1, f) if t is None else t
-            merged = False
-        else:                                  # "My" | "sister's" -> "My sister's"
+        else:                                  # "My" | "sister's" -> "My sister's", "from the" | "children"
             na, nb, t, merged = ta + tb, [], b1 / f, True
         k = int(round(t * f))
         if not merged:
