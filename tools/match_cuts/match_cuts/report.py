@@ -1503,7 +1503,7 @@ def _audio_chain_lines(ctx: Any) -> list[str]:
              + (f"; {split} clip(s) need more than +15 dB, so two or more equal Volumes" if split else "")
              + "), Volume 0 dB, Panner 0.",
              f"- In Premiere: select all A1 clips and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
-             "your LoudVOGOOOD has the same values) -- Premiere cannot import those two from an XML.",
+             "not your older LoudVOGOOOD: its Amplify is +4.5 dB) -- Premiere cannot import those two from an XML.",
              "- Don't use Audio Gain > Normalize again: the tool already normalised (as a Volume). A clip you trim later "
              "keeps the gain measured on its first range (the Hard Limiter then catches anything over 0 dB)."]
     if unread:

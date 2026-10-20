@@ -85,7 +85,8 @@ Settings are this computer's own: `%APPDATA%\MovieRecaps\settings.json`.
    edit gets **its own project next to it** (`<name>_edit.prproj`, made from an empty Premiere 2024 project), which
    Premiere opens and imports the edit into -- save it with Ctrl+S. Pressed again later, a saved project just opens
    (nothing is imported twice). Then select all A1 clips and apply the preset `assets\premiere\MovieRecaps audio
-   chain.prfpset` (or your LoudVOGOOOD): the Hard Limiter and Amplify an XML cannot carry.
+   chain.prfpset` (Hard Limiter + Amplify +3.0 dB since day 13 -- not your older LoudVOGOOOD / GoodAUDIO, they have
+   +4.5 dB): the Hard Limiter and Amplify an XML cannot carry.
 5. Drag rows to change the order. Right-click a row: Open folder, Open in Premiere, Copy title, Run again
    (Thorough), Remove.
 6. A finished project's edit goes to the shared folder by itself (Settings). The taskbar button fills with the

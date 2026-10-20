@@ -402,8 +402,8 @@ Two defaults of this mode (config `premiere_static_framing` / `premiere_follow_a
   Volumes above +15 dB), Volume 0 dB, Panner 0 -- in this order, after its speed, unmuted, no keyframes (keyframes
   made the 125 % A1 of the laptop's output/005 import muted). An XML cannot carry the Hard Limiter and Amplify
   (Premiere: "not translated"), so they come from `assets\premiere\MovieRecaps audio chain.prfpset` (Hard Limiter
-  0 dB / 0 dB / 7 ms / 100 ms / 1.00, Amplify +4.5 dB; your LoudVOGOOOD preset has the same values): select all A1
-  clips in Premiere and apply it. Don't use Audio Gain > Normalize again. The hard check `XML AUDIO` fails the run
+  0 dB / 0 dB / 7 ms / 100 ms / 1.00, Amplify +3.0 dB -- day 13; night 11's +4.5 dB = your older LoudVOGOOOD /
+  GoodAUDIO, don't use those any more): select all A1 clips in Premiere and apply it. Don't use Audio Gain > Normalize again. The hard check `XML AUDIO` fails the run
   when a clip's chain is not exactly this (and re-measures each gain). Your projects' -inf levels and pitch effects
   are your own sound work: never learned or copied.
 * **No mini cuts (`--min-clip FRAMES`, default 10; 0 = off).** A V1 clip shorter than 10 sequence frames (1/6 s)

@@ -3500,7 +3500,8 @@ PREMIERE_MASTERCLIP = "masterclip-raw"
 # ---------------------------------------------------------------------------------------------
 #
 # Your chain, in this order: Audio Gain "Normalize All Peaks to 0 dB", Volume 0 dB, Hard Limiter (Maximum Amplitude
-# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +4.5 dB, Panner 0. What Premiere
+# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +3.0 dB (day 13; +4.5 dB on night
+# 11), Panner 0. What Premiere
 # Pro 2024's FCP7 XML import really makes of each form (tested on this PC: test XMLs imported, the project saved and its
 # .prproj read back, every form on all five A1 clips of a real 1_edit.xml -- work\t26\audio\NOTES.md):
 #   * Audio Levels (audiolevels, its level linear: 1 = 0 dB) -> the clip's own Volume (of several, the last one).
@@ -3516,10 +3517,11 @@ PREMIERE_MASTERCLIP = "masterclip-raw"
 # So every A1 clip gets what an XML can carry, each with its real value: the normalisation as Gain filters (each at most
 # +15 dB: as many as its gain needs, all equal), Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0). In Premiere:
 # Volume 0 dB, Volume +N dB (once or more: the Audio Gain's normalisation -- a gain is a gain, the same sound before
-# or after the clip's Volume), Panner 0. The Hard Limiter and Amplify +4.5 dB cannot come through an XML at all, and
-# nothing stands in for them (a Volume +4.5 dB would look like something else, and double the +4.5 dB once your own
-# preset with both -- "LoudVOGOOOD" -- is put on the clips): each A1 clip's comment and the report name them; select all
-# A1 clips and apply your preset (and do not normalise again: that is done).
+# or after the clip's Volume), Panner 0. The Hard Limiter and Amplify +3.0 dB cannot come through an XML at all, and
+# nothing stands in for them (a Volume +3.0 dB would look like something else, and double the +3.0 dB once the preset
+# with both -- MovieRecaps audio chain -- is put on the clips): each A1 clip's comment and the report name them; select
+# all A1 clips and apply the preset (and do not normalise again: that is done). Your older "LoudVOGOOOD" preset has
+# Amplify +4.5 dB (night 11's value): since day 13 the chain is +3.0 dB -- use MovieRecaps audio chain.
 # The normalisation is measured like Premiere's own: the loudest sample the clip plays -- the media's first channel
 # (A1 takes the file's audio track 1: Premiere makes it a mono clip of that channel) over the clip's source range
 # (Premiere's Audio Gain dialog read -13.1 / -14.2 dB on two clips of video10 where this reads -13.13 / -14.23 dB; its
@@ -3534,7 +3536,8 @@ VOLUME_LEVEL = 1.0                                   # Volume 0 dB (Audio Levels
 PANNER = 0.0                                         # centre
 HARD_LIMITER = ("Hard Limiter (Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
                 "1.00)")
-AMPLIFY = "Amplify +4.5 dB"
+AMPLIFY_DB = 3.0                                     # day 13 (night 11: +4.5 dB, = your LoudVOGOOOD)
+AMPLIFY = f"Amplify +{AMPLIFY_DB:.1f} dB"
 NOT_IN_XML = f"{HARD_LIMITER} and {AMPLIFY}"          # your chain's two effects no XML can bring into Premiere
 AUDIO_CHAIN_TEXT = f"Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, {HARD_LIMITER}, {AMPLIFY}, Panner 0"
 AUDIO_CHAIN_XML = "Audio Gain (Normalize All Peaks to 0 dB, as Volume), Volume 0 dB, Panner 0"   # what an XML carries
@@ -3711,7 +3714,7 @@ def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]
                 + "; in Premiere " + ("a Volume" if len(stages) == 1 else f"{len(stages)} Volumes of "
                                       f"{factor_db(stages[0]):+.2f} dB") + ")")
     return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: select all A1 "
-            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + Amplify +4.5 dB); don't use Audio Gain > Normalize "
+            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + {AMPLIFY}); don't use Audio Gain > Normalize "
             "again, the tool already normalised (as a Volume)")
 
 
