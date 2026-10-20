@@ -394,7 +394,9 @@ def record_edit(p: P.Project, res: dict) -> None:
     state = P.DONE if label in ("PASS", "OK with a note") else (P.FAILED if label != "STOPPED" else P.WAITING)
     p.set_step("edit", state, result=label, run_dir=res.get("run_dir"), seconds=res.get("seconds"),
                failures=list(res.get("failures") or [])[:5], notes=list(res.get("notes") or [])[:5],
-               **({"error": (res.get("failures") or [label])[0]} if state == P.FAILED else {}))
+               # day 13: a stop's error is why in plain words and what to do (results.read_result's reason_line)
+               **({"error": res.get("reason_line") or (res.get("failures") or [label])[0]}
+                  if state == P.FAILED else {}))
 
 
 # ---------------------------------------------------------------------------------------------------------------------

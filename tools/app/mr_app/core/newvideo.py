@@ -224,7 +224,22 @@ def plain_error(err: Any) -> str:
         return DISK_FULL
     if re.match(r"^[A-Za-z_]+(Error|Exception)$", text):           # a bare exception name
         return f"something went wrong ({text}) -- press Try again"
+    if _TECHNICAL.search(text):           # day 13: a tool's technical line (an ffmpeg exit code, an errno, the worker
+        try:                              # pool's lost file, "details in ...") as match_cuts.plain_reason says it
+            from match_cuts import plain_reason
+            r = plain_reason.explain(stderr=text, stop="")
+            if r.kind not in (plain_reason.UNKNOWN, plain_reason.TOOL_STOP):
+                return r.line()[:400]
+            said = plain_reason.plain_text(text) if "details in" in text else ""
+            if said and said != text:
+                return said[:400]
+        except Exception:  # noqa: BLE001 - the tool's module not importable here: as it is
+            pass
     return text[:300]
+
+
+_TECHNICAL = re.compile(r"\w(?:Error|Exception):|\[(?:Errno|WinError) -?\d+\]|\bfailed \(-?\d+\)|match_cuts_pool_|"
+                        r"details in \S|exit code -?\d{3,}", re.I)
 
 
 def classify(text: str) -> str | None:

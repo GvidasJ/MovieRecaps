@@ -544,8 +544,10 @@ class ConvertResult:
     size_out: int = 0
 
 
-def _ffmpeg_problem(log_tail: str) -> str:
-    """FFmpeg's own messages (not this module's 'command:' / 'plan:' lines in the log) -> plain words."""
+def _ffmpeg_problem(log_tail: str, code: int | None = None) -> str:
+    """FFmpeg's own messages (not this module's 'command:' / 'plan:' lines in the log) -> plain words; day 13: else
+    its exit code (ffmpeg 7 exits with its error code: 4294967268 = -28 = the disk is full, -12 out of memory ...,
+    match_cuts.plain_reason)."""
     log_tail = "\n".join(l for l in log_tail.splitlines()
                          if not l.startswith(("command:", "encoder:", "plan:", "in:", "---", "note:")))
     low = log_tail.lower()
@@ -557,6 +559,16 @@ def _ffmpeg_problem(log_tail: str) -> str:
         return "the GPU encoder (NVENC) failed"
     if "permission denied" in low:
         return "Windows did not allow writing the file (is it open in another program?)"
+    if code not in (None, 0, 1):
+        try:
+            from match_cuts import plain_reason as PR
+            kind, words = PR.program_code(code)
+            if kind == PR.DISK_FULL:
+                return "the disk is full: free some space and try again"
+            if kind:
+                return f"FFmpeg stopped: {words}"
+        except Exception:  # noqa: BLE001 - the tool's module not importable here: FFmpeg's own last line
+            pass
     last = [l for l in log_tail.splitlines() if l.strip()][-1:] or ["FFmpeg failed"]
     return f"FFmpeg failed: {last[0].strip()[:160]}"
 
@@ -716,7 +728,7 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
             raise
         if code != 0 or not tmp.is_file():
             _unlink(tmp)
-            raise ConvertError(f"{_ffmpeg_problem(ffmpeg_tail())} -- the original is kept")
+            raise ConvertError(f"{_ffmpeg_problem(ffmpeg_tail(), code)} -- the original is kept")
         say(0.99, "checking the converted file")
         out = inspect(tmp)
         out_timing = video_timing(out, fps=info.fps)       # one frame added at the end on both: the original's

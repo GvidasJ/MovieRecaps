@@ -1985,8 +1985,8 @@ class DownloadPage(QWidget):
             it.state = STOPPED
             it.failed_step = key
             self._step(it, key, S_WAIT, None, "stopped")
-        else:
-            self._fail(it, key, (res.get("failures") or [lab])[0])
+        else:                             # day 13: a stop says why in plain words and what to do (reason_line)
+            self._fail(it, key, res.get("reason_line") or (res.get("failures") or [lab])[0])
         if it.kind == NV.JUST_CUTS and lab != "STOPPED":
             self._learn_hook(it, res)
         self._refresh(it)

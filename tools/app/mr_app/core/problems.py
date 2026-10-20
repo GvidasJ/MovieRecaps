@@ -328,6 +328,7 @@ def is_tool_problem(res: dict | None) -> bool:
 
 
 _NOISE = re.compile(r"(UserWarning|DeprecationWarning|FutureWarning|warnings\.warn|\[ WARN:|: pass \(\d)")
+_DETAILS_IN = re.compile(r"^(?:match_cuts: )?details in \S")       # the log's path: the entry has it (log:)
 _TS = re.compile(r"^(?:[\d-]+ )?\d\d:\d\d:\d\d(?:,\d+)? ")
 _PRIORITY = (                                                  # (rank, pattern): the lower, the more it says
     (0, re.compile(r"(?i)^match_cuts result:")),
@@ -354,7 +355,7 @@ def key_lines(text: str, limit: int = MAX_LINES) -> list[str]:
     cands: list[tuple[int, int, str]] = []
     for i, ln in enumerate(lines):
         s = ln.strip()
-        if not s or _NOISE.search(s) or ln.startswith("  File "):
+        if not s or _NOISE.search(s) or ln.startswith("  File ") or _DETAILS_IN.match(s):
             continue
         r = _rank(ln)
         if r is not None:

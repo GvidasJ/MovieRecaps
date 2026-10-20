@@ -459,11 +459,16 @@ class JobRow(QFrame):
         for w in (self.mode, self.speed, self.tpl):
             ctl.addWidget(w)
         ctl.addStretch(1)
+        self.b_retry = W.Button("Try again", "Small")     # day 13: a run that stopped by itself (a full disk, a crash)
+        self.b_retry.setToolTip("Run this video again (the same mode, as its next take) -- after you did what the "
+                                "line above says")
+        self.b_retry.clicked.connect(self._retry)
+        self.b_retry.hide()
         self.b_folder = W.Button("Open folder", "Small")
         self.b_prem = W.Button("Open in Premiere", "Small")
         self.b_report = W.Button("Show report", "Small")
         self.remove = W.Button("Remove", "Ghost")
-        for b in (self.b_folder, self.b_prem, self.b_report, self.remove):
+        for b in (self.b_retry, self.b_folder, self.b_prem, self.b_report, self.remove):
             ctl.addWidget(b)
         self.b_folder.clicked.connect(self._open_folder)
         self.b_prem.clicked.connect(self._open_premiere)
@@ -565,6 +570,12 @@ class JobRow(QFrame):
 
     def _swap(self) -> None:
         self.page.swap_job(self.job)
+
+    def _retry(self) -> None:
+        """Try again (day 13): a run that stopped by itself -- the same video once more, in the same mode."""
+        j = self.job
+        if j.complete and j.state in (J.DONE, J.STOPPED):
+            self.page.run_again(j, j.mode)
 
     def _pick(self, k: int) -> None:
         if k < len(self._pick_files):
@@ -761,6 +772,7 @@ class JobRow(QFrame):
         done = j.state in (J.DONE, J.STOPPED) and j.run_dir is not None
         for b in (self.b_folder, self.b_prem, self.b_report):
             b.setVisible(done)
+        self.b_retry.setVisible(j.state in (J.DONE, J.STOPPED) and j.complete and R.stopped_by_itself(res))
         self.b_prem.setEnabled(done and (Path(j.run_dir) / "1_edit.xml").is_file() if done else False)
         self.note.setVisible(bool(self.note.text()))
         self.remove.setVisible(j.state != J.RUNNING)
@@ -919,7 +931,13 @@ class ReportDialog(QDialog):
             if rows:
                 parts.append(f"<p style='color:{theme.TEXT};font-weight:700;margin-top:10px'>{title}</p>" +
                              "".join(f"<div style='color:{theme.MUTED};margin-left:8px'>{esc(x)}</div>" for x in rows))
-        sec("Why it failed", r.get("failures") or [])
+        if r.get("reason_line"):                          # day 13: a stop -- why in plain words, then what to do
+            sec("Why it stopped", [r.get("reason") or ""])
+            sec("What to do", [r.get("todo") or ""])
+            detail = str(r.get("reason_detail") or "")
+            sec("From the log", [detail] if detail != str(r.get("reason") or "") else [])
+        else:
+            sec("Why it failed", r.get("failures") or [])
         sec("Note", r.get("notes") or [])
         sec("Check by hand (from the run's end summary)", [h.strip() for h in r.get("hand") or []])
         sec("Captions written as they are -- check them", r.get("doubtful") or [])
@@ -928,7 +946,7 @@ class ReportDialog(QDialog):
         tb.setHtml("".join(parts) or "<p>No report: the run did not finish.</p>")
         lay.addWidget(tb, 1)
         row = QHBoxLayout()
-        for text, path in (("Open report.md", r.get("report")), ("Open the run's log", r.get("log"))):
+        for text, path in (("Open report.md", r.get("report")), ("Open log", r.get("log"))):
             b = W.Button(text)
             b.setEnabled(bool(path) and Path(path).is_file())
             b.clicked.connect(lambda _=False, p=path: os.startfile(str(p)))   # noqa: S606
@@ -1431,7 +1449,8 @@ class MatchCutsPage(QWidget):
         self._add_row(j)
         self.update_counts()
         _toast(self.ctx, "Queued again -- the RAW and the competitor switched" if swap else
-               "Queued again -- the input checks skipped" if force else "Queued again (Thorough)")
+               "Queued again -- the input checks skipped" if force else
+               f"Queued again ({'Fast' if j.mode == J.FAST else 'Thorough'})")
         if self.running and self.current is None:
             self._next()
 

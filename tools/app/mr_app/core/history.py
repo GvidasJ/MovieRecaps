@@ -114,6 +114,20 @@ def _first(items: Any) -> str:
     return ""
 
 
+def plain_failure(text: str) -> str:
+    """A failed edit's stored reason in plain words (day 13): project.json of an older run holds the tool's own
+    line ('the run stopped (exit 2): ERROR: RuntimeError: conform raw: ffmpeg failed (4294967268): ffmpeg ...',
+    'details in ... match_cuts.log') -- said as match_cuts.plain_reason says it (text only, nothing is read); plain
+    words stay as they are."""
+    if not text:
+        return ""
+    try:
+        from match_cuts import plain_reason
+        return _short(plain_reason.plain_text(text))
+    except Exception:  # noqa: BLE001 - the tool's module not importable here: as it is
+        return _short(text)
+
+
 def _source(data: Mapping, role: str) -> str:
     """The competitor's / RAW's title, else its file name, else its link."""
     d = data.get(role) if isinstance(data.get(role), Mapping) else {}
@@ -189,7 +203,11 @@ def project_events(data: Mapping) -> list[Event]:
     elif e.get("state") == "failed":
         base = "Just cuts failed" if e.get("kind") == "just_cuts" else "Edit failed"
         what = base if result in ("", "FAIL") else f"{base} · {result}"
-        add(e.get("finished"), what, _first(e.get("failures")) or e.get("error") or "", FAIL)
+        fails = e.get("failures") if isinstance(e.get("failures"), (list, tuple)) else []
+        first, err = str(fails[0] if fails else ""), str(e.get("error") or "")
+        # day 13: a stop's error is its plain line, its first failure "the run stopped (exit N): <that line>"
+        detail = err if err and first != err and first.endswith(err) else (first or err)
+        add(e.get("finished"), what, plain_failure(detail), FAIL)
     up = board.get("uploaded") if isinstance(board.get("uploaded"), Mapping) else {}
     if up and parse_time(up.get("at")) is not None:
         detail = " · ".join(x for x in (str(up.get("title") or ""), UPLOAD_HOW.get(str(up.get("how") or ""), ""))
