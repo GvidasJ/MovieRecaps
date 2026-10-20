@@ -1688,7 +1688,8 @@ class DownloadPage(QWidget):
             self._worked = True
             th = StageThread(it, stages, default)
             th.named.connect(self._named)
-            th.moved.connect(self._moved_by_row)
+            if getattr(th, "moved", None) is not None:      # (day 13: a stage that renamed its project folder)
+                th.moved.connect(self._moved_by_row)
             th.progress.connect(self._progress)
             th.done.connect(self._done)
             self.current = th
