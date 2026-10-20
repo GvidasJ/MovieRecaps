@@ -187,7 +187,22 @@ Watched live during the final app test run: 9 aria2c processes, 16 listening soc
 - The Borat runs' real cause (why C: filled, whether Storage Sense emptied %TEMP%) is the lead's (problems_queue).
 - Not tried on the real laptop share `\\192.168.101.11\Shared` (cannot be reached from the PC); `\\127.0.0.1\C$` was.
 
+## Merged with the main branch
+
+The main branch moved today (health, rawkeep, pairs, problems, audio, learn, Liquid Death). I merged it into this
+branch (merge commit "Merge the main branch …"): one conflict, `flow.record_edit` — main added `inputs=` to the same
+`set_step(...)` call where this branch made `error=` the plain line; both kept. The other shared files
+(`convert.py`, `newvideo.py`, `download_tool.py`, `match_cuts_tool.py`, `batch.py`) merged by themselves.
+
 ## Tests
+
+- Whole suites on this branch: **app 1021 passed, 5 skipped** (the skips need other computers' data); **tool 1448
+  passed, 97 skipped, 1 failed** — `test_report.py::test_report_renders_every_section`, which fails the same way on
+  the untouched base commit 5e7a67e (pre-existing, not from this branch: the report's line about the test video's
+  start time, probably this PC's FFmpeg 8.0). After the merge with the main branch: the tool tests for batch / stops /
+  day 12 / day 13 / night 6 / night 8 / pairs / problems / rawkeep: 198 passed, 3 skipped; the whole app suite: 1066
+  passed, 5 skipped, 1 failed — `test_motion.py::test_a_fader_fades_in_in_about_0_3_s…`, a real-time fade timing
+  test, while the PC was heavily loaded (the run took 12 min instead of 5); alone it passed 3 times out of 3.
 
 - tool: `tools/match_cuts/tests/test_day13_errors.py` (22 tests: the Borat lines, errno/AVERROR/crash codes, tool
   stops kept, never a traceback / library warning, the stopping message decides, the log's last ERROR line, no
