@@ -211,6 +211,50 @@ def test_remove_never_deletes_a_file_that_was_already_there(sess, tmp_path):
     assert not part.exists()
 
 
+def test_review_the_space_check_counts_only_this_torrents_file(sess, tmp_path):
+    """A smaller other film with the same name (a 720p one for a 1080p torrent) is renamed "(old)" and the full film
+    downloaded: it does not count as already there."""
+    data = _data()
+    m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    (dl / "Movie.2020.1080p.mkv").write_bytes(os.urandom(len(data) // 2))
+    sess.free = lambda p: len(data) // 2 + 1000
+    with pytest.raises(T.TorrentError, match="Not enough free space"):
+        sess.check_space(m, [0], dl)
+
+
+def test_review_remove_deletes_its_own_part_file_when_only_a_sample_was_there(sess, tmp_path):
+    """A non-chosen file of the torrent in the folder (a sample, an .srt) makes the job check -- but the film it
+    started downloading itself is still its own part file: Remove deletes it."""
+    src = tmp_path / "src" / "Example.Movie.2016"
+    src.mkdir(parents=True)
+    (src / "Example.Movie.2016.1080p.mkv").write_bytes(_data(8))
+    (src / "Sample.mkv").write_bytes(_data(2, seed=3))
+    m = T.read_torrent(T.make_torrent(src, piece_length=PIECE))
+    dl = tmp_path / "dl"
+    (dl / "Example.Movie.2016").mkdir(parents=True)
+    (dl / "Example.Movie.2016" / "Sample.mkv").write_bytes(_data(2, seed=3))
+    jid = sess.start(m, [0], dl)
+    assert sess.job(jid).checked and sess.job(jid).found == []
+    film = dl / "Example.Movie.2016" / "Example.Movie.2016.1080p.mkv"
+    film.write_bytes(b"part of it")                          # what aria2c wrote meanwhile
+    sess.remove(jid)
+    assert not film.exists() and (dl / "Example.Movie.2016" / "Sample.mkv").exists()
+
+
+def test_review_resume_after_error_13_checks_again(sess, tmp_path):
+    data = _data()
+    m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])
+    jid = sess.start(m, [0], tmp_path / "dl")
+    for _ in range(2):                                       # once by itself, then a plain failure
+        sess.eng.set(jid, status="error", errorCode=13, errorMessage="")
+        sess.poll(jid)
+    assert sess.poll(jid)["state"] == "failed"
+    sess.resume(jid)                                         # the card's Resume: checked again, not the same stop
+    assert sess.eng.used("addTorrent")[-1][3].get("check-integrity") == "true"
+
+
 def test_a_file_with_its_aria2_goes_on_as_before(sess, tmp_path):
     data = _data()
     m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])

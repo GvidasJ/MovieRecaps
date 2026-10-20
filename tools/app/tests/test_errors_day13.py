@@ -155,6 +155,9 @@ def test_the_new_video_rows_words(tmp_path):
     assert NV.plain_error("RAW: this video is private") == "RAW: this video is private"      # plain stays plain
     res = R.read_result(_run(tmp_path), 2, "", BORAT_FFMPEG)
     assert NV.plain_error(res["reason_line"]) == res["reason_line"]
+    ytdlp = ("the download did not work: unable to open for writing: [Errno 2] No such file or directory: "
+             "'C:\\\\p\\\\x.mp4.part'")                       # a download's words: never the edit run's advice
+    assert "the RAW and the competitor" not in NV.plain_error(ytdlp)
 
 
 def test_just_cuts_says_a_full_disk_plainly(tmp_path):
@@ -226,6 +229,14 @@ def test_the_queue_row_says_why_and_offers_try_again(page, tmp_path):
     again = page.jobs[-1]
     assert again.mode == J.FAST and again.take == 2 and again.state == J.READY
     assert ("Queued again (Fast)", "ok") in page.toasts
+
+
+def test_try_again_on_a_row_you_ran_anyway_runs_it_anyway_again(page, tmp_path):
+    res = R.read_result(_run(tmp_path), 2, "", BORAT_FFMPEG)
+    j = _done_job(page, tmp_path, res)
+    j.force_inputs = True                                     # you had pressed Run anyway after a WRONG PAIR
+    page.rows[j.id].b_retry.click()
+    assert page.jobs[-1].force_inputs and page.jobs[-1].take == 2
 
 
 def test_no_try_again_for_wrong_pair_or_a_pass(page, tmp_path):

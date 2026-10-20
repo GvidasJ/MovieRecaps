@@ -216,6 +216,9 @@ _LOG_ERROR = re.compile(r"^(?:\d{4}-\d\d-\d\d )?\d\d:\d\d:\d\d(?:[,.]\d+)? (?:ER
 _LIBRARY = re.compile(r"^\s*(?:\[ ?(?:WARN|INFO|DEBUG)\b|\S+\.py:\d+: \w*Warning:|warnings\.warn\(|\S*Warning: |"
                       r"W\d{4} |I\d{4} )")
 _DETAILS_IN = re.compile(r"^(?:match_cuts: )?details in \S", re.I)
+# the tool's own command line -- batch_console.log starts with it: never a message (a run stopped without saying
+# anything was shown as "... does not know yet: C:\...\python.exe -m match_cuts --competitor ...")
+_COMMAND_LINE = re.compile(r"python[w]?(?:\.exe)?\"?\s+(?:-\S+\s+)*-m\s+match_cuts(?:\.\w+)?\s", re.I)
 _FFMPEG_CODE = re.compile(r"\b(?P<prog>ffmpeg|ffprobe)(?:\.exe)?(?: writer)? failed \((?P<code>-?\d+)\)", re.I)
 _COMMAND_CODE = re.compile(r"command failed \((?P<code>-?\d+)\): (?P<cmd>\S+)", re.I)
 _DISK_FULL_TECH = re.compile(r"no space left on device|\[errno 28\]|\berrno 28\b|\benospc\b|\[winerror 112\]|"
@@ -294,12 +297,19 @@ def _drive_of(*texts: str) -> str:
     """The drive the line names last ('C:'), a network folder ('\\\\server\\share'), or ''. The last path of an
     ffmpeg command line is the file it writes."""
     for t in texts:
-        t = _un_repr(str(t or ""))
-        found: list[tuple[int, str]] = [(m.start(), m.group(1).upper() + ":") for m in _DRIVE.finditer(t)]
-        found += [(m.start(), m.group(1)) for m in _UNC.finditer(t)]
+        raw = str(t or "")
+        found = _paths_in(raw)                     # as written (a command line: \\NAS\share\x.mp4) ...
+        if not any(d.startswith("\\\\") for _p, d in found):
+            found = _paths_in(_un_repr(raw)) or found          # ... else as a Python repr writes it ('\\\\NAS\\x')
         if found:
             return max(found)[1]
     return ""
+
+
+def _paths_in(text: str) -> list[tuple[int, str]]:
+    """(place, 'C:' or '\\\\server\\share') of every drive or network folder named in ``text``."""
+    return ([(m.start(), m.group(1).upper() + ":") for m in _DRIVE.finditer(text)]
+            + [(m.start(), m.group(1)) for m in _UNC.finditer(text)])
 
 
 def _file_name(line: str) -> str:
@@ -344,14 +354,15 @@ def plain_line(line: str) -> str:
     if m:
         t, msg = m.group("type"), (m.group("msg") or "").strip()
         short = t.rsplit(".", 1)[-1]
-        if msg and short in ("RuntimeError", "Exception", "OSError", "IOError", "StepError", "CalledProcessError"):
+        if msg and short in ("RuntimeError", "Exception", "OSError", "IOError", "StepError", "CalledProcessError",
+                             "NoSpaceError", "InputError"):
             s = msg
         elif msg:
             s = f"{msg} ({short})"
         else:
             s = short
     s = re.sub(r"\[(?:Errno|WinError) -?\d+\]\s*", "", s)
-    s = _un_repr(s)
+    s = _QUOTED_PATH.sub(lambda m: m.group(0).replace(m.group("p"), _un_repr(m.group("p"))), s)   # repr paths only
     s = " ".join(s.split())
     return s if len(s) <= MAX_TEXT else s[:MAX_TEXT - 3].rstrip() + "..."
 
@@ -362,7 +373,8 @@ def _console_errors(stderr: str) -> list[str]:
     out: list[str] = []
     for ln in _lines(stderr):
         s = ln.strip()
-        if not s or _LIBRARY.match(ln) or _DETAILS_IN.match(s) or s.startswith(("Run folder", "Traceback", "File ")):
+        if not s or _LIBRARY.match(ln) or _DETAILS_IN.match(s) or s.startswith(("Run folder", "Traceback", "File ")) \
+                or _COMMAND_LINE.search(s):
             continue
         if ln[:1].isspace():                       # a traceback frame / a source line
             continue
@@ -390,8 +402,13 @@ def _stop_block(stderr: str) -> list[str]:
     after its command line), up to a blank line; [] when the console has no such line. An older line printed long
     before (a library's "CUDA out of memory, falling back ...") is not part of it."""
     lines = _lines(stderr)
-    head = next((i for i in range(len(lines) - 1, -1, -1)
-                 if not _LIBRARY.match(lines[i]) and _meaningful(lines[i].strip())), None)
+    end = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith("Run folder")), None)
+    if end is not None:                  # cli's last line: what Python prints after it (exit noise) is not the reason
+        lines = lines[:end]
+    cli = [i for i in range(len(lines)) if lines[i].startswith("match_cuts: ERROR:")]
+    head = cli[-1] if cli else next((i for i in range(len(lines) - 1, -1, -1)
+                                     if not _LIBRARY.match(lines[i]) and not _COMMAND_LINE.search(lines[i])
+                                     and _meaningful(lines[i].strip())), None)
     if head is None:
         return []
     block = [lines[head].strip()]
@@ -399,7 +416,7 @@ def _stop_block(stderr: str) -> list[str]:
         s = ln.strip()
         if not s or _TS.match(s):
             break
-        if _LIBRARY.match(ln) or _DETAILS_IN.match(s) or ln[:1].isspace() or \
+        if _LIBRARY.match(ln) or _DETAILS_IN.match(s) or ln[:1].isspace() or _COMMAND_LINE.search(s) or \
                 s.startswith(("Run folder", "Traceback", "Thread 0x", "Current thread", "Extension modules")):
             continue
         block.append(s)
@@ -508,6 +525,8 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
         from .batch import stop_message
         stop = stop_message(stderr, code=code)
     stop = (stop or "").strip()
+    if _COMMAND_LINE.search(stop):                           # the command line of a console read back: no message
+        stop = ""
     if _tool_stop(stop):                                     # WRONG PAIR ... -- plain already, with what to do
         return Reason(stop, "", TOOL_STOP, stop)
     missing = _INPUT_MISSING.match(_clean(stop))             # cli's own "raw file not found: <path>"
@@ -535,7 +554,7 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
         k, w = program_code(int(m.group("code")), name)
         prog = (k, w, ln)
         break
-    pool = next((ln for ln in reversed(every) if _POOL.search(ln)), "")
+    pool = next((ln for ln in errs if _POOL.search(ln)), "")     # the stopping message's (not an older one's)
     full = [ln for ln in every if _DISK_FULL.search(ln) and not _LIBRARY.match(ln)]
     disk_line = prog[2] if prog and prog[0] == DISK_FULL else (full[-1] if full else "")
     if disk_line or (prog and prog[0] == DISK_FULL):
@@ -562,6 +581,12 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
                 + (f" ({tmp})" if tmp else "") + f" -- this happens when {drive} is full (or when something empties "
                 f"the temp folder during a run)")
         return Reason(text, _todo_disk(drive), DISK_FULL, _clean(pool)[:600], drive)
+    crash = crash_words(code)
+    if crash and not (block and block[-1].startswith("match_cuts: ERROR:")):
+        # the tool's process crashed (Windows' code): the console's other lines are older soft errors of steps
+        # that went on (a log ERROR line and its traceback), not the reason
+        k = CRASH_KIND.get(int(code), CRASH)
+        return Reason(crash, _TODO.get(k, _TODO[CRASH]), k, f"exit code {code}")
     if prog and prog[0]:
         k, w, ln = prog
         # what FFmpeg's code adds, in words (its code name is for the log only); the kinds that say it all, without
@@ -585,8 +610,7 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
     if prog:                                                     # ffmpeg's code 1 and no words we know
         return Reason(f"FFmpeg stopped {_step(prog[2]) or 'on a video'}: {plain_line(prog[2])}".strip(),
                       _TODO[UNKNOWN], UNKNOWN, _clean(prog[2])[:600])
-    crash = crash_words(code)
-    if code is not None and crash:
+    if crash:
         k = CRASH_KIND.get(int(code), CRASH)
         return Reason(crash, _TODO.get(k, _TODO[CRASH]), k, f"exit code {code}")
     if code == 130 or any(_clean(ln).lower() in ("interrupted", "keyboardinterrupt") for ln in errs):
@@ -625,6 +649,8 @@ def plain_text(text: str) -> str:
     if not t:
         return ""
     body = re.sub(r"^the run stopped \(exit -?\d+\):\s*", "", t)
+    if body.endswith((f"then {TRY}.", f"the full log: {OPEN_LOG}.", f"Press Try again.")):
+        return t                                             # said by this module already: plain as it is
     m = re.match(r"^the run stopped \(exit (-?\d+)\)", t)
     code = int(m.group(1)) if m else None
     technical = (_FFMPEG_CODE.search(body) or _COMMAND_CODE.search(body) or _POOL.search(body)

@@ -225,6 +225,56 @@ def test_a_missing_input_file_says_which_and_what_to_do():
     assert r.text.startswith("the competitor's file is not there any more")
 
 
+def test_a_console_read_back_never_gives_its_command_line_as_the_reason(tmp_path):
+    """batch_console.log starts with the tool's command line; a run stopped without a word (output\\video1 on this PC)
+    was said as "... does not know yet: C:\\...\\python.exe -m match_cuts --competitor ..."."""
+    run = tmp_path / "video1"
+    (run / "extras").mkdir(parents=True)
+    console = (r"C:\Users\gvida\Desktop\bh\MovieRecaps\.venv\Scripts\python.exe -m match_cuts --competitor "
+               r"D:\Shared\videos2\video1\comp.mp4 --raw D:\Shared\videos2\video1\raw.mp4 --run-dir " + str(run) +
+               " --premiere --fast --speed 100\n\n\n15:27:08 INFO == S0 env\n15:27:09 INFO == S2 probe+conform\n")
+    (run / "extras" / "batch_console.log").write_text(console, encoding="utf-8")
+    r = P.explain_run(run, "", 2)
+    assert r.text == "the run stopped without saying why (exit code 2)" and "python" not in r.line()
+    assert "-m match_cuts" not in P.explain(console, code=2).line()
+
+
+def test_review_a_crash_code_wins_over_older_soft_errors():
+    soft = ("00:10:00 ERROR match_cuts speech map failed: [WinError 32] in use\nTraceback (most recent call last):\n"
+            "  File \"x.py\", line 1, in f\nPermissionError: [WinError 32] The process cannot access the file "
+            "because it is being used by another process: 'C:\\\\w\\\\a.wav'\n")
+    r = P.explain(soft, code=3221225477)
+    assert r.kind == P.CRASH and "memory access" in r.text
+    log = "2026-10-20 00:10:00,000 ERROR match_cuts.pipeline people analysis failed: CUDA out of memory\n"
+    assert P.explain("", log, code=0xC0000409).kind == P.CRASH
+
+
+def test_review_an_older_pool_line_is_not_the_reason():
+    err = ("00:05:00 ERROR match_cuts raw index failed: [Errno 2] No such file or directory: "
+           "'C:\\\\T\\\\match_cuts_pool_ab\\\\state-3.pkl'\nmatch_cuts: ERROR: ValueError: the frame map is empty\n")
+    r = P.explain(err, code=2)
+    assert r.kind == P.UNKNOWN and "the frame map is empty" in r.text
+
+
+def test_review_what_python_prints_after_run_folder_is_not_the_reason():
+    noise = ("Exception ignored in: <function Pool.__del__ at 0x0000012>\nTraceback (most recent call last):\n"
+             "  File \"pool.py\", line 1, in __del__\nOSError: [WinError 6] The handle is invalid\n")
+    r = P.explain(BORAT_FFMPEG + noise, code=2)
+    assert r.kind == P.DISK_FULL and r.drive == "C:" and "handle" not in r.line()
+
+
+def test_review_a_network_folder_keeps_its_two_backslashes():
+    r = P.explain("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (4294967268): ffmpeg -i C:\\in\\raw.mp4 "
+                  "\\\\NAS\\share\\work\\raw_ae.mp4\n", code=2)
+    assert r.drive == "\\\\NAS\\share" and r.text.startswith("the network folder \\\\NAS\\share ran out of space")
+    ns = ("match_cuts: ERROR: NoSpaceError: not enough free space to copy raw.mp4 (14.2 GB) into the run folder's "
+          "media (\\\\NAS\\share\\out\\x\\extras\\media): 3.1 GB free -- a network folder: x. Free some space\n")
+    r = P.explain(ns, code=2)
+    assert r.drive == "\\\\NAS\\share" and "(\\\\NAS\\share\\out\\x\\extras\\media)" in r.text
+    assert "NoSpaceError" not in r.line()
+    assert P.plain_text(r.line()) == r.line()                   # plain already: History shows it as it is
+
+
 def test_the_tools_own_stops_stay_as_they_are():
     for stop in ("WRONG PAIR: the competitor's pictures are not in this RAW (0 of 16 frames found)",
                  "PICTURE NOT FOUND (sound found) -- the RAW may be a different cut",

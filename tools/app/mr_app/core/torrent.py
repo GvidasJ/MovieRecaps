@@ -918,6 +918,7 @@ class Job:
     renamed: str = ""               # the "(old)" renames of the note, kept when the note changes
     resumed: bool = False           # its files and its .aria2 were in the folder when it was given to aria2c
     given_at: float = 0.0           # when it was last given to aria2c (time.time())
+    found: list = field(default_factory=list)   # chosen files that were in the folder before it: Remove keeps them
 
 
 class TorrentSession:
@@ -1146,7 +1147,9 @@ class TorrentSession:
                 p = aria2_path(meta, save_dir, i)
                 if p.is_file():
                     s = p.stat().st_size
-                    have += s if s <= meta.files[i].size else 0
+                    if 0 < s <= meta.files[i].size:   # only this torrent's (a same-name other file is renamed "(old)")
+                        ok = file_matches(meta, i, p, s)
+                        have += s if ok is True or (ok is None and s == meta.files[i].size) else 0
             except (OSError, IndexError):
                 continue
         return have
@@ -1211,6 +1214,8 @@ class TorrentSession:
                     why = "it is too short to be checked"
             if not why:
                 kept.append(p)
+                if size > 0 and str(p) not in job.found:
+                    job.found.append(str(p))      # yours from before (maybe a finished download): Remove keeps it
                 continue
             new = old_name(p)
             try:
@@ -1362,6 +1367,7 @@ class TorrentSession:
         if status in ("paused", "waiting"):
             self.engine.call("aria2.unpause", j.id)
         elif status != "active":
+            real = self._real_paths(j) if j.rechecked else None      # asked before aria2c forgets the job
             for m in ("aria2.removeDownloadResult",):
                 try:
                     self.engine.call(m, j.id)
@@ -1376,15 +1382,17 @@ class TorrentSession:
                 data = self._torrent_file(j.info_hash).read_bytes()
             except OSError as e:
                 raise TorrentError("The saved .torrent is missing — add the magnet link again.") from e
-            self._add(j, data)
+            # day 13: after aria2c's "File exists, but a control file ..." Resume checks the file again, with
+            # aria2c's own paths (the name it escapes another way) -- else every Resume would stop the same way
+            self._add(j, data, check=j.rechecked, real=real)
         j.state, j.error = "downloading", ""
         self._last_alive[j.id] = self.clock()
         self._save()
 
     def remove(self, job_id: str, delete_files: bool | None = None) -> None:
         """Stop and forget a job. An unfinished job's part-downloaded files are deleted (``delete_files``: None =
-        only when it did not finish); a finished download is never deleted -- nor (day 13) the files a job found
-        already in the folder (``checked``: maybe your earlier finished download, being checked)."""
+        only when it did not finish); a finished download is never deleted -- nor (day 13) a chosen file that was
+        in the folder before the job (``found``: maybe your earlier finished download, being checked)."""
         j = self._need(job_id)
         real = self._real_paths(j) if j.state != "finished" else {}     # asked before aria2c forgets the job
         for m in ("aria2.forceRemove", "aria2.removeDownloadResult"):
@@ -1394,9 +1402,9 @@ class TorrentSession:
                 pass
         unfinished = j.state != "finished"
         if delete_files is None:
-            delete_files = unfinished and not j.checked
-        if delete_files and unfinished and not j.checked:
-            self._delete_parts(j, real)
+            delete_files = unfinished
+        if delete_files and unfinished:
+            self._delete_parts(j, real, keep=j.found)
         j.state = "removed"
         with self._lock:
             self._jobs.pop(j.id, None)
@@ -1433,7 +1441,7 @@ class TorrentSession:
         except (OSError, TorrentError, IndexError):
             return ""
 
-    def _delete_parts(self, j: Job, real: dict[int, Path] | None = None) -> None:
+    def _delete_parts(self, j: Job, real: dict[int, Path] | None = None, keep: Iterable[str] = ()) -> None:
         """The part-downloaded files of THIS job's chosen files (aria2c's own paths when known, else the torrent's
         names) and its .aria2 progress file -- never a file another known job of the same torrent and folder uses,
         never anything outside the save folder. Unselected files are not touched (aria2c leaves at most small
@@ -1449,6 +1457,7 @@ class TorrentSession:
                       and x.info_hash == j.info_hash and os.path.normcase(os.path.abspath(x.save_dir)) == here]
         theirs = {i for x in others for i in x.indexes}
         real = real or {}
+        mine = {os.path.normcase(os.path.abspath(k)) for k in keep}      # day 13: in the folder before this job
         paths: list[Path] = []
         for i in j.indexes:
             if i in theirs or not 0 <= i < len(meta.files):
@@ -1458,10 +1467,10 @@ class TorrentSession:
                     p = p or meta.disk_path(base, i)
                 except TorrentError:
                     continue
-                if inside(base, p) and p not in paths:
+                if inside(base, p) and p not in paths and os.path.normcase(os.path.abspath(p)) not in mine:
                     paths.append(p)
         ctl = base / (meta.files[0].path if meta.single else meta.name)
-        if not others and inside(base, ctl):
+        if not others and not mine and inside(base, ctl):              # kept files keep their progress file too
             paths.append(Path(str(ctl) + ".aria2"))
         # give aria2c a moment to close the files it had open
         for _ in range(20):

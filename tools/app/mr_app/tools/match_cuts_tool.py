@@ -574,8 +574,8 @@ class JobRow(QFrame):
     def _retry(self) -> None:
         """Try again (day 13): a run that stopped by itself -- the same video once more, in the same mode."""
         j = self.job
-        if j.complete and j.state in (J.DONE, J.STOPPED):
-            self.page.run_again(j, j.mode)
+        if j.complete and j.state in (J.DONE, J.STOPPED):     # a row you ran anyway stays "run anyway"
+            self.page.run_again(j, j.mode, force=bool(getattr(j, "force_inputs", False)))
 
     def _pick(self, k: int) -> None:
         if k < len(self._pick_files):

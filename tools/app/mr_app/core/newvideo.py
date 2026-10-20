@@ -224,8 +224,9 @@ def plain_error(err: Any) -> str:
         return DISK_FULL
     if re.match(r"^[A-Za-z_]+(Error|Exception)$", text):           # a bare exception name
         return f"something went wrong ({text}) -- press Try again"
-    if _TECHNICAL.search(text):           # day 13: a tool's technical line (an ffmpeg exit code, an errno, the worker
-        try:                              # pool's lost file, "details in ...") as match_cuts.plain_reason says it
+    if _TOOL_RUN.search(text):            # day 13: a tool run's technical line (an ffmpeg exit code, the worker pool's
+        try:                              # lost file, "details in ...") as match_cuts.plain_reason says it -- not a
+            #                               download's or a conversion's (their own words; "the run" is the edit)
             from match_cuts import plain_reason
             r = plain_reason.explain(stderr=text, stop="")
             if r.kind not in (plain_reason.UNKNOWN, plain_reason.TOOL_STOP):
@@ -240,6 +241,9 @@ def plain_error(err: Any) -> str:
 
 _TECHNICAL = re.compile(r"\w(?:Error|Exception):|\[(?:Errno|WinError) -?\d+\]|\bfailed \(-?\d+\)|match_cuts_pool_|"
                         r"details in \S|exit code -?\d{3,}", re.I)
+# a line that comes from a run of the tool (the edit, Just cuts), not from a download or the app's own conversion
+_TOOL_RUN = re.compile(r"\bff(?:mpeg|probe)(?:\.exe)? (?:writer )?failed \(-?\d+\)|match_cuts_pool_|details in \S|"
+                       r"the run stopped \(exit|match_cuts: |the cuts could not be made", re.I)
 
 
 def classify(text: str) -> str | None:
