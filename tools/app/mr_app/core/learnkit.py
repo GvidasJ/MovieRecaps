@@ -43,6 +43,7 @@ from . import paths
 
 BS = "\\"
 STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")   # a 5.1 RAW's one file in a run's extras\\media (day 12)
+ORIGINAL_NAMES = ("raw.mp4", "raw.mov", "raw.m4v")     # day 13: the original RAW V1 plays (match_cuts.edit_media)
 
 
 def is_run_folder(p: Path) -> bool:
@@ -460,6 +461,7 @@ def project_raw(pr: Any, raw: dict) -> tuple[str, Any, bool] | None:
     names = {_file_name(str(raw.get(k) or "")).lower() for k in ("file", "file_rel", "file_abs", "source_path")}
     names.discard("")
     names.update(STEREO_NAMES)        # a 5.1 RAW: 1_edit.xml plays its one file, raw_stereo.mp4 (day 12)
+    names.update(ORIGINAL_NAMES)      # day 13: V1 plays the original RAW, extras\\media\\raw.<ext>
     want = {"raw": raw}
     best, rank = None, None
     for s in pr.sequences:
@@ -491,6 +493,16 @@ def sequence_text(pr: Any, seq: Any) -> str:
     return f"'{seq.name}'{where}{size}{rate}, {seq.duration:.1f} s"
 
 
+def sound_name_of(L: Any, seq: Any, name: str) -> str:
+    """Day 13: the file the sequence's sound clips play the RAW's sound under -- raw_stereo.wav when V1 plays the
+    original RAW (learn.played_sound_name), else ``name`` (also with a tool from before day 13)."""
+    fn = getattr(L, "played_sound_name", None)
+    if fn is None:
+        return name
+    from types import SimpleNamespace
+    return fn(SimpleNamespace(sequences=[seq]), name)
+
+
 def played_share(pr_seq: Any, raw_media: str, run_dir: Path, raw_width: float | None = None) -> float | None:
     """The share of the RAW moments the project's sequence plays that the run's edit (1_edit.xml) plays too
     (learn.edit_changes' "played"; the pieces of one take joined first); None when it cannot be told."""
@@ -502,7 +514,8 @@ def played_share(pr_seq: Any, raw_media: str, run_dir: Path, raw_width: float | 
         tp, ts, _fps, _w = L.tool_clips(rf["edit"], raw_width or None)
     except Exception:  # noqa: BLE001 - an edit the tool cannot read back: cannot tell
         return None
-    up, us = L.user_clips(pr_seq, PR.file_name(raw_media))
+    name = PR.file_name(raw_media)
+    up, us = L.user_clips(pr_seq, name, sound_name_of(L, pr_seq, name))
     t, u = (tp or ts), (up or us)
     if not t or not u:
         return None
