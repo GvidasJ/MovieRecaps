@@ -228,6 +228,7 @@ _POOL_DIR = re.compile(r"(?P<dir>(?:[A-Za-z]:|\\\\[^\\\s'\"]+)[^'\"\n]*?)[\\/]+m
 _DRIVE = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]):[\\/]")
 _UNC = re.compile(r"(\\\\[A-Za-z0-9_.$-]+\\[A-Za-z0-9_.$ -]+)")
 _QUOTED_PATH = re.compile(r"""['"](?P<p>(?:[A-Za-z]:|\\\\)[^'"\n]+)['"]""")
+_LEAD_PATH = re.compile(r"""^(?P<p>(?:[A-Za-z]:|\\\\)[^'"*?<>|\n]*?\.[A-Za-z0-9]{2,4}): """)   # FFmpeg: "C:\x.mp4: ..."
 _TOOL_STOP = re.compile(r"^\s*(?:wrong pair\b|the inputs look wrong\b)|picture not found|not in this raw", re.I)
 _INPUT_MISSING = re.compile(r"^(raw|competitor|voice-over) file not found:\s*(.+)$", re.I)
 _PY_ERROR = re.compile(r"^(?:match_cuts: )?(?:ERROR: )?(?P<type>[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|"
@@ -303,7 +304,7 @@ def _drive_of(*texts: str) -> str:
 
 def _file_name(line: str) -> str:
     """The file name a Python error names ("... No such file or directory: 'C:\\\\x\\\\raw.mp4'" -> 'raw.mp4')."""
-    m = _QUOTED_PATH.search(line or "")
+    m = _QUOTED_PATH.search(line or "") or _LEAD_PATH.match(_clean(line or ""))
     if not m:
         return ""
     p = _un_repr(m.group("p")).rstrip("\\/")
@@ -383,6 +384,28 @@ def _meaningful(line: str) -> bool:
                 or _FFMPEG_CODE.search(line) or _COMMAND_CODE.search(line))
 
 
+def _stop_block(stderr: str) -> list[str]:
+    """The message that stopped the run, NEWEST FIRST: the console's last meaningful line (cli's "match_cuts: ERROR:
+    X: ...", a fatal error, an ffmpeg failure) and the lines printed right under it as part of it (FFmpeg's own words
+    after its command line), up to a blank line; [] when the console has no such line. An older line printed long
+    before (a library's "CUDA out of memory, falling back ...") is not part of it."""
+    lines = _lines(stderr)
+    head = next((i for i in range(len(lines) - 1, -1, -1)
+                 if not _LIBRARY.match(lines[i]) and _meaningful(lines[i].strip())), None)
+    if head is None:
+        return []
+    block = [lines[head].strip()]
+    for ln in lines[head + 1:]:
+        s = ln.strip()
+        if not s or _TS.match(s):
+            break
+        if _LIBRARY.match(ln) or _DETAILS_IN.match(s) or ln[:1].isspace() or \
+                s.startswith(("Run folder", "Traceback", "Thread 0x", "Current thread", "Extension modules")):
+            continue
+        block.append(s)
+    return list(reversed(block))
+
+
 def _error_lines(stderr: str, log: str) -> list[str]:
     """The lines that may say why it stopped, NEWEST FIRST: the console's (the exception that stopped the run is
     printed there, and only there), then the log's ERROR lines (older soft errors of steps that went on)."""
@@ -443,8 +466,9 @@ _KIND_TEXT = {
 }
 
 
-def _kind_reason(kind: str, line: str, extra: str = "") -> Reason:
-    """The Reason of a known kind for one error line (its file name / step / what it said added)."""
+def _kind_reason(kind: str, line: str, extra: str = "", step: str = "") -> Reason:
+    """The Reason of a known kind for one error line (its file name / step / what it said added; ``step``: the
+    stopping line's step when this line does not say one -- FFmpeg's own words under its command line)."""
     text = _KIND_TEXT.get(kind, "")
     name = _file_name(line)
     if kind == FILE_MISSING and name:
@@ -457,7 +481,7 @@ def _kind_reason(kind: str, line: str, extra: str = "") -> Reason:
         what = re.sub(r"\s*\((?:\w+Error|\w+Exception)\)$", "", plain_line(line))
         if what and len(what) < 140:
             text = f"{text} ({what})"
-    step = _step(line)
+    step = _step(line) or step
     if step and kind not in (SETUP,):
         text = f"{text} {step}"
     if extra:
@@ -493,9 +517,11 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
         return Reason(f"{who} is not there any more ({missing.group(2).strip()})",
                       f"put it back where it was (or drop the video again), then {TRY}", FILE_MISSING, stop)
     # the newest first. The exception that stopped the run is printed only to the console ("match_cuts: ERROR: ..."):
-    # when it is there, it alone decides; the log's ERROR lines (soft errors of steps that went on) only otherwise
-    cons = list(reversed(_console_errors(stderr)))
-    errs = cons if any(_meaningful(ln) for ln in cons) else cons + list(reversed(_log_errors(log)))
+    # when it is there, it (and the lines printed as part of it) alone decides; else the console's other lines and the
+    # log's ERROR lines (soft errors of steps that went on)
+    block = _stop_block(stderr)
+    errs = block or (list(reversed(_console_errors(stderr))) + list(reversed(_log_errors(log))))
+    head_step = _step(block[-1]) if block else ""          # "while converting the RAW", from the stopping line
     every = _lines(stderr) + _lines(log)
     # ffmpeg / ffprobe exit codes in the error lines (the newest first)
     prog: tuple[str, str, str] | None = None                # (kind, words, line)
@@ -555,7 +581,7 @@ def _explain(stderr: str, log: str, code: int | None, stop: str | None) -> Reaso
                 if kind == FILE_MISSING and re.search(r"\[winerror 2\] the system cannot find the file specified\s*$",
                                                       ln, re.I):
                     return _kind_reason(SETUP, ln)                   # a program to start that is not there
-                return _kind_reason(kind, ln)
+                return _kind_reason(kind, ln, step=head_step)
     if prog:                                                     # ffmpeg's code 1 and no words we know
         return Reason(f"FFmpeg stopped {_step(prog[2]) or 'on a video'}: {plain_line(prog[2])}".strip(),
                       _TODO[UNKNOWN], UNKNOWN, _clean(prog[2])[:600])

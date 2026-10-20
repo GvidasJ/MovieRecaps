@@ -186,6 +186,19 @@ def test_the_exception_that_stopped_the_run_wins_over_an_older_error_in_the_log(
     assert r.text == "the run stopped on a problem the app does not know yet: the frame map is empty (ValueError)"
 
 
+def test_an_older_library_line_in_the_console_does_not_win_over_the_stop():
+    err = ("CUDA out of memory. Tried to allocate 2.00 GiB (falling back to the CPU)\n00:10:00 INFO == S5\n"
+           "match_cuts: ERROR: ValueError: the frame map is empty\nRun folder: C:\\x\n")
+    assert P.explain(err, code=2).text == ("the run stopped on a problem the app does not know yet: the frame map is "
+                                           "empty (ValueError)")
+    ff = ("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (1): ffmpeg -i C:\\x\\raw.mp4 C:\\w\\o.mp4\n"
+          "[mov @ 01] moov atom not found\nC:\\x\\raw.mp4: Invalid data found when processing input\n\n"
+          "match_cuts: details in C:\\x\\match_cuts.log\n")
+    r = P.explain(ff, code=2)                                 # FFmpeg's own words under its command line count
+    assert r.kind == P.BROKEN_VIDEO and r.text == ("the video raw.mp4 is damaged or not complete, so FFmpeg could not "
+                                                   "read it while converting the RAW")
+
+
 def test_the_words_have_no_technical_brackets_and_ffmpeg_is_spelled_right():
     r = P.explain("match_cuts: ERROR: RuntimeError: conform raw: ffmpeg failed (4294967284): ffmpeg -i C:\\a.mp4 "
                   "C:\\w\\b.mp4\n", code=2)
