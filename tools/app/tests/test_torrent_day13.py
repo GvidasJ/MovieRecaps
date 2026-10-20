@@ -283,7 +283,9 @@ def test_the_card_shows_the_note(sess, tmp_path):
 # ---------------------------------------------------------------------------------------------------------------------
 
 needs_aria2 = pytest.mark.skipif(T.find_aria2c() is None, reason="aria2c.exe is not installed (run setup_app.py)")
-EXTRA = ["--enable-dht=false", "--bt-enable-lpd=false", "--bt-tracker-interval=2"]
+from mr_app.core.torrent_selftest import LOCAL_ONLY  # noqa: E402 - 127.0.0.1 only: no Windows firewall question
+
+EXTRA = LOCAL_ONLY + ["--bt-tracker-interval=2"]
 
 
 class Real:
@@ -331,6 +333,31 @@ class Real:
                     pass
             a.stop()
         self.tracker.close()
+
+
+def test_the_tests_aria2c_command_lines_are_127_0_0_1_only():
+    from conftest import _aria2c_on_this_computer_only as local
+    cmd = local([r"C:\x\aria2c.exe", "--enable-rpc=true", "--enable-dht=true", "--disable-ipv6=false"])
+    assert cmd[-4:] == LOCAL_ONLY                                         # added last: they win over the app's own
+    assert local(["aria2c", "--version"]) == ["aria2c", "--version"]      # not a daemon: as it is
+    assert local(["ffmpeg", "-i", "x"]) == ["ffmpeg", "-i", "x"] and local("aria2c --enable-rpc=true") == \
+        "aria2c --enable-rpc=true"
+
+
+@needs_aria2
+def test_every_aria2c_a_test_starts_listens_on_127_0_0_1_only(tmp_path):
+    """The lead saw Windows' firewall question about aria2c.exe during the tests: an aria2c started with the app's own
+    command line (no test options at all) still binds to 127.0.0.1 only, without DHT / IPv6 (conftest)."""
+    a = T.Aria2(tmp_path / "state", listen_port=T._free_port())
+    try:
+        a.start()
+        g = a.call("aria2.getGlobalOption")
+        assert (g.get("interface"), g.get("disable-ipv6"), g.get("enable-dht"), g.get("bt-enable-lpd")) == \
+            ("127.0.0.1", "true", "false", "false")
+    finally:
+        if a.running():
+            a.proc.kill()
+        a.stop()
 
 
 @pytest.fixture()

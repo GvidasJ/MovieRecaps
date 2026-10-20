@@ -20,6 +20,11 @@ from pathlib import Path
 
 from . import torrent as T
 
+# day 13: an aria2c of a check or a test listens on 127.0.0.1 only -- no IPv6, no DHT, no local discovery -- so
+# Windows never asks its firewall question ("allow public and private networks to access aria2c.exe?"); it popped
+# up during the tests and blocked every click. The app's own aria2c is not changed (it needs the internet).
+LOCAL_ONLY = ["--interface=127.0.0.1", "--disable-ipv6=true", "--enable-dht=false", "--bt-enable-lpd=false"]
+
 
 class LocalTracker:
     """A minimal BitTorrent HTTP tracker on 127.0.0.1: every peer that announces is told about the others."""
@@ -84,10 +89,8 @@ def run(folder: str | Path | None = None, size: int = 300 * 1024, timeout: float
     src = seed_dir / "tiny_check_video.mp4"
     src.write_bytes(data)
     tracker = LocalTracker()
-    seeder = T.Aria2(seed_state, listen_port=T._free_port(),
-                     extra_args=["--enable-dht=false", "--bt-enable-lpd=false"])
-    getter = T.Aria2(get_state, listen_port=T._free_port(),
-                     extra_args=["--enable-dht=false", "--bt-enable-lpd=false", "--bt-tracker-interval=2"])
+    seeder = T.Aria2(seed_state, listen_port=T._free_port(), extra_args=list(LOCAL_ONLY))
+    getter = T.Aria2(get_state, listen_port=T._free_port(), extra_args=LOCAL_ONLY + ["--bt-tracker-interval=2"])
     try:
         tor = T.make_torrent(src, [tracker.url])
         meta0 = T.read_torrent(tor)

@@ -307,7 +307,7 @@ def test_a_real_local_torrent_goes_through_the_new_video_row(tmp_path, monkeypat
     (seed_dir / "notes.txt").write_text("a small extra file", encoding="utf-8")
     comp = _tiny_video(tmp_path / "comp" / "short.mp4", 1.0, "180x320")
     tracker = TS.LocalTracker()
-    off = ["--enable-dht=false", "--bt-enable-lpd=false", "--bt-tracker-interval=2"]
+    off = TS.LOCAL_ONLY + ["--bt-tracker-interval=2"]       # 127.0.0.1 only: no Windows firewall question
     seeder = T.Aria2(seed_state, listen_port=T._free_port(), extra_args=off)   # noqa: SLF001
     getter = T.Aria2(get_state, listen_port=T._free_port(), extra_args=off)    # noqa: SLF001
     page = None

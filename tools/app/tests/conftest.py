@@ -43,11 +43,28 @@ def _is_shutdown_command(args) -> bool:
     return name in ("shutdown", "shutdown.exe")
 
 
+def _aria2c_on_this_computer_only(args):
+    """Day 13: an aria2c a test starts (its RPC daemon) listens on 127.0.0.1 only -- torrent_selftest.LOCAL_ONLY
+    (--interface=127.0.0.1, no IPv6, no DHT / local discovery) is added when missing -- so Windows never asks its
+    firewall question about aria2c.exe (it popped up during the torrent tests and blocked every click)."""
+    if isinstance(args, (str, bytes)):
+        return args
+    try:
+        lst = [str(a) for a in args]
+    except TypeError:
+        return args
+    if not lst or lst[0].replace("\\", "/").rsplit("/", 1)[-1].strip('"').lower() not in ("aria2c", "aria2c.exe") \
+            or "--enable-rpc=true" not in lst:
+        return args
+    from mr_app.core.torrent_selftest import LOCAL_ONLY
+    return lst + [a for a in LOCAL_ONLY if a not in lst]
+
+
 @pytest.fixture(autouse=True)
 def _never_turn_the_pc_off(monkeypatch):
     """No test can ever turn this PC off: core.shutdown.SHUTDOWN (and its real command) raise, and any process
     started as "shutdown ..." through subprocess is refused. A test that wants turn_off to "work" replaces SHUTDOWN
-    with its own fake, as before."""
+    with its own fake, as before. Day 13: every aria2c a test starts listens on 127.0.0.1 only (above)."""
     import subprocess
 
     from mr_app.core import shutdown as SD
@@ -66,7 +83,7 @@ def _never_turn_the_pc_off(monkeypatch):
         def __init__(self, args, *a, **k):
             if _is_shutdown_command(args):
                 refuse()
-            super().__init__(args, *a, **k)
+            super().__init__(_aria2c_on_this_computer_only(args), *a, **k)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(subprocess, "Popen", Popen)
     yield
