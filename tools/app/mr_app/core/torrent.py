@@ -882,7 +882,10 @@ def _exists_error(st: dict) -> bool:
 # ---------------------------------------------------------------------------------------------------------------------
 
 STATUS_KEYS = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "uploadSpeed", "connections",
-               "numSeeders", "errorCode", "errorMessage", "seeder", "infoHash", "followedBy", "files", "dir"]
+               "numSeeders", "errorCode", "errorMessage", "seeder", "infoHash", "followedBy", "files", "dir",
+               "verifiedLength", "verifyIntegrityPending"]
+CHECK_BPS = 20 * 1024 ** 2              # day 13: a check of a file already there reads at least this fast (a network
+#                                         folder): until then no peers and no progress is not "no one sharing"
 
 
 @dataclass
@@ -1507,7 +1510,8 @@ class TorrentSession:
         conns = int(st.get("connections", 0) or 0)
         seeds = int(st.get("numSeeders", 0) or 0)
         changed = False
-        if done > j.done or conns > 0:
+        verifying = "verifiedLength" in st or str(st.get("verifyIntegrityPending", "")).lower() == "true"
+        if done > j.done or conns > 0 or verifying:          # day 13: checking the file already there is progress
             self._last_alive[j.id] = now
         if conns > 0 or int(st.get("downloadSpeed", 0) or 0) > 0:
             j.fetched = True
@@ -1558,7 +1562,10 @@ class TorrentSession:
                 changed = True
         if j.state == "downloading" and status == "active":
             alive = self._last_alive.setdefault(j.id, now)
-            if now - alive > self.stall_minutes * 60:
+            limit = self.stall_minutes * 60
+            if j.checked and not j.fetched:      # an older aria2c says nothing while it checks: time for the check
+                limit += j.size / CHECK_BPS
+            if now - alive > limit:
                 j.state, j.error = "stalled", no_one_sharing(self.stall_minutes)
                 try:
                     self.engine.call("aria2.forcePause", j.id)

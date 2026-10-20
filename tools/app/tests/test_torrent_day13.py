@@ -50,7 +50,7 @@ def sess(tmp_path):
     s = T.TorrentSession(tmp_path / "state", engine=eng, settings=S.Settings(), clock=clock,
                          sleep=lambda _s: setattr(clock, "t", clock.t + 30), free=lambda p: 500 * GB,
                          scrape=lambda ih, tr: 3)
-    s.eng = eng
+    s.eng, s.clk = eng, clock
     return s
 
 
@@ -166,6 +166,28 @@ def test_a_file_that_is_not_this_torrents_is_renamed_old_and_fetched_fresh(sess,
     jid2 = sess.start(m, [0], dl2)
     assert (dl2 / "Movie.2020.1080p (old).mkv").read_bytes() == same
     assert "none of the parts checked match" in sess.poll(jid2)["note"]
+
+
+def test_a_long_check_of_a_file_already_there_is_not_no_one_sharing(sess, tmp_path):
+    """A big film checked over the laptop's network takes minutes with no peer and no progress: not "No one is
+    sharing" -- aria2c 1.37 says it is checking (verifiedLength), an older one says nothing: time by the size."""
+    data = _data()
+    m = T.read_torrent(_one_file_torrent(tmp_path, data)[0])
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    (dl / "Movie.2020.1080p.mkv").write_bytes(data)
+    jid = sess.start(m, [0], dl)
+    sess.stall_minutes = 10
+    sess.eng.set(jid, verifiedLength=1000)
+    sess.clk.t += 11 * 60
+    assert sess.poll(jid)["state"] == "downloading"
+    del sess.eng.d[jid]["verifiedLength"]
+    sess.job(jid).size = 40 * GB
+    sess.clk.t += 11 * 60
+    assert sess.poll(jid)["state"] == "downloading"                       # 40 GB at 20 MB/s: still checking
+    sess.clk.t += 40 * GB / T.CHECK_BPS
+    st = sess.poll(jid)
+    assert st["state"] == "stalled" and st["error"].startswith("No one is sharing")
 
 
 def test_a_file_with_its_aria2_goes_on_as_before(sess, tmp_path):
