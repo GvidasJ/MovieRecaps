@@ -133,6 +133,7 @@ class Context:
     frame: Any = None                                 # --frame: frame.Frame (the PNG and its hole)
     premiere_cutlist: Any = None                      # the cut list 1_edit.xml was written from (premiere_plan's)
     stereo: dict = field(default_factory=dict)        # the stereo copy 1_edit.xml plays (a 5.1 RAW; stereo.py)
+    edit_media: dict = field(default_factory=dict)    # day 13: the RAW files 1_edit.xml plays (edit_media.prepare)
     unmirrored: int = 0                               # segments whose competitor mirror the Premiere edit took off
     finish: dict = field(default_factory=dict)        # --speed / --frame: what the last step did (stage_finish)
     verify: dict = field(default_factory=dict)
@@ -2999,7 +3000,7 @@ def stage_exports(ctx: Context) -> None:
     rp = None
     if premiere:
         ex, rp = premiere_plan(ctx, ex)
-        ex = stereo_for_premiere(ctx, ex)       # 5.1 / 7.1 sound: 1_edit.xml plays a clean stereo copy of the RAW
+        ex = premiere_media(ctx, ex)            # day 13: V1 plays the original RAW, A1 its stereo sound (5.1 ...)
         ctx.premiere_cutlist = ex
         produced["xml"], ctx.premiere_xml = _soft(ctx, "S8 Premiere XML",
                                                   lambda: export_xml_edl.write_premiere_xml(ex, xml, cfg, rp))
@@ -3077,6 +3078,65 @@ def stage_exports(ctx: Context) -> None:
         if produced["compare"] and cmp_path.exists():
             ctx.paths["compare"] = str(cmp_path)
     ctx.exports.update(collect_deliverables(ctx, produced))
+
+
+def premiere_media(ctx: Context, ex: Cutlist) -> Cutlist:
+    """Day 13, keep the original RAW: the files 1_edit.xml plays (edit_media.prepare) -- V1 the original RAW (hard
+    linked / copied into extras/media as raw.<ext>, an .mkv remuxed), A1 the same file's sound or, for 5.1 / a sound
+    that starts late / another codec, a stereo WAV made with the analysis copy's own audio steps (checked sample-exact
+    against it). An original Premiere cannot place frame for frame (VFR, rotation, ...): a CRF 17 slow copy, and the
+    report and the summary say why. The analysis, the cut list and every cache keep the analysed copy, which is removed
+    at the end of the run (drop_analysis_copy). Anything failing here: the day-12 way (stereo_for_premiere) and a
+    warning."""
+    import copy as _copy
+    if getattr(ctx, "raw_conform", None) is None or getattr(ctx, "raw_input", None) is None \
+            or getattr(ctx, "raw_info", None) is None:
+        return stereo_for_premiere(ctx, ex)
+    from . import edit_media
+    try:
+        res = edit_media.prepare(ctx.raw_input, ctx.raw_info, ctx.raw_conform, ctx.cfg, ctx.cfg.media_dir)
+    except Exception as e:  # noqa: BLE001 - the edit is still made, on the analysed copy as before
+        log.error("the RAW for Premiere: %s\n%s", e, traceback.format_exc())
+        ctx.warn(f"the original RAW could not be placed for Premiere ({type(e).__name__}: {e}) -- 1_edit.xml plays the "
+                 "tool's converted copy, as before day 13")
+        return stereo_for_premiere(ctx, ex)
+    ctx.edit_media = res
+    ctx.dlog.record("premiere", "edit_media", picture={k: v for k, v in res["picture"].items() if k != "check"},
+                    sound={k: v for k, v in (res.get("sound") or {}).items() if k != "sync"},
+                    sync=(res.get("sound") or {}).get("sync"), line=res.get("line"))
+    log.info("the RAW for Premiere: %s", res.get("line"))
+    if res.get("fallback"):
+        ctx.warn(f"the original RAW cannot be used in Premiere as it is ({res['fallback']}) -- 1_edit.xml plays a "
+                 f"converted copy, extras/media/{res['picture'].get('name')} (H.264 CRF {edit_media.DELIVERY_CRF}, "
+                 f"preset {edit_media.DELIVERY_PRESET})")
+    out = _copy.copy(ex)
+    out.raw = edit_media.premiere_block(ex.raw, res, ctx.cfg.out_dir)
+    return out
+
+
+def drop_analysis_copy(ctx: Context) -> dict:
+    """Day 13: once the run is finished (checked, report written), the tool's converted analysis copy
+    (media/raw_ae.<ext>) goes -- 1_edit.xml plays the original RAW (premiere_media); edit_media.drop_analysis_copy says
+    when it is kept. Premiere runs only; never fails the run."""
+    em = getattr(ctx, "edit_media", None) or {}
+    conf = getattr(ctx, "raw_conform", None)
+    pic = (em.get("picture") or {}).get("path")
+    if not getattr(ctx.cfg, "premiere", False) or not pic or conf is None or not bool(getattr(conf, "conformed", False)):
+        return {}
+    from . import edit_media
+    try:
+        xmls = sorted({p for d in (Path(ctx.cfg.deliver), Path(ctx.cfg.out_dir)) if d.is_dir() for p in d.glob("*.xml")})
+        res = edit_media.drop_analysis_copy(conf.path, pic, xmls, getattr(ctx.cfg, "raw", None))
+    except Exception as e:  # noqa: BLE001 - the run is done; at worst the copy stays
+        log.warning("the analysis copy %s could not be removed (%s: %s)", Path(conf.path).name, type(e).__name__, e)
+        return {}
+    if res.get("removed"):
+        log.info("the analysis copy media/%s removed (%.2f GB) -- 1_edit.xml plays media/%s", Path(conf.path).name,
+                 res["bytes"] / 1024 ** 3, Path(pic).name)
+    else:
+        log.info("the analysis copy media/%s kept (%s)", Path(conf.path).name, res.get("why") or "?")
+    ctx.dlog.record("premiere", "drop_analysis_copy", **res)
+    return res
 
 
 def stereo_for_premiere(ctx: Context, ex: Cutlist) -> Cutlist:
@@ -4108,6 +4168,9 @@ def hand_checks(ctx: Context) -> dict[str, list[str]]:
         out["links"] = link_lines(exports)
     if getattr(cfg, "premiere", False) and getattr(ctx, "people", None) is not None:
         out["people"] = person_lines(ctx)
+    em = getattr(ctx, "edit_media", None) or {}
+    if getattr(cfg, "premiere", False) and em.get("line"):       # day 13: which RAW files 1_edit.xml plays
+        out["raw_media"] = [str(em["line"])]
     try:                                         # which speech model ran where (the GPU, or the CPU and why)
         from .transcribe import summary as asr_summary
         out["asr"] = asr_summary()
@@ -4360,6 +4423,7 @@ def run(cfg: Config) -> dict:
             for key in ("report", "verify"):
                 ctx.exports["files"][key] = ctx.paths.get(key)
         one_raw_file(ctx)              # day 12: a 5.1 RAW leaves one RAW file in the run folder (raw_stereo)
+        drop_analysis_copy(ctx)        # day 13: 1_edit.xml plays the original RAW -- the converted copy goes
     finally:
         eta.uninstall(clock, ctx.timings if "total" in ctx.timings and not getattr(cfg, "quick_checks", False)
                       else None)              # a finished run's times: the history (not check-all's: its caches)
