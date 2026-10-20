@@ -3,19 +3,20 @@
 re-transcription.
 
 1. **On the sound of the edit you get** (day 13, 6.1 -- your video16 / mindculpt fixes). The captions are timed on
-   the edit's own transcript; in some edits that transcript runs a little off the sound 1_edit.xml plays (video16:
-   0.25 s early from 4.8 s on, mindculpt: up to 0.47 s late in its second half -- the delivered audio transcribed
-   again agrees with you there), and in your fixes you dragged exactly those stretches onto the words as heard. Each
-   transcript word is paired with the same word of the RAW's own transcript where 1_edit.xml's A1 plays it
-   (captions.speech_starts: what Premiere plays); where the paired words around a caption agree on one offset of at
-   least MIN_SHIFT_S, the caption moves by it -- start and end, as you drag a block; an edge on a video cut stays on
-   the cut. Captions on the sound already (an offset under MIN_SHIFT_S, words that disagree, too few words) are not
+   a transcript of the caption step's own rendering of the edit's audio (the cut list: each piece at the
+   competitor's speed), while 1_edit.xml plays every RAW clip at 100 %; where the competitor changed the speed the
+   two can run apart (video16: 0.27 s early from 4.8 s on, mindculpt: up to 0.47 s late in its second half -- the
+   delivered audio transcribed again agrees with you there), and in your fixes you dragged exactly those stretches
+   onto the words as heard. Each transcript word is paired with the same word of the RAW's own transcript where
+   1_edit.xml's A1 plays it (captions.speech_starts: what Premiere plays); a caption whose neighbouring words agree
+   on an offset of at least MIN_SHIFT_S belongs to a stretch, and a stretch whose offset reaches STRETCH_SHIFT_S
+   somewhere moves -- each caption by its offset, start and end, as you drag a block; an edge on a video cut stays
+   on the cut. Captions on the sound or nearly (a smaller offset, words that disagree, too few words) are not
    touched: in your earlier fixes you kept them where they were.
 2. **Pairs kept together** (day 13, 9.3; caption rule 9): see pairs_fix.
 """
 from __future__ import annotations
 
-import bisect
 import re
 import statistics
 from fractions import Fraction
@@ -29,6 +30,8 @@ AGREE_SHARE = 0.6         # ... and at least this share of them agree
 MIN_SHIFT_S = 0.15        # only an offset this big moves a caption (0.15 s: 3.6 frames at 23.976 fps) ...
 STRETCH_SHIFT_S = 0.25    # ... and only in a stretch whose offset reaches this somewhere (your video16: 0.27 s,
                           # mindculpt up to 0.47 s moved; laptop009's drift to 0.22 s at its end you kept)
+MIN_STRETCH = 3           # ... of at least this many captions (one caption off alone, like video021's stammer
+                          # "I've-", is no stretch)
 MIN_FRAMES_S = 2 / 60     # a caption moved shorter than this keeps its length
 
 _NORM = re.compile(r"[^0-9a-z']+")
@@ -96,11 +99,12 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
            min_shift: float = MIN_SHIFT_S) -> tuple[list[dict], list[dict]]:
     """(the captions moved onto the delivered sound, what moved): ``caps`` [{text, start, end (frames of ``fps``),
     mode, ...}] in order; ``pairs`` pair_words(transcript the captions are timed on, the RAW's words where the
-    delivered A1 plays them); a spoken caption whose start has a local_offset of at least ``min_shift`` moves by it
-    (start and end, rounded to frames). An edge on a video cut (``cuts``, frames) stays there; captions inside another
-    video's stretch (``stretches``, frames) and action / placeholder captions do not move. Order and back-to-back
-    kept: a caption ends where the next one starts when it did before, never after it; one left shorter than 2
-    frames keeps its length. Returns new dicts (the input is not changed)."""
+    delivered A1 plays them); spoken captions next to each other whose starts have a local_offset of at least
+    ``min_shift`` the same way make a stretch, and a stretch reaching STRETCH_SHIFT_S somewhere moves, each caption by
+    its own offset (start and end, rounded to frames). An edge on a video cut (``cuts``, frames) stays there;
+    captions inside another video's stretch (``stretches``, frames) and action / placeholder captions do not move.
+    Order and back-to-back kept: a caption ends where the next one starts when it did before, never after it; one
+    left shorter than 2 frames keeps its length. Returns new dicts (the input is not changed)."""
     f = float(fps)
     out = [dict(c) for c in caps]
     cut = set(int(x) for x in cuts)
@@ -128,7 +132,7 @@ def retime(caps: Sequence[dict], pairs: Sequence[tuple[float, float]], fps: Frac
             if offs[j] is not None:
                 members.append(j)
             j += 1
-        if members and max(abs(offs[k]) for k in members) >= max(min_shift, STRETCH_SHIFT_S):
+        if len(members) >= MIN_STRETCH and max(abs(offs[k]) for k in members) >= max(min_shift, STRETCH_SHIFT_S):
             for k in members:
                 shift[k] = -int(round(offs[k] * f))
         i = max(j, i + 1)
@@ -369,6 +373,7 @@ def run(ctx: Any) -> dict:
     cap["captions"] = [{**{k: v for k, v in c.items() if k not in keep}, **{k: c[k] for k in keep if k in c}}
                        for c in rows]
     cap["count"] = len(rows)
+    cap["by_mode"] = {m: sum(1 for c in rows if c.get("mode") == m) for m in dict.fromkeys(c.get("mode") for c in rows)}
     cap["placeholders"] = [c for c in cap["captions"] if c.get("mode") == "placeholder"]
     cap["post"] = info
     dump_json(cap, ctx.cfg.debug_dir / "captions.json")

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 from fractions import Fraction
-from pathlib import Path
 from types import SimpleNamespace
 
 from match_cuts import post_captions as P
@@ -71,10 +70,18 @@ def test_a_late_stretch_moves_onto_the_sound_start_and_end_back_to_back():
 def test_an_early_stretch_moves_later():
     """video16 (Always Sunny): the captions 0.27 s before the words are heard -- 16 frames later."""
     own, ref = _late_transcript(n=14, late=-0.27, t0=10.0)
-    caps = [_cap("w0 w1", 584, 632), _cap("w2 w3", 632, 680)]
+    caps = [_cap("w0 w1", 584, 632), _cap("w2 w3", 632, 680), _cap("w4 w5", 680, 728)]
     new, moved = P.retime(caps, P.pair_words(own, ref), F60)
-    assert [(c["start"], c["end"]) for c in new] == [(600, 648), (648, 696)]
-    assert [m["by_frames"] for m in moved] == [16, 16]
+    assert [(c["start"], c["end"]) for c in new] == [(600, 648), (648, 696), (696, 744)]
+    assert [m["by_frames"] for m in moved] == [16, 16, 16]
+
+
+def test_one_caption_off_alone_is_no_stretch():
+    """video021: only the stammer "I've-" had words 0.4 s off around it -- one caption is left where it is."""
+    pairs = [(12.0 + 0.4 * i, 12.0 + 0.4 * i - 0.45) for i in range(6)]
+    caps = [_cap("a b", 600, 750), _cap("c d", 750, 960), _cap("e f", 960, 1100)]
+    assert P.local_offset(pairs, 12.5) is not None and P.local_offset(pairs, 10.0) is None
+    assert P.retime(caps, pairs, F60)[1] == []
 
 
 def test_a_drift_moves_only_when_it_gets_big_somewhere():
@@ -103,9 +110,10 @@ def test_captions_on_the_sound_or_nearly_stay_where_they_are():
 
 def test_an_edge_on_a_video_cut_stays_and_nothing_crosses_a_cut():
     own, ref = _late_transcript(n=14, late=0.45, t0=10.0)
-    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723)]
+    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723), _cap("w4 w5", 723, 771)]
     new, _ = P.retime(caps, P.pair_words(own, ref), F60, cuts=[675])
     assert new[0]["start"] == 600 and new[0]["end"] == 675 and new[1]["start"] == 675   # the cut keeps its edge
+    assert [(c["start"], c["end"]) for c in new[1:]] == [(675, 696), (696, 744)]
     new, _ = P.retime(caps, P.pair_words(own, ref), F60, cuts=[610])
     assert new[0]["start"] == 610                                         # up to the cut, not across it
 
@@ -113,17 +121,19 @@ def test_an_edge_on_a_video_cut_stays_and_nothing_crosses_a_cut():
 def test_placeholders_actions_and_other_video_do_not_move():
     own, ref = _late_transcript(n=14, late=0.45, t0=10.0)
     caps = [_cap("w0 w1", 627, 675), _cap("*laughs*", 675, 723, "action"), _cap("w4 w5", 723, 771),
-            _cap("*...*", 771, 800, "placeholder")]
-    new, moved = P.retime(caps, P.pair_words(own, ref), F60, stretches=[(700, 800)])
-    assert [m["text"] for m in moved] == ["w0 w1"]                         # w4 w5 is another video's stretch
-    assert [(c["start"], c["end"]) for c in new] == [(600, 675), (675, 723), (723, 771), (771, 800)]
+            _cap("w6 w7", 771, 819), _cap("w8 w9", 819, 867), _cap("*...*", 867, 900, "placeholder")]
+    new, moved = P.retime(caps, P.pair_words(own, ref), F60, stretches=[(819, 900)])
+    assert [m["text"] for m in moved] == ["w0 w1", "w4 w5", "w6 w7"]       # w8 w9 is another video's stretch
+    assert [(c["start"], c["end"]) for c in new] == [(600, 675), (675, 696), (696, 744), (744, 819), (819, 867),
+                                                     (867, 900)]
 
 
 def test_a_caption_moved_earlier_leaves_the_one_before_two_frames():
     own, ref = _late_transcript(n=14, late=0.45, t0=10.0)
-    caps = [_cap("*...*", 600, 627, "placeholder"), _cap("w0 w1", 627, 675)]
+    caps = [_cap("*...*", 600, 627, "placeholder"), _cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723),
+            _cap("w4 w5", 723, 771)]
     new, _ = P.retime(caps, P.pair_words(own, ref), F60)
-    assert [(c["start"], c["end"]) for c in new] == [(600, 602), (602, 648)]
+    assert [(c["start"], c["end"]) for c in new] == [(600, 602), (602, 648), (648, 696), (696, 744)]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -206,19 +216,19 @@ def test_the_step_rewrites_the_srt_and_captions_json(tmp_path, monkeypatch):
     from match_cuts import captions as C
     from match_cuts import export_xml_edl as X
     own, ref = _late_transcript(n=14, late=0.45, t0=10.0)
-    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723)]
+    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723), _cap("w4 w5", 723, 771)]
     (tmp_path / "1_edit.xml").write_text("<xmeml/>", encoding="utf-8")
     monkeypatch.setattr(C, "edit_cuts", lambda xml, fps: [])
     monkeypatch.setattr(X, "parse_premiere_xml", lambda xml: {"audio": []})
     monkeypatch.setattr(C, "speech_starts", lambda items, sm, fps: ([], ref))
     ctx, srt = _ctx(tmp_path, caps, own, speech=object())
     info = P.run(ctx)
-    assert len(info["retimed"]) == 2 and info["offset_s"]["words"] == 14
+    assert len(info["retimed"]) == 3 and info["offset_s"]["words"] == 14
     blocks = srt.read_text(encoding="utf-8").strip().split("\n\n")
     assert blocks[0].splitlines() == ["1", "00:00:10,000 --> 00:00:10,800", "w0 w1"]
     saved = json.loads((tmp_path / "debug" / "captions.json").read_text(encoding="utf-8"))
     assert [(c["start"], c["end"], c["start_tc"]) for c in saved["captions"]] == \
-        [(600, 648, "00:00:10,000"), (648, 696, "00:00:10,800")]
+        [(600, 648, "00:00:10,000"), (648, 696, "00:00:10,800"), (696, 744, "00:00:11,600")]
     assert saved["post"]["retimed"][0]["by_frames"] == -27
     from match_cuts.report import _post_captions
     lines = _post_captions(ctx.captions)
@@ -227,7 +237,7 @@ def test_the_step_rewrites_the_srt_and_captions_json(tmp_path, monkeypatch):
 
 def test_the_step_leaves_copied_captions_and_a_missing_speech_map_alone(tmp_path):
     own, _ref = _late_transcript(n=14, late=0.45, t0=10.0)
-    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723)]
+    caps = [_cap("w0 w1", 627, 675), _cap("w2 w3", 675, 723), _cap("w4 w5", 723, 771)]
     ctx, srt = _ctx(tmp_path, caps, own, styled=False, speech=object())
     assert P.run(ctx) == {"pairs": [], "retimed": []} and srt.read_text(encoding="utf-8") == "old"
     ctx, srt = _ctx(tmp_path, caps, own, styled=True, speech=None)
