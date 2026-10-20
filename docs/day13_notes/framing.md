@@ -14,7 +14,7 @@ middle of the window; when their face is cut off at the window's edge, only unti
 (a slide, not a jump onto another part of the picture: night 8's lesson from 021 S54 / S56, and video19's Family Guy
 doctor -- 85 px instead of 466 px, which would have pushed Lois, a face the detection does not find, out). Each moved
 clip says so in its XML comment and in the run's end summary ("centred on the person speaking (RAW x ..., Light-ASD
-..., ...% of the speech): the picture moved ... px sideways, zoom kept" / "slid onto the person speaking, cut off at
+..., ...% of the speech): the picture moved ... px sideways, zoom and height kept" / "slid onto the person speaking, cut off at
 the window's edge ...").
 
 "Clear" (Light-ASD, the person SPEAKING -- never just the biggest face) means all of:
@@ -46,7 +46,7 @@ replaced spot (B-roll / not in the RAW).
    hard checks (validate_premiere_exports, without the EDL and the speech map) were run on both XMLs: the rule adds no
    hard-check failure anywhere. (Four were dumped the fast way, see below.)
 2. **Pictures of every move** (RAW frame, the tool's window before = red, after = blue, yours = green, faces with
-   their Light-ASD score): `work\t28\framing\pics\<tag>\<case>_moves.png`. Every move is onto the person speaking; none
+   their Light-ASD score): `work\t28\framing\pics\final\` and `pics\fast_rest\`. Every move is onto the person speaking; none
    onto another person.
 3. **The histories:** video6 (a cartoon, you kept the middle on all 9 clips): nothing moves (the flickering cartoon
    faces, unclear speakers). laptop004 (a cartoon, you moved re-framed clips back): nothing moves (no clear speaker).
@@ -103,13 +103,13 @@ check-all had not reached them), so they could not be replayed.
 ## What I decided on my own (the user is away)
 
 1. **Centre the person speaking** (not "slide just until they are in", day 12's way): your moves land closest to the
-   speaker in the middle of the window -- video11 +188 / +222 px (the rule: +211 / +230), video14 -154 px on four
+   speaker in the middle of the window -- video11 +188 px (the rule: +211), video14 -154 px on four
    clips (the rule: -169), laptop013 +228 (the rule: +244).
 2. **On by default.** The replays: framing better on the keyed videos and no clip of any video worse, no new
    hard-check failure, and every move onto the person speaking (pictures). If the lead's check-all disagrees, one
    switch turns it off (`SPEAKER_CENTRE = False`, or `MATCH_CUTS_SPEAKER_CENTRE=0` for one run).
-3. **Never against the XML's own `--min-move` check.** That check reads a clip cut at a RAW shot change as ending half
-   a frame (one 60 fps tick) later, so about half of the RAW shot changes look like "the same shot" to it; a framing
+3. **Never against the XML's own `--min-move` check.** That check takes the moment a clip ends half a 1/60 s step too
+   late, so a RAW shot change inside that half step -- about half of them -- looks like "the same shot" to it; a framing
    change under 250 px there passes only when the framing before does not show the person after the cut. The rule
    follows that reading exactly (it cost one of your moves: video11 at 46.6 s, +245 px). I did not change the check
    itself (other helpers edit the validation today; a hard check is not mine to loosen).
@@ -138,6 +138,7 @@ check-all had not reached them), so they could not be replayed.
 * The whole tool suite with the graphics card hidden, final code: **1447 passed, 96 skipped, 0 failed** (19 min).
   (An earlier full run while the PC's memory was full had 8 worker-pool tests fail -- workers that could not start;
   they pass on their own and in the final run.)
+
 ## Files
 
 * `tools/match_cuts/match_cuts/export_xml_edl.py`: one new block right after day 12's `_speaker_cut_off` (constants,
