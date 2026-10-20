@@ -134,6 +134,40 @@ def test_the_app_reads_the_check_from_its_own_process(monkeypatch):
     assert V.check_in_process("py.exe")[0].text == "the version check failed (ImportError: boom)"
 
 
+class _FakeProc:
+    def __init__(self, lines, code):
+        self.stdout, self._code = iter(lines), code
+
+    def wait(self):
+        return self._code
+
+
+def test_fix_now_runs_setup_app_from_the_app_and_keeps_its_log(tmp_path):
+    seen, said = {}, []
+
+    def popen(cmd, **kw):
+        seen["cmd"], seen["cwd"] = cmd, kw.get("cwd")
+        return _FakeProc(["found: PySceneDetect 0.6.4 is too old (0.7.1 needed)\n", "installing PySceneDetect ...\n",
+                          "Successfully installed scenedetect-0.7.1\n", "done: everything is as the project expects\n"], 0)
+    log = tmp_path / "logs" / "setup_app.log"
+    assert V.run_setup("py.exe", log, said.append, popen) == (0, "")
+    assert seen["cmd"] == ["py.exe", str(V.SETUP), "--from-app"] and seen["cwd"] == str(V.REPO)
+    assert said == ["installing PySceneDetect ..."]
+    text = log.read_text(encoding="utf-8")
+    assert "Fix now: setup_app.py --from-app" in text and "Successfully installed scenedetect-0.7.1" in text
+    assert "--- exit code 0" in text
+    code, why = V.run_setup("py.exe", log, None, lambda cmd, **kw: _FakeProc(
+        ["left: PySide6 6.11.0 is too old (6.12.0 needed) -- close MovieRecaps, then run: ...\n"], 2))
+    assert code == 2 and why.startswith("PySide6 6.11.0 is too old")
+    code, why = V.run_setup("py.exe", log, None, lambda cmd, **kw: _FakeProc(
+        ["pip could not install yt-dlp -- check the internet connection and run this line again\n"], 1))
+    assert code == 1 and why.startswith("pip could not install yt-dlp")
+
+    def broken(cmd, **kw):
+        raise OSError("no such file")
+    assert V.run_setup("py.exe", log, None, broken) == (1, "setup_app could not start (no such file)")
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # setup_app.py (1.4): a broken PySceneDetect no longer crashes it -- it goes on and installs 0.7.1
 # ---------------------------------------------------------------------------------------------------------------------

@@ -411,6 +411,47 @@ def check_in_process(python: str | os.PathLike | None = None, timeout_s: float =
     return [Problem("check", "the check", f"the version check failed ({tail[:140]})", HAND)]
 
 
+SETUP = REPO / "tools" / "app" / "setup_app.py"
+
+
+def run_setup(python: str | os.PathLike, log_path: str | os.PathLike, say: Callable[[str], None] | None = None,
+              popen: Callable = subprocess.Popen) -> tuple[int, str]:
+    """The app's Fix now: ``setup_app.py --from-app`` in its own process -- every line it prints into ``log_path``
+    (after a dated header), its "installing ..." lines to ``say`` -- then (exit code, why it did not fix everything,
+    in plain words: '' when it did)."""
+    import time
+    log = Path(log_path)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    left: list[str] = []
+    reason = ""
+    with open(log, "a", encoding="utf-8", errors="replace") as f:
+        f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} Fix now: setup_app.py --from-app\n")
+        f.flush()
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+        try:
+            p = popen([str(python), str(SETUP), "--from-app"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                      text=True, encoding="utf-8", errors="replace", cwd=str(REPO), env=env,
+                      creationflags=CREATE_NO_WINDOW)
+        except OSError as e:
+            f.write(f"could not start: {e}\n")
+            return 1, f"setup_app could not start ({e})"
+        for line in p.stdout:
+            f.write(line)
+            f.flush()
+            s = line.strip()
+            if say is not None and s.startswith(("installing ", "downloading ")):
+                say(s)
+            if s.startswith("left: "):
+                left.append(s[6:])
+            elif s.startswith("pip could not install"):
+                reason = s
+        code = p.wait()
+        f.write(f"--- exit code {code}\n")
+    if code == 0:
+        return 0, ""
+    return code, reason or ("; ".join(left[:2]) if left else f"setup_app stopped (exit code {code})")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     probs = check()

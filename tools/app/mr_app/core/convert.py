@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -673,12 +672,11 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
         dest_dir.mkdir(parents=True, exist_ok=True)
         final = _target(src, dest_dir, delete_original)
         tmp = dest_dir / f"{src.stem}.converting.mp4"
-        free = shutil.disk_usage(dest_dir).free
-        if pl.how == "rewrap" and free < info.size * 1.05:
-            raise ConvertError(f"not enough free space on the disk ({_size(free)} free, the video is "
-                               f"{_size(info.size)})")
-        if pl.how == "encode" and free < info.size * 2:
-            log(f"note: only {_size(free)} free on the disk -- the H.264 copy may be bigger than the original")
+        from . import space                       # day 13: the one place of every estimate -- or it does not start
+        room = space.convert_problem(info.size, pl.how, dest_dir, src.name)
+        if room:
+            log(f"not started: {room}")
+            raise ConvertError(room)
         start = 0.0
         try:
             r = _run([ffprobe_bin(), "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0",

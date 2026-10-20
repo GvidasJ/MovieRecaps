@@ -200,6 +200,8 @@ _RULES: list[tuple[str, str]] = [
     (r"getaddrinfo|no internet|connection (?:dropped|reset|refused)|timed out|network", NO_NET),
 ]
 
+_SAYS_HOW_MUCH = re.compile(r"\bonly [\d.]+ (?:[kmgt]b|bytes?) is free\b")    # core.space's own words: kept
+
 _LIBRARY = re.compile(r"^\s*(\[[^\]]*\]\s*)?(warning|warn|info|debug)\b|opencv|cv2\.|global .*\.cpp|ffmpeg version",
                       re.I)
 
@@ -220,8 +222,8 @@ def plain_error(err: Any) -> str:
     real = [x for x in lines if not _LIBRARY.search(x)]       # a library's warning is never the reason
     text = (real[-1] if real else lines[-1]).strip()
     low = text.lower()
-    if re.search(_RULES[0][0], low):
-        return DISK_FULL
+    if re.search(_RULES[0][0], low) and not _SAYS_HOW_MUCH.search(low):
+        return DISK_FULL                                   # (day 13: one that says how much is needed stays)
     if re.match(r"^[A-Za-z_]+(Error|Exception)$", text):           # a bare exception name
         return f"something went wrong ({text}) -- press Try again"
     return text[:300]

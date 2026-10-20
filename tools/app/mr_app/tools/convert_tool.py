@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QCheckBox, QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from . import Tool
@@ -219,10 +219,16 @@ class ConvertPage(QWidget):
         if th is not None:
             th.wait(2000)
         it = self._item(item_id)
+        from ..core import space
+        from ..ui import health
         if it is not None:
             it.state = "done" if ok else ("stopped" if text == "stopped by you" else "failed")
             it.text, it.share = text, 1.0 if ok else it.share
             self.rows[it.id].refresh()
+            if not ok and space.is_space_error(text):        # day 13: no room -- the numbers, and Clean up
+                QTimer.singleShot(0, self, lambda t=text, n=it.path.name: health.offer_cleanup(self.ctx, self,
+                                                                                             f"{n}: {t}"))
+        health.space_changed(self.ctx)                       # day 13: the strip's free space read again
         if not any(i.state == "waiting" for i in self.items):
             done = sum(1 for i in self.items if i.state == "done")
             self.ctx.notify("Convert: done", f"{done} of {len(self.items)} converted")
