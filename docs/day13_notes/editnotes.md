@@ -47,7 +47,7 @@ the end summary ("Fixed in the edit by itself: N" under *Check by hand*), at the
 | video12-fixed | FAIL: `XML FLASH S30+S31+S32 at 00:00:32:00: 2 frame(s)` | 1_edit.xml 770 -> 768 frames, ends on RAW 1530 (your fix's end); 0 problems |
 | video6-fixed | FAIL: `XML FLASH S08+S09+S10+S11 at 00:00:21:00: 1 frame(s)` | 1_edit.xml 505 -> 504 frames; 0 problems |
 | laptop013-fixed | -- | edit_60fps.xml: A1 cut at 653 -> 654 with its snapped V1 cut (1_edit.xml unchanged) |
-| laptop004, laptop010, video7, video8, video9, video11, video14, video15 | -- | identical V1 / A1 lists at both rates |
+| laptop004, laptop010, video7, video8, video9, video10, video11, video14, video15 | -- | identical V1 / A1 lists at both rates |
 
 A sweep of every finished run's own files (all 28 day-12 check-all runs, every run in D:\Shared\Projects, output\
 laptop_video10-19): A1 moves only in laptop013 (above) and, among your real runs, in Are We There Yet (its 3 notes),
@@ -61,6 +61,14 @@ on the CPU with the code before my change (git HEAD of day 12) and with mine: th
 1_edit.xml at the RAW's rate + its hard checks (scripts in my scratchpad: en_replay.py / en_cmp.py). The replayed old
 code gives exactly day 12's XMLs (checked on video14 and laptop013). The flash check change was swept over every
 day-12 check-all XML and every run in D:\Shared\Projects and output\laptop_video1x: only Family Guy changes.
+
+## Tests
+
+* New: `tools\match_cuts\tests\test_day13_editnotes.py`, 17 tests (small synthetic plans: the A1 fix at 60 fps and at
+  the RAW's rate, with `--speed` too; the end cut, its captions and the run's last step `apply_final` with the summary
+  and report lines; the cut fixer's 4 cases and the cases it must leave; the burst rule and its limits; nothing with
+  `--remove-silence`). Changed: `test_flash_018.py` (A1 now moves with the snapped cuts).
+* Tool suite (GPU hidden): see the counts at the end of this file. App suite: 979 passed, 5 skipped.
 
 ## For the lead (merge / check by hand)
 
@@ -83,7 +91,9 @@ day-12 check-all XML and every run in D:\Shared\Projects and output\laptop_video
 * **A cached end-to-end check-all re-run** (the brief's main test): one try of video12 at 08:09 died in its analysis
   stage with `SystemError: <built-in function resize> returned a result with an exception set` -- the PC had run out of
   commit memory (the lead's check-all, the framing helper's dumps and mine together); a second try I stopped at 08:20
-  when the lead asked (2 GB of commit memory left). The pipeline's last step (apply_final: 1_edit.xml at the RAW's rate,
-  its hard checks, the SRT, the summary and report lines) is covered by a unit test on the CPU instead
+  when the lead asked (2 GB of commit memory left). The PC never had 30 GB of commit memory and the graphics card under
+  9 GB at the same time again before the deadline, so I left it (the lead's runs come first). The export itself was
+  replayed on the CPU for 12 of the 27 cases (above), and the pipeline's last step (apply_final: 1_edit.xml at the RAW's
+  rate, its hard checks, the SRT, the summary and report lines) is covered by a unit test
   (`test_the_run_writes_and_lists_the_fix`). The lead's final check-all will show video6 / video12 passing.
 * A re-run of the two real projects (not needed: their own files show the before / after).
