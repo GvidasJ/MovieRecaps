@@ -61,3 +61,16 @@ def test_a_caption_split_on_such_a_cut_is_whole_again():
     slow = [{"text": "in my", "start": 0, "end": 60, "mode": "voice"},
             {"text": "face", "start": 60, "end": 100, "mode": "voice"}]
     assert PC.rejoin(slow, {60}, FPS)[1] == []                  # 1.67 s on screen
+
+
+def test_an_edge_moved_onto_such_a_cut_goes_back_to_the_next_word():
+    # video11: "that says" | "shenanigans" -- rule 10 had moved the edge from 163 (where "shenanigans." is heard,
+    # 2.728 s) onto the speaker rule's re-frame at 167 (2.783 s)
+    caps = [{"text": "that says", "start": 140, "end": 167, "mode": "voice"},
+            {"text": "shenanigans", "start": 167, "end": 242, "mode": "voice"}]
+    words = [["that", 2.347, 2.467], ["says", 2.527, 2.688], ["shenanigans.", 2.728, 3.37]]
+    out, done = PC.unpin(caps, {167}, words, FPS)
+    assert [(c["start"], c["end"]) for c in out] == [(140, 163), (163, 242)]      # 2.728 s starts in frame 163
+    assert done and done[0]["from"] == 167 and done[0]["to"] == 163 and caps[0]["end"] == 167
+    assert PC.unpin(caps, {200}, words, FPS)[1] == []                             # not on such a cut
+    assert PC.unpin(caps, {167}, [], FPS)[1] == []                                # the word not heard: left

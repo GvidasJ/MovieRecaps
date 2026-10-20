@@ -433,6 +433,32 @@ def rejoin(caps: Sequence[dict], at: set[int], fps: Fraction) -> tuple[list[dict
     return out, done
 
 
+def unpin(caps: Sequence[dict], at: set[int], words: Sequence[Sequence[Any]], fps: Fraction
+          ) -> tuple[list[dict], list[dict]]:
+    """A boundary of two spoken captions sitting exactly on one of ``at`` (rule_cuts) -- rule 10 had moved it onto
+    that re-frame of the speaker rule (video11: "that says" | "shenanigans" from 2.717 s to 2.783 s) -- goes back to
+    where the next caption's first word is heard (the frame it starts in), when that is inside both captions. Returns (the captions, what changed)."""
+    import math
+    f = float(fps)
+    out = [dict(c) for c in caps]
+    done: list[dict] = []
+    for a, b in zip(out, out[1:]):
+        c = int(a["end"])
+        if c != int(b["start"]) or c not in at or not (_spoken(a) and _spoken(b)):
+            continue
+        tb = _toks(b.get("text", ""))
+        t = _word_time(words, tb[0], int(a["start"]) / f, int(b["end"]) / f, c / f) if tb else None
+        if t is None:
+            continue
+        k = int(math.floor(t * f + 1e-9))           # the frame the word starts in (video11: 163, as before)
+        if k == c or not int(a["start"]) < k < int(b["end"]):
+            continue
+        a["end"], b["start"] = k, k
+        done.append({"was": f"{a.get('text')} | {b.get('text')} at frame {c}",
+                     "now": f"the edge at frame {k}, where '{tb[0]}' is heard", "from": c, "to": k})
+    return out, done
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # the run's step (pipeline.stage_captions)
 # ---------------------------------------------------------------------------------------------------------------------
@@ -462,8 +488,9 @@ def run(ctx: Any) -> dict:
     stretches = [(int(o["a"]), int(o["b"])) for o in cap.get("other_video") or []]
     rows = sorted((dict(c) for c in cap["captions"]), key=lambda c: int(c["start"]))
     rows, rejoined = rejoin(rows, reframed, fps)
-    if rejoined:
-        info["rejoined"] = rejoined
+    rows, unpinned = unpin(rows, reframed, words, fps)
+    if rejoined or unpinned:
+        info["rejoined"] = rejoined + unpinned
     rows, info["pairs"] = pairs_fix(rows, words, fps, cuts, stretches)
     voice_over = str(cap.get("source") or "").startswith("voice-over")
     sm = getattr(ctx, "speech", None)
