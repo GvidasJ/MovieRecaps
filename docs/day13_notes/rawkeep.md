@@ -183,4 +183,11 @@ that case in `edit_media.picture_choice` (one line).
 * App: `tests/test_rawkeep.py` — 6 tests (found by hash, replaced only on yes, the XMLs rewritten clip for clip and
   passing the checks, a project playing it keeps it and is never changed — another run's project does not block, the
   original gone / another file / VFR kept, a failing check leaves the run as it was, the Board UI question + Yes).
-* Counts: see the reply (whole suites run at the end).
+* Whole suites at the end: **tool 1449 passed, 97 skipped** (22 min, `CUDA_VISIBLE_DEVICES=` empty, from bash);
+  **app 985 passed, 5 skipped** (8 min, my worktree's code first on PYTHONPATH — the venv's own `match_cuts` points
+  at the main tree). Note: in PowerShell `$env:CUDA_VISIBLE_DEVICES=""` deletes the variable (the GPU stays
+  visible) — my earlier PowerShell runs (the app suite, the end-to-end run) could see the GPU; use bash
+  `CUDA_VISIBLE_DEVICES= …` or `-1` in PowerShell.
+* Cached stage keys: `common.stage_code_hash` of all 17 stages identical for HEAD and this branch (`changed: 0`).
+* Time cost to know: a remux is checked by a full decode of the remuxed file (an episode ~2 min, a 2-hour film
+  maybe ~10 min) — still far below the CRF 17 slow encode it replaces.
