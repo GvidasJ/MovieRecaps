@@ -157,6 +157,17 @@ def test_the_new_video_rows_words(tmp_path):
     assert NV.plain_error(res["reason_line"]) == res["reason_line"]
 
 
+def test_just_cuts_says_a_full_disk_plainly(tmp_path):
+    from mr_app.core import flow
+    run = _run(tmp_path)
+    err = (f"match_cuts: the cuts could not be made: RuntimeError: conform raw: ffmpeg failed (4294967268): {CMD}\n")
+    res = flow.just_cuts_result(run, 2, err)
+    assert res["label"] == "FAIL" and res["failures"][0].startswith("The disk C: is full")
+    assert res["reason_kind"] == "disk full" and "RuntimeError" not in res["failures"][0]
+    res = flow.just_cuts_result(run, 2, "match_cuts: the template x.png cannot be used: no transparent hole\n")
+    assert res["failures"][0] == "the template x.png cannot be used: no transparent hole"     # its own words stay
+
+
 def test_the_apps_own_conversion_reads_ffmpegs_exit_code():
     from mr_app.core import convert as C
     assert C._ffmpeg_problem("", 4294967268) == "the disk is full: free some space and try again"     # noqa: SLF001

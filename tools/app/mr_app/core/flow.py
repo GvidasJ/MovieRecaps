@@ -524,15 +524,29 @@ def just_cuts_result(run_dir: Path, code: int | None, stderr: str = "", stopped:
     else:
         label = "FAIL"
     stop = ""
+    why = None
     if label == "FAIL":
         from .newvideo import plain_error
         lines = [x.strip() for x in (stderr or "").splitlines() if x.strip()]
-        mine = [x for x in lines if x.lower().startswith("match_cuts:")]
+        mine = [x for x in lines if x.lower().startswith("match_cuts:") and " details in " not in f" {x} "]
         stop = (mine[-1].split(":", 1)[1].strip() if mine else
                 plain_error("\n".join(lines)) if lines else f"the cuts were not made (exit {code})")
-    return {"label": label, "failures": ([stop] if stop else []) + (errors if label == "FAIL" else []),
-            "notes": errors if label == "OK with a note" else [], "cuts": info.get("cuts"),
-            "clips": info.get("clips"), "run_dir": str(run_dir)}
+        try:                                  # day 13: a full disk, a crash ... in plain words with what to do
+            from match_cuts import plain_reason
+            why = plain_reason.explain(stderr=stderr or "", code=code, stop="")
+            if why.kind in (plain_reason.UNKNOWN, plain_reason.TOOL_STOP):
+                why = None
+        except Exception:  # noqa: BLE001 - the tool's module not importable here: its own line
+            why = None
+        if why is not None:
+            stop = why.line()
+    out = {"label": label, "failures": ([stop] if stop else []) + (errors if label == "FAIL" else []),
+           "notes": errors if label == "OK with a note" else [], "cuts": info.get("cuts"),
+           "clips": info.get("clips"), "run_dir": str(run_dir)}
+    if why is not None:
+        out.update(reason=why.text, todo=why.todo, reason_line=why.line(), reason_kind=why.kind,
+                   reason_detail=why.detail)
+    return out
 
 
 def just_cuts_step(p: P.Project, progress: Progress | None = None, cancel: threading.Event | None = None,
