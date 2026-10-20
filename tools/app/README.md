@@ -44,6 +44,23 @@ broken shows ONE amber line under the top strip with **Fix now**: `setup_app.py`
 in `%APPDATA%\MovieRecaps\setup_app.log`, **open log**), then "Fixed ✓" or the plain reason. Fix now waits while a
 video is being made, downloaded or converted; PySide6 (the window itself) is replaced only with the app closed.
 
+**Day 13, also:**
+* **Names = the video's title** (the YouTube title, else your headline, else the competitor post's title): new
+  projects are `<date>_<title>` folders (Windows-safe, emoji kept, at most 100 characters, (2) / (3)); next to
+  `1_edit.xml` the app writes `<title>_edit.xml` (the sequence named after the title) and Open in Premiere opens it in
+  `<title>.prproj`. The queue, the board, History and New video rows show the title (the folder in the tooltip). An
+  older card has **Rename to title**; a rename waits while a run, a copy, Clean up or Premiere uses the folder, and a
+  folder a Premiere project of yours plays from keeps its name (`mr_app\core\names.py`, `renames.py`).
+* **Why a run stopped, in plain words** -- the queue row, its report, History, New video and the problem cards (the
+  same words as the batch: `match_cuts\plain_reason.py`), e.g. "The disk C: ran out of space ... free space on C:
+  (Board -> Clean up), then press Try again"; a stop that was not the input's fault gets **Try again** on its row.
+* **Board -> Clean up** also offers *Keep the original RAW*: an older run that plays a big `raw_stereo.mp4` gets the
+  original back (checked by its hash; never when a Premiere project plays that run's file) -- it shows the space saved
+  and changes nothing before Yes.
+* **Torrents**: a film already in the folder without its `.aria2` file is checked against the torrent first (the right
+  pieces kept, a complete one finished at once, a different file renamed "<name> (old)"); every aria2 error in plain
+  words.
+
 Keys: **Space** starts the queue, **Del** removes the queue row under the mouse, **Ctrl+V** pastes a YouTube link
 into Download (only when you are not typing in a field).
 
