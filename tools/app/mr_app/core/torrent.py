@@ -892,6 +892,7 @@ STATUS_KEYS = ["gid", "status", "totalLength", "completedLength", "downloadSpeed
                "verifiedLength", "verifyIntegrityPending"]
 CHECK_BPS = 20 * 1024 ** 2              # day 13: a check of a file already there reads at least this fast (a network
 #                                         folder): until then no peers and no progress is not "no one sharing"
+RESUMED_AT_ONCE_S = 10.0                # finished this soon with no peer seen, from its .aria2: it was complete
 
 
 @dataclass
@@ -915,6 +916,8 @@ class Job:
     rechecked: bool = False         # aria2c said "File exists, but a control file does not exist": added again
     fetched: bool = False           # something was downloaded (peers / speed seen) -- else a check found it complete
     renamed: str = ""               # the "(old)" renames of the note, kept when the note changes
+    resumed: bool = False           # its files and its .aria2 were in the folder when it was given to aria2c
+    given_at: float = 0.0           # when it was last given to aria2c (time.time())
 
 
 class TorrentSession:
@@ -1177,8 +1180,10 @@ class TorrentSession:
         base = Path(job.save_dir)
         real = real or {}
         try:
-            if control_file(meta, base).is_file():
-                return False                 # aria2c goes on from its own progress file
+            if control_file(meta, base).is_file():       # aria2c goes on from its own progress file (it keeps it
+                job.resumed = job.resumed or any(          # after a download of some of a folder's files too)
+                    (real.get(i) or aria2_path(meta, base, i)).is_file() for i in job.indexes)
+                return False
         except OSError:
             return False
         renamed: list[tuple[Path, Path, str]] = []
@@ -1268,6 +1273,7 @@ class TorrentSession:
             meta = None
         if meta is not None:
             check = self._prepare_existing(job, meta, real) or check
+        job.given_at = time.time()
         b64 = base64.b64encode(torrent).decode("ascii")
         try:
             self.engine.call("aria2.addTorrent", b64, [], self._options(job, paused, check))
@@ -1534,6 +1540,9 @@ class TorrentSession:
                         "The video was already partly in the download folder: the right parts were kept and only "
                         "the missing parts were downloaded.")
                 j.note = " ".join(x for x in (j.renamed, said) if x)
+            elif j.resumed and not j.fetched and j.given_at and time.time() - j.given_at < RESUMED_AT_ONCE_S:
+                j.note = ("The video was already complete in the download folder (from an earlier download of this "
+                          "torrent), so nothing was downloaded again.")
             real = self._real_paths(j)
             vi = next((i for i in real if self._guess(j, i) == j.video), None)
             if vi is None and len(real) == 1:

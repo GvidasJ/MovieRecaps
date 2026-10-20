@@ -430,6 +430,48 @@ def test_real_a_finished_file_is_finished_at_once_without_downloading(real, tmp_
 
 
 @needs_aria2
+def test_real_the_next_short_of_the_same_film_needs_no_download(real, tmp_path):
+    """The real case: a movie torrent (a folder: the film, a sample, a note) downloaded once for one Short; the next
+    Short of the same film adds the same torrent again -- aria2c deleted its .aria2 when it finished. With nobody
+    sharing any more, it is finished at once from the file already there (checked, not written)."""
+    src = tmp_path / "src" / "Borat.2006.1080p"
+    src.mkdir(parents=True)
+    film = _data(80, seed=11)
+    (src / "Borat.2006.1080p.mkv").write_bytes(film)
+    (src / "Sample.mkv").write_bytes(_data(9, seed=12))
+    (src / "info.nfo").write_bytes(b"x" * 3000)
+    tor = T.make_torrent(src, [real.tracker.url], piece_length=PIECE)
+    m = T.read_torrent(tor)
+    real.seeder.start()
+    real.gid = real.seeder.call("aria2.addTorrent", base64.b64encode(tor).decode(), [],
+                                {"dir": str(src.parent), "check-integrity": "true", "seed-ratio": "0.0",
+                                 "bt-tracker-interval": "2"})
+    i = m.biggest_video()
+    dl = tmp_path / "dl"
+    jid = real.sess.start(m, [i], dl)
+    st = real.wait(jid)
+    assert st["state"] == "finished" and Path(st["video"]).read_bytes() == film
+    real.sess.remove(jid)                                    # a finished download is never deleted
+    f = Path(st["video"])
+    before = f.stat().st_mtime_ns
+    real.seeder.proc.kill()                                  # nobody shares it any more
+    real.seeder.proc.wait(timeout=5)
+    ctl = T.control_file(m, dl)
+    assert ctl.is_file()                 # one file of a folder's: aria2c keeps its .aria2 when it has finished
+    jid2 = real.sess.start(m, [i], dl)                       # 1. the .aria2 is there: it goes on from it
+    st2 = real.wait(jid2, 40)
+    assert st2["state"] == "finished" and "nothing was downloaded again" in st2["note"], st2
+    assert f.read_bytes() == film and f.stat().st_mtime_ns == before
+    real.sess.remove(jid2)
+    ctl.unlink()                                             # 2. the .aria2 lost: checked against the torrent
+    jid3 = real.sess.start(m, [i], dl)
+    assert real.sess.job(jid3).checked
+    st3 = real.wait(jid3, 40)
+    assert st3["state"] == "finished" and "every part is right, so nothing was downloaded again" in st3["note"], st3
+    assert f.read_bytes() == film and f.stat().st_mtime_ns == before
+
+
+@needs_aria2
 def test_real_a_half_file_fetches_only_the_missing_pieces(real, tmp_path):
     data = _data()
     m = real.share(data)

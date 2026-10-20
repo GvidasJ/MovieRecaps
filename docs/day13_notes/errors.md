@@ -15,9 +15,9 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
      (112), the tool's `NoSpaceError`, and an ffmpeg / ffprobe exit code that is −28 as unsigned 32-bit
      (**4294967268 = ENOSPC**; ffmpeg 7 exits with its own error code). The drive comes from the line — for an
      ffmpeg command line, the last path (the file it writes). Borat edit-2/3:
-     *"The disk C: ran out of space (only … GB free now — said while it is under 30 GB): the run stopped while
-     converting the RAW. Free space on C: (Board →
-     Clean up), then press Try again."*
+     *"The disk C: ran out of space: the run stopped while converting the RAW. Free space on C: (Board → Clean up),
+     then press Try again."* (with "(only N GB free now)" while C: has under 30 GB; not when space came back —
+     "full (90 GB free now)" read as nonsense once the half-written file was removed)
   3. **the worker pool's lost file** (`FileNotFoundError …\match_cuts_pool_…\state-4.pkl`): `visual_match._spawn_map`
      writes the pickled state of every parallel call into `%TEMP%\match_cuts_pool_*\state-N.pkl`, its spawn worker
      processes read it from there. Said as *"The run crashed after C: filled up: the tool's helper processes could
@@ -41,9 +41,13 @@ app use the same words; no cached stage imports it — editing it re-runs nothin
      last ERROR line — its first line only, never the traceback logged under it, never a library warning, never
      "details in …") in plain form (no time/level/logger, no command line, `RuntimeError:` dropped, other exception
      names in brackets at the end), plus *"Press Try again; if it stops the same way again, the full log: Open log."*
-- **The console decides first**: cli prints the exception that stopped the run only to the console; when it is there
-  it alone decides (an older soft error in match_cuts.log — "speech map failed …" of a step that went on — never
-  wins); the log's ERROR lines count when the console says nothing meaningful (a run read back later).
+- **Only the message that stopped the run decides**: cli prints the exception that stopped the run only to the
+  console. Its last meaningful line ("match_cuts: ERROR: X: …", a fatal error, an ffmpeg failure) and the lines
+  printed right under it as part of it (FFmpeg's own words after its command line — they also give the file's name
+  and, from the head line, the step "while converting the RAW") decide alone: an older soft error in match_cuts.log
+  ("speech map failed …" of a step that went on) or an older library line in the console ("CUDA out of memory,
+  falling back to the CPU") never wins. The console's other lines and the log's ERROR lines count only when there is
+  no such message (a run read back later). A full disk anywhere is still the reason (decision 4).
 - Checked against this PC's real FFmpeg 8.0: a missing input exits 4294967294 (= −2), a junk file AVERROR_INVALIDDATA,
   an unknown encoder AVERROR_ENCODER_NOT_FOUND — each comes out right.
 - `batch.stop_message` never returns cli's "details in … match_cuts.log" line any more (that was all the laptop
@@ -106,6 +110,9 @@ So `core/torrent.py` now, before giving a download to aria2c (`_prepare_existing
   permission, a network folder gone, a missing folder, plus "already registered", "piece length", bad magnet /
   .torrent, name lookup, time-out). jobs.json entries saved with day 12's "The download stopped: <aria2c's sentence>"
   are said plainly when loaded.
+- a long check (a big film over the laptop's network takes minutes with no peer and no progress) is never "No one is
+  sharing": aria2c 1.37's `verifiedLength` counts as progress, and for an aria2c that says nothing while it checks
+  the stall time grows by the file's size at 20 MB/s (`CHECK_BPS`).
 - **Remove never deletes a file the job found already in the folder** (it may be your earlier finished download,
   being checked) — before, Remove on an unfinished job deleted its chosen files whatever they were.
 - the free-space check (`check_space`) does not count what is already in the folder (the next Short of the same film
@@ -154,12 +161,15 @@ internet). My two early experiments (before the request) ran aria2c without it �
 
 ## Tests
 
-- tool: `tools/match_cuts/tests/test_day13_errors.py` (13 tests: the Borat lines, errno/AVERROR/crash codes, tool
-  stops kept, never a traceback / library warning, the log's last ERROR line, plain_text, the batch summary).
-- app: `tools/app/tests/test_errors_day13.py` (13: read_result, short, problems entry, project.json, History, the
-  New video words, the real queue row with Try again, the report dialog) and `tools/app/tests/test_torrent_day13.py`
-  (16: escaping / old name / piece check, the fake-engine options and notes, error 13 once, every aria2 code, the
-  card's note, old jobs.json, the space check; **real aria2c on 127.0.0.1**: a finished file finished at once with
+- tool: `tools/match_cuts/tests/test_day13_errors.py` (17 tests: the Borat lines, errno/AVERROR/crash codes, tool
+  stops kept, never a traceback / library warning, the stopping message decides, the log's last ERROR line, no
+  technical brackets, a missing input, plain_text, the batch summary).
+- app: `tools/app/tests/test_errors_day13.py` (14: read_result, short, problems entry, project.json, History, the
+  New video words, Just cuts, the app's conversion, the real queue row with Try again, the report dialog),
+  `test_errors_day13_newvideo.py` (1: the real New video row), `test_errors_day13_learn.py` (2: the Learn tab's old
+  Borat entries) and `tools/app/tests/test_torrent_day13.py` (20: escaping / old name / piece check, the fake-engine
+  options and notes, error 13 once, every aria2 code, the card's note, old jobs.json, the space check, the long check,
+  Remove keeps a file that was there, 127.0.0.1-only aria2c; **real aria2c on 127.0.0.1**: a finished file finished at once with
   bytes and mtime unchanged and nobody sharing, a half file fetching only the missing pieces (the sharer's upload
   ≤ 60 %), a bigger file renamed "(old)" and fetched fresh, error 13 from aria2c checked by itself, a UNC folder
   with the .aria2 next to the download while it runs). The tests use the aria2c the app itself would use
