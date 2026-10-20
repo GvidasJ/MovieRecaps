@@ -221,8 +221,8 @@ captions, cuts and video position / scale were compared.
 | trims at cut points, 1-8 small cuts inside clips (pauses) | yours by hand, as you asked (the pauses: section 10) |
 
 Five new test cases `tests\real\video16-fixed` … `video20-fixed` (each with its channel template and watermark as the
-laptop ran it). **check-all before -> after** (before = this morning's code; after = tonight's final code, all 34 test
-videos):
+laptop ran it). **check-all before -> after** (before = this morning's code; after = tonight's final code, 33 of the
+34 test videos -- all but Liquid Death):
 
 | | before | after |
 |---|---|---|
