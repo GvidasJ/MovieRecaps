@@ -2,3 +2,4 @@ PySide6-Essentials==6.12.0
 yt-dlp[default]>=2026.8.19
 psd-tools>=1.25.0
 # torrents: aria2c.exe is not a pip package (libtorrent has no wheel for Python 3.14) -- setup_app.py downloads it into tools\app\bin
+# keep these three the same as mr_app\core\versions.py (the table setup_app.py and the app's start-up check use; a test compares them)
