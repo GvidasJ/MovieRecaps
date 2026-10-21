@@ -271,22 +271,10 @@ def rename_sequence(text: str, name: str) -> str:
     return text[:m.start(2)] + escape(name) + text[m.end(2):]
 
 
-def _copy_ok(out: Path, xml: Path, sequence: str) -> bool:
-    """The title-named copy is there for this very edit (not older than 1_edit.xml) with this sequence name."""
-    try:
-        if os.stat(out).st_mtime < os.stat(xml).st_mtime:
-            return False
-        with open(out, "rb") as f:
-            head = f.read(8192).decode("utf-8", "replace")
-    except OSError:
-        return False
-    return sequence_name_in(head) == sequence
-
-
 def write_copy(xml: Path, out: Path, sequence: str) -> Path:
-    """``out`` = 1_edit.xml with its sequence called ``sequence``, written atomically, with 1_edit.xml's times (Open
-    in Premiere compares the edit's time with the project's last save: a copy made now must not count as an edit made
-    again)."""
+    """``out`` (1_edit.xml itself: ``out`` == ``xml``) = 1_edit.xml with its sequence called ``sequence``, written
+    atomically, with 1_edit.xml's times (Open in Premiere compares the edit's time with the project's last save: a
+    rename made now must not count as an edit made again)."""
     st = os.stat(xml)
     text = Path(xml).read_bytes().decode("utf-8")
     data = rename_sequence(text, sequence).encode("utf-8")
@@ -306,53 +294,63 @@ def write_copy(xml: Path, out: Path, sequence: str) -> Path:
     return out
 
 
-def named_copy(xml: Path) -> Path:
-    """The run's 1_edit.xml as a named copy next to it (Premiere names the new project after it; 1_edit.xml itself is
-    never changed). Day 13: a project whose names follow its title gets ``<title>_edit.xml`` with the sequence called
-    after the title (the render is named after it); a project from before keeps night 10's ``<project>_<run>.xml``
-    (an exact copy, "Recreated Edit (Premiere)"), any other run ``<run folder>_edit.xml``."""
+def edit_for_premiere(xml: Path) -> Path:
+    """What Open in Premiere imports (day 14): the run's 1_edit.xml itself -- ONE XML per edit, no copies (day 13's
+    ``<title>_edit.xml`` next to it made a project hold the edit twice: "Recreated Edit (Premiere)" and the title) --
+    its sequence called after the project's title without emoji (names.sequence_name: Premiere names the render after
+    it; a project from before day 13 keeps the tool's own name). Only that <name>'s text changes, and the file keeps
+    its times (needs_import: never "the edit made again"). The app's old copies of the edit go (renames.drop_copies;
+    never your own files). Returns 1_edit.xml."""
     from . import names
     xml = Path(xml)
-    fname, seq = names.copy_name(xml.parent)
-    out = xml.with_name(fname)
-    if seq is None:
-        if not out.is_file() or out.stat().st_mtime < xml.stat().st_mtime:
-            shutil.copy2(xml, out)
-        return out
-    if not _copy_ok(out, xml, seq):
+    _fname, seq = names.copy_name(xml.parent)
+    if seq is not None:
         try:
-            write_copy(xml, out, seq)
-        except (ValueError, UnicodeDecodeError):      # not the tool's XML: an exact copy, as before
-            shutil.copy2(xml, out)
-    try:                                              # on the project's list of the app's own copies (a rename
-        from . import renames                         # removes only those, never a copy you made)
-        renames.remember_copy(xml.parent, out.name)
-    except Exception:  # noqa: BLE001
+            with open(xml, "rb") as f:
+                head = f.read(65536).decode("utf-8", "replace")
+            if sequence_name_in(head) not in (None, seq):
+                write_copy(xml, xml, seq)
+        except (OSError, ValueError, UnicodeDecodeError):
+            pass                                      # (not the tool's XML: as it is)
+    try:
+        from . import renames
+        renames.drop_copies(xml.parent)
+    except Exception:  # noqa: BLE001 - an old copy that stays does no harm
         pass
-    return out
+    return xml
+
+
+named_copy = edit_for_premiere                        # (day 13's name, kept for its callers)
 
 
 def project_for(xml: Path) -> Path:
-    """The run's own Premiere project, next to its named XML copy: '<title>.prproj' for a title-named copy
-    ('<title>_edit.xml', day 13), else the copy's own name (video10_edit.prproj)."""
+    """The run's own Premiere project next to its 1_edit.xml: '<title>.prproj' for a project whose names follow its
+    title (day 13), else night 10's '<project>_<run>.prproj' / '<run>_edit.prproj'."""
     from . import names
     xml = Path(xml)
     fname, seq = names.copy_name(xml.parent)
-    if seq is not None and xml.name == fname:
-        return xml.with_name(names.project_name(xml))
-    return xml.with_suffix(".prproj")
+    if seq is not None:
+        return xml.with_name(names.project_name(fname))
+    return xml.with_name(Path(fname).with_suffix(".prproj").name)
 
 
 def is_own_project(prproj: str | os.PathLike) -> bool:
     """The app made this .prproj (Open in Premiere: an empty project the edit is imported into): night 10's
-    '<name>_edit.prproj', or day 13's '<title>.prproj' next to its '<title>_edit.xml'."""
+    '<name>_edit.prproj', day 13's '<title>.prproj' (next to its '<title>_edit.xml', or the name the run's project
+    has now), or one on the project's list of the app's projects (renames.own_projects: day 14 keeps no XML copy to
+    tell them by)."""
     from . import names
     p = Path(prproj)
     if p.stem.lower().endswith("_edit"):
         return True
     try:
-        return p.with_name(p.stem + names.COPY_SUFFIX).is_file()
-    except OSError:
+        if p.with_name(p.stem + names.COPY_SUFFIX).is_file():
+            return True
+        if project_for(p.parent / "1_edit.xml").name.lower() == p.name.lower():
+            return True
+        from . import renames
+        return p.name.lower() in renames.own_projects(p.parent)
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -524,6 +522,11 @@ def _open(xml: Path, wait_s: float) -> str:
         try:
             shutil.copyfile(template(), proj)
             made = True
+            try:                                      # (the app's own project: never taken for your fix)
+                from . import renames
+                renames.remember_project(proj.parent, proj.name)
+            except Exception:  # noqa: BLE001
+                pass
         except OSError as e:
             _show_folder(xml.parent)
             return (f"{proj.name} could not be made next to the edit ({e.strerror or e}): the run folder is open -- "

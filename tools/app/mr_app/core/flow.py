@@ -405,9 +405,10 @@ def record_edit(p: P.Project, res: dict) -> None:
 
 
 def title_copy(p: P.Project, run_dir: Path) -> Path | None:
-    """Day 13: a finished edit of a project named after its title gets ``<title>_edit.xml`` next to its 1_edit.xml at
-    once (the sequence called after the title: Premiere names the render after it) -- 1_edit.xml stays as it is.
-    Projects from before get nothing new here. Never raises."""
+    """A finished edit of a project named after its title: the sequence in its 1_edit.xml called after the title
+    without emoji, at once (premiere.edit_for_premiere -- day 14: no XML copy any more, Open in Premiere imports
+    1_edit.xml itself; Premiere names the render after the sequence). Projects from before get nothing new here.
+    Never raises."""
     try:
         from . import names as NM
         if not NM.uses_titles(p.data) or not (Path(run_dir) / "1_edit.xml").is_file():

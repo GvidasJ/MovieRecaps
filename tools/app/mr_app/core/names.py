@@ -242,10 +242,25 @@ def file_stem(title_part: str, roots_len: int = ROOT_LEN) -> str:
     return cut(t, MAX_LEN, room) if utf16_len(t) > room else t
 
 
+def no_emoji(text: Any) -> str:
+    """The text without emoji (day 14: Premiere shows them as empty boxes in a sequence's name, and the render is
+    named after it): pictographs and other symbols (Unicode 'So'), everything outside the Basic Multilingual Plane,
+    emoji joiners, variation selectors, keycaps; the spaces tidied. Letters of every language stay."""
+    out = []
+    for ch in str(text or ""):
+        cp = ord(ch)
+        if cp > 0xFFFF or 0xD800 <= cp <= 0xDFFF or cp in (0x200D, 0x20E3) or 0xFE00 <= cp <= 0xFE0F or \
+                unicodedata.category(ch) == "So":
+            out.append(" ")
+        else:
+            out.append(ch)
+    return " ".join("".join(out).split())
+
+
 def sequence_name(title: Any) -> str:
-    """The sequence's name in <title>_edit.xml (Premiere names the render after it): the title, Windows-safe (the
-    render's file name), at most MAX_LEN characters -- not cut for paths."""
-    return safe_name(title, MAX_LEN)
+    """The sequence's name in 1_edit.xml (Premiere names the render after it): the title without emoji (no_emoji),
+    Windows-safe (the render's file name), at most MAX_LEN characters -- not cut for paths."""
+    return safe_name(no_emoji(title), MAX_LEN)
 
 
 def folder_base(title: Any, day: str | None = None, roots_len: int = ROOT_LEN) -> str:

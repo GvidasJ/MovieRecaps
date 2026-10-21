@@ -105,9 +105,10 @@ def test_not_running_premiere_starts_with_the_runs_own_project_then_imports_the_
     xml = _run(tmp_path)
     msg = premiere.open_xml(xml)
     run = xml.parent
-    proj, copy = run / "video10_edit.prproj", run / "video10_edit.xml"
+    proj, copy = run / "video10_edit.prproj", xml
     assert proj.read_bytes() == premiere.template().read_bytes()          # Premiere's empty project, byte for byte
     assert fake.p.handed == [proj, copy]                                  # started WITH the project, then the edit
+    assert sorted(f.name for f in run.glob("*.xml")) == ["1_edit.xml"]    # day 14: one XML, 1_edit.xml itself
     assert fake.p.project == proj and fake.p.changed
     assert msg == ("Premiere Pro started with video10_edit.prproj (next to the edit) and imported the edit into it "
                    "-- save it (Ctrl+S)")
@@ -122,7 +123,7 @@ def test_a_projects_edit_gets_the_projects_name(tmp_path, fake):
     xml.write_text("<xmeml/>", encoding="utf-8")
     premiere.open_xml(xml)
     assert fake.p.handed[0].name == "2026-10-18_a-lot-to-catch-up-on_edit-2.prproj"
-    assert fake.p.handed[1].name == "2026-10-18_a-lot-to-catch-up-on_edit-2.xml"
+    assert fake.p.handed[1] == xml                                         # day 14: 1_edit.xml itself
 
 
 def test_a_saved_project_opens_as_it_is_nothing_imported_twice(tmp_path, fake):
@@ -141,7 +142,7 @@ def test_a_project_never_saved_after_the_import_gets_the_edit_again(tmp_path, fa
     proj.write_bytes(premiere.template().read_bytes())                    # made here before, closed without saving
     os.utime(proj, (1_800_000_000, 1_800_000_000))
     msg = premiere.open_xml(xml)
-    assert fake.p.handed == [proj, xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [proj, xml]
     assert "imported the edit into it" in msg and "made again" not in msg
 
 
@@ -150,7 +151,7 @@ def test_an_edit_made_again_after_the_last_save_is_imported_once_more(tmp_path, 
     proj = xml.parent / "video10_edit.prproj"
     _saved_project(proj, mtime=1_600_000_000)                             # saved BEFORE the edit was made again
     msg = premiere.open_xml(xml)
-    assert fake.p.handed == [proj, xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [proj, xml]
     assert "imported the edit made again (one more sequence) into it" in msg
 
 
@@ -173,7 +174,7 @@ def test_home_screen_the_project_is_handed_over_then_the_edit(tmp_path, fake):
     fake.use(FakePremiere(running=True))
     msg = premiere.open_xml(xml)
     proj = xml.parent / "video10_edit.prproj"
-    assert fake.p.handed == [proj, xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [proj, xml]
     assert msg == ("Premiere Pro opened video10_edit.prproj (next to the edit) and imported the edit into it "
                    "-- save it (Ctrl+S)")
 
@@ -212,7 +213,7 @@ def test_another_project_open_gets_the_edit(tmp_path, fake):
     other = tmp_path / "theirs" / "644.prproj"
     fake.use(FakePremiere(running=True, project=other))
     msg = premiere.open_xml(xml)
-    assert fake.p.handed == [xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [xml]
     assert not (xml.parent / "video10_edit.prproj").exists()              # nothing made: it went into theirs
     assert msg == "The edit is imported into 644.prproj, the project open in Premiere -- save it there"
 
@@ -222,7 +223,7 @@ def test_the_runs_own_project_open_with_the_edit_from_here_gets_nothing_again(tm
     first = premiere.open_xml(xml)                                        # started, imported (not saved yet)
     assert "imported the edit" in first
     again = premiere.open_xml(xml)                                        # pressed again: its own project is open
-    assert fake.p.handed == [xml.parent / "video10_edit.prproj", xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [xml.parent / "video10_edit.prproj", xml]
     assert again == "video10_edit.prproj is open in Premiere already, with the edit"
 
 
@@ -244,7 +245,7 @@ def test_the_runs_own_project_open_without_the_edit_gets_it(tmp_path, fake):
     proj.write_bytes(premiere.template().read_bytes())                    # opened by hand: still empty
     fake.use(FakePremiere(running=True, project=proj))
     msg = premiere.open_xml(xml)
-    assert fake.p.handed == [xml.parent / "video10_edit.xml"]
+    assert fake.p.handed == [xml]
     assert msg == "video10_edit.prproj is open in Premiere: the edit is imported into it -- save it (Ctrl+S)"
 
 

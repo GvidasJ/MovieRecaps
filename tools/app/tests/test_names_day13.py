@@ -100,7 +100,8 @@ def test_names_fit_windows_path_limit_with_emoji_counted_twice():
     assert NM.utf16_len(f"{folder}\\edit-99\\.{t}_edit.xml.123456.1234567890.tmp") <= NM.PATH_LIMIT   # its temp file
     assert NM.utf16_len(f"{folder}\\edit-99\\extras\\debug\\verify_failures\\k00544.png") <= NM.PATH_LIMIT
     assert NM.fit("Short title 😭") == "Short title 😭"                  # a usual title is kept whole
-    assert NM.sequence_name(long) == NM.safe_name(long)                # the sequence: not cut for paths
+    assert NM.sequence_name(long) == NM.safe_name(NM.no_emoji(long))   # the sequence: not cut for paths (day 14:
+    assert NM.sequence_name(long).endswith("Every Time")               # no emoji, Premiere shows them as boxes)
 
 
 def test_a_flag_and_a_half_emoji_never_break_a_name():
@@ -207,49 +208,72 @@ def title_project(root: Path, title: str = TITLE, *, upload: str = "", edit: boo
     return p
 
 
-def test_the_edit_copy_is_named_after_the_title_with_the_sequence_renamed(tmp_path):
+def test_the_edit_itself_carries_the_title_as_its_sequence_without_emoji(tmp_path):
+    """Day 14: ONE XML per edit -- Open in Premiere imports 1_edit.xml itself, its sequence called after the title
+    without emoji (two copies of one edit made two sequences in one project; the emoji showed as boxes)."""
     p = title_project(tmp_path / "local")
     xml = p.folder / "edit" / "1_edit.xml"
-    before = xml.read_bytes()
-    out = PM.named_copy(xml)
-    assert out.name == f"{NM.file_stem(NM.fit(TITLE))}_edit.xml"
-    assert PM.sequence_name_in(out.read_text(encoding="utf-8")) == NM.sequence_name(TITLE)
-    assert xml.read_bytes() == before                                  # 1_edit.xml exactly as it was
-    assert out.read_bytes().replace(NM.sequence_name(TITLE).encode("utf-8"), b"Recreated Edit (Premiere)") == \
-        before                                                         # every other byte the same
-    assert abs(out.stat().st_mtime - xml.stat().st_mtime) < 0.01       # the edit's time (Open in Premiere compares)
-    assert PM.project_for(out).name == f"{NM.file_stem(NM.fit(TITLE))}.prproj"
-    assert PM.named_copy(xml) == out                                   # made once
+    before, t0 = xml.read_bytes(), xml.stat().st_mtime
+    out = PM.edit_for_premiere(xml)
+    seq = NM.sequence_name(TITLE)
+    assert out == xml and sorted(f.name for f in xml.parent.glob("*.xml")) == ["1_edit.xml"]       # no copy
+    assert seq == "The fact that this ad sounds so wrong is hilarious"                          # no emoji
+    assert PM.sequence_name_in(xml.read_text(encoding="utf-8")) == seq
+    assert xml.read_bytes().replace(seq.encode("utf-8"), b"Recreated Edit (Premiere)") == before   # only its name
+    assert abs(xml.stat().st_mtime - t0) < 0.01                       # its times kept (never "made again")
+    assert PM.project_for(xml).name == f"{NM.file_stem(NM.fit(TITLE))}.prproj"
+    assert PM.edit_for_premiere(xml) == xml and PM.named_copy is PM.edit_for_premiere
 
 
 def test_a_sequence_name_with_an_ampersand_is_escaped_and_reads_back(tmp_path):
     p = title_project(tmp_path / "local", title="Tom & Jerry's best 😂")
-    out = PM.named_copy(p.folder / "edit" / "1_edit.xml")
+    out = PM.edit_for_premiere(p.folder / "edit" / "1_edit.xml")
     import xml.etree.ElementTree as ET
     root = ET.fromstring(out.read_bytes())
-    assert root.find("sequence/name").text == "Tom & Jerry's best 😂"
+    assert root.find("sequence/name").text == "Tom & Jerry's best"
 
 
 def test_an_old_project_keeps_night_10s_names(tmp_path):
     p = P.create(tmp_path, competitor_url="https://youtu.be/AbCdEf12345", name="A lot to catch up on")
     xml = edit_xml(p.folder / "edit")
-    out = PM.named_copy(xml)
-    assert out.name == f"{p.folder.name}_edit.xml" and out.read_bytes() == xml.read_bytes()
-    assert PM.project_for(out).name == f"{p.folder.name}_edit.prproj"
-    cuts = PM.named_copy(edit_xml(p.folder / "cuts"))                   # night 10 named a Just cuts run's copy so
-    assert cuts.name == "cuts_edit.xml" and PM.project_for(cuts).name == "cuts_edit.prproj"
+    before = xml.read_bytes()
+    out = PM.edit_for_premiere(xml)
+    assert out == xml and xml.read_bytes() == before                  # the tool's own sequence name, untouched
+    assert PM.project_for(xml).name == f"{p.folder.name}_edit.prproj"
+    cuts = PM.edit_for_premiere(edit_xml(p.folder / "cuts"))           # night 10 named a Just cuts run's project so
+    assert cuts.name == "1_edit.xml" and PM.project_for(cuts).name == "cuts_edit.prproj"
 
 
-def test_a_finished_edit_gets_its_title_copy_at_once(tmp_path):
+def test_a_finished_edit_gets_its_title_sequence_at_once(tmp_path):
     from mr_app.core import flow
     p = title_project(tmp_path / "local", edit=False)
-    edit_xml(p.folder / "edit")
+    xml = edit_xml(p.folder / "edit")
     flow.record_edit(p, {"label": "PASS", "run_dir": str(p.folder / "edit")})
-    assert (p.folder / "edit" / f"{NM.file_stem(NM.fit(TITLE))}_edit.xml").is_file()
+    assert [f.name for f in (p.folder / "edit").glob("*.xml")] == ["1_edit.xml"]
+    assert PM.sequence_name_in(xml.read_text(encoding="utf-8")) == NM.sequence_name(TITLE)
     old = P.create(tmp_path, competitor_url="https://youtu.be/AbCdEf12345", name="old one")
-    edit_xml(old.folder / "edit")
+    oxml = edit_xml(old.folder / "edit")
     flow.record_edit(old, {"label": "PASS", "run_dir": str(old.folder / "edit")})
     assert [f.name for f in (old.folder / "edit").glob("*.xml")] == ["1_edit.xml"]          # nothing new there
+    assert PM.sequence_name_in(oxml.read_text(encoding="utf-8")) == "Recreated Edit (Premiere)"
+
+
+def test_the_apps_old_copies_go_and_their_projects_stay_its_own(tmp_path):
+    """Day 14: a run folder from day 13 -- 1_edit.xml and the app's <title>_edit.xml with its <title>.prproj: the copy
+    goes (it is this very edit), the project stays and is still the app's own (never taken for your fix)."""
+    p = title_project(tmp_path / "local")
+    run = p.folder / "edit"
+    xml = run / "1_edit.xml"
+    stem = NM.file_stem(NM.fit(TITLE))
+    copy = run / f"{stem}_edit.xml"
+    copy.write_bytes(PM.rename_sequence(xml.read_bytes().decode("utf-8"), TITLE).encode("utf-8"))   # (as day 13 wrote it)
+    RN.remember_copy(run, copy.name)
+    proj = saved(run / f"{stem}.prproj")
+    mine = run / "my backup.xml"
+    mine.write_bytes(xml.read_bytes())                                 # your own copy: never touched
+    PM.edit_for_premiere(xml)
+    assert not copy.exists() and mine.exists() and proj.exists()
+    assert PM.is_own_project(proj) and B._own(proj)                    # (the board never takes it for your fix)
 
 
 def saved(path: Path, sequence: str = TITLE) -> Path:
@@ -317,11 +341,9 @@ def test_a_new_youtube_title_renames_both_copies_with_everything_linked(tmp_path
     assert Path(dl["steps"]["edit"]["run_dir"]) == new_local / "edit"
     for run in (new_local / "edit", new_hub / "edit"):
         x = (run / "1_edit.xml").read_text(encoding="utf-8")
-        assert PM.sequence_name_in(x) == "Recreated Edit (Premiere)"     # 1_edit.xml keeps its name and sequence
+        assert PM.sequence_name_in(x) == "Nobody expected this radio ad"  # day 14: the edit itself follows the title
         assert PB.file_url(str(run / "extras" / "media" / "raw.mp4")) in x       # its media: the new folder
-        copies = sorted(f.name for f in run.glob("*.xml"))
-        assert copies == ["1_edit.xml", "Nobody expected this radio ad 📻_edit.xml"]       # the old copy gone
-        assert PM.sequence_name_in((run / copies[1]).read_text(encoding="utf-8")) == "Nobody expected this radio ad 📻"
+        assert sorted(f.name for f in run.glob("*.xml")) == ["1_edit.xml"]       # one XML, no copy
     e = WT.read(hub)[0]
     assert Path(e.project) == new_local and Path(e.run) == new_local / "edit" and e.name == new_name
     assert Path(PB.pending(local)[0]["folder"]) == new_local
@@ -464,8 +486,9 @@ def test_a_premiere_project_that_plays_its_files_keeps_the_name(tmp_path, monkey
     assert d["names"]["kept"]["for"] == "2026-10-20_Kept because of my project"
     c = B.card_of(p.folder)
     assert c.rename_to == "" and "cop.prproj" in c.kept                  # no Rename to title button for it
-    copies = sorted(f.name for f in (p.folder / "edit").glob("*.xml"))
-    assert "Kept because of my project_edit.xml" in copies               # the app's own copy follows the title
+    x = (p.folder / "edit" / "1_edit.xml").read_text(encoding="utf-8")
+    assert PM.sequence_name_in(x) == "Kept because of my project"        # the edit's sequence follows the title
+    assert sorted(f.name for f in (p.folder / "edit").glob("*.xml")) == ["1_edit.xml"]        # (day 14: one XML)
 
 
 def test_a_saved_project_in_the_folder_or_open_in_premiere_before_keeps_the_name(tmp_path):
@@ -491,14 +514,17 @@ def test_an_empty_own_project_is_renamed_with_the_folder(tmp_path):
     out = PM.named_copy(p.folder / "edit" / "1_edit.xml")
     PM.project_for(out).write_bytes(PM.template().read_bytes() if PM.template().is_file() else b"\x1f\x8b")
     os.utime(PM.project_for(out), (time.time() - 3600, time.time() - 3600))
+    RN.remember_project(p.folder / "edit", PM.project_for(out).name)      # (Open in Premiere made it)
     res = RN.sync_run_files(p.folder / "edit", P.load(p.folder).data)
     assert res == []                                                       # already right
     P.load(p.folder).update(title="Shiny new headline")
     d = P.load(p.folder).data
     done = RN.sync_run_files(p.folder / "edit", d)
     names = sorted(f.name for f in (p.folder / "edit").iterdir() if f.is_file())
-    assert "Shiny new headline_edit.xml" in names and "Shiny new headline.prproj" in names
-    assert f"{NM.file_stem(NM.fit(TITLE))}_edit.xml" not in names and done
+    assert "Shiny new headline.prproj" in names and f"{NM.file_stem(NM.fit(TITLE))}.prproj" not in names and done
+    assert [n for n in names if n.endswith(".xml")] == ["1_edit.xml"]
+    assert PM.sequence_name_in((p.folder / "edit" / "1_edit.xml").read_text(encoding="utf-8")) == "Shiny new headline"
+    assert PM.is_own_project(p.folder / "edit" / "Shiny new headline.prproj")
 
 
 def test_old_projects_are_renamed_only_by_rename_to_title(tmp_path):
@@ -610,7 +636,8 @@ def test_a_hand_edited_title_txt_names_the_folder_and_the_files_alike(tmp_path):
     res = RN.rename(p.folder, hub=hub, local_root=local)
     assert res.state == RN.RENAMED and res.folder.name.endswith("_Hand typed title"), res.text
     assert P.load(res.folder).data["upload_title"] == "Hand typed title"
-    assert sorted(f.name for f in (res.folder / "edit").glob("*.xml")) == ["1_edit.xml", "Hand typed title_edit.xml"]
+    assert sorted(f.name for f in (res.folder / "edit").glob("*.xml")) == ["1_edit.xml"]       # (day 14: one XML)
+    assert PM.sequence_name_in((res.folder / "edit" / "1_edit.xml").read_text(encoding="utf-8")) == "Hand typed title"
 
 
 def test_after_a_publish_the_two_copies_share_a_base_so_a_later_change_on_either_wins(tmp_path):
@@ -677,8 +704,9 @@ def test_a_rename_never_removes_your_own_copy_of_the_xml(tmp_path):
     res = RN.rename(p.folder, hub=hub, local_root=local)
     assert res.state == RN.RENAMED, res.text
     files = sorted(f.name for f in (res.folder / "edit").glob("*.xml"))
-    assert files == ["1_edit backup.xml", "1_edit.xml", "Brand new title_edit.xml", "my version_edit.xml"]
-    assert P.load(res.folder).data["names"]["copies"] == ["edit/Brand new title_edit.xml"]
+    assert files == ["1_edit backup.xml", "1_edit.xml", "my version_edit.xml"]       # yours stay; the app keeps none
+    assert not P.load(res.folder).data["names"].get("copies")
+    assert PM.sequence_name_in((res.folder / "edit" / "1_edit.xml").read_text(encoding="utf-8")) == "Brand new title"
 
 
 def test_paths_with_apostrophes_after_the_old_name_are_another_project(tmp_path):
@@ -738,7 +766,7 @@ def test_a_waiting_rename_is_kept_while_its_folder_cannot_be_reached(tmp_path, m
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Learn still finds the run from a project made from <title>_edit.xml
+# Learn still finds the run from a project made from the title-named edit
 # ---------------------------------------------------------------------------------------------------------------------
 
 def test_learn_finds_the_run_of_a_project_made_from_the_title_copy(tmp_path):
@@ -752,11 +780,11 @@ def test_learn_finds_the_run_of_a_project_made_from_the_title_copy(tmp_path):
     x = run / "1_edit.xml"
     x.write_text(x.read_text(encoding="utf-8").replace(
         "<sequence>", "<sequence id='sequence-1'><name>Recreated Edit (Premiere)</name>", 1), encoding="utf-8")
-    copy = PM.named_copy(x)
-    assert copy.name == f"{NM.file_stem(NM.fit(TITLE))}_edit.xml"
+    edit = PM.edit_for_premiere(x)                                       # day 14: 1_edit.xml itself, title-named
+    assert edit == x and PM.sequence_name_in(x.read_text(encoding="utf-8")) == NM.sequence_name(TITLE)
     # the project Premiere makes from it: <title>.prproj next to it, its sequence called after the title, the media
     # in the run's extras\media
-    pr = LC.fake_prproj(PM.project_for(copy), [{"path": str(run / "extras" / "media" / "raw.mp4"), **LC.RAW}],
+    pr = LC.fake_prproj(PM.project_for(edit), [{"path": str(run / "extras" / "media" / "raw.mp4"), **LC.RAW}],
                         [{"name": NM.sequence_name(TITLE), "fps": 30.0,
                           "video": [[(0.0, 5.0, 0, 1.0), (5.0, 9.0, 0, 8.0)]],
                           "audio": [[(0.0, 5.0, 0, 1.0), (5.0, 9.0, 0, 8.0)]],

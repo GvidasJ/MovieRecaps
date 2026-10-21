@@ -188,7 +188,9 @@ def test_open_in_premiere_names_a_projects_edit_after_the_project(tmp_path):
     for run in ("edit", "edit-2"):
         (p.folder / run).mkdir()
         (p.folder / run / "1_edit.xml").write_text("<xmeml/>", encoding="utf-8")
-        assert premiere.named_copy(p.folder / run / "1_edit.xml").name == f"{p.folder.name}_{run}.xml"
+        xml = premiere.edit_for_premiere(p.folder / run / "1_edit.xml")          # day 14: 1_edit.xml itself, no copy
+        assert xml.name == "1_edit.xml" and [f.name for f in (p.folder / run).glob("*.xml")] == ["1_edit.xml"]
+        assert premiere.project_for(xml).name == f"{p.folder.name}_{run}.prproj"
 
 
 def test_steps_status_lists_the_projects(tmp_path, monkeypatch, capsys):

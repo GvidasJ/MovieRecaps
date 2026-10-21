@@ -491,36 +491,59 @@ def app_copy_names(run: Path, data: dict | None) -> set[str]:
     return out
 
 
-def sync_run_files(run: Path, data: dict | None) -> list[str]:
-    """The app's files in a run folder follow the project's names (a project whose names follow its title): its XML
-    copy is ``<title>_edit.xml`` (made now when missing, the sequence called after the title); an older copy THE APP
-    WROTE (``app_copy_names``, and still the same edit: 1_edit.xml with another sequence name) is removed, with its
-    empty Premiere project renamed to ``<title>.prproj`` -- both stay when you saved that project (it holds the edit).
-    1_edit.xml and your own files (a backup of the XML, any other name) are never touched. Returns what was done."""
-    from . import premiere
-    xml = run / "1_edit.xml"
-    if not xml.is_file() or not NM.uses_titles(data):
-        return []
-    fname, seq = NM.copy_name(run, data)
-    if seq is None:
-        return []
-    done: list[str] = []
-    out = run / fname
-    had = out.is_file()
+PROJECTS = "projects"               # project.json "names": {"projects": ["edit/<title>.prproj", ...]}: the Premiere
+#                                     projects Open in Premiere made (day 14: no XML copy tells them by any more)
+
+
+def remember_project(run: str | os.PathLike, name: str) -> None:
+    """Open in Premiere made the project ``name`` in this run folder: on the project's list (never raises)."""
+    run = Path(run)
+    key = f"{run.name}/{name}"
+
+    def apply(d: dict) -> None:
+        m = d.get(NM.KEY)
+        if not isinstance(m, dict):
+            return                                    # (a project from before day 13: its own projects keep night 10's
+        c = [str(x) for x in (m.get(PROJECTS) or [])]  # names, project_for tells them)
+        if key.lower() not in [x.lower() for x in c]:
+            m[PROJECTS] = (c + [key])[-50:]
     try:
-        premiere.named_copy(xml)
-    except (OSError, ValueError) as e:
-        return [f"{fname} could not be written ({e})"]
-    if not had:
-        done.append(fname)
+        if (run.parent / "project.json").is_file():
+            P.load(run.parent).change(apply)
+    except (OSError, ValueError):
+        pass
+
+
+def own_projects(run: str | os.PathLike) -> set[str]:
+    """The names (lower case) of the Premiere projects Open in Premiere made in this run folder (remember_project)."""
+    run = Path(run)
+    d = _read(run.parent) or {}
+    n = d.get(NM.KEY) if isinstance(d.get(NM.KEY), dict) else {}
+    return {str(x).split("/", 1)[1].lower() for x in (n.get(PROJECTS) or [])
+            if "/" in str(x) and str(x).split("/", 1)[0].lower() == run.name.lower()}
+
+
+def drop_copies(run: str | os.PathLike, data: dict | None = None) -> list[str]:
+    """Day 14: ONE XML per edit -- the XML copies THE APP WROTE in this run folder (``app_copy_names``: day 13's
+    ``<title>_edit.xml``, night 10's ``<project>_<run>.xml`` ...) are removed when they still are this very edit
+    (1_edit.xml, its sequence's name aside). A Premiere project next to one stays (yours, or the app's -- then on the
+    project's list: it is still the app's own project). 1_edit.xml and your own files (a backup of the XML, any other
+    name, a copy changed since) are never touched. Returns what was done."""
+    from . import premiere
+    run = Path(run)
+    xml = run / "1_edit.xml"
+    if not xml.is_file():
+        return []
     try:
         base = xml.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
-        return done
-    ours = app_copy_names(run, _read(run.parent) or data)
-    new_proj = run / NM.project_name(out)
+        return []
+    d = data if data is not None else (_read(run.parent) or {})
+    fname, _seq = NM.copy_name(run, d)
+    ours = app_copy_names(run, d) | {fname.lower()}
+    done: list[str] = []
     for f in sorted(run.iterdir()):
-        if f.suffix.lower() != ".xml" or f.name.lower() in ("1_edit.xml", fname.lower()) or not f.is_file():
+        if f.suffix.lower() != ".xml" or f.name.lower() == "1_edit.xml" or not f.is_file():
             continue
         if f.name.lower() not in ours:
             continue                                  # not a copy the app wrote: yours, never touched
@@ -530,22 +553,62 @@ def sync_run_files(run: Path, data: dict | None) -> list[str]:
             continue
         if not _same_edit(text, base):
             continue                                  # (changed since: not the app's copy of this edit any more)
-        partners = [p for p in {run / NM.project_name(f), f.with_suffix(".prproj")} if p.is_file()]
-        if any(premiere.holds_edit(p) for p in partners):
-            continue                                  # you saved that project: it and its copy stay as they are
-        for p in partners:
-            if not new_proj.exists():
-                try:
-                    os.replace(p, new_proj)
-                    done.append(f"{p.name} -> {new_proj.name}")
-                except OSError:
-                    pass
+        for p in {run / NM.project_name(f), f.with_suffix(".prproj")}:
+            if p.is_file() and premiere.is_own_project(p):
+                remember_project(run, p.name)         # (still the app's own project without its copy)
         try:
             f.unlink()
-            done.append(f"{f.name} removed (now {fname})")
+            done.append(f"{f.name} removed (Premiere imports 1_edit.xml itself)")
             _forget_copy(run.parent, f"{run.name}/{f.name}")
         except OSError:
             pass
+    return done
+
+
+def sync_run_files(run: Path, data: dict | None) -> list[str]:
+    """The app's files in a run folder follow the project's names (a project whose names follow its title): the
+    sequence in 1_edit.xml is called after the title without emoji (premiere.edit_for_premiere: only that name, the
+    file's times kept), the app's old XML copies of the edit go (drop_copies), and the app's own EMPTY Premiere project
+    is renamed to ``<title>.prproj`` -- one you saved (it holds the edit) keeps its name. Your own files are never
+    touched. Returns what was done."""
+    from . import premiere
+    xml = run / "1_edit.xml"
+    if not xml.is_file() or not NM.uses_titles(data):
+        return []
+    fname, seq = NM.copy_name(run, data)
+    if seq is None:
+        return []
+    done: list[str] = []
+    try:
+        with open(xml, "rb") as f:
+            before = premiere.sequence_name_in(f.read(65536).decode("utf-8", "replace"))
+    except OSError:
+        before = None
+    copies_before = {f.name for f in run.glob("*.xml")}
+    try:
+        premiere.edit_for_premiere(xml)
+    except (OSError, ValueError) as e:
+        return [f"1_edit.xml could not be renamed ({e})"]
+    try:
+        with open(xml, "rb") as f:
+            after = premiere.sequence_name_in(f.read(65536).decode("utf-8", "replace"))
+    except OSError:
+        after = before
+    if after != before:
+        done.append(f"the sequence in 1_edit.xml is called {after!r}")
+    done += [f"{n} removed (Premiere imports 1_edit.xml itself)" for n in sorted(copies_before - {f.name for f in
+                                                                                                   run.glob("*.xml")})]
+    new_proj = run / NM.project_name(fname)
+    if not new_proj.exists():
+        for p in sorted(run.glob("*.prproj")):
+            if p != new_proj and premiere.is_own_project(p) and not premiere.holds_edit(p):
+                try:
+                    os.replace(p, new_proj)
+                    remember_project(run, new_proj.name)
+                    done.append(f"{p.name} -> {new_proj.name}")
+                    break
+                except OSError:
+                    pass
     return done
 
 

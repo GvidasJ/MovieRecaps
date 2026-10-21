@@ -267,13 +267,15 @@ def test_a_job_runs_hidden_and_stop_kills_it_and_everything_it_started(tmp_path,
     assert "started" in (tmp_path / "out" / "video4.batch.log").read_text(encoding="utf-8")
 
 
-def test_premiere_gets_a_copy_named_after_the_run(tmp_path):
-    """Premiere names the new project after the XML: video10_edit, not one more 1_edit."""
+def test_premiere_gets_1_edit_xml_itself_in_a_project_named_after_the_run(tmp_path):
+    """Day 14: ONE XML per edit -- Premiere imports 1_edit.xml itself (no copy next to it) into the run's own project,
+    named after the run: video10_edit.prproj, not one more 1_edit."""
     from mr_app.core import premiere
     run_dir = tmp_path / "video10"
     run_dir.mkdir()
     xml = run_dir / "1_edit.xml"
     xml.write_text("<xmeml/>", encoding="utf-8")
-    got = premiere.named_copy(xml)
-    assert got == run_dir / "video10_edit.xml" and got.read_text(encoding="utf-8") == "<xmeml/>"
+    got = premiere.edit_for_premiere(xml)
+    assert got == xml and got.read_text(encoding="utf-8") == "<xmeml/>" and not (run_dir / "video10_edit.xml").exists()
+    assert premiere.project_for(xml).name == "video10_edit.prproj"
     assert premiere.find() is None or premiere.find().name == "Adobe Premiere Pro.exe"
