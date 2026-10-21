@@ -121,10 +121,14 @@ def picture_choice(src: Any, analysis: Any, conformed: bool) -> dict:
     return {"how": "convert", "why": f"Premiere cannot open .{src.container or '?'} files"}
 
 
-def sound_choice(src: Any, picture_how: str) -> dict:
-    """How A1 plays the RAW's sound: {'how': 'same' (the V1 file's own sound) | 'wav' | 'none', 'why'}."""
+def sound_choice(src: Any, picture_how: str, force_wav: bool = False) -> dict:
+    """How A1 plays the RAW's sound: {'how': 'same' (the V1 file's own sound) | 'wav' | 'none', 'why'}.
+    ``force_wav`` (day 14: the run analysed a piece of the movie, excerpt.py): always the WAV -- made to the movie's
+    frames at the end of the run, so A1 and V1 count the same frames."""
     if not bool(getattr(src, "has_audio", False)):
         return {"how": "none", "why": "the RAW has no sound"}
+    if force_wav:
+        return {"how": "wav", "why": "a piece of the movie was analysed: one stereo track made to the movie's frames"}
     if picture_how == "checked_copy":
         picture_how = "analysis"                      # (S2's copy has the analysed sound, re-based to frame 0)
     if picture_how not in ("analysis", "original"):
@@ -444,7 +448,7 @@ def prepare(src: Any, analysis: Any, conf: Any, cfg: Any, media_dir: str | Path)
         out["picture"].update(path=str(dst.resolve()), name=dst.name, placed="converted", bytes=cv["bytes"],
                               encoder=cv["encoder"], check=chk["samples"])
         out["fallback"] = pic["why"]
-    snd = sound_choice(src, out["picture"]["how"])
+    snd = sound_choice(src, out["picture"]["how"], force_wav=getattr(cfg, "excerpt_sound", "") == "wav")
     out["sound"] = dict(snd)
     if snd["how"] == "wav":
         dst = media / SOUND_NAME

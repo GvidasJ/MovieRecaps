@@ -166,8 +166,12 @@ def sequence_of(project: PR.Project, media_name: str, cutlist: dict | None = Non
 
 
 def load_cutlist(rf: dict[str, Path]) -> dict:
+    """The run's cut list -- a run made on a piece of the movie (day 14, excerpt.py) read as if the whole movie had been
+    analysed: the frames its 1_edit.xml plays."""
     p = rf["cutlist"]
-    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    cl = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    from .excerpt import movie_cutlist
+    return movie_cutlist(cl, rf["dir"])
 
 
 STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")    # a 5.1 RAW's one file for Premiere (stereo.py)

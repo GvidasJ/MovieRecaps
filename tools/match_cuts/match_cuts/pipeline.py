@@ -134,6 +134,8 @@ class Context:
     premiere_cutlist: Any = None                      # the cut list 1_edit.xml was written from (premiere_plan's)
     stereo: dict = field(default_factory=dict)        # the stereo copy 1_edit.xml plays (a 5.1 RAW; stereo.py)
     edit_media: dict = field(default_factory=dict)    # day 13: the RAW files 1_edit.xml plays (edit_media.prepare)
+    pair: Any = None                                  # day 14: S1's answer (pair_check.Result: where the sound is)
+    excerpt: Any = None                               # day 14: the piece of the movie the run analyses (excerpt.py)
     unmirrored: int = 0                               # segments whose competitor mirror the Premiere edit took off
     finish: dict = field(default_factory=dict)        # --speed / --frame: what the last step did (stage_finish)
     verify: dict = field(default_factory=dict)
@@ -4416,6 +4418,38 @@ def resolve_gpu(cfg: Config) -> list[str]:
 
 
 def run(cfg: Config) -> dict:
+    """Run S0..S10 (``run_once``). Day 14: a run that analysed only a piece of the movie (excerpt.py) and found too
+    little of the competitor in it (NOT IN RAW / PICTURE NOT FOUND), or whose missing stretches' sound is in the movie
+    outside the piece (excerpt.rest_check), is made again on the whole movie."""
+    from . import excerpt
+    try:
+        res = run_once(cfg)
+    except NotInRaw as e:
+        if isinstance(e, WrongPair) or not getattr(cfg, "raw_movie", None):
+            raise
+        log.warning("piece of the movie: %s -- the run is made again on the whole movie", str(e).splitlines()[0][:300])
+        excerpt.drop_piece(cfg)
+        return run_once(cfg)
+    ctx = res.get("context")
+    if ctx is not None and getattr(ctx, "excerpt", None) is not None:
+        rest = excerpt.rest_check(ctx)
+        ctx.finish["excerpt_rest"] = rest
+        if rest.get("looked"):
+            log.info("piece of the movie: %d stretch(es) of the competitor the piece did not show looked for in the "
+                     "whole movie by their sound: %s (%.1f s)", rest["looked"],
+                     f"{len(rest['found'])} found outside the piece" if rest.get("found") else "not in the movie",
+                     float(rest.get("seconds") or 0.0))
+        if rest.get("found"):
+            log.warning("piece of the movie: %d stretch(es) of the competitor it did not show are in the movie outside "
+                        "it (%s) -- the run is made again on the whole movie", len(rest["found"]),
+                        "; ".join(f"{f['comp'][0]:.1f}-{f['comp'][1]:.1f} s at {f['movie_at'][0]:.0f} s"
+                                  for f in rest["found"][:3]))
+            excerpt.drop_piece(cfg)
+            return run_once(cfg)
+    return res
+
+
+def run_once(cfg: Config) -> dict:
     """Run S0..S10. Returns {criteria, checks, failures, warnings, paths, timings, exit_code, context}."""
     _guard_paths(cfg)
     _prepare_dirs(cfg)
@@ -4445,7 +4479,14 @@ def run(cfg: Config) -> dict:
             stage_env(ctx)
         with _stage(ctx, "S1 pair check"):        # night 11: a competitor from another RAW stops here, in seconds
             from . import pair_check
-            pair_check.stop_if_wrong_pair(ctx)
+            ctx.pair = pair_check.stop_if_wrong_pair(ctx)
+        if not getattr(cfg, "raw_movie", None):  # day 14: a long RAW whose sound was found -- only that piece of it
+            from . import excerpt
+            if not excerpt.applies(cfg, ctx.pair):
+                with _stage(ctx, "S1.5 piece of the movie"):
+                    excerpt.prepare(ctx, ctx.pair)
+            else:
+                log.info("piece of the movie: no (%s) -- the whole RAW is analysed", excerpt.applies(cfg, ctx.pair))
         with _stage(ctx, "S2 probe+conform"):
             stage_probe_conform(ctx)
         with _stage(ctx, "S3 audio"):
@@ -4491,6 +4532,9 @@ def run(cfg: Config) -> dict:
                 ctx.exports["files"][key] = ctx.paths.get(key)
         one_raw_file(ctx)              # day 12: a 5.1 RAW leaves one RAW file in the run folder (raw_stereo)
         drop_analysis_copy(ctx)        # day 13: 1_edit.xml plays the original RAW -- the converted copy goes
+        if ctx.excerpt is not None:    # day 14: the edit moved onto the movie, the piece deleted
+            from . import excerpt
+            ctx.finish["excerpt"] = excerpt.finish(ctx)
     finally:
         eta.uninstall(clock, ctx.timings if "total" in ctx.timings and not getattr(cfg, "quick_checks", False)
                       else None)              # a finished run's times: the history (not check-all's: its caches)

@@ -380,6 +380,12 @@ def run_meta(run_dir: str | os.PathLike) -> RunMeta | None:
         return None
     if not isinstance(cl, dict):
         return None
+    try:                                     # day 14: a run made on a piece of the movie -- its RAW is the movie
+        tool()
+        from match_cuts.excerpt import movie_cutlist
+        cl = movie_cutlist(cl, run_dir)
+    except Exception:  # noqa: BLE001 - as it is written
+        pass
     prov = dict(cl.get("provenance") or {})
     prov.pop("analysis_params", None)
     meta = RunMeta(Path(run_dir), dict(cl.get("raw") or {}), dict(cl.get("competitor") or {}), prov,

@@ -109,7 +109,10 @@ class Edit:
         """The edit a run matched (cutlist.json): every segment of the RAW at its speed (a time remap at its mean
         speed), the rest as other footage; with the part of the RAW its picture shows."""
         if not isinstance(cl, dict):
-            cl = json.loads(Path(cl).read_text(encoding="utf-8"))
+            p = Path(cl)
+            cl = json.loads(p.read_text(encoding="utf-8"))
+            from .excerpt import movie_cutlist         # day 14: a run made on a piece of the movie: the movie's times
+            cl = movie_cutlist(cl, p.parent.parent if p.parent.name.lower() == "extras" else p.parent)
         from .model import parse_fps
         fps = float(parse_fps(str(cl["competitor"]["fps"])))
         raw_fps = float(parse_fps(str(cl["raw"]["fps"])))
