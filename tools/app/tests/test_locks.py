@@ -120,7 +120,8 @@ def test_a_lock_this_process_left_from_before_is_ours(project):
 def test_a_stale_lock_is_taken_over_and_said_so(project):
     write_lock(project, LAPTOP, 111, hours_ago=3)
     lk = L.WorkLock(project, "publish", me=PC, pid=222).acquire()
-    since = (datetime.now() - timedelta(hours=3)).strftime("%H:%M")
+    since = L._since({"started": (datetime.now() - timedelta(hours=3)).astimezone().isoformat()})   # (another day
+    #                                                                       before 03:00: "21 Oct 23:19")
     assert lk.taken_over.startswith(f"taken over from the laptop (since {since}, edit): no heartbeat for 3 h ")
     d = read_lock(project)
     assert d["id"] == "PC-GUID" and d["what"] == "publish"

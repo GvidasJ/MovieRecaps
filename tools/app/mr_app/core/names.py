@@ -11,6 +11,9 @@ stays exactly as the tool wrote it (every check, check-all and Learn find runs t
 * Windows-safe (``safe_name``): no \\ / : * ? " < > | (\\ / | become a space, the others go) and no control
   characters, emoji kept, spaces tidied, no space or dot at the end, never a device name (CON, NUL, COM1 ...), at
   most 100 characters, cut at a word and never inside an emoji.
+* Night 15: the folder's and the files' names (``fit``) keep only letters, numbers, spaces and - _ ( ) (``plain``):
+  Premiere's XML import failed on a folder named with emoji. The title with its emoji stays in project.json,
+  title.txt and on the board; the sequence's name keeps its signs (no emoji: ``sequence_name``).
 * Short enough for Windows' 260-character paths (``fit``): the deepest file the tool writes in a run folder and
   ``<root>\\<date>_<title> (99)\\edit-99\\.<title>_edit.xml.<pid>.<tid>.tmp`` (the temp file the copy is written
   through) must stay under ``PATH_LIMIT`` -- so with the usual projects folder a title longer than about 65
@@ -146,6 +149,40 @@ def safe_name(text: Any, max_len: int = MAX_LEN, max_units: int | None = None) -
     return t
 
 
+PLAIN_KEEP = frozenset(" -_()")                 # night 15: the only signs a folder or file name keeps
+_APOSTROPHES = frozenset("'’‘ʼ`´")   # gone without a space: don't -> dont, she’d -> shed
+_DASHES = frozenset("‐‑‒–—―−")   # – — ... -> -
+
+
+def plain(text: Any) -> str:
+    """A title with only letters (every language: é, ž, Ж ...), numbers, spaces and ``- _ ( )`` (night 15: Premiere's
+    XML import fails -- "generic error" / "File Import Failure" -- on a folder whose name has emoji). Apostrophes go
+    (don't -> dont), long dashes become -, & becomes "and", every other sign and emoji a space; spaces tidied. The
+    title itself (with its emoji) stays in project.json, title.txt and the board."""
+    t = unicodedata.normalize("NFC", str(text or ""))
+    out = []
+    for ch in t:
+        if ch in _APOSTROPHES or ord(ch) in _INVISIBLE:
+            continue
+        if ch in _DASHES:
+            out.append("-")
+        elif ch == "&":
+            out.append(" and ")
+        elif ch in PLAIN_KEEP or unicodedata.category(ch)[0] in "LN":
+            out.append(ch)
+        elif unicodedata.category(ch)[0] == "M" and out and out[-1] not in PLAIN_KEEP:
+            out.append(ch)                            # an accent on its letter
+        else:
+            out.append(" ")
+    return " ".join("".join(out).split())
+
+
+def is_plain(name: Any) -> bool:
+    """The name has only what ``plain`` keeps (a dot only before a file's extension is not asked here)."""
+    n = str(name or "")
+    return plain(n) == " ".join(n.split()) and n == n.strip()
+
+
 def one_line(text: Any) -> str:
     """A headline as one line: its lines joined by a space."""
     return " ".join(x.strip() for x in str(text or "").splitlines() if x.strip())
@@ -216,13 +253,14 @@ def root_len(*roots: Any) -> int:
 
 
 def fit(title: Any, roots_len: int = ROOT_LEN) -> str:
-    """The title part of the names (the folder's and the files'): safe_name, at most MAX_LEN characters, and short
+    """The title part of the names (the folder's and the files'): only letters, numbers, spaces and - _ ( ) (``plain``,
+    night 15), at most MAX_LEN characters, and short
     enough that ``<root>\\<date>_<title> (99)\\edit-99\\<title>_edit.xml`` and the deepest file of a run folder stay
     under PATH_LIMIT (the title is in that path twice)."""
     fixed = roots_len + 1 + len("2026-10-20_") + SUFFIX_ROOM
     twice = (PATH_LIMIT - fixed - COPY_TAIL) // 2
     once = PATH_LIMIT - fixed - RUN_TAIL
-    return safe_name(title, MAX_LEN, max(8, min(twice, once)))
+    return safe_name(plain(title), MAX_LEN, max(8, min(twice, once)))
 
 
 PREMIERE_LIMIT = 259                # the longest path Windows takes (260 with its end mark)

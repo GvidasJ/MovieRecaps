@@ -117,7 +117,7 @@ def test_an_old_cards_name_is_its_title_and_rename_to_title_renames_it(setup):
     finally:
         Mo.set_enabled(True)
     w.rename.click()                                                      # in the background: the window never waits
-    want = setup.local / f"{NM.day_of(old.name)}_{SHOWN}"
+    want = setup.local / f"{NM.day_of(old.name)}_{NM.plain(SHOWN)}"
     assert pump_until(setup.app, lambda: want.is_dir() and any(c.folder == want for c in page.cards))
     assert not old.exists() and any("Renamed after its title" in t for t, _k in setup.toasts)
     assert pump_until(setup.app, lambda: card_widgets(page) and card_widgets(page)[0].rename is None)
@@ -245,7 +245,7 @@ def test_the_window_renames_after_a_title_change_and_retries_what_waited(qapp, t
     finally:
         lock.release()
     MW.MainWindow.retry_renames(win)                                      # the minute's retry renames it
-    want = "2026-10-20_The YouTube title 🎥"
+    want = "2026-10-20_The YouTube title"
     assert seen == [(base, want)] and (local / want).is_dir() and RN.pending() == []
     assert any("Renamed after its title" in t for t, _k in toasts)
 
@@ -267,7 +267,7 @@ def test_a_new_video_rows_folder_follows_the_headline_after_its_template(tmp_pat
     th.named.connect(lambda i, f: named.append(f))
     out: dict = {}
     th._template(out)                                                     # noqa: SLF001 - the stage as it runs
-    want = p.folder.with_name(f"{NM.day_of(p.folder.name)}_When it finally works 💀")
+    want = p.folder.with_name(f"{NM.day_of(p.folder.name)}_When it finally works")
     assert it.project == want and want.is_dir() and named == [str(want)] and "renamed" in out.get("rename", "").lower()
 
 

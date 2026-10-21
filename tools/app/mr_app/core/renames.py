@@ -996,6 +996,61 @@ def retry_pending(*, hub: str | os.PathLike | None = None, local_root: str | os.
     return out
 
 
+SWEEP_DONE = "plain_sweep"          # project.json "names": {"plain_sweep": time}: looked at once (night 15)
+
+
+def not_plain(folder: Path, data: dict | None) -> bool:
+    """A title-named project whose folder still has emoji or other signs (made before night 15) and that was not
+    looked at by the sweep yet (a folder that keeps its name for a Premiere project is looked at once)."""
+    if not data or not NM.uses_titles(data) or NM.is_plain(folder.name):
+        return False
+    n = data.get(NM.KEY) if isinstance(data.get(NM.KEY), dict) else {}
+    return not n.get(SWEEP_DONE)
+
+
+def plain_sweep(*, hub: str | os.PathLike | None = None, local_root: str | os.PathLike | None = None,
+                dry_run: bool = False) -> list[Result]:
+    """Night 15: every title-named project of this computer and the shared folder whose folder name still has emoji
+    (Premiere's XML import fails on them) renamed to its plain name (names.plain) -- through ``request``, so it
+    waits while something uses it and keeps its name while a Premiere project plays its files (said in the result,
+    remembered in project.json). Each one is looked at once (a rename that has to wait stays on the pending list).
+    ``dry_run``: the folders that would be looked at, nothing changed."""
+    h, lr = _roots(hub, local_root)
+    seen: set[str] = set()
+    out: list[Result] = []
+    for root in (lr, h):
+        if root is None:
+            continue
+        try:
+            folders = sorted(d for d in root.iterdir() if d.is_dir())
+        except OSError:
+            continue
+        for f in folders:
+            if _norm(f) in seen:
+                continue
+            seen.add(_norm(f))
+            data = _read(f)
+            if not not_plain(f, data):
+                continue
+            if dry_run:
+                out.append(Result(WAIT, f, "would be looked at"))
+                continue
+            res = request(f, hub=h, local_root=lr)
+            for _o, n in res.moved:
+                seen.add(_norm(n))
+            if res.state != WAIT:
+                try:
+                    def done(x: dict) -> None:
+                        n = dict(x.get(NM.KEY) if isinstance(x.get(NM.KEY), dict) else {})
+                        n[SWEEP_DONE] = P.now()
+                        x[NM.KEY] = n
+                    P.load(res.folder).change(done)
+                except (OSError, ValueError):
+                    pass
+            out.append(res)
+    return out
+
+
 def waiting_for(folder: str | os.PathLike) -> str:
     """Why the folder's rename waits ('' when it does not)."""
     k = _norm(folder)

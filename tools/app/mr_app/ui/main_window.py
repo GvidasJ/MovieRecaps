@@ -185,6 +185,8 @@ class MainWindow(QMainWindow):
         self._rename_timer.timeout.connect(self.retry_renames)
         self._rename_timer.start(60_000)
         QTimer.singleShot(12_000, self.retry_renames)
+        if _start_checks():                               # night 15: folders named with emoji (made before)
+            QTimer.singleShot(20_000, self.plain_names)   # get their plain names, once
         self._publishing: dict[str, int] = {}             # folders being copied to the shared folder right now
         try:                                              # (a rename waits for the whole copy)
             from ..core import renames
@@ -412,6 +414,23 @@ class MainWindow(QMainWindow):
                     b = self.pages.get("board")
                     if b is not None and hasattr(b, "reload"):
                         b.reload()
+        BG.call(work, done, lambda _e: None)
+
+    def plain_names(self) -> None:
+        """Night 15: the projects whose folder still has emoji in its name (Premiere's XML import fails on them)
+        renamed to their plain names once, in the background (core.renames.plain_sweep: a folder a Premiere project
+        plays keeps its name; one in use waits)."""
+        hub, local = _save_root(self.settings), paths.projects_root()
+
+        def work():
+            from ..core import renames as RN
+            with BG.counted_work() as _renaming:
+                return RN.plain_sweep(hub=hub, local_root=local)
+
+        def done(results) -> None:
+            for res in results or []:
+                if getattr(res, "moved", None) or getattr(res, "state", "") == "renamed":
+                    self.renamed(res)
         BG.call(work, done, lambda _e: None)
 
     def find_hub(self) -> None:

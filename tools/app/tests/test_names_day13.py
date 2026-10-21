@@ -99,7 +99,8 @@ def test_names_fit_windows_path_limit_with_emoji_counted_twice():
     assert NM.utf16_len(f"{folder}\\edit-99\\{t}_edit.xml") <= NM.PATH_LIMIT
     assert NM.utf16_len(f"{folder}\\edit-99\\.{t}_edit.xml.123456.1234567890.tmp") <= NM.PATH_LIMIT   # its temp file
     assert NM.utf16_len(f"{folder}\\edit-99\\extras\\debug\\verify_failures\\k00544.png") <= NM.PATH_LIMIT
-    assert NM.fit("Short title 😭") == "Short title 😭"                  # a usual title is kept whole
+    assert NM.fit("Short title 😭") == "Short title"                     # a usual title is kept whole (night 15:
+    #                                                                      without its emoji)
     assert NM.sequence_name(long) == NM.safe_name(NM.no_emoji(long))   # the sequence: not cut for paths (day 14:
     assert NM.sequence_name(long).endswith("Every Time")               # no emoji, Premiere shows them as boxes)
 
@@ -287,7 +288,7 @@ def test_the_apps_own_title_project_is_never_taken_for_your_fix(tmp_path):
     p = title_project(tmp_path / "local", title="Finally fixed 😭")       # the title even ends with "fixed"
     out = PM.named_copy(p.folder / "edit" / "1_edit.xml")
     own = PM.project_for(out)
-    assert own.name == "Finally fixed 😭.prproj"
+    assert own.name == "Finally fixed.prproj"                           # (night 15: no emoji)
     saved(own)
     assert PM.is_own_project(own)
     st = own.stat()
@@ -328,7 +329,7 @@ def test_a_new_youtube_title_renames_both_copies_with_everything_linked(tmp_path
     B.set_upload_title(old_local, "Nobody expected this radio ad 📻")
     res = RN.rename(old_local, hub=hub, local_root=local)
     assert res.state == RN.RENAMED, res.text
-    new_name = "2026-10-20_Nobody expected this radio ad 📻"
+    new_name = "2026-10-20_Nobody expected this radio ad"               # (night 15: no emoji)
     new_local, new_hub = local / new_name, hub / new_name
     assert res.folder == new_local and not old_local.exists() and not old_hub.exists()
     assert new_local.is_dir() and new_hub.is_dir()
@@ -417,7 +418,7 @@ def test_it_waits_while_something_uses_the_folder_then_renames(tmp_path):
         lock.release()
     out = RN.retry_pending(hub=hub, local_root=local)
     assert out[0].state == RN.RENAMED and RN.pending() == []
-    assert (local / "2026-10-20_Renamed later 😂").is_dir()
+    assert (local / "2026-10-20_Renamed later").is_dir()
 
 
 def test_its_first_copy_to_the_shared_folder_makes_it_wait(tmp_path):
@@ -533,9 +534,9 @@ def test_old_projects_are_renamed_only_by_rename_to_title(tmp_path):
     p.update(title="The fact that he\nsaid it 😭")
     assert RN.rename(p.folder, hub=hub, local_root=local).state == RN.OLD
     c = B.card_of(p.folder)
-    assert c.display == "The fact that he said it 😭" and c.rename_to.endswith("_The fact that he said it 😭")
+    assert c.display == "The fact that he said it 😭" and c.rename_to.endswith("_The fact that he said it")
     res = RN.rename(p.folder, hub=hub, local_root=local, explicit=True)
-    assert res.state == RN.RENAMED and res.folder.name.endswith("_The fact that he said it 😭")
+    assert res.state == RN.RENAMED and res.folder.name.endswith("_The fact that he said it")
     assert NM.uses_titles(P.load(res.folder).data)                        # from now on it follows its title
 
 
@@ -569,7 +570,7 @@ def test_renaming_one_copy_keeps_a_title_only_its_twin_has(tmp_path):
     B.set_title(p.folder, "A new headline\nfrom the queue row")           # this computer: the headline, later
     res = RN.rename(p.folder, hub=hub, local_root=local)
     assert res.state == RN.RENAMED, res.text                             # named after the YouTube title (it wins)
-    assert res.folder.name.endswith("_Set on the laptop 🎥")
+    assert res.folder.name.endswith("_Set on the laptop")
     for c in (res.folder, hub / res.folder.name):
         d = P.load(c).data
         assert d["upload_title"] == "Set on the laptop 🎥"               # never wiped by the other copy's ""
