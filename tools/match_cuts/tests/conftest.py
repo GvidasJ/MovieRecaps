@@ -28,6 +28,9 @@ os.environ["MATCH_CUTS_NO_AE"] = "1"
 # nor the vision model of the action suggestions (night 9: a 4 GB model per run with a *...* placeholder); the tests
 # of the suggestions use a stand-in model
 os.environ["MATCH_CUTS_NO_ACTION_MODEL"] = "1"
+# nor the graphics card's encoder for a RAW's conversion (day 14): the tests' conversions stay the CPU's, the same on
+# every machine; the tests of NVENC switch it on themselves
+os.environ["MATCH_CUTS_NVENC"] = "0"
 
 
 def _slow_enabled(config) -> bool:

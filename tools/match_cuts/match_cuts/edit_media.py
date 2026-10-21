@@ -16,9 +16,11 @@ own scratch for its analysis and is removed when the run is done (pipeline.drop_
   with 1024 priming samples that every program has to skip by itself), so A1 lands on the planned sample anywhere.
 * The plan's frame N is the original's frame N only for a constant frame rate that starts at 0, with square pixels, an
   even size and no rotation (conform's CFR re-stamp: conformed frame k = decoded frame k). Anything else -- VFR, a start
-  time, an edit list on the picture, rotation, SAR, interlacing, another codec or container -- and V1 plays
-  ``media/raw_premiere.mp4``: converted with the analysis copy's own picture steps (the same frames) but at H.264
-  CRF 17 preset slow (not CRF 12 veryfast), no sound (A1: raw_stereo.wav); the run's report and summary say why.
+  time, an edit list on the picture, rotation, SAR, interlacing, another codec or container -- and V1 plays the copy
+  S2 made (day 14, ``checked_copy``: media/raw_ae.<ext>, the analysed frames themselves, checked against the original
+  when it was made -- never a second conversion; Ted 2 was converted twice, 12.5 + ~45 min on the laptop); the run's
+  report and summary say why. ``media/raw_premiere.mp4`` (H.264 CRF 17 slow from the original, no sound) is made only
+  when there is no such copy.
 
 No cached stage imports this module (it is not in common.STAGE_CODE): it changes no cache key.
 """
@@ -123,6 +125,8 @@ def sound_choice(src: Any, picture_how: str) -> dict:
     """How A1 plays the RAW's sound: {'how': 'same' (the V1 file's own sound) | 'wav' | 'none', 'why'}."""
     if not bool(getattr(src, "has_audio", False)):
         return {"how": "none", "why": "the RAW has no sound"}
+    if picture_how == "checked_copy":
+        picture_how = "analysis"                      # (S2's copy has the analysed sound, re-based to frame 0)
     if picture_how not in ("analysis", "original"):
         return {"how": "wav", "why": "V1 plays a copy without sound"}
     ch = int(getattr(src, "a_channels", 0) or 0)
@@ -419,7 +423,14 @@ def prepare(src: Any, analysis: Any, conf: Any, cfg: Any, media_dir: str | Path)
             out["picture"] = dict(pic)
         else:
             out["picture"].update(path=str(dst.resolve()), name=dst.name, placed="remux", bytes=rm["bytes"])
-    if pic["how"] == "convert":
+    if pic["how"] == "convert" and conformed and Path(conf.path).is_file():
+        # day 14: never convert the same RAW twice -- the copy S2 made (checked frame for frame against the original:
+        # conform.verify_transcode) is what the analysis read, and what V1 plays
+        out["picture"] = {"how": "checked_copy", "why": pic["why"], "path": str(Path(conf.path).resolve()),
+                          "name": Path(conf.path).name, "placed": "the copy made in S2",
+                          "encoder": _conform_encoder(conf)}
+        out["fallback"] = pic["why"]
+    elif pic["how"] == "convert":
         dst = media / CONVERTED_NAME
         need, free = int(getattr(src, "file_size", 0) or 0), shutil.disk_usage(media).free
         if free < need + conform.COPY_RESERVE:
@@ -464,6 +475,16 @@ def _layout(path: str | Path) -> str:
     return str((stereo.audio_layout(path) or {}).get("layout") or "")
 
 
+def _conform_encoder(conf: Any) -> str:
+    """How S2's copy was encoded, in a few words (from its conform reason)."""
+    reason = str(getattr(conf, "reason", "") or "")
+    for key, words in (("NVENC", "H.264 on the graphics card, NVENC cq 17"), ("H.264 CRF 12", "H.264 CRF 12"),
+                       ("ProRes", "ProRes 422 LT")):
+        if key in reason:
+            return words
+    return "converted in S2"
+
+
 def summary_line(res: dict) -> str:
     """One plain sentence: what V1 and A1 of 1_edit.xml play."""
     p, s = res.get("picture") or {}, res.get("sound") or {}
@@ -475,6 +496,9 @@ def summary_line(res: dict) -> str:
              + ("a hard link: no extra space" if p.get("placed") in ("hardlink", "same") else "a copy") + ")")
     elif how == "remux":
         v = f"V1 plays the original RAW's video moved into extras\\media\\{p.get('name')} (nothing re-encoded)"
+    elif how == "checked_copy":
+        v = (f"V1 plays the copy the tool made once in S2 (extras\\media\\{p.get('name')}, {p.get('encoder')}; checked "
+             f"frame for frame against the original) because the original cannot be used as it is: {p.get('why')}")
     else:
         v = (f"V1 plays a converted copy (extras\\media\\{p.get('name')}, {p.get('encoder', 'H.264')}) because the "
              f"original cannot be used as it is: {p.get('why')}")

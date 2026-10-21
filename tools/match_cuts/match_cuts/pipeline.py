@@ -2118,11 +2118,11 @@ def stage_env(ctx: Context) -> None:
                     ae_app=env.get("ae_app"), aerender=env.get("aerender"))
 
 
-def _conform_key(ctx: Context, info: StreamInfo) -> str:
+def _conform_key(ctx: Context, info: StreamInfo, *extra: Any) -> str:
     cfg = ctx.cfg
     return stage_key("conform", info.role, info.file_hash, str(Path(cfg.media_dir).resolve()), cfg.force_conform,
                      cfg.conform_codec, cfg.conform_h264_preset, cfg.conform_h264_crf, cfg.competitor_h264_preset,
-                     cfg.competitor_h264_crf, cfg.large_file_bytes)
+                     cfg.competitor_h264_crf, cfg.large_file_bytes, *extra)
 
 
 def surface_input_warnings(ctx: Context, probe_mod: Any) -> None:
@@ -2145,12 +2145,51 @@ def surface_input_warnings(ctx: Context, probe_mod: Any) -> None:
             ctx.dlog.record("probe", "input_warning", role=info.role, path=info.path, warning=str(w))
 
 
+STEADY_DRIFT_FRAMES = 0.5      # day 14: frames that stay within half a frame of the grid ...
+STEADY_STEP_FRAMES = 0.1       # ... with every step one frame long (as close as the old VFR rule asked of each step)
+
+
+def steady_timing(info: StreamInfo) -> StreamInfo | None:
+    """Day 14: a RAW the probe calls VFR only because its timestamps drift slowly off the nominal grid -- every step one
+    frame long (within STEADY_STEP_FRAMES: no frame dropped, doubled or shifted on its own) and every frame within half
+    a frame of its slot (STEADY_DRIFT_FRAMES) -- has a constant frame rate: Ted 2's YTS x264 runs at exactly 23.976
+    fps against the nominal 24000/1001, 0.181 frames apart after two hours. Frame k is frame k everywhere, so the RAW
+    needs no conversion for it (the old After Effects rule converted anything above 0.1 frame -- twice in a Premiere
+    run). Frames that jump around one by one (a phone's) still count as VFR. Returns a copy of ``info`` treated as
+    constant (vfr off, its 'vfr' issue gone), else None."""
+    if info is None or not bool(getattr(info, "vfr", False)):
+        return None
+    if not info.pts_file or not Path(info.pts_file).exists():
+        return None                                   # (no measured timestamps: it stays as the probe said)
+    from .probe import load_pts
+    try:
+        pts = np.asarray(load_pts(info), dtype=np.float64)
+    except Exception:  # noqa: BLE001 - without its timestamps it stays as the probe said
+        return None
+    if len(pts) < 2 or not info.fps:
+        return None
+    f = float(Fraction(info.fps))
+    step = float(np.max(np.abs(np.diff(pts) * f - 1.0)))
+    drift = float(np.max(np.abs((pts - pts[0]) * f - np.arange(len(pts)))))
+    if not (step < STEADY_STEP_FRAMES and drift < STEADY_DRIFT_FRAMES):
+        return None
+    return dataclasses.replace(info, vfr=False, ae_issues=[i for i in info.ae_issues if not str(i).startswith("vfr:")])
+
+
 def stage_probe_conform(ctx: Context) -> None:
     from . import conform, probe
     cfg = ctx.cfg
     work = str(cfg.work)
     ctx.comp_input = probe.probe(cfg.competitor, "competitor", work, decode=True)
     ctx.raw_input = probe.probe(cfg.raw, "raw", work, decode=True)
+    steady = steady_timing(ctx.raw_input)
+    if steady is not None:
+        log.info("the RAW's timestamps drift at most %.3f frames off the %s fps grid (under %.1f, no frame dropped or "
+                 "doubled): a constant frame rate -- not converted for it", ctx.raw_input.pts_jitter,
+                 fps_str(ctx.raw_input.fps), STEADY_DRIFT_FRAMES)
+        ctx.dlog.record("probe", "steady_timing", role="raw", pts_jitter=round(float(ctx.raw_input.pts_jitter), 4),
+                        limit=STEADY_DRIFT_FRAMES, issues_left=list(steady.ae_issues))
+        ctx.raw_input = steady
     for info in (ctx.comp_input, ctx.raw_input):
         ctx.dlog.record("probe", "input", role=info.role, path=info.path, fps=fps_str(info.fps),
                         frames=info.nb_frames, vfr=info.vfr, ae_issues=info.ae_issues, rotation=info.rotation)
@@ -2161,7 +2200,9 @@ def stage_probe_conform(ctx: Context) -> None:
     if ctx.raw_input.vfr:
         ctx.warn(f"RAW is VFR (PTS jitter {ctx.raw_input.pts_jitter:.2f} frames): conformed to CFR "
                  f"{fps_str(ctx.raw_input.fps)}", analysis=True)
-    ctx.raw_conform = self_cached_stage(ctx, "conform_raw", _conform_key(ctx, ctx.raw_input),
+    ctx.raw_conform = self_cached_stage(ctx, "conform_raw",
+                                        _conform_key(ctx, ctx.raw_input,
+                                                     *(["steady timing"] if steady is not None else [])),
                                         lambda: conform.conform(ctx.raw_input, "raw", cfg, ctx.dlog), ("conform",))
     ctx.comp_conform = self_cached_stage(ctx, "conform_competitor", _conform_key(ctx, ctx.comp_input),
                                          lambda: conform.conform(ctx.comp_input, "competitor", cfg, ctx.dlog),
@@ -2176,6 +2217,8 @@ def stage_probe_conform(ctx: Context) -> None:
             raise RuntimeError(f"conformed {role} failed verification against the original: {ver}")
     # analysis happens ONLY on the files After Effects imports
     ctx.raw_info = probe.probe(str(ctx.raw_conform.path), "raw", work, decode=True)
+    if steady is not None and not ctx.raw_conform.conformed:     # (the RAW itself, linked: the same steady timing)
+        ctx.raw_info = steady_timing(ctx.raw_info) or ctx.raw_info
     ctx.comp_info = probe.probe(str(ctx.comp_conform.path), "competitor", work, decode=True)
     for info in (ctx.raw_info, ctx.comp_info):
         if info.nb_frames <= 0 or not info.fps:
@@ -3105,7 +3148,11 @@ def premiere_media(ctx: Context, ex: Cutlist) -> Cutlist:
                     sound={k: v for k, v in (res.get("sound") or {}).items() if k != "sync"},
                     sync=(res.get("sound") or {}).get("sync"), line=res.get("line"))
     log.info("the RAW for Premiere: %s", res.get("line"))
-    if res.get("fallback"):
+    if res.get("fallback") and res["picture"].get("how") == "checked_copy":
+        ctx.warn(f"the original RAW cannot be used in Premiere as it is ({res['fallback']}) -- 1_edit.xml plays the "
+                 f"copy the tool made once in S2, extras/media/{res['picture'].get('name')} "
+                 f"({res['picture'].get('encoder')}; not converted a second time)")
+    elif res.get("fallback"):
         ctx.warn(f"the original RAW cannot be used in Premiere as it is ({res['fallback']}) -- 1_edit.xml plays a "
                  f"converted copy, extras/media/{res['picture'].get('name')} (H.264 CRF {edit_media.DELIVERY_CRF}, "
                  f"preset {edit_media.DELIVERY_PRESET})")

@@ -6,7 +6,12 @@ RAW:
                           every run folder holds its own media, whatever its size; the log says "copied, not
                           linked: <reason>"; not enough free space for the copy stops the run with that said).
   * not AE-safe        -> ``output/media/raw_ae.mov`` (ProRes 422 LT, prores_aw profile 1, PCM s16le
-                          48 kHz) for <= 10 min, else ``raw_ae.mp4`` (H.264 CRF 12, AAC 48 kHz).
+                          48 kHz) for <= 10 min, else ``raw_ae.mp4`` (H.264 CRF 12, AAC 48 kHz). Day 14: on a
+                          machine with an NVIDIA card, ``raw_ae.mp4`` on the card at any length (H.264 NVENC
+                          cq 17 preset p5 -- the CPU's libx264 when NVENC fails; MATCH_CUTS_NVENC=0: never).
+                          Timestamps out of order (probe 'pts_order', an x265 release muxed with PTS = DTS): re-stamped
+                          in decoding order, never by the timestamps, and a video edit list that only hides the B-frame
+                          delay worked out from them is ignored (``bogus_video_editlist``: it hid real frames).
 COMPETITOR (reference layer + analysis): always ``output/media/competitor_ref.mp4`` (H.264 + AAC):
   placed the same way when AE-safe mp4/H.264/AAC, else transcoded.
 
@@ -51,7 +56,7 @@ from typing import Any
 
 import numpy as np
 
-from .common import (DecisionLog, STAGE_VERSION, atomic_write_text, ffmpeg_bin, file_hash, fps_str, log,
+from .common import (DecisionLog, STAGE_VERSION, atomic_write_text, ffmpeg_bin, ffprobe_bin, file_hash, fps_str, log,
                      null_dlog, params_hash, replace_file)
 from .model import StreamInfo
 from .probe import (ae_issues, display_geometry, load_pts_int, probe, reader_sar, video_stream_ordinal)
@@ -69,6 +74,15 @@ COVER_MAX_SIDE = 96                  # frames compared at <= 96 px (content iden
 COVER_FULL_MAX = 6000                # conforms up to this many frames are checked completely ...
 COVER_WINDOW = 240                   # ... longer ones in evenly spread windows of this many output slots
 COVER_OVERLAP = 8                    # adjacent full-coverage windows overlap (no unchecked seam frames)
+# day 14: a RAW is converted once, on the graphics card (H.264 NVENC, constant quality 17, preset p5: night 10
+# measured cq 17 as good as x264 CRF 13); the CPU's libx264 only when NVENC is missing or fails
+NVENC_ARGS = ("-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "17", "-b:v", "0",
+              "-profile:v", "high", "-bf", "2")
+NVENC_ENV = "MATCH_CUTS_NVENC"       # "0": never use NVENC (the CPU's libx264 as before)
+ORDER_CHECK_FRAMES = 2400            # a source with scrambled timestamps: its first frames are checked in decoding order
+EDITLIST_DELAY_MAX_FRAMES = 4        # ... and a video edit list trimming at most this many frames only hides the
+#                                      B-frame delay worked out from those timestamps (bogus_video_editlist)
+_VIDEO_TRIM_RE = re.compile(r"edit_list: video edit starts at .*\(trims (-?[0-9.]+) s\)")
 
 
 @dataclass
@@ -191,18 +205,74 @@ def interval_slots(pts: np.ndarray, tb: Fraction, fps: Fraction) -> list[Fractio
     return out
 
 
-def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
-    """Everything that determines a transcode (also the cache 'params')."""
+@functools.lru_cache(maxsize=8)
+def _nvenc_works(binary: str) -> bool:
+    """This ffmpeg can encode H.264 on an NVIDIA graphics card (two frames tried; cached per binary)."""
+    try:
+        r = subprocess.run([binary, "-hide_banner", "-v", "error", "-nostdin", "-f", "lavfi", "-i",
+                            "color=c=black:s=256x144:r=24", "-frames:v", "2", "-c:v", "h264_nvenc", "-f", "null", "-"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def nvenc_ok() -> bool:
+    """A RAW's conversion runs on the graphics card (NVENC) -- unless MATCH_CUTS_NVENC=0 or the card cannot."""
+    if os.environ.get(NVENC_ENV, "").strip() == "0":
+        return False
+    return _nvenc_works(ffmpeg_bin())
+
+
+def scrambled_pts(info: StreamInfo) -> bool:
+    """The decoder's frames carry timestamps out of order (probe 'pts_order': e.g. an x265 release muxed with PTS =
+    DTS) -- the decoding order is the only true frame order: frame k = the k-th decoded frame."""
+    return any(str(i).startswith("pts_order") for i in (info.ae_issues or []))
+
+
+def bogus_video_editlist(info: StreamInfo) -> bool:
+    """A file with scrambled timestamps (``scrambled_pts``) whose video edit list trims only a B-frame delay's worth of
+    frames (<= EDITLIST_DELAY_MAX_FRAMES): the edit was worked out from the wrong timestamps and hides real frames --
+    Ted 2 RBG (PTS = DTS): the first two packets in decoding order, its frames 0 and 3, so the rest of the picture ran
+    two frames ahead of its sound. Converted with that edit list ignored: every frame, in decoding order, frame 0 with
+    sound sample 0."""
+    if not scrambled_pts(info) or not info.fps:
+        return False
+    for i in info.ae_issues or []:
+        m = _VIDEO_TRIM_RE.match(str(i))
+        if m:
+            frames = float(m.group(1)) * float(Fraction(info.fps))
+            return 0 < frames <= EDITLIST_DELAY_MAX_FRAMES + 0.01
+    return False
+
+
+def video_packets(path: str, vindex: int, ignore_editlist: bool = False) -> int | None:
+    """The number of video packets (= frames) in the file, the edit list ignored or not (ffprobe, no decoding)."""
+    cmd = [ffprobe_bin(), "-v", "error", *(["-ignore_editlist", "1"] if ignore_editlist else []),
+           "-select_streams", f"v:{int(vindex)}",
+           "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        return int(r.stdout.strip().splitlines()[0]) if r.returncode == 0 and r.stdout.strip() else None
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+def plan_transcode(info: StreamInfo, role: str, cfg, gpu: bool | None = None) -> dict:
+    """Everything that determines a transcode (also the cache 'params'). ``gpu``: a RAW's H.264 on the graphics card
+    (None: when NVENC works -- nvenc_ok)."""
     fps = Fraction(info.fps)
     geo = output_geometry(info)
     codec = "h264_ref" if role == "competitor" else str(getattr(cfg, "conform_codec", "auto") or "auto")
+    if role == "raw" and codec in ("auto", "h264") and gpu is None:
+        gpu = nvenc_ok()
     if codec == "auto":
-        codec = "prores_lt" if info.duration <= PRORES_MAX_S else "h264"
+        codec = "h264" if gpu else ("prores_lt" if info.duration <= PRORES_MAX_S else "h264")
     if codec not in ("prores_lt", "prores", "prores_ks", "h264", "h264_ref"):
         raise ValueError(f"unknown conform_codec {codec!r} (auto|prores_lt|prores|prores_ks|h264)")
     pts, tb, _origin = load_pts_int(info)
     extra: dict[str, Any] = {}
-    if info.vfr:
+    if info.vfr and not scrambled_pts(info):          # (scrambled timestamps: re-stamped in decoding order)
         mode = "fps"
         shift = vfr_pts_shift(tb, fps)
         tb_f = _frac_gcd(Fraction(tb), shift) if shift > 0 else Fraction(tb)   # PTS and shift exact in tb_f
@@ -222,6 +292,11 @@ def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
     else:
         mode = "restamp"
         expected = int(info.nb_frames)
+        if role == "raw" and bogus_video_editlist(info):
+            n_all = video_packets(info.path, video_stream_ordinal(info), ignore_editlist=True)
+            if n_all and n_all > expected:                 # every frame, the edit list's hidden ones too
+                expected = int(n_all)
+                extra["ignore_video_editlist"] = True
         timing = [f"settb={fps.denominator}/{fps.numerator}", "setpts=N",
                   f"fps=fps={fps.numerator}/{fps.denominator}", f"trim=end_frame={expected}"]
     vf = list(timing)
@@ -251,6 +326,8 @@ def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
         vargs = ["-c:v", "prores_aw", "-profile:v", "2", "-vendor", "apl0"]
     elif codec == "prores_ks":
         vargs = ["-c:v", "prores_ks", "-profile:v", "1", "-vendor", "apl0"]
+    elif codec == "h264" and role == "raw" and gpu:
+        vargs = [*NVENC_ARGS, "-g", str(g)]
     elif codec == "h264":
         vargs = ["-c:v", "libx264", "-preset", str(getattr(cfg, "conform_h264_preset", "veryfast")),
                  "-crf", str(getattr(cfg, "conform_h264_crf", 12)), "-g", str(g), "-bf", "2",
@@ -271,6 +348,10 @@ def plan_transcode(info: StreamInfo, role: str, cfg) -> dict:
             "fps": fps_str(fps), "expected_frames": int(expected), "width": geo["w"], "height": geo["h"],
             "vf": ",".join(vf), "af": ",".join(af) if af else None, "vargs": vargs, "aargs": aargs,
             "vindex": video_stream_ordinal(info), **extra}
+
+
+def _on_gpu(plan: dict) -> bool:
+    return "h264_nvenc" in (plan.get("vargs") or [])
 
 
 def _parse_version(text: str) -> tuple[int, ...]:
@@ -313,9 +394,15 @@ def sync_args(ffmpeg_version: tuple[int, ...] | None = None) -> tuple[str, ...]:
 
 def ffmpeg_command(src: str, out: str, plan: dict, ffmpeg_version: tuple[int, ...] | None = None) -> list[str]:
     """The conform's ffmpeg command line. ``ffmpeg_version`` None = detect (see sync_args)."""
-    cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-i", src, "-map", f"0:v:{plan['vindex']}"]
-    if plan["af"]:
-        cmd += ["-map", "0:a:0"]
+    if plan.get("ignore_video_editlist"):          # the picture without its (bogus) edit list, the sound with its own
+        cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-ignore_editlist", "1", "-i", src, "-i", src,
+               "-map", f"0:v:{plan['vindex']}"]
+        if plan["af"]:
+            cmd += ["-map", "1:a:0"]
+    else:
+        cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-i", src, "-map", f"0:v:{plan['vindex']}"]
+        if plan["af"]:
+            cmd += ["-map", "0:a:0"]
     cmd += ["-filter:v", plan["vf"]]
     if plan["af"]:
         cmd += ["-filter:a", plan["af"]]
@@ -397,13 +484,7 @@ def decode_source_frames(info: StreamInfo, indices: list[int], geo: dict, size: 
                         if p > lo and target is not None:
                             break               # seek overshot -> retry further back
                     if p in wanted:
-                        img = rd._convert(frame, "gray", None, None)
-                        if geo.get("crop"):
-                            # the conform crops only an odd UNSCALED axis (after rotation, before scaling)
-                            if not geo.get("scale_y"):
-                                img = img[:geo["crop"][1]]
-                            if not geo.get("scale_x"):
-                                img = img[:, :geo["crop"][0]]
+                        img = _crop_like_conform(rd._convert(frame, "gray", None, None), geo)
                         got[wanted[p]] = cv2.resize(img, size, interpolation=cv2.INTER_AREA)
                     if p >= hi:
                         break
@@ -413,6 +494,51 @@ def decode_source_frames(info: StreamInfo, indices: list[int], geo: dict, size: 
                     break
             if not done:
                 raise RuntimeError(f"{info.path}: could not decode source frames {cl[:5]}... by PTS")
+    finally:
+        rd.close()
+    return out
+
+
+def _crop_like_conform(img: np.ndarray, geo: dict) -> np.ndarray:
+    """The conform crops only an odd UNSCALED axis (after rotation, before scaling)."""
+    if geo.get("crop"):
+        if not geo.get("scale_y"):
+            img = img[:geo["crop"][1]]
+        if not geo.get("scale_x"):
+            img = img[:, :geo["crop"][0]]
+    return img
+
+
+def decode_source_in_order(info: StreamInfo, indices: list[int], geo: dict, size: tuple[int, int],
+                           ignore_editlist: bool = False) -> dict[int, np.ndarray]:
+    """Gray display-oriented source frames by their place in DECODING order (frame k = the k-th frame the decoder
+    gives, as the conform's re-stamp counts them) -- for a source whose timestamps are scrambled (``scrambled_pts``),
+    where frames cannot be found by PTS: decoded from the start up to the last one wanted (``ignore_editlist``: as the
+    conform read it, bogus_video_editlist). Rotation/SAR as VideoReader; the conform crop is applied; resized to
+    ``size`` (INTER_AREA)."""
+    import av
+    import cv2
+    from .media import VideoReader
+
+    want = sorted(set(int(i) for i in indices if int(i) >= 0))
+    out: dict[int, np.ndarray] = {}
+    if not want:
+        return out
+    wanted, last = set(want), want[-1]
+    rd = VideoReader(info.path, fps=info.fps, stream_index=video_stream_ordinal(info), rotation=info.rotation,
+                     sar=reader_sar(info))
+    try:
+        if ignore_editlist:                           # (VideoReader's own container honours the edit list)
+            rd.container.close()
+            rd.container = av.open(str(info.path), options={"ignore_editlist": "1"})
+            rd.stream = rd.container.streams.video[video_stream_ordinal(info)]
+            rd.stream.thread_type = "AUTO"
+        for i, frame in enumerate(rd.container.decode(rd.stream)):
+            if i in wanted:
+                img = _crop_like_conform(rd._convert(frame, "gray", None, None), geo)
+                out[i] = cv2.resize(img, size, interpolation=cv2.INTER_AREA)
+            if i >= last:
+                break
     finally:
         rd.close()
     return out
@@ -594,15 +720,25 @@ def verify_transcode(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
     n = int(min(out.nb_frames, plan["expected_frames"]))
     pts, tb, _ = load_pts_int(src)
     fps = Fraction(plan["fps"])
+    # timestamps out of order (scrambled_pts): frames are found by their place in decoding order, decoded from the
+    # start -- the first ORDER_CHECK_FRAMES of them (the frame count covers the rest)
+    in_order = scrambled_pts(src) and plan["mode"] == "restamp"
     if n > 0:
-        m = min(n, SAMPLE_TARGET)
-        ks = np.unique(np.round(np.linspace(0, n - 1, m)).astype(np.int64))
-        src_idx = source_index_for_output(ks, plan["mode"], pts, tb, fps,
-                                          _plan_shift(plan, tb, fps) if plan["mode"] == "fps" else None)
-        need = sorted({int(j) for i in src_idx for j in (i - 1, i, i + 1) if 0 <= j < len(pts)})
+        n_chk = min(n, ORDER_CHECK_FRAMES) if in_order else n
+        m = min(n_chk, SAMPLE_TARGET)
+        ks = np.unique(np.round(np.linspace(0, n_chk - 1, m)).astype(np.int64))
         size = _compare_size(plan["width"], plan["height"])
         geo = output_geometry(src)
-        orig = decode_source_frames(src, need, geo, size)
+        if in_order:                                   # conformed frame k = the k-th decoded frame
+            src_idx = ks.copy()
+            need = sorted({int(j) for i in src_idx for j in (i - 1, i, i + 1) if 0 <= j < n})
+            orig = decode_source_in_order(src, need, geo, size, bool(plan.get("ignore_video_editlist")))
+            res["checked_in_decoding_order"] = int(n_chk)
+        else:
+            src_idx = source_index_for_output(ks, plan["mode"], pts, tb, fps,
+                                              _plan_shift(plan, tb, fps) if plan["mode"] == "fps" else None)
+            need = sorted({int(j) for i in src_idx for j in (i - 1, i, i + 1) if 0 <= j < len(pts)})
+            orig = decode_source_frames(src, need, geo, size)
         with VideoReader(out.path, fps=out.fps) as rd:
             conf = {k: cv2.resize(img, size, interpolation=cv2.INTER_AREA)
                     for k, img in rd.get_many([int(k) for k in ks], fmt="gray").items()}
@@ -802,9 +938,20 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
     tmp = dst.with_name(".tmp_" + dst.name)
     cmd = ffmpeg_command(str(src), str(tmp), plan)
     t0 = time.perf_counter()
-    log.info("conform %s: %s -> %s (%s, %s, %d frames)", role, src.name, dst.name, plan["codec"], plan["mode"],
-             plan["expected_frames"])
+    log.info("conform %s: %s -> %s (%s%s, %s, %d frames)", role, src.name, dst.name, plan["codec"],
+             " on the graphics card (NVENC)" if _on_gpu(plan) else "", plan["mode"], plan["expected_frames"])
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0 and _on_gpu(plan):
+        # the graphics card could not (busy with other encodes, a driver problem ...): the CPU, never a stop
+        log.warning("conform %s: the graphics card's encoder failed (%s) -- converting on the CPU instead", role,
+                    (r.stderr or "").strip()[-300:])
+        if tmp.exists():
+            tmp.unlink()
+        plan = plan_transcode(info, role, cfg, gpu=False)
+        dst = media / plan["name"]
+        tmp = dst.with_name(".tmp_" + dst.name)
+        cmd = ffmpeg_command(str(src), str(tmp), plan)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         if tmp.exists():
             tmp.unlink()
@@ -823,6 +970,8 @@ def conform(info: StreamInfo, role: str, cfg, dlog: DecisionLog | None = None) -
     codec_desc = {"prores_lt": "ProRes 422 LT (prores_aw) + PCM 48 kHz", "prores": "ProRes 422 (prores_aw) + PCM 48 kHz",
                   "prores_ks": "ProRes 422 LT (prores_ks) + PCM 48 kHz", "h264": "H.264 CRF 12 + AAC 48 kHz",
                   "h264_ref": "H.264 + AAC 48 kHz"}[plan["codec"]]
+    if _on_gpu(plan):
+        codec_desc = "H.264 on the graphics card (NVENC cq 17, preset p5) + AAC 48 kHz"
     timing_desc = (f"VFR->CFR fps round=up (PTS shifted back by {plan.get('pts_shift')} s for timestamp "
                    "quantisation)" if plan["mode"] == "fps" else "CFR re-stamped by frame index")
     reason = ("not AE-safe: " + "; ".join(why_not_copy) + f" -> transcoded to {codec_desc}, {timing_desc} at "

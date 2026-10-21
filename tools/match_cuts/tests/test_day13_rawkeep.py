@@ -207,21 +207,25 @@ def test_a_picture_that_starts_late_is_remuxed_to_start_at_its_first_frame(tmp_p
     assert chk["ok"], chk["why"]                                               # frame k is the analysed frame k
 
 
-def test_a_vfr_raw_plays_a_crf_17_slow_copy_and_says_why(tmp_path):
+def test_a_vfr_raw_plays_the_copy_made_in_s2_and_is_never_converted_twice(tmp_path):
     src = _video(tmp_path / "phone.mp4", channels=2, vfr=True)
     r = _prepared(tmp_path, src)
-    assert r.info.vfr
-    pic = r.res["picture"]
-    assert pic["how"] == "convert" and pic["name"] == edit_media.CONVERTED_NAME and "vfr" in r.res["fallback"]
-    assert pic["encoder"] == "H.264 CRF 17, preset slow" and len(pic["check"]) >= 4
-    assert edit_media.frames_of(pic["path"]) == r.analysed.nb_frames
-    assert stereo.audio_layout(pic["path"]) == {}
-    assert r.res["sound"]["how"] == "wav" and r.res["sound"]["sync"]["ok"]
-    assert "converted copy" in r.res["line"] and "vfr" in r.res["line"]
-    plan = conform.plan_transcode(r.info, "raw", edit_media.delivery_cfg(r.cfg))
-    assert "-crf" in plan["vargs"] and plan["vargs"][plan["vargs"].index("-crf") + 1] == "17"
-    assert plan["vargs"][plan["vargs"].index("-preset") + 1] == "slow"
-    assert r.cfg.conform_h264_crf == 12                                          # the analysis copy's own settings stay
+    assert r.info.vfr and r.conf.conformed
+    pic = r.res["picture"]                                                       # day 14: no second conversion
+    assert pic["how"] == "checked_copy" and pic["name"] == "raw_ae.mp4" and "vfr" in r.res["fallback"]
+    assert os.path.samefile(pic["path"], r.conf.path) and pic["encoder"] == "H.264 CRF 12"
+    assert not (r.media / edit_media.CONVERTED_NAME).exists()
+    assert r.res["sound"]["how"] == "same"                                       # the copy's own sound, re-based
+    assert "made once in S2" in r.res["line"] and "vfr" in r.res["line"]
+    ex_raw = edit_media.premiere_block({"audio_channels": 2}, r.res, r.cfg.out_dir)
+    assert ex_raw["picture_file"] == "media/raw_ae.mp4" and ex_raw["picture_audio_channels"] == 2
+    assert "sound_file" not in ex_raw
+    rec = []                                                                     # the run's end keeps the copy V1 plays
+    ctx = SimpleNamespace(cfg=SimpleNamespace(premiere=True, deliver=tmp_path / "run", out_dir=r.cfg.out_dir,
+                                              raw=str(src)),
+                          edit_media=r.res, raw_conform=r.conf,
+                          dlog=SimpleNamespace(record=lambda *a, **k: rec.append((a, k))))
+    assert not pipeline.drop_analysis_copy(ctx)["removed"] and Path(r.conf.path).is_file()
 
 
 def test_the_sync_check_catches_a_shifted_sound(tmp_path):
