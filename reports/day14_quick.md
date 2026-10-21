@@ -56,6 +56,7 @@ No new packages. Start MovieRecaps again.
 - **Emoji in folder names still make Premiere's XML import fail** ("File Import Failure", reproduced on this PC this morning). Every project since day 13 has them. Plain folders and non-English letters import fine. Say if I should do this next: folder names without emoji, and the existing folders renamed safely.
 - **Far-apart places:** these use the whole movie (no multi-piece cut yet).
 - **Missing clips:** these are looked for in the rest of the movie by their sound only.
-- **Disk:** C: had 33 GB free.
-  - `powershell -ExecutionPolicy Bypass -File work\cleanup_day14.ps1` lists about 37 GB of old scratch (`work\t27`, `work\t28` except `t28\ld`, today's `work\t30`).
+- **Disk:** C: has 23 GB free.
+  - `powershell -ExecutionPolicy Bypass -File work\cleanup_day14.ps1` lists my old scratch (`work\t27`, `work\t28` except `t28\ld`, today's test runs in `work\t30`).
+  - Deleting it frees about 55 GB. The list shows 69 GB because it counts hard links twice.
   - Add `-Delete` to delete it. I could not delete it myself.
