@@ -1,0 +1,638 @@
+{
+ "wrong": true,
+ "sound": {
+  "state": "not found",
+  "tested": 12,
+  "found": 0,
+  "why": "none of it is in the RAW's sound",
+  "seconds": 0.8,
+  "where": [],
+  "details": {
+   "speed": "1.00",
+   "tried": {
+    "1.00": [
+     {
+      "at": 2.72,
+      "raw_at": 515.42,
+      "ncc": 0.2933,
+      "z": 5.08,
+      "ratio": 1.038,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 5.78,
+      "raw_at": 3715.52,
+      "ncc": 0.2774,
+      "z": 5.44,
+      "ratio": 1.003,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 11.14,
+      "raw_at": 1624.78,
+      "ncc": 0.2991,
+      "z": 5.42,
+      "ratio": 1.037,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 13.0,
+      "raw_at": 2215.66,
+      "ncc": 0.3206,
+      "z": 5.46,
+      "ratio": 1.182,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 14.8,
+      "raw_at": 2608.86,
+      "ncc": 0.3128,
+      "z": 5.54,
+      "ratio": 1.109,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 20.2,
+      "raw_at": 3265.78,
+      "ncc": 0.3135,
+      "z": 5.28,
+      "ratio": 1.007,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 23.12,
+      "raw_at": 176.4,
+      "ncc": 0.2659,
+      "z": 4.98,
+      "ratio": 1.014,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 27.78,
+      "raw_at": 4330.08,
+      "ncc": 0.3318,
+      "z": 5.37,
+      "ratio": 1.001,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 31.76,
+      "raw_at": 1017.68,
+      "ncc": 0.2986,
+      "z": 5.44,
+      "ratio": 1.03,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 37.54,
+      "raw_at": 1620.96,
+      "ncc": 0.2976,
+      "z": 5.31,
+      "ratio": 1.025,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 40.46,
+      "raw_at": 175.84,
+      "ncc": 0.309,
+      "z": 5.15,
+      "ratio": 1.006,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 43.34,
+      "raw_at": 4227.92,
+      "ncc": 0.3166,
+      "z": 5.61,
+      "ratio": 1.039,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tempo": [
+     {
+      "at": 3.34,
+      "raw_at": 876.82,
+      "ncc": 0.2956,
+      "z": 4.94,
+      "ratio": 1.006,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 7.3,
+      "raw_at": 1656.14,
+      "ncc": 0.3225,
+      "z": 5.79,
+      "ratio": 1.029,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 13.9,
+      "raw_at": 3362.88,
+      "ncc": 0.3139,
+      "z": 5.37,
+      "ratio": 1.107,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 18.3,
+      "raw_at": 26.56,
+      "ncc": 0.2961,
+      "z": 4.8,
+      "ratio": 1.007,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 25.58,
+      "raw_at": 2923.96,
+      "ncc": 0.3344,
+      "z": 5.37,
+      "ratio": 1.023,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 27.14,
+      "raw_at": 281.06,
+      "ncc": 0.3399,
+      "z": 5.22,
+      "ratio": 1.016,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 29.26,
+      "raw_at": 1565.16,
+      "ncc": 0.333,
+      "z": 5.64,
+      "ratio": 1.018,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 34.74,
+      "raw_at": 2042.52,
+      "ncc": 0.3139,
+      "z": 4.92,
+      "ratio": 1.013,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 40.22,
+      "raw_at": 3204.76,
+      "ncc": 0.3102,
+      "z": 5.16,
+      "ratio": 1.005,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 47.38,
+      "raw_at": 2044.02,
+      "ncc": 0.3625,
+      "z": 6.02,
+      "ratio": 1.064,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 49.1,
+      "raw_at": 1646.42,
+      "ncc": 0.3245,
+      "z": 5.12,
+      "ratio": 1.016,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 51.22,
+      "raw_at": 1650.5,
+      "ncc": 0.3237,
+      "z": 5.05,
+      "ratio": 1.0,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 55.08,
+      "raw_at": 3267.98,
+      "ncc": 0.3221,
+      "z": 5.28,
+      "ratio": 1.073,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tape": [
+     {
+      "at": 3.34,
+      "raw_at": 1735.14,
+      "ncc": 0.2636,
+      "z": 4.69,
+      "ratio": 1.036,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 7.3,
+      "raw_at": 1656.14,
+      "ncc": 0.2787,
+      "z": 5.55,
+      "ratio": 1.008,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 13.9,
+      "raw_at": 518.34,
+      "ncc": 0.2794,
+      "z": 5.1,
+      "ratio": 1.003,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 18.34,
+      "raw_at": 3079.92,
+      "ncc": 0.3132,
+      "z": 5.4,
+      "ratio": 1.105,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 25.58,
+      "raw_at": 2923.96,
+      "ncc": 0.3246,
+      "z": 5.57,
+      "ratio": 1.019,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 27.28,
+      "raw_at": 2925.66,
+      "ncc": 0.3043,
+      "z": 5.05,
+      "ratio": 1.001,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 29.26,
+      "raw_at": 1565.16,
+      "ncc": 0.3277,
+      "z": 5.89,
+      "ratio": 1.037,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 34.76,
+      "raw_at": 1595.62,
+      "ncc": 0.3022,
+      "z": 4.86,
+      "ratio": 1.017,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 40.22,
+      "raw_at": 3676.02,
+      "ncc": 0.2803,
+      "z": 5.01,
+      "ratio": 1.008,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 47.48,
+      "raw_at": 1507.6,
+      "ncc": 0.3204,
+      "z": 5.49,
+      "ratio": 1.053,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 49.12,
+      "raw_at": 1646.44,
+      "ncc": 0.3267,
+      "z": 5.34,
+      "ratio": 1.157,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 51.52,
+      "raw_at": 2988.86,
+      "ncc": 0.3003,
+      "z": 4.89,
+      "ratio": 1.015,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 55.08,
+      "raw_at": 3348.08,
+      "ncc": 0.3119,
+      "z": 5.43,
+      "ratio": 1.085,
+      "found": false,
+      "weak": false
+     }
+    ]
+   }
+  },
+  "weak": 0,
+  "share": 0.0
+ },
+ "picture": {
+  "state": "not found",
+  "tested": 16,
+  "found": 0,
+  "why": "none of its frames is in the RAW",
+  "seconds": 15.09,
+  "where": [],
+  "details": {
+   "wait_s": 13.89,
+   "keyframes_error": "",
+   "box": [
+    0,
+    0,
+    360,
+    640
+   ],
+   "keyframes": 1248,
+   "keyframe_w": 544,
+   "decode_s": 2.27,
+   "sift_s": 16.35,
+   "index_s": 17.14,
+   "frames": [
+    {
+     "at": 2.92,
+     "raw_at": 2687.64,
+     "inliers": 4,
+     "matches": 26,
+     "scale": 0.356,
+     "rot": -163.2,
+     "spread": [
+      0.031,
+      0.24
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 5.81,
+     "raw_at": 20.4,
+     "inliers": 4,
+     "matches": 22,
+     "scale": 0.091,
+     "rot": 48.1,
+     "spread": [
+      0.692,
+      0.459
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 8.7,
+     "raw_at": 3227.47,
+     "inliers": 4,
+     "matches": 18,
+     "scale": 0.031,
+     "rot": -144.6,
+     "spread": [
+      0.069,
+      0.28
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 11.59,
+     "raw_at": 4750.41,
+     "inliers": 4,
+     "matches": 14,
+     "scale": 0.065,
+     "rot": -114.2,
+     "spread": [
+      0.211,
+      0.528
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 14.48,
+     "raw_at": 5115.36,
+     "inliers": 4,
+     "matches": 17,
+     "scale": 0.105,
+     "rot": -3.3,
+     "spread": [
+      0.445,
+      0.275
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 17.36,
+     "raw_at": 1817.23,
+     "inliers": 4,
+     "matches": 22,
+     "scale": 1.683,
+     "rot": 32.0,
+     "spread": [
+      0.438,
+      0.204
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 20.25,
+     "raw_at": 3086.62,
+     "inliers": 3,
+     "matches": 13,
+     "scale": 0.777,
+     "rot": 127.9,
+     "spread": [
+      0.373,
+      0.314
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 23.14,
+     "raw_at": 4792.12,
+     "inliers": 4,
+     "matches": 7,
+     "scale": 0.966,
+     "rot": -39.6,
+     "spread": [
+      0.254,
+      0.257
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 26.03,
+     "raw_at": 2135.09,
+     "inliers": 3,
+     "matches": 14,
+     "scale": 0.504,
+     "rot": -24.6,
+     "spread": [
+      0.097,
+      0.733
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 28.92,
+     "raw_at": 3302.22,
+     "inliers": 4,
+     "matches": 7,
+     "scale": 0.126,
+     "rot": -100.9,
+     "spread": [
+      0.681,
+      0.128
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 31.81,
+     "raw_at": 1946.32,
+     "inliers": 4,
+     "matches": 19,
+     "scale": 1.271,
+     "rot": 76.4,
+     "spread": [
+      0.311,
+      0.339
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 34.7,
+     "raw_at": 4750.41,
+     "inliers": 3,
+     "matches": 9,
+     "scale": 0.282,
+     "rot": 114.2,
+     "spread": [
+      0.336,
+      0.237
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 37.59,
+     "raw_at": 2398.98,
+     "inliers": 4,
+     "matches": 16,
+     "scale": 0.747,
+     "rot": -126.7,
+     "spread": [
+      0.048,
+      0.412
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 40.48,
+     "raw_at": 4158.4,
+     "inliers": 4,
+     "matches": 28,
+     "scale": 0.337,
+     "rot": -48.2,
+     "spread": [
+      0.615,
+      0.262
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 43.37,
+     "raw_at": 3545.17,
+     "inliers": 3,
+     "matches": 15,
+     "scale": 0.965,
+     "rot": -11.6,
+     "spread": [
+      0.279,
+      0.231
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 46.25,
+     "raw_at": 1240.36,
+     "inliers": 3,
+     "matches": 10,
+     "scale": 1.218,
+     "rot": 29.1,
+     "spread": [
+      0.298,
+      0.367
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    }
+   ]
+  },
+  "weak": 0,
+  "share": 0.0
+ },
+ "seconds": 21.47,
+ "cached": false,
+ "competitor": "tiktok_cultureratedpv_7357048330179841323.mp4",
+ "raw": "Dr..Dolittle.2.2001.1080p.BluRay.x264.AAC5.1-[YTS.GG - YTS.BZ].mp4",
+ "truth": false
+}

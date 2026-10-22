@@ -48,7 +48,7 @@ import numpy as np
 
 from .common import ffmpeg_bin, ffprobe_bin, log
 
-VERSION = 2
+VERSION = 3                   # 3: night 15 -- the frames' chain (decide)
 
 # --- sound ---------------------------------------------------------------------------------------------------------
 SR = 8000                     # Hz, mono
@@ -89,6 +89,9 @@ WEAK_INLIERS, WEAK_INLIER_SHARE, WEAK_SPREAD = 6, 0.20, 0.10   # ... weak eviden
 MAX_ROT_DEG = 10.0
 SCALE_RANGE = (0.12, 6.0)     # RAW keyframe px per competitor px
 MIN_POINTS = 25               # a competitor frame with fewer SIFT points is not usable
+CHAIN_SLACK_S = 10.5          # night 15: frames agree when the RAW time goes on by at most RATE x the competitor's
+CHAIN_RATE = 1.6              # + this (the keyframe a frame is matched to lies up to a GOP before it), never back
+CHAIN_MIN = 3                 # fewer agreeing frames than this, none found, the sound empty: another episode
 SEGMENT_MIN_S = 60.0          # the RAW's keyframes: parallel pieces of at least this many seconds ...
 MAX_SEGMENTS = 16             # ... at most this many
 # --- decisions -----------------------------------------------------------------------------------------------------
@@ -153,7 +156,9 @@ class Result:
             sides.append(self.picture.text("picture", "frames", why=False))
         return ("WRONG PAIR: This competitor doesn't seem to come from this RAW (" + "; ".join(sides)
                 + f"; checked in {self.seconds:.0f} s). Is the RAW the episode or movie it was cut from? Another episode "
-                f"of the same show or another version of the movie looks like this too. Competitor: {comp}; RAW: {raw}. "
+                f"of the same show or another version of the movie looks like this too -- or a download named after one film "
+                "that holds another (open the RAW and look). "
+                f"Competitor: {comp}; RAW: {raw}. "
                 "To run it anyway: --force-inputs.")
 
     def to_dict(self) -> dict:
@@ -919,6 +924,7 @@ def picture_check(times: list[float], frames: list[np.ndarray], box: tuple[int, 
     n, k, w = len(usable), len(found), len(weak)
     secs = round(time.perf_counter() - t0, 2)
     det["frames"] = res
+    det["chain"] = chain(res)
     if n < 3:
         return Side(ABSENT, n, k, "the competitor's frames have too little detail to compare", secs, details=det, weak=w)
     if k >= 2 and (k >= 3 or k / n >= 0.15):
@@ -936,6 +942,23 @@ def picture_check(times: list[float], frames: list[np.ndarray], box: tuple[int, 
 # the whole check
 # =====================================================================================================================
 
+def chain(frames: list[dict]) -> int:
+    """Night 15: how many of the found / almost found frames agree in order and timing -- the longest run of them,
+    in the competitor's order, mirrored alike, whose RAW times go forward about as fast (CHAIN_RATE x the competitor's
+    time + CHAIN_SLACK_S: a frame is matched to the keyframe before it). Look-alike rooms of another episode of a
+    cartoon are almost found here and there over the episode, mirrored one way then the other (Family Guy: 8 frames,
+    at most 2 agree); a true pair's frames follow its scene (4-16 on every check-all case and real reel)."""
+    pts = sorted((float(f["at"]), float(f["raw_at"]), bool(f.get("mirrored"))) for f in frames
+                 if (f.get("weak") or f.get("found")) and f.get("raw_at") is not None)
+    best = [1] * len(pts)
+    for j in range(len(pts)):
+        for i in range(j):
+            da, dr = pts[j][0] - pts[i][0], pts[j][1] - pts[i][1]
+            if pts[i][2] == pts[j][2] and da > 0 and -0.5 <= dr <= CHAIN_RATE * da + CHAIN_SLACK_S:
+                best[j] = max(best[j], best[i] + 1)
+    return max(best, default=0)
+
+
 def sound_fails(s: Side) -> bool:
     """The sound says "not from this RAW": nothing found, or not there -- or at most one piece of many found (another
     episode of the same show shares its jingle, its theme, its laugh track) with nothing else even almost found."""
@@ -946,10 +969,16 @@ def sound_fails(s: Side) -> bool:
 
 def decide(sound: Side, picture: Side | None) -> bool:
     """WRONG PAIR only when the evidence clearly says so: the picture looked at and not one of its frames even almost
-    found, and the sound failing (sound_fails) -- or the picture not there and nothing of the sound even almost found.
+    found, and the sound failing (sound_fails) -- or (night 15) not one frame found, fewer than CHAIN_MIN of the almost
+    found ones agreeing (``chain``) and not one piece of the sound found (at most one almost) -- or the picture not
+    there and nothing of the sound even almost found.
     Never on the sound alone, never when both are not there."""
-    if picture is None or sound.state == FOUND or picture.state in (FOUND, UNCLEAR):
+    if picture is None or sound.state == FOUND or picture.state == FOUND:
         return False
+    if picture.state == UNCLEAR:                        # night 15: frames only almost found, here and there (another
+        ch = (picture.details or {}).get("chain")       # episode's look-alike rooms), and the sound with nothing
+        return (ch is not None and ch < CHAIN_MIN and picture.found == 0 and sound.found == 0 and sound.weak <= 1
+                and sound.tested >= MIN_WINDOWS and sound.state in (NOT_FOUND, UNCLEAR))
     if picture.state == NOT_FOUND:
         return sound_fails(sound)
     return sound.state == NOT_FOUND                     # the picture not there: the sound must show nothing at all

@@ -1,0 +1,611 @@
+{
+ "wrong": false,
+ "sound": {
+  "state": "not found",
+  "tested": 10,
+  "found": 0,
+  "why": "none of it is in the RAW's sound",
+  "seconds": 0.41,
+  "where": [],
+  "details": {
+   "speed": "1.00",
+   "tried": {
+    "1.00": [
+     {
+      "at": 1.42,
+      "raw_at": 497.84,
+      "ncc": 0.3036,
+      "z": 4.65,
+      "ratio": 1.034,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 7.76,
+      "raw_at": 1014.58,
+      "ncc": 0.3051,
+      "z": 5.13,
+      "ratio": 1.019,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 9.96,
+      "raw_at": 92.08,
+      "ncc": 0.2856,
+      "z": 4.63,
+      "ratio": 1.022,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 11.92,
+      "raw_at": 540.56,
+      "ncc": 0.2989,
+      "z": 4.61,
+      "ratio": 1.06,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 14.1,
+      "raw_at": 420.28,
+      "ncc": 0.3403,
+      "z": 5.1,
+      "ratio": 1.075,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 19.04,
+      "raw_at": 366.7,
+      "ncc": 0.3731,
+      "z": 5.61,
+      "ratio": 1.103,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 22.82,
+      "raw_at": 863.4,
+      "ncc": 0.2978,
+      "z": 4.49,
+      "ratio": 1.026,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 28.14,
+      "raw_at": 251.02,
+      "ncc": 0.334,
+      "z": 5.01,
+      "ratio": 1.021,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 30.64,
+      "raw_at": 1074.5,
+      "ncc": 0.3504,
+      "z": 5.02,
+      "ratio": 1.031,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 36.06,
+      "raw_at": 46.04,
+      "ncc": 0.3876,
+      "z": 5.7,
+      "ratio": 1.114,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tempo": [
+     {
+      "at": 2.56,
+      "raw_at": 50.9,
+      "ncc": 0.3801,
+      "z": 5.44,
+      "ratio": 1.07,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 8.32,
+      "raw_at": 964.0,
+      "ncc": 0.2898,
+      "z": 4.7,
+      "ratio": 1.062,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 11.62,
+      "raw_at": 395.34,
+      "ncc": 0.3122,
+      "z": 4.83,
+      "ratio": 1.05,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 14.96,
+      "raw_at": 81.22,
+      "ncc": 0.3539,
+      "z": 5.05,
+      "ratio": 1.076,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 17.6,
+      "raw_at": 801.56,
+      "ncc": 0.3549,
+      "z": 5.08,
+      "ratio": 1.058,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 23.12,
+      "raw_at": 696.18,
+      "ncc": 0.3767,
+      "z": 5.27,
+      "ratio": 1.088,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 26.22,
+      "raw_at": 883.32,
+      "ncc": 0.3513,
+      "z": 5.17,
+      "ratio": 1.002,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 30.58,
+      "raw_at": 1233.96,
+      "ncc": 0.3287,
+      "z": 4.54,
+      "ratio": 1.0,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 34.9,
+      "raw_at": 1179.18,
+      "ncc": 0.3454,
+      "z": 5.27,
+      "ratio": 1.183,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 37.4,
+      "raw_at": 660.86,
+      "ncc": 0.3396,
+      "z": 4.68,
+      "ratio": 1.02,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 42.3,
+      "raw_at": 1230.82,
+      "ncc": 0.3521,
+      "z": 4.93,
+      "ratio": 1.053,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 45.94,
+      "raw_at": 443.56,
+      "ncc": 0.3577,
+      "z": 4.86,
+      "ratio": 1.066,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tape": [
+     {
+      "at": 0.64,
+      "raw_at": 1130.48,
+      "ncc": 0.3039,
+      "z": 4.64,
+      "ratio": 1.004,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 2.9,
+      "raw_at": 51.24,
+      "ncc": 0.38,
+      "z": 5.51,
+      "ratio": 1.103,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 8.34,
+      "raw_at": 964.02,
+      "ncc": 0.2805,
+      "z": 4.8,
+      "ratio": 1.005,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 11.62,
+      "raw_at": 217.04,
+      "ncc": 0.3184,
+      "z": 4.93,
+      "ratio": 1.038,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 14.94,
+      "raw_at": 81.2,
+      "ncc": 0.3119,
+      "z": 4.46,
+      "ratio": 1.036,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 17.6,
+      "raw_at": 669.4,
+      "ncc": 0.3195,
+      "z": 4.84,
+      "ratio": 1.024,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 23.14,
+      "raw_at": 696.22,
+      "ncc": 0.3457,
+      "z": 5.35,
+      "ratio": 1.035,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 26.22,
+      "raw_at": 1262.1,
+      "ncc": 0.3073,
+      "z": 4.87,
+      "ratio": 1.051,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 30.58,
+      "raw_at": 1147.3,
+      "ncc": 0.3041,
+      "z": 4.51,
+      "ratio": 1.016,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 34.88,
+      "raw_at": 645.22,
+      "ncc": 0.3048,
+      "z": 4.85,
+      "ratio": 1.011,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 37.38,
+      "raw_at": 1019.98,
+      "ncc": 0.3323,
+      "z": 4.8,
+      "ratio": 1.056,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 42.28,
+      "raw_at": 1230.8,
+      "ncc": 0.2986,
+      "z": 4.48,
+      "ratio": 1.04,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 46.04,
+      "raw_at": 443.68,
+      "ncc": 0.3415,
+      "z": 5.04,
+      "ratio": 1.076,
+      "found": false,
+      "weak": false
+     }
+    ]
+   }
+  },
+  "weak": 0,
+  "share": 0.0
+ },
+ "picture": {
+  "state": "unclear",
+  "tested": 16,
+  "found": 0,
+  "why": "too little to be sure (8 of 16 frames almost found)",
+  "seconds": 3.4,
+  "where": [],
+  "details": {
+   "wait_s": 3.07,
+   "keyframes_error": "",
+   "box": [
+    0,
+    181,
+    360,
+    446
+   ],
+   "keyframes": 459,
+   "keyframe_w": 448,
+   "decode_s": 1.39,
+   "sift_s": 3.96,
+   "index_s": 4.13,
+   "frames": [
+    {
+     "at": 2.35,
+     "raw_at": 1249.25,
+     "inliers": 14,
+     "matches": 28,
+     "scale": 0.822,
+     "rot": 0.9,
+     "spread": [
+      0.102,
+      0.203
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 4.68,
+     "raw_at": 1249.25,
+     "inliers": 11,
+     "matches": 30,
+     "scale": 0.823,
+     "rot": 1.3,
+     "spread": [
+      0.102,
+      0.201
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 7.01,
+     "raw_at": 1249.25,
+     "inliers": 10,
+     "matches": 23,
+     "scale": 0.776,
+     "rot": -3.9,
+     "spread": [
+      0.129,
+      0.271
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 9.34,
+     "raw_at": 1054.8,
+     "inliers": 10,
+     "matches": 22,
+     "scale": 0.807,
+     "rot": 4.5,
+     "spread": [
+      0.29,
+      0.095
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 11.67,
+     "raw_at": 1189.19,
+     "inliers": 6,
+     "matches": 12,
+     "scale": 0.882,
+     "rot": 3.3,
+     "spread": [
+      0.248,
+      0.314
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 14.0,
+     "raw_at": 1037.04,
+     "inliers": 4,
+     "matches": 16,
+     "scale": 0.408,
+     "rot": 2.3,
+     "spread": [
+      0.111,
+      0.224
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 16.32,
+     "raw_at": 1221.22,
+     "inliers": 4,
+     "matches": 12,
+     "scale": 1.588,
+     "rot": 64.2,
+     "spread": [
+      0.201,
+      0.006
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 18.65,
+     "raw_at": 524.52,
+     "inliers": 6,
+     "matches": 16,
+     "scale": 0.949,
+     "rot": 4.1,
+     "spread": [
+      0.141,
+      0.047
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 20.98,
+     "raw_at": 524.52,
+     "inliers": 5,
+     "matches": 18,
+     "scale": 0.901,
+     "rot": 8.2,
+     "spread": [
+      0.023,
+      0.261
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 23.31,
+     "raw_at": 524.52,
+     "inliers": 7,
+     "matches": 22,
+     "scale": 0.895,
+     "rot": 5.5,
+     "spread": [
+      0.156,
+      0.293
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 25.64,
+     "raw_at": 524.52,
+     "inliers": 6,
+     "matches": 16,
+     "scale": 0.949,
+     "rot": 4.1,
+     "spread": [
+      0.141,
+      0.047
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 27.97,
+     "raw_at": 524.52,
+     "inliers": 6,
+     "matches": 17,
+     "scale": 0.949,
+     "rot": 4.1,
+     "spread": [
+      0.141,
+      0.047
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 30.29,
+     "raw_at": 1221.22,
+     "inliers": 4,
+     "matches": 12,
+     "scale": 1.588,
+     "rot": 64.2,
+     "spread": [
+      0.202,
+      0.006
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 32.62,
+     "raw_at": 1049.05,
+     "inliers": 7,
+     "matches": 17,
+     "scale": 1.114,
+     "rot": 9.4,
+     "spread": [
+      0.112,
+      0.227
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 34.95,
+     "raw_at": 596.35,
+     "inliers": 6,
+     "matches": 16,
+     "scale": 0.67,
+     "rot": -5.7,
+     "spread": [
+      0.1,
+      0.452
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 37.28,
+     "raw_at": 1054.8,
+     "inliers": 14,
+     "matches": 26,
+     "scale": 0.815,
+     "rot": 3.8,
+     "spread": [
+      0.286,
+      0.117
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    }
+   ]
+  },
+  "weak": 8,
+  "share": 0.0
+ },
+ "seconds": 6.12,
+ "cached": false,
+ "competitor": "Video by darkhumor [DYZ2Vtgxi3n].mp4",
+ "raw": "Family Guy S08E11 Dial Meg for Murder 1080p DSNP WEB-DL DDP5 1 H 264-FLUX.mp4",
+ "truth": false
+}

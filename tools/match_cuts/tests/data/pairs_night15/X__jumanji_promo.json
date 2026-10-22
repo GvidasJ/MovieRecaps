@@ -1,0 +1,649 @@
+{
+ "wrong": true,
+ "sound": {
+  "state": "unclear",
+  "tested": 13,
+  "found": 1,
+  "why": "too little to be sure (1 of 13 pieces almost found)",
+  "seconds": 1.15,
+  "where": [
+   3.26
+  ],
+  "details": {
+   "speed": "1.25 tape",
+   "tried": {
+    "1.00": [
+     {
+      "at": 2.96,
+      "raw_at": 4630.94,
+      "ncc": 0.2617,
+      "z": 5.94,
+      "ratio": 1.025,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 7.64,
+      "raw_at": 2953.14,
+      "ncc": 0.2699,
+      "z": 6.09,
+      "ratio": 1.031,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 13.58,
+      "raw_at": 650.96,
+      "ncc": 0.249,
+      "z": 5.89,
+      "ratio": 1.006,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 17.96,
+      "raw_at": 6598.88,
+      "ncc": 0.3519,
+      "z": 7.2,
+      "ratio": 1.167,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 19.9,
+      "raw_at": 775.44,
+      "ncc": 0.3428,
+      "z": 6.6,
+      "ratio": 1.123,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 25.02,
+      "raw_at": 4838.56,
+      "ncc": 0.3092,
+      "z": 6.6,
+      "ratio": 1.166,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 29.9,
+      "raw_at": 3446.9,
+      "ncc": 0.3293,
+      "z": 6.82,
+      "ratio": 1.077,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 32.46,
+      "raw_at": 4429.28,
+      "ncc": 0.2781,
+      "z": 5.92,
+      "ratio": 1.013,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 39.6,
+      "raw_at": 1757.38,
+      "ncc": 0.3201,
+      "z": 6.6,
+      "ratio": 1.002,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 42.46,
+      "raw_at": 463.42,
+      "ncc": 0.2963,
+      "z": 5.9,
+      "ratio": 1.014,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 44.96,
+      "raw_at": 3864.62,
+      "ncc": 0.3056,
+      "z": 5.78,
+      "ratio": 1.031,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 50.48,
+      "raw_at": 4011.1,
+      "ncc": 0.3612,
+      "z": 7.48,
+      "ratio": 1.202,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 54.88,
+      "raw_at": 2447.98,
+      "ncc": 0.2654,
+      "z": 5.88,
+      "ratio": 1.005,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tempo": [
+     {
+      "at": 4.44,
+      "raw_at": 3056.58,
+      "ncc": 0.307,
+      "z": 6.43,
+      "ratio": 1.015,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 10.3,
+      "raw_at": 5359.04,
+      "ncc": 0.3052,
+      "z": 6.51,
+      "ratio": 1.152,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 17.62,
+      "raw_at": 4407.74,
+      "ncc": 0.2887,
+      "z": 6.39,
+      "ratio": 1.122,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 22.68,
+      "raw_at": 6646.12,
+      "ncc": 0.356,
+      "z": 7.07,
+      "ratio": 1.003,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 24.88,
+      "raw_at": 3681.1,
+      "ncc": 0.3335,
+      "z": 6.29,
+      "ratio": 1.007,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 31.32,
+      "raw_at": 3.26,
+      "ncc": 0.3656,
+      "z": 7.4,
+      "ratio": 1.328,
+      "found": false,
+      "weak": true
+     },
+     {
+      "at": 37.36,
+      "raw_at": 377.78,
+      "ncc": 0.3158,
+      "z": 6.33,
+      "ratio": 1.009,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 41.0,
+      "raw_at": 1130.52,
+      "ncc": 0.2822,
+      "z": 5.89,
+      "ratio": 1.001,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 50.1,
+      "raw_at": 3831.2,
+      "ncc": 0.2957,
+      "z": 5.98,
+      "ratio": 1.001,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 54.66,
+      "raw_at": 3350.12,
+      "ncc": 0.3109,
+      "z": 5.9,
+      "ratio": 1.003,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 62.76,
+      "raw_at": 6333.86,
+      "ncc": 0.2925,
+      "z": 6.09,
+      "ratio": 1.054,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 64.86,
+      "raw_at": 1941.9,
+      "ncc": 0.3161,
+      "z": 6.0,
+      "ratio": 1.055,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 69.36,
+      "raw_at": 3546.54,
+      "ncc": 0.2857,
+      "z": 6.21,
+      "ratio": 1.019,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tape": [
+     {
+      "at": 4.42,
+      "raw_at": 5057.14,
+      "ncc": 0.2897,
+      "z": 6.33,
+      "ratio": 1.026,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 10.3,
+      "raw_at": 5359.04,
+      "ncc": 0.268,
+      "z": 5.99,
+      "ratio": 1.066,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 17.5,
+      "raw_at": 4407.62,
+      "ncc": 0.2626,
+      "z": 6.07,
+      "ratio": 1.059,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 22.68,
+      "raw_at": 6646.12,
+      "ncc": 0.3455,
+      "z": 7.21,
+      "ratio": 1.016,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 24.88,
+      "raw_at": 3681.1,
+      "ncc": 0.3251,
+      "z": 6.39,
+      "ratio": 1.123,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 31.32,
+      "raw_at": 3.26,
+      "ncc": 0.4478,
+      "z": 9.73,
+      "ratio": 1.761,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 38.3,
+      "raw_at": 1452.32,
+      "ncc": 0.273,
+      "z": 5.5,
+      "ratio": 1.005,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 41.0,
+      "raw_at": 1130.52,
+      "ncc": 0.3048,
+      "z": 6.52,
+      "ratio": 1.091,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 46.48,
+      "raw_at": 877.4,
+      "ncc": 0.2902,
+      "z": 6.31,
+      "ratio": 1.105,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 52.58,
+      "raw_at": 734.66,
+      "ncc": 0.2934,
+      "z": 6.0,
+      "ratio": 1.001,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 55.92,
+      "raw_at": 6389.44,
+      "ncc": 0.2982,
+      "z": 5.61,
+      "ratio": 1.003,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 63.62,
+      "raw_at": 3352.04,
+      "ncc": 0.3068,
+      "z": 6.14,
+      "ratio": 1.116,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 69.44,
+      "raw_at": 2389.06,
+      "ncc": 0.3104,
+      "z": 7.02,
+      "ratio": 1.125,
+      "found": false,
+      "weak": false
+     }
+    ]
+   }
+  },
+  "weak": 1,
+  "share": 0.07692307692307693
+ },
+ "picture": {
+  "state": "not found",
+  "tested": 16,
+  "found": 0,
+  "why": "none of its frames is in the RAW",
+  "seconds": 13.2,
+  "where": [],
+  "details": {
+   "wait_s": 12.59,
+   "keyframes_error": "",
+   "box": [
+    0,
+    0,
+    360,
+    202
+   ],
+   "keyframes": 2167,
+   "keyframe_w": 448,
+   "decode_s": 3.19,
+   "sift_s": 15.69,
+   "index_s": 16.59,
+   "frames": [
+    {
+     "at": 3.61,
+     "raw_at": 5129.92,
+     "inliers": 3,
+     "matches": 14,
+     "scale": 0.793,
+     "rot": 99.8,
+     "spread": [
+      0.066,
+      0.289
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 7.17,
+     "raw_at": 1501.54,
+     "inliers": 4,
+     "matches": 16,
+     "scale": 0.233,
+     "rot": 105.8,
+     "spread": [
+      0.49,
+      0.062
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 10.74,
+     "raw_at": 5196.02,
+     "inliers": 4,
+     "matches": 21,
+     "scale": 0.358,
+     "rot": 157.0,
+     "spread": [
+      0.536,
+      0.396
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 14.31,
+     "raw_at": 4147.89,
+     "inliers": 3,
+     "matches": 15,
+     "scale": 0.111,
+     "rot": 22.5,
+     "spread": [
+      0.735,
+      0.601
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 17.88,
+     "raw_at": 2310.77,
+     "inliers": 3,
+     "matches": 16,
+     "scale": 0.683,
+     "rot": -107.4,
+     "spread": [
+      0.08,
+      0.649
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 21.44,
+     "raw_at": 3844.22,
+     "inliers": 3,
+     "matches": 20,
+     "scale": 0.5,
+     "rot": -43.6,
+     "spread": [
+      0.517,
+      0.702
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 25.01,
+     "raw_at": 1344.05,
+     "inliers": 3,
+     "matches": 13,
+     "scale": 0.548,
+     "rot": -129.5,
+     "spread": [
+      0.521,
+      0.002
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 28.58,
+     "raw_at": 333.04,
+     "inliers": 3,
+     "matches": 14,
+     "scale": 0.072,
+     "rot": -8.8,
+     "spread": [
+      0.459,
+      0.247
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 32.15,
+     "raw_at": 1447.2,
+     "inliers": 4,
+     "matches": 13,
+     "scale": 0.744,
+     "rot": -72.8,
+     "spread": [
+      0.12,
+      0.213
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 35.72,
+     "raw_at": 2437.35,
+     "inliers": 3,
+     "matches": 9,
+     "scale": 0.716,
+     "rot": -25.9,
+     "spread": [
+      0.85,
+      0.625
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 39.28,
+     "raw_at": 333.04,
+     "inliers": 4,
+     "matches": 15,
+     "scale": 1.033,
+     "rot": 49.4,
+     "spread": [
+      0.083,
+      0.137
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 42.85,
+     "raw_at": 667.08,
+     "inliers": 4,
+     "matches": 12,
+     "scale": 0.359,
+     "rot": 102.5,
+     "spread": [
+      0.856,
+      0.798
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 46.42,
+     "raw_at": 6051.55,
+     "inliers": 3,
+     "matches": 8,
+     "scale": 0.407,
+     "rot": -37.6,
+     "spread": [
+      0.434,
+      0.412
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 49.99,
+     "raw_at": 776.9,
+     "inliers": 3,
+     "matches": 16,
+     "scale": 0.264,
+     "rot": -174.3,
+     "spread": [
+      0.646,
+      0.396
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 53.55,
+     "raw_at": 788.37,
+     "inliers": 3,
+     "matches": 10,
+     "scale": 7.792,
+     "rot": -141.3,
+     "spread": [
+      0.055,
+      0.031
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 57.12,
+     "raw_at": 101.6,
+     "inliers": 4,
+     "matches": 24,
+     "scale": 0.037,
+     "rot": -169.0,
+     "spread": [
+      0.255,
+      0.083
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    }
+   ]
+  },
+  "weak": 0,
+  "share": 0.0
+ },
+ "seconds": 18.88,
+ "cached": false,
+ "competitor": "JUMANJI： THE NEXT LEVEL - Happy Halloween - Sony Pictures Entertainment (1080p, vp9).webm",
+ "raw": "Jumanji.The.Next.Level.2019.1080p.BluRay.x264.AAC5.1-[YTS.MX].mp4",
+ "truth": false
+}

@@ -1,0 +1,381 @@
+{
+ "wrong": false,
+ "sound": {
+  "state": "found",
+  "tested": 6,
+  "found": 6,
+  "why": "found as if sped up 1.25 tempo",
+  "seconds": 1.55,
+  "where": [
+   505.26,
+   507.7,
+   510.04,
+   514.18,
+   517.42,
+   521.36
+  ],
+  "details": {
+   "speed": "1.25 tempo",
+   "tried": {
+    "1.00": [
+     {
+      "at": 1.44,
+      "raw_at": 1016.98,
+      "ncc": 0.2712,
+      "z": 4.59,
+      "ratio": 1.005,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 3.3,
+      "raw_at": 569.32,
+      "ncc": 0.3139,
+      "z": 5.29,
+      "ratio": 1.068,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 8.46,
+      "raw_at": 1145.6,
+      "ncc": 0.2629,
+      "z": 4.46,
+      "ratio": 1.024,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 11.3,
+      "raw_at": 590.74,
+      "ncc": 0.203,
+      "z": 4.41,
+      "ratio": 1.017,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 14.32,
+      "raw_at": 287.8,
+      "ncc": 0.2145,
+      "z": 4.94,
+      "ratio": 1.079,
+      "found": false,
+      "weak": false
+     }
+    ],
+    "1.25 tempo": [
+     {
+      "at": 1.78,
+      "raw_at": 505.26,
+      "ncc": 0.8504,
+      "z": 12.82,
+      "ratio": 2.654,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 4.22,
+      "raw_at": 507.7,
+      "ncc": 0.8808,
+      "z": 13.56,
+      "ratio": 3.048,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 6.56,
+      "raw_at": 510.04,
+      "ncc": 0.7653,
+      "z": 13.01,
+      "ratio": 2.612,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 10.7,
+      "raw_at": 514.18,
+      "ncc": 0.8519,
+      "z": 13.35,
+      "ratio": 2.946,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 13.96,
+      "raw_at": 517.42,
+      "ncc": 0.7299,
+      "z": 13.14,
+      "ratio": 2.688,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 17.9,
+      "raw_at": 521.36,
+      "ncc": 0.6014,
+      "z": 11.89,
+      "ratio": 2.498,
+      "found": true,
+      "weak": true
+     }
+    ]
+   }
+  },
+  "weak": 6,
+  "share": 1.0
+ },
+ "picture": {
+  "state": "unclear",
+  "tested": 15,
+  "found": 2,
+  "why": "too little to be sure (2 of 15 frames almost found)",
+  "seconds": 6.53,
+  "where": [
+   510.51,
+   519.64
+  ],
+  "details": {
+   "wait_s": 6.05,
+   "keyframes_error": "",
+   "box": [
+    0,
+    107,
+    360,
+    605
+   ],
+   "keyframes": 503,
+   "keyframe_w": 736,
+   "decode_s": 1.56,
+   "sift_s": 7.43,
+   "index_s": 7.6,
+   "frames": [
+    {
+     "at": 1.18,
+     "raw_at": 611.15,
+     "inliers": 3,
+     "matches": 16,
+     "scale": 1.973,
+     "rot": -77.5,
+     "spread": [
+      0.38,
+      0.131
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 2.35,
+     "raw_at": 604.85,
+     "inliers": 4,
+     "matches": 10,
+     "scale": 0.5,
+     "rot": 138.5,
+     "spread": [
+      0.105,
+      0.19
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 3.52,
+     "raw_at": 510.51,
+     "inliers": 8,
+     "matches": 19,
+     "scale": 0.908,
+     "rot": 3.7,
+     "spread": [
+      0.51,
+      0.47
+     ],
+     "mirrored": true,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 4.69,
+     "raw_at": 510.51,
+     "inliers": 5,
+     "matches": 19,
+     "scale": 0.91,
+     "rot": -6.6,
+     "spread": [
+      0.435,
+      0.159
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 5.86,
+     "raw_at": 717.13,
+     "inliers": 3,
+     "matches": 13,
+     "scale": 1.006,
+     "rot": -152.7,
+     "spread": [
+      0.298,
+      0.15
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 7.03,
+     "raw_at": 1193.19,
+     "inliers": 3,
+     "matches": 15,
+     "scale": 0.657,
+     "rot": 22.3,
+     "spread": [
+      0.268,
+      0.407
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 8.2,
+     "inliers": 0
+    },
+    {
+     "at": 9.37,
+     "inliers": 0
+    },
+    {
+     "at": 10.54,
+     "raw_at": 168.25,
+     "inliers": 4,
+     "matches": 9,
+     "scale": 1.836,
+     "rot": 117.6,
+     "spread": [
+      0.302,
+      0.395
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 11.71,
+     "raw_at": 513.85,
+     "inliers": 5,
+     "matches": 29,
+     "scale": 0.85,
+     "rot": 4.4,
+     "spread": [
+      0.175,
+      0.309
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 12.88,
+     "raw_at": 519.64,
+     "inliers": 21,
+     "matches": 44,
+     "scale": 0.865,
+     "rot": 0.1,
+     "spread": [
+      0.444,
+      0.392
+     ],
+     "mirrored": true,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 14.05,
+     "raw_at": 531.2,
+     "inliers": 5,
+     "matches": 13,
+     "scale": 0.852,
+     "rot": -1.2,
+     "spread": [
+      0.139,
+      0.08
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 15.22,
+     "raw_at": 168.25,
+     "inliers": 3,
+     "matches": 18,
+     "scale": 2.692,
+     "rot": 84.4,
+     "spread": [
+      0.061,
+      0.24
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 16.39,
+     "raw_at": 168.25,
+     "inliers": 3,
+     "matches": 20,
+     "scale": 1.123,
+     "rot": 100.1,
+     "spread": [
+      0.69,
+      0.522
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 17.56,
+     "raw_at": 168.25,
+     "inliers": 3,
+     "matches": 15,
+     "scale": 1.49,
+     "rot": 114.4,
+     "spread": [
+      0.635,
+      0.676
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 18.73,
+     "raw_at": 1162.08,
+     "inliers": 4,
+     "matches": 24,
+     "scale": 1.047,
+     "rot": 29.1,
+     "spread": [
+      0.719,
+      0.416
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    }
+   ]
+  },
+  "weak": 2,
+  "share": 0.13333333333333333
+ },
+ "seconds": 11.33,
+ "cached": false,
+ "competitor": "competitor.mp4",
+ "raw": "raw.mp4",
+ "truth": true
+}

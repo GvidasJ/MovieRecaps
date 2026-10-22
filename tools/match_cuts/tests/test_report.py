@@ -148,7 +148,7 @@ def test_report_renders_every_section(tmp_path):
     ctx = make_ctx(tmp_path)
     path = tmp_path / "output" / "report.md"
     report.write_report(ctx, path)
-    md = path.read_text()
+    md = path.read_text(encoding="utf-8")
     titles = [t for t, _ in report.SECTIONS]
     for i, t in enumerate(titles, start=1):
         assert f"## {i}. {t}" in md

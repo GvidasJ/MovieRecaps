@@ -1,0 +1,379 @@
+{
+ "wrong": false,
+ "sound": {
+  "state": "found",
+  "tested": 7,
+  "found": 7,
+  "why": "",
+  "seconds": 0.59,
+  "where": [
+   236.64,
+   240.08,
+   245.24,
+   250.7,
+   252.82,
+   256.38,
+   258.32
+  ],
+  "details": {
+   "speed": "1.00",
+   "tried": {
+    "1.00": [
+     {
+      "at": 2.7,
+      "raw_at": 236.64,
+      "ncc": 0.967,
+      "z": 18.45,
+      "ratio": 3.879,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 5.44,
+      "raw_at": 240.08,
+      "ncc": 0.5842,
+      "z": 13.14,
+      "ratio": 2.386,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 10.6,
+      "raw_at": 245.24,
+      "ncc": 0.9492,
+      "z": 23.92,
+      "ratio": 5.071,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 16.06,
+      "raw_at": 250.7,
+      "ncc": 0.9631,
+      "z": 24.16,
+      "ratio": 5.527,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 18.18,
+      "raw_at": 252.82,
+      "ncc": 0.9657,
+      "z": 23.37,
+      "ratio": 5.751,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 21.74,
+      "raw_at": 256.38,
+      "ncc": 0.917,
+      "z": 18.23,
+      "ratio": 3.918,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 23.24,
+      "raw_at": 258.32,
+      "ncc": 0.5514,
+      "z": 10.34,
+      "ratio": 2.06,
+      "found": true,
+      "weak": true
+     }
+    ]
+   }
+  },
+  "weak": 7,
+  "share": 1.0
+ },
+ "picture": {
+  "state": "found",
+  "tested": 16,
+  "found": 15,
+  "why": "",
+  "seconds": 3.61,
+  "where": [
+   235.61,
+   236.94,
+   236.94,
+   241.57,
+   245.04,
+   245.04,
+   247.71,
+   247.71,
+   253.0,
+   259.26,
+   259.26,
+   259.26,
+   263.26,
+   265.26,
+   265.26
+  ],
+  "details": {
+   "wait_s": 3.35,
+   "keyframes_error": "",
+   "box": [
+    0,
+    209,
+    360,
+    431
+   ],
+   "keyframes": 427,
+   "keyframe_w": 448,
+   "decode_s": 0.9,
+   "sift_s": 4.07,
+   "index_s": 4.27,
+   "frames": [
+    {
+     "at": 1.78,
+     "raw_at": 235.61,
+     "inliers": 123,
+     "matches": 141,
+     "scale": 1.179,
+     "rot": -0.1,
+     "spread": [
+      0.767,
+      0.864
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 3.54,
+     "raw_at": 236.94,
+     "inliers": 45,
+     "matches": 70,
+     "scale": 1.189,
+     "rot": -0.4,
+     "spread": [
+      0.651,
+      0.838
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 5.3,
+     "raw_at": 236.94,
+     "inliers": 9,
+     "matches": 21,
+     "scale": 1.258,
+     "rot": 0.8,
+     "spread": [
+      0.657,
+      0.479
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 7.06,
+     "raw_at": 241.57,
+     "inliers": 116,
+     "matches": 121,
+     "scale": 1.177,
+     "rot": 0.0,
+     "spread": [
+      0.879,
+      0.886
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 8.82,
+     "raw_at": 259.26,
+     "inliers": 9,
+     "matches": 21,
+     "scale": 1.157,
+     "rot": 8.5,
+     "spread": [
+      0.424,
+      0.401
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 10.58,
+     "raw_at": 245.04,
+     "inliers": 91,
+     "matches": 108,
+     "scale": 1.189,
+     "rot": -0.1,
+     "spread": [
+      0.875,
+      0.857
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 12.34,
+     "raw_at": 245.04,
+     "inliers": 23,
+     "matches": 54,
+     "scale": 1.178,
+     "rot": -0.7,
+     "spread": [
+      0.741,
+      0.809
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 14.1,
+     "raw_at": 247.71,
+     "inliers": 15,
+     "matches": 36,
+     "scale": 1.171,
+     "rot": 0.7,
+     "spread": [
+      0.578,
+      0.709
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 15.86,
+     "raw_at": 253.0,
+     "inliers": 14,
+     "matches": 49,
+     "scale": 1.282,
+     "rot": 1.1,
+     "spread": [
+      0.624,
+      0.39
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 17.62,
+     "raw_at": 251.25,
+     "inliers": 6,
+     "matches": 29,
+     "scale": 1.273,
+     "rot": -4.1,
+     "spread": [
+      0.119,
+      0.271
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 19.38,
+     "raw_at": 265.26,
+     "inliers": 10,
+     "matches": 21,
+     "scale": 1.12,
+     "rot": 1.1,
+     "spread": [
+      0.592,
+      0.261
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 21.15,
+     "raw_at": 265.26,
+     "inliers": 17,
+     "matches": 26,
+     "scale": 1.178,
+     "rot": -0.1,
+     "spread": [
+      0.565,
+      0.379
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 22.91,
+     "raw_at": 247.71,
+     "inliers": 40,
+     "matches": 60,
+     "scale": 1.133,
+     "rot": -1.7,
+     "spread": [
+      0.151,
+      0.335
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 24.67,
+     "raw_at": 259.26,
+     "inliers": 86,
+     "matches": 114,
+     "scale": 1.182,
+     "rot": -0.3,
+     "spread": [
+      0.97,
+      0.815
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 26.43,
+     "raw_at": 259.26,
+     "inliers": 24,
+     "matches": 64,
+     "scale": 1.146,
+     "rot": -0.2,
+     "spread": [
+      0.973,
+      0.247
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 28.19,
+     "raw_at": 263.26,
+     "inliers": 28,
+     "matches": 55,
+     "scale": 1.163,
+     "rot": 2.2,
+     "spread": [
+      0.51,
+      0.7
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    }
+   ]
+  },
+  "weak": 16,
+  "share": 0.9375
+ },
+ "seconds": 6.0,
+ "cached": false,
+ "competitor": "Video by epic.scence.clips [DZ56TJHuM75].mp4",
+ "raw": "Blue Mountain State - S03E05 - Training Day.mp4",
+ "truth": true
+}

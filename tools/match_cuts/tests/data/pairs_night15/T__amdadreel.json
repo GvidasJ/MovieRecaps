@@ -1,0 +1,365 @@
+{
+ "wrong": false,
+ "sound": {
+  "state": "found",
+  "tested": 7,
+  "found": 6,
+  "why": "",
+  "seconds": 0.3,
+  "where": [
+   293.32,
+   316.98,
+   320.1,
+   322.88,
+   334.02,
+   347.7
+  ],
+  "details": {
+   "speed": "1.00",
+   "tried": {
+    "1.00": [
+     {
+      "at": 1.08,
+      "raw_at": 293.32,
+      "ncc": 0.9369,
+      "z": 13.53,
+      "ratio": 2.581,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 2.74,
+      "raw_at": 294.98,
+      "ncc": 0.4849,
+      "z": 8.26,
+      "ratio": 1.182,
+      "found": false,
+      "weak": false
+     },
+     {
+      "at": 7.86,
+      "raw_at": 316.98,
+      "ncc": 0.8286,
+      "z": 11.74,
+      "ratio": 2.573,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 11.0,
+      "raw_at": 320.1,
+      "ncc": 0.8706,
+      "z": 12.77,
+      "ratio": 2.663,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 13.78,
+      "raw_at": 322.88,
+      "ncc": 0.8299,
+      "z": 12.42,
+      "ratio": 2.479,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 19.1,
+      "raw_at": 334.02,
+      "ncc": 0.9265,
+      "z": 13.61,
+      "ratio": 2.894,
+      "found": true,
+      "weak": true
+     },
+     {
+      "at": 22.06,
+      "raw_at": 347.7,
+      "ncc": 0.8196,
+      "z": 12.87,
+      "ratio": 2.407,
+      "found": true,
+      "weak": true
+     }
+    ]
+   }
+  },
+  "weak": 6,
+  "share": 0.8571428571428571
+ },
+ "picture": {
+  "state": "unclear",
+  "tested": 16,
+  "found": 2,
+  "why": "too little to be sure (12 of 16 frames almost found)",
+  "seconds": 1.72,
+  "where": [
+   170.19,
+   320.34
+  ],
+  "details": {
+   "wait_s": 1.22,
+   "keyframes_error": "",
+   "box": [
+    0,
+    235,
+    360,
+    462
+   ],
+   "keyframes": 132,
+   "keyframe_w": 448,
+   "decode_s": 0.41,
+   "sift_s": 1.71,
+   "index_s": 1.78,
+   "frames": [
+    {
+     "at": 1.65,
+     "raw_at": 140.16,
+     "inliers": 9,
+     "matches": 38,
+     "scale": 1.532,
+     "rot": 4.3,
+     "spread": [
+      0.445,
+      0.124
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 3.28,
+     "raw_at": 170.19,
+     "inliers": 19,
+     "matches": 43,
+     "scale": 0.8,
+     "rot": -3.8,
+     "spread": [
+      0.444,
+      0.425
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 4.92,
+     "raw_at": 130.15,
+     "inliers": 8,
+     "matches": 22,
+     "scale": 1.331,
+     "rot": 2.8,
+     "spread": [
+      0.044,
+      0.382
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 6.55,
+     "raw_at": 220.24,
+     "inliers": 4,
+     "matches": 14,
+     "scale": 1.374,
+     "rot": 0.2,
+     "spread": [
+      0.714,
+      0.082
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 8.18,
+     "raw_at": 320.34,
+     "inliers": 27,
+     "matches": 80,
+     "scale": 1.144,
+     "rot": 1.5,
+     "spread": [
+      0.504,
+      0.109
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 9.81,
+     "raw_at": 320.34,
+     "inliers": 31,
+     "matches": 80,
+     "scale": 1.14,
+     "rot": 0.6,
+     "spread": [
+      0.514,
+      0.091
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 11.45,
+     "raw_at": 320.34,
+     "inliers": 17,
+     "matches": 66,
+     "scale": 1.102,
+     "rot": 1.5,
+     "spread": [
+      0.427,
+      0.118
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 13.08,
+     "raw_at": 320.34,
+     "inliers": 15,
+     "matches": 61,
+     "scale": 1.11,
+     "rot": 1.5,
+     "spread": [
+      0.442,
+      0.111
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 14.71,
+     "raw_at": 320.34,
+     "inliers": 12,
+     "matches": 46,
+     "scale": 1.167,
+     "rot": 4.9,
+     "spread": [
+      0.636,
+      0.272
+     ],
+     "mirrored": false,
+     "found": true,
+     "weak": true
+    },
+    {
+     "at": 16.35,
+     "raw_at": 320.34,
+     "inliers": 12,
+     "matches": 54,
+     "scale": 1.319,
+     "rot": 3.9,
+     "spread": [
+      0.438,
+      0.405
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 17.98,
+     "raw_at": 1081.1,
+     "inliers": 2,
+     "matches": 6,
+     "scale": 0.455,
+     "rot": 88.2,
+     "spread": [
+      0.139,
+      0.581
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": false
+    },
+    {
+     "at": 19.61,
+     "raw_at": 410.43,
+     "inliers": 10,
+     "matches": 50,
+     "scale": 1.425,
+     "rot": 5.6,
+     "spread": [
+      0.11,
+      0.267
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 21.25,
+     "raw_at": 410.43,
+     "inliers": 13,
+     "matches": 52,
+     "scale": 1.448,
+     "rot": 5.3,
+     "spread": [
+      0.112,
+      0.365
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 22.88,
+     "raw_at": 140.16,
+     "inliers": 14,
+     "matches": 38,
+     "scale": 1.044,
+     "rot": 10.0,
+     "spread": [
+      0.219,
+      0.128
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 24.51,
+     "raw_at": 920.94,
+     "inliers": 14,
+     "matches": 36,
+     "scale": 1.253,
+     "rot": -5.3,
+     "spread": [
+      0.303,
+      0.148
+     ],
+     "mirrored": true,
+     "found": false,
+     "weak": true
+    },
+    {
+     "at": 26.14,
+     "raw_at": 350.37,
+     "inliers": 24,
+     "matches": 62,
+     "scale": 1.152,
+     "rot": -2.2,
+     "spread": [
+      0.298,
+      0.134
+     ],
+     "mirrored": false,
+     "found": false,
+     "weak": true
+    }
+   ]
+  },
+  "weak": 12,
+  "share": 0.125
+ },
+ "seconds": 4.04,
+ "cached": false,
+ "competitor": "Video by cinemaclips991 [DczA1q3MTge].mp4",
+ "raw": "American Dad! - S03E02 - The American Dad After School Special - [HDTV-1080p]h265 AAC.mp4",
+ "truth": true
+}
