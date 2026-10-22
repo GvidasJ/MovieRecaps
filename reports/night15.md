@@ -325,6 +325,7 @@ All four changes are only in the "search the picture again" path, which runs onl
      | 0.30 s | 13 | 6 |
      | 0.40 s | 9 | 5 |
    - **Kept:** the sound way, the pauses around cuts included, at 0.25 s: 8 of your 10, in a list of 16 for this one-minute edit. It only writes a list, so nothing in any edit changed.
+   - **Over all 14 test videos that finished tonight:** your edits skip a bit of the RAW's sound 111 times (pauses you cut, and trims at cuts). **65 of them (59 %) fall on a pause the list names**, in lists of 104 pauses in all (about 7 a video). The best: video021 10 of 11, video018 9 of 13. The worst: laptop004 0 of 2, mike005 2 of 12 (mike005's skips are mostly trims of whole words at the cuts, not pauses).
    - (This PC's own `\\192.168.101.11\Shared` paths are read from `D:\Shared`, so the PC can measure the shared projects too.)
 ## The check-all (tasks 3 and 8)
 
