@@ -131,6 +131,45 @@ class JobRun:
                 cpu = None
         return tuple(sizes), cpu
 
+    def reading(self) -> tuple[float, float, float] | None:
+        """What the run's ffmpeg is converting (night 15, the console): (input seconds read, the input's seconds,
+        x real time) -- from the bytes the ffmpeg process has read of its ``-i`` file against that file's size; None
+        when no ffmpeg runs, its input is small (< 50 MB) or its length is unknown."""
+        if self.proc is None or self.proc.poll() is not None:
+            return None
+        try:
+            import psutil
+            kids = psutil.Process(self.proc.pid).children(recursive=True)
+        except Exception:  # noqa: BLE001
+            return None
+        for p in kids:
+            try:
+                if not p.name().lower().startswith("ffmpeg"):
+                    continue
+                args = p.cmdline()
+                src = Path(args[args.index("-i") + 1]) if "-i" in args else None
+                if src is None or not src.is_file() or src.stat().st_size < 50_000_000:
+                    continue
+                total = self._length(src)
+                if not total:
+                    continue
+                frac = min(1.0, p.io_counters().read_bytes / float(src.stat().st_size))
+                took = max(1.0, time.time() - p.create_time())
+                return frac * total, total, frac * total / took
+            except Exception:  # noqa: BLE001 - it just ended / no access: the next one
+                continue
+        return None
+
+    def _length(self, f: Path) -> float | None:
+        cache = self.__dict__.setdefault("_lengths", {})
+        if str(f) not in cache:
+            try:
+                from match_cuts.cli import quick_probe
+                cache[str(f)] = float(quick_probe(f)["duration"])
+            except Exception:  # noqa: BLE001
+                cache[str(f)] = None
+        return cache[str(f)]
+
     def stop(self) -> None:
         self.stopped = True
         if self.proc is not None and self.proc.poll() is None:

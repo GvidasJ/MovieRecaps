@@ -16,7 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QConicalGradient, QCursor, QDrag, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout,
-                               QLabel, QMessageBox, QTextBrowser, QVBoxLayout, QWidget)
+                               QLabel, QMessageBox, QPlainTextEdit, QTextBrowser, QVBoxLayout, QWidget)
 
 from . import Tool
 from ..core import jobs as J
@@ -54,6 +54,7 @@ class Worker(QThread):
 class JobThread(QThread):
     """One job (core.run.JobRun): ``progress(job id, text, share)`` every 2 s, then ``done(job id, result)``."""
     progress = Signal(int, str, float)
+    console = Signal(int, object)           # night 15: (job id, the console's lines) when they changed
     done = Signal(int, dict)
 
     def __init__(self, job: J.Job, converted: dict, out_dir: Path):
@@ -136,22 +137,43 @@ class JobThread(QThread):
                 pass
 
         honest = P.Honest(self.estimate)      # night 15: smoothed range, never backwards, "seems stuck"
+        con = None
+        try:                                  # night 15: "What it's doing now"
+            from match_cuts import run_folders
+            from ..core.console import Console
+            con = Console(self.run_.run_dir / run_folders.EXTRAS / "match_cuts.log",
+                          reading=getattr(self.run_, "reading", None))
+        except Exception:  # noqa: BLE001 - no console, the run goes on
+            con = None
 
         def poll(r) -> None:
             text = r.progress_text()
             pr = P.parse(text)
             sig, cpu = r.activity() if hasattr(r, "activity") else (text, None)
             h = honest.update(r.elapsed(), pr.left_s, (text, sig), cpu, line=text)
-            bits = [pr.step or "starting", f"{100 * h['share']:.0f} %"]
+            self.job.progress_code = pr.code                # (small and grey next to the plain name)
+            bits = [pr.plain or pr.step or "starting", f"{100 * h['share']:.0f} %"]
             if h["stuck"]:
                 bits.append(P.STUCK_TEXT)
             elif h["left"]:
                 bits.append(h["left"])
             self.progress.emit(self.job.id, " · ".join(bits), h["share"])
+            if con is not None:
+                try:
+                    if con.poll():
+                        self.console.emit(self.job.id, con.shown())
+                except Exception:  # noqa: BLE001
+                    pass
         try:
             res = self.run_.wait(poll)
         except Exception as e:  # noqa: BLE001
             res = {"label": R.FAIL, "failures": [f"{type(e).__name__}: {e}"]}
+        if con is not None:                   # the run's last lines (no "now:" line: it ended)
+            try:
+                con.poll()
+                self.console.emit(self.job.id, list(con.lines))
+            except Exception:  # noqa: BLE001
+                pass
         if self.job.project is not None:
             try:
                 from ..core import projects as PJ
@@ -465,6 +487,36 @@ class JobRow(QFrame):
         stp.addWidget(self.step, 1)
         stp.addWidget(self.mode_txt, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(stp)
+        self.con_box = QWidget()                 # night 15: "What it's doing now" -- the run in plain words
+        self.con_box.setObjectName("Transparent")
+        cv = QVBoxLayout(self.con_box)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(4)
+        ch = QHBoxLayout()
+        ch.setSpacing(8)
+        self.con_toggle = W.Button("", "Mini")
+        self.con_toggle.setToolTip("Show or hide what the run is doing now, in plain words (remembered)")
+        self.con_toggle.clicked.connect(self._toggle_console)
+        self.con_copy = W.Button("Copy log", "Mini")
+        self.con_copy.setToolTip("Copy all these lines (to send them); the full technical log stays in the run "
+                                 "folder (extras\\match_cuts.log)")
+        self.con_copy.clicked.connect(self._copy_console)
+        ch.addWidget(self.con_toggle)
+        ch.addStretch(1)
+        ch.addWidget(self.con_copy)
+        cv.addLayout(ch)
+        self.con = QPlainTextEdit()
+        self.con.setReadOnly(True)
+        self.con.setFont(W.mono(10.5))
+        self.con.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.con.setFixedHeight(150)
+        self.con.setStyleSheet(f"QPlainTextEdit {{ color: {theme.MUTED}; background: transparent; "
+                               f"border: 1px solid {theme.LINE}; border-radius: 6px; padding: 4px; }}")
+        cv.addWidget(self.con)
+        lay.addWidget(self.con_box)
+        self.con_box.hide()
+        self._con_lines: list[str] = []
+        self.show_console(self._console_open())
         self.dates = QLabel()
         self.dates.setFont(W.mono(11))
         self.dates.setWordWrap(True)
@@ -675,6 +727,45 @@ class JobRow(QFrame):
         w.start()
 
     # -- looks --
+    # -- "What it's doing now" (night 15) --
+    @staticmethod
+    def _console_open() -> bool:
+        try:
+            from ..core import settings as S
+            return bool(S.load().console_open)
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _toggle_console(self) -> None:
+        opened = not self._con_open
+        try:
+            from ..core import settings as S
+            s = S.load()
+            s.console_open = opened
+            S.save(s)
+        except Exception:  # noqa: BLE001 - not remembered, still switched
+            pass
+        self.page.console_switched(opened)
+
+    def show_console(self, opened: bool) -> None:
+        self._con_open = opened
+        self.con.setVisible(opened)
+        self.con_copy.setVisible(opened)
+        self.con_toggle.setText(("▾ " if opened else "▸ ") + "What it's doing now")
+
+    def set_console(self, lines: list[str]) -> None:
+        self._con_lines = list(lines or [])
+        bar = self.con.verticalScrollBar()
+        at_end = bar.value() >= bar.maximum() - 2
+        keep = bar.value()
+        self.con.setPlainText("\n".join(self._con_lines))
+        bar.setValue(bar.maximum() if at_end else keep)          # newest at the bottom, unless you scrolled up
+        self.con_box.setVisible(bool(self._con_lines))
+
+    def _copy_console(self) -> None:
+        QApplication.clipboard().setText("\n".join(self._con_lines))
+        _toast(self.page.ctx, "Log copied ✓")
+
     def set_scene(self, n: int, runs: int | None = None) -> None:
         """The slate: SCENE (its place in the queue) · TAKE · the date, and for a waiting row when it runs (day 12:
         the rows are shown newest first, so the run order is said on each: RUNS 1ST = the next one)."""
@@ -758,6 +849,7 @@ class JobRow(QFrame):
         self.remove.setEnabled(j.state != J.RUNNING)
         self.mode_txt.setText("Fast" if j.mode == J.FAST else "Thorough")
         res = j.result or {}
+        self.step.setTextFormat(Qt.TextFormat.PlainText)
         if j.state == J.READY and checking:
             prep = getattr(j, "preparing", "")
             self.pill.set("Check which is the RAW", (theme.AMBER, theme.AMBER_SOFT, theme.AMBER_LINE))
@@ -777,8 +869,14 @@ class JobRow(QFrame):
             self.bar.state("waiting")
         elif j.state == J.RUNNING:
             self.pill.set("running")
-            self.step.setText("stopping, to start again with the RAW and the competitor switched ..."
-                              if getattr(j, "restart_swapped", False) else (j.progress or "starting"))
+            code = getattr(j, "progress_code", "") or ""
+            if getattr(j, "restart_swapped", False):
+                self.step.setTextFormat(Qt.TextFormat.PlainText)
+                self.step.setText("stopping, to start again with the RAW and the competitor switched ...")
+            else:                                # night 15: the plain name, its S-number small and grey after it
+                self.step.setTextFormat(Qt.TextFormat.RichText)
+                self.step.setText(esc(j.progress or "starting") + (
+                    f"&nbsp;&nbsp;<span style='color:{theme.DIM}; font-size:9pt'>{esc(code)}</span>" if code else ""))
             self.step.setStyleSheet(f"color: {theme.MUTED};")
             self.note.setText("")
             self.bar.state("running")
@@ -1704,6 +1802,8 @@ class MatchCutsPage(QWidget):
         self._reorder()                               # it glides to the top
         th = JobThread(nxt, self.converted, self.out_dir)
         th.progress.connect(self._progress)
+        if hasattr(th, "console"):                    # (a stand-in thread may have no console)
+            th.console.connect(self._console)
         th.done.connect(self._done)
         self.current = th
         self.update_counts()
@@ -1717,6 +1817,16 @@ class MatchCutsPage(QWidget):
         j.progress, j.percent = text, share
         self.rows[j.id].refresh()
         self._taskbar()
+
+    def _console(self, job_id: int, lines) -> None:
+        row = self.rows.get(job_id)
+        if row is not None:
+            row.set_console(list(lines or []))
+
+    def console_switched(self, opened: bool) -> None:
+        """The console opened / closed on one row: on every row (one setting)."""
+        for row in self.rows.values():
+            row.show_console(opened)
 
     def _taskbar(self) -> None:
         fn = getattr(self.ctx, "set_progress", None)

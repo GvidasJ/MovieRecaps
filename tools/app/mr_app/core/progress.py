@@ -9,22 +9,34 @@ import re
 from dataclasses import dataclass
 
 _WHOLE = re.compile(r"whole run: (?:about (\d+) h (\d+) min|about (\d+) min|under (a minute|2 min))")
-_STEP = re.compile(r"^\s*(S[\d.]+[a-z]?)\s+(.+?)(?::\s*(\d+)\s*%|\s+--|;|:\s*still|$)")
+_STEP = re.compile(r"^\s*(S[\d.]+[a-z]?(?:-S[\d.]+)?)\s+(.+?)(?::\s*(\d+)\s*%|\s+--|;|:\s*still|$)")
 
-# the stages' names in plain words (the tool's own names otherwise)
-PLAIN = {
-    "S2": "reading the videos", "S3": "making small copies", "S4": "finding the picture area",
-    "S5": "finding each frame in the RAW", "S6": "checking the cuts", "S7": "planning the edit",
-    "S8": "writing the files", "S9": "checking the result", "S10": "writing the report",
-}
+
+def plain_name(stage: str) -> str:
+    """The stage in plain words (night 15: match_cuts.stage_names -- "Finding each competitor shot in the RAW")."""
+    try:
+        from match_cuts.stage_names import plain
+        return plain(stage)
+    except Exception:  # noqa: BLE001 - an old tool: its own name
+        return stage
+
+
+def stage_code(stage: str) -> str:
+    m = re.match(r"\s*(S\d+(?:\.\d+)?(?:-S[\d.]+)?)", stage or "")
+    return m.group(1) if m else ""
 
 
 @dataclass
 class Progress:
     step: str = ""            # "S5.2 visual search"
-    plain: str = ""           # "finding each frame in the RAW"
+    plain: str = ""           # "Finding each competitor shot in the RAW"
     step_pct: float | None = None
     left_s: float | None = None
+
+    @property
+    def code(self) -> str:
+        """'S5.2' -- shown small and grey next to the plain name."""
+        return stage_code(self.step)
 
     def text(self) -> str:
         """One short line for the queue: 'S5.2 visual search (40 %) -- about 5 min left'."""
@@ -64,7 +76,7 @@ def parse(text: str) -> Progress:
         code, name = m.group(1), m.group(2).strip(" -:;")
         name = re.sub(r":.*$", "", name).strip()
         out.step = f"{code} {name}".strip()
-        out.plain = PLAIN.get(code.split(".")[0], name)
+        out.plain = plain_name(out.step)
         if m.group(3):
             out.step_pct = float(m.group(3))
     return out

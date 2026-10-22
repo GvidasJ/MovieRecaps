@@ -9,7 +9,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 1 | Emoji in names (Premiere import) | **done** | nothing to do: new folders and files get plain names; old ones were renamed at the start of the app | open the 6 kept folders' projects as before (below) |
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
 | 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
-| 4 | Honest progress | **done** | nothing to do: the queue line shows "about 25-35 min left", the % never goes back, and a stuck run says so | watch one long run in the queue |
+| 4 | Honest progress | **done** (also the plain stage names and the "What it's doing now" console) | nothing to do: the queue line shows "Finding each competitor shot in the RAW · 40 % · about 25-35 min left"; click "What it's doing now" under the running row for the live lines, "Copy log" to send them | watch one long run in the queue |
 | 5 | SceneProof template + its music | **done** (imported in Premiere 2024: no error, the song on A2 at +5 / -1 dB) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | listen to `work\t31\sp\prem_test\edit\edit_edit.prproj` once |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
@@ -120,6 +120,23 @@ These change the picture search itself, so every check-all case would have to be
   - American Dad (this PC): the old bar showed 16 % then 63 % within a minute, while its time went 41 -> 94 -> 29 -> 4 min, and it went backwards once. The new bar went 12 % -> 23 % -> 41 % -> 69 % (35-50 -> 20-30 -> 10-15 -> 3-5 min) and never back.
   - laptop009 (check-all): the old bar went backwards twice (93 % -> 88 %). The new one never did.
 - **Tests:** app 1152 passed. 9 new tests (`test_progress_night15.py`). One old test (`test_locks` heartbeat) failed once on a Windows file-access clash and passes when run again (17 of 17). It is not related to this change.
+
+### Task 4, second part -- plain stage names + "What it's doing now" (done)
+
+- **Plain stage names:** the running row now says "Finding each competitor shot in the RAW · 40 % · about 25-35 min left", with the S-number small and grey after it. New video's edit line shows the same words. The report's timings table has a "step" column in plain words first.
+  - S1 "Checking the RAW and the competitor are the same scene", S2 "Preparing the RAW (checking / converting)", S5.2 "Finding each competitor shot in the RAW", S5.3 "Placing every frame exactly", S5.4-S6 "Deciding the cuts", S8 "Making the Premiere files", S8 captions "Writing the captions", S9 "Double-checking every cut against the competitor", S10 "Writing the report" (all of them: `tools\match_cuts\match_cuts\stage_names.py`).
+  - The taskbar button shows only the fill, no words, so nothing changed there.
+- **"What it's doing now":** under the running row, "▾ What it's doing now" opens or closes a small panel. It is remembered (Settings file, `console_open`), and one click sets it for every row.
+  - Each line has the time and plain words, newest at the bottom (it stays where you are if you scroll up). For example:
+    - `07:52  The sound of the competitor was found in the RAW (6 of 7 pieces) -- the same scene, going on`
+    - `07:53  Finding shots -- 118 of 278 pieces searched, 42 %, about 2 min left in this step`
+    - `07:55  Found in the RAW: 100 % of the picture, 94 % of the sound`
+    - `07:57  Double-checking cuts -- the cuts: needs a look`
+  - The last line is live and changes every 2 s: `now: Preparing the RAW -- converting 13.1x real time, 19 of 22 min done -- 1 min 34 s in this step`. The conversion speed comes from how much of the RAW the ffmpeg process has read (no change to the tool, so no cache is touched).
+  - A step's newer count replaces its older one, so a long step doesn't fill the panel. Steps that take under 1.5 s are not shown. The checks' technical notes stay in the report, not here.
+  - **Copy log** copies all the lines. The full technical log stays in the run folder (`extras\match_cuts.log`).
+- **Real test:** American Dad as SceneProof, run as the queue runs it, the console read every 2 s: 166 updates in 338 s, never more than 2 s apart. The RAW's conversion showed 22 min of RAW done in about 100 s (13x real time).
+- **Not done:** per-shot lines like "Shot 24 found at 1:12:05 (very sure)" or "Cut 13 is 2 frames off, fixing it". The tool doesn't log those as it goes, and changing what the search logs means changing the search modules, which would throw away every cache (hours of re-runs). The counts ("118 of 278 pieces searched") and each check's result are shown instead.
 ## Task 5 -- SceneProof template + its music (done, checked in Premiere)
 
 - **What I found in your projects:**

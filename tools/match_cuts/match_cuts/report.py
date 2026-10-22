@@ -1485,7 +1485,8 @@ def _environment(ctx: Any) -> list[str]:
            f"- After Effects: {env.get('ae_app') or 'not installed'}; aerender: {env.get('aerender') or 'not installed'}",
            f"- match_cuts {env.get('tool_version', '')}"]
     if t:
-        out += ["", md_table(["stage", "seconds"], [[k, f"{float(v):.2f}"] for k, v in t.items()])]
+        from .stage_names import plain          # night 15: the plain name first, the tool's own name after
+        out += ["", md_table(["step", "stage", "seconds"], [[plain(k), k, f"{float(v):.2f}"] for k, v in t.items()])]
     return out
 
 
