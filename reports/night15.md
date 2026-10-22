@@ -188,7 +188,9 @@ All four changes are only in the "search the picture again" path, which runs onl
 - **After closing the app:** a paused video is kept in `%APPDATA%\MovieRecaps\paused.json` and comes back in the queue, paused, when the app opens. **Closing the app while a video is being made now pauses it** instead of throwing it away (the close question says so). Remove on a paused row forgets it but leaves its folder.
 - A project's edit that is paused shows as "waiting" in project.json, not failed.
 - **Real test** (Blue Mountain State S03E05 + its reel, through the app's own runner): the first run reached "Placing every frame exactly" after **869 s**. Pause stopped it in under a second. **Resume was back at that step after 48 s** (the RAW's conversion, the sound and the picture search all came from the caches), and the run finished: **PASS, 619 s after Resume**, `1_edit.xml` in the same folder. The pause cost about 40 s in all (869 + 619 s, against about 1450 s in one go).
-- **Tests:** app 1192 passed, 0 failed.
+- **A second real test, through the queue page itself** (a short pair, Start, the row's Pause, the page made again as when the app opens): it paused at "Making the Premiere files", came back paused, and Resume finished it in the same folder (PASS, 513 s).
+  - That test found a bug, now fixed: a run paused in its last steps (after it had written `1_edit.xml`) was taken as finished and shown as "stopped". Now a pause counts as a pause unless the run had printed its final result, and Resume goes on in a folder that already has a `1_edit.xml` (the run writes it again).
+- **Tests:** app 1192 passed, 0 failed (plus 1 new pause test).
 - **Tests:** 7 new (`test_pause_night15.py`): the paused list survives a restart, Resume runs into the same folder with `--resume`, Pause stops a real child process and leaves the note, the rows' buttons, the queue stops on a pause, a paused project waits.
 
 ## Task 7 -- Auto zip + renders by day (done)

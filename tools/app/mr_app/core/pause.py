@@ -34,10 +34,11 @@ def mark_path(run_dir: Path) -> Path:
 
 
 def can_resume(run_dir: Path | None) -> bool:
-    """A paused run folder that can go on: its note there and no finished edit."""
+    """A paused run folder that can go on: its note is there (taken away when the run ends, or when Resume starts it
+    again). A run paused in its last steps has its 1_edit.xml already: the resumed run writes it again."""
     if run_dir is None:
         return False
-    return mark_path(run_dir).is_file() and not (Path(run_dir) / "1_edit.xml").is_file()
+    return mark_path(run_dir).is_file()
 
 
 def mark(run_dir: Path, step: str = "", plain: str = "") -> None:

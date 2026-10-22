@@ -840,8 +840,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if getattr(args, "run_dir", None):
         run_dir = Path(args.run_dir)
         paused = run_dir / run_folders.EXTRAS / PAUSED_FILE
-        if getattr(args, "resume", False) and paused.is_file() and not (run_dir / run_folders.EDIT_XML).exists():
-            paused.unlink()                          # night 15: Resume -- the same folder, the log goes on
+        if getattr(args, "resume", False) and paused.is_file():
+            paused.unlink()                          # night 15: Resume -- the same folder, the log goes on (a run
+            #                                          paused in its last steps writes its 1_edit.xml again)
             print(f"match_cuts: resuming the paused run in {run_dir}", file=sys.stderr)
         elif (run_dir / run_folders.EDIT_XML).exists() or (run_dir / run_folders.EXTRAS).exists():
             print(f"match_cuts: --run-dir {run_dir} holds a run already", file=sys.stderr)

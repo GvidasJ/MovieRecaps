@@ -231,7 +231,8 @@ class JobRun:
         res = read_result(self.run_dir, code, stdout, stderr, self.stopped)
         if self.paused:
             from . import pause as PZ
-            if PZ.can_resume(self.run_dir):
+            # stopped by the pause, not at its end: no "match_cuts result:" line (exit code 1 alone can be either)
+            if PZ.can_resume(self.run_dir) and batch.RESULT_LINE not in stdout:
                 res.update(label=PZ.LABEL, paused=True, run_dir=str(self.run_dir))
             else:                                   # it ended by itself just before the pause: what it gave
                 try:

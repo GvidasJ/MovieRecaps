@@ -36,9 +36,11 @@ def test_a_paused_video_is_kept_on_this_computer_and_comes_back(tmp_path, monkey
                                                                      "The fact that", 2)
     assert b.competitor == tmp_path / "c.mp4" and b.run_dir == d and b.state == J.PAUSED
     assert PZ.line(b) == "paused at Finding shots -- Resume goes on from there"
-    (d / "1_edit.xml").write_text("<xmeml/>")                    # it finished after all: nothing to go on with
-    assert not PZ.can_resume(d) and PZ.load() == []
+    (d / "1_edit.xml").write_text("<xmeml/>")                    # paused in its last steps: 1_edit.xml there
+    assert PZ.can_resume(d) and len(PZ.load()) == 1              # ... and it still goes on (S8 writes it again)
     assert PZ.read_mark(d)["step"] == "S5.2 visual search"
+    PZ.mark_path(d).unlink()                                     # the note gone (the run ended / resumed)
+    assert not PZ.can_resume(d) and PZ.load() == []
 
 
 def test_resume_runs_the_tool_into_the_same_folder(tmp_path):
@@ -65,6 +67,20 @@ def test_pause_stops_the_run_and_leaves_the_note_for_resume(tmp_path, monkeypatc
     assert time.time() - t < 15
     assert res["label"] == PZ.LABEL and res["paused"] and res["run_dir"] == str(r.run_dir)
     assert PZ.read_mark(r.run_dir)["plain"] == "Placing every frame exactly"
+
+
+def test_a_run_that_reached_its_end_before_the_pause_is_finished_not_paused(tmp_path, monkeypatch):
+    """Exit code 1 is both a finished run with notes and a stopped one: the run's own result line decides."""
+    from match_cuts import batch
+    code = f"import time; print({batch.RESULT_LINE!r} + ' PASS', flush=True); time.sleep(60)"
+    monkeypatch.setattr(run, "command", lambda *a, **k: [sys.executable, "-c", code])
+    j = J.Job("video4", tmp_path / "c.mp4", tmp_path / "r.mp4")
+    r = run.JobRun(j, out_dir=tmp_path / "out", work_dir=tmp_path / "work", python=Path(sys.executable))
+    r.start()
+    time.sleep(1.5)
+    r.pause("S10 report", "Writing the report")
+    res = r.wait(every_s=0.2)
+    assert res["label"] != PZ.LABEL and not res.get("paused") and not PZ.mark_path(r.run_dir).exists()
 
 
 def test_the_tool_and_the_app_name_the_note_alike():
