@@ -14,6 +14,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 6 | Pause / Resume | **done** | **Pause** on the running row; **Resume** on the paused row (also after closing the app -- closing it while a video is made pauses it) | pause one long run and resume it |
 | 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
+| 12 | Find source (many clips at once) | **done** | Progress > **Find source**: paste the links (one per line) or drop clips, **Find all (N)**; Copy all; Torrent search per row | try it on your next 5 clips |
 | 11 | Ctrl+F search | **done** | **Ctrl+F** on any page; in a torrent's file list type `S09E05` / `9x05` / `ep 5`, then "Tick only these" | try it on a series torrent |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
@@ -207,6 +208,25 @@ These change the picture search itself, so every check-all case would have to be
 - **The torrent's file list:** a search box over the files (when there is more than one): a live filter, "12 of 24", **Tick only these** (ticks what the search shows and unticks the rest), Esc clears it. It understands episodes written any usual way: `S09E05`, `s9e5`, `9x05`, `ep 5` (any season), `episode 7`, `e15`; anything else is words in any order.
 - **Every page:** **Ctrl+F** opens a search box over the page you are on. It finds your words in everything the page shows (the queue's rows, the projects, the board's cards ...), outlines the one it is at, scrolls to it and says "3 of 12". Enter goes to the next one, Shift+Enter to the one before, and Esc clears and closes it. Switching to another page searches that page.
 - **Tests:** 14 new (`test_find_night15.py`), one on the real window.
+
+## Task 12 -- Find source, many clips at once (done)
+
+- **Where:** Progress > **Find source** (next to Download). Paste links, one per line, or drop many files, then **Find all (N)**. Five are looked at side by side and the rest wait in line. Each row fills in as soon as its clip is done.
+- **One row per clip, always the same columns:** `#` · **Clip** (its name, length, Instagram / TikTok / YouTube / file) · **Comes from** (big: "American Dad! — S03E02" or "Dr. Dolittle 2 (2001)"; small under it: the episode's title and what found it) · **How sure** (green **Sure 90 %+**, yellow **Check** with the 2nd guess, red **Not found** with why).
+- **Torrent search** on each row copies the words to search ("American Dad S03E02 1080p") and opens a web search with them. The app has no torrent search of its own to fill, so paste the words where you search. **Copy all** copies the list: `3. Reel DczA1q3MTge — American Dad! — S03E02 — sure 98 %`.
+- **History:** every list is kept (newest first, on the page), and the last list is back after a restart (`%APPDATA%\MovieRecaps\find_source.json`).
+- **How it finds it (no login, no cookies):**
+  1. the post's text (title, description, tags; yt-dlp reads them without downloading)
+  2. **your RAWs on this computer** (30 movies and episodes: the projects' RAWs and the laptop cases). When the text names one, the clip's **sound** is looked for in it (the tool's own quick sound check), and found = **Sure**. When the text names nothing, the sound is looked for in your other RAWs too (episodes first, 12 at most, 4 minutes at most).
+  3. the public title lists (IMDb's search suggestions, TVmaze for episode titles) for a name the text says that is not on this computer = **Check**.
+- **Real batch, 5 at once, 54 s in all:**
+  - the Dolittle 2 reel and the TikTok: **Dr. Dolittle 2 (2001) — check 65 %**. The text names it, but its sound is not in your "Dr. Dolittle 2" file, because that file is really the 1998 film (task 2). Right.
+  - American Dad: **American Dad! — S03E02 — sure 98 %** (5 s)
+  - the Family Guy clip (darkhumor): **Family Guy — check 60 %: "the episode is not one of your 4 (S11E10, S09E11, S11E01, S08E11)"**. Right: both of the episodes you had for it were wrong pairs (task 2).
+  - Blue Mountain State (its post only says "...this is Jack Reacher..."): **Blue Mountain State — S03E05 — sure 99 %**, found by its sound in your RAW.
+  - From the real Instagram link (not the file): American Dad sure 98 % in 8 s, with no login.
+- **Not used yet:** the burned-in text and the speech. No free service matches them to a title without a login or a key, so they are named in a "Not found" reason instead.
+- **Tests:** 24 new (`test_find_source_night15.py`): the name reading, the 6 answers above as fakes, the history, and the page (7 links: 5 at once at most, the rows, Copy all, back after a restart).
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.

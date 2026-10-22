@@ -33,8 +33,9 @@ from . import widgets as W
 CONTENT_W = 1040                    # the pages' column (the reference: a centred column)
 WIDE_W = 1680                       # the Board's
 TABS = (("Match cuts", ("match_cuts", "learn")), ("Board", ("board",)),
-        ("Progress", ("download", "convert", "template")), ("History", ("history",)))
-SUB_TITLES = {"match_cuts": "Queue", "learn": "Learn", "download": "Download", "convert": "Convert",
+        ("Progress", ("download", "find_source", "convert", "template")), ("History", ("history",)))
+SUB_TITLES = {"match_cuts": "Queue", "learn": "Learn", "download": "Download", "find_source": "Find source",
+              "convert": "Convert",
               "template": "Template", "board": "Board", "history": "History"}
 WIDE = {"board"}
 

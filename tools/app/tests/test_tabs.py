@@ -51,10 +51,11 @@ def test_the_window_has_the_four_tabs_and_every_page_under_one(qapp):
     from mr_app.ui import main_window as MW
     win = MW.MainWindow(tools())
     assert [t.text for t in win.tabbar.tabs] == ["Match cuts", "Board", "Progress", "History"]
-    assert set(win.pages) == {"match_cuts", "learn", "board", "download", "convert", "template", "history"}
+    assert set(win.pages) == {"match_cuts", "learn", "board", "download", "find_source", "convert", "template",
+                              "history"}
     win.select("template")
     assert win.tabbar.index == 2 and win.stack.currentIndex() == 2
-    assert win.areas[2].current_key() == "template" and win.areas[2].sub.index == 2
+    assert win.areas[2].current_key() == "template" and win.areas[2].sub.index == 3
     win.select("learn")
     assert win.tabbar.index == 0 and win.areas[0].current_key() == "learn"
     win.close()
