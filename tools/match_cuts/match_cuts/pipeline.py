@@ -2494,6 +2494,12 @@ def stop_if_picture_not_found(ctx: Context) -> None:
     if getattr(ctx.cfg, "force_inputs", False):
         ctx.warn(msg, analysis=True)
         return
+    if getattr(ctx.cfg, "premiere", False) and not getattr(ctx.cfg, "raw_movie", None):   # (a piece: run() goes on)
+        from . import placed_by_sound      # night 15: never nothing -- the RAW placed by its sound, to check by hand
+        pb = placed_by_sound.write(ctx)
+        if pb.get("path"):
+            msg += (f" A project with the RAW placed by its sound was made instead: {Path(pb['path']).name} "
+                    f"({100 * pb['covered']:.0f} % of the competitor) -- placed by sound, check the framing.")
     log.error("STOPPED: %s", msg)
     raise PictureNotFound(msg)
 

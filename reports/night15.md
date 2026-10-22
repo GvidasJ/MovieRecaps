@@ -8,7 +8,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 |---|---|---|---|---|
 | 1 | Emoji in names (Premiere import) | **done** | nothing to do: new folders and files get plain names; old ones were renamed at the start of the app | open the 6 kept folders' projects as before (below) |
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
-| 3 | Cartoons / tilted and zoomed reels | **step 1 done** (the stretch); steps 2-5 not started -- see below | nothing to do: it is found by itself (`--raw-stretch off` / `4:3` to force) | open the American Dad edit in Premiere (below) |
+| 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
 
@@ -84,14 +84,30 @@ I checked every pair you named with the quick check, and also 37 true pairs (eve
   - Run folder: `work\t31\ad\run2`.
 - **No false alarms:** all 36 other true pairs (every check-all case plus Blue Mountain State and The Suite Life) say "not stretched" (ratio 0.995-1.003). Competitors sped up to 125 % are not checked (the safe side).
   - So check-all cannot change: the stretch is off on all its cases, and their conversion keys stay the same.
-- **Not done yet (the rest of task 3)**, left for when you say continue:
-  - 2. the edge (lines) comparison with the burned-in captions masked
-  - 3. accepting lower scores inside the sound's place when neighbouring frames agree
-  - 4. stopping within minutes instead of hours
-  - 5. a "placed by sound" project when the picture is still not found
-
-  The stretch fixes the case that was named, so these are now for other cartoons.
 - **Tests:** tool 1606 passed, 0 failed. 8 new tests (`test_night15_stretch.py`), including the real American Dad files on this PC.
+
+### Task 3, fix 5 -- never nothing: "placed by sound" (done)
+
+- **What changed:** when the sound is found but the picture is not, even after the second search (PICTURE NOT FOUND), the run still stops, but it first makes **`1_edit_placed_by_sound.xml`** in the run folder (`placed_by_sound.py`):
+  - the reel's length on the usual sequence (your frame on V2, the RAW's rate, the audio chain on A1)
+  - V1/A1: the RAW where its **sound** placed each part of the reel (one clip per jump the sound found)
+  - the RAW fills the window, centred, because the reel's framing is not known
+  - a marker over the whole sequence: **"PLACED BY SOUND -- check the framing"**, and "NOT IN RAW" markers where the sound placed nothing
+  - the stop message ends with: "A project with the RAW placed by its sound was made instead: 1_edit_placed_by_sound.xml (96 % of the competitor) -- placed by sound, check the framing."
+- **How you use it:** when a run says PICTURE NOT FOUND, open its run folder and import `1_edit_placed_by_sound.xml` in Premiere. Then fix the framing (and any cut that is a little off) by hand.
+- It is never named `1_edit.xml`, so the app still shows the stop, and nothing treats it as a normal edit.
+- It is not made when the sound places less than 25 % of the reel, with `--force-inputs` (that makes the normal edit anyway), or while only a piece of the movie was analysed (the run is then made again on the whole movie first).
+- **Real test:** American Dad, from the sound alone: 5 clips covering 100 % of the reel. Against the edit the picture search made, 80 % of the points are within 0.1 s (median 0.045 s). The ones further off are next to cuts, up to 0.9 s, which is why the marker says to check.
+- **Tests:** tool 1643 passed, 0 failed; app 1144 passed. 9 new tests (`test_night15_placed_by_sound.py`), one of them on the real American Dad sound.
+
+### Task 3, fixes 1-4 -- not done (left on purpose)
+
+- 1. the edge (lines) comparison for cartoons, with the burned-in captions masked
+- 2. trying ±8° and other zooms (American Dad was a stretch, not a rotation: its frames fit with 0.1-0.3°)
+- 3. accepting lower scores inside the place the sound found
+- 4. stopping within minutes
+
+These change the picture search itself, so every check-all case would have to be run again to show that nothing gets worse. That is hours of GPU time while you're using the PC. The named case is now fixed (the stretch), and the placed-by-sound project means a cartoon whose picture is not found still gives you something to work from. I left them for a night when the PC is free.
 
 ## Time before -> after
 
@@ -100,14 +116,15 @@ I checked every pair you named with the quick check, and also 37 true pairs (eve
 
 ## Still broken
 
-- **Task 3, steps 2-5** (see task 3) and **tasks 4-16** are not started: you asked me to stop after task 3. When you say "continue", I go on with task 3 step 2.
+- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 4-16:** not started yet.
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
 - The PC's backup shutdown is still set for 15:30 (`shutdown /a` cancels it).
 
 ## Check by hand
 
 1. **American Dad** (`work\t31\ad\run2\1_edit.xml`): open it in Premiere. The picture should fill the window like the reel's. Then look at Stan at about 0:06-0:07 (the PERSON note) and the first 10 frames (the FLASH note).
-2. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min).
+2. **Placed by sound** (`work\t31\pbs\run_auto\1_edit_placed_by_sound.xml`, American Dad made from the sound alone): import it in Premiere and check that it opens with no error, with the marker on top.
+3. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min).
 
 ## On the laptop
 
@@ -126,4 +143,6 @@ No new packages. Start MovieRecaps again. About 20 seconds after it starts, it r
 2. **Folders your Premiere projects play keep their emoji names**: a rename would make those projects "Media offline", and they are finished.
 3. **The pair check's new stop needs the sound to have nothing** and not one frame found, so no measured true pair can be stopped. One look-alike Family Guy pair still goes on (the safe side).
 4. **A stretched RAW is converted and V1 plays the copy.** Premiere's XML import has no tested way to stretch a clip sideways, so the stretch is done in the copy instead of in the XML.
-5. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.
+5. **The placed-by-sound project is a separate file** (`1_edit_placed_by_sound.xml`), not `1_edit.xml`, and the run still says PICTURE NOT FOUND, so it is never mistaken for a checked edit.
+6. **The cartoon search changes (task 3, fixes 1-4) wait** for a night when the PC is free: they touch every run and need a full check-all to prove nothing gets worse.
+7. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.
