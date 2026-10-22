@@ -107,6 +107,7 @@ class Context:
     fm_pre: FrameMap | None = None            # refine output, as cached (input of S5.4)
     fm: FrameMap | None = None                # after segmentation (saved to <work>/frame_map.npz)
     picture_retry: dict | None = None         # night 8: the picture searched again (picture_retry.retry's result)
+    raw_stretch: Any = None                   # night 15: the RAW's pixels this many times wider (stretch.check), or None
     full_res: dict = field(default_factory=dict)      # fullres.py: the re-check (S5.5) and the verification (S9)
     fast_compare: dict = field(default_factory=dict)  # what the thorough default changed against --fast (S6)
     full_frames: Any = None                   # (competitor, RAW) fullres.FrameStore, decoded once for both
@@ -2184,6 +2185,15 @@ def stage_probe_conform(ctx: Context) -> None:
     work = str(cfg.work)
     ctx.comp_input = probe.probe(cfg.competitor, "competitor", work, decode=True)
     ctx.raw_input = probe.probe(cfg.raw, "raw", work, decode=True)
+    stretched = getattr(ctx, "raw_stretch", None)
+    if stretched is not None:                      # night 15 (stretch.py): S2 converts it as wide as the competitor
+        from . import stretch                      # shows it; the whole analysis and V1 use that copy
+        ctx.raw_input = stretch.apply_to(ctx.raw_input, stretched)
+        log.info("stretch: the RAW is analysed %.3f times as wide (%dx%d) -- the competitor shows it stretched; V1 "
+                 "plays that copy", float(stretched), ctx.raw_input.display_width, ctx.raw_input.display_height)
+        ctx.warn(f"the competitor shows the RAW stretched {float(stretched):.2f} times sideways (a 4:3 picture pulled "
+                 "out to 16:9): the RAW was converted as wide, and V1 plays that copy -- check the framing in Premiere",
+                 analysis=True)
     steady = steady_timing(ctx.raw_input)
     if steady is not None:
         log.info("the RAW's timestamps drift at most %.3f frames off the %s fps grid (under %.1f, no frame dropped or "
@@ -2204,7 +2214,8 @@ def stage_probe_conform(ctx: Context) -> None:
                  f"{fps_str(ctx.raw_input.fps)}", analysis=True)
     ctx.raw_conform = self_cached_stage(ctx, "conform_raw",
                                         _conform_key(ctx, ctx.raw_input,
-                                                     *(["steady timing"] if steady is not None else [])),
+                                                     *(["steady timing"] if steady is not None else []),
+                                                     *([f"stretch {stretched}"] if stretched is not None else [])),
                                         lambda: conform.conform(ctx.raw_input, "raw", cfg, ctx.dlog), ("conform",))
     ctx.comp_conform = self_cached_stage(ctx, "conform_competitor", _conform_key(ctx, ctx.comp_input),
                                          lambda: conform.conform(ctx.comp_input, "competitor", cfg, ctx.dlog),
@@ -4480,7 +4491,9 @@ def run_once(cfg: Config) -> dict:
         with _stage(ctx, "S1 pair check"):        # night 11: a competitor from another RAW stops here, in seconds
             from . import pair_check
             ctx.pair = pair_check.stop_if_wrong_pair(ctx)
-        if not getattr(cfg, "raw_movie", None):  # day 14: a long RAW whose sound was found -- only that piece of it
+            from . import stretch                 # night 15: a competitor that stretched the RAW sideways (4:3 -> 16:9)
+            ctx.raw_stretch = stretch.check(ctx)
+        if not getattr(cfg, "raw_movie", None) and ctx.raw_stretch is None:   # (stretched: V1 plays the whole copy)  # day 14: a long RAW whose sound was found -- only that piece of it
             from . import excerpt
             if not excerpt.applies(cfg, ctx.pair):
                 with _stage(ctx, "S1.5 piece of the movie"):

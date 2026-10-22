@@ -331,6 +331,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-swap", action="store_true",
                    help="never swap --competitor/--raw even if they look reversed")
     p.add_argument("--quick-checks", action="store_true", help=argparse.SUPPRESS)   # check-all: no AE recreation checks
+    p.add_argument("--raw-stretch", default="auto", metavar="auto|off|W:H",
+                   help="night 15: a competitor that shows the RAW stretched sideways (a 4:3 episode pulled out to 16:9) -- auto: found from a few frames where the sound placed it; off: never; W:H (e.g. 4:3): the RAW's pixels that many times wider")
     p.add_argument("--force-inputs", action="store_true",
                    help="skip the wrong-input checks: by default the run stops at once (before converting anything) "
                         "when the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, "
@@ -406,6 +408,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
         cfg.seed = int(args.seed)
     cfg.check_determinism = bool(getattr(args, "check_determinism", False))
     cfg.force_inputs = bool(getattr(args, "force_inputs", False))
+    cfg.raw_stretch = str(getattr(args, "raw_stretch", None) or "auto")
     cfg.quick_checks = bool(getattr(args, "quick_checks", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()

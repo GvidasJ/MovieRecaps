@@ -8,6 +8,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 |---|---|---|---|---|
 | 1 | Emoji in names (Premiere import) | **done** | nothing to do: new folders and files get plain names; old ones were renamed at the start of the app | open the 6 kept folders' projects as before (below) |
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
+| 3 | Cartoons / tilted and zoomed reels | **step 1 done** (the stretch); steps 2-5 not started -- see below | nothing to do: it is found by itself (`--raw-stretch off` / `4:3` to force) | open the American Dad edit in Premiere (below) |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
 
@@ -33,7 +34,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 
 ## Task 2 -- WRONG PAIR on right pairs
 
-I checked every pair you named with the quick check, and also 37 true pairs (every check-all case plus 3 real reels) and 90 crossed pairs (each competitor with other RAWs, the same show first). The results are saved in `work	31\pairs`.
+I checked every pair you named with the quick check, and also 37 true pairs (every check-all case plus 3 real reels) and 90 crossed pairs (each competitor with other RAWs, the same show first). The results are saved in `work\t31\pairs`.
 
 - **Dr. Dolittle 2: the stop was right. The RAW is the wrong film.**
   - The torrent "Dr. Dolittle 2 (2001) [1080p] [BluRay] [5.1] [YTS.GG - YTS.BZ]" contains **Dr. Dolittle (1998)**:
@@ -52,15 +53,77 @@ I checked every pair you named with the quick check, and also 37 true pairs (eve
   - One wrong pair still goes on, which is the safe side: video19's competitor has 3 frames *really found* in S08E11, on a shot that comes back in many episodes. With frames found, the check is not sure.
 - **The Jumanji promo** (Kevin Hart dressed as The Rock is not in the film): still a WRONG PAIR.
 - **Right pairs still go on:** American Dad's tilted reel, Blue Mountain State, The Suite Life.
-- **Test cases:** `tools\match_cuts	ests	est_night15_pairs.py` uses 14 real results as fixtures. On this PC it also checks the real files: wrong FG episode, Dolittle, American Dad.
+- **Test cases:** `tools\match_cuts\tests\test_night15_pairs.py` uses 14 real results as fixtures. On this PC it also checks the real files: wrong FG episode, Dolittle, American Dad.
 - **Tests:** tool 1599 passed, 0 failed. One old test (`test_report`) also failed on yesterday's code: it read the report without UTF-8, so the "—" got garbled. I fixed that test.
+
+## Task 3 -- American Dad and stretched cartoons (step 1 of 5 done)
+
+- **The real cause was not a rotation.** The reel **stretched the 4:3 episode sideways to 16:9**:
+  - a full fit on 13 frames gives width / height **1.32**, with rotation 0.1-0.3°
+  - the picture search fits one zoom for both axes plus a rotation, so it could never line such a frame up. Its best guess was "rotated 5°, scale 0.79", with a score of 0.735 where 0.90 is needed.
+  - Cartoons and old sitcoms are often 4:3, and clip channels often stretch them. That is likely part of "cartoons fail often".
+- **What changed** (`tools\match_cuts\match_cuts\stretch.py`):
+  - **The check:** right after the quick pair check (S1), the tool takes a few frames where the sound placed the scene and fits a full fit with a separate zoom per axis. When 3 or more frames agree on a sideways stretch of 10 % or more, the stretch is used (snapped to 4:3 when it is within 4 % of it).
+  - **What it does then:** the RAW gets that shape before S2. S2 converts it once on the graphics card into a 1920x1080 picture, the whole analysis runs on it, and V1 plays that copy.
+    - The report and the warnings say: "the competitor shows the RAW stretched 1.33 times sideways ... check the framing in Premiere".
+    - With a stretch, no piece of the movie is cut.
+  - **Switch:** `--raw-stretch auto` (default) / `off` / `4:3` to force a value.
+- **American Dad, before -> after:**
+
+  | | before | after |
+  |---|---|---|
+  | where | laptop, old code | this PC, new code |
+  | picture found | 0 % (after 2 h) | **100 %** |
+  | result | PICTURE NOT FOUND, no edit | **1_edit.xml + captions** |
+  | time | 6522 s (109 min) | **858 s (14.3 min)** |
+
+  - The side-by-side `compare.mp4` lines up frame for frame with the reel.
+  - The run says FAIL on two XML notes that you check by hand:
+    - **PERSON:** the live-action face check on a cartoon puts Stan's face at the window's edge, where the reel itself shows him. Day 13 also left cartoon PERSON notes to you.
+    - **FLASH:** 10 frames of another shot at 0:00.
+  - Run folder: `work\t31\ad\run2`.
+- **No false alarms:** all 36 other true pairs (every check-all case plus Blue Mountain State and The Suite Life) say "not stretched" (ratio 0.995-1.003). Competitors sped up to 125 % are not checked (the safe side).
+  - So check-all cannot change: the stretch is off on all its cases, and their conversion keys stay the same.
+- **Not done yet (the rest of task 3)**, left for when you say continue:
+  - 2. the edge (lines) comparison with the burned-in captions masked
+  - 3. accepting lower scores inside the sound's place when neighbouring frames agree
+  - 4. stopping within minutes instead of hours
+  - 5. a "placed by sound" project when the picture is still not found
+
+  The stretch fixes the case that was named, so these are now for other cartoons.
+- **Tests:** tool 1606 passed, 0 failed. 8 new tests (`test_night15_stretch.py`), including the real American Dad files on this PC.
 
 ## Time before -> after
 
+- American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
+- A wrong Family Guy episode: **the whole long search, then NOT IN THIS RAW -> about 5 s at the quick check (WRONG PAIR)**.
+
 ## Still broken
+
+- **Task 3, steps 2-5** (see task 3) and **tasks 4-16** are not started: you asked me to stop after task 3. When you say "continue", I go on with task 3 step 2.
+- 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
+- The PC's backup shutdown is still set for 15:30 (`shutdown /a` cancels it).
 
 ## Check by hand
 
+1. **American Dad** (`work\t31\ad\run2\1_edit.xml`): open it in Premiere. The picture should fill the window like the reel's. Then look at Stan at about 0:06-0:07 (the PERSON note) and the first 10 frames (the FLASH note).
+2. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min).
+
 ## On the laptop
 
+Close MovieRecaps, then in PowerShell:
+
+```
+cd C:\Users\gvida\Desktop\bh\MovieRecaps
+git pull
+```
+
+No new packages. Start MovieRecaps again. About 20 seconds after it starts, it renames the laptop's own emoji project folders (the ones no Premiere project uses), once.
+
 ## What I decided on my own
+
+1. **Apostrophes are dropped from folder names** (`she’d` -> `shed`), the safest reading of "only letters, numbers, spaces and - _ ( )".
+2. **Folders your Premiere projects play keep their emoji names**: a rename would make those projects "Media offline", and they are finished.
+3. **The pair check's new stop needs the sound to have nothing** and not one frame found, so no measured true pair can be stopped. One look-alike Family Guy pair still goes on (the safe side).
+4. **A stretched RAW is converted and V1 plays the copy.** Premiere's XML import has no tested way to stretch a clip sideways, so the stretch is done in the copy instead of in the XML.
+5. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.

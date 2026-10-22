@@ -47,6 +47,9 @@ class Config:
     fps_mode: str = "competitor"           # competitor | source
     force_conform: bool = False            # conform RAW even if AE-safe (testing)
     force_inputs: bool = False             # --force-inputs: no wrong-input stops (inputs_check; nothing found)
+    raw_stretch: str = "auto"              # night 15 --raw-stretch: auto / off / w:h -- the RAW's pixels wider, as a
+    #                                        competitor that stretched a 4:3 picture to 16:9 shows it (stretch.py;
+    #                                        only into the conform key)
     quick_checks: bool = False             # check-all: no After Effects recreation checks (c2-c5, 9.9)
     conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
     ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
@@ -391,7 +394,7 @@ class Config:
         for k in ("competitor", "raw", "out_dir", "work_dir", "deliver_dir", "previous_out_dir", "verbose", "workers",
                   "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
-                  "force_inputs", "quick_checks",
+                  "force_inputs", "quick_checks", "raw_stretch",
                   "ae_time_mode", "ae_slack_tol_frames", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",
