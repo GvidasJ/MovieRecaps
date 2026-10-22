@@ -356,7 +356,7 @@ Run tonight from frozen copies of the code: `work\snap15a` (09:26, with task 3's
 - **Tool: 1665 passed, 0 failed** (74 skipped: they need files that are not on this PC). One test needed the 7 new test cases added to its list (night 6's list of new-style cases).
 - **App: 1208 passed** (1 skipped), plus the real-aria2c torrent test **run alone: passed**. In the whole suite it crashes this afternoon, also with this morning's code (see "Still broken").
 - `.venv\Scripts\python tools\app\setup_app.py`: "done: everything is as the project expects" (exit 0).
-- Ended at about 15:00, C: 54 GB free, D: 2.6 TB free. 25 commits tonight, all pushed to `claude/new-session-ol4era`.
+- Ended at about 15:00, C: 54 GB free, D: 2.6 TB free. 28 commits tonight, all pushed to `claude/new-session-ol4era`.
 
 ## Time before -> after
 
