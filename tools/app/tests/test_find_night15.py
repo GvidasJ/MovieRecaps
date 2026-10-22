@@ -102,7 +102,13 @@ def test_ctrl_f_finds_on_the_page_and_esc_clears(qt):
     page.deleteLater()
 
 
-def test_ctrl_f_on_the_real_window_searches_the_page_shown(qt):
+def test_ctrl_f_on_the_real_window_searches_the_page_shown(qt, tmp_path, monkeypatch):
+    import json
+    f = tmp_path / "settings.json"                     # (as test_chrome_ui's window: nothing of this computer's)
+    f.write_text(json.dumps({"save_to": str(tmp_path / "shared"), "intro": False}), encoding="utf-8")
+    (tmp_path / "shared").mkdir()
+    monkeypatch.setenv("MOVIERECAPS_SETTINGS", str(f))
+    monkeypatch.setenv("MOVIERECAPS_PROJECTS", str(tmp_path / "local"))
     from mr_app.tools import tools
     from mr_app.ui import main_window as MW
     win = MW.MainWindow(tools())
@@ -119,4 +125,6 @@ def test_ctrl_f_on_the_real_window_searches_the_page_shown(qt):
         win.find_bar.close_bar()
         assert not win.find_bar.isVisible()
     finally:
-        win.close()
+        win.hide()
+        win.deleteLater()                                # (its timers go with it: nothing fires in a later test)
+        qt.processEvents()
