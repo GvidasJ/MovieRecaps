@@ -135,7 +135,7 @@ class FindSourcePage(QWidget):
         self.running = False
         self.cancel = threading.Event()
         self.batch = 0
-        self.relay = _Relay()
+        self.relay = _Relay(self)                  # (a child of the page: deleted with it, never left to the GC)
         self.relay.answered.connect(self._answered)
         self.relay.working.connect(self._working)
         self.relay.all_done.connect(self._all_done)
