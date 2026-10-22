@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video24_fixed.prproj (2026-10-22): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video24\\video24_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-21_The Biggest Red Flag of All Time \ud83d\udea9\ud83d\ude2d\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-21_The Biggest Red Flag of All Time \ud83d\udea9\ud83d\ude2d\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 203.870333,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

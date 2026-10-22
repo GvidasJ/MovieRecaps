@@ -1,0 +1,417 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 1063.800 s",
+ "fps": 25.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 1.04,
+   "kind": "raw",
+   "src_in": 30.0,
+   "speed": 1.0
+  },
+  {
+   "start": 1.04,
+   "end": 1.92,
+   "kind": "raw",
+   "src_in": 34.92,
+   "speed": 1.0
+  },
+  {
+   "start": 1.92,
+   "end": 4.2,
+   "kind": "raw",
+   "src_in": 35.92,
+   "speed": 1.0
+  },
+  {
+   "start": 4.2,
+   "end": 5.28,
+   "kind": "raw",
+   "src_in": 40.0,
+   "speed": 1.0
+  },
+  {
+   "start": 5.28,
+   "end": 5.68,
+   "kind": "raw",
+   "src_in": 42.0,
+   "speed": 1.0
+  },
+  {
+   "start": 5.68,
+   "end": 6.8,
+   "kind": "raw",
+   "src_in": 42.4,
+   "speed": 1.0
+  },
+  {
+   "start": 6.8,
+   "end": 7.96,
+   "kind": "raw",
+   "src_in": 54.52,
+   "speed": 1.0
+  },
+  {
+   "start": 7.96,
+   "end": 9.36,
+   "kind": "raw",
+   "src_in": 56.12,
+   "speed": 1.0
+  },
+  {
+   "start": 9.36,
+   "end": 10.88,
+   "kind": "raw",
+   "src_in": 62.8,
+   "speed": 1.0
+  },
+  {
+   "start": 10.88,
+   "end": 12.56,
+   "kind": "raw",
+   "src_in": 66.92,
+   "speed": 1.0
+  },
+  {
+   "start": 12.56,
+   "end": 13.96,
+   "kind": "raw",
+   "src_in": 77.0,
+   "speed": 1.0
+  },
+  {
+   "start": 13.96,
+   "end": 14.96,
+   "kind": "raw",
+   "src_in": 79.2,
+   "speed": 1.0
+  },
+  {
+   "start": 14.96,
+   "end": 15.24,
+   "kind": "raw",
+   "src_in": 83.4,
+   "speed": 1.0
+  },
+  {
+   "start": 15.24,
+   "end": 16.28,
+   "kind": "raw",
+   "src_in": 83.68,
+   "speed": 1.0
+  },
+  {
+   "start": 16.28,
+   "end": 17.64,
+   "kind": "raw",
+   "src_in": 85.6,
+   "speed": 1.0
+  },
+  {
+   "start": 17.64,
+   "end": 18.48,
+   "kind": "raw",
+   "src_in": 86.96,
+   "speed": 1.0
+  },
+  {
+   "start": 18.48,
+   "end": 18.84,
+   "kind": "raw",
+   "src_in": 88.68,
+   "speed": 1.0
+  },
+  {
+   "start": 18.84,
+   "end": 19.4,
+   "kind": "raw",
+   "src_in": 93.28,
+   "speed": 1.0
+  },
+  {
+   "start": 19.4,
+   "end": 20.64,
+   "kind": "raw",
+   "src_in": 94.6,
+   "speed": 1.0
+  },
+  {
+   "start": 20.64,
+   "end": 20.92,
+   "kind": "raw",
+   "src_in": 95.84,
+   "speed": 1.0
+  },
+  {
+   "start": 20.92,
+   "end": 22.68,
+   "kind": "raw",
+   "src_in": 96.12,
+   "speed": 1.0
+  },
+  {
+   "start": 22.68,
+   "end": 24.52,
+   "kind": "raw",
+   "src_in": 98.76,
+   "speed": 1.0
+  },
+  {
+   "start": 24.52,
+   "end": 25.4,
+   "kind": "raw",
+   "src_in": 100.76,
+   "speed": 1.0
+  },
+  {
+   "start": 25.4,
+   "end": 26.76,
+   "kind": "raw",
+   "src_in": 101.64,
+   "speed": 1.0
+  },
+  {
+   "start": 26.76,
+   "end": 27.6,
+   "kind": "raw",
+   "src_in": 103.0,
+   "speed": 1.0
+  },
+  {
+   "start": 27.6,
+   "end": 27.96,
+   "kind": "raw",
+   "src_in": 105.52,
+   "speed": 1.0
+  },
+  {
+   "start": 27.96,
+   "end": 29.04,
+   "kind": "raw",
+   "src_in": 106.2,
+   "speed": 1.0
+  },
+  {
+   "start": 29.04,
+   "end": 31.16,
+   "kind": "raw",
+   "src_in": 114.64,
+   "speed": 1.0
+  },
+  {
+   "start": 31.16,
+   "end": 31.8,
+   "kind": "raw",
+   "src_in": 123.44,
+   "speed": 1.0
+  },
+  {
+   "start": 31.8,
+   "end": 32.52,
+   "kind": "raw",
+   "src_in": 126.8,
+   "speed": 1.0
+  },
+  {
+   "start": 32.52,
+   "end": 34.0,
+   "kind": "raw",
+   "src_in": 128.16,
+   "speed": 1.0
+  },
+  {
+   "start": 34.0,
+   "end": 35.12,
+   "kind": "raw",
+   "src_in": 137.84,
+   "speed": 1.0
+  },
+  {
+   "start": 35.12,
+   "end": 36.0,
+   "kind": "raw",
+   "src_in": 139.8,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.0,
+   "src_out": 31.04,
+   "dx": -357.125,
+   "scale": 121.3922
+  },
+  {
+   "src_in": 34.92,
+   "src_out": 35.8,
+   "dx": -462.125,
+   "scale": 121.3922
+  },
+  {
+   "src_in": 35.92,
+   "src_out": 38.2,
+   "dx": -462.125,
+   "scale": 121.3922
+  },
+  {
+   "src_in": 40.0,
+   "src_out": 41.48,
+   "dx": 489.835,
+   "scale": 121.5246
+  },
+  {
+   "src_in": 42.4,
+   "src_out": 43.52,
+   "dx": -310.872,
+   "scale": 121.4526
+  },
+  {
+   "src_in": 54.52,
+   "src_out": 55.68,
+   "dx": -310.872,
+   "scale": 121.4526
+  },
+  {
+   "src_in": 56.12,
+   "src_out": 57.52,
+   "dx": -310.872,
+   "scale": 121.4526
+  },
+  {
+   "src_in": 62.8,
+   "src_out": 64.32,
+   "dx": -310.872,
+   "scale": 121.4526
+  },
+  {
+   "src_in": 66.92,
+   "src_out": 68.6,
+   "dx": 316.315,
+   "scale": 121.35
+  },
+  {
+   "src_in": 77.0,
+   "src_out": 78.4,
+   "dx": -398.641,
+   "scale": 160.5382
+  },
+  {
+   "src_in": 79.2,
+   "src_out": 80.2,
+   "dx": -235.235,
+   "scale": 121.4176
+  },
+  {
+   "src_in": 83.4,
+   "src_out": 84.72,
+   "dx": -261.114,
+   "scale": 121.4141
+  },
+  {
+   "src_in": 85.6,
+   "src_out": 86.96,
+   "dx": -513.114,
+   "scale": 121.4141
+  },
+  {
+   "src_in": 87.84,
+   "src_out": 89.04,
+   "dx": 163.563,
+   "scale": 121.4141
+  },
+  {
+   "src_in": 93.28,
+   "src_out": 93.84,
+   "dx": -588.673,
+   "scale": 239.5415
+  },
+  {
+   "src_in": 94.6,
+   "src_out": 95.84,
+   "dx": -559.037,
+   "scale": 160.6502
+  },
+  {
+   "src_in": 95.84,
+   "src_out": 97.88,
+   "dx": -1006.876,
+   "scale": 184.656
+  },
+  {
+   "src_in": 98.76,
+   "src_out": 100.6,
+   "dx": -429.236,
+   "scale": 121.3793
+  },
+  {
+   "src_in": 100.76,
+   "src_out": 101.64,
+   "dx": -429.236,
+   "scale": 121.3793
+  },
+  {
+   "src_in": 101.64,
+   "src_out": 103.0,
+   "dx": -380.215,
+   "scale": 121.3418
+  },
+  {
+   "src_in": 103.0,
+   "src_out": 103.84,
+   "dx": -55.215,
+   "scale": 121.3418
+  },
+  {
+   "src_in": 105.52,
+   "src_out": 105.88,
+   "dx": -386.747,
+   "scale": 121.2204
+  },
+  {
+   "src_in": 106.2,
+   "src_out": 107.28,
+   "dx": -554.611,
+   "scale": 127.4977
+  },
+  {
+   "src_in": 114.64,
+   "src_out": 116.44,
+   "dx": -91.16,
+   "scale": 163.4967
+  },
+  {
+   "src_in": 123.12,
+   "src_out": 124.08,
+   "dx": 309.624,
+   "scale": 121.4602
+  },
+  {
+   "src_in": 126.8,
+   "src_out": 127.52,
+   "dx": -423.818,
+   "scale": 160.6893
+  },
+  {
+   "src_in": 128.16,
+   "src_out": 129.64,
+   "dx": -241.283,
+   "scale": 130.4954
+  },
+  {
+   "src_in": 137.84,
+   "src_out": 138.96,
+   "dx": -291.657,
+   "scale": 121.4232
+  },
+  {
+   "src_in": 139.8,
+   "src_out": 140.68,
+   "dx": 575.694,
+   "scale": 157.5917
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

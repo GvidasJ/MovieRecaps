@@ -1,0 +1,124 @@
+{
+ "video": "video23-fixed",
+ "date": "2026-10-22",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video23\\video23_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-21_The Funniest Driving Lesson of All Time \ud83d\ude97\ud83d\ude2d\\edit",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.0,
+   0.292,
+   -0.017,
+   0.025,
+   0.559
+  ],
+  "ends": [
+   0.008,
+   -0.025,
+   0.017,
+   0.025,
+   0.008
+  ],
+  "removed": 1,
+  "added": 0,
+  "inner": [
+   1.877,
+   0.459,
+   0.876,
+   0.584,
+   0.709
+  ],
+  "moved": [
+   -97.0,
+   0.0,
+   0.0,
+   0.0,
+   217.0,
+   -393.0,
+   205.0,
+   205.0,
+   -428.0,
+   154.0,
+   -317.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.997,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 3,
+  "case": 1,
+  "removed": 1,
+  "added": 2,
+  "rewritten": 0,
+  "changes": [
+   {
+    "heard": "letter",
+    "written": "letters",
+    "kind": "words",
+    "before": "shift the",
+    "after": "stand for",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "left",
+    "written": "low",
+    "kind": "words",
+    "before": "drive and",
+    "after": "You're making",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "Oh",
+    "written": "Ohhh",
+    "kind": "words",
+    "before": "technical talk",
+    "after": "I'm sorry",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "Fim",
+    "written": "FIM",
+    "kind": "case",
+    "before": "",
+    "after": "",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

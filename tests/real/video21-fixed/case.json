@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video21_fixed.prproj (2026-10-22): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video21\\video21_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-20_The Funniest Math Class of All Time \ud83d\udcda\ud83d\ude2d\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-20_The Funniest Math Class of All Time \ud83d\udcda\ud83d\ude2d\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 530.238042,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

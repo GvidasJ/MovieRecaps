@@ -16,6 +16,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
 | 12 | Find source (many clips at once) | **done** | Progress > **Find source**: paste the links (one per line) or drop clips, **Find all (N)**; Copy all; Torrent search per row | try it on your next 5 clips |
 | 13 | The 3 suggestions | **1 not possible from the app (why below), 2 done, 3 already so** | open `3_pauses.txt` next to `1_edit.xml` and jump to each timecode | the audio chain: still the preset on A1 |
+| 14 | Learn queue + problems | **done**: 7 learned (new test cases), 6 problems given their status | nothing to do; the S08 still in the 12 Year Old edit by hand | the 12 Year Old S08 at 0:05 |
 | 11 | Ctrl+F search | **done** | **Ctrl+F** on any page; in a torrent's file list type `S09E05` / `9x05` / `ep 5`, then "Tick only these" | try it on a series torrent |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
@@ -241,6 +242,20 @@ These change the picture search itself, so every check-all case would have to be
    - Real: the 12 Year Old project: 1 pause (1.25 s). Blue Mountain State: none.
 3. **Captions timed on the sound 1_edit.xml plays -- already so (since day 13):** the captions are made from the edit at 100 % (every clip at its own speed, as A1 plays it), with its silences, repeats and speech-safe moves cut out the same way as 1_edit.xml. Then the day-13 step moves any caption that runs off the sound onto it. The "28 captions start more than 2 frames from their first word" notes come from the caption rules (shortest length, the competitor's timing), not from the sound used.
 - **Tests:** 4 new (`test_night15_pauses.py`).
+
+## Task 14 -- the learn queue and the problems (done; the 7 new test cases' check-all is running)
+
+- **Learn queue: all 7 open entries learned** (video21-27) and marked done in `learn_queue.md`. Each is a new test case in `tests\real\videoNN-fixed`: your finished edit as the key (captions, cuts and framing), with the channel's frame and watermark the run used (video21-24). The 7 now run in a third check-all stream, so the next nights are measured against your fixes.
+  - What your fixes show, captions only:
+    - **4 words you censor** that the censor list didn't have: `fuc*ity`, `s*ck` (video21), `prostit*tion` (video22), `cond*m` (video24). They are now in `caption_censor.txt` (whole words only: "sucking" stays as you keep it in video6).
+    - Learn also wanted 5 caption-glossary lines: the same 4 words with the `*` dropped ("fuc ity", "prostit tion"), "Oh -> Ohhh" and "Fim -> FIM". **Not taken:** the glossary also goes to the speech recognition as hints, so any new line re-transcribes every video; "Oh -> Ohhh" would change every "Oh"; and the censored words now come from the censor list instead.
+    - Your action texts (`*raises his hand*`, `*police rushes in*` ...) were added to the action examples, as learn does for every fix.
+- **Problems queue: all 6 open entries have their status** in `problems_queue.md`:
+  - **American Dad PICTURE NOT FOUND: fixed** (the stretch, task 3).
+  - **12 Year Old (Benchwarmers), found, not fixed:** S08 (00:00:05:15, 0.6 s) is the competitor holding and zooming on 4 RAW frames (also used in S09-S10). The tool read it as a slow reverse (-0.30 speed), and the XML plays it backwards. **By hand:** put a still of RAW 300.59 s there. The fix is in the segment step, which needs a check-all from scratch, so it waits for a free night.
+  - aqoevqvh: one take in two clips (S01 / S02) with the same framing. Nothing you'd see; join them if you like.
+  - The Funniest Grandma (PERSON): who speaks is unclear there, so nothing moves on its own. Check S12 by hand.
+  - The two Ted 2 stops ("could not decode source frames by PTS"): not captions, cuts or position, so not touched (task 14's scope). Convert that file in the Convert tab and press Try again.
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.

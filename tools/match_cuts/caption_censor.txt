@@ -83,3 +83,10 @@ bitches = bit*hes
 murdered = murde*ed
 crackhead = cra*khead
 crackheads = cra*kheads
+
+# your own forms (night 15): video21 "fuc*ity", "s*ck", video22 "prostit*tion", video24 "cond*m" -- only the words
+# your fixes show ("sucking" stays: video6)
+fuckity = fuc*ity
+suck = s*ck
+prostitution = prostit*tion
+condom = cond*m

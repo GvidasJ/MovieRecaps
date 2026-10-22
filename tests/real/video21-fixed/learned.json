@@ -1,0 +1,151 @@
+{
+ "video": "video21-fixed",
+ "date": "2026-10-22",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video21\\video21_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-20_The Funniest Math Class of All Time \ud83d\udcda\ud83d\ude2d\\edit",
+ "edit": {
+  "clips": 7,
+  "starts": [
+   0.0,
+   -1.627,
+   0.0,
+   0.0,
+   0.083,
+   0.0,
+   -0.0
+  ],
+  "ends": [
+   1.251,
+   0.0,
+   -0.334,
+   0.083,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.334
+  ],
+  "moved": [
+   159.0,
+   159.0,
+   159.0,
+   125.0,
+   73.0,
+   125.0,
+   73.0,
+   73.0,
+   -0.0,
+   601.0,
+   167.0,
+   167.0,
+   155.0,
+   -461.0,
+   120.0,
+   527.0,
+   187.0,
+   -462.0,
+   223.0,
+   223.0,
+   223.0,
+   93.0,
+   156.0,
+   136.0,
+   95.0,
+   154.0,
+   -0.0,
+   146.0,
+   109.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.969,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Funniest Math Class of All Time \ud83d\udcda\ud83d\ude2d",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 3,
+  "case": 0,
+  "removed": 1,
+  "added": 17,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "ass",
+    "written": "as",
+    "kind": "words",
+    "before": "king fat",
+    "after": "Kyle Why",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "fuckity",
+    "written": "fuc ity",
+    "kind": "words",
+    "before": "Fu k",
+    "after": "fu k",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "suck",
+    "written": "s ck",
+    "kind": "words",
+    "before": "like to",
+    "after": "my balls",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}
