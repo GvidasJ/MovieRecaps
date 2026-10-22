@@ -23,10 +23,26 @@ def test_only_the_long_pauses_inside_a_clip_are_listed(tmp_path):
     words = [["late", 2.95, 3.3], ["we", 0.1, 0.4], ["are", 0.45, 0.7], ["here", 1.3, 1.6],   # (any order)
              ["now", 1.75, 1.95], ["so", 2.3, 2.6]]
     found = PL.pauses(words, fps, clips)
-    # are -> here: 0.6 s inside clip 1 (listed); now -> so: 0.35 s (short); so -> late at 2.6-2.95 s: 0.35 s;
-    # here -> now: 0.15 s; a gap holding the cut at frame 48 (2.0 s) is never listed
-    assert [(p["before"], p["after"], p["clip"], p["seconds"]) for p in found] == [("are", "here", 1, 0.6)]
+    # are -> here: 0.6 s inside clip 1; so -> late 0.35 s inside clip 2 (listed); here -> now: 0.15 s (short);
+    # now -> so holds the cut at frame 48 (2.0 s): never listed
+    assert [(p["before"], p["after"], p["clip"], p["seconds"]) for p in found] == [("are", "here", 1, 0.6),
+                                                                                  ("so", "late", 2, 0.35)]
     assert found[0]["tc"] == "00:00:00:17"
+    assert PL.MIN_PAUSE_S == 0.25                     # (task 16: 8 of your 10 Liquid Death cuts; 0.4 s: 5)
+
+
+def test_a_word_timed_into_the_pause_is_trimmed_to_its_sound():
+    import numpy as np
+    sr = PL.SR
+    y = np.zeros(3 * sr, np.float32)
+    for a, b in ((0.2, 0.6), (1.2, 1.6)):                          # "hello" sounds 0.2-0.6 s, "there" 1.2-1.6 s
+        i0, i1 = int(round(a * sr)), int(round(b * sr))
+        y[i0:i1] = 0.5 * np.sin(2 * np.pi * 220 * np.arange(i1 - i0) / sr).astype(np.float32)
+    y += 0.001 * np.random.default_rng(1).standard_normal(len(y)).astype(np.float32)
+    words = [["hello", 0.2, 1.1], ["there", 1.15, 1.6]]             # the recogniser timed "hello" into the pause
+    assert PL.pauses(words, Fraction(24), [(0, 72)]) == []          # by the timings: no pause
+    found = PL.pauses(PL.audible(words, y), Fraction(24), [(0, 72)])
+    assert len(found) == 1 and 0.5 <= found[0]["seconds"] <= 0.65   # by the sound: the 0.6 s pause
 
 
 def test_a_gap_with_a_cut_in_it_is_the_cuts_business(tmp_path):

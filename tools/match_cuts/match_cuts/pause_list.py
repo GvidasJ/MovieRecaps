@@ -4,18 +4,36 @@ longer between two words INSIDE one clip of 1_edit.xml (a gap at a cut is the cu
 words around it -- so you jump to each one and decide. Nothing is cut: no rule predicts which of them you take out
 (day 13: of 38 such pauses you cut 9).
 
-The words are the captions' (``captions.words_final``: the edit's own sound transcribed, its silences cut out -- the
-sound A1 of 1_edit.xml plays), the clips are V1's of 1_edit.xml. In no cached stage: written after the captions."""
+The words are the captions' (``captions.words_final``: the edit's own sound transcribed, its silences cut out), each
+trimmed to its AUDIBLE part on the sound A1 of 1_edit.xml plays (silence.word_cores: a recognised word's timing runs
+on into the pause after it). Night 15, task 16, measured on Liquid Death against your 10 cut pauses: the gaps between
+the words' timings found 0 of them; between their audible parts 8 of 10 at 0.25 s (16 pauses listed), 5 at 0.4 s
+-- so MIN_PAUSE_S is 0.25. Without A1's sound (a file that can not be read) the words' own timings are used. In no
+cached stage: written after S8 speed + frame."""
 from __future__ import annotations
 
+import subprocess
+import urllib.parse
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Sequence
 
-MIN_PAUSE_S = 0.40          # a gap between two words this long or longer is listed
+import numpy as np
+
+MIN_PAUSE_S = 0.25          # a gap between two words' audible parts this long or longer is listed
 EDGE_S = 0.05               # a clip edge this close to the gap counts as a cut in it
 FILE_NAME = "3_pauses.txt"
+SR = 16000                  # A1's sound is read at this rate for the loudness
+
+
+def _rate(el: Any, default: Fraction) -> Fraction:
+    if el is None:
+        return default
+    tb = int(el.findtext("timebase") or 0) or int(round(float(default)))
+    ntsc = (el.findtext("ntsc") or "").strip().upper() == "TRUE"
+    return Fraction(tb * 1000, 1001) if ntsc else Fraction(tb)
 
 
 def sequence_of(xml: Path) -> tuple[Fraction, list[tuple[int, int]]]:
@@ -24,10 +42,7 @@ def sequence_of(xml: Path) -> tuple[Fraction, list[tuple[int, int]]]:
     seq = root.find(".//sequence")
     if seq is None:
         raise ValueError("no sequence")
-    rate = seq.find("rate")
-    tb = int((rate.findtext("timebase") if rate is not None else None) or 30)
-    ntsc = ((rate.findtext("ntsc") if rate is not None else "") or "").strip().upper() == "TRUE"
-    fps = Fraction(tb * 1000, 1001) if ntsc else Fraction(tb)
+    fps = _rate(seq.find("rate"), Fraction(30))
     track = seq.find("./media/video/track")
     clips: list[tuple[int, int]] = []
     for ci in (track.findall("clipitem") if track is not None else []):
@@ -38,6 +53,90 @@ def sequence_of(xml: Path) -> tuple[Fraction, list[tuple[int, int]]]:
         if a >= 0 and b > a:
             clips.append((a, b))
     return fps, sorted(clips)
+
+
+PC_SHARE, PC_LOCAL = "//192.168.101.11/shared/", "D:/Shared/"     # the PC's D:\Shared as the laptop names it
+
+
+def _path_of(u: str) -> Path:
+    p = urllib.parse.urlparse(u)
+    s = urllib.parse.unquote(p.path)
+    if p.netloc and p.netloc.lower() != "localhost":
+        unc = "//" + p.netloc + s
+        if unc.lower().startswith(PC_SHARE) and Path(PC_LOCAL).is_dir():     # on the PC itself: its own disk
+            local = Path(PC_LOCAL + unc[len(PC_SHARE):])
+            if local.exists():
+                return local
+        return Path(unc)
+    return Path(s[1:] if s[:1] == "/" and s[2:3] == ":" else s)
+
+
+def _speed(ci: Any) -> float:
+    """A clip's speed (Time Remap's 'speed' in %; 1.0 without one)."""
+    for par in ci.iter("parameter"):
+        if (par.findtext("parameterid") or "").strip().lower() == "speed":
+            try:
+                return max(1e-3, abs(float(par.findtext("value") or 100.0)) / 100.0)
+            except ValueError:
+                pass
+    return 1.0
+
+
+def a1_sound(xml: Path) -> np.ndarray | None:
+    """The sound A1 of 1_edit.xml plays (mono, SR), on the sequence's clock; None when it can not be read."""
+    from .common import ffmpeg_bin
+    root = ET.parse(xml).getroot()
+    seq = root.find(".//sequence")
+    fps = _rate(seq.find("rate"), Fraction(30))
+    files = {f.get("id"): _path_of(f.findtext("pathurl")) for f in root.iter("file")
+             if f.get("id") and f.findtext("pathurl")}
+    n = int(seq.findtext("duration") or 0)
+    track = seq.find("./media/audio/track")
+    if track is None or n <= 0:
+        return None
+    y = np.zeros(int(n / float(fps) * SR) + SR, np.float32)
+    got = 0
+    for ci in track.findall("clipitem"):
+        try:
+            a, b, i = int(ci.findtext("start")), int(ci.findtext("end")), int(ci.findtext("in"))
+        except (TypeError, ValueError):
+            continue
+        f = ci.find("file")
+        src = files.get(f.get("id")) if f is not None else None
+        if src is None or a < 0 or b <= a or not src.exists():
+            continue
+        k = _speed(ci)
+        dur_seq = (b - a) / float(fps)
+        out = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{i / float(fps):.4f}", "-t", f"{dur_seq * k:.4f}",
+                              "-i", str(src), "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
+                             capture_output=True, timeout=600)
+        seg = np.frombuffer(out.stdout, np.float32)
+        if not len(seg):
+            continue
+        want = int(round(dur_seq * SR))
+        if abs(k - 1.0) > 1e-6 and want > 0:                 # a sped-up clip: its loudness on the sequence's clock
+            seg = np.interp(np.linspace(0, len(seg) - 1, want), np.arange(len(seg)), seg).astype(np.float32)
+        s0 = int(round(a / float(fps) * SR))
+        seg = seg[: max(0, len(y) - s0)]
+        y[s0:s0 + len(seg)] = seg
+        got += 1
+    return y if got else None
+
+
+def audible(words: Sequence[Sequence[Any]], y: np.ndarray | None) -> list[tuple[str, float, float]]:
+    """Each word's audible part on A1's sound (silence.word_cores); the words' own timings without the sound."""
+    ws = sorted(((str(w[0]), float(w[1]), float(w[2])) for w in words if len(w) >= 3), key=lambda w: (w[1], w[2]))
+    if y is None or not len(y) or not ws:
+        return ws
+    from . import silence as SI
+    t, db = SI.loudness(y, SR)
+    lv = SI.levels(db, SI.Settings())
+    out: list[tuple[str, float, float]] = []
+    for w in ws:
+        for a, b in SI.word_cores([SimpleNamespace(text=w[0], start=w[1], end=w[2])], t, db, lv["noise_db"]):
+            if b > a:
+                out.append((w[0], float(a), float(b)))
+    return sorted(out, key=lambda w: (w[1], w[2])) or ws
 
 
 def timecode(seconds: float, fps: Fraction) -> str:
@@ -51,7 +150,8 @@ def timecode(seconds: float, fps: Fraction) -> str:
 
 def pauses(words: Sequence[Sequence[Any]], fps: Fraction, clips: list[tuple[int, int]],
            min_s: float = MIN_PAUSE_S) -> list[dict]:
-    """The gaps of ``min_s`` or longer between two words ([text, start s, end s], sequence seconds) inside one clip."""
+    """The gaps of ``min_s`` or longer between two words ([text, start s, end s], sequence seconds: their audible
+    parts when known) inside one clip."""
     ws = sorted(((str(w[0]), float(w[1]), float(w[2])) for w in words if len(w) >= 3), key=lambda w: (w[1], w[2]))
     edges = sorted({a for a, _b in clips} | {b for _a, b in clips})
     out = []
@@ -83,15 +183,19 @@ def text(found: list[dict], min_s: float = MIN_PAUSE_S) -> str:
 
 
 def write(run_dir: Path, words: Sequence[Sequence[Any]] | None) -> dict:
-    """3_pauses.txt in the run folder (from 1_edit.xml's V1 and the captions' words); never raises."""
+    """3_pauses.txt in the run folder (from 1_edit.xml's V1 and A1 and the captions' words); never raises."""
     try:
         xml = Path(run_dir) / "1_edit.xml"
         if not words or not xml.is_file():
             return {"path": None, "pauses": []}
         fps, clips = sequence_of(xml)
-        found = pauses(words, fps, clips)
+        try:
+            y = a1_sound(xml)
+        except Exception:  # noqa: BLE001 - the words' own timings then
+            y = None
+        found = pauses(audible(words, y), fps, clips)
         p = Path(run_dir) / FILE_NAME
         p.write_text(text(found), encoding="utf-8")
-        return {"path": str(p), "pauses": found}
+        return {"path": str(p), "pauses": found, "audible": y is not None}
     except Exception as e:  # noqa: BLE001 - a list to help you, never a stop
         return {"path": None, "pauses": [], "error": f"{type(e).__name__}: {e}"}

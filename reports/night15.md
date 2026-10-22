@@ -20,6 +20,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 12 | Find source (many clips at once) | **done** | Progress > **Find source**: paste the links (one per line) or drop clips, **Find all (N)**; Copy all; Torrent search per row | try it on your next 5 clips |
 | 13 | The 3 suggestions | **1 not possible from the app (why below), 2 done, 3 already so** | open `3_pauses.txt` next to `1_edit.xml` and jump to each timecode | the audio chain: still the preset on A1 |
 | 14 | Learn queue + problems | **done**: 7 learned (new test cases), 6 problems given their status | nothing to do; the S08 still in the 12 Year Old edit by hand | the 12 Year Old S08 at 0:05 |
+| 16 | Learn by yourself | **1 rule kept so far** (the pause list on the sound: 8 of your 10 Liquid Death cuts, was 0) | `3_pauses.txt` | -- |
 | 11 | Ctrl+F search | **done** | **Ctrl+F** on any page; in a torrent's file list type `S09E05` / `9x05` / `ep 5`, then "Tick only these" | try it on a series torrent |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
@@ -265,9 +266,10 @@ These change the picture search itself, so every check-all case would have to be
    - What it can't: Premiere drops the Hard Limiter and Amplify from an XML. That was proved on night 11: written with Premiere's names or its filter IDs, they come in "not translated".
    - Doing it by itself needs a script running *inside* Premiere. Premiere can't be handed a script from outside (the app only starts it with the file). It needs an installed panel (a CEP extension), and an unsigned one needs a registry switch (`PlayerDebugMode`). I didn't install that on your PC without asking: it changes how Premiere loads add-ons. If you want it, say so and I'll build the panel ("Apply the audio chain to A1").
    - Today: select all A1 clips and drop **MovieRecaps audio chain** (Effects > Presets) on them: Hard Limiter (0 / 0 / 7 ms / 100 ms / 1.00) + Amplify +3.0 dB.
-2. **A list of the pauses to take out -- done:** next to `1_edit.xml` every run now writes **`3_pauses.txt`**: each gap of 0.4 s or more between two words *inside* one clip (a gap at a cut is left out), with its timecode on the sequence, its length and the words around it:
-   `1. 00:00:02:04 - 00:00:03:10  1.25 s  clip 2:  "certificate." ... "He's"`. Nothing is cut: no rule predicts which ones you cut (day 13: of 38 such pauses you cut 9). It follows `--speed` (125 %: the times of the 125 % edit).
-   - Real: the 12 Year Old project: 1 pause (1.25 s). Blue Mountain State: none.
+2. **A list of the pauses to take out -- done:** next to `1_edit.xml` every run now writes **`3_pauses.txt`**: each pause of **0.25 s** or more between two words *inside* one clip (a gap at a cut is left out), with its timecode on the sequence, its length and the words around it:
+   `1. 00:00:02:03 - 00:00:03:10  1.29 s  clip 2:  "certificate." ... "He's"`. Nothing is cut: no rule predicts which ones you cut (day 13: of 38 such pauses you cut 9). It follows `--speed` (125 %: the times of the 125 % edit).
+   - The pauses are measured on the **sound A1 of 1_edit.xml plays**: each recognised word is trimmed to its audible part, because a word's timing runs on into the pause after it. See task 16 for why and how well it works.
+   - Real: the 12 Year Old project: 1 pause (1.29 s). Blue Mountain State: 2. Liquid Death: 10.
 3. **Captions timed on the sound 1_edit.xml plays -- already so (since day 13):** the captions are made from the edit at 100 % (every clip at its own speed, as A1 plays it), with its silences, repeats and speech-safe moves cut out the same way as 1_edit.xml. Then the day-13 step moves any caption that runs off the sound onto it. The "28 captions start more than 2 frames from their first word" notes come from the caption rules (shortest length, the competitor's timing), not from the sound used.
 - **Tests:** 4 new (`test_night15_pauses.py`).
 
@@ -284,6 +286,20 @@ These change the picture search itself, so every check-all case would have to be
   - aqoevqvh: one take in two clips (S01 / S02) with the same framing. Nothing you'd see; join them if you like.
   - The Funniest Grandma (PERSON): who speaks is unclear there, so nothing moves on its own. Check S12 by hand.
   - The two Ted 2 stops ("could not decode source frames by PTS"): not captions, cuts or position, so not touched (task 14's scope). Convert that file in the Convert tab and press Try again.
+## Task 16 -- learned by myself
+
+1. **The pause list now finds the pauses you cut** (measured against your Liquid Death fix, the test case with your own 10 pause cuts inside the tool's clips):
+   - built as first planned (the gaps between the recognised words' timings, 0.4 s or more): it listed 1 pause and **0 of your 10 cuts**. The words' timings run on into the pauses, so most pauses look shorter than they are.
+   - measured on the sound instead (each word trimmed to its audible part on the sound A1 plays, silence.py's own rule):
+
+     | at least | pauses listed | of your 10 cuts |
+     |---|---|---|
+     | 0.15 s | 35 | 9 |
+     | **0.25 s** | **16** | **8** |
+     | 0.30 s | 12 | 6 |
+     | 0.40 s | 9 | 5 |
+   - **Kept:** the sound way at 0.25 s (8 of your 10, a list of about 10-16 for a one-minute edit). It only writes a list, so nothing in any edit changed.
+   - (This PC's own `\\192.168.101.11\Shared` paths are read from `D:\Shared`, so the PC can measure the shared projects too.)
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
