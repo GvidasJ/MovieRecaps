@@ -15,6 +15,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
 | 12 | Find source (many clips at once) | **done** | Progress > **Find source**: paste the links (one per line) or drop clips, **Find all (N)**; Copy all; Torrent search per row | try it on your next 5 clips |
+| 13 | The 3 suggestions | **1 not possible from the app (why below), 2 done, 3 already so** | open `3_pauses.txt` next to `1_edit.xml` and jump to each timecode | the audio chain: still the preset on A1 |
 | 11 | Ctrl+F search | **done** | **Ctrl+F** on any page; in a torrent's file list type `S09E05` / `9x05` / `ep 5`, then "Tick only these" | try it on a series torrent |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
@@ -227,6 +228,19 @@ These change the picture search itself, so every check-all case would have to be
   - From the real Instagram link (not the file): American Dad sure 98 % in 8 s, with no login.
 - **Not used yet:** the burned-in text and the speech. No free service matches them to a title without a login or a key, so they are named in a "Not found" reason instead.
 - **Tests:** 24 new (`test_find_source_night15.py`): the name reading, the 6 answers above as fakes, the history, and the page (7 links: 5 at once at most, the rows, Copy all, back after a restart).
+
+## Task 13 -- the three suggestions you liked
+
+1. **The audio chain on A1 by itself in Premiere -- not possible from the app; the preset stays the one step.**
+   - What 1_edit.xml already carries on every A1 clip: Normalize All Peaks to 0 dB (as the clip's Volume, measured on its own sound), Volume 0 dB, Panner 0.
+   - What it can't: Premiere drops the Hard Limiter and Amplify from an XML. That was proved on night 11: written with Premiere's names or its filter IDs, they come in "not translated".
+   - Doing it by itself needs a script running *inside* Premiere. Premiere can't be handed a script from outside (the app only starts it with the file). It needs an installed panel (a CEP extension), and an unsigned one needs a registry switch (`PlayerDebugMode`). I didn't install that on your PC without asking: it changes how Premiere loads add-ons. If you want it, say so and I'll build the panel ("Apply the audio chain to A1").
+   - Today: select all A1 clips and drop **MovieRecaps audio chain** (Effects > Presets) on them: Hard Limiter (0 / 0 / 7 ms / 100 ms / 1.00) + Amplify +3.0 dB.
+2. **A list of the pauses to take out -- done:** next to `1_edit.xml` every run now writes **`3_pauses.txt`**: each gap of 0.4 s or more between two words *inside* one clip (a gap at a cut is left out), with its timecode on the sequence, its length and the words around it:
+   `1. 00:00:02:04 - 00:00:03:10  1.25 s  clip 2:  "certificate." ... "He's"`. Nothing is cut: no rule predicts which ones you cut (day 13: of 38 such pauses you cut 9). It follows `--speed` (125 %: the times of the 125 % edit).
+   - Real: the 12 Year Old project: 1 pause (1.25 s). Blue Mountain State: none.
+3. **Captions timed on the sound 1_edit.xml plays -- already so (since day 13):** the captions are made from the edit at 100 % (every clip at its own speed, as A1 plays it), with its silences, repeats and speech-safe moves cut out the same way as 1_edit.xml. Then the day-13 step moves any caption that runs off the sound onto it. The "28 captions start more than 2 frames from their first word" notes come from the caption rules (shortest length, the competitor's timing), not from the sound used.
+- **Tests:** 4 new (`test_night15_pauses.py`).
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.

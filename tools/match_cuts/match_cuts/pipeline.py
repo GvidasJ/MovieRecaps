@@ -3881,6 +3881,25 @@ def stage_captions(ctx: Context) -> None:
             ctx.warn(f"no action suggested for the *...* placeholders ({type(e).__name__}: {e}) -- they stay")
 
 
+def write_pause_list(ctx: Context) -> None:
+    """Night 15 (task 13): 3_pauses.txt next to 1_edit.xml -- every pause of pause_list.MIN_PAUSE_S or more between
+    two words inside one of its clips, with its timecode (the captions' words, at the edit's --speed); nothing is cut.
+    In no cached stage; never fails the run."""
+    from . import pause_list
+    caps = ctx.captions if isinstance(getattr(ctx, "captions", None), dict) else {}
+    words = caps.get("words_final") or []
+    k = float(getattr(ctx.cfg, "premiere_speed", 1.0) or 1.0)
+    if words and abs(k - 1.0) > 1e-9:
+        words = [[w[0], float(w[1]) / k, float(w[2]) / k] for w in words]
+    res = pause_list.write(Path(ctx.cfg.deliver_dir), words)
+    if isinstance(getattr(ctx, "finish", None), dict):
+        ctx.finish["pauses"] = {"path": res.get("path"), "n": len(res.get("pauses") or []), "error": res.get("error")}
+    if res.get("path"):
+        found = res.get("pauses") or []
+        log.info("pauses: %d inside the clips (%.2f s or more, %.2f s in all) listed in %s -- nothing cut", len(found),
+                 pause_list.MIN_PAUSE_S, sum(x["seconds"] for x in found), pause_list.FILE_NAME)
+
+
 def post_captions_step(ctx: Context) -> None:
     """Day 13 (post_captions.py, in no cached stage): the pairs kept together joined (caption rule 9, where it is
     safe) and the captions timed on the edit's transcript moved onto the sound 1_edit.xml plays where the two
@@ -4539,6 +4558,7 @@ def run_once(cfg: Config) -> dict:
         if getattr(cfg, "premiere", False):
             with _stage(ctx, "S8 speed + frame"):
                 stage_finish(ctx)
+            write_pause_list(ctx)       # night 15: 3_pauses.txt -- the pauses inside clips you may take out
         with _stage(ctx, "S9 verify"):
             stage_verify(ctx)
         if getattr(cfg, "music_file", "") and getattr(cfg, "premiere", False):
