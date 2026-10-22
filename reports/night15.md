@@ -266,7 +266,7 @@ These change the picture search itself, so every check-all case would have to be
    - What it can't: Premiere drops the Hard Limiter and Amplify from an XML. That was proved on night 11: written with Premiere's names or its filter IDs, they come in "not translated".
    - Doing it by itself needs a script running *inside* Premiere. Premiere can't be handed a script from outside (the app only starts it with the file). It needs an installed panel (a CEP extension), and an unsigned one needs a registry switch (`PlayerDebugMode`). I didn't install that on your PC without asking: it changes how Premiere loads add-ons. If you want it, say so and I'll build the panel ("Apply the audio chain to A1").
    - Today: select all A1 clips and drop **MovieRecaps audio chain** (Effects > Presets) on them: Hard Limiter (0 / 0 / 7 ms / 100 ms / 1.00) + Amplify +3.0 dB.
-2. **A list of the pauses to take out -- done:** next to `1_edit.xml` every run now writes **`3_pauses.txt`**: each pause of **0.25 s** or more between two words *inside* one clip (a gap at a cut is left out), with its timecode on the sequence, its length and the words around it:
+2. **A list of the pauses to take out -- done:** next to `1_edit.xml` every run now writes **`3_pauses.txt`**: each pause of **0.25 s** or more between two words, inside a clip or around one of its cuts ("at the cut, clips 4-5"), with its timecode on the sequence, its length and the words around it:
    `1. 00:00:02:03 - 00:00:03:10  1.29 s  clip 2:  "certificate." ... "He's"`. Nothing is cut: no rule predicts which ones you cut (day 13: of 38 such pauses you cut 9). It follows `--speed` (125 %: the times of the 125 % edit).
    - The pauses are measured on the **sound A1 of 1_edit.xml plays**: each recognised word is trimmed to its audible part, because a word's timing runs on into the pause after it. See task 16 for why and how well it works.
    - Real: the 12 Year Old project: 1 pause (1.29 s). Blue Mountain State: 2. Liquid Death: 10.
@@ -290,15 +290,15 @@ These change the picture search itself, so every check-all case would have to be
 
 1. **The pause list now finds the pauses you cut** (measured against your Liquid Death fix, the test case with your own 10 pause cuts inside the tool's clips):
    - built as first planned (the gaps between the recognised words' timings, 0.4 s or more): it listed 1 pause and **0 of your 10 cuts**. The words' timings run on into the pauses, so most pauses look shorter than they are.
-   - measured on the sound instead (each word trimmed to its audible part on the sound A1 plays, silence.py's own rule):
+   - measured on the sound instead (each word trimmed to its audible part on the sound A1 plays, silence.py's own rule): inside the clips only it found 3 of your 10. **Most of your "pause cuts" are trims of the pause around one of the tool's cuts**, so those are listed too, marked "at the cut, clips 4-5":
 
      | at least | pauses listed | of your 10 cuts |
      |---|---|---|
-     | 0.15 s | 35 | 9 |
+     | 0.15 s | 32 | 9 |
      | **0.25 s** | **16** | **8** |
-     | 0.30 s | 12 | 6 |
+     | 0.30 s | 13 | 6 |
      | 0.40 s | 9 | 5 |
-   - **Kept:** the sound way at 0.25 s (8 of your 10, a list of about 10-16 for a one-minute edit). It only writes a list, so nothing in any edit changed.
+   - **Kept:** the sound way, the pauses around cuts included, at 0.25 s: 8 of your 10, in a list of 16 for this one-minute edit. It only writes a list, so nothing in any edit changed.
    - (This PC's own `\\192.168.101.11\Shared` paths are read from `D:\Shared`, so the PC can measure the shared projects too.)
 ## Time before -> after
 

@@ -1,5 +1,5 @@
 """The pauses you may want to take out (night 15, task 13 -- day 13's suggestion 2): every quiet gap of MIN_PAUSE_S or
-longer between two words INSIDE one clip of 1_edit.xml (a gap at a cut is the cut's business), listed in
+longer between two words in 1_edit.xml -- inside one clip, or around one of its cuts ("at the cut") -- listed in
 ``3_pauses.txt`` next to 1_edit.xml with its place on the sequence (the timecode Premiere shows), its length and the
 words around it -- so you jump to each one and decide. Nothing is cut: no rule predicts which of them you take out
 (day 13: of 38 such pauses you cut 9).
@@ -7,8 +7,9 @@ words around it -- so you jump to each one and decide. Nothing is cut: no rule p
 The words are the captions' (``captions.words_final``: the edit's own sound transcribed, its silences cut out), each
 trimmed to its AUDIBLE part on the sound A1 of 1_edit.xml plays (silence.word_cores: a recognised word's timing runs
 on into the pause after it). Night 15, task 16, measured on Liquid Death against your 10 cut pauses: the gaps between
-the words' timings found 0 of them; between their audible parts 8 of 10 at 0.25 s (16 pauses listed), 5 at 0.4 s
--- so MIN_PAUSE_S is 0.25. Without A1's sound (a file that can not be read) the words' own timings are used. In no
+the words' timings found 0 of them; between their audible parts, inside the clips only, 3; with the pauses around the
+cuts too (most of yours are trims at the tool's cuts) 8 of 10 at 0.25 s (16 listed), 5 at 0.4 s -- so the cuts' pauses
+are listed and MIN_PAUSE_S is 0.25. Without A1's sound (a file that can not be read) the words' own timings are used. In no
 cached stage: written after S8 speed + frame."""
 from __future__ import annotations
 
@@ -159,23 +160,26 @@ def pauses(words: Sequence[Sequence[Any]], fps: Fraction, clips: list[tuple[int,
         if s1 - e0 < min_s:
             continue
         lo, hi = (e0 - EDGE_S) * float(fps), (s1 + EDGE_S) * float(fps)
-        if any(lo <= e <= hi for e in edges):
-            continue                                    # a cut in the gap: not a pause inside a take
+        at_cut = any(lo <= e <= hi for e in edges)      # a cut in the gap: the pause around a cut (you trim those too)
         clip = next((k for k, (a, b) in enumerate(clips, 1) if a <= e0 * float(fps) < b), None)
-        if clip is None:
+        nxt = next((k for k, (a, b) in enumerate(clips, 1) if a <= s1 * float(fps) < b), None)
+        if clip is None and nxt is None:
             continue
         out.append({"start": round(e0, 3), "end": round(s1, 3), "seconds": round(s1 - e0, 2), "before": t0,
-                    "after": t1, "clip": clip, "tc": timecode(e0, fps), "tc_end": timecode(s1, fps)})
+                    "after": t1, "clip": clip or nxt, "next_clip": nxt, "at_cut": at_cut,
+                    "tc": timecode(e0, fps), "tc_end": timecode(s1, fps)})
     return out
 
 
 def text(found: list[dict], min_s: float = MIN_PAUSE_S) -> str:
-    lines = [f"Pauses of {min_s:.2f} s or more inside a clip of 1_edit.xml (between two words) -- each one you may "
-             "want to take out by hand; nothing was cut.", ""]
+    lines = [f"Pauses of {min_s:.2f} s or more between two words in 1_edit.xml -- inside a clip, or around a cut (you "
+             "trim those too) -- each one you may want to take out by hand; nothing was cut.", ""]
     if not found:
         lines.append("None.")
     for k, p in enumerate(found, 1):
-        lines.append(f"{k:2d}. {p['tc']} - {p['tc_end']}  {p['seconds']:.2f} s  clip {p['clip']}:  "
+        where = (f"at the cut, clips {p['clip']}-{p['next_clip']}" if p.get("at_cut") and p.get("next_clip") and
+                 p.get("next_clip") != p.get("clip") else ("at a cut" if p.get("at_cut") else f"clip {p['clip']}"))
+        lines.append(f"{k:2d}. {p['tc']} - {p['tc_end']}  {p['seconds']:.2f} s  {where}:  "
                      f"\"{p['before']}\" ... \"{p['after']}\"")
     total = sum(p["seconds"] for p in found)
     lines += ["", f"{len(found)} pause(s), {total:.2f} s in all."]
