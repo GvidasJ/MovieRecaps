@@ -339,6 +339,7 @@ All four changes are only in the "search the picture again" path, which runs onl
 4. **Pause / Resume:** pause one long run in the queue, close the app, open it, press Resume.
 5. **A zip:** open `D:\Shared\Projects\<a project>\<name>.zip` and its `HOW TO OPEN.txt` before you send one. **The renders:** `D:\Shared\renders\2026-10-22\` and `Documents\renders\` (9 moved; `renders\moved.log` says from where).
 6. **`3_pauses.txt`** next to your next edit's `1_edit.xml`: are the pauses it lists the ones you'd cut?
+7. **video27 (blackads.prproj, Extras):** your captions there are on V5 with the track's output switched off (the eye closed), so learn could not read them (89 text graphics). Turn V5 on, save, and learn it again: Learn tab, or `python -m match_cuts learn finishedideo27ideo27_fixed.prproj --run <its run> --name video27-fixed`.
 
 ## On the laptop
 

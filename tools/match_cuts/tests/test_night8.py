@@ -121,11 +121,13 @@ def test_the_best_attempt_is_used_and_the_run_keeps_its_own_settings(monkeypatch
                           fm_pre=fm0, raw_proxy="raw", anchors=[], index=None, keys={"frame_map": "k0"},
                           hints=_hints(40, 40), dlog=SimpleNamespace(record=lambda *a, **k: None),
                           raw_fps=Fraction(24), raw_info=SimpleNamespace(nb_frames=10000, duration=400.0))
-    shares = {"the biggest moving area": 30, "the whole frame": 70, "a denser search with a wider zoom range": 50}
+    shares = {"the biggest moving area": 30, "the whole frame": 70, "comparing lines and shapes (edges)": 40,
+              "a denser search with a wider zoom range": 50}
     monkeypatch.setattr(PRT, "layout_boxes", lambda c: [("the biggest moving area", (0, 0, 9, 9)),
                                                         ("the whole frame", (0, 0, 36, 64))])
     monkeypatch.setattr(PRT, "forced_layout", lambda c, name, e: (f"layout:{name}", f"ov:{name}"))
     monkeypatch.setattr(PRT, "dense_cfg", lambda cfg: SimpleNamespace(name="dense"))
+    monkeypatch.setattr(PRT, "edge_cfg", lambda cfg: SimpleNamespace(name="run"))
     monkeypatch.setattr(PRT, "windowed_proxy", lambda raw, wins: ("view", tuple(wins)))
 
     def fake_attempt(c, name, lay, ov, cfg, base_raw, index_raw=None, extra=()):
@@ -138,6 +140,7 @@ def test_the_best_attempt_is_used_and_the_run_keeps_its_own_settings(monkeypatch
     res = PRT.retry(ctx, "base")
     assert res["used"] == "the whole frame" and res["share"] == pytest.approx(0.7)
     assert [n for n, _ in res["attempts"]] == ["the biggest moving area", "the whole frame",
+                                               "comparing lines and shapes (edges)",
                                                "a denser search with a wider zoom range"]
     assert ctx.layout == "layout:the whole frame" and ctx.keys["frame_map"] == "k:the whole frame"
     assert PRT.matched_share(ctx.fm_pre) == pytest.approx(0.7) and ctx.cfg.name == "run"

@@ -14,6 +14,18 @@ box re-measurement against the RAW when it finds something, cached under its own
    frame indexed where the competitor's sound was found in the RAW (with a margin), DENSE_FEATURES keypoints per frame
    instead of 500 (a small or heavily zoomed picture keeps enough of them), twice the candidates per frame.
 
+Night 15 (cartoons, the laptop's American Dad case: 2 hours of retries, then PICTURE NOT FOUND):
+
+* before the dense search, **comparing lines and shapes (edges)**: the best layout searched again with half of each
+  picture score from the edges (grad_weight EDGE_WEIGHT) -- a cartoon's flat colours change with the copy's grading,
+  its outlines do not;
+* after it, when still under PICTURE_RETRY_BELOW and TRUST_SOUND is on (it is OFF: see TRUST_SOUND),
+  **trusting the sound**: the dense search on the RAW where the sound
+  was found with picture scores from TRUST_MIN accepted, every match then kept only when it agrees with the sound
+  (trust_filter: within TRUST_SLACK_S of the RAW moment the sound puts it at, in forward runs of TRUST_RUN+ frames);
+  a run that uses it says so (pipeline: "placed with lower picture scores where the sound agreed -- check");
+* **fail fast**: no new attempt starts after RETRY_BUDGET_S of retries (the skipped ones are named in the log).
+
 Every search also tries the mirrored (left-right flipped) picture: visual_match checks the flip hypothesis of every
 candidate (the mirrored frame's keypoints vote too), so a mirrored competitor needs no pass of its own.
 
@@ -44,6 +56,16 @@ MOVING_SAMPLES = 80         # competitor frames sampled for the moving area
 DENSE_FEATURES = 2000       # SIFT keypoints per frame in the dense search (the default 500)
 WINDOW_PAD_S = 4.0          # RAW seconds indexed before and after each RAW moment the competitor's sound was found at
 REFINE_MIN = 0.02           # an attempt matching at least this share gets the box re-measurement against the RAW
+# night 15 (task 3, cartoons): three more attempts, only here -- where the sound is found and the picture is not
+EDGE_WEIGHT = 0.5           # "lines and shapes": half of each picture score from the edges (gradient magnitude) --
+                            # a cartoon's flat colours change with the copy's grading, its outlines do not
+TRUST_SOUND = False         # OFF: measured on American Dad (night 15) the frames it keeps sit where the sound says but
+                            # not on the right frame (median 1.5 frames off, up to 37: a distorted picture scores ~0.72
+                            # on every neighbouring frame) -- 1_edit_placed_by_sound.xml is the honest output there
+TRUST_MIN = 0.65            # "trusting the sound": inside the place the sound found, a picture score this high counts
+TRUST_RUN = 5               # ... for runs of at least this many neighbouring frames in the order and timing ...
+TRUST_SLACK_S = 1.5         # ... each within this of the RAW moment the sound puts it at
+RETRY_BUDGET_S = 600.0      # fail fast: no new attempt starts after the retries took this long (the laptop: 2 hours)
 
 NOT_FOUND_HEAD = ("PICTURE NOT FOUND (sound found) -- the RAW may be a different version (for example credits squeezed "
                   "at the end), mirrored, or heavily zoomed")
@@ -195,6 +217,66 @@ def dense_cfg(cfg: Any) -> Any:
     return c
 
 
+def edge_cfg(cfg: Any) -> Any:
+    """The settings of the "lines and shapes" attempt (night 15): each picture score half from the edges."""
+    c = copy.deepcopy(cfg)
+    c.grad_weight = max(float(cfg.grad_weight), EDGE_WEIGHT)
+    return c
+
+
+def trust_cfg(cfg: Any) -> Any:
+    """The settings of the "trusting the sound" attempt (night 15): the dense search's, with a picture score of
+    TRUST_MIN accepted (anchors and matches) -- only ever run on the RAW where the sound was found, and every match
+    checked against the sound afterwards (trust_filter)."""
+    c = dense_cfg(cfg)
+    c.match_thresh = TRUST_MIN
+    c.anchor_zncc_slack = 0.0
+    c.none_thresh = min(float(cfg.none_thresh), TRUST_MIN - 0.05)
+    return c
+
+
+def sound_raw_times(ctx: Any, n: int) -> np.ndarray:
+    """For each competitor frame, the RAW second its sound puts it at (the nearest confident sound window's offset;
+    NaN without one within two windows)."""
+    h = ctx.hints
+    conf = h.confident(ctx.cfg.audio_min_conf)
+    ct, rt = np.asarray(h.comp_t, np.float64)[conf], np.asarray(h.raw_t, np.float64)[conf]
+    out = np.full(n, np.nan)
+    if not ct.size:
+        return out
+    tc = np.arange(n, dtype=np.float64) / float(ctx.comp_fps)
+    i = np.abs(tc[:, None] - ct[None, :]).argmin(axis=1)
+    near = np.abs(tc - ct[i]) <= 2.0 * float(getattr(h, "window", 1.0)) + 1e-9
+    out[near] = tc[near] + (rt[i] - ct[i])[near]
+    return out
+
+
+def trust_filter(ctx: Any, fm: Any) -> int:
+    """The matches of the "trusting the sound" attempt kept only where the picture agrees with the sound: the RAW
+    frame within TRUST_SLACK_S of the sound's moment, in runs of TRUST_RUN or more neighbouring frames whose RAW frames
+    go forward (order and timing); every other match becomes UNRESOLVED. Returns the matches kept."""
+    st = np.asarray(fm.status).copy()
+    raw = np.asarray(fm.raw, np.float64)
+    want = sound_raw_times(ctx, int(fm.n))
+    ok = (st == Status.MATCH) & (raw >= 0) & np.isfinite(want) & \
+        (np.abs(raw / float(ctx.raw_fps) - want) <= TRUST_SLACK_S)
+    keep = np.zeros_like(ok)
+    k, n = 0, len(ok)
+    while k < n:
+        if not ok[k]:
+            k += 1
+            continue
+        e = k
+        while e + 1 < n and ok[e + 1] and raw[e + 1] >= raw[e] and raw[e + 1] - raw[e] <= 4.0:
+            e += 1
+        if e - k + 1 >= TRUST_RUN:
+            keep[k:e + 1] = True
+        k = e + 1
+    st[(st == Status.MATCH) & ~keep] = Status.UNRESOLVED
+    fm.status = st
+    return int(keep.sum())
+
+
 _STATE = ("cfg", "layout", "overlays", "fm_pre", "raw_proxy", "anchors", "index")
 
 
@@ -246,10 +328,25 @@ def retry(ctx: Any, base_raw: Any) -> dict | None:
                 "sound is there -- searching the picture again (the layout measured again: the biggest moving area, "
                 "the whole frame; a denser search with a wider zoom range; every search also tries the mirrored "
                 "picture)", 100 * pic, 100 * snd)
+    import time
+    t0 = time.monotonic()
+    skipped: list[str] = []
+
+    def late(name: str) -> bool:
+        """Fail fast (night 15): no new attempt after RETRY_BUDGET_S."""
+        if time.monotonic() - t0 < RETRY_BUDGET_S:
+            return False
+        skipped.append(name)
+        log.info("picture search again -- %s not tried: the retries took %.0f min already", name,
+                 (time.monotonic() - t0) / 60.0)
+        return True
+
     first = {"name": "the first search", "share": pic, "state": _state(ctx)}
     tries: list[dict] = []
     best = first
     for name, edges in layout_boxes(ctx):
+        if late(name):
+            continue
         try:
             lay, ov = forced_layout(ctx, name, edges)
             r = attempt(ctx, name, lay, ov, ctx.cfg, base_raw)
@@ -261,26 +358,59 @@ def retry(ctx: Any, base_raw: Any) -> dict | None:
             best = r
         if best["share"] >= ENOUGH:
             break
-    if best["share"] < ENOUGH:
-        wins = sound_windows(ctx)
-        if wins:
-            try:
-                st = best["state"]
-                view = windowed_proxy(base_raw, wins)
-                r = attempt(ctx, "a denser search with a wider zoom range", st["layout"], copy.deepcopy(st["overlays"]),
-                            dense_cfg(ctx.cfg), base_raw, index_raw=view,
-                            extra=("windows", [list(w) for w in wins], "from", best["name"]))
-                tries.append(r)
-                if r["share"] > best["share"] + 1e-9:
-                    best = r
-            except Exception as e:  # noqa: BLE001 - as above
-                log.warning("picture search again -- the denser search failed: %s: %s", type(e).__name__, e)
+    edge_name = "comparing lines and shapes (edges)"
+    if best["share"] < ENOUGH and not late(edge_name):         # night 15: cartoons -- the outlines, not the colours
+        try:
+            st = best["state"]
+            r = attempt(ctx, edge_name, st["layout"], copy.deepcopy(st["overlays"]), edge_cfg(ctx.cfg), base_raw,
+                        extra=("grad_weight", EDGE_WEIGHT, "from", best["name"]))
+            tries.append(r)
+            if r["share"] > best["share"] + 1e-9:
+                best = r
+        except Exception as e:  # noqa: BLE001 - as above
+            log.warning("picture search again -- %s failed: %s: %s", edge_name, type(e).__name__, e)
+    wins = sound_windows(ctx)
+    dense_name = "a denser search with a wider zoom range"
+    if best["share"] < ENOUGH and wins and not late(dense_name):
+        try:
+            st = best["state"]
+            view = windowed_proxy(base_raw, wins)
+            r = attempt(ctx, dense_name, st["layout"], copy.deepcopy(st["overlays"]),
+                        dense_cfg(ctx.cfg), base_raw, index_raw=view,
+                        extra=("windows", [list(w) for w in wins], "from", best["name"]))
+            tries.append(r)
+            if r["share"] > best["share"] + 1e-9:
+                best = r
+        except Exception as e:  # noqa: BLE001 - as above
+            log.warning("picture search again -- the denser search failed: %s: %s", type(e).__name__, e)
+    trust_name = "trusting the sound (lower picture scores where the sound found it)"
+    if TRUST_SOUND and best["share"] < PICTURE_RETRY_BELOW and wins and not late(trust_name):     # night 15: the last try
+        try:
+            st = best["state"]
+            view = windowed_proxy(base_raw, wins)
+            r = attempt(ctx, trust_name, st["layout"], copy.deepcopy(st["overlays"]), trust_cfg(ctx.cfg), base_raw,
+                        index_raw=view, extra=("windows", [list(w) for w in wins], "trust", TRUST_MIN, TRUST_RUN,
+                                               TRUST_SLACK_S, "from", best["name"]))
+            fm = r["state"]["fm_pre"]
+            if fm is not None:
+                fm = r["state"]["fm_pre"] = fm.copy()
+                kept = trust_filter(ctx, fm)
+                r["share"] = matched_share(fm)
+                log.info("picture search again -- %s: %d frames agree with the sound in order and timing (%.0f %%)",
+                         trust_name, kept, 100 * r["share"])
+                r["trusted"] = True
+            tries.append(r)
+            if r["share"] > best["share"] + 1e-9:
+                best = r
+        except Exception as e:  # noqa: BLE001 - as above
+            log.warning("picture search again -- %s failed: %s: %s", trust_name, type(e).__name__, e)
     if best is not first:
         cfg = ctx.cfg
         _restore(ctx, best["state"])
         ctx.cfg = cfg                                  # the run's own settings for everything after the search
     out = {"picture": pic, "sound": snd, "attempts": [(r["name"], round(r["share"], 4)) for r in tries],
-           "used": best["name"], "share": best["share"]}
+           "used": best["name"], "share": best["share"], "trusted": bool(best.get("trusted")),
+           "skipped": skipped, "seconds": round(time.monotonic() - t0, 1)}
     ctx.dlog.record("picture_retry", "result", **out)
     log.info("picture search again: %s -- %.0f %% of the competitor's frames found (the first search: %.0f %%)",
              "used " + best["name"] if best is not first else "nothing found more than the first search",

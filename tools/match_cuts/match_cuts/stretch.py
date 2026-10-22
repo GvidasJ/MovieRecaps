@@ -32,7 +32,8 @@ MIN_FRAMES = 3              # frames that must agree on the stretch
 MIN_INLIERS = 20            # RANSAC inliers of a frame's affine fit
 AGREE = 0.06                # the frames' width / height ratios within this (relative) of their median
 MIN_STRETCH = 0.10          # a stretch under 10 % is no stretch (zoom noise, letterboxing rounding)
-MAX_ROT_DEG = 3.0           # a real rotation is the similarity search's own business
+MAX_ROT_DEG = 8.0           # night 15 (task 3 fix 2): a reel turned up to 8 degrees is measured too (the stretch is the
+                            # column lengths of the fit -- a turn does not change them); more is not a fit
 USUAL = (Fraction(4, 3), Fraction(3, 4))   # 4:3 pulled out to 16:9, and 16:9 squeezed into 4:3
 SNAP = 0.04                 # a measured stretch within 4 % of a usual one is that one
 MAX_FRAMES = 8              # competitor frames tried at most

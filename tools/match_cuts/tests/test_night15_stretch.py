@@ -76,15 +76,17 @@ def test_places_are_the_middles_of_the_found_pieces_at_the_normal_speed():
     assert ST.places(sped) == [] and ST.places(None) == []              # sped-up: not checked (the safe side)
 
 
-@pytest.mark.parametrize("sx, want", [(1.333, Fraction(4, 3)), (1.0, None)])
-def test_detect_on_frames(monkeypatch, sx, want):
-    """detect() with the frames read from memory: a 4:3 picture stretched to 16:9 gives 4/3; a plain zoom nothing."""
+@pytest.mark.parametrize("sx, rot, want", [(1.333, 0.0, Fraction(4, 3)), (1.0, 0.0, None),
+                                           (1.333, 5.0, Fraction(4, 3)), (1.0, 5.0, None), (1.333, 12.0, None)])
+def test_detect_on_frames(monkeypatch, sx, rot, want):
+    """detect() with the frames read from memory: a 4:3 picture stretched to 16:9 gives 4/3; a plain zoom nothing.
+    Night 15 (task 3 fix 2): the same when the reel is also turned 5 degrees (up to MAX_ROT_DEG); turned 12: no fit."""
     scenes = {t: _scene(seed=t) for t in range(6)}
 
     def frame(path, t, w):
         k = int(round(t)) % 6 if path == "raw" else int(round(t - 0.0)) % 6
         img = scenes[k]
-        return _stretched(img, 0.9 * sx, 0.9) if path == "comp" else img
+        return _stretched(img, 0.9 * sx, 0.9, rot) if path == "comp" else img
     monkeypatch.setattr(ST, "_frame", frame)
     monkeypatch.setattr(ST, "RAW_NEIGHBOURS", (0.0,))
     pair = _pair([(float(k) - 1.5, float(k) - 1.5) for k in range(6)])

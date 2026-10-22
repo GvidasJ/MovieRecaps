@@ -2483,6 +2483,11 @@ def stop_if_picture_not_found(ctx: Context) -> None:
                      f"{100 * res['sound']:.0f} % of its sound is there, even after searching again: most of the edit "
                      "is missing -- the RAW may be a different version (for example credits squeezed at the end), "
                      "mirrored, or heavily zoomed", analysis=True)
+        elif res.get("trusted"):
+            ctx.warn(f"the competitor's picture was placed with lower picture scores where the sound agreed "
+                     f"({100 * res['share']:.0f} % of its frames, each within {PRT.TRUST_SLACK_S:g} s of where the "
+                     f"sound put it; the first search {100 * res['picture']:.0f} %) -- check every cut in Premiere",
+                     analysis=True)
         elif res.get("used") != "the first search":
             ctx.warn(f"the competitor's picture was found only after searching it again ({res['used']}: "
                      f"{100 * res['share']:.0f} % of its frames; the first search {100 * res['picture']:.0f} %, its "
