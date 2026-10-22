@@ -10,7 +10,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
 | 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
 | 4 | Honest progress | **done** | nothing to do: the queue line shows "about 25-35 min left", the % never goes back, and a stuck run says so | watch one long run in the queue |
-| 5 | SceneProof template + its music | **done** (the Premiere import check waits for an idle PC) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | import `work\t31\sp\run_ad\1_edit.xml` and compare it with song.prproj |
+| 5 | SceneProof template + its music | **done** (imported in Premiere 2024: no error, the song on A2 at +5 / -1 dB) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | listen to `work\t31\sp\prem_test\edit\edit_edit.prproj` once |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
 
@@ -120,7 +120,7 @@ These change the picture search itself, so every check-all case would have to be
   - American Dad (this PC): the old bar showed 16 % then 63 % within a minute, while its time went 41 -> 94 -> 29 -> 4 min, and it went backwards once. The new bar went 12 % -> 23 % -> 41 % -> 69 % (35-50 -> 20-30 -> 10-15 -> 3-5 min) and never back.
   - laptop009 (check-all): the old bar went backwards twice (93 % -> 88 %). The new one never did.
 - **Tests:** app 1152 passed. 9 new tests (`test_progress_night15.py`). One old test (`test_locks` heartbeat) failed once on a Windows file-access clash and passes when run again (17 of 17). It is not related to this change.
-## Task 5 -- SceneProof template + its music (done; Premiere check still to do)
+## Task 5 -- SceneProof template + its music (done, checked in Premiere)
 
 - **What I found in your projects:**
   - `kid.png` (V4 in song.prproj) is the per-video card: the white card, the round photo, "SceneProof", the blue badge, the grey @SceneProof, the bold "The fact that..." text, and a transparent video window. The window is exactly where your other channels have theirs.
@@ -142,7 +142,11 @@ These change the picture search itself, so every check-all case would have to be
   - V1 RAW (18 clips), V2 the SceneProof card, V3 the watermark
   - A1 the RAW's sound (18 clips, unchanged), **A2 the song: 0.00-12.30 s at +5 dB, 12.30-25.15 s at -1 dB** (the edit is 25.15 s)
   - (The run's FAIL is the American Dad notes from task 3, not the music.)
-- **Not checked yet: the import in Premiere.** You were using the PC the whole time, so I didn't open Premiere. I will import it when the PC is idle and compare it with song.prproj (the look, and the music on A2 with its two volumes).
+- **Imported in Premiere 2024 (07:41, the PC free):** the app's Open in Premiere made `work\t31\sp\prem_test\edit\edit_edit.prproj` and imported the edit with **no error and no message**. Saved and read back:
+  - V1 the RAW (18 clips), V2 the SceneProof card, V3 the watermark; A1 the RAW's sound (18 clips, its levels as before)
+  - **A2: "Mother Sea" 0.00-12.30 s, Volume +5.0 dB, then 12.30-25.15 s, Volume -1.0 dB** -- the same two levels as song.prproj (Premiere stores them as 1.778 x and 0.891 x)
+  - The song starts 0.50 s into the file, not 0.52 s, and the cut is at 12.30 s, not 12.32 s: an XML places clips on whole frames (this edit is 23.976 fps, one frame = 0.042 s). 20 ms is not audible.
+- Also imported: the placed-by-sound American Dad (`work\t31\pbs\run_auto\1_edit_placed_by_sound.xml`): no error, V1 5 clips + V2 the frame, A1 5 clips, the marker in it.
 - **Tests:** tool 1649 passed, 0 failed; app 1159 passed (the upload check now also lists @SceneProof's public Shorts tab, with no login). 12 new tests (`test_sceneproof_night15.py`, `test_night15_music.py`).
 ## Time before -> after
 
@@ -151,14 +155,14 @@ These change the picture search itself, so every check-all case would have to be
 
 ## Still broken
 
-- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 6-16:** not started yet. **Task 5:** the Premiere import check is still to do.
+- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 6-16:** not started yet. **Task 9b** (refine faster, the Benchwarmers case): your message names it, but the saved `docs\night15_prompt.md` has no Task 9b yet (the Task 4 console part is there). I do it after Task 9 from your message's words.
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
 - The PC's backup shutdown is still set for 15:30 (`shutdown /a` cancels it).
 
 ## Check by hand
 
 1. **American Dad** (`work\t31\ad\run2\1_edit.xml`): open it in Premiere. The picture should fill the window like the reel's. Then look at Stan at about 0:06-0:07 (the PERSON note) and the first 10 frames (the FLASH note).
-2. **Placed by sound** (`work\t31\pbs\run_auto\1_edit_placed_by_sound.xml`, American Dad made from the sound alone): import it in Premiere and check that it opens with no error, with the marker on top.
+2. **Placed by sound** (`work\t31\pbs\run_auto\run_auto_edit.prproj`, American Dad made from the sound alone; it imported with no error): look at the framing.
 3. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min).
 
 ## On the laptop
