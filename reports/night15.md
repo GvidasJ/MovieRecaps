@@ -10,6 +10,7 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
 | 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
 | 4 | Honest progress | **done** | nothing to do: the queue line shows "about 25-35 min left", the % never goes back, and a stuck run says so | watch one long run in the queue |
+| 5 | SceneProof template + its music | **done** (the Premiere import check waits for an idle PC) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | import `work\t31\sp\run_ad\1_edit.xml` and compare it with song.prproj |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
 
@@ -119,6 +120,30 @@ These change the picture search itself, so every check-all case would have to be
   - American Dad (this PC): the old bar showed 16 % then 63 % within a minute, while its time went 41 -> 94 -> 29 -> 4 min, and it went backwards once. The new bar went 12 % -> 23 % -> 41 % -> 69 % (35-50 -> 20-30 -> 10-15 -> 3-5 min) and never back.
   - laptop009 (check-all): the old bar went backwards twice (93 % -> 88 %). The new one never did.
 - **Tests:** app 1152 passed. 9 new tests (`test_progress_night15.py`). One old test (`test_locks` heartbeat) failed once on a Windows file-access clash and passes when run again (17 of 17). It is not related to this change.
+## Task 5 -- SceneProof template + its music (done; Premiere check still to do)
+
+- **What I found in your projects:**
+  - `kid.png` (V4 in song.prproj) is the per-video card: the white card, the round photo, "SceneProof", the blue badge, the grey @SceneProof, the bold "The fact that..." text, and a transparent video window. The window is exactly where your other channels have theirs.
+  - `ScenmeProof_00000.png` (V3) is the faint white "SCENEPROOF" word low in the picture, so it is the channel's **watermark**.
+  - The V2 Color Matte pieces are short bits you placed by hand at a few moments. I can't tell what rule places them, so they are not made (see the decisions below).
+  - The music: two clips of "Mother Sea" on A2, from 0.52 s into the song, cut at 12.32 s, Clip Gain 1.778 (+5 dB) then 0.891 (-1 dB).
+- **What changed:**
+  - **A new channel, `assets\channels\SceneProof`**: `template.png` (the card without a headline, made from your kid.png), `example.png` (your kid.png, the "default template"), `watermark.png` (= ScenmeProof_00000.png), the song, and `channel.json` with the music settings.
+    - A channel can now be a `template.png` instead of a `template.psd`. A new PNG channel needs no code change either.
+  - **Choosing it:** SceneProof appears with the other channels in New video (a blue dot) and in Match cuts (Template). The channel you used last stays the default, so nothing changes until you pick SceneProof. Settings has no template choice today, so I didn't add one there (the choice is per video, as for your other channels).
+  - **The headline:** the same font, size and place as your kid.png (checked: same rows and size, same letters). Only the line break can differ: the app keeps both lines inside 920 px, and your kid.png put "the" on the second line. Press Enter in the title to break where you want.
+  - **The music, on every SceneProof edit:** A2, from 0.52 s into the song, cut at 12.32 s, +5 dB before and -1 dB after, ending where the video ends. **A1 is not touched.**
+    - The song is added after the edit's checks, so the checks of your A1 sound stay exactly as before.
+    - **The level is the clip's Volume, not its Clip Gain:** day 11 proved that no XML can set Clip Gain in Premiere, while Audio Levels arrives as the clip's Volume. So you get Volume +5 dB / -1 dB, which sounds the same.
+    - Premiere makes the song a mono clip of its first channel, as it does with A1.
+    - The song is put into the run's `extras\media` next to the RAW.
+  - Tool switches: `--music FILE --music-start 0.52 --music-split 12.32 --music-gains 5,-1`.
+- **Real test:** American Dad made as a SceneProof video (`work\t31\sp\run_ad\1_edit.xml`, your header example's headline "The fact that his dad was this honest is hilarious"):
+  - V1 RAW (18 clips), V2 the SceneProof card, V3 the watermark
+  - A1 the RAW's sound (18 clips, unchanged), **A2 the song: 0.00-12.30 s at +5 dB, 12.30-25.15 s at -1 dB** (the edit is 25.15 s)
+  - (The run's FAIL is the American Dad notes from task 3, not the music.)
+- **Not checked yet: the import in Premiere.** You were using the PC the whole time, so I didn't open Premiere. I will import it when the PC is idle and compare it with song.prproj (the look, and the music on A2 with its two volumes).
+- **Tests:** tool 1649 passed, 0 failed; app 1159 passed (the upload check now also lists @SceneProof's public Shorts tab, with no login). 12 new tests (`test_sceneproof_night15.py`, `test_night15_music.py`).
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
@@ -126,7 +151,7 @@ These change the picture search itself, so every check-all case would have to be
 
 ## Still broken
 
-- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 5-16:** not started yet.
+- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 6-16:** not started yet. **Task 5:** the Premiere import check is still to do.
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
 - The PC's backup shutdown is still set for 15:30 (`shutdown /a` cancels it).
 
@@ -155,4 +180,6 @@ No new packages. Start MovieRecaps again. About 20 seconds after it starts, it r
 4. **A stretched RAW is converted and V1 plays the copy.** Premiere's XML import has no tested way to stretch a clip sideways, so the stretch is done in the copy instead of in the XML.
 5. **The placed-by-sound project is a separate file** (`1_edit_placed_by_sound.xml`), not `1_edit.xml`, and the run still says PICTURE NOT FOUND, so it is never mistaken for a checked edit.
 6. **The cartoon search changes (task 3, fixes 1-4) wait** for a night when the PC is free: they touch every run and need a full check-all to prove nothing gets worse.
-7. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.
+7. **SceneProof is a channel**, like your three others (its card, its watermark, plus its song), not a separate kind of template. That way it works everywhere a channel does.
+8. **The V2 Color Matte pieces of song.prproj are not made:** they are a few short bits placed by hand, and I can't tell what rule places them.
+9. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.

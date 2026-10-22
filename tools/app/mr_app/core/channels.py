@@ -19,6 +19,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -26,6 +27,9 @@ from PIL import Image
 from . import headline, paths
 
 PSD_NAME = "template.psd"
+PNG_NAME = "template.png"                  # night 15: a channel without a PSD (SceneProof): its base as a 2160x3840 PNG --
+#                                            the card without a headline, the video window transparent
+EXAMPLE_NAME = "example.png"               # ... and its "default template as it is" (with an example headline)
 WATERMARK_NAME = "watermark.png"
 INFO_NAME = "channel.json"
 HEADLINE_AREA = (150, 740, 2010, 1035)     # x0, y0, x1, y1 on the PSD: the example headline's place (plain white)
@@ -44,6 +48,37 @@ class Channel:
     link: str
     handle: str
     shorts_only: bool = False
+    music: "Music | None" = None
+
+
+@dataclass(frozen=True)
+class Music:
+    """Night 15: a channel's song, always on A2 of its edits (SceneProof: "music" in its channel.json) -- the file in the
+    channel's folder, from ``start_s`` into the song, cut at ``split_s`` of the edit, ``gains_db`` before / after."""
+    file: Path
+    start_s: float = 0.0
+    split_s: float = 0.0
+    gains_db: tuple[float, ...] = (0.0,)
+
+    def args(self) -> list[str]:
+        """The tool's switches (match_cuts --music ...)."""
+        return ["--music", str(self.file), "--music-start", f"{self.start_s:g}", "--music-split", f"{self.split_s:g}",
+                "--music-gains", ",".join(f"{g:g}" for g in self.gains_db)]
+
+
+def _music(folder: Path, spec: Any) -> Music | None:
+    """channel.json's "music": {"file", "start_s", "split_s", "gains_db"} -> Music (None: none, or its file missing)."""
+    if not isinstance(spec, dict) or not spec.get("file"):
+        return None
+    p = Path(str(spec["file"]))
+    p = p if p.is_absolute() else folder / p
+    if not p.is_file():
+        return None
+    try:
+        gains = tuple(float(g) for g in (spec.get("gains_db") or [0.0]))
+        return Music(p, float(spec.get("start_s") or 0.0), float(spec.get("split_s") or 0.0), gains)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -67,7 +102,8 @@ class TemplateResult:
 
 def _defaults(name: str) -> dict:
     handle = "@" + re.sub(r"\s+", "", name)
-    return {"name": name, "link": f"https://www.youtube.com/{handle}", "handle": handle, "shorts_only": False}
+    return {"name": name, "link": f"https://www.youtube.com/{handle}", "handle": handle, "shorts_only": False,
+            "music": None, "headline_anchor": None}
 
 
 def read_info(folder: Path) -> dict:
@@ -87,7 +123,8 @@ def read_info(folder: Path) -> dict:
 
 
 def channels(root: Path | None = None) -> list[Channel]:
-    """Every channel: a folder of ``root`` (assets/channels) with a template.psd, sorted by name."""
+    """Every channel: a folder of ``root`` (assets/channels) with a template.psd (or, night 15, a template.png),
+    sorted by name."""
     root = Path(root) if root is not None else paths.channels_dir()
     out = []
     if not root.is_dir():
@@ -95,11 +132,13 @@ def channels(root: Path | None = None) -> list[Channel]:
     for folder in sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.name.lower()):
         psd = folder / PSD_NAME
         if not psd.is_file():
-            continue
+            psd = folder / PNG_NAME
+            if not psd.is_file():
+                continue
         info = read_info(folder)
         wm = folder / WATERMARK_NAME
         out.append(Channel(str(info["name"]), folder, psd, wm if wm.is_file() else None, str(info["link"]),
-                           str(info["handle"]), bool(info["shorts_only"])))
+                           str(info["handle"]), bool(info["shorts_only"]), _music(folder, info.get("music"))))
     return out
 
 
@@ -173,7 +212,19 @@ def _area_white(img: Image.Image, area: tuple[int, int, int, int]) -> tuple[bool
 
 
 def build_base(ch: Channel) -> tuple[Image.Image, dict]:
-    """(the base RGBA 2160x3840, what was done) -- straight from the PSD (slow: seconds); base_template caches it."""
+    """(the base RGBA 2160x3840, what was done) -- straight from the PSD (slow: seconds); base_template caches it. A
+    template.png (night 15) is the base as it is (2160x3840; another size is scaled), the headline where channel.json's
+    "headline_anchor" says (else the standard place)."""
+    if ch.psd.suffix.lower() == ".png":
+        with Image.open(ch.psd) as im:
+            img = im.convert("RGBA")
+        size = (SEQUENCE[0] * 2, SEQUENCE[1] * 2)
+        if img.size != size:
+            img = img.resize(size, Image.Resampling.LANCZOS)
+        a = read_info(ch.folder).get("headline_anchor")
+        anchor = [float(a[0]), float(a[1])] if isinstance(a, (list, tuple)) and len(a) == 2 else None
+        return img, {"png": str(ch.psd), "size": list(img.size), "method": "template.png as it is",
+                     "why": "a channel without a PSD", "anchor": anchor}
     from psd_tools import PSDImage
     psd = PSDImage.open(ch.psd)
     merged = psd.topil()

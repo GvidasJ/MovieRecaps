@@ -4541,6 +4541,9 @@ def run_once(cfg: Config) -> dict:
                 stage_finish(ctx)
         with _stage(ctx, "S9 verify"):
             stage_verify(ctx)
+        if getattr(cfg, "music_file", "") and getattr(cfg, "premiere", False):
+            from . import music                    # night 15: the channel's song on A2, after the checks (SceneProof)
+            ctx.finish["music"] = music.apply(ctx)
         ctx.timings["total"] = round(time.perf_counter() - t_all, 3)
         write_cutlist(ctx)             # final timings; everything else unchanged since S6
         _collect_paths(ctx)

@@ -35,6 +35,7 @@ RED_LINE = "#5a2326"
 LOU = "#f0a84a"                 # the channels' dots
 MIKE = "#e5484d"
 FLICK = "#a78bfa"
+SCENE = "#1d9bf0"               # SceneProof (night 15): its verified badge's blue
 
 # kept for the older names the tools still use
 SURFACE = PANEL
@@ -49,7 +50,7 @@ MONO = "JetBrains Mono"
 GRID_STEP = 48                  # px between the grid's lines (the reference: 48)
 GRID_COLOUR = "#1b1b1b"
 
-CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "Flick707": FLICK}
+CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "Flick707": FLICK, "SceneProof": SCENE}
 
 # a result word -> its pill: (text colour, background, border)
 PILLS = {

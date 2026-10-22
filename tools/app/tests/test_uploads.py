@@ -87,7 +87,8 @@ def test_the_three_channels_and_their_shorts_tabs():
         pytest.skip("no assets/channels in this checkout")
     assert tabs == [("Flick707", "https://www.youtube.com/@Flick707/shorts"),
                     ("LouLaughs", "https://www.youtube.com/@LouLaughs/shorts"),
-                    ("MikeMemesYou", "https://www.youtube.com/@MikeMemesYou/shorts")]
+                    ("MikeMemesYou", "https://www.youtube.com/@MikeMemesYou/shorts"),
+                    ("SceneProof", "https://www.youtube.com/@SceneProof/shorts")]      # night 15
 
 
 @pytest.mark.parametrize("link, handle, tab", [

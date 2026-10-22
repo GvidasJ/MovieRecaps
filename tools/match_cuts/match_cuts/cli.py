@@ -333,6 +333,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quick-checks", action="store_true", help=argparse.SUPPRESS)   # check-all: no AE recreation checks
     p.add_argument("--raw-stretch", default="auto", metavar="auto|off|W:H",
                    help="night 15: a competitor that shows the RAW stretched sideways (a 4:3 episode pulled out to 16:9) -- auto: found from a few frames where the sound placed it; off: never; W:H (e.g. 4:3): the RAW's pixels that many times wider")
+    p.add_argument("--music", default="", metavar="FILE",
+                   help="night 15: a song on A2 of 1_edit.xml (after the edit is checked; A1 untouched) -- SceneProof")
+    p.add_argument("--music-start", type=float, default=0.0, metavar="S", help="the song from this far in (s)")
+    p.add_argument("--music-split", type=float, default=0.0, metavar="S",
+                   help="cut the song there (sequence s): each piece at its own level (--music-gains)")
+    p.add_argument("--music-gains", default="0", metavar="DB,DB", help="the levels before / after the cut, e.g. 5,-1")
     p.add_argument("--force-inputs", action="store_true",
                    help="skip the wrong-input checks: by default the run stops at once (before converting anything) "
                         "when the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, "
@@ -409,6 +415,10 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.check_determinism = bool(getattr(args, "check_determinism", False))
     cfg.force_inputs = bool(getattr(args, "force_inputs", False))
     cfg.raw_stretch = str(getattr(args, "raw_stretch", None) or "auto")
+    cfg.music_file = str(getattr(args, "music", "") or "")
+    cfg.music_start_s = float(getattr(args, "music_start", 0.0) or 0.0)
+    cfg.music_split_s = float(getattr(args, "music_split", 0.0) or 0.0)
+    cfg.music_gains_db = str(getattr(args, "music_gains", "0") or "0")
     cfg.quick_checks = bool(getattr(args, "quick_checks", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()

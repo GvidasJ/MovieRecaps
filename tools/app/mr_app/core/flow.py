@@ -451,12 +451,19 @@ def prepare(p: P.Project, progress: Progress | None = None, cancel: threading.Ev
 
 def default_template(ch: Any, out_png: str | Path) -> Path:
     """The channel's template exactly as its template.psd shows it (its example headline kept: "the default template
-    as it is"), 1080x1920, written to ``out_png``."""
-    from psd_tools import PSDImage
+    as it is"), 1080x1920, written to ``out_png``. A channel with a template.png (night 15): its example.png, else the
+    template.png itself."""
+    from PIL import Image
 
     from . import channels as Ch
-    psd = PSDImage.open(ch.psd)
-    img = psd.topil() or psd.composite()
+    if Path(ch.psd).suffix.lower() == ".png":
+        ex = Path(ch.folder) / Ch.EXAMPLE_NAME
+        with Image.open(ex if ex.is_file() else ch.psd) as im:
+            img = im.convert("RGBA")
+    else:
+        from psd_tools import PSDImage
+        psd = PSDImage.open(ch.psd)
+        img = psd.topil() or psd.composite()
     img = Ch.downscale(img.convert("RGBA"), Ch.SEQUENCE)
     out = Path(out_png)
     out.parent.mkdir(parents=True, exist_ok=True)

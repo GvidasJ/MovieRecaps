@@ -3,7 +3,7 @@ see it; drop the competitor's video to read its headline and check your title ag
 the transparent video window kept). The same editor opens from a video's row (Match cuts, Download), and the edit
 then uses the template as its frame with the channel's watermark on top.
 
-A new channel is a new folder in assets\\channels\\<Channel>\\ (template.psd + watermark.png): no code change."""
+A new channel is a new folder in assets\\channels\\<Channel>\\ (template.psd -- or template.png -- + watermark.png [+ channel.json, its "music"]): no code change."""
 from __future__ import annotations
 
 import os
@@ -52,10 +52,11 @@ class TemplatePage(QWidget):
             from ..core import channels as Ch
             rows = [f"{c.name}  ·  {getattr(c, 'link', '') or ''}" + ("  ·  Shorts only" if getattr(c, "shorts_only",
                                                                                                     False) else "")
+                    + ("  ·  its song on A2" if getattr(c, "music", None) else "")
                     for c in Ch.channels()]
         except Exception as e:  # noqa: BLE001
             rows = [f"could not read the channels: {e}"]
-        rows.append(f"A new channel: a new folder in {paths.channels_dir()} with its template.psd and watermark.png.")
+        rows.append(f"A new channel: a new folder in {paths.channels_dir()} with its template.psd (or a 2160x3840 template.png) and watermark.png.")
         self.channels.setText("\n".join(rows))
 
     def _save(self) -> None:
