@@ -93,6 +93,32 @@ class JobRun:
     def elapsed(self) -> float:
         return time.time() - self.t0 if self.t0 else 0.0
 
+    def activity(self) -> tuple[object, float | None]:
+        """(what the run wrote last: its log's size and its stdout's, the CPU seconds of its processes -- None when
+        they cannot be read) for the "seems stuck" check (night 15)."""
+        from match_cuts import run_folders
+        sizes = []
+        for p in (self.run_dir / run_folders.EXTRAS / "match_cuts.log", self._out_path):
+            try:
+                sizes.append(p.stat().st_size)
+            except OSError:
+                sizes.append(-1)
+        cpu = None
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                import psutil
+                root = psutil.Process(self.proc.pid)
+                cpu = 0.0
+                for p in [root, *root.children(recursive=True)]:
+                    try:
+                        t = p.cpu_times()
+                        cpu += float(t.user + t.system)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except Exception:  # noqa: BLE001 - no psutil / the process just ended: output only
+                cpu = None
+        return tuple(sizes), cpu
+
     def stop(self) -> None:
         self.stopped = True
         if self.proc is not None and self.proc.poll() is None:

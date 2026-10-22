@@ -135,13 +135,19 @@ class JobThread(QThread):
             except Exception:  # noqa: BLE001 - the status is a convenience
                 pass
 
+        honest = P.Honest(self.estimate)      # night 15: smoothed range, never backwards, "seems stuck"
+
         def poll(r) -> None:
-            pr = P.parse(r.progress_text())
-            share = P.share_done(r.elapsed(), pr.left_s, self.estimate)
-            bits = [pr.step or "starting", f"{100 * share:.0f} %"]
-            if pr.left_s is not None:
-                bits.append(P.left_text(pr.left_s))
-            self.progress.emit(self.job.id, " · ".join(bits), share)
+            text = r.progress_text()
+            pr = P.parse(text)
+            sig, cpu = r.activity() if hasattr(r, "activity") else (text, None)
+            h = honest.update(r.elapsed(), pr.left_s, (text, sig), cpu, line=text)
+            bits = [pr.step or "starting", f"{100 * h['share']:.0f} %"]
+            if h["stuck"]:
+                bits.append(P.STUCK_TEXT)
+            elif h["left"]:
+                bits.append(h["left"])
+            self.progress.emit(self.job.id, " · ".join(bits), h["share"])
         try:
             res = self.run_.wait(poll)
         except Exception as e:  # noqa: BLE001
