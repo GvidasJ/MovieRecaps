@@ -326,6 +326,30 @@ All four changes are only in the "search the picture again" path, which runs onl
      | 0.40 s | 9 | 5 |
    - **Kept:** the sound way, the pauses around cuts included, at 0.25 s: 8 of your 10, in a list of 16 for this one-minute edit. It only writes a list, so nothing in any edit changed.
    - (This PC's own `\\192.168.101.11\Shared` paths are read from `D:\Shared`, so the PC can measure the shared projects too.)
+## The check-all (tasks 3 and 8)
+
+Run tonight from frozen copies of the code: `work\snap15a` (09:26, with task 3's search changes) for your test videos, and `work\snap15b` (10:40, with task 8's pieces too) for the episode-length ones, run with and without the piece (task 8 above). Up to three streams shared the graphics card, so a case took 5-100 minutes and **not every case could run before the end**:
+
+- **13 of the 34 older test videos finished.** Every one has **exactly day 13's scores**: hard checks, captions exactly as yours, word errors, cuts reproduced, framing. And **not one of tonight's runs searched the picture again**, which is the only place task 3's changes act (in these runs the first search found 64-100 % of the picture; it needs under 25 %).
+- Not run tonight in this form: video14, video15, video017, zendaya, video8, laptop010, laptop013, video17, video19, video20, video7, zendaya-age, deadpool, video10, video5, video16, video18. They were stopped or never started at 13:15 to leave time for the final tests. video1, video2, video3, video020 and video018 ran in task 8's comparison instead (`--fast`, hard checks: 4 PASS with the piece). The 7 new test cases (video21-27) were started, but none finished.
+- Two things the table can't show: the stretch check now measuring reels turned up to 8° (none of the test videos is stretched, so it can't change them), and Liquid Death, which day 13 left out of its table (tonight: PASS, framing 11 of 13).
+
+| video | day 13: hard / captions / word errors / cuts / framing | tonight | searched again |
+|---|---|---|---|
+| liquid-death-fixed | (not in day 13) | PASS / 3/55 / 11.11 / 1/10 / 11/13 | no |
+| laptop009-fixed | pass/pass/pass / 22/52 / 6.77 / 2/13 / 15/16 | PASS / 22/52 / 6.77 / 2/13 / 15/16 | no |
+| spiderman-school | pass/pass/pass / 11/64 / 10.2 / 2/21 / - | PASS / 11/64 / 10.20 / 2/21 / - | no |
+| video018-fixed | pass/pass/pass / 12/49 / 14.81 / 1/15 / - | PASS / 12/49 / 14.81 / 1/15 / - | no |
+| video021-fixed | pass/pass/pass / 22/40 / 13.51 / 0/15 / 8/21 | PASS / 22/40 / 13.51 / 0/15 / 8/21 | no |
+| video4 | pass/pass/pass / 6/38 / 18.42 / 2/7 / - | PASS / 6/38 / 18.42 / 2/7 / - | no |
+| video6-fixed | pass/pass/pass / 18/32 / 10.0 / 5/7 / 9/9 | PASS / 18/32 / 10.00 / 5/7 / 9/9 | no |
+| video9-fixed | pass/pass/pass / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | no |
+| chocolate-fixed | pass/pass/pass / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | no |
+| laptop004-fixed | pass/pass/pass / 6/27 / 12.5 / 0/3 / - | PASS / 6/27 / 12.50 / 0/3 / - | no |
+| mike005-fixed | pass/pass/pass / 9/46 / 13.04 / 2/13 / 0/14 | PASS / 9/46 / 13.04 / 2/13 / 0/14 | no |
+| video11-fixed | pass/pass/pass / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | no |
+| video12-fixed | pass/pass/pass / 8/51 / 4.08 / 4/13 / 4/16 | PASS / 8/51 / 4.08 / 4/13 / 4/16 | no |
+
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
