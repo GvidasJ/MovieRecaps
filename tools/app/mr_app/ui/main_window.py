@@ -135,6 +135,9 @@ class MainWindow(QMainWindow):
         self.quote = chrome.QuoteLine()
         self.quote.clicked.connect(self.next_quote)
         root.addWidget(_column(self.quote))
+        from .find_bar import FindBar                     # night 15: Ctrl+F on every page
+        self.find_bar = FindBar(lambda: self.pages.get(self.current()))
+        root.addWidget(_column(self.find_bar))
         root.addWidget(self.stack, 1)
         self.toast_w = W.Toast(bg)
         self.intro = chrome.Intro(bg)
@@ -187,6 +190,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(12_000, self.retry_renames)
         if _start_checks():                               # night 15: folders named with emoji (made before)
             QTimer.singleShot(20_000, self.plain_names)   # get their plain names, once
+            QTimer.singleShot(30_000, self.tidy)          # night 15: the projects' zips, the renders by day
+            self._tidy_timer = QTimer(self)
+            self._tidy_timer.timeout.connect(self.tidy)
+            self._tidy_timer.start(10 * 60_000)
         self._publishing: dict[str, int] = {}             # folders being copied to the shared folder right now
         try:                                              # (a rename waits for the whole copy)
             from ..core import renames
@@ -433,6 +440,24 @@ class MainWindow(QMainWindow):
                     self.renamed(res)
         BG.call(work, done, lambda _e: None)
 
+    def tidy(self) -> None:
+        """Night 15 (task 7), in the background: every finished project's zip made (or made again when its files
+        changed: core.share_zip), and Media Encoder's renders moved into renders\\<day>\\ folders (core.renders)."""
+        hub = _save_root(self.settings)
+
+        def work():
+            from ..core import renders, share_zip
+            with BG.counted_work() as _tidying:
+                zips = share_zip.sweep(hub)
+                moved = renders.sort_renders()
+            return zips, moved
+
+        def done(r) -> None:
+            zips, moved = r or ([], [])
+            if moved:
+                self.toast(f"{len(moved)} render{'s' if len(moved) != 1 else ''} put in renders\\<day> folders")
+        BG.call(work, done, lambda _e: None)
+
     def find_hub(self) -> None:
         """Where the shared files are (the save folder, else this computer's): looked up in the background (a network
         folder that is not there can take seconds to say so), then the quote line starts."""
@@ -504,13 +529,36 @@ class MainWindow(QMainWindow):
         for a in self.areas:
             self.stack.addWidget(a)
         self.tabbar.changed.connect(lambda i, old: self.stack.glide_to(i, i > old))
+        self.tabbar.changed.connect(lambda *_a: QTimer.singleShot(0, self._find_again))
+        for a in self.areas:
+            if a.sub is not None:
+                a.sub.changed.connect(lambda *_a: QTimer.singleShot(0, self._find_again))
         return head
 
+    def _find_again(self) -> None:
+        fb = getattr(self, "find_bar", None)
+        if fb is not None:
+            fb.refresh()
+
     def _shortcuts(self) -> None:
-        for keys, fn in (("Space", self._key_start), ("Delete", self._key_delete), ("Ctrl+V", self._key_paste)):
+        for keys, fn in (("Space", self._key_start), ("Delete", self._key_delete), ("Ctrl+V", self._key_paste),
+                         ("Ctrl+F", self._key_find)):
             sc = QShortcut(QKeySequence(keys), self)
             sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.activated.connect(fn)
+
+    def _key_find(self) -> None:
+        """Ctrl+F: the search box over this page (a torrent's file list has its own: its box takes Ctrl+F there)."""
+        w = QApplication.focusWidget()
+        own = getattr(w, "find_box", None) if w is not None else None
+        while w is not None and own is None:
+            w = w.parentWidget()
+            own = getattr(w, "find_box", None) if w is not None else None
+        if own is not None and own.isVisible():
+            own.setFocus()
+            own.selectAll()
+            return
+        self.find_bar.open_bar()
 
     def _typing(self) -> bool:
         w = QApplication.focusWidget()
@@ -728,6 +776,7 @@ class MainWindow(QMainWindow):
                 if i != old:
                     self.stack.glide_to(i, i > old)
                 a.show_key(key)
+                self._find_again()                        # night 15: the search box over the page shown now
                 return
 
     def current(self) -> str:
@@ -854,12 +903,13 @@ class MainWindow(QMainWindow):
         if busy:                                          # a run, a download or a conversion still going
             r = QMessageBox.question(self, "Still working",
                                      "A video is still being made, downloaded or converted. Stop it and close the "
-                                     "app?")
+                                     "app?\n\n(A video being made is paused: Resume goes on from where it was "
+                                     "when you open the app again.)")
             if r != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
-            for p in busy:
-                p.stop()
+            for p in busy:                                # night 15: a video being made is paused, not lost
+                getattr(p, "pause_for_close", p.stop)()
         for p in self.pages.values():
             if hasattr(p, "closing"):
                 try:

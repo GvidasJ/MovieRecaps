@@ -32,6 +32,8 @@ from .common import ffprobe_bin
 from . import run_folders
 from .config import Config
 
+PAUSED_FILE = "paused.json"     # night 15: the app paused this run (extras/); --resume goes on with it
+
 DEFAULTS = {  # the prompt's Configuration block
     "competitor": "./input/competitor.mp4",
     "raw": "./input/raw.mp4",
@@ -157,6 +159,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-dir", default=None, metavar="DIR",
                    help="this exact folder as the run folder (created; must not hold a run yet) instead of the next "
                         "numbered one in --out (batch: one named after each video)")
+    p.add_argument("--resume", action="store_true",
+                   help="with --run-dir: go on with the run paused there (its extras/paused.json; the app's Pause) -- "
+                        "the stages it finished come from the caches in seconds, the run goes on from where it was")
     p.add_argument("--layout", default=DEFAULTS["layout"], choices=["match", "fill", "source"],
                    help="match = recreate the competitor layout (box, corners, background, per-shot framing); "
                         "fill = full-screen 9:16 keeping the per-shot framing; source = cuts only at RAW size "
@@ -834,7 +839,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     prev = run_folders.newest_run_dir(base)
     if getattr(args, "run_dir", None):
         run_dir = Path(args.run_dir)
-        if (run_dir / run_folders.EDIT_XML).exists() or (run_dir / run_folders.EXTRAS).exists():
+        paused = run_dir / run_folders.EXTRAS / PAUSED_FILE
+        if getattr(args, "resume", False) and paused.is_file() and not (run_dir / run_folders.EDIT_XML).exists():
+            paused.unlink()                          # night 15: Resume -- the same folder, the log goes on
+            print(f"match_cuts: resuming the paused run in {run_dir}", file=sys.stderr)
+        elif (run_dir / run_folders.EDIT_XML).exists() or (run_dir / run_folders.EXTRAS).exists():
             print(f"match_cuts: --run-dir {run_dir} holds a run already", file=sys.stderr)
             return 2
         run_dir.mkdir(parents=True, exist_ok=True)

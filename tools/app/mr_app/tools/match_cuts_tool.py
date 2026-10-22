@@ -152,6 +152,7 @@ class JobThread(QThread):
             sig, cpu = r.activity() if hasattr(r, "activity") else (text, None)
             h = honest.update(r.elapsed(), pr.left_s, (text, sig), cpu, line=text)
             self.job.progress_code = pr.code                # (small and grey next to the plain name)
+            self.job.progress_plain = pr.plain or pr.step or ""
             bits = [pr.plain or pr.step or "starting", f"{100 * h['share']:.0f} %"]
             if h["stuck"]:
                 bits.append(P.STUCK_TEXT)
@@ -186,6 +187,14 @@ class JobThread(QThread):
         self.stop_asked = True
         if self.run_ is not None:
             self.run_.stop()
+
+    def pause(self) -> None:
+        """Night 15: Pause -- the run stops; Resume goes on from the step it was at (core.pause)."""
+        if self.run_ is None or not hasattr(self.run_, "pause"):
+            self.stop()
+            return
+        self.stop_asked = True
+        self.run_.pause(getattr(self.job, "progress_code", "") or "", getattr(self.job, "progress_plain", "") or "")
 
 
 def seconds_of(p: Path) -> float | None:
@@ -549,11 +558,20 @@ class JobRow(QFrame):
                                 "line above says")
         self.b_retry.clicked.connect(self._retry)
         self.b_retry.hide()
+        self.b_pause = W.Button("Pause", "Small")         # night 15: the computer free now, Resume goes on from here
+        self.b_pause.setToolTip("Pause this video: the computer is free at once. Resume goes on from the step it was "
+                                "at -- also after you close the app")
+        self.b_pause.clicked.connect(lambda: self.page.pause_job(self.job))
+        self.b_pause.hide()
+        self.b_resume = W.Button("Resume", "Small")
+        self.b_resume.setToolTip("Go on from the step it was paused at (the steps it finished come back in seconds)")
+        self.b_resume.clicked.connect(lambda: self.page.resume_job(self.job))
+        self.b_resume.hide()
         self.b_folder = W.Button("Open folder", "Small")
         self.b_prem = W.Button("Open in Premiere", "Small")
         self.b_report = W.Button("Show report", "Small")
         self.remove = W.Button("Remove", "Ghost")
-        for b in (self.b_retry, self.b_folder, self.b_prem, self.b_report, self.remove):
+        for b in (self.b_pause, self.b_resume, self.b_retry, self.b_folder, self.b_prem, self.b_report, self.remove):
             ctl.addWidget(b)
         self.b_folder.clicked.connect(self._open_folder)
         self.b_prem.clicked.connect(self._open_premiere)
@@ -836,7 +854,7 @@ class JobRow(QFrame):
                 s = j.raw_s if f == Path(j.raw) else j.comp_s
                 b.setText(f"{short_file_name(f.name)} ({J.clock(s)}) is the RAW")
                 b.setToolTip(str(f))
-        busy = j.state in (J.RUNNING, J.DONE, J.STOPPED)
+        busy = j.state in (J.RUNNING, J.DONE, J.STOPPED, J.PAUSED)
         self.mode.set(j.mode)
         self.mode.setEnabled(not busy)
         self.speed.setText(f"{j.speed:g} %")
@@ -873,6 +891,9 @@ class JobRow(QFrame):
             if getattr(j, "restart_swapped", False):
                 self.step.setTextFormat(Qt.TextFormat.PlainText)
                 self.step.setText("stopping, to start again with the RAW and the competitor switched ...")
+            elif getattr(j, "pausing", False):
+                self.step.setTextFormat(Qt.TextFormat.PlainText)
+                self.step.setText("pausing ...")
             else:                                # night 15: the plain name, its S-number small and grey after it
                 self.step.setTextFormat(Qt.TextFormat.RichText)
                 self.step.setText(esc(j.progress or "starting") + (
@@ -880,6 +901,14 @@ class JobRow(QFrame):
             self.step.setStyleSheet(f"color: {theme.MUTED};")
             self.note.setText("")
             self.bar.state("running")
+            self.bar.set(j.percent)
+        elif j.state == J.PAUSED:                       # night 15
+            from ..core import pause as PZ
+            self.pill.set("paused", (theme.AMBER, theme.AMBER_SOFT, theme.AMBER_LINE))
+            self.step.setText(PZ.line(j))
+            self.step.setStyleSheet(f"color: {theme.AMBER};")
+            self.note.setText("")
+            self.bar.state("waiting")
             self.bar.set(j.percent)
         elif j.state in (J.DONE, J.STOPPED):
             lab = res.get("label", R.FAIL)
@@ -912,6 +941,9 @@ class JobRow(QFrame):
         for b in (self.b_folder, self.b_prem, self.b_report):
             b.setVisible(done)
         self.b_retry.setVisible(j.state in (J.DONE, J.STOPPED) and j.complete and R.stopped_by_itself(res))
+        self.b_pause.setVisible(j.state == J.RUNNING and not getattr(j, "restart_swapped", False)
+                                and not getattr(j, "pausing", False))
+        self.b_resume.setVisible(j.state == J.PAUSED)
         self.b_prem.setEnabled(done and (Path(j.run_dir) / "1_edit.xml").is_file() if done else False)
         self.note.setVisible(bool(self.note.text()))
         self.remove.setVisible(j.state != J.RUNNING)
@@ -1182,6 +1214,7 @@ class MatchCutsPage(QWidget):
         lay.addWidget(legend)
         lay.addStretch(1)
         self.update_counts()
+        self._restore_paused()
 
     @staticmethod
     def _legend() -> str:
@@ -1460,6 +1493,8 @@ class MatchCutsPage(QWidget):
         if job.state == J.RUNNING:
             return
         self.jobs = [j for j in self.jobs if j.id != job.id]
+        if job.state == J.PAUSED:                          # (its run folder stays: your files are never deleted)
+            self._save_paused()
         row = self.rows.pop(job.id, None)
 
         def gone() -> None:
@@ -1853,6 +1888,9 @@ class MatchCutsPage(QWidget):
             return
         from ..ui import health
         health.space_changed(self.ctx)                    # day 13: the strip's free space read again
+        if j is not None and res.get("paused"):           # night 15: paused -- the queue stops here
+            self._paused(j, res)
+            return
         if j is not None:
             j.result = res
             j.state = J.STOPPED if res.get("label") == R.STOPPED else J.DONE
@@ -1960,6 +1998,92 @@ class MatchCutsPage(QWidget):
             self.current.stop()
         self.say("stopped -- the videos not run yet stay in the queue")
         self.update_counts()
+
+    # -- night 15: Pause / Resume (core.pause) --
+    def pause_job(self, j: J.Job) -> None:
+        """Pause on the running row: the run stops now; Resume goes on from the step it was at."""
+        if j.state != J.RUNNING or self.current is None or self.current.job.id != j.id:
+            return
+        j.pausing = True
+        self.rows[j.id].refresh()
+        self.current.pause()
+
+    def _paused(self, j: J.Job, res: dict) -> None:
+        j.state, j.result, j.pausing, j.resume = J.PAUSED, res, False, False
+        j.paused_step = getattr(j, "progress_plain", "") or ""
+        if res.get("run_dir"):
+            j.run_dir = Path(res["run_dir"])
+        self._save_paused()
+        row = self.rows.get(j.id)
+        if row is not None:
+            row.refresh()
+        self._reorder()
+        self.running = False                              # the computer is free: the other videos wait
+        self._run_jobs = []
+        fn = getattr(self.ctx, "set_progress", None)
+        if fn is not None:
+            fn(None)
+        self.say("paused -- Resume goes on from where it was; the other videos wait")
+        self.update_counts()
+        _toast(self.ctx, "Paused — Resume goes on from here", "note")
+
+    def resume_job(self, j: J.Job) -> None:
+        """Resume on a paused row: it runs first, into its own run folder (the finished steps from the caches)."""
+        from ..core import pause as PZ
+        if j.state != J.PAUSED:
+            return
+        j.resume = PZ.can_resume(j.run_dir)
+        if not j.resume:
+            _toast(self.ctx, "Its run folder can not go on any more -- it runs from the start", "note")
+        j.state, j.result, j.progress = J.READY, {}, ""
+        self.jobs.remove(j)
+        self.jobs.insert(0, j)                            # the next one to run
+        self._save_paused()
+        self.rows[j.id].refresh()
+        self._reorder()
+        if self.running:
+            if self.current is None:
+                self._next(j)
+        else:
+            self.start(confirm=False)
+
+    def _save_paused(self) -> None:
+        try:
+            from ..core import pause as PZ
+            PZ.save([j for j in self.jobs if j.state == J.PAUSED])
+        except Exception:  # noqa: BLE001 - a convenience
+            pass
+
+    def _restore_paused(self) -> None:
+        """The videos paused before the app was closed: back in the queue, paused."""
+        try:
+            from ..core import pause as PZ
+            jobs = PZ.load()
+        except Exception:  # noqa: BLE001
+            return
+        for j in jobs:
+            if any(x.run_dir is not None and j.run_dir is not None and Path(x.run_dir) == Path(j.run_dir)
+                   for x in self.jobs):
+                continue
+            self._add_row(j)
+        if jobs:
+            self.update_counts()
+
+    def pause_for_close(self) -> None:
+        """The app closes while a video is made: it is paused (not lost) -- Resume goes on after the app opens."""
+        th = self.current
+        self.running = False
+        if th is None:
+            return
+        j = th.job
+        th.pause()
+        th.wait(30000)
+        run = getattr(th, "run_", None)
+        from ..core import pause as PZ
+        if run is not None and PZ.can_resume(run.run_dir):
+            j.state, j.run_dir = J.PAUSED, run.run_dir
+            j.paused_step = getattr(j, "progress_plain", "") or ""
+            self._save_paused()
 
     def swap_waiting(self) -> bool:
         """A video swapped while it ran waits for its old run's thread to end before it starts again."""

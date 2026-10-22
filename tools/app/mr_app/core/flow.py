@@ -393,7 +393,8 @@ def template_for_job(job: Any) -> tuple[Path | None, Path | None]:
 def record_edit(p: P.Project, res: dict) -> None:
     """The edit's result in project.json."""
     label = res.get("label", "FAIL")
-    state = P.DONE if label in ("PASS", "OK with a note") else (P.FAILED if label != "STOPPED" else P.WAITING)
+    state = P.DONE if label in ("PASS", "OK with a note") else (P.FAILED if label not in ("STOPPED", "PAUSED") else
+                                                                P.WAITING)          # (night 15: paused = waiting)
     p.set_step("edit", state, result=label, run_dir=res.get("run_dir"), seconds=res.get("seconds"),
                failures=list(res.get("failures") or [])[:5], notes=list(res.get("notes") or [])[:5],
                **({"inputs": res["inputs"]} if res.get("inputs") else {}),          # day 13: the two files it read
@@ -402,6 +403,11 @@ def record_edit(p: P.Project, res: dict) -> None:
                   if state == P.FAILED else {}))
     if state == P.DONE and res.get("run_dir"):
         title_copy(p, Path(res["run_dir"]))
+        try:                                     # night 15: the zip to send (core.share_zip; never stops anything)
+            from . import share_zip
+            share_zip.make(Path(p.folder), Path(res["run_dir"]))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def title_copy(p: P.Project, run_dir: Path) -> Path | None:

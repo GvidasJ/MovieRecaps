@@ -22,10 +22,12 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
+                               QWidget)
 
+from ..core import find as F
 from ..core import torrent as T
 from . import background as BG
 from . import motion as M
@@ -249,6 +251,23 @@ class TorrentPicker(W.Card):
         self.bar = W.GlideBar(3)
         self.bar.state("running")
         self.lay.addWidget(self.bar)
+        find = QHBoxLayout()                              # night 15: find a file -- words, or an episode
+        find.setSpacing(8)
+        self.find_box = QLineEdit()
+        self.find_box.setPlaceholderText("Find a file: words, or an episode -- S09E05, 9x05, ep 5  (Ctrl+F, Esc clears)")
+        self.find_box.setClearButtonEnabled(True)
+        self.find_box.textChanged.connect(self._filter)
+        self.find_box.installEventFilter(self)
+        find.addWidget(self.find_box, 1)
+        self.find_count = W.mono_label("", theme.MUTED)
+        find.addWidget(self.find_count)
+        self.only_btn = W.Button("Tick only these", "Small")
+        self.only_btn.setToolTip("Tick the files the search shows, untick all the others")
+        self.only_btn.clicked.connect(self._tick_only)
+        find.addWidget(self.only_btn)
+        for w in (self.find_box, self.find_count, self.only_btn):
+            w.hide()
+        self.lay.addLayout(find)
         self.files = QVBoxLayout()
         self.files.setSpacing(4)
         self.lay.addLayout(self.files)
@@ -337,8 +356,38 @@ class TorrentPicker(W.Card):
         self.info.setText(f"{n} file{'s' if n != 1 else ''} · {T.human_size(meta.total)} · {seeds} · "
                           f"free on {drive}{'' if drive.endswith(':') else ':'} {free_t}")
         self.save_label.setText(f"Save to {self.save_dir}")
+        for w in (self.find_box, self.find_count, self.only_btn):
+            w.setVisible(len(self.rows) > 1)
+        self._filter(self.find_box.text())
         self._update()
         self.ready.emit()
+
+    # -- night 15: finding a file --------------------------------------------------------------------------------------
+
+    def shown(self) -> list[FileRow]:
+        """The rows the search shows (all of them without a search)."""
+        q = self.find_box.text()
+        return [r for r in self.rows if F.matches(q, r.file.path)]
+
+    def _filter(self, text: str) -> None:
+        shown = self.shown()
+        for r in self.rows:
+            r.setVisible(r in shown)
+        self.find_count.setText(F.count_line(len(shown), len(self.rows)))
+        self.only_btn.setEnabled(bool(text.strip()) and bool(shown))
+
+    def _tick_only(self) -> None:
+        """Tick only these: the files the search shows ticked, every other one unticked."""
+        shown = self.shown()
+        for r in self.rows:
+            r.box.setChecked(r in shown)
+        self._update()
+
+    def eventFilter(self, obj, e) -> bool:                 # noqa: N802 - Esc in the search box clears it
+        if obj is self.find_box and e.type() == QEvent.Type.KeyPress and e.key() == Qt.Key.Key_Escape:
+            self.find_box.clear()
+            return True
+        return super().eventFilter(obj, e)
 
     # -- choosing ------------------------------------------------------------------------------------------------------
 

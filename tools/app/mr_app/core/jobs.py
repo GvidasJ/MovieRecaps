@@ -30,6 +30,7 @@ READY = "ready"
 RUNNING = "running"
 DONE = "done"
 STOPPED = "stopped"
+PAUSED = "paused"           # night 15: paused -- Resume goes on from the step it was at (core.pause)
 
 _ids = itertools.count(1)
 
@@ -192,7 +193,7 @@ def run_order(jobs: Sequence[Job]) -> list[Job]:
 def display_order(jobs: Sequence[Job]) -> list[Job]:
     """Newest on top (day 12) -- the ORDER SHOWN, never the order run:
 
-    1. running rows at the very top;
+    1. running rows at the very top (night 15: then the paused ones);
     2. then the waiting rows, newest first: the run order upside down -- so the next one to run is the lowest waiting
        row, and a row you drag stays exactly where you dropped it (its run place changes with it; each waiting row
        says "RUNS 1ST", "RUNS 2ND" ...);
@@ -202,7 +203,8 @@ def display_order(jobs: Sequence[Job]) -> list[Job]:
     done = [j for j in jobs if j.state in (DONE, STOPPED)]
     order = {j.id: k for k, j in enumerate(jobs)}
     done.sort(key=lambda j: (j.edited or j.added or datetime.min, order[j.id]), reverse=True)
-    return running + waiting + done
+    paused = [j for j in jobs if j.state == PAUSED]
+    return running + paused + waiting + done
 
 
 def run_places(jobs: Sequence[Job]) -> dict[int, int]:

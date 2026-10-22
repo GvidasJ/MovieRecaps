@@ -65,15 +65,23 @@ class JobRun:
         self.work = Path(work_dir or paths.work_dir())
         self.python = Path(python or paths.python_exe())
         self.converted = converted if converted is not None else {}
-        self.run_dir = batch.run_folder_for(self.out, getattr(job, "run_name", "") or job.name)
+        self.resuming = False
+        from . import pause as PZ
+        if getattr(job, "resume", False) and PZ.can_resume(getattr(job, "run_dir", None)):
+            self.run_dir, self.resuming = Path(job.run_dir), True      # night 15: Resume -- the same run folder
+        else:
+            self.run_dir = batch.run_folder_for(self.out, getattr(job, "run_name", "") or job.name)
         raw = Path(job.raw)
         self.use_raw = self.converted.get(raw.resolve(), raw)
         self.frame, self.watermark = frame, watermark
         self.cmd = command(self.python, Path(job.competitor), self.use_raw, self.run_dir, self.work,
                            job.mode == FAST, float(job.speed), frame, watermark,
                            forced(job), bool(getattr(job, "roles_chosen", False)), short_raw(job), channel_music(job))
+        if self.resuming:
+            self.cmd.append("--resume")
         self.proc: subprocess.Popen | None = None
         self.stopped = False
+        self.paused = False
         self.t0 = 0.0
         self._err: list[str] = []
         self._out_path = self.out / f".{self.run_dir.name}.app.stdout"
@@ -170,6 +178,16 @@ class JobRun:
                 cache[str(f)] = None
         return cache[str(f)]
 
+    def pause(self, step: str = "", plain: str = "") -> None:
+        """Night 15: stop the run so that Resume goes on from this step (core.pause): the note in its folder first."""
+        from . import pause as PZ
+        self.paused = True
+        try:
+            PZ.mark(self.run_dir, step, plain)
+        except OSError:
+            pass
+        self.stop()
+
     def stop(self) -> None:
         self.stopped = True
         if self.proc is not None and self.proc.poll() is None:
@@ -211,6 +229,16 @@ class JobRun:
                 if cr is not None:
                     self.converted[raw] = cr
         res = read_result(self.run_dir, code, stdout, stderr, self.stopped)
+        if self.paused:
+            from . import pause as PZ
+            if PZ.can_resume(self.run_dir):
+                res.update(label=PZ.LABEL, paused=True, run_dir=str(self.run_dir))
+            else:                                   # it ended by itself just before the pause: what it gave
+                try:
+                    PZ.mark_path(self.run_dir).unlink()
+                except OSError:
+                    pass
+                res = read_result(self.run_dir, code, stdout, stderr, False)
         res.update(exit=code, seconds=round(self.elapsed(), 1), log=str(log), command=" ".join(self.cmd))
         try:                                    # day 13: what the run was given (a stop can be compared with a run)
             from . import inputs as IN

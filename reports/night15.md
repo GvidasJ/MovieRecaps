@@ -11,6 +11,10 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
 | 4 | Honest progress | **done** (also the plain stage names and the "What it's doing now" console) | nothing to do: the queue line shows "Finding each competitor shot in the RAW · 40 % · about 25-35 min left"; click "What it's doing now" under the running row for the live lines, "Copy log" to send them | watch one long run in the queue |
 | 5 | SceneProof template + its music | **done** (imported in Premiere 2024: no error, the song on A2 at +5 / -1 dB) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | listen to `work\t31\sp\prem_test\edit\edit_edit.prproj` once |
+| 6 | Pause / Resume | **done** | **Pause** on the running row; **Resume** on the paused row (also after closing the app -- closing it while a video is made pauses it) | pause one long run and resume it |
+| 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
+| 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
+| 11 | Ctrl+F search | **done** | **Ctrl+F** on any page; in a torrent's file list type `S09E05` / `9x05` / `ep 5`, then "Tick only these" | try it on a series torrent |
 
 ## Task 1 -- Premiere "File Import Failure" (emoji in folder names)
 
@@ -165,6 +169,44 @@ These change the picture search itself, so every check-all case would have to be
   - The song starts 0.50 s into the file, not 0.52 s, and the cut is at 12.30 s, not 12.32 s: an XML places clips on whole frames (this edit is 23.976 fps, one frame = 0.042 s). 20 ms is not audible.
 - Also imported: the placed-by-sound American Dad (`work\t31\pbs\run_auto\1_edit_placed_by_sound.xml`): no error, V1 5 clips + V2 the frame, A1 5 clips, the marker in it.
 - **Tests:** tool 1649 passed, 0 failed; app 1159 passed (the upload check now also lists @SceneProof's public Shorts tab, with no login). 12 new tests (`test_sceneproof_night15.py`, `test_night15_music.py`).
+
+## Task 6 -- Pause / Resume (done)
+
+- **How you use it:** the running row has a **Pause** button. The computer is free at once, the row says "paused at Placing every frame exactly -- Resume goes on from there", and the queue stops (the other videos wait). **Resume** on that row runs it first, from where it was.
+- **It goes on from the same step:** Resume runs the tool again into the **same run folder** (`--run-dir <it> --resume`). The steps it had finished come back from the tool's caches in seconds (the RAW's conversion, the sound search, the picture search ...). The step it was at starts again, and its log goes on in the same file.
+- **The cache can't break:** Pause stops the process like Stop does, and the tool writes every cached result whole or not at all (a temporary file renamed into place), so a stop never leaves half a result.
+- **After closing the app:** a paused video is kept in `%APPDATA%\MovieRecaps\paused.json` and comes back in the queue, paused, when the app opens. **Closing the app while a video is being made now pauses it** instead of throwing it away (the close question says so). Remove on a paused row forgets it but leaves its folder.
+- A project's edit that is paused shows as "waiting" in project.json, not failed.
+- **Real test** (Blue Mountain State S03E05 + its reel, through the app's own runner): the first run reached "Placing every frame exactly" after **869 s**. Pause stopped it in under a second. **Resume was back at that step after 48 s** (the RAW's conversion, the sound and the picture search all came from the caches), and the run finished: **PASS, 619 s after Resume**, `1_edit.xml` in the same folder. The pause cost about 40 s in all (869 + 619 s, against about 1450 s in one go).
+- **Tests:** app 1192 passed, 0 failed.
+- **Tests:** 7 new (`test_pause_night15.py`): the paused list survives a restart, Resume runs into the same folder with `--resume`, Pause stops a real child process and leaves the note, the rows' buttons, the queue stops on a pause, a paused project waits.
+
+## Task 7 -- Auto zip + renders by day (done)
+
+- **The zip:** every finished project gets `<project name>.zip` in its folder, made as soon as its edit is done. It is made again when its files change (for example when Open in Premiere saved the project). Projects made before got theirs at the app's start (a sweep every 10 minutes).
+  - In it: `1_edit.xml`, `2_captions.srt`, the run's `.prproj` when there is one, `title.txt`, `media\` (every file the edit plays that is under 200 MB: the frame, the watermark, the song ...), and **`HOW TO OPEN.txt`**: how to import it, and what was **left out and where it is**.
+  - Left out: a file over 200 MB that is on the shared drive (the movie, its WAV): the edit finds it there (the XML points at `\\192.168.101.11\Shared\...`). A big file that is NOT on the shared drive is listed as "send it yourself".
+  - The zip and its folder have the name **without emoji** (Premiere can't import from an emoji folder).
+  - **Real run:** 26 zips made for the finished projects in `D:\Shared\Projects` in 19 s, mostly 0.1-5 MB; the biggest is 294 MB (Weight Loss Class, which plays several small videos).
+- **Renders by day:** every video Media Encoder made (from its own log, `Documents\Adobe\Adobe Media Encoder\<version>\AMEEncodingLog.txt`) is **moved** into `renders\<day>\` next to where it was written. `D:\Shared\xasd.mp4` made on 22 October is now `D:\Shared\renders\2026-10-22\xasd.mp4`.
+  - **Never deleted:** a move on the same drive. A name already there gets "-2". A render newer than 2 minutes or still in use waits. Every move is written to `renders\moved.log`.
+  - **Real run:** 9 renders moved (3 in `D:\Shared`, 6 in `Documents`), the old ones too.
+  - To put them back: `.venv\Scripts\python -c "from mr_app.core import renders; print(renders.put_back(r'D:\Shared\renders\moved.log'))"` (from `tools\app`).
+- **Tests:** 6 new (`test_zip_renders_night15.py`).
+
+## Task 10 -- the ".aria2 control file" error (already fixed on day 13)
+
+- It was already done on day 13, and I checked it again today:
+  - a file already there without its `.aria2` is checked against the torrent (`--check-integrity=true`): the right pieces are kept and only the missing ones downloaded. A complete file is finished at once.
+  - a file that can't be this torrent's (bigger, or none of its pieces right) is renamed "<name> (old)" and downloaded fresh. **A finished file is never truncated or overwritten** (`--allow-overwrite=false`).
+  - aria2's error 13 coming back later is checked once by itself. Every aria2 error code is said in plain words, with what to do.
+- **Test today:** the 6 tests that run the real aria2c (a finished file, a half file, a wrong-size file, error 13 ...) pass, and so do the 15 others about this.
+
+## Task 11 -- Ctrl+F search (done)
+
+- **The torrent's file list:** a search box over the files (when there is more than one): a live filter, "12 of 24", **Tick only these** (ticks what the search shows and unticks the rest), Esc clears it. It understands episodes written any usual way: `S09E05`, `s9e5`, `9x05`, `ep 5` (any season), `episode 7`, `e15`; anything else is words in any order.
+- **Every page:** **Ctrl+F** opens a search box over the page you are on. It finds your words in everything the page shows (the queue's rows, the projects, the board's cards ...), outlines the one it is at, scrolls to it and says "3 of 12". Enter goes to the next one, Shift+Enter to the one before, and Esc clears and closes it. Switching to another page searches that page.
+- **Tests:** 14 new (`test_find_night15.py`), one on the real window.
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
