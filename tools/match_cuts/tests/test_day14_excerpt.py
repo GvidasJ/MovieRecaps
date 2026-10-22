@@ -64,8 +64,12 @@ def test_places_too_far_apart_or_a_short_movie_use_the_whole_movie():
     m = _facts()
     assert E.plan_piece(m, [100.0, 3500.0]) is None         # 58 min + 10 min of 120: more than 40 %
     assert E.plan_piece(m, []) is None
-    short = _facts(minutes=20.0)
-    assert E.plan_piece(short, [600.0]) is None             # 10 of 20 minutes: more than 40 %
+    short = _facts(minutes=20.0)                             # night 15: a 20 min RAW is an episode -- +- 2 min:
+    p = E.plan_piece(short, [600.0])                         # about 4 of its 20 minutes, a piece (day 14: whole)
+    assert p is not None and (p.k1 - p.k0) / short.frames < 0.3
+    assert E.plan_piece(short, [100.0, 700.0]) is None       # 10 + 4 of 20 min: more than 60 % -- the whole episode
+    assert E.rules(20 * 60.0) == (E.EPISODE_MARGIN_S, E.EPISODE_MAX_SHARE, "episode")
+    assert E.rules(100 * 60.0) == (E.MARGIN_S, E.MAX_SHARE, "movie")
 
 
 def test_only_a_premiere_run_whose_sound_was_found_uses_a_piece(monkeypatch):
@@ -87,6 +91,7 @@ def test_the_piece_has_the_movies_frames_and_sound(tmp_path, monkeypatch):
     m = E.movie_facts(movie)
     assert m.why == "" and m.frames == 959 and len(m.keyframes) >= 30 and m.a_channels == 6
     monkeypatch.setattr(E, "MARGIN_S", 6.0)
+    monkeypatch.setattr(E, "EPISODE_MAX_S", 0.0)          # (the film rules, not night 15's episodes)
     monkeypatch.setattr(E, "MAX_SHARE", 0.9)
     p = E.plan_piece(m, [15.0])
     assert p is not None and p.k0 % 24 == 0 and 0 < p.k0 < 15.0 * float(m.rate)

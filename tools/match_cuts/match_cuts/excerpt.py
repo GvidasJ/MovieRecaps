@@ -21,6 +21,9 @@ numerator divides (a 125 % clip's <in> counts the movie in steps of 1.25 frames)
 
 One piece covers every found place (from the first one's -MARGIN_S to the last one's +MARGIN_S); places too far apart
 for that (more than MAX_SHARE of the movie in all) make the run use the whole movie.
+
+Night 15 (task 8): a TV episode (a RAW of MIN_RAW_S to EPISODE_MAX_S) is cut too, with its own numbers: the found
+places +- EPISODE_MARGIN_S, the whole episode only when that is more than EPISODE_MAX_SHARE of it (``rules``).
 """
 from __future__ import annotations
 
@@ -44,6 +47,9 @@ from .common import ffmpeg_bin, ffprobe_bin, fps_str, log
 MIN_RAW_S = 15 * 60.0           # a RAW shorter than this is analysed whole
 MARGIN_S = 5 * 60.0             # the piece: every found place +- this
 MAX_SHARE = 0.40                # a piece longer than this share of the movie: the whole movie instead
+EPISODE_MAX_S = 70 * 60.0       # night 15 (task 8): a RAW up to this long is a TV episode: its piece is the found places
+EPISODE_MARGIN_S = 2 * 60.0     #   +- this, and the whole episode only when that is more than EPISODE_MAX_SHARE of it
+EPISODE_MAX_SHARE = 0.60
 STEP_FRAMES = 0.1               # every frame one frame after the one before (probe's VFR rule for one step) ...
 DRIFT_FRAMES = 0.5              # ... and every frame within half a frame of its slot (pipeline.steady_timing)
 SOUND_RATE = 48000
@@ -219,6 +225,13 @@ def speed_step(speed: float) -> int:
     return max(1, int(abs(s.numerator))) if s != 0 else 1
 
 
+def rules(duration: float) -> tuple[float, float, str]:
+    """(margin s, max share, "episode" | "movie") for a RAW this long (night 15: episodes +- 2 min, up to 60 %)."""
+    if duration and duration <= EPISODE_MAX_S:
+        return EPISODE_MARGIN_S, EPISODE_MAX_SHARE, "episode"
+    return MARGIN_S, MAX_SHARE, "movie"
+
+
 def plan_piece(m: Movie, places: list[float], speed: float = 1.0) -> Plan | None:
     """The piece around the found ``places`` (RAW seconds where the competitor's sound pieces were found; each piece
     WIN_S long) -- None with the reason logged when the whole movie is used instead."""
@@ -227,11 +240,12 @@ def plan_piece(m: Movie, places: list[float], speed: float = 1.0) -> Plan | None
     f = float(fps)
     if not places:
         return None
-    lo = max(0.0, min(places) - MARGIN_S)
-    hi = min(m.duration, max(places) + WIN_S + MARGIN_S)
-    if hi - lo > MAX_SHARE * m.duration:
-        log.info("piece of the movie: the found places span %.1f of %.1f min (+- %.0f min) -- more than %.0f %%: the "
-                 "whole movie", (max(places) - min(places)) / 60, m.duration / 60, MARGIN_S / 60, 100 * MAX_SHARE)
+    margin, share, kind = rules(m.duration)
+    lo = max(0.0, min(places) - margin)
+    hi = min(m.duration, max(places) + WIN_S + margin)
+    if hi - lo > share * m.duration:
+        log.info("piece of the %s: the found places span %.1f of %.1f min (+- %.0f min) -- more than %.0f %%: the "
+                 "whole %s", kind, (max(places) - min(places)) / 60, m.duration / 60, margin / 60, 100 * share, kind)
         return None
     step = speed_step(speed)
     want0 = int(math.floor(lo * f))
@@ -248,9 +262,9 @@ def plan_piece(m: Movie, places: list[float], speed: float = 1.0) -> Plan | None
         k1, _p1, dts_end = min(ends)
     else:
         k1, dts_end = m.frames, None
-    if (k1 - k0) / max(1, m.frames) > MAX_SHARE:
-        log.info("piece of the movie: %d of %d frames between keyframes -- more than %.0f %%: the whole movie",
-                 k1 - k0, m.frames, 100 * MAX_SHARE)
+    if (k1 - k0) / max(1, m.frames) > share:
+        log.info("piece of the %s: %d of %d frames between keyframes -- more than %.0f %%: the whole %s",
+                 kind, k1 - k0, m.frames, 100 * share, kind)
         return None
     return Plan(int(k0), int(k1), int(pts0), dts_end, sorted(float(x) for x in places))
 
@@ -438,9 +452,10 @@ def prepare(ctx: Any, pair: Any) -> Excerpt | None:
         log.info("piece of the movie: no (the RAW is %.1f min, under %.0f) -- the whole RAW is analysed", dur / 60,
                  MIN_RAW_S / 60)
         return None
-    if dur and (max(places) - min(places)) + 2 * MARGIN_S > MAX_SHARE * dur:
+    margin, share, _kind = rules(dur)
+    if dur and (max(places) - min(places)) + 2 * margin > share * dur:
         log.info("piece of the movie: no (the found places +- %.0f min are more than %.0f %% of the RAW's %.1f min) "
-                 "-- the whole RAW is analysed", MARGIN_S / 60, 100 * MAX_SHARE, dur / 60)
+                 "-- the whole RAW is analysed", margin / 60, 100 * share, dur / 60)
         return None
     t0 = time.perf_counter()
     m = movie_facts(raw)

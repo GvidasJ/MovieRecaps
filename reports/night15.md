@@ -13,7 +13,7 @@ Started 02:11 (PC); worked until about 15:00, the PC free from 07:39 on. The bac
 | 5 | SceneProof template + its music | **done** (imported in Premiere 2024: no error, the song on A2 at +5 / -1 dB) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | listen to `work\t31\sp\prem_test\edit\edit_edit.prproj` once |
 | 6 | Pause / Resume | **done** | **Pause** on the running row; **Resume** on the paused row (also after closing the app -- closing it while a video is made pauses it) | pause one long run and resume it |
 | 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
-| 8 | TV episodes in pieces | **done** (being checked on the 5 episode-length check-all videos) | nothing to do: a 15-70 min RAW is cut to the found place ± 2 min; the XML plays the original episode | -- |
+| 8 | TV episodes in pieces | **done** (checked on the 5 episode-length check-all videos: 2 better, 2 the same, 1 a note) | nothing to do: a 15-70 min RAW is cut to the found place ± 2 min; the XML plays the original episode | -- |
 | 9 | Speed (captions next to the picture search, one recognition) | **not done** (measured: can't be done safely; why below) | -- | -- |
 | 9b | Refine faster (Benchwarmers) | **measured, the fix designed, not built** (it needs a check-all from scratch) | -- | -- |
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
@@ -206,7 +206,7 @@ All four changes are only in the "search the picture again" path, which runs onl
   - To put them back: `.venv\Scripts\python -c "from mr_app.core import renders; print(renders.put_back(r'D:\Shared\renders\moved.log'))"` (from `tools\app`).
 - **Tests:** 6 new (`test_zip_renders_night15.py`).
 
-## Task 8 -- TV episodes cut into pieces too (done; the check-all comparison is at the end of this report)
+## Task 8 -- TV episodes cut into pieces too (done)
 
 - **What changed:** a RAW of 15-70 minutes counts as a TV episode. Its piece is where the sound found the clip **± 2 minutes** (films: ± 5), and the whole episode is used only when that piece would be **more than 60 %** of it (films: 40 %). Before, ± 5 min of a 22-minute episode was always over 40 %, so episodes were never cut.
 - **The XML points to the original episode:** after the run, 1_edit.xml plays the episode file itself (`extras\media\raw.mp4`), every clip at its frame in the episode. The piece's frames are checked against the episode's (identical, SSIM 1.0), and the piece is deleted.
@@ -215,6 +215,17 @@ All four changes are only in the "search the picture again" path, which runs onl
   - **the analysis (preparing the RAW, its sound, the proxies, finding and placing the shots): about 918 s for the whole episode -> about 170 s for the piece** (proxies 473 -> 20 s, finding shots 96 -> 63 s, placing every frame 146 -> 39 s)
   - the whole run took 2106 s against about 1450 s, but that is not the piece's doing. The end steps ran while the GPU was full with two check-all streams (the face check 924 s instead of 39 s, the captions 870 s instead of 208 s). Reading the piece is as fast as the whole file (both 0.32 s for 15 s of video).
   - **The edit: the same 5 clips, the same RAW frames** (5607-6358), but one cut is 1 frame earlier (720 instead of 721), between two competitor frames that show the same picture. The c2 check calls that a "spurious cut", so the piece run reads FAIL where the whole run read PASS. Nothing you'd see changes (both frames are the same image), but it is a difference.
+- **The check-all's 5 videos with a 15-70 min RAW**, each run twice with tonight's code, with the piece and with pieces switched off (`MATCH_CUTS_NO_PIECE=1`), so the piece is the only difference:
+  - **video020** (21.4 min, the known `--fast` case): **better with the piece**. The picture found went from 36 % to **50 %** of the competitor (frames 340-497 and 560-659 now placed instead of "another video"), and the hard checks went from **FAIL to PASS**. In `--fast` a shorter RAW is searched more densely, so the piece helps there.
+  - **video018** (24.5 min): **better**: 100 % of the picture found instead of 96 %, in 24 clips instead of 38. PASS both ways.
+  - **video3** (24.2 min) and **video2** (24.4 min): PASS both ways. video3 has the same clips give or take a frame at a few cuts. video2 is cut differently (20 clips against 14), and with no key for it I can't say which is closer to yours.
+  - **video1** (23.5 min): the piece run has one take split into two clips with the same framing (an XML note, so check-all calls it FAIL), and its first clip starts 1 RAW frame later. Nothing you'd see changes.
+  - | | with the piece | whole episode |
+    |---|---|---|
+    | hard checks | 4 PASS (video020, video018, video3, video2) + video1's split note | 4 PASS + video020's FAIL |
+    | picture found | video020 50 %, video018 100 % | video020 36 %, video018 96 % |
+  - **Decision: pieces on for episodes, as you asked.** Two videos got clearly better and two the same. In two (video1 and Blue Mountain State) a cut moved one frame between identical frames or one take was split in two. Those are notes, not something you'd see.
+- **Tests:** the piece tests (`test_day14_excerpt.py`) updated for episodes: a 20-minute RAW with one place now makes a piece, and places 10 minutes apart use the whole episode.
 
 ## Task 9 -- speed: captions next to the picture search, one speech recognition (not done: why)
 
@@ -330,7 +341,7 @@ All four changes are only in the "search the picture again" path, which runs onl
 - **The 12 Year Old (Benchwarmers) edit's S08** plays a 0.6 s held + zoomed moment backwards (task 14): put a still there by hand. The fix is in suggestions.md.
 - **The two Ted 2 runs** stop on "could not decode source frames by PTS": convert the file in the Convert tab first (task 14).
 - **Task 9 and 9b** (speed): not built (why under each). **Task 15** (cartoon speaker): kept off.
-- **Task 8:** on Blue Mountain State the piece put one cut a frame earlier between two identical frames, and the c2 check calls it a spurious cut (FAIL where the whole episode's run read PASS). The check-all comparison of the 5 episode-length videos is below.
+- **Task 8:** in 2 of the 6 episodes tried (Blue Mountain State, video1) the piece gave a check note the whole episode didn't: a cut a frame earlier between two identical frames, or one take in two clips. Nothing you'd see; 2 others got better (task 8).
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
 
 ## Check by hand
