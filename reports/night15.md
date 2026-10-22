@@ -350,6 +350,13 @@ Run tonight from frozen copies of the code: `work\snap15a` (09:26, with task 3's
 | video11-fixed | pass/pass/pass / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | no |
 | video12-fixed | pass/pass/pass / 8/51 / 4.08 / 4/13 / 4/16 | PASS / 8/51 / 4.08 / 4/13 / 4/16 | no |
 
+## Tests at the end (14:05-14:31, the PC free)
+
+- **Tool: 1665 passed, 0 failed** (74 skipped: they need files that are not on this PC). One test needed the 7 new test cases added to its list (night 6's list of new-style cases).
+- **App: 1208 passed** (1 skipped), plus the real-aria2c torrent test **run alone: passed**. In the whole suite it crashes this afternoon, also with this morning's code (see "Still broken").
+- `.venv\Scripts\python tools\app\setup_app.py`: "done: everything is as the project expects" (exit 0).
+- Ended at about 15:00, C: 54 GB free, D: 2.6 TB free. 25 commits tonight, all pushed to `claude/new-session-ol4era`.
+
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
@@ -366,6 +373,7 @@ Run tonight from frozen copies of the code: `work\snap15a` (09:26, with task 3's
 - **The two Ted 2 runs** stop on "could not decode source frames by PTS": convert the file in the Convert tab first (task 14).
 - **Task 9 and 9b** (speed): not built (why under each). **Task 15** (cartoon speaker): kept off.
 - **Task 8:** in 2 of the 6 episodes tried (Blue Mountain State, video1) the piece gave a check note the whole episode didn't: a cut a frame earlier between two identical frames, or one take in two clips. Nothing you'd see; 2 others got better (task 8).
+- **The whole app test suite crashed** ("Fatal Python error: Aborted" / an access violation) inside the torrent tests that drive the real aria2c, in 5 full runs this afternoon. That test passes when run alone, and the rest pass without it (1208). **The same crash now happens with this morning's 10:05 code, which passed at 10:05**, so it's the state of this PC after hours of heavy runs, not tonight's changes. A restart should clear it; if not, run `.venv\Scripts\python -m pytest tools\app\tests\test_torrent.py` and send me what it says.
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
 
 ## Check by hand
