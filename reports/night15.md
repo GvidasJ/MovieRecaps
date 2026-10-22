@@ -14,6 +14,9 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 | 6 | Pause / Resume | **done** | **Pause** on the running row; **Resume** on the paused row (also after closing the app -- closing it while a video is made pauses it) | pause one long run and resume it |
 | 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
+| 9 | Speed (captions next to the picture search, one recognition) | **not done** (measured: can't be done safely; why below) | -- | -- |
+| 9b | Refine faster (Benchwarmers) | **measured, the fix designed, not built** (it needs a check-all from scratch) | -- | -- |
+| 15 | The person speaking in cartoons | **kept off** (not safe: why below) | slide cartoon clips by hand, as now | -- |
 | 12 | Find source (many clips at once) | **done** | Progress > **Find source**: paste the links (one per line) or drop clips, **Find all (N)**; Copy all; Torrent search per row | try it on your next 5 clips |
 | 13 | The 3 suggestions | **1 not possible from the app (why below), 2 done, 3 already so** | open `3_pauses.txt` next to `1_edit.xml` and jump to each timecode | the audio chain: still the preset on A1 |
 | 14 | Learn queue + problems | **done**: 7 learned (new test cases), 6 problems given their status | nothing to do; the S08 still in the 12 Year Old edit by hand | the 12 Year Old S08 at 0:05 |
@@ -229,6 +232,31 @@ These change the picture search itself, so every check-all case would have to be
   - From the real Instagram link (not the file): American Dad sure 98 % in 8 s, with no login.
 - **Not used yet:** the burned-in text and the speech. No free service matches them to a title without a login or a key, so they are named in a "Not found" reason instead.
 - **Tests:** 24 new (`test_find_source_night15.py`): the name reading, the 6 answers above as fakes, the history, and the page (7 links: 5 at once at most, the rows, Copy all, back after a restart).
+
+## Task 9 -- speed: captions next to the picture search, one speech recognition (not done: why)
+
+- **Measured** on the Benchwarmers run (the 12 Year Old project, 2 h 22 min) and Blue Mountain State: the speech recognition is small next to the picture search:
+  - Benchwarmers: picture search 32 min + placing every frame 91 min; the competitor's speech (other video) 22 s, the RAW's speech map 13 s, the captions 112 s (41 s of it recognition and checking, 70 s the action suggestions).
+- **Captions at the same time as the picture search can't be done safely:** the captions are made from the edit's own sound (what 1_edit.xml plays: the edit's cuts, its silences and repeats taken out). That sound only exists after the picture search, the cuts and S8's silence plan. Making them from something else (the competitor's sound, or the RAW before the cuts) changes their words and timing, and the captions are the most fragile score (± 2-5 on any change).
+- **"Once, not twice":** the recognitions hear different sounds (the competitor's, the RAW's speech map, the edit's), so none is a repeat of another. The two passes inside the captions (the main model plus a second model where it is unsure) are the night-12 quality check you asked for.
+- So: **no change**, nothing got worse. The real time is in Task 9b.
+
+## Task 9b -- refine faster, the Benchwarmers case (measured; the fix designed, not built)
+
+- Your message names it, but the saved `docs\night15_prompt.md` has no Task 9b, so I worked from your words.
+- **Where the 91 minutes of "Placing every frame exactly" went** (the 12 Year Old project = The Benchwarmers, 2 h 22 min in all):
+  - the **rescue search**: 3 rounds over 1126 competitor frames, **52 minutes** (about 2.8 s a frame). 653 of those searches (58 %) found nothing at all, and none re-confirmed a frame's own place.
+  - the frames it searched include the **320 the run then marked NOT IN THE RAW** (3 stretches of another video in that reel).
+  - the rest: measuring, line fits, the detail pass (about 25 minutes).
+- **The fix (designed):** don't rescue-search frames whose sound the sound search already put outside the RAW (the other-video stretches), and stop the rounds when one finds nothing new. Expected about 30 of the 52 minutes saved on this case.
+- **Why not tonight:** it changes the refine step itself. Every cached frame map of every case would be made again, and the check-all would have to run from scratch (5-6 hours) to show nothing gets worse. Tonight's check-all is already testing tasks 3 and 8.
+
+## Task 15 -- the person speaking, in cartoons (kept off: not safe)
+
+- **Kept off.** The speaker rule finds faces with a face detector and the speaker with Light-ASD (a lip-movement model). Both are made for real faces:
+  - the rule only moves a clip when the speaker's face is found on 98 %+ of its frames. Cartoon faces flicker (found, lost, found again), so day 13 made it skip cartoons, and a drawn mouth isn't what Light-ASD was trained on.
+  - in video19 (Family Guy) you moved 9 of 10 clips a little to the right, so you do re-frame cartoons. But with no reliable way to tell which drawn character is speaking, a rule could move a clip onto the wrong one, which you said must never happen.
+- What would make it safe: a cartoon face/character finder (not one on this PC), checked on your cartoon fixes (video18, video19, video22 Family Guy and video21 South Park, now test cases). Until then the cartoon PERSON notes stay notes, and you slide those clips by hand.
 
 ## Task 13 -- the three suggestions you liked
 
