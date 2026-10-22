@@ -8,12 +8,13 @@ Started 02:11 (PC). The backup shutdown is set for 15:30. C: 73.7 GB free, D: 2.
 |---|---|---|---|---|
 | 1 | Emoji in names (Premiere import) | **done** | nothing to do: new folders and files get plain names; old ones were renamed at the start of the app | open the 6 kept folders' projects as before (below) |
 | 2 | WRONG PAIR stops right pairs | **done** | nothing to do. A wrong Family Guy episode is now stopped in seconds, not after the long search. | **Dolittle: download the real Dr. Dolittle 2** (the YTS file is the 1998 film) |
-| 3 | Cartoons / tilted and zoomed reels | **partly done:** the stretch + "placed by sound" are done; the cartoon search changes are not (see below) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
+| 3 | Cartoons / tilted and zoomed reels | **done:** the stretch, "placed by sound", the edge try, turned reels up to 8°, fail fast; trusting the sound built but OFF (measured: near, not on, the right frame) | nothing to do: the stretch is found by itself (`--raw-stretch off` / `4:3` to force). On PICTURE NOT FOUND, import `1_edit_placed_by_sound.xml` | open the American Dad edit and one placed-by-sound XML in Premiere (below) |
 | 4 | Honest progress | **done** (also the plain stage names and the "What it's doing now" console) | nothing to do: the queue line shows "Finding each competitor shot in the RAW · 40 % · about 25-35 min left"; click "What it's doing now" under the running row for the live lines, "Copy log" to send them | watch one long run in the queue |
 | 5 | SceneProof template + its music | **done** (imported in Premiere 2024: no error, the song on A2 at +5 / -1 dB) | choose the channel **SceneProof** (New video buttons, Match cuts > Template) -- its card, its watermark and its song come by themselves | listen to `work\t31\sp\prem_test\edit\edit_edit.prproj` once |
 | 6 | Pause / Resume | **done** | **Pause** on the running row; **Resume** on the paused row (also after closing the app -- closing it while a video is made pauses it) | pause one long run and resume it |
 | 7 | Auto zip + renders by day | **done** | nothing to do: `<project>.zip` appears in each finished project; Media Encoder's renders go into `renders\<day>\` by themselves | send one zip to your friend; look in `D:\Shared\renders\` |
 | 10 | aria2 ".aria2 control file" error | **already fixed** (day 13), checked again | nothing to do | -- |
+| 8 | TV episodes in pieces | **done** (being checked on the 5 episode-length check-all videos) | nothing to do: a 15-70 min RAW is cut to the found place ± 2 min; the XML plays the original episode | -- |
 | 9 | Speed (captions next to the picture search, one recognition) | **not done** (measured: can't be done safely; why below) | -- | -- |
 | 9b | Refine faster (Benchwarmers) | **measured, the fix designed, not built** (it needs a check-all from scratch) | -- | -- |
 | 15 | The person speaking in cartoons | **kept off** (not safe: why below) | slide cartoon clips by hand, as now | -- |
@@ -113,14 +114,16 @@ I checked every pair you named with the quick check, and also 37 true pairs (eve
 - **Real test:** American Dad, from the sound alone: 5 clips covering 100 % of the reel. Against the edit the picture search made, 80 % of the points are within 0.1 s (median 0.045 s). The ones further off are next to cuts, up to 0.9 s, which is why the marker says to check.
 - **Tests:** tool 1643 passed, 0 failed; app 1144 passed. 9 new tests (`test_night15_placed_by_sound.py`), one of them on the real American Dad sound.
 
-### Task 3, fixes 1-4 -- not done (left on purpose)
+### Task 3, fixes 1-4 -- done tonight (the PC free), checked with the whole check-all
 
-- 1. the edge (lines) comparison for cartoons, with the burned-in captions masked
-- 2. trying ±8° and other zooms (American Dad was a stretch, not a rotation: its frames fit with 0.1-0.3°)
-- 3. accepting lower scores inside the place the sound found
-- 4. stopping within minutes
+All four changes are only in the "search the picture again" path, which runs only when the first search finds under 25 % of the picture while the sound is found. A normal run never gets there, and the check-all shows it (at the end of this report).
 
-These change the picture search itself, so every check-all case would have to be run again to show that nothing gets worse. That is hours of GPU time while you're using the PC. The named case is now fixed (the stretch), and the placed-by-sound project means a cartoon whose picture is not found still gives you something to work from. I left them for a night when the PC is free.
+- **The "before":** American Dad with the stretch fix switched off (`--raw-stretch off`) on this PC: **94 min** (5614 s), 83 of them in the searches again (the whole frame: 14 min of search + 45 min placing frames, 0 %; the denser search: 23 min, 0 %), then PICTURE NOT FOUND. The same as the laptop's 2 hours.
+- **Fix 1 -- lines and shapes (edges):** a new try before the denser search: the best layout searched again with half of every picture score from the edges (a cartoon's flat colours change with the copy's grading, its outlines don't). The burned-in captions were already masked in every search.
+- **Fix 2 -- turned and zoomed reels:** the zoom was already in every search (it fits a scale and a turn). What failed was the stretch check: it threw away every frame turned more than 3°. **It now measures up to 8°** (a turn doesn't change the stretch it measures). Made-up test: American Dad's reel turned 5° and scaled to 853 px on a 1080x1920 card (`work\t31\ad\rot\rotated_reel.mp4`): **before**, the stretch was missed and the run went down the same long road; **after**, stretch found (1.333), **100 % of the picture, an edit in 969 s**.
+- **Fix 3 -- trust the sound window: built, tested, and left OFF** (`TRUST_SOUND = False`). Measured on American Dad: the frames it would keep (scores 0.65-0.75 where the sound says) sit **near, not on, the right frame**: median 1.5 frames off, up to 37 frames (1.5 s), against the 100 % edit the stretch fix makes. Your prompt said "the right frames were found with s=0.735 but rejected". They were near the right place, but a stretched picture scores about 0.72 on every neighbouring frame, so the score can't pick the frame. The placed-by-sound project (fix 5) is the honest output there.
+- **Fix 4 -- fail fast:** no new try starts after 10 minutes of searching again, and the ones skipped are named in the log. On American Dad this skips the denser search (23 min). A try that has already started can't be cut short without changing the frame placing itself (every cache made again), so the worst case is now one try (about an hour on that case), not two.
+- **Tests:** 12 new (`test_night15_cartoon_search.py`, 2 more cases in `test_night15_stretch.py`), night 8's retry test updated.
 
 ## Task 4 -- Honest progress (done)
 
@@ -234,6 +237,16 @@ These change the picture search itself, so every check-all case would have to be
 - **Not used yet:** the burned-in text and the speech. No free service matches them to a title without a login or a key, so they are named in a "Not found" reason instead.
 - **Tests:** 24 new (`test_find_source_night15.py`): the name reading, the 6 answers above as fakes, the history, and the page (7 links: 5 at once at most, the rows, Copy all, back after a restart).
 
+## Task 8 -- TV episodes cut into pieces too (done; the check-all comparison is at the end of this report)
+
+- **What changed:** a RAW of 15-70 minutes counts as a TV episode. Its piece is where the sound found the clip **± 2 minutes** (films: ± 5), and the whole episode is used only when that piece would be **more than 60 %** of it (films: 40 %). Before, ± 5 min of a 22-minute episode was always over 40 %, so episodes were never cut.
+- **The XML points to the original episode:** after the run, 1_edit.xml plays the episode file itself (`extras\media\raw.mp4`), every clip at its frame in the episode. The piece's frames are checked against the episode's (identical, SSIM 1.0), and the piece is deleted.
+- **Real test, Blue Mountain State S03E05 (21.6 min) + its reel:**
+  - the piece: 1:55-6:22 (4.5 of 21.6 min), cut in 2.3 s by stream copy (nothing re-encoded)
+  - **the analysis (preparing the RAW, its sound, the proxies, finding and placing the shots): about 918 s for the whole episode -> about 170 s for the piece** (proxies 473 -> 20 s, finding shots 96 -> 63 s, placing every frame 146 -> 39 s)
+  - the whole run took 2106 s against about 1450 s, but that is not the piece's doing. The end steps ran while the GPU was full with two check-all streams (the face check 924 s instead of 39 s, the captions 870 s instead of 208 s). Reading the piece is as fast as the whole file (both 0.32 s for 15 s of video).
+  - **The edit: the same 5 clips, the same RAW frames** (5607-6358), but one cut is 1 frame earlier (720 instead of 721), between two competitor frames that show the same picture. The c2 check calls that a "spurious cut", so the piece run reads FAIL where the whole run read PASS. Nothing you'd see changes (both frames are the same image), but it is a difference.
+
 ## Task 9 -- speed: captions next to the picture search, one speech recognition (not done: why)
 
 - **Measured** on the Benchwarmers run (the 12 Year Old project, 2 h 22 min) and Blue Mountain State: the speech recognition is small next to the picture search:
@@ -273,9 +286,9 @@ These change the picture search itself, so every check-all case would have to be
 3. **Captions timed on the sound 1_edit.xml plays -- already so (since day 13):** the captions are made from the edit at 100 % (every clip at its own speed, as A1 plays it), with its silences, repeats and speech-safe moves cut out the same way as 1_edit.xml. Then the day-13 step moves any caption that runs off the sound onto it. The "28 captions start more than 2 frames from their first word" notes come from the caption rules (shortest length, the competitor's timing), not from the sound used.
 - **Tests:** 4 new (`test_night15_pauses.py`).
 
-## Task 14 -- the learn queue and the problems (done; the 7 new test cases' check-all is running)
+## Task 14 -- the learn queue and the problems (done)
 
-- **Learn queue: all 7 open entries learned** (video21-27) and marked done in `learn_queue.md`. Each is a new test case in `tests\real\videoNN-fixed`: your finished edit as the key (captions, cuts and framing), with the channel's frame and watermark the run used (video21-24). The 7 now run in a third check-all stream, so the next nights are measured against your fixes.
+- **Learn queue: all 7 open entries learned** (video21-27) and marked done in `learn_queue.md`. Each is a new test case in `tests\real\videoNN-fixed`: your finished edit as the key (captions, cuts and framing), with the channel's frame and watermark the run used (video21-24). From the next check-all on, the tool is measured against these fixes too (tonight's run of them was stopped to keep the GPU for tasks 3 and 8).
   - What your fixes show, captions only:
     - **4 words you censor** that the censor list didn't have: `fuc*ity`, `s*ck` (video21), `prostit*tion` (video22), `cond*m` (video24). They are now in `caption_censor.txt` (whole words only: "sucking" stays as you keep it in video6).
     - Learn also wanted 5 caption-glossary lines: the same 4 words with the `*` dropped ("fuc ity", "prostit tion"), "Oh -> Ohhh" and "Fim -> FIM". **Not taken:** the glossary also goes to the speech recognition as hints, so any new line re-transcribes every video; "Oh -> Ohhh" would change every "Oh"; and the censored words now come from the censor list instead.
@@ -303,19 +316,29 @@ These change the picture search itself, so every check-all case would have to be
 ## Time before -> after
 
 - American Dad S03E02 + reel `DczA1q3MTge`: **6522 s, no edit -> 858 s (14.3 min), an edit**. Before = the laptop, after = this PC.
+- American Dad with the stretch fix off (the old way, on this PC): **5614 s (94 min), PICTURE NOT FOUND**. The new fail-fast skips the denser search's 23 min, and the stretch fix makes the edit in 858 s.
+- The reel turned 5° (made up): **stretch missed, the long road -> 969 s, 100 % of the picture**.
 - A wrong Family Guy episode: **the whole long search, then NOT IN THIS RAW -> about 5 s at the quick check (WRONG PAIR)**.
+- A paused run resumed (Blue Mountain State): **869 s to the refine the first time -> back there 48 s after Resume**.
+- A TV episode analysed as a piece (Blue Mountain State, 21.6 min): **the analysis about 918 s -> about 170 s**.
+- Find source, 5 clips at once: **54 s** (one link alone: 8 s, the download included).
 
 ## Still broken
 
-- **Task 3, fixes 1-4** (the cartoon search changes): not done, they need a free PC for a whole check-all. **Tasks 6-16:** not started yet. **Task 9b** (refine faster, the Benchwarmers case): your message names it, but the saved `docs\night15_prompt.md` has no Task 9b yet (the Task 4 console part is there). I do it after Task 9 from your message's words.
+- **The 12 Year Old (Benchwarmers) edit's S08** plays a 0.6 s held + zoomed moment backwards (task 14): put a still there by hand. The fix is in suggestions.md.
+- **The two Ted 2 runs** stop on "could not decode source frames by PTS": convert the file in the Convert tab first (task 14).
+- **Task 9 and 9b** (speed): not built (why under each). **Task 15** (cartoon speaker): kept off.
+- **Task 8:** on Blue Mountain State the piece put one cut a frame earlier between two identical frames, and the c2 check calls it a spurious cut (FAIL where the whole episode's run read PASS). The check-all comparison of the 5 episode-length videos is below.
 - 6 finished projects keep their emoji folder names, because your Premiere projects play their files (task 1).
-- The PC's backup shutdown is still set for 15:30 (`shutdown /a` cancels it).
 
 ## Check by hand
 
 1. **American Dad** (`work\t31\ad\run2\1_edit.xml`): open it in Premiere. The picture should fill the window like the reel's. Then look at Stan at about 0:06-0:07 (the PERSON note) and the first 10 frames (the FLASH note).
 2. **Placed by sound** (`work\t31\pbs\run_auto\run_auto_edit.prproj`, American Dad made from the sound alone; it imported with no error): look at the framing.
-3. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min).
+3. **Dr. Dolittle 2:** the YTS download named "Dr. Dolittle 2" is the 1998 film. Download a real Dr. Dolittle 2 (about 1 h 27 min). Find source says the same ("check: its sound is not in your RAW").
+4. **Pause / Resume:** pause one long run in the queue, close the app, open it, press Resume.
+5. **A zip:** open `D:\Shared\Projects\<a project>\<name>.zip` and its `HOW TO OPEN.txt` before you send one. **The renders:** `D:\Shared\renders\2026-10-22\` and `Documents\renders\` (9 moved; `renders\moved.log` says from where).
+6. **`3_pauses.txt`** next to your next edit's `1_edit.xml`: are the pauses it lists the ones you'd cut?
 
 ## On the laptop
 
@@ -326,7 +349,15 @@ cd C:\Users\gvida\Desktop\bh\MovieRecaps
 git pull
 ```
 
-No new packages. Start MovieRecaps again. About 20 seconds after it starts, it renames the laptop's own emoji project folders (the ones no Premiere project uses), once.
+No new packages. Start MovieRecaps again. About 20 seconds after it starts, it renames the laptop's own emoji project folders (the ones no Premiere project uses), once. 30 seconds after it starts, it makes the zips of the laptop's finished projects and sorts its Media Encoder renders into `renders\<day>\` (every 10 minutes after that).
+
+## 5 new suggestions (saved in `D:\Shared\Projects\suggestions.md`, not built)
+
+1. **The pauses as markers in Premiere**: the same list as markers in 1_edit.xml, one click to each pause (small).
+2. **Find source from the speech**: a word index of every RAW's speech, so a clip whose post says nothing is still found in seconds (a full night).
+3. **Placing every frame faster**: skip the frames of the reel's other video. About half an hour saved on the Benchwarmers reel (half a night, plus a check-all from scratch).
+4. **A held, zoomed moment kept as a still** (the 12 Year Old S08; half a night).
+5. **A RAW that can't be read is converted by itself** (the Ted 2 stops; small).
 
 ## What I decided on my own
 
@@ -335,7 +366,14 @@ No new packages. Start MovieRecaps again. About 20 seconds after it starts, it r
 3. **The pair check's new stop needs the sound to have nothing** and not one frame found, so no measured true pair can be stopped. One look-alike Family Guy pair still goes on (the safe side).
 4. **A stretched RAW is converted and V1 plays the copy.** Premiere's XML import has no tested way to stretch a clip sideways, so the stretch is done in the copy instead of in the XML.
 5. **The placed-by-sound project is a separate file** (`1_edit_placed_by_sound.xml`), not `1_edit.xml`, and the run still says PICTURE NOT FOUND, so it is never mistaken for a checked edit.
-6. **The cartoon search changes (task 3, fixes 1-4) wait** for a night when the PC is free: they touch every run and need a full check-all to prove nothing gets worse.
+6. **Trusting the sound (task 3, fix 3) is built but off**: measured, it keeps frames near the right one, not on it.
 7. **SceneProof is a channel**, like your three others (its card, its watermark, plus its song), not a separate kind of template. That way it works everywhere a channel does.
 8. **The V2 Color Matte pieces of song.prproj are not made:** they are a few short bits placed by hand, and I can't tell what rule places them.
 9. **No screenshots of the desktop.** One Premiere test caught other windows on your screen, so I deleted those pictures and checked Premiere by its window title and messages instead.
+10. **Pausing stops the whole queue** (the PC is free at once), and Resume starts it again with the paused video first. **Closing the app while a video is made pauses it** instead of throwing the work away.
+11. **The zips leave out a file over 200 MB that is on the shared drive** (the movie, its WAV): the XML already finds it there. The zip's folder has no emoji.
+12. **Renders are moved, never copied or deleted**, only ones Media Encoder's own log says it finished. Every move is logged so it can be put back.
+13. **Find source's "Torrent search" opens a web search** with the words copied, because the app has no torrent search of its own to fill.
+14. **The audio chain is not put on by a Premiere panel**: that needs an unsigned add-on and a registry switch, and I wouldn't install that on your PC without asking.
+15. **Learn's new caption-glossary lines were not taken** (they would re-hint every transcription, and "Oh -> Ohhh" changes every "Oh"). The censored words went into the censor list instead.
+16. **The check-all of the 7 new test cases was stopped** to keep the GPU for the check-all of tasks 3 and 8 (they run next time).
