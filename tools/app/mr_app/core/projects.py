@@ -314,8 +314,15 @@ class Project:
 
     def file(self, role: str) -> Path | None:
         """The competitor's / RAW's file in the folder (None until it is there)."""
-        name = (self.data.get(role) or {}).get("file")
-        return self.folder / name if name else None
+        d = self.data.get(role) or {}
+        name = d.get("file")
+        if not name:
+            return None
+        here = self.folder / name
+        kept = d.get("kept_at")                      # day 16: the whole movie left in the folder it was downloaded
+        if kept and not here.exists() and Path(str(kept)).is_file():     # to (flow.drop_whole_raw): read it there
+            return Path(str(kept))
+        return here
 
     def log_path(self, step: str, role: str | None = None) -> Path:
         """``logs\\<step>_<role>.log`` (``logs\\<step>.log`` without a role); the logs folder is made."""

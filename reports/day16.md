@@ -8,6 +8,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 |---|---|---|---|
 | 1 | "Try with another RAW" keeps your title and text | **done** | a row that failed because of its RAW (WRONG PAIR, NOT IN THIS RAW, PICTURE NOT FOUND, a RAW that can't be read) has **Try with another RAW**. History has it too, on the failed event |
 | 2 | The zip has the whole project folder | **done** (Premiere test passed) | nothing to do: each finished project's `<name>.zip` now holds the whole folder; its size is on the board card ("zip 2.2 GB") |
+| 3 | Only the movie's piece in the project folder | **done** (Premiere: every clip on its frame) | nothing to do: a new edit plays edit\extras\media\raw.mov, the found place ± 10 min; the whole movie stays where you downloaded it |
 
 ## Task 1 -- "Try with another RAW" (done)
 
@@ -58,3 +59,54 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
   - Premiere finds the files next to the XML by itself, so your friend needs nothing else: unzip, then File > Import `edit\1_edit.xml`.
   - Test folder: `work\t16\zt`.
 - **Tests:** app 1220 passed, 0 failed (7 new: `test_zip_day16.py`; night 15's zip test changed to the whole folder).
+
+## Task 3 -- only the movie's piece in the project folder (done)
+
+- **What changed** (`tools\match_cuts\match_cuts\keep_piece.py`, at the very end of every Premiere run):
+  - The tool takes the RAW frames every V1 / A1 clip of 1_edit.xml plays and groups them. Clips closer than 20 minutes are one group.
+  - Each group is kept **± 10 minutes**, from the keyframe before to the keyframe after, cut by **stream copy**: the very same packets, nothing re-encoded.
+  - All the groups go one after the other into **one file**, `edit\extras\media\raw.mov`. One group gives one piece. A montage from far-apart places gives one piece per group, in a row in that file.
+  - A1:
+    - `raw_stereo.wav` is cut the same way, sample for sample.
+    - When A1 plays the RAW's own sound, the piece carries that sound as exact PCM.
+  - Every RAW clip of 1_edit.xml (and of the planning copy `extras\edit_60fps.xml`) is moved onto the piece, at the right frame.
+  - **Checked before anything changes:**
+    - the piece's frames are the movie's at the start, middle and end of every group
+    - three clips per group show the movie's frame
+    - the moved XML has no Premiere problem
+
+    Then it is swapped in, and the run's link or copy of the whole movie is removed from `extras\media`.
+  - **The whole movie stays when:**
+    - the RAW is under 15 min
+    - the pieces would be over 60 % of it
+    - it can't be cut that way (VFR, an edit list ...)
+    - any check fails (nothing is changed then, and the log says why)
+- **The analysis is as fast as before:** it still uses its own smaller piece (± 5 min films, ± 2 min episodes). This step comes after it and takes 2-5 s.
+- **The project folder (the app):** after such an edit, the project folder's own copy or hard link of the whole movie is removed. This only happens when:
+  - the movie is still where you downloaded it (the same size)
+  - and the app did not convert it
+
+  project.json remembers where the movie is (`raw.kept_at`), and Run again reads it there. A RAW the app converted, or a YouTube download made into the project folder, stays.
+- **Learn and the scores:** `extras\keep_piece.json` says where each piece is in the movie.
+  - Learn reads your fixes in the piece's frames, because your Premiere project plays the piece.
+  - The check-all scores map the XML back to the movie's frames, because the answer keys count in them.
+- **Existing finished projects: not changed.**
+- **Real test** (copies of two finished runs in `work\t16\kp`; your projects untouched):
+
+  | | the movie | piece kept | before -> after (V1 + A1 files) | time |
+  |---|---|---|---|---|
+  | **Benchwarmers** (12 Year Old, film, 1:25:10) | raw.mp4 1090 MB + raw_stereo.wav 664 MB | 40:53-1:03:06 (26 %) | **1673 MB -> 495 MB** | 2.5 s |
+  | **faces** (episode, 28:30; A1 plays the RAW's own sound) | raw.mp4 2412 MB | 16:10-28:30 (43 %) | **2412 MB -> 1107 MB** | 4.1 s |
+
+  - **In Premiere 2024 (08:00, you were away):** both imported with no message, `raw.mov` online with the piece's exact length (1333.0 s, 740.2 s).
+  - From the saved projects: **every V1 clip (44 of 44, and 23 of 23) starts exactly at its frame of the old XML** (the whole movie) minus the piece's start.
+  - The tool's own frame checks on the same clips: the same pictures.
+  - The pieces are HEVC with B-frames and the same edit list as the original files Premiere already plays.
+- **What it would do on your finished projects** (a dry run, nothing changed):
+  - films keep 12-26 % of the movie: Lab Accident 16 % of 4.4 GB, Funniest Accent 17 % of 5.7 GB, Awkward Interview 12 %, Coldest Dad 22 %
+  - 28-min episodes 43-60 %: faces, aqoevqvh, Personality Switch, Honest Conversation
+  - most 21-28 min episodes stay whole: ± 10 min of a 22-min episode is over 60 %
+- **Tests:**
+  - tool: **1643 passed, 0 failed** (5 new: `test_day16_keep_piece.py` -- two far-apart groups in one file with the very same pixels and samples, the shifts, the read-back for scores and Learn, the whole movie when too big or a check fails)
+  - app: **1223 passed** (2 new: `test_keep_piece_app_day16.py`)
+  - Skipped tests went up from 74 to 101: those tests need `input\competitor.mp4` and `input\raw_test.mp4`, which were gone before I started (the `input` folder was changed at 07:18).

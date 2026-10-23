@@ -171,7 +171,7 @@ def load_cutlist(rf: dict[str, Path]) -> dict:
     p = rf["cutlist"]
     cl = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
     from .excerpt import movie_cutlist
-    return movie_cutlist(cl, rf["dir"])
+    return movie_cutlist(cl, rf["dir"], as_played=True)     # (day 16: in the piece's frames when it plays one)
 
 
 STEREO_NAMES = ("raw_stereo.mp4", "raw_stereo.mov")    # a 5.1 RAW's one file for Premiere (stereo.py)

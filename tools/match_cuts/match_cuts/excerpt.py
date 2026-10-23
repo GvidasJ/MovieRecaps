@@ -529,15 +529,18 @@ def run_info(run_dir: str | os.PathLike) -> dict | None:
     return None
 
 
-def movie_cutlist(cl: dict, run_dir: str | os.PathLike) -> dict:
+def movie_cutlist(cl: dict, run_dir: str | os.PathLike, as_played: bool = False) -> dict:
     """A run's cut list (cutlist.json: the piece's frames) as if the whole movie had been analysed -- every RAW
     frame + k0, every RAW second + k0 / fps, the RAW block the movie (extras/media/raw.<ext>, its frames and length)
-    -- for a run made on a piece (``run_info``); the cut list itself otherwise. What 1_edit.xml plays is then what
-    the cut list says (Learn compares your project with both)."""
+    -- for a run made on a piece (``run_info``); the cut list itself otherwise. Day 16, ``as_played`` (Learn: your
+    project plays what 1_edit.xml plays): a run whose 1_edit.xml plays only the movie's piece (keep_piece) in that
+    piece's frames (``piece_cutlist``); the scores keep the movie's frames (the answer keys count in them)."""
     import copy
     info = run_info(run_dir)
-    if not info or not isinstance(cl, dict) or not cl:
+    if not isinstance(cl, dict) or not cl:
         return cl
+    if not info:
+        return piece_cutlist(cl, run_dir) if as_played else cl
     k0 = int(info.get("k0") or 0)
     t0 = k0 / float(Fraction(str(info.get("fps") or "1")))
     out = copy.deepcopy(cl)
@@ -564,6 +567,58 @@ def movie_cutlist(cl: dict, run_dir: str | os.PathLike) -> dict:
         for e in s.get("evidence") or []:
             if isinstance(e, dict) and e.get("raw") is not None and int(e["raw"]) >= 0:
                 e["raw"] = int(e["raw"]) + k0
+    return piece_cutlist(out, run_dir) if as_played else out
+
+
+def piece_cutlist(cl: dict, run_dir: str | os.PathLike) -> dict:
+    """Day 16 (keep_piece): a run whose 1_edit.xml plays only the movie's piece -- its cut list (in the movie's
+    frames) in the piece's frames: every RAW frame / second of a segment moved by its group's shift, the RAW block
+    the piece (extras/media/raw.mov, its frames and length). The cut list itself for any other run."""
+    import copy
+    from .keep_piece import run_info as keep_info
+    info = keep_info(run_dir)
+    if not info or not isinstance(cl, dict) or not cl:
+        return cl
+    groups = [g for g in info.get("groups") or [] if isinstance(g, dict)]
+    if not groups:
+        return cl
+    fps = Fraction(str(info.get("fps") or "1"))
+    out = copy.deepcopy(cl)
+
+    def shift_of(frame: float) -> int:
+        for g in groups:
+            if int(g["k0"]) <= frame < int(g["k1"]):
+                return int(g["k0"]) - int(g["offset"])
+        return int(groups[0]["k0"]) - int(groups[0]["offset"])
+
+    name = str(info.get("piece") or "raw.mov")
+    raw = out.setdefault("raw", {})
+    media = Path(run_dir) / ("extras" if (Path(run_dir) / "extras").is_dir() else "") / "media" / name
+    raw.update(frames=int(info.get("frames") or raw.get("frames") or 0),
+               duration_s=float(info.get("frames") or 0) / float(fps), file=f"media/{name}", file_rel=f"media/{name}",
+               file_abs=str(media), keep_piece={"groups": groups})
+    for s in out.get("segments") or []:
+        at = s.get("raw_in_frame")
+        if at is None and s.get("raw_in_seconds") is not None:
+            at = float(s["raw_in_seconds"]) * float(fps)
+        if at is None:
+            continue
+        d = shift_of(float(at))
+        t = d / float(fps)
+        for key in ("raw_in_frame", "raw_out_frame"):
+            if s.get(key) is not None:
+                s[key] = int(s[key]) - d
+        if s.get("raw_in_seconds") is not None:
+            s["raw_in_seconds"] = float(s["raw_in_seconds"]) - t
+        for kk in s.get("time_remap_keys") or []:
+            if isinstance(kk, dict) and kk.get("raw_seconds") is not None:
+                kk["raw_seconds"] = float(kk["raw_seconds"]) - t
+        for key in ("raw_in_interval", "raw_in_interval_both"):
+            if s.get(key) and len(s[key]) == 2:
+                s[key] = [float(s[key][0]) - t, float(s[key][1]) - t]
+        for e in s.get("evidence") or []:
+            if isinstance(e, dict) and e.get("raw") is not None and int(e["raw"]) >= 0:
+                e["raw"] = int(e["raw"]) - d
     return out
 
 

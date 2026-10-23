@@ -4582,6 +4582,9 @@ def run_once(cfg: Config) -> dict:
         if ctx.excerpt is not None:    # day 14: the edit moved onto the movie, the piece deleted
             from . import excerpt
             ctx.finish["excerpt"] = excerpt.finish(ctx)
+        if getattr(cfg, "premiere", False):    # day 16: 1_edit.xml plays only the movie's piece (+- 10 min)
+            from . import keep_piece
+            ctx.finish["keep_piece"] = keep_piece.finish(ctx)
     finally:
         eta.uninstall(clock, ctx.timings if "total" in ctx.timings and not getattr(cfg, "quick_checks", False)
                       else None)              # a finished run's times: the history (not check-all's: its caches)

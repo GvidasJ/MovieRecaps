@@ -16,6 +16,7 @@ same status.
 ``progress(role, share 0..1, text)`` is called often by the long steps; ``cancel`` is a threading.Event."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -403,11 +404,54 @@ def record_edit(p: P.Project, res: dict) -> None:
                   if state == P.FAILED else {}))
     if state == P.DONE and res.get("run_dir"):
         title_copy(p, Path(res["run_dir"]))
+        try:                                     # day 16: the edit plays only the movie's piece -- the whole movie
+            drop_whole_raw(p, Path(res["run_dir"]))     # leaves the project folder (it stays where it was downloaded)
+        except Exception:  # noqa: BLE001
+            pass
         try:                                     # night 15: the zip to send (core.share_zip; never stops anything;
             from . import share_zip              #   day 16: the whole folder -- in its own thread, nothing waits)
             share_zip.make_later(Path(p.folder), Path(res["run_dir"]))
         except Exception:  # noqa: BLE001
             pass
+
+
+def drop_whole_raw(p: P.Project, run_dir: Path) -> str:
+    """Day 16 (task 3): when the finished edit plays only the movie's piece (its extras\\keep_piece.json), the whole
+    movie the project folder holds goes -- only when it is that very movie, not converted, and the movie is still
+    where it was downloaded (project.json's raw.source_file / the download step's "from", the same size): a hard
+    link or a copy of it. project.json keeps where it is (raw.kept_at: Project.file reads it there). Returns what was
+    done in plain words ('' = nothing)."""
+    import json
+    info = Path(run_dir) / "extras" / "keep_piece.json"
+    try:
+        if not json.loads(info.read_text(encoding="utf-8")).get("kept"):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    raw_d = p.data.get("raw") if isinstance(p.data.get("raw"), dict) else {}
+    name = raw_d.get("file")
+    if not name:
+        return ""
+    here = p.folder / name
+    if not here.is_file():
+        return ""
+    conv = ((p.data.get("steps") or {}).get("convert") or {}).get("raw") or {}
+    if isinstance(conv, dict) and conv.get("how") not in (None, "keep"):
+        return ""                                # a converted copy: the app's own work (kept for a run again)
+    dl = ((p.data.get("steps") or {}).get("download") or {}).get("raw") or {}
+    src = next((Path(str(s)) for s in (raw_d.get("source_file"), dl.get("from") if isinstance(dl, dict) else None)
+                if s and Path(str(s)).is_file()), None)
+    if src is None or os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(here)):
+        return ""
+    try:
+        if src.stat().st_size != here.stat().st_size:
+            return ""
+        how = "a hard link" if os.path.samefile(src, here) else "a copy"
+        here.unlink()
+    except OSError:
+        return ""
+    p.update(raw={"kept_at": str(src), "left_folder": P.now(), "left_as": how})
+    return f"the whole movie left the project folder ({how}; it stays at {src})"
 
 
 def title_copy(p: P.Project, run_dir: Path) -> Path | None:

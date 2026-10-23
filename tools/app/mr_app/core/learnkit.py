@@ -383,7 +383,7 @@ def run_meta(run_dir: str | os.PathLike) -> RunMeta | None:
     try:                                     # day 14: a run made on a piece of the movie -- its RAW is the movie
         tool()
         from match_cuts.excerpt import movie_cutlist
-        cl = movie_cutlist(cl, run_dir)
+        cl = movie_cutlist(cl, run_dir, as_played=True)     # (day 16: what 1_edit.xml plays)
     except Exception:  # noqa: BLE001 - as it is written
         pass
     prov = dict(cl.get("provenance") or {})

@@ -356,12 +356,33 @@ def for_run(comp_path: str | Path, comp_hash: str, run_dir: str | Path,
     return None
 
 
+def movie_times(e: "Edit", run_dir: str | Path) -> "Edit":
+    """Day 16: a run whose 1_edit.xml plays only the movie's piece (keep_piece.json) -- its XML's RAW times moved back
+    onto the movie (each piece by its group's shift), so it is scored against keys that count in the movie."""
+    from .keep_piece import run_info
+    info = run_info(run_dir)
+    groups = [g for g in (info or {}).get("groups") or [] if isinstance(g, dict)]
+    if not groups:
+        return e
+    from fractions import Fraction
+    fps = float(Fraction(str(info.get("fps") or "1")))
+    for p in e.pieces:
+        if p.raw is None:
+            continue
+        f = p.raw * fps
+        g = next((g for g in groups if int(g["offset"]) - 0.5 <= f < int(g["offset"]) + int(g["k1"]) - int(g["k0"])),
+                 groups[0])
+        p.raw = p.raw + (int(g["k0"]) - int(g["offset"])) / fps
+    return e
+
+
 def score_run(answer_edit: str | Path, run_dir: str | Path) -> CutScore:
     """A run folder's 1_edit.xml against an answer key's timeline (its track: picture or sound) -- the 60 fps version
     when the run delivered it at the RAW's rate (run_folders.planned_files: night 7)."""
     from .run_folders import planned_files
     key = Edit.from_answer(answer_edit)
     got = Edit.from_xml(planned_files(run_dir)[0], "sound" if key.what == "sound" else "picture")
+    got = movie_times(got, run_dir)
     if key.raw_fps == key.fps and got.raw_fps:
         key.raw_fps = got.raw_fps
     return score(key, got)
