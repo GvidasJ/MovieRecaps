@@ -1,0 +1,2279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PremiereData Version="3">
+	<Tree ObjectRef="1"/>
+	<Tree ObjectID="1" ClassID="177f2841-dd5b-43bd-9d9a-79e231bd47dd" Version="1">
+		<Node Version="1">
+		</Node>
+		<RootBin ObjectRef="2"/>
+	</Tree>
+	<BinTreeItem ObjectID="2" ClassID="5e0f46fa-384f-4c09-bc53-0b8e2b7005b5" Version="4">
+		<Items Version="1">
+			<Item Index="0" ObjectRef="3"/>
+		</Items>
+		<Expanded>false</Expanded>
+		<Sorted>false</Sorted>
+		<TreeItemBase Version="4">
+			<Name>Root</Name>
+			<Node Version="1">
+			</Node>
+			<Locked>false</Locked>
+		</TreeItemBase>
+	</BinTreeItem>
+	<BinTreeItem ObjectID="3" ClassID="5e0f46fa-384f-4c09-bc53-0b8e2b7005b5" Version="4">
+		<Items Version="1">
+			<Item Index="0" ObjectRef="5"/>
+		</Items>
+		<Expanded>true</Expanded>
+		<Sorted>true</Sorted>
+		<TreeItemBase Version="4">
+			<Name>Presets</Name>
+			<Node Version="1">
+				<Properties Version="1">
+					<HandlerEffects.EffectItemTree.PresetsBin>1</HandlerEffects.EffectItemTree.PresetsBin>
+				</Properties>
+			</Node>
+			<Data ObjectRef="4"/>
+			<Locked>false</Locked>
+		</TreeItemBase>
+	</BinTreeItem>
+	<EffectBinItem ObjectID="4" ClassID="5f513d71-0018-4405-a10b-bf5597f99960" Version="1">
+		<Flavor>1</Flavor>
+	</EffectBinItem>
+	<TreeItem ObjectID="5" ClassID="025f59ac-1f29-42c0-9897-ada1059bd547" Version="3">
+		<TreeItemBase Version="4">
+			<Name>MovieRecaps song chain</Name>
+			<Node Version="1">
+				<Properties Version="1">
+					<MZ.EffectPresets.PresetUID>f5ec52e7-724c-438f-acd1-0fcfb425fbc1</MZ.EffectPresets.PresetUID>
+				</Properties>
+			</Node>
+			<Data ObjectRef="6"/>
+			<Locked>false</Locked>
+		</TreeItemBase>
+	</TreeItem>
+	<FilterPresetItem ObjectID="6" ClassID="e56c9ba0-91cb-4f21-9174-c1b52448c6c9" Version="2">
+		<EffectItem Version="1">
+			<EffectFlavor>0</EffectFlavor>
+			<EffectIsShorcut>false</EffectIsShorcut>
+		</EffectItem>
+		<FilterPresets Version="1">
+			<FilterPreset Index="0" ObjectRef="7"/>
+			<FilterPreset Index="1" ObjectRef="45"/>
+			<FilterPreset Index="2" ObjectRef="83"/>
+			<FilterPreset Index="3" ObjectRef="121"/>
+			<FilterPreset Index="4" ObjectRef="131"/>
+			<FilterPreset Index="5" ObjectRef="141"/>
+		</FilterPresets>
+	</FilterPresetItem>
+	<FilterPreset ObjectID="7" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<Component ObjectRef="8"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="8" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>0</ChannelType>
+			<AudioChannelLayout>[{"channellabel":0}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Amplify</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="9"/>
+					<Param Index="1" ObjectRef="10"/>
+					<Param Index="2" ObjectRef="11"/>
+					<Param Index="3" ObjectRef="12"/>
+					<Param Index="4" ObjectRef="13"/>
+					<Param Index="5" ObjectRef="14"/>
+					<Param Index="6" ObjectRef="15"/>
+					<Param Index="7" ObjectRef="16"/>
+					<Param Index="8" ObjectRef="17"/>
+					<Param Index="9" ObjectRef="18"/>
+					<Param Index="10" ObjectRef="19"/>
+					<Param Index="11" ObjectRef="20"/>
+					<Param Index="12" ObjectRef="21"/>
+					<Param Index="13" ObjectRef="22"/>
+					<Param Index="14" ObjectRef="23"/>
+					<Param Index="15" ObjectRef="24"/>
+					<Param Index="16" ObjectRef="25"/>
+					<Param Index="17" ObjectRef="26"/>
+					<Param Index="18" ObjectRef="27"/>
+					<Param Index="19" ObjectRef="28"/>
+					<Param Index="20" ObjectRef="29"/>
+					<Param Index="21" ObjectRef="30"/>
+					<Param Index="22" ObjectRef="31"/>
+					<Param Index="23" ObjectRef="32"/>
+					<Param Index="24" ObjectRef="33"/>
+					<Param Index="25" ObjectRef="34"/>
+					<Param Index="26" ObjectRef="35"/>
+					<Param Index="27" ObjectRef="36"/>
+					<Param Index="28" ObjectRef="37"/>
+					<Param Index="29" ObjectRef="38"/>
+					<Param Index="30" ObjectRef="39"/>
+					<Param Index="31" ObjectRef="40"/>
+					<Param Index="32" ObjectRef="41"/>
+					<Param Index="33" ObjectRef="42"/>
+					<Param Index="34" ObjectRef="43"/>
+					<Param Index="35" ObjectRef="44"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName>MovieRecaps audio chain</InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+					<Properties Version="1">
+						<AudioFilterWindow.Targeted>true</AudioFilterWindow.Targeted>
+						<AudioFilterWindow.Visible>false</AudioFilterWindow.Visible>
+					</Properties>
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="4263480046">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5QYXJhbUxpc3Q8L2tleT4KPGFycmF5Pgo8YXJyYXkudHlwZT48ZmxvYXQvPjwvYXJyYXkudHlwZT4KPGZsb2F0PjAuMDMxMjU8L2Zsb2F0Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjxmbG9hdD4wLjY4NzU8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4wLjY2NjY2NjY5PC9mbG9hdD4KPGZsb2F0PjAuNjY2NjY2Njk8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY2OTwvZmxvYXQ+CjxmbG9hdD4xPC9mbG9hdD4KPC9hcnJheT4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjA8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[0],"name":"","type":0}],"out":[{"layout":[0],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="9" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267131000</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="10" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Channel Count</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.03125,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.03125</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267203200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="11" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Sliders</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267233000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="12" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Gain</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.687500000000,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.687500000000</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267243600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="13" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267247700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="14" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267251600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="15" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267255700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="16" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267260200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="17" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267263800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="18" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267266600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="19" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267269800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="20" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267275500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="21" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267278900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="22" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267281800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="23" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267285300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="24" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267288800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="25" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267291700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="26" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267295100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="27" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267298800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="28" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267301600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="29" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267305300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="30" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267311900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="31" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267315300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="32" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267319500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="33" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267323100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="34" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267326300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="35" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267330500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="36" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267334800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="37" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267338500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="38" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267344300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="39" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267348800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="40" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267352300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="41" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267356400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="42" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267361500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="43" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267365900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="44" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Keyframes</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267380900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<FilterPreset ObjectID="45" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<Component ObjectRef="46"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="46" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>1</ChannelType>
+			<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Amplify</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="47"/>
+					<Param Index="1" ObjectRef="48"/>
+					<Param Index="2" ObjectRef="49"/>
+					<Param Index="3" ObjectRef="50"/>
+					<Param Index="4" ObjectRef="51"/>
+					<Param Index="5" ObjectRef="52"/>
+					<Param Index="6" ObjectRef="53"/>
+					<Param Index="7" ObjectRef="54"/>
+					<Param Index="8" ObjectRef="55"/>
+					<Param Index="9" ObjectRef="56"/>
+					<Param Index="10" ObjectRef="57"/>
+					<Param Index="11" ObjectRef="58"/>
+					<Param Index="12" ObjectRef="59"/>
+					<Param Index="13" ObjectRef="60"/>
+					<Param Index="14" ObjectRef="61"/>
+					<Param Index="15" ObjectRef="62"/>
+					<Param Index="16" ObjectRef="63"/>
+					<Param Index="17" ObjectRef="64"/>
+					<Param Index="18" ObjectRef="65"/>
+					<Param Index="19" ObjectRef="66"/>
+					<Param Index="20" ObjectRef="67"/>
+					<Param Index="21" ObjectRef="68"/>
+					<Param Index="22" ObjectRef="69"/>
+					<Param Index="23" ObjectRef="70"/>
+					<Param Index="24" ObjectRef="71"/>
+					<Param Index="25" ObjectRef="72"/>
+					<Param Index="26" ObjectRef="73"/>
+					<Param Index="27" ObjectRef="74"/>
+					<Param Index="28" ObjectRef="75"/>
+					<Param Index="29" ObjectRef="76"/>
+					<Param Index="30" ObjectRef="77"/>
+					<Param Index="31" ObjectRef="78"/>
+					<Param Index="32" ObjectRef="79"/>
+					<Param Index="33" ObjectRef="80"/>
+					<Param Index="34" ObjectRef="81"/>
+					<Param Index="35" ObjectRef="82"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName></InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="1999709216">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5GYWN0b3J5UHJlc2V0PC9rZXk+Cjx1c3RyaW5nPihEZWZhdWx0KTwvdXN0cmluZz4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjI8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[100,101],"name":"","type":0}],"out":[{"layout":[100,101],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="47" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267131000</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="48" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Channel Count</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.0625,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.0625</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267203200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="49" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Sliders</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267233000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="50" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Left</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568327300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="51" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Right</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568337000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="52" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568342500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="53" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568350100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="54" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568355400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="55" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568362500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="56" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568366500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="57" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568370400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="58" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568373500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="59" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568380800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="60" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568387700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="61" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568395600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="62" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568400700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="63" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568404500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="64" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568410300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="65" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568414800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="66" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568420800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="67" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568425200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="68" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568431600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="69" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568435700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="70" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568438600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="71" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568561900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="72" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568568500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="73" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568574500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="74" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568578600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="75" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568582800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="76" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568587400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="77" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568594200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="78" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568599400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="79" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568604200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="80" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568609500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="81" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346568613200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="82" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Keyframes</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267380900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<FilterPreset ObjectID="83" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<Component ObjectRef="84"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="84" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>2</ChannelType>
+			<AudioChannelLayout>[{"channellabel":100},{"channellabel":101},{"channellabel":102},{"channellabel":103},{"channellabel":104},{"channellabel":105}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Amplify</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="85"/>
+					<Param Index="1" ObjectRef="86"/>
+					<Param Index="2" ObjectRef="87"/>
+					<Param Index="3" ObjectRef="88"/>
+					<Param Index="4" ObjectRef="89"/>
+					<Param Index="5" ObjectRef="90"/>
+					<Param Index="6" ObjectRef="91"/>
+					<Param Index="7" ObjectRef="92"/>
+					<Param Index="8" ObjectRef="93"/>
+					<Param Index="9" ObjectRef="94"/>
+					<Param Index="10" ObjectRef="95"/>
+					<Param Index="11" ObjectRef="96"/>
+					<Param Index="12" ObjectRef="97"/>
+					<Param Index="13" ObjectRef="98"/>
+					<Param Index="14" ObjectRef="99"/>
+					<Param Index="15" ObjectRef="100"/>
+					<Param Index="16" ObjectRef="101"/>
+					<Param Index="17" ObjectRef="102"/>
+					<Param Index="18" ObjectRef="103"/>
+					<Param Index="19" ObjectRef="104"/>
+					<Param Index="20" ObjectRef="105"/>
+					<Param Index="21" ObjectRef="106"/>
+					<Param Index="22" ObjectRef="107"/>
+					<Param Index="23" ObjectRef="108"/>
+					<Param Index="24" ObjectRef="109"/>
+					<Param Index="25" ObjectRef="110"/>
+					<Param Index="26" ObjectRef="111"/>
+					<Param Index="27" ObjectRef="112"/>
+					<Param Index="28" ObjectRef="113"/>
+					<Param Index="29" ObjectRef="114"/>
+					<Param Index="30" ObjectRef="115"/>
+					<Param Index="31" ObjectRef="116"/>
+					<Param Index="32" ObjectRef="117"/>
+					<Param Index="33" ObjectRef="118"/>
+					<Param Index="34" ObjectRef="119"/>
+					<Param Index="35" ObjectRef="120"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName></InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>f14fee7d-fe5f-4202-b790-f53209e56411</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="1999709216">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5GYWN0b3J5UHJlc2V0PC9rZXk+Cjx1c3RyaW5nPihEZWZhdWx0KTwvdXN0cmluZz4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjI8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[100,101,102,103,104,105],"name":"","type":0}],"out":[{"layout":[100,101,102,103,104,105],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="85" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267131000</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="86" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Channel Count</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.1875,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.1875</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267203200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="87" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Sliders</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267233000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="88" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Left</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574583900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="89" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Right</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574589500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="90" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Center</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574595800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="91" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Low Frequency Effects</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574606000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="92" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Left Surround</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574613400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="93" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Right Surround</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666984558,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666984558</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574620700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="94" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574625200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="95" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574628100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="96" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574631200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="97" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574636100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="98" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574640400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="99" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574643100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="100" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574646300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="101" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574649000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="102" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574653700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="103" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574657900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="104" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574660900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="105" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574666200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="106" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574670800</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="107" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574673700</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="108" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574679400</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="109" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574683300</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="110" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574686900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="111" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574690500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="112" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574696000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="113" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574699500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="114" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574703100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="115" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574705600</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="116" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574710100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="117" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574714000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="118" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574716500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="119" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name></Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.666666686535,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.666666686535</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>63346574718900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="120" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Keyframes</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489267380900</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<FilterPreset ObjectID="121" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<Component ObjectRef="122"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="122" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>0</ChannelType>
+			<AudioChannelLayout>[{"channellabel":0}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Hard Limiter</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="123"/>
+					<Param Index="1" ObjectRef="124"/>
+					<Param Index="2" ObjectRef="125"/>
+					<Param Index="3" ObjectRef="126"/>
+					<Param Index="4" ObjectRef="127"/>
+					<Param Index="5" ObjectRef="128"/>
+					<Param Index="6" ObjectRef="129"/>
+					<Param Index="7" ObjectRef="130"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName>MovieRecaps audio chain</InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="2735320232">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5QYXJhbUxpc3Q8L2tleT4KPGFycmF5Pgo8YXJyYXkudHlwZT48ZmxvYXQvPjwvYXJyYXkudHlwZT4KPGZsb2F0PjE8L2Zsb2F0Pgo8ZmxvYXQ+MC42NjY2NjY5ODwvZmxvYXQ+CjxmbG9hdD4wLjEzMzMzMzAxPC9mbG9hdD4KPGZsb2F0PjAuMzc1PC9mbG9hdD4KPGZsb2F0PjE8L2Zsb2F0Pgo8ZmxvYXQ+MTwvZmxvYXQ+CjxmbG9hdD4wPC9mbG9hdD4KPC9hcnJheT4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjA8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MjwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[0],"name":"","type":0}],"out":[{"layout":[0],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="123" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489127934100</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="124" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Maximum Amplitude</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128043100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="125" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Input Boost</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.680000000000,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.680000000000</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128071200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="126" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Look-Ahead Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.133333012462,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.133333012462</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128091200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="127" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Release Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.375,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.375</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128104500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="128" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Channels</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128115000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="129" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Decay to Ceiling</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128125100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="130" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Limit True Peak</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128138200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<FilterPreset ObjectID="131" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<Component ObjectRef="132"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="132" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>1</ChannelType>
+			<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Hard Limiter</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="133"/>
+					<Param Index="1" ObjectRef="134"/>
+					<Param Index="2" ObjectRef="135"/>
+					<Param Index="3" ObjectRef="136"/>
+					<Param Index="4" ObjectRef="137"/>
+					<Param Index="5" ObjectRef="138"/>
+					<Param Index="6" ObjectRef="139"/>
+					<Param Index="7" ObjectRef="140"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName></InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="1999709216">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5GYWN0b3J5UHJlc2V0PC9rZXk+Cjx1c3RyaW5nPihEZWZhdWx0KTwvdXN0cmluZz4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjI8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MjwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[100,101],"name":"","type":0}],"out":[{"layout":[100,101],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="133" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489127934100</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="134" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Maximum Amplitude</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.999000012875,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.999000012875</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128043100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="135" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Input Boost</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.680000000000,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.680000000000</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128071200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="136" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Look-Ahead Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.133333012462,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.133333012462</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128091200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="137" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Release Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.375,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.375</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128104500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="138" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Channels</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128115000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="139" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Decay to Ceiling</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128125100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="140" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Limit True Peak</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128138200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<FilterPreset ObjectID="141" ClassID="ee52a7d2-069e-47f7-aa30-e3e3286b65a3" Version="3">
+		<Description>Hard Limiter Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00 + Amplify +3.00 dB. MovieRecaps: put it on both song clips (A2) of a SceneProof 1_edit.xml.</Description>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<Component ObjectRef="142"/>
+		<MediaType>80b8e3d5-6dca-4195-aefb-cb5f407ab009</MediaType>
+		<AnchorInPoint>406425600000</AnchorInPoint>
+		<AnchorOutPoint>751887360000</AnchorOutPoint>
+		<Speed>1.</Speed>
+		<TransitionDuration>0</TransitionDuration>
+		<Node Version="1">
+		</Node>
+		<Type>0</Type>
+	</FilterPreset>
+	<AudioFilterComponent ObjectID="142" ClassID="d77a90a0-6c9e-44bf-9b20-de8c21168fe1" Version="4">
+		<FilterPreset>0</FilterPreset>
+		<AudioComponent Version="3">
+			<ChannelType>2</ChannelType>
+			<AudioChannelLayout>[{"channellabel":100},{"channellabel":101},{"channellabel":102},{"channellabel":103},{"channellabel":104},{"channellabel":105}]</AudioChannelLayout>
+			<FrameRate>5292000</FrameRate>
+			<AudioComponentType>0</AudioComponentType>
+			<Component Version="6">
+				<Bypass>false</Bypass>
+				<DisplayName>Hard Limiter</DisplayName>
+				<Params Version="1">
+					<Param Index="0" ObjectRef="143"/>
+					<Param Index="1" ObjectRef="144"/>
+					<Param Index="2" ObjectRef="145"/>
+					<Param Index="3" ObjectRef="146"/>
+					<Param Index="4" ObjectRef="147"/>
+					<Param Index="5" ObjectRef="148"/>
+					<Param Index="6" ObjectRef="149"/>
+					<Param Index="7" ObjectRef="150"/>
+				</Params>
+				<Intrinsic>false</Intrinsic>
+				<InstanceName></InstanceName>
+				<ArchivedType>0</ArchivedType>
+				<Node Version="1">
+				</Node>
+				<ID>0</ID>
+			</Component>
+		</AudioComponent>
+		<FilterMatchName>e0b23f05-f1a7-4ef7-9b50-7ec3e3002058</FilterMatchName>
+		<FilterIndex>-1</FilterIndex>
+		<OpaqueData Encoding="base64" Checksum="1999709216">PD94bWwgdmVyc2lvbj0nMS4wJz8+Cjxwcm9wLm1hcCB2ZXJzaW9uPSc0Jz4KPHByb3AubGlzdD4KPHByb3AucGFpcj4KPGtleT5GYWN0b3J5UHJlc2V0PC9rZXk+Cjx1c3RyaW5nPihEZWZhdWx0KTwvdXN0cmluZz4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VHlwZTwva2V5Pgo8aW50IHR5cGU9J3NpZ25lZCcgc2l6ZT0nMzInPjI8L2ludD4KPC9wcm9wLnBhaXI+Cjxwcm9wLnBhaXI+CjxrZXk+VmVyc2lvbjwva2V5Pgo8ZmxvYXQ+MjwvZmxvYXQ+CjwvcHJvcC5wYWlyPgo8L3Byb3AubGlzdD4KPC9wcm9wLm1hcD4K</OpaqueData>
+		<ChannelConfigData>{"in":[{"layout":[100,101,102,103,104,105],"name":"","type":0}],"out":[{"layout":[100,101,102,103,104,105],"name":"","type":0}]}</ChannelConfigData>
+	</AudioFilterComponent>
+	<AudioComponentParam ObjectID="143" ClassID="32657501-3aa4-445f-a49b-d09ecb9fa1ae" Version="9">
+		<Name>Bypass</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>4</ParameterControlType>
+		<StartKeyframe>-91445760000000000,false,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>false</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489127934100</Timestamp>
+		<Node Version="1">
+			<Properties Version="1">
+				<ECP.NonParamGroup.Expanded>true</ECP.NonParamGroup.Expanded>
+			</Properties>
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="144" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Maximum Amplitude</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.999000012875,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.999000012875</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128043100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="145" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Input Boost</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.680000000000,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.680000000000</CurrentValue>
+		<UnitsString>dB</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128071200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="146" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Look-Ahead Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.133333012462,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.133333012462</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128091200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="147" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Release Time</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.375,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.375</CurrentValue>
+		<UnitsString>ms</UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128104500</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="148" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Link Channels</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128115000</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="149" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Decay to Ceiling</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,1.,0,0,0,0,0,0</StartKeyframe>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128125100</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+	<AudioComponentParam ObjectID="150" ClassID="a714635e-a628-4b27-9d59-77eba47dbc1a" Version="9">
+		<Name>Limit True Peak</Name>
+		<Keyframes></Keyframes>
+		<IsTimeVarying>false</IsTimeVarying>
+		<ParameterControlType>2</ParameterControlType>
+		<StartKeyframe>-91445760000000000,0.,0,0,0,0,0,0</StartKeyframe>
+		<CurrentValue>0.</CurrentValue>
+		<UnitsString></UnitsString>
+		<RangeLocked>true</RangeLocked>
+		<IsInverted>false</IsInverted>
+		<Timestamp>62489128138200</Timestamp>
+		<Node Version="1">
+		</Node>
+	</AudioComponentParam>
+</PremiereData>

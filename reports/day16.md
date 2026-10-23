@@ -9,6 +9,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | 1 | "Try with another RAW" keeps your title and text | **done** | a row that failed because of its RAW (WRONG PAIR, NOT IN THIS RAW, PICTURE NOT FOUND, a RAW that can't be read) has **Try with another RAW**. History has it too, on the failed event |
 | 2 | The zip has the whole project folder | **done** (Premiere test passed) | nothing to do: each finished project's `<name>.zip` now holds the whole folder; its size is on the board card ("zip 2.2 GB") |
 | 3 | Only the movie's piece in the project folder | **done** (Premiere: every clip on its frame) | nothing to do: a new edit plays edit\extras\media\raw.mov, the found place ± 10 min; the whole movie stays where you downloaded it |
+| 4 | SceneProof song: the right levels and effects | **done** (Premiere: A2 at +13.5 / +7.5 dB) | import assets\premiere\MovieRecaps song chain.prfpset once, then drop it on the two song clips of each SceneProof edit |
 | 5 | Find source with NexLev and Algrow | **done** (5 real clips at once: all 5 right, Sure) | Progress > Find source as before: an AI watches each clip first; Sure only when checked (your RAW's sound, IMDb / TVmaze); it uses credits once per clip |
 
 ## Task 1 -- "Try with another RAW" (done)
@@ -110,7 +111,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 - **Tests:**
   - tool: **1643 passed, 0 failed** (5 new: `test_day16_keep_piece.py` -- two far-apart groups in one file with the very same pixels and samples, the shifts, the read-back for scores and Learn, the whole movie when too big or a check fails)
   - app: **1223 passed** (2 new: `test_keep_piece_app_day16.py`)
-  - Skipped tests went up from 74 to 101: those tests need `input\competitor.mp4` and `input\raw_test.mp4`, which were gone before I started (the `input` folder was changed at 07:18).
+  - Skipped: 101 -- 91 slow tests (they run only with `--runslow`) and Linux-only ones; night 15 counted 74, and I didn't find why the count differs (no test fails). (`input\competitor.mp4` and `input\raw_test.mp4` were already gone when I started: the `input` folder was changed at 07:18.)
 
 ## Task 5 -- Find source with NexLev and Algrow (done)
 
@@ -150,3 +151,29 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 - **What this shows:** the AI is always right about the title, but **it says "100 % sure" on wrong episode numbers** (3 of 3 shows here). So an episode is never Sure from the AI alone: only with its sound in your RAW, or TVmaze's title matching.
 - **Not built:** the optional "Algrow transcript of a YouTube clip of that scene" step. The sound check and TVmaze already decide every case above. The free `fetch_transcript` is in `ai_watch.transcript()` for later.
 - **Tests:** 9 new (`test_ai_watch_day16.py`, fakes only: no network, no credits). App tests never spend credits (`MOVIERECAPS_NO_AI`).
+
+## Task 4 -- SceneProof song: the right levels and effects (done; the preset drop is yours)
+
+- **Your project (read from `Desktop\song.prproj`):** each song clip has, in this order, Volume, Volume, Hard Limiter, Amplify. Your Input Boost **2.00 dB** is stored as 0.68 (so the scale is -100..+50 dB).
+  - Your Amplify there is **+4.5 dB** (your older LoudVOGOOOD value), not +3.00. I used **+3.00 dB** as you wrote in the prompt. If +4.5 is the one you want, say so and I'll change one number.
+- **What an edit gets now (SceneProof, A2):**
+  - before the cut (12.32 s): **Volume +13.5 dB** (your Clip Gain +5 + your Volume Level 8.5)
+  - after the cut: **Volume +7.5 dB** (-1 + 8.5)
+  - each song clip's comment says: "drop the preset MovieRecaps song chain on it"
+- **The new preset `assets\premiere\MovieRecaps song chain.prfpset`:** Hard Limiter (Maximum Amplitude 0 dB, **Input Boost 2.00 dB**, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00) + **Amplify +3.00 dB**.
+  - It is made from your A1 preset file (Premiere's own export), with its own name and preset id. The values are checked in a test: Input Boost 0.68 on the limiter for 1, 2 and 6 channels; Amplify 0.6875.
+  - **Install it once like the A1 preset:** in Premiere's Effects panel, right-click **Presets > Import Presets...**, and pick `assets\premiere\MovieRecaps song chain.prfpset`.
+- **Measured -- does +13.5 / +7.5 dB with the preset sound like your way?** An XML can't carry Clip Gain, and I can't render from Premiere without clicking (dropping a preset needs the mouse). So I measured the same chain on the real song with FFmpeg's limiter (ceiling 0 dB, 7 ms, 100 ms), both ways Premiere could order a clip's Volume:
+
+  | the clip's Volume | piece | your way | the tool's way (Volume +13.5 / +7.5 + the preset) |
+  |---|---|---|---|
+  | before the effects | +5 dB piece | -8.70 LUFS, peak +3.00 | **-8.70 LUFS, peak +3.00** |
+  | before the effects | -1 dB piece | -4.30 LUFS, peak +3.00 | **-4.30 LUFS, peak +3.00** |
+  | after the effects | +5 dB piece | -7.80 LUFS, peak +8.40 | **-7.80 LUFS, peak +8.40** |
+  | after the effects | -1 dB piece | -3.40 LUFS, peak +8.40 | **-3.40 LUFS, peak +8.40** |
+
+  - **The same in every case.** The song's loudest peak is -10.1 dBFS: with the Volume after the effects, the limiter never touches it; with the Volume before, every gain is before the limiter anyway.
+  - (For a louder song I added `song_preset(gain)`, which puts a Clip Gain into the Input Boost; it isn't needed for this one.)
+- **What you must set by hand:** only drop **MovieRecaps song chain** on the two song clips (A2). Nothing else.
+- **Premiere test (08:24, you were away):** a SceneProof edit (the American Dad one) imported with no message. The saved project has A2 with 2 song clips at **Volume +13.5 dB and +7.5 dB** (Premiere kept +13.5, it doesn't cut it to +12). Test folder `work\t16\song\edit`. The preset drop and listening are yours.
+- **Tests:** 3 new (`test_day16_song_chain.py`); night 15's music and SceneProof tests unchanged and passing.

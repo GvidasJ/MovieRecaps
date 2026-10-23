@@ -344,6 +344,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--music-split", type=float, default=0.0, metavar="S",
                    help="cut the song there (sequence s): each piece at its own level (--music-gains)")
     p.add_argument("--music-gains", default="0", metavar="DB,DB", help="the levels before / after the cut, e.g. 5,-1")
+    p.add_argument("--music-volume", type=float, default=None, metavar="DB",
+                   help="day 16: your song Volume Level (SceneProof 8.5), added to each piece's --music-gains "
+                        "(+13.5 / +7.5 dB); the Hard Limiter + Amplify: the preset 'MovieRecaps song chain'")
     p.add_argument("--force-inputs", action="store_true",
                    help="skip the wrong-input checks: by default the run stops at once (before converting anything) "
                         "when the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, "
@@ -424,6 +427,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.music_start_s = float(getattr(args, "music_start", 0.0) or 0.0)
     cfg.music_split_s = float(getattr(args, "music_split", 0.0) or 0.0)
     cfg.music_gains_db = str(getattr(args, "music_gains", "0") or "0")
+    cfg.music_volume_db = getattr(args, "music_volume", None)
     cfg.quick_checks = bool(getattr(args, "quick_checks", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()

@@ -12,6 +12,16 @@ Volume, so each piece gets Volume +5 dB / -1 dB -- the same loudness. Premiere m
 channel, as it does with A1's stereo sound.
 
 The song is linked (else copied) into extras/media next to the RAW, so the run folder holds everything it plays.
+
+Day 16 (task 4) -- your song chain exactly: in your project each song clip has Clip Gain (+5 dB before the cut, -1 dB
+after), Volume Level 8.5 dB, a Hard Limiter (Maximum Amplitude 0 dB, Input Boost 2.00 dB, Look-Ahead 7 ms, Release
+100 ms, Link Channels 1.00) and Amplify +3.00 dB. An XML carries only the Volume (``--music-volume`` 8.5), never Clip
+Gain, a Hard Limiter or Amplify. So each piece's Volume is its Clip Gain + 8.5 dB (+13.5 dB before the cut, +7.5 dB
+after) and the preset "MovieRecaps song chain" (``song_preset``: the Hard Limiter with Input Boost 2.00 dB + Amplify
++3.00 dB, assets\\premiere) goes on both song clips by hand. Measured on the song (day 16, ffmpeg's limiter with the
+same settings): the same loudness as your chain whether Premiere applies a clip's Volume before or after its effects --
+the song's loudest peak is -10.1 dBFS, so the limiter only works where every gain is before it. (A song that peaks
+higher would need the Clip Gain inside the Input Boost: ``song_preset(gain_db)`` makes such a preset.)
 """
 from __future__ import annotations
 
@@ -27,6 +37,9 @@ from typing import Any, Sequence
 
 from .common import ffprobe_bin, log
 
+SONG_INPUT_BOOST_DB = 2.0          # day 16: your song's Hard Limiter Input Boost (song.prproj: 2.00 dB)
+SONG_AMPLIFY_DB = 3.0               # ... and its Amplify (your prompt: +3.00 dB)
+PRESET_TEMPLATE = Path(__file__).resolve().parents[3] / "assets" / "premiere" / "MovieRecaps audio chain.prfpset"
 CLIP_ID = "clipitem-music"
 FILE_ID = "file-music"
 MASTER_ID = "masterclip-music"
@@ -115,19 +128,64 @@ def place_media(song: Path, media_dir: Path | None) -> Path:
         return song
 
 
+SONG_PRESET = "MovieRecaps song chain"
+
+
+def preset_name(gain_db: float = 0.0) -> str:
+    """'MovieRecaps song chain' (a preset with a Clip Gain in its Input Boost: 'MovieRecaps song chain +5')."""
+    return SONG_PRESET if not gain_db else f"{SONG_PRESET} {gain_db:+g}"
+
+
+def boost_value(db: float) -> str:
+    """A Hard Limiter Input Boost in a preset file: -100..+50 dB as 0..1 (0 dB = 0.666667, your 2.00 dB = 0.68)."""
+    return f"{(float(db) + 100.0) / 150.0:.12f}"
+
+
+def amplify_value(db: float) -> str:
+    """An Amplify gain in a preset file: -96..+48 dB as 0..1 (+3 dB = 0.6875, +4.5 dB = 0.697917)."""
+    return f"{(float(db) + 96.0) / 144.0:.12f}"
+
+
+def song_preset(gain_db: float = 0.0, template: str | Path = PRESET_TEMPLATE) -> str:
+    """The text of the preset for a song piece with Clip Gain ``gain_db``: the A1 preset (Premiere's own export, its
+    Hard Limiter and Amplify for 1 / 2 / 6 channels) with Input Boost SONG_INPUT_BOOST_DB + gain_db, Amplify
+    SONG_AMPLIFY_DB, its own name and a new preset id."""
+    import re
+    import uuid
+    t = Path(template).read_text(encoding="utf-8")
+    name = preset_name(gain_db)
+    boost = SONG_INPUT_BOOST_DB + float(gain_db)
+    t = t.replace("<Name>MovieRecaps audio chain</Name>", f"<Name>{name}</Name>")
+    t = re.sub(r"(<MZ\.EffectPresets\.PresetUID>)[^<]*(<)", lambda m: m.group(1) + str(uuid.uuid4()) + m.group(2), t)
+    desc = (f"Hard Limiter Maximum Amplitude 0 dB, Input Boost {boost:.2f} dB, Look-Ahead 7 ms, Release 100 ms, Link "
+            f"Channels 1.00 + Amplify +{SONG_AMPLIFY_DB:.2f} dB. MovieRecaps: put it on both song clips (A2) of a "
+            "SceneProof 1_edit.xml.")
+    t = re.sub(r"<Description>[^<]*</Description>", f"<Description>{desc}</Description>", t)
+    # every Input Boost parameter (only the Hard Limiter has one) and every Amplify Gain
+    t = re.sub(r"(<Name>Input Boost</Name>.*?<StartKeyframe>-?\d+,)([^,<]*)(,.*?<CurrentValue>)([^<]*)(<)",
+               lambda m: m.group(1) + boost_value(boost) + m.group(3) + boost_value(boost) + m.group(5), t, flags=re.S)
+    t = re.sub(r"(<Name>Gain</Name>.*?<StartKeyframe>-?\d+,)([^,<]*)(,.*?<CurrentValue>)([^<]*)(<)",
+               lambda m: m.group(1) + amplify_value(SONG_AMPLIFY_DB) + m.group(3) + amplify_value(SONG_AMPLIFY_DB)
+               + m.group(5), t, flags=re.S)
+    return t
+
+
 def add_music(xml: str | Path, song: str | Path, start_s: float = 0.0, split_s: float = 0.0,
-              gains_db: Sequence[float] = (0.0,), media_dir: str | Path | None = None) -> dict:
-    """Put ``song`` on A2 of ``xml`` (module docstring). Returns {'clips', 'pieces', 'file', 'seconds'} or {'error'}.
-    Never raises."""
+              gains_db: Sequence[float] = (0.0,), media_dir: str | Path | None = None,
+              volume_db: float | None = None) -> dict:
+    """Put ``song`` on A2 of ``xml`` (module docstring). ``volume_db`` (day 16): your Volume Level on every piece, added
+    to its gain (8.5: +13.5 / +7.5 dB); None: each piece's Volume is its gain (night 15). Returns {'clips', 'pieces',
+    'file', 'seconds'} or {'error'}. Never raises."""
     try:
         return _add(Path(xml), Path(song), float(start_s), float(split_s), list(gains_db),
-                    Path(media_dir) if media_dir else None)
+                    Path(media_dir) if media_dir else None, volume_db)
     except Exception as e:  # noqa: BLE001 - the edit stays as it was
         log.warning("music: not added (%s: %s)", type(e).__name__, e)
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[float], media_dir: Path | None) -> dict:
+def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[float], media_dir: Path | None,
+         volume_db: float | None = None) -> dict:
     if not song.is_file():
         return {"error": f"the song is not there: {song}"}
     info = probe(song)
@@ -191,14 +249,20 @@ def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[floa
         _sub(pa, "name", "Level")
         _sub(pa, "valuemin", 0)
         _sub(pa, "valuemax", "3.98109")
-        _sub(pa, "value", f"{10.0 ** (p['gain_db'] / 20.0):.6f}")
+        vol = p["gain_db"] if volume_db is None else p["gain_db"] + float(volume_db)
+        _sub(pa, "value", f"{10.0 ** (vol / 20.0):.6f}")
         st = _sub(ci, "sourcetrack")
         _sub(st, "mediatype", "audio")
         _sub(st, "trackindex", 1)
         cm = _sub(ci, "comments")
         _sub(cm, "mastercomment1", "MUSIC")
-        _sub(cm, "mastercomment2", f"{song.name} from {p['in'] / float(fps):.2f} s, Volume {p['gain_db']:+g} dB (your "
-                                   "Clip Gain; an XML cannot set Clip Gain)")
+        if volume_db is None:
+            _sub(cm, "mastercomment2", f"{song.name} from {p['in'] / float(fps):.2f} s, Volume {p['gain_db']:+g} dB "
+                                       "(your Clip Gain; an XML cannot set Clip Gain)")
+        else:
+            _sub(cm, "mastercomment2", f"{song.name} from {p['in'] / float(fps):.2f} s, Volume {vol:+g} dB (your Clip "
+                                       f"Gain {p['gain_db']:+g} + Volume {float(volume_db):g} dB) -- drop the preset "
+                                       f"\"{SONG_PRESET}\" on it (Hard Limiter + Amplify)")
     ET.indent(root, space="  ")
     body = ET.tostring(root, encoding="unicode")
     tmp = xml.with_suffix(".music.tmp")
@@ -206,7 +270,9 @@ def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[floa
     tmp.replace(xml)
     out = {"clips": len(ps), "file": str(placed), "seconds": round(ps[-1]["end"] / float(fps), 3),
            "pieces": [{"from_s": round(p["start"] / float(fps), 3), "to_s": round(p["end"] / float(fps), 3),
-                       "song_s": round(p["in"] / float(fps), 3), "gain_db": p["gain_db"]} for p in ps]}
+                       "song_s": round(p["in"] / float(fps), 3), "gain_db": p["gain_db"],
+                       **({"volume_db": p["gain_db"] + float(volume_db), "preset": SONG_PRESET}
+                          if volume_db is not None else {})} for p in ps]}
     log.info("music: %s on A2 -- %s", song.name, "; ".join(f"{q['from_s']:.2f}-{q['to_s']:.2f} s at "
                                                           f"{q['gain_db']:+g} dB" for q in out["pieces"]))
     return out
@@ -224,7 +290,8 @@ def apply(ctx: Any) -> dict | None:
         return {"error": "no 1_edit.xml"}
     res = add_music(xml, song, float(getattr(cfg, "music_start_s", 0.0) or 0.0),
                     float(getattr(cfg, "music_split_s", 0.0) or 0.0),
-                    parse_gains(getattr(cfg, "music_gains_db", "0")), getattr(cfg, "media_dir", None))
+                    parse_gains(getattr(cfg, "music_gains_db", "0")), getattr(cfg, "media_dir", None),
+                    getattr(cfg, "music_volume_db", None))
     if res.get("error"):
         ctx.warn(f"the music was not added to 1_edit.xml: {res['error']}")
     try:

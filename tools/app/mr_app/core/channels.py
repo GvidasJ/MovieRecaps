@@ -59,11 +59,13 @@ class Music:
     start_s: float = 0.0
     split_s: float = 0.0
     gains_db: tuple[float, ...] = (0.0,)
+    volume_db: float | None = None          # day 16: every piece's Volume; the gains go into its song preset
 
     def args(self) -> list[str]:
         """The tool's switches (match_cuts --music ...)."""
         return ["--music", str(self.file), "--music-start", f"{self.start_s:g}", "--music-split", f"{self.split_s:g}",
-                "--music-gains", ",".join(f"{g:g}" for g in self.gains_db)]
+                "--music-gains", ",".join(f"{g:g}" for g in self.gains_db)] + (
+            ["--music-volume", f"{self.volume_db:g}"] if self.volume_db is not None else [])
 
 
 def _music(folder: Path, spec: Any) -> Music | None:
@@ -76,7 +78,9 @@ def _music(folder: Path, spec: Any) -> Music | None:
         return None
     try:
         gains = tuple(float(g) for g in (spec.get("gains_db") or [0.0]))
-        return Music(p, float(spec.get("start_s") or 0.0), float(spec.get("split_s") or 0.0), gains)
+        vol = spec.get("volume_db")
+        return Music(p, float(spec.get("start_s") or 0.0), float(spec.get("split_s") or 0.0), gains,
+                     float(vol) if vol is not None else None)
     except (TypeError, ValueError):
         return None
 
