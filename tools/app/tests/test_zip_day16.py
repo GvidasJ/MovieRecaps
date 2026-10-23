@@ -18,6 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mr_app.core import share_zip  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def any_free_space(monkeypatch):
+    """The tests never depend on this PC's free space (the 40 GB rule has its own test)."""
+    monkeypatch.setattr(share_zip, "MIN_FREE", 0)
+
+
 def _old(p: Path, data: bytes = b"x") -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)

@@ -86,6 +86,7 @@ def test_a_finished_project_zip_has_the_whole_folder_and_how_to_open_it(tmp_path
     """Day 16 (task 2) replaced night 15's "only the edit files": the whole folder (test_zip_day16.py has the rest)."""
     monkeypatch.setattr(share_zip, "BIG_BYTES", 1000)
     monkeypatch.setattr(share_zip, "on_share", lambda p: True)
+    monkeypatch.setattr(share_zip, "MIN_FREE", 0)                  # (not this PC's free space)
     proj, run = _project(tmp_path)
     z = share_zip.make(proj, run)
     assert z == proj / f"{proj.name}.zip"

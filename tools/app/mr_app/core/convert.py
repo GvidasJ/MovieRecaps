@@ -364,6 +364,14 @@ def _aac_rate(channels: int | None) -> str:
     return AAC_STEREO if c <= 2 else AAC_SURROUND if c <= 6 else AAC_71
 
 
+def plan_audio(info: MediaInfo) -> list[AudioPlan]:
+    """Every sound stream: copied (AAC / MP3), else made AAC."""
+    return [AudioPlan(a["index"], "copy") if a["codec"] in COPY_AUDIO else
+            AudioPlan(a["index"], "aac", _aac_rate(a["channels"]),
+                      remap_51=a["channels"] == 6 and (a["layout"] or "") not in ("5.1", ""))
+            for a in info.audio]
+
+
 def plan(info: MediaInfo) -> Plan:
     """keep / rewrap / encode, and why (module docstring)."""
     if info.vcodec is None:
@@ -432,9 +440,10 @@ def _colour_args(info: MediaInfo) -> list[str]:
 
 
 def ffmpeg_command(info: MediaInfo, pl: Plan, out_path: Path, encoder_args: list[str] | None = None,
-                   time_base: str | None = None) -> list[str]:
+                   time_base: str | None = None, restamp: bool = False) -> list[str]:
     """FFmpeg's command line for the plan: the picture (copied, or encoded with ``encoder_args`` keeping every
-    frame's time), every sound stream (copied or AAC), progress on stdout."""
+    frame's time), every sound stream (copied or AAC), progress on stdout. Day 16, ``restamp``: every decoded frame
+    on the next slot of the constant rate (frame k = the k-th frame decoded; nothing dropped or doubled), 8-bit."""
     cmd = [ffmpeg_bin(), "-hide_banner", "-nostdin", "-y", "-loglevel", "info", "-progress", "pipe:1", "-nostats",
            "-stats_period", "0.5", "-i", str(info.path), "-map", f"0:{info.video_index}"]
     for a in pl.audio:
@@ -444,6 +453,8 @@ def ffmpeg_command(info: MediaInfo, pl: Plan, out_path: Path, encoder_args: list
         cmd += ["-c:v", "copy"] + (["-tag:v", "hvc1"] if pl.hevc else [])
     else:
         gop = max(1, round(GOP_S * float(info.fps))) if info.fps else 60
+        if restamp and info.fps:
+            cmd += ["-vf", f"setpts=N*{info.fps.denominator}/{info.fps.numerator}/TB,format=yuv420p"]
         cmd += list(encoder_args or X264) + ["-g", str(gop), "-fps_mode", "passthrough",
                                              "-enc_time_base:v", time_base or "demux"] + _colour_args(info)
     for k, a in enumerate(pl.audio):
@@ -467,7 +478,7 @@ def grid_time_base(fps: Fraction) -> str:
 # ---------------------------------------------------------------------------------------------------------------------
 
 def check(src: MediaInfo, out: MediaInfo, src_t: Timing, out_t: Timing,
-          grid: bool = False) -> tuple[bool, dict, list[str]]:
+          grid: bool = False, restamped: bool = False) -> tuple[bool, dict, list[str]]:
     """(all right, the numbers, the problems in plain words): the same shown frames, the picture's length within
     one frame, the sound's length within CHECK_AUDIO_S, the same picture size, the same frame rate (the average one
     -- frames per second of length -- and, for exact constant-rate times, the nominal one too). ``src_t`` /
@@ -488,8 +499,14 @@ def check(src: MediaInfo, out: MediaInfo, src_t: Timing, out_t: Timing,
         probs.append("the frames could not be counted")
     elif src_frames != out_frames:
         probs.append(f"{out_frames} frames instead of {src_frames}")
-    if src_video_s and out_video_s and abs(src_video_s - out_video_s) > frame_s + 0.002:
+    on_grid = bool(restamped and src.fps and out_frames and out_video_s and
+                   abs(out_video_s - out_frames / float(src.fps)) <= 0.002)
+    if src_video_s and out_video_s and abs(src_video_s - out_video_s) > frame_s + 0.002 and not on_grid:
+        # (day 16, ``restamped``: the very same frames on the exact constant rate may differ from an uneven original's
+        # length -- the Ted 2 x265 file: 7550.816 s of jittered times, 181040 frames = 7550.877 s on the grid)
         probs.append(f"the picture is {out_video_s:.3f} s long instead of {src_video_s:.3f} s")
+    if on_grid and src.audio_duration and abs(out_video_s - src.audio_duration) >             abs(src_video_s - src.audio_duration) + 2 * frame_s:
+        probs.append(f"the re-stamped picture ends {out_video_s - src.audio_duration:+.3f} s from its sound")
     if src.audio and not out.audio:
         probs.append("the sound is missing")
     elif len(out.audio) < len(src.audio):
@@ -639,12 +656,33 @@ def progress_text(label: str, done_s: float, speed: float, duration: float | Non
     return frac, text
 
 
+DECODE_FIX_SUFFIX = ".reencoded"      # day 16: '<stem>.reencoded.mp4' -- a RAW whose frames could not be read
+
+
+def reencode_for_decode(path: str | os.PathLike, out_dir: str | os.PathLike | None = None,
+                        progress: Progress | None = None, cancel: threading.Event | None = None,
+                        log_path: str | os.PathLike | None = None) -> ConvertResult:
+    """Day 16, task 6: a RAW the tool can't read ("could not decode source frames ... by PTS": the Ted 2 x265 file)
+    re-encoded ONCE -- NVENC (the CPU when there is none), 8-bit H.264, every frame on the next slot of its constant
+    rate, its sound copied / AAC -- into ``<stem>.reencoded.mp4`` next to it (or ``out_dir``); the original is never
+    deleted. A copy made before is used again."""
+    src = Path(path)
+    dest = Path(out_dir) if out_dir else src.parent
+    done = dest / f"{src.stem}{DECODE_FIX_SUFFIX}.mp4"
+    if done.is_file() and done.stat().st_size > 0:
+        return ConvertResult(done, "encode", "h264_nvenc", None, {}, False, 0.0, "made before: used again",
+                             original=src, size_in=src.stat().st_size, size_out=done.stat().st_size)
+    return convert_file(src, dest, delete_original=False, progress=progress, cancel=cancel, gpu="on",
+                        log_path=log_path, force_encode=True)
+
+
 def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = None, delete_original: bool = True,
                  progress: Progress | None = None, cancel: threading.Event | None = None, gpu: str | bool = "auto",
-                 log_path: str | os.PathLike | None = None) -> ConvertResult:
+                 log_path: str | os.PathLike | None = None, force_encode: bool = False) -> ConvertResult:
     """Make ``path`` Premiere-ready (module docstring): keep, rewrap or encode, CHECK, then (``delete_original``)
     delete the original and name the result ``<stem>.mp4``. ConvertError (plain words; the original kept) or
-    Cancelled (the temp file removed)."""
+    Cancelled (the temp file removed). Day 16, ``force_encode`` (reencode_for_decode): always re-encoded, 8-bit,
+    every frame re-stamped onto the constant rate, named ``<stem>.reencoded.mp4``."""
     t0 = time.time()
     src = Path(path)
     say = progress or (lambda f, t: None)
@@ -673,6 +711,10 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
         say(0.0, "reading the video")
         info = inspect(src)
         pl = plan(info)
+        if force_encode:
+            audio = pl.audio or plan_audio(info)
+            pl = Plan("encode", f"{NAMES.get(info.vcodec, info.vcodec)}: its frames can't be read by their time "
+                                "stamps -- re-encoded once to H.264, every frame on the constant rate", audio=audio)
         log(f"in: {info.describe()} ({_size(info.size)})")
         log(f"plan: {pl.how} -- {pl.why}")
         if pl.how == "keep":
@@ -682,7 +724,8 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
                                  pl.why, original=src, size_in=info.size, size_out=info.size)
         dest_dir = Path(out_dir) if out_dir else src.parent
         dest_dir.mkdir(parents=True, exist_ok=True)
-        final = _target(src, dest_dir, delete_original)
+        final = (dest_dir / f"{src.stem}{DECODE_FIX_SUFFIX}.mp4") if force_encode else \
+            _target(src, dest_dir, delete_original)
         tmp = dest_dir / f"{src.stem}.converting.mp4"
         from . import space                       # day 13: the one place of every estimate -- or it does not start
         room = space.convert_problem(info.size, pl.how, dest_dir, src.name)
@@ -700,14 +743,19 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
         timing = video_timing(info, start)                 # the shown frames (an edit list may hide some)
         src_video_s = timing.duration if timing.duration else info.duration
         encoder, enc_args, enc_why, time_base = "copy", None, "copied", None
-        if pl.how == "encode":
+        if pl.how == "encode" and force_encode:             # 8-bit H.264 on NVENC, the frames re-stamped
+            encoder, enc_args, enc_why = ("h264_nvenc", list(NVENC), "NVENC on the GPU") if nvenc_available() else \
+                ("libx264", list(X264), "x264 on the CPU (no NVENC here)")
+            time_base = grid_time_base(info.fps) if info.fps else "demux"
+            log(f"encoder: {encoder} ({enc_why}); every decoded frame on the next slot of {time_base}")
+        elif pl.how == "encode":
             encoder, enc_args, enc_why = choose_encoder(info, gpu)
             time_base = grid_time_base(info.fps) if timing.on_grid and info.fps else "demux"
             log(f"encoder: {encoder} ({enc_why}); frame times: "
                 f"{'exact constant rate ' + time_base if time_base != 'demux' else 'kept as they are (variable)'}")
         label = "copying into MP4" if pl.how == "rewrap" else \
             f"converting to H.264 ({'GPU' if encoder == 'h264_nvenc' else 'CPU'})"
-        cmd = ffmpeg_command(info, pl, tmp, enc_args, time_base)
+        cmd = ffmpeg_command(info, pl, tmp, enc_args, time_base, restamp=force_encode)
         log("command: " + subprocess.list2cmdline(cmd))
         if log_f is not None:
             log_f.flush()
@@ -717,7 +765,7 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
                 log("NVENC failed -- once more with x264 on the CPU")
                 encoder, enc_args, enc_why = "libx264", list(X264), "x264 on the CPU (NVENC failed)"
                 label = "converting to H.264 (CPU)"
-                cmd = ffmpeg_command(info, pl, tmp, enc_args, time_base)
+                cmd = ffmpeg_command(info, pl, tmp, enc_args, time_base, restamp=force_encode)
                 log("command: " + subprocess.list2cmdline(cmd))
                 code = _run_ffmpeg(cmd, src_video_s, label, say, cancel, err_f)
         except Cancelled:
@@ -730,7 +778,8 @@ def convert_file(path: str | os.PathLike, out_dir: str | os.PathLike | None = No
         say(0.99, "checking the converted file")
         out = inspect(tmp)
         out_timing = video_timing(out, fps=info.fps)       # one frame added at the end on both: the original's
-        ok, checks, probs = check(info, out, timing, out_timing, grid=time_base not in (None, "demux"))
+        ok, checks, probs = check(info, out, timing, out_timing, grid=time_base not in (None, "demux") and
+                                  not force_encode, restamped=force_encode)
         log(f"out: {out.describe()} ({_size(out.size)})")
         log(f"check: {json.dumps(checks)}" + (f" -- PROBLEMS: {'; '.join(probs)}" if probs else " -- OK"))
         if not ok:

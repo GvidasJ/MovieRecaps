@@ -11,6 +11,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | 3 | Only the movie's piece in the project folder | **done** (Premiere: every clip on its frame) | nothing to do: a new edit plays edit\extras\media\raw.mov, the found place ± 10 min; the whole movie stays where you downloaded it |
 | 4 | SceneProof song: the right levels and effects | **done** (Premiere: A2 at +13.5 / +7.5 dB) | import assets\premiere\MovieRecaps song chain.prfpset once, then drop it on the two song clips of each SceneProof edit |
 | 5 | Find source with NexLev and Algrow | **done** (5 real clips at once: all 5 right, Sure) | Progress > Find source as before: an AI watches each clip first; Sure only when checked (your RAW's sound, IMDb / TVmaze); it uses credits once per clip |
+| 6 | A RAW that can't be read is converted by itself | **done** (the real Ted 2 x265 file: the stop reproduced, the converted copy reads) | nothing to do: the row converts the RAW once (NVENC) and runs the video again |
 | 7 | Learn: your new fixes | **done** (video28-32 learned, video27 learned again with its hidden captions) | nothing to do: 5 new test cases; the check-all measures the tool against them |
 
 ## Task 1 -- "Try with another RAW" (done)
@@ -201,3 +202,28 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
   - your action texts added to the action examples, as Learn does for every fix
 - **Not taken (as on night 15):** Learn's 3 glossary lines (`1 200 -> 1200`, `kill -> k ll`, `arses -> ars s`). The glossary also goes to the speech recognition as hints, so any new line re-transcribes every video. The two censored words came from the censor list instead.
 - **The rules:** only captions, cuts and video position / scale were learned. The check-all below measures the tool against these new keys.
+
+## Task 6 -- a RAW that can't be read is converted by itself (done)
+
+- **What changed (the queue):** when a run stops with "could not decode source frames ... by PTS", the same row goes on by itself:
+  1. It **converts the RAW once**: NVENC (the CPU if there is none), 8-bit H.264, every frame on the next slot of its constant rate (nothing dropped or doubled), the sound copied. The row says "the RAW can't be read by its time stamps: converting it once (NVENC) -- the video then runs again by itself", with the progress.
+  2. It **runs the same video again** on the converted copy, in the same queue slot.
+
+  - The copy is `<RAW name>.reencoded.mp4` next to the RAW. **The original is never deleted.** A copy made before is used again.
+  - project.json remembers the copy (`raw.decode_copy`), so Try again and Run again use it too.
+  - Only once: if the converted copy stopped the same way, or the conversion failed, the row shows the stop and why (no loop). Any other stop is as before.
+- **Why the Convert tab didn't help before:** it never re-encodes HEVC, it only puts it into MP4. That is why `Ted2_fixed.mp4` stopped the same way (problems_queue.md). This fix re-encodes.
+- **Real test, the Ted 2 x265 file** (`D:\Shared\Downloads\Torrents\Ted.2.2015.EXTENDED.1080p.BluRay.x265-RBG.mp4`, 2 h 6 min, 10-bit HEVC, its first 2 frames hidden by an edit list):
+  - the tool's own frame reader on the original: **"could not decode source frames [0, 1]... by PTS"**, the very stop of your two runs
+  - the app's conversion (the one the queue uses): **181040 of 181040 frames, 10.2 GB, 35 min** (at 11x on a free GPU; 3.4x while three check-all streams ran)
+  - the same reader on the copy: **frames 0, 1, 5000 and 100000 read**
+  - The copy is in `D:\mr_scratch\ted\` (a folder of mine on D:). You can use it as the RAW, or delete it.
+  - The full run of the Lab Accident reel on it was not finished today (it would hold the GPU for hours next to the check-all).
+  - **Also found:** since day 14 a film is analysed in a piece, and the Ted piece read fine. With today's code, the Lab Accident reel on the Ted 2 x265 file got past "Preparing the RAW" with no conversion at all. The conversion is the safety net for when the whole file is read.
+- **The conversion's check:** a re-stamped copy is checked on the same frame count and the exact constant-rate length. The original's uneven times gave 7550.816 s; the copy is 181040 frames = 7550.877 s. The copy must not end further from its sound than the original did (it is closer: the sound is 7550.954 s).
+- **Tests:** 4 new (`test_decode_fix_day16.py`):
+  - convert once and run again
+  - never a loop
+  - a failed conversion is said
+  - the project reads its copy
+  - a real 10-bit x265 clip re-encoded with every frame kept

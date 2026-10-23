@@ -319,6 +319,9 @@ class Project:
         if not name:
             return None
         here = self.folder / name
+        dc = d.get("decode_copy")                    # day 16: the RAW re-encoded once because it can't be read
+        if role == "raw" and dc and Path(str(dc)).is_file():
+            return Path(str(dc))
         kept = d.get("kept_at")                      # day 16: the whole movie left in the folder it was downloaded
         if kept and not here.exists() and Path(str(kept)).is_file():     # to (flow.drop_whole_raw): read it there
             return Path(str(kept))

@@ -175,6 +175,9 @@ class JobThread(QThread):
                 self.console.emit(self.job.id, list(con.lines))
             except Exception:  # noqa: BLE001
                 pass
+        if self._decode_fix(res):            # day 16: the RAW converted once and the video run again
+            self._run(flow, lock)
+            return
         if self.job.project is not None:
             try:
                 from ..core import projects as PJ
@@ -182,6 +185,38 @@ class JobThread(QThread):
             except Exception:  # noqa: BLE001
                 pass
         self.done.emit(self.job.id, res)
+
+    def _decode_fix(self, res: dict) -> bool:
+        """Day 16, task 6: a run that stopped because the RAW can't be read ("could not decode source frames ... by
+        PTS") -- the RAW re-encoded ONCE (core.convert.reencode_for_decode: NVENC) and the same video run again on
+        it, never a stop. True when it may run again; a conversion that fails is said in the result."""
+        j = self.job
+        texts = [str(res.get(k) or "") for k in ("stop", "reason", "reason_line", "reason_detail")]
+        texts += [str(f) for f in (res.get("failures") or [])][:3]
+        if self.stop_asked or getattr(j, "decode_converted", False) or j.raw is None or \
+                not any("could not decode source frames" in t.lower() for t in texts):
+            return False
+        from ..core import convert as CV
+        raw = Path(j.raw)
+        self.progress.emit(j.id, "the RAW can't be read by its time stamps: converting it once (NVENC) -- the video "
+                                 "then runs again by itself", 0.0)
+
+        def said(share: float, text: str) -> None:
+            self.progress.emit(j.id, f"converting the RAW once (it can't be read as it is) · {text}", 0.0)
+        try:
+            out = CV.reencode_for_decode(raw, progress=said)
+        except Exception as e:  # noqa: BLE001 - said in the result: the run's stop and why the fix failed
+            res.setdefault("failures", []).append(f"the RAW could not be converted by itself either: {e}")
+            return False
+        j.decode_converted = True
+        j.raw, j.raw_s = Path(out.path), None
+        if j.project is not None:
+            try:
+                from ..core import projects as PJ
+                PJ.load(j.project).update(raw={"decode_copy": str(out.path)})
+            except Exception:  # noqa: BLE001
+                pass
+        return True
 
     def stop(self) -> None:
         self.stop_asked = True
