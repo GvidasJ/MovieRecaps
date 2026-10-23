@@ -320,6 +320,7 @@ Started 07:21 (PC); worked until about 15:00, the PC free from about 07:30 on. T
 - **App: 1235 passed, 0 failed**, the real-aria2c torrent test included (it crashed inside the whole suite on night 15; today it passed twice in full runs).
 - `.venv\Scripts\python toolspp\setup_app.py`: "done: everything is as the project expects" (exit 0).
 - The keys: a scan of 5771 files (the code, the reports, git, the app's data, the clips) finds neither key anywhere.
+- **The shutdown:** you were at the PC at 14:47 (input 1 s before), so I cancelled the 15:30 backup shutdown and did not turn the PC off.
 - 11 commits today, all pushed to `claude/new-session-ol4era`.
 - A day-13 test said "kill him" must stay uncensored. That was an example, not your fix: no key ever had it uncensored, and video31 shows you write `k*ll`. The test now follows video31.
 
