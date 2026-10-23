@@ -1,0 +1,15 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video32_fixed.prproj (2026-10-23): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video32\\video32_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-22_The Most British Answer In British Comedy\\edit",
+ "full_raw": "input/downloads/2026-10-22_The Most British Answer In British Comedy/edit/extras/media/raw.mp4",
+ "raw_offset": 780.8,
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

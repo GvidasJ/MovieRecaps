@@ -1,0 +1,116 @@
+{
+ "video": "video29-fixed",
+ "date": "2026-10-23",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video29\\video29_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-22_The Funniest Weight Loss Class of All Time (2)\\edit",
+ "edit": {
+  "clips": 12,
+  "starts": [
+   0.2,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   0.0,
+   -0.56,
+   0.16,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   314.0,
+   314.0,
+   460.5,
+   -77.5,
+   -0.0,
+   -77.5,
+   -0.0,
+   -0.0,
+   140.5,
+   -0.0,
+   357.0,
+   -0.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   1.27,
+   1.27,
+   0.0,
+   1.27,
+   0.0,
+   0.0,
+   1.27,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.991,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Funniest Weight Loss Class of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 25.0
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 0,
+  "removed": 0,
+  "added": 0,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "do",
+    "written": "say",
+    "kind": "words",
+    "before": "chips Sorry",
+    "after": "it again",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "Do",
+    "written": "Say",
+    "kind": "words",
+    "before": "and chips",
+    "after": "it again",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

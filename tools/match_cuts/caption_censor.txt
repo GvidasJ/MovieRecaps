@@ -90,3 +90,7 @@ fuckity = fuc*ity
 suck = s*ck
 prostitution = prostit*tion
 condom = cond*m
+
+# your own forms (day 16): video31 "k*ll", "ars*s" -- only the words your fixes show
+kill = k*ll
+arses = ars*s

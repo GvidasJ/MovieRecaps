@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video28_fixed.prproj (2026-10-23): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video28\\video28_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-22_The Most Believable 12 Year Old of All Time\\edit",
+ "full_competitor": "D:\\Shared\\Projects\\2026-10-22_The Most Believable 12 Year Old of All Time\\edit\\extras\\media\\competitor_ref.mp4",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-22_The Most Believable 12 Year Old of All Time\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 3022.310958,
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

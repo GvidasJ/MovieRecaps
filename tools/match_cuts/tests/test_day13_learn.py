@@ -18,12 +18,14 @@ NEW = ("video16-fixed", "video17-fixed", "video18-fixed", "video19-fixed", "vide
 @pytest.mark.parametrize("heard, written", [
     ("you bitch", "you bit*h"), ("Bitches be like", "Bit*hes be like"), ("he got murdered", "he got murde*ed"),
     ("5 crackheads", "5 cra*kheads"), ("a crackhead", "a cra*khead"), ("what the fuck", "what the fu*k"),
+    ("kill him", "k*ll him"), ("their arses", "their ars*s"),     # day 16: video31 (no key has them uncensored)
 ])
 def test_your_censored_words_are_written_as_you_write_them(heard, written):
     assert C.censor_text(heard, C.censor_table()) == written
 
 
-@pytest.mark.parametrize("kept", ["murder", "kill him", "crack the code", "dead", "shit"])
+@pytest.mark.parametrize("kept", ["murder", "killer", "crack the code", "dead", "shit"])   # (day 16: "kill" is
+#                                                                                   censored now -- video31's k*ll)
 def test_words_your_fixes_never_censored_stay(kept):
     assert C.censor_text(kept, C.censor_table()) == kept
 

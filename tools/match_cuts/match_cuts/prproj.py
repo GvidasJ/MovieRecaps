@@ -329,6 +329,14 @@ def captions_of(seq: Sequence) -> list[Item]:
                 best = items
         if best:
             return best
+    # day 16: no visible caption anywhere -- the hidden VIDEO track with the most text graphics is still yours (video27,
+    # blackads.prproj: your captions on V5 with its output off); a hidden CAPTION track still never counts (C84 / C41)
+    for n in seq.tracks(VIDEO):
+        if (VIDEO, n) not in seq.hidden:
+            continue
+        items = [it for it in seq.track(VIDEO, n) if it.text and it.enabled and it.is_graphic]
+        if len(items) > len(best):
+            best = items
     return best
 
 

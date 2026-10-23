@@ -11,6 +11,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | 3 | Only the movie's piece in the project folder | **done** (Premiere: every clip on its frame) | nothing to do: a new edit plays edit\extras\media\raw.mov, the found place ± 10 min; the whole movie stays where you downloaded it |
 | 4 | SceneProof song: the right levels and effects | **done** (Premiere: A2 at +13.5 / +7.5 dB) | import assets\premiere\MovieRecaps song chain.prfpset once, then drop it on the two song clips of each SceneProof edit |
 | 5 | Find source with NexLev and Algrow | **done** (5 real clips at once: all 5 right, Sure) | Progress > Find source as before: an AI watches each clip first; Sure only when checked (your RAW's sound, IMDb / TVmaze); it uses credits once per clip |
+| 7 | Learn: your new fixes | **done** (video28-32 learned, video27 learned again with its hidden captions) | nothing to do: 5 new test cases; the check-all measures the tool against them |
 
 ## Task 1 -- "Try with another RAW" (done)
 
@@ -177,3 +178,26 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 - **What you must set by hand:** only drop **MovieRecaps song chain** on the two song clips (A2). Nothing else.
 - **Premiere test (08:24, you were away):** a SceneProof edit (the American Dad one) imported with no message. The saved project has A2 with 2 song clips at **Volume +13.5 dB and +7.5 dB** (Premiere kept +13.5, it doesn't cut it to +12). Test folder `work\t16\song\edit`. The preset drop and listening are yours.
 - **Tests:** 3 new (`test_day16_song_chain.py`); night 15's music and SceneProof tests unchanged and passing.
+
+## Task 7 -- Learn: your new fixes (done)
+
+- **All five open entries (video28-32) are learned** and marked done in `learn_queue.md`. Each is a new test case in `tests\real\videoNN-fixed`: your finished edit as the key (captions, cuts and framing), with the frame and watermark its run used.
+- **The laptop folders were not needed.** The runs of video29, video31 and video32 are on this PC too (`input\downloads\2026-10-22_The Funniest Weight Loss Class of All Time (2)`, `...Most Suspicious Farmer...`, `...Most British Answer...`), so nothing has to be copied over.
+- **video27 (blackads.prproj), your captions on a hidden track:** Learn now reads the text graphics of a hidden video track when the project shows no captions anywhere else. Video27 was learned again: **89 captions in its key** (before: none, "your captions are hidden").
+  - A hidden **caption** track still never counts. Those are the stale copies Premiere keeps (video1's C84, video2's C41).
+- **What your fixes show:**
+
+  | case | video | captions you changed | cuts | framing |
+  |---|---|---|---|---|
+  | video27 | Extras (faces) | 3 words; 4 action texts | 3 of 20 edges moved, 1 clip removed, 3 pause cuts | 11 clips moved (median -159 px) |
+  | video28 | The Benchwarmers (12 Year Old) | 4 words ("1 200" -> "1200"); 7 action texts | 37 of 44 edges moved, 4 removed, 4 added, 6 pause cuts | 28 moved (+189 px), 9 zoomed (+3.5 %) |
+  | video29 | Little Britain (Weight Loss Class) | 2 words ("do" -> "say") | 3 of 24 edges moved | 7 moved (+314 px) |
+  | video30 | Key & Peele (Personality Switch) | none; 4 action texts | 2 of 12 moved, 1 removed, 2 pause cuts | 7 moved (-195 px) |
+  | video31 | The Farmer (British comedy) | 3 words: **k\*ll** (twice), **ars\*s** | 0 of 12 edges moved | 5 moved (+430 px) |
+  | video32 | The British Answer | 5 words | 6 of 46 edges moved | 4 moved (-489 px) |
+
+- **Taken:**
+  - your censored forms `kill = k*ll` and `arses = ars*s` added to `caption_censor.txt` (whole words; no other key has them uncensored)
+  - your action texts added to the action examples, as Learn does for every fix
+- **Not taken (as on night 15):** Learn's 3 glossary lines (`1 200 -> 1200`, `kill -> k ll`, `arses -> ars s`). The glossary also goes to the speech recognition as hints, so any new line re-transcribes every video. The two censored words came from the censor list instead.
+- **The rules:** only captions, cuts and video position / scale were learned. The check-all below measures the tool against these new keys.

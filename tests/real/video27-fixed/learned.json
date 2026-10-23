@@ -1,6 +1,6 @@
 {
  "video": "video27-fixed",
- "date": "2026-10-22",
+ "date": "2026-10-23",
  "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video27\\video27_fixed.prproj",
  "run": "D:\\Shared\\Projects\\2026-10-21_faces\\edit",
  "edit": {
@@ -105,8 +105,39 @@
   }
  },
  "captions": {
-  "count": 0,
-  "why": "your captions are on V5 (89 text graphics), hidden (its output off: the eye closed) -- not in the finished video; turn it on and save, then run learn again",
-  "changes": []
+  "words": 3,
+  "case": 0,
+  "removed": 5,
+  "added": 13,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "no",
+    "written": "he should know",
+    "kind": "words",
+    "before": "you were",
+    "after": "no you",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "it",
+    "written": "he",
+    "kind": "words",
+    "before": "the Matrix",
+    "after": "was a",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "that",
+    "written": "a black",
+    "kind": "words",
+    "before": "to get",
+    "after": "guy to",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
  }
 }

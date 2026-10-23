@@ -1,0 +1,181 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 2.711 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 1.5015,
+   "kind": "raw",
+   "src_in": 30.363666,
+   "speed": 1.0
+  },
+  {
+   "start": 1.5015,
+   "end": 2.877875,
+   "kind": "raw",
+   "src_in": 31.865166,
+   "speed": 1.0
+  },
+  {
+   "start": 2.877875,
+   "end": 5.547208,
+   "kind": "raw",
+   "src_in": 33.5335,
+   "speed": 1.0
+  },
+  {
+   "start": 5.547208,
+   "end": 8.550208,
+   "kind": "raw",
+   "src_in": 36.202833,
+   "speed": 1.0
+  },
+  {
+   "start": 8.550208,
+   "end": 12.429083,
+   "kind": "raw",
+   "src_in": 39.998291,
+   "speed": 1.0
+  },
+  {
+   "start": 12.429083,
+   "end": 15.098417,
+   "kind": "raw",
+   "src_in": 44.29425,
+   "speed": 1.0
+  },
+  {
+   "start": 15.098417,
+   "end": 16.933583,
+   "kind": "raw",
+   "src_in": 46.963583,
+   "speed": 1.0
+  },
+  {
+   "start": 16.933583,
+   "end": 21.438083,
+   "kind": "raw",
+   "src_in": 49.090708,
+   "speed": 1.0
+  },
+  {
+   "start": 21.438083,
+   "end": 22.564208,
+   "kind": "raw",
+   "src_in": 54.429375,
+   "speed": 1.0
+  },
+  {
+   "start": 22.564208,
+   "end": 22.814458,
+   "kind": "raw",
+   "src_in": 55.5555,
+   "speed": 1.0
+  },
+  {
+   "start": 22.814458,
+   "end": 22.939583,
+   "kind": "raw",
+   "src_in": 55.930875,
+   "speed": 1.0
+  },
+  {
+   "start": 22.939583,
+   "end": 23.440083,
+   "kind": "raw",
+   "src_in": 56.056,
+   "speed": 1.0
+  },
+  {
+   "start": 23.440083,
+   "end": 24.983292,
+   "kind": "raw",
+   "src_in": 56.848458,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.363666,
+   "src_out": 31.865166,
+   "dx": -195.342,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 31.865166,
+   "src_out": 33.241541,
+   "dx": 212.658,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 33.5335,
+   "src_out": 36.202833,
+   "dx": -346.488,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 36.202833,
+   "src_out": 39.205833,
+   "dx": 212.658,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 39.998291,
+   "src_out": 43.877166,
+   "dx": -201.342,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 44.29425,
+   "src_out": 46.963583,
+   "dx": 212.658,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 46.963583,
+   "src_out": 48.79875,
+   "dx": -246.342,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 49.090708,
+   "src_out": 53.595208,
+   "dx": -0.342,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 54.429375,
+   "src_out": 55.5555,
+   "dx": -215.342,
+   "scale": 113.2759
+  },
+  {
+   "src_in": 55.5555,
+   "src_out": 55.80575,
+   "dx": 270.519,
+   "scale": 113.323
+  },
+  {
+   "src_in": 55.930875,
+   "src_out": 56.056,
+   "dx": 270.519,
+   "scale": 113.323
+  },
+  {
+   "src_in": 56.056,
+   "src_out": 56.5565,
+   "dx": -63.885,
+   "scale": 113.3271
+  },
+  {
+   "src_in": 56.848458,
+   "src_out": 58.391666,
+   "dx": -63.885,
+   "scale": 113.3271
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

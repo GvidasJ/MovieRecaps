@@ -1,0 +1,99 @@
+{
+ "video": "video31-fixed",
+ "date": "2026-10-23",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video31\\video31_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-22_The Most Suspicious Farmer In British Comedy\\edit",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   188.0,
+   430.0,
+   430.0,
+   430.0,
+   430.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Suspicious Farmer In British Comedy",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 25.0
+  }
+ },
+ "captions": {
+  "words": 3,
+  "case": 0,
+  "removed": 0,
+  "added": 3,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "kill",
+    "written": "k ll",
+    "kind": "words",
+    "before": "chicken You",
+    "after": "it you",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "kill",
+    "written": "k ll",
+    "kind": "words",
+    "before": "Or don't",
+    "after": "it Fu",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "arses",
+    "written": "ars s",
+    "kind": "words",
+    "before": "of their",
+    "after": "Fu king",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

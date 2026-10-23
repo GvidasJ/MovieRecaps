@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video30_fixed.prproj (2026-10-23): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video30\\video30_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-22_The Fastest Personality Switch of All Time\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-22_The Fastest Personality Switch of All Time\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 2.711042,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}
