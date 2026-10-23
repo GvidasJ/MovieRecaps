@@ -1,6 +1,6 @@
 # Day 16 (23 October): one task at a time
 
-Started 07:21 (PC); you were using the PC, so code and light tests first. The backup shutdown is set for 15:30. C: 51.5 GB free, D: 2383 GB free at the start.
+Started 07:21 (PC); worked until about 15:00, the PC free from about 07:30 on. The backup shutdown was set for 15:30. C: 51.5 GB free, D: 2383 GB free at the start; at the end C: 39.0 GB, D: 2311 GB (see Still broken).
 
 ## The tasks
 
@@ -13,6 +13,8 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | 5 | Find source with NexLev and Algrow | **done** (5 real clips at once: all 5 right, Sure) | Progress > Find source as before: an AI watches each clip first; Sure only when checked (your RAW's sound, IMDb / TVmaze); it uses credits once per clip |
 | 6 | A RAW that can't be read is converted by itself | **done** (the real Ted 2 x265 file: the stop reproduced, the converted copy reads) | nothing to do: the row converts the RAW once (NVENC) and runs the video again |
 | 7 | Learn: your new fixes | **done** (video28-32 learned, video27 learned again with its hidden captions) | nothing to do: 5 new test cases; the check-all measures the tool against them |
+| 8 | Refine faster + the S08 still + the check-all | **done** (both rules ON; 24 of 46 cases ran, nothing worse; S08 not seen on your real case) | nothing to do |
+| 9 | Learn by yourself | **not done** (no graphics-card time left after the check-all; what it would be below) | -- |
 
 ## Task 1 -- "Try with another RAW" (done)
 
@@ -227,3 +229,149 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
   - a failed conversion is said
   - the project reads its copy
   - a real 10-bit x265 clip re-encoded with every frame kept
+
+## Task 8 -- refine faster + the Benchwarmers S08 + the check-all
+
+- **Refine faster (built, ON):**
+  - Refine no longer rescue-searches a competitor frame that has no picture track when it sits inside a stretch of **2 s or more where the sound search found no candidate in the RAW** (another video's sound).
+  - "Stop the rounds when a round finds nothing new" was already so (a round that adds nothing ends them), so nothing changed there.
+  - Switch: `MATCH_CUTS_RESCUE_ALL=1` searches every frame again.
+- **The S08 hold (built, ON):** a "reverse" segment slower than 0.5x backwards, at most 2 s long and moving at most 6 RAW frames, becomes a **still of the RAW frame its competitor frames match most**. Its framing keys (the zoom) are kept. Switch: `MATCH_CUTS_NO_STILL=1`.
+- **The check-all:** from a frozen copy of the code (`work\snap16a`), up to 3 streams. Every case recomputes the picture placing (refine changed), so cases took 8-48 min each instead of night 15's 5-30.
+  - The 12 new cases (video21-32) have no caches at all: video22 took 44 min, video21 93 min, and video28 (Benchwarmers) was 8 % into its first picture search after 75 min. So I ran the older cases first (they decide "nothing gets worse": they have a "before").
+- **Did the rules act, and did anything get worse?**
+  - **The rescue skip acted on 1 finished case: zendaya** (121 frames not searched). The same case run again on a copy of the code with both rules off (`work\snap16b`, its own cache keys, a real "before"):
+    - **the very same edit** (6 of 6 clips identical)
+    - the same frame map (575 matched, 165 none)
+    - **rescue searches 165 -> 44**
+  - **The still rule acted on no finished case.**
+  - Every older case that finished has **exactly its earlier scores**, except two whose difference comes from night 15, not today:
+    - **video2** captions 2/21 -> 1/21: today's captions are word for word night 15's run with the episode piece (night 15, task 8); night 15's run without the piece has day 13's
+    - **video1** hard checks FAIL: today's edit is clip for clip night 15's piece run (night 15 already reported "one take split into two clips", an XML note)
+- **Time before -> after:**
+  - **Benchwarmers (video28): not measured.** Your project folder's `.mp4` RAW is gone (only the `.mkv` is in Torrents), so its caches can't be reused, and the test case's first picture search alone would have taken hours today. Your original run: refine 5449 s (91 min), 1126 rescue searches (night 15). Expected with the skip: the 320 other-video frames (3 stretches) no longer searched.
+  - **zendaya:** rescue searches 165 -> 44 (-73 %). The refine time (346 s vs 299 s) is hidden by the load: three streams shared the PC, so seconds aren't comparable between runs.
+  - **The S08 itself is not verified on your real case today** (video28 too slow, above). It is covered by tests (the rule; the frame it picks).
+- **Kept:** both rules, ON. Nothing got worse on any case where they acted (one) or didn't (all the others).
+
+## The check-all (Task 8)
+
+- **How it ran:** from the frozen code `work\snap16a` (the commits of 08:43), 3 streams from 09:27 / 10:00 until 14:05. The table's "before" is day 13's table (night 15 matched it exactly on its 13 cases; liquid-death from night 15).
+- **24 of 46 cases finished.** Not run in time: deadpool, laptop009, liquid-death, mike005, video018, video021, video10, video12, video16, video18, video20, video5, video7, zendaya-age, and the new video22 (only stream B's first try: 44 min, then stopped for the reorder), 23, 25, 26, 28, 29, 31, 32.
+- "rescue skipped" = frames the new refine rule did not search; "stills" = holds made a still. Neither rule acted anywhere except zendaya (checked A/B: the same edit).
+
+| video | before: hard / captions / word errors / cuts / framing | day 16 | time | rescue skipped | stills |
+|---|---|---|---|---|---|
+| chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | 21 min | - | - |
+| laptop004-fixed | PASS / 6/27 / 12.5 / 0/3 / - | PASS / 6/27 / 12.50 / 0/3 / - | 28 min | - | - |
+| spiderman-school | PASS / 11/64 / 10.2 / 2/21 / - | PASS / 11/64 / 10.20 / 2/21 / - | 22 min | - | - |
+| video020-fixed | fail/pass/pass / 0/30 / 94.12 / 0/11 / - | PASS / 0/30 / 73.33 / 0/11 / - | 25 min | - | - |
+| video1 | PASS / 21/111 / 10.83 / 11/29 / - | FAIL / 20/111 / 10.00 / 9/29 / - | 42 min | - | - |
+| video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 14 min | - | - |
+| video2 | PASS / 2/21 / 4.76 / 1/1 / - | PASS / 1/21 / 9.52 / 1/1 / - | 11 min | - | - |
+| video3 | PASS / 9/71 / 10.76 / 1/11 / - | PASS / 10/71 / 8.86 / 1/11 / - | 15 min | - | - |
+| video4 | PASS / 6/38 / 18.42 / 2/7 / - | PASS / 6/38 / 18.42 / 2/7 / - | 40 min | - | - |
+| video6-fixed | PASS / 18/32 / 10.0 / 5/7 / 9/9 | PASS / 18/32 / 10.00 / 5/7 / 9/9 | 39 min | - | - |
+| video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 16 min | - | - |
+| video21-fixed | (new case) | FAIL / 0/70 / 0.00 / 0/24 / 2/32 | 93 min | - | - |
+| video24-fixed | (new case) | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 11 min | - | - |
+| video27-fixed | (new case) | PASS / 12/89 / 19.15 / 2/12 / 12/22 | 74 min | - | - |
+| video30-fixed | (new case) | PASS / 18/43 / 16.85 / 4/7 / 2/13 | 13 min | - | - |
+| laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | PASS / 10/34 / 7.69 / 1/9 / 11/13 | 9 min | - | - |
+| laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | PASS / 12/22 / 13.33 / 1/5 / 2/6 | 13 min | - | - |
+| video017-fixed | PASS / 23/43 / 10.99 / 4/12 / - | PASS / 23/43 / 10.99 / 4/12 / - | 11 min | - | - |
+| video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | PASS / 16/42 / 8.00 / 1/3 / 4/10 | 10 min | - | - |
+| video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 19 min | - | - |
+| video17-fixed | PASS / 9/32 / 14.04 / 5/7 / 13/16 | PASS / 9/32 / 14.04 / 5/7 / 13/16 | 47 min | - | - |
+| video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | PASS / 8/33 / 30.00 / 3/8 / 1/10 | 42 min | - | - |
+| video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 8 min | - | - |
+| zendaya | PASS / - / - / - / - | PASS / - / - / - / - | 26 min | 121 | - |
+
+- **The differences, all from night 15 (not today):** the 4 episode cases (RAW 21-24 min) are analysed in a piece since night 15 (its task 8: "pieces on for episodes").
+  - **video1:** FAIL. Today's edit is clip for clip night 15's piece run; night 15 reported the split take.
+  - **video2:** captions 2/21 -> 1/21. Today's captions are word for word night 15's piece run.
+  - **video020:** better (fail -> PASS, word errors 94 -> 73).
+  - **video3:** better (captions 9 -> 10/71).
+- **The 4 new cases that finished** have no "before" (their first full run):
+  - video24 PASS 14/42 captions
+  - video27 PASS 12/89 (its hidden captions are the key now)
+  - video30 PASS 18/43
+  - video21 FAIL: one stretch the tool would not guess (frames 292-339 all match RAW 963: a hold), and a caption score of 0/70 with 0.00 word errors, which looks like this new case's key not lining up with the run. Both are in "check by hand".
+
+## Task 9 -- learn by yourself (not done: no time left)
+
+- The check-all held the graphics card until 14:05, so no new rule could get a check-all of its own. Building one without that would break "nothing may get worse".
+- **What the data points at, for the next free night:**
+  - The biggest remaining difference in your fixes is **framing**. Learn's summary over all cases: "the picture moved sideways on 21 videos". The finished cases show framing as low as mike005's 0/14, video8 4/11 and video21 2/32.
+  - A careful rule would be "centre on the person speaking" extended to clips the speaker rule now leaves alone. It needs a check-all from scratch.
+  - Second: video21's hold (frames 292-339 on one RAW frame) could be a still like today's S08 rule, but it is a hold of a frame the competitor didn't zoom on, so it needs its own look.
+
+## Time and sizes before -> after
+
+- **Benchwarmers piece (Task 3):** the run folder's V1 + A1 files 1673 MB -> 495 MB. faces (episode): 2412 MB -> 1107 MB. Your projects' zips (Task 2): 0.8 GB -> 67.8 GB in all (now the whole folders), made in 92 s.
+- **Find source, 5 clips at once (Task 5):** 19 s with the AI watching (each clip 7-19 s; one AI watch: 13 s).
+- **Ted 2 x265 conversion (Task 6):** 35 min (10.2 GB) with the PC shared; 11x real time on a free GPU.
+- **Refine (Task 8):** zendaya's rescue searches 165 -> 44. The Benchwarmers refine time was not measured (above).
+- **Check-all cases:** 8-48 min each today (every case placed its frames again) against night 15's 5-30 min with its caches.
+
+## Tests at the end
+
+- **Tool: 1652 passed, 0 failed** (101 skipped: 91 slow tests that run only with `--runslow`, and Linux-only ones).
+- **App: 1235 passed, 0 failed**, the real-aria2c torrent test included (it crashed inside the whole suite on night 15; today it passed twice in full runs).
+- `.venv\Scripts\python toolspp\setup_app.py`: "done: everything is as the project expects" (exit 0).
+- A day-13 test said "kill him" must stay uncensored. That was an example, not your fix: no key ever had it uncensored, and video31 shows you write `k*ll`. The test now follows video31.
+
+## Still broken
+
+- **The 12 Year Old (Benchwarmers) S08:** the still rule is built and ON, but not seen on your real case today (video28 was too slow to run). Your current edit still plays it backwards: put the still by hand (RAW 300.59 s), as night 15 said.
+- **video28's picture search:** 8-10 % after 53-75 min, in both thorough and `--fast` mode, on a 190 s RAW. Something about this case makes the first search very slow. Worth a look on a free night.
+- **video21:** see the check-all above.
+- **The zip is not made while its drive has under 40 GB free** (C: went down to 34.6 GB during the check-all). The 10-minute sweep makes it once there is room.
+- **Task 6 on the full Lab Accident run:** the conversion and reading were tested on the real Ted 2 file, but the whole run on the converted copy was not finished today.
+
+## Check by hand
+
+1. **Import the song preset** once (Effects > Presets > Import Presets, `assets\premiere\MovieRecaps song chain.prfpset`). Drop it on the two song clips of a SceneProof edit (`work\t16\song\edit\edit_edit.prproj` is ready) and listen. Also tell me whether the song's Amplify should be +3.00 dB (your prompt) or +4.5 dB (your song.prproj).
+2. **A piece of the movie (Task 3):** open `work\t16\kp\bench\edit\edit_edit.prproj` (Benchwarmers) or `work\t16\kp\faces\edit\edit_edit.prproj`. Each clip should show the same picture as your old edit.
+3. **Try with another RAW:** on your next WRONG PAIR, press it and check the form.
+4. **Find source:** paste your next 5 links. It uses NexLev / Algrow credits once per clip.
+5. **A zip:** unzip one into another folder and import `edit\1_edit.xml` (I did this once: no Media offline).
+6. **video21-fixed:** its frames 292-339 (a hold of RAW 963) and why its caption score is 0/70.
+7. **The Ted 2 copy** `D:\mr_scratch\ted\Ted.2...reencoded.mp4` (10.2 GB): keep it as that RAW, or delete it.
+
+## On the laptop
+
+Close MovieRecaps, then in PowerShell:
+
+```
+cd C:\Users\gvida\Desktop\bh\MovieRecaps
+git pull
+.venv\Scripts\python tools\app\setup_app.py
+```
+
+- No new packages.
+- Start MovieRecaps again. At its start (and every 10 minutes), it remakes the laptop's finished projects' zips as whole-folder zips (Task 2).
+- **The NexLev / Algrow keys are only on the PC** (its Windows user environment). On the laptop, Find source works as before (your RAWs' sound, the post's text, IMDb / TVmaze) and says "key not found" for the AI. To use the AI there too, set the two variables yourself in the laptop's Windows settings (System > About > Advanced system settings > Environment Variables > User variables: `NEXLEV_API_KEY`, `ALGROW_API_KEY`), then start MovieRecaps again. The app never writes them anywhere.
+- The song preset: in Premiere on the laptop, Effects > right-click **Presets > Import Presets...** and pick `assets\premiere\MovieRecaps song chain.prfpset` (once).
+
+## 5 new suggestions (saved in `D:\Shared\Projects\suggestions.md`, not built)
+
+1. **"Try with another RAW" says which RAW to get:** the row runs Find source on the competitor (free the second time: cached) and fills in the search words (small).
+2. **An episode from the AI alone, checked against TVmaze's episode summaries:** the AI was "100 % sure" on 3 wrong episode numbers today (half a night).
+3. **A smaller zip to send, without the tool's own checks** (`extras\debug`, compare.mp4, preview_recreation.mp4: about a quarter of a finished edit) (small).
+4. **A RAW checked for readability right after the download**, converted there if needed, before the run (small).
+5. **The slowest step on the board card**, e.g. "slow: placing frames 91 min" (small).
+
+## What I decided on my own
+
+1. **Find source's AI goes through NexLev's and Algrow's MCP servers** (the same tools as their Claude connectors), with your keys as Bearer tokens read from the user environment. Neither publishes a plain REST API for these tools.
+2. **One song preset with Volume +13.5 / +7.5 dB**, as you asked, after measuring it the same as your chain either way Premiere orders the Volume. The two-preset variant (the Clip Gain inside each Input Boost) is in the code for a louder song.
+3. **The song's Amplify is +3.00 dB** (your prompt), though your song.prproj has +4.5 dB. One number to change if you want 4.5.
+4. **The whole movie leaves the project folder only when it is a link or copy of the download still in place**, never a conversion the app made (that would cost a re-conversion on Run again).
+5. **The piece cut for V1 carries the RAW's sound as PCM only when A1 plays it**; otherwise A1's WAV is cut the same way, sample for sample.
+6. **The zip is not made when its drive would drop under 40 GB free** (your disk rule).
+7. **Task 6 converts in the queue (the app), not in the tool's RAW step:** a change there would remake every RAW's cached conversion (hours).
+8. **The check-all ran the older cases first:** the new cases have no caches and took 44-93 min each; the older ones have a "before", so they decide "nothing gets worse".
+9. **Task 8's switch-off runs use a second frozen copy of the code (`snap16b`)**, because the switches don't change the cache keys (a run with them would only get the cached result back).
+10. **Learn's glossary lines were not taken** (as on night 15); your two censored words went into the censor list.
+11. **I cleaned only my own scratch:** night 11's `work\t26\pairs` and `checkall` (11.3 GB), my test copies, the check-all runs' media links, my test temp folders. Stage caches were not touched.
