@@ -51,10 +51,10 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
   - The big ones still hold the whole movie, because they were made before Task 3: mindculpt 8.6 GB, Are We There Yet 7.4 GB, Funniest Accent 7.2 GB, Lab Accident 5.9 GB, Borat 5.2 GB.
   - The smallest: 69-110 MB.
   - I checked one (Coldest Dad, 2.2 GB) with a full CRC check: every file whole.
-  - HOW TO OPEN of a Just cuts project names `cuts_edit.xml`.
+  - HOW TO OPEN of a Just cuts project names `cuts\1_edit.xml`.
 - **Premiere test (07:45, you were away):** I copied the "milk" project, pointed its XML at that copy, zipped it, then **hid the copy** (renamed it) so the XML's paths led nowhere, and unzipped it into another folder. Then I imported the XML with Open in Premiere and saved.
   - **No message, no "Link Media", no Media offline.**
   - The saved project plays every file from the unzipped folder: `raw.mp4`, `raw_stereo.wav`, the frame and the watermark, each with its real size and length.
-  - Premiere finds the files next to the XML by itself, so your friend needs nothing else: unzip, then File > Import `edit_edit.xml`.
-  - Test folder: `work	16\zt`.
+  - Premiere finds the files next to the XML by itself, so your friend needs nothing else: unzip, then File > Import `edit\1_edit.xml`.
+  - Test folder: `work\t16\zt`.
 - **Tests:** app 1220 passed, 0 failed (7 new: `test_zip_day16.py`; night 15's zip test changed to the whole folder).
