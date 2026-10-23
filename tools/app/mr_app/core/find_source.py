@@ -19,6 +19,7 @@ yet: no service matches them without a login (said in the reason when nothing el
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -137,6 +138,18 @@ class LibItem:
     sound: str = ""                             # a file of it to check the sound in ("" = none here)
 
 
+def _here(p: Any) -> str:
+    """A path as this computer reads it: the PC's own \\\\192.168.101.11\\Shared\\... is D:\\Shared\\... ('' for none)."""
+    if not p:
+        return ""
+    try:
+        from .learn_hub import for_pc
+        q = str(for_pc(str(p)))
+        return q if Path(q).exists() else str(p)
+    except Exception:  # noqa: BLE001
+        return str(p)
+
+
 def library(roots: Iterable[Path] | None = None) -> list[LibItem]:
     """The movies and episodes this computer has: each project's RAW (project.json; its sound: the run's own copy or
     sound file) and every big video in the case folders (D:\\Shared\\laptop_cases)."""
@@ -160,17 +173,24 @@ def library(roots: Iterable[Path] | None = None) -> list[LibItem]:
             pj = folder / P.FILE
             if pj.is_file():
                 try:
-                    raw = (P.read_json(pj).get("raw") or {}).get("file") or ""
+                    rd = P.read_json(pj).get("raw") or {}
                 except Exception:  # noqa: BLE001
-                    raw = ""
+                    rd = {}
+                raw = rd.get("file") or ""
                 if raw:
+                    # day 16: the whole movie first (the folder's, else where it was downloaded); the run's media
+                    # only when that run played the whole movie -- a piece's sound (day 14's excerpt, day 16's
+                    # keep_piece) holds one scene, not the movie
+                    snd = next((str(x) for x in (folder / raw, _here(rd.get("kept_at")), _here(rd.get("source_file")))
+                                if x and Path(str(x)).is_file()), "")
                     media = folder / "edit" / "extras" / "media"
-                    snd = next((str(media / n) for n in ("raw_stereo.wav", "raw_stereo.mp4", "raw.wav")
-                                if (media / n).is_file()), "")
-                    if not snd:
-                        snd = next((str(p) for p in sorted(media.glob("raw*")) if p.suffix.lower() in VIDEO_EXTS), "")
-                    if not snd and (folder / raw).is_file():
-                        snd = str(folder / raw)
+                    piece = any((folder / "edit" / "extras" / n).is_file() for n in ("excerpt.json", "keep_piece.json"))
+                    if not snd and not piece:
+                        snd = next((str(media / n) for n in ("raw_stereo.wav", "raw_stereo.mp4", "raw.wav")
+                                    if (media / n).is_file()), "")
+                        if not snd:
+                            snd = next((str(p) for p in sorted(media.glob("raw*")) if p.suffix.lower() in VIDEO_EXTS),
+                                       "")
                     files.append((raw, snd))
             try:
                 for f in folder.iterdir():
@@ -182,10 +202,10 @@ def library(roots: Iterable[Path] | None = None) -> list[LibItem]:
                 t = parse_name(name)
                 if t is None:
                     continue
-                key = norm(t.text())
-                if key in seen:
-                    for it in out:                             # one per title; keep one with a sound to check
-                        if norm(it.title.text()) == key and not it.sound and snd:
+                key = norm(name)                               # day 16: one per FILE (two downloads named after
+                if key in seen:                                #   one film -- the YTS "Dr. Dolittle 2" that holds
+                    for it in out:                             #   the 1998 film -- are both looked in)
+                        if norm(it.file) == key and not it.sound and snd:
                             it.sound = snd
                     continue
                 seen.add(key)
@@ -350,6 +370,8 @@ class Answer:
     second: Title | None = None
     reason: str = ""                            # NOT FOUND: why, in plain words
     raw_file: str = ""                          # your RAW it was found in
+    ai: dict = field(default_factory=dict)      # day 16: what the AI that watched it said (core.ai_watch: by, guess,
+    #                                             sure, lines, why ...)
 
     def comes_from(self) -> str:
         return self.title.text() if self.title is not None else "—"
@@ -370,7 +392,8 @@ class Answer:
         t = d.get("title")
         s = d.get("second")
         return cls(Clip(**d["clip"]), Title(**t) if t else None, d.get("verdict", NOT_FOUND), float(d.get("sure", 0)),
-                   d.get("how", ""), Title(**s) if s else None, d.get("reason", ""), d.get("raw_file", ""))
+                   d.get("how", ""), Title(**s) if s else None, d.get("reason", ""), d.get("raw_file", ""),
+                   dict(d.get("ai") or {}))
 
 
 def _sound_found(clip_file: Path, raw_sound: str) -> float | None:
@@ -387,10 +410,52 @@ def _sound_found(clip_file: Path, raw_sound: str) -> float | None:
     return 0.0
 
 
+USE_AI = True                                   # day 16: the AI watches the clip first (core.ai_watch; credits)
+AI_SURE = 85                                    # the AI this sure of a title the public lists confirm: Sure
+
+
+def link_of(clip: Clip) -> str:
+    """The public link of a clip (a file named after its Instagram reel: that reel's link); '' when none."""
+    if _LINK.match(clip.source):
+        return clip.source
+    m = re.match(r"Reel ([\w-]{8,15})$", clip.name or "")
+    return f"https://www.instagram.com/reel/{m.group(1)}/" if m else ""
+
+
+def ai_title(w: Any) -> Title | None:
+    """The AI's guess as a Title (None: it had none)."""
+    if w is None or not getattr(w, "title", ""):
+        return None
+    if w.season and w.episode:
+        return Title(w.title, w.year, int(w.season), int(w.episode), w.episode_title or "", "episode")
+    return Title(w.title, w.year, kind="show" if w.kind == "show" else "movie")
+
+
+def checked(guess: Title, listed: Title | None) -> str:
+    """The public lists confirm the AI's guess: '' when not, else what confirms it (plain words). A film: IMDb has
+    it with the same year (+- 1); an episode: TVmaze has that season / episode, and its title is the one the AI
+    named."""
+    if listed is None or (norm(listed.name) != norm(guess.name) and norm(guess.name) not in norm(listed.name)):
+        return ""
+    if guess.kind == "episode":
+        if not listed.episode_title or not guess.episode_title:
+            return ""
+        a, b = norm(listed.episode_title), norm(guess.episode_title)
+        if a == b or (len(b) >= 5 and (a in b or b in a)):
+            return f"TVmaze: S{guess.season:02d}E{guess.episode:02d} is \"{listed.episode_title}\""
+        return ""
+    if guess.kind == "movie":
+        if guess.year and listed.year and abs(int(listed.year) - int(guess.year)) > 1:
+            return ""
+        return f"IMDb has {listed.name}" + (f" ({listed.year})" if listed.year else "")
+    return ""
+
+
 def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None,
-         cancel: threading.Event | None = None, say: Callable[[str], None] | None = None) -> Answer:
+         cancel: threading.Event | None = None, say: Callable[[str], None] | None = None,
+         watcher: Callable[..., Any] | None = None) -> Answer:
     """Which movie / episode one clip comes from (module docstring). Never raises: a clip that can not be read is NOT
-    FOUND with why."""
+    FOUND with why. Day 16: first the AI watches it (``watcher``: core.ai_watch.watch -- tests put a fake here)."""
     say = say or (lambda _t: None)
     try:
         say("reading the post")
@@ -401,8 +466,29 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
         return Answer(Clip(source=source, name=source[-40:], platform=platform_of(source)),
                       reason=f"the link could not be read: {msg}"[:200])
     lib = library() if lib is None else lib
+    ans = Answer(clip)
+    w, guess = None, None
+    link = link_of(clip)
+    if ((USE_AI and not os.environ.get("MOVIERECAPS_NO_AI")) or watcher is not None) and link:
+        try:
+            if watcher is None:
+                from .ai_watch import watch as watcher
+            w = watcher(link, say=say)
+        except Exception:  # noqa: BLE001 - as before without it
+            w = None
+        guess = ai_title(w)
+        if w is not None:
+            ans.ai = {"by": w.by, "guess": w.guess(), "sure": w.sure, "why": w.why, "lines": list(w.lines)[:20],
+                      "on_screen": list(w.on_screen)[:10], "actors": list(w.actors), "setting": w.setting,
+                      "error": w.error}
     ep = episode_in(clip.text)
+    if guess is not None and guess.kind == "episode" and ep is None:
+        ep = (guess.season, guess.episode)
     named = named_in(clip.text, lib)
+    if guess is not None:                      # the AI's title among your RAWs: looked at first
+        mine = [it for it in lib if len(norm(it.title.name)) >= 4 and (norm(it.title.name) == norm(guess.name) or
+                                                                         norm(it.title.name) in norm(guess.name))]
+        named = mine + [it for it in named if it not in mine]
     # the library's titles the text names: the episode it says first, then the show's other files
     picks: list[LibItem] = []
     for it in named:
@@ -411,7 +497,6 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
             picks.insert(0, it)
         else:
             picks.append(it)
-    ans = Answer(clip)
     clip_file = _clip_file(clip, work, cancel) if any(it.sound for it in lib) else None
     ruled_out: list[LibItem] = []
     t_scan = time.monotonic()
@@ -430,6 +515,7 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
                 ans.title, ans.verdict, ans.raw_file = it.title, SURE, it.file
                 ans.sure = min(0.99, 0.90 + 0.09 * share)
                 ans.how = f"its sound found in your RAW ({round(100 * share)} % of it)" + (
+                    f"; {w.by}'s AI said {w.guess()}" if guess is not None and w is not None else
                     "; the post's text names it" if it in named else "")
                 return True
             if share is not None:
@@ -441,6 +527,28 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
         rest = [it for it in lib if it not in picks]
         rest.sort(key=lambda it: (it.title.kind != "episode", it.title.text()))
         found = try_sound(rest, TEXT_PICKS + SCAN_MAX, SCAN_BUDGET_S)
+    if not found and guess is not None:            # the AI's guess, checked in the public lists
+        say("checking the AI's guess in the public title lists")
+        listed = online(f"{guess.name} ({guess.year})" if guess.year and guess.kind == "movie" else guess.name,
+                        (guess.season, guess.episode) if guess.kind == "episode" else None)
+        ok = checked(guess, listed)
+        mine = [it for it in picks if norm(it.title.name) == norm(guess.name)]
+        ans.title = guess if listed is None else Title(listed.name if norm(listed.name) == norm(guess.name) else
+                                                        guess.name, guess.year or listed.year, guess.season,
+                                                        guess.episode, (listed.episode_title or guess.episode_title),
+                                                        guess.kind)
+        said = f"{w.by}'s AI watched it (picture and sound; it says {w.sure} % sure)"
+        if ok and w.sure >= AI_SURE and not any(it in ruled_out for it in mine):
+            ans.verdict, ans.sure = SURE, min(0.95, w.sure / 100.0)
+            ans.how = f"{said}; checked: {ok}"
+        else:
+            ans.verdict, ans.sure = CHECK, min(0.8, max(0.3, w.sure / 100.0 * 0.8))
+            why = ("its sound is not in your RAW of it" if any(it in ruled_out for it in mine) else
+                   "the public lists don't confirm it" if not ok else f"the AI is only {w.sure} % sure")
+            ans.how = f"{said} -- only the AI's guess: {why}"
+        if mine:
+            ans.raw_file = mine[0].file
+        found = True
     if not found and picks:
         best = picks[0]
         out = [it for it in ruled_out if it in picks]
@@ -471,8 +579,13 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
                     break
     if ans.title is None:
         ans.reason = ("the post's text names no movie or show I know"
-                      if clip.text.strip() else "the post has no text to read") + \
-                     " -- the burned-in text and the speech can not be looked up without a login"
+                      if clip.text.strip() else "the post has no text to read")
+        if w is not None and w.by:
+            ans.reason += f"; {w.by}'s AI watched it and does not know it" + (f" ({w.why[:120]})" if w.why else "")
+        elif w is not None and w.error:
+            ans.reason += f"; the AI could not watch it ({w.error[:160]})"
+        elif not link:
+            ans.reason += " -- a file with no public link: the AI can't watch it"
     return ans
 
 
@@ -483,10 +596,13 @@ def _clip_file(clip: Clip, work: Path | None, cancel: threading.Event | None) ->
         return p if p.is_file() else None
     from . import download as D, paths
     dest = Path(work or paths.work_dir()) / "find_source"
-    try:
-        return Path(D.download(clip.source, dest, "competitor", cancel=cancel).path)
-    except Exception:  # noqa: BLE001
-        return None
+    for attempt in range(2):                     # day 16: once more after a moment (5 at once: a download can fail)
+        try:
+            return Path(D.download(clip.source, dest, "competitor", cancel=cancel).path)
+        except Exception:  # noqa: BLE001
+            if attempt == 0 and not (cancel is not None and cancel.is_set()):
+                time.sleep(3.0)
+    return None
 
 
 # ---------------------------------------------------------------------------------------------------------------------

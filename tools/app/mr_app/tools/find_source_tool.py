@@ -144,9 +144,12 @@ class FindSourcePage(QWidget):
         lay.setSpacing(14)
         lay.addWidget(W.SectionHeader("Find source"))
         lay.addWidget(W.label("Which movie or episode each clip comes from -- only its name (and season / episode); "
-                              "you download the RAW yourself. Paste links, one per line, or drop files. Looked at: "
-                              "the post's text, your RAWs on this computer (the clip's sound in them = Sure), and "
-                              "public title lists. No login is used.", "Muted", wrap=True))
+                              "you download the RAW yourself. Paste links, one per line, or drop files. First an AI "
+                              "watches each clip (picture and sound: NexLev, else Algrow); its guess is checked in "
+                              "public title lists (TVmaze, IMDb) and by the clip's sound in your RAWs on this "
+                              "computer -- Sure only when checked. No login is used.", "Muted", wrap=True))
+        from ..core.ai_watch import CREDITS_NOTE
+        lay.addWidget(W.label(CREDITS_NOTE, "Dim", wrap=True))
         self.box = QPlainTextEdit()
         self.box.setPlaceholderText("https://www.instagram.com/reel/DdVZePAga2I/\nhttps://www.tiktok.com/@.../video/...\n"
                                     "(or drop video files here)")

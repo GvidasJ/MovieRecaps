@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _TMP = Path(tempfile.mkdtemp(prefix="mr_app_tests_"))
 os.environ.setdefault("MOVIERECAPS_APPDATA", str(_TMP / "appdata"))
 os.environ.setdefault("MOVIERECAPS_PROJECTS", str(_TMP / "projects"))
+os.environ.setdefault("MOVIERECAPS_NO_AI", "1")       # day 16: Find source never spends NexLev / Algrow credits in a test
 if "MOVIERECAPS_SETTINGS" not in os.environ:
     os.environ["MOVIERECAPS_SETTINGS"] = str(_TMP / "settings.json")
     (_TMP / "settings.json").write_text(json.dumps({"save_to": str(_TMP / "shared"), "intro": False}),

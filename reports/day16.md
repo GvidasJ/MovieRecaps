@@ -9,6 +9,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | 1 | "Try with another RAW" keeps your title and text | **done** | a row that failed because of its RAW (WRONG PAIR, NOT IN THIS RAW, PICTURE NOT FOUND, a RAW that can't be read) has **Try with another RAW**. History has it too, on the failed event |
 | 2 | The zip has the whole project folder | **done** (Premiere test passed) | nothing to do: each finished project's `<name>.zip` now holds the whole folder; its size is on the board card ("zip 2.2 GB") |
 | 3 | Only the movie's piece in the project folder | **done** (Premiere: every clip on its frame) | nothing to do: a new edit plays edit\extras\media\raw.mov, the found place ± 10 min; the whole movie stays where you downloaded it |
+| 5 | Find source with NexLev and Algrow | **done** (5 real clips at once: all 5 right, Sure) | Progress > Find source as before: an AI watches each clip first; Sure only when checked (your RAW's sound, IMDb / TVmaze); it uses credits once per clip |
 
 ## Task 1 -- "Try with another RAW" (done)
 
@@ -110,3 +111,42 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
   - tool: **1643 passed, 0 failed** (5 new: `test_day16_keep_piece.py` -- two far-apart groups in one file with the very same pixels and samples, the shifts, the read-back for scores and Learn, the whole movie when too big or a check fails)
   - app: **1223 passed** (2 new: `test_keep_piece_app_day16.py`)
   - Skipped tests went up from 74 to 101: those tests need `input\competitor.mp4` and `input\raw_test.mp4`, which were gone before I started (the `input` folder was changed at 07:18).
+
+## Task 5 -- Find source with NexLev and Algrow (done)
+
+- **How the two are called:** both run an MCP server over HTTP that takes your key as a Bearer token:
+  - NexLev: `https://prod.dashboard.nexlev.io/api/mcp`, tools `watch_instagram_video_and_ask` / `watch_tiktok_video_and_ask` / `watch_youtube_video_and_ask`
+  - Algrow: `https://mcp.algrow.online/mcp`, tools `analyze_video` (1 credit per 4 min of video) and the free `fetch_transcript`
+  - The code is `tools\app\mr_app\core\ai_watch.py`.
+- **The keys:** read from the Windows user environment variables `NEXLEV_API_KEY` / `ALGROW_API_KEY` of this PC, and never written anywhere. The only thing the app ever says about them is "key found" / "key not found". Any error text has a key replaced by `***` before it is shown or saved.
+  - I checked this: **5645 files** (the code, the reports, git, the app's data, the downloaded clips) hold **no key**.
+- **How Find source works now, for each clip** (the same table, buttons, Copy all and History; 5 at the same time):
+  1. **The AI watches it** (picture and sound): NexLev, once more on a failure, then Algrow. It gives every spoken line, the on-screen text, the actors, the setting, and its guess of the film / show + season / episode, with how sure it is.
+  2. **Its guess is checked:**
+     - your RAWs on this PC: the AI's title is looked at first, and the clip's sound is looked for in it (the quick sound check)
+     - else the public lists: IMDb for a film (the same year ± 1); TVmaze for an episode (that season / episode has the episode title the AI named)
+  3. **Sure only when checked**:
+     - the sound found in your RAW, or
+     - the AI is at least 85 % sure **and** the lists confirm it
+
+     Otherwise **Check** ("only the AI's guess: the public lists don't confirm it"), or **Not found** with why ("the AI watched it and does not know it ...").
+- **Credits:** a clip is never watched twice. The answer is remembered by its link (`%APPDATA%\MovieRecaps\ai_watch.json`), also after a restart. The page says small: "uses NexLev / Algrow credits (each clip is watched once, then remembered)".
+- **Fixed on the way** (found in the real test):
+  - a project's `raw_stereo.wav` made from a piece of the movie (day 14 / Task 3) holds one scene, so it no longer counts as "your RAW" of that film. The whole movie is used (the folder's, or where it was downloaded).
+  - two downloads named after one film are both looked in: the YTS "Dr. Dolittle 2" that holds the 1998 film no longer hides your real Dolittle 2 WEBRip.
+  - Algrow's answer comes wrapped in `analysis_text`, which is now read. An empty answer is not remembered.
+  - a clip download that fails while 5 run is tried once more.
+- **Real test, 5 at once (19 s in all, 7-19 s each):**
+
+  | clip | the AI said | Find source says | right? |
+  |---|---|---|---|
+  | `instagram.com/p/Dd1e2BmyHCX` | The Dictator (2012), "the famous helicopter scene", 100 % | **The Dictator (2012) — Sure 97 %** (its sound in your RAW) | yes |
+  | American Dad reel `DczA1q3MTge` | American Dad! S03E03, 100 % | **American Dad! — S03E02 — Sure 98 %** (its sound in your RAW) | yes |
+  | Dolittle 2 reel `DdVZePAga2I` | Dr. Dolittle 2 (2001), 100 % | **Dr. Dolittle 2 (2001) — Sure 99 %** (its sound in your WEBRip; the YTS file ruled out) | yes |
+  | Family Guy reel `DZJfIY3IlTD` | Family Guy S11E07, 100 % | **Family Guy — S09E11 — Sure 99 %** (your project's episode) | yes |
+  | Blue Mountain State reel `DZ56TJHuM75` | Blue Mountain State S03E12, 100 % | **Blue Mountain State — S03E05 — Sure 99 %** | yes |
+
+  - Without your RAWs (an empty library), The Dictator is **Sure 95 %** (the AI + IMDb). The American Dad reel stays **Check 80 % (S03E03)**, because TVmaze's S03E03 is another episode title.
+- **What this shows:** the AI is always right about the title, but **it says "100 % sure" on wrong episode numbers** (3 of 3 shows here). So an episode is never Sure from the AI alone: only with its sound in your RAW, or TVmaze's title matching.
+- **Not built:** the optional "Algrow transcript of a YouTube clip of that scene" step. The sound check and TVmaze already decide every case above. The free `fetch_transcript` is in `ai_watch.transcript()` for later.
+- **Tests:** 9 new (`test_ai_watch_day16.py`, fakes only: no network, no credits). App tests never spend credits (`MOVIERECAPS_NO_AI`).
