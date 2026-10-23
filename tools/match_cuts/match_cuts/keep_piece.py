@@ -550,7 +550,11 @@ def finish(ctx: Any) -> dict:
     cfg = ctx.cfg
     if not getattr(cfg, "premiere", False):
         return {}
-    if getattr(cfg, "no_keep_piece", False) or os.environ.get("MATCH_CUTS_NO_KEEP_PIECE", "").strip() not in ("", "0"):
+    # Day 16 follow-up (the user's call): OFF by default -- the edit plays the whole movie again, the whole movie
+    # stays in the project folder. MATCH_CUTS_KEEP_PIECE=1 switches the piece back on.
+    if (getattr(cfg, "no_keep_piece", False)
+            or os.environ.get("MATCH_CUTS_NO_KEEP_PIECE", "").strip() not in ("", "0")
+            or os.environ.get("MATCH_CUTS_KEEP_PIECE", "").strip() in ("", "0")):
         return _off("switched off")
     sources = [x for x in (getattr(cfg, "raw_movie", None), getattr(cfg, "raw_input", None), getattr(cfg, "raw", None))
                if x]
