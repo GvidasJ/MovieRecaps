@@ -558,6 +558,11 @@ class JobRow(QFrame):
                                 "line above says")
         self.b_retry.clicked.connect(self._retry)
         self.b_retry.hide()
+        from ..core import another_raw as AR
+        self.b_another = W.Button(AR.BUTTON, "Small")     # day 16: failed because of the RAW -- keep the rest
+        self.b_another.setToolTip(AR.TIP)
+        self.b_another.clicked.connect(lambda: self.page.try_another_raw(self.job))
+        self.b_another.hide()
         self.b_pause = W.Button("Pause", "Small")         # night 15: the computer free now, Resume goes on from here
         self.b_pause.setToolTip("Pause this video: the computer is free at once. Resume goes on from the step it was "
                                 "at -- also after you close the app")
@@ -571,7 +576,7 @@ class JobRow(QFrame):
         self.b_prem = W.Button("Open in Premiere", "Small")
         self.b_report = W.Button("Show report", "Small")
         self.remove = W.Button("Remove", "Ghost")
-        for b in (self.b_pause, self.b_resume, self.b_retry, self.b_folder, self.b_prem, self.b_report, self.remove):
+        for b in (self.b_pause, self.b_resume, self.b_retry, self.b_another, self.b_folder, self.b_prem, self.b_report, self.remove):
             ctl.addWidget(b)
         self.b_folder.clicked.connect(self._open_folder)
         self.b_prem.clicked.connect(self._open_premiere)
@@ -941,6 +946,8 @@ class JobRow(QFrame):
         for b in (self.b_folder, self.b_prem, self.b_report):
             b.setVisible(done)
         self.b_retry.setVisible(j.state in (J.DONE, J.STOPPED) and j.complete and R.stopped_by_itself(res))
+        from ..core import another_raw as AR
+        self.b_another.setVisible(j.state in (J.DONE, J.STOPPED) and AR.failed_by_raw(res))
         self.b_pause.setVisible(j.state == J.RUNNING and not getattr(j, "restart_swapped", False)
                                 and not getattr(j, "pausing", False))
         self.b_resume.setVisible(j.state == J.PAUSED)
@@ -1632,6 +1639,24 @@ class MatchCutsPage(QWidget):
                f"Queued again ({'Fast' if j.mode == J.FAST else 'Thorough'})")
         if self.running and self.current is None:
             self._next()
+
+    def try_another_raw(self, job: J.Job) -> None:
+        """Day 16: "Try with another RAW" on a row that failed because of its RAW -- New video opens with the YouTube
+        title, the headline, the channel and the competitor filled in (project.json first: read off the window's
+        thread), only the RAW to pick or download."""
+        from ..core import another_raw as AR
+        from ..ui import background as BG
+        dl = (getattr(self.ctx, "pages", None) or {}).get("download")
+        if dl is None or not hasattr(dl, "prefill_another_raw"):
+            self.say("Try with another RAW: the New video page is not there")
+            return
+
+        def got(k) -> None:
+            sel = getattr(self.ctx, "select", None)
+            if sel is not None:
+                sel("download")
+            dl.prefill_another_raw(k)
+        BG.call(lambda: AR.kept_from_job(job), got, lambda e: self.say(f"Try with another RAW: {e}"))
 
     def clear_finished(self) -> None:
         for j in [j for j in self.jobs if j.state in (J.DONE, J.STOPPED)]:

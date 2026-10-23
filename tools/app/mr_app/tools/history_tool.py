@@ -18,11 +18,23 @@ SHOW_MAX = 500
 class _Item(QWidget):
     """One event: the channel-coloured marker on the line, the time, what happened, the title and channel."""
 
-    def __init__(self, ev):
+    def __init__(self, ev, page=None):
         super().__init__()
         self.ev = ev
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(58)
+        self.retry = bool(getattr(ev, "retry", False)) and bool(getattr(ev, "folder", ""))
+        # day 16: an edit that failed because of its RAW keeps its YouTube title and headline here, to reuse
+        yt = (getattr(ev, "upload_title", "") or "").strip()
+        head = (getattr(ev, "title", "") or "").replace("\n", " / ").strip()
+        self.line3 = " · ".join(x for x in ((f"YouTube: {yt}" if yt else ""), (f"Headline: {head}" if head else ""))
+                                if x) if self.retry else ""
+        self.setFixedHeight(76 if self.line3 else 58)
+        self.b_retry = None
+        if self.retry and page is not None:
+            from ..core import another_raw as AR
+            self.b_retry = W.Button(AR.BUTTON, "Small", parent=self)
+            self.b_retry.setToolTip(AR.TIP)
+            self.b_retry.clicked.connect(lambda: page.try_another_raw(ev))
         t = (getattr(ev, "title", "") or "").replace("\n", " / ")
         shown = getattr(ev, "shown", "") or t or getattr(ev, "name", "")     # day 13: the video's title is the name
         name = getattr(ev, "name", "")
@@ -33,7 +45,13 @@ class _Item(QWidget):
         self.line2 = " · ".join(x for x in (shown, getattr(ev, "channel", "")) if x)
 
     def sizeHint(self) -> QSize:                          # noqa: N802
-        return QSize(600, 58)
+        return QSize(600, self.height())
+
+    def resizeEvent(self, e) -> None:                     # noqa: N802
+        if self.b_retry is not None:
+            self.b_retry.adjustSize()
+            self.b_retry.move(self.width() - self.b_retry.width() - 4, 6)
+        super().resizeEvent(e)
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
         p = QPainter(self)
@@ -61,6 +79,10 @@ class _Item(QWidget):
         p.setPen(QColor(theme.MUTED))
         fm = QFontMetrics(W.font(12))
         p.drawText(QPointF(x, 51), fm.elidedText(self.line2, Qt.TextElideMode.ElideRight, int(self.width() - x - 8)))
+        if self.line3:
+            p.setPen(QColor(theme.DIM))
+            p.drawText(QPointF(x, 69), fm.elidedText(self.line3, Qt.TextElideMode.ElideRight,
+                                                     int(self.width() - x - 8)))
         p.end()
 
 
@@ -112,9 +134,26 @@ class HistoryPage(QWidget):
             if it.widget():
                 it.widget().deleteLater()
         for ev in evs[:SHOW_MAX]:
-            self.items.addWidget(_Item(ev))
+            self.items.addWidget(_Item(ev, self))
         self.empty.setVisible(not evs)
         self.count.setText(f"{len(evs)} event(s)" if evs else "")
+
+
+    def try_another_raw(self, ev) -> None:
+        """Day 16: "Try with another RAW" on a failed edit: New video with that project's title, headline, channel
+        and competitor (its project.json read off the window's thread)."""
+        from ..core import another_raw as AR
+        from ..ui import background as BG
+        dl = (getattr(self.ctx, "pages", None) or {}).get("download")
+        if dl is None or not hasattr(dl, "prefill_another_raw"):
+            return
+
+        def got(k) -> None:
+            sel = getattr(self.ctx, "select", None)
+            if sel is not None:
+                sel("download")
+            dl.prefill_another_raw(k)
+        BG.call(lambda: AR.kept_from_project(ev.folder), got, lambda _e: None)
 
 
 class HistoryTool(Tool):

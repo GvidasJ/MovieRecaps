@@ -41,6 +41,9 @@ class Event:
     detail: str = ""
     kind: str = INFO        # ok / note / fail / info
     shown: str = ""         # day 13: the name History shows -- the video's title (names.display_name), '' = title / name
+    folder: str = ""        # day 16: the project's folder (project.json's data from the board carries "_folder")
+    retry: bool = False     # day 16: the edit failed because of its RAW -- "Try with another RAW" on this event
+    upload_title: str = ""  # day 16: the YouTube title, shown with the headline on such an event
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -214,6 +217,15 @@ def project_events(data: Mapping) -> list[Event]:
         # day 13: a stop's error is its plain line, its first failure "the run stopped (exit N): <that line>"
         detail = err if err and first != err and first.endswith(err) else (first or err)
         add(e.get("finished"), what, plain_failure(detail), FAIL)
+        try:                                 # day 16: failed because of the RAW -> its title and text kept to reuse
+            from .another_raw import edit_failed_by_raw
+            by_raw = edit_failed_by_raw(data)
+        except Exception:  # noqa: BLE001
+            by_raw = False
+        if by_raw and out:
+            from dataclasses import replace
+            out[-1] = replace(out[-1], folder=str(data.get("_folder") or ""), retry=True,
+                              upload_title=str(data.get("upload_title") or ""))
     up = board.get("uploaded") if isinstance(board.get("uploaded"), Mapping) else {}
     if up and parse_time(up.get("at")) is not None:
         detail = " · ".join(x for x in (str(up.get("title") or ""), UPLOAD_HOW.get(str(up.get("how") or ""), ""))
@@ -321,7 +333,7 @@ def search(evs: Iterable[Event], text: str) -> list[Event]:
         return evs
     out = []
     for ev in evs:
-        hay = fold(" ".join((ev.title, ev.channel, ev.name, ev.what, ev.detail, ev.shown)))
+        hay = fold(" ".join((ev.title, ev.channel, ev.name, ev.what, ev.detail, ev.shown, ev.upload_title)))
         if all(w in hay for w in words):
             out.append(ev)
     return out

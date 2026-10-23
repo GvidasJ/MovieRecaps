@@ -1232,7 +1232,9 @@ class DownloadPage(QWidget):
             if not names or set(names) == set(self.ch.buttons):
                 return
             old = self.ch
-            new = ChannelButtons(names, NV.last_channel(names) if old.value not in names else old.value)
+            want = getattr(self, "_want_channel", "")      # day 16: Try with another RAW's channel, once it is here
+            new = ChannelButtons(names, want if want in names else
+                                 NV.last_channel(names) if old.value not in names else old.value)
             new.changed.connect(NV.set_last_channel)
             lay = old.parentWidget().layout() if old.parentWidget() is not None else None
             if lay is None:
@@ -1357,6 +1359,35 @@ class DownloadPage(QWidget):
         self.raw.setText(str(f))
         self.msg.setStyleSheet("")
         self.msg.setText(f"RAW: {f.name}")
+
+    def prefill_another_raw(self, k) -> None:
+        """Day 16: "Try with another RAW" (a queue row or History): the form gets the failed video's competitor,
+        channel, headline, YouTube title, mode and speed; the RAW's field is emptied and focused -- you only paste or
+        pick the new RAW. ``k``: core.another_raw.Kept."""
+        from ..core import another_raw as AR
+        self.raw.clear()
+        self.raw_file = None
+        if k.competitor_file is not None:
+            self.comp_file = Path(k.competitor_file)
+            self.comp.setText(str(self.comp_file))
+        else:
+            self.comp_file = None
+            self.comp.setText(k.competitor_url or "")
+        if k.channel:
+            self._want_channel = k.channel
+            if k.channel in self.ch.buttons:
+                self.ch.set(k.channel)
+        self.head.set_text(k.title or "")
+        self._head_ready()
+        self.yt.setText(k.upload_title or "")
+        if k.mode in (J.FAST, J.THOROUGH):
+            self.mode.set(k.mode)
+        self.speed.set("125" if abs(float(k.speed or 100.0) - 125.0) < 1e-6 else "100")
+        self._detect()
+        self.msg.setStyleSheet(f"color: {theme.AMBER};")
+        self.msg.setText(AR.form_message(k))
+        self.raw.setFocus()
+        scroll_to_top(self)
 
     # -- adding --
     def _item_from(self, raw_text: str, comp_text: str, raw_file: Path | None = None,

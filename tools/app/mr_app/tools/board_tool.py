@@ -658,7 +658,8 @@ class BoardPage(QWidget):
         def work():
             from ..core import board
             cards = board.load_cards(shared, local)
-            datas = [c.data for c in cards if isinstance(getattr(c, "data", None), dict)]   # (for the History tab)
+            datas = [dict(c.data, _folder=str(c.folder)) for c in cards              # (for the History tab; day 16:
+                     if isinstance(getattr(c, "data", None), dict)]                 # its folder, Try another RAW)
             return cards, datas
 
         def got(r) -> None:
