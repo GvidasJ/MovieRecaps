@@ -45,6 +45,7 @@ RAW time is decided before framing and never by a free per-frame or per-candidat
 from __future__ import annotations
 
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -771,6 +772,10 @@ class _Hyp:
     def get(self, j: int) -> float:
         i = j - self.lo
         return float(self.scores[i]) if 0 <= i < len(self.scores) else float("nan")
+
+
+RESCUE_SKIP_OFF_SOUND = True     # day 16: no rescue search where the sound search put the competitor outside the RAW
+OFF_SOUND_MIN_S = 2.0            # ... over a stretch this long at least (MATCH_CUTS_RESCUE_ALL=1: search them all)
 
 
 @dataclass
@@ -2002,6 +2007,36 @@ class _Refiner:
         return changed
 
     # -- 5. rescue --------------------------------------------------------------------------------
+    def _off_sound(self) -> np.ndarray:
+        """Day 16 (task 8): the competitor frames inside a stretch of at least OFF_SOUND_MIN_S where the sound search
+        found NO candidate in the RAW (every audio window's conf < 1: the null level wins) -- another video's sound
+        (the 12 Year Old / Benchwarmers reel: 320 frames of three other-video stretches searched in vain). Cached."""
+        if getattr(self, "_off_sound_mask", None) is not None:
+            return self._off_sound_mask
+        mask = np.zeros(self.N, dtype=bool)
+        h = self.hints
+        if h is not None and RESCUE_SKIP_OFF_SOUND and len(getattr(h, "comp_t", ())) and \
+                os.environ.get("MATCH_CUTS_RESCUE_ALL", "").strip() in ("", "0"):
+            ct = np.asarray(h.comp_t, dtype=np.float64)
+            none = ~(np.isfinite(np.asarray(h.raw_t, dtype=np.float64)) & (np.asarray(h.conf) >= 1.0))
+            half = float(h.window) / 2.0
+            fps = float(self.comp.fps)
+            i = 0
+            while i < len(ct):
+                if not none[i]:
+                    i += 1
+                    continue
+                j = i
+                while j + 1 < len(ct) and none[j + 1]:
+                    j += 1
+                t0, t1 = ct[i] - half, ct[j] + half
+                if t1 - t0 >= OFF_SOUND_MIN_S:
+                    a, b = max(0, int(math.ceil(t0 * fps))), min(self.N, int(math.floor(t1 * fps)) + 1)
+                    mask[a:b] = True
+                i = j + 1
+        self._off_sound_mask = mask
+        return mask
+
     def _rescue_triggers(self) -> list[int]:
         thr = self.cfg.match_thresh
         trig = []
@@ -2028,7 +2063,14 @@ class _Refiner:
     def _rescue(self) -> bool:
         if self.index is None:
             return False
-        trig = [k for k in self._rescue_triggers() if k not in self.searched]
+        off = self._off_sound()
+        skipped = [k for k in self._rescue_triggers() if k not in self.searched and off[k] and self.win_tid[k] < 0]
+        trig = [k for k in self._rescue_triggers() if k not in self.searched and not (off[k] and self.win_tid[k] < 0)]
+        if skipped:                    # day 16: no picture track and the sound is not in the RAW there: not searched
+            self.stats["rescue_skipped_off_sound"] = self.stats.get("rescue_skipped_off_sound", 0) + len(skipped)
+            self.searched.update(skipped)
+            self.dlog.record("refine", "rescue_skipped_off_sound", frames=len(skipped),
+                             runs=[[int(a), int(b)] for a, b in _runs(np.isin(np.arange(self.N), skipped))][:40])
         if not trig:
             return False
         todo: list[int] = []

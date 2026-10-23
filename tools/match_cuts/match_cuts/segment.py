@@ -959,6 +959,32 @@ class _Seg:
 # the builder
 # =================================================================================================
 
+HOLD_AS_STILL = True             # day 16: a short slow reverse over a few RAW frames becomes a still (MATCH_CUTS_NO_STILL=1)
+HOLD_MAX_RAW_FRAMES = 6.0        # ... it moves at most this many RAW frames
+HOLD_MAX_SPEED = 0.5             # ... at most this fast backwards
+HOLD_MAX_S = 2.0                 # ... over at most this long
+
+
+def _held(v: float, n: int, comp_fps: Any, raw_fps: Any) -> bool:
+    """A reverse segment that is a hold: slower than HOLD_MAX_SPEED backwards, at most HOLD_MAX_S long and moving at
+    most HOLD_MAX_RAW_FRAMES RAW frames (a reverse you see plays more than that)."""
+    import os
+    if os.environ.get("MATCH_CUTS_NO_STILL", "").strip() not in ("", "0"):
+        return False
+    cf, rf = float(Fraction(str(comp_fps))), float(Fraction(str(raw_fps)))
+    moved = abs(float(v)) * int(n) * rf / cf
+    return -HOLD_MAX_SPEED <= float(v) < 0 and int(n) / cf <= HOLD_MAX_S and moved <= HOLD_MAX_RAW_FRAMES
+
+
+def _held_frame(F: Any, a: int, b: int, default: int) -> int:
+    """The RAW frame the segment's matched competitor frames show most (ties: the earliest); ``default`` without."""
+    js = [int(F.raw[k]) for k in range(a, b) if F.status[k] == Status.MATCH and int(F.raw[k]) >= 0]
+    if not js:
+        return int(default)
+    vals, counts = np.unique(np.asarray(js), return_counts=True)
+    return int(vals[int(np.argmax(counts))])
+
+
 def hold_frames(comp_fps: Any, raw_fps: Any, v: float) -> int:
     """How many consecutive competitor frames on one RAW frame make a hold (moving_holds): at least 3, and more than
     one RAW frame lasts by itself at speed ``v`` -- comp_fps / (raw_fps x v) competitor frames (a 60 fps competitor
@@ -3850,6 +3876,18 @@ class _Builder:
             seg.time_mode = "remap"
             seg.time_remap_keys = [{"comp_frame": S.a, "raw_seconds": val}, {"comp_frame": S.b, "raw_seconds": val}]
             notes.append(f"freeze frame on RAW {j}")
+        elif m.v < 0 and ks.size and HOLD_AS_STILL and _held(m.v, S.b - S.a, cf, self.rf):
+            # day 16 (task 8): a "slow reverse" over a few RAW frames is the competitor holding them (and zooming:
+            # the 12 Year Old S08, 4 RAW frames over 0.6 s read as speed -0.30) -- a still of the RAW frame its
+            # frames match most, the framing keys (the zoom) kept; never played backwards
+            j = _held_frame(F, S.a, S.b, int(self.pred(S, S.a)))
+            val = (j + 0.25) / float(self.rf)
+            seg.speed = 0.0
+            seg.time_mode = "remap"
+            seg.time_remap_keys = [{"comp_frame": S.a, "raw_seconds": val}, {"comp_frame": S.b, "raw_seconds": val}]
+            seg.raw_in_frame = seg.raw_out_frame = j
+            notes.append(f"held frames (a slow reverse {m.v:.3g} over {abs(m.v) * (S.b - S.a) * float(self.rf) / float(cf):.1f}"
+                         f" RAW frames): a still of RAW {j}")
         elif m.v < 0 and ks.size:
             seg.time_mode = "remap"
             seg.time_remap_keys = [
