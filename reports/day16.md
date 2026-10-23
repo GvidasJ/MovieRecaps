@@ -7,6 +7,7 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 | # | task | state | how you use it |
 |---|---|---|---|
 | 1 | "Try with another RAW" keeps your title and text | **done** | a row that failed because of its RAW (WRONG PAIR, NOT IN THIS RAW, PICTURE NOT FOUND, a RAW that can't be read) has **Try with another RAW**. History has it too, on the failed event |
+| 2 | The zip has the whole project folder | **done** (Premiere test passed) | nothing to do: each finished project's `<name>.zip` now holds the whole folder; its size is on the board card ("zip 2.2 GB") |
 
 ## Task 1 -- "Try with another RAW" (done)
 
@@ -30,3 +31,30 @@ Started 07:21 (PC); you were using the PC, so code and light tests first. The ba
 
   This was only read: nothing in that folder was changed.
 - **Tests:** app 1214 passed, 0 failed (6 new: `test_another_raw_day16.py`, one of them on the real Dolittle project). The real-aria2c torrent test still crashes inside the whole suite, as on night 15. It passes alone (1 passed).
+
+## Task 2 -- the zip has the whole project folder (done)
+
+- **What's in it now:** everything in the project folder, with the same folders inside, under one folder named after the project (without emoji):
+  - `edit\` (1_edit.xml, the captions, `extras\` with its media: the RAW or its piece, its WAV, the frame, the watermark, the song)
+  - `logs\`, the competitor clip, `project.json`, `template.png`, `title.txt`, `titles_found.txt`
+  - `HOW TO OPEN.txt`
+- **Videos, sounds and pictures are stored as they are** (no compressing again), so it is fast and lossless. Text is compressed.
+- **Never in it:** any `.zip` / `.7z` / `.rar` (itself or an older one), half-written files (`.tmp`, `.part`, `.aria2`), and the work locks.
+  - A file that is the same file twice (a hard link) goes in once, as the copy the edit plays. HOW TO OPEN names the other one.
+  - A file the edit plays from outside the project folder goes into `outside\` when it is small. When it is big, it is left out and named.
+- **It is made in the background** right after the edit (the queue doesn't wait). The 10-minute sweep makes it again when a file changes.
+  - project.json alone doesn't count as a change, because the board changes it.
+  - A zip of night 15's kind is made again by itself.
+- **The board card** shows "zip 2.2 GB" (the tooltip says where it is).
+- **A safety rule:** the zip is not made when it would leave its drive with under 40 GB free.
+- **The existing zips were remade** (`D:\Shared\Projects`, 35 finished projects): 0.8 GB -> **67.8 GB** in all, in **92 s**.
+  - The big ones still hold the whole movie, because they were made before Task 3: mindculpt 8.6 GB, Are We There Yet 7.4 GB, Funniest Accent 7.2 GB, Lab Accident 5.9 GB, Borat 5.2 GB.
+  - The smallest: 69-110 MB.
+  - I checked one (Coldest Dad, 2.2 GB) with a full CRC check: every file whole.
+  - HOW TO OPEN of a Just cuts project names `cuts_edit.xml`.
+- **Premiere test (07:45, you were away):** I copied the "milk" project, pointed its XML at that copy, zipped it, then **hid the copy** (renamed it) so the XML's paths led nowhere, and unzipped it into another folder. Then I imported the XML with Open in Premiere and saved.
+  - **No message, no "Link Media", no Media offline.**
+  - The saved project plays every file from the unzipped folder: `raw.mp4`, `raw_stereo.wav`, the frame and the watermark, each with its real size and length.
+  - Premiere finds the files next to the XML by itself, so your friend needs nothing else: unzip, then File > Import `edit_edit.xml`.
+  - Test folder: `work	16\zt`.
+- **Tests:** app 1220 passed, 0 failed (7 new: `test_zip_day16.py`; night 15's zip test changed to the whole folder).

@@ -225,6 +225,15 @@ class BoardCard(QFrame):
         dates.setWordWrap(True)
         dates.setStyleSheet(f"color: {theme.DIM};")
         lay.addWidget(dates)
+        self.zip_line = None
+        zb = getattr(card, "zip_bytes", None)
+        if zb is not None:                                # day 16: the zip to send -- the whole project folder
+            from ..core.share_zip import size_text, zip_path
+            self.zip_line = QLabel(f"zip {size_text(zb)}")
+            self.zip_line.setFont(W.mono(10.5))
+            self.zip_line.setStyleSheet(f"color: {theme.DIM};")
+            self.zip_line.setToolTip(f"{zip_path(card.folder)}\nthe whole project folder, to send")
+            lay.addWidget(self.zip_line)
         lock = getattr(card, "lock", None)
         if lock:
             lk = W.label(f"{lock.get('computer', 'another computer')} is working on it ({lock.get('what', '')})",

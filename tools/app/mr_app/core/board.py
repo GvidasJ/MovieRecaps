@@ -123,6 +123,7 @@ class Card:
     rename_to: str = ""                      # day 13: the folder name its title gives when it is not called that yet
     #                                          (and was not kept on purpose: names.kept) -- "Rename to title"
     kept: str = ""                           # day 13: why it keeps its name (plain words), '' when it does not
+    zip_bytes: int | None = None             # day 16: the size of its zip to send (core.share_zip), None: no zip yet
 
     @property
     def label(self) -> str:
@@ -297,6 +298,11 @@ def card_of(folder: str | os.PathLike, where: str | None = None) -> Card:
         card.edit_result = str((ed or {}).get("result") or "") if isinstance(ed, dict) else ""
         h = locks.holder(folder)
         card.lock = h if h is not None and not h.get("stale") else None
+        try:                                 # day 16: the zip's size on the card
+            from .share_zip import zip_size
+            card.zip_bytes = zip_size(folder)
+        except Exception:  # noqa: BLE001
+            card.zip_bytes = None
         _names(card, folder, data)
     except Exception as e:  # noqa: BLE001 - a strange project.json never breaks the board
         card.error = f"project.json has something unexpected in it ({type(e).__name__}: {e})"

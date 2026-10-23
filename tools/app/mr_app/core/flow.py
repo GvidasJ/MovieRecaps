@@ -403,9 +403,9 @@ def record_edit(p: P.Project, res: dict) -> None:
                   if state == P.FAILED else {}))
     if state == P.DONE and res.get("run_dir"):
         title_copy(p, Path(res["run_dir"]))
-        try:                                     # night 15: the zip to send (core.share_zip; never stops anything)
-            from . import share_zip
-            share_zip.make(Path(p.folder), Path(res["run_dir"]))
+        try:                                     # night 15: the zip to send (core.share_zip; never stops anything;
+            from . import share_zip              #   day 16: the whole folder -- in its own thread, nothing waits)
+            share_zip.make_later(Path(p.folder), Path(res["run_dir"]))
         except Exception:  # noqa: BLE001
             pass
 

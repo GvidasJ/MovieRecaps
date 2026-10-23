@@ -82,19 +82,20 @@ def _project(tmp_path: Path, big_on_share: bool = True) -> tuple[Path, Path]:
     return proj, run
 
 
-def test_a_finished_project_zip_has_the_edit_its_small_media_and_how_to_open_it(tmp_path, monkeypatch):
+def test_a_finished_project_zip_has_the_whole_folder_and_how_to_open_it(tmp_path, monkeypatch):
+    """Day 16 (task 2) replaced night 15's "only the edit files": the whole folder (test_zip_day16.py has the rest)."""
     monkeypatch.setattr(share_zip, "BIG_BYTES", 1000)
-    monkeypatch.setattr(share_zip, "on_share", lambda p: "media" in str(p))
+    monkeypatch.setattr(share_zip, "on_share", lambda p: True)
     proj, run = _project(tmp_path)
     z = share_zip.make(proj, run)
     assert z == proj / f"{proj.name}.zip"
     names = zipfile.ZipFile(z).namelist()
     top = proj.name
-    assert set(names) == {f"{top}/1_edit.xml", f"{top}/2_captions.srt", f"{top}/video_edit.prproj",
-                          f"{top}/title.txt", f"{top}/media/frame.png", f"{top}/{share_zip.HOW_TO}"}
+    assert set(names) == {f"{top}/edit/1_edit.xml", f"{top}/edit/2_captions.srt", f"{top}/edit/video_edit.prproj",
+                          f"{top}/title.txt", f"{top}/project.json", f"{top}/edit/extras/media/frame.png",
+                          f"{top}/edit/extras/media/raw.mp4", f"{top}/{share_zip.HOW_TO}"}
     how = zipfile.ZipFile(z).read(f"{top}/{share_zip.HOW_TO}").decode("utf-8")
-    assert "raw.mp4: on the shared drive (the edit finds it there)" in how
-    assert "song.mp3: not found where the edit points" in how and "File > Import, pick 1_edit.xml" in how
+    assert "song.mp3: not found where the edit points" in how and r"pick edit\1_edit.xml" in how
     assert not share_zip.needs_zip(proj, run)
     t = time.time() - 7200                                         # (the zip made before ...)
     os.utime(z, (t, t))                                            # ... Premiere saved the project: made again
@@ -102,14 +103,6 @@ def test_a_finished_project_zip_has_the_edit_its_small_media_and_how_to_open_it(
     assert share_zip.sweep(tmp_path) == [z] and not share_zip.needs_zip(proj, run)
     assert share_zip.sweep(tmp_path) == []
     assert (run / "extras" / "media" / "raw.mp4").is_file()         # nothing moved or deleted
-
-
-def test_a_big_file_not_on_the_shared_drive_is_named_to_send_yourself(tmp_path, monkeypatch):
-    monkeypatch.setattr(share_zip, "BIG_BYTES", 1000)
-    monkeypatch.setattr(share_zip, "on_share", lambda p: False)
-    proj, run = _project(tmp_path)
-    put, left = share_zip.members(proj, run)
-    assert any(f.name == "raw.mp4" and "send it yourself" in why for f, why in left)
 
 
 def test_no_finished_edit_no_zip(tmp_path):
