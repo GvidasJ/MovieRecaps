@@ -29,12 +29,15 @@ class _Item(QWidget):
         self.line3 = " · ".join(x for x in ((f"YouTube: {yt}" if yt else ""), (f"Headline: {head}" if head else ""))
                                 if x) if self.retry else ""
         self.setFixedHeight(76 if self.line3 else 58)
-        self.b_retry = None
+        self.b_retry = self.b_comp = None
         if self.retry and page is not None:
             from ..core import another_raw as AR
             self.b_retry = W.Button(AR.BUTTON, "Small", parent=self)
             self.b_retry.setToolTip(AR.TIP)
             self.b_retry.clicked.connect(lambda: page.try_another_raw(ev))
+            self.b_comp = W.Button(AR.BUTTON_COMP, "Small", parent=self)      # day 17: both on every failed edit
+            self.b_comp.setToolTip(AR.TIP_COMP)
+            self.b_comp.clicked.connect(lambda: page.try_another_raw(ev, "competitor"))
         t = (getattr(ev, "title", "") or "").replace("\n", " / ")
         shown = getattr(ev, "shown", "") or t or getattr(ev, "name", "")     # day 13: the video's title is the name
         name = getattr(ev, "name", "")
@@ -51,6 +54,9 @@ class _Item(QWidget):
         if self.b_retry is not None:
             self.b_retry.adjustSize()
             self.b_retry.move(self.width() - self.b_retry.width() - 4, 6)
+        if self.b_comp is not None:
+            self.b_comp.adjustSize()
+            self.b_comp.move(self.width() - self.b_retry.width() - self.b_comp.width() - 10, 6)
         super().resizeEvent(e)
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
@@ -139,20 +145,22 @@ class HistoryPage(QWidget):
         self.count.setText(f"{len(evs)} event(s)" if evs else "")
 
 
-    def try_another_raw(self, ev) -> None:
+    def try_another_raw(self, ev, what: str = "raw") -> None:
         """Day 16: "Try with another RAW" on a failed edit: New video with that project's title, headline, channel
-        and competitor (its project.json read off the window's thread)."""
+        and competitor (its project.json read off the window's thread). Day 17: ``what`` "competitor": the RAW kept
+        instead of the competitor."""
         from ..core import another_raw as AR
         from ..ui import background as BG
         dl = (getattr(self.ctx, "pages", None) or {}).get("download")
-        if dl is None or not hasattr(dl, "prefill_another_raw"):
+        fill = getattr(dl, "prefill_another_comp" if what == "competitor" else "prefill_another_raw", None)
+        if dl is None or fill is None:
             return
 
         def got(k) -> None:
             sel = getattr(self.ctx, "select", None)
             if sel is not None:
                 sel("download")
-            dl.prefill_another_raw(k)
+            fill(k)
         BG.call(lambda: AR.kept_from_project(ev.folder), got, lambda _e: None)
 
 

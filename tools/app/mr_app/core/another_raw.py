@@ -87,6 +87,15 @@ class Kept:
     project: Path | None = None     # the failed project (its folder)
     raw_name: str = ""              # the RAW that failed (said in the form's message)
     why: str = ""                   # its result: WRONG PAIR ...
+    # day 17: "Try with another competitor" keeps the RAW -- its file when it is here (no new download), else its link
+    raw_file: Path | None = None
+    raw_url: str = ""
+    raw_torrent: str = ""
+    comp_name: str = ""             # the competitor that failed (said in the form's message)
+
+    @property
+    def has_raw(self) -> bool:
+        return self.raw_file is not None or bool(self.raw_url or self.raw_torrent)
 
     @property
     def has_competitor(self) -> bool:
@@ -131,11 +140,20 @@ def kept_from_project(p: Any) -> Kept:
         speed = float(e.get("speed") or data.get("speed") or 100.0)
     except (TypeError, ValueError):
         speed = 100.0
+    rf = None                            # day 17: the RAW as it is here (the download in place, the project's copy)
+    for cand in ([raw.get("kept_at"), raw.get("source_file")] +
+                 ([folder / str(raw["file"])] if raw.get("file") and folder is not None else [])):
+        if cand and Path(str(cand)).is_file():
+            rf = Path(str(cand))
+            break
     return Kept(title=str(data.get("title") or ""), upload_title=str(data.get("upload_title") or ""),
                 channel=str(data.get("channel") or ""), competitor_file=f,
                 competitor_url=str(comp.get("url") or ""), mode=str(e.get("mode") or ""), speed=speed,
                 project=folder, raw_name=str(raw.get("file") or raw.get("title") or ""),
-                why=str(e.get("result") or ""))
+                why=str(e.get("result") or "") or ("FAIL" if e.get("state") == "failed" else ""),
+                raw_file=rf, raw_url=str(raw.get("url") or "") if rf is None else "",
+                raw_torrent=str(raw.get("torrent") or "") if rf is None else "",
+                comp_name=str(comp.get("file") or comp.get("title") or ""))
 
 
 def kept_from_job(job: Any, data: Mapping | None = None) -> Kept:
@@ -161,9 +179,77 @@ def kept_from_job(job: Any, data: Mapping | None = None) -> Kept:
     raw = getattr(job, "raw", None)
     if raw is not None:
         k.raw_name = Path(raw).name
+        if k.raw_file is None and Path(raw).is_file():
+            k.raw_file = Path(raw)
+    if comp is not None and not k.comp_name:
+        k.comp_name = Path(comp).name
     res = getattr(job, "result", None) or {}
     k.why = str(res.get("label") or k.why) if isinstance(res, Mapping) else k.why
     return k
+
+
+BUTTON_COMP = "Try with another competitor"
+TIP_COMP = ("Make this video again with another competitor: the RAW (no new download), the headline, the YouTube "
+            "title and the channel are kept -- you only paste or pick the new competitor")
+OK_LABELS = ("PASS", "OK with a note", "Cuts ready")
+
+
+def failed_or_stopped(state: str, result: Mapping | None, stopped_states=("stopped",)) -> bool:
+    """Day 17: a row that failed or stopped -- any stop (a download stop too): both "Try with another ..." buttons."""
+    if state in stopped_states:
+        return True
+    lab = str((result or {}).get("label") or "") if isinstance(result, Mapping) else ""
+    return bool(lab) and lab not in OK_LABELS
+
+
+def edit_failed(data: Mapping | None) -> bool:
+    """project.json's edit step failed (any reason) or ended in a stop (WRONG PAIR ...)."""
+    steps = (data or {}).get("steps") if isinstance((data or {}).get("steps"), Mapping) else {}
+    e = steps.get("edit") if isinstance(steps.get("edit"), Mapping) else {}
+    return bool(e) and (e.get("state") == "failed" or str(e.get("result") or "") in RAW_LABELS)
+
+
+def kept_from_item(it: Any) -> Kept:
+    """What a New video row keeps (its project.json first when it has a project; else the row's own fields: a row
+    that stopped while downloading has no edit yet)."""
+    project = getattr(it, "project", None)
+    k = kept_from_project(project) if project is not None and Path(project).is_dir() else Kept()
+    k.title = k.title or str(getattr(it, "title", "") or "")
+    k.upload_title = k.upload_title or str(getattr(it, "upload_title", "") or "")
+    k.channel = k.channel or str(getattr(it, "channel", "") or "")
+    cf = getattr(it, "comp_file", None)
+    if k.competitor_file is None and cf is not None and Path(cf).is_file():
+        k.competitor_file = Path(cf)
+    k.competitor_url = k.competitor_url or str(getattr(it, "competitor_url", "") or "")
+    rf = getattr(it, "raw_file", None)
+    if not k.has_raw:
+        if rf is not None and Path(rf).is_file():
+            k.raw_file = Path(rf)
+        else:
+            k.raw_url = str(getattr(it, "raw_url", "") or "")
+            k.raw_torrent = str(getattr(it, "raw_torrent", "") or "")
+    k.mode = str(getattr(it, "mode", "") or k.mode)
+    try:
+        k.speed = float(getattr(it, "speed", None) or k.speed)
+    except (TypeError, ValueError):
+        pass
+    res = getattr(it, "result", None) or {}
+    k.why = str(res.get("label") or "") if isinstance(res, Mapping) and res.get("label") else (
+        k.why or ("STOPPED" if getattr(it, "state", "") == "stopped" else "FAIL"))
+    k.raw_name = k.raw_name or (Path(rf).name if rf else "")
+    k.comp_name = k.comp_name or (Path(cf).name if cf else str(getattr(it, "competitor_url", "") or "")[-40:])
+    return k
+
+
+def form_message_comp(k: Kept) -> str:
+    """The form's line after "Try with another competitor" filled it in."""
+    kept = [x for x, ok in (("the RAW", k.has_raw), ("the YouTube title", k.upload_title), ("the headline", k.title),
+                            ("the channel", k.channel)) if ok]
+    what = ", ".join(kept[:-1]) + (" and " if len(kept) > 1 else "") + kept[-1] if kept else "nothing"
+    old = f" ({k.comp_name} gave {k.why})" if k.comp_name and k.why else ""
+    raw = " (no new download)" if k.raw_file is not None else ""
+    return (f"Try with another competitor{old}: {what}{raw} kept -- paste or pick only the new competitor, then "
+            "Make the video")
 
 
 def form_message(k: Kept) -> str:

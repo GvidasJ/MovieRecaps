@@ -8,6 +8,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 |---|---|---|---|
 | 1 | Stop C: from filling up | **done** | nothing to do: the tool's cache is on D:\mr_cache; zips are made only for projects off C: |
 | 2 | Find source much better | **done** (right 4 -> 7 of 10 with your RAWs OFF; wrong "Sure" 3 -> 0) | Progress > Find source as before; a row that isn't sure shows its top 3 |
+| 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
 | 3 | SceneProof song: real Clip Gain + your preset | **done** (Premiere test passed) | Open in Premiere, save (Ctrl+S): the app closes Premiere once, writes Clip Gain +5 / -1 dB + Volume 8.5 dB, opens it again. Import `assets\premiere\CorrectVolume.prfpset` once and drop it on the 2 song clips |
 
 ## Task 1 -- stop C: from filling up (done)
@@ -90,3 +91,14 @@ The right answers I found by reading the clips' lines, searching them on YouTube
   - then Premiere saved the project itself once more (a marker added and undone, Ctrl+S): its own file still has **Clip Gain +5.00 / -1.00 dB and Volume +8.50 / +8.50 dB on A2, exactly as `song.prproj`** -- so Premiere read them
   - The preset drop itself needs the mouse: yours, once per edit (as day 16).
 - **Tests:** 7 new (`test_song_gain_day17.py`: the values, only those lines change, once only, a backup; the watch: closed after your save, written, opened again; another project or Premiere closed by you; day 16's real saved project). App: 1258 passed. Day 16's song test now expects "CorrectVolume" in the clip comment.
+
+## Task 4 -- both "Try with another ..." buttons on every failed row (done)
+
+- **Where:** every row that failed or stopped, for any reason (a download stop, WRONG PAIR, a convert stop, a full disk, a crash ...):
+  - the Match cuts queue's rows
+  - the New video rows (a row that stopped while downloading has no edit yet: it gets them too)
+  - History's failed edits (now any failed edit, not only the RAW ones)
+- **Try with another RAW** (as day 16): New video keeps the competitor, the headline, the YouTube title, the channel, Fast / Thorough and 100 / 125 %; the RAW field is empty and has the cursor.
+- **Try with another competitor** (new): New video keeps **the RAW** -- its file when it is on this PC (the download where it is, or the project's copy: **no new download**), else its link or magnet -- and the headline, the YouTube title, the channel, the mode and the speed; the competitor field is empty and has the cursor. The amber line says what was kept and which competitor gave which stop.
+- A row that finished well (PASS, OK with a note, Cuts ready) has neither.
+- **Tests:** 5 new (`test_another_comp_day17.py`): a WRONG PAIR on the queue, a download stop (a torrent removed) and a convert stop on New video, and History's failed edit each show both, and each button fills in everything. App: 1262 passed.

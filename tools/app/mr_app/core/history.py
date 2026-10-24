@@ -217,9 +217,9 @@ def project_events(data: Mapping) -> list[Event]:
         # day 13: a stop's error is its plain line, its first failure "the run stopped (exit N): <that line>"
         detail = err if err and first != err and first.endswith(err) else (first or err)
         add(e.get("finished"), what, plain_failure(detail), FAIL)
-        try:                                 # day 16: failed because of the RAW -> its title and text kept to reuse
-            from .another_raw import edit_failed_by_raw
-            by_raw = edit_failed_by_raw(data)
+        try:                                 # day 16: failed because of the RAW -> its title and text kept to reuse;
+            from .another_raw import edit_failed  # day 17: any failed edit (both "Try with another ..." buttons)
+            by_raw = edit_failed(data)
         except Exception:  # noqa: BLE001
             by_raw = False
         if by_raw and out:

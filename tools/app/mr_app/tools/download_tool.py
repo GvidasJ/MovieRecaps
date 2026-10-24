@@ -754,11 +754,19 @@ class VideoRow(W.Card):
         self.b_folder.clicked.connect(self._folder)
         self.b_retry = W.Button("Try again", "Small")
         self.b_retry.clicked.connect(lambda: self.page.retry(self.item))
+        from ..core import another_raw as AR      # day 17: every failed or stopped row (a download stop too)
+        self.b_another_raw = W.Button(AR.BUTTON, "Small")
+        self.b_another_raw.setToolTip(AR.TIP)
+        self.b_another_raw.clicked.connect(lambda: self.page.another_for_item(self.item, "raw"))
+        self.b_another_comp = W.Button(AR.BUTTON_COMP, "Small")
+        self.b_another_comp.setToolTip(AR.TIP_COMP)
+        self.b_another_comp.clicked.connect(lambda: self.page.another_for_item(self.item, "competitor"))
         self.b_stop = W.Button("Stop", "Small")
         self.b_stop.clicked.connect(lambda: self.page.stop_item(self.item))
         self.b_remove = W.Button("Remove", "Ghost")
         self.b_remove.clicked.connect(lambda: self.page.remove_item(self.item))
-        for b in (self.b_go, self.b_prem, self.b_change, self.b_comp, self.b_folder, self.b_retry, self.b_stop):
+        for b in (self.b_go, self.b_prem, self.b_change, self.b_comp, self.b_folder, self.b_retry,
+                  self.b_another_raw, self.b_another_comp, self.b_stop):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_remove)
@@ -884,6 +892,10 @@ class VideoRow(W.Card):
         self.b_comp.setVisible(done_ok and just and self._asking != "competitor")
         self.b_stop.setVisible(busy)
         self.b_retry.setVisible(it.state in (FAILED, STOPPED))
+        failed = it.state in (FAILED, STOPPED) or (it.state == DONE and it.result.get("label") not in
+                                                   (None, "", "PASS", "OK with a note", "Cuts ready"))
+        self.b_another_raw.setVisible(failed)
+        self.b_another_comp.setVisible(failed)
         self.b_folder.setVisible(it.project is not None)
         self.b_remove.setEnabled(not busy and not (it.job is not None and it.job.state == J.RUNNING))
 
@@ -1388,6 +1400,45 @@ class DownloadPage(QWidget):
         self.msg.setText(AR.form_message(k))
         self.raw.setFocus()
         scroll_to_top(self)
+
+    def prefill_another_comp(self, k) -> None:
+        """Day 17: "Try with another competitor": the form keeps the failed video's RAW (its file when it is here: no
+        new download), channel, headline, YouTube title, mode and speed; the competitor's field is emptied and
+        focused -- you only paste or pick the new competitor. ``k``: core.another_raw.Kept."""
+        from ..core import another_raw as AR
+        self.raw.clear()
+        self.raw_file = None
+        if k.raw_file is not None:
+            self._set_raw_file(Path(k.raw_file))
+        else:
+            self.raw.setText(k.raw_torrent or k.raw_url or "")
+        self.comp.clear()
+        self.comp_file = None
+        if k.channel:
+            self._want_channel = k.channel
+            if k.channel in self.ch.buttons:
+                self.ch.set(k.channel)
+        self.head.set_text(k.title or "")
+        self._head_ready()
+        self.yt.setText(k.upload_title or "")
+        if k.mode in (J.FAST, J.THOROUGH):
+            self.mode.set(k.mode)
+        self.speed.set("125" if abs(float(k.speed or 100.0) - 125.0) < 1e-6 else "100")
+        self._detect()
+        self.msg.setStyleSheet(f"color: {theme.AMBER};")
+        self.msg.setText(AR.form_message_comp(k))
+        self.comp.setFocus()
+        scroll_to_top(self)
+
+    def another_for_item(self, it: Item, what: str) -> None:
+        """Day 17: a failed or stopped row's "Try with another RAW" / "... competitor" (``what``: raw / competitor):
+        the form filled in from the row (its project.json read off the window's thread)."""
+        from ..core import another_raw as AR
+
+        def got(k) -> None:
+            (self.prefill_another_comp if what == "competitor" else self.prefill_another_raw)(k)
+        off_thread(lambda: AR.kept_from_item(it), got,
+                   lambda e: self.toast(f"Try with another {what}: {e}", "fail"))
 
     # -- adding --
     def _item_from(self, raw_text: str, comp_text: str, raw_file: Path | None = None,
