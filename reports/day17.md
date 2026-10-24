@@ -11,6 +11,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 | 3 | SceneProof song: real Clip Gain + your preset | **done** (Premiere test passed) | Open in Premiere, save (Ctrl+S): the app closes Premiere once, writes Clip Gain +5 / -1 dB + Volume 8.5 dB, opens it again. Import `assets\premiere\CorrectVolume.prfpset` once and drop it on the 2 song clips |
 | 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
 | 5 | Torrents that stopped for no reason | **done** (the laptop's case reproduced for real, then fixed) | nothing to do: a too-long path gets a shorter name by itself; Settings shows whether the torrent folder is reachable |
+| 6 | Test the Convert fix from this morning | **done** (the real Key & Peele file converts) | nothing to do |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -119,3 +120,9 @@ The right answers I found by reading the clips' lines, searching them on YouTube
   - under "Save torrents to": "**reachable and can be written**" (green), "reachable, but it can't be written" or "not reachable now" (amber), checked in the background like the projects folder (it writes and removes a tiny test file)
 - **A restarted download** (Remove + Try again) reads "Save torrents to" at that moment, so it uses the **current** folder (checked in a test).
 - **Tests:** 7 new (`test_torrent_day17.py`, the real aria2 one included); all torrent tests: 57 passed. App: 1269 passed.
+
+## Task 6 -- the Convert fix from this morning, tested (done)
+
+- **The rule (295a8d7):** a copy whose sound ends with the picture may be up to 1.5 s shorter than the original's sound, when the original's sound ran on **after** the picture's last frame. Nothing a clip can play is lost.
+- **New tests** (`test_convert_day17.py`, 4): the real Key & Peele numbers (sound 1277.48 s, picture 1276.65 s, the copy's sound 1276.64 s): **OK**; sound cut **inside** the picture (1270.00 s; or 0.75 s short of a sound that ended with the picture): **still a stop**; more than 1.5 s gone: still a stop; a longer sound in the copy: still a stop.
+- **Real run:** Convert on a copy of `input\downloads6-10-24_The Most Suspicious Question of All Time\Key.&.Peele.S05E11...mkv` (HEVC + AC-3 5.1): **done in 83 s** -- the picture copied as it is (MP4, lossless, 30609 of 30609 frames, 1276.651 s both), the sound made AAC: 1277.484 s -> 1276.640 s, accepted by the new rule. (My copy and its result were deleted afterwards; your file is untouched.)
