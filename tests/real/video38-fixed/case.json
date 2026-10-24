@@ -1,0 +1,13 @@
+{
+ "timeline": "edit",
+ "notes": "learned from video38_fixed.prproj (2026-10-24): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video38\\video38_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-23_The Funniest Police Officers In Scottish Comedy\\edit",
+ "full_raw": "input/downloads/2026-10-23_The Funniest Police Officers In Scottish Comedy/edit/extras/media/raw.mov",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

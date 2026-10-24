@@ -1,0 +1,15 @@
+{
+ "timeline": "edit",
+ "notes": "learned from video33_fixed.prproj (2026-10-24): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video33\\video33_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-23_The Coldest Dad of All Time (3)\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-23_The Coldest Dad of All Time (3)\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 481.522708,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

@@ -1,0 +1,97 @@
+{
+ "video": "video38-fixed",
+ "date": "2026-10-24",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video38\\video38_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-23_The Funniest Police Officers In Scottish Comedy\\edit",
+ "edit": {
+  "clips": 4,
+  "starts": [
+   0.32,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   -0.0,
+   0.0,
+   0.0,
+   -0.72
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.56,
+   0.4,
+   1.08
+  ],
+  "moved": [
+   -457.0,
+   -193.0,
+   -193.0,
+   -338.0,
+   -0.0,
+   -164.4,
+   194.0,
+   -184.0,
+   -154.0,
+   364.0,
+   -244.0,
+   0.0,
+   0.0,
+   0.0,
+   156.0,
+   0.0,
+   120.0,
+   -173.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.01,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Funniest Police Officers In Scottish Comedy",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 25.0
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 1,
+  "added": 12,
+  "rewritten": 1,
+  "changes": []
+ }
+}

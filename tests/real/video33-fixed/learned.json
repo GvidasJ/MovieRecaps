@@ -1,0 +1,111 @@
+{
+ "video": "video33-fixed",
+ "date": "2026-10-24",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video33\\video33_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-23_The Coldest Dad of All Time (3)\\edit",
+ "edit": {
+  "clips": 7,
+  "starts": [
+   0.0,
+   0.0,
+   -0.0,
+   0.0,
+   0.25,
+   0.0
+  ],
+  "ends": [
+   -0.0,
+   0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   0.0
+  ],
+  "removed": 1,
+  "added": 0,
+  "inner": [
+   0.459
+  ],
+  "moved": [
+   -778.0,
+   -0.0,
+   -724.0,
+   652.0,
+   283.0,
+   283.0,
+   0.0,
+   0.0,
+   -0.0,
+   262.0,
+   -473.0,
+   0.0,
+   0.0,
+   83.0,
+   -28.0,
+   -162.0,
+   -109.0,
+   33.5,
+   -58.0,
+   -0.0,
+   125.0,
+   125.0,
+   125.0,
+   -4.3
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.04
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Coldest Dad of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 4,
+  "added": 12,
+  "rewritten": 0,
+  "changes": []
+ }
+}

@@ -1,0 +1,65 @@
+{
+ "video": "video34-fixed",
+ "date": "2026-10-24",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video34\\video34_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-23_That Time When Luck Was Not On His Side (2)\\edit",
+ "edit": {
+  "clips": 3,
+  "starts": [
+   -0.0,
+   0.292,
+   0.0
+  ],
+  "ends": [
+   -0.834,
+   1.627,
+   -1.793
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.5
+  ],
+  "moved": [
+   0.0,
+   32.0,
+   -102.0,
+   0.0
+  ],
+  "zoomed": [
+   -0.0,
+   4.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.908,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "That Time When Luck Was Not On His Side",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 4,
+  "rewritten": 1,
+  "changes": []
+ }
+}

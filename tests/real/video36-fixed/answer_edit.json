@@ -1,0 +1,90 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 2511.592 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 4.5045,
+   "kind": "raw",
+   "src_in": 30.03,
+   "speed": 1.0
+  },
+  {
+   "start": 4.5045,
+   "end": 5.839167,
+   "kind": "raw",
+   "src_in": 34.5345,
+   "speed": 1.0
+  },
+  {
+   "start": 5.839167,
+   "end": 6.631625,
+   "kind": "raw",
+   "src_in": 36.995291,
+   "speed": 1.0
+  },
+  {
+   "start": 6.631625,
+   "end": 9.843167,
+   "kind": "raw",
+   "src_in": 38.413375,
+   "speed": 1.0
+  },
+  {
+   "start": 9.843167,
+   "end": 11.636625,
+   "kind": "raw",
+   "src_in": 41.624916,
+   "speed": 1.0
+  },
+  {
+   "start": 11.636625,
+   "end": 16.850167,
+   "kind": "raw",
+   "src_in": 45.587208,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.03,
+   "src_out": 34.5345,
+   "dx": 10.804,
+   "scale": 152.5825
+  },
+  {
+   "src_in": 34.5345,
+   "src_out": 35.869166,
+   "dx": 10.804,
+   "scale": 152.5825
+  },
+  {
+   "src_in": 36.995291,
+   "src_out": 37.78775,
+   "dx": 10.804,
+   "scale": 152.5825
+  },
+  {
+   "src_in": 38.413375,
+   "src_out": 41.624916,
+   "dx": 10.804,
+   "scale": 152.5825
+  },
+  {
+   "src_in": 41.624916,
+   "src_out": 43.418375,
+   "dx": 10.804,
+   "scale": 152.5825
+  },
+  {
+   "src_in": 45.587208,
+   "src_out": 50.80075,
+   "dx": 10.804,
+   "scale": 152.5825
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

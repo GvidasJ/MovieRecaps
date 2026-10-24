@@ -1,0 +1,15 @@
+{
+ "timeline": "edit",
+ "notes": "learned from video37_fixed.prproj (2026-10-24): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video37\\video37_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-23_The Worst Bodyguard of All Time\\edit",
+ "full_raw": "input/downloads/2026-10-23_The Worst Bodyguard of All Time/edit/extras/media/raw.mp4",
+ "raw_offset": 1008.758759,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}
