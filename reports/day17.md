@@ -13,6 +13,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 | 5 | Torrents that stopped for no reason | **done** (the laptop's case reproduced for real, then fixed) | nothing to do: a too-long path gets a shorter name by itself; Settings shows whether the torrent folder is reachable |
 | 6 | Test the Convert fix from this morning | **done** (the real Key & Peele file converts) | nothing to do |
 | 7 | Look-alike scenes: the sound decides (The Dictator) | **built, OFF** (it helps this case little; the check-all result is below) | nothing to do; `MATCH_CUTS_SOUND_TAKES=1` switches it on |
+| 8 | Learn by yourself | **partly**: your 6 new fixes learned (video33-38: test cases, action captions); no new rule (below) | nothing to do |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -151,5 +152,35 @@ The right answers I found by reading the clips' lines, searching them on YouTube
   | pairs of clips showing the same RAW moment | 23 | 22 |
 
   One competitor shot (frames 0-19) became one take at 80 %; in the other 7 shots no single line fits every piece (the cuts between near-identical angles that even PySceneDetect doesn't see). **That is far from the competitor's ~18 shots**, so it does not fix this case.
-- **The switch:** `MATCH_CUTS_SOUND_TAKES=1` on, `=0` off; **OFF by default** (your rule: ON only if the check-all says nothing got worse in time). The check-all with it ON is below.
+- **The switch:** `MATCH_CUTS_SOUND_TAKES=1` on, `=0` off; **OFF by default.**
+- **The check-all with it ON** (09:54-10:28, 2 streams, a frozen copy of the code `work\snap17a`; every case analysed from scratch -- the check-all's old caches were gone):
+
+  | case | it acted? | ON | OFF (the same caches) | day 16 |
+  |---|---|---|---|---|
+  | video14-fixed | yes: 7 pieces on the sound's take, 1 competitor shot one take | PASS / captions **11/42** / word errors 7.0 % / cuts 1/3 / framing 4/10 | PASS / **16/42** / 8.0 % / 1/3 / 4/10 | PASS / 16/42 / 8.0 / 1/3 / 4/10 |
+  | video3 | yes: the whole competitor one take (4 clips) | hard checks PASS | not run | PASS |
+  | video8-fixed | found the take, moved nothing | PASS / 0/16 / 9.1 % / 1/4 / 4/11 | (the same XML) | the same |
+  | laptop010-fixed | no | PASS / 10/34 / 7.7 % / 1/9 / 11/13 | (the same XML) | the same |
+  | video30-fixed | found the take, moved nothing | PASS / 18/43 / 16.9 % / 4/7 / 2/13 | (the same XML) | the same |
+
+  - **video14 got worse** with it ON: 5 fewer captions exactly right (their timing follows the pieces it moved), so by your rule it **stays OFF**. I stopped this check-all there (10:28) and used the graphics card for a check-all of today's default code instead (below).
 - **Tests:** 5 new (`test_day17_sound_takes.py`): look-alike pieces put on the sound's take, never a repeat; a real cut the line doesn't fit stays; straight through past the sound; one competitor shot one take at 80 %; off by the switch and without sound.
+
+## Task 8 -- learn by yourself (partly done)
+
+- **The new learn-queue items, all six learned** (video33-38, your fixes of 23 October; `learn_queue.md` marks them done). Each is a new test case in `tests\real\videoNN-fixed` with your finished edit as the key (captions, cuts, framing) and the frame and watermark its run used:
+
+  | case | video | captions you changed | cuts | framing |
+  |---|---|---|---|---|
+  | video33 | The Coldest Dad (Dr. Dolittle 2) | none (5 action texts) | 1 of 12 edges moved, 1 clip removed | 14 clips moved sideways (median +104 px) |
+  | video34 | Luck Not On His Side (Family Guy) | none (5 action texts) | 4 of 6 edges moved | 1 moved (-102 px) |
+  | video35 | Specific Punishment (The Cleveland Show) | 3 words ("Tivo" -> "TiVo"); 3 action texts | 2 of 14 moved, 1 removed | 11 moved (+82 px) |
+  | video36 | Funniest Accent (Hot Fuzz) | none (1 action text) | 2 of 8 moved, 1 removed | none |
+  | video37 | Worst Bodyguard (The Dictator) | 1 word | 1 of 16 moved, 1 removed | 12 moved (-260 px) |
+  | video38 | Police Officers (Scottish comedy) | none (6 action texts) | 2 of 8 moved | 13 moved (-173 px) |
+
+  - **Taken:** your 20 new action texts (the examples of the action suggestions), as Learn does.
+  - **Not taken** (as on days 15-16): Learn's glossary line `Tivo -> TiVo` -- the glossary also goes to the speech recognition as hints, so a new line re-transcribes every video.
+  - Fixed on the way: Learn's new cases had no `"style": "new"` (day 16 added it by hand), so a check-all ran them unscored; they have it now.
+- **The biggest difference with your fixes: still framing** -- the picture moved sideways on 4 of the 6 new videos and on 25 of all cases. But the moves differ clip by clip (video37: from -653 to +292 px), not one shift: it is *which person* each clip is centred on. A rule for that needs its own check-all from scratch (3-4 hours on today's numbers), and the graphics card was busy with Task 7's and the default code's check-all. Building a rule without its check-all would break "nothing may get worse", so **no new rule today**.
+- **Incident (fixed):** a script of mine that marked the six lines in `D:\Shared\Projects\learn_queue.md` failed half-way and left the file empty. I rewrote it at once, line for line, from the copy I had read a minute before (26 entries, all `[x]`), and checked that the app reads all 26. Please glance at it.
