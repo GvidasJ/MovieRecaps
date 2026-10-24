@@ -129,6 +129,7 @@ def place_media(song: Path, media_dir: Path | None) -> Path:
 
 
 SONG_PRESET = "MovieRecaps song chain"
+USER_PRESET = "CorrectVolume"         # day 17: your own preset (assets/premiere/CorrectVolume.prfpset) on the song clips
 
 
 def preset_name(gain_db: float = 0.0) -> str:
@@ -262,7 +263,8 @@ def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[floa
         else:
             _sub(cm, "mastercomment2", f"{song.name} from {p['in'] / float(fps):.2f} s, Volume {vol:+g} dB (your Clip "
                                        f"Gain {p['gain_db']:+g} + Volume {float(volume_db):g} dB) -- drop the preset "
-                                       f"\"{SONG_PRESET}\" on it (Hard Limiter + Amplify)")
+                                       f"\"{USER_PRESET}\" on it (Hard Limiter + Amplify); Open in Premiere "
+                                       "writes the Clip Gain into the saved project")
     ET.indent(root, space="  ")
     body = ET.tostring(root, encoding="unicode")
     tmp = xml.with_suffix(".music.tmp")
@@ -271,7 +273,7 @@ def _add(xml: Path, song: Path, start_s: float, split_s: float, gains: list[floa
     out = {"clips": len(ps), "file": str(placed), "seconds": round(ps[-1]["end"] / float(fps), 3),
            "pieces": [{"from_s": round(p["start"] / float(fps), 3), "to_s": round(p["end"] / float(fps), 3),
                        "song_s": round(p["in"] / float(fps), 3), "gain_db": p["gain_db"],
-                       **({"volume_db": p["gain_db"] + float(volume_db), "preset": SONG_PRESET}
+                       **({"volume_db": p["gain_db"] + float(volume_db), "preset": USER_PRESET}
                           if volume_db is not None else {})} for p in ps]}
     log.info("music: %s on A2 -- %s", song.name, "; ".join(f"{q['from_s']:.2f}-{q['to_s']:.2f} s at "
                                                           f"{q['gain_db']:+g} dB" for q in out["pieces"]))

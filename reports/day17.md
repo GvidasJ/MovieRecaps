@@ -8,6 +8,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 |---|---|---|---|
 | 1 | Stop C: from filling up | **done** | nothing to do: the tool's cache is on D:\mr_cache; zips are made only for projects off C: |
 | 2 | Find source much better | **done** (right 4 -> 7 of 10 with your RAWs OFF; wrong "Sure" 3 -> 0) | Progress > Find source as before; a row that isn't sure shows its top 3 |
+| 3 | SceneProof song: real Clip Gain + your preset | **done** (Premiere test passed) | Open in Premiere, save (Ctrl+S): the app closes Premiere once, writes Clip Gain +5 / -1 dB + Volume 8.5 dB, opens it again. Import `assets\premiere\CorrectVolume.prfpset` once and drop it on the 2 song clips |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -68,3 +69,24 @@ The right answers I found by reading the clips' lines, searching them on YouTube
 - Time: 3.5 min for the 10 at once with the 19 new AI watches; 30 s again from the caches.
 - **Tests:** 8 new (`test_find_source_day17.py`, fakes only: no network, no credits). Day 16's test changed: TVmaze having the AI's own episode title no longer makes an episode Sure. App: 1251 passed, plus the real aria2c test alone (inside the whole suite it crashed Python once again: the known night-15 crash, see Still broken).
 - The keys: a scan of the app's code, the reports and the three Find source files finds neither key.
+
+## Task 3 -- SceneProof song: real Clip Gain + your preset (done)
+
+- **What happens now** (a SceneProof edit, with its song on A2):
+  1. Open in Premiere imports the edit as before. The XML still gives the song Volume +13.5 / +7.5 dB (an XML can't carry Clip Gain), so it already sounds right before step 3.
+  2. You save (Ctrl+S).
+  3. The app sees the save (the title without "*", the file newer), **closes Premiere** (nothing is lost: everything is saved), writes into the saved project for each song clip:
+     - the real **Clip Gain**: `<Gain>1.7782794237136841</Gain>` (+5 dB) on the first, `0.89125096797943115` (-1 dB) on the second -- your `song.prproj`'s own values
+     - **Volume 8.5 dB** on both (the Volume's Level, stored as 0.4732)
+
+     and **opens it again**. Only those values change; the project as Premiere saved it is kept next to it (`<name>.before_song_gain.prproj`).
+  - Also: a saved project whose song has no Clip Gain yet gets it the next time you press Open in Premiere (before Premiere opens it); Premiere closed by you after saving: written, not opened again; another project opened, a message on closing, or no save in 30 minutes: nothing is changed, and the next Open in Premiere does it.
+  - The gains come from the edit's own song clip comments ("your Clip Gain +5 + Volume 8.5 dB"), so older SceneProof runs work too.
+- **Your preset:** `docs\sceneproof\CorrectVolume.prfpset` is now `assets\premiere\CorrectVolume.prfpset` (the same bytes), and the song clips' comments say "drop the preset CorrectVolume on it". **Import it once** like the A1 preset: Effects panel > right-click Presets > Import Presets... > `assets\premiere\CorrectVolume.prfpset`.
+  - Its Hard Limiter has Input Boost **2 dB for a mono clip** and 0 dB for stereo / 5.1. Premiere makes the song clips **mono** from the XML (the saved project: `[{"channellabel":0}]`, one channel), so they get **2.00 dB, as your project has**. (Your song.prproj's clips are stereo with 2.00 dB set by hand; the preset gives a stereo clip 0 dB -- so the mono clips are the ones that match.)
+- **Premiere test (08:32-08:45, you were away 39 min):** a copy of day 16's SceneProof edit (`work\t17\song\edit`):
+  - Open in Premiere: "Premiere Pro started with edit_edit.prproj ... and imported the edit into it -- save it (Ctrl+S) -- then the app closes Premiere once, writes the song's Clip Gain ... and opens it again"
+  - saved with Ctrl+S (as you would): within 2 s the app closed Premiere, wrote the values and opened the project again, with no message
+  - then Premiere saved the project itself once more (a marker added and undone, Ctrl+S): its own file still has **Clip Gain +5.00 / -1.00 dB and Volume +8.50 / +8.50 dB on A2, exactly as `song.prproj`** -- so Premiere read them
+  - The preset drop itself needs the mouse: yours, once per edit (as day 16).
+- **Tests:** 7 new (`test_song_gain_day17.py`: the values, only those lines change, once only, a backup; the watch: closed after your save, written, opened again; another project or Premiere closed by you; day 16's real saved project). App: 1258 passed. Day 16's song test now expects "CorrectVolume" in the clip comment.

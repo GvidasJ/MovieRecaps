@@ -346,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--music-gains", default="0", metavar="DB,DB", help="the levels before / after the cut, e.g. 5,-1")
     p.add_argument("--music-volume", type=float, default=None, metavar="DB",
                    help="day 16: your song Volume Level (SceneProof 8.5), added to each piece's --music-gains "
-                        "(+13.5 / +7.5 dB); the Hard Limiter + Amplify: the preset 'MovieRecaps song chain'")
+                        "(+13.5 / +7.5 dB); the Hard Limiter + Amplify: the preset 'CorrectVolume' (assets/premiere; Open in Premiere writes the Clip Gain into the saved project)")
     p.add_argument("--force-inputs", action="store_true",
                    help="skip the wrong-input checks: by default the run stops at once (before converting anything) "
                         "when the competitor is longer than a Short (3 minutes), almost as long as the RAW or longer, "

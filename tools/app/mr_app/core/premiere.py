@@ -478,6 +478,114 @@ def _unseen(st: State) -> str:
     return " -- look at Premiere: it did not show the import yet"
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# day 17 (task 3): the SceneProof song's real Clip Gain, written into the saved project (core.song_gain)
+# ---------------------------------------------------------------------------------------------------------------------
+
+SONG_WATCH_S = 1800.0                # after the import: the save watched for this long
+SONG_CLOSE_S = 90.0                  # Premiere closed (its project saved) within this long, else left as it is
+SONG_STATUS: dict[str, str] = {}     # project -> what happened (plain words; the app shows the last one)
+_SONG_WATCHING: set[str] = set()
+
+
+def song_before_open(proj: Path, xml: Path) -> str:
+    """A saved project whose song clips have no Clip Gain yet (Premiere doesn't hold it now): written now."""
+    from . import song_gain
+    if proj.is_file() and song_gain.needs_fix(proj, xml):
+        done = song_gain.fix(proj, xml)
+        SONG_STATUS[_key(proj)] = done
+        return done
+    return ""
+
+
+def _close(st: State) -> bool:
+    """Premiere's main window asked to close (as its X does); True when Premiere is gone within SONG_CLOSE_S."""
+    if os.name != "nt" or not st.hwnd:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32 = ctypes.WinDLL("user32")
+        u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        u32.PostMessageW(st.hwnd, 0x0010, 0, 0)                     # WM_CLOSE
+    except Exception:  # noqa: BLE001
+        return False
+    t0 = _clock()
+    while _clock() - t0 < SONG_CLOSE_S:
+        if not _pids():
+            return True
+        _sleep(1.0)
+    return False
+
+
+def song_watch(exe: Path, proj: Path, xml: Path, timeout: float = SONG_WATCH_S, t_import: float | None = None) -> str:
+    """After the edit went into its own project: when you have saved it (the title without "*", the file newer
+    than the import) Premiere is closed (nothing is lost: everything is saved), the song's real Clip Gain and Volume
+    8.5 dB are written into the project, and Premiere opens it again. Premiere closed by you: written, not opened
+    again. Another project opened, a message on closing, or no save within ``timeout``: nothing (said)."""
+    from . import song_gain
+    k = _key(proj)
+    if t_import is None:
+        try:
+            t_import = os.stat(proj).st_mtime
+        except OSError:
+            t_import = 0.0
+    t0 = _clock()
+    while _clock() - t0 < timeout:
+        _sleep(2.0)
+        st = state()
+        try:
+            saved = os.stat(proj).st_mtime > t_import
+        except OSError:
+            saved = False
+        if not st.running:
+            out = song_gain.fix(proj, xml) if saved or song_gain.needs_fix(proj, xml) else ""
+            SONG_STATUS[k] = out or "Premiere was closed before the project was saved: the song's Clip Gain waits " \
+                                    "for the next Open in Premiere"
+            return SONG_STATUS[k]
+        if st.title is None or st.project is None:
+            continue
+        if not same_file(st.project, proj):
+            SONG_STATUS[k] = "another project was opened: the song's Clip Gain is written at the next Open in Premiere"
+            return SONG_STATUS[k]
+        if saved and not st.changed and not st.message and song_gain.needs_fix(proj, xml):
+            if not _close(st):
+                SONG_STATUS[k] = ("Premiere did not close (a message?): the song's Clip Gain is written at the next "
+                                  "Open in Premiere")
+                return SONG_STATUS[k]
+            out = song_gain.fix(proj, xml)
+            _launch(exe, proj)
+            _wait(lambda s: same_file(s.project, proj), START_WAIT_S)
+            SONG_STATUS[k] = (out + " -- Premiere opened it again") if out else "Premiere opened the project again"
+            return SONG_STATUS[k]
+        if saved and not song_gain.needs_fix(proj, xml):
+            SONG_STATUS[k] = ""
+            return ""
+    SONG_STATUS[k] = "not saved within 30 minutes: the song's Clip Gain is written at the next Open in Premiere"
+    return SONG_STATUS[k]
+
+
+def _song_later(exe: Path, proj: Path, xml: Path, saved_counts: bool = False) -> str:
+    """song_watch in its own thread when the edit has a song with its Clip Gain (SceneProof); the words for the
+    message ('' without a song). ``saved_counts``: the project as saved now counts (it was open with the edit
+    already) -- else only a save after now."""
+    from . import song_gain
+    if not song_gain.pieces(xml)[1] or _key(proj) in _SONG_WATCHING:
+        return ""
+    if saved_counts and not song_gain.needs_fix(proj, xml):
+        return ""
+
+    def run() -> None:
+        try:
+            song_watch(exe, proj, xml, t_import=0.0 if saved_counts else None)
+        finally:
+            _SONG_WATCHING.discard(_key(proj))
+    _SONG_WATCHING.add(_key(proj))
+    threading.Thread(target=run, name="song_gain", daemon=True).start()
+    return (" -- then the app closes Premiere once, writes the song's Clip Gain (+5 / -1 dB) and Volume 8.5 dB into "
+            "the saved project and opens it again")
+
+
 def open_xml(xml: Path, wait_s: float = START_WAIT_S) -> str:
     """Open a run's 1_edit.xml in Premiere Pro, in the run's own project next to it (see the module's text); returns
     what happened (plain words). Waits for Premiere: call it in the background."""
@@ -510,11 +618,11 @@ def _open(xml: Path, wait_s: float) -> str:
                     + ("" if seen else _unseen(st)))
         if not needs_import(proj, xml) or st.changed or _handed_here(proj, xml, st):     # ("*": the empty project
             _front(st.hwnd)                                                                 #  changed -- by the import)
-            return f"{proj.name} is open in Premiere already, with the edit"
+            return f"{proj.name} is open in Premiere already, with the edit" + _song_later(exe, proj, xml, True)
         st, seen = _import(exe, xml, st, proj)
         _front(st.hwnd)
         return f"{proj.name} is open in Premiere: the edit is imported into it -- save it (Ctrl+S)" + \
-            ("" if seen else _unseen(st))
+            ("" if seen else _unseen(st)) + _song_later(exe, proj, xml)
 
     # (2) not running, (3) its Home screen: the run's own project, opened by Premiere, then the edit into it
     made = False
@@ -533,6 +641,7 @@ def _open(xml: Path, wait_s: float) -> str:
                     f"import {xml.name} into a project yourself (File > Import)")
     again = not made and holds_edit(proj) and needs_import(proj, xml)       # an edit made again since the last save
     need = made or needs_import(proj, xml)
+    song = "" if made or need else song_before_open(proj, xml)    # day 17: saved, song clips without Clip Gain
     started = not st.running
     _launch(exe, proj)
     st = _wait(lambda s: same_file(s.project, proj), wait_s)
@@ -548,9 +657,10 @@ def _open(xml: Path, wait_s: float) -> str:
     who = "Premiere Pro started with" if started else "Premiere Pro opened"
     if not need:
         _front(st.hwnd)
-        return f"{who} {proj.name} (next to the edit) as you saved it -- the edit is in it already"
+        return f"{who} {proj.name} (next to the edit) as you saved it -- the edit is in it already" + \
+            (f" ({song})" if song else "")
     st, seen = _import(exe, xml, _settle(), proj)
     _front(st.hwnd)
     what = "the edit made again (one more sequence)" if again else "the edit"
     return f"{who} {proj.name} (next to the edit) and imported {what} into it -- save it (Ctrl+S)" + \
-        ("" if seen else _unseen(st))
+        ("" if seen else _unseen(st)) + _song_later(exe, proj, xml)

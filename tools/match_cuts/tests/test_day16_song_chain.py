@@ -39,7 +39,7 @@ def test_each_piece_gets_its_clip_gain_plus_the_volume_level_and_names_the_prese
     vals = [float(ci.find("filter/effect/parameter/value").text) for ci in clips]
     assert vals == [pytest.approx(10 ** (13.5 / 20), abs=1e-6), pytest.approx(10 ** (7.5 / 20), abs=1e-6)]
     notes = [ci.findtext("comments/mastercomment2") for ci in clips]
-    assert all('drop the preset "MovieRecaps song chain"' in n for n in notes) and "+13.5 dB" in notes[0]
+    assert all(f'drop the preset "{music.USER_PRESET}"' in n for n in notes) and "+13.5 dB" in notes[0]   # day 17
     xml2 = _xml(tmp_path / "old.xml")                       # night 15's way, without --music-volume: as before
     old = music.add_music(xml2, song, 0.52, 12.32, [5.0, -1.0], tmp_path / "media")
     assert [p["gain_db"] for p in old["pieces"]] == [5.0, -1.0] and "volume_db" not in old["pieces"][0]
