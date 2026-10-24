@@ -59,6 +59,11 @@ The right answers I found by reading the clips' lines, searching them on YouTube
 6. **Sure only when proven:** your RAW's sound (as before); or the clip's words in the transcript of a YouTube clip titled with it; or the top YouTube clips of 2+ different lines titled with that episode; or the episode's summary fitting best and a titled clip naming it (or fitting clearly best and being the AI's own guess). A film: IMDb's year **and** a YouTube clip of its lines titled with the film. Otherwise Check.
 7. **Nothing is paid twice:** every AI answer by link (`ai_watch.json`; the second opinion as `second:<clip>`); every search, transcript and TVmaze list in `%APPDATA%\MovieRecaps\source_proof.json`. Searches and transcripts are free (Algrow's subscription); only the AI watches use credits. The test below used 10 new watches + 9 second opinions once; running it again cost nothing (30 s).
 8. Found on the way: a video without a transcript answers "No transcript available ..."; that text is no longer taken as its transcript.
+9. **Added later: the web's quote sites.** The end of the 2 most distinctive lines (at most 8 words) is searched as an exact phrase on the web (DuckDuckGo's plain page; cached):
+   - a quote site's result with the clip's own words that names the episode by its **title** (IMDb's quotes: `"Everybody Hates Chris" Everybody Hates Houseguests (TV Episode 2007)`) proves it (Sure)
+   - one that names only its **number** (YARN: `Family Guy (1999) - S09E11 ... clip with quote "So, technically it's not prostitution, it's a porno."` -- the right episode, where both AIs said S16E09) puts it first, but is Sure only when another check agrees, because quote sites and TVmaze can number episodes differently (American Dad!)
+   - for a film: the film named with the clip's words proves it; and when the AI knows nothing, the quote site's name is used
+   - **Limitation found today:** DuckDuckGo refuses this PC's searches for a while after a burst (my first test sent 20 at once). The app now searches one at a time, 3 s apart, and makes no web search for 15 minutes after a refusal (then it works as before, without the web). In today's re-test it answered 2 searches, then refused again, so the before -> after table above is without the web step; the YARN result for the Family Guy clip was seen in a manual search.
 
 ### Test: the 10 clips, your RAW library OFF
 
@@ -184,3 +189,67 @@ The right answers I found by reading the clips' lines, searching them on YouTube
   - Fixed on the way: Learn's new cases had no `"style": "new"` (day 16 added it by hand), so a check-all ran them unscored; they have it now.
 - **The biggest difference with your fixes: still framing** -- the picture moved sideways on 4 of the 6 new videos and on 25 of all cases. But the moves differ clip by clip (video37: from -653 to +292 px), not one shift: it is *which person* each clip is centred on. A rule for that needs its own check-all from scratch (3-4 hours on today's numbers), and the graphics card was busy with Task 7's and the default code's check-all. Building a rule without its check-all would break "nothing may get worse", so **no new rule today**.
 - **Incident (fixed):** a script of mine that marked the six lines in `D:\Shared\Projects\learn_queue.md` failed half-way and left the file empty. I rewrote it at once, line for line, from the copy I had read a minute before (26 entries, all `[x]`), and checked that the app reads all 26. Please glance at it.
+
+## Still broken
+
+- **The Dictator interview (Task 7):** still about 26 clips where the competitor has about 18 shots. The cause is that the competitor re-edited the picture over the dialogue and cuts between near-identical camera angles; the sound can't decide there (details in Task 7).
+- **Find source:** 3 of the 10 clips still give the wrong episode (as Check, never Sure): the Family Guy cutaway gag (`DZJfIY3IlTD`), the Blue Mountain State condom scene (`DZ56TJHuM75`) and the Family Guy reverse-time scene (`H15KjMR3mmo`, the right one in its top 3). The quote-site search names the right Family Guy episode (S09E11) in a manual test, but DuckDuckGo stopped answering after my first burst of searches (it shows an "anomaly" page), so the app now searches one at a time and pauses 15 minutes after a refusal.
+- **The real-aria2c torrent test** crashed Python once inside the whole app suite again (an access violation, the known night-15 crash); alone it passes.
+- **Framing** stays the biggest difference with your fixes (Task 8): which person each clip is centred on.
+
+## Check by hand
+
+1. **SceneProof song:** import `assets\premiere\CorrectVolume.prfpset` once (Effects > right-click Presets > Import Presets...). On your next SceneProof edit: Open in Premiere, Ctrl+S, wait for Premiere to close and open again, then look at A2: Clip Gain +5 / -1 dB, Volume 8.5 dB. Drop CorrectVolume on both song clips.
+2. **`D:\Shared\Projects\learn_queue.md`:** I rewrote it after my mistake (Task 8); check that it looks as before (26 lines, video13-38, all learned).
+3. **Find source:** paste your next links; a row that isn't sure shows its top 3 small under the verdict.
+4. **Try with another competitor:** on your next failed row.
+5. **The laptop's torrent folder:** in Settings the line under "Save torrents to" should say "reachable and can be written"; then the Everybody Hates Chris season torrent again (Remove, Try again).
+6. **Two automatic zips** are still in `input\downloads` (`When Islam Tried An Energy Drink (2)`, `The Worst First Word of All Time`): delete them if you want the space; no new ones are made there.
+
+## On the laptop
+
+Close MovieRecaps, then in PowerShell:
+
+```
+cd C:\Users\gvida\Desktop\bh\MovieRecaps
+git pull
+.venv\Scripts\python tools\app\setup_app.py
+```
+
+- No new packages.
+- `setup_app.py` moves the tool's cache to `D:\mr_cache` **only if the laptop has a fixed D: drive** (otherwise it says "the tool's cache stays in work\cache"). It needs MovieRecaps closed.
+- Settings > "Save torrents to": if it is `//192.168.101.11/...`, it becomes `\192.168.101.11\...` by itself when you press OK.
+- Import `assets\premiere\CorrectVolume.prfpset` in Premiere once (Effects > Presets > Import Presets...).
+- The NexLev / Algrow keys stay only on the PC (as on day 16).
+
+## The check-all of today's code (switch OFF, as you get it)
+
+- **How it ran:** from the frozen copy `work\snap17a`, 2 streams from 10:29 until about 14:30, every case analysed from scratch (the check-all's caches on C: were gone). "before" is day 16's table.
+- **Every older case that finished has exactly its day-16 scores** -- today's changes don't touch the edit (the Find source, zip, cache, torrent, song and button work is all in the app; the tool only got the switch-OFF Task 7 step and a comment).
+
+| video | before (day 16): hard / captions / word errors / cuts / framing | today | time |
+|---|---|---|---|
+| video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | the same (switch OFF) | 12 min |
+| video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | the same | 6 min |
+| laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | the same | 9 min |
+| video30-fixed | PASS / 18/43 / 16.85 / 4/7 / 2/13 | the same | 10 min |
+| video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | the same | 8 min |
+| video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | the same | 10 min |
+| video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | the same | 13 min |
+| laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | the same | 7 min |
+| video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | the same | 17 min |
+| chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | the same | 15 min |
+| video017-fixed, video2, spiderman-school, video020-fixed | PASS (hard checks) | PASS (hard checks, `--fast`) | 14-32 min |
+| zendaya | PASS | PASS | 12 min |
+| video3 | PASS | PASS (this one ran with the switch ON: the rule made it one take) | 17 min |
+
+**The six new cases (first runs: today's numbers are their "before"):**
+
+| video | hard | captions exactly | word errors | cuts | framing | time |
+|---|---|---|---|---|---|---|
+| video33-fixed (Dolittle 2) | PASS | 28/81 | 15.8 % | 3/6 | 6/24 | 48 min |
+| video34-fixed (Family Guy) | PASS | 2/20 | 34.1 % | 0/3 | 0/4 | 11 min |
+| video35-fixed (Cleveland Show) | **FAIL**: 1 flash frame left in the XML (2 frames of another RAW shot at 27.2 s) | 4/33 | 15.7 % | 3/9 | 9/23 | 27 min |
+| video36-fixed (Hot Fuzz) | PASS | 0/32 | 27.2 % | 0/3 | 6/6 | 11 min |
+| video37-fixed (The Dictator) | **FAIL**: the speaking person outside the window in one clip (XML PERSON) | 4/44 | 11.5 % | 3/7 | 0/11 | 22 min |
+| video38-fixed (Scottish comedy) | PASS | 8/33 | 43.0 % | 2/6 | 5/19 | 31 min |
