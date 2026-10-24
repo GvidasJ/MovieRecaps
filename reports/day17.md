@@ -270,9 +270,9 @@ git pull
 
 - **Tool: 1657 passed, 0 failed** (101 skipped: the slow tests that run only with `--runslow`, and Linux-only ones). One older test lists the learned cases by name; today's six were added to it, as on day 16.
 - **App: 1273 passed, 0 failed**, the real-aria2c torrent test included (no crash this time).
-- `.venv\Scripts\python toolspp\setup_app.py`: "the tool's cache is on D:\mr_cache (work\cache points there)", "done: everything is as the project expects" (exit 0).
+- `.venv\Scripts\python tools\app\setup_app.py`: "the tool's cache is on D:\mr_cache (work\cache points there)", "done: everything is as the project expects" (exit 0).
 - **The keys:** a scan of 456 files (the code, the reports, the docs, Find source's three files, the shared suggestions and learn queue) finds neither key.
-- 21 commits today, all pushed to `claude/new-session-ol4era`.
+- 17 commits today, all pushed to `claude/new-session-ol4era`.
 - **The shutdown:** none was set and the PC stays on (as you asked).
 
 ## 5 new suggestions (saved in `D:\Shared\Projects\suggestions.md`, not built)
