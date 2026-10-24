@@ -12,7 +12,7 @@ Started 07:52 (PC; you were at it, then away from about 08:00 on). No shutdown w
 | 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
 | 5 | Torrents that stopped for no reason | **done** (the laptop's case reproduced for real, then fixed) | nothing to do: a too-long path gets a shorter name by itself; Settings shows whether the torrent folder is reachable |
 | 6 | Test the Convert fix from this morning | **done** (the real Key & Peele file converts) | nothing to do |
-| 7 | Look-alike scenes: the sound decides (The Dictator) | **built, OFF** (it helps this case little; the check-all result is below) | nothing to do; `MATCH_CUTS_SOUND_TAKES=1` switches it on |
+| 7 | Look-alike scenes: the sound decides (The Dictator) | **built, OFF** (it helps this case little, and ON made video14's captions worse in the check-all) | nothing to do; `MATCH_CUTS_SOUND_TAKES=1` switches it on |
 | 8 | Learn by yourself | **partly**: your 6 new fixes learned (video33-38: test cases, action captions); no new rule (below) | nothing to do |
 
 ## Task 1 -- stop C: from filling up (done)
