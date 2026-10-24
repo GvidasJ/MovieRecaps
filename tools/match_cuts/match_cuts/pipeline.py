@@ -3282,6 +3282,15 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
         else:
             log.info("Premiere: the %d-frame dissolve S%02d|S%02d is a hard cut at competitor frame %d (no "
                      "transitions)", d["frames"], d["segments"][0], d["segments"][1], d["cut"])
+    # day 17 (task 7): look-alike scenes -- where the competitor's sound plays one RAW take straight through, the
+    # pieces of look-alike RAW frames go on that take's line (sound_takes; MATCH_CUTS_SOUND_TAKES)
+    from . import sound_takes
+    ex, by_sound = sound_takes.apply(ctx, ex)
+    for d in by_sound:
+        ctx.dlog.record("premiere", "sound_take", **d)
+    if by_sound:
+        log.info("Premiere: %d piece(s) put on the take the sound plays (look-alike frames): %s", len(by_sound),
+                 ", ".join(f"S{d['segment']:02d} ({d['how']})" for d in by_sound[:40]))
     # the pieces of one continuous RAW take play as one (night 5, laptop009): no jump or stutter inside a take; a
     # piece that starts on a RAW shot change keeps the competitor's timing there (night 6, laptop004's flash)
     ex, takes, joined = join_takes(ex, take_shot_changes(ctx, ex), getattr(ctx.cfg, "premiere_normal_audio", True))

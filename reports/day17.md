@@ -12,6 +12,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 | 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
 | 5 | Torrents that stopped for no reason | **done** (the laptop's case reproduced for real, then fixed) | nothing to do: a too-long path gets a shorter name by itself; Settings shows whether the torrent folder is reachable |
 | 6 | Test the Convert fix from this morning | **done** (the real Key & Peele file converts) | nothing to do |
+| 7 | Look-alike scenes: the sound decides (The Dictator) | **built, OFF** (it helps this case little; the check-all result is below) | nothing to do; `MATCH_CUTS_SOUND_TAKES=1` switches it on |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -126,3 +127,29 @@ The right answers I found by reading the clips' lines, searching them on YouTube
 - **The rule (295a8d7):** a copy whose sound ends with the picture may be up to 1.5 s shorter than the original's sound, when the original's sound ran on **after** the picture's last frame. Nothing a clip can play is lost.
 - **New tests** (`test_convert_day17.py`, 4): the real Key & Peele numbers (sound 1277.48 s, picture 1276.65 s, the copy's sound 1276.64 s): **OK**; sound cut **inside** the picture (1270.00 s; or 0.75 s short of a sound that ended with the picture): **still a stop**; more than 1.5 s gone: still a stop; a longer sound in the copy: still a stop.
 - **Real run:** Convert on a copy of `input\downloads\2026-10-24_The Most Suspicious Question of All Time\Key.&.Peele.S05E11...mkv` (HEVC + AC-3 5.1): **done in 83 s** -- the picture copied as it is (MP4, lossless, 30609 of 30609 frames, 1276.651 s both), the sound made AAC: 1277.484 s -> 1276.640 s, accepted by the new rule. (My copy and its result were deleted afterwards; your file is untouched.)
+
+## Task 7 -- look-alike scenes: the sound decides (built, OFF behind a switch)
+
+- **What I found in your Dictator case** (`2026-10-23_The Most Awkward Interview of All Time`):
+  - The competitor's sound is found at **one RAW offset from 17.25 s to its end** (79 sound windows, the film +99.79 s): the dialogue plays straight through.
+  - But the competitor **re-edited the picture** over that dialogue: e.g. at 18.7 s it shows Larry King's close-up while the film, at the same moment of the dialogue, shows the wide shot; at 20.7 s the wide ABN shot where the film is on Larry. At the sound's own moment the film's picture is another shot (picture score ~0.1 against ~0.85 for the frames the tool chose). So "the frame where the sound sits" is not the picture there.
+  - The competitor has **17 shot changes** (PySceneDetect), the tool's cut list 62 cuts. Inside the competitor's shots the tool's pieces jump between near-identical frames of static interview shots, and part of the competitor is slower than the film (38.3 s against 29.2 s at 100 %).
+- **What I built** (`tools\match_cuts\match_cuts\sound_takes.py`, a step of the Premiere plan before the takes are joined; it changes nothing in the cached analysis, so no case has to be analysed again):
+  1. the sound's takes: confident sound windows at one RAW offset (at least 8)
+  2. the take's exact line from the picture of the pieces already on it (the sound can sit a few frames off the picture)
+  3. a piece off that line goes on it **only when the line's picture scores as well** (within 0.03) as the piece's own frames -- so the re-edited shots above rightly stay
+  4. the take goes on past the sound while the picture fits
+  5. **one competitor shot, one take**: inside each competitor shot, the doubted pieces go on one line (a piece's own moment played on at 100 % or at 80 %) when every piece fits it as well as its own frames; the line nearest the sound wins a tie
+  - never the same RAW moment twice inside a take (one line)
+- **Measured on your case** (the same caches, switch off vs on):
+
+  | | before (off) | after (on) |
+  |---|---|---|
+  | V1 clips in 1_edit.xml | 27 | **26** |
+  | RAW jumps | 20 | 19 |
+  | clips of 8 frames or less | 14 | 15 |
+  | pairs of clips showing the same RAW moment | 23 | 22 |
+
+  One competitor shot (frames 0-19) became one take at 80 %; in the other 7 shots no single line fits every piece (the cuts between near-identical angles that even PySceneDetect doesn't see). **That is far from the competitor's ~18 shots**, so it does not fix this case.
+- **The switch:** `MATCH_CUTS_SOUND_TAKES=1` on, `=0` off; **OFF by default** (your rule: ON only if the check-all says nothing got worse in time). The check-all with it ON is below.
+- **Tests:** 5 new (`test_day17_sound_takes.py`): look-alike pieces put on the sound's take, never a repeat; a real cut the line doesn't fit stays; straight through past the sound; one competitor shot one take at 80 %; off by the switch and without sound.
