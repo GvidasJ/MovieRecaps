@@ -278,7 +278,8 @@ class Meta:
         if not inside(base, out):
             raise TorrentError("This torrent's file names point outside the save folder -- it is not safe to "
                                "download.")
-        return out
+        short = short_out(self, save_dir, index)        # day 17: a path over Windows' 260 characters: a shorter one
+        return base / short if short else out
 
     def chosen_video(self, indexes: Iterable[int]) -> int | None:
         ix = sorted(set(indexes))
@@ -300,12 +301,69 @@ def aria2_escape(part: str) -> str:
     return "".join(f"%{ord(c):02X}" if ord(c) < 0x20 or ord(c) == 0x7F or c in _WIN_BAD else c for c in part)
 
 
-def aria2_path(meta: "Meta", save_dir: str | Path, index: int) -> Path:
-    """Where aria2c itself writes file ``index`` on Windows (names escaped like aria2c does: 'a:b' -> 'a%3Ab')."""
+def natural_path(meta: "Meta", save_dir: str | Path, index: int) -> Path:
+    """Where aria2c would write file ``index`` by the torrent's own names (escaped like aria2c does: 'a:b' ->
+    'a%3Ab'), however long."""
     f = meta.files[index]
     parts = [aria2_escape(p) for p in f.path.split("/") if p]
     base = Path(save_dir)
     return base.joinpath(*parts) if meta.single else base.joinpath(aria2_escape(meta.name), *parts)
+
+
+def aria2_path(meta: "Meta", save_dir: str | Path, index: int) -> Path:
+    """Where aria2c itself writes file ``index`` on Windows: its natural path, or -- over Windows' path limit -- the
+    shorter one this app gives it (short_out, aria2c's index-out)."""
+    short = short_out(meta, save_dir, index)
+    return Path(save_dir) / short if short else natural_path(meta, save_dir, index)
+
+
+# Day 17: Windows' 260-character path limit. An Everybody Hates Chris season torrent (its folder 95 characters, the
+# season folder, the file ~110) in the laptop's download folder went over it, and aria2c stopped with "the system
+# cannot find the path specified" ("the folder is not there any more"). A chosen file whose path would be longer than
+# PATH_SAFE is written to a shorter one instead: <save folder>\<the torrent's name, cut>\<the file's own name> (the
+# season folder left out; the name cut too only when it alone is too long).
+WIN_PATH_MAX = 259                       # MAX_PATH (260) less the closing NUL
+PATH_SAFE = 240                          # ... less room for aria2c's own suffixes (.aria2, a renamed copy's " (1)")
+_NAME_BAD = re.compile(r'[\x00-\x1f\x7f"*:<>?\\|/]')
+
+
+def _plain_name(part: str) -> str:
+    """A name with the characters Windows forbids (and aria2c would escape) made '_', no dots / spaces at its end."""
+    return _NAME_BAD.sub("_", part).rstrip(" .") or "_"
+
+
+def path_too_long(p: str | Path, limit: int = PATH_SAFE) -> bool:
+    return len(os.path.abspath(str(p))) > limit
+
+
+def is_network(p: str | Path) -> bool:
+    """A \\\\server\\share folder. (aria2c writes there as well as on a local disk -- day 13's real test over
+    \\\\127.0.0.1\\C$, again on day 17 -- but its path is longer: the laptop's \\\\192.168.101.11\\Shared\\Downloads\\
+    Torrents\\ is 14 characters more than D:\\Shared\\Downloads\\Torrents\\, which took the Everybody Hates Chris
+    season torrent over Windows' 260: short_out.)"""
+    s = str(p or "").replace("/", "\\")
+    return s.startswith("\\\\") and not s.startswith("\\\\?\\")
+
+
+def short_out(meta: "Meta", save_dir: str | Path, index: int) -> str | None:
+    """The shorter path (relative to the save folder, '/' between its parts) file ``index`` is written to when its
+    natural path is over PATH_SAFE; None when the natural one is short enough."""
+    if not path_too_long(natural_path(meta, save_dir, index)):
+        return None
+    f = meta.files[index]
+    name = _plain_name([p for p in f.path.split("/") if p][-1])
+    base = len(os.path.abspath(str(save_dir))) + 1
+    room = PATH_SAFE - base
+    if room < 12:
+        raise TorrentError(f"The save folder {save_dir} itself is too long a path for Windows (its 260-character "
+                           "limit). Choose a shorter folder in Settings → \"Save torrents to\".")
+    stem, ext = os.path.splitext(name)
+    if len(name) > room:                                  # the file's own name alone is too long: cut its stem
+        name = stem[: max(1, room - len(ext))].rstrip(" .") + ext
+    if meta.single:
+        return name
+    top = _plain_name(meta.name)[: max(0, room - len(name) - 1)].rstrip(" .")
+    return f"{top}/{name}" if len(top) >= 8 else name
 
 
 def control_file(meta: "Meta", save_dir: str | Path) -> Path:
@@ -839,11 +897,22 @@ _ARIA2_CAUSE = {
 }
 
 
-def plain_aria2(code: int | None, message: str = "", folder: str | Path | None = None) -> str:
+def plain_aria2(code: int | None, message: str = "", folder: str | Path | None = None, path: str = "") -> str:
     """One aria2c error (its errorCode 1-32 and errorMessage) as what happened + what to do, in plain words -- never
     aria2c's own sentence. The Windows cause it quotes (no space, a file in use, no permission, a network folder
-    gone) wins over the bare code."""
+    gone) wins over the bare code. Day 17: ``path`` (the longest file it writes) over Windows' 260 characters with
+    a "path"/"cannot make" error is said as "the path is too long"."""
     msg = str(message or "")
+    if path and len(path) > WIN_PATH_MAX and (re.search(r"cannot find the path|no such file|filename.*too long|"
+                                                        r"path.*too long|could not (?:open|create)", msg, re.I)
+                                              or code in (16, 17, 18)):
+        return (f"The path is too long for Windows ({len(path)} characters, the limit is 260): the torrent's folder "
+                f"and file names in {folder or 'the download folder'} are too long together. Press Resume (or Remove, "
+                "then Try again): the app now saves such a file under a shorter name (or choose a shorter folder in "
+                "Settings → \"Save torrents to\").")
+    if folder and len(str(folder)) > PATH_SAFE:
+        return (f"The path is too long for Windows: the download folder {folder} alone is {len(str(folder))} "
+                "characters (the limit is 260). Choose a shorter folder in Settings → \"Save torrents to\".")
     key: int | str | None = None
     for rx, k in _ARIA2_MESSAGES:
         if rx.search(msg):
@@ -1156,9 +1225,14 @@ class TorrentSession:
 
     # -- the download --------------------------------------------------------------------------------------------------
 
-    def _options(self, job: Job, paused: bool = False, check: bool = False) -> dict:
+    def _options(self, job: Job, paused: bool = False, check: bool = False, meta: Meta | None = None) -> dict:
         o = {"dir": job.save_dir, "select-file": ",".join(str(i + 1) for i in sorted(job.indexes)),
              "gid": job.id, "continue": "true", "allow-overwrite": "false", "auto-file-renaming": "false"}
+        if meta is not None:              # day 17: a file over Windows' path limit goes to a shorter path -- every
+            outs = [f"{i + 1}={s}" for i in range(len(meta.files))      # file, not only the chosen ones: aria2c
+                    for s in [short_out(meta, job.save_dir, i)] if s]   # writes the next episode's shared piece too
+            if outs:
+                o["index-out"] = outs
         if job.sharing:
             o["seed-ratio"] = "1.0"
         else:
@@ -1281,7 +1355,7 @@ class TorrentSession:
         job.given_at = time.time()
         b64 = base64.b64encode(torrent).decode("ascii")
         try:
-            self.engine.call("aria2.addTorrent", b64, [], self._options(job, paused, check))
+            self.engine.call("aria2.addTorrent", b64, [], self._options(job, paused, check, meta))
         except RpcError as e:
             if "already" in e.message.lower() or e.code == 12:
                 return
@@ -1645,5 +1719,14 @@ def _plain_rpc(e: RpcError, what: str) -> str:
 
 
 def _plain_status(st: dict, folder: Path) -> str:
-    """A download that stopped with an error, in plain words with what to do (plain_aria2)."""
-    return plain_aria2(st.get("errorCode"), str(st.get("errorMessage", "") or ""), folder)
+    """A download that stopped with an error, in plain words with what to do (plain_aria2). Day 17: a file whose path
+    is over Windows' 260 characters is said as that ("the path is too long"), never "the folder is not there"."""
+    longest = ""
+    for f in st.get("files") or []:
+        try:
+            p = str(f.get("path") or "")
+            if not p.startswith("[METADATA]") and len(p) > len(longest):     # (an unticked file's piece too)
+                longest = p
+        except AttributeError:
+            continue
+    return plain_aria2(st.get("errorCode"), str(st.get("errorMessage", "") or ""), folder, longest)

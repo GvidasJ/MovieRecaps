@@ -75,9 +75,12 @@ class SettingsDialog(QDialog):
         tpick.clicked.connect(self._browse_tdir)
         trow.addWidget(tpick)
         tdflt = W.Button("This computer's default", "Small")
-        tdflt.clicked.connect(lambda: self.tdir.setText(""))
+        tdflt.clicked.connect(lambda: (self.tdir.setText(""), self._check_tdir()))
         trow.addWidget(tdflt)
         tbox.addLayout(trow)
+        self.tdir_note = W.label("", "Dim", wrap=True)     # day 17: "reachable" (and writable), as for projects
+        tbox.addWidget(self.tdir_note)
+        self.tdir.editingFinished.connect(self._tidy_tdir)
         srow = QHBoxLayout()
         srow.addWidget(W.label("Keep sharing after a download", "Dim"))
         self.share = W.Segmented([("on", "On"), ("off", "Off")],
@@ -173,6 +176,53 @@ class SettingsDialog(QDialog):
                                              self.tdir.text().strip() or str(self._default_tdir()))
         if d:
             self.tdir.setText(d)
+            self._tidy_tdir()
+
+    def _tidy_tdir(self) -> None:
+        """Day 17: "/" made "\\" by itself, then the folder checked: reachable and writable (in the background)."""
+        from ..core import settings as S
+        t = S.normalize_folder(self.tdir.text())
+        if t != self.tdir.text():
+            self.tdir.setText(t)
+        self._check_tdir()
+
+    def _tdir(self):
+        from pathlib import Path
+        t = self.tdir.text().strip().strip('"')
+        return Path(t) if t else Path(str(self._default_tdir()))
+
+    def _check_tdir(self) -> None:
+        folder = self._tdir()
+        self.tdir_note.setText(f"checking {folder} …")
+        self.tdir_note.setStyleSheet(f"color: {theme.DIM};")
+
+        def work():
+            from ..core import publish, torrent
+            if not publish.reachable(folder, 4.0):
+                return "away"
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                probe = folder / ".movierecaps_write_test.tmp"
+                probe.write_bytes(b"x")
+                probe.unlink()
+            except OSError:
+                return "readonly"
+            return "network" if torrent.is_network(folder) else "ok"
+
+        def got(how) -> None:
+            if str(self._tdir()) != str(folder):
+                return
+            text, col = {
+                "ok": (f"{folder} -- reachable and can be written", theme.GREEN),
+                "network": (f"{folder} -- reachable and can be written (a network folder: a file whose path would "
+                            "pass Windows' 260 characters is saved under a shorter name)", theme.GREEN),
+                "readonly": (f"{folder} -- reachable, but it can't be written (no permission?): downloads would "
+                             "stop", theme.AMBER),
+                "away": (f"{folder} -- not reachable now: a torrent can't start until it is back (or choose "
+                         "another folder)", theme.AMBER)}.get(how, (f"{folder}", theme.DIM))
+            self.tdir_note.setText(text)
+            self.tdir_note.setStyleSheet(f"color: {col};")
+        BG.call(work, got, lambda e: self.tdir_note.setText(f"could not check it: {e}"))
 
     def _machine_changed(self) -> None:
         self.s.machine = self.machine.value
@@ -185,6 +235,8 @@ class SettingsDialog(QDialog):
         if hasattr(self, "tdir"):
             self.tdir.setPlaceholderText(str(self._default_tdir()))
         self._check_root()
+        if hasattr(self, "tdir_note"):
+            self._check_tdir()
 
     def _root(self):
         from pathlib import Path
@@ -225,14 +277,15 @@ class SettingsDialog(QDialog):
 
     def _ok(self) -> None:
         s = self.s
-        s.save_to = self.save.text().strip().strip('"')
+        from ..core import settings as S0
+        s.save_to = S0.normalize_folder(self.save.text())         # day 17: "/" -> "\" by itself
         s.machine = self.machine.value
         s.animations = self.anim.value == "on"
         s.intro = self.intro.value == "on"
         s.daily_goal = int(self.daily.value())
         s.monthly_goal = int(self.monthly.value())
         s.upload_check_minutes = int(self.every.value())
-        s.torrent_dir = self.tdir.text().strip().strip('"')
+        s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
         try:
             from ..core import settings as S

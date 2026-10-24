@@ -8,8 +8,9 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 |---|---|---|---|
 | 1 | Stop C: from filling up | **done** | nothing to do: the tool's cache is on D:\mr_cache; zips are made only for projects off C: |
 | 2 | Find source much better | **done** (right 4 -> 7 of 10 with your RAWs OFF; wrong "Sure" 3 -> 0) | Progress > Find source as before; a row that isn't sure shows its top 3 |
-| 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
 | 3 | SceneProof song: real Clip Gain + your preset | **done** (Premiere test passed) | Open in Premiere, save (Ctrl+S): the app closes Premiere once, writes Clip Gain +5 / -1 dB + Volume 8.5 dB, opens it again. Import `assets\premiere\CorrectVolume.prfpset` once and drop it on the 2 song clips |
+| 4 | Both "Try with another ..." buttons on every failed row | **done** | any failed or stopped row (queue, New video, History): **Try with another RAW** or **Try with another competitor** |
+| 5 | Torrents that stopped for no reason | **done** (the laptop's case reproduced for real, then fixed) | nothing to do: a too-long path gets a shorter name by itself; Settings shows whether the torrent folder is reachable |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -102,3 +103,19 @@ The right answers I found by reading the clips' lines, searching them on YouTube
 - **Try with another competitor** (new): New video keeps **the RAW** -- its file when it is on this PC (the download where it is, or the project's copy: **no new download**), else its link or magnet -- and the headline, the YouTube title, the channel, the mode and the speed; the competitor field is empty and has the cursor. The amber line says what was kept and which competitor gave which stop.
 - A row that finished well (PASS, OK with a note, Cuts ready) has neither.
 - **Tests:** 5 new (`test_another_comp_day17.py`): a WRONG PAIR on the queue, a download stop (a torrent removed) and a convert stop on New video, and History's failed edit each show both, and each button fills in everything. App: 1262 passed.
+
+## Task 5 -- torrent downloads that stopped for no reason (done)
+
+- **The cause, measured:** the Everybody Hates Chris season torrent's names are 95 (its folder) + 22 (`Season 3 (AMZN WEB-DL)`) + 110 (the episode) characters.
+  - on the PC, in `D:\Shared\Downloads\Torrents`, the episode's path is **just under** Windows' 260
+  - on the laptop, `\192.168.101.11\Shared\Downloads\Torrents` is 14 characters longer: **over 260** -> aria2 "cannot find the path specified" -> the app said "the folder is not there any more"
+  - **the network folder itself is not a problem:** aria2 writes a network folder as well as a local one (day 13's real test over `\127.0.0.1\C$`, run again today: passed). Its longer path is what took the laptop's torrent over the limit. So nothing is downloaded locally and moved; it goes straight there as before.
+- **Reproduced for real** (aria2, a local seeder, the very names, into a network folder `\127.0.0.1\C$\...`): it stopped the same way, and it was **not even the ticked episode**: aria2 also writes the small piece the ticked episode shares with the next one (S03E08), and that file's path was over the limit.
+- **The fix:** every file of the torrent whose path would be over 240 characters (260 less room for aria2's `.aria2` and the like) is given a shorter path with aria2's own `index-out`: `<save folder>\<the torrent's name, cut>\<the episode's own name>` (the season folder left out; the episode keeps its name; its name is cut too only when it alone is too long). Short paths are as before. The same real test then **downloaded the episode whole**, with its own name, in a path under 240.
+  - A download that stopped this way before goes on with **Resume** (it is given to aria2 again with the short names).
+- **The words:** a stop whose file path is over 260 says "**The path is too long for Windows** (N characters, the limit is 260) ...", never "the folder is not there". A folder that is really missing still says that.
+- **Settings:**
+  - "Save torrents to" and "Save projects to" turn `/` into `\` by themselves (`//192.168.101.11/Shared/...` -> `\192.168.101.11\Shared\...`), also for a settings file written before
+  - under "Save torrents to": "**reachable and can be written**" (green), "reachable, but it can't be written" or "not reachable now" (amber), checked in the background like the projects folder (it writes and removes a tiny test file)
+- **A restarted download** (Remove + Try again) reads "Save torrents to" at that moment, so it uses the **current** folder (checked in a test).
+- **Tests:** 7 new (`test_torrent_day17.py`, the real aria2 one included); all torrent tests: 57 passed. App: 1269 passed.

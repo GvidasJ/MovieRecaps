@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field, fields
@@ -79,9 +80,22 @@ def _int(v: Any, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
 
 
+def normalize_folder(v: str) -> str:
+    """Day 17: a folder as Windows writes it -- "//192.168.101.11/Shared/x" and "D:/a/b" with "\\" (aria2c and
+    some Windows calls trip over "/"); quotes and spaces around it dropped; "" stays "" (this computer's default)."""
+    s = (v or "").strip().strip('"').strip()
+    if not s or os.sep != "\\":
+        return s
+    s = s.replace("/", "\\")
+    unc = s.startswith("\\\\")
+    s = re.sub(r"\\{2,}", r"\\", s)
+    s = ("\\" + s) if unc else s
+    return s.rstrip("\\") if len(s) > 3 else s
+
+
 def _valid(name: str, v: Any, default: Any) -> Any:
     if name in ("save_to", "torrent_dir"):
-        return v.strip() if isinstance(v, str) else default
+        return normalize_folder(v) if isinstance(v, str) else default
     if name == "machine":
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
