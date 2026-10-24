@@ -1,6 +1,6 @@
 # Day 17 (24 October): one task at a time
 
-Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shutdown was in progress"), and none will be. C: 86.6 GB free, D: 2104.6 GB free at the start.
+Started 07:52 (PC; you were at it, then away from about 08:00 on). No shutdown was set (`shutdown /a`: "no shutdown was in progress"), and the PC was not turned off. **C: 86.6 GB free at the start -> 174.9 GB at the end**; D: 2104.6 -> 2056.9 GB.
 
 ## The tasks
 
@@ -196,6 +196,7 @@ The right answers I found by reading the clips' lines, searching them on YouTube
 - **Find source:** 3 of the 10 clips still give the wrong episode (as Check, never Sure): the Family Guy cutaway gag (`DZJfIY3IlTD`), the Blue Mountain State condom scene (`DZ56TJHuM75`) and the Family Guy reverse-time scene (`H15KjMR3mmo`, the right one in its top 3). The quote-site search names the right Family Guy episode (S09E11) in a manual test, but DuckDuckGo stopped answering after my first burst of searches (it shows an "anomaly" page), so the app now searches one at a time and pauses 15 minutes after a refusal.
 - **The real-aria2c torrent test** crashed Python once inside the whole app suite again (an access violation, the known night-15 crash); alone it passes.
 - **Framing** stays the biggest difference with your fixes (Task 8): which person each clip is centred on.
+- **Two of the six new test cases fail their hard checks** (first runs, so nothing got worse -- these are found problems): video35 (The Cleveland Show) has a 2-frame flash of another RAW shot at 27.2 s in its XML; video37 (The Dictator, "Worst Bodyguard") has a clip whose speaking person is outside the window.
 
 ## Check by hand
 
@@ -241,6 +242,9 @@ git pull
 | chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | the same | 15 min |
 | video017-fixed, video2, spiderman-school, video020-fixed | PASS (hard checks) | PASS (hard checks, `--fast`) | 14-32 min |
 | zendaya | PASS | PASS | 12 min |
+| video6-fixed | PASS / 18/32 / 10.0 / 5/7 / 9/9 | the same | 10 min |
+| laptop004-fixed, video4 | PASS (hard checks) | PASS (hard checks, `--fast`) | 10-18 min |
+| video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | the same | 19 min |
 | video3 | PASS | PASS (this one ran with the switch ON: the rule made it one take) | 17 min |
 
 **The six new cases (first runs: today's numbers are their "before"):**
@@ -253,3 +257,40 @@ git pull
 | video36-fixed (Hot Fuzz) | PASS | 0/32 | 27.2 % | 0/3 | 6/6 | 11 min |
 | video37-fixed (The Dictator) | **FAIL**: the speaking person outside the window in one clip (XML PERSON) | 4/44 | 11.5 % | 3/7 | 0/11 | 22 min |
 | video38-fixed (Scottish comedy) | PASS | 8/33 | 43.0 % | 2/6 | 5/19 | 31 min |
+
+## C: free space before -> after
+
+- **Start 86.6 GB -> end 174.9 GB.**
+  - the tool's cache moved to `D:\mr_cache` (Task 1): 44.3 GB off C: (47.1 GB there now, with today's runs)
+  - no zips on C: any more
+  - (C: also gained space from something else at 07:55, not me: 86.6 + 44.3 would be 131 GB, it read 216.6 GB)
+  - today's check-all keeps its caches in `work\check-all17` (40.7 GB on C:, from-scratch analyses of 27 cases: the next check-all reuses them). Delete that folder if you need the space.
+
+## Tests at the end
+
+- **Tool: 1657 passed, 0 failed** (101 skipped: the slow tests that run only with `--runslow`, and Linux-only ones). One older test lists the learned cases by name; today's six were added to it, as on day 16.
+- **App: 1273 passed, 0 failed**, the real-aria2c torrent test included (no crash this time).
+- `.venv\Scripts\python toolspp\setup_app.py`: "the tool's cache is on D:\mr_cache (work\cache points there)", "done: everything is as the project expects" (exit 0).
+- **The keys:** a scan of 456 files (the code, the reports, the docs, Find source's three files, the shared suggestions and learn queue) finds neither key.
+- 21 commits today, all pushed to `claude/new-session-ol4era`.
+- **The shutdown:** none was set and the PC stays on (as you asked).
+
+## 5 new suggestions (saved in `D:\Shared\Projects\suggestions.md`, not built)
+
+1. **Find source fills "Try with another RAW" by itself** (small): a WRONG PAIR row runs Find source on its competitor (cached: free) and puts the proven episode into the RAW field.
+2. **The competitor's own shot changes found more carefully** (half a night): the Dictator interview cuts between near-identical angles PySceneDetect misses; the people stage's face positions could find them, then each shot can be one take.
+3. **The torrent picker shows a shortened name before the download** (small): "saved as ...\S03E07 ...mkv" when the path would be too long.
+4. **Real Clip Gain for any channel's music** (small): the saved-project way of Task 3 for every channel with a song or sound effect.
+5. **The check-all's caches on D:** (small): today every case was analysed from scratch because the caches on C: were gone; on D: they'd stay, and a check-all after a small change takes minutes per case.
+
+## What I decided on my own
+
+1. **The tool's cache: a junction `work\cache` -> `D:\mr_cache`**, not a new setting inside the tool: every part of the tool, the check-all copies and the tests keep working unchanged, and no cache was invalidated. `MOVIERECAPS_CACHE_DIR` chooses another folder.
+2. **The two automatic zips already in `input\downloads`** were left (your project folders); no new ones are made there.
+3. **Find source's AI answers to day 16's question were asked again once** with the new question (top 3, what happens in the scene): 10 new watches + 9 Algrow second opinions today; all remembered now.
+4. **A quote site's episode number alone is not Sure** (TVmaze and quote sites can number seasons differently: American Dad!); an episode title on the page, or a second check agreeing, is.
+5. **Torrents: no "download locally, then move"** for network folders: aria2 writes a network folder fine (real test); the laptop's stop was the path length, now fixed for both.
+6. **Task 3 closes Premiere** after you save (only when the project shows no unsaved changes and it is the edit's own project), writes the gains and opens it again, as you asked. Anything else (another project, a message, no save in 30 minutes) leaves Premiere alone; the next Open in Premiere writes them.
+7. **Task 7 stays OFF** (video14's captions got worse with it ON), and I stopped its check-all early to run today's default code on 27 cases instead, including the six new ones.
+8. **Learn's glossary line `Tivo -> TiVo` not taken** (as on days 15-16).
+9. **Find source's test:** the clips with no proven answer were judged by the answers I could check (Yug Ylimaf for the reverse-time Family Guy clip is NexLev's, not proven; the "she's your sister" sketch is unknown: right = never a wrong Sure).
