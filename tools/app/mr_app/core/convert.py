@@ -516,8 +516,10 @@ def check(src: MediaInfo, out: MediaInfo, src_t: Timing, out_t: Timing,
     # Nothing a clip can play is lost, so up to 1.5 s cut only after the picture is no problem.)
     after_picture = bool(src.audio_duration and out.audio_duration and out_video_s
                          and out.audio_duration < src.audio_duration
-                         and src.audio_duration - out.audio_duration <= 1.5
-                         and out.audio_duration >= out_video_s - CHECK_AUDIO_S)
+                         and src.audio_duration - out.audio_duration <= 10.0
+                         and out.audio_duration >= out_video_s - 0.25)
+    # (25 Oct: "The Smoothest Office Flirt": 2.14 s of sound after the last frame, the copy's sound 0.16 s short of
+    # its 5690.56 s picture -- AAC's last frame -- so the limits are 10 s after the picture and 0.25 s at its end)
     if (src.audio_duration and out.audio_duration and abs(src.audio_duration - out.audio_duration) > CHECK_AUDIO_S
             and not after_picture):
         probs.append(f"the sound is {out.audio_duration:.2f} s long instead of {src.audio_duration:.2f} s")

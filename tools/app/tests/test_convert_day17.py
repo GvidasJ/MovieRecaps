@@ -1,5 +1,5 @@
 """Day 17, task 6: the Convert check's rule from 295a8d7 -- sound that ran past the picture's last frame may end with
-the picture in the copy (up to 1.5 s): OK; sound cut short INSIDE the picture: still a stop. Key & Peele S05E11 had
+the picture in the copy (up to 10 s after it; the copy's sound within 0.25 s of the picture's end): OK; sound cut short INSIDE the picture: still a stop. Key & Peele S05E11 had
 0.84 s of sound after its last frame (1277.48 s of sound, a 1276.65 s picture, the copy's sound 1276.64 s).
 
 Run: python -m pytest tools/app/tests/test_convert_day17.py"""
@@ -42,8 +42,13 @@ def test_sound_cut_inside_the_picture_is_still_a_stop():
     assert not ok2 and any("sound is" in p for p in probs2)
 
 
-def test_more_than_1_5_s_after_the_picture_is_still_said():
-    ok, _nums, probs = _check(1279.00, 1276.64)                       # 2.35 s gone: more than the rule allows
+def test_two_seconds_after_the_picture_is_ok():                       # 25 Oct: "The Smoothest Office Flirt"
+    ok, _nums, probs = _check(1279.00, 1276.50)                       # 2.5 s after the picture, the copy's sound 0.15 s
+    assert ok, probs                                                  # short of the picture's end (AAC's last frame)
+
+
+def test_more_than_10_s_after_the_picture_is_still_said():
+    ok, _nums, probs = _check(1290.00, 1276.64)                       # 13.4 s gone: more than the rule allows
     assert not ok and any("sound is" in p for p in probs)
 
 
