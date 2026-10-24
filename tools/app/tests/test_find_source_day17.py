@@ -189,3 +189,33 @@ def test_a_quote_site_with_the_exact_words_names_the_episode():
     pr2 = SP.prove(w, _services(None, None, FG_EPS, web=web2))
     assert pr2.sure and (pr2.season, pr2.episode) == (9, 11) and "getyarn.io" in pr2.how
     assert SP.QUOTE_RX.search("The Dictator (2012) Comedy clip with quote You mean your Porsche?").group(1) ==         "The Dictator"
+
+
+def test_the_web_search_is_polite_and_pauses_after_a_refusal(tmp_path, monkeypatch):
+    import io
+    import urllib.request
+    monkeypatch.setattr(SP, "_cache_path", lambda: tmp_path / "source_proof.json")
+    monkeypatch.setattr(SP, "WEB_GAP_S", 0.0)
+    monkeypatch.setitem(SP._web_state, "blocked_until", 0.0)                       # noqa: SLF001
+    calls = []
+    page = ['<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgetyarn.io%2Fx&rut=1">'
+            'YARN | So, technically</a> <a class="result__snippet" href="x">Family Guy (1999) - S09E11 Comedy clip '
+            'with quote</a>']
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        return R(page[0].encode())
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    got = SP.web_search("\"technically it's not prostitution\" Family Guy")
+    assert got and got[0]["url"] == "https://getyarn.io/x" and "S09E11" in got[0]["snippet"]
+    assert SP.web_search("\"technically it's not prostitution\" family guy") == got and len(calls) == 1   # cached
+    page[0] = "<html>... an anomaly in your traffic ...</html>"
+    assert SP.web_search("another line") == [] and len(calls) == 2
+    assert SP.web_search("a third line") == [] and len(calls) == 2           # paused: not asked again
