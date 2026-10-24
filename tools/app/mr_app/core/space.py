@@ -380,6 +380,16 @@ def _work_dir() -> Path:
     return paths.work_dir()
 
 
+def _cache_dir(work_dir: Path | None = None) -> Path:
+    """The tool's cache as it really is: work\\cache, or D:\\mr_cache when work\\cache is a junction to it (day 17,
+    core.cache_move) -- so its space is counted on D:, not C:."""
+    p = Path(work_dir or _work_dir()) / "cache"
+    try:
+        return Path(os.path.realpath(p)) if p.exists() else Path(work_dir or _work_dir())
+    except OSError:
+        return Path(work_dir or _work_dir())
+
+
 def media_parts(m: Media, folder: Path, who: str = "") -> list[Part]:
     """What a run makes from its RAW in ``folder``: the temporary analysis copy, V1's own copy (a remux or a CRF 17
     copy) and A1's stereo WAV (module docstring)."""
@@ -420,7 +430,7 @@ def run_parts(competitor: Path | None, raw: Path, run_dir: Path, work_dir: Path 
     if competitor is not None and Path(competitor).suffix.lower() not in SAFE:
         n = size(Path(competitor))
         parts.append(Part(run_dir, 2 * n, f"the competitor's converted copy (~{gb(2 * n)})"))
-    parts.append(Part(Path(work_dir or _work_dir()), cache_bytes(m, size(raw)),
+    parts.append(Part(_cache_dir(work_dir), cache_bytes(m, size(raw)),
                       "the tool's saved analysis of the RAW (work\\cache)"))
     return parts
 
@@ -607,11 +617,11 @@ def new_video_problem(links: Sequence[Any], raw_file: Path | None, root: Path, c
         dur = max([float(getattr(li, "duration", 0) or 0) for li in links if li is not None] or [0.0])
         if m is not None:
             parts += media_parts(m, root, "the tool's")
-            parts.append(Part(Path(work_dir or _work_dir()), cache_bytes(m, m.size),
+            parts.append(Part(_cache_dir(work_dir), cache_bytes(m, m.size),
                               "the tool's saved analysis (work\\cache)"))
         else:
             fake = Media("", 0, dur, 1920, 1080, 25.0) if dur else None
-            parts.append(Part(Path(work_dir or _work_dir()), cache_bytes(fake, size(raw_file) if raw_file else 0),
+            parts.append(Part(_cache_dir(work_dir), cache_bytes(fake, size(raw_file) if raw_file else 0),
                               "the tool's saved analysis (work\\cache)"))
         parts.append(Part(root, RUN_FILES, "the edit's own files"))
     probs = shortfalls(per_drive([("", parts)]), action="free some space (Board -> Clean up) and press Try again",

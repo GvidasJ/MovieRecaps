@@ -16,6 +16,8 @@ folders inside**: ``edit\\`` (1_edit.xml, the captions, extras\\media -- the RAW
 * A file the XML plays from OUTSIDE the project folder: put in ``outside\\`` when it is small (under BIG_BYTES), else
   left out and said (on the shared drive the edit finds it there; elsewhere: send it yourself).
 * The zip is not made when it would leave its drive under MIN_FREE free (the zip is about as big as the folder).
+* Day 17: the zip is made only for a project on ANOTHER drive than Windows' own (D:\\Shared\\Projects, a network
+  folder), never in input\\downloads on C: (5 automatic zips there filled 15.7 GB of C: in 1.5 hours).
 
 Nothing is ever deleted or moved: the zip is written next to them (a temporary file renamed into place).
 """
@@ -210,7 +212,7 @@ def needs_zip(project: Path, run_dir: Path) -> bool:
     """No zip yet, a zip of the older kind (night 15: only the edit files), or a file changed after it was made
     (project.json alone does not count: the board changes it)."""
     z = zip_path(project)
-    if not (Path(run_dir) / "1_edit.xml").is_file():
+    if not (Path(run_dir) / "1_edit.xml").is_file() or not drive_ok(project):
         return False
     if not z.is_file() or not _is_v2(z):
         return True
@@ -225,6 +227,18 @@ def needs_zip(project: Path, run_dir: Path) -> bool:
         except OSError:
             continue
     return False
+
+
+def drive_ok(project: Path) -> bool:
+    """Day 17: a zip only for a project NOT on Windows' own drive (C:): D:\\Shared\\Projects, another drive or a
+    \\\\server\\share. (MOVIERECAPS_ZIP_ANY_DRIVE=1 lets the app's tests zip their temp folders on C:.)"""
+    if os.environ.get("MOVIERECAPS_ZIP_ANY_DRIVE") == "1":
+        return True
+    s = os.path.abspath(str(project)).replace("/", "\\")
+    if s.startswith("\\\\"):
+        return True
+    drive = os.path.splitdrive(s)[0].upper()
+    return bool(drive) and drive != (os.environ.get("SystemDrive") or "C:").upper()
 
 
 def _free_after(folder: Path, need: int) -> int:
@@ -249,7 +263,7 @@ def make(project: Path, run_dir: Path | None = None) -> Path | None:
     try:
         project = Path(project)
         run_dir = Path(run_dir) if run_dir else project / "edit"
-        if not (run_dir / "1_edit.xml").is_file():
+        if not (run_dir / "1_edit.xml").is_file() or not drive_ok(project):
             return None
         put, left = members(project, run_dir)
         z = zip_path(project)

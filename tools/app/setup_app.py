@@ -66,6 +66,11 @@ def main(argv: list | None = None) -> int:
         except (OSError, subprocess.SubprocessError):
             pass
         print(f"the shortcut is on the desktop ({p}) -- double-click MovieRecaps")
+        from mr_app.core import cache_move   # day 17: the tool's cache on D: (work\cache a junction to D:\mr_cache)
+        try:
+            cache_move.move()
+        except Exception as e:  # noqa: BLE001 - never stops the setup; the cache stays where it is
+            print(f"note: the tool's cache was not moved to D: ({e})")
     after = V.check(wants=wants) if (jobs or "deno" in keys or "aria2c" in keys) else problems
     for p in after:
         if p.closed and from_app:

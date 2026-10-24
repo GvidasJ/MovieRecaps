@@ -27,6 +27,7 @@ def test_same_drive_needs_only_the_run_files(tmp_path):
 def test_another_drive_needs_the_copies_and_a_full_drive_is_named(tmp_path, monkeypatch):
     comp, raw = _video(tmp_path / "in" / "c.mp4", 1000), _video(tmp_path / "in" / "raw.mp4", 5 * space.GB // 1000)
     monkeypatch.setattr(space, "same_drive", lambda a, b: False)
+    monkeypatch.setattr(space, "_cache_dir", lambda w=None: tmp_path / "work")   # day 17: this PC's cache is on D:
     n, why = space.need_bytes(comp, raw, tmp_path / "out" / "video1")
     assert n == space.RUN_FILES + space.RESERVE + 1000 + raw.stat().st_size
     assert "a copy of the RAW" in why and "another drive" in why
