@@ -46,10 +46,11 @@ def _watch(d: dict) -> A.Watch:
     return A.parse_answer(json.dumps(d), "https://www.instagram.com/reel/Ddm3LHisOm6/", "Algrow")
 
 
-def _services(search=None, tr=None, eps=None, log=None):
+def _services(search=None, tr=None, eps=None, log=None, web=None):
     log = log if log is not None else []
     return SP.Services(search=lambda q: log.append(q) or (search(q) if search else []),
-                       transcript=lambda v: (tr or {}).get(v, ""), episodes=lambda s: eps or {})
+                       transcript=lambda v: (tr or {}).get(v, ""), episodes=lambda s: eps or {},
+                       web=lambda q: (web(q) if web else []))
 
 
 def test_a_titled_clip_with_the_same_words_proves_the_episode_the_ai_got_wrong():
@@ -153,3 +154,38 @@ def test_the_newer_prompt_asks_once_more_and_keeps_the_older_answer_when_that_fa
     assert new.version == A.PROMPT_VERSION and new.guesses[0]["episode"] == 11
     assert A.watch(link, nexlev=lambda u: pytest.fail("asked twice")).version == A.PROMPT_VERSION
     assert "guesses" in A.PROMPT and "top 3" in A.PROMPT
+
+
+FG = {"title": "Family Guy", "kind": "show", "season": 16, "episode": 9, "episode_title": "Don't Be a Dickens at "
+      "Christmas", "sure": 100, "why": "a cutaway gag",
+      "spoken_lines": ["Both of you are under arrest for prostitution.", "You paid her to have sex.",
+                       "No, I paid her to have sex and we're filming it. So technically it's not prostitution, "
+                       "it's a porno."]}
+FG_EPS = {"name": "Family Guy", "eps": [
+    {"season": 9, "number": 11, "name": "German Guy", "summary": "Chris meets a puppeteer named Franz."},
+    {"season": 16, "number": 9, "name": "Don't Be a Dickens at Christmas", "summary": "Peter fills in as Santa."},
+    {"season": 3, "number": 2, "name": "Mr. Griffin Goes to Washington", "summary": "Peter lobbies Washington."}]}
+
+
+def test_a_quote_site_with_the_exact_words_names_the_episode():
+    """The real day-17 case: YARN's snippet "Family Guy (1999) - S09E11 Comedy clip with quote So, technically it's
+    not prostitution, it's a porno." -- the AI's S16E09 was wrong."""
+    w = A.parse_answer(json.dumps(FG), "https://www.instagram.com/reel/DZJfIY3IlTD/", "NexLev")
+
+    def web(q):
+        if "porno" not in q:
+            return []
+        return [{"title": "YARN | So, technically it's not prostitution, it's a porno. | Family ...",
+                 "url": "https://getyarn.io/yarn-clip/a571", "snippet": "Family Guy (1999) - S09E11 Comedy clip with "
+                 "quote So, technically it's not prostitution, it's a porno. Yarn is the best search for video clips"}]
+    pr = SP.prove(w, _services(None, None, FG_EPS, web=web))
+    assert (pr.season, pr.episode, pr.episode_title) == (9, 11, "German Guy")
+    assert not pr.sure                       # the number alone: no other check agrees (another ordering?)
+    assert "getyarn.io has the clip's exact words" in pr.others[0]["why"]
+    # with a second line's quote (or the AI, a titled clip, a top summary) agreeing: Sure
+    def web2(q):                             # both searched lines found on the quote site
+        return [dict(x, snippet=x["snippet"] + " Both of you are under arrest for prostitution.")
+                for x in web("porno")]
+    pr2 = SP.prove(w, _services(None, None, FG_EPS, web=web2))
+    assert pr2.sure and (pr2.season, pr2.episode) == (9, 11) and "getyarn.io" in pr2.how
+    assert SP.QUOTE_RX.search("The Dictator (2012) Comedy clip with quote You mean your Porsche?").group(1) ==         "The Dictator"

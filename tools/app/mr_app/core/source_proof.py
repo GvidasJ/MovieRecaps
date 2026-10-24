@@ -187,11 +187,58 @@ def episodes(show: str) -> dict:
     return _remember("tvm:" + norm(show), ask) or {}
 
 
+WEB_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/130.0 Safari/537.36"}
+# a quote site's result: "Family Guy (1999) - S09E11 Comedy clip with quote ..." (YARN), "The Dictator (2012) ..."
+QUOTE_RX = re.compile(r"([A-Z0-9][^|\n]{1,80}?) \((\d{4})\)(?: - S(\d{1,2})E(\d{1,3}))?\s+(?:\w+ )?clip with quote")
+
+
+WEB_GAP_S = 3.0                         # one web search at a time, this far apart (5 clips at once: a burst of 20
+WEB_PAUSE_S = 900.0                     # searches got DuckDuckGo's "anomaly" page) -- and none for this long after it
+_web_lock = threading.Lock()
+_web_state = {"last": 0.0, "blocked_until": 0.0}
+
+
+def web_search(query: str) -> list[dict]:
+    """The web (DuckDuckGo's plain HTML page): [{title, url, snippet}] of the first results; [] when it can't be
+    read. Cached by the query; polite (WEB_GAP_S between searches, none for WEB_PAUSE_S after a refusal)."""
+    def ask() -> list[dict]:
+        import html as H
+        import time as T
+        import urllib.request
+        with _web_lock:
+            now = T.monotonic()
+            if now < _web_state["blocked_until"]:
+                return []
+            T.sleep(max(0.0, _web_state["last"] + WEB_GAP_S - now))
+            try:
+                req = urllib.request.Request("https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query),
+                                             headers=WEB_UA)
+                with urllib.request.urlopen(req, timeout=15) as r:    # noqa: S310 - a fixed public https host
+                    t = r.read().decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001 - no web: no evidence
+                return []
+            finally:
+                _web_state["last"] = T.monotonic()
+            if "result__a" not in t and "anomaly" in t.lower():
+                _web_state["blocked_until"] = T.monotonic() + WEB_PAUSE_S
+                return []
+        out = []
+        for m in re.finditer(r'class="result__a" href="([^"]+)">(.*?)</a>.*?class="result__snippet"[^>]*>(.*?)</a>',
+                             t, re.S):
+            url = urllib.parse.unquote(re.sub(r"^.*?uddg=", "", m.group(1)).split("&rut=")[0].split("&amp;rut=")[0])
+            out.append({"title": H.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip(), "url": url,
+                        "snippet": H.unescape(re.sub(r"<[^>]+>", "", m.group(3))).strip()[:400]})
+        return out[:10]
+    return _remember("web:" + query.lower().strip(), ask) or []
+
+
 @dataclass
 class Services:
     search: Callable[[str], list] = yt_search
     transcript: Callable[[str], str] = transcript
     episodes: Callable[[str], dict] = episodes
+    web: Callable[[str], list] = web_search
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -321,6 +368,29 @@ def prove(w: Any, services: Services | None = None) -> Proof:
             if hits >= (2 if len([x for x in lines if len(words(x)) >= 3]) >= 3 else 1):
                 scene.append(dict(r, hits=hits))
     pr.scene_titles = [r["title"] for r in scene]
+    # 1b. the web: quote sites (YARN: "Family Guy (1999) - S09E11 ... clip with quote") with the clip's exact words
+    quotes: list[dict] = []
+    for ln in distinctive(lines, 2):
+        part = " ".join(ln.split()[-8:]).strip(" .,!?")   # the line's end: one word heard differently elsewhere
+        q = f"\"{part}\" {show}".strip()                    # in a long line would spoil an exact-phrase search
+        pr.tried.append(f"searched the web for {q[:80]}")
+        for r in (sv.web(q) or [])[:8]:
+            text = f"{r.get('title', '')} {r.get('snippet', '')}"
+            if line_hits([ln], text) < 1:
+                continue                            # not the clip's own words
+            m = QUOTE_RX.search(r.get("snippet", "")) or QUOTE_RX.search(r.get("title", ""))
+            if m:
+                quotes.append({"name": m.group(1).strip(), "year": int(m.group(2)),
+                               "season": int(m.group(3)) if m.group(3) else None,
+                               "episode": int(m.group(4)) if m.group(4) else None, "line": ln,
+                               "site": urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", "")})
+    if not show and quotes:                         # no title from the AI: the quote site names it
+        qt = quotes[0]
+        show = qt["name"]
+        guesses = [{"title": qt["name"], "year": qt["year"], "kind": "show" if qt["season"] else "movie",
+                    "season": qt["season"], "episode": qt["episode"], "episode_title": "",
+                    "why": f"{qt['site']} has the clip's exact words"}]
+        pr.tried.append(f"{qt['site']} names {qt['name']} for the clip's exact words")
     if looked:
         pr.tried.append(f"read {len(looked)} transcripts ({len(scene)} with the clip's own words)")
     if not show:
@@ -337,9 +407,15 @@ def prove(w: Any, services: Services | None = None) -> Proof:
     if not is_show:                       # a film: the scene's clips naming it are the proof
         g = guesses[0]
         pr.name, pr.kind = g["title"], "movie"
+        film_q = [q for q in quotes if norm(q["name"]) and (norm(q["name"]) in norm(g["title"]) or
+                                                             norm(g["title"]) in norm(q["name"]))]
         if scene_named:
             pr.sure = pr.titled = True
             pr.how = f"a YouTube clip with the clip's own words is titled \"{scene_named[0]['title'][:80]}\""
+        elif film_q:
+            pr.sure = pr.titled = True
+            pr.how = (f"{film_q[0]['site']} has the clip's exact words (\"{film_q[0]['line'][:50]}\") in "
+                      f"{film_q[0]['name']} ({film_q[0]['year']})")
         elif in_titles:
             pr.titled = True
             pr.how = f"YouTube clips of these lines are titled with it (\"{in_titles[0]['title'][:80]}\")"
@@ -397,6 +473,15 @@ def prove(w: Any, services: Services | None = None) -> Proof:
         title_eps.append(by_key[k])
         add(by_key[k], 1.0 + 0.8 * (n - 1), f"YouTube clips of {n} of its lines are titled \"{named_by[k][:70]}\""
             if n > 1 else f"a YouTube clip of these lines is titled \"{named_by[k][:70]}\"")
+    quote_eps: dict[tuple, dict] = {}            # 1b's quote sites naming an episode of this show
+    for q in quotes:
+        if q["season"] and q["episode"] and norm(q["name"]) and (norm(q["name"]) in norm(pr.name) or
+                                                                  norm(pr.name) in norm(q["name"])):
+            e = by_key.get((q["season"], q["episode"]))
+            if e is not None and (e["season"], e["number"]) not in quote_eps:
+                quote_eps[(e["season"], e["number"])] = q
+                add(e, 2.5, f"{q['site']} has the clip's exact words (\"{q['line'][:40]}\") in "
+                            f"S{q['season']:02d}E{q['episode']:02d}")
     ai_eps = []
     for i, g in enumerate(guesses[:3]):
         e = None
@@ -430,6 +515,14 @@ def prove(w: Any, services: Services | None = None) -> Proof:
     if any(e is best for e, _r in scene_eps):
         r = next(r for e, r in scene_eps if e is best)
         pr.sure, pr.how = True, f"a YouTube clip with the clip's own words is titled \"{r['title'][:80]}\""
+    elif top[0] in quote_eps and (any(e is best for e in ai_eps) or any(e is best for e in title_eps)
+                                  or any(e is best and sc0 > 0 for sc0, e in ranking[:5])
+                                  or len({q["line"] for q in quotes if (q["season"], q["episode"]) == top[0]}) >= 2):
+        # (a quote site's number alone could follow another ordering than TVmaze's -- American Dad!: so another
+        # check must agree: the AI's guess, a titled clip, a top-5 summary, or a second line's quote)
+        q = quote_eps[top[0]]
+        pr.sure, pr.how = True, (f"{q['site']} has the clip's exact words (\"{q['line'][:50]}\") in "
+                                 f"S{top[0][0]:02d}E{top[0][1]:02d}")
     elif lines_naming.get(top[0], 0) >= 2:
         pr.sure, pr.how = True, (f"the top YouTube clips of {lines_naming[top[0]]} of its lines are titled "
                                  f"\"{named_by[top[0]][:80]}\"")
