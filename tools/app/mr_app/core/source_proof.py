@@ -370,6 +370,7 @@ def prove(w: Any, services: Services | None = None) -> Proof:
     pr.scene_titles = [r["title"] for r in scene]
     # 1b. the web: quote sites (YARN: "Family Guy (1999) - S09E11 ... clip with quote") with the clip's exact words
     quotes: list[dict] = []
+    web_hits: list[dict] = []                       # every web result with the clip's exact words
     for ln in distinctive(lines, 2):
         part = " ".join(ln.split()[-8:]).strip(" .,!?")   # the line's end: one word heard differently elsewhere
         q = f"\"{part}\" {show}".strip()                    # in a long line would spoil an exact-phrase search
@@ -378,6 +379,8 @@ def prove(w: Any, services: Services | None = None) -> Proof:
             text = f"{r.get('title', '')} {r.get('snippet', '')}"
             if line_hits([ln], text) < 1:
                 continue                            # not the clip's own words
+            web_hits.append({"text": text, "line": ln, "title": r.get("title", ""),
+                             "site": urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", "")})
             m = QUOTE_RX.search(r.get("snippet", "")) or QUOTE_RX.search(r.get("title", ""))
             if m:
                 quotes.append({"name": m.group(1).strip(), "year": int(m.group(2)),
@@ -482,6 +485,15 @@ def prove(w: Any, services: Services | None = None) -> Proof:
                 quote_eps[(e["season"], e["number"])] = q
                 add(e, 2.5, f"{q['site']} has the clip's exact words (\"{q['line'][:40]}\") in "
                             f"S{q['season']:02d}E{q['episode']:02d}")
+    quote_named: dict[tuple, dict] = {}          # a quote page with the clip's words whose title NAMES the episode
+    for h in web_hits:                           # (IMDb: '"Everybody Hates Chris" Everybody Hates Houseguests (TV
+        if norm(pr.name) not in norm(h["title"]):  #  Episode 2007)' -- its title, no numbering to disagree on)
+            continue
+        e = episode_named(h["title"], eps)
+        if e is not None and len(norm(e["name"])) >= 5 and norm(e["name"]) in norm(h["title"]) and \
+                (e["season"], e["number"]) not in quote_named:
+            quote_named[(e["season"], e["number"])] = h
+            add(e, 3.0, f"{h['site']} has the clip's exact words in \"{e['name']}\"")
     ai_eps = []
     for i, g in enumerate(guesses[:3]):
         e = None
@@ -515,6 +527,10 @@ def prove(w: Any, services: Services | None = None) -> Proof:
     if any(e is best for e, _r in scene_eps):
         r = next(r for e, r in scene_eps if e is best)
         pr.sure, pr.how = True, f"a YouTube clip with the clip's own words is titled \"{r['title'][:80]}\""
+    elif top[0] in quote_named:
+        h = quote_named[top[0]]
+        pr.sure, pr.how = True, (f"{h['site']} has the clip's exact words (\"{h['line'][:50]}\") on a page titled "
+                                 f"\"{h['title'][:80]}\"")
     elif top[0] in quote_eps and (any(e is best for e in ai_eps) or any(e is best for e in title_eps)
                                   or any(e is best and sc0 > 0 for sc0, e in ranking[:5])
                                   or len({q["line"] for q in quotes if (q["season"], q["episode"]) == top[0]}) >= 2):

@@ -219,3 +219,16 @@ def test_the_web_search_is_polite_and_pauses_after_a_refusal(tmp_path, monkeypat
     page[0] = "<html>... an anomaly in your traffic ...</html>"
     assert SP.web_search("another line") == [] and len(calls) == 2
     assert SP.web_search("a third line") == [] and len(calls) == 2           # paused: not asked again
+
+
+def test_a_quote_page_titled_with_the_episode_proves_it():
+    """The real day-17 result: IMDb's quotes page '"Everybody Hates Chris" Everybody Hates Houseguests (TV Episode
+    2007) - Quotes' with the clip's words -- the episode by its title (no numbering to disagree on)."""
+    w = _watch(EHC)
+
+    def web(q):
+        return [{"title": "\"Everybody Hates Chris\" Everybody Hates Houseguests (TV Episode 2007) - Quotes - IMDb",
+                 "url": "https://www.imdb.com/title/tt1/quotes/", "snippet": "Chris: It's because he's staying at my "
+                 "house for the week. Ms. Morello: Oh my God, he's drunk! Did he have a 40 for breakfast?"}]
+    pr = SP.prove(w, _services(None, None, EPS, web=web))
+    assert pr.sure and (pr.season, pr.episode) == (3, 7) and "imdb.com" in pr.how
