@@ -511,7 +511,15 @@ def check(src: MediaInfo, out: MediaInfo, src_t: Timing, out_t: Timing,
         probs.append("the sound is missing")
     elif len(out.audio) < len(src.audio):
         probs.append(f"{len(out.audio)} sound tracks instead of {len(src.audio)}")
-    if src.audio_duration and out.audio_duration and abs(src.audio_duration - out.audio_duration) > CHECK_AUDIO_S:
+    # (day 16 follow-up: sound that ran past the picture's last frame may end with the picture in the copy -- Key &
+    # Peele S05E11: 0.84 s of sound after the last frame, the AAC copy ending at 1276.64 s with its 1276.65 s picture.
+    # Nothing a clip can play is lost, so up to 1.5 s cut only after the picture is no problem.)
+    after_picture = bool(src.audio_duration and out.audio_duration and out_video_s
+                         and out.audio_duration < src.audio_duration
+                         and src.audio_duration - out.audio_duration <= 1.5
+                         and out.audio_duration >= out_video_s - CHECK_AUDIO_S)
+    if (src.audio_duration and out.audio_duration and abs(src.audio_duration - out.audio_duration) > CHECK_AUDIO_S
+            and not after_picture):
         probs.append(f"the sound is {out.audio_duration:.2f} s long instead of {src.audio_duration:.2f} s")
     if src.display_size != out.display_size:
         probs.append(f"the picture is {checks['size'][1]} instead of {checks['size'][0]}")
