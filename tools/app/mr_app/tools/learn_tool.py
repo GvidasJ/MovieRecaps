@@ -100,8 +100,7 @@ class LearnPage(QWidget):
         self.b_prompt.clicked.connect(self.copy_prompt)
         lay.addWidget(W.SectionHeader("Learn from your fix", [self.b_prompt]))
         # day 12: waiting for your fix / problems / suggestions
-        self.columns = LB.LearnColumns()
-        lay.addWidget(self.columns)
+        self.columns = LB.LearnColumns()      # (added under the drop zone and its check card: you asked, 24 Oct)
         self._wait: dict = {}                 # waiting card id -> waiting.Card
         self._probs: dict = {}                # problem id -> problems.Problem
         self._sugs: dict = {}                 # suggestion title -> suggestions.Suggestion
@@ -162,6 +161,8 @@ class LearnPage(QWidget):
         self.bar = W.GlideBar(3)
         self.check.lay.addWidget(self.bar)
         lay.addWidget(self.check)
+        # the three columns go under the drop zone and its check card (24 Oct)
+        lay.addWidget(self.columns)
         # the queue, the rules, the wishes
         self.q_count = W.label("", "Small")
         lay.addWidget(W.SectionHeader("Learn queue", [self.q_count]))
