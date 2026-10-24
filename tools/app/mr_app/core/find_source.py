@@ -18,6 +18,7 @@ yet: no service matches them without a login (said in the reason when nothing el
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -372,6 +373,7 @@ class Answer:
     raw_file: str = ""                          # your RAW it was found in
     ai: dict = field(default_factory=dict)      # day 16: what the AI that watched it said (core.ai_watch: by, guess,
     #                                             sure, lines, why ...)
+    others: list = field(default_factory=list)  # day 17: the top 3 when not sure: [{text, season, episode, why}]
 
     def comes_from(self) -> str:
         return self.title.text() if self.title is not None else "—"
@@ -382,6 +384,9 @@ class Answer:
             return f"{k}. {self.clip.name} — not found ({self.reason})"
         word = "sure" if self.verdict == SURE else "check"
         extra = f" (or {self.second.text()})" if self.second is not None and self.verdict == CHECK else ""
+        others = [o.get("text") for o in (self.others or [])[1:3] if isinstance(o, dict) and o.get("text")]
+        if others and self.verdict == CHECK:                 # day 17: the top 3
+            extra = " (or " + "; or ".join(others) + ")"
         return f"{k}. {self.clip.name} — {self.comes_from()}{extra} — {word} {round(100 * self.sure)} %"
 
     def to_dict(self) -> dict:
@@ -393,7 +398,7 @@ class Answer:
         s = d.get("second")
         return cls(Clip(**d["clip"]), Title(**t) if t else None, d.get("verdict", NOT_FOUND), float(d.get("sure", 0)),
                    d.get("how", ""), Title(**s) if s else None, d.get("reason", ""), d.get("raw_file", ""),
-                   dict(d.get("ai") or {}))
+                   dict(d.get("ai") or {}), list(d.get("others") or []))
 
 
 def _sound_found(clip_file: Path, raw_sound: str) -> float | None:
@@ -412,6 +417,45 @@ def _sound_found(clip_file: Path, raw_sound: str) -> float | None:
 
 USE_AI = True                                   # day 16: the AI watches the clip first (core.ai_watch; credits)
 AI_SURE = 85                                    # the AI this sure of a title the public lists confirm: Sure
+
+
+def _proof(w: Any, prover: Callable[..., Any] | None, say: Callable[[str], None], link: str = "",
+           second: Callable[..., Any] | None = None) -> tuple[Any, str]:
+    """Day 17: (core.source_proof's evidence for the watched clip, words for the row's "how" about a second
+    opinion). Without proof, Algrow's AI watches it too (``second``; once: cached) and its guesses join NexLev's.
+    (None, "") in the app's tests (MOVIERECAPS_NO_AI: no network) unless they pass fakes."""
+    if prover is None and os.environ.get("MOVIERECAPS_NO_AI"):
+        return None, ""
+    try:
+        if prover is None:
+            from .source_proof import prove as prover
+        say("searching for its lines and checking the episode summaries")
+        pr = prover(w)
+    except Exception:  # noqa: BLE001 - no proof: as before
+        return None, ""
+    if (pr is not None and pr.sure) or not link or (second is None and os.environ.get("MOVIERECAPS_NO_AI")):
+        return pr, ""
+    try:
+        if second is None:
+            from .ai_watch import second_opinion as second
+        w2 = second(link, w, say=say)
+    except Exception:  # noqa: BLE001
+        w2 = None
+    if w2 is None or not getattr(w2, "title", ""):
+        return pr, ""
+    agree = norm(w2.title) == norm(w.title)
+    wm = copy.copy(w)
+    g2 = [{"title": w2.title, "year": w2.year, "kind": w2.kind, "season": w2.season, "episode": w2.episode,
+           "episode_title": w2.episode_title, "why": w2.why}] + list(getattr(w2, "guesses", None) or [])
+    mine = list(getattr(w, "guesses", None) or [])
+    wm.guesses = (mine + g2)[:6] if agree else mine
+    wm.lines = list(w.lines) + [x for x in (w2.lines or []) if x not in w.lines]
+    try:
+        pr2 = prover(wm)
+    except Exception:  # noqa: BLE001
+        pr2 = None
+    said = f"; Algrow's AI says {w2.guess()} too" if agree else f"; Algrow's AI says {w2.guess()} instead"
+    return (pr2 if pr2 is not None else pr), said
 
 
 def link_of(clip: Clip) -> str:
@@ -453,7 +497,8 @@ def checked(guess: Title, listed: Title | None) -> str:
 
 def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None,
          cancel: threading.Event | None = None, say: Callable[[str], None] | None = None,
-         watcher: Callable[..., Any] | None = None) -> Answer:
+         watcher: Callable[..., Any] | None = None, prover: Callable[..., Any] | None = None,
+         second: Callable[..., Any] | None = None) -> Answer:
     """Which movie / episode one clip comes from (module docstring). Never raises: a clip that can not be read is NOT
     FOUND with why. Day 16: first the AI watches it (``watcher``: core.ai_watch.watch -- tests put a fake here)."""
     say = say or (lambda _t: None)
@@ -467,7 +512,7 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
                       reason=f"the link could not be read: {msg}"[:200])
     lib = library() if lib is None else lib
     ans = Answer(clip)
-    w, guess = None, None
+    w, guess, hint = None, None, ""
     link = link_of(clip)
     if ((USE_AI and not os.environ.get("MOVIERECAPS_NO_AI")) or watcher is not None) and link:
         try:
@@ -538,17 +583,44 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
                                                         guess.episode, (listed.episode_title or guess.episode_title),
                                                         guess.kind)
         said = f"{w.by}'s AI watched it (picture and sound; it says {w.sure} % sure)"
-        if ok and w.sure >= AI_SURE and not any(it in ruled_out for it in mine):
+        not_mine = any(it in ruled_out for it in mine)
+        # day 17: the proof -- the clip's lines searched for (YouTube clips titled with it, their transcripts) and,
+        # for a series, every episode summary compared with the clip (core.source_proof); the AI alone is never Sure
+        # of an episode (its number was wrong on 6 of 7 real clips)
+        pr, said2 = _proof(w, prover, say, link, second)
+        said += said2
+        if pr is not None and (pr.kind == "episode" or (pr.kind == "show" and guess.kind != "movie")):
+            if pr.season and pr.episode:
+                ans.title = Title(pr.name or guess.name, guess.year, int(pr.season), int(pr.episode),
+                                  pr.episode_title, "episode")
+            ans.others = list(pr.others)
+            if pr.sure and not not_mine:
+                ans.verdict, ans.sure, ans.how = SURE, 0.95, f"{said}; proven: {pr.how}"
+            else:
+                ans.verdict, ans.sure = CHECK, min(0.8, max(0.3, w.sure / 100.0 * 0.8))
+                ans.how = f"{said} -- " + ("its sound is not in your RAW of it" if not_mine else
+                                           f"not proven: {pr.how}" if pr.how else "only the AI's guess")
+        elif ok and w.sure >= AI_SURE and not not_mine and guess.kind != "episode" and (
+                pr is None or pr.sure or pr.titled):
             ans.verdict, ans.sure = SURE, min(0.95, w.sure / 100.0)
-            ans.how = f"{said}; checked: {ok}"
+            ans.how = f"{said}; checked: {ok}" + (f"; {pr.how}" if pr is not None and pr.how else "")
         else:
             ans.verdict, ans.sure = CHECK, min(0.8, max(0.3, w.sure / 100.0 * 0.8))
-            why = ("its sound is not in your RAW of it" if any(it in ruled_out for it in mine) else
-                   "the public lists don't confirm it" if not ok else f"the AI is only {w.sure} % sure")
+            why = ("its sound is not in your RAW of it" if not_mine else
+                   "the public lists don't confirm it" if not ok else f"the AI is only {w.sure} % sure"
+                   if w.sure < AI_SURE else "no YouTube clip of these lines names it")
             ans.how = f"{said} -- only the AI's guess: {why}"
+            if pr is not None:
+                ans.others = list(pr.others)
         if mine:
             ans.raw_file = mine[0].file
         found = True
+    elif not found and w is not None and w.by and w.lines:
+        pr, _said = _proof(w, prover, say)        # no title from the AI: a clip of the very scene may name it
+        if pr is not None and pr.scene_titles:
+            hint = f"; a YouTube clip with the same words is titled \"{pr.scene_titles[0][:90]}\" -- look there"
+        elif pr is not None and pr.tried:
+            hint = "; tried: " + "; ".join(pr.tried[:3])
     if not found and picks:
         best = picks[0]
         out = [it for it in ruled_out if it in picks]
@@ -586,6 +658,7 @@ def find(source: str, lib: list[LibItem] | None = None, work: Path | None = None
             ans.reason += f"; the AI could not watch it ({w.error[:160]})"
         elif not link:
             ans.reason += " -- a file with no public link: the AI can't watch it"
+        ans.reason += hint
     return ans
 
 

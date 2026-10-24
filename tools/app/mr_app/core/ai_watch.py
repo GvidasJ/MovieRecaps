@@ -42,11 +42,17 @@ PROMPT = (
     '"actors": ["actors you recognise"], "characters": ["character names said or shown"], '
     '"setting": "where it happens, in a few words", "title": "the film or TV show this clip is cut from", '
     '"year": 2012, "kind": "movie" or "show", "season": null, "episode": null, "episode_title": "", '
-    '"sure": 0, "why": "what makes you think it is that one"}\n'
-    "Rules: the title is the original film or TV show the scene comes from (not the channel or the account). For a TV "
-    "show give the season and episode numbers and the episode's title when you know them. \"sure\" is 0-100: how "
-    "sure you are of the title (and of the episode, for a show). When you do not know, give \"title\": \"\" and "
-    "\"sure\": 0 -- never guess wildly.")
+    '"sure": 0, "why": "what makes you think it is that one", '
+    '"guesses": [{"title": "", "year": null, "kind": "movie or show", "season": null, "episode": null, '
+    '"episode_title": "", "why": "what in the clip fits this one"}]}\n'
+    "Rules: write EVERY spoken line word for word (they are searched for). The title is the original film or TV show "
+    "the scene comes from (not the channel or the account). For a TV show give the season and episode numbers and "
+    "the episode's title when you know them, and say in \"why\" what happens in the scene (it is compared with the "
+    "episode summaries). \"guesses\": your top 3 guesses, the best first (for a show: three episodes; the episode "
+    "numbers are often wrong, so give the ones whose story fits). \"sure\" is 0-100: how sure you are of the title "
+    "(and of the episode, for a show). When you do not know, give \"title\": \"\" and \"sure\": 0 -- never guess "
+    "wildly.")
+PROMPT_VERSION = 2                       # day 17: + the top 3 guesses; answers to the older prompt stay usable
 
 _lock = threading.Lock()
 
@@ -190,6 +196,8 @@ class Watch:
     setting: str = ""
     error: str = ""                      # why nothing was watched (plain words, no key)
     at: str = ""
+    guesses: list = field(default_factory=list)     # day 17: the top 3 [{title, year, kind, season, episode, ...}]
+    version: int = 1                     # the prompt it answered (PROMPT_VERSION)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -252,6 +260,14 @@ def parse_answer(text: str, link: str, by: str) -> Watch:
     w.actors = [str(x) for x in d.get("actors") or [] if str(x).strip()][:12]
     w.characters = [str(x) for x in d.get("characters") or [] if str(x).strip()][:12]
     w.setting = str(d.get("setting") or "")[:200]
+    for g in d.get("guesses") or []:
+        if isinstance(g, dict) and str(g.get("title") or "").strip():
+            w.guesses.append({"title": str(g["title"]).strip(), "year": _int(g.get("year")),
+                              "kind": "show" if str(g.get("kind") or "").lower().startswith(("show", "tv", "series"))
+                              else "movie", "season": _int(g.get("season")), "episode": _int(g.get("episode")),
+                              "episode_title": str(g.get("episode_title") or "").strip(),
+                              "why": str(g.get("why") or "")[:200]})
+    w.guesses = w.guesses[:3]
     return w
 
 
@@ -325,9 +341,12 @@ def watch(link: str, say=None, nexlev=None, algrow=None) -> Watch:
     ``nexlev`` / ``algrow``: the callers (tests put fakes here)."""
     say = say or (lambda _t: None)
     c = cached(link)
-    if c is not None and (c.by or c.error.startswith("not a public")):
+    if c is not None and c.error.startswith("not a public"):
         return c
-    pf = platform(link)
+    if c is not None and c.by and (c.version >= PROMPT_VERSION or not (nexlev or algrow or _keys())):
+        return c
+    old = c if c is not None and c.by else None        # day 17: an answer to the older prompt (no top 3): asked once
+    pf = platform(link)                                  #   more with the new one; kept when that fails
     if not pf:
         return Watch(link, error="not a public Instagram / TikTok / YouTube link: the AI can't watch it")
     errors = []
@@ -346,11 +365,48 @@ def watch(link: str, say=None, nexlev=None, algrow=None) -> Watch:
                 errors.append(f"{name}: {w.error}")
                 continue
             w.at = time.strftime("%Y-%m-%dT%H:%M:%S")
+            w.version = PROMPT_VERSION
             _store(w)
             return w
         except Exception as e:  # noqa: BLE001 - the next service, else said
             errors.append(f"{name}: {_scrub(e)}"[:200])
+    if old is not None:
+        return old
     return Watch(link, error="; ".join(errors) or "no service could watch it")
+
+
+def _keys() -> bool:
+    return bool(key(NEXLEV_KEY) or key(ALGROW_KEY))
+
+
+def second_opinion(link: str, first: Watch, say=None, algrow=None) -> Watch | None:
+    """Day 17: Algrow's AI watches the clip too (when NexLev's answer is not proven, or the checks disagree) -- once:
+    cached by the link as "second:<clip>". None when the first answer was Algrow's already, or Algrow can't."""
+    if first is None or first.by == "Algrow" or not platform(link):
+        return None
+    k = "second:" + norm_link(link)
+    d = _load().get(k)
+    if isinstance(d, dict):
+        return Watch.from_dict(d)
+    if algrow is None and not key(ALGROW_KEY):
+        return None
+    try:
+        (say or (lambda _t: None))("a second opinion: Algrow's AI is watching the clip too ...")
+        w = parse_answer((algrow or _algrow)(link), link, "Algrow")
+    except Exception:  # noqa: BLE001
+        return None
+    if w.error:
+        return None
+    w.at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    with _lock:
+        d = _load()
+        d[k] = w.to_dict()
+        p = _cache_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+    return w
 
 
 def transcript(video: str) -> str:

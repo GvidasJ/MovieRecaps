@@ -7,6 +7,7 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
 | # | task | state | how you use it |
 |---|---|---|---|
 | 1 | Stop C: from filling up | **done** | nothing to do: the tool's cache is on D:\mr_cache; zips are made only for projects off C: |
+| 2 | Find source much better | **done** (right 4 -> 7 of 10 with your RAWs OFF; wrong "Sure" 3 -> 0) | Progress > Find source as before; a row that isn't sure shows its top 3 |
 
 ## Task 1 -- stop C: from filling up (done)
 
@@ -22,3 +23,48 @@ Started 07:52 (PC; you were at it). No shutdown was set (`shutdown /a`: "no shut
   - C: free before -> after the run: 216.57 -> 216.18 GB (-0.39 GB: only the run folder itself, `work\t17`, 67 MB, and Windows)
   - C: free before -> after the move: 86.6 GB -> 216.6 GB. (The move gave 44.3 GB; the rest was freed by something else at the same time -- not by me.)
 - **Tests:** 5 new (`test_disk_day17.py`): no zip on C: (make, needs_zip and the sweep), a zip on D: / a network folder; the move keeps every file and leaves a junction; no move while MovieRecaps runs; a computer without D: keeps work\cache. One older test (`test_space.py`) now fakes the cache folder (on this PC it is on D:).
+
+## Task 2 -- Find source much better (done)
+
+### The real failures (from Find source's History, `ai_watch.json` and `work\find_source`)
+
+The right answers I found by reading the clips' lines, searching them on YouTube, and comparing with TVmaze's episode summaries.
+
+| clip | what it said | the right answer | why it was wrong |
+|---|---|---|---|
+| Instagram `Ddm3LHisOm6` (memezar, "Did he have a 40 for breakfast?") | Everybody Hates Chris S03E11 "Everybody Hates the Port Authority" -- **Sure 95 %** | **S03E07 "Everybody Hates Houseguests"** (Greg stays the week at Chris's house; a YouTube clip of this very scene is titled "Everybody Hates Houseguests - Mrs. Morello") | the AI gave a wrong episode number with its matching title, and day 16 called that "TVmaze confirms it" |
+| Instagram `DZPlV3EMKoZ` ("I'm getting married ... she's your sister") | Not found | not known (a sketch). **Not** We're the Millers, as the post's text says (the AI says so too) | -- (Not found is fair) |
+| YouTube `-thitow5F3s` (T-Bag "Not that hot?") | Prison Break S01E06 -- Check | S01E06 "Riots, Drills and the Devil (1)" (the heat wave), most likely; both AIs agree, no clip names the episode | -- (right, not proven) |
+| YouTube `H15KjMR3mmo` (Family Guy, "fat guys wrestling club") | Not found (night 15, no AI); today's first try with day 16's code: Family Guy S10E17 -- **Sure** | Family Guy, most likely **S11E04 "Yug Ylimaf"** (time runs backwards: the lines are a conversation played in reverse; NexLev's new answer). Not proven | the AI's episode number + TVmaze's title for that number was taken as proof |
+| YouTube `yiooj4IXHAs` (Fairly OddParents, "why aren't you miserable") | "Nickelodeon (1976)", a film -- Check | The Fairly OddParents **S02E13 "Totally Spaced Out"** (TVmaze's numbering: Mark Chang takes Vicky away, Timmy leaves Happy Town) | the hashtag #nickelodeon was taken for a title; the AI then said "Spaced Out" S01E01 (another episode) |
+| day 16: The Dictator `Dd1e2BmyHCX` | The Dictator (2012) Sure | the same | -- |
+| day 16: American Dad `DczA1q3MTge` | (your RAWs off) S03E03 Check | **"The American Dad After School Special"** (your file S03E02; TVmaze S02E02) | the AI's number |
+| day 16: Dr. Dolittle 2 `DdVZePAga2I` | Sure | the same | -- |
+| day 16: Family Guy `DZJfIY3IlTD` | (your RAWs off) S11E07 **Sure** | **S09E11 "German Guy"** (your RAW's sound) | the AI's number + TVmaze's title for it |
+| day 16: Blue Mountain State `DZ56TJHuM75` | (your RAWs off) S03E12 Check | **S03E05 "Training Day"** (your RAW's sound) | the AI's number |
+
+### What changed
+
+1. **The AI is asked better** (NexLev, Algrow): every spoken line word for word, the on-screen text, the actors and characters, the show or film, **what happens in the scene** (it is compared with the summaries) and its **top 3 guesses**, each with why. A clip answered with day 16's question is asked once more with the new one (then remembered); when that fails, the older answer is used.
+2. **The lines are searched for** (new `core\source_proof.py`): the 3 most distinctive lines, each with the show's name, in Algrow's free `youtube_search`. The first results' titles are read (clips of a scene are often titled with the episode), and the short results' transcripts (Algrow's free `fetch_transcript`) are compared with the clip's lines word for word (4 words in a row).
+3. **The episode is checked, not only the show:** every episode summary of the show on TVmaze is compared with the clip (its lines, characters, setting and what the AI says happens); rare words count most, and a long summary doesn't win by its length. The AI's number alone never makes an episode Sure (it was wrong on 6 of 7 real clips). Its episode title counts more than its number, and a close title counts a little ("Spaced Out" -> "Totally Spaced Out").
+4. **A second opinion:** when the episode isn't proven, Algrow's AI watches the clip too (once, remembered); its guesses join NexLev's, and the row says "Algrow's AI says ... too / instead".
+5. **The top 3 in the row** when it isn't sure: the best one big, the other two small ("also: 2. ... (why) · 3. ... (why)"); Copy all has them too. "Not found" says what it tried.
+6. **Sure only when proven:** your RAW's sound (as before); or the clip's words in the transcript of a YouTube clip titled with it; or the top YouTube clips of 2+ different lines titled with that episode; or the episode's summary fitting best and a titled clip naming it (or fitting clearly best and being the AI's own guess). A film: IMDb's year **and** a YouTube clip of its lines titled with the film. Otherwise Check.
+7. **Nothing is paid twice:** every AI answer by link (`ai_watch.json`; the second opinion as `second:<clip>`); every search, transcript and TVmaze list in `%APPDATA%\MovieRecaps\source_proof.json`. Searches and transcripts are free (Algrow's subscription); only the AI watches use credits. The test below used 10 new watches + 9 second opinions once; running it again cost nothing (30 s).
+8. Found on the way: a video without a transcript answers "No transcript available ..."; that text is no longer taken as its transcript.
+
+### Test: the 10 clips, your RAW library OFF
+
+| | before (day 16's code) | after |
+|---|---|---|
+| right (show and episode) | **4 of 10** | **7 of 10** |
+| a **wrong** answer said **Sure** | **3** (EHC S03E11, Family Guy S10E17, Family Guy S11E07) | **0** |
+| right and Sure | The Dictator, Dr. Dolittle 2 | The Dictator, Dr. Dolittle 2, **Everybody Hates Chris S03E07** (proven: 3 of its lines' top YouTube clips are titled "Everybody Hates Houseguests") |
+| the right episode in the top 3 | -- | 8 of 10 |
+
+- After, per clip: Prison Break S01E06 Check; Fairly OddParents **S02E13** Check (right); American Dad **S02E02 "After School Special"** Check (right); Yug Ylimaf in the top 3 (the first is Algrow's S20E06); the sketch: Check of a show the AI named, never Sure; Family Guy `DZJfIY3IlTD` and Blue Mountain State still the wrong episode (Check): a cutaway gag no summary describes, and a scene the summaries don't mention, with no titled clip naming either episode.
+- With your RAWs ON (as you use it), day 16's 5 stay Sure by their sound (that part is unchanged).
+- Time: 3.5 min for the 10 at once with the 19 new AI watches; 30 s again from the caches.
+- **Tests:** 8 new (`test_find_source_day17.py`, fakes only: no network, no credits). Day 16's test changed: TVmaze having the AI's own episode title no longer makes an episode Sure. App: 1251 passed, plus the real aria2c test alone (inside the whole suite it crashed Python once again: the known night-15 crash, see Still broken).
+- The keys: a scan of the app's code, the reports and the three Find source files finds neither key.

@@ -86,11 +86,13 @@ def test_sure_only_when_the_public_lists_confirm_the_ais_guess(monkeypatch):
 
 
 def test_an_episode_is_sure_only_when_tvmaze_has_the_title_the_ai_named(monkeypatch):
+    # day 17: TVmaze having the AI's own episode title is no proof any more (Everybody Hates Chris S03E11 was
+    # "Sure" for S03E07): without the proof of core.source_proof an episode is Check
     _clip(monkeypatch)
     monkeypatch.setattr(FS, "online", lambda name, ep=None: FS.Title(
         "American Dad!", 2005, ep[0], ep[1], "The American Dad After School Special", "episode"))
     a = FS.find("https://www.instagram.com/reel/DczA1q3MTge/", lib=[], watcher=_fake_watch(AMDAD))
-    assert a.verdict == FS.SURE and a.title.text() == "American Dad! — S03E02" and "TVmaze" in a.how
+    assert a.verdict == FS.CHECK and a.title.text() == "American Dad! — S03E02"
     monkeypatch.setattr(FS, "online", lambda name, ep=None: FS.Title("American Dad!", 2005, ep[0], ep[1],
                                                                        "Tears of a Clooney", "episode"))
     b = FS.find("https://www.instagram.com/reel/DczA1q3MTge/", lib=[], watcher=_fake_watch(AMDAD))

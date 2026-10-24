@@ -102,7 +102,12 @@ class ResultRow(W.Card):
         pct = f" {round(100 * a.sure)} %" if a.verdict != FS.NOT_FOUND else ""
         self.sure.setText(f"{word}{pct}")
         self.sure.setStyleSheet(f"color: {colour};")
-        if a.verdict == FS.CHECK and a.second is not None:
+        others = [o for o in (a.others or [])[1:3] if isinstance(o, dict) and o.get("text")]
+        if a.verdict == FS.CHECK and others:          # day 17: the top 3 -- the best one big, the other two small
+            self.sure_small.setText(_esc("also: " + "  ·  ".join(
+                f"{k}. {o['text']}" + (f" ({o['why'][:90]})" if o.get("why") else "") for k, o in
+                enumerate(others, 2))))
+        elif a.verdict == FS.CHECK and a.second is not None:
             self.sure_small.setText(_esc(f"2nd guess: {a.second.text()}"))
         elif a.verdict == FS.NOT_FOUND:
             self.sure_small.setText(_esc(a.reason))
