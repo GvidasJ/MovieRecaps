@@ -34,11 +34,13 @@ class Tab(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def _font(self):
+        if theme.MONO_LOOK:                                # run 18: the pages as uppercase mono words
+            return W.mono(11 if self.small else 12, 600, 8)
         return W.font(11, 600, 8) if self.small else W.font(13, 600)
 
     def sizeHint(self) -> QSize:                          # noqa: N802
         fm = QFontMetrics(self._font())
-        t = self.text.upper() if self.small else self.text
+        t = self.text.upper() if (self.small or theme.MONO_LOOK) else self.text
         extra = (QFontMetrics(W.mono(10, 500)).horizontalAdvance(self.badge) + 10) if self.badge else 0
         return QSize(fm.horizontalAdvance(t) + (20 if self.small else 24) + extra, fm.height() + (10 if self.small else 14))
 
@@ -70,18 +72,22 @@ class Tab(QWidget):
         p = QPainter(self)
         r = QRectF(self.rect())
         h, s = self.hover.value, self.sel.value
-        if h > 0:
+        if h > 0 and not theme.MONO_LOOK:
             p.fillRect(r, M.alpha(theme.PANEL2, h))
             W.sweep(p, r, self.light.value, peak=0.03)
         p.setFont(self._font())
-        p.setPen(M.mix(theme.MUTED, theme.TEXT, max(h, s)))
-        t = self.text.upper() if self.small else self.text
+        p.setPen(M.mix(theme.DIM if theme.MONO_LOOK else theme.MUTED, theme.TEXT, max(h, s)))
+        t = self.text.upper() if (self.small or theme.MONO_LOOK) else self.text
         fm = QFontMetrics(self._font())
         tw = fm.horizontalAdvance(t)
         bw = (QFontMetrics(W.mono(10, 500)).horizontalAdvance(self.badge) + 10) if self.badge else 0
         x = (r.width() - tw - bw) / 2
         p.drawText(QRectF(x, 0, tw + 2, r.height() - 1), Qt.AlignmentFlag.AlignVCenter, t)
-        if self.badge:
+        if self.badge and theme.MONO_LOOK:                 # run 18: the count in red, no box
+            p.setFont(W.mono(11, 700))
+            p.setPen(QColor(theme.RED))
+            p.drawText(QRectF(x + tw + 6, 0, bw, r.height() - 1), Qt.AlignmentFlag.AlignVCenter, self.badge)
+        elif self.badge:
             br = QRectF(x + tw + 6, r.center().y() - 7, bw - 4, 14)
             p.fillRect(br, QColor(theme.RED))
             p.setFont(W.mono(10, 500))
@@ -94,7 +100,8 @@ class Tab(QWidget):
             inset = 8.0 if self.small else 12.0
             full = r.width() - 2 * inset
             w = full * scale
-            p.fillRect(QRectF(inset + (full - w) / 2, r.height() - 2, w, 2), M.alpha(theme.RED, op))
+            thick = 1 if theme.MONO_LOOK else 2            # run 18: a thin red line under the open page
+            p.fillRect(QRectF(inset + (full - w) / 2, r.height() - thick, w, thick), M.alpha(theme.RED, op))
         p.end()
 
 

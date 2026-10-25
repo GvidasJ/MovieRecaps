@@ -91,3 +91,14 @@ def _never_turn_the_pc_off(monkeypatch):
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(subprocess, "Popen", Popen)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _classic_look_after_each_test():
+    """Run 18: a test that starts the whole app (app.main sets the look from the settings: Mono + red by default)
+    puts the theme back afterwards -- the other tests are written for the classic look."""
+    from mr_app.ui import theme
+    saved = {k: v for k, v in vars(theme).items() if k.isupper() and not callable(v)}
+    yield
+    for k, v in saved.items():
+        setattr(theme, k, v)

@@ -680,6 +680,7 @@ class VideoRow(W.Card):
     def __init__(self, page: "DownloadPage", item: Item):
         super().__init__(margins=(16, 14, 16, 14), spacing=10)
         self.page, self.item = page, item
+        self.list_row = theme.MONO_LOOK          # run 18 (Mono + red): a row of a list, a thin line under it
         top = QHBoxLayout()
         top.setSpacing(10)
         self.name = W.label("", "Name")
@@ -697,6 +698,12 @@ class VideoRow(W.Card):
         self.cells: dict[str, StepCell] = {}
         self.lay.addLayout(self.steps_row)
         self._build_steps()
+        self.pipe = self.blocks = None
+        if theme.MONO_LOOK:                      # run 18: the steps as dots and lines, the running step's blocks
+            from ..ui import mono_parts as MP
+            self.pipe, self.blocks = MP.PipelineDots(), MP.BlockBar()
+            self.lay.addWidget(self.pipe)
+            self.lay.addWidget(self.blocks)
         self.pair = W.label("", "Dim", wrap=True, select=True)
         self.lay.addWidget(self.pair)
         self.extras = QVBoxLayout()                 # the torrent's file picker / progress card, while there
@@ -858,6 +865,8 @@ class VideoRow(W.Card):
         self.pill.set(word, cols)
         for k, c in self.cells.items():
             c.set(it.steps.get(k) or Step())
+        if self.pipe is not None:
+            self._mono(it)
         raw = it.raw_url or (Path(it.raw_file).name if it.raw_file else "") or \
             ("torrent " + torrent_name(it.raw_torrent))
         comp = it.competitor_url or (Path(it.comp_file).name if it.comp_file else "")
@@ -898,6 +907,32 @@ class VideoRow(W.Card):
         self.b_another_comp.setVisible(failed)
         self.b_folder.setVisible(it.project is not None)
         self.b_remove.setEnabled(not busy and not (it.job is not None and it.job.state == J.RUNNING))
+
+    def _mono(self, it: "Item") -> None:
+        """Run 18 (Mono + red): the step cells become one line of dots (● done, ◉ running, ✕ failed, ○ waiting, and
+        DONE at the end) and the running step's bar of blocks; the status word red FAILED, amber %, green PASS."""
+        from ..ui import mono_parts as MP
+        for c in self.cells.values():
+            c.hide()
+        to = {S_DONE: MP.DONE, S_NOTE: MP.DONE, S_SKIP: MP.DONE, S_RUN: MP.RUN, S_FAIL: MP.FAIL, S_ASK: MP.RUN}
+        steps = [(label.replace(" ×2", ""), to.get((it.steps.get(k) or Step()).state, MP.WAIT))
+                 for k, label in it.step_list()]
+        ok = it.state == DONE and (it.result or {}).get("label", "PASS") in ("PASS", "OK with a note", "Cuts ready")
+        self.pipe.set(steps + [("Done", MP.DONE if ok else MP.WAIT)])
+        run = next((k for k, _l in it.step_list() if (it.steps.get(k) or Step()).state == S_RUN), None)
+        if run is not None:
+            st = it.steps.get(run) or Step()
+            self.blocks.set(st.share, MP.RUN, MP.eta_of(st.text))
+            self.blocks.show()
+            self.pill.set(f"{int(round(100 * float(st.share or 0.0)))}%",
+                          (theme.AMBER, theme.AMBER_SOFT, theme.AMBER_LINE))
+        elif ok:
+            self.blocks.set(1.0, MP.DONE)
+            self.blocks.show()
+        else:
+            self.blocks.hide()
+        if it.state == FAILED:
+            self.pill.set("FAILED", (theme.RED, theme.RED_SOFT, theme.RED_LINE))
 
     def _pill(self) -> tuple[str, tuple[str, str, str] | None]:
         it = self.item
@@ -955,7 +990,7 @@ class RowList(GlideList):
     ``set_rows(rows)`` = the rows in the order shown (rows not given leave the list, new ones join at their place)."""
 
     def __init__(self):
-        super().__init__(spacing=12)
+        super().__init__(spacing=0 if theme.MONO_LOOK else 12)        # run 18 (Mono + red): a list, thin lines
         self.setObjectName("Transparent")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 

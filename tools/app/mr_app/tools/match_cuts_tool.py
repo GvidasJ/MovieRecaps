@@ -324,7 +324,7 @@ def pair_html(j: J.Job) -> str:
         return (f"<span style='color:{colour};font-weight:600;letter-spacing:1px'>{word}</span>&nbsp;"
                 f"<span style='color:{theme.TEXT}'>{n}</span>&nbsp;<span style='color:{theme.DIM}'>({ln})</span>")
     return (part("RAW", theme.CORAL, j.raw, j.raw_s) + f"<span style='color:{theme.DIM}'>&nbsp;&nbsp;·&nbsp;&nbsp;</span>"
-            + part("COMP", theme.BLUE, j.competitor, j.comp_s))
+            + part("COMP", theme.DIM if theme.MONO_LOOK else theme.BLUE, j.competitor, j.comp_s))   # (amber = running)
 
 
 def template_problems(j: J.Job) -> list[str]:
@@ -524,6 +524,15 @@ class JobRow(QFrame):
         self._pick_files: list[Path] = []
         self.bar = W.GlideBar(3)
         lay.addWidget(self.bar)
+        self.pipe = self.blocks = self.cov = None
+        if theme.MONO_LOOK:                      # run 18 (Mono + red): the steps as dots, a bar of blocks, and where
+            from ..ui import mono_parts as MP    # the competitor was found (a finished or failed edit)
+            self.bar.hide()
+            self.pipe, self.blocks, self.cov = MP.PipelineDots(), MP.BlockBar(), MP.CoverageStrip()
+            self.cov.hide()
+            self._cov_of = None
+            for w in (self.pipe, self.blocks, self.cov):
+                lay.addWidget(w)
         stp = QHBoxLayout()
         self.step = W.mono_label("", theme.MUTED, 12)
         self.step.setWordWrap(True)
@@ -963,9 +972,11 @@ class JobRow(QFrame):
                               ("stopped by you" if lab == R.STOPPED else "stopped"))
             self.step.setStyleSheet(f"color: {theme.MUTED};")
             self.note.setText(R.short(res) if lab not in (R.PASS,) else "")
+            if theme.MONO_LOOK:                  # run 18 (Mono + red): a failed row's reason in red
+                self.note.setStyleSheet(f"color: {theme.RED};" if lab not in R.GOOD and lab != R.STOPPED else "")
             self.bar.state(lab)
             self.bar.set(1.0 if lab in R.GOOD else j.percent)
-        if j.state == J.RUNNING:
+        if j.state == J.RUNNING and not theme.MONO_LOOK:      # (no circling border in the Mono + red look)
             self.ring.start()
         else:
             self.ring.stop()
@@ -996,12 +1007,52 @@ class JobRow(QFrame):
         self.b_prem.setEnabled(done and (Path(j.run_dir) / "1_edit.xml").is_file() if done else False)
         self.note.setVisible(bool(self.note.text()))
         self.remove.setVisible(j.state != J.RUNNING)
+        if self.pipe is not None:
+            self._mono(j, res)
         self.update()
+
+    def _mono(self, j: J.Job, res: dict) -> None:
+        """Run 18 (Mono + red): the dots, the blocks, the status word (red FAILED, amber %, green PASS) and the
+        coverage strip of a finished or failed edit (its cut list read off the window's thread, once)."""
+        from ..ui import mono_parts as MP
+        lab = res.get("label", "") if j.state in (J.DONE, J.STOPPED) else ""
+        good = lab in R.GOOD
+        edit = {J.RUNNING: MP.RUN, J.PAUSED: MP.RUN}.get(j.state, MP.WAIT)
+        if j.state in (J.DONE, J.STOPPED):
+            edit = MP.DONE if good else MP.FAIL
+        self.pipe.set([("Download", MP.DONE), ("Convert", MP.DONE), ("Edit", edit),
+                       ("Done", MP.DONE if good else MP.WAIT)])
+        if j.state == J.RUNNING:
+            self.blocks.set(j.percent, MP.RUN, MP.eta_of(j.progress or ""))
+            self.pill.set(f"{int(round(100 * float(j.percent or 0.0)))}%", (theme.AMBER, theme.AMBER_SOFT,
+                                                                              theme.AMBER_LINE))
+        elif j.state in (J.DONE, J.STOPPED):
+            self.blocks.set(1.0 if good else float(j.percent or 0.0), MP.DONE if good else MP.FAIL)
+            if not good and lab not in (R.STOPPED, "PAUSED"):
+                self.pill.set("FAILED" if lab == R.FAIL else lab, (theme.RED, theme.RED_SOFT, theme.RED_LINE))
+        else:
+            self.blocks.set(float(j.percent or 0.0), MP.WAIT)
+        if j.state in (J.DONE, J.STOPPED) and j.run_dir is not None and self._cov_of != str(j.run_dir):
+            self._cov_of = str(j.run_dir)
+            from ..ui import background as BG
+            BG.call(lambda rd=j.run_dir: MP.coverage_of(rd), lambda got: self.cov.set(*got), lambda _e: None)
+        elif j.state not in (J.DONE, J.STOPPED):
+            self.cov.hide()
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
         p = QPainter(self)
         r = QRectF(self.rect())
         h = self.hover.value
+        if theme.MONO_LOOK:                                  # run 18: a row of a list -- a thin line under it, a faint
+            if self.check.isVisibleTo(self):                 # fill and the red left edge under the mouse
+                p.fillRect(r, QColor(theme.AMBER_SOFT))
+            elif h > 0:
+                p.fillRect(r, Mo.alpha("#111111", h))
+            p.fillRect(QRectF(r.left(), r.bottom() - 1, r.width(), 1), QColor(theme.LINE2 if h > 0 else theme.LINE))
+            if h > 0:
+                p.fillRect(QRectF(0, 0, 2, r.height()), Mo.alpha(theme.RED, h))
+            p.end()
+            return
         if self.check.isVisibleTo(self):                     # day 12: the amber "Check which is the RAW" card
             W.box(p, r, theme.AMBER_SOFT, theme.AMBER_LINE)
         else:
@@ -1037,7 +1088,7 @@ class QueueList(GlideList):
     the run order)."""
 
     def __init__(self, page: "MatchCutsPage"):
-        super().__init__(spacing=10)
+        super().__init__(spacing=0 if theme.MONO_LOOK else 10)     # run 18 (Mono + red): a list, thin lines
         self.setObjectName("Transparent")
         self.page = page
         self.setAcceptDrops(True)
@@ -1052,7 +1103,7 @@ class QueueList(GlideList):
     def paintEvent(self, _e) -> None:                     # noqa: N802
         p = QPainter(self)
         for row in self.rows():
-            if row.hover.value > 0:
+            if row.hover.value > 0 and not theme.MONO_LOOK:     # (no glow in the Mono + red look)
                 W.soft_shadow(p, QRectF(row.geometry()), theme.RED, 0.10 * row.hover.value)
         if self._slot is not None:
             rows = self.waiting_rows()

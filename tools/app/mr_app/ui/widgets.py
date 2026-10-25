@@ -21,6 +21,8 @@ from . import theme
 def font(size: float, weight: int = 400, spacing: float = 0.0, family: str | None = None) -> QFont:
     """A font in pixels; ``spacing`` is extra letter spacing in percent (6 = +6 %)."""
     f = QFont(family or theme.FONT)
+    if theme.MONO_LOOK:                                    # run 18: a monospace font has no emoji -- Windows' own
+        f.setFamilies([family or theme.FONT, "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI"])   # come after it
     f.setPixelSize(max(1, int(round(size))))
     f.setWeight(QFont.Weight(weight))
     if spacing:
@@ -217,6 +219,11 @@ def brand(size: int = 15) -> QWidget:
     lay = QHBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(10)
+    if theme.MONO_LOOK:                                    # run 18: MOVIE + red RECAPS, no logo
+        name = QLabel(f"MOVIE<span style='color:{theme.RED}'>RECAPS</span>")
+        name.setFont(mono(size, 800, 10))
+        lay.addWidget(name, 0, Qt.AlignmentFlag.AlignVCenter)
+        return w
     lay.addWidget(Logo(28), 0, Qt.AlignmentFlag.AlignVCenter)
     name = QLabel(f"Movie<span style='color:{theme.RED}'>Recaps</span>")
     name.setFont(font(size + 1, 700, 1))
@@ -245,6 +252,8 @@ class GridBackground(QWidget):
         w, h = max(1, self.width()), max(1, self.height())
         pm = QPixmap(w, h)
         pm.fill(QColor(theme.BG))
+        if theme.MONO_LOOK:                                # run 18: plain near-black, no grid, no vignette
+            return pm
         p = QPainter(pm)
         step = theme.GRID_STEP
         p.setPen(QPen(QColor(theme.GRID_COLOUR), 1))
@@ -372,7 +381,7 @@ class SectionHeader(QWidget):
         lay.addWidget(_H2Mark(), 0, Qt.AlignmentFlag.AlignVCenter)
         self.title = QLabel(title.upper())
         self.title.setObjectName("Section")
-        self.title.setFont(display(26, 6))
+        self.title.setFont(mono(13, 700, 14) if theme.MONO_LOOK else display(26, 6))   # run 18: "■ VIDEOS"
         lay.addWidget(self.title, 0, Qt.AlignmentFlag.AlignVCenter)
         lay.addStretch(1)
         for w in right:
@@ -386,6 +395,10 @@ class _H2Mark(QWidget):
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
         p = QPainter(self)
+        if theme.MONO_LOOK:                                # a plain small red square
+            p.fillRect(self.rect(), QColor(theme.RED))
+            p.end()
+            return
         g = QLinearGradient(QPointF(0, 0), QPointF(7, 7))
         g.setColorAt(0, QColor(theme.RED))
         g.setColorAt(1, QColor(theme.CORAL))
@@ -429,16 +442,21 @@ class Button(QPushButton):
 
     def _font(self) -> QFont:
         k = self.kind()
+        if theme.MONO_LOOK:                                # run 18: uppercase mono, a little letter spacing
+            return mono(10 if k in ("Seg", "Mini", "Copy", "Small", "Ghost") else 11, 600, 6)
         if k in ("Seg", "Mini", "Copy"):
             return font(11, 600, 4 if k == "Seg" else 0)
         if k in ("Small", "Ghost"):
             return font(12, 600)
         return font(13, 600)
 
+    def _shown_text(self) -> str:
+        return self.text().upper() if theme.MONO_LOOK else self.text()
+
     def sizeHint(self) -> QSize:                          # noqa: N802
         fm = QFontMetrics(self._font())
         px, py = self.PAD[self.kind()]
-        w = fm.horizontalAdvance(self.text()) + 2 * px + 2
+        w = fm.horizontalAdvance(self._shown_text()) + 2 * px + 2
         if self._kbd:
             w += QFontMetrics(mono(10, 500)).horizontalAdvance(self._kbd) + 10 + 6
         return QSize(w, fm.height() + 2 * py + 2)
@@ -474,7 +492,9 @@ class Button(QPushButton):
         r = QRectF(self.rect())
         k, h, on = self.kind(), self.hover.value, self.isEnabled()
         down = self.isDown()
-        if k == "Primary":
+        if theme.MONO_LOOK:                                # run 18: square; the main action red filled, the rest
+            text = self._paint_mono(p, r, k, h, on)        # outlined grey; no glow, no gradient, no sweep
+        elif k == "Primary":
             g = QLinearGradient(r.topLeft(), r.topRight())
             g.setColorAt(0, QColor(theme.RED) if on else QColor("#3a1d1e"))
             g.setColorAt(1, QColor(theme.CORAL) if on else QColor("#3a2420"))
@@ -502,18 +522,18 @@ class Button(QPushButton):
                 p.fillRect(QRectF(r.left(), r.top(), r.width() * h, r.height()), QColor(theme.RED_SOFT))
             box(p, r, None, M.mix(theme.LINE2, theme.RED, h) if on else theme.LINE)
             text = QColor(("#ff8a8d" if k == "Danger" else theme.TEXT) if on else theme.DIM)
-        if on and k not in ("Ghost", "Seg", "Mini") and self.light.value > 0:
+        if on and k not in ("Ghost", "Seg", "Mini") and self.light.value > 0 and not theme.MONO_LOOK:
             sweep(p, r, self.light.value)           # in: it crosses to the right; out: it goes back
         if down and on:
             p.fillRect(r, QColor(255, 255, 255, 18))
         p.setFont(self._font())
         p.setPen(text)
         fm = QFontMetrics(self._font())
-        tw = fm.horizontalAdvance(self.text())
+        tw = fm.horizontalAdvance(self._shown_text())
         kw = (QFontMetrics(mono(10, 500)).horizontalAdvance(self._kbd) + 10 + 6) if self._kbd else 0
         x = r.left() + (r.width() - tw - kw) / 2
         p.drawText(QRectF(x, r.top(), tw + 2, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   self.text())
+                   self._shown_text())
         if self._kbd:
             kf = mono(10, 500)
             p.setFont(kf)
@@ -524,6 +544,29 @@ class Button(QPushButton):
             p.setPen(QColor("#ffffff") if prim else QColor(theme.MUTED))
             p.drawText(kr, Qt.AlignmentFlag.AlignCenter, self._kbd)
         p.end()
+
+
+    def _paint_mono(self, p: QPainter, r: QRectF, k: str, h: float, on: bool) -> QColor:
+        """The Mono + red button (its text's colour): Primary -- the one main action of an area -- red filled (a
+        little lighter under the mouse); the others outlined grey, the outline and the text brightening under the
+        mouse (red text for Danger); a toggle that is on: a white outline."""
+        if k == "Primary":
+            p.fillRect(r, M.mix(theme.RED, theme.RED_HI, h) if on else QColor("#2a1416"))
+            return QColor("#ffffff") if on else QColor("#8a6466")
+        if k == "Ghost":
+            if on and h > 0:
+                p.fillRect(r, M.alpha("#161616", h))
+            return M.mix(theme.DIM, theme.TEXT, h) if on else QColor(theme.DIM)
+        checked = self.isCheckable() and self.isChecked()
+        if on and h > 0:
+            p.fillRect(r, M.alpha("#141414", h))
+        line = theme.TEXT if checked else (M.mix(theme.LINE2, "#7a7a7a", h) if on else QColor(theme.LINE))
+        box(p, r, None, line)
+        if k == "Danger":
+            return QColor(theme.RED) if on else QColor(theme.DIM)
+        if not on:
+            return QColor(theme.DIM)
+        return QColor(theme.TEXT) if checked else M.mix(theme.MUTED, theme.TEXT, h)
 
 
 class Segmented(QWidget):
@@ -604,7 +647,7 @@ class Pill(QWidget):
         return [M.mix(a, b, t) for a, b in zip(self._from, self._to)]
 
     def _font(self) -> QFont:
-        return font(10, 600, 8)
+        return mono(10, 700, 8) if theme.MONO_LOOK else font(10, 600, 8)
 
     def sizeHint(self) -> QSize:                          # noqa: N802
         fm = QFontMetrics(self._font())
@@ -614,7 +657,8 @@ class Pill(QWidget):
         p = QPainter(self)
         fg, bg, line = self._now()
         r = QRectF(self.rect())
-        box(p, r, bg, line)
+        if not theme.MONO_LOOK:                            # run 18, Mono + red: the coloured word only
+            box(p, r, bg, line)
         dot = QColor(fg)
         a = 0.9
         if self.pulse.running():
@@ -781,6 +825,17 @@ class Card(QFrame):
 
     def paint_box(self, p: QPainter, r: QRectF) -> None:
         h = self.hover.value
+        if theme.MONO_LOOK:                                # run 18: thin lines, no box -- a row of a list (its
+            if h > 0:                                      # line under it) or a plain thin frame; a faint fill
+                p.fillRect(r, M.alpha("#111111", h))      # under the mouse
+            if getattr(self, "list_row", False):
+                p.fillRect(QRectF(r.left(), r.bottom() - 1, r.width(), 1), QColor(theme.LINE2 if h > 0 else
+                                                                                   theme.LINE))
+            else:
+                box(p, r, None, M.mix(theme.LINE, theme.LINE2, h))
+            if self._corners:
+                corners(p, r, h)
+            return
         box(p, r, M.mix(self._fill, self._fill_hot, h), M.mix(self._line, self._line_hot, h))
         if self._hover_on:
             sweep(p, r.adjusted(1, 1, -1, -1), self.light.value, peak=0.03)

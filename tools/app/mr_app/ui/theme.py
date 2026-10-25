@@ -65,6 +65,78 @@ PILLS = {
 STATE_COLOURS = {k: v[0] for k, v in PILLS.items()}
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# run 18 (task 8): the "Mono + red" look -- the default; Settings -> "Classic look" keeps the look above
+# ---------------------------------------------------------------------------------------------------------------------
+
+LOOK = "classic"                # apply_look() sets it: "mono" or "classic"
+MONO_LOOK = False               # the widgets that draw themselves otherwise in the Mono + red look ask this
+
+
+def apply_look(look: str | None) -> str:
+    """Set the look before any widget is made (app.py, at the start): "mono" (the default) -- near-black, one
+    monospace font, uppercase labels, red only for failures, counts and the one main button, green for PASS / done,
+    amber for running, thin lines instead of boxes, no glows or gradients -- or "classic" (as before: nothing
+    changes). Returns the look set."""
+    global LOOK, MONO_LOOK, BG, PANEL, PANEL2, LINE, LINE2, TEXT, MUTED, DIM, RED, RED_HI, RED_SOFT, WINE
+    global WINE_LINE, CORAL, GREEN, GREEN_SOFT, GREEN_LINE, AMBER, AMBER_SOFT, AMBER_LINE, BLUE, BLUE_SOFT, BLUE_LINE
+    global RED_LINE, SURFACE, SURFACE_HI, FILL, LINE_HI, GRID_COLOUR, PILLS, STATE_COLOURS
+    look = "classic" if str(look or "").strip().lower() == "classic" else "mono"
+    LOOK = look
+    MONO_LOOK = look == "mono"
+    if not MONO_LOOK:
+        return look
+    BG = "#0a0a0a"
+    PANEL = "#0d0d0d"
+    PANEL2 = "#121212"
+    LINE = "#1a1a1a"
+    LINE2 = "#333333"
+    TEXT = "#dcdcdc"
+    MUTED = "#9a9a9a"
+    DIM = "#6b6b6b"
+    RED = "#e5484d"
+    RED_HI = "#ef5a5f"
+    RED_SOFT = "#1d0f10"
+    WINE = "#1d0f10"
+    WINE_LINE = "#333333"
+    CORAL = DIM                 # (no second accent: labels are dim)
+    GREEN = "#58c470"
+    GREEN_SOFT = "#0f1a12"
+    GREEN_LINE = "#24502c"
+    AMBER = "#d6a12a"
+    AMBER_SOFT = "#1d170b"
+    AMBER_LINE = "#5a4513"
+    BLUE, BLUE_SOFT, BLUE_LINE = AMBER, AMBER_SOFT, AMBER_LINE      # running is amber
+    RED_LINE = "#5a2326"
+    SURFACE, SURFACE_HI, FILL, LINE_HI = PANEL, "#111111", "#141414", LINE2
+    GRID_COLOUR = BG            # no grid
+    PILLS = {
+        "waiting": (DIM, PANEL2, LINE2), "ready": (DIM, PANEL2, LINE2), "queued": (DIM, PANEL2, LINE2),
+        "running": (AMBER, AMBER_SOFT, AMBER_LINE),
+        "PASS": (GREEN, GREEN_SOFT, GREEN_LINE), "ready to edit": (GREEN, GREEN_SOFT, GREEN_LINE),
+        "OK with a note": (AMBER, AMBER_SOFT, AMBER_LINE), "note": (AMBER, AMBER_SOFT, AMBER_LINE),
+        "FAIL": (RED, RED_SOFT, RED_LINE), "PICTURE NOT FOUND": (RED, RED_SOFT, RED_LINE),
+        "NOT IN THIS RAW": (RED, RED_SOFT, RED_LINE), "WRONG PAIR": (RED, RED_SOFT, RED_LINE),
+        "STOPPED": (DIM, PANEL2, LINE2),
+    }
+    STATE_COLOURS = {k: v[0] for k, v in PILLS.items()}
+    return look
+
+
+def mono_fonts() -> None:
+    """The Mono + red look: one monospace font for the whole app (the bundled JetBrains Mono; Cascadia Mono or
+    Consolas when it can't load) -- called after load_fonts()."""
+    global FONT, DISPLAY
+    if not MONO_LOOK:
+        return
+    from PySide6.QtGui import QFontDatabase
+    fams = set(QFontDatabase.families())
+    for f in (MONO, "JetBrains Mono", "Cascadia Mono", "Consolas"):
+        if f in fams:
+            FONT = DISPLAY = f
+            return
+
+
 def channel_colour(name: str | None) -> str:
     """A channel's dot colour (red for one the app does not know)."""
     if not name:

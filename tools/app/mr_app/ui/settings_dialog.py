@@ -105,6 +105,17 @@ class SettingsDialog(QDialog):
         arow.addStretch(1)
         g.addLayout(arow, r, 1)
         r += 1
+        # run 18: the look -- Mono + red (new), or the classic one as before
+        g.addWidget(W.label("Classic look", "Small"), r, 0)
+        lrow = QHBoxLayout()
+        self.look = W.Segmented([("on", "On"), ("off", "Off")],
+                                "on" if getattr(self.s, "look", "mono") == "classic" else "off")
+        lrow.addWidget(self.look)
+        lrow.addWidget(W.label("On: the look before run 18 (Off: Mono + red) -- it changes when the app opens again",
+                               "Dim"))
+        lrow.addStretch(1)
+        g.addLayout(lrow, r, 1)
+        r += 1
         # goals
         g.addWidget(W.label("Goals", "Small"), r, 0)
         grow = QHBoxLayout()
@@ -287,6 +298,9 @@ class SettingsDialog(QDialog):
         s.upload_check_minutes = int(self.every.value())
         s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
+        look = "classic" if self.look.value == "on" else "mono"
+        changed_look = look != getattr(s, "look", "mono")
+        s.look = look
         try:
             from ..core import settings as S
             S.save(s)
@@ -295,6 +309,7 @@ class SettingsDialog(QDialog):
             self.where.setStyleSheet(f"color: {theme.RED};")
             return
         self.result_settings = s
+        self.look_changed = changed_look              # (the window says: open the app again to see it)
         self.accept()
 
     def showEvent(self, e) -> None:                       # noqa: N802

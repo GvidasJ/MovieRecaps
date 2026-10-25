@@ -547,6 +547,21 @@ class MainWindow(QMainWindow):
             sc = QShortcut(QKeySequence(keys), self)
             sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.activated.connect(fn)
+        from . import mono_parts                          # run 18: Ctrl+K -- go to any page or action
+        self._ctrl_k = mono_parts.install_command_box(self, self.command_actions)
+
+    def command_actions(self) -> list:
+        """Ctrl+K's list: (name, its own shortcut, what it does) -- every page and the main actions."""
+        def go(key: str):
+            return lambda: self.select(key)
+        out = [("New video", "", go("download")), ("Match cuts queue", "", go("match_cuts")),
+               ("Learn", "", go("learn")), ("Board", "", go("board")), ("History", "", go("history")),
+               ("Find source", "", go("find_source")), ("Convert", "", go("convert")),
+               ("Template", "", go("template")), ("Settings", "", self.open_settings),
+               ("Start the queue", "Space", lambda: (self.select("match_cuts"), self._key_start())),
+               ("Paste a link", "Ctrl+V", self._key_paste), ("Search this page", "Ctrl+F", self._key_find)]
+        return [(n, k, fn) for n, k, fn in out if not n.startswith(("Find source", "Convert", "Template"))
+                or any(key in self.pages for key in ("find_source", "convert", "template"))]
 
     def _key_find(self) -> None:
         """Ctrl+F: the search box over this page (a torrent's file list has its own: its box takes Ctrl+F there)."""
@@ -883,7 +898,8 @@ class MainWindow(QMainWindow):
             for p in self.pages.values():
                 if hasattr(p, "settings_changed"):
                     p.settings_changed(self.settings)
-            self.toast("Settings saved ✓")
+            self.toast("Settings saved ✓ -- the new look shows when the app opens again" if getattr(
+                d, "look_changed", False) else "Settings saved ✓")
 
     def showEvent(self, e) -> None:                       # noqa: N802
         W.dark_title_bar(self)

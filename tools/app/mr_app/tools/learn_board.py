@@ -156,6 +156,15 @@ class LCard(QWidget):
         from PySide6.QtGui import QPainter
         p = QPainter(self)
         h = self.hover.value
+        if theme.MONO_LOOK:                          # run 18 (Mono + red): a row of the strip -- a thin line under it,
+            r = QRectF(self.rect())                  # a faint fill under the mouse, amber left edge for a warning
+            if h > 0:
+                p.fillRect(r, M.alpha("#111111", h))
+            p.fillRect(QRectF(r.left(), r.bottom() - 1, r.width(), 1), M.mix(theme.LINE, theme.LINE2, h))
+            if self.warn:
+                p.fillRect(QRectF(r.left(), r.top(), 2, r.height()), M.alpha(theme.AMBER, 0.8))
+            p.end()
+            return
         line = M.mix(theme.AMBER_LINE, theme.AMBER, 0.35 * h) if self.warn else M.mix(theme.LINE, theme.LINE2, h)
         W.box(p, QRectF(self.rect()), theme.PANEL, line)
         p.end()
@@ -183,8 +192,8 @@ class LCol(QWidget):
         # (the width follows the page: the columns never hold the window wider -- narrow, they stack instead)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(*((12, 10, 12, 10) if theme.MONO_LOOK else (0, 0, 0, 0)))
+        lay.setSpacing(0 if theme.MONO_LOOK else 8)
         head = QHBoxLayout()
         head.setSpacing(8)
         self.head = QLabel(title.upper())
@@ -192,8 +201,9 @@ class LCol(QWidget):
         self.head.setStyleSheet(f"color: {theme.DIM};")
         head.addWidget(self.head)
         self.badge = QLabel("")
-        self.badge.setFont(W.mono(10, 700))
-        self.badge.setStyleSheet(f"background: {theme.RED}; color: #ffffff; padding: 1px 6px;")
+        self.badge.setFont(W.mono(10.5 if theme.MONO_LOOK else 10, 700))
+        self.badge.setStyleSheet(f"color: {theme.RED};" if theme.MONO_LOOK else      # run 18: the count in red
+                                 f"background: {theme.RED}; color: #ffffff; padding: 1px 6px;")
         self.badge.hide()
         head.addWidget(self.badge)
         head.addStretch(1)
@@ -203,7 +213,7 @@ class LCol(QWidget):
         self.empty.setStyleSheet(f"color: {theme.DIM};")
         lay.addWidget(self.empty)
         self.body = QVBoxLayout()
-        self.body.setSpacing(8)
+        self.body.setSpacing(0 if theme.MONO_LOOK else 8)
         lay.addLayout(self.body)
         lay.addStretch(1)
         self.cards: dict[str, LCard] = {}
@@ -279,8 +289,8 @@ class LearnColumns(QWidget):
         self.cols = [self.waiting, self.problems, self.suggestions]
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(GAP)
-        self.grid.setVerticalSpacing(GAP + 6)
+        self.grid.setHorizontalSpacing(1 if theme.MONO_LOOK else GAP)     # run 18: one strip, thin dividers
+        self.grid.setVerticalSpacing(1 if theme.MONO_LOOK else GAP + 6)
         self._wide: bool | None = None
         self._arrange(True)
 
@@ -301,3 +311,19 @@ class LearnColumns(QWidget):
     def resizeEvent(self, e) -> None:                     # noqa: N802
         self._arrange(e.size().width() >= 3 * MIN_COL_W + 2 * GAP)
         super().resizeEvent(e)
+
+    def paintEvent(self, _e) -> None:                     # noqa: N802
+        """Run 18 (Mono + red): the three columns as one strip -- a thin frame and thin dividers between them."""
+        if not theme.MONO_LOOK:
+            return
+        from PySide6.QtGui import QColor, QPainter
+        p = QPainter(self)
+        r = QRectF(self.rect())
+        W.box(p, r, None, theme.LINE)
+        for c in self.cols[1:]:
+            g = c.geometry()
+            if self._wide:
+                p.fillRect(QRectF(g.left() - 1, r.top(), 1, r.height()), QColor(theme.LINE))
+            else:
+                p.fillRect(QRectF(r.left(), g.top() - 1, r.width(), 1), QColor(theme.LINE))
+        p.end()

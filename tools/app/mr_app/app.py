@@ -19,14 +19,21 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001 - not Windows
         pass
     from PySide6.QtWidgets import QApplication
-    from .tools import tools
     from .ui import theme
+    try:                                     # run 18: the look first (Mono + red, or Settings -> Classic look)
+        from .core import settings as S
+        theme.apply_look(S.load().look)
+    except Exception:  # noqa: BLE001 - never a crash at the start: the new look
+        theme.apply_look("mono")
+    from .tools import tools
     from .ui import widgets as W
     from .ui.main_window import MainWindow
     app = QApplication(sys.argv[:1])
     app.setApplicationName("MovieRecaps")
     fam = theme.load_fonts()
     theme.FONT = fam
+    theme.mono_fonts()
+    fam = theme.FONT
     app.setFont(W.font(13, 400, family=fam))
     app.setStyleSheet(theme.qss(fam))
     theme.warm_fonts(app.font())             # the emoji font's first lookup (~0.5 s) before the window, not on a page

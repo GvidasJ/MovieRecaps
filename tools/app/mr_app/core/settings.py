@@ -46,6 +46,7 @@ class Settings:
     torrent_dir: str = ""              # "Save torrents to"; "" = this computer's default (torrent.default_dir)
     torrent_keep_sharing: bool = False  # "Keep sharing after a download" (off: sharing stops when it is finished)
     console_open: bool = True          # night 15: the queue's "What it's doing now" panel open (remembered)
+    look: str = "mono"                 # run 18: "mono" (Mono + red) | "classic" (Settings -> Classic look)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -109,6 +110,8 @@ def _valid(name: str, v: Any, default: Any) -> Any:
         return _int(v, default, 1, 24 * 60)
     if name in ("pc_names", "laptop_names"):
         return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else default
+    if name == "look":
+        return v if v in ("mono", "classic") else default
     return v
 
 
