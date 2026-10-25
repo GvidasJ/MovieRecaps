@@ -78,6 +78,31 @@ def test_someone_else_shown_the_competitors_own_framing_or_a_person_shown_stays(
     assert _fix([_clip(-1935.0)], sp) == 0                                       # shown already
 
 
+def test_the_xml_and_its_check_run_the_same_last_steps(tmp_path, monkeypatch):
+    """video14 / video37 (run 18): a join or a person move made at the end of the XML is made in the check's rebuild
+    of it too (last_steps) -- the check reads the XML it expects, not "N V1 clips, expected M" or "Motion differs"."""
+    from test_export_xml_edl import premiere_cutlist
+
+    from match_cuts.config import Config
+    cl = premiere_cutlist()
+    cfg = Config(out_dir=str(tmp_path), premiere=True)
+    real, calls = ex.last_steps, []
+
+    def nudged(clips, audio, cfg_, fps, raw_wh, spans):          # stands in for a person move on the first clip
+        clips, audio, pairs = real(clips, audio, cfg_, fps, raw_wh, spans)
+        calls.append(fps)
+        s = clips[0].keys[0][1]
+        clips[0].keys = [(clips[0].keys[0][0], Sim(s.s, 0.0, s.tx - 30.0, s.ty))]
+        return clips, audio, pairs
+    monkeypatch.setattr(ex, "last_steps", nudged)
+    xml, edl = tmp_path / "recreated_edit.xml", tmp_path / "recreated_edit.edl"
+    ex.write_premiere_xml(cl, xml, cfg)
+    ex.write_edl(cl, edl, cfg)
+    v = ex.validate_premiere_exports(cl, xml, edl, cfg)
+    assert len(calls) == 2
+    assert not any("differs from the planned" in e or "V1 clips, expected" in e for e in v["errors"]), v["errors"]
+
+
 def test_a_move_that_would_break_min_move_beside_it_is_not_made():
     before = _clip(-1300.0, rec=(0, 100), src=3179, sid=15)                      # shows the person (x 680-950)
     c = _clip(-1000.0, rec=(100, 292), src=3279)

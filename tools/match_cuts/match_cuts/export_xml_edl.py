@@ -4223,6 +4223,22 @@ def _person_check_fix_on() -> bool:
     return PERSON_CHECK_FIX if v not in ("0", "1") else v == "1"
 
 
+def last_steps(clips: list[PremiereClip], audio: list[dict], cfg: Any, fps: Fraction, raw_wh: tuple[float, float],
+               spans: tuple[list[tuple[float, float]], list[tuple[float, float]]]
+               ) -> tuple[list[PremiereClip], list[dict], list[tuple[int, int]]]:
+    """Run 18: the edit's last steps, the same in write_premiere_xml (the checked edit and 1_edit.xml at the RAW's
+    rate) and in validate_premiere_exports' rebuild of it: one take left in two clips joined again (join_seams), V1 /
+    A1 linked again, the clips the XML PERSON check would fail moved onto their person (_person_check_fix; ``spans``:
+    _person_spans of the planned clips). Returns (clips, audio, pairs) as link_pairs."""
+    clips, audio = join_seams(clips, audio)
+    clips, audio, pairs = link_pairs(clips, audio)
+    people = _people_of(cfg)
+    if people is not None and _person_check_fix_on() and not getattr(cfg, "premiere_follow_speaker", False):
+        st = premiere_settings(cfg)
+        _person_check_fix(clips, people, raw_wh, st["window"], fps, *spans, st["min_move"])
+    return clips, audio, pairs
+
+
 def _person_spans(planned: Sequence[PremiereClip], fps: Fraction
                   ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """(every planned clip's whole stretch, those that keep the competitor's own framing) in RAW seconds: what the
@@ -4829,13 +4845,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                 getattr(cfg, "premiere_shots", None))
             if take_jumps:
                 end_cut, cut_fixed = _after_jumps(end_cut, cut_fixed, take_jumps)
-        clips, audio_items = join_seams(clips, audio_items)        # run 18: one take left in two clips -- one again
-        clips, audio_items, pairs = link_pairs(clips, audio_items)
         fps = want
         src_dur = int(math.floor(raw_frames * float(fps) / float(raw_fps)))
-    people = _people_of(cfg)
-    if people is not None and _person_check_fix_on() and not getattr(cfg, "premiere_follow_speaker", False):
-        _person_check_fix(clips, people, (raw_w, raw_h), st["window"], fps, *person_spans, st["min_move"])
+    clips, audio_items, pairs = last_steps(clips, audio_items, cfg, fps, (raw_w, raw_h), person_spans)
 
     def where(x: int) -> int:             # a position of the planning grid (100 %) on the delivered sequence
         y = int(round(int(x) / float(speed))) if abs(float(speed) - 1.0) > 1e-9 else int(x)
@@ -6933,6 +6945,9 @@ def validate_premiere_exports(cutlist: Cutlist, xml_path: str | os.PathLike, edl
             clips, _ = split_at_shots(clips, getattr(cfg, "premiere_shots", None), cutlist.raw_fps, st["fps"],
                                       premiere_factor(cutlist.comp_fps, st["fps"]))
         clips, want_a, _ = link_pairs(clips, want_a)          # as write_premiere_xml links them
+        clips, want_a, _ = last_steps(clips, want_a, cfg, st["fps"],      # ... and finishes them (run 18)
+                                      (float(cutlist.raw["width"]), float(cutlist.raw["height"])),
+                                      _person_spans(plan_clips, st["fps"]))
         x = parse_premiere_xml(xml_path)
     except Exception as e:  # noqa: BLE001
         errors.append(f"XML: validation crashed: {type(e).__name__}: {e}")
