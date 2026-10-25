@@ -1,6 +1,6 @@
 # Run 18 (25 October): one task at a time
 
-Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress" -- the PC stays on. C: 102.5 GB free at the start, D: 1795.7 GB.
+Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress" -- the PC stays on. C: 102.5 GB free at the start, D: 1795.7 GB. Ended 14:40: C: 120 GB free, D: 1725 GB; nothing of yours deleted; the PC left on. You came back at about 14:03 -- from then on everything ran at BelowNormal and nothing touched Premiere or your windows.
 
 ## The tasks
 
@@ -12,7 +12,7 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 | 4 | The lists stay when the app closes; History's three buttons | **done** | close the app as usual: everything comes back; History: Try again / another RAW / another competitor on every failure |
 | 5 | Learn and your 60 fps sequences | **done** (it already compared by time; now a rule, and the card says so) | nothing |
 | 6 | The Convert check's new rule on the real file | **done** (Fletch Lives converts) | nothing |
-| 7 | Learn the queue + video35 / video37 | **done**: learned 7 of 7; **video35 and video37 pass now** (both failed on day 17) | nothing |
+| 7 | Learn the queue + video35 / video37 | **done**: learned 7 of 7 (all 7 pass the check-all); **video35 and video37 pass now** (both failed on day 17); a flash at the very start, found by two new cases, is cut too | nothing |
 | 8 | The "Mono + red" look | **done** | it is the new look; Settings -> Classic look: On goes back |
 | 9 | Learn by yourself: whom each clip is centred on | **done, nothing turned on**: one narrow rule found (+3 clips in video37) but it undoes your video021 two-shot -- built as a switch, OFF | `MATCH_CUTS_CENTRE_SURE=1` to try it |
 
@@ -215,7 +215,7 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 
 Every case of day 17's check-all again on today's final code (its caches on D:, `D:\mr_checkall`), and the new cases from the learn queue (analysed for the first time: an hour or more each). "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
 
-**In short: day 17's 26 cases -- 24 PASS, 2 FAIL (video35, video37) -> all 26 PASS.** Every score the same as day 17 except the cases Task 3's step changed (video14 better; video19, video34, video6: see Task 3 -- the edits as close to yours or closer, the caption numbers moved) and video37's framing (0 -> 2 of 11). The new cases: all PASS (flkoick1 and video42 after today's start-flash fix).
+**In short: day 17's 26 cases -- 24 PASS, 2 FAIL (video35, video37) -> all 26 PASS.** Every score the same as day 17 except the cases Task 3's step changed (video14 better; video19, video34, video6: see Task 3 -- what each plays against your edit, and why the caption numbers moved) and video37's framing (0 -> 2 of 11). The new cases: all PASS (flkoick1 and video42 after today's start-flash fix).
 
 <!-- TABLE -->
 | video | day 17: hard / captions / word errors / cuts / framing | run 18 | time |
@@ -230,9 +230,9 @@ Every case of day 17's check-all again on today's final code (its caches on D:, 
 | video017-fixed | PASS (hard checks) | PASS (hard checks) | 8m56s |
 | video020-fixed | PASS (hard checks) | PASS (hard checks) | 19m37s |
 | video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 4m43s |
-| video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 7m28s |
+| video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 12m23s |
 | video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 8m51s |
-| video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | PASS / 6/33 / 32.79 / 4/8 / 1/10 | 10m24s |
+| video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | PASS / 6/33 / 32.79 / 4/8 / 1/10 | 34m21s |
 | video2 | PASS (hard checks) | PASS (hard checks) | 3m14s |
 | video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 6m57s |
 | video3 | PASS (hard checks) | PASS (hard checks) | 25m34s |
@@ -241,13 +241,14 @@ Every case of day 17's check-all again on today's final code (its caches on D:, 
 | video34-fixed | PASS / 2/20 / 34.1 / 0/3 / 0/4 | PASS / 1/20 / 42.22 / 0/3 / 0/4 | 6m21s |
 | video35-fixed | **FAIL** / 4/33 / 15.7 / 3/9 / 9/23 | PASS / 4/33 / 15.71 / 3/9 / 9/23 | 18m45s |
 | video36-fixed | PASS / 0/32 / 27.2 / 0/3 / 6/6 | PASS / 0/32 / 27.16 / 0/3 / 6/6 | 24m54s |
-| video37-fixed | **FAIL** / 4/44 / 11.5 / 3/7 / 0/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 43m20s |
+| video37-fixed | **FAIL** / 4/44 / 11.5 / 3/7 / 0/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 9m41s |
 | video38-fixed | PASS / 8/33 / 43.0 / 2/6 / 5/19 | PASS / 8/33 / 43.04 / 2/6 / 5/19 | 7m11s |
 | video39-fixed | -- (new) | PASS / 9/38 / 3.8 / 2/6 / 4/8 | 48m00s |
 | video4 | PASS (hard checks) | PASS (hard checks) | 17m17s |
 | video40-fixed | -- (new) | PASS / 1/48 / 37.5 / 1/9 / 2/14 | 16m19s |
 | video41-fixed | -- (new) | PASS / 6/46 / 29.73 / 2/6 / 8/17 | 63m44s |
 | video42-fixed | -- (new) | PASS / 6/38 / 27.54 / 4/9 / 4/13 | 6m19s |
+| video43-fixed | -- (new) | PASS / 6/36 / 24.68 / 0/0 / 0/3 | 187m19s |
 | video6-fixed | PASS / 18/32 / 10.0 / 5/7 / 9/9 | PASS / 17/32 / 8.33 / 5/7 / 9/9 | 7m53s |
 | video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 3m38s |
 | video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 8m40s |
@@ -292,11 +293,19 @@ git pull
 6. **Task 7:** Learn's two glossary lines (`god -> God`, a censored word) not taken, as on days 15-17 (a new glossary line re-transcribes every video); the 26 new action captions taken. The 7 new cases got `"style": "new"` and their run's frame and watermark, as day 17's.
 7. **Task 8:** the new look is the default (you chose it); Classic look is one switch away. The pictures are drawn offscreen by Qt (never your desktop).
 8. **Task 9:** the one rule found stays OFF because it undoes your video021 two-shot (a test from night 3), though it helps video37 -- "nothing may get worse" wins.
-9. **The check-all ran while I fixed what it found** (video14's two clips, video37's person, the start flash): each case's row is from a run on the code that has every fix able to act on it -- the later fixes only act where an XML check fails, and every case they could reach was run again on the final code (video14, video37, flkoick1, video42, video40, video43).
-10. **The new cases:** first analysed today (about an hour each with three streams on the graphics card). All 7 are in the table if they finished by the end.
+9. **The check-all ran while I fixed what it found** (video14's two clips, video37's person, the start flash): each case's row is from a run on code that has every fix able to act on it -- the later fixes only act where an XML check fails, so a case that passed can't change; the cases they did act on ran again on the final code (video14, video37, flkoick1, video42), and video14, video19 and video37 came out the same there again.
+10. **The new cases:** first analysed today (48 minutes to 3 hours each with three streams on the graphics card); all 7 finished and passed.
+
+## 5 new suggestions (in `D:\Shared\Projects\suggestions.md`, not built)
+
+1. **Make a finished run's edit again in seconds** -- a rule change tried on all 34 cases in minutes, not hours (half a night)
+2. **A marker on each clip whose speaker is unclear** -- where you re-frame most clips by hand, a Premiere marker points your eye (small)
+3. **"Check my saved project" in the app** -- after Ctrl+S, the app says the A1 chain and the song are right before you render (small)
+4. **"Clear finished" on the queue and New video** -- the kept lists don't grow forever (small)
+5. **The coverage strip on History's rows too** -- weak matches visible at a glance (small)
 
 ## Tests
 
 - After tasks 1-2: tool 1657 passed, 0 failed; app 1279 passed, 0 failed.
-- On the final code (12:50): **tool 1671 passed, 0 failed** (102 skipped: the GPU-only ones, the graphics card hidden while the check-all ran); **app 1238 passed, 0 failed**, and its torrent tests apart: 58 passed.
+- **The final run (14:24-14:37, on the code as pushed): tool 1671 passed, 0 failed** (the graphics card hidden), then its GPU test files with the card: **57 passed**; **app 1238 passed, 0 failed**; the app's torrent tests apart: **58 passed**. `setup_app.py`: "done: everything is as the project expects".
 - New today: 37 tests (A1 chain 5, the song 2, cartoon repeats 6, the kept lists 5, Learn's frame rate 2, Convert 1, the look 7, the person pass 5, the joined take 1 and the start flash 3; the end-flash test extended for video35).
