@@ -8,13 +8,13 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 |---|---|---|---|
 | 1 | A1 voice: real Clip Gain + the right effects, no extra Volume | **done** (Premiere test passed on all 4 channels; no preset needed) | Open in Premiere from the app, save (Ctrl+S): the app closes Premiere once, writes everything, opens it again |
 | 2 | The song on every channel | **done** (Premiere test passed on all 4 channels) | nothing: MikeMemesYou, Flick707 and LouLaughs edits get SceneProof's song on A2, with its effects |
-| 3 | Cartoons: a repeat only cut when its sound repeats too | built; the check-all is running (below) | nothing: it is on (`MATCH_CUTS_REPEAT_SOUND=0` turns it off) |
+| 3 | Cartoons: a repeat only cut when its sound repeats too | **done** (your case: 1.75 s of the competitor no longer cut; video40 plays 91 % of the RAW you kept instead of 85 %, video19 97 % instead of 92 %) | nothing: it is on (`MATCH_CUTS_REPEAT_SOUND=0` turns it off) |
 | 4 | The lists stay when the app closes; History's three buttons | **done** | close the app as usual: everything comes back; History: Try again / another RAW / another competitor on every failure |
 | 5 | Learn and your 60 fps sequences | **done** (it already compared by time; now a rule, and the card says so) | nothing |
 | 6 | The Convert check's new rule on the real file | **done** (Fletch Lives converts) | nothing |
-| 7 | Learn the queue + video35 / video37 | learned 7 of 7; **video35 passes now**; video37 and video14 in the final check-all | nothing |
+| 7 | Learn the queue + video35 / video37 | **done**: learned 7 of 7; **video35 and video37 pass now** (both failed on day 17) | nothing |
 | 8 | The "Mono + red" look | **done** | it is the new look; Settings -> Classic look: On goes back |
-| 9 | Learn by yourself: whom each clip is centred on | being tested (below) | -- |
+| 9 | Learn by yourself: whom each clip is centred on | **done, nothing turned on**: one narrow rule found (+3 clips in video37) but it undoes your video021 two-shot -- built as a switch, OFF | `MATCH_CUTS_CENTRE_SURE=1` to try it |
 
 ## Task 1 -- A1 voice: real Clip Gain + the right effects (done)
 
@@ -75,7 +75,7 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 
   | video40-fixed | step OFF | step ON (the default) |
   |---|---|---|
-  | hard checks | **FAIL** (a take left in two clips) | **PASS** |
+  | hard checks (both runs before today's join of a take left in two clips) | **FAIL** (a take left in two clips) | **PASS** |
   | repeats cut | 10 (2.27 s) | 1 (0.20 s) |
   | of the RAW you kept, it plays | 85.1 % (misses 4.46 s) | **90.9 %** (misses 2.71 s) |
   | RAW it plays that you cut | 3.88 s | 4.34 s |
@@ -84,7 +84,8 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 
 - **The other cartoon it changed: video19** (Family Guy, "I can't believe it's not butter"): 11 pieces put where their sound is; it now plays **97.4 %** of the RAW you kept (day 17: 92.4 %; misses 0.58 s instead of 1.71 s), the same 1.46 s you cut; cuts 3 -> 4 of 8. Day 17 cut 4 bits you kept (RAW 35.03-35.45, 36.75-37.54, 44.54-44.71, 52.68-52.97 s); now that take plays straight, as in your fix.
 - **Why the captions numbers went down there anyway:** they are compared by time, and both versions keep a 0.75 s pause you removed early on (RAW 30.49-31.24 s), which shifts every later caption. Day 17's 4 wrong cuts happened to shorten the edit by about the same, so its captions sat closer in time. The words themselves are transcribed again on every run (the known ±2-5 noise).
-- So the step stays **ON**. Every other case of the check-all: the same as day 17 (the table below).
+- **video34** (Family Guy, "Luck Not On His Side"): 4 pieces moved 0.3-0.4 s to where their sound is (S08, S09, S15, S16). It plays the same 92.9 % of the RAW you kept as day 17, plus 0.33 s more of a part you cut (RAW 36.66-38.08 s). The spoken captions are word for word the same; one action caption there now reads "\*looks at the van\*" instead of your "\*walks away\*" (the AI describes the frames it shows), and that one caption is the whole word-error change (34.1 -> 42.2 %) and the 2 -> 1 exact captions.
+- So the step stays **ON**. The other cases of the check-all: the same as day 17 (the table below).
 
 ## Task 4 -- the lists stay when the app closes
 
@@ -131,9 +132,10 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
   | video43-fixed | The Funniest Flight In British Comedy (3) | (a piece of the movie) |
 
   Each is a check-all case now (`tests\real\<case>`: your finished edit's captions and clips, the competitor, the RAW piece, its frame and watermark). From your captions: **26 new action captions** (`caption_actions.txt`). Learn's two glossary lines were not taken (below, "What I decided").
-- **video35 (the 2-frame flash at 27.2 s):** the competitor's last 2 frames jump to another shot, so the edit's last clip was a 2-frame piece of another RAW shot -- a flash at the very end. The end check only knew a take running on into a new shot; now a **last clip of up to 0.1 s** that shows another RAW shot is cut too, as you did (your fix ends on the clip before it; `END_CLIP_FLASH_S`).
-- **video14 (a new hard FAIL from Task 3's step, caught by the check-all):** "S09+...+S21 / S22: one continuous RAW take with the same framing, but two clips" -- the step put a piece back where its sound is, and the take was left in two clips. Now two clips that play one continuous take (the same speed, mirror and framing) become one clip again, with their A1 (`join_seams`; never at a split made on purpose: a RAW shot change). It runs in the edit's **last step** (`last_steps`), which the XML check rebuilds the same way -- the first version ran only at the RAW's rate, so the checked 60 fps edit still had the two clips.
-- **video37 (the person speaking outside the window, 00:00:22:29 and 00:00:25:12, the same on day 17):** the day-12 and day-13 rules judged the pieces of that clip one by one (2 s each, "no clear speaker" in each), but the edit joins them into one clip (S26..S31, RAW 55.13-60.57 s) and the XML check judges the joined clip: the person speaking there is outside the window, nobody else in it. Now the edit's last step judges the **final clips exactly as that check does** (the same stretches, the person speaking or the biggest face, the same exceptions: someone else shown whole is the competitor's choice; a clip keeping the competitor's own framing) and moves a clip that would fail, zoom kept: **centred** on the person when the face is entirely outside the window (your fix of this clip: -650 px; centred: -666), **slid in** when it is only cut off at the edge (as the day-12 rule). The clips of one RAW shot with one framing move together, and nothing moves if a cut next to it would then change under --min-move. `MATCH_CUTS_PERSON_CHECK_FIX=0` turns it off. (Its other failure on day 17, a 3-frame flash at the very end, is cut in 1_edit.xml at the RAW's rate and checked there.)
+- **video35 (the 2-frame flash at 27.2 s):** the competitor's last 2 frames jump to another shot, so the edit's last clip was a 2-frame piece of another RAW shot -- a flash at the very end. The end check only knew a take running on into a new shot; now a **last clip of up to 0.1 s** that shows another RAW shot is cut too, as you did (your fix ends on the clip before it; `END_CLIP_FLASH_S`). **Result: PASS** (day 17: FAIL), every score as on day 17 (captions 4/33, word errors 15.7 %, cuts 3/9, framing 9/23).
+- **video14 (a new hard FAIL from Task 3's step, caught by the check-all):** "S09+...+S21 / S22: one continuous RAW take with the same framing, but two clips" -- the step put a piece back where its sound is, and the take was left in two clips. Now two clips that play one continuous take (the same speed, mirror and framing) become one clip again, with their A1 (`join_seams`; never at a split made on purpose: a RAW shot change). It runs in the edit's **last step** (`last_steps`), which the XML check rebuilds the same way -- the first version ran only at the RAW's rate, so the checked 60 fps edit still had the two clips; the second compared more strictly than the check (the clip before was the last piece of a clip with a framing per RAW shot, and S22's framing equalled S21's only to the 7th digit).
+- **video37 (the person speaking outside the window, 00:00:22:29 and 00:00:25:12, the same on day 17):** the day-12 and day-13 rules judged the pieces of that clip one by one (2 s each, "no clear speaker" in each), but the edit joins them into one clip (S26..S31, RAW 55.13-60.57 s) and the XML check judges the joined clip: the person speaking there is outside the window, nobody else in it. Now the edit's last step judges the **final clips exactly as that check does** (the same stretches, the person speaking or the biggest face, the same exceptions: someone else shown whole is the competitor's choice; a clip keeping the competitor's own framing) and moves a clip that would fail, zoom kept: **centred** on the person when the face is entirely outside the window (your fix of this clip: -650 px; centred: -666), **slid in** when it is only cut off at the edge (as the day-12 rule). The clips of one RAW shot with one framing move together; when a slide would make a cut next to it change under --min-move, the clip takes the framing of its neighbour in the same RAW shot if that shows the person (the take is then one clip again). `MATCH_CUTS_PERSON_CHECK_FIX=0` turns it off. (Its other failure on day 17, a 3-frame flash at the very end, is cut in 1_edit.xml at the RAW's rate and checked there.)
+  **Result: PASS** (day 17: FAIL). RAW 55.13-57.85 s moved -667 px (yours: -650); RAW 57.85-60.57 s took the next clip's framing, -270 px (yours: -300 for that whole take). Framing 0/11 -> **2/11**; cuts 3/7 and word errors 11.5 % as before (captions 4 -> 3 of 44: the re-transcription).
 - **The check-all:** below.
 
 ## Task 8 -- the "Mono + red" look
@@ -183,14 +185,68 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
   | a wide shot | 7 | 0 | **2** | 1 | 4 |
   | --min-move | 3 | 1 | 0 | 0 | 2 |
 
-- **So no general "centre the speaker more" rule:** it loses as often as it wins. The biggest group (25 of the 39 "unclear speaker" clips) is framed by you on someone who is neither the competitor's choice nor the speaker the tool found -- a listener, someone reacting, or two people. The tool cannot see that yet (it keeps only the speaker's face in its notes; a suggestion below).
-- **The one narrow pattern:** a **very clear** speaker (on 90 % or more of the speech, Light-ASD 3.5 or more, 3 or more above every other face) that the tool left because the competitor's own framing is no wider than the template, or because centring would hide someone else the competitor shows. You centred them in video37 (43-47 s, 3 clips) and video33 (S18, 2 clips), and no clip of this kind got worse. Built as a switch, **OFF** until tested: `CENTRE_SURE` (`MATCH_CUTS_CENTRE_SURE=1`). It can only act where the log shows such a clip: video33, video37, zendaya and video4.
-- **The test:** (below, when it ran).
+- **So no general "centre the speaker more" rule:** it loses as often as it wins. The biggest group (25 of the 39 "unclear speaker" clips) is framed by you on someone who is neither the competitor's choice nor the speaker the tool found -- a listener, someone reacting, or two people (below, with every face).
+- **The one narrow pattern:** a **very clear** speaker (on 90 % or more of the speech, Light-ASD 3.5 or more, 3 or more above every other face) that the tool left because the competitor's own framing is no wider than the template, or because centring would hide someone else the competitor shows. You centred them in video37 (43-47 s, 3 clips) and video33 (S18, 2 clips), and no clip of this kind got worse. Built as a switch, **OFF** until tested: `CENTRE_SURE` (`MATCH_CUTS_CENTRE_SURE=1`). It can only act where the log shows such a clip: video33, video37, zendaya, video4 and (a new case) mik1.
+- **The test** (the check-all of those cases again with the switch on, everything else the same):
+
+  | case | switch off | switch on |
+  |---|---|---|
+  | video37-fixed | PASS, framing 2/11 | PASS, framing **5/11** (4 RAW shots centred; captions, word errors, cuts the same) |
+  | video33-fixed | PASS, framing 6/24 | the same (its sure speakers' moves are under 104 px: "centred already") |
+  | zendaya | PASS | the same edit (its one such clip: "centred already") |
+  | video4 | PASS | the same edit (its 3 such clips: "a close-up" / "centred already") |
+
+- **But it would undo one of your own fixes:** the tool's tests keep what you did in **video021 at 82.5 s** (night 3): two women in a pool, the one on the right speaking very clearly (Light-ASD 3.9) at the window's edge, the other shown whole -- **you kept the two-shot**. With the switch on, that test fails: the rule would centre her and push the other woman out. In video37 you did the opposite (centred the speaker). Your two fixes disagree and I can't yet tell them apart, so by your rule ("keep only if nothing gets worse") **the switch stays OFF**. `MATCH_CUTS_CENTRE_SURE=1` turns it on for one run if you want to try it.
+- **Then with every face** (the people analysis the tool keeps in its cache: each face's box and speaking score frame by frame), all 253 clips you framed in the scored cases -- what sits in the window's middle under your framing:
+
+  | faces in the clip | the top speaker | another face | between two faces | no face at the middle |
+  |---|---|---|---|---|
+  | none (cartoons, objects) | -- | -- | -- | 76 |
+  | one | 78 | -- | -- | 45 |
+  | two | 18 | 5 | 10 | 6 |
+  | three or more | 1 | 4 | 4 | 6 |
+
+  With two faces and a clear speaker you centre the speaker 16 times of 28 (between the two: 6). Where the speaker is unclear (11 clips) you choose differently each time (between: 4, the other face: 3, the speaker: 2, neither: 2). A "two-shot" rule (the middle between the two faces) would match you in 1 of those 11 and break 2 clips that match you now -- so no rule from this either.
+- **Learned for good from this:** nothing new turned on. Where the tool and you differ is mapped (the tables above); your choices there follow the content (who reacts, whom the joke is on), not anything the face positions or speaking scores show.
+
+## The check-all: day 17 -> run 18
+
+Every case of day 17's check-all again on today's final code (its caches on D:, `D:\mr_checkall`), and the new cases from the learn queue (analysed for the first time: an hour or more each). "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
+
+<!-- TABLE -->
+| video | day 17: hard / captions / word errors / cuts / framing | run 18 | time |
+|---|---|---|---|
+| chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | 32m19s |
+| laptop004-fixed | PASS (hard checks) | PASS (hard checks) | 3m48s |
+| laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | PASS / 10/34 / 7.69 / 1/9 / 11/13 | 4m05s |
+| laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | PASS / 12/22 / 13.33 / 1/5 / 2/6 | 7m54s |
+| mik1-fixed | -- (new) | PASS / 8/69 / 13.33 / 8/13 / 2/15 | 77m41s |
+| spiderman-school | PASS (hard checks) | PASS (hard checks) | 8m45s |
+| video017-fixed | PASS (hard checks) | PASS (hard checks) | 8m56s |
+| video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 4m43s |
+| video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 7m28s |
+| video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 8m51s |
+| video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | PASS / 6/33 / 32.79 / 4/8 / 1/10 | 10m24s |
+| video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 6m57s |
+| video3 | PASS (hard checks) | PASS (hard checks) | 25m34s |
+| video30-fixed | PASS / 18/43 / 16.85 / 4/7 / 2/13 | PASS / 18/43 / 16.85 / 4/7 / 2/13 | 8m58s |
+| video33-fixed | PASS / 28/81 / 15.8 / 3/6 / 6/24 | PASS / 28/81 / 15.82 / 3/6 / 6/24 | 5m25s |
+| video34-fixed | PASS / 2/20 / 34.1 / 0/3 / 0/4 | PASS / 1/20 / 42.22 / 0/3 / 0/4 | 6m21s |
+| video35-fixed | **FAIL** / 4/33 / 15.7 / 3/9 / 9/23 | PASS / 4/33 / 15.71 / 3/9 / 9/23 | 18m45s |
+| video36-fixed | PASS / 0/32 / 27.2 / 0/3 / 6/6 | PASS / 0/32 / 27.16 / 0/3 / 6/6 | 24m54s |
+| video37-fixed | **FAIL** / 4/44 / 11.5 / 3/7 / 0/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 43m20s |
+| video38-fixed | PASS / 8/33 / 43.0 / 2/6 / 5/19 | PASS / 8/33 / 43.04 / 2/6 / 5/19 | 7m11s |
+| video39-fixed | -- (new) | PASS / 9/38 / 3.8 / 2/6 / 4/8 | 48m00s |
+| video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 3m38s |
+| video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 8m40s |
+<!-- /TABLE -->
 
 ## Still broken / not done
 
+- **flkoick1 (new case, Arthur): FAIL -- a 1-frame flash at the very start.** The edit opens one frame before a RAW shot change (its first frame shows RAW 30.03 s, the shot before; the next shot starts at 30.07 s). Your fix starts at RAW 30.113 s. The end of an edit already gets such frames cut (day 13, and video35 today); the start needs the same, but cutting at the start moves every clip, caption and check of the edit by those frames -- too big to slip in safely in the last hours. Until then: in Premiere, trim the first frame (or two) off the start of the edit.
+
 - **The general pause check** (Task 3: no pause cut where A1 isn't the competitor's sound) is built but OFF -- it made video37 worse.
-- **The framing rule (Task 9):** no general rule found; whom you centre in the clips where the speaker is unclear can't be told from what the tool keeps (a suggestion below).
+- **The framing rule (Task 9):** no rule turned on. The one candidate (centre a very clear speaker even over the competitor's framing) helps video37 but undoes your video021 two-shot; where the speaker is unclear your choices don't follow the faces' positions or speaking scores.
 - **Captions numbers move by themselves** (re-transcription on every run, ±2-5 exact captions): a change that only moves the picture can still show -1 / +1 captions.
 - **App tests:** one animation timing test (a colour fade "part-way after 110 ms") can fail when the PC is very busy (it passed alone, 9 of 9); the torrent tests still run apart from the rest (they crash Qt when run together with everything under heavy load -- the known night-15 crash).
 

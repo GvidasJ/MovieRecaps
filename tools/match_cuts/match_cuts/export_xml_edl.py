@@ -2577,10 +2577,12 @@ def _speaker_centre_on() -> bool:
     return SPEAKER_CENTRE if v not in ("0", "1") else v == "1"
 
 
-CENTRE_SURE = False         # run 18 (task 9, your framing in 16 cases): a VERY clear speaker -- on this share of the
+CENTRE_SURE = False         # run 18 (task 9, your framing in 13 cases): a VERY clear speaker -- on this share of the
 CENTRE_SURE_SHARE = 0.9     # speech, Light-ASD this high and this far above every other face -- is centred even over
 CENTRE_SURE_ASD = 3.5       # the competitor's own framing (its window no wider than the template's) and even when it
-CENTRE_SURE_MARGIN = 3.0    # hides someone else the competitor shows (video37 43-47 s, video33 S18: you centred them);
+CENTRE_SURE_MARGIN = 3.0    # hides someone else the competitor shows (video37 43-47 s: you centred them, framing 2 -> 5
+#                             of 11). OFF: it undoes your video021 two-shot at 82.5 s (test_day13_framing: the speaker,
+#                             Light-ASD 3.9, at the window's edge, the other woman shown whole -- you kept both);
 #                             MATCH_CUTS_CENTRE_SURE=1 / 0 switches it for one run
 
 
@@ -3540,6 +3542,73 @@ def end_flash_frames(clips: Sequence[PremiereClip], n: int, changes_s: Sequence[
 END_CLIP_FLASH_S = 0.1      # run 18: a last clip this short of another RAW shot at the very end is cut (2 frames at 24)
 
 
+def start_flash_frames(clips: Sequence[PremiereClip], n: int, changes_s: Sequence[float] | None, fps: Fraction) -> int:
+    """Run 18 (flkoick1, Arthur: the edit opened one frame before a RAW shot change -- its first frame the shot
+    before, XML FLASH at 00:00:00:00; your fix starts on the new shot): end_flash_frames at the other end -- how many
+    frames at the very start of the edit show a RAW shot its take runs straight on out of (one RAW frame or so a
+    frame) within shots.MIN_SHOT_S. 0 when there is none: the first shot long enough, a real cut of the competitor's
+    after it, a dissolve or a reverse at the start, an empty start."""
+    from .shots import MIN_SHOT_S, shot_of
+    if not changes_s or n <= 0:
+        return 0
+    f = float(fps)
+    need = int(math.ceil(MIN_SHOT_S * f - 1e-9))
+    vis = sorted((c for c in clips if c.rec_end > c.rec_start), key=lambda c: c.rec_start)
+    if not vis or vis[0].rec_start != 0:
+        return 0
+    t_at: dict[int, float] = {}                 # sequence frame -> the RAW second Premiere shows there
+    items = []
+    for c in vis:
+        v = float(c.speed)
+        if v <= 0 or c.end == -1 or c.start == -1:
+            continue
+        x_in = xml_roundtrip(c.src_in, c.src_out, c.speed, item_length(c.start, c.end))[0]   # as the XML is read
+        items.append({"start": c.rec_start, "end": c.rec_end, "speed": v, "in": x_in})
+        for r in range(c.rec_start, min(c.rec_end, need + 2)):
+            t_at[r] = (x_in + (r - c.rec_start) * v) / f
+    cs = played_through(items, fps, changes_s)  # as the flash check reads them
+    if 0 not in t_at:
+        return 0
+    k = shot_of(t_at[0], cs)
+    run = 1
+    while run in t_at and shot_of(t_at[run], cs) == k:
+        run += 1
+    if run >= need or run not in t_at:
+        return 0
+    step = t_at[run] - t_at[run - 1]            # the take runs on out of it into the next shot
+    return run if 0.0 < step <= 2.5 / f else 0
+
+
+def cut_start(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: Sequence[dict], n: int, k: int
+              ) -> tuple[list[PremiereClip], list[dict], list[dict], int]:
+    """cut_end at the other end: the edit without its first ``k`` frames (start_flash_frames) -- V1 and A1 start
+    there (each on its own source line), everything after them ``k`` frames earlier, markers too; the sequence ``k``
+    frames shorter. Returns (clips, audio, markers, frames)."""
+    k = int(k)
+
+    def head(r0: int, s0: int, v: float) -> int:          # the source frame at the new start of an item cut there
+        return s0 + int(round((k - r0) * v))
+    out_c: list[PremiereClip] = []
+    for c in clips:
+        if c.rec_end <= k:
+            continue
+        if c.rec_start < k:
+            c = dataclasses.replace(c, start=k, rec_start=k, src_in=head(c.rec_start, c.src_in, float(c.speed)))
+        out_c.append(dataclasses.replace(c, start=c.start - k if c.start != -1 else -1,
+                                         end=c.end - k if c.end != -1 else -1,
+                                         rec_start=c.rec_start - k, rec_end=c.rec_end - k))
+    out_a: list[dict] = []
+    for it in audio:
+        if int(it["end"]) <= k:
+            continue
+        if int(it["start"]) < k:
+            it = dict(it, start=k, **{"in": head(int(it["start"]), int(it["in"]), float(it["speed"]))})
+        out_a.append(dict(it, start=int(it["start"]) - k, end=int(it["end"]) - k))
+    out_m = [dict(m, **{"in": max(0, int(m["in"]) - k),
+                        "out": (max(0, int(m["out"]) - k) if int(m["out"]) >= 0 else m["out"])}) for m in markers]
+    return out_c, out_a, out_m, int(n) - k
+
+
 def cut_end(clips: Sequence[PremiereClip], audio: Sequence[dict], markers: Sequence[dict], n: int, k: int
             ) -> tuple[list[PremiereClip], list[dict], list[dict], int]:
     """The edit without its last ``k`` frames (end_flash_frames): V1 and A1 end there (each on its own source line),
@@ -3790,6 +3859,38 @@ def fix_take_jumps(clips: list[PremiereClip], audio: list[dict], markers: list[d
     return clips, audio, markers, n, done
 
 
+def _cut_start_flash(clips: list[PremiereClip], audio: list[dict], markers: list[dict], n: int,
+                     pos_map: dict[int, int], fps: Fraction, changes_s: Sequence[float] | None
+                     ) -> tuple[list[PremiereClip], list[dict], list[dict], int, dict | None]:
+    """Run 18: start_flash_frames + cut_start on the edit at the RAW's rate, with ``pos_map`` (the planning grid's
+    positions on it: the captions follow) moved as many frames earlier (a caption that started in the frames cut
+    starts at 0). Like the end cut, the checked 60 fps edit keeps them. Returns (clips, audio, markers, frames,
+    {'frames', 'label'} or None)."""
+    k = start_flash_frames(clips, n, changes_s, fps) if START_FLASH_CUT else 0
+    if not k:
+        return clips, audio, markers, n, None
+    first = min((c for c in clips if c.rec_end > c.rec_start), key=lambda c: c.rec_start)
+    info = {"frames": int(k), "label": first.label}
+    clips, audio, markers, n = cut_start(clips, audio, markers, n, k)
+    for x, y in list(pos_map.items()):
+        pos_map[x] = max(0, int(y) - int(k))
+    return clips, audio, markers, n, info
+
+
+START_FLASH_CUT = True      # run 18 (flkoick1): the first frames of another RAW shot at the very start are cut too
+
+
+def _after_start_cut(end_cut: dict | None, cut_fixed: Sequence[dict], jumps: Sequence[dict], k: int
+                     ) -> tuple[dict | None, list[dict], list[dict]]:
+    """The positions the fixes before the start cut name, in the edit ``k`` frames shorter at its start."""
+    def earlier(pos: int) -> int:
+        return max(0, int(pos) - int(k))
+    if end_cut:
+        end_cut = dict(end_cut, at=earlier(end_cut["at"]), was=earlier(end_cut["was"]))
+    return (end_cut, [dict(m, **{"from": earlier(m["from"]), "to": earlier(m["to"])}) for m in cut_fixed],
+            [dict(j, put=earlier(j["put"]), was=earlier(j["was"]), at=earlier(j["at"])) for j in jumps])
+
+
 def _after_jumps(end_cut: dict | None, cut_fixed: Sequence[dict], jumps: Sequence[dict]
                  ) -> tuple[dict | None, list[dict]]:
     """The positions the fixes before fix_take_jumps name (the edit before it), in the longer edit: each frame put
@@ -3836,10 +3937,10 @@ def _cut_end_flash(clips: list[PremiereClip], audio: list[dict], markers: list[d
 
 def edit_fix_lines(followed: Sequence[dict], end_cut: dict | None, fps: Fraction,
                    where: Callable[[int], int] | None = None, cut_fixed: Sequence[dict] = (),
-                   take_jumps: Sequence[dict] = ()) -> list[str]:
-    """The fixes of follow_snapped_cuts / end_flash_frames / fix_cut_flashes / fix_take_jumps in plain words, at the
-    delivered sequence's timecodes (``where``: a position of the planning grid on it -- --speed and the RAW's rate move
-    the cuts; fix_cut_flashes' and fix_take_jumps' positions are the delivered sequence's own)."""
+                   take_jumps: Sequence[dict] = (), start_cut: dict | None = None) -> list[str]:
+    """The fixes of follow_snapped_cuts / end_flash_frames / fix_cut_flashes / fix_take_jumps / start_flash_frames in
+    plain words, at the delivered sequence's timecodes (``where``: a position of the planning grid on it -- --speed and
+    the RAW's rate move the cuts; fix_cut_flashes' and fix_take_jumps' positions are the delivered sequence's own)."""
     def short(label: Any) -> str:          # "S01+S02+...+S16|S17": a clip of many competitor cuts by its first / last
         def one(x: str) -> str:
             p = x.split("+")
@@ -3870,6 +3971,12 @@ def edit_fix_lines(followed: Sequence[dict], end_cut: dict | None, fps: Fraction
                    f"({short(end_cut['label'])}): the edit's last {'frame' if k == 1 else f'{k} frames'} showed the "
                    f"first {'frame' if k == 1 else 'frames'} of the RAW's next shot -- 1_edit.xml now ends on that "
                    "shot change")
+    if start_cut:
+        k = int(start_cut["frames"])
+        out.append(f"{k} flash frame{'' if k == 1 else 's'} removed at the start ({short(start_cut['label'])}): the "
+                   f"edit's first {'frame' if k == 1 else f'{k} frames'} showed the last "
+                   f"{'frame' if k == 1 else 'frames'} of the RAW's shot before -- 1_edit.xml now starts on that shot "
+                   "change, everything after it that much earlier")
     return out
 
 
@@ -4857,6 +4964,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     plan_fps = fps
     want = Fraction(str(seq_rate)) if seq_rate not in (None, "") else fps
     end_cut: dict | None = None
+    start_cut: dict | None = None
     cut_fixed: list[dict] = []
     take_jumps: list[dict] = []
     if want != fps:                       # night 7: the sequence at the RAW's own rate
@@ -4874,6 +4982,10 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                 getattr(cfg, "premiere_shots", None))
             if take_jumps:
                 end_cut, cut_fixed = _after_jumps(end_cut, cut_fixed, take_jumps)
+            clips, audio_items, markers, N, start_cut = _cut_start_flash(clips, audio_items, markers, N, pos_map, want,
+                                                                         getattr(cfg, "premiere_shots", None))
+            if start_cut:                 # run 18 (flkoick1): every position named so far that many frames earlier
+                end_cut, cut_fixed, take_jumps = _after_start_cut(end_cut, cut_fixed, take_jumps, start_cut["frames"])
         fps = want
         src_dur = int(math.floor(raw_frames * float(fps) / float(raw_fps)))
     clips, audio_items, pairs = last_steps(clips, audio_items, cfg, fps, (raw_w, raw_h), person_spans)
@@ -4883,7 +4995,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
         if fps == plan_fps:
             return y
         return pos_map.get(y, int(math.floor(Fraction(y) * Fraction(fps) / Fraction(plan_fps) + Fraction(1, 2))))
-    fixes = edit_fix_lines(followed, end_cut, fps, where, cut_fixed, take_jumps)
+    fixes = edit_fix_lines(followed, end_cut, fps, where, cut_fixed, take_jumps, start_cut)
     for line in fixes:
         warnings.append(f"fixed by itself: {line}")
     a_of = {v: a for v, a in pairs}
@@ -5034,7 +5146,8 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
     return {"clips": len(clips), "markers": len(markers), "warnings": warnings, "factor": fac, "links": len(pairs),
             "fps": fps_str(fps), "plan_fps": fps_str(plan_fps), "frames": int(N),
             "pos_map": {str(k): v for k, v in sorted(pos_map.items())},
-            "a1_followed": followed, "end_cut": end_cut, "cut_flashes": cut_fixed, "take_jumps": take_jumps,
+            "a1_followed": followed, "end_cut": end_cut, "start_cut": start_cut, "cut_flashes": cut_fixed,
+            "take_jumps": take_jumps,
             "edit_fixes": fixes,
             "reframed": reframed, "snapped": snapped, "scene_cuts": scene, "audio_chain": chain,
             "other_video": [{"segment": m["other_video"], "in": m["in"], "out": m["out"],
@@ -5105,8 +5218,21 @@ def _without_put_back(x: dict, puts: Sequence[tuple[int, int]]) -> dict:
     return dict(x, clips=[one(q) for q in x["clips"]], audio=[one(q) for q in x["audio"]], duration=m(x["duration"]))
 
 
+def _with_start_cut(x: dict, k: int) -> dict:
+    """The parsed XML ``x`` with the ``k`` frames start_flash_frames cut off its start put back as nothing: every
+    item that much later, the sequence that much longer -- the edit on the checked edit's timeline, to compare."""
+    if not k:
+        return x
+
+    def one(q: dict) -> dict:
+        s, e = int(q["start"]), int(q["end"])
+        return dict(q, start=s + k if s >= 0 else s, end=e + k if e >= 0 else e)
+    return dict(x, clips=[one(q) for q in x["clips"]], audio=[one(q) for q in x["audio"]],
+                duration=int(x["duration"]) + k)
+
+
 def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0, end_cut: int = 0,
-                  put_back: Sequence[tuple[int, int]] = ()) -> list[str]:
+                  put_back: Sequence[tuple[int, int]] = (), start_cut: int = 0) -> list[str]:
     """Night 7: 1_edit.xml at the RAW's rate (``final_xml``; --speed k too) against the edit every other check read
     (``base_xml``: the 60 fps grid, 100 %): the sequence lasts its length / k (within a frame of the new rate); every
     V1 clip and A1 item plays, on each of its frames, the RAW its twin in the checked edit (the clip it overlaps most)
@@ -5117,9 +5243,12 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
     the RAW's next shot: the sequence that much shorter, the checked edit's clips after its new end not wanted.
     ``put_back`` (day 13: write_premiere_xml's take_jumps, [(first frame, frames)] of the final sequence): skipped
     frames played again inside a take on purpose -- compared with them taken out again (each one moves everything
-    after it a frame: two of them would put the rest two frames off the plan). One line per item."""
+    after it a frame: two of them would put the rest two frames off the plan). ``start_cut`` (run 18,
+    write_premiere_xml's start_cut): that many frames cut off the start on purpose -- compared with them put back as
+    nothing, the checked edit's clips before the new start not wanted. One line per item."""
     a, b = parse_premiere_xml(base_xml), parse_premiere_xml(final_xml)
     b = _without_put_back(b, sorted((int(s), int(d)) for s, d in put_back or ()))
+    b = _with_start_cut(b, int(start_cut))
     fa, fb = float(_seq_rate(a)), float(_seq_rate(b))
     k = float(k)
     out: list[str] = []
@@ -5182,6 +5311,8 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
             t0, t1 = int(c["start"]) / fa / k, int(c["end"]) / fa / k
             if end_cut and t0 >= end_b - 0.5 / fb:       # after the end cut on purpose (a sliver of the next shot)
                 continue
+            if start_cut and t1 <= (int(start_cut) + 0.5) / fb:   # before the start cut on purpose (run 18)
+                continue
             if t1 - t0 >= 1.0 / fb and not any(min(t1, y1) - max(t0, y0) > 1e-9 for y0, y1 in fin):
                 out.append(f"XML RATE {name} {c.get('label') or '?'}: the checked edit's clip at {t0:.3f}-{t1:.3f} s "
                            "is missing")
@@ -5191,12 +5322,12 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
 def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0,
                        shots: Sequence[float] | None = None, raw_fps: Any = None, moving: bool = False,
                        allow_repeats: bool = False, end_cut: int = 0,
-                       put_back: Sequence[tuple[int, int]] = ()) -> list[str]:
+                       put_back: Sequence[tuple[int, int]] = (), start_cut: int = 0) -> list[str]:
     """The hard checks of 1_edit.xml written again at the RAW's rate (night 7; pipeline.apply_final), on its own
     numbers: ITEM, REPEAT, FLASH (with the RAW's shot changes), AUDIO, TRANSITION, LINK, SYNC -- and XML RATE against
-    the checked edit (rate_problems; ``end_cut``: the frames cut off its end on purpose, write_premiere_xml's
-    end_cut). The checks on what was cut where (SPEECH, SILENCE, PERSON, GAP, OTHER VIDEO, ENDING) read the checked
-    edit: the new rate moves no cut by more than a frame."""
+    the checked edit (rate_problems; ``end_cut`` / ``start_cut``: the frames cut off its end / start on purpose,
+    write_premiere_xml's). The checks on what was cut where (SPEECH, SILENCE, PERSON, GAP, OTHER VIDEO, ENDING) read
+    the checked edit: the new rate moves no cut by more than a frame."""
     items = premiere_item_problems(final_xml)
     out = [f"XML ITEM {p}" for p in items]
     if items:
@@ -5209,7 +5340,7 @@ def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike
     out += [f"XML TRANSITION {p}" for p in premiere_transition_problems(final_xml)]
     out += [f"XML LINK {p}" for p in premiere_link_problems(final_xml)[0]]
     out += [f"XML SYNC {p}" for p in premiere_sync_problems(final_xml, moving)[0]]
-    out += rate_problems(base_xml, final_xml, k, end_cut, put_back)
+    out += rate_problems(base_xml, final_xml, k, end_cut, put_back, start_cut)
     return out
 
 

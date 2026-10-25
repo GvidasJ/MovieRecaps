@@ -235,6 +235,76 @@ def test_the_delivered_edit_ends_on_the_raws_shot_change(tmp_path):
                    "RAW's next shot -- 1_edit.xml now ends on that shot change"]
 
 
+def test_run18_start_flash_frames_finds_only_a_sliver_of_the_shot_before_at_the_very_start():
+    # flkoick1 (run 18): one take at the RAW's rate; a shot change at RAW 1001 -- the edit's first frame (RAW 1000)
+    # is the shot before's last
+    take = [_clip24(0, 100, 1000)]
+    assert ex.start_flash_frames(take, 100, shots.seconds([1001], R24), R24) == 1
+    assert ex.start_flash_frames(take, 100, shots.seconds([1002], R24), R24) == 2
+    assert ex.start_flash_frames(take, 100, shots.seconds([1006], R24), R24) == 0     # 6 frames: 0.25 s, a real shot
+    assert ex.start_flash_frames(take, 100, shots.seconds([1050], R24), R24) == 0     # the middle: not the start's
+    assert ex.start_flash_frames(take, 100, [], R24) == 0 and ex.start_flash_frames(take, 100, None, R24) == 0
+    # the take's first pieces split at the change (the XML's Scene Edit Detection: flkoick1's 1-frame first clip)
+    split = [_clip24(0, 1, 1000), _clip24(1, 100, 1001)]
+    assert ex.start_flash_frames(split, 100, shots.seconds([1001], R24), R24) == 1
+    # the competitor's own first cut: 3 frames of another moment of the RAW, then a real cut -- not a take running on
+    cut = [_clip24(0, 3, 5000), _clip24(3, 100, 7000, 2)]
+    assert ex.start_flash_frames(cut, 100, shots.seconds([5003], R24), R24) == 0
+    # black before the first clip, a reverse: nothing to cut
+    assert ex.start_flash_frames([_clip24(4, 100, 1000)], 100, shots.seconds([1001], R24), R24) == 0
+    rev = [ex.dataclasses.replace(_clip24(0, 100, 1100), speed=-1.0, src_out=1000)]
+    assert ex.start_flash_frames(rev, 100, shots.seconds([1099], R24), R24) == 0
+
+
+def test_run18_cut_start_moves_v1_a1_markers_earlier_and_shortens_the_sequence():
+    clips = [_clip24(0, 1, 1000), _clip24(1, 60, 1001), _clip24(60, 100, 1060, 2)]
+    audio = [{"start": 0, "end": 100, "in": 1000, "out": 1100, "speed": 1.0}]
+    markers = [{"name": "x", "in": 0, "out": 10}, {"name": "y", "in": 50, "out": -1}]
+    c, a, m, n = ex.cut_start(clips, audio, markers, 100, 1)
+    assert n == 99 and [(x.start, x.end, x.rec_start, x.rec_end, x.src_in, x.src_out) for x in c] == [
+        (0, 59, 0, 59, 1001, 1060), (59, 99, 59, 99, 1060, 1100)]
+    assert [(x["start"], x["end"], x["in"], x["out"]) for x in a] == [(0, 99, 1001, 1100)]
+    assert [(x["in"], x["out"]) for x in m] == [(0, 9), (49, -1)]
+
+
+def start_flash_like() -> Cutlist:
+    """flkoick1's start (run 18): the first clip starts on RAW frame 1318, the RAW's next shot on frame 1319."""
+    segs = [Segment(1, "raw", 0, 120, raw_in_seconds=1318 * 1001 / 24000, transform=framing(-96.7)),
+            Segment(2, "raw", 120, 300, raw_in_seconds=2000 * 1001 / 24000, transform=framing(-246.7))]
+    return cutlist(segs, "24000/1001", 300, raw_frames=3000)
+
+
+START_SHOTS = shots.seconds([1319], R24)
+
+
+def test_run18_the_delivered_edit_starts_on_the_raws_shot_change(tmp_path):
+    cl = start_flash_like()
+    cfg = config(tmp_path, START_SHOTS)
+    base, final = tmp_path / "edit_60fps.xml", tmp_path / "1_edit.xml"
+    r60 = ex.write_premiere_xml(cl, base, cfg)
+    assert r60["start_cut"] is None                       # the checked 60 fps edit keeps them, as the end
+    res = ex.write_premiere_xml(cl, final, cfg, seq_rate=R24)
+    xf = ex.parse_premiere_xml(final)
+    n_full = ex.rerate_edit([], [], [], 300, F60, R24)[3]
+    k = res["start_cut"]["frames"]                        # (the RAW frames before 1319 the edit opened on)
+    assert res["start_cut"]["label"] == "S01" and 1 <= k <= 2 and xf["duration"] == n_full - k
+    first_v, first_a = min(xf["clips"], key=lambda c: c["start"]), min(xf["audio"], key=lambda c: c["start"])
+    assert first_v["start"] == first_a["start"] == 0 and first_v["in"] == first_a["in"] == 1319
+    assert ex.premiere_flash_problems(final, START_SHOTS, R24) == []
+    assert ex.final_xml_problems(base, final, 1.0, START_SHOTS, R24, start_cut=k) == []
+    assert any("XML RATE" in p for p in ex.rate_problems(base, final, 1.0))    # without the allowance
+    assert res["edit_fixes"][-1].startswith(f"{k} flash frame{'s' if k > 1 else ''} removed at the start (S01)")
+    pm = {int(q): v for q, v in res["pos_map"].items()}
+    assert pm[0] == 0 and pm[300] == n_full - k           # the captions follow: everything that much earlier
+    try:                                                  # switched off: the old start (and its flash)
+        ex.START_FLASH_CUT = False
+        ex.write_premiere_xml(cl, final, cfg, seq_rate=R24)
+        assert ex.parse_premiere_xml(final)["duration"] == n_full
+        assert ex.premiere_flash_problems(final, START_SHOTS, R24)
+    finally:
+        ex.START_FLASH_CUT = True
+
+
 def test_with_remove_silence_the_end_is_left_as_the_speech_safe_step_made_it(tmp_path):
     cfg = config(tmp_path, V12_SHOTS, remove_silence=True, competitor="c.mp4")
     res = ex.write_premiere_xml(video12_like(), tmp_path / "1_edit.xml", cfg, seq_rate=R24)
