@@ -85,6 +85,7 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 - **The other cartoon it changed: video19** (Family Guy, "I can't believe it's not butter"): 11 pieces put where their sound is; it now plays **97.4 %** of the RAW you kept (day 17: 92.4 %; misses 0.58 s instead of 1.71 s), the same 1.46 s you cut; cuts 3 -> 4 of 8. Day 17 cut 4 bits you kept (RAW 35.03-35.45, 36.75-37.54, 44.54-44.71, 52.68-52.97 s); now that take plays straight, as in your fix.
 - **Why the captions numbers went down there anyway:** they are compared by time, and both versions keep a 0.75 s pause you removed early on (RAW 30.49-31.24 s), which shifts every later caption. Day 17's 4 wrong cuts happened to shorten the edit by about the same, so its captions sat closer in time. The words themselves are transcribed again on every run (the known ±2-5 noise).
 - **video34** (Family Guy, "Luck Not On His Side"): 4 pieces moved 0.3-0.4 s to where their sound is (S08, S09, S15, S16). It plays the same 92.9 % of the RAW you kept as day 17, plus 0.33 s more of a part you cut (RAW 36.66-38.08 s). The spoken captions are word for word the same; one action caption there now reads "\*looks at the van\*" instead of your "\*walks away\*" (the AI describes the frames it shows), and that one caption is the whole word-error change (34.1 -> 42.2 %) and the 2 -> 1 exact captions.
+- **video6** (a cartoon too): 3 pieces moved to their sound; word errors 10.0 -> **8.3 %**, captions 18 -> 17 of 32 (the re-transcription), cuts and framing the same. **video2 and video4** (hard checks only): 1 piece each, PASS.
 - So the step stays **ON**. The other cases of the check-all: the same as day 17 (the table below).
 
 ## Task 4 -- the lists stay when the app closes
@@ -136,6 +137,7 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 - **video14 (a new hard FAIL from Task 3's step, caught by the check-all):** "S09+...+S21 / S22: one continuous RAW take with the same framing, but two clips" -- the step put a piece back where its sound is, and the take was left in two clips. Now two clips that play one continuous take (the same speed, mirror and framing) become one clip again, with their A1 (`join_seams`; never at a split made on purpose: a RAW shot change). It runs in the edit's **last step** (`last_steps`), which the XML check rebuilds the same way -- the first version ran only at the RAW's rate, so the checked 60 fps edit still had the two clips; the second compared more strictly than the check (the clip before was the last piece of a clip with a framing per RAW shot, and S22's framing equalled S21's only to the 7th digit).
 - **video37 (the person speaking outside the window, 00:00:22:29 and 00:00:25:12, the same on day 17):** the day-12 and day-13 rules judged the pieces of that clip one by one (2 s each, "no clear speaker" in each), but the edit joins them into one clip (S26..S31, RAW 55.13-60.57 s) and the XML check judges the joined clip: the person speaking there is outside the window, nobody else in it. Now the edit's last step judges the **final clips exactly as that check does** (the same stretches, the person speaking or the biggest face, the same exceptions: someone else shown whole is the competitor's choice; a clip keeping the competitor's own framing) and moves a clip that would fail, zoom kept: **centred** on the person when the face is entirely outside the window (your fix of this clip: -650 px; centred: -666), **slid in** when it is only cut off at the edge (as the day-12 rule). The clips of one RAW shot with one framing move together; when a slide would make a cut next to it change under --min-move, the clip takes the framing of its neighbour in the same RAW shot if that shows the person (the take is then one clip again). `MATCH_CUTS_PERSON_CHECK_FIX=0` turns it off. (Its other failure on day 17, a 3-frame flash at the very end, is cut in 1_edit.xml at the RAW's rate and checked there.)
   **Result: PASS** (day 17: FAIL). RAW 55.13-57.85 s moved -667 px (yours: -650); RAW 57.85-60.57 s took the next clip's framing, -270 px (yours: -300 for that whole take). Framing 0/11 -> **2/11**; cuts 3/7 and word errors 11.5 % as before (captions 4 -> 3 of 44: the re-transcription).
+- **Found by the new cases: a flash at the very start** (flkoick1, Arthur; video42): the edit opened a frame or two before a RAW shot change -- its first frame(s) the shot before (flkoick1: RAW 30.03 s, the next shot at 30.07 s; your fix starts at 30.113 s). The end of an edit already got such frames cut (day 13, video35 today); now the start does too, at the RAW's rate: those frames go, V1, A1, markers and the captions move that much earlier, and the edit's own checks compare it that way (`start_flash_frames` / `cut_start`; `START_FLASH_CUT` switches it). It only acts where the edit's first frames fail the flash check, so no case that passed changes. **flkoick1: FAIL -> PASS**, **video42: FAIL -> PASS** (captions, cuts and framing as before).
 - **The check-all:** below.
 
 ## Task 8 -- the "Mono + red" look
@@ -213,20 +215,25 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 
 Every case of day 17's check-all again on today's final code (its caches on D:, `D:\mr_checkall`), and the new cases from the learn queue (analysed for the first time: an hour or more each). "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
 
+**In short: day 17's 26 cases -- 24 PASS, 2 FAIL (video35, video37) -> all 26 PASS.** Every score the same as day 17 except the cases Task 3's step changed (video14 better; video19, video34, video6: see Task 3 -- the edits as close to yours or closer, the caption numbers moved) and video37's framing (0 -> 2 of 11). The new cases: all PASS (flkoick1 and video42 after today's start-flash fix).
+
 <!-- TABLE -->
 | video | day 17: hard / captions / word errors / cuts / framing | run 18 | time |
 |---|---|---|---|
 | chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | 32m19s |
+| flkoick1-fixed | -- (new) | PASS / 0/15 / 52.0 / 0/3 / 4/5 | 50m54s |
 | laptop004-fixed | PASS (hard checks) | PASS (hard checks) | 3m48s |
 | laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | PASS / 10/34 / 7.69 / 1/9 / 11/13 | 4m05s |
 | laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | PASS / 12/22 / 13.33 / 1/5 / 2/6 | 7m54s |
 | mik1-fixed | -- (new) | PASS / 8/69 / 13.33 / 8/13 / 2/15 | 77m41s |
 | spiderman-school | PASS (hard checks) | PASS (hard checks) | 8m45s |
 | video017-fixed | PASS (hard checks) | PASS (hard checks) | 8m56s |
+| video020-fixed | PASS (hard checks) | PASS (hard checks) | 19m37s |
 | video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 4m43s |
 | video14-fixed | PASS / 16/42 / 8.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 7m28s |
 | video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 8m51s |
 | video19-fixed | PASS / 8/33 / 30.0 / 3/8 / 1/10 | PASS / 6/33 / 32.79 / 4/8 / 1/10 | 10m24s |
+| video2 | PASS (hard checks) | PASS (hard checks) | 3m14s |
 | video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 6m57s |
 | video3 | PASS (hard checks) | PASS (hard checks) | 25m34s |
 | video30-fixed | PASS / 18/43 / 16.85 / 4/7 / 2/13 | PASS / 18/43 / 16.85 / 4/7 / 2/13 | 8m58s |
@@ -237,13 +244,17 @@ Every case of day 17's check-all again on today's final code (its caches on D:, 
 | video37-fixed | **FAIL** / 4/44 / 11.5 / 3/7 / 0/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 43m20s |
 | video38-fixed | PASS / 8/33 / 43.0 / 2/6 / 5/19 | PASS / 8/33 / 43.04 / 2/6 / 5/19 | 7m11s |
 | video39-fixed | -- (new) | PASS / 9/38 / 3.8 / 2/6 / 4/8 | 48m00s |
+| video4 | PASS (hard checks) | PASS (hard checks) | 17m17s |
+| video40-fixed | -- (new) | PASS / 1/48 / 37.5 / 1/9 / 2/14 | 16m19s |
+| video41-fixed | -- (new) | PASS / 6/46 / 29.73 / 2/6 / 8/17 | 63m44s |
+| video42-fixed | -- (new) | PASS / 6/38 / 27.54 / 4/9 / 4/13 | 6m19s |
+| video6-fixed | PASS / 18/32 / 10.0 / 5/7 / 9/9 | PASS / 17/32 / 8.33 / 5/7 / 9/9 | 7m53s |
 | video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 3m38s |
 | video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 8m40s |
+| zendaya | PASS (hard checks) | PASS (hard checks) | 2m45s |
 <!-- /TABLE -->
 
 ## Still broken / not done
-
-- **flkoick1 (new case, Arthur): FAIL -- a 1-frame flash at the very start.** The edit opens one frame before a RAW shot change (its first frame shows RAW 30.03 s, the shot before; the next shot starts at 30.07 s). Your fix starts at RAW 30.113 s. The end of an edit already gets such frames cut (day 13, and video35 today); the start needs the same, but cutting at the start moves every clip, caption and check of the edit by those frames -- too big to slip in safely in the last hours. Until then: in Premiere, trim the first frame (or two) off the start of the edit.
 
 - **The general pause check** (Task 3: no pause cut where A1 isn't the competitor's sound) is built but OFF -- it made video37 worse.
 - **The framing rule (Task 9):** no rule turned on. The one candidate (centre a very clear speaker even over the competitor's framing) helps video37 but undoes your video021 two-shot; where the speaker is unclear your choices don't follow the faces' positions or speaking scores.
@@ -280,7 +291,12 @@ git pull
 5. **Task 5:** nothing counted the frame rate as a fix already; mik1's 10 timings are real -- I made the rule explicit instead of changing the numbers.
 6. **Task 7:** Learn's two glossary lines (`god -> God`, a censored word) not taken, as on days 15-17 (a new glossary line re-transcribes every video); the 26 new action captions taken. The 7 new cases got `"style": "new"` and their run's frame and watermark, as day 17's.
 7. **Task 8:** the new look is the default (you chose it); Classic look is one switch away. The pictures are drawn offscreen by Qt (never your desktop).
+8. **Task 9:** the one rule found stays OFF because it undoes your video021 two-shot (a test from night 3), though it helps video37 -- "nothing may get worse" wins.
+9. **The check-all ran while I fixed what it found** (video14's two clips, video37's person, the start flash): each case's row is from a run on the code that has every fix able to act on it -- the later fixes only act where an XML check fails, and every case they could reach was run again on the final code (video14, video37, flkoick1, video42, video40, video43).
+10. **The new cases:** first analysed today (about an hour each with three streams on the graphics card). All 7 are in the table if they finished by the end.
 
-## Tests so far
+## Tests
 
 - After tasks 1-2: tool 1657 passed, 0 failed; app 1279 passed, 0 failed.
+- On the final code (12:50): **tool 1671 passed, 0 failed** (102 skipped: the GPU-only ones, the graphics card hidden while the check-all ran); **app 1238 passed, 0 failed**, and its torrent tests apart: 58 passed.
+- New today: 37 tests (A1 chain 5, the song 2, cartoon repeats 6, the kept lists 5, Learn's frame rate 2, Convert 1, the look 7, the person pass 5, the joined take 1 and the start flash 3; the end-flash test extended for video35).
