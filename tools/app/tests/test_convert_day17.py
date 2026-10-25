@@ -55,3 +55,17 @@ def test_more_than_10_s_after_the_picture_is_still_said():
 def test_a_longer_copy_sound_is_still_said():
     ok, _nums, probs = _check(1276.64, 1277.48)
     assert not ok and any("sound is" in p for p in probs)
+
+
+def test_run18_the_real_fletch_lives_numbers():
+    """Run 18, task 6: the real Convert of 'Fletch.Lives.1989.720p.HDTV.mkv' (25 Oct, on the PC): the picture copied
+    whole (136434 of 136434 frames, 5690.56 s both), the sound 5692.704 s -> 5690.40 s (it ran 2.14 s past the last
+    frame; the copy's ends 0.16 s before the picture's end) -- passed. The same file with its sound cut inside the
+    picture still stops."""
+    frames, v = 136434, 5690.56                       # (as measured on the file and its copy)
+    t = C.Timing(frames, v, True, 0.0)
+    ok, nums, probs = C.check(_info(5692.704, v), _info(5690.40, v), t, t)
+    assert ok, probs
+    for cut in (5689.50, 5600.00):                    # 1.06 s / 90 s of the picture without its sound
+        ok2, _n, probs2 = C.check(_info(5692.704, v), _info(cut, v), t, t)
+        assert not ok2 and any(f"the sound is {cut:.2f} s long instead of 5692.70 s" in p for p in probs2)
