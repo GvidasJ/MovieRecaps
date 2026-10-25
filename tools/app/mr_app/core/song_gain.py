@@ -127,7 +127,7 @@ def song_clips(text: str, song_name: str) -> list[dict]:
                 if "<Name>Level</Name>" in body.get(par, ""):
                     level = par
             break
-        out.append({"start": start, "audioclip": ac, "level": level})
+        out.append({"start": start, "audioclip": ac, "level": level, "chain": chain})
     return sorted(out, key=lambda c: c["start"])
 
 
@@ -152,16 +152,33 @@ def _current(text: str, xml: Path) -> tuple[list[dict], list[tuple[int, float, f
 
 
 def needs_fix(prproj: Path, xml: Path) -> bool:
-    """The saved project has the edit's song clips without their Clip Gain / Volume 8.5 dB yet."""
+    """The saved project still lacks the edit's song Clip Gain / Volume 8.5 dB, or A1's chain (core.a1_chain)."""
     try:
         text = _read(prproj)
     except (OSError, EOFError, gzip.BadGzipFile, UnicodeDecodeError):
         return False
+    from . import a1_chain
+    return _song_needs_fix(text, xml) or a1_chain.a1_needs_fix(text, xml)
+
+
+def has_work(xml: Path) -> bool:
+    """The edit has something the saved project must get: a song with its Clip Gain, or A1 clips with their chain."""
+    from . import a1_chain
+    return bool(pieces(xml)[1] or a1_chain.a1_pieces(xml)[2])
+
+
+def _song_needs_fix(text: str, xml: Path, effects: bool = True) -> bool:
+    """The song clips lack their Clip Gain / Volume -- or (``effects``) your CorrectVolume's Hard Limiter + Amplify
+    (run 18, task 2)."""
+    from . import a1_chain
     clips, ps = _current(text, xml)
     if not clips or len(clips) != len(ps):
         return False
     sp = _spans(text)
     for c, (_s, g, v) in zip(clips, ps):
+        if effects and c.get("chain") and not a1_chain.has_effects_in_order(text, c["chain"], sp,
+                                                                                     one_volume=False):
+            return True
         a = text[sp[c["audioclip"]][0]:sp[c["audioclip"]][1]]
         m = re.search(r"<Gain>([^<]*)</Gain>", a)
         if not m or abs(float(m.group(1)) - gain_value(g)) > TOL:
@@ -174,36 +191,40 @@ def needs_fix(prproj: Path, xml: Path) -> bool:
 
 
 def fix(prproj: Path, xml: Path) -> str:
-    """Write each song clip's real Clip Gain and Volume (module docstring); what was done, in plain words ('' when
-    there is nothing to do). Never raises."""
+    """Write each song clip's real Clip Gain and Volume (module docstring) and A1's chain (core.a1_chain); what was
+    done, in plain words ('' when there is nothing to do). Never raises."""
+    from . import a1_chain
     prproj = Path(prproj)
     try:
         text = _read(prproj)
+        ed = a1_chain.Edit(text)
+        said = []
         clips, ps = _current(text, xml)
-        if not ps:
-            return ""
-        if len(clips) != len(ps):
-            return f"the song's Clip Gain was not written: the project has {len(clips)} song clips, the edit {len(ps)}"
-        sp = _spans(text)
-        edits = []                                         # (start, end, new text) of each changed object
-        for c, (_s, g, v) in zip(clips, ps):
-            s, e, _t = sp[c["audioclip"]]
-            edits.append((s, e, _set_gain(text[s:e], gain_text(g))))
-            if c["level"]:
-                s2, e2, _t2 = sp[c["level"]]
-                edits.append((s2, e2, _set_level(text[s2:e2], level_value(v))))
-        new = text
-        for s, e, t in sorted(edits, key=lambda x: -x[0]):
-            new = new[:s] + t + new[e:]
+        if ps and len(clips) != len(ps):
+            said.append(f"the song's Clip Gain was not written: the project has {len(clips)} song clips, "
+                        f"the edit {len(ps)}")
+        elif ps:
+            if _song_needs_fix(text, xml, effects=False):
+                for c, (_s, g, v) in zip(clips, ps):
+                    ed.set(c["audioclip"], _set_gain(ed.body(c["audioclip"]), gain_text(g)))
+                    if c["level"]:
+                        ed.set(c["level"], _set_level(ed.body(c["level"]), level_value(v)))
+                said.append("the song's Clip Gain " + " / ".join(f"{g:+g} dB" for _s, g, _v in ps) +
+                            f" and Volume {ps[0][2]:g} dB")
+            if sum(a1_chain.add_effects(ed, c["chain"]) for c in clips if c.get("chain")):
+                said.append("the song's Hard Limiter (Input Boost 2 dB) + Amplify +3 dB (your CorrectVolume)")
+        a1 = a1_chain.a1_fix(ed, xml)
+        if a1:
+            said.append(a1)
+        new = ed.apply()
         if new == text:
-            return ""
+            return "; ".join(s for s in said if "not written" in s)
         backup = prproj.with_name(prproj.stem + BACKUP)
         if not backup.exists():
             shutil.copy2(prproj, backup)
         tmp = prproj.with_name(prproj.name + ".tmp")
         tmp.write_bytes(gzip.compress(new.encode("utf-8")))
         os.replace(tmp, prproj)
-        return ("the song's Clip Gain " + " / ".join(f"{g:+g} dB" for _s, g, _v in ps) +
-                f" and Volume {ps[0][2]:g} dB written into {prproj.name}")
+        return "; ".join(said) + f" written into {prproj.name}"
     except Exception as e:  # noqa: BLE001 - the project stays as Premiere saved it
-        return f"the song's Clip Gain was not written ({type(e).__name__}: {e})"
+        return f"the audio chain was not written ({type(e).__name__}: {e})"

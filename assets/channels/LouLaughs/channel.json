@@ -2,5 +2,7 @@
  "name": "LouLaughs",
  "link": "https://www.youtube.com/@LouLaughs",
  "handle": "@LouLaughs",
- "shorts_only": false
+ "shorts_only": false,
+ "music": {"file": "../SceneProof/One Piece OST - Mother Sea (First Part) Extended Version.mp3", "start_s": 0.52,
+           "split_s": 12.32, "gains_db": [5.0, -1.0], "volume_db": 8.5}
 }

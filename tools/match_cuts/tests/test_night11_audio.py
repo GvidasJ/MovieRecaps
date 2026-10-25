@@ -321,15 +321,15 @@ def test_the_preset_file_holds_exactly_the_hard_limiter_and_amplify():
         if "ParamList" in (base64.b64decode(od).decode() if od else ""):
             states[p.findtext("FilterMatchName")] = floats
     hl, amp = states[HL_MATCH], states[AMP_MATCH]
-    # Hard Limiter: Maximum Amplitude 1 (0 dB), Input Boost 0.666667 (0 dB), Look-Ahead 0.133333 (7 ms), Release 0.375
-    # (100 ms), Link Channels 1 (1.00), Decay to Ceiling 1, Limit True Peak 0 -- as Premiere's panel showed them
-    assert hl[:7] == pytest.approx([1.0, 0.666667, 0.133333, 0.375, 1.0, 1.0, 0.0], abs=1e-6)
+    # Hard Limiter: Maximum Amplitude 1 (0 dB), Input Boost 0.68 (2 dB: run 18, your CorrectVolume; it was 0.666667,
+    # 0 dB), Look-Ahead 0.133333 (7 ms), Release 0.375 (100 ms), Link Channels 1 (1.00), Decay to Ceiling 1, Limit True
+    # Peak 0 -- as Premiere's panel showed them
+    assert hl[:7] == pytest.approx([1.0, 0.68, 0.133333, 0.375, 1.0, 1.0, 0.0], abs=1e-6)
     # Amplify: one channel, linked sliders, Gain 0.6875 = (3.0 + 96) / 144: +3.0 dB on its -96 .. +48 dB scale (day 13;
     # night 11's +4.5 dB was 0.697917) -- the preset made again with Premiere's own Save Preset + Export Preset
     assert ex.AMPLIFY_DB == 3.0 and ex.AMPLIFY == "Amplify +3.0 dB"
     assert amp[0] == pytest.approx(0.03125) and amp[2] == pytest.approx((ex.AMPLIFY_DB + 96.0) / 144.0, abs=1e-6)
-    descs = {p.findtext("Description") for p in presets}
-    assert len(descs) == 1 and "Amplify +3.0 dB" in descs.pop()
+    assert ex.PRESET_NAME == "CorrectVolume"                  # run 18: your own preset (its descriptions are empty)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

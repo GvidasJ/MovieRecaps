@@ -1526,7 +1526,9 @@ def _audio_chain_lines(ctx: Any) -> list[str]:
              "after the clip's own, an XML cannot set its Audio Gain"
              + (f"; {split} clip(s) need more than +15 dB, so two or more equal Volumes" if split else "")
              + "), Volume 0 dB, Panner 0.",
-             f"- In Premiere: select all A1 clips and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
+             "- Open in Premiere from the app and save (Ctrl+S): the app writes each clip's gain as its real Clip Gain "
+             f"(the extra Volume goes), the {NOT_IN_XML} into the saved project. Without the app: select all A1 clips "
+             f"and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
              "not your older LoudVOGOOOD: its Amplify is +4.5 dB) -- Premiere cannot import those two from an XML.",
              "- Don't use Audio Gain > Normalize again: the tool already normalised (as a Volume). A clip you trim later "
              "keeps the gain measured on its first range (the Hard Limiter then catches anything over 0 dB)."]

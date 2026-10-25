@@ -109,15 +109,25 @@ def test_the_clip_gain_and_volume_8_5_db_go_into_the_saved_project(tmp_path):
     assert G.pieces(xml) == (SONG, [(0, 5.0, 8.5), (295, -1.0, 8.5)])
     before = G._read(proj)                                                         # noqa: SLF001
     assert G.needs_fix(proj, xml)
-    assert G.fix(proj, xml) == f"the song's Clip Gain +5 dB / -1 dB and Volume 8.5 dB written into {proj.name}"
+    assert G.fix(proj, xml) == (f"the song's Clip Gain +5 dB / -1 dB and Volume 8.5 dB; the song's Hard Limiter (Input "
+                                f"Boost 2 dB) + Amplify +3 dB (your CorrectVolume) written into {proj.name}")  # run 18
     after = G._read(proj)                                                          # noqa: SLF001
     # your song.prproj's values exactly: Gain 1.7782794237136841 (+5 dB) and 0.89125096797943115 (-1 dB)
     assert "<Gain>1.7782794237136841</Gain>" in after and "<Gain>0.89125096797943115</Gain>" in after
     assert after.count(f"<CurrentValue>{G.level_value(8.5):.17g}</CurrentValue>") == 2
     assert not G.needs_fix(proj, xml) and G.fix(proj, xml) == ""                   # once only
     assert (tmp_path / ("edit" + G.BACKUP)).read_bytes() == gzip.compress(before.encode("utf-8"))
-    changed = [ln for ln in after.splitlines() if ln not in before.splitlines()]
-    assert len(changed) == 6                                                        # 2 Gains + 2 x (keyframe, value)
+    # run 18: the effects' new objects (ids after the project's own) and their two chain entries per clip aside
+    from mr_app.core import a1_chain as A
+    old_max = A.max_object_id(before)
+    new_objs = [(s, e) for k, (s, e, _t) in A.spans(after).items() if k.isdigit() and int(k) > old_max]
+    kept = after
+    for s, e in sorted(new_objs, reverse=True):
+        kept = kept[:s] + kept[e:]
+    assert len(new_objs) == 2 * (37 + 9)                     # per clip: Amplify + 36 values, Hard Limiter + 8 values
+    changed = [ln for ln in kept.splitlines() if ln.strip() and ln not in before.splitlines()]
+    assert len([ln for ln in changed if "<Component Index=" not in ln]) == 6      # 2 Gains + 2 x (keyframe, value)
+    assert len([ln for ln in changed if "<Component Index=" in ln]) == 4          # Hard Limiter + Amplify per clip
 
 
 def test_the_levels_premiere_stores():

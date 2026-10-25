@@ -12,7 +12,7 @@ from match_cuts import export_xml_edl as ex, report
 def test_the_chain_is_the_same_with_amplify_plus_3_db():
     assert ex.AMPLIFY == "Amplify +3.0 dB" and ex.AMPLIFY_DB == 3.0
     assert ex.AUDIO_CHAIN_TEXT == ("Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, Hard Limiter (Maximum "
-                                   "Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
+                                   "Amplitude 0 dB, Input Boost 2 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
                                    "1.00), Amplify +3.0 dB, Panner 0")
     assert ex.NOT_IN_XML.endswith("and Amplify +3.0 dB")
 

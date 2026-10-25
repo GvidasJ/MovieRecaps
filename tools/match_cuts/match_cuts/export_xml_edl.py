@@ -4319,7 +4319,8 @@ def sound_file_problems(xml_path: str | os.PathLike) -> list[str]:
 # ---------------------------------------------------------------------------------------------
 #
 # Your chain, in this order: Audio Gain "Normalize All Peaks to 0 dB", Volume 0 dB, Hard Limiter (Maximum Amplitude
-# 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +3.0 dB (day 13; +4.5 dB on night
+# 0 dB, Input Boost 2 dB (run 18; 0 dB before), Look-Ahead 7 ms, Release 100 ms, Link Channels 1.00), Amplify +3.0 dB
+# (day 13; +4.5 dB on night
 # 11), Panner 0. What Premiere
 # Pro 2024's FCP7 XML import really makes of each form (tested on this PC: test XMLs imported, the project saved and its
 # .prproj read back, every form on all five A1 clips of a real 1_edit.xml -- work\t26\audio\NOTES.md):
@@ -4353,15 +4354,15 @@ GAIN_STAGE_MAX = 5.623413                            # +15 dB: the most one impo
 GAIN_STAGE_SPLIT_DB = 14.99                          # a normalisation over this is split into equal stages
 VOLUME_LEVEL = 1.0                                   # Volume 0 dB (Audio Levels, linear)
 PANNER = 0.0                                         # centre
-HARD_LIMITER = ("Hard Limiter (Maximum Amplitude 0 dB, Input Boost 0 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
-                "1.00)")
+HARD_LIMITER = ("Hard Limiter (Maximum Amplitude 0 dB, Input Boost 2 dB, Look-Ahead 7 ms, Release 100 ms, Link Channels "
+                "1.00)")                         # run 18: Input Boost 2.00 dB (your CorrectVolume; it was 0 dB)
 AMPLIFY_DB = 3.0                                     # day 13 (night 11: +4.5 dB, = your LoudVOGOOOD)
 AMPLIFY = f"Amplify +{AMPLIFY_DB:.1f} dB"
 NOT_IN_XML = f"{HARD_LIMITER} and {AMPLIFY}"          # your chain's two effects no XML can bring into Premiere
 AUDIO_CHAIN_TEXT = f"Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, {HARD_LIMITER}, {AMPLIFY}, Panner 0"
 AUDIO_CHAIN_XML = "Audio Gain (Normalize All Peaks to 0 dB, as Volume), Volume 0 dB, Panner 0"   # what an XML carries
-PRESET_NAME = "MovieRecaps audio chain"              # the Premiere effect preset with the Hard Limiter + Amplify
-PRESET_FILE = "assets\\premiere\\MovieRecaps audio chain.prfpset"     # in the repository (import it once in Premiere)
+PRESET_NAME = "CorrectVolume"                        # run 18: your own preset (Hard Limiter 2 dB + Amplify +3 dB) is
+PRESET_FILE = "assets\\premiere\\CorrectVolume.prfpset"    # A1's too (the old "MovieRecaps audio chain": Input Boost 0 dB)
 _PEAK_WINDOW_S = 120.0       # a1_peaks: one ffmpeg decode covers at most this much sound (a longer clip: in pieces)
 _AUDIO_WINDOWS: dict[tuple, Any] = {}      # decoded windows (one channel) kept for this run's next XML / its check
 _AUDIO_WINDOWS_BYTES = 256 << 20           # ... at most this much of them (the oldest go first)
@@ -4532,9 +4533,10 @@ def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]
                 + (f", Premiere's +{NORMALIZE_MAX_DB:g} dB at most" if gain_db >= NORMALIZE_MAX_DB - 1e-9 else "")
                 + "; in Premiere " + ("a Volume" if len(stages) == 1 else f"{len(stages)} Volumes of "
                                       f"{factor_db(stages[0]):+.2f} dB") + ")")
-    return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: select all A1 "
-            f"clips, apply the preset ({PRESET_NAME}: Hard Limiter + {AMPLIFY}); don't use Audio Gain > Normalize "
-            "again, the tool already normalised (as a Volume)")
+    return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: after you save "
+            "(Ctrl+S) the app writes this gain as the clip's Clip Gain (the extra Volume goes), the Hard Limiter and "
+            f"{AMPLIFY} into the project; without the app: select all A1 clips, apply the preset ({PRESET_NAME}: Hard "
+            f"Limiter + {AMPLIFY}); don't use Audio Gain > Normalize again, the tool already normalised (as a Volume)")
 
 
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,

@@ -479,7 +479,8 @@ def _unseen(st: State) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# day 17 (task 3): the SceneProof song's real Clip Gain, written into the saved project (core.song_gain)
+# day 17 (task 3): the SceneProof song's real Clip Gain, written into the saved project (core.song_gain); run 18
+# (task 1): every edit's A1 chain too -- each clip's own Clip Gain, one Volume 0 dB, Hard Limiter + Amplify (a1_chain)
 # ---------------------------------------------------------------------------------------------------------------------
 
 SONG_WATCH_S = 1800.0                # after the import: the save watched for this long
@@ -540,17 +541,17 @@ def song_watch(exe: Path, proj: Path, xml: Path, timeout: float = SONG_WATCH_S, 
             saved = False
         if not st.running:
             out = song_gain.fix(proj, xml) if saved or song_gain.needs_fix(proj, xml) else ""
-            SONG_STATUS[k] = out or "Premiere was closed before the project was saved: the song's Clip Gain waits " \
+            SONG_STATUS[k] = out or "Premiere was closed before the project was saved: the audio chain waits " \
                                     "for the next Open in Premiere"
             return SONG_STATUS[k]
         if st.title is None or st.project is None:
             continue
         if not same_file(st.project, proj):
-            SONG_STATUS[k] = "another project was opened: the song's Clip Gain is written at the next Open in Premiere"
+            SONG_STATUS[k] = "another project was opened: the audio chain is written at the next Open in Premiere"
             return SONG_STATUS[k]
         if saved and not st.changed and not st.message and song_gain.needs_fix(proj, xml):
             if not _close(st):
-                SONG_STATUS[k] = ("Premiere did not close (a message?): the song's Clip Gain is written at the next "
+                SONG_STATUS[k] = ("Premiere did not close (a message?): the audio chain is written at the next "
                                   "Open in Premiere")
                 return SONG_STATUS[k]
             out = song_gain.fix(proj, xml)
@@ -561,16 +562,16 @@ def song_watch(exe: Path, proj: Path, xml: Path, timeout: float = SONG_WATCH_S, 
         if saved and not song_gain.needs_fix(proj, xml):
             SONG_STATUS[k] = ""
             return ""
-    SONG_STATUS[k] = "not saved within 30 minutes: the song's Clip Gain is written at the next Open in Premiere"
+    SONG_STATUS[k] = "not saved within 30 minutes: the audio chain is written at the next Open in Premiere"
     return SONG_STATUS[k]
 
 
 def _song_later(exe: Path, proj: Path, xml: Path, saved_counts: bool = False) -> str:
-    """song_watch in its own thread when the edit has a song with its Clip Gain (SceneProof); the words for the
-    message ('' without a song). ``saved_counts``: the project as saved now counts (it was open with the edit
+    """song_watch in its own thread when the edit has a song with its Clip Gain or A1 clips with their chain; the words
+    for the message ('' without either). ``saved_counts``: the project as saved now counts (it was open with the edit
     already) -- else only a save after now."""
     from . import song_gain
-    if not song_gain.pieces(xml)[1] or _key(proj) in _SONG_WATCHING:
+    if not song_gain.has_work(xml) or _key(proj) in _SONG_WATCHING:
         return ""
     if saved_counts and not song_gain.needs_fix(proj, xml):
         return ""
@@ -582,8 +583,9 @@ def _song_later(exe: Path, proj: Path, xml: Path, saved_counts: bool = False) ->
             _SONG_WATCHING.discard(_key(proj))
     _SONG_WATCHING.add(_key(proj))
     threading.Thread(target=run, name="song_gain", daemon=True).start()
-    return (" -- then the app closes Premiere once, writes the song's Clip Gain (+5 / -1 dB) and Volume 8.5 dB into "
-            "the saved project and opens it again")
+    what = "A1's Clip Gain, Hard Limiter and Amplify" + (
+        " and the song's Clip Gain (+5 / -1 dB) and Volume 8.5 dB" if song_gain.pieces(xml)[1] else "")
+    return f" -- then the app closes Premiere once, writes {what} into the saved project and opens it again"
 
 
 def open_xml(xml: Path, wait_s: float = START_WAIT_S) -> str:

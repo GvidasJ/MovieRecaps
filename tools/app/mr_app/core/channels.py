@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -73,7 +74,7 @@ def _music(folder: Path, spec: Any) -> Music | None:
     if not isinstance(spec, dict) or not spec.get("file"):
         return None
     p = Path(str(spec["file"]))
-    p = p if p.is_absolute() else folder / p
+    p = p if p.is_absolute() else Path(os.path.normpath(folder / p))     # run 18: "../SceneProof/<song>" too
     if not p.is_file():
         return None
     try:
