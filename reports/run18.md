@@ -102,6 +102,26 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 - **Sound cut inside the picture still stops it:** a new test with this file's own numbers -- its copy's sound 1.06 s or 90 s short inside the picture: "the sound is ... long instead of 5692.70 s" (a stop), as before.
 - **Tests:** Convert's 49 tests pass (1 new: the real Fletch Lives numbers).
 
+## Task 7 -- the learn queue, video35 and video37
+
+- **Learned: 7 of 7** open lines of `D:\Shared\Projects\learn_queue.md` (now marked `[x]`; 0 open):
+
+  | case | video | RAW |
+  |---|---|---|
+  | mik1-fixed | The Most Suspicious Question of All Time (3) | Reno 911 S05E11 |
+  | video39-fixed | The Most Clueless Teacher In Comedy History | Everybody Hates Chris S03E07 |
+  | flkoick1-fixed | The Most Questionable Kids Show Moment of All Time | Arthur S14E15 |
+  | video40-fixed | The Funniest Phone Call of All Time (2) | Family Guy S05E16 (Task 3's case) |
+  | video41-fixed | The Worst First Word of All Time | (a piece of the movie) |
+  | video42-fixed | The Most Willing Victim of All Time | (a piece of the movie) |
+  | video43-fixed | The Funniest Flight In British Comedy (3) | (a piece of the movie) |
+
+  Each is a check-all case now (`tests\real\<case>`: your finished edit's captions and clips, the competitor, the RAW piece, its frame and watermark). From your captions: **26 new action captions** (`caption_actions.txt`). Learn's two glossary lines were not taken (below, "What I decided").
+- **video35 (the 2-frame flash at 27.2 s):** the competitor's last 2 frames jump to another shot, so the edit's last clip was a 2-frame piece of another RAW shot -- a flash at the very end. The end check only knew a take running on into a new shot; now a **last clip of up to 0.1 s** that shows another RAW shot is cut too, as you did (your fix ends on the clip before it; `END_CLIP_FLASH_S`).
+- **video14 (a new hard FAIL from Task 3's step, caught by the check-all):** "S09+...+S21 / S22: one continuous RAW take with the same framing, but two clips" -- the step put a piece back where its sound is, and the move to the RAW's rate left the take in two clips. Now two clips that play one continuous take (the same speed, mirror and framing) become one clip again, with their A1 (`join_seams`; never at a split made on purpose: a RAW shot change).
+- **video37 (the person speaking outside the window, 00:00:22:14 and 00:00:25:26):** the tool's own rules each skipped this clip for a different reason (the speaker was "not clear" over the clip's whole stretch, so neither the day-12 nor the day-13 rule moved it), while the final XML check judged it on the person speaking there and failed. Now a last framing step judges every clip **exactly as that check does** (its stretch, the person speaking or the biggest face, the competitor's choice of whom to show, its own framing) and slides a clip that would fail sideways, zoom kept, until the face is in (`_person_check_fix`; `MATCH_CUTS_PERSON_CHECK_FIX=0` turns it off). Every other clip is left as it is.
+- **The check-all:** below.
+
 ## Task 8 -- the "Mono + red" look
 
 - **It is the default now.** Settings -> **Classic look: On** goes back to today's look (it changes when the app opens again; the window says so). The setting is `look` in `settings.json` ("mono" / "classic").

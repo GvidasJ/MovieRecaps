@@ -3291,6 +3291,16 @@ def premiere_plan(ctx: Context, ex: Cutlist) -> tuple[Cutlist, Any]:
     if by_sound:
         log.info("Premiere: %d piece(s) put on the take the sound plays (look-alike frames): %s", len(by_sound),
                  ", ".join(f"S{d['segment']:02d} ({d['how']})" for d in by_sound[:40]))
+    # run 18 (task 3): a piece put on a RAW moment another piece plays (a cartoon's held drawing) goes where its sound
+    # is, when its picture is the same there -- the repeat removal then has nothing of the competitor to cut
+    from . import repeat_sound
+    ex, by_sound2 = repeat_sound.apply(ctx, ex)
+    for d in by_sound2:
+        ctx.dlog.record("premiere", "repeat_by_sound", **d)
+    if by_sound2:
+        log.info("Premiere: %d piece(s) on a RAW moment another piece plays put where the competitor's sound is (the "
+                 "same picture there): %s", len(by_sound2),
+                 ", ".join(f"S{d['segment']:02d} RAW {d['from']:.2f} -> {d['to']:.2f} s" for d in by_sound2[:40]))
     # the pieces of one continuous RAW take play as one (night 5, laptop009): no jump or stutter inside a take; a
     # piece that starts on a RAW shot change keeps the competitor's timing there (night 6, laptop004's flash)
     ex, takes, joined = join_takes(ex, take_shot_changes(ctx, ex), getattr(ctx.cfg, "premiere_normal_audio", True))
@@ -3478,6 +3488,29 @@ def action_beats(ctx: Context) -> list[tuple[int, int]]:
         return []
 
 
+def sound_elsewhere_beats(ctx: Context, cl: Cutlist) -> list[tuple[int, int]]:
+    """repeat_sound.sound_elsewhere as sequence frames of the Premiere plan before its cuts (as action_beats): the
+    pieces whose picture is not where the competitor's sound is -- their A1 is not the competitor's sound, so its
+    quiet there is no pause to cut."""
+    try:
+        from . import repeat_sound
+        from .export_xml_edl import premiere_factor, premiere_settings
+        ranges = repeat_sound.sound_elsewhere(ctx, cl)
+        if not ranges:
+            return []
+        fac = premiere_factor(ctx.comp_fps, premiere_settings(ctx.cfg)["fps"])
+        km = ctx.keep_map if ctx.keep_map is not None and ctx.keep_map.stretched else None
+        out = [((km.map(a) if km is not None else a) * fac, (km.map(b) if km is not None else b) * fac)
+               for a, b in ranges]
+        log.info("silence removal: %d piece(s) whose picture is not where the competitor's sound is -- no pause cut "
+                 "there (A1 is not the competitor's sound): %s", len(out),
+                 ", ".join(f"{timecode(a, ctx.comp_fps)}-{timecode(b, ctx.comp_fps)}" for a, b in ranges[:20]))
+        return out
+    except Exception as e:  # noqa: BLE001 - the silences are planned without it
+        log.warning("silence removal: the sound check not used (%s: %s)", type(e).__name__, e)
+        return []
+
+
 def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     """silence.plan_premiere of the Premiere export. With --remove-silence: the speech-safe cuts (ctx.speech), then the
     silences of the RAW audio under my clips; by default neither ({'off': ...}: the competitor's cut points, the edit
@@ -3488,6 +3521,8 @@ def silence_plan(ctx: Context, cl: Cutlist) -> dict:
     remove = removes_silence(ctx.cfg)
     pauses = cuts_pauses(ctx.cfg)             # the default (night 6): the pauses inside the takes, carefully
     beats = action_beats(ctx) if (remove or pauses) else []
+    if (remove or pauses) and os.environ.get("MATCH_CUTS_PAUSE_SOUND_CHECK", "").strip() == "1":
+        beats = beats + sound_elsewhere_beats(ctx, cl)    # run 18 (task 3): OFF -- it cost video37 a caption and a cut
     try:
         plan = silence.plan_premiere(cl, ctx.raw_audio, int(ctx.audio_sr), ctx.cfg, words_reader(ctx),
                                      ctx.speech if (remove or pauses) else None, remove=remove or pauses,

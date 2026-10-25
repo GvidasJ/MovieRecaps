@@ -1,0 +1,108 @@
+{
+ "video": "video42-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video42\\video42_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-24_The Most Willing Victim of All Time\\edit",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.209,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   292.0,
+   292.0,
+   203.4,
+   203.4,
+   -0.0,
+   -0.0,
+   136.0,
+   -260.0,
+   624.5,
+   163.0,
+   0.0,
+   0.0,
+   -254.0,
+   -211.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   -0.02,
+   0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Willing Victim of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 0,
+  "removed": 1,
+  "added": 8,
+  "rewritten": 3,
+  "changes": [
+   {
+    "heard": "be",
+    "written": "we're",
+    "kind": "words",
+    "before": "you pick",
+    "after": "only picking",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "rape",
+    "written": "r pe",
+    "kind": "words",
+    "before": "a gang",
+    "after": "okay You",
+    "glossary": true,
+    "why": ""
+   }
+  ]
+ }
+}

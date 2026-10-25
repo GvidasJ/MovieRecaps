@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video40_fixed.prproj (2026-10-25): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video40\\video40_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-24_The Funniest Phone Call of All Time (2)\\edit",
+ "full_raw": "D:\\Shared\\Projects\\2026-10-24_The Funniest Phone Call of All Time (2)\\edit\\extras\\media\\raw.mp4",
+ "raw_offset": 108.274833,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

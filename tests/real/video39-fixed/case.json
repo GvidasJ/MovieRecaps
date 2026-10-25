@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video39_fixed.prproj (2026-10-25): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video39\\video39_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Most Clueless Teacher In Comedy History\\edit",
+ "full_raw": "input/downloads/2026-10-24_The Most Clueless Teacher In Comedy History/edit/extras/media/raw.mp4",
+ "raw_offset": 593.050792,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

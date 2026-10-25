@@ -1,0 +1,123 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 593.051 s",
+ "fps": 23.976023976023978,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 2.377375,
+   "kind": "raw",
+   "src_in": 30.03,
+   "speed": 1.0
+  },
+  {
+   "start": 2.377375,
+   "end": 3.712042,
+   "kind": "raw",
+   "src_in": 32.699333,
+   "speed": 1.0
+  },
+  {
+   "start": 3.712042,
+   "end": 8.5085,
+   "kind": "raw",
+   "src_in": 34.367666,
+   "speed": 1.0
+  },
+  {
+   "start": 8.5085,
+   "end": 9.5095,
+   "kind": "raw",
+   "src_in": 39.164125,
+   "speed": 1.0
+  },
+  {
+   "start": 9.5095,
+   "end": 11.052708,
+   "kind": "raw",
+   "src_in": 40.999291,
+   "speed": 1.0
+  },
+  {
+   "start": 11.052708,
+   "end": 16.099417,
+   "kind": "raw",
+   "src_in": 42.834458,
+   "speed": 1.0
+  },
+  {
+   "start": 16.099417,
+   "end": 16.975292,
+   "kind": "raw",
+   "src_in": 47.881166,
+   "speed": 1.0
+  },
+  {
+   "start": 16.975292,
+   "end": 18.727042,
+   "kind": "raw",
+   "src_in": 49.132416,
+   "speed": 1.0
+  },
+  {
+   "start": 18.727042,
+   "end": 19.978292,
+   "kind": "raw",
+   "src_in": 51.134416,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.03,
+   "src_out": 32.407375,
+   "dx": -226.632,
+   "scale": 115.1846
+  },
+  {
+   "src_in": 32.699333,
+   "src_out": 34.034,
+   "dx": -70.632,
+   "scale": 115.1846
+  },
+  {
+   "src_in": 34.367666,
+   "src_out": 39.164125,
+   "dx": -226.632,
+   "scale": 115.1846
+  },
+  {
+   "src_in": 39.164125,
+   "src_out": 40.165125,
+   "dx": 216.517,
+   "scale": 115.2306
+  },
+  {
+   "src_in": 40.999291,
+   "src_out": 42.5425,
+   "dx": 216.517,
+   "scale": 115.2306
+  },
+  {
+   "src_in": 42.834458,
+   "src_out": 47.881166,
+   "dx": -221.231,
+   "scale": 115.2683
+  },
+  {
+   "src_in": 48.256541,
+   "src_out": 50.884166,
+   "dx": -333.231,
+   "scale": 115.2683
+  },
+  {
+   "src_in": 51.134416,
+   "src_out": 52.385666,
+   "dx": 115.352,
+   "scale": 115.1849
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

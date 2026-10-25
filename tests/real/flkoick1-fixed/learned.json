@@ -1,0 +1,67 @@
+{
+ "video": "flkoick1-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\flkoick1\\flkoick1_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Most Questionable Kids Show Moment of All Time\\edit",
+ "edit": {
+  "clips": 1,
+  "starts": [
+   0.083
+  ],
+  "ends": [
+   -0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.417,
+   0.292,
+   0.125
+  ],
+  "moved": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Questionable Kids Show Moment of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 3,
+  "added": 11,
+  "rewritten": 1,
+  "changes": []
+ }
+}

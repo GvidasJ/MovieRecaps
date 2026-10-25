@@ -161,6 +161,10 @@ def test_end_flash_frames_finds_only_a_sliver_of_the_next_shot_at_the_very_end()
     # the competitor's own last cut: 3 frames of another moment of the RAW (a real cut, not the take running on)
     cut = [_clip24(0, 97, 1000), _clip24(97, 100, 5000, 2)]
     assert ex.end_flash_frames(cut, 100, shots.seconds([5000], R24), R24) == 0
+    # run 18 (video35): a last clip of 2 frames (0.08 s) of another shot -- a flash at the end: cut (your fix ends
+    # on the clip before it)
+    flash = [_clip24(0, 98, 1000), _clip24(98, 100, 5000, 2)]
+    assert ex.end_flash_frames(flash, 100, shots.seconds([5000], R24), R24) == 2
     # the take's last pieces split at the change (the XML's Scene Edit Detection): the same sliver
     split = [_clip24(0, 98, 1000), _clip24(98, 100, 1098)]
     assert ex.end_flash_frames(split, 100, shots.seconds([1098], R24), R24) == 2
@@ -400,3 +404,20 @@ def test_report_lists_the_fixes():
                           premiere_xml={"edit_fixes": ["1 flash frame removed at 00:00:24:22 (S26): ..."]}, people=None)
     text = "\n".join(report._premiere_checks(ctx))
     assert "**Fixed in the edit by itself** (1" in text and "1 flash frame removed at 00:00:24:22 (S26)" in text
+
+
+def test_run18_one_take_left_in_two_clips_is_one_clip_again():
+    """video14 (run 18): a repeat trimmed at a cut and the move to the RAW's rate left S09..S21 / S22 playing one
+    continuous take with the same framing as two clips (XML: "one continuous RAW take ... but two clips"): one clip,
+    its A1 items one too. A seam where A1 does not continue stays a cut."""
+    clips = [_clip24(0, 60, 1000), _clip24(60, 100, 1060, 2)]
+    audio = [{"start": 0, "end": 60, "in": 1000, "out": 1060, "speed": 1.0, "what": "picture"},
+             {"start": 60, "end": 100, "in": 1060, "out": 1100, "speed": 1.0, "what": "picture"}]
+    c2, a2 = ex.join_seams(clips, audio)
+    assert [(c.rec_start, c.rec_end, c.src_in, c.src_out) for c in c2] == [(0, 100, 1000, 1100)]
+    assert [(a["start"], a["end"], a["in"], a["out"]) for a in a2] == [(0, 100, 1000, 1100)]
+    jump = [_clip24(0, 60, 1000), _clip24(60, 100, 1061, 2)]                 # a real cut (a frame skipped): kept
+    assert len(ex.join_seams(jump, audio)[0]) == 2
+    line = [dict(audio[0]), dict(audio[1], **{"in": 2000, "out": 2040})]     # A1 jumps there: the cut stays
+    c3, a3 = ex.join_seams(clips, line)
+    assert len(c3) == 2 and len(a3) == 2

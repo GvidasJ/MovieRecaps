@@ -1,0 +1,118 @@
+{
+ "video": "video41-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video41\\video41_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Worst First Word of All Time\\edit",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.459,
+   0.167,
+   0.25,
+   0.0,
+   0.0
+  ],
+  "ends": [
+   -2.127,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "removed": 1,
+  "added": 0,
+  "inner": [
+   -463.963,
+   0.375,
+   1.376
+  ],
+  "moved": [
+   -0.0,
+   -67.0,
+   -0.0,
+   -32.0,
+   -189.0,
+   390.0,
+   390.0,
+   -0.0,
+   -78.0,
+   -78.0,
+   -0.0,
+   54.0,
+   0.0,
+   0.0,
+   318.9,
+   0.0,
+   0.0,
+   -0.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   0.03,
+   -0.0,
+   -0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Worst First Word of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 0,
+  "removed": 0,
+  "added": 6,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "his",
+    "written": "A hole",
+    "kind": "words",
+    "before": "just say",
+    "after": "looks at",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "want to",
+    "written": "wanna",
+    "kind": "words",
+    "before": "you don't",
+    "after": "say that",
+    "glossary": false,
+    "why": "a spoken form against its written one: your style for this video, not a spelling"
+   }
+  ]
+ }
+}

@@ -1,0 +1,64 @@
+{
+ "what": "your finished edit (its Premiere project, the RAW audio under the clips): the timeline answer.srt is timed on; RAW times on raw.mp4, the RAW from 90.560 s",
+ "fps": 25.0,
+ "audio": [
+  {
+   "start": 0.0,
+   "end": 10.04,
+   "kind": "raw",
+   "src_in": 30.56,
+   "speed": 1.0
+  },
+  {
+   "start": 10.04,
+   "end": 16.2,
+   "kind": "raw",
+   "src_in": 40.6,
+   "speed": 1.0
+  },
+  {
+   "start": 16.2,
+   "end": 20.12,
+   "kind": "raw",
+   "src_in": 46.76,
+   "speed": 1.0
+  },
+  {
+   "start": 20.12,
+   "end": 23.96,
+   "kind": "raw",
+   "src_in": 50.68,
+   "speed": 1.0
+  }
+ ],
+ "framing": [
+  {
+   "src_in": 30.56,
+   "src_out": 40.6,
+   "dx": -232.541,
+   "scale": 175.656
+  },
+  {
+   "src_in": 40.6,
+   "src_out": 46.76,
+   "dx": null,
+   "scale": null
+  },
+  {
+   "src_in": 46.76,
+   "src_out": 50.68,
+   "dx": 279.459,
+   "scale": 175.656
+  },
+  {
+   "src_in": 50.68,
+   "src_out": 54.52,
+   "dx": -128.541,
+   "scale": 175.656
+  }
+ ],
+ "framing_size": [
+  1080,
+  1920
+ ]
+}

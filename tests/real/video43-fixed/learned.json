@@ -1,0 +1,57 @@
+{
+ "video": "video43-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video43\\video43_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Funniest Flight In British Comedy (3)\\edit",
+ "edit": {
+  "clips": 1,
+  "starts": [
+   0.56
+  ],
+  "ends": [
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   -234.0,
+   278.0,
+   -130.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Funniest Flight In British Comedy",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 25.0
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 18,
+  "rewritten": 0,
+  "changes": []
+ }
+}

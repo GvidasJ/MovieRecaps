@@ -1,0 +1,139 @@
+{
+ "video": "mik1-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\mik1\\mik1_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Most Suspicious Question of All Time (3)\\edit",
+ "edit": {
+  "clips": 13,
+  "starts": [
+   0.228,
+   -0.008,
+   0.007,
+   0.006,
+   0.005,
+   0.002,
+   -0.005,
+   -0.001,
+   -0.005,
+   -0.005,
+   0.36,
+   0.006,
+   0.003
+  ],
+  "ends": [
+   -0.007,
+   -0.01,
+   0.006,
+   0.005,
+   0.002,
+   0.015,
+   -0.001,
+   0.012,
+   -0.006,
+   0.06,
+   -0.01,
+   0.003,
+   -0.001
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.167
+  ],
+  "moved": [
+   50.0,
+   1187.3,
+   382.0,
+   382.0,
+   361.0,
+   -800.0,
+   18.7,
+   -156.3,
+   -829.8,
+   0.0,
+   127.0,
+   89.0,
+   -155.0,
+   -154.0,
+   -154.0,
+   -154.0,
+   158.0
+  ],
+  "zoomed": [
+   0.0,
+   0.37,
+   -0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   1.29,
+   1.29,
+   -0.01,
+   0.0,
+   0.0,
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.997,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Suspicious Question of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 60.0
+  }
+ },
+ "captions": {
+  "words": 3,
+  "case": 0,
+  "removed": 3,
+  "added": 7,
+  "rewritten": 0,
+  "changes": [
+   {
+    "heard": "all right",
+    "written": "alright",
+    "kind": "words",
+    "before": "right now",
+    "after": "that this",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "of",
+    "written": "oh",
+    "kind": "words",
+    "before": "and one",
+    "after": "them may",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "I",
+    "written": "If",
+    "kind": "words",
+    "before": "nor there",
+    "after": "indeed this",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

@@ -1,0 +1,176 @@
+{
+ "video": "video40-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video40\\video40_fixed.prproj",
+ "run": "D:\\Shared\\Projects\\2026-10-24_The Funniest Phone Call of All Time (2)\\edit",
+ "edit": {
+  "clips": 15,
+  "starts": [
+   2.419,
+   0.125,
+   0.167,
+   -1.71,
+   -2.419,
+   -0.042,
+   -2.461,
+   -4.88,
+   -1.543,
+   -3.504,
+   -0.209,
+   0.542,
+   -0.667,
+   -3.086,
+   -3.337
+  ],
+  "ends": [
+   0.083,
+   0.167,
+   1.335,
+   0.042,
+   -0.125,
+   2.836,
+   0.417,
+   6.715,
+   3.795,
+   -1.084,
+   4.004,
+   4.755,
+   2.628,
+   1.752,
+   0.167
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.25,
+   0.125,
+   0.083,
+   0.626,
+   0.626,
+   0.417
+  ],
+  "moved": [
+   282.0,
+   282.0,
+   282.0,
+   282.0,
+   282.0,
+   282.0,
+   -721.9,
+   -721.9,
+   182.1,
+   182.1,
+   -39.9,
+   -39.9,
+   -123.9,
+   111.0,
+   447.0,
+   111.0,
+   141.2,
+   141.2,
+   141.2,
+   16.2,
+   168.2,
+   -209.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   85.0,
+   85.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.01,
+   0.01,
+   0.01,
+   -0.01,
+   -0.01,
+   -0.01,
+   -0.01,
+   -0.01,
+   81.07
+  ],
+  "framing": "compared",
+  "played": 0.618,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Funniest Phone Call of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 2,
+  "case": 3,
+  "removed": 5,
+  "added": 25,
+  "rewritten": 1,
+  "changes": [
+   {
+    "heard": "quagmire",
+    "written": "Quagmire",
+    "kind": "case",
+    "before": "",
+    "after": "",
+    "glossary": false,
+    "why": "an ordinary word: emphasis, not a name"
+   },
+   {
+    "heard": "god",
+    "written": "God",
+    "kind": "case",
+    "before": "",
+    "after": "",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "do",
+    "written": "are",
+    "kind": "words",
+    "before": "god what",
+    "after": "we do",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   },
+   {
+    "heard": "god",
+    "written": "God",
+    "kind": "case",
+    "before": "",
+    "after": "",
+    "glossary": true,
+    "why": ""
+   },
+   {
+    "heard": "other",
+    "written": "should",
+    "kind": "words",
+    "before": "god we",
+    "after": "text each",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

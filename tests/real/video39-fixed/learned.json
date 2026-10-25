@@ -1,0 +1,79 @@
+{
+ "video": "video39-fixed",
+ "date": "2026-10-25",
+ "project": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\video39\\video39_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Most Clueless Teacher In Comedy History\\edit",
+ "edit": {
+  "clips": 4,
+  "starts": [
+   0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   -0.0,
+   0.25
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.292,
+   0.292,
+   0.25
+  ],
+  "moved": [
+   0.0,
+   156.0,
+   0.0,
+   -59.0,
+   -59.0,
+   90.0,
+   -22.0,
+   -22.0,
+   0.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 0.987,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "Recreated Edit (Premiere)",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 0,
+  "added": 3,
+  "rewritten": 0,
+  "changes": []
+ }
+}

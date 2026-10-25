@@ -1,0 +1,15 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from mik1_fixed.prproj (2026-10-25): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\finished\\mik1\\mik1_fixed.prproj",
+ "run": "C:\\Users\\gvida\\Desktop\\bh\\MovieRecaps\\input\\downloads\\2026-10-24_The Most Suspicious Question of All Time (3)\\edit",
+ "full_raw": "input/downloads/2026-10-24_The Most Suspicious Question of All Time (3)/edit/extras/media/raw.mp4",
+ "raw_offset": 259.292367,
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}
