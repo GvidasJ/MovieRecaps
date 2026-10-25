@@ -1696,8 +1696,13 @@ class DownloadPage(QWidget):
         """At the app's start (the main window calls it once): the torrent downloads that were not finished go on,
         each on a row again (its video -- competitor, channel, headline ... -- from the app's small torrent_rows.json;
         a download with no row kept becomes a row of its own, Just cuts unless a competitor is added). Nothing is
-        started when there is no unfinished torrent (aria2c is not even started)."""
+        started when there is no unfinished torrent (aria2c is not even started). Run 18: the rows kept when the app
+        closed come back first (restore_rows); a torrent that goes on finds its own kept row."""
         from ..ui import background as BG
+        try:
+            self.restore_rows()
+        except Exception:  # noqa: BLE001 - never a crash at the start
+            pass
 
         def work():
             return NV.torrent_rows() if NV.unfinished_torrents() else None
@@ -1718,6 +1723,17 @@ class DownloadPage(QWidget):
                 continue
             f = dict(rows.get(job.id) or {})
             comp_file = f.get("comp_file")
+            # run 18: its own row kept when the app closed (stopped there by the close) goes on -- not a second row
+            kept = next((i for i in self.items if i.torrent_job is None and i.raw_torrent and f.get("raw_torrent")
+                         and i.raw_torrent == f.get("raw_torrent") and (i.competitor_url or "") ==
+                         (f.get("competitor_url") or "") and i.state in (STOPPED, FAILED)), None)
+            if kept is not None:
+                kept.state, kept.started, kept.error, kept.failed_step = WORKING, datetime.now(), "", ""
+                kept.name = kept.name or job.name or ""
+                self._step(kept, "download", S_RUN, 0.0, "continues after the restart")
+                job._mr_kept = True                         # noqa: SLF001 - already kept
+                self._attach_torrent(kept, job, TP)
+                continue
             it = Item(f.get("competitor_url") or "", raw_torrent=f.get("raw_torrent") or job.name or "torrent",
                       channel=f.get("channel") or "", title=f.get("title") or "", mode=f.get("mode") or J.FAST,
                       speed=float(f.get("speed") or 100.0), upload_title=f.get("upload_title") or "",
@@ -1874,6 +1890,7 @@ class DownloadPage(QWidget):
         health.space_changed(self.ctx)                          # day 13: the strip's free space read again
         self._order()
         self._counts()
+        self._save_rows()                                       # run 18: kept for the next start
         self._next()
 
     def _fail(self, it: Item, stage: str, error: str) -> None:
@@ -1888,7 +1905,11 @@ class DownloadPage(QWidget):
         if it.project is None:                 # no project.json to keep it: History's own log (a small append)
             from ..core import history as H
             H.log_event(f"{stage.capitalize()} failed", it.raw_url or str(it.raw_file or it.raw_torrent or "")[:120],
-                        it.error, H.FAIL, NV.one_line(it.title), it.channel)
+                        it.error, H.FAIL, NV.one_line(it.title), it.channel,
+                        inputs={"raw": it.raw_url or it.raw_torrent or (str(it.raw_file) if it.raw_file else ""),
+                                "competitor": it.competitor_url or (str(it.comp_file) if it.comp_file else ""),
+                                "headline": it.title, "upload_title": it.upload_title, "channel": it.channel,
+                                "mode": it.mode, "speed": it.speed, "kind": it.kind, "step": stage})   # run 18
         self._order()
 
     # -- what comes after a step: wait for the button, or go on by itself (Automatic) --
@@ -2152,6 +2173,7 @@ class DownloadPage(QWidget):
             self._learn_hook(it, res)
         self._refresh(it)
         self._order()
+        self._save_rows()                                       # run 18: kept for the next start
 
     def _learn_hook(self, it: Item, res: dict) -> None:
         """A Just cuts run ended (the full edits end in the Match cuts queue, which calls the same hook): a FAIL or an
@@ -2192,6 +2214,87 @@ class DownloadPage(QWidget):
         self._step(it, self._display_step(it, stage), S_WAIT, 0.0, "")
         self.queue(it, (stage,), default_template=it.default_template)
 
+    # -- run 18 (task 4): History's "Try again" --
+    def retry_project(self, folder, step: str = "") -> str:
+        """History's Try again on a project's failure: its row here tries again from the step that failed (``step``;
+        its own failed step when it has one); a project without a row here gets one (from its project.json: the
+        links or files, channel, headline, YouTube title, mode and speed; the steps it finished kept). What happened,
+        in plain words."""
+        from .match_cuts_tool import same_folder
+        mine = [i for i in self.items if i.project is not None and same_folder(i.project, folder)]
+        it = next((i for i in mine if i.state in (FAILED, STOPPED)), None)
+        if it is None and mine:
+            return "it is on the New video list already, and not stopped"
+        if it is None:
+            it = self._item_of_project(Path(folder), step)
+            if it is None:
+                return "its project folder can't be read"
+            self.items.append(it)
+            self.rows[it.id] = VideoRow(self, it)
+        if step and step in it.steps:
+            it.failed_step = step
+        self.retry(it)
+        self._order(scroll_top=True)
+        self._counts()
+        return f"trying {it.name or 'it'} again from {it.failed_step or step or 'its first step'}"
+
+    def _item_of_project(self, folder: Path, step: str) -> Item | None:
+        """A New video row of a project (its project.json), stopped at ``step``."""
+        from ..core import another_raw as AR
+        from ..core import projects as PJ
+        try:
+            p = PJ.load(folder)
+        except Exception:  # noqa: BLE001
+            return None
+        data = p.data
+        k = AR.kept_from_project(folder)
+        kind = NV.JUST_CUTS if str(data.get("kind") or "") == "just_cuts" else NV.FULL
+        it = Item(k.competitor_url or "", raw_url=k.raw_url, raw_file=k.raw_file, channel=k.channel, title=k.title,
+                  mode=k.mode if k.mode in (J.FAST, J.THOROUGH) else J.FAST, speed=float(k.speed or 100.0),
+                  project=folder, name=folder.name, upload_title=k.upload_title, kind=kind,
+                  raw_torrent=k.raw_torrent, comp_file=k.competitor_file)
+        for key in it.steps:
+            st = p.step("edit" if key == "cuts" else key)             # (Just cuts keeps its cuts as the edit step)
+            state = str((st or {}).get("state") or "")
+            it.steps[key] = Step(S_DONE if state == PJ.DONE else (S_FAIL if state == "failed" else S_WAIT),
+                                 1.0 if state == PJ.DONE else 0.0, "failed" if state == "failed" else "", None)
+        it.state, it.failed_step = FAILED, step or next((key for key in it.steps if it.steps[key].state == S_FAIL),
+                                                          "download")
+        it.error = str((p.step("edit" if it.failed_step == "cuts" else it.failed_step) or {}).get("error") or "")
+        return it
+
+    def retry_logged(self, inputs: dict) -> str:
+        """History's Try again on a failure that never got a project folder (a broken link ...): the same video
+        added again -- its RAW, competitor, channel, headline, YouTube title, mode and speed -- as if you pressed Add."""
+        raw, comp = str(inputs.get("raw") or ""), str(inputs.get("competitor") or "")
+        if not raw and not comp:
+            return "nothing to try again: no link or file was kept"
+        self.raw_file = None
+        self.comp_file = None
+        if raw and Path(raw).is_file():
+            self._set_raw_file(Path(raw))
+        else:
+            self.raw.setText(raw)
+        if comp and Path(comp).is_file():
+            self.comp_file = Path(comp)
+            self.comp.setText(str(self.comp_file))
+        else:
+            self.comp.setText(comp)
+        ch = str(inputs.get("channel") or "")
+        if ch:
+            self._want_channel = ch
+            if ch in self.ch.buttons:
+                self.ch.set(ch)
+        self.head.set_text(str(inputs.get("headline") or ""))
+        self._head_ready()
+        self.yt.setText(str(inputs.get("upload_title") or ""))
+        if inputs.get("mode") in (J.FAST, J.THOROUGH):
+            self.mode.set(inputs["mode"])
+        self.speed.set("125" if abs(float(inputs.get("speed") or 100.0) - 125.0) < 1e-6 else "100")
+        self._detect()
+        it = self.add()
+        return "added again" if it is not None else "the form is filled in: press Add"
+
     def stop_item(self, it: Item) -> None:
         w = it.torrent_widget
         if it.torrent_job is None and w is not None and hasattr(w, "cancel"):     # the torrent's file list: Cancel
@@ -2219,6 +2322,7 @@ class DownloadPage(QWidget):
             row.deleteLater()
         self._order()
         self._counts()
+        self._save_rows()                                       # run 18: the kept list without it
 
     def _xml_path(self, it: Item) -> Path | None:
         rd = it.result.get("run_dir") if it.result else None
@@ -2391,6 +2495,79 @@ class DownloadPage(QWidget):
         bits = [f"{n} video(s)"] + ([f"{busy} running"] if busy else []) + ([f"{wait} waiting for you"] if wait else [])
         self.count.setText("  ·  ".join(bits) if n else "")
         self.empty.setVisible(not self.items)
+
+    # -- run 18 (task 4): the list stays when the app closes (core.rows_keep) --
+    def closing(self) -> None:
+        """The app closes: every row is kept, as it is (a step going now was stopped by the close: it comes back
+        stopped at that step)."""
+        self._save_rows()
+
+    def _save_rows(self) -> None:
+        if not getattr(self, "_rows_restored", False):
+            return                                        # (the kept list is read first: never written over before)
+        try:
+            from ..core import rows_keep as RK
+            RK.save_newvideo(self.items)
+        except Exception:  # noqa: BLE001 - a convenience
+            pass
+
+    def restore_rows(self) -> int:
+        """The rows as they were when the app closed (once, at the start, before the torrents): each with its inputs,
+        steps, stop message and result -- so its buttons are there again. A step that was going comes back stopped
+        at that step (Try again goes on from it); a row whose edit was in the Match cuts queue finds its queue row
+        again (the same project), else it comes back stopped at the edit. How many came back."""
+        if getattr(self, "_rows_restored", False):
+            return 0
+        self._rows_restored = True
+        try:
+            from ..core import rows_keep as RK
+            saved = RK.load_newvideo()
+        except Exception:  # noqa: BLE001
+            return 0
+        if not saved:
+            return 0
+        from .match_cuts_tool import same_folder
+        mc = (getattr(self.ctx, "pages", None) or {}).get("match_cuts")
+        names = {f for f in Item.__dataclass_fields__ if f not in ("id", "steps", "job", "torrent_job",
+                                                                   "torrent_widget", "files")}
+        n = 0
+        for s in saved:
+            kw = {k: v for k, v in s["kw"].items() if k in names}
+            kw["competitor_url"] = kw.get("competitor_url") or ""
+            try:
+                it = Item(**kw)
+            except TypeError:
+                continue
+            for k, v in s["steps"].items():
+                if k in it.steps:
+                    it.steps[k] = Step(v["state"] or S_WAIT, v["share"], v["text"], v["finished"])
+            if it.state in (QUEUED, WORKING):            # stopped by the close, at the step that was going
+                going = next((k for k, st in it.steps.items() if st.state == S_RUN), "") or it.failed_step or \
+                    next((k for k, st in it.steps.items() if st.state not in (S_DONE, S_NOTE, S_SKIP)), "download")
+                it.state, it.error, it.failed_step, it.message = STOPPED, RK.CLOSED_WHILE_WORKING, going, ""
+                if going in it.steps:
+                    it.steps[going] = Step(S_WAIT, 0.0, "stopped", None)
+            elif it.state == SENT:                        # its edit in the queue: the same project's row there
+                job = None
+                if mc is not None and it.project is not None:
+                    want = s.get("job_run_dir")
+                    cands = [j for j in getattr(mc, "jobs", []) if j.project is not None
+                             and same_folder(j.project, it.project)]
+                    job = next((j for j in cands if want and j.run_dir is not None and str(j.run_dir) == want),
+                               None) or (cands[-1] if cands else None)
+                if job is not None:
+                    it.job = job
+                else:
+                    it.state, it.error, it.failed_step = STOPPED, RK.CLOSED_WHILE_WORKING, "edit"
+                    if "edit" in it.steps:
+                        it.steps["edit"] = Step(S_WAIT, 0.0, "stopped", None)
+            self.items.append(it)
+            self.rows[it.id] = VideoRow(self, it)
+            n += 1
+        if n:
+            self._order()
+            self._counts()
+        return n
 
     def busy(self) -> bool:
         return self.current is not None

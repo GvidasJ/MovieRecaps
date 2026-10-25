@@ -1263,7 +1263,7 @@ class MatchCutsPage(QWidget):
         lay.addWidget(legend)
         lay.addStretch(1)
         self.update_counts()
-        self._restore_paused()
+        self._restore_rows()
 
     @staticmethod
     def _legend() -> str:
@@ -1544,6 +1544,8 @@ class MatchCutsPage(QWidget):
         self.jobs = [j for j in self.jobs if j.id != job.id]
         if job.state == J.PAUSED:                          # (its run folder stays: your files are never deleted)
             self._save_paused()
+        else:
+            self._save_rows()                              # run 18: the kept list without it
         row = self.rows.pop(job.id, None)
 
         def gone() -> None:
@@ -1984,6 +1986,7 @@ class MatchCutsPage(QWidget):
                 fn(j)
             from .learn_tool import after_edit        # day 12: problems_queue.md / "Waiting for your fix"
             after_edit(self.ctx, j, res)
+            self._save_rows()                         # run 18: its result kept for the next start
         self._taskbar()
         if self.running:
             self._next()
@@ -2123,6 +2126,39 @@ class MatchCutsPage(QWidget):
             PZ.save([j for j in self.jobs if j.state == J.PAUSED])
         except Exception:  # noqa: BLE001 - a convenience
             pass
+        self._save_rows()
+
+    def _save_rows(self) -> None:
+        """Run 18 (task 4): every row of the queue kept for the app's next start (core.rows_keep)."""
+        try:
+            from ..core import rows_keep as RK
+            RK.save_queue(self.jobs)
+        except Exception:  # noqa: BLE001 - a convenience
+            pass
+
+    def closing(self) -> None:
+        """The app closes (after a video being made was paused): every row is kept, as it is."""
+        self._save_rows()
+
+    def _restore_rows(self) -> None:
+        """Run 18 (task 4): the queue as it was when the app closed -- every row with its inputs, state, stop message
+        and result (core.rows_keep); a list never saved yet: the paused videos, as night 15."""
+        try:
+            from ..core import rows_keep as RK
+            jobs = RK.load_queue()
+        except Exception:  # noqa: BLE001
+            jobs = None
+        if jobs is None:
+            self._restore_paused()
+            return
+        for j in jobs:
+            if any(x.run_dir is not None and j.run_dir is not None and Path(x.run_dir) == Path(j.run_dir)
+                   for x in self.jobs):
+                continue
+            self._add_row(j)
+        if jobs:
+            self._save_paused()
+            self.update_counts()
 
     def _restore_paused(self) -> None:
         """The videos paused before the app was closed: back in the queue, paused."""

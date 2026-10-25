@@ -22,16 +22,20 @@ class _Item(QWidget):
         super().__init__()
         self.ev = ev
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.retry = bool(getattr(ev, "retry", False)) and bool(getattr(ev, "folder", ""))
+        self.retry = bool(getattr(ev, "retry", False)) and bool(getattr(ev, "folder", "") or getattr(ev, "extra", ""))
         # day 16: an edit that failed because of its RAW keeps its YouTube title and headline here, to reuse
         yt = (getattr(ev, "upload_title", "") or "").strip()
         head = (getattr(ev, "title", "") or "").replace("\n", " / ").strip()
         self.line3 = " · ".join(x for x in ((f"YouTube: {yt}" if yt else ""), (f"Headline: {head}" if head else ""))
                                 if x) if self.retry else ""
         self.setFixedHeight(76 if self.line3 else 58)
-        self.b_retry = self.b_comp = None
+        self.b_retry = self.b_comp = self.b_again = None
         if self.retry and page is not None:
             from ..core import another_raw as AR
+            self.b_again = W.Button("Try again", "Small", parent=self)          # run 18: every failure
+            self.b_again.setToolTip("Try this step again (a download, a conversion, a template or the edit), with "
+                                    "the same RAW, competitor, headline, YouTube title and channel")
+            self.b_again.clicked.connect(lambda: page.try_again(ev))
             self.b_retry = W.Button(AR.BUTTON, "Small", parent=self)
             self.b_retry.setToolTip(AR.TIP)
             self.b_retry.clicked.connect(lambda: page.try_another_raw(ev))
@@ -57,6 +61,10 @@ class _Item(QWidget):
         if self.b_comp is not None:
             self.b_comp.adjustSize()
             self.b_comp.move(self.width() - self.b_retry.width() - self.b_comp.width() - 10, 6)
+        if self.b_again is not None:
+            self.b_again.adjustSize()
+            self.b_again.move(self.width() - self.b_retry.width() - self.b_comp.width() - self.b_again.width() - 16,
+                              6)
         super().resizeEvent(e)
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
@@ -161,7 +169,57 @@ class HistoryPage(QWidget):
             if sel is not None:
                 sel("download")
             fill(k)
+        if not getattr(ev, "folder", "") and getattr(ev, "extra", ""):      # run 18: a failure with no project
+            got(_kept_of_logged(ev))
+            return
         BG.call(lambda: AR.kept_from_project(ev.folder), got, lambda _e: None)
+
+    def try_again(self, ev) -> str:
+        """Run 18: "Try again" on any failure: the New video page tries the step again (a project's row -- made from
+        its project.json when it has none there; a failure with no project: the same video added again)."""
+        import json
+        dl = (getattr(self.ctx, "pages", None) or {}).get("download")
+        if dl is None:
+            return ""
+        sel = getattr(self.ctx, "select", None)
+        if sel is not None:
+            sel("download")
+        if getattr(ev, "folder", ""):
+            said = dl.retry_project(ev.folder, getattr(ev, "step", "") or "")
+        else:
+            try:
+                said = dl.retry_logged(json.loads(getattr(ev, "extra", "") or "{}"))
+            except ValueError:
+                said = "nothing to try again"
+        toast = getattr(dl, "toast", None)
+        if toast is not None and said:
+            toast(f"Try again: {said}", "ok" if said.startswith(("trying", "added")) else "note")
+        return said
+
+
+def _kept_of_logged(ev):
+    """Run 18: what a logged failure (no project folder) keeps, for the two "Try with another ..." buttons."""
+    import json
+
+    from ..core import another_raw as AR
+    try:
+        d = json.loads(getattr(ev, "extra", "") or "{}")
+    except ValueError:
+        d = {}
+    from pathlib import Path
+    raw, comp = str(d.get("raw") or ""), str(d.get("competitor") or "")
+    rf = Path(raw) if raw and Path(raw).is_file() else None
+    cf = Path(comp) if comp and Path(comp).is_file() else None
+    try:
+        speed = float(d.get("speed") or 100.0)
+    except (TypeError, ValueError):
+        speed = 100.0
+    return AR.Kept(title=str(d.get("headline") or ""), upload_title=str(d.get("upload_title") or ""),
+                   channel=str(d.get("channel") or ""), competitor_file=cf, competitor_url="" if cf else comp,
+                   mode=str(d.get("mode") or ""), speed=speed, why="FAIL", raw_file=rf,
+                   raw_url="" if rf or raw.startswith("magnet:") or raw.lower().endswith(".torrent") else raw,
+                   raw_torrent=raw if (raw.startswith("magnet:") or raw.lower().endswith(".torrent")) else "",
+                   raw_name=Path(raw).name if raw else "", comp_name=Path(comp).name if comp else "")
 
 
 class HistoryTool(Tool):

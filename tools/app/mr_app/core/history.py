@@ -44,6 +44,8 @@ class Event:
     folder: str = ""        # day 16: the project's folder (project.json's data from the board carries "_folder")
     retry: bool = False     # day 16: the edit failed because of its RAW -- "Try with another RAW" on this event
     upload_title: str = ""  # day 16: the YouTube title, shown with the headline on such an event
+    step: str = ""          # run 18: the step that failed (download / convert / template / edit): "Try again" redoes it
+    extra: str = ""         # run 18: a logged failure (no project folder): its inputs (JSON) for the three buttons
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -196,6 +198,10 @@ def project_events(data: Mapping) -> list[Event]:
             add(s.get("finished"), done, detail, NOTE if s.get("default") else INFO, column=column)
         elif s.get("state") == "failed":
             add(s.get("finished"), failed, s.get("error") or "", FAIL)
+            if out and out[-1].what == failed and data.get("_folder"):    # run 18: Try again and both "Try with
+                from dataclasses import replace                            # another ..." on every failure
+                out[-1] = replace(out[-1], folder=str(data.get("_folder") or ""), retry=True, step=key,
+                                  upload_title=str(data.get("upload_title") or ""))
     jb = data.get("just_cuts_before")                   # Just cuts made before "Add a competitor" (newvideo)
     if isinstance(jb, Mapping) and jb.get("state") == "done":
         add(jb.get("finished"), f"Just cuts made · {jb.get('result') or 'PASS'}",
@@ -224,7 +230,7 @@ def project_events(data: Mapping) -> list[Event]:
             by_raw = False
         if by_raw and out:
             from dataclasses import replace
-            out[-1] = replace(out[-1], folder=str(data.get("_folder") or ""), retry=True,
+            out[-1] = replace(out[-1], folder=str(data.get("_folder") or ""), retry=True, step="edit",
                               upload_title=str(data.get("upload_title") or ""))
     up = board.get("uploaded") if isinstance(board.get("uploaded"), Mapping) else {}
     if up and parse_time(up.get("at")) is not None:
@@ -272,11 +278,15 @@ def _log_path() -> Path:
 
 
 def log_event(what: str, name: str, detail: str = "", kind: str = INFO, title: str = "", channel: str = "",
-              at: datetime | None = None) -> None:
-    """One event that has no project.json to live in (it shows in History with its date); never raises."""
+              at: datetime | None = None, inputs: Mapping | None = None) -> None:
+    """One event that has no project.json to live in (it shows in History with its date); never raises. Run 18:
+    ``inputs`` -- a failed New video's inputs (raw, competitor, headline, upload_title, channel, mode, speed, kind,
+    step), so its History event has Try again and both "Try with another ..." buttons too."""
     import json
     rec = {"at": (at or datetime.now().astimezone()).isoformat(timespec="seconds"), "what": what, "name": name,
            "detail": _short(detail), "kind": kind, "title": title, "channel": channel}
+    if inputs:
+        rec["inputs"] = {k: (str(v) if isinstance(v, Path) else v) for k, v in dict(inputs).items()}
     try:
         p = _log_path()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -302,8 +312,13 @@ def logged_events() -> list[Event]:
             continue
         if t is None:
             continue
+        ins = d.get("inputs") if isinstance(d.get("inputs"), dict) else None
+        fail = str(d.get("kind") or INFO) == FAIL and bool(ins)
         out.append(Event(t, str(d.get("what") or ""), str(d.get("name") or ""), str(d.get("title") or ""),
-                         str(d.get("channel") or ""), str(d.get("detail") or ""), str(d.get("kind") or INFO)))
+                         str(d.get("channel") or ""), str(d.get("detail") or ""), str(d.get("kind") or INFO),
+                         retry=fail, upload_title=str((ins or {}).get("upload_title") or ""),
+                         step=str((ins or {}).get("step") or ""),
+                         extra=json.dumps(ins, ensure_ascii=False) if fail else ""))
     return out
 
 
