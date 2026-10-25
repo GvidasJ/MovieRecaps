@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 from fractions import Fraction
 from types import SimpleNamespace
 
@@ -421,3 +422,13 @@ def test_run18_one_take_left_in_two_clips_is_one_clip_again():
     line = [dict(audio[0]), dict(audio[1], **{"in": 2000, "out": 2040})]     # A1 jumps there: the cut stays
     c3, a3 = ex.join_seams(clips, line)
     assert len(c3) == 2 and len(a3) == 2
+    # the real video14: the clip before is the last piece of a clip with a framing per RAW shot (its list kept, the
+    # change before its own range), and S22's framing is S21's to the 7th digit -- as the XML's check reads them: one
+    piece = dataclasses.replace(_clip24(0, 60, 1000), shot_framing=[(900, _clip24(0, 1, 0).keys[0][1])])
+    s = piece.keys[0][1]
+    s22 = dataclasses.replace(_clip24(60, 100, 1060, 2), keys=[(1060, Sim(s.s, 0.0, s.tx + 1e-4, s.ty))])
+    assert len(ex.join_seams([piece, s22], audio)[0]) == 2                  # (exact framing: two)
+    c4, _ = ex.join_seams([piece, s22], audio, (1920.0, 1080.0))
+    assert len(c4) == 1 and not c4[0].shot_framing
+    inside = dataclasses.replace(piece, shot_framing=[(1030, s)])            # a change inside its own range: kept
+    assert len(ex.join_seams([inside, s22], audio, (1920.0, 1080.0))[0]) == 2

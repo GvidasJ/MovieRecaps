@@ -71,7 +71,20 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
   | XML checks | every check OK; a warning "one continuous RAW take with the same framing, but two clips" | every check OK, no warning |
 
 - **Tests:** 6 new (`test_run18_repeat_sound.py`): new words over a held drawing go where their sound is; a real repeat (its sound repeats too) is left to the repeat removal; a piece whose picture differs there stays; off by the switch / without sound; the real case's shape (103 %, the picture 0.06 s off the sound): one take; the silence check.
-- **The check-all:** running (below).
+- **The deciding test: video40**, this very video as a check-all case with your own fix as the answer (learned this morning), run with the step off and on:
+
+  | video40-fixed | step OFF | step ON (the default) |
+  |---|---|---|
+  | hard checks | **FAIL** (a take left in two clips) | **PASS** |
+  | repeats cut | 10 (2.27 s) | 1 (0.20 s) |
+  | of the RAW you kept, it plays | 85.1 % (misses 4.46 s) | **90.9 %** (misses 2.71 s) |
+  | RAW it plays that you cut | 3.88 s | 4.34 s |
+  | framing / cuts | 0/14, 1/9 | 2/14, 1/9 |
+  | captions exact / word errors | 2/48, 32.4 % | 1/48, 37.5 % |
+
+- **The other cartoon it changed: video19** (Family Guy, "I can't believe it's not butter"): 11 pieces put where their sound is; it now plays **97.4 %** of the RAW you kept (day 17: 92.4 %; misses 0.58 s instead of 1.71 s), the same 1.46 s you cut; cuts 3 -> 4 of 8. Day 17 cut 4 bits you kept (RAW 35.03-35.45, 36.75-37.54, 44.54-44.71, 52.68-52.97 s); now that take plays straight, as in your fix.
+- **Why the captions numbers went down there anyway:** they are compared by time, and both versions keep a 0.75 s pause you removed early on (RAW 30.49-31.24 s), which shifts every later caption. Day 17's 4 wrong cuts happened to shorten the edit by about the same, so its captions sat closer in time. The words themselves are transcribed again on every run (the known ±2-5 noise).
+- So the step stays **ON**. Every other case of the check-all: the same as day 17 (the table below).
 
 ## Task 4 -- the lists stay when the app closes
 
@@ -154,6 +167,38 @@ Started 05:29 (PC; you were at it). `shutdown /a`: "no shutdown was in progress"
 
   (Offscreen, Qt draws no emoji at all -- blank in the classic pictures, small boxes in the mono ones; the real window draws them.) `tools\app\look_shots.py <folder> mono|classic` makes them again.
 - **Tests:** 7 new (`test_look_run18.py`): your palette, classic unchanged, the setting; the dots, the blocks, the coverage strip from a cut list; Ctrl+K finds and runs; a queue row and a New video row drawn as a list with their dots, blocks, red FAILED and reason. The app's other tests run on the classic look (each test puts the theme back).
+
+## Task 9 -- learn by yourself: whom each clip is centred on
+
+- **What I looked at:** your framing of 101 clips in 13 scored cases (chocolate, laptop010, video11, 14, 15, 19, 24, 33-38: every clip the tool had a centring note for), each set against (1) the tool's own reason for leaving that clip's framing as it is (its log: "not centred on the person speaking: unclear speaker", "a close-up", ...) and (2) where your framing puts the face the tool found speaking. A clip counts as matching you when it is within 40 px of your framing (the check-all's framing score).
+- **What centring the found speaker would do, by the tool's reason for not doing it:**
+
+  | the tool's reason | your clips | would match you more | less | the same either way | off either way |
+  |---|---|---|---|---|---|
+  | unclear speaker | 39 | 2 | **7** | 5 | 25 |
+  | a close-up | 18 | 1 | **5** | 5 | 7 |
+  | centred already (under 104 px) | 14 | 2 | **4** | 7 | 1 |
+  | the competitor's own framing | 12 | **3** | 1 | 2 | 6 |
+  | would hide someone it shows | 7 | **3** | 1 | 0 | 3 |
+  | a wide shot | 7 | 0 | **2** | 1 | 4 |
+  | --min-move | 3 | 1 | 0 | 0 | 2 |
+
+- **So no general "centre the speaker more" rule:** it loses as often as it wins. The biggest group (25 of the 39 "unclear speaker" clips) is framed by you on someone who is neither the competitor's choice nor the speaker the tool found -- a listener, someone reacting, or two people. The tool cannot see that yet (it keeps only the speaker's face in its notes; a suggestion below).
+- **The one narrow pattern:** a **very clear** speaker (on 90 % or more of the speech, Light-ASD 3.5 or more, 3 or more above every other face) that the tool left because the competitor's own framing is no wider than the template, or because centring would hide someone else the competitor shows. You centred them in video37 (43-47 s, 3 clips) and video33 (S18, 2 clips), and no clip of this kind got worse. Built as a switch, **OFF** until tested: `CENTRE_SURE` (`MATCH_CUTS_CENTRE_SURE=1`). It can only act where the log shows such a clip: video33, video37, zendaya and video4.
+- **The test:** (below, when it ran).
+
+## Still broken / not done
+
+- **The general pause check** (Task 3: no pause cut where A1 isn't the competitor's sound) is built but OFF -- it made video37 worse.
+- **The framing rule (Task 9):** no general rule found; whom you centre in the clips where the speaker is unclear can't be told from what the tool keeps (a suggestion below).
+- **Captions numbers move by themselves** (re-transcription on every run, ±2-5 exact captions): a change that only moves the picture can still show -1 / +1 captions.
+- **App tests:** one animation timing test (a colour fade "part-way after 110 ms") can fail when the PC is very busy (it passed alone, 9 of 9); the torrent tests still run apart from the rest (they crash Qt when run together with everything under heavy load -- the known night-15 crash).
+
+## What to do by hand in Premiere
+
+- **Nothing for the sound**, when you open the edit with the app's **Open in Premiere**: press **Ctrl+S** once after it opens -- the app closes Premiere, writes A1's Clip Gain, the Hard Limiter (2 dB) and Amplify (+3 dB) on every A1 clip (and the song's gains, Volume and the same two effects on A2), and opens the project again. Then edit as usual.
+- **Only if you import 1_edit.xml by hand** (not through the app): the sound is right (each A1 clip's gain is in a Volume), but the Hard Limiter + Amplify are not on: select the A1 clips (and the song's clips on A2) and drop your **CorrectVolume** preset on them.
+- Optional: the old "MovieRecaps audio chain" preset (Input Boost 0 dB) is not used any more -- delete it from Premiere's Presets so it isn't picked by mistake.
 
 ## On the laptop
 

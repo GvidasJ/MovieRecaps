@@ -103,10 +103,16 @@ def test_the_xml_and_its_check_run_the_same_last_steps(tmp_path, monkeypatch):
     assert not any("differs from the planned" in e or "V1 clips, expected" in e for e in v["errors"]), v["errors"]
 
 
-def test_a_move_that_would_break_min_move_beside_it_is_not_made():
+def test_a_move_under_min_move_beside_it_holds_the_neighbours_framing_or_nothing_moves():
+    sp = _People(speakers.Faces("speaker", True, CUT, others=[CUT]))
     before = _clip(-1300.0, rec=(0, 100), src=3179, sid=15)                      # shows the person (x 680-950)
     c = _clip(-1000.0, rec=(100, 292), src=3279)
-    sp = _People(speakers.Faces("speaker", True, CUT, others=[CUT]))
-    assert _fix([before, c], sp) == 0 and c.keys[0][1].tx == -1000.0            # an 83 px change in one shot
+    assert _fix([before, c], sp) == 1                                            # the slide: an 83 px change in
+    assert c.keys[0][1] == before.keys[0][1]                                     # one shot -- the take's framing held
+    c = _clip(-1000.0, rec=(100, 292), src=3279)
+    after = _clip(-1250.0, rec=(292, 400), src=3471, sid=17)                     # 50 px from before's: every choice
+    assert _fix([_clip(-1300.0, rec=(0, 100), src=3179, sid=15), c, after], sp) == 0    # breaks a cut beside it
+    assert c.keys[0][1].tx == -1000.0
     sp2 = _People(speakers.Faces("speaker", True, CUT, others=[CUT]), one_shot=False)
     assert _fix([_clip(-1300.0, rec=(0, 100), src=3179, sid=15), c], sp2) == 1   # another RAW shot: free
+    assert -260 < c.keys[0][1].tx - (-1000.0) < -200                            # (slid in)
