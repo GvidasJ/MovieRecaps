@@ -42,7 +42,9 @@ def test_the_three_channels_are_found_with_their_links():
         assert ch.psd == REPO / "assets" / "channels" / name / "template.psd"
         assert ch.watermark == REPO / "assets" / "channels" / name / "watermark.png"
         info = json.loads((ch.folder / "channel.json").read_text(encoding="utf-8"))
+        music = info.pop("music", None)                  # run 18 (task 2): SceneProof's song on every channel
         assert info == {"name": name, "link": ch.link, "handle": ch.handle, "shorts_only": ch.shorts_only}
+        assert music is not None and ch.music is not None and ch.music.volume_db == 8.5
     assert chs["Flick707"].shorts_only and not chs["LouLaughs"].shorts_only and not chs["MikeMemesYou"].shorts_only
     assert C.find("loulaughs").name == "LouLaughs"
     with pytest.raises(LookupError):
