@@ -270,14 +270,23 @@ def _shared(c: Any, u: Any) -> bool:
     return _overlap(c, u) > min(0.1, 0.5 * min(abs(c.r1 - c.r0), abs(u.r1 - u.r0)))
 
 
-def cut_changes(tool: Sequence[Any], user: Sequence[Any]) -> dict:
+def slower_frame_s(tool_fps: float | None, user_fps: float | None) -> float:
+    """Run 18 (task 5): one frame of the slower of the two sequences (the tool's edit, your fixed project) -- a time
+    difference under it is the frame-rate change (29.97 -> 60 fps), never a fix of yours. 0 when neither is known."""
+    rates = [float(f) for f in (tool_fps, user_fps) if f and float(f) > 0]
+    return 1.0 / min(rates) if rates else 0.0
+
+
+def cut_changes(tool: Sequence[Any], user: Sequence[Any], frame_s: float = 0.0) -> dict:
     """The cuts of the tool's edit against yours (both: learn.Clip lists, one take's pieces joined). First the clips
     one side has and the other does not (learn.edit_changes' rule: no piece of the RAW in common) -- clips_removed /
     clips_added, with their RAW seconds; then the cuts between the clips both have, matched by the RAW on both sides
     of each cut: {same, trimmed (moved less than NEAR_S: by hand), moved, removed (yours plays on there), added (a cut
     of yours the tool does not make: inside a take), start / end (your first clip's start and last clip's end against
     the tool's, RAW s, + = later), length (your edit's against the tool's, s), shifts (each matched cut's move, RAW
-    s)}. The edit's start counts as a cut point; the ending never does (you trim it by hand)."""
+    s)}. The edit's start counts as a cut point; the ending never does (you trim it by hand). ``frame_s`` (run 18):
+    a move under one frame of the slower sequence is no trim (the frame-rate change, not a fix)."""
+    trim = max(TRIM_S, float(frame_s or 0.0) + 1e-6)
     t_all = sorted(tool, key=lambda c: c.t0)
     u_all = sorted(user, key=lambda c: c.t0)
     tool = [c for c in t_all if any(_shared(c, u) for u in u_all)]
@@ -297,14 +306,14 @@ def cut_changes(tool: Sequence[Any], user: Sequence[Any]) -> dict:
         used.add(hit)
         d = max(abs(user[hit].r1 - a.r1), abs(user[hit + 1].r0 - b.r0))
         out["shifts"].append(round(d, 3))
-        out["moved" if d > NEAR_S else "trimmed" if d >= TRIM_S else "same"] += 1
+        out["moved" if d > NEAR_S else "trimmed" if d >= trim else "same"] += 1
     out["added"] = max(0, len(user) - 1 - len(used))
     if tool and user:
         if _shared(tool[0], user[0]):
             out["start"] = d = round(user[0].r0 - tool[0].r0, 3)          # the first cut-in counts as a cut point
             if abs(d) > NEAR_S:
                 out["moved"] += 1
-            elif abs(d) >= TRIM_S:
+            elif abs(d) >= trim:
                 out["trimmed"] += 1
         if _shared(tool[-1], user[-1]):
             out["end"] = round(user[-1].r1 - tool[-1].r1, 3)              # the ending: by hand, never counted
@@ -570,8 +579,8 @@ def _check(prproj: Path, run: Path, card: CheckCard) -> None:
     if not byname:
         card.notes.append(f"your project plays the RAW under another name ({K._file_name(media)})")
     flips = L.project_flips(prproj)
-    tool_pic, tool_snd, _fps, _w = L.tool_clips(rf["edit"], float(meta.raw.get("width") or 0) or None,
-                                                unflip=flips == 0)
+    tool_pic, tool_snd, tool_fps, _w = L.tool_clips(rf["edit"], float(meta.raw.get("width") or 0) or None,
+                                                    unflip=flips == 0)
     user_pic, user_snd = L.user_clips(seq, PR.file_name(media), K.sound_name_of(L, seq, PR.file_name(media)))
     card.details["read_s"] = round(time.time() - t0, 3)
     # cuts and position: the picture (your audio is moved by hand); the sound only when the picture is not the RAW's
@@ -586,7 +595,15 @@ def _check(prproj: Path, run: Path, card: CheckCard) -> None:
     if e["played"] < MIN_PLAYED:
         card.problems.append(f"the run's edit plays only {100 * e['played']:.0f} % of what your project plays: it is "
                              "probably not the run your project was made from -- pick another")
-    cc = cut_changes(tk, uk)
+    # run 18 (task 5): everything by time -- your sequence at another rate (60 fps over the tool's 29.97) is no fix;
+    # a difference under one frame of the slower rate is not counted
+    frame_s = slower_frame_s(tool_fps, seq.fps)
+    if tool_fps and seq.fps and abs(float(seq.fps) / float(tool_fps) - 1.0) > 1e-3:
+        card.notes.append(f"your sequence runs at {float(seq.fps):.3f}".rstrip("0").rstrip(".") +
+                          f" fps, the tool's at {float(tool_fps):.3f}".rstrip("0").rstrip(".") +
+                          " fps: compared by time -- the frame rate is not counted as a fix, and a difference under "
+                          f"one frame of the slower rate ({1000 * frame_s:.0f} ms) is not counted")
+    cc = cut_changes(tk, uk, frame_s)
     card.cuts = cut_line(cc, key)
     card.details["cuts"] = {**cc, "key": key}
     pc = position_changes(tool_pic, user_pic)
@@ -608,7 +625,7 @@ def _check(prproj: Path, run: Path, card: CheckCard) -> None:
         card.notes.append(L.hidden_captions_note(seq))
     tool_end = max((c.t1 for c in (tool_snd or tool_pic)), default=None)
     capc = caption_changes(tool_caps, user_caps, tool_snd or tool_pic, user_snd or user_pic, tool_end,
-                           max(TIMING_S, 1.5 / float(seq.fps or 60.0)))
+                           max(TIMING_S, 1.5 / float(seq.fps or 60.0), frame_s + 1e-6))
     card.captions = caption_line(capc, look) if tool_caps or user_caps else "none on either side"
     if not tool_caps:
         card.notes.append("the run has no 2_captions.srt: your captions are compared with nothing")
