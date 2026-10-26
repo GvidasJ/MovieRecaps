@@ -7,7 +7,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 | # | task | state | how you use it |
 |---|---|---|---|
 | 1 | Only ONE RAW per project, the edit plays the whole movie | **done** (film + episode real runs PASS, frame-exact) | nothing for new edits; your old ones: Board -> Clean up -> Yes ("One RAW per project": 19 run folders ready, 4 kept for your r1/r2_POPW projects) |
-| 2 | No temporary extra Volume effects | not started | |
+| 2 | No temporary extra Volume effects | **done** (the Premiere check: see the task -- it waits for you to be away) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
 | 3 | The live animations | not started | |
 | 4 | The laptop cleans its own cache | not started | |
 | 5 | Learn the queue | not started | |
@@ -51,6 +51,39 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 
 **Tests:** 4 new tool tests (`test_run19_one_raw.py`: the song is not doubled audio, another sound under A1 still is; a piece run with the song plays the whole movie frame-exact and keeps one RAW; a failed move leaves no movie next to the piece and the app's note; the move keeps a movie already in the media) -- they fail on the old code with your log's exact error; 6 new app tests (`test_rawcopies_run19.py`: a project and its renamed twin both done on Yes, frame-exact; your Premiere project playing the piece keeps it; a move that doesn't check out changes nothing; an unused copy goes, the played one stays; unfinished runs are not offered; the Board button asks first and does it only on Yes).
 
+## Task 2 -- no temporary extra Volume effects (done; the Premiere check runs when you are away)
+
+**What changed:** 1_edit.xml carries **no Gain filter** any more. Until run 18 each A1 clip's "Normalize All Peaks to 0 dB" came as one or more Gain filters, and Premiere imports each as an EXTRA Volume effect (two of +9.6 dB stacked on a loud clip, next to its own Volume) until Ctrl+S made the app rewrite the project. Now each A1 clip has only Volume 0 dB and Panner 0 in the XML -- right after the import Premiere shows **exactly one Volume: the clip's own, at 0 dB**. The gain is written in the clip's comment ("audio chain: Audio Gain +13.84 dB ..."), where the app's save step reads it and writes it as the real **Clip Gain**, with the Hard Limiter (2 dB) and Amplify (+3 dB), as in run 18.
+
+- **Another way for Premiere to import the gain?** No. Premiere 2024's XML import has no form for Clip Gain (tested on day 11: FCP's Gain unit becomes an extra Volume; Audio Levels becomes the clip's own Volume, which you want at 0 dB). So the clips come in at 0 dB and the app's save step adds the Clip Gain.
+- **How loud an edit is before -> after the save** (measured on each edit's own A1 sound; the Hard Limiter as ffmpeg's limiter with the same settings):
+
+  | edit (channel) | A1 clips (their Clip Gain) | right after the import | after Ctrl+S (the app's save step) |
+  |---|---|---|---|
+  | Hardest Guessing Game (SceneProof) | 4 (+8.2 .. +10.1 dB) | -24.1 LUFS, peak -8.2 dBFS | **-10.6 LUFS**, peak +3.0 dBFS |
+  | Most Honest Answer (MikeMemesYou) | 12 (+13.4 .. +50.1 dB) | -34.1 LUFS, peak -13.4 dBFS | **-11.9 LUFS**, peak +3.0 dBFS |
+  | Funniest Background Squad (Flick707) | 8 (+10.7 .. +15.8 dB) | -27.8 LUFS, peak -10.7 dBFS | **-11.3 LUFS**, peak +3.0 dBFS |
+  | When Islam Tried An Energy Drink (2) (LouLaughs) | 3 (+1.0 .. +1.6 dB) | -19.2 LUFS, peak -1.0 dBFS | **-13.5 LUFS**, peak +3.0 dBFS |
+
+  So until the save the voice plays at the RAW's own level -- 6-22 dB quieter (a quiet RAW the most); after it, as in run 18.
+- **The save step, every time** (Open in Premiere -> Ctrl+S -> the app closes Premiere, writes, opens it again):
+  - it now **holds on as long as Premiere runs** (before: it gave up after 30 minutes);
+  - **another project opened** in Premiere meanwhile: it waits; back to this one and saved -> done (before: it gave up);
+  - **Premiere doesn't close** (a message): it tries again after your next Ctrl+S (before: it gave up);
+  - Premiere closed by you: written when the project was saved, as before.
+- **On the row** (the queue and New video), a line under the buttons -- amber until it's done, with why:
+  - "the sound isn't set yet: press Ctrl+S in Premiere"
+  - "... -- another project is open in Premiere (X.prproj): press Open in Premiere on this video, then Ctrl+S"
+  - "... -- Premiere did not close (a message?): answer it, then press Ctrl+S again"
+  - "... -- the edit went into X.prproj (the project open in Premiere): the app sets the sound only in the edit's own project -- close it, then press Open in Premiere (or Audio Gain > Normalize All Peaks to 0 dB and your CorrectVolume preset by hand)" -- the app never changes your own projects
+  - "... -- Premiere was closed before the project was saved: press Open in Premiere, then Ctrl+S"
+  - green when done: "✓ the sound is set: A1: 12 clips with their own Clip Gain (+13.38 to +50.14 dB), Volume 0 dB, Hard Limiter (Input Boost 2 dB) + Amplify +3 dB written into ..."
+- **The XML's own check (XML AUDIO)** now wants exactly Volume 0 dB + Panner 0 on every A1 clip (a Gain filter -- an extra Volume -- fails it) and checks each comment's gain against the clip's own sound. The song on A2 is never judged as the voice (it comes after the checks; the same trap as task 1).
+- **Without the app** (1_edit.xml imported by hand): select all A1 clips, Audio Gain > Normalize All Peaks to 0 dB, then drop your CorrectVolume preset (each clip's comment says so).
+- **Tests:** 4 new tool tests (`test_run19_no_extra_volume.py`) and 6 new app tests (`test_sound_run19.py`: a run-19 import has one Volume and gets its sound on save; the watch waits out another project; Premiere not closing is tried again after the next save; closed before saving says so; the row line; Open in Premiere into another project says the sound is yours to set); night 4 / night 11 / day 17 tests changed to the new form (the old Gain-filter form is now a failure).
+- **Real edits made with today's code**, one per channel (`work\t19\prem\...`, your inputs hard-linked): every A1 clip has only Volume 0 dB + Panner 0 and its gain in its comment, XML AUDIO passes.
+- **The Premiere test:** <!-- PREMIERE2 -->not run yet -- you came back at about 07:53 (my harness stopped before touching anything) and Premiere is open with your project now; it runs when you are away again and Premiere is closed.
+
 ## What I decided on my own
 
 1. **Task 1, the link on this computer:** `edit\extras\media\raw.mp4` stays a hard link of your RAW (the same file under a plain name, no extra space), and 1_edit.xml plays it -- I did not make the XML point at your RAW's own file name. Why: Premiere's XML import fails on some names (emoji; your RAWs come from torrents and YouTube), the edit keeps working when you move or delete the RAW in the project folder, and publishing copies only the edit folder (the shared copy then holds the RAW once). Explorer counts the two names twice; the disk doesn't (`fsutil hardlink list <file>` shows both names). Note: in two projects (Guessing Game, Weirdest Car Shopping) the RAW in the project folder is in your Recycle Bin -- deleting it freed nothing, because the edit's `raw.mp4` is that same file.
@@ -59,3 +92,4 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 ## Tests
 
 - After task 1 (07:05-07:26, the graphics card hidden, then again with it): **tool 1676 passed, 0 failed**; **app 1244 passed, 0 failed**; the app's torrent tests apart: **58 passed** (one of them failed first only because my test folder's long path made the downloaded file's name too long -- with pytest's usual folder: 58 of 58).
+- After task 2 (07:47-08:19; you came back at about 07:53, so from then on BelowNormal): **tool 1679 passed, 0 failed**; **app 1250 passed, 0 failed**.

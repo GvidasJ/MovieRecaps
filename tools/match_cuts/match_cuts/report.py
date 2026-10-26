@@ -1495,9 +1495,10 @@ PREMIERE_CHECKS = [   # (name in the errors, key of validate_premiere_exports, w
     ("XML EMPTY", "empty_problems", "the edit holds at least one clip (never an empty edit delivered as a normal one)"),
     ("XML GAP", "gaps", "every clip covers the template window"),
     ("XML REPEAT", "repeat_problems", "no RAW footage or audio plays twice"),
-    ("XML AUDIO", "audio_problems", "every A1 clip enabled with your audio chain as far as an XML carries it: its own "
-                                    "Normalize All Peaks to 0 dB (as Volume), Volume 0 dB, Panner 0 -- in this order, "
-                                    "nothing else but its speed, no keyframes"),
+    ("XML AUDIO", "audio_problems", "every A1 clip enabled with your audio chain as far as an XML carries it: Volume "
+                                    "0 dB, Panner 0 -- in this order, no Gain filter (no extra Volume), nothing else "
+                                    "but its speed, no keyframes -- and its own Normalize All Peaks to 0 dB in its "
+                                    "comment (the app writes it as Clip Gain)"),
     ("XML ENDING", "ending_problems", "the edit ends on the competitor's last RAW moment (the default: no --remove-silence)"),
     ("XML SPEECH", "speech_problems", "no audio cut inside speech (--remove-silence)"),
     ("XML FLASH", "flash_problems", "no piece of a RAW shot under 0.25 s at a cut"),
@@ -1520,18 +1521,17 @@ def _audio_chain_lines(ctx: Any) -> list[str]:
     from .export_xml_edl import NOT_IN_XML, PRESET_FILE, PRESET_NAME
     gains = [float(c.get("gain_db") or 0.0) for c in chain if c.get("read", True)]
     unread = [str(c.get("label")) for c in chain if not c.get("read", True)]
-    split = sum(1 for c in chain if int(c.get("stages") or 1) > 1)
     lines = ["", f"**Audio chain** on all {len(chain)} A1 clips: each normalised to its own peak (Normalize All Peaks "
-             "to 0 dB" + (f": {min(gains):+.1f} to {max(gains):+.1f} dB" if gains else "") + " -- in Premiere a Volume "
-             "after the clip's own, an XML cannot set its Audio Gain"
-             + (f"; {split} clip(s) need more than +15 dB, so two or more equal Volumes" if split else "")
-             + "), Volume 0 dB, Panner 0.",
+             "to 0 dB" + (f": {min(gains):+.1f} to {max(gains):+.1f} dB" if gains else "") + " -- in the clip's "
+             "comment: an XML cannot set Premiere's Clip Gain, and run 19 writes no extra Volume for it), Volume 0 dB, "
+             "Panner 0. Right after the import every A1 clip has only its own Volume at 0 dB: it plays at the RAW's "
+             "own level (quieter) until you save.",
              "- Open in Premiere from the app and save (Ctrl+S): the app writes each clip's gain as its real Clip Gain "
-             f"(the extra Volume goes), the {NOT_IN_XML} into the saved project. Without the app: select all A1 clips "
-             f"and apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
+             f"and the {NOT_IN_XML} into the saved project. Without the app: select all A1 clips, Audio Gain > "
+             f"Normalize All Peaks to 0 dB, then apply the preset **{PRESET_NAME}** ({PRESET_FILE}: {NOT_IN_XML}; "
              "not your older LoudVOGOOOD: its Amplify is +4.5 dB) -- Premiere cannot import those two from an XML.",
-             "- Don't use Audio Gain > Normalize again: the tool already normalised (as a Volume). A clip you trim later "
-             "keeps the gain measured on its first range (the Hard Limiter then catches anything over 0 dB)."]
+             "- A clip you trim later keeps the gain measured on its first range (the Hard Limiter then catches "
+             "anything over 0 dB)."]
     if unread:
         lines.append(f"- **Not normalised** (their sound could not be read): {', '.join(unread)}")
     return lines

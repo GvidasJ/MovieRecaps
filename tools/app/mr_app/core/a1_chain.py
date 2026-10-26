@@ -1,9 +1,11 @@
 """YOUR AUDIO CHAIN IN THE SAVED PROJECT (run 18, tasks 1 and 2: every channel).
 
-An XML can't carry Clip Gain, a Hard Limiter or Amplify. So 1_edit.xml gives each A1 voice clip its "Normalize All
-Peaks to 0 dB" as Gain filters, which Premiere imports as one or more EXTRA Volume effects (two of +7.6 dB on one
-clip, stacked). The saved .prproj CAN carry your chain, so after Premiere imported the edit and the project was saved,
-``fix(prproj, xml)`` turns each A1 clip into exactly:
+An XML can't carry Clip Gain, a Hard Limiter or Amplify. Until run 19, 1_edit.xml gave each A1 voice clip its
+"Normalize All Peaks to 0 dB" as Gain filters, which Premiere imports as one or more EXTRA Volume effects (two of
++7.6 dB on one clip, stacked). Run 19 (task 2): the XML carries no Gain filter -- each A1 clip imports with only its
+own Volume at 0 dB (at the RAW's own level), its gain only in its comment. The saved .prproj CAN carry your chain, so
+after Premiere imported the edit and the project was saved, ``fix(prproj, xml)`` turns each A1 clip into exactly
+(a project imported from an older XML gets its extra Volumes taken out too):
 
 1. **Clip Gain** = its own normalisation (the clip's loudest peak to 0 dB: the gain in its XML comment, "audio chain:
    Audio Gain +12.40 dB ...", measured by the tool on the sound that clip plays) -- ``<Gain>`` on its AudioClip

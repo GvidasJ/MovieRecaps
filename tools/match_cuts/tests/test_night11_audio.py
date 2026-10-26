@@ -1,7 +1,8 @@
 """Night 11, item 5: the audio chain on every A1 clip (export_xml_edl's audio chain section). What an FCP7 XML can bring
-into Premiere Pro 2024 (tested there): your Audio Gain "Normalize All Peaks to 0 dB" (each clip's own gain, measured on
-the sound it plays, as Volume stages of at most +15 dB), Volume 0 dB, Panner 0 -- in this order, nothing else but its
-speed, no keyframes; the Hard Limiter and Amplify +4.5 dB come from the preset (Premiere cannot import them)."""
+into Premiere Pro 2024 (tested there): Volume 0 dB, Panner 0 -- in this order, nothing else but its speed, no
+keyframes; your Audio Gain "Normalize All Peaks to 0 dB" (each clip's own gain, measured on the sound it plays) is in
+the clip's comment -- run 19: no Gain filter any more (Premiere made each one an extra Volume); the app writes it as
+the clip's Clip Gain, with the Hard Limiter and Amplify, when it saves the project."""
 from __future__ import annotations
 
 import copy
@@ -80,30 +81,25 @@ def test_every_a1_clip_carries_the_chain_with_its_own_normalisation(tmp_path, k,
     fps = ex._xml_rate(seq)
     items = seq.findall("media/audio/track/clipitem")
     assert len(items) >= 5
-    split = 0
     for ci in items:
         assert ci.findtext("enabled") == "TRUE" and ci.find(".//keyframe") is None
         chain = ex.audio_chain_of(ci)
         speeds = [x for x in chain if x[0] == "speed"]
         assert len(speeds) == (1 if abs(ex._remap_speed(ci) - 1.0) > 1e-9 else 0)    # its speed stays
         body = [x for x in chain if x[0] != "speed"]
-        assert body[-2:] == [("volume", 1.0), ("pan", 0.0)]                          # Volume 0 dB, Panner 0
-        stages = [v for kind, v in body[:-2]]
-        assert stages and all(kind == "gain" for kind, _ in body[:-2])
-        assert all(0 < v <= ex.GAIN_STAGE_MAX for v in stages) and len(set(stages)) == 1
+        assert body == [("volume", 1.0), ("pan", 0.0)]              # Volume 0 dB, Panner 0 -- run 19: no Gain filter
         peak = _played_peak(ci, fps, y)
         want = ex.normalize_gain_db(peak)                                           # 0 dB for the silent S05
-        assert sum(ex.factor_db(v) for v in stages) == pytest.approx(want, abs=0.01)
-        assert len(stages) == max(1, math.ceil(want / ex.GAIN_STAGE_SPLIT_DB - 1e-9))
+        assert ex.comment_gain_db(ci) == pytest.approx(want, abs=0.01)              # the gain: in its comment
         assert want > 5.0 or peak == 0.0                                             # the loud right channel never counts
-        split += len(stages) > 1
         note = ci.findtext("comments/mastercomment2")
-        assert "apply the preset" in note and "don't use Audio Gain > Normalize again" in note
-    assert split >= 1                                                                # S04: +40 dB in three Volumes
+        assert "apply the preset" in note and "Normalize All Peaks to 0 dB, then apply" in note
+        assert "comes in at its own level" in note and "Clip Gain" in note
     assert ex.premiere_audio_problems(xml) == []
     chain = res["audio_chain"]
     assert len(chain) == len(items) and all(c["read"] for c in chain)
-    assert any(c["stages"] == 3 and c["gain_db"] == pytest.approx(40.0, abs=0.05) for c in chain)
+    assert any(c["gain_db"] == pytest.approx(40.0, abs=0.05) for c in chain)          # S04: +40 dB (a quiet clip)
+    assert all(c["stages"] == 0 for c in chain)                                       # (no Volume stage any more)
     assert any(c["peak_db"] is None and c["gain_db"] == 0.0 for c in chain)           # the silent one
 
 
@@ -165,8 +161,8 @@ def test_unreadable_sound_keeps_0_db_and_says_so(tmp_path):
     assert any("could not be read" in w for w in res["warnings"])
     assert all(not c["read"] and c["gain_db"] == 0.0 for c in res["audio_chain"])
     for ci in ET.parse(xml).getroot().findall("sequence/media/audio/track/clipitem"):
-        assert [x for x in ex.audio_chain_of(ci) if x[0] != "speed"] == [("gain", 1.0), ("volume", 1.0), ("pan", 0.0)]
-        assert "could not be read" in ci.findtext("comments/mastercomment2")
+        assert [x for x in ex.audio_chain_of(ci) if x[0] != "speed"] == [("volume", 1.0), ("pan", 0.0)]
+        assert "could not be read" in ci.findtext("comments/mastercomment2") and ex.comment_gain_db(ci) == 0.0
     assert ex.premiere_audio_problems(xml) == []                       # nothing to measure against: not judged
 
 
@@ -219,28 +215,31 @@ def test_the_check_catches_wrong_values(tmp_path):
         ci.find("filter/effect[effectid='audiopan']/parameter/parameterid").text = "level"
     assert any("Panner (no value)" in p for p in _broken(tmp_path, hung))
 
-    def over(ci):                                   # one stage over Premiere's +15 dB
-        ci.find(f"filter/effect[effectid='{ex.AUDIO_GAIN_ID}']/parameter/value").text = "6"
-    probs = _broken(tmp_path, over)
-    assert any("over +15 dB" in p for p in probs)
-    assert any("Normalize All Peaks to 0 dB wants" in p for p in probs)          # and not this clip's gain
-
-    def wrong_gain(ci):                             # a stage of the right form, the wrong gain for this clip
-        ci.find(f"filter/effect[effectid='{ex.AUDIO_GAIN_ID}']/parameter/value").text = "2"
+    def wrong_gain(ci):                             # the comment's gain wrong for this clip (the app writes it)
+        cm = ci.find("comments/mastercomment2")
+        cm.text = ex.AUDIO_GAIN_COMMENT.sub("audio chain: Audio Gain +6.02 dB", cm.text, count=1)
     probs = _broken(tmp_path, wrong_gain)
     assert len(probs) == 1 and "its Audio Gain is +6.02 dB, but the loudest sample it plays is at" in probs[0]
 
 
-def test_the_check_catches_unequal_or_needless_stages(tmp_path):
-    def two(ci):                                    # one stage split in two unequal ones
-        f = next(f for f in _filters(ci) if f.find("effect/effectid").text == ex.AUDIO_GAIN_ID)
-        g = copy.deepcopy(f)
-        v = float(f.find("effect/parameter/value").text)
-        f.find("effect/parameter/value").text = ex._fmt(v / 2)
-        g.find("effect/parameter/value").text = "2"
-        ci.insert(list(ci).index(f) + 1, g)
-    probs = _broken(tmp_path, two, index=2)         # S03: +8 dB, one stage
-    assert any("stages differ" in p for p in probs) and any("split into 2 stages" in p for p in probs)
+def _gain_filter(value: str) -> ET.Element:
+    """FCP's Gain audio unit as 1_edit.xml wrote it until run 18 (Premiere: one extra Volume)."""
+    f = ET.Element("filter")
+    e = ET.SubElement(f, "effect")
+    ET.SubElement(e, "name").text = "Gain"
+    ET.SubElement(e, "effectid").text = ex.AUDIO_GAIN_ID
+    p = ET.SubElement(e, "parameter")
+    ET.SubElement(p, "parameterid").text = "Gain(dB)"
+    ET.SubElement(p, "value").text = value
+    return f
+
+
+def test_the_check_catches_a_gain_filter_an_extra_volume(tmp_path):
+    def old_form(ci):                               # run 18's normalisation stage before the Volume
+        lv = next(f for f in _filters(ci) if f.find("effect/effectid").text == "audiolevels")
+        ci.insert(list(ci).index(lv), _gain_filter("2.511886"))
+    probs = _broken(tmp_path, old_form, index=2)
+    assert len(probs) == 1 and "1 Gain filter(s) on it (Gain +8.00 dB)" in probs[0] and "extra Volume" in probs[0]
 
 
 def test_the_check_catches_an_extra_effect_and_a_stand_in(tmp_path):
@@ -251,13 +250,10 @@ def test_the_check_catches_an_extra_effect_and_a_stand_in(tmp_path):
     assert any("Hard Limiter on it" in p for p in _broken(tmp_path, extra))
 
     def stand_in(ci):                               # a Volume +4.5 dB standing in for Amplify, after the Volume
-        f = next(f for f in _filters(ci) if f.find("effect/effectid").text == ex.AUDIO_GAIN_ID)
-        g = copy.deepcopy(f)
-        g.find("effect/parameter/value").text = "1.678804"
         pan = next(f for f in _filters(ci) if f.find("effect/effectid").text == "audiopan")
-        ci.insert(list(ci).index(pan), g)
+        ci.insert(list(ci).index(pan), _gain_filter("1.678804"))
     probs = _broken(tmp_path, stand_in)
-    assert len(probs) == 1 and "its chain is Gain" in probs[0] and "Gain +4.50 dB, audiopan 0" in probs[0]
+    assert len(probs) == 1 and "Gain filter(s) on it (Gain +4.50 dB)" in probs[0]
 
     def doubled(ci):                                # a second Audio Levels (Premiere keeps only the last one)
         f = next(f for f in _filters(ci) if f.find("effect/effectid").text == "audiolevels")
@@ -342,6 +338,6 @@ def test_the_report_names_the_chain_and_the_preset(tmp_path):
     _, res = _write(tmp_path)
     lines = "\n".join(report._audio_chain_lines(SimpleNamespace(premiere_xml=res)))
     assert ex.PRESET_NAME in lines and ex.PRESET_FILE in lines and "LoudVOGOOOD" in lines
-    assert "Don't use Audio Gain > Normalize again" in lines and "trim" in lines
-    assert "need more than +15 dB" in lines
+    assert "only its own Volume at 0 dB" in lines and "trim" in lines and "Clip Gain" in lines
+    assert "+15 dB" not in lines and "extra Volume goes" not in lines                 # (run 19: none to remove)
     assert report._audio_chain_lines(SimpleNamespace(premiere_xml=None)) == []

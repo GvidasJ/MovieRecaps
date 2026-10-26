@@ -161,6 +161,21 @@ def needs_fix(prproj: Path, xml: Path) -> bool:
     return _song_needs_fix(text, xml) or a1_chain.a1_needs_fix(text, xml)
 
 
+def holds_edit_sound(prproj: Path, xml: Path) -> bool:
+    """Run 19: the saved project holds the edit's A1 clips (or, without A1 work, its song clips) as the edit made them
+    -- only then does "nothing to fix" mean the sound is set."""
+    try:
+        text = _read(prproj)
+    except (OSError, EOFError, gzip.BadGzipFile, UnicodeDecodeError):
+        return False
+    from . import a1_chain
+    clips, ps, fps = a1_chain._a1(text, xml)                     # noqa: SLF001
+    if ps:
+        return a1_chain._match(clips, ps, fps) is not None       # noqa: SLF001
+    sc, sp = _current(text, xml)
+    return bool(sp) and len(sc) == len(sp)
+
+
 def has_work(xml: Path) -> bool:
     """The edit has something the saved project must get: a song with its Clip Gain, or A1 clips with their chain."""
     from . import a1_chain

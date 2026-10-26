@@ -581,6 +581,9 @@ class JobRow(QFrame):
         lay.addLayout(info)
         self.note = W.label("", "Muted", wrap=True, select=True)
         lay.addWidget(self.note)
+        from ..ui.sound_line import SoundLine
+        self.sound = SoundLine()                           # run 19: the edit's sound in Premiere (the save step)
+        lay.addWidget(self.sound)
         ctl = QHBoxLayout()
         ctl.setSpacing(6)
         self.mode = W.Segmented([(J.FAST, "Fast"), (J.THOROUGH, "Thorough")], job.mode)
@@ -898,6 +901,7 @@ class JobRow(QFrame):
                 self.chan_box.addWidget(W.channel_chip(j.channel, 12))
         self.pair.setText(pair_html(j))
         self.pair.setToolTip(f"RAW: {j.raw}\ncompetitor: {j.competitor}" if j.complete else "")
+        self.sound.set_xml(Path(j.run_dir) / "1_edit.xml" if j.run_dir and j.state == J.DONE else None)
         self.swap.setVisible(j.complete)
         self.swap.setEnabled(j.complete and not getattr(j, "restart_swapped", False))
         checking = J.needs_check(j)

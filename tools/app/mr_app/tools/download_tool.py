@@ -747,6 +747,9 @@ class VideoRow(W.Card):
         self.now.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         foot.addWidget(self.now, 3)
         self.lay.addLayout(foot)
+        from ..ui.sound_line import SoundLine
+        self.sound = SoundLine()                           # run 19: the edit's sound in Premiere (the save step)
+        self.lay.addWidget(self.sound)
         btns = QHBoxLayout()
         btns.setSpacing(8)
         self.b_go = W.Button("Convert", "Primary")
@@ -871,6 +874,7 @@ class VideoRow(W.Card):
             ("torrent " + torrent_name(it.raw_torrent))
         comp = it.competitor_url or (Path(it.comp_file).name if it.comp_file else "")
         self.pair.setText(f"RAW: {raw}" + (f"  ·  COMP: {comp}" if comp else "  ·  no competitor (Just cuts)"))
+        self.sound.set_xml(self.page._xml_path(it) if it.state == DONE else None)   # noqa: SLF001
         has_comp = bool(comp)
         self.titles.setVisible(has_comp)
         if has_comp:

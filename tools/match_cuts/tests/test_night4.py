@@ -47,8 +47,8 @@ def test_every_a1_clip_imports_at_0_db_without_keyframes(tmp_path, k):
         assert ci.findtext("enabled") == "TRUE"
         assert ci.find(".//keyframe") is None
         chain = [(k, v) for k, v in ex.audio_chain_of(ci) if k != "speed"]        # night 11: the chain
-        assert chain[-2:] == [("volume", 1.0), ("pan", 0.0)]                      # Volume 0 dB, Panner 0
-        assert chain[:-2] and all(k == "gain" and v > 0 for k, v in chain[:-2])  # the normalisation stage(s)
+        assert chain == [("volume", 1.0), ("pan", 0.0)]       # Volume 0 dB, Panner 0 (run 19: the gain in its comment)
+        assert ex.comment_gain_db(ci) is not None
     assert ex.premiere_audio_problems(xml) == []
     assert all(a["levels"] == [] for a in ex.parse_premiere_xml(xml)["audio"])
 

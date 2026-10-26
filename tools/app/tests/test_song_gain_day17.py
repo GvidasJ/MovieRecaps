@@ -189,10 +189,21 @@ def test_after_your_save_premiere_closes_the_gain_is_written_and_it_opens_again(
 def test_another_project_or_no_save_writes_nothing_now(tmp_path, monkeypatch):
     xml, proj = _xml(tmp_path / "edit.xml"), _project(tmp_path / "edit.prproj")
     other = _Fake(tmp_path / "other.prproj")
+    ticks = {"n": 0, "untouched": [], "said": []}
+
+    def sleep(_s):                                    # run 19: another project is waited out -- then Premiere closes
+        ticks["n"] += 1
+        ticks["untouched"].append(G.needs_fix(proj, xml))
+        ticks["said"].append(PR.SOUND.get(PR._key(proj), {}).get("text", ""))           # noqa: SLF001
+        if ticks["n"] == 5:
+            other.running = False
     monkeypatch.setattr(PR, "state", other.state)
-    monkeypatch.setattr(PR, "_sleep", lambda _s: None)
+    monkeypatch.setattr(PR, "_sleep", sleep)
     monkeypatch.setattr(PR, "_close", lambda st: pytest.fail("never closed for another project"))
-    assert "another project" in PR.song_watch(Path("p.exe"), proj, xml, timeout=1e9) and G.needs_fix(proj, xml)
+    out = PR.song_watch(Path("p.exe"), proj, xml, timeout=1e9)
+    assert ticks["untouched"] == [True] * 5                     # nothing written while the other project was open
+    assert any("another project is open in Premiere (other.prproj)" in t for t in ticks["said"])
+    assert "the sound is set" in out and not G.needs_fix(proj, xml)     # Premiere closed: written ("closed by you")
     # Premiere closed by you after saving: written, not opened again
     gone = _Fake(proj)
     gone.running = False

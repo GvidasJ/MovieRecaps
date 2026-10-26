@@ -483,10 +483,42 @@ def _unseen(st: State) -> str:
 # (task 1): every edit's A1 chain too -- each clip's own Clip Gain, one Volume 0 dB, Hard Limiter + Amplify (a1_chain)
 # ---------------------------------------------------------------------------------------------------------------------
 
-SONG_WATCH_S = 1800.0                # after the import: the save watched for this long
-SONG_CLOSE_S = 90.0                  # Premiere closed (its project saved) within this long, else left as it is
-SONG_STATUS: dict[str, str] = {}     # project -> what happened (plain words; the app shows the last one)
+SONG_WATCH_S = 12 * 3600.0           # run 19: watched as long as Premiere runs (at most this; was 30 minutes)
+SONG_CLOSE_S = 90.0                  # Premiere closed (its project saved) within this long, else tried after a new save
+SONG_STATUS: dict[str, str] = {}     # project -> what happened (plain words)
 _SONG_WATCHING: set[str] = set()
+# run 19 (task 2): the edit's sound for its row -- the XML brings no extra Volume any more, so until the app's save step
+# has written the Clip Gain the A1 clips play at the RAW's own level: the row says so plainly
+SOUND: dict[str, dict] = {}          # project -> {"state": WAITING / SET / NOT_SET, "text": plain words, "at": time}
+WAITING, SET, NOT_SET = "waiting", "set", "not set"
+NOT_SET_YET = "the sound isn't set yet: press Ctrl+S in Premiere"
+
+
+def _sound(k: str, state_: str, text: str) -> str:
+    SOUND[k] = {"state": state_, "text": text, "at": time.time()}
+    SONG_STATUS[k] = text
+    return text
+
+
+def _done_or_not(k: str, out: str, proj: Path, xml: Path, why: str) -> str:
+    """The state after the save step ran (``out``: song_gain.fix's words) -- set, else not set and ``why``."""
+    from . import song_gain
+    if "written into" in out or (not out and proj.is_file() and song_gain.holds_edit_sound(proj, xml)
+                                 and not song_gain.needs_fix(proj, xml)):
+        return _sound(k, SET, "the sound is set: " + (out or "Clip Gain, Hard Limiter (2 dB) and Amplify (+3 dB) are "
+                                                      "in the project"))
+    return _sound(k, NOT_SET, f"{NOT_SET_YET} -- {out or why}")
+
+
+_PROJ_OF: dict[str, str] = {}        # run 19: an edit (its 1_edit.xml) -> the project Open in Premiere put it into
+_PRESET = "CorrectVolume"
+
+
+def sound_note(xml: str | os.PathLike) -> dict | None:
+    """Run 19: the sound of a run's edit in the project Open in Premiere put it into, for the row: {"state", "text"};
+    None when the app did not open it in Premiere since it started. Two dictionary looks: any thread may call it."""
+    k = _PROJ_OF.get(_key(Path(xml)))
+    return SOUND.get(k) if k else None
 
 
 def song_before_open(proj: Path, xml: Path) -> str:
@@ -494,7 +526,7 @@ def song_before_open(proj: Path, xml: Path) -> str:
     from . import song_gain
     if proj.is_file() and song_gain.needs_fix(proj, xml):
         done = song_gain.fix(proj, xml)
-        SONG_STATUS[_key(proj)] = done
+        _done_or_not(_key(proj), done, proj, xml, "it could not be written")
         return done
     return ""
 
@@ -519,51 +551,67 @@ def _close(st: State) -> bool:
     return False
 
 
+def _mtime(p: Path) -> float | None:
+    try:
+        return os.stat(p).st_mtime
+    except OSError:
+        return None
+
+
 def song_watch(exe: Path, proj: Path, xml: Path, timeout: float = SONG_WATCH_S, t_import: float | None = None) -> str:
     """After the edit went into its own project: when you have saved it (the title without "*", the file newer
-    than the import) Premiere is closed (nothing is lost: everything is saved), the song's real Clip Gain and Volume
-    8.5 dB are written into the project, and Premiere opens it again. Premiere closed by you: written, not opened
-    again. Another project opened, a message on closing, or no save within ``timeout``: nothing (said)."""
+    than the import) Premiere is closed (nothing is lost: everything is saved), A1's chain and the song's real Clip
+    Gain and Volume 8.5 dB are written into the project, and Premiere opens it again. Premiere closed by you: written
+    (when it was saved), not opened again. Run 19 -- it holds on as long as Premiere runs: another project open in
+    Premiere meanwhile is waited out (back to this one and saved: done then), and when Premiere does not close (a
+    message?) it is tried again after your next save; the row says "the sound isn't set yet: press Ctrl+S in
+    Premiere" with why (``SOUND``) until it is done. Returns the last words."""
     from . import song_gain
     k = _key(proj)
     if t_import is None:
-        try:
-            t_import = os.stat(proj).st_mtime
-        except OSError:
-            t_import = 0.0
+        t_import = _mtime(proj) or 0.0
     t0 = _clock()
+    refused: float | None = None          # the project's time when Premiere did not close (tried after a newer save)
+    _sound(k, WAITING, NOT_SET_YET)
     while _clock() - t0 < timeout:
         _sleep(2.0)
         st = state()
-        try:
-            saved = os.stat(proj).st_mtime > t_import
-        except OSError:
-            saved = False
+        mt = _mtime(proj)
+        saved = mt is not None and mt > t_import
         if not st.running:
             out = song_gain.fix(proj, xml) if saved or song_gain.needs_fix(proj, xml) else ""
-            SONG_STATUS[k] = out or "Premiere was closed before the project was saved: the audio chain waits " \
-                                    "for the next Open in Premiere"
-            return SONG_STATUS[k]
+            return _done_or_not(k, out, proj, xml, "Premiere was closed before the project was saved: press Open in "
+                                                   "Premiere, then Ctrl+S")
         if st.title is None or st.project is None:
             continue
         if not same_file(st.project, proj):
-            SONG_STATUS[k] = "another project was opened: the audio chain is written at the next Open in Premiere"
-            return SONG_STATUS[k]
+            if SOUND.get(k, {}).get("text", "").find("another project") < 0:
+                _sound(k, NOT_SET, f"{NOT_SET_YET} -- another project is open in Premiere ({st.project.name}): "
+                                   "press Open in Premiere on this video, then Ctrl+S")
+            continue
         if saved and not st.changed and not st.message and song_gain.needs_fix(proj, xml):
+            if refused is not None and mt is not None and mt <= refused:
+                continue                                         # (the same save that did not close: wait for a new one)
             if not _close(st):
-                SONG_STATUS[k] = ("Premiere did not close (a message?): the audio chain is written at the next "
-                                  "Open in Premiere")
-                return SONG_STATUS[k]
+                refused = mt
+                _sound(k, NOT_SET, f"{NOT_SET_YET} -- Premiere did not close (a message?): answer it, then press "
+                                   "Ctrl+S again")
+                continue
             out = song_gain.fix(proj, xml)
             _launch(exe, proj)
             _wait(lambda s: same_file(s.project, proj), START_WAIT_S)
-            SONG_STATUS[k] = (out + " -- Premiere opened it again") if out else "Premiere opened the project again"
-            return SONG_STATUS[k]
+            return _done_or_not(k, (out + " -- Premiere opened it again") if out else "", proj, xml,
+                                "it could not be written")
         if saved and not song_gain.needs_fix(proj, xml):
-            SONG_STATUS[k] = ""
-            return ""
-    SONG_STATUS[k] = "not saved within 30 minutes: the audio chain is written at the next Open in Premiere"
-    return SONG_STATUS[k]
+            if song_gain.holds_edit_sound(proj, xml):
+                return _done_or_not(k, "", proj, xml, "")
+            if SOUND.get(k, {}).get("state") != NOT_SET:             # saved without the edit's clips as it made
+                _sound(k, NOT_SET, f"{NOT_SET_YET} -- the saved project does not hold the edit's A1 clips as the "
+                                   "edit made them (moved or cut by hand?): its sound is yours to set")
+            continue
+        if SOUND.get(k, {}).get("state") == NOT_SET and same_file(st.project, proj) and refused is None:
+            _sound(k, WAITING, NOT_SET_YET)                      # (back to this project after another one)
+    return _sound(k, NOT_SET, f"{NOT_SET_YET} -- not saved within {timeout / 3600:g} hours")
 
 
 def _song_later(exe: Path, proj: Path, xml: Path, saved_counts: bool = False) -> str:
@@ -574,6 +622,8 @@ def _song_later(exe: Path, proj: Path, xml: Path, saved_counts: bool = False) ->
     if not song_gain.has_work(xml) or _key(proj) in _SONG_WATCHING:
         return ""
     if saved_counts and not song_gain.needs_fix(proj, xml):
+        if proj.is_file():
+            _done_or_not(_key(proj), "", proj, xml, "")             # (its saved project has the sound already)
         return ""
 
     def run() -> None:
@@ -602,6 +652,7 @@ def _open(xml: Path, wait_s: float) -> str:
         return "Premiere Pro was not found on this computer: the run folder is open -- import 1_edit.xml yourself"
     xml = named_copy(xml)
     proj = saved_own_project(xml.parent) or project_for(xml)
+    _PROJ_OF[_key(xml)] = _key(proj)                                     # (run 19: the row's sound line)
     st = state()
     if st.running and st.title is None:                                  # starting (or closing): its window waited for
         st = _wait(lambda s: s.title is not None or not s.running, wait_s)
@@ -616,6 +667,13 @@ def _open(xml: Path, wait_s: float) -> str:
             other = st.project
             st, seen = _import(exe, xml, st, other)
             _front(st.hwnd)
+            from . import song_gain
+            if song_gain.has_work(xml):                                  # run 19: the app sets the sound only in the
+                _PROJ_OF[_key(xml)] = _key(other)                        # edit's own project, never in yours
+                _sound(_key(other), NOT_SET, f"{NOT_SET_YET} -- the edit went into {other.name} (the project open in "
+                                             "Premiere): the app sets the sound only in the edit's own project -- "
+                                             "close it, then press Open in Premiere (or Audio Gain > Normalize All "
+                                             f"Peaks to 0 dB and your {_PRESET} preset by hand)")
             return (f"The edit is imported into {other.name}, the project open in Premiere -- save it there"
                     + ("" if seen else _unseen(st)))
         if not needs_import(proj, xml) or st.changed or _handed_here(proj, xml, st):     # ("*": the empty project
@@ -659,6 +717,9 @@ def _open(xml: Path, wait_s: float) -> str:
     who = "Premiere Pro started with" if started else "Premiere Pro opened"
     if not need:
         _front(st.hwnd)
+        from . import song_gain
+        if not song and song_gain.has_work(xml):                         # run 19: say it on the row (set before)
+            _done_or_not(_key(proj), "", proj, xml, "press Ctrl+S in Premiere")
         return f"{who} {proj.name} (next to the edit) as you saved it -- the edit is in it already" + \
             (f" ({song})" if song else "")
     st, seen = _import(exe, xml, _settle(), proj)

@@ -4718,6 +4718,13 @@ def sound_file_problems(xml_path: str | os.PathLike) -> list[str]:
 # (A1 takes the file's audio track 1: Premiere makes it a mono clip of that channel) over the clip's source range
 # (Premiere's Audio Gain dialog read -13.1 / -14.2 dB on two clips of video10 where this reads -13.13 / -14.23 dB; its
 # normalisation +13.12743 dB, this +13.12767 dB).
+# Run 18: the app writes the whole chain into the saved project after your Ctrl+S (core.a1_chain: each clip's Audio
+# Gain as its real Clip Gain, the extra Volumes out, the Hard Limiter and Amplify in). Run 19 (task 2: "I don't want to
+# ever see them"): the XML carries NO Gain filter any more -- no extra Volume ever appears; each A1 clip imports with
+# only its own Volume at 0 dB and Panner 0, at its own level, and its normalisation lives in its comment ("audio chain:
+# Audio Gain +13.84 dB ..."), which the app's save step reads (no XML form sets Premiere's Clip Gain: day 11).
+
+AUDIO_GAIN_COMMENT = re.compile(r"audio chain: Audio Gain ([+-]?\d+(?:\.\d+)?) dB")   # (core.a1_chain reads the same)
 
 AUDIO_GAIN_ID = "{61756678, 4761696e, 4b657947}"     # FCP's Gain audio unit ('aufx' 'Gain' 'KeyG'), Premiere's own id
 NORMALIZE_TO_DB = 0.0                                # Normalize All Peaks to 0 dB
@@ -4732,7 +4739,7 @@ AMPLIFY_DB = 3.0                                     # day 13 (night 11: +4.5 dB
 AMPLIFY = f"Amplify +{AMPLIFY_DB:.1f} dB"
 NOT_IN_XML = f"{HARD_LIMITER} and {AMPLIFY}"          # your chain's two effects no XML can bring into Premiere
 AUDIO_CHAIN_TEXT = f"Audio Gain (Normalize All Peaks to 0 dB), Volume 0 dB, {HARD_LIMITER}, {AMPLIFY}, Panner 0"
-AUDIO_CHAIN_XML = "Audio Gain (Normalize All Peaks to 0 dB, as Volume), Volume 0 dB, Panner 0"   # what an XML carries
+AUDIO_CHAIN_XML = "Volume 0 dB, Panner 0 (the Audio Gain in the clip's comment)"   # what an XML carries (run 19)
 PRESET_NAME = "CorrectVolume"                        # run 18: your own preset (Hard Limiter 2 dB + Amplify +3 dB) is
 PRESET_FILE = "assets\\premiere\\CorrectVolume.prfpset"    # A1's too (the old "MovieRecaps audio chain": Input Boost 0 dB)
 _PEAK_WINDOW_S = 120.0       # a1_peaks: one ffmpeg decode covers at most this much sound (a longer clip: in pieces)
@@ -4884,18 +4891,17 @@ def _audio_filter(parent: ET.Element, name: str, kind: str, pid: str, pname: str
 
 
 def _audio_chain(parent: ET.Element, gain_db: float) -> list[float]:
-    """The chain on one A1 clip item, as far as an XML carries it (see the section comment): the normalisation
-    (``gain_db``, as Gain filters), Volume 0 dB, Panner 0. Returns the normalisation's stage factors."""
-    stages = normalize_stages(gain_db)
-    for f in stages:
-        _gain_filter(parent, f)
+    """The chain on one A1 clip item, as far as an XML carries it (see the section comment): Volume 0 dB, Panner 0 --
+    run 19: no Gain filter (Premiere made each one an extra Volume); the normalisation ``gain_db`` goes into the clip's
+    comment (audio_chain_note) and becomes its Clip Gain when the app saves the project. Returns [] (no stages)."""
     _audio_filter(parent, "Audio Levels", "audiolevels", "level", "Level", 0, 3.98109, VOLUME_LEVEL)
     _audio_filter(parent, "Audio Pan", "audiopan", "pan", "Pan", -1, 1, PANNER)
-    return stages
+    return []
 
 
-def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]) -> str:
-    """The A1 clip's comment: its chain, in your words -- what the XML gives it and what you add."""
+def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float] = ()) -> str:
+    """The A1 clip's comment: its chain, in your words -- what the XML gives it, what the app's save step writes (its
+    Audio Gain as the clip's Clip Gain: core.a1_chain reads it here) and what you do without the app."""
     if peak is None:
         norm = "Audio Gain 0 dB (its sound could not be read: not normalised -- check it)"
     elif not peak > 0:
@@ -4903,12 +4909,17 @@ def audio_chain_note(gain_db: float, peak: float | None, stages: Sequence[float]
     else:
         norm = (f"Audio Gain {gain_db:+.2f} dB (Normalize All Peaks to 0 dB: its peak {factor_db(peak):.2f} dBFS"
                 + (f", Premiere's +{NORMALIZE_MAX_DB:g} dB at most" if gain_db >= NORMALIZE_MAX_DB - 1e-9 else "")
-                + "; in Premiere " + ("a Volume" if len(stages) == 1 else f"{len(stages)} Volumes of "
-                                      f"{factor_db(stages[0]):+.2f} dB") + ")")
-    return (f"audio chain: {norm}, Volume 0 dB, Panner 0. Premiere cannot import the rest from an XML: after you save "
-            "(Ctrl+S) the app writes this gain as the clip's Clip Gain (the extra Volume goes), the Hard Limiter and "
-            f"{AMPLIFY} into the project; without the app: select all A1 clips, apply the preset ({PRESET_NAME}: Hard "
-            f"Limiter + {AMPLIFY}); don't use Audio Gain > Normalize again, the tool already normalised (as a Volume)")
+                + ")")
+    return (f"audio chain: {norm}, Volume 0 dB, Panner 0. The clip comes in at its own level (Volume 0 dB, no other "
+            "Volume); after you save (Ctrl+S) the app writes this gain as the clip's Clip Gain and the Hard Limiter "
+            f"and {AMPLIFY} into the project. Without the app: select all A1 clips, Audio Gain > Normalize All Peaks "
+            f"to 0 dB, then apply the preset ({PRESET_NAME}: Hard Limiter + {AMPLIFY})")
+
+
+def comment_gain_db(ci: ET.Element) -> float | None:
+    """The Audio Gain an A1 clip item's comment names (audio_chain_note), None without one."""
+    m = AUDIO_GAIN_COMMENT.search(str(_text(ci, "comments/mastercomment2", "") or ""))
+    return float(m.group(1)) if m else None
 
 
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,
@@ -6237,21 +6248,22 @@ def _chain_words(chain: Sequence[tuple[str, float | None]]) -> str:
 
 def _chain_parts(chain: Sequence[tuple[str, float | None]]
                  ) -> tuple[list[float | None], float | None, float | None] | None:
-    """(normalisation stages, Volume level, pan) of an audio_chain_of chain in your chain's form -- Gain filter(s),
-    Audio Levels, Audio Pan, in this order, nothing else but its speed -- else None."""
+    """([], Volume level, pan) of an audio_chain_of chain in your chain's XML form -- Audio Levels, Audio Pan, in this
+    order, nothing else but its speed (run 19: no Gain filter -- each one is an extra Volume in Premiere) -- else
+    None."""
     body = [(k, v) for k, v in chain if k != "speed"]
     kinds = "".join({"gain": "G", "volume": "L", "pan": "P"}.get(k, "X") for k, _ in body)
-    if not re.fullmatch(r"G+LP", kinds):
+    if kinds != "LP":
         return None
-    return [v for _, v in body[:-2]], body[-2][1], body[-1][1]
+    return [], body[-2][1], body[-1][1]
 
 
 def audio_chain_problems(ci: ET.Element) -> list[str]:
     """What is wrong with one audio clip item's chain (none: []): your chain as far as an XML carries it, as
-    1_edit.xml writes it (the section comment above) -- the normalisation (one or more Gain filters, each at most
-    +15 dB, all equal, as few as it needs, at most +96 dB in all), Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0)
-    -- in this order, nothing else but its speed (one Time Remap), each value static (keyframes:
-    premiere_audio_problems). Nothing may stand in for the Hard Limiter or Amplify (Premiere cannot import them)."""
+    1_edit.xml writes it (the section comment above) -- Audio Levels 1 (Volume 0 dB), Audio Pan 0 (Panner 0), in this
+    order, nothing else but its speed (one Time Remap), each value static (keyframes: premiere_audio_problems). Run 19:
+    no Gain filter (Premiere imports each one as an extra Volume; the normalisation is in the clip's comment and the
+    app writes it as Clip Gain). Nothing may stand in for the Hard Limiter or Amplify (Premiere cannot import them)."""
     chain = audio_chain_of(ci)
     out: list[str] = []
     if sum(1 for k, _ in chain if k == "speed") > 1:
@@ -6261,25 +6273,17 @@ def audio_chain_problems(ci: ET.Element) -> list[str]:
     others = sorted({k for k, _ in body if k not in ("gain", "volume", "pan")})
     if others:
         out.append(f"{', '.join(others)} on it ({want})")
-    parts = _chain_parts(chain)
+    gains = [v for k, v in body if k == "gain"]
+    if gains:
+        out.append(f"{len(gains)} Gain filter(s) on it ({', '.join(_chain_words([('gain', v)]) for v in gains)}): "
+                   "Premiere imports each one as an extra Volume -- want none (the Audio Gain is in the clip's comment; "
+                   "the app writes it as Clip Gain)")
+    parts = _chain_parts([(k, v) for k, v in chain if k != "gain"])
     if parts is None:
         if not others:
             out.append(f"its chain is {_chain_words(body)} ({want})")
         return out
-    stages, level, pan = parts
-    if any(v is None or not v > 0 for v in stages):
-        out.append("its Audio Gain (normalisation) has a Gain filter without a positive value")
-    else:
-        if any(v > GAIN_STAGE_MAX + 1e-6 for v in stages):
-            out.append(f"its Audio Gain has a stage over +15 dB ({', '.join(f'{factor_db(v):+.2f}' for v in stages)} "
-                       "dB): Premiere's import clamps each one at +15 dB")
-        if any(abs(v - stages[0]) > 1e-6 for v in stages):
-            out.append(f"its Audio Gain stages differ ({', '.join(f'{factor_db(v):+.2f}' for v in stages)} dB)")
-        total = sum(factor_db(v) for v in stages)
-        if total > NORMALIZE_MAX_DB + 0.01:
-            out.append(f"its Audio Gain is {total:+.2f} dB (Premiere's Audio Gain gives +{NORMALIZE_MAX_DB:g} dB at most)")
-        if len(stages) > 1 and total <= GAIN_STAGE_SPLIT_DB * (len(stages) - 1) + 1e-6:
-            out.append(f"its Audio Gain {total:+.2f} dB is split into {len(stages)} stages (want as few as it needs)")
+    _stages, level, pan = parts
     if level is None or abs(level - VOLUME_LEVEL) > 1e-6:
         out.append(f"Volume {_chain_words([('volume', level)]).split(' ', 1)[-1]} (want 0 dB: Audio Levels 1)")
     if pan is None or abs(pan - PANNER) > 1e-9:
@@ -6302,10 +6306,11 @@ def _url_path(url: str) -> str:
 
 
 def audio_gain_problems(xml_path: str | os.PathLike) -> list[str]:
-    """The chain's value that depends on the sound: every audio clip's Audio Gain (its normalisation stages together)
-    must be the gain that brings the loudest sample it plays to 0 dB -- measured again on the media the XML names
-    (a1_peaks: the channel of its source track over its source range). A clip whose sound cannot be read is not judged
-    (write_premiere_xml warned about it); one whose chain is not your chain is audio_chain_problems'."""
+    """The chain's value that depends on the sound: every audio clip's Audio Gain (run 19: the one its comment names,
+    which the app writes as its Clip Gain) must be the gain that brings the loudest sample it plays to 0 dB --
+    measured again on the media the XML names (a1_peaks: the channel of its source track over its source range). A
+    clip whose sound cannot be read, or without an audio chain comment, is not judged (write_premiere_xml warned about
+    it); one whose chain is not your chain is audio_chain_problems'."""
     root = ET.parse(str(xml_path)).getroot()
     seq = root.find("sequence")
     if seq is None:
@@ -6334,11 +6339,10 @@ def audio_gain_problems(xml_path: str | os.PathLike) -> list[str]:
         for (path, track), idx in groups.items():
             peaks = a1_peaks(path, [played[i] for i in idx], fps, track)
             for i, peak in zip(idx, peaks):
-                parts = _chain_parts(audio_chain_of(els[i]))
-                if peak is None or parts is None or any(v is None or not v > 0 for v in parts[0]):
+                have = comment_gain_db(els[i])           # run 19: the Audio Gain the app writes as Clip Gain
+                if peak is None or have is None:
                     continue
-                stages = parts[0]
-                have, want = sum(factor_db(v) for v in stages), normalize_gain_db(peak)
+                want = normalize_gain_db(peak)
                 if abs(have - want) > AUDIO_GAIN_TOL_DB:
                     loud = f"{factor_db(peak):.2f} dBFS" if peak > 0 else "silence"
                     out.append(f"A{n} {item_label(els[i]) or els[i].get('id')} at {_text(els[i], 'start')}: its Audio "
@@ -6350,10 +6354,11 @@ def audio_gain_problems(xml_path: str | os.PathLike) -> list[str]:
 def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
     """The hard audio check of the final XML (night 11: it replaces "every A1 clip at 0 dB, no effect but its speed"):
     every audio clip plays -- enabled, no audio track switched off or locked -- and carries exactly your audio chain as
-    far as an XML carries it (audio_chain_problems: the normalisation, Volume 0 dB, Panner 0, in this order, nothing
-    else but its speed), its normalisation the one its own sound wants (audio_gain_problems), with no
+    far as an XML carries it (audio_chain_problems: Volume 0 dB, Panner 0, in this order, nothing else but its speed --
+    run 19: no Gain filter), its normalisation (its comment) the one its own sound wants (audio_gain_problems), with no
     keyframe of any kind (a fade's level keyframes imported the 125 % A1 of the laptop's output\\005 muted). Your
     projects' own -inf / pitch audio stays yours: the tool never copies it."""
+    from .music import FILE_ID as MUSIC_FILE_ID
     root = ET.parse(str(xml_path)).getroot()
     seq = root.find("sequence")
     out: list[str] = []
@@ -6363,6 +6368,9 @@ def premiere_audio_problems(xml_path: str | os.PathLike) -> list[str]:
         if str(_text(tr, "locked", "FALSE")).upper() == "TRUE":
             out.append(f"A{n} is locked")
         for ci in tr.findall("clipitem"):
+            f_el = ci.find("file")
+            if f_el is not None and f_el.get("id") == MUSIC_FILE_ID:
+                continue                 # run 19: the channel's song (added after S9) has its own chain: music.py
             what = f"A{n} {item_label(ci) or ci.get('id')} at {_text(ci, 'start')}"
             if str(_text(ci, "enabled", "TRUE")).upper() == "FALSE":
                 out.append(f"{what}: switched off (enabled FALSE)")
