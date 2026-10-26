@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from video45_fixed.prproj (2026-10-26): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "finished\\video45\\video45_fixed.prproj",
+ "run": "output\\laptop_video45",
+ "full_raw": "output/laptop_video45/extras/media/raw.mp4",
+ "raw_offset": 1607.772833,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

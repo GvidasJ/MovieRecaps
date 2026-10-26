@@ -1,0 +1,87 @@
+{
+ "video": "video44-fixed",
+ "date": "2026-10-26",
+ "project": "finished\\video44\\video44_fixed.prproj",
+ "run": "output\\laptop_video44",
+ "edit": {
+  "clips": 4,
+  "starts": [
+   2.211,
+   0.0,
+   -0.0,
+   0.876
+  ],
+  "ends": [
+   0.0,
+   0.0,
+   -0.0,
+   0.083
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.709
+  ],
+  "moved": [
+   -0.0,
+   0.0,
+   0.0,
+   -0.0,
+   414.9,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.0,
+   0.0,
+   306.0,
+   -63.3,
+   -748.6,
+   -0.0
+  ],
+  "zoomed": [
+   0.0,
+   -0.0,
+   0.0,
+   0.0,
+   0.03,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   -0.0,
+   -0.08,
+   -0.06,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.994,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Fastest Job Interview of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 2,
+  "added": 2,
+  "rewritten": 3,
+  "changes": []
+ }
+}

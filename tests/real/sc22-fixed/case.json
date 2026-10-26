@@ -1,0 +1,16 @@
+{
+ "style": "new",
+ "timeline": "edit",
+ "notes": "learned from sc22_fixed.prproj (2026-10-26): answer.srt and answer_edit.json are your finished edit",
+ "learned_from": "finished\\sc22\\sc22_fixed.prproj",
+ "run": "output\\laptop_sc22",
+ "full_raw": "output/laptop_sc22/extras/media/raw.mov",
+ "raw_offset": 91.633208,
+ "srt_rate": "24000/1001",
+ "options": [
+  "--frame",
+  "{case}/frame.png",
+  "--watermark",
+  "{case}/watermark.png"
+ ]
+}

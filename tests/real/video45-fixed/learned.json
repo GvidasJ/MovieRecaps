@@ -1,0 +1,96 @@
+{
+ "video": "video45-fixed",
+ "date": "2026-10-26",
+ "project": "finished\\video45\\video45_fixed.prproj",
+ "run": "output\\laptop_video45",
+ "edit": {
+  "clips": 5,
+  "starts": [
+   1.835,
+   0.0,
+   -1.001,
+   -0.0,
+   0.0
+  ],
+  "ends": [
+   -0.0,
+   11.094,
+   0.0,
+   -0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [
+   0.375,
+   0.375
+  ],
+  "moved": [
+   -300.0,
+   -300.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   416.2,
+   -0.0,
+   0.0,
+   -0.0,
+   -0.0,
+   -436.0,
+   531.0
+  ],
+  "zoomed": [
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   0.01,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0,
+   -0.0
+  ],
+  "framing": "compared",
+  "played": 0.961,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Honest Answer of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 1,
+  "case": 0,
+  "removed": 0,
+  "added": 1,
+  "rewritten": 2,
+  "changes": [
+   {
+    "heard": "pouring liquid",
+    "written": "looks at fire",
+    "kind": "words",
+    "before": "been nope",
+    "after": "Want to",
+    "glossary": false,
+    "why": "other ordinary words: what was heard there, not a spelling or a name (\"of\" -> \"to\" would change every \"of\" the audio allows)"
+   }
+  ]
+ }
+}

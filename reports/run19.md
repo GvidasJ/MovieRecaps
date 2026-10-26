@@ -10,7 +10,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 | 2 | No temporary extra Volume effects | **done** (the Premiere check: see the task -- it waits for you to be away) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
 | 3 | The live animations | **done** (watched on a real run; pictures in `run19_look`) | nothing: the running video moves by itself; Settings -> Animations: Off stops the movement |
 | 4 | The laptop cleans its own cache | **done** | nothing (on by itself); Settings -> Clean the cache shows what it freed, Off stops it |
-| 5 | Learn the queue | not started | |
+| 5 | Learn the queue | **done**: 5 of 5 learned, 5 new test cases (their first check-all runs: below) | nothing |
 | 6 | The check-all + learn by yourself | not started | |
 
 ## Task 1 -- only ONE RAW per project, and the edit plays the whole movie (done)
@@ -120,6 +120,25 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 - **On the laptop:** after `git pull` and opening the app, the first clean (within a minute) removes the cache files older than 7 days -- most of the 91 GB -- and, while C: is under 30 GB free, the ones older than 2 days.
 - **Tests:** 7 new (`test_cache_clean_run19.py`, fake files with fake dates): no D: -> the 7-day files go, the newer ones and a RAW outside stay; a low drive -> the oldest 2-day files first, only as many as needed, never today's; the PC with room -> nothing; a file used since the plan stays (a folder link inside is never followed); the result kept for Settings; this PC's real cache left alone (not even listed); Settings' switch and line.
 
+## Task 5 -- learn the queue (done)
+
+- **Learned: 5 of 5** open lines of `D:\Shared\Projects\learn_queue.md` (now `[x]`; 0 open), each from the copies your Learn tab made (`finished\<n>\<n>_fixed.prproj`, `output\laptop_<n>`), the same way as run 18:
+
+  | case | video | RAW |
+  |---|---|---|
+  | video44-fixed | The Fastest Job Interview of All Time (2) | Parks and Recreation S02E13 |
+  | video45-fixed | The Most Honest Answer of All Time | Two Mules for Sister Sara (1970) |
+  | video46-fixed | The Fastest Personality Switch In Cartoon History | The Boo crew "Sneaker madness" special |
+  | e1-fixed | The Most Awkward Helicopter Ride of All Time | (the piece of the film its run analysed) |
+  | sc22-fixed | The Most Strategic Team Pick of All Time (5) | It's Always Sunny S02E06 (its piece) |
+
+- **What was learned** (only captions, cuts and position):
+  - **captions:** 20 new action captions (`caption_actions.txt`, the examples the action suggestions follow: \*fair point\*, \*closes the door\*, \*looks at fire\*, \*steps back\*, \*vibing\*, \*laughing hysterically\*, \*looks at his team\* ...). **No glossary line** this time: every word you changed is an ordinary word for that moment, not a spelling or a name (video45 "pouring liquid" -> "looks at fire", e1 "Some" -> "the fireworks", "I'll you" -> "Togheter"), so it stays in its own case only.
+  - **cuts and position** (your answer key in each case): video44 3 of 8 clip edges moved, 4 clips slid (median +121 px); video45 3 of 10 edges, 5 clips (median -300 px); video46 9 of 22 edges, 1 clip removed, 6 cuts of yours inside clips; e1 4 of 30 edges, 12 clips slid (median -207 px), 3 zoomed (+6.4 %); sc22 4 of 12 edges, 7 clips slid (median -213 px), clips starting later (+0.54 s).
+  - **No new default:** Learn's suggestions pull both ways across your videos (clips end earlier on 3, later on 10; start earlier on 8, later on 7) -- as before, not taken.
+- **Each is a test case** (`tests\real\<case>`: your finished edit's captions and clips, the competitor, the RAW's window, its frame and watermark, `"style": "new"`). e1 and sc22 were made on the piece of the movie (task 1's bug), so their test RAW is that piece's window -- the scores don't mind.
+- **Their first check-all runs** are going (an hour or more each: nothing cached yet): results in the table below.
+
 ## What I decided on my own
 
 1. **Task 1, the link on this computer:** `edit\extras\media\raw.mp4` stays a hard link of your RAW (the same file under a plain name, no extra space), and 1_edit.xml plays it -- I did not make the XML point at your RAW's own file name. Why: Premiere's XML import fails on some names (emoji; your RAWs come from torrents and YouTube), the edit keeps working when you move or delete the RAW in the project folder, and publishing copies only the edit folder (the shared copy then holds the RAW once). Explorer counts the two names twice; the disk doesn't (`fsutil hardlink list <file>` shows both names). Note: in two projects (Guessing Game, Weirdest Car Shopping) the RAW in the project folder is in your Recycle Bin -- deleting it freed nothing, because the edit's `raw.mp4` is that same file.
@@ -131,3 +150,4 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 - After task 2 (07:47-08:19; you came back at about 07:53, so from then on BelowNormal): **tool 1679 passed, 0 failed**; **app 1250 passed, 0 failed**.
 - After task 3 (09:01-09:05, BelowNormal): **app 1264 passed, 0 failed** (the tool unchanged since task 2: 1679 passed).
 - After task 4: the app suite above already held its 7 tests (1264 passed, 0 failed); the cleaner checked for real on this PC (nothing to do).
+- After task 5: the tool tests that read the test cases: **300 passed** (one list of case names, `test_night6`, needed the five new ones: 30 of 30 then); a full tool run had to stop at 36 % (no failure until then) because the computer's memory ran low next to the check-all -- it runs again at the end.

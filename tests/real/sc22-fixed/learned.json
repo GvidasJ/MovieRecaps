@@ -1,0 +1,83 @@
+{
+ "video": "sc22-fixed",
+ "date": "2026-10-26",
+ "project": "finished\\sc22\\sc22_fixed.prproj",
+ "run": "output\\laptop_sc22",
+ "edit": {
+  "clips": 6,
+  "starts": [
+   0.542,
+   0.292,
+   0.0,
+   -0.0,
+   0.542,
+   0.751
+  ],
+  "ends": [
+   -0.0,
+   0.0,
+   -0.0,
+   0.0,
+   -0.0,
+   0.0
+  ],
+  "removed": 0,
+  "added": 0,
+  "inner": [],
+  "moved": [
+   -204.0,
+   -272.0,
+   -274.0,
+   -274.0,
+   -24.0,
+   114.0,
+   -213.0,
+   -208.0,
+   0.0,
+   0.0,
+   23.0
+  ],
+  "zoomed": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "framing": "compared",
+  "played": 1.0,
+  "speed": {
+   "tool": 1.0,
+   "user": 1.0
+  },
+  "flip": {
+   "tool": 0,
+   "project": 0
+  },
+  "key": "sound",
+  "sequence": {
+   "name": "The Most Strategic Team Pick of All Time",
+   "index": 0,
+   "of": 1,
+   "size": [
+    1080,
+    1920
+   ],
+   "fps": 23.976
+  }
+ },
+ "captions": {
+  "words": 0,
+  "case": 0,
+  "removed": 2,
+  "added": 13,
+  "rewritten": 2,
+  "changes": []
+ }
+}
