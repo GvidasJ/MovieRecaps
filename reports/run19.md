@@ -1,6 +1,6 @@
 # Run 19 (26 October): one task at a time
 
-Started 06:34 (PC; you had just written the prompt, then you were away from about 06:35). `shutdown /a`: "no shutdown was in progress"; the backup shutdown is set for **15:30** (`shutdown /s /t 32136`). C: 48.1 GB free at the start, D: 1528.2 GB.
+Started 06:34 (PC; you had just written the prompt, then you were away from about 06:35). `shutdown /a`: "no shutdown was in progress"; the backup shutdown is set for **15:30** (`shutdown /s /t 32136`). C: 48.1 GB free at the start, D: 1528.2 GB. **Disks during the day:** C: fell to 37.2 GB at 09:34 (the day's test runs and new test cases), so I deleted my own pytest temp folders (5.8 GB, this and two earlier sessions' -- nothing of yours): 45.3 GB, and 45-48 GB from then on; D: never under 1,500 GB.
 
 ## The tasks
 
