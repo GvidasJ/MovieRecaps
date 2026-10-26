@@ -2,6 +2,8 @@
 
 Started 06:34 (PC; you had just written the prompt, then you were away from about 06:35). `shutdown /a`: "no shutdown was in progress"; the backup shutdown is set for **15:30** (`shutdown /s /t 32136`). C: 48.1 GB free at the start, D: 1528.2 GB. **Disks during the day:** C: fell to 37.2 GB at 09:34 (the day's test runs and new test cases), so I deleted my own pytest temp folders (5.8 GB, this and two earlier sessions' -- nothing of yours): 45.3 GB, and 45-48 GB from then on; D: never under 1,500 GB.
 
+**Ended 14:49:** all six tasks done, every change tested and pushed (branch `claude/new-session-ol4era`); the PC shuts down at about 15:00 as you asked (`shutdown /a`, then `shutdown /s /t 120`).
+
 ## In one minute
 
 - **One RAW per project (task 1):** fixed -- a piece run with a song now ends playing the whole movie, with one RAW in the folder, the shared copy and the zip. Your 23 old run folders: Board -> Clean up -> Yes (19 ready; 4 kept because your r1/r2_POPW projects play their piece).
