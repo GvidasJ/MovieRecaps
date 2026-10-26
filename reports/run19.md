@@ -246,6 +246,7 @@ git pull
 - **The cache cleans itself** (task 4): within a minute of opening the app, the tool's cache files not used for 7 days go (most of the laptop's 91 GB), and while C: is under 30 GB free the ones not used for 2 days too. Settings -> Clean the cache shows what it freed (Off stops it).
 - **One RAW per project** (task 1): Board -> Clean up lists the laptop's own run folders that still hold the piece next to the movie (and the shared folder's, if not cleaned on the PC yet) -- nothing is removed until you press Yes.
 - The five new test cases come with `git pull` (414 MB).
+- The first run of any video you ran before makes its speech transcription once more (task 6's caption fix is in that step's cache key): a minute at most, the same words.
 
 ## My test data (delete it if you want the space; nothing of yours is in it)
 
