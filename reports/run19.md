@@ -163,6 +163,7 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 - Action captions: 91 of the 672 are yours (`*hangs up*`, `*confused*`, `*panicking*` ...): the tool makes 7 of your 98 word for word; at 30 it leaves its `*...*` placeholder (45 of its 77 action captions are that), at 27 it writes another action (`*hangs the phone*`), at 22 there is speech. A word-for-word score can't reward a near phrasing; the 20 new examples from today's learning are the way in (task 5).
 - Framing: the clips framed otherwise are off by 100-550 px, either way -- a different person centred, not a small shift; run 18's finding stands (no rule).
 - Cuts: of your 148 cuts, 58 are made exactly, 30 within half a second but trimmed otherwise -- your out points a median 2.6 frames earlier, but anywhere from 12 frames earlier to 6 later (no one direction) -- and 60 have no tool cut near: mostly the bits you take out inside a take (81 such cuts over your videos, 0.1-4.7 s; the pause rules of day 13 and run 18 made cases worse), so no cut rule either.
+- **e1 (new today) came out with 0 of your 78 captions and 92 % word errors** -- the one real fault I found. In 18-45 s of the edit the actors' accents beat both speech models: large-v3 (the main one) heard nothing at all -- it stopped at "a 911 2012 2012" and came back at "5 4 3 2 1" -- and turbo (the second one) drifted into Hebrew. With no word heard, the tool writes `*...*` there, although the competitor shows its English captions on screen the whole time (the ones you typed: "such as the Empire State Building | ohh | that would be lovely ..."). The edit's sound is fine (large-v3 hears 136 words in the run's own preview; your app run, on its slightly different cut, heard 97). **I tried** having the main model hear such a skipped stretch again on its own (when the second model heard 8+ words over 6+ s there): on e1 it heard one word, in the wrong place -- so it is **not kept** (taken out again, every cache key as before). The right fix is to take the competitor's on-screen captions where no word is heard; it changes every competitor-mode video's captions, so it needs a full check-all: in `suggestions.md`.
 - **So no new rule today: none passed "nothing gets worse".** The scripts are in `work\t19` (caption_kinds, caption_shift, caption_snap, caption_join, user_moves, cut_snap, placed_check).
 
 ## Still broken / not done
@@ -170,6 +171,7 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 <!-- BROKEN -->- **The Premiere check of task 2** (see task 2) -- it needs you away and Premiere closed.
 - **The search fills the strip only at its end** (task 3): the tool hands over its finds when the search is over; changing that changes the search step's code (every saved analysis redone once) -- in `suggestions.md`.
 - **No caption, cut or framing rule learned today** (task 6): the four caption rules I tried each made at least one case worse; framing differences are about who is centred.
+- **Where the speech models hear nothing, the captions are `*...*`** even when the competitor shows its captions on screen (e1: 27 s of accented speech) -- in `suggestions.md`.
 - From run 18, unchanged: the general pause check is built but OFF (it made video37 worse); captions numbers move by themselves by ±2-5 on any re-run (re-transcription).
 
 ## What to do by hand in Premiere
@@ -197,6 +199,14 @@ git pull
 
 1. **Task 1, the link on this computer:** `edit\extras\media\raw.mp4` stays a hard link of your RAW (the same file under a plain name, no extra space), and 1_edit.xml plays it -- I did not make the XML point at your RAW's own file name. Why: Premiere's XML import fails on some names (emoji; your RAWs come from torrents and YouTube), the edit keeps working when you move or delete the RAW in the project folder, and publishing copies only the edit folder (the shared copy then holds the RAW once). Explorer counts the two names twice; the disk doesn't (`fsutil hardlink list <file>` shows both names). Note: in two projects (Guessing Game, Weirdest Car Shopping) the RAW in the project folder is in your Recycle Bin -- deleting it freed nothing, because the edit's `raw.mp4` is that same file.
 2. **Task 1, the old projects:** for a run whose edit plays the piece next to the unused movie, Clean up **moves the edit onto the whole movie and removes the piece** (what the fixed tool makes), rather than deleting the unused movie (which would free more, ~34 GB in D:\Shared, but leave every such edit playing only its piece -- the bug you reported). Your Premiere projects are only read; a piece one of them plays is kept.
+
+## 5 new suggestions (in `D:\Shared\Projects\suggestions.md`, not built)
+
+1. **A1's sound file only for the part the edit plays** -- each film project, its shared copy and its zip about half a GB smaller (half a night)
+2. **The search shows what it found while it searches** -- the coverage strip filling during the search, not at its end (half a night; every saved analysis redone once)
+3. **Learn makes the test case complete by itself** -- style new, the frame and the watermark, no hand work after a learn (small)
+4. **The check-all freezes its own copy of the tool** -- with the caption word lists, every time (small)
+5. **The competitor's own captions where the speech models hear nothing** -- e1's 27 s of `*...*` (half a night + a full check-all)
 
 ## Tests
 
