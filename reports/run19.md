@@ -11,7 +11,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 | 3 | The live animations | **done** (watched on a real run; pictures in `run19_look`) | nothing: the running video moves by itself; Settings -> Animations: Off stops the movement |
 | 4 | The laptop cleans its own cache | **done** | nothing (on by itself); Settings -> Clean the cache shows what it freed, Off stops it |
 | 5 | Learn the queue | **done**: 5 of 5 learned, 5 new test cases (their first check-all runs: below) | nothing |
-| 6 | The check-all + learn by yourself | not started | |
+| 6 | The check-all + learn by yourself | going (the check-all runs; learn by yourself: 4 caption rules tried offline, none kept) | |
 
 ## Task 1 -- only ONE RAW per project, and the edit plays the whole movie (done)
 
@@ -106,10 +106,11 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
   - SHOTS FOUND **18 / 18** (the edit's 18 clips, no stretch outside the RAW), CAPTIONS **59** (`captions: 59 captions`), FRAME **00:00:42:08** (the last of the 1268 competitor frames placed at 29.97 fps);
   - the strip and the wave: 23 pieces from the cut list (green, one amber unsure piece at 17 s), the competitor's sound as 240 bars coloured the same;
   - at the end: ✓ PASS, the receipt "✓ PASS · 18 clips · 59 captions · 0 flashes · 100 % found in the RAW · 37 min 19 s · READY FOR PREMIERE ›", the red OPEN IN PREMIERE; the dot of EDIT and DONE turned green with their tick.
-  - Not seen live in this watch: the search itself (the scan line sweeping and the strip filling piece by piece) -- mik1's search had ended before I attached (and came from its cache). The same reading on a real search's files (the Strategic Team Pick episode's first run, 10-24) gives the search counter (`search 2/2: 254/262`), 523 found frames and their pieces; I watch it live on task 5's first new case (its search is not cached).
+  - Not seen live in this watch: the search itself -- mik1's search had ended before I attached (and came from its cache).
+- **The search, live** (09:10-09:49, task 5's first new case **e1**, the Helicopter Ride, its search not cached; `reports\run19_look\e1\`): the row followed the real run from its first second. The scan line swept the competitor's sound wave **6 times** (e1's search runs 6 passes, not 2: the line starts again at the left with each pass, from the tool's own `search 5/6: 213/287 tasks done`), the bar crept from 0 to 63 % in 38 minutes and never went back, the status typed "Finding each competitor shot in the RAW". What I learned: **the tool hands over the frames it found only when the search ends** -- for 38 minutes FRAMES FOUND stayed at `-` and the strip stayed dark grey, then **1,721 frames and 5 pieces came at once** (09:49:09). So now the strip **fills from the left** at that moment, piece after piece in about a second (a puzzle filling in), instead of everything appearing in one blink -- the numbers stay the run's own. Making it fill *during* the search needs the search step to write each find as it comes: that changes the search's code, so every saved analysis would be redone once -- not today (it's in `suggestions.md`).
 - **Pictures** (`reports\run19_look\`, the same moments drawn by run 18's app (`*_before.png`, from git) and by today's (`*_after.png`)): `2_captions`, `3_checking` (the counters, the wave, the strip), `4_finished` (the receipt, ✓ PASS, OPEN IN PREMIERE); `watch_mik1.jsonl` has every second's numbers.
 - One fix from the watch: SHOTS FOUND first showed 13 / 13 (a line about the 60 fps planning copy) and then 18 / 18; it now waits for the delivered edit's own count, so a shown number never changes.
-- **Tests:** 8 new (`test_live_run19.py`): the live numbers from a run's files written line by line (and never the run before's decisions); the competitor read from a cached probe too; the wave and the timecode; the bar never goes back and is at once with Animations off; a dot pops; the status types in; the counters roll, the receipt, DONE n; a queue row running then finished (the live parts, then the receipt and OPEN IN PREMIERE).
+- **Tests:** 9 new (`test_live_run19.py`): the live numbers from a run's files written line by line (and never the run before's decisions); the competitor read from a cached probe too; the wave and the timecode; the bar never goes back and is at once with Animations off; a dot pops; the status types in; the counters roll, the receipt, DONE n; a queue row running then finished (the live parts, then the receipt and OPEN IN PREMIERE); the finds handed over at once fill the strip from the left.
 
 ## Task 4 -- the laptop cleans its own cache (done)
 
@@ -137,7 +138,30 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
   - **cuts and position** (your answer key in each case): video44 3 of 8 clip edges moved, 4 clips slid (median +121 px); video45 3 of 10 edges, 5 clips (median -300 px); video46 9 of 22 edges, 1 clip removed, 6 cuts of yours inside clips; e1 4 of 30 edges, 12 clips slid (median -207 px), 3 zoomed (+6.4 %); sc22 4 of 12 edges, 7 clips slid (median -213 px), clips starting later (+0.54 s).
   - **No new default:** Learn's suggestions pull both ways across your videos (clips end earlier on 3, later on 10; start earlier on 8, later on 7) -- as before, not taken.
 - **Each is a test case** (`tests\real\<case>`: your finished edit's captions and clips, the competitor, the RAW's window, its frame and watermark, `"style": "new"`). e1 and sc22 were made on the piece of the movie (task 1's bug), so their test RAW is that piece's window -- the scores don't mind.
-- **Their first check-all runs** are going (an hour or more each: nothing cached yet): results in the table below.
+- **Their first check-all runs:** e1 first (its search watched live: task 3); the other four are at the end of the check-all's queue, after every old case (each needs an hour or more the first time).
+
+## Task 6 -- the check-all + learn by yourself
+
+**How it ran:** every case of run 18's check-all again (its caches on D:, `D:\mr_checkall`), from a frozen copy of today's tool (`work\snap19b`: the code of tasks 1-5 with its caption word lists), two at a time at BelowNormal -- a third would not fit next to your open Premiere (one case's full-resolution check alone held 34 GB of memory). I started it early (08:21, in the background, while I built tasks 3-5) because it takes hours. My first frozen copy (08:21) missed the caption word lists (allowlist, glossary, censor list, action examples) next to the code; 3 cases had made their captions without them: mik1 came out exactly as in run 18 anyway, video41 and video43 run again from the right copy (task 6 of `suggestions.md`: the check-all should freeze its own copy).
+
+<!-- CHECKALL -->(the table comes when the runs are done)
+
+### Learn by yourself: the biggest remaining difference
+
+Your fixes against the tool's newest edits, over the 25 scored cases: **captions** are the biggest difference -- 210 of your 882 captions come out exactly (text and start within 2 frames at 60 fps); the 672 others: **240 line breaks** (the same words, split elsewhere), **239 words**, **182 timing** (same words, start more than 2 frames off), 11 capitals/punctuation, 5 extra. Next: framing (177 of 286 clips framed otherwise) and cuts (90 of your 148 cuts not made, run 18's table).
+
+What I tried -- **offline**, on every case's newest run, scored exactly like the check-all (no tool change, no cache touched):
+
+| rule | all cases | better / worse | kept? |
+|---|---|---|---|
+| every caption 1 frame (60 fps) earlier | +16 exact | 14 / **5** (video14 21 -> 14, video11 14 -> 9) | no |
+| every caption 2-5 frames earlier, or later | -19 to -147 | -- | no |
+| a caption starting within 1-8 frames of a cut starts on the cut (you put 82 of the captions you moved exactly on a cut) | +0 / -1 | 0 / 1 (video11) | no |
+| a lone word joins its neighbour (you make more 2-word captions: 371 against the tool's 274) | -11 to -44 | 3 / 9 | no |
+
+- Why timing has no easy rule: the best shift differs per video (video37 -5 frames, video35 -3, video14 +2), and of the 441 captions you moved against your own runs, 147 went one frame (24 fps) earlier -- but 71 % of the moved ones sit far from any cut, and on your 23.976 sequences even the captions you never touched land a fraction of a frame off the tool's (Premiere's frame grid), so part of "timing" is the grid, not you.
+- Framing: the clips framed otherwise are off by 100-550 px, either way -- a different person centred, not a small shift; run 18's finding stands (no rule).
+- **So no new rule today: none passed "nothing gets worse".** The scripts are in `work\t19` (caption_kinds, caption_shift, caption_snap, caption_join, user_moves, cut_snap, placed_check).
 
 ## What I decided on my own
 
