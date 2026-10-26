@@ -44,7 +44,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 
 (Before = your project as it is now; after = the same run with the fix. GB = 1,000,000,000 bytes, as your "7.1 GB". The "after" folders still hold A1's sound file made to the movie's frames: silence up to the piece, then its sound -- 0.53 GB for the Guessing Game; that is day 14's design: the XML's sync check needs A1 on the movie's frames.) Both runs' results are the same as your original runs'.
 
-**Your existing projects -- Board -> Clean up -> "One RAW per project"** (nothing is done until you press Yes): it lists every finished run that holds a RAW nothing plays, with sizes. For these 23 old run folders it **moves the edit onto the whole movie** (exactly what a run does now: every clip at its frame, A1's sound made to the movie's frames, first made aside and checked against the movie at three clips) **and removes the piece** -- the project then holds its RAW once and plays the whole movie; a shared project gets its zip made again. A copy that nothing plays at all would simply go. Your Premiere projects are read, never changed, and a file one of them plays is kept: the projects in the project folder and the ones Premiere opened lately.
+**Your existing projects -- Board -> Clean up -> "One RAW per project"** (nothing is done until you press Yes): it lists every finished run that holds a RAW nothing plays, with sizes. For these 23 old run folders it **moves the edit onto the whole movie** (exactly what a run does now: every clip at its frame, A1's sound made to the movie's frames, first made aside and checked against the movie at three clips) **and removes the piece** -- the project then holds its RAW once and plays the whole movie; a shared project gets its zip made again. A copy that nothing plays at all would simply go. Your Premiere projects are read, never changed, and a file one of them plays is kept: the projects in the project folder and the ones Premiere opened lately. (It can only see this computer's projects: if you ever opened a shared edit straight from D:\Shared in a project saved on the laptop, untick that folder.)
 - What it finds today (checked, not done): 23 run folders; **19 ready**, every move checked frame for frame (SSIM 1.000 at three clips each). The Guessing Game is on the list (both copies: this computer and D:\Shared).
 - **4 kept** (2 projects, both copies): **Awkward Helicopter Ride** and **Strategic Team Pick (5)** -- your recent Premiere projects `r1_POPW.prproj` / `r2_POPW.prproj` (D:\Downloads\e (4)\...) play their piece `raw.mov`. Relink those in Premiere first if you want them done.
 - What it frees: the pieces (up to 1.1 GB each), minus A1's sound file growing by the silence up to the piece -- about **1.6 GB** in all (the Guessing Game: 555 MB on each copy; its zip 8.41 -> ~7.74 GB). The big unused movie copies are not deleted: after the move they are the RAW the edit plays.
@@ -82,7 +82,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 - **Without the app** (1_edit.xml imported by hand): select all A1 clips, Audio Gain > Normalize All Peaks to 0 dB, then drop your CorrectVolume preset (each clip's comment says so).
 - **Tests:** 4 new tool tests (`test_run19_no_extra_volume.py`) and 6 new app tests (`test_sound_run19.py`: a run-19 import has one Volume and gets its sound on save; the watch waits out another project; Premiere not closing is tried again after the next save; closed before saving says so; the row line; Open in Premiere into another project says the sound is yours to set); night 4 / night 11 / day 17 tests changed to the new form (the old Gain-filter form is now a failure).
 - **Real edits made with today's code**, one per channel (`work\t19\prem\...`, your inputs hard-linked): every A1 clip has only Volume 0 dB + Panner 0 and its gain in its comment, XML AUDIO passes.
-- **The Premiere test:** <!-- PREMIERE2 -->not run yet -- you came back at about 07:53 (my harness stopped before touching anything) and Premiere is open with your project now; it runs when you are away again and Premiere is closed.
+- **The Premiere test:** <!-- PREMIERE2 -->not run yet. At 07:58 my harness opened Premiere with its first test project (SceneProof's) and imported the edit, then saw you at the PC and stopped -- leaving that Premiere open with my test project, unsaved (I first took it for your project: it is mine, `work\t19\prem\...`; nothing of yours was in it). The test runs by itself when you have been away 10 minutes (it first closes that Premiere without saving, only if it still holds my test project).
 
 ## Task 3 -- the live animations (done)
 
@@ -114,7 +114,7 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 
 ## Task 4 -- the laptop cleans its own cache (done)
 
-- **What it does** (`core\cache_clean.py`): on a computer **without a D: drive** (the laptop: its `work\cache` stays on C:) the tool's cache files **not used for 7 days** go; when the cache's drive is **below 30 GB free** (any computer), the oldest **not used for 2 days** go too, oldest first, until the drive is back over 30 GB -- the newest always stay. "Used" = the file's last write or read. Only files inside the cache folder (`work\cache`, its link followed) -- never a project, a RAW, a run folder, never a folder link inside the cache. Everything in there is made again by the next run that needs it (it is only slower once).
+- **What it does** (`core\cache_clean.py`): on a computer **without a D: drive** (the laptop: its `work\cache` stays on C:) the tool's cache files **not used for 7 days** go; when the cache's drive is **below 30 GB free** (any computer), the oldest **not used for 2 days** go too, oldest first, until the drive is back over 30 GB -- the newest always stay. "Used" = the file's last write or read (Windows often doesn't record reads on a big drive: then it is simply the file's age, as you asked). Only files inside the cache folder (`work\cache`, its link followed) -- never a project, a RAW, a run folder, never a folder link inside the cache. Everything in there is made again by the next run that needs it (it is only slower once).
 - **When:** 45 s after the app starts, then every hour -- but never while a MovieRecaps run or a test session is going (it may be reading one of those files): then the next hour.
 - **Settings -> Clean the cache: On** (the default) / Off, and the last clean's result under it, e.g. "Last clean: 26 Oct 09:04: freed 61.2 GB (2,310 cache file(s); no D: drive: the files not used for 7 days) -- 73.0 GB free now". A clean that freed something also says it in a toast.
 - **On this PC** (checked for real at 09:04): the cache is `D:\mr_cache` with 1,510 GB free -- "nothing to clean (the cache is on D: and D: has room)"; it does not even look at the files. Only if D: itself fell under 30 GB free would it act.
@@ -160,8 +160,38 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 | a lone word joins its neighbour (you make more 2-word captions: 371 against the tool's 274) | -11 to -44 | 3 / 9 | no |
 
 - Why timing has no easy rule: the best shift differs per video (video37 -5 frames, video35 -3, video14 +2), and of the 441 captions you moved against your own runs, 147 went one frame (24 fps) earlier -- but 71 % of the moved ones sit far from any cut, and on your 23.976 sequences even the captions you never touched land a fraction of a frame off the tool's (Premiere's frame grid), so part of "timing" is the grid, not you.
+- Action captions: 91 of the 672 are yours (`*hangs up*`, `*confused*`, `*panicking*` ...): the tool makes 7 of your 98 word for word; at 30 it leaves its `*...*` placeholder (45 of its 77 action captions are that), at 27 it writes another action (`*hangs the phone*`), at 22 there is speech. A word-for-word score can't reward a near phrasing; the 20 new examples from today's learning are the way in (task 5).
 - Framing: the clips framed otherwise are off by 100-550 px, either way -- a different person centred, not a small shift; run 18's finding stands (no rule).
+- Cuts: of your 148 cuts, 58 are made exactly, 30 within half a second but trimmed otherwise -- your out points a median 2.6 frames earlier, but anywhere from 12 frames earlier to 6 later (no one direction) -- and 60 have no tool cut near: mostly the bits you take out inside a take (81 such cuts over your videos, 0.1-4.7 s; the pause rules of day 13 and run 18 made cases worse), so no cut rule either.
 - **So no new rule today: none passed "nothing gets worse".** The scripts are in `work\t19` (caption_kinds, caption_shift, caption_snap, caption_join, user_moves, cut_snap, placed_check).
+
+## Still broken / not done
+
+<!-- BROKEN -->- **The Premiere check of task 2** (see task 2) -- it needs you away and Premiere closed.
+- **The search fills the strip only at its end** (task 3): the tool hands over its finds when the search is over; changing that changes the search step's code (every saved analysis redone once) -- in `suggestions.md`.
+- **No caption, cut or framing rule learned today** (task 6): the four caption rules I tried each made at least one case worse; framing differences are about who is centred.
+- From run 18, unchanged: the general pause check is built but OFF (it made video37 worse); captions numbers move by themselves by ±2-5 on any re-run (re-transcription).
+
+## What to do by hand in Premiere
+
+- **Nothing for the sound**, when you open the edit with the app's **Open in Premiere**: press **Ctrl+S** once after it opens -- the app closes Premiere, writes each A1 clip's **Clip Gain** (its "Normalize All Peaks to 0 dB"), the Hard Limiter (2 dB) and Amplify (+3 dB) (and the song's gains on A2), and opens the project again. Then edit as usual. **New:** until that is done the row says, in amber, "the sound isn't set yet: press Ctrl+S in Premiere" (and why, e.g. another project was open); then a green "✓ the sound is set".
+- **Only if you import 1_edit.xml by hand** (not through the app): the clips now come in **at their own level** (only Volume 0 dB -- no extra Volume any more): select all A1 clips, **Audio Gain -> Normalize All Peaks to 0 dB**, then drop your **CorrectVolume** preset on them (the same is written in each clip's comment).
+- The Premiere window that was open this morning showed **my test project** (`work\t19\prem\SceneProof\...`), left by my task 2 test at 07:58 when you came back: close it with **No** to "save changes" (nothing of yours is in it).
+
+## On the laptop
+
+Close MovieRecaps, then in PowerShell:
+
+```
+cd C:\Users\gvida\Desktop\bh\MovieRecaps
+git pull
+.venv\Scripts\python tools\app\setup_app.py
+```
+
+- No new packages.
+- **The cache cleans itself** (task 4): within a minute of opening the app, the tool's cache files not used for 7 days go (most of the laptop's 91 GB), and while C: is under 30 GB free the ones not used for 2 days too. Settings -> Clean the cache shows what it freed (Off stops it).
+- **One RAW per project** (task 1): Board -> Clean up lists the laptop's own run folders that still hold the piece next to the movie (and the shared folder's, if not cleaned on the PC yet) -- nothing is removed until you press Yes.
+- The five new test cases come with `git pull` (414 MB).
 
 ## What I decided on my own
 
@@ -175,3 +205,4 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 - After task 3 (09:01-09:05, BelowNormal): **app 1264 passed, 0 failed** (the tool unchanged since task 2: 1679 passed).
 - After task 4: the app suite above already held its 7 tests (1264 passed, 0 failed); the cleaner checked for real on this PC (nothing to do).
 - After task 5: the tool tests that read the test cases: **300 passed** (one list of case names, `test_night6`, needed the five new ones: 30 of 30 then); a full tool run had to stop at 36 % (no failure until then) because the computer's memory ran low next to the check-all -- it runs again at the end.
+- After the strip change (10:04-10:08, BelowNormal, the graphics card hidden; the torrent tests apart, at the end): **app 1265 passed, 0 failed** (2 skipped).
