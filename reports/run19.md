@@ -144,7 +144,46 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 
 **How it ran:** every case of run 18's check-all again (its caches on D:, `D:\mr_checkall`), from a frozen copy of today's tool (`work\snap19b`: the code of tasks 1-5 with its caption word lists), two at a time at BelowNormal -- a third would not fit in the memory (one case's full-resolution check alone held 34 GB; Premiere -- my own test's, I found later -- held 17 GB). I started it early (08:21, in the background, while I built tasks 3-5) because it takes hours. My first frozen copy (08:21) missed the caption word lists (allowlist, glossary, censor list, action examples) next to the code; 3 cases had made their captions without them: mik1 came out exactly as in run 18 anyway, video41 and video43 run again from the right copy (task 6 of `suggestions.md`: the check-all should freeze its own copy).
 
-<!-- CHECKALL -->(the table comes when the runs are done)
+<!-- CHECKALL -->
+**So far (11:05): 27 of run 18's 33 cases ran again -- all PASS, and every score exactly as in run 18** (captions, word errors, cuts, framing): nothing in tasks 1-2 changed a result, and nothing broke (every XML check passes with the new sound, the song is never "doubled audio"). Most cases took 2-8 minutes (their analysis comes from the cache). Still running: video19, then the new video44 and sc22, then video39, flkoick1, video41, the new video46 and video45, and video43 last. "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
+
+| video | run 18: hard / captions / word errors / cuts / framing | run 19 | time |
+|---|---|---|---|
+| chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | 5m44s |
+| e1-fixed | -- (new) | PASS / 0/78 / 91.72 / 10/14 / 26/33 | 60m02s |
+| laptop004-fixed | PASS (hard checks) | PASS (hard checks) | 3m27s |
+| laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | PASS / 10/34 / 7.69 / 1/9 / 11/13 | 1m48s |
+| laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | PASS / 12/22 / 13.33 / 1/5 / 2/6 | 2m16s |
+| mik1-fixed | PASS / 8/69 / 13.33 / 8/13 / 2/15 | PASS / 8/69 / 13.33 / 8/13 / 2/15 | 37m18s |
+| spiderman-school | PASS (hard checks) | PASS (hard checks) | 4m51s |
+| video017-fixed | PASS (hard checks) | PASS (hard checks) | 2m29s |
+| video020-fixed | PASS (hard checks) | PASS (hard checks) | 5m11s |
+| video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 2m59s |
+| video14-fixed | PASS / 21/42 / 6.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 4m41s |
+| video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 3m34s |
+| video19-fixed | PASS / 6/33 / 32.79 / 4/8 / 1/10 | (not finished) |  |
+| video2 | PASS (hard checks) | PASS (hard checks) | 3m52s |
+| video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 3m45s |
+| video3 | PASS (hard checks) | PASS (hard checks) | 2m39s |
+| video30-fixed | PASS / 18/43 / 16.85 / 4/7 / 2/13 | PASS / 18/43 / 16.85 / 4/7 / 2/13 | 1m53s |
+| video33-fixed | PASS / 28/81 / 15.82 / 3/6 / 6/24 | PASS / 28/81 / 15.82 / 3/6 / 6/24 | 6m15s |
+| video34-fixed | PASS / 1/20 / 42.22 / 0/3 / 0/4 | PASS / 1/20 / 42.22 / 0/3 / 0/4 | 3m57s |
+| video35-fixed | PASS / 4/33 / 15.71 / 3/9 / 9/23 | PASS / 4/33 / 15.71 / 3/9 / 9/23 | 5m42s |
+| video36-fixed | PASS / 0/32 / 27.16 / 0/3 / 6/6 | PASS / 0/32 / 27.16 / 0/3 / 6/6 | 3m05s |
+| video37-fixed | PASS / 3/44 / 11.49 / 3/7 / 2/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 7m29s |
+| video38-fixed | PASS / 8/33 / 43.04 / 2/6 / 5/19 | PASS / 8/33 / 43.04 / 2/6 / 5/19 | 3m47s |
+| video4 | PASS (hard checks) | PASS (hard checks) | 6m51s |
+| video40-fixed | PASS / 1/48 / 37.5 / 1/9 / 2/14 | PASS / 1/48 / 37.5 / 1/9 / 2/14 | 8m07s |
+| video41-fixed | PASS / 6/46 / 29.73 / 2/6 / 8/17 | (not finished) |  |
+| video42-fixed | PASS / 6/38 / 27.54 / 4/9 / 4/13 | PASS / 6/38 / 27.54 / 4/9 / 4/13 | 2m14s |
+| video43-fixed | PASS / 6/36 / 24.68 / 0/0 / 0/3 | (not finished) |  |
+| video44-fixed | -- (new) | (not finished) |  |
+| video46-fixed | -- (new) | (not finished) |  |
+| video6-fixed | PASS / 17/32 / 8.33 / 5/7 / 9/9 | PASS / 17/32 / 8.33 / 5/7 / 9/9 | 6m48s |
+| video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 1m36s |
+| video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 4m38s |
+| zendaya | PASS (hard checks) | PASS (hard checks) | 5m57s |
+<!-- /CHECKALL -->
 
 ### Learn by yourself: the biggest remaining difference
 
@@ -192,6 +231,12 @@ git pull
 - **The cache cleans itself** (task 4): within a minute of opening the app, the tool's cache files not used for 7 days go (most of the laptop's 91 GB), and while C: is under 30 GB free the ones not used for 2 days too. Settings -> Clean the cache shows what it freed (Off stops it).
 - **One RAW per project** (task 1): Board -> Clean up lists the laptop's own run folders that still hold the piece next to the movie (and the shared folder's, if not cleaned on the PC yet) -- nothing is removed until you press Yes.
 - The five new test cases come with `git pull` (414 MB).
+
+## My test data (delete it if you want the space; nothing of yours is in it)
+
+- `D:\mr_t19` -- **17.5 GB** on D:: task 1's test shared folder (the film's and the episode's published copies and zips, before and after), the Premiere test's notes.
+- `work\t19` -- **3.6 GB** on C:: task 1's two test projects, task 2's four channel edits, my scripts. The RAW files in there are second names (hard links) of your own RAWs: deleting them takes nothing from yours.
+- `D:\mr_checkall\R19` -- **4.5 GB**: today's check-all runs (like run 18's `A18` ... `V18k` next to it).
 
 ## What I decided on my own
 
