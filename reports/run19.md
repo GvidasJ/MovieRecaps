@@ -2,6 +2,15 @@
 
 Started 06:34 (PC; you had just written the prompt, then you were away from about 06:35). `shutdown /a`: "no shutdown was in progress"; the backup shutdown is set for **15:30** (`shutdown /s /t 32136`). C: 48.1 GB free at the start, D: 1528.2 GB. **Disks during the day:** C: fell to 37.2 GB at 09:34 (the day's test runs and new test cases), so I deleted my own pytest temp folders (5.8 GB, this and two earlier sessions' -- nothing of yours): 45.3 GB, and 45-48 GB from then on; D: never under 1,500 GB.
 
+## In one minute
+
+- **One RAW per project (task 1):** fixed -- a piece run with a song now ends playing the whole movie, with one RAW in the folder, the shared copy and the zip. Your 23 old run folders: Board -> Clean up -> Yes (19 ready; 4 kept because your r1/r2_POPW projects play their piece).
+- **No extra Volume (task 2):** 1_edit.xml brings only the clip's own Volume at 0 dB; Ctrl+S after Open in Premiere writes the real Clip Gain + Hard Limiter + Amplify. The row tells you, in amber, when the sound isn't set yet. Not checked in Premiere today (you were at the screen): a 2-minute check by hand is in task 2.
+- **Live animations (task 3)** and **the laptop's own cache cleaning (task 4):** done, nothing to do.
+- **Learned (task 5):** all 5 queue lines, 5 new test cases, 20 new action captions.
+- **Check-all (task 6):** run 18's cases again -- all PASS with exactly the same scores (tasks 1-2 broke nothing); the new cases pass. No new caption/cut/framing rule: none I tried left every case as good. One real fault found (e1's 27 s of `*...*`): a suggestion.
+- **On the laptop:** `git pull`, then `.venv\Scripts\python tools\app\setup_app.py`.
+
 ## The tasks
 
 | # | task | state | how you use it |
