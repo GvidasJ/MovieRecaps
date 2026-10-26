@@ -40,7 +40,8 @@ from . import widgets as W
 DONE, RUN, WAIT, FAIL = "done", "running", "waiting", "failed"
 POP_MS = 260                    # run 19: a dot's tick when its step finishes
 FILL_MS = 650                   # the block bar's smooth fill
-FADE_MS = 420                   # a found piece fading in on the coverage strip
+FADE_MS = 420                   # a found piece fading in on the coverage strip ...
+STAGGER_MS = 700                # ... the pieces one after the other from the left (the last starts this much later)
 ROLL_MS = 520                   # a counter rolling to its new value
 TYPE_MS = 16                    # the status typing in: one letter this often (at most TYPE_MAX_MS in all)
 TYPE_MAX_MS = 700
@@ -208,8 +209,8 @@ class CoverageStrip(QWidget):
         super().__init__()
         self.duration, self.spans = 0.0, []
         self.live = False                         # run 19: while the run searches (dark grey = not searched yet)
-        self.new: set[tuple] = set()              # the pieces that came with the last set(): they fade in
-        self.fade = Mo.Once(self, self.update, FADE_MS, Mo.SOFT)
+        self.new: set[tuple] = set()              # the pieces that came with the last set(): they fade in, one after
+        self.fade = Mo.Once(self, self.update, FADE_MS + STAGGER_MS, Mo.LINEAR)   # the other from the left
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(22)
         self.setToolTip("Where the competitor was found in the RAW: green found, red not in the RAW, amber unsure "
@@ -228,8 +229,13 @@ class CoverageStrip(QWidget):
         self.update()
 
     def alpha_of(self, span: tuple) -> float:
-        """How far a piece has faded in (1: there)."""
-        return self.fade.value if span in self.new and self.fade.active else 1.0
+        """How far a piece has faded in (1: there). The search hands over its finds at once (its two passes end):
+        they fade in one after the other from the left -- a puzzle filling in -- in about a second."""
+        if span not in self.new or not self.fade.active:
+            return 1.0
+        delay = STAGGER_MS * max(0.0, min(1.0, float(span[0]) / self.duration)) if self.duration > 0 else 0.0
+        t = self.fade.value * (FADE_MS + STAGGER_MS) - delay
+        return max(0.0, min(1.0, t / FADE_MS))
 
     @staticmethod
     def _clock(s: float) -> str:

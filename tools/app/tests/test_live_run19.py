@@ -227,3 +227,14 @@ def test_the_running_row_shows_the_live_parts_then_the_finish(qapp, mono, tmp_pa
         getattr(q, "poll", SimpleNamespace(stop=lambda: None)).stop()
         q.deleteLater()
         qapp.processEvents()
+
+
+def test_the_finds_fill_the_strip_from_the_left(qapp, motion_on):
+    from mr_app.ui import mono_parts as MP
+    s = MP.CoverageStrip()
+    s.set(10.0, [], live=True)
+    pieces = [(0.0, 1.0, "raw"), (5.0, 6.0, "raw"), (9.0, 10.0, "unsure")]
+    s.set(10.0, pieces, live=True)                             # the search hands over its finds at once
+    assert pump_until(qapp, lambda: s.alpha_of(pieces[0]) > 0.5, 1.0)
+    assert s.alpha_of(pieces[2]) < s.alpha_of(pieces[0])       # the right-hand ones come later
+    assert pump_until(qapp, lambda: all(s.alpha_of(p) == 1.0 for p in pieces), 3.0)
