@@ -1684,9 +1684,10 @@ def run_captions(ctx) -> dict:
             warn(f"no transcription: {err}")
         else:
             y_in, held = without_stretches(y16, ov, fps) if ov else (y16, [])    # my audio alone (another video's
-            try:                                                                  # stretches taken out)
-                words = restore_times(transcribe.transcribe_words(y_in, transcribe.SR, model, language, ctx.cache,
-                                                                  hints), held)
+            said: list[Word] = []                                                 # stretches taken out)
+            try:
+                said = transcribe.transcribe_words(y_in, transcribe.SR, model, language, ctx.cache, hints)
+                words = restore_times(said, held)
             except Exception as e:  # noqa: BLE001 - e.g. the model download failed: captions without a transcript
                 err = f"{type(e).__name__}: {e}"
                 warn(f"transcription failed: {err}")
@@ -1694,8 +1695,19 @@ def run_captions(ctx) -> dict:
             if words and check_model.lower() not in ("", "none") and check_model != model:
                 try:                                 # the second-best model: where it hears otherwise, decided
                     from . import caption_recheck as R2
-                    other = restore_times(transcribe.transcribe_words(y_in, transcribe.SR, check_model, language,
-                                                                      ctx.cache, hints, aligned=False), held)
+                    heard = transcribe.transcribe_words(y_in, transcribe.SR, check_model, language, ctx.cache, hints,
+                                                        aligned=False)
+                    said, again = R2.fill_skips(said, heard, y_in, transcribe.SR, lambda y: transcribe.transcribe_words(
+                        y, transcribe.SR, model, language, ctx.cache, ()))     # (no hints: they can make it skip)
+                    if again:                        # run 19: a stretch the main model skipped, heard again
+                        words = restore_times(said, held)
+                        mine = {_said_as(w) for w in words}
+                        res["heard_again"] = again
+                        log.info("captions: the %s model skipped %d stretch(es) the %s heard (%s): heard again "
+                                 "without the hints, %d word(s)", model, len(again), check_model,
+                                 ", ".join(f"{r['start']:.1f}-{r['end']:.1f} s" for r in again),
+                                 sum(r["heard_again"] for r in again))
+                    other = restore_times(heard, held)
                     words, two, extra = R2.resolve_two(words, other, model, check_model,
                                                        R2.clear_captions(spans, span_fps) if spans else None)
                     res["second_opinion"] = dict(two, words=len(other),

@@ -574,6 +574,62 @@ def resolve_two(a: Sequence[Word], b: Sequence[Word], name_a: str, name_b: str,
     return out, rep, unsure
 
 
+SKIP_S = 6.0              # the best model heard nothing for this long where the second one heard ...
+SKIP_WORDS = 8            # ... at least this many words: it skipped them -- the sound is heard again without the hints
+SKIP_NEAR_S = 0.5         # a word of the second model this close to one of the best's: not in a skipped stretch
+
+
+def skipped(a: Sequence[Word], b: Sequence[Word], min_s: float = SKIP_S, min_words: int = SKIP_WORDS
+            ) -> list[tuple[float, float, int]]:
+    """The stretches (start, end, words) where the second model ``b`` heard at least ``min_words`` words over at least
+    ``min_s`` seconds and the best model ``a`` heard none -- the best model skipped them: large-v3 can jump over half a
+    minute after a repeated word (run 19, e1: "a 911 2012 2012", then nothing until "5 4 3 2 1" -- 60 words the
+    second model heard, the captions there left as *...*)."""
+    heard = sorted((w.start, w.end) for w in a)
+    out: list[tuple[float, float, int]] = []
+    run: list[Word] = []
+
+    def close() -> None:
+        if len(run) >= min_words and run[-1].end - run[0].start >= min_s:
+            out.append((run[0].start, run[-1].end, len(run)))
+
+    for w in sorted(b, key=lambda w: (w.start, w.end)):
+        if any(s - SKIP_NEAR_S <= w.start <= e + SKIP_NEAR_S for s, e in heard):
+            close()
+            run = []
+        else:
+            run.append(w)
+    close()
+    return out
+
+
+def fill_skips(a: Sequence[Word], b: Sequence[Word], y: np.ndarray, sr: int,
+               hear: Callable[[np.ndarray], Sequence[Word]]) -> tuple[list[Word], list[dict]]:
+    """The best model's words ``a`` (on ``y``'s time) with every stretch it skipped (``skipped``) filled: the whole
+    sound ``y`` heard again through ``hear`` -- the best model again, WITHOUT the caption hints (Whisper's prompt:
+    with "AI, MJ, MCU" large-v3 heard 69 words of e1's edit and skipped 14 s, without them all 136; the stretch cut out
+    on its own it does not hear either way: it locks on the repeated word it starts with) -- and its words inside the
+    stretches added in time order (never over a word ``a`` has, never a made-up stock phrase). The second model's
+    words are never taken: they only show where to listen. Returns (the words, one row per stretch); where nothing was
+    skipped, ``a``'s words as they are, no row, and nothing heard again: every other video's captions stay exactly as
+    they were."""
+    rows: list[dict] = []
+    out = list(a)
+    gaps = skipped(a, b)
+    got = list(hear(y)) if gaps else []
+    for t0, t1, n in gaps:
+        new = [w for w in got if t0 - SKIP_NEAR_S <= w.start and w.end <= t1 + SKIP_NEAR_S
+               and not any(x.start < w.end and w.start < x.end for x in out)]
+        if new and hallucination(new):
+            new = []
+        rows.append({"start": round(t0, 3), "end": round(t1, 3), "second_heard": n, "heard_again": len(new),
+                     "text": _text(new)})
+        out += new
+    if not rows:
+        return list(a), rows
+    return sorted(out, key=lambda w: (w.start, w.end)), rows
+
+
 SCREEN_CONTEXT = 3        # words heard on either side of a place, scored with it (the same in both readings)
 SCREEN_PAD_S = 0.3        # the audio scored reaches this far past them
 SCREEN_JUMP_S = 1.5       # a longer gap between two of those words: no single phrase to score
