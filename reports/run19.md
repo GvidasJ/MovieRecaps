@@ -7,7 +7,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 | # | task | state | how you use it |
 |---|---|---|---|
 | 1 | Only ONE RAW per project, the edit plays the whole movie | **done** (film + episode real runs PASS, frame-exact) | nothing for new edits; your old ones: Board -> Clean up -> Yes ("One RAW per project": 19 run folders ready, 4 kept for your r1/r2_POPW projects) |
-| 2 | No temporary extra Volume effects | **done** (the Premiere check: see the task -- it waits for you to be away) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
+| 2 | No temporary extra Volume effects | **done** (the check in Premiere itself not run: you were at the screen -- a 2-minute check by hand is in the task) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
 | 3 | The live animations | **done** (watched on a real run; pictures in `run19_look`) | nothing: the running video moves by itself; Settings -> Animations: Off stops the movement |
 | 4 | The laptop cleans its own cache | **done** | nothing (on by itself); Settings -> Clean the cache shows what it freed, Off stops it |
 | 5 | Learn the queue | **done**: 5 of 5 learned, 5 new test cases (their first check-all runs: below) | nothing |
@@ -82,7 +82,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 - **Without the app** (1_edit.xml imported by hand): select all A1 clips, Audio Gain > Normalize All Peaks to 0 dB, then drop your CorrectVolume preset (each clip's comment says so).
 - **Tests:** 4 new tool tests (`test_run19_no_extra_volume.py`) and 6 new app tests (`test_sound_run19.py`: a run-19 import has one Volume and gets its sound on save; the watch waits out another project; Premiere not closing is tried again after the next save; closed before saving says so; the row line; Open in Premiere into another project says the sound is yours to set); night 4 / night 11 / day 17 tests changed to the new form (the old Gain-filter form is now a failure).
 - **Real edits made with today's code**, one per channel (`work\t19\prem\...`, your inputs hard-linked): every A1 clip has only Volume 0 dB + Panner 0 and its gain in its comment, XML AUDIO passes.
-- **The Premiere test:** <!-- PREMIERE2 -->not run yet. At 07:58 my harness opened Premiere with its first test project (SceneProof's) and imported the edit, then saw you at the PC and stopped -- leaving that Premiere open with my test project, unsaved (I first took it for your project: it is mine, `work\t19\prem\...`; nothing of yours was in it). The test runs by itself when you have been away 10 minutes (it first closes that Premiere without saving, only if it still holds my test project).
+- **The Premiere test:** <!-- PREMIERE2 -->**not run** (twice stopped for you). At 07:58 my harness opened Premiere with its first test project (SceneProof's), then saw you at the PC and stopped -- leaving that Premiere open with my test project, unsaved (I first took it for your project: it was mine, `work\t19\prem\...`). At 10:11, after 10 minutes without input, I closed it without saving; at 10:21 the test opened Premiere again and **13 seconds later it was closed** -- by you, I think (input at that moment, no crash) -- so you were at the screen without typing, and I stopped trying: no more Premiere windows today. **To check it yourself (2 minutes):** on any new edit press Open in Premiere; before Ctrl+S, click an A1 clip -> Effect Controls shows only its own **Volume at 0.0 dB** (no second Volume); press Ctrl+S -> the app closes and reopens Premiere -> the same clip shows its **Clip Gain** (right-click -> Audio Gain), **Hard Limiter** and **Amplify** under the Volume, and the row says "✓ the sound is set".
 
 ## Task 3 -- the live animations (done)
 
@@ -168,7 +168,7 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 
 ## Still broken / not done
 
-<!-- BROKEN -->- **The Premiere check of task 2** (see task 2) -- it needs you away and Premiere closed.
+<!-- BROKEN -->- **The Premiere check of task 2** was not run (you were at the screen when it opened Premiere): the 2-minute check by hand is in task 2.
 - **The search fills the strip only at its end** (task 3): the tool hands over its finds when the search is over; changing that changes the search step's code (every saved analysis redone once) -- in `suggestions.md`.
 - **No caption, cut or framing rule learned today** (task 6): the four caption rules I tried each made at least one case worse; framing differences are about who is centred.
 - **Where the speech models hear nothing, the captions are `*...*`** even when the competitor shows its captions on screen (e1: 27 s of accented speech) -- in `suggestions.md`.
