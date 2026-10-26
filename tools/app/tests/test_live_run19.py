@@ -238,3 +238,17 @@ def test_the_finds_fill_the_strip_from_the_left(qapp, motion_on):
     assert pump_until(qapp, lambda: s.alpha_of(pieces[0]) > 0.5, 1.0)
     assert s.alpha_of(pieces[2]) < s.alpha_of(pieces[0])       # the right-hand ones come later
     assert pump_until(qapp, lambda: all(s.alpha_of(p) == 1.0 for p in pieces), 3.0)
+
+
+def test_a_flash_the_last_step_removed_is_no_flash_on_the_receipt(tmp_path):
+    """e1 (run 19): the report's XML FLASH line shows the first check's FAIL (1); the last step removed that flash and
+    the delivered 1_edit.xml passed every check -- the receipt says 0 flashes. Without that last word: the report's."""
+    for ending, want in (("; every check OK", 0), ("; 1 check failed: XML FLASH", 1)):
+        r = _run(tmp_path / str(want))
+        _say(r.log, T + "== S8 captions", T + "1_edit.xml: 29 clips on a 23.976 fps sequence (the RAW's rate) -- "
+             "57.02 s (the checked edit: 57.02 s); 46 captions timed to it" + ending)
+        (r.run / "extras" / "report.md").write_text(
+            "| `XML FLASH` | no piece of a RAW shot under 0.25 s at a cut | **FAIL** (1) |", encoding="utf-8")
+        lv = L.Live(r.run, r.work, None)
+        lv.finish({"label": "PASS", "seconds": 3603})
+        assert lv.snapshot()["final"]["flashes"] == want and lv.snapshot()["final"]["clips"] == 29

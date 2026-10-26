@@ -114,6 +114,7 @@ class Live:
         self.final: dict | None = None
         self.shots: tuple[int, int] | None = None             # (found, all): the edit's clips (+ not in the RAW)
         self.clips: int | None = None                         # the delivered edit's clips (its last line)
+        self.checks_ok = False                                # ... and that line says "every check OK"
         self.gaps: int | None = None                          # the competitor's stretches not in the RAW (cut list)
         self.coverage: list[tuple[float, float, str]] = []    # (t0, t1, kind), the cut list's
         self._dec_ok = False
@@ -202,6 +203,7 @@ class Live:
         m = _FINAL.search(ln)
         if m:
             self.final = dict(self.final or {}, clips=int(m.group(1)), captions=int(m.group(2)))
+            self.checks_ok = ln.rstrip().endswith("every check OK")
             self.captions = int(m.group(2))
             self.clips = int(m.group(1))
             self._shots()
@@ -247,7 +249,9 @@ class Live:
         pct = self.read_cutlist()
         if pct is not None:
             res.setdefault("raw_pct", pct)
-        try:
+        if self.checks_ok:                                    # the delivered 1_edit.xml passed every check -- XML
+            res.setdefault("flashes", 0)                      # FLASH too (the report's table may show the first
+        try:                                                  # check's FAIL of a flash the last step then removed: e1)
             rep = (self.run_dir / "extras" / "report.md").read_text(encoding="utf-8", errors="replace")
             m = _FLASH.search(rep)
             word = m.group(1) if m else ""
