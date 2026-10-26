@@ -9,7 +9,9 @@ Fixed → Rendered → Uploaded -- for the PC and the laptop at once (the shared
   an edit, template.png, project.json or title.txt. Day 12, one RAW file per run: an older run that holds a 5.1 RAW
   twice (raw_ae.mp4 / raw.mp4 next to raw_stereo.mp4, which its 1_edit.xml plays) is checked in the background
   (core.rawfiles: raw_stereo opens as the same video, nothing plays the old copy -- your projects are only read) and
-  the old copy is offered with the space it frees; it goes only on Yes.
+  the old copy is offered with the space it frees; it goes only on Yes. Run 19, one RAW per project (core.rawcopies):
+  an older run whose edit plays only the piece of the movie, with the whole movie unused next to it, is offered too --
+  on Yes its edit is moved onto the whole movie (checked frame for frame) and the piece goes.
 * Every 30 minutes (and at the start) the three channels' Shorts tabs are read (core.uploads): a Short with the same
   title moves its card to Uploaded with the date; a near match asks first ("Is this the same video?").
 """
@@ -920,32 +922,37 @@ class BoardPage(QWidget):
         say = self._cleanup_say
 
         def work():
-            from ..core import board, rawfiles, rawkeep
+            from ..core import board, rawcopies, rawfiles, rawkeep
             junk = board.cleanup_plan(cards, local_root=local)
             # day 12: older runs of a 5.1 RAW hold the RAW twice -- checked here, removed only after you say yes
             raws = rawfiles.plan(cards, local_root=local, say=say)
             # day 13: older runs that play a big converted raw_stereo copy -- the original RAW instead, after yes
             big = rawkeep.plan(cards, local_root=local, say=say)
-            return junk, raws, big
+            # run 19: older runs that hold a RAW nothing plays (the movie next to the piece the edit plays)
+            one = rawcopies.plan(cards, local_root=local, say=say)
+            return junk, raws, big, one
 
         def got(res) -> None:
             self.b_clean.setEnabled(True)
             self.status.setText(before)
-            junk, raws, big = res
+            junk, raws, big, one = res
             ok = [r for r in raws if r.ok]
             kept = [r for r in raws if not r.ok]
             okb = [b for b in big if b.ok]
             keptb = [b for b in big if not b.ok]
-            if not junk and not ok and not okb:
+            okc = [c for c in one if c.ok]
+            keptc = [c for c in one if not c.ok]
+            if not junk and not ok and not okb and not okc:
                 self.toast("Nothing to clean up ✓" + (f" ({len(kept)} old run(s) keep two RAW files: see above)"
                                                         if kept else ""))
-                if kept or keptb:
+                if kept or keptb or keptc:
                     self.status.setText("\n".join(t for t in (self._kept_text(kept) if kept else "",
-                                                             self._kept_big_text(keptb) if keptb else "") if t))
+                                                             self._kept_big_text(keptb) if keptb else "",
+                                                             self._kept_one_text(keptc) if keptc else "") if t))
                 return
             from ..core import publish
             total = (sum(int(getattr(j, "size", 0) or 0) for j in junk) + sum(r.freed for r in ok)
-                     + sum(b.freed for b in okb))
+                     + sum(b.freed for b in okb) + sum(max(0, c.freed) for c in okc))
             lines = [f"{publish.plain_size(getattr(j, 'size', 0))}  {Path(j.path).name}  ({getattr(j, 'why', '')})"
                      for j in junk[:25]]
             more = f"\n... and {len(junk) - 25} more" if len(junk) > 25 else ""
@@ -967,22 +974,37 @@ class BoardPage(QWidget):
                          + (f"\n... and {len(okb) - 25} more" if len(okb) > 25 else "") + "\n\n")
             if keptb:
                 text += self._kept_big_text(keptb) + "\n\n"
+            if okc:
+                pieces = [c for c in okc if c.kind == "piece"]
+                text += ("One RAW per project -- these projects hold a RAW that nothing plays."
+                         + (" Their edit plays only the piece of the movie the run analysed (a bug until run 19: the "
+                            "song on A2 stopped the edit's move onto the movie), with the whole movie unused next to "
+                            "it: Clean up moves each edit onto the whole movie, every clip at its own frame (checked "
+                            "against the movie), and the piece goes -- the project then holds its RAW once."
+                            if pieces else "")
+                         + (" The others: the unused copy goes." if len(pieces) < len(okc) else "")
+                         + "\n\n" + "\n".join(c.line() for c in okc[:25])
+                         + (f"\n... and {len(okc) - 25} more" if len(okc) > 25 else "") + "\n\n")
+            if keptc:
+                text += self._kept_one_text(keptc) + "\n\n"
+            moved = okb or any(c.kind == "piece" for c in okc)
             text += (f"Space saved: {publish.plain_size(total)}.\n\nNever touched: your Premiere projects (a run one "
                      "of them plays keeps its copy), template.png, project.json, title.txt. "
                      + ("Changed for the runs above: only their own 1_edit.xml / extras XMLs (they play the original "
-                        "RAW now)." if okb else "Never touched either: the edits themselves (their XMLs, raw_stereo, "
-                                                 "the captions)."))
+                        "RAW / the whole movie now)." if moved else "Never touched either: the edits themselves (their "
+                                                                   "XMLs, raw_stereo, the captions)."))
             r = QMessageBox.question(self, "Clean up", text)
             if r != QMessageBox.StandardButton.Yes:
                 return
             self.b_clean.setEnabled(False)
 
             def work2():
-                from ..core import board, rawfiles, rawkeep
+                from ..core import board, rawcopies, rawfiles, rawkeep
                 freed, errors = board.cleanup(junk) if junk else (0, [])
                 f2, e2 = rawfiles.remove(ok, say=say)
                 f3, e3 = rawkeep.replace(okb, say=say) if okb else (0, [])
-                return freed + f2 + f3, errors + e2 + e3
+                f4, e4 = rawcopies.remove(okc, say=say) if okc else (0, [])
+                return freed + f2 + f3 + max(0, f4), errors + e2 + e3 + e4
 
             def done(res2) -> None:
                 self.b_clean.setEnabled(True)
@@ -1000,6 +1022,13 @@ class BoardPage(QWidget):
         """The old runs that keep both RAW files, and why (plain words)."""
         return "Kept (both RAW files stay):\n" + "\n".join(f"  {r.where}: " + "; ".join(r.problems[:2])
                                                           for r in kept[:10])
+
+    @staticmethod
+    def _kept_one_text(kept) -> str:
+        """Run 19: the projects that keep a RAW nothing plays, and why (plain words)."""
+        return ("Kept (the RAW nothing plays stays):\n"
+                + "\n".join(f"  {c.where}: " + "; ".join(c.problems[:1]) for c in kept[:10])
+                + (f"\n  ... and {len(kept) - 10} more" if len(kept) > 10 else ""))
 
     @staticmethod
     def _kept_big_text(kept) -> str:

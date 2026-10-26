@@ -385,6 +385,14 @@ def checks_of(run_dir: Path | None) -> dict:
         fails.append("1_edit.xml hard checks not run: " + "; ".join(row["not_checked"][:5]))
     if (row.get("inputs") or {}).get("status") == "fail":
         fails.append("an input changed during the run")
+    try:                                   # run 19: the edit should play the movie -- say it when it plays a piece
+        from .excerpt import failed_move
+        fm = failed_move(run_dir) if run_dir is not None else None
+    except Exception:  # noqa: BLE001 - a note is a help
+        fm = None
+    if fm:
+        notes.append(f"1_edit.xml plays only the piece of the movie the run analysed ({fm.get('where', '?')}, "
+                     f"extras\\media\\{fm.get('plays', '?')}), not the movie itself: {fm.get('error')}"[:900])
     return {"pass": not fails, "failures": fails, "notes": notes, "row": row}
 
 

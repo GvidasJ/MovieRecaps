@@ -3167,6 +3167,10 @@ def premiere_media(ctx: Context, ex: Cutlist) -> Cutlist:
         ctx.warn(f"the original RAW could not be placed for Premiere ({type(e).__name__}: {e}) -- 1_edit.xml plays the "
                  "tool's converted copy, as before day 13")
         return stereo_for_premiere(ctx, ex)
+    if getattr(ctx, "excerpt", None) is not None and res.get("line"):     # run 19: it is the piece, not the movie
+        res["line"] = (str(res["line"]).replace("V1 plays the original RAW (", "V1 plays the piece of the movie the run "
+                                                "analysed, for now (", 1)
+                       + " -- at the end of the run 1_edit.xml is moved onto the movie itself")
     ctx.edit_media = res
     ctx.dlog.record("premiere", "edit_media", picture={k: v for k, v in res["picture"].items() if k != "check"},
                     sound={k: v for k, v in (res.get("sound") or {}).items() if k != "sync"},

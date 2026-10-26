@@ -851,25 +851,35 @@ def check_moved(before: Path, after: Path, ex: Excerpt, piece: str, points: int 
     return {"ok": not bad, "rows": rows, "why": "; ".join(bad)}
 
 
-def finish(ctx: Any) -> dict:
-    """The end of a run that analysed a piece (module docstring): 1_edit.xml and the edits in extras/ moved onto the
-    movie, A1's raw_stereo.wav made to the movie's frames, the movie linked into the run's media, extras/excerpt.json
-    written, the piece deleted. Everything is made aside and checked first; if anything fails, nothing is changed:
-    the edit keeps playing the piece (kept in the run's media) and a warning says so. Never raises."""
-    ex = getattr(ctx, "excerpt", None)
-    if ex is None:
-        return {}
-    cfg = ctx.cfg
+def where_text(ex: Excerpt) -> str:
+    """'37:54-48:15 of 1:49:31': the piece in the movie."""
+    fps = float(Fraction(ex.fps))
+    return f"{_clock(ex.t0)}-{_clock(ex.t0 + ex.frames / fps)} of {_clock(ex.movie_seconds)}"
+
+
+def move_run(ex: Excerpt, deliver: Path, out_dir: Path, media: Path, plays: Path | None,
+             also_piece: tuple[Path, ...] = ()) -> dict:
+    """The move onto the movie on a run folder's own files (``finish`` at the end of a run; run 19: the app's Clean up
+    for a finished run whose move failed before -- the song on A2 stopped it, ``finish``'s docstring): 1_edit.xml
+    (in ``deliver``) and the edits in ``out_dir`` (extras: edit_*.xml) moved onto ``ex.movie``, which is linked into
+    ``media`` as raw.<ext> (a hard link, else a copy; the very file already there: kept), A1's raw_stereo.wav made to
+    the movie's frames, extras/excerpt.json written, the piece deleted: ``ex.piece``, ``plays`` (the piece's file in
+    ``media`` V1 plays now) and ``also_piece`` (the analysis copy, when still there). Everything is made aside and
+    checked first (the moved 1_edit.xml's hard item check; three V1 clips show the movie's frame where the piece's
+    showed); on any failure it raises and nothing is changed -- a link or copy of the movie it made is removed
+    again, so the run folder never holds the movie AND its piece. Returns {moved, xmls, placed, ..., line, where}."""
     t0 = time.perf_counter()
     out: dict[str, Any] = {"moved": False}
     temps: list[Path] = []
+    movie = Path(ex.movie)
+    movie_name = "raw" + (movie.suffix.lower() or ".mp4")
+    movie_media = media / movie_name
+    same_name = plays is not None and os.path.normcase(os.path.abspath(plays)) == \
+        os.path.normcase(os.path.abspath(movie_media))
+    target = movie_media.with_name(movie_media.stem + ".movie" + movie_media.suffix) if same_name else movie_media
+    made: Path | None = None              # the movie's link / copy this call made (removed again on a failure)
     try:
-        media = Path(cfg.media_dir)
-        movie = Path(ex.movie)
-        movie_name = "raw" + (movie.suffix.lower() or ".mp4")
-        piece_link = Path(ctx.raw_conform.path) if getattr(ctx, "raw_conform", None) is not None else None
-        xmls = [p for p in [Path(cfg.deliver) / "1_edit.xml"] + sorted(Path(cfg.out).glob("edit_*.xml"))
-                if p.is_file()]
+        xmls = [p for p in [deliver / "1_edit.xml"] + sorted(out_dir.glob("edit_*.xml")) if p.is_file()]
         if not xmls:
             raise RuntimeError("no edit XML to move")
         # the sound: A1 plays raw_stereo.wav, made to the movie's frames
@@ -880,14 +890,11 @@ def finish(ctx: Any) -> dict:
             temps.append(wav_tmp)
             wav_frames = int(math.floor(samples * float(Fraction(ex.fps)) / SOUND_RATE))
         # the movie in the run's media (raw.<ext>; the piece's own link goes when the names are the same)
-        movie_media = media / movie_name
-        same_name = piece_link is not None and os.path.normcase(str(piece_link.resolve())) == \
-            os.path.normcase(str(movie_media.resolve()))
-        target = movie_media.with_name(movie_media.stem + ".movie" + movie_media.suffix) if same_name else movie_media
         from .conform import _link_or_copy
+        existed = target.exists()
         how, why = _link_or_copy(movie.resolve(), target)
-        if same_name:
-            temps.append(target)
+        if not existed and os.path.normcase(os.path.abspath(target)) != os.path.normcase(os.path.abspath(movie)):
+            made = target
         moved = []
         for x in xmls:
             tmp = x.with_name(x.stem + ".movie.part.xml")
@@ -895,7 +902,7 @@ def finish(ctx: Any) -> dict:
             info = shift_xml(x, tmp, ex, movie_media, movie_name, wav_frames)
             moved.append((x, tmp, info))
         from .export_xml_edl import premiere_item_problems
-        final = Path(cfg.deliver) / "1_edit.xml"
+        final = deliver / "1_edit.xml"
         for x, tmp, info in moved:
             if x == final:
                 probs = premiere_item_problems(tmp)
@@ -909,66 +916,114 @@ def finish(ctx: Any) -> dict:
         if wav_tmp is not None:
             os.replace(wav_tmp, wav)
         if same_name:
-            piece_link.unlink(missing_ok=True)
+            plays.unlink(missing_ok=True)
             os.replace(target, movie_media)
+        made = None
         for x, tmp, info in moved:
             os.replace(tmp, x)
-        out.update(moved=True, xmls=[str(x) for x, _t, _i in moved], placed=how, why_copy=why,
-                   exact=all(i["exact"] for x, _t, i in moved if x == final),
-                   planning_copies_exact=all(i["exact"] for x, _t, i in moved if x != final),
-                   shift_frames=ex.k0)
-        (Path(cfg.out) / INFO_NAME).write_text(json.dumps({**ex.to_dict(), "piece": None, "piece_name": PIECE_NAME,
-                                                           "moved": out}, indent=1, default=str), encoding="utf-8")
-        # the piece goes: the file in work and every copy / link of it in the run's media (what V1 played, the
-        # analysis copy) -- never the movie's link or the sound file
-        pic = ((getattr(ctx, "edit_media", None) or {}).get("picture") or {}).get("path")
-        keep = {os.path.normcase(str(p.resolve())) for p in (movie_media, wav) if p.exists()}
-        for p in {Path(ex.piece), *(x for x in (piece_link, Path(pic) if pic else None) if x is not None)}:
-            if p.exists() and os.path.normcase(str(p.resolve())) not in keep:
-                try:
-                    p.unlink()
-                except OSError as e:
-                    log.warning("piece of the movie: %s could not be deleted (%s)", p, e)
-        out["seconds"] = round(time.perf_counter() - t0, 2)
-        fps = float(Fraction(ex.fps))
-        where = f"{_clock(ex.t0)}-{_clock(ex.t0 + ex.frames / fps)} of {_clock(ex.movie_seconds)}"
-        line = (f"V1 plays the movie itself (extras\\media\\{movie_name}, "
-                f"{'a hard link: no extra space' if how in ('hardlink', 'same') else 'a copy'}); A1 plays "
-                f"raw_stereo.wav (stereo, made to the movie's frames) -- the run analysed only the piece {where} "
-                f"(cut in {ex.cut_seconds:.0f} s, deleted now)")
-        if isinstance(getattr(ctx, "edit_media", None), dict):
-            ctx.edit_media["line"] = line            # (the end summary says what 1_edit.xml plays now)
-        out["line"] = line
-        try:
-            rep = Path(cfg.out) / "report.md"
-            if rep.is_file():
-                with open(rep, "a", encoding="utf-8") as fh:
-                    fh.write(f"\n\n## Piece of the movie (day 14)\n\n- The run analysed the piece {where} (frames "
-                             f"{ex.k0}-{ex.k0 + ex.frames - 1} of the movie's {ex.movie_frames}), cut by stream copy "
-                             f"where the sound check found the place ({', '.join(_clock(t) for t in ex.places[:4])})."
-                             f"\n- RAW times and frames in this report count from the piece's start: add "
-                             f"{_clock(ex.t0)} ({ex.k0} frames) for the movie's.\n- {line}.\n")
-        except OSError:
-            pass
-        log.info("piece of the movie: 1_edit.xml now plays the movie itself (extras\\media\\%s, %s) -- every RAW clip "
-                 "at its frame + %d%s; A1 plays raw_stereo.wav made to the movie's frames; the piece deleted (%.1f s)",
-                 movie_name, "a hard link" if how in ("hardlink", "same") else "a copy", ex.k0,
-                 "" if out["exact"] else " (rounded to the nearest frame of a sped-up clip)", out["seconds"])
-        ctx.dlog.record("premiere", "excerpt_moved", **{k: v for k, v in out.items() if k != "check"},
-                        check=out.get("check"))
-    except Exception as e:  # noqa: BLE001 - the edit keeps playing the piece
-        for p in temps:
+    except BaseException:
+        for p in temps + ([made] if made is not None else []):
             try:
                 if p.exists():
                     p.unlink()
             except OSError:
                 pass
-        log.error("piece of the movie: 1_edit.xml could not be moved onto the movie (%s: %s) -- it plays the piece "
-                  "(kept as extras\\media\\%s)", type(e).__name__, e,
-                  Path(ctx.raw_conform.path).name if getattr(ctx, "raw_conform", None) else PIECE_NAME)
-        ctx.warn(f"1_edit.xml plays the piece of the movie the run analysed, not the movie itself ({e})")
-        out["error"] = f"{type(e).__name__}: {e}"
+        raise
+    out.update(moved=True, xmls=[str(x) for x, _t, _i in moved], placed=how, why_copy=why,
+               exact=all(i["exact"] for x, _t, i in moved if x == final),
+               planning_copies_exact=all(i["exact"] for x, _t, i in moved if x != final),
+               shift_frames=ex.k0)
+    (out_dir / INFO_NAME).write_text(json.dumps({**ex.to_dict(), "piece": None, "piece_name": PIECE_NAME,
+                                                 "moved": out}, indent=1, default=str), encoding="utf-8")
+    # the piece goes: the file in work and every copy / link of it in the run's media (what V1 played, the
+    # analysis copy) -- never the movie's link or the sound file
+    keep = {os.path.normcase(str(p.resolve())) for p in (movie_media, wav) if p.exists()}
+    for p in {Path(ex.piece), *(Path(x) for x in (plays, *also_piece) if x)}:
+        if p.exists() and os.path.normcase(str(p.resolve())) not in keep:
+            try:
+                p.unlink()
+            except OSError as e:
+                log.warning("piece of the movie: %s could not be deleted (%s)", p, e)
+    out["seconds"] = round(time.perf_counter() - t0, 2)
+    where = where_text(ex)
+    line = (f"V1 plays the movie itself (extras\\media\\{movie_name}, "
+            f"{'a hard link: no extra space' if how in ('hardlink', 'same') else 'a copy'}); A1 plays "
+            f"raw_stereo.wav (stereo, made to the movie's frames) -- the run analysed only the piece {where} "
+            f"(cut in {ex.cut_seconds:.0f} s, deleted now)")
+    out.update(line=line, where=where, movie_name=movie_name)
+    try:
+        rep = out_dir / "report.md"
+        if rep.is_file():
+            with open(rep, "a", encoding="utf-8") as fh:
+                fh.write(f"\n\n## Piece of the movie (day 14)\n\n- The run analysed the piece {where} (frames "
+                         f"{ex.k0}-{ex.k0 + ex.frames - 1} of the movie's {ex.movie_frames}), cut by stream copy "
+                         f"where the sound check found the place ({', '.join(_clock(t) for t in ex.places[:4])})."
+                         f"\n- RAW times and frames in this report count from the piece's start: add "
+                         f"{_clock(ex.t0)} ({ex.k0} frames) for the movie's.\n- {line}.\n")
+    except OSError:
+        pass
     return out
+
+
+def finish(ctx: Any) -> dict:
+    """The end of a run that analysed a piece (module docstring): ``move_run`` on the run folder -- 1_edit.xml and the
+    edits in extras/ moved onto the movie, A1's raw_stereo.wav made to the movie's frames, the movie linked into the
+    run's media, extras/excerpt.json written, the piece deleted. Everything is made aside and checked first; if
+    anything fails, nothing is changed: the edit keeps playing the piece (kept in the run's media), a warning says so
+    and extras/excerpt.json records why (the app shows it as a note). Never raises.
+    Run 19: 1_edit.xml has the channel's song on A2 by now (music.apply runs after S9); until run 19 the item check
+    counted it as "doubled audio" with A1, so every run with a song (SceneProof since night 15, every channel since
+    run 18) kept playing the piece -- and the movie's link it had made stayed next to it, unused."""
+    ex = getattr(ctx, "excerpt", None)
+    if ex is None:
+        return {}
+    cfg = ctx.cfg
+    pic = ((getattr(ctx, "edit_media", None) or {}).get("picture") or {}).get("path")
+    plays = Path(pic) if pic else None
+    conf = Path(ctx.raw_conform.path) if getattr(ctx, "raw_conform", None) is not None else None
+    try:
+        out = move_run(ex, Path(cfg.deliver), Path(cfg.out), Path(cfg.media_dir), plays,
+                       tuple(p for p in (conf,) if p is not None))
+    except Exception as e:  # noqa: BLE001 - the edit keeps playing the piece
+        name = plays.name if plays is not None and plays.exists() else PIECE_NAME
+        log.error("piece of the movie: 1_edit.xml could not be moved onto the movie (%s: %s) -- it plays only the "
+                  "piece %s (extras\\media\\%s)", type(e).__name__, e, where_text(ex), name)
+        ctx.warn(f"1_edit.xml plays only the piece of the movie the run analysed ({where_text(ex)}), not the movie "
+                 f"itself ({e})")
+        out = {"moved": False, "error": f"{type(e).__name__}: {e}", "plays": name, "where": where_text(ex)}
+        if isinstance(getattr(ctx, "edit_media", None), dict):
+            ctx.edit_media["line"] = (f"V1 plays only the piece of the movie the run analysed ({out['where']}, "
+                                      f"extras\\media\\{name}): it could not be moved onto the movie itself")
+        try:
+            (Path(cfg.out) / INFO_NAME).write_text(json.dumps({**ex.to_dict(), "moved": out}, indent=1, default=str),
+                                                   encoding="utf-8")
+        except OSError:
+            pass
+        return out
+    if isinstance(getattr(ctx, "edit_media", None), dict):
+        ctx.edit_media["line"] = out["line"]         # (the end summary says what 1_edit.xml plays now)
+    log.info("piece of the movie: 1_edit.xml now plays the movie itself (extras\\media\\%s, %s) -- every RAW clip "
+             "at its frame + %d%s; A1 plays raw_stereo.wav made to the movie's frames; the piece deleted (%.1f s)",
+             out["movie_name"], "a hard link" if out["placed"] in ("hardlink", "same") else "a copy", ex.k0,
+             "" if out["exact"] else " (rounded to the nearest frame of a sped-up clip)", out["seconds"])
+    ctx.dlog.record("premiere", "excerpt_moved", **{k: v for k, v in out.items() if k != "check"},
+                    check=out.get("check"))
+    return out
+
+
+def failed_move(run_dir: str | os.PathLike) -> dict | None:
+    """Run 19: extras/excerpt.json of a run whose edit could not be moved onto the movie (it plays only the piece):
+    {where, plays, error}; None for any other run."""
+    d = Path(run_dir)
+    for p in (d / "extras" / INFO_NAME, d / INFO_NAME):
+        if p.is_file():
+            try:
+                info = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+            mv = info.get("moved") if isinstance(info, dict) else None
+            return mv if isinstance(mv, dict) and mv.get("moved") is False and mv.get("error") else None
+    return None
 
 
 def _clock(s: float) -> str:

@@ -6083,7 +6083,10 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
     out - in equal to its length on the sequence x its speed (exactly at 100 %, within a frame otherwise), in / out
     inside its media's length (its <duration>), and no overlap with the items next to it. An item joined by a
     transition (start or end -1) runs from / to the transition's edge for its media and to its cut point on the
-    track. Returns one line per broken item (none: []); Premiere skips such an item ("invalid start/end")."""
+    track. Returns one line per broken item (none: []); Premiere skips such an item ("invalid start/end").
+    Run 19: the channel's song (music.py, its clips' file ``file-music``) plays UNDER the voice on purpose -- it is
+    never "doubled audio" with A1; its clips only must not overlap each other."""
+    from .music import FILE_ID as MUSIC_FILE_ID
     root = ET.parse(str(xml_path)).getroot()
     seq = root.find("sequence")
     if seq is None:
@@ -6095,6 +6098,7 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
         r = int(round(float(seq_rate)))
         return f"{f // (3600 * r):02d}:{f // (60 * r) % 60:02d}:{f // r % 60:02d}:{f % r:02d}"
     heard: list[tuple[int, int, str]] = []           # every audio item: two never play at the same moment
+    song: list[tuple[int, int, str]] = []            # the song's clips (under the voice): not each other
     for kind in ("video", "audio"):
         for n, track in enumerate(seq.findall(f"media/{kind}/track"), start=1):
             label = f"{kind[0].upper()}{n}"
@@ -6128,7 +6132,9 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
                 if not s_cut < e_cut:
                     out.append(f"{where}: start {s_cut} is not before end {e_cut}")
                     continue
-                spans.append((s_cut, e_cut, where))
+                f_el = e.find("file")
+                (song if kind == "audio" and f_el is not None and f_el.get("id") == MUSIC_FILE_ID
+                 else spans).append((s_cut, e_cut, where))
                 if e.tag == "generatoritem":
                     continue
                 if not a < b:
@@ -6152,7 +6158,8 @@ def premiere_item_problems(xml_path: str | os.PathLike) -> list[str]:
                     out.append(f"{where}: in {a} before the start of its media")
             if kind == "video":
                 out += _overlaps(spans, tc, "")
-    return out + _overlaps(heard, tc, " (doubled audio: two audio clips at the same moment)")
+    return (out + _overlaps(heard, tc, " (doubled audio: two audio clips at the same moment)")
+            + _overlaps(song, tc, ""))
 
 
 def _overlaps(spans: list[tuple[int, int, str]], tc: Any, what: str) -> list[str]:
