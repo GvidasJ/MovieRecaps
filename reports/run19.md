@@ -152,26 +152,28 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 
 ## Task 6 -- the check-all + learn by yourself
 
-**How it ran:** every case of run 18's check-all again (its caches on D:, `D:\mr_checkall`), from a frozen copy of today's tool (`work\snap19b`: the code of tasks 1-5 with its caption word lists), two at a time at BelowNormal -- a third would not fit in the memory (one case's full-resolution check alone held 34 GB; Premiere -- my own test's, I found later -- held 17 GB). I started it early (08:21, in the background, while I built tasks 3-5) because it takes hours. My first frozen copy (08:21) missed the caption word lists (allowlist, glossary, censor list, action examples) next to the code; 3 cases had made their captions without them: mik1 came out exactly as in run 18 anyway, video41 and video43 run again from the right copy (task 6 of `suggestions.md`: the check-all should freeze its own copy).
+**How it ran:** every case of run 18's check-all again (its caches on D:, `D:\mr_checkall`), from a frozen copy of today's tool (`work\snap19b`: the code of tasks 1-5 with its caption word lists), two at a time at BelowNormal -- a third would not fit in the memory (one case's full-resolution check alone held 34 GB; Premiere -- my own test's, I found later -- held 17 GB). I started it early (08:21, in the background, while I built tasks 3-5) because it takes hours. My first frozen copy (08:21) missed the caption word lists (allowlist, glossary, censor list, action examples) next to the code; 3 cases had made their captions without them: mik1 came out exactly as in run 18 anyway, video41 ran again from the right copy (video43 did not finish: below) (task 6 of `suggestions.md`: the check-all should freeze its own copy).
 
 <!-- CHECKALL -->
-**So far (11:05): 27 of run 18's 33 cases ran again -- all PASS, and every score exactly as in run 18** (captions, word errors, cuts, framing): nothing in tasks 1-2 changed a result, and nothing broke (every XML check passes with the new sound, the song is never "doubled audio"). Most cases took 2-8 minutes (their analysis comes from the cache). Still running: video19, then the new video44 and sc22, then video39, flkoick1, video41, the new video46 and video45, and video43 last. "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
+**In short: 32 of run 18's 33 cases ran again -- all PASS, every score exactly as in run 18** (captions, word errors, cuts, framing): nothing in tasks 1-2 changed a result, and nothing broke (every XML check passes with the new sound; the song is never "doubled audio"). **The 5 new cases all PASS** (their first analysis: 13 to 89 minutes). **video43 did not finish** today: its full-resolution check takes about 3 hours, and it had to give way twice -- to the caption fix's test and to the end of the day (it passed in run 18; nothing in tasks 1-2 is particular to it). Most old cases took 2-8 minutes (their analysis comes from the cache). The rows from 12:17 on (flkoick1, video41, video45, video46) ran on the final code with the caption fix -- the old ones with exactly run 18's scores there too. video19, video4, video020, video3, flkoick1 and video41 end with the tool's own strict "result: FAIL" -- an uncertain segment among the recreation criteria the check-all doesn't score -- exactly as in run 18; their hard checks pass. e1's row is from before the caption fix (with it: 2/78 captions, 82 % word errors -- task 6 below). "hard": the deliverables and every XML check; captions: exactly like yours / your captions; word errors: %; cuts: your cuts the tool makes; framing: your clips framed as you did (within 40 px).
 
 | video | run 18: hard / captions / word errors / cuts / framing | run 19 | time |
 |---|---|---|---|
 | chocolate-fixed | PASS / 7/22 / 16.67 / 1/3 / 5/5 | PASS / 7/22 / 16.67 / 1/3 / 5/5 | 5m44s |
 | e1-fixed | -- (new) | PASS / 0/78 / 91.72 / 10/14 / 26/33 | 60m02s |
+| flkoick1-fixed | PASS / 0/15 / 52.0 / 0/3 / 4/5 | PASS / 0/15 / 52.0 / 0/3 / 4/5 | 3m51s |
 | laptop004-fixed | PASS (hard checks) | PASS (hard checks) | 3m27s |
 | laptop010-fixed | PASS / 10/34 / 7.69 / 1/9 / 11/13 | PASS / 10/34 / 7.69 / 1/9 / 11/13 | 1m48s |
 | laptop013-fixed | PASS / 12/22 / 13.33 / 1/5 / 2/6 | PASS / 12/22 / 13.33 / 1/5 / 2/6 | 2m16s |
 | mik1-fixed | PASS / 8/69 / 13.33 / 8/13 / 2/15 | PASS / 8/69 / 13.33 / 8/13 / 2/15 | 37m18s |
+| sc22-fixed | -- (new) | PASS / 2/34 / 22.86 / 2/5 / 4/11 | 68m34s |
 | spiderman-school | PASS (hard checks) | PASS (hard checks) | 4m51s |
 | video017-fixed | PASS (hard checks) | PASS (hard checks) | 2m29s |
 | video020-fixed | PASS (hard checks) | PASS (hard checks) | 5m11s |
 | video11-fixed | PASS / 14/23 / 15.38 / 2/3 / 2/8 | PASS / 14/23 / 15.38 / 2/3 / 2/8 | 2m59s |
 | video14-fixed | PASS / 21/42 / 6.0 / 1/3 / 4/10 | PASS / 21/42 / 6.0 / 1/3 / 4/10 | 4m41s |
 | video15-fixed | PASS / 7/22 / 33.93 / 3/8 / 12/21 | PASS / 7/22 / 33.93 / 3/8 / 12/21 | 3m34s |
-| video19-fixed | PASS / 6/33 / 32.79 / 4/8 / 1/10 | (not finished) |  |
+| video19-fixed | PASS / 6/33 / 32.79 / 4/8 / 1/10 | PASS / 6/33 / 32.79 / 4/8 / 1/10 | 13m00s |
 | video2 | PASS (hard checks) | PASS (hard checks) | 3m52s |
 | video24-fixed | PASS / 14/42 / 42.39 / 4/7 / 1/14 | PASS / 14/42 / 42.39 / 4/7 / 1/14 | 3m45s |
 | video3 | PASS (hard checks) | PASS (hard checks) | 2m39s |
@@ -182,13 +184,15 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 | video36-fixed | PASS / 0/32 / 27.16 / 0/3 / 6/6 | PASS / 0/32 / 27.16 / 0/3 / 6/6 | 3m05s |
 | video37-fixed | PASS / 3/44 / 11.49 / 3/7 / 2/11 | PASS / 3/44 / 11.49 / 3/7 / 2/11 | 7m29s |
 | video38-fixed | PASS / 8/33 / 43.04 / 2/6 / 5/19 | PASS / 8/33 / 43.04 / 2/6 / 5/19 | 3m47s |
+| video39-fixed | PASS / 9/38 / 3.8 / 2/6 / 4/8 | PASS / 9/38 / 3.8 / 2/6 / 4/8 | 6m37s |
 | video4 | PASS (hard checks) | PASS (hard checks) | 6m51s |
 | video40-fixed | PASS / 1/48 / 37.5 / 1/9 / 2/14 | PASS / 1/48 / 37.5 / 1/9 / 2/14 | 8m07s |
-| video41-fixed | PASS / 6/46 / 29.73 / 2/6 / 8/17 | (not finished) |  |
+| video41-fixed | PASS / 6/46 / 29.73 / 2/6 / 8/17 | PASS / 6/46 / 29.73 / 2/6 / 8/17 | 12m00s |
 | video42-fixed | PASS / 6/38 / 27.54 / 4/9 / 4/13 | PASS / 6/38 / 27.54 / 4/9 / 4/13 | 2m14s |
 | video43-fixed | PASS / 6/36 / 24.68 / 0/0 / 0/3 | (not finished) |  |
-| video44-fixed | -- (new) | (not finished) |  |
-| video46-fixed | -- (new) | (not finished) |  |
+| video44-fixed | -- (new) | PASS / 6/25 / 21.15 / 2/4 / 9/11 | 17m26s |
+| video45-fixed | -- (new) | PASS / 3/32 / 14.47 / 3/5 / 5/12 | 12m55s |
+| video46-fixed | -- (new) | PASS / 2/59 / 38.33 / 4/16 / 17/19 | 89m11s |
 | video6-fixed | PASS / 17/32 / 8.33 / 5/7 / 9/9 | PASS / 17/32 / 8.33 / 5/7 / 9/9 | 6m48s |
 | video8-fixed | PASS / 0/16 / 9.09 / 1/4 / 4/11 | PASS / 0/16 / 9.09 / 1/4 / 4/11 | 1m36s |
 | video9-fixed | PASS / 4/18 / 44.44 / 3/4 / 4/4 | PASS / 4/18 / 44.44 / 3/4 / 4/4 | 4m38s |
@@ -226,6 +230,7 @@ What I tried -- **offline**, on every case's newest run, scored exactly like the
 - **The search fills the strip only at its end** (task 3): the tool hands over its finds when the search is over; changing that changes the search step's code (every saved analysis redone once) -- in `suggestions.md`.
 - **No caption, cut or framing rule learned today** (task 6): the four caption rules I tried each made at least one case worse; framing differences are about who is centred.
 - **Where neither speech model hears anything, the captions are `*...*`** even when the competitor shows its captions on screen (e1's skip is fixed; a stretch no model hears at all is not) -- in `suggestions.md`.
+- **An app test can crash Qt while the check-all fills the graphics card** (`test_find_night15`'s real window, night 15's code): three times at 13:36-13:42, never with the card free -- a test-teardown race, not today's code.
 - From run 18, unchanged: the general pause check is built but OFF (it made video37 worse); captions numbers move by themselves by ±2-5 on any re-run (re-transcription).
 
 ## What to do by hand in Premiere
@@ -285,3 +290,4 @@ git pull
 - After task 5 and the tries of task 6 (10:35-10:48, BelowNormal, the graphics card hidden, the tool's code as pushed -- the hear-again try taken out again): **tool 1679 passed, 0 failed** (102 skipped: the GPU tests, run with the card at the end).
 - With task 6's caption fix (12:17-12:31, BelowNormal, the graphics card hidden): **tool 1684 passed, 0 failed** (5 new: `test_run19_heard_again.py` -- a skipped stretch is found, heard again by the main model without the hints and filled; nothing skipped -> nothing asked, nothing changed; a made-up phrase or nothing heard adds nothing; the whole caption step with the hints making it skip).
 - With the receipt's flash fix (12:34-12:40, BelowNormal, the graphics card hidden, the torrent tests apart): **app 1266 passed, 0 failed** (2 skipped; 1 new: a flash the last step removed is no flash on the receipt).
+- **The final run (on the code as pushed):** tool **1684 passed, 0 failed** (13:24-13:35, the graphics card hidden), then its GPU test files with the card: **57 passed** (14:05); app **1266 passed, 0 failed** (14:02-14:05); the app's torrent tests apart: **58 passed**. On the way, two things under load (both old code, not today's): a lock test that compares minutes failed once when the minute turned mid-test (now it reads the lock's own time: fixed); and three app runs at 13:36-13:42 crashed in Qt's teardown of the real-window test of night 15's Ctrl+F (`test_find_night15`) while the check-all held the graphics card at 99 % -- that test passes alone, in its group, and in the whole run with the card free (likely: the window's start asks `nvidia-smi`, slow under that load, and its thread was still running when the test closed the window -- the crash dumps show such threads; not proven).
