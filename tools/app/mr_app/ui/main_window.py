@@ -195,6 +195,10 @@ class MainWindow(QMainWindow):
             self._tidy_timer = QTimer(self)
             self._tidy_timer.timeout.connect(self.tidy)
             self._tidy_timer.start(10 * 60_000)
+            QTimer.singleShot(45_000, self.clean_cache)   # run 19: the tool's old cache files (the laptop: no D:)
+            self._cache_timer = QTimer(self)
+            self._cache_timer.timeout.connect(self.clean_cache)
+            self._cache_timer.start(60 * 60_000)
         self._publishing: dict[str, int] = {}             # folders being copied to the shared folder right now
         try:                                              # (a rename waits for the whole copy)
             from ..core import renames
@@ -457,6 +461,26 @@ class MainWindow(QMainWindow):
             zips, moved = r or ([], [])
             if moved:
                 self.toast(f"{len(moved)} render{'s' if len(moved) != 1 else ''} put in renders\\<day> folders")
+        BG.call(work, done, lambda _e: None)
+
+    def clean_cache(self) -> None:
+        """Run 19 (task 4), in the background: the tool's cache files nobody used for a while go (core.cache_clean:
+        on a computer without D:, or with the cache's drive low) -- unless Settings' "Clean the cache" is Off, and
+        never while a MovieRecaps run is going (it may be reading one); what it freed is in Settings."""
+        if not getattr(self.settings, "cache_clean", True):
+            return
+
+        def work():
+            from ..core import cache_clean as CC
+            from ..core import cache_move as CM
+            if CM.busy():
+                return None                               # (a run is going: the next hour)
+            return CC.clean()
+
+        def done(rep) -> None:
+            if rep is not None and rep.files:
+                from ..core.publish import plain_size
+                self.toast(f"The tool's cache: {plain_size(rep.freed)} of old files freed ({rep.why})")
         BG.call(work, done, lambda _e: None)
 
     def find_hub(self) -> None:

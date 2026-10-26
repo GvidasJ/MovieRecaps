@@ -116,6 +116,26 @@ class SettingsDialog(QDialog):
         lrow.addStretch(1)
         g.addLayout(lrow, r, 1)
         r += 1
+        # run 19: the tool's cache cleans itself (the laptop: no D: drive -- its cache grew to 91 GB)
+        g.addWidget(W.label("Clean the cache", "Small"), r, 0)
+        cbox = QVBoxLayout()
+        crow = QHBoxLayout()
+        self.cclean = W.Segmented([("on", "On"), ("off", "Off")],
+                                  "on" if getattr(self.s, "cache_clean", True) else "off")
+        crow.addWidget(self.cclean)
+        crow.addWidget(W.label("by itself, at the start and every hour: on a computer without D:, the tool's cache "
+                               "files not used for 7 days go (under 30 GB free: 2 days) -- never a project or a RAW",
+                               "Dim", wrap=True), 1)
+        cbox.addLayout(crow)
+        try:
+            from ..core import cache_clean as CC
+            last = CC.last().line()
+        except Exception:  # noqa: BLE001
+            last = "has not run yet"
+        self.cclean_line = W.label(f"Last clean: {last}", "Dim", wrap=True, select=True)
+        cbox.addWidget(self.cclean_line)
+        g.addLayout(cbox, r, 1)
+        r += 1
         # goals
         g.addWidget(W.label("Goals", "Small"), r, 0)
         grow = QHBoxLayout()
@@ -298,6 +318,7 @@ class SettingsDialog(QDialog):
         s.upload_check_minutes = int(self.every.value())
         s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
+        s.cache_clean = self.cclean.value == "on"
         look = "classic" if self.look.value == "on" else "mono"
         changed_look = look != getattr(s, "look", "mono")
         s.look = look

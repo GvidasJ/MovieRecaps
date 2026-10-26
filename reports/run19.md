@@ -9,7 +9,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 | 1 | Only ONE RAW per project, the edit plays the whole movie | **done** (film + episode real runs PASS, frame-exact) | nothing for new edits; your old ones: Board -> Clean up -> Yes ("One RAW per project": 19 run folders ready, 4 kept for your r1/r2_POPW projects) |
 | 2 | No temporary extra Volume effects | **done** (the Premiere check: see the task -- it waits for you to be away) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
 | 3 | The live animations | **done** (watched on a real run; pictures in `run19_look`) | nothing: the running video moves by itself; Settings -> Animations: Off stops the movement |
-| 4 | The laptop cleans its own cache | not started | |
+| 4 | The laptop cleans its own cache | **done** | nothing (on by itself); Settings -> Clean the cache shows what it freed, Off stops it |
 | 5 | Learn the queue | not started | |
 | 6 | The check-all + learn by yourself | not started | |
 
@@ -111,6 +111,15 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 - One fix from the watch: SHOTS FOUND first showed 13 / 13 (a line about the 60 fps planning copy) and then 18 / 18; it now waits for the delivered edit's own count, so a shown number never changes.
 - **Tests:** 8 new (`test_live_run19.py`): the live numbers from a run's files written line by line (and never the run before's decisions); the competitor read from a cached probe too; the wave and the timecode; the bar never goes back and is at once with Animations off; a dot pops; the status types in; the counters roll, the receipt, DONE n; a queue row running then finished (the live parts, then the receipt and OPEN IN PREMIERE).
 
+## Task 4 -- the laptop cleans its own cache (done)
+
+- **What it does** (`core\cache_clean.py`): on a computer **without a D: drive** (the laptop: its `work\cache` stays on C:) the tool's cache files **not used for 7 days** go; when the cache's drive is **below 30 GB free** (any computer), the oldest **not used for 2 days** go too, oldest first, until the drive is back over 30 GB -- the newest always stay. "Used" = the file's last write or read. Only files inside the cache folder (`work\cache`, its link followed) -- never a project, a RAW, a run folder, never a folder link inside the cache. Everything in there is made again by the next run that needs it (it is only slower once).
+- **When:** 45 s after the app starts, then every hour -- but never while a MovieRecaps run or a test session is going (it may be reading one of those files): then the next hour.
+- **Settings -> Clean the cache: On** (the default) / Off, and the last clean's result under it, e.g. "Last clean: 26 Oct 09:04: freed 61.2 GB (2,310 cache file(s); no D: drive: the files not used for 7 days) -- 73.0 GB free now". A clean that freed something also says it in a toast.
+- **On this PC** (checked for real at 09:04): the cache is `D:\mr_cache` with 1,510 GB free -- "nothing to clean (the cache is on D: and D: has room)"; it does not even look at the files. Only if D: itself fell under 30 GB free would it act.
+- **On the laptop:** after `git pull` and opening the app, the first clean (within a minute) removes the cache files older than 7 days -- most of the 91 GB -- and, while C: is under 30 GB free, the ones older than 2 days.
+- **Tests:** 7 new (`test_cache_clean_run19.py`, fake files with fake dates): no D: -> the 7-day files go, the newer ones and a RAW outside stay; a low drive -> the oldest 2-day files first, only as many as needed, never today's; the PC with room -> nothing; a file used since the plan stays (a folder link inside is never followed); the result kept for Settings; this PC's real cache left alone (not even listed); Settings' switch and line.
+
 ## What I decided on my own
 
 1. **Task 1, the link on this computer:** `edit\extras\media\raw.mp4` stays a hard link of your RAW (the same file under a plain name, no extra space), and 1_edit.xml plays it -- I did not make the XML point at your RAW's own file name. Why: Premiere's XML import fails on some names (emoji; your RAWs come from torrents and YouTube), the edit keeps working when you move or delete the RAW in the project folder, and publishing copies only the edit folder (the shared copy then holds the RAW once). Explorer counts the two names twice; the disk doesn't (`fsutil hardlink list <file>` shows both names). Note: in two projects (Guessing Game, Weirdest Car Shopping) the RAW in the project folder is in your Recycle Bin -- deleting it freed nothing, because the edit's `raw.mp4` is that same file.
@@ -121,3 +130,4 @@ All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animatio
 - After task 1 (07:05-07:26, the graphics card hidden, then again with it): **tool 1676 passed, 0 failed**; **app 1244 passed, 0 failed**; the app's torrent tests apart: **58 passed** (one of them failed first only because my test folder's long path made the downloaded file's name too long -- with pytest's usual folder: 58 of 58).
 - After task 2 (07:47-08:19; you came back at about 07:53, so from then on BelowNormal): **tool 1679 passed, 0 failed**; **app 1250 passed, 0 failed**.
 - After task 3 (09:01-09:05, BelowNormal): **app 1264 passed, 0 failed** (the tool unchanged since task 2: 1679 passed).
+- After task 4: the app suite above already held its 7 tests (1264 passed, 0 failed); the cleaner checked for real on this PC (nothing to do).

@@ -47,6 +47,7 @@ class Settings:
     torrent_keep_sharing: bool = False  # "Keep sharing after a download" (off: sharing stops when it is finished)
     console_open: bool = True          # night 15: the queue's "What it's doing now" panel open (remembered)
     look: str = "mono"                 # run 18: "mono" (Mono + red) | "classic" (Settings -> Classic look)
+    cache_clean: bool = True           # run 19: the tool's old cache files go by themselves (core.cache_clean)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -100,7 +101,7 @@ def _valid(name: str, v: Any, default: Any) -> Any:
     if name == "machine":
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
-    if name in ("animations", "intro", "torrent_keep_sharing", "console_open"):
+    if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean"):
         return v if isinstance(v, bool) else default
     if name == "daily_goal":
         return _int(v, default, 1, 1000)
