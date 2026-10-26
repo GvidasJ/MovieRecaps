@@ -698,12 +698,19 @@ class VideoRow(W.Card):
         self.cells: dict[str, StepCell] = {}
         self.lay.addLayout(self.steps_row)
         self._build_steps()
-        self.pipe = self.blocks = None
+        self.pipe = self.blocks = self.counters = self.wave = self.cov = self.receipt = None
         if theme.MONO_LOOK:                      # run 18: the steps as dots and lines, the running step's blocks
             from ..ui import mono_parts as MP
             self.pipe, self.blocks = MP.PipelineDots(), MP.BlockBar()
             self.lay.addWidget(self.pipe)
             self.lay.addWidget(self.blocks)
+            # run 19: its edit live (the queue job's core.live numbers), then the finish receipt
+            self.counters, self.wave, self.cov, self.receipt = (MP.RollCounters(), MP.WaveScan(),
+                                                                MP.CoverageStrip(), MP.Receipt())
+            self.cov.hide()
+            self.receipt.premiere.connect(lambda: self.page.open_premiere(self.item))
+            for w in (self.counters, self.wave, self.cov, self.receipt):
+                self.lay.addWidget(w)
         self.pair = W.label("", "Dim", wrap=True, select=True)
         self.lay.addWidget(self.pair)
         self.extras = QVBoxLayout()                 # the torrent's file picker / progress card, while there
@@ -937,6 +944,25 @@ class VideoRow(W.Card):
             self.blocks.hide()
         if it.state == FAILED:
             self.pill.set("FAILED", (theme.RED, theme.RED_SOFT, theme.RED_LINE))
+        lv = (getattr(it.job, "live", None) if it.job is not None else None) or {}
+        editing = run in ("edit", "cuts") and bool(lv)          # run 19: the edit live (core.live)
+        if editing:
+            frame = (lv.get("placed"), lv.get("fps")) if lv.get("placed") else None
+            self.counters.set(lv.get("shots"), lv.get("captions"), frame, lv.get("frames_found"))
+            self.counters.show()
+            self.wave.set(lv.get("wave") or [], lv.get("duration") or 0.0, lv.get("scan"), lv.get("coverage") or [])
+            self.cov.set(lv.get("duration") or 0.0, lv.get("coverage") or [], live=True)
+        else:
+            self.counters.hide()
+            self.wave.hide()
+        fin = lv.get("final") if isinstance(lv.get("final"), dict) else None
+        if it.state == DONE and fin:
+            self.cov.set(lv.get("duration") or 0.0, lv.get("coverage") or [])
+            self.receipt.set(dict(fin, label=(it.result or {}).get("label") or fin.get("label")), shown_before=False)
+        else:
+            self.receipt.hide()
+            if not editing:
+                self.cov.hide()
 
     def _pill(self) -> tuple[str, tuple[str, str, str] | None]:
         it = self.item
@@ -1166,7 +1192,13 @@ class DownloadPage(QWidget):
         self._form(lay)
         lay.addSpacing(10)
         self.count = W.label("", "Small")
-        lay.addWidget(W.SectionHeader("Videos", [self.count]))
+        self.done_count = None
+        right: list = [self.count]
+        if theme.MONO_LOOK:                                  # run 19: DONE n, ticking up when a video finishes
+            from ..ui import mono_parts as MP
+            self.done_count = MP.DoneCount()
+            right.append(self.done_count)
+        lay.addWidget(W.SectionHeader("Videos", right))
         self.list = RowList()
         self.list.inserted.connect(lambda _w: scroll_to_top(self))      # a new row -> the list's top (as the queue)
         lay.addWidget(self.list)
@@ -2534,6 +2566,9 @@ class DownloadPage(QWidget):
         bits = [f"{n} video(s)"] + ([f"{busy} running"] if busy else []) + ([f"{wait} waiting for you"] if wait else [])
         self.count.setText("  ·  ".join(bits) if n else "")
         self.empty.setVisible(not self.items)
+        if self.done_count is not None:
+            self.done_count.set(sum(1 for i in self.items if i.state == DONE and (i.result or {}).get(
+                "label", "PASS") in ("PASS", "OK with a note", "Cuts ready")))
 
     # -- run 18 (task 4): the list stays when the app closes (core.rows_keep) --
     def closing(self) -> None:

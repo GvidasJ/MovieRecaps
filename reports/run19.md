@@ -8,7 +8,7 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 |---|---|---|---|
 | 1 | Only ONE RAW per project, the edit plays the whole movie | **done** (film + episode real runs PASS, frame-exact) | nothing for new edits; your old ones: Board -> Clean up -> Yes ("One RAW per project": 19 run folders ready, 4 kept for your r1/r2_POPW projects) |
 | 2 | No temporary extra Volume effects | **done** (the Premiere check: see the task -- it waits for you to be away) | Open in Premiere, Ctrl+S, as before; the row says when the sound isn't set yet |
-| 3 | The live animations | not started | |
+| 3 | The live animations | **done** (watched on a real run; pictures in `run19_look`) | nothing: the running video moves by itself; Settings -> Animations: Off stops the movement |
 | 4 | The laptop cleans its own cache | not started | |
 | 5 | Learn the queue | not started | |
 | 6 | The check-all + learn by yourself | not started | |
@@ -84,6 +84,33 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 - **Real edits made with today's code**, one per channel (`work\t19\prem\...`, your inputs hard-linked): every A1 clip has only Volume 0 dB + Panner 0 and its gain in its comment, XML AUDIO passes.
 - **The Premiere test:** <!-- PREMIERE2 -->not run yet -- you came back at about 07:53 (my harness stopped before touching anything) and Premiere is open with your project now; it runs when you are away again and Premiere is closed.
 
+## Task 3 -- the live animations (done)
+
+All in the Mono + red look, calm (no sound, no glow), and Settings -> **Animations: Off** makes every change happen at once. Every number is the run's own -- read from the files the tool writes anyway (`core\live.py`), so **nothing in the tool or its caches changed**: the tool already wrote all of it live, the app just never read it.
+
+| what you see | where it moves | from which real numbers |
+|---|---|---|
+| **coverage strip fills live** | dark grey "not searched yet"; each piece fades in where it is: green found, amber unsure; at the end red where not in the RAW | every competitor frame the search finds (the decision log's `anchor` records: frame, RAW frame, score -- green from score 0.90), then the cut list's own shots |
+| **scan line over the sound wave** | the competitor's sound as a small wave; a thin red line sweeps it with the search (each pass); the wave turns green where found, red not in the RAW | the search's own counter (`search 1/2: 110/262 tasks done`), the found frames, the competitor's sound (240 peaks) |
+| **pipeline dots pop** | a short scale tick on the dot of a step that just finished | the row's own steps (download, convert, edit ... done) |
+| **status types itself in** | the step's plain name letter by letter when the step changes (the % and time left update as before) | the run's stage line (`== S5.2 visual search` -> "Finding each competitor shot in the RAW") |
+| **block bar fills smoothly** | glides to each new share, the last block part-filled, never back while running | the honest estimate (night 15) |
+| **big rolling counters** | SHOTS FOUND `23` while it searches, `13 / 13` once the cuts are decided; CAPTIONS; FRAME `00:00:26:09` while it places frames -- each rolls to its new value | shots: the pieces of the RAW the found frames make, then the edit's clips (+ the stretches not in the RAW as the total); captions: `captions: 29 captions`; frame: the furthest competitor frame placed (the `track` records) |
+| **the finish** | the status flips to **✓ PASS**; a small dashed **receipt**: ✓ PASS · 13 clips · 29 captions · 0 flashes · 100 % found in the RAW · 24 min 03 s · READY FOR PREMIERE › (click it: Open in Premiere); the row's button becomes the red **OPEN IN PREMIERE**; **DONE n** in the Videos header rolls up by one | the run's last line (`1_edit.xml: 13 clips ... 29 captions`), the cut list, the report's XML FLASH check, the time |
+
+- The New video row shows the same parts while its edit runs in the queue, and its receipt at the end.
+- A row from before (the app opened again) gets its receipt read from its run folder.
+- **The real test** (08:48-08:59, you were away): the app's own queue page, drawn by Qt offscreen (never your screen), with a row following a REAL run -- the check-all's mik1 (Reno 911, 42 s competitor) -- fed exactly as the queue's job thread feeds a row, every second, 620 times, until the run's end. (A third heavy run of my own did not fit: with the two check-all streams and your open Premiere, free memory fell to 1.6 GB and I stopped my run at once; so I watched a run that was going anyway.) What moved, and from which numbers:
+  - the status typed itself in at each step: "Writing the captions" (08:48:30) -> "Putting on the speed and the frame" (08:49:29) -> "Double-checking every cut against the competitor" (08:50:05);
+  - the bar glided from 71 % to 99 % in 620 small steps and never went back;
+  - SHOTS FOUND **18 / 18** (the edit's 18 clips, no stretch outside the RAW), CAPTIONS **59** (`captions: 59 captions`), FRAME **00:00:42:08** (the last of the 1268 competitor frames placed at 29.97 fps);
+  - the strip and the wave: 23 pieces from the cut list (green, one amber unsure piece at 17 s), the competitor's sound as 240 bars coloured the same;
+  - at the end: ✓ PASS, the receipt "✓ PASS · 18 clips · 59 captions · 0 flashes · 100 % found in the RAW · 37 min 19 s · READY FOR PREMIERE ›", the red OPEN IN PREMIERE; the dot of EDIT and DONE turned green with their tick.
+  - Not seen live in this watch: the search itself (the scan line sweeping and the strip filling piece by piece) -- mik1's search had ended before I attached (and came from its cache). The same reading on a real search's files (the Strategic Team Pick episode's first run, 10-24) gives the search counter (`search 2/2: 254/262`), 523 found frames and their pieces; I watch it live on task 5's first new case (its search is not cached).
+- **Pictures** (`reports\run19_look\`, the same moments drawn by run 18's app (`*_before.png`, from git) and by today's (`*_after.png`)): `2_captions`, `3_checking` (the counters, the wave, the strip), `4_finished` (the receipt, ✓ PASS, OPEN IN PREMIERE); `watch_mik1.jsonl` has every second's numbers.
+- One fix from the watch: SHOTS FOUND first showed 13 / 13 (a line about the 60 fps planning copy) and then 18 / 18; it now waits for the delivered edit's own count, so a shown number never changes.
+- **Tests:** 8 new (`test_live_run19.py`): the live numbers from a run's files written line by line (and never the run before's decisions); the competitor read from a cached probe too; the wave and the timecode; the bar never goes back and is at once with Animations off; a dot pops; the status types in; the counters roll, the receipt, DONE n; a queue row running then finished (the live parts, then the receipt and OPEN IN PREMIERE).
+
 ## What I decided on my own
 
 1. **Task 1, the link on this computer:** `edit\extras\media\raw.mp4` stays a hard link of your RAW (the same file under a plain name, no extra space), and 1_edit.xml plays it -- I did not make the XML point at your RAW's own file name. Why: Premiere's XML import fails on some names (emoji; your RAWs come from torrents and YouTube), the edit keeps working when you move or delete the RAW in the project folder, and publishing copies only the edit folder (the shared copy then holds the RAW once). Explorer counts the two names twice; the disk doesn't (`fsutil hardlink list <file>` shows both names). Note: in two projects (Guessing Game, Weirdest Car Shopping) the RAW in the project folder is in your Recycle Bin -- deleting it freed nothing, because the edit's `raw.mp4` is that same file.
@@ -93,3 +120,4 @@ Started 06:34 (PC; you had just written the prompt, then you were away from abou
 
 - After task 1 (07:05-07:26, the graphics card hidden, then again with it): **tool 1676 passed, 0 failed**; **app 1244 passed, 0 failed**; the app's torrent tests apart: **58 passed** (one of them failed first only because my test folder's long path made the downloaded file's name too long -- with pytest's usual folder: 58 of 58).
 - After task 2 (07:47-08:19; you came back at about 07:53, so from then on BelowNormal): **tool 1679 passed, 0 failed**; **app 1250 passed, 0 failed**.
+- After task 3 (09:01-09:05, BelowNormal): **app 1264 passed, 0 failed** (the tool unchanged since task 2: 1679 passed).

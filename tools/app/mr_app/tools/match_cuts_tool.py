@@ -137,6 +137,16 @@ class JobThread(QThread):
                 pass
 
         honest = P.Honest(self.estimate)      # night 15: smoothed range, never backwards, "seems stuck"
+        live = None
+        try:                                  # run 19: the live numbers the row's animations show (core.live)
+            from ..core.live import Live
+            cmd = [str(c) for c in (getattr(self.run_, "cmd", None) or [])]
+            work = cmd[cmd.index("--work") + 1] if "--work" in cmd[:-1] else None
+            live = Live(self.run_.run_dir, work, self.job.competitor)
+            live.load_wave()
+            self.job.live = live.snapshot()
+        except Exception:  # noqa: BLE001 - no live parts, the run goes on
+            live = None
         con = None
         try:                                  # night 15: "What it's doing now"
             from match_cuts import run_folders
@@ -158,6 +168,12 @@ class JobThread(QThread):
                 bits.append(P.STUCK_TEXT)
             elif h["left"]:
                 bits.append(h["left"])
+            if live is not None:
+                try:
+                    if live.poll():
+                        self.job.live = live.snapshot()
+                except Exception:  # noqa: BLE001 - a help, never a stop
+                    pass
             self.progress.emit(self.job.id, " · ".join(bits), h["share"])
             if con is not None:
                 try:
@@ -178,6 +194,12 @@ class JobThread(QThread):
         if self._decode_fix(res):            # day 16: the RAW converted once and the video run again
             self._run(flow, lock)
             return
+        if live is not None:                 # run 19: the finish receipt's numbers
+            try:
+                live.finish({**res, "seconds": res.get("seconds") or round(self.run_.elapsed())})
+                self.job.live = live.snapshot()
+            except Exception:  # noqa: BLE001
+                pass
         if self.job.project is not None:
             try:
                 from ..core import projects as PJ
@@ -524,18 +546,26 @@ class JobRow(QFrame):
         self._pick_files: list[Path] = []
         self.bar = W.GlideBar(3)
         lay.addWidget(self.bar)
-        self.pipe = self.blocks = self.cov = None
+        self.pipe = self.blocks = self.cov = self.wave = self.counters = self.receipt = None
         if theme.MONO_LOOK:                      # run 18 (Mono + red): the steps as dots, a bar of blocks, and where
             from ..ui import mono_parts as MP    # the competitor was found (a finished or failed edit)
             self.bar.hide()
             self.pipe, self.blocks, self.cov = MP.PipelineDots(), MP.BlockBar(), MP.CoverageStrip()
+            # run 19: the running video live -- the counters, the competitor's sound with the search's line, the
+            # strip filling as it finds (core.live), then the finish receipt
+            self.counters, self.wave, self.receipt = MP.RollCounters(), MP.WaveScan(), MP.Receipt()
+            self.receipt.premiere.connect(self._open_premiere)
             self.cov.hide()
             self._cov_of = None
-            for w in (self.pipe, self.blocks, self.cov):
+            for w in (self.pipe, self.blocks, self.counters, self.wave, self.cov, self.receipt):
                 lay.addWidget(w)
         stp = QHBoxLayout()
         self.step = W.mono_label("", theme.MUTED, 12)
         self.step.setWordWrap(True)
+        self.typer = None
+        if theme.MONO_LOOK:                      # run 19: the status types itself in when the step changes
+            from ..ui import mono_parts as MP
+            self.typer = MP.Typer(self.step)
         self.mode_txt = W.mono_label("", theme.MUTED, 12)
         stp.addWidget(self.step, 1)
         stp.addWidget(self.mode_txt, 0, Qt.AlignmentFlag.AlignTop)
@@ -925,6 +955,8 @@ class JobRow(QFrame):
         self.remove.setEnabled(j.state != J.RUNNING)
         self.mode_txt.setText("Fast" if j.mode == J.FAST else "Thorough")
         res = j.result or {}
+        if self.typer is not None and j.state != J.RUNNING:
+            self.typer.stop()
         self.step.setTextFormat(Qt.TextFormat.PlainText)
         if j.state == J.READY and checking:
             prep = getattr(j, "preparing", "")
@@ -952,6 +984,11 @@ class JobRow(QFrame):
             elif getattr(j, "pausing", False):
                 self.step.setTextFormat(Qt.TextFormat.PlainText)
                 self.step.setText("pausing ...")
+            elif self.typer is not None:         # run 19: the step's plain name types itself in when it changes
+                text = j.progress or "starting"
+                head, sep, rest = text.partition(" · ")
+                self.typer.set(head, (esc(sep + rest) if sep else "") + (
+                    f"&nbsp;&nbsp;<span style='color:{theme.DIM}; font-size:9pt'>{esc(code)}</span>" if code else ""))
             else:                                # night 15: the plain name, its S-number small and grey after it
                 self.step.setTextFormat(Qt.TextFormat.RichText)
                 self.step.setText(esc(j.progress or "starting") + (
@@ -975,6 +1012,11 @@ class JobRow(QFrame):
             self.step.setText("done" + (f" in {took}" if took else "") if lab in R.GOOD else
                               ("stopped by you" if lab == R.STOPPED else "stopped"))
             self.step.setStyleSheet(f"color: {theme.MUTED};")
+            if theme.MONO_LOOK and lab in R.GOOD:      # run 19: the status flips to ✓ PASS
+                self.step.setTextFormat(Qt.TextFormat.RichText)
+                self.step.setText(f"<span style='color:{theme.GREEN}; font-weight:700'>✓ {esc(lab.upper())}</span>"
+                                  + (f"<span style='color:{theme.MUTED}'>&nbsp;&nbsp;done in {esc(took)}</span>"
+                                     if took else ""))
             self.note.setText(R.short(res) if lab not in (R.PASS,) else "")
             if theme.MONO_LOOK:                  # run 18 (Mono + red): a failed row's reason in red
                 self.note.setStyleSheet(f"color: {theme.RED};" if lab not in R.GOOD and lab != R.STOPPED else "")
@@ -1036,12 +1078,49 @@ class JobRow(QFrame):
                 self.pill.set("FAILED" if lab == R.FAIL else lab, (theme.RED, theme.RED_SOFT, theme.RED_LINE))
         else:
             self.blocks.set(float(j.percent or 0.0), MP.WAIT)
-        if j.state in (J.DONE, J.STOPPED) and j.run_dir is not None and self._cov_of != str(j.run_dir):
+        lv = getattr(j, "live", None) or {}
+        running = j.state == J.RUNNING
+        if running and lv:                       # run 19: the live parts, from the run's real numbers (core.live)
+            frame = (lv.get("placed"), lv.get("fps")) if lv.get("placed") else None
+            self.counters.set(lv.get("shots"), lv.get("captions"), frame, lv.get("frames_found"))
+            self.counters.show()
+            self.wave.set(lv.get("wave") or [], lv.get("duration") or 0.0, lv.get("scan"), lv.get("coverage") or [])
+            self.cov.set(lv.get("duration") or 0.0, lv.get("coverage") or [], live=True)
+        else:
+            self.counters.hide()
+            self.wave.hide()
+        fin = lv.get("final") if isinstance(lv.get("final"), dict) else None
+        if j.state in (J.DONE, J.STOPPED) and fin and lv.get("coverage"):
+            self._cov_of = str(j.run_dir)                # (the live strip ends on the cut list's own coverage)
+            self.cov.set(lv.get("duration") or 0.0, lv["coverage"])
+        elif j.state in (J.DONE, J.STOPPED) and j.run_dir is not None and self._cov_of != str(j.run_dir):
             self._cov_of = str(j.run_dir)
             from ..ui import background as BG
             BG.call(lambda rd=j.run_dir: MP.coverage_of(rd), lambda got: self.cov.set(*got), lambda _e: None)
-        elif j.state not in (J.DONE, J.STOPPED):
+            if good and not fin:                         # a row from before (the app opened again): its receipt
+                def build(rd=j.run_dir, r=dict(res)):
+                    from ..core.live import Live
+                    x = Live(rd, None, None)
+                    x.finish(r)
+                    return x.snapshot()
+
+                def got(snap, job=j) -> None:
+                    job.live = snap
+                    self.refresh()
+                BG.call(build, got, lambda _e: None)
+        elif not running and j.state not in (J.DONE, J.STOPPED):
             self.cov.hide()
+        if j.state in (J.DONE, J.STOPPED) and fin:
+            self.receipt.set(dict(fin, label=lab or fin.get("label")), shown_before=False)
+        else:
+            self.receipt.hide()
+        main = j.state in (J.DONE, J.STOPPED) and good   # run 19: the finished edit's main button
+        if (self.b_prem.objectName() == "Primary") != main:
+            self.b_prem.setObjectName("Primary" if main else "Small")
+            self.b_prem.setText("OPEN IN PREMIERE" if main else "Open in Premiere")
+            self.b_prem.style().unpolish(self.b_prem)
+            self.b_prem.style().polish(self.b_prem)
+            self.b_prem.update()
 
     def paintEvent(self, _e) -> None:                     # noqa: N802
         p = QPainter(self)
