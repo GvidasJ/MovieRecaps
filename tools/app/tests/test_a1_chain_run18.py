@@ -18,6 +18,13 @@ from mr_app.core import a1_chain as A  # noqa: E402
 from mr_app.core import premiere as PR  # noqa: E402
 from mr_app.core import song_gain as G  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _a1_chain_on(monkeypatch):
+    """27 Oct: A1's chain is OFF by default (A1 left at 0 dB); these tests check it switched on."""
+    monkeypatch.setenv("MOVIERECAPS_A1_CHAIN", "1")
+
+
 TPF = 8475667200            # ticks per frame at 29.97 fps (254016000000 * 1001 / 30000)
 MEDIA = "raw_stereo.wav"
 

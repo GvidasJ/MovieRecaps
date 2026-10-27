@@ -5,12 +5,21 @@ Amplify in the saved project (core.song_gain, the same way as A1's chain).
 Run: python -m pytest tools/app/tests/test_song_all_channels_run18.py"""
 from __future__ import annotations
 
+import pytest
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mr_app.core import channels as C  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _a1_chain_on(monkeypatch):
+    """27 Oct: A1's chain is OFF by default (A1 left at 0 dB); these tests check it switched on."""
+    monkeypatch.setenv("MOVIERECAPS_A1_CHAIN", "1")
+
 
 SONG = "One Piece OST - Mother Sea (First Part) Extended Version.mp3"
 

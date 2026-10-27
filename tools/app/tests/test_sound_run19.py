@@ -26,6 +26,13 @@ from test_board_ui import qapp  # noqa: E402,F401 - the board tests' QApplicatio
 
 
 @pytest.fixture(autouse=True)
+def _a1_chain_on(monkeypatch):
+    """27 Oct: A1's chain is OFF by default (A1 left at 0 dB); these tests check it switched on."""
+    monkeypatch.setenv("MOVIERECAPS_A1_CHAIN", "1")
+
+
+
+@pytest.fixture(autouse=True)
 def _clean_state():
     PR.SOUND.clear()
     PR._PROJ_OF.clear()                                         # noqa: SLF001

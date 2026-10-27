@@ -18,6 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mr_app.core import premiere as PR  # noqa: E402
 from mr_app.core import song_gain as G  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _a1_chain_on(monkeypatch):
+    """27 Oct: A1's chain is OFF by default (A1 left at 0 dB); these tests check it switched on."""
+    monkeypatch.setenv("MOVIERECAPS_A1_CHAIN", "1")
+
+
 ROOT = Path(__file__).resolve().parents[3]
 SONG = "One Piece OST - Mother Sea (First Part) Extended Version.mp3"
 

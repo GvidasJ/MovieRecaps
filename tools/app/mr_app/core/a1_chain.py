@@ -24,6 +24,7 @@ Limiter's Input Boost 0..1 over -100..+50 dB (2 dB = 0.68); Amplify's Gain 0..1 
 """
 from __future__ import annotations
 
+import os
 import re
 import xml.etree.ElementTree as ET
 from fractions import Fraction
@@ -54,7 +55,12 @@ def _fps(root: ET.Element) -> Fraction:
 
 def a1_pieces(xml: Path) -> tuple[str, Fraction, list[tuple[int, float]]]:
     """(A1's file name, the sequence's frame rate, [(start frame, Clip Gain dB)] in order) from the edit's A1 clips
-    with an audio chain comment; ('', 0, []) when there are none."""
+    with an audio chain comment; ('', 0, []) when there are none.
+
+    27 Oct (your call): A1 is left alone -- no Clip Gain, no Hard Limiter, no Amplify, only its own Volume at 0 dB
+    (as the XML imports it). MOVIERECAPS_A1_CHAIN=1 switches the chain back on. The song on A2 is unchanged."""
+    if os.environ.get("MOVIERECAPS_A1_CHAIN", "").strip() in ("", "0"):
+        return "", Fraction(0), []
     try:
         root = ET.parse(str(xml)).getroot()
     except (OSError, ET.ParseError):
