@@ -38,7 +38,9 @@ from typing import Any, Callable
 
 from . import machine as M
 
-MAX_PIECE_S = 80.0                  # the piece: at most 1:20 (29 Oct, your call: 2 min took the laptop ~1 h 45 min)
+MAX_PIECE_S = 80.0                  # the piece when the competitor's length is unknown: at most 1:20
+EXTRA_S = 20.0                      # 29 Oct, your call: the piece = the competitor's length + 20 s (10 s each side):
+                                    # a 10 s competitor -> a 30 s piece, a 20 s one -> 40 s
 TIMEOUT_S = 3600.0                  # nothing back from the laptop within this: the normal RAW
 TIMEOUT_WHY = "the laptop did not answer in 1 hour"
 STILL_WHY = "the laptop was still enhancing it"
@@ -246,6 +248,19 @@ def _aac(mov: Path, dst: Path, channels: int) -> None:
     os.replace(tmp, dst)
 
 
+def piece_length(competitor: str | os.PathLike) -> float:
+    """The piece's length for this competitor: its own length + EXTRA_S (10 s each side of the scene); MAX_PIECE_S
+    when its length can't be read."""
+    from match_cuts.common import ffprobe_bin
+    try:
+        r = _run([ffprobe_bin(), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                  str(competitor)], timeout=60)
+        d = float((r.stdout or "").strip().splitlines()[0])
+    except Exception:  # noqa: BLE001 - unknown length: the old limit
+        return MAX_PIECE_S
+    return d + EXTRA_S if d > 0 else MAX_PIECE_S
+
+
 def find_scene(competitor: str | os.PathLike, raw: str | os.PathLike, work: str | os.PathLike | None = None,
                progress: Callable[[str], None] | None = None) -> list[float]:
     """Where the competitor's sound is in the RAW (RAW seconds), by the tool's quick sound check. Raises EnhanceError
@@ -263,7 +278,7 @@ def find_scene(competitor: str | os.PathLike, raw: str | os.PathLike, work: str 
 
 def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str, out_dir: str | os.PathLike,
                project: str | os.PathLike | None = None, work: str | os.PathLike | None = None,
-               progress: Callable[[float, str], None] | None = None, max_s: float = MAX_PIECE_S) -> dict:
+               progress: Callable[[float, str], None] | None = None, max_s: float | None = None) -> dict:
     """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json. Returns its
     info (the json's content); raises EnhanceError with the reason in plain words -- then the edit uses the normal
     RAW."""
@@ -280,6 +295,8 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     m = X.movie_facts(str(raw))
     if m.why:
         raise EnhanceError(f"the RAW cannot be cut losslessly: {m.why}")
+    if max_s is None:
+        max_s = piece_length(competitor)
     p = plan(m, places, WIN_S, max_s)
     n_plan = p.k1 - p.k0
     work.mkdir(parents=True, exist_ok=True)
