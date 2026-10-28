@@ -103,7 +103,7 @@ def test_near_the_movies_ends_the_piece_stays_inside_it():
     assert p.k0 == 0 and p.k1 / f <= E.MAX_PIECE_S + 1e-6 and p.k1 / f >= 8.0
     p = E.plan(m, [595.0], 3.0)
     assert p.k1 == m.frames and p.dts_end is None and (p.k1 - p.k0) / f <= E.MAX_PIECE_S
-    short = _facts(minutes=1.5)                              # a RAW under 2 minutes: all of it
+    short = _facts(minutes=1.0)                              # a RAW shorter than the piece: all of it
     p = E.plan(short, [30.0], 3.0)
     assert (p.k0, p.k1) == (0, short.frames)
 

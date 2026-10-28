@@ -32,7 +32,7 @@ class EnhancePage(QWidget):
         lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(14)
         lay.addWidget(W.SectionHeader("Enhance on this laptop"))
-        lay.addWidget(W.label("The PC puts the scene's piece (2 minutes at most) in the Enhance folder; this laptop "
+        lay.addWidget(W.label("The PC puts the scene's piece (1:20 at most) in the Enhance folder; this laptop "
                               "takes it by itself, runs Topaz Video AI on it (Proteus 2x, Apollo 60 fps, H.265 "
                               "Main10 180 Mb/s) and puts the enhanced piece back next to it. The PC then makes the "
                               "edit with it.", "Muted", wrap=True))

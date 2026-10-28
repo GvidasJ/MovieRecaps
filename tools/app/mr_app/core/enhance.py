@@ -38,7 +38,7 @@ from typing import Any, Callable
 
 from . import machine as M
 
-MAX_PIECE_S = 120.0                 # the piece: at most 2 minutes
+MAX_PIECE_S = 80.0                  # the piece: at most 1:20 (29 Oct, your call: 2 min took the laptop ~1 h 45 min)
 TIMEOUT_S = 3600.0                  # nothing back from the laptop within this: the normal RAW
 TIMEOUT_WHY = "the laptop did not answer in 1 hour"
 STILL_WHY = "the laptop was still enhancing it"
