@@ -60,7 +60,7 @@ the end.
 
 ### On the laptop (nothing to do: it is on by itself)
 
-- The app looks at `\192.168.101.11\Shared\Enhance\` **every 30 s and when it starts**. A new `_TOENHANCE.mp4` that
+- The app looks at `\\192.168.101.11\Shared\Enhance\` **every 30 s and when it starts**. A new `_TOENHANCE.mp4` that
   nobody has taken is taken (a lock file `<project>_TOENHANCE.lock`, made so that only one computer can make it; the
   laptop rewrites it every 5 s with its progress, and a lock nobody rewrote for 15 min -- the laptop was turned off --
   is free again).
