@@ -16,6 +16,13 @@ from mr_app.core import channels as C  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _music_on(monkeypatch):
+    """28 Oct: no song by default; these tests check the song switched on."""
+    monkeypatch.setenv("MOVIERECAPS_MUSIC", "1")
+
+
+
+@pytest.fixture(autouse=True)
 def _a1_chain_on(monkeypatch):
     """27 Oct: A1's chain is OFF by default (A1 left at 0 dB); these tests check it switched on."""
     monkeypatch.setenv("MOVIERECAPS_A1_CHAIN", "1")

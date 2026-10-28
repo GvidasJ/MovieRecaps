@@ -2,6 +2,8 @@
 watermark, and its song on A2 of every edit (channel.json "music")."""
 from __future__ import annotations
 
+import pytest
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +12,13 @@ import numpy as np
 from PIL import Image
 
 from mr_app.core import channels as C
+
+
+@pytest.fixture(autouse=True)
+def _music_on(monkeypatch):
+    """28 Oct: no song by default; these tests check the song switched on."""
+    monkeypatch.setenv("MOVIERECAPS_MUSIC", "1")
+
 
 
 def _png_channel(root: Path, music: bool = True) -> Path:

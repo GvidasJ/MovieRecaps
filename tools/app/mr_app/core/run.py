@@ -34,7 +34,12 @@ def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast
 
 
 def channel_music(job: Job) -> list[str]:
-    """The tool's --music switches of the job's channel (night 15: SceneProof's song), [] without one."""
+    """The tool's --music switches of the job's channel (night 15: SceneProof's song), [] without one.
+
+    28 Oct (your call): no song is added any more, on any channel -- [] unless MOVIERECAPS_MUSIC=1 (the channels'
+    "music" settings are kept for that switch)."""
+    if os.environ.get("MOVIERECAPS_MUSIC", "").strip() in ("", "0"):
+        return []
     try:
         from .flow import find_channel
         ch = find_channel(getattr(job, "channel", "") or "")
