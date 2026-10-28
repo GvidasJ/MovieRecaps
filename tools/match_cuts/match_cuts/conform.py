@@ -63,6 +63,7 @@ from .probe import (ae_issues, display_geometry, load_pts_int, probe, reader_sar
 
 CONFORM_JSON = ".conform.json"
 SSIM_MIN = 0.98
+SSIM_SOFT = 0.96                     # a very detailed picture (Topaz 4K): 0.96-0.98 is OK when the frame beats both neighbours
 MIN_SAMPLES = 50
 SAMPLE_TARGET = 64
 COMPARE_MAX_SIDE = 480
@@ -760,6 +761,8 @@ def verify_transcode(src: StreamInfo, out: StreamInfo, plan: dict) -> dict:
                 if inf:
                     informative = True
                     ok = ok and s0 > snb
+            if not ok and s0 > SSIM_SOFT and len(nb) == 2 and all(s0 > v for v in nb.values()):
+                ok = True                                   # codec loss on fine detail, but clearly the right frame
             n_inf += int(informative)
             rec = {"k": int(k), "src": int(i), "ssim": round(s0, 5), "neighbours": nb, "informative": informative}
             samples.append(rec)
