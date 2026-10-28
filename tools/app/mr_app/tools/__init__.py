@@ -18,10 +18,11 @@ def tools() -> list[Tool]:
     from .board_tool import BoardTool
     from .convert_tool import ConvertTool
     from .download_tool import DownloadTool
+    from .enhance_tool import EnhanceTool
     from .find_source_tool import FindSourceTool
     from .history_tool import HistoryTool
     from .learn_tool import LearnTool
     from .match_cuts_tool import MatchCutsTool
     from .template_tool import TemplateTool
     return [MatchCutsTool(), LearnTool(), BoardTool(), DownloadTool(), FindSourceTool(), ConvertTool(), TemplateTool(),
-            HistoryTool()]
+            EnhanceTool(), HistoryTool()]

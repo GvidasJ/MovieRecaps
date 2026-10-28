@@ -17,6 +17,8 @@ os.environ.setdefault("MOVIERECAPS_NO_CACHE_MOVE", "1")   # day 17: setup_app's 
 os.environ.setdefault("MOVIERECAPS_ZIP_ANY_DRIVE", "1")   # day 17: the zip tests' temp folders are on C:
 os.environ.setdefault("MOVIERECAPS_NO_AI", "1")       # day 16: Find source never spends NexLev / Algrow credits in a test
 os.environ.setdefault("MOVIERECAPS_KEEP_ROWS", "0")   # run 18: each test's lists start empty (its own test switches it on)
+os.environ.setdefault("MOVIERECAPS_ENHANCE", "0")     # run 20: no row sends a piece to the laptop, no Topaz worker starts
+#                                                       (the enhance tests switch them on)
 if "MOVIERECAPS_SETTINGS" not in os.environ:
     os.environ["MOVIERECAPS_SETTINGS"] = str(_TMP / "settings.json")
     (_TMP / "settings.json").write_text(json.dumps({"save_to": str(_TMP / "shared"), "intro": False}),

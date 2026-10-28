@@ -8,6 +8,9 @@ own: the PC and the laptop save the finished projects to different paths of the 
   (``pc_names`` / ``laptop_names``) for computers whose names differ.
 * Torrents (day 12): "Save torrents to" (`torrent_dir`, "" = D:\\Shared\\Downloads\\Torrents on the PC, the same
   folder over the network on the laptop) and "Keep sharing after a download" (`torrent_keep_sharing`, off).
+* Run 20: the scene's piece enhanced with Topaz on the laptop (core.enhance): "Enhance the scene on the laptop first"
+  (``enhance_send``), "Enhance pieces for the PC with Topaz" (``enhance_topaz``) -- None = this computer's default
+  (the PC sends, the laptop enhances) -- and the Enhance folder (``enhance_dir``, "" = this computer's default).
 * Animations on/off, the intro, the daily and monthly goals, how often the Shorts are checked for uploads.
 
 A missing file is the defaults. A broken one gives the defaults too and is kept as settings.json.bad, so nothing
@@ -48,6 +51,9 @@ class Settings:
     console_open: bool = True          # night 15: the queue's "What it's doing now" panel open (remembered)
     look: str = "mono"                 # run 18: "mono" (Mono + red) | "classic" (Settings -> Classic look)
     cache_clean: bool = True           # run 19: the tool's old cache files go by themselves (core.cache_clean)
+    enhance_send: bool | None = None   # run 20: "Enhance the scene on the laptop first" (None: on on the PC only)
+    enhance_topaz: bool | None = None  # run 20: "Enhance pieces for the PC with Topaz" (None: on on the laptop only)
+    enhance_dir: str = ""              # run 20: the Enhance folder ("" = this computer's default: core.enhance.share_dir)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -96,13 +102,15 @@ def normalize_folder(v: str) -> str:
 
 
 def _valid(name: str, v: Any, default: Any) -> Any:
-    if name in ("save_to", "torrent_dir"):
+    if name in ("save_to", "torrent_dir", "enhance_dir"):
         return normalize_folder(v) if isinstance(v, str) else default
     if name == "machine":
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
     if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean"):
         return v if isinstance(v, bool) else default
+    if name in ("enhance_send", "enhance_topaz"):
+        return v if isinstance(v, bool) or v is None else default
     if name == "daily_goal":
         return _int(v, default, 1, 1000)
     if name == "monthly_goal":

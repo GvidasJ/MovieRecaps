@@ -157,7 +157,7 @@ def load_queue() -> list | None:
 ITEM_FIELDS = ("competitor_url", "raw_url", "raw_file", "channel", "title", "mode", "speed", "edit", "state",
                "project", "name", "headline", "message", "error", "upload_title", "kind", "raw_torrent", "comp_file",
                "added", "started", "gate", "failed_step", "post_title", "video_headline", "default_template",
-               "result", "roles", "rename_note")
+               "result", "roles", "rename_note", "enhance", "enhance_late")
 ITEM_PATHS = {"raw_file", "project", "comp_file"}
 
 

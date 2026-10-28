@@ -61,9 +61,12 @@ S_ASK = "ask"                     # amber, the bar empty: the step needs somethi
 
 STEPS_FULL = [("download", "Download"), ("convert", "Convert ×2"), ("template", "Template"), ("edit", "Edit")]
 STEPS_JUST = [("download", "Download"), ("convert", "Convert"), ("cuts", "Cuts")]
+STEP_ENHANCE = ("enhance", "Enhance")      # run 20: the scene's piece enhanced on the laptop (core.enhance)
 
 # what a row waits for
 G_CONVERT, G_SEND, G_HEADLINE, G_COMP = "convert", "send", "headline", "competitor"
+G_ENHANCE = "enhance"                      # run 20: the edit waits for the laptop's enhanced piece
+ENHANCE_POLL_S = 10.0                      # run 20: the Enhance folder is looked at this often for a waiting row
 
 
 @dataclass
@@ -114,13 +117,17 @@ class Item:
     torrent_widget: Any = None              # its picker / progress card inside the row
     said_pick: bool = False                 # the row says the queue asks which is the RAW
     renaming: int = 0                       # day 13: the thread of this row's own stage while it renames its folder
+    enhance: bool = False                   # run 20: the scene's piece is enhanced on the laptop before the edit
+    enhance_late: bool = False              # run 20: the enhanced piece came after the edit was made without it
 
     def __post_init__(self) -> None:
         if not self.steps:
             self.steps = {k: Step() for k, _ in self.step_list()}
 
     def step_list(self) -> list[tuple[str, str]]:
-        return STEPS_JUST if self.kind == NV.JUST_CUTS else STEPS_FULL
+        if self.kind == NV.JUST_CUTS:
+            return STEPS_JUST
+        return STEPS_FULL[:-1] + [STEP_ENHANCE, STEPS_FULL[-1]] if self.enhance else STEPS_FULL
 
     def order_time(self) -> float:
         """When it counts as new for the order shown: a finished row when its last step finished (the one finished
@@ -358,6 +365,31 @@ class StageThread(QThread):
                 it.project = Path(new)
                 self.named.emit(it.id, str(new))
         return res
+
+    def _enhance(self, out: dict) -> None:
+        """Run 20: the scene's piece into the Enhance folder for the laptop (core.enhance.make_piece). Never fails the
+        row: a piece that cannot be made means the edit uses the normal RAW (``out["enhance"]`` says why)."""
+        from ..core import enhance as E
+        from ..core import settings as S
+        it = self.item
+        p = self._project()
+        comp, raw = p.file("competitor"), p.file("raw")
+        folder = E.share_dir(S.load())
+        name = p.folder.name
+        rec: dict = {"name": E.safe_name(name), "folder": str(folder)}
+        try:
+            if comp is None or raw is None or not comp.is_file() or not raw.is_file():
+                raise E.EnhanceError("the competitor and the RAW are not both in the folder")
+            info = E.make_piece(comp, raw, name, folder, project=p.folder,
+                                progress=lambda s, t: self._say("raw", s, t))
+            rec.update(state="sent", sent=time.time(), where=info.get("where"), piece=info)
+        except E.EnhanceError as e:
+            rec.update(state="skipped", why=str(e))
+        except Exception as e:  # noqa: BLE001 - said in plain words; the edit goes on with the normal RAW
+            rec.update(state="skipped", why=NV.plain_error(e))
+        p.update(enhance=None)                            # (a new try: nothing of the last one's kept)
+        p.update(enhance=rec)
+        out["enhance"] = rec
 
     def _cuts(self, out: dict) -> None:
         from ..core import flow
@@ -780,10 +812,14 @@ class VideoRow(W.Card):
         self.b_another_comp.clicked.connect(lambda: self.page.another_for_item(self.item, "competitor"))
         self.b_stop = W.Button("Stop", "Small")
         self.b_stop.clicked.connect(lambda: self.page.stop_item(self.item))
+        self.b_enh = W.Button("Use the enhanced piece", "Small")      # run 20: it came after the edit was made
+        self.b_enh.setToolTip("The laptop's enhanced piece came after the edit was made with the normal RAW: "
+                              "check it, copy it into the project and make the edit again with it")
+        self.b_enh.clicked.connect(lambda: self.page.use_enhanced(self.item))
         self.b_remove = W.Button("Remove", "Ghost")
         self.b_remove.clicked.connect(lambda: self.page.remove_item(self.item))
         for b in (self.b_go, self.b_prem, self.b_change, self.b_comp, self.b_folder, self.b_retry,
-                  self.b_another_raw, self.b_another_comp, self.b_stop):
+                  self.b_another_raw, self.b_another_comp, self.b_stop, self.b_enh):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_remove)
@@ -917,6 +953,7 @@ class VideoRow(W.Card):
         self.b_another_raw.setVisible(failed)
         self.b_another_comp.setVisible(failed)
         self.b_folder.setVisible(it.project is not None)
+        self.b_enh.setVisible(bool(it.enhance_late) and it.state in (DONE, FAILED, STOPPED))
         self.b_remove.setEnabled(not busy and not (it.job is not None and it.job.state == J.RUNNING))
 
     def _mono(self, it: "Item") -> None:
@@ -979,6 +1016,8 @@ class VideoRow(W.Card):
             return word, theme.pill_colours(lab)
         if it.gate == G_HEADLINE:
             return "needs a headline", theme.pill_colours("note")
+        if it.gate == G_ENHANCE:
+            return "waiting for the laptop", None
         if it.state == GATED or waits_for_pick(it):
             return ("Check which is the RAW", theme.pill_colours("note")) if waits_for_pick(it) else \
                 ("waiting for you", None)
@@ -1525,6 +1564,9 @@ class DownloadPage(QWidget):
             return None, "a torrent needs a competitor -- add the competitor's link or file"
         it = Item("", channel=self.ch.value, title=self.head.text(), mode=self.mode.value,
                   speed=float(self.speed.value), kind=made)
+        if made == NV.FULL:                                 # run 20: Settings' "Enhance the scene on the laptop first"
+            from ..core import enhance as E
+            it.enhance = E.sends(getattr(self.ctx, "settings", None))
         if rk == NV.FILE:
             f = raw_file or Path(NV._clean(raw_text))                      # noqa: SLF001
             if not f.is_file():
@@ -1935,6 +1977,8 @@ class DownloadPage(QWidget):
                             self._step(it, "template", S_DONE, 1.0, "")
                     elif st == "template":
                         continue
+                    elif st == "enhance":
+                        self._enhance_said(it, res.get("enhance") or {})
                     else:
                         self._step(it, key, S_DONE, 1.0, "")
                 if res.get("result"):
@@ -1992,8 +2036,11 @@ class DownloadPage(QWidget):
                 self.queue(it, ("convert",))
             else:
                 self._gate(it, G_CONVERT)
-        elif last == "convert":
+        elif last == "convert" or last == "enhance":
             it.roles = ()
+            if last == "convert" and it.enhance and (it.steps.get("enhance") or Step()).state == S_WAIT:
+                self.queue(it, ("enhance",))              # run 20: the piece for the laptop first (it works on it
+                return                                    #   while the row goes on: template, headline ...)
             if auto:
                 self.proceed(it)
             else:
@@ -2159,6 +2206,10 @@ class DownloadPage(QWidget):
             return
         if it.state == SENT and it.job is None:
             return                                        # being sent already (a second press)
+        if it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN:
+            self._gate(it, G_ENHANCE)                     # run 20: the edit waits for the laptop's enhanced piece
+            self._enhance_wanted = 0.0                    #   (the Enhance folder looked at now)
+            return
         # project.json + title.txt written and read back (a network folder on the laptop): off the window's thread
         # (day 12 click-through: 60-140 ms here). SENT at once: "Turn off the PC" counts it as work meanwhile.
         it.state = SENT
@@ -2216,7 +2267,98 @@ class DownloadPage(QWidget):
                 it.said_pick = waits_for_pick(it)        # said on the row
                 self._refresh(it)
             self._order()
+        self._enhance_poll()
         self._check_shutdown()
+
+    # -- run 20: the scene's piece enhanced on the laptop (core.enhance) --
+    def _enhance_said(self, it: Item, rec: dict) -> None:
+        """The piece's stage ended: sent (the step waits for the laptop) or skipped (why, on the row)."""
+        if rec.get("state") == "sent":
+            self._step(it, "enhance", S_RUN, 0.0, "waiting for the laptop")
+            self._enhance_wanted = 0.0
+        else:
+            self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {rec.get('why') or 'no piece'}")
+
+    def _enhance_poll(self) -> None:
+        """Every ENHANCE_POLL_S: the rows whose piece is with the laptop (or late) -- their state read from the
+        Enhance folder in the background; an enhanced piece is checked and copied into the project there too."""
+        now = time.monotonic()
+        if getattr(self, "_enhance_busy", False) or now - getattr(self, "_enhance_wanted", 0.0) < ENHANCE_POLL_S:
+            return
+        rows = [(it.id, it.project) for it in self.items if it.enhance and it.project is not None and
+                (it.steps.get("enhance") or Step()).state == S_RUN]
+        from ..core.enhance import is_late
+        late = [(it.id, it.project) for it in self.items if it.enhance and it.project is not None and
+                (it.steps.get("enhance") or Step()).state == S_NOTE and not it.enhance_late and
+                is_late((it.steps.get("enhance") or Step()).text)]          # (a late piece: its button)
+        if not rows and not late:
+            return
+        self._enhance_busy, self._enhance_wanted = True, now
+
+        def work():
+            from ..core import enhance as E
+            return {iid: E.watch(folder) for iid, folder in rows + late}
+
+        def done(res) -> None:
+            self._enhance_busy = False
+            for iid, r in (res or {}).items():
+                it = self._item(iid)
+                if it is not None and r:
+                    self._enhance_apply(it, r)
+
+        def failed(_e) -> None:
+            self._enhance_busy = False
+        off_thread(work, done, failed)
+
+    def _enhance_apply(self, it: Item, r: dict) -> None:
+        st = (it.steps.get("enhance") or Step()).state
+        what = r.get("state")
+        if what == "progress" and st == S_RUN:
+            self._step(it, "enhance", S_RUN, float(r.get("share") or 0.0), r.get("text") or "waiting for the laptop")
+            return
+        if what == "late_ready":
+            if not it.enhance_late:
+                it.enhance_late = True
+                self._refresh(it)
+            return
+        if st != S_RUN:
+            return
+        if what == "used":
+            self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced on the laptop")
+        elif what in ("failed", "late", "skipped"):
+            self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {r.get('why') or 'the laptop did not answer'}")
+        else:
+            return
+        self._save_rows()
+        if it.gate == G_ENHANCE:                          # the edit waited for it: it starts now
+            it.gate = ""
+            self.send_to_edit(it, start=True)
+
+    def use_enhanced(self, it: Item) -> None:
+        """"Use the enhanced piece": the laptop's piece came after the edit was made with the normal RAW -- it is
+        checked and copied into the project, and the edit is made again with it."""
+        if it.project is None:
+            return
+        folder = it.project
+        self._step(it, "enhance", S_RUN, 0.0, "taking the enhanced piece")
+
+        def work():
+            from ..core import enhance as E
+            return E.use_late(folder)
+
+        def done(r) -> None:
+            r = r or {}
+            it.enhance_late = False
+            if not r.get("ok"):
+                self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {r.get('why') or 'it could not be used'}")
+                self.toast(f"The enhanced piece cannot be used: {r.get('why')}", "warn")
+                return
+            self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced on the laptop")
+            it.error, it.result = "", {}
+            self._step(it, "edit", S_WAIT, 0.0, "")
+            self.send_to_edit(it, start=True)
+
+        off_thread(work, done, lambda e: done({"ok": False, "why": NV.plain_error(e)}))
 
     def _finish(self, it: Item, res: dict) -> None:
         it.result = res
@@ -2520,6 +2662,10 @@ class DownloadPage(QWidget):
                     "Converted — press Send to Match cuts when you want")
         if it.gate == G_HEADLINE:
             return "Waiting for the headline — download and convert are done"
+        if it.gate == G_ENHANCE:                          # run 20
+            st = it.steps.get("enhance") or Step()
+            return f"The scene's piece is with the laptop ({st.text or 'waiting for the laptop'}) — the edit " \
+                   "starts when it comes back"
         if it.state == DONE:
             lab = it.result.get("label", "")
             if it.kind == NV.JUST_CUTS:
@@ -2531,6 +2677,9 @@ class DownloadPage(QWidget):
                     f"Edit made, with a note: {(it.result.get('notes') or [''])[0][:160]}"
             if it.default_template:
                 text += " · default template used"
+            enh = it.steps.get("enhance") if it.enhance else None
+            if enh is not None and enh.state in (S_DONE, S_NOTE) and enh.text:      # run 20: enhanced, or why not
+                text += f" · {enh.text}"
             return text
         if it.state == SENT:
             if waits_for_pick(it):

@@ -18,7 +18,7 @@ class SettingsDialog(QDialog):
         super().__init__(win)
         self.win = win
         self.setWindowTitle("Settings")
-        self.resize(760, 560)
+        self.resize(760, 680)
         self.s = copy.deepcopy(settings)
         self.result_settings = settings
         lay = QVBoxLayout(self)
@@ -136,6 +136,40 @@ class SettingsDialog(QDialog):
         cbox.addWidget(self.cclean_line)
         g.addLayout(cbox, r, 1)
         r += 1
+        # run 20: the scene's piece enhanced with Topaz on the laptop (core.enhance)
+        from ..core import enhance as E
+        g.addWidget(W.label("Enhance with Topaz", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
+        ebox = QVBoxLayout()
+        erow = QHBoxLayout()
+        erow.addWidget(W.label("Enhance the scene on the laptop first", "Dim"))
+        self.enh_send = W.Segmented([("on", "On"), ("off", "Off")], "on" if E.sends(self.s) else "off")
+        erow.addWidget(self.enh_send)
+        erow.addWidget(W.label("the PC: a piece of 2 min at most around the scene goes to the laptop; the edit "
+                               "waits for it (1 hour at most, then the normal RAW)", "Dim", wrap=True), 1)
+        ebox.addLayout(erow)
+        trow2 = QHBoxLayout()
+        trow2.addWidget(W.label("Enhance pieces for the PC with Topaz", "Dim"))
+        self.enh_topaz = W.Segmented([("on", "On"), ("off", "Off")], "on" if E.enhances(self.s) else "off")
+        trow2.addWidget(self.enh_topaz)
+        self.b_test_topaz = W.Button("Test Topaz", "Small")
+        self.b_test_topaz.clicked.connect(self._test_topaz)
+        trow2.addWidget(self.b_test_topaz)
+        trow2.addStretch(1)
+        ebox.addLayout(trow2)
+        self.topaz_line = W.label("Topaz Video AI: looking for it…", "Dim", wrap=True, select=True)
+        ebox.addWidget(self.topaz_line)
+        frow = QHBoxLayout()
+        frow.addWidget(W.label("Enhance folder", "Dim"))
+        self.enh_dir = QLineEdit(str(getattr(self.s, "enhance_dir", "") or ""))
+        self.enh_dir.setPlaceholderText(str(self._default_enhance_dir()))
+        frow.addWidget(self.enh_dir, 1)
+        edflt = W.Button("This computer's default", "Small")
+        edflt.clicked.connect(lambda: self.enh_dir.setText(""))
+        frow.addWidget(edflt)
+        ebox.addLayout(frow)
+        g.addLayout(ebox, r, 1)
+        r += 1
+        self._find_topaz()
         # goals
         g.addWidget(W.label("Goals", "Small"), r, 0)
         grow = QHBoxLayout()
@@ -300,6 +334,49 @@ class SettingsDialog(QDialog):
         if d:
             self.save.setText(d)
 
+    def _default_enhance_dir(self):
+        from ..core import enhance as E
+        s = copy.deepcopy(self.s)
+        s.enhance_dir = ""
+        try:
+            s.machine = self.machine.value
+        except AttributeError:
+            pass
+        return E.share_dir(s)
+
+    def _find_topaz(self) -> None:
+        def got(tz) -> None:
+            try:
+                self.topaz_line.setText(tz.line())
+                self.topaz_line.setStyleSheet("" if tz.found else f"color: {theme.AMBER};")
+            except RuntimeError:                          # (the dialog closed meanwhile)
+                pass
+
+        def work():
+            from ..core import enhance as E
+            return E.find_topaz()
+        BG.call(work, got, lambda _e: None)
+
+    def _test_topaz(self) -> None:
+        """"Test Topaz": 2 seconds of a test clip enhanced (in the background) -- did it work?"""
+        self.b_test_topaz.setEnabled(False)
+        self.topaz_line.setText("Testing Topaz on 2 seconds of a test clip… (about a minute)")
+        self.topaz_line.setStyleSheet("")
+
+        def got(r) -> None:
+            r = r or {}
+            try:
+                self.b_test_topaz.setEnabled(True)
+                self.topaz_line.setText(r.get("text") or "")
+                self.topaz_line.setStyleSheet(f"color: {theme.GREEN if r.get('ok') else theme.RED};")
+            except RuntimeError:
+                pass
+
+        def work():
+            from ..core import enhance as E
+            return E.test_topaz()
+        BG.call(work, got, lambda e: got({"ok": False, "text": f"{type(e).__name__}: {e}"}))
+
     def _replay(self) -> None:
         try:
             self.win.play_intro()
@@ -319,7 +396,14 @@ class SettingsDialog(QDialog):
         s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
         s.cache_clean = self.cclean.value == "on"
-        look = "classic" if self.look.value == "on" else "mono"
+        from ..core import enhance as E                   # run 20: kept as "this computer's default" (None) when
+        dflt = copy.deepcopy(s)                           #   it is the default -- the default follows the machine
+        dflt.enhance_send = dflt.enhance_topaz = None
+        send, topaz = self.enh_send.value == "on", self.enh_topaz.value == "on"
+        s.enhance_send = None if send == E.sends(dflt) else send
+        s.enhance_topaz = None if topaz == E.enhances(dflt) else topaz
+        s.enhance_dir = S0.normalize_folder(self.enh_dir.text())
+        look ="classic" if self.look.value == "on" else "mono"
         changed_look = look != getattr(s, "look", "mono")
         s.look = look
         try:

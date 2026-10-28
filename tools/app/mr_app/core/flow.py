@@ -321,6 +321,11 @@ def edit_job(p: P.Project, fast: bool = True, speed: float = 100.0):
     j.title = p.data.get("title") or ""
     j.roles_chosen = chosen_roles(p.data) is not None      # day 12: you said which one is the RAW
     j.roles_how = str((chosen_roles(p.data) or {}).get("how") or "")     # "form": the New video form's RAW field
+    from . import enhance
+    enh = enhance.edit_raw(p.data, p.folder)
+    if enh is not None:                                    # run 20: the enhanced piece of the scene is the RAW (2 min
+        j.raw = enh                                        #   at most: it can be about as long as the Short -- it is
+        j.roles_chosen, j.roles_how = True, "form"         #   the RAW all the same, as if chosen in the form)
     return j
 
 
