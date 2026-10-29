@@ -329,6 +329,9 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     m = X.movie_facts(str(raw))
     if max_s is None:
         max_s = piece_length(competitor)
+        span = max(places) + WIN_S - min(places)          # 30 Oct: the competitor skips parts of the scene (Key &
+        if span + 10.0 > max_s:                           # Peele: places 45 s apart in a 23 s video) -> a longer
+            max_s = min(MAX_PIECE_S, span + 10.0)         # piece, 5 s each side, at most 1:20
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
         return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say)
     p = plan(m, places, WIN_S, max_s)
