@@ -50,6 +50,7 @@ class Channel:
     handle: str
     shorts_only: bool = False
     music: "Music | None" = None
+    style: headline.Style = headline.DEFAULT_STYLE   # 29 Oct: its headline's font / size (channel.json "headline_style")
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ class TemplateResult:
 def _defaults(name: str) -> dict:
     handle = "@" + re.sub(r"\s+", "", name)
     return {"name": name, "link": f"https://www.youtube.com/{handle}", "handle": handle, "shorts_only": False,
-            "music": None, "headline_anchor": None}
+            "music": None, "headline_anchor": None, "headline_style": None}
 
 
 def read_info(folder: Path) -> dict:
@@ -143,7 +144,8 @@ def channels(root: Path | None = None) -> list[Channel]:
         info = read_info(folder)
         wm = folder / WATERMARK_NAME
         out.append(Channel(str(info["name"]), folder, psd, wm if wm.is_file() else None, str(info["link"]),
-                           str(info["handle"]), bool(info["shorts_only"]), _music(folder, info.get("music"))))
+                           str(info["handle"]), bool(info["shorts_only"]), _music(folder, info.get("music")),
+                           headline.style_from(info.get("headline_style"))))
     return out
 
 
@@ -309,8 +311,17 @@ def base_info(ch: Channel) -> dict:
 def headline_anchor(ch: Channel) -> tuple[float, float]:
     """Where the channel's headline goes: (centre x, first baseline) of its PSD's example headline, PSD px -- the
     standard place (1085.46, 849.20) when the PSD does not say."""
-    a = base_info(ch).get("anchor")
-    return (float(a[0]), float(a[1])) if a else (headline.CENTRE_X, headline.BASELINE_1)
+    a = base_info(ch).get("anchor") or read_info(ch.folder).get("headline_anchor")      # PSD, else channel.json
+    if isinstance(a, (list, tuple)) and len(a) == 2:
+        return float(a[0]), float(a[1])
+    return headline.CENTRE_X, headline.BASELINE_1
+
+
+def headline_layout(ch: Channel, title: str) -> headline.Layout:
+    """The headline's layout for ``title`` in the channel's own style (lines, shrinking) -- for the editor."""
+    anchor = headline_anchor(ch)
+    with headline.styled(ch.style):
+        return headline.layout(title, anchor=anchor)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -330,7 +341,9 @@ def downscale(img: Image.Image, size: tuple[int, int]) -> Image.Image:
 def compose(ch: Channel, title: str) -> tuple[Image.Image, headline.Layout]:
     """(the template with ``title`` at 2160x3840, its layout)."""
     base = base_template(ch)
-    hl, lay = headline.render(title, anchor=headline_anchor(ch))
+    anchor = headline_anchor(ch)
+    with headline.styled(ch.style):
+        hl, lay = headline.render(title, anchor=anchor)
     out = base.copy()
     out.alpha_composite(hl)
     return out, lay
@@ -363,7 +376,12 @@ def make_template(ch: Channel, title: str, out_png: str | Path,
     out = Path(out_png)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
-    return TemplateResult(out, lay, lay.shrunk, lay.scale_pct, lay.why, list(lay.warnings), _hole(out))
+    warnings = list(lay.warnings)
+    spec = read_info(ch.folder).get("headline_style")
+    if isinstance(spec, dict) and spec.get("font") and ch.style == headline.DEFAULT_STYLE:
+        warnings.append(f"the headline font {spec['font']} is not on this computer: the headline is in NeueMontreal "
+                        f"instead (install the font, or put it in assets/fonts)")
+    return TemplateResult(out, lay, lay.shrunk, lay.scale_pct, lay.why, warnings, _hole(out))
 
 
 @functools.lru_cache(maxsize=8)
@@ -377,7 +395,9 @@ def preview(ch: Channel, title: str, width: int = 540) -> Image.Image:
     """The template with ``title`` at ``width`` px wide (RGBA; the window transparent) -- fast enough to redraw on
     every key press: the base is kept at this size, the headline is drawn directly at it."""
     base = _preview_base(ch, _key(ch.psd), int(width))
-    hl, _ = headline.render(title, size=base.size, anchor=_preview_anchor(ch, _key(ch.psd)))
+    anchor = _preview_anchor(ch, _key(ch.psd))
+    with headline.styled(ch.style):
+        hl, _ = headline.render(title, size=base.size, anchor=anchor)
     out = base.copy()
     out.alpha_composite(hl)
     return out

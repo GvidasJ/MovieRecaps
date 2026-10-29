@@ -52,17 +52,22 @@ class _Render(QThread):
                 self.done.emit(None, {"error": f"no channel {self.channel!r}"})
                 return
             im = Ch.preview(ch, self.title, width=self.width)
-            info = layout_info(self.title)
+            info = layout_info(self.title, ch)
             self.done.emit(im, info)
         except Exception as e:  # noqa: BLE001 - shown in the editor
             self.done.emit(None, {"error": f"{type(e).__name__}: {e}"})
 
 
-def layout_info(title: str) -> dict:
-    """{'lines', 'shrunk', 'why'} of a title (headline.layout) for the editor's line under the title."""
+def layout_info(title: str, ch=None) -> dict:
+    """{'lines', 'shrunk', 'why'} of a title (headline.layout; in ``ch``'s headline style when given) for the
+    editor's line under the title."""
     try:
         from ..core import headline as H
-        lay = H.layout(title)
+        if ch is not None:
+            from ..core import channels as Ch
+            lay = Ch.headline_layout(ch, title)
+        else:
+            lay = H.layout(title)
         return {"lines": [str(x) for x in getattr(lay, "lines", [])], "shrunk": bool(getattr(lay, "shrunk", False)),
                 "why": str(getattr(lay, "why", "") or ""), "scale": float(getattr(lay, "scale", 1.0) or 1.0),
                 "summary": lay.summary() if hasattr(lay, "summary") else "",

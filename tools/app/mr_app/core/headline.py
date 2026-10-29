@@ -22,6 +22,7 @@ break fits, the headline is shrunk until it fits (``Layout.shrunk`` and ``Layout
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import io
 import math
@@ -68,8 +69,87 @@ ZWJ = 0x200D
 _LOCK = threading.RLock()        # fontTools reads tables lazily: one thread at a time (the app previews in a thread)
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# another channel's headline style (29 Oct, MikeCuts: Instagram Sans Condensed Bold 140 pt, tracking -10, Faux Bold)
+# ---------------------------------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Style:
+    """A channel's headline type layer: its font (a file in assets/fonts), size (pt = px on the 2160x3840 PSD),
+    Photoshop tracking (1/1000 em) and Faux Bold. Faux Bold's fitted numbers (above) grow with the size."""
+    font: str = "NeueMontreal-Bold.otf"
+    size: float = 122.0
+    tracking: float = 10.0
+    faux_bold: bool = True
+
+    def values(self) -> dict:
+        k = float(self.size) / 122.0
+        fb = 1.0 if self.faux_bold else 0.0
+        return {"TEXT_FONT": self.font, "SIZE": float(self.size), "TRACKING": float(self.tracking) / 1000.0 * self.size,
+                "BOLD_GROW": 1.5 * k * fb, "BOLD_ADVANCE": 3.29 * k * fb, "EMOJI_BOLD_ADVANCE": 1.64 * k * fb,
+                "LINE_PITCH": 1.2 * self.size, "CENTRE_TRIM": 2.6 * k * fb,
+                "CAP_HEIGHT": 715 / 1000 if self.font == "NeueMontreal-Bold.otf" else _cap_height(self.font)}
+
+
+DEFAULT_STYLE = Style()
+
+
+def style_from(spec) -> Style:
+    """channel.json's "headline_style" ({"font", "size", "tracking", "faux_bold"}) -> Style (the default when there
+    is none, or its font is not on this computer: see font_file)."""
+    if not isinstance(spec, dict) or not spec.get("font"):
+        return DEFAULT_STYLE
+    try:
+        st = Style(str(spec["font"]), float(spec.get("size", 122.0)), float(spec.get("tracking", 0.0)),
+                   bool(spec.get("faux_bold", False)))
+    except (TypeError, ValueError):
+        return DEFAULT_STYLE
+    return st if font_file(st.font) is not None else DEFAULT_STYLE
+
+
+def _cap_height(font: str) -> float:
+    """A font's capital height (em) from its OS/2 table (its 'H' when the table does not say)."""
+    tf = _text_font(str(font_file(font) or paths.fonts_dir() / font))
+    os2 = tf.tt["OS/2"] if "OS/2" in tf.tt else None
+    cap = getattr(os2, "sCapHeight", 0) or 0
+    if not cap:
+        b = tf.bounds(tf.glyph("H") or "")
+        cap = b[3] if b else 0.7 * tf.upem
+    return float(cap) / tf.upem
+
+
+@contextlib.contextmanager
+def styled(style: Style | None = None):
+    """Everything inside draws and measures in ``style`` (the default: the channels' NeueMontreal one). One thread at
+    a time (the module's lock), so the app's preview thread never mixes two styles."""
+    style = style or DEFAULT_STYLE
+    with _LOCK:
+        g = globals()
+        old = {n: g[n] for n in style.values()}
+        g.update(style.values())
+        try:
+            yield style
+        finally:
+            g.update(old)
+
+
+def font_file(name: str) -> Path | None:
+    """A headline font by its file name: assets/fonts first, else the fonts installed on this computer (yours, then
+    Windows') -- so a font that may not be shared (Instagram Sans) stays out of the repo. None: not found."""
+    import os
+    dirs = [paths.fonts_dir()]
+    if os.environ.get("LOCALAPPDATA"):
+        dirs.append(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "Windows" / "Fonts")
+    dirs.append(Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts")
+    for d in dirs:
+        p = d / name
+        if p.is_file():
+            return p
+    return None
+
+
 def text_font_path() -> Path:
-    return paths.fonts_dir() / TEXT_FONT
+    return font_file(TEXT_FONT) or paths.fonts_dir() / TEXT_FONT
 
 
 def emoji_font_path() -> Path:
@@ -309,10 +389,14 @@ class _EmojiFont:
         return bm.getchannel("A").getbbox() or (0, 0, bm.width, bm.height)
 
 
-@functools.lru_cache(maxsize=2)
 def _text_font(path: str | None = None) -> _TextFont:
+    return _text_font_at(str(path) if path else str(text_font_path()))
+
+
+@functools.lru_cache(maxsize=4)
+def _text_font_at(path: str) -> _TextFont:
     with _LOCK:
-        return _TextFont(Path(path) if path else text_font_path())
+        return _TextFont(Path(path))
 
 
 @functools.lru_cache(maxsize=2)
@@ -457,8 +541,12 @@ class _Line:
         return max(0.0, self.ink_right - self.ink_left)
 
 
-@functools.lru_cache(maxsize=512)
 def _measure(text: str) -> _Line:
+    return _measure_in(text, (TEXT_FONT, SIZE, TRACKING, BOLD_ADVANCE, BOLD_GROW))
+
+
+@functools.lru_cache(maxsize=512)
+def _measure_in(text: str, style_key: tuple) -> _Line:
     """The glyphs of one line at full size: pen positions with kerning, tracking and Faux Bold's extra advance, the
     advance width and where the ink starts and ends."""
     tf, warnings = _text_font(), []
@@ -537,6 +625,7 @@ class Layout:
     baselines: list[float] = field(default_factory=list)
     own_break: bool = False                  # the title's own line break was used
     centre_x: float = CENTRE_X               # the lines are centred on this x
+    size_pt: float = 122.0                   # the headline's full size (its channel's style)
 
     @property
     def scale_pct(self) -> float:
@@ -552,7 +641,7 @@ class Layout:
         if not self.lines:
             return "no headline"
         n = f"{len(self.lines)} line{'s' if len(self.lines) > 1 else ''}"
-        return f"{n}, {self.why}" if self.shrunk else f"{n}, full size (122 pt)"
+        return f"{n}, {self.why}" if self.shrunk else f"{n}, full size ({self.size_pt:g} pt)"
 
 
 def _block_middle(baseline_1: float = BASELINE_1) -> float:
@@ -622,7 +711,7 @@ def layout(title: str, max_width: float = MAX_WIDTH,
     else:
         toks = tokens(parts[0] if parts else "")
         if not toks:
-            return Layout(title, [], [], warnings=[], baselines=[], centre_x=cx)
+            return Layout(title, [], [], warnings=[], baselines=[], centre_x=cx, size_pt=SIZE)
         if len(toks) == 1:
             lines, widths = toks, [line_width(toks[0])]
         else:
@@ -646,7 +735,7 @@ def layout(title: str, max_width: float = MAX_WIDTH,
             why = f"shrunk to {100 * k:.0f} %: no break keeps both lines inside {px} px"
     if why_extra:
         warnings.append(why_extra)
-    return Layout(title, lines, widths, k, shrunk, why, warnings, _baselines(len(lines), k, b1), own, cx)
+    return Layout(title, lines, widths, k, shrunk, why, warnings, _baselines(len(lines), k, b1), own, cx, SIZE)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
