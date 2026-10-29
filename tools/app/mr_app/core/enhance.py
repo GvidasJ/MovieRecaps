@@ -293,10 +293,10 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))
     say(0.4, "reading the RAW's keyframes")
     m = X.movie_facts(str(raw))
-    if m.why:
-        raise EnhanceError(f"the RAW cannot be cut losslessly: {m.why}")
     if max_s is None:
         max_s = piece_length(competitor)
+    if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
+        return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say)
     p = plan(m, places, WIN_S, max_s)
     n_plan = p.k1 - p.k0
     work.mkdir(parents=True, exist_ok=True)
@@ -340,6 +340,83 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     _write_json(nm.info, info)
     say(1.0, f"the piece {info['where']} is in the Enhance folder")
     return info
+
+
+def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", name: str, project: Any,
+                   why_not_copy: str, t0: float, say: Callable[[float, str], None]) -> dict:
+    """29 Oct: the piece when the RAW cannot be cut losslessly (uneven frame timing, ...): the same time window
+    encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words)."""
+    from match_cuts.common import ffmpeg_bin
+    from match_cuts.pair_check import WIN_S
+    st = _probe_raw(raw)
+    fps = st["fps"]
+    dur = st["duration"]
+    if not fps or not dur:
+        raise EnhanceError(f"the RAW cannot be cut losslessly ({why_not_copy}) and its frame rate or length can't "
+                           "be read")
+    s0, s1 = max(0.0, min(places)), min(dur, max(places) + WIN_S)
+    if s1 - s0 > max_s:
+        raise EnhanceError(f"the scene is {_clock(s1 - s0)} long (places far apart or a montage) -- more than "
+                           f"{_clock(max_s)}")
+    margin = (max_s - (s1 - s0)) / 2.0
+    lo, hi = s0 - margin, s1 + margin
+    if lo < 0:
+        lo, hi = 0.0, hi - lo
+    if hi > dur:
+        lo, hi = max(0.0, lo - (hi - dur)), dur
+    say(0.55, "encoding the piece (the RAW can't be cut losslessly)")
+    Path(nm.piece).parent.mkdir(parents=True, exist_ok=True)
+    for f in nm.all():
+        f.unlink(missing_ok=True)
+    tmp = nm.piece.with_name(nm.piece.stem + ".part" + nm.piece.suffix)
+    r = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-ss", f"{lo:.6f}", "-i", str(raw),
+              "-t", f"{hi - lo:.6f}", "-map", "0:v:0", "-map", "0:a:0?", "-vf", f"fps={fps}",
+              "-c:v", "libx264", "-preset", "medium", "-crf", "10", "-pix_fmt", "yuv420p",
+              "-c:a", "aac", "-b:a", "320k", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(tmp)])
+    if r.returncode != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        raise EnhanceError(f"the piece could not be encoded: {(r.stderr or '').strip()[-300:]}")
+    os.replace(tmp, nm.piece)
+    from match_cuts import excerpt as X
+    n = X._frames_in(nm.piece)                                                # noqa: SLF001
+    if n <= 0:
+        nm.piece.unlink(missing_ok=True)
+        raise EnhanceError("the encoded piece has no frames")
+    f = float(fps)
+    info = {"project": safe_name(name), "project_folder": str(project or ""), "computer": M.host(),
+            "raw": os.path.abspath(str(raw)), "raw_name": raw.name, "start_frame": int(round(lo * f)),
+            "start_s": round(lo, 6), "frames": int(n), "fps": str(fps), "duration": round(n / f, 6),
+            "width": st["width"], "height": st["height"], "scene": [round(s0, 3), round(s1, 3)],
+            "places": [round(x, 3) for x in places], "raw_duration": round(dur, 3),
+            "bytes": int(nm.piece.stat().st_size), "check": None, "made": time.time(),
+            "seconds": round(time.perf_counter() - t0, 1), "encoded": True, "why_encoded": why_not_copy,
+            "where": f"{_clock(lo)}-{_clock(lo + n / f)} of {_clock(dur)}"}
+    _write_json(nm.info, info)
+    say(1.0, f"the piece {info['where']} is in the Enhance folder (encoded)")
+    return info
+
+
+def _probe_raw(raw: Path) -> dict:
+    """{fps (Fraction or None), duration, width, height} of the RAW's first video stream."""
+    from match_cuts.common import ffprobe_bin
+    r = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+              "stream=width,height,avg_frame_rate,r_frame_rate:format=duration", "-of", "json", str(raw)], timeout=120)
+    try:
+        d = json.loads(r.stdout or "{}")
+        v = (d.get("streams") or [{}])[0]
+        fr = None
+        for k in ("avg_frame_rate", "r_frame_rate"):
+            try:
+                x = Fraction(str(v.get(k) or "0/1"))
+            except (ValueError, ZeroDivisionError):
+                continue
+            if 0 < x <= 120:
+                fr = x.limit_denominator(1001)
+                break
+        return {"fps": fr, "duration": float((d.get("format") or {}).get("duration") or 0.0),
+                "width": int(v.get("width") or 0), "height": int(v.get("height") or 0)}
+    except (ValueError, TypeError):
+        return {"fps": None, "duration": 0.0, "width": 0, "height": 0}
 
 
 def _write_json(path: Path, d: dict) -> None:
