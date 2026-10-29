@@ -1020,8 +1020,9 @@ class Worker:
     the oldest piece nobody took is taken and enhanced. ``jobs``: what it did (the newest last)."""
 
     def __init__(self, folder: Callable[[], Path] | Path, on_change: Callable[[Job], None] | None = None,
-                 scan_s: float = SCAN_S):
+                 scan_s: float = SCAN_S, hold: Callable[[], str] | None = None):
         self.folder = folder if callable(folder) else (lambda f=Path(folder): f)
+        self.hold = hold                # 29 Oct: why not to start Topaz now ('' = go): an edit running here
         self.on_change = on_change
         self.scan_s = scan_s
         self.jobs: list[Job] = []
@@ -1057,6 +1058,14 @@ class Worker:
             self.note = f"the Enhance folder {folder} cannot be reached"
             return None
         self.note = ""
+        try:
+            why = self.hold() if self.hold is not None else ""
+        except Exception:  # noqa: BLE001
+            why = ""
+        if why:                         # the graphics card is busy with an edit: the piece waits (nobody takes it)
+            if waiting_pieces(folder):
+                self.note = f"a piece waits until {why}"
+            return None
         for nm in waiting_pieces(folder):
             token = take(nm)
             if token is None:

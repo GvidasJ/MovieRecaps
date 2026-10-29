@@ -75,11 +75,20 @@ class EnhancePage(QWidget):
         from ..core import enhance as E
         return E.share_dir(self._settings())
 
+    def _edit_running(self) -> str:
+        """29 Oct: Topaz never starts while this computer runs an edit (both on one graphics card: out of memory)."""
+        pages = getattr(self.ctx, "pages", None) or {}
+        mc = pages.get("match_cuts") if hasattr(pages, "get") else None
+        try:
+            return "the edit running on this computer is done" if mc is not None and mc.busy() else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def settings_changed(self, s) -> None:
         from ..core import enhance as E
         if E.enhances(s):
             if self.worker is None:
-                self.worker = E.Worker(self._folder, self.relay.changed.emit)
+                self.worker = E.Worker(self._folder, self.relay.changed.emit, hold=self._edit_running)
             self.worker.start()
         elif self.worker is not None:
             if not self.worker.busy:                  # (a piece being enhanced is finished first)
