@@ -270,10 +270,44 @@ def find_scene(competitor: str | os.PathLike, raw: str | os.PathLike, work: str 
     snd = getattr(res, "sound", None)
     if getattr(res, "wrong", False):
         raise EnhanceError("the quick check says the competitor does not come from this RAW")
-    if snd is None or getattr(snd, "state", "") != PC.FOUND or not list(getattr(snd, "where", None) or []):
-        why = str(getattr(snd, "why", "") or "").strip()
-        raise EnhanceError("the sound check could not find the scene in the RAW" + (f" ({why})" if why else ""))
-    return [float(x) for x in snd.where]
+    if snd is not None and getattr(snd, "state", "") == PC.FOUND and list(getattr(snd, "where", None) or []):
+        return [float(x) for x in snd.where]
+    # 29 Oct: the sound did not find it (music over the scene: Madagascar, Key & Peele) -> the picture's found frames,
+    # else the sound's almost-found pieces -- their biggest group that fits in one piece
+    pic = getattr(res, "picture", None)
+    if pic is not None and getattr(pic, "state", "") == PC.FOUND and list(getattr(pic, "where", None) or []):
+        g = _group([float(x) for x in pic.where], MAX_PIECE_S - PC.WIN_S)
+        if len(g) >= 2:
+            return g
+    for stats in ((getattr(snd, "details", None) or {}).get("tried") or {}).values():
+        # almost-found pieces that agree on WHERE the competitor starts in the RAW (raw_at - at within 1.5 s)
+        pts = sorted((float(x["raw_at"]) - float(x.get("at") or 0.0), float(x["raw_at"])) for x in stats
+                     if isinstance(x, dict) and (x.get("weak") or x.get("found")) and x.get("raw_at") is not None)
+        best: list = []
+        for i in range(len(pts)):
+            grp = [q for q in pts if abs(q[0] - pts[i][0]) <= 1.5]
+            if len(grp) > len(best):
+                best = grp
+        if len(best) >= 2:
+            g = _group([q[1] for q in best], MAX_PIECE_S - PC.WIN_S)
+            if len(g) >= 2:
+                return g
+    why = str(getattr(snd, "why", "") or "").strip()
+    raise EnhanceError("neither the sound nor the picture check could find the scene in the RAW" +
+                       (f" ({why})" if why else ""))
+
+
+def _group(times: list[float], span: float) -> list[float]:
+    """The biggest group of ``times`` that fits within ``span`` seconds (the earliest group on a tie)."""
+    t = sorted(times)
+    best: list[float] = []
+    j = 0
+    for i in range(len(t)):
+        while t[i] - t[j] > span:
+            j += 1
+        if i - j + 1 > len(best):
+            best = t[j:i + 1]
+    return best
 
 
 def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str, out_dir: str | os.PathLike,
