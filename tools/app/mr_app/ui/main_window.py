@@ -242,7 +242,13 @@ class MainWindow(QMainWindow):
         def work():
             from ..core import publish
             with self.publishing(folder):
-                return publish.publish_or_queue(folder, root, local)
+                r = publish.publish_or_queue(folder, root, local)
+            try:                                             # 29 Oct: one enhanced video, no RAW left in the folder
+                from ..core import enhance as E
+                E.tidy_project(folder)
+            except Exception:  # noqa: BLE001
+                pass
+            return r
 
         def done(r) -> None:
             res, note = r

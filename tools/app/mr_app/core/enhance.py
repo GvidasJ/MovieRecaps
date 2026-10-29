@@ -555,6 +555,67 @@ def take_back(folder: str | os.PathLike, name: str, project: str | os.PathLike, 
     return {"ok": True, "why": "", "file": str(dst), "check": chk}
 
 
+def tidy_project(project: str | os.PathLike) -> list[str]:
+    """29 Oct, your call: a finished project whose edit plays the enhanced piece keeps ONE video of it and no RAW:
+    - the enhanced piece once: enhance\\raw_enhanced.mp4 goes when the edit's own copy (edit*\\extras\\media\\raw.mp4)
+      is the same file (a hard link or the same size)
+    - the RAW in the project folder goes when no edit XML plays it (a RAW kept elsewhere -- the torrent folder,
+      input\\downloads -- is never touched)
+    Returns what was removed (also written into project.json's "enhance": "tidied")."""
+    from . import projects as PJ
+    try:
+        p = PJ.load(project)
+    except Exception:  # noqa: BLE001
+        return []
+    rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+    if rec.get("state") != "used":
+        return []
+    folder = Path(p.folder)
+    enh = folder / PROJECT_SUB / PROJECT_FILE
+    media = [m for m in sorted(folder.glob("edit*/extras/media/raw.mp4")) if m.is_file()]
+    if not media and not enh.is_file():
+        return []
+    xml_text = ""
+    for x in folder.glob("edit*/*.xml"):
+        try:
+            xml_text += x.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+    removed: list[str] = []
+    if enh.is_file() and media:
+        same = False
+        try:
+            same = os.path.samefile(enh, media[0]) or enh.stat().st_size == media[0].stat().st_size
+        except OSError:
+            pass
+        if same and PROJECT_FILE not in xml_text:
+            try:
+                enh.unlink()
+                removed.append(str(enh.relative_to(folder)))
+            except OSError:
+                pass
+    raw = p.file("raw")
+    try:
+        inside = raw is not None and raw.is_file() and raw.resolve().parent == folder.resolve()
+    except OSError:
+        inside = False
+    if inside and media:
+        from urllib.parse import quote
+        plays = raw.name in xml_text or quote(raw.name) in xml_text
+        if not plays:
+            try:
+                raw.unlink()
+                removed.append(raw.name)
+            except OSError:
+                pass
+    if removed:
+        try:
+            p.update(enhance=dict(rec, tidied=removed, tidied_at=time.time()))
+        except Exception:  # noqa: BLE001
+            pass
+    return removed
+
+
 def clear(folder: str | os.PathLike, name: str) -> None:
     """The project's files in the Enhance folder go (only its own: the piece, its json, the lock, the result)."""
     for f in names(folder, name).all():
