@@ -588,7 +588,7 @@ def find_topaz() -> Topaz:
         from match_cuts.common import ffmpeg_bin
         return Topaz(Path(ffmpeg_bin()), None, None, "", True)
     pf = [os.environ.get("ProgramFiles", r"C:\Program Files"), os.environ.get("ProgramW6432", ""),
-          r"C:\Program Files"]
+          r"C:\Program Files"] + [f"{d}:\\Program Files" for d in "DEFG"]     # 29 Oct: the PC has it on D:
     cands = [Path(os.environ[TOPAZ_ENV])] if os.environ.get(TOPAZ_ENV) else []
     for base in pf:
         if base:
