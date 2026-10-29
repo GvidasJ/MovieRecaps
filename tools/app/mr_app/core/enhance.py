@@ -753,7 +753,7 @@ def _opts(d: dict) -> str:
     return ":".join(f"{k}={v}" for k, v in d.items())
 
 
-def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike) -> list[str]:
+def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0) -> list[str]:
     """Topaz's ffmpeg with the user's settings: Proteus at 2x the piece's size, then Apollo to 60 fps; H.265 Main10
     at a constant 180 Mb/s; the sound copied. The fake Topaz: a plain 2x scale and 60 fps (the tests)."""
     head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
@@ -761,7 +761,8 @@ def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike) -> 
     if tz.fake:
         return head + ["-vf", f"scale=iw*2:ih*2:flags=lanczos,fps={OUT_FPS}", "-c:v", "libx264", "-preset",
                        "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"] + tail
-    chain = f"tvai_up={_opts({**PROTEUS, **GPU})},tvai_fi={_opts({**APOLLO, **GPU})}"
+    gpu = dict(GPU, vram=f"{vram:g}")
+    chain = f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}"
     return head + ["-vf", chain, "-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc", "cbr",
                    "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", "360M", "-preset", "p5",
                    "-tag:v", "hvc1"] + tail
@@ -795,11 +796,22 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
               progress: Callable[[float, float | None], None] | None = None,
               cancel: threading.Event | None = None) -> None:
     """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
-    (plain words) when it fails or was stopped."""
+    (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
+    again with less of its memory (60 %, then 35 %)."""
     tz = tz or find_topaz()
     if not tz.found:
         raise EnhanceError(tz.why)
-    cmd = topaz_command(tz, src, dst)
+    for vram in (1.0, 0.6, 0.35):
+        try:
+            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, vram)
+        except EnhanceError as e:
+            if "ran out of memory" not in str(e) or vram == 0.35 or (cancel is not None and cancel.is_set()):
+                raise
+            Path(dst).unlink(missing_ok=True)
+
+
+def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float) -> None:
+    cmd = topaz_command(tz, src, dst, vram)
     t0 = time.monotonic()
     pr = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           env=topaz_env(tz), creationflags=NO_WINDOW)
