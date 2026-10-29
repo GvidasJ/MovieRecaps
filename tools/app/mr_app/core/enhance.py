@@ -334,7 +334,12 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
             max_s = min(MAX_PIECE_S, span + 10.0)         # piece, 5 s each side, at most 1:20
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
         return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say)
-    p = plan(m, places, WIN_S, max_s)
+    try:
+        p = plan(m, places, WIN_S, max_s)
+    except EnhanceError as e:                            # 30 Oct: keyframes too far apart for a lossless cut -> an
+        if "keyframe" not in str(e):                     # encoded piece of the same window
+            raise
+        return _encoded_piece(raw, places, max_s, nm, name, project, str(e), t0, say)
     n_plan = p.k1 - p.k0
     work.mkdir(parents=True, exist_ok=True)
     mov = work / "piece.mov"
