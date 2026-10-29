@@ -4,5 +4,7 @@
  "handle": "@LouLaughs",
  "shorts_only": false,
  "music": {"file": "../SceneProof/One Piece OST - Mother Sea (First Part) Extended Version.mp3", "start_s": 0.52,
-           "split_s": 12.32, "gains_db": [5.0, -1.0], "volume_db": 8.5}
+           "split_s": 12.32, "gains_db": [5.0, -1.0], "volume_db": 8.5},
+ "headline_anchor": [1063.5, 849.5],
+ "headline_style": {"font": "Instagram Sans Condensed Bold.ttf", "size": 140, "tracking": -10, "faux_bold": true}
 }
