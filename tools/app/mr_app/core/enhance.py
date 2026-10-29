@@ -396,7 +396,8 @@ def check_enhanced(path: str | os.PathLike, info: dict) -> dict:
         out["duration"] = round(dur, 4)
         piece_fps = float(Fraction(str(info.get("fps") or "0/1")) or 0) or OUT_FPS
         want = float(info.get("duration") or 0.0)
-        if abs(dur - want) > 1.0 / piece_fps + 1e-3:
+        short_ok = 1.0 / piece_fps + 0.15 + 1e-3      # 29 Oct: Apollo makes no new frames after the piece's last one
+        if dur - want > 1.0 / piece_fps + 1e-3 or want - dur > short_ok:   # (a few 60 fps frames short is fine)
             raise EnhanceError(f"it is {dur:.3f} s long, the piece {want:.3f} s (more than one frame apart)")
         start = float(st.get("start_time") or 0.0)
         if abs(start) > 1.0 / OUT_FPS:
