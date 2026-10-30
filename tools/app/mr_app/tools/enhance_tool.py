@@ -88,7 +88,8 @@ class EnhancePage(QWidget):
         from ..core import enhance as E
         if E.enhances(s):
             if self.worker is None:
-                self.worker = E.Worker(self._folder, self.relay.changed.emit, hold=self._edit_running)
+                self.worker = E.Worker(self._folder, self.relay.changed.emit, hold=self._edit_running,
+                                       machine=lambda: E._kind(self._settings()))      # noqa: SLF001
             self.worker.start()
         elif self.worker is not None:
             if not self.worker.busy:                  # (a piece being enhanced is finished first)

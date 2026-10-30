@@ -317,7 +317,8 @@ def _group(times: list[float], span: float) -> list[float]:
 
 def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str, out_dir: str | os.PathLike,
                project: str | os.PathLike | None = None, work: str | os.PathLike | None = None,
-               progress: Callable[[float, str], None] | None = None, max_s: float | None = None) -> dict:
+               progress: Callable[[float, str], None] | None = None, max_s: float | None = None,
+               topaz_on: str = "") -> dict:
     """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json. Returns its
     info (the json's content); raises EnhanceError with the reason in plain words -- then the edit uses the normal
     RAW."""
@@ -340,13 +341,13 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
         if span + 10.0 > max_s:                           # Peele: places 45 s apart in a 23 s video) -> a longer
             max_s = min(MAX_PIECE_S, span + 10.0)         # piece, 5 s each side, at most 1:20
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
-        return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say)
+        return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say, topaz_on)
     try:
         p = plan(m, places, WIN_S, max_s)
     except EnhanceError as e:                            # 30 Oct: keyframes too far apart for a lossless cut -> an
         if "keyframe" not in str(e):                     # encoded piece of the same window
             raise
-        return _encoded_piece(raw, places, max_s, nm, name, project, str(e), t0, say)
+        return _encoded_piece(raw, places, max_s, nm, name, project, str(e), t0, say, topaz_on)
     n_plan = p.k1 - p.k0
     work.mkdir(parents=True, exist_ok=True)
     mov = work / "piece.mov"
@@ -371,7 +372,8 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     except Exception as e:  # noqa: BLE001 - 30 Oct: the lossless cut is not right (HEVC: 824 frames for 820) ->
         nm.piece.unlink(missing_ok=True)                # an encoded piece of the same window instead
         mov.unlink(missing_ok=True)
-        return _encoded_piece(raw, places, max_s, nm, name, project, f"the lossless cut failed: {e}", t0, say)
+        return _encoded_piece(raw, places, max_s, nm, name, project, f"the lossless cut failed: {e}", t0, say,
+                              topaz_on)
     finally:
         mov.unlink(missing_ok=True)
     fps = m.rate
@@ -384,13 +386,14 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
             "bytes": int(nm.piece.stat().st_size), "check": chk.get("rows"), "made": time.time(),
             "seconds": round(time.perf_counter() - t0, 1),
             "where": f"{_clock(a)}-{_clock(b)} of {_clock(m.duration)}"}
+    info["topaz_on"] = topaz_on
     _write_json(nm.info, info)
     say(1.0, f"the piece {info['where']} is in the Enhance folder")
     return info
 
 
 def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", name: str, project: Any,
-                   why_not_copy: str, t0: float, say: Callable[[float, str], None]) -> dict:
+                   why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str = "") -> dict:
     """29 Oct: the piece when the RAW cannot be cut losslessly (uneven frame timing, ...): the same time window
     encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words)."""
     from match_cuts.common import ffmpeg_bin
@@ -437,6 +440,7 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
             "places": [round(x, 3) for x in places], "raw_duration": round(dur, 3),
             "bytes": int(nm.piece.stat().st_size), "check": None, "made": time.time(),
             "seconds": round(time.perf_counter() - t0, 1), "encoded": True, "why_encoded": why_not_copy,
+            "topaz_on": topaz_on,
             "where": f"{_clock(lo)}-{_clock(lo + n / f)} of {_clock(dur)}"}
     _write_json(nm.info, info)
     say(1.0, f"the piece {info['where']} is in the Enhance folder (encoded)")
@@ -980,7 +984,7 @@ def worker_alive(folder: str | os.PathLike, now: float | None = None) -> bool:
         return False
 
 
-def waiting_pieces(folder: str | os.PathLike, now: float | None = None) -> list[Names]:
+def waiting_pieces(folder: str | os.PathLike, now: float | None = None, machine: str = "") -> list[Names]:
     """The pieces in the Enhance folder nobody has taken (the oldest first): their json written, no result yet, no
     live lock."""
     folder = Path(folder)
@@ -996,6 +1000,10 @@ def waiting_pieces(folder: str | os.PathLike, now: float | None = None) -> list[
                 continue
             if nm.lock.exists() and not lock_stale(nm.lock, now):
                 continue
+            if machine:                          # 30 Oct: a piece meant for the other computer is left for it
+                want = str((read_info(nm.info) or {}).get("topaz_on") or "")
+                if want and want != machine:
+                    continue
             out.append((p.stat().st_mtime, nm))
         except OSError:
             continue
@@ -1087,9 +1095,11 @@ class Worker:
     the oldest piece nobody took is taken and enhanced. ``jobs``: what it did (the newest last)."""
 
     def __init__(self, folder: Callable[[], Path] | Path, on_change: Callable[[Job], None] | None = None,
-                 scan_s: float = SCAN_S, hold: Callable[[], str] | None = None):
+                 scan_s: float = SCAN_S, hold: Callable[[], str] | None = None,
+                 machine: Callable[[], str] | None = None):
         self.folder = folder if callable(folder) else (lambda f=Path(folder): f)
         self.hold = hold                # 29 Oct: why not to start Topaz now ('' = go): an edit running here
+        self.machine = machine          # 30 Oct: "pc" / "laptop" -- only the pieces meant for it (or for either)
         self.on_change = on_change
         self.scan_s = scan_s
         self.jobs: list[Job] = []
@@ -1129,11 +1139,15 @@ class Worker:
             why = self.hold() if self.hold is not None else ""
         except Exception:  # noqa: BLE001
             why = ""
+        try:
+            me = self.machine() if self.machine is not None else ""
+        except Exception:  # noqa: BLE001
+            me = ""
         if why:                         # the graphics card is busy with an edit: the piece waits (nobody takes it)
-            if waiting_pieces(folder):
+            if waiting_pieces(folder, machine=me):
                 self.note = f"a piece waits until {why}"
             return None
-        for nm in waiting_pieces(folder):
+        for nm in waiting_pieces(folder, machine=me):
             token = take(nm)
             if token is None:
                 continue

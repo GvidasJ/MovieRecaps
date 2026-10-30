@@ -381,7 +381,8 @@ class StageThread(QThread):
             if comp is None or raw is None or not comp.is_file() or not raw.is_file():
                 raise E.EnhanceError("the competitor and the RAW are not both in the folder")
             info = E.make_piece(comp, raw, name, folder, project=p.folder,
-                                progress=lambda s, t: self._say("raw", s, t))
+                                progress=lambda s, t: self._say("raw", s, t),
+                                topaz_on=str(getattr(S.load(), "enhance_where", "") or ""))
             rec.update(state="sent", sent=time.time(), where=info.get("where"), piece=info)
         except E.EnhanceError as e:
             rec.update(state="skipped", why=str(e))

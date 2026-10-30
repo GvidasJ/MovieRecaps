@@ -156,6 +156,14 @@ class SettingsDialog(QDialog):
         trow2.addWidget(self.b_test_topaz)
         trow2.addStretch(1)
         ebox.addLayout(trow2)
+        wrow = QHBoxLayout()                              # 30 Oct: where Topaz runs for the videos made here
+        wrow.addWidget(W.label("Topaz for the videos made here runs on", "Dim"))
+        self.enh_where = W.Segmented([("pc", "PC"), ("laptop", "Laptop"), ("", "Either")],
+                                     str(getattr(self.s, "enhance_where", "") or ""))
+        wrow.addWidget(self.enh_where)
+        wrow.addWidget(W.label("only that computer takes the piece (its \"Enhance pieces … with Topaz\" on)", "Dim",
+                               wrap=True), 1)
+        ebox.addLayout(wrow)
         self.topaz_line = W.label("Topaz Video AI: looking for it…", "Dim", wrap=True, select=True)
         ebox.addWidget(self.topaz_line)
         frow = QHBoxLayout()
@@ -403,6 +411,7 @@ class SettingsDialog(QDialog):
         s.enhance_send = None if send == E.sends(dflt) else send
         s.enhance_topaz = None if topaz == E.enhances(dflt) else topaz
         s.enhance_dir = S0.normalize_folder(self.enh_dir.text())
+        s.enhance_where = str(self.enh_where.value or "")
         look ="classic" if self.look.value == "on" else "mono"
         changed_look = look != getattr(s, "look", "mono")
         s.look = look

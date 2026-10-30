@@ -54,6 +54,7 @@ class Settings:
     enhance_send: bool | None = None   # run 20: "Enhance the scene on the laptop first" (None: on on the PC only)
     enhance_topaz: bool | None = None  # run 20: "Enhance pieces for the PC with Topaz" (None: on on the laptop only)
     enhance_dir: str = ""              # run 20: the Enhance folder ("" = this computer's default: core.enhance.share_dir)
+    enhance_where: str = ""            # 30 Oct: Topaz for the videos made here runs on "pc" / "laptop" ("" = either)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -119,6 +120,8 @@ def _valid(name: str, v: Any, default: Any) -> Any:
         return _int(v, default, 1, 24 * 60)
     if name in ("pc_names", "laptop_names"):
         return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else default
+    if name == "enhance_where":
+        return v if v in ("", "pc", "laptop") else default
     if name == "look":
         return v if v in ("mono", "classic") else default
     return v
