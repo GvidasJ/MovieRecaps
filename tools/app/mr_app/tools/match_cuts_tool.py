@@ -2024,10 +2024,27 @@ class MatchCutsPage(QWidget):
                  ("" if confirm or not probs else "  ·  worth a look: " + "; ".join(probs[:4])))
         self._next()
 
+    def _topaz_busy(self) -> bool:
+        """30 Oct: Topaz is enhancing on this computer right now (its Enhance page's worker)."""
+        try:
+            pg = (getattr(self.ctx, "pages", None) or {}).get("enhance")
+            w = getattr(pg, "worker", None)
+            return bool(w is not None and w.busy)
+        except Exception:  # noqa: BLE001
+            return False
+
     def _next(self, first: J.Job | None = None) -> None:
         """The next video in the run order (``first``: this one now -- a video that started again after Swap)."""
         nxt = first if first is not None and J.runnable(first) else \
             next((j for j in self.jobs if J.runnable(j)), None)
+        if nxt is not None and self._topaz_busy():        # 30 Oct: an edit and Topaz at once ran the laptop out of
+            nxt.progress = "waits: Topaz is enhancing on this computer"      # memory (16 GB) -- the edit waits
+            row = self.rows.get(nxt.id)
+            if row is not None:
+                row.refresh()
+            self.update_counts()
+            QTimer.singleShot(30_000, lambda: self._next(first) if self.running and self.current is None else None)
+            return
         if nxt is None:
             if any(j.state == J.READY and j.complete and (getattr(j, "preparing", "") or
                                                           getattr(j, "reading_lengths", False)) for j in self.jobs):
