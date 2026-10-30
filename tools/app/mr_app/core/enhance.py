@@ -47,6 +47,9 @@ STILL_WHY = "the laptop was still enhancing it"
 MAX_WAIT_S = 4 * 3600.0             # ... but a laptop that is still enhancing it (its lock rewritten) is waited for up
                                     #   to this long (this laptop: 1080p -> 4K runs at ~1/50 of real time)
 SCAN_S = 30.0                       # the laptop looks for new pieces this often
+WORKER_ALIVE_S = 5 * 60.0           # 30 Oct: a Topaz computer that wrote its heartbeat this recently is alive ...
+ALIVE_WAIT_S = 12 * 3600.0          # ... and a piece waiting in its line (behind others / an edit) is waited for this
+WORKER_GLOB = ".topaz_worker_*.json"
 LOCK_STALE_S = 15 * 60.0            # a lock not rewritten for this long: its computer stopped -- free again
 LOCK_BEAT_S = 5.0                   # the owner rewrites its lock this often (its progress)
 OUT_FPS = 60
@@ -279,7 +282,9 @@ def find_scene(competitor: str | os.PathLike, raw: str | os.PathLike, work: str 
         g = _group([float(x) for x in pic.where], MAX_PIECE_S - PC.WIN_S)
         if len(g) >= 2:
             return g
-    for stats in ((getattr(snd, "details", None) or {}).get("tried") or {}).values():
+    frames = (getattr(pic, "details", None) or {}).get("frames") if pic is not None else None
+    tried = list(((getattr(snd, "details", None) or {}).get("tried") or {}).values()) + ([frames] if frames else [])
+    for stats in tried:
         # almost-found pieces that agree on WHERE the competitor starts in the RAW (raw_at - at within 1.5 s)
         pts = sorted((float(x["raw_at"]) - float(x.get("at") or 0.0), float(x["raw_at"])) for x in stats
                      if isinstance(x, dict) and (x.get("weak") or x.get("found")) and x.get("raw_at") is not None)
@@ -327,6 +332,8 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))
     say(0.4, "reading the RAW's keyframes")
     m = X.movie_facts(str(raw))
+    if max(places) + WIN_S - min(places) > MAX_PIECE_S - 10.0:   # 30 Oct: places far apart (a montage, look-alikes)
+        places = _group(places, MAX_PIECE_S - 10.0 - WIN_S)      # -> the biggest group that fits in 1:20
     if max_s is None:
         max_s = piece_length(competitor)
         span = max(places) + WIN_S - min(places)          # 30 Oct: the competitor skips parts of the scene (Key &
@@ -702,7 +709,8 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         p.update(enhance={"state": "failed", "why": why})
         return {"state": "failed", "why": why}
     waited = now - float(rec.get("sent") or now)
-    if waited > timeout_s and not (b.state == "enhancing" and waited < MAX_WAIT_S):
+    if waited > timeout_s and not (b.state == "enhancing" and waited < MAX_WAIT_S) and \
+            not (b.state != "enhancing" and waited < ALIVE_WAIT_S and worker_alive(folder, now)):
         why = TIMEOUT_WHY if b.state != "enhancing" else f"{STILL_WHY} after {_clock(waited)}"
         p.update(enhance={"state": "late", "why": why, "late": now})
         return {"state": "late", "why": why}
@@ -953,6 +961,25 @@ def beat(nm: Names, token: str, **fields: Any) -> bool:
         return False
 
 
+def beat_worker(folder: str | os.PathLike, note: str = "") -> None:
+    """30 Oct: this computer's Topaz worker is alive (a small file in the Enhance folder, rewritten every scan) -- so a
+    piece waiting in its line is not given up after 1 hour."""
+    try:
+        f = Path(folder) / f".topaz_worker_{safe_name(M.host())}_{_kind(None)}.json"
+        f.write_text(json.dumps({"computer": M.host(), "time": time.time(), "note": note}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def worker_alive(folder: str | os.PathLike, now: float | None = None) -> bool:
+    """A Topaz worker wrote its heartbeat into the Enhance folder in the last WORKER_ALIVE_S."""
+    now = time.time() if now is None else now
+    try:
+        return any(now - f.stat().st_mtime < WORKER_ALIVE_S for f in Path(folder).glob(WORKER_GLOB))
+    except OSError:
+        return False
+
+
 def waiting_pieces(folder: str | os.PathLike, now: float | None = None) -> list[Names]:
     """The pieces in the Enhance folder nobody has taken (the oldest first): their json written, no result yet, no
     live lock."""
@@ -1117,6 +1144,7 @@ class Worker:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
+            beat_worker(self.folder(), self.note)
             try:
                 self.once()
             except Exception as e:  # noqa: BLE001 - the loop never dies
