@@ -950,8 +950,9 @@ class VideoRow(W.Card):
         self.b_retry.setVisible(it.state in (FAILED, STOPPED))
         failed = it.state in (FAILED, STOPPED) or (it.state == DONE and it.result.get("label") not in
                                                    (None, "", "PASS", "OK with a note", "Cuts ready"))
-        self.b_another_raw.setVisible(failed)
-        self.b_another_comp.setVisible(failed)
+        paused = it.job is not None and getattr(it.job, "state", None) == J.PAUSED      # 30 Oct: a paused edit too
+        self.b_another_raw.setVisible(failed or paused)
+        self.b_another_comp.setVisible(failed or paused)
         self.b_folder.setVisible(it.project is not None)
         self.b_enh.setVisible(bool(it.enhance_late) and it.state in (DONE, FAILED, STOPPED))
         self.b_remove.setEnabled(not busy and not (it.job is not None and it.job.state == J.RUNNING))

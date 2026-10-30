@@ -1045,6 +1045,7 @@ class JobRow(QFrame):
         self.b_retry.setVisible(j.state in (J.DONE, J.STOPPED) and j.complete and R.stopped_by_itself(res))
         from ..core import another_raw as AR
         failed = j.state in (J.DONE, J.STOPPED) and AR.failed_or_stopped(j.state, res, (J.STOPPED,))   # day 17: any
+        failed = failed or j.state == J.PAUSED                       # 30 Oct: a paused video can change its RAW too
         self.b_another.setVisible(failed)                                                              # stop: both
         self.b_another_comp.setVisible(failed)
         self.b_pause.setVisible(j.state == J.RUNNING and not getattr(j, "restart_swapped", False)
