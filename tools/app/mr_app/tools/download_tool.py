@@ -1642,6 +1642,7 @@ class DownloadPage(QWidget):
         self.rows[it.id] = row
         self._order(scroll_top=True)
         self._counts()
+        self._save_rows()                                       # 30 Oct: kept at once (a crash lost the running row)
         if it.raw_torrent:
             self.start_torrent(it)
         else:
@@ -1943,6 +1944,7 @@ class DownloadPage(QWidget):
 
     def _step(self, it: Item, key: str, state: str, share: float | None = None, text: str | None = None) -> None:
         st = it.steps.setdefault(key, Step())
+        changed = st.state != state
         st.state = state
         if share is not None:
             st.share = max(0.0, min(1.0, share))
@@ -1952,6 +1954,8 @@ class DownloadPage(QWidget):
             st.share = 1.0
             st.finished = datetime.now()
         self._refresh(it)
+        if changed:
+            self._save_rows()                                   # 30 Oct: every step change kept (a crash loses nothing)
 
     def _done(self, item_id: int, res: dict) -> None:
         th, self.current = self.current, None

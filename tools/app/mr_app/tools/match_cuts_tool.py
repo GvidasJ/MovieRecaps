@@ -1511,6 +1511,8 @@ class MatchCutsPage(QWidget):
         order = [x.id for x in J.display_order(self.jobs)]
         self.queue.insert(row, order.index(j.id))          # in its place at once; the rows under it glide down
         self._reorder()
+        if getattr(self, "_restore_done", False):           # 30 Oct: kept at once (a crash lost the running video)
+            self._save_rows()
         return row
 
     def _read_lengths(self, j: J.Job) -> None:
@@ -2040,6 +2042,7 @@ class MatchCutsPage(QWidget):
             self._run_jobs.append(nxt.id)
         nxt.state = J.RUNNING
         nxt.progress, nxt.percent = "starting", 0.0
+        self._save_rows()                                   # 30 Oct: "running" kept -- after a crash it is back
         self.rows[nxt.id].refresh()
         self._reorder()                               # it glides to the top
         th = JobThread(nxt, self.converted, self.out_dir)
@@ -2283,6 +2286,7 @@ class MatchCutsPage(QWidget):
             jobs = RK.load_queue()
         except Exception:  # noqa: BLE001
             jobs = None
+        self._restore_done = True
         if jobs is None:
             self._restore_paused()
             return
