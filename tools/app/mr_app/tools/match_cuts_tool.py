@@ -2120,8 +2120,8 @@ class MatchCutsPage(QWidget):
                                                                        f"{j.name}: {lab}"),
                        "ok" if lab == R.PASS else ("note" if lab == R.OK_NOTE else "fail"))
             fn = getattr(self.ctx, "project_done", None)
-            if fn is not None and j.project is not None and lab in R.GOOD:
-                fn(j)
+            if fn is not None and j.project is not None and lab != R.STOPPED and j.run_dir is not None:
+                fn(j)                                 # 30 Oct: every finished edit goes to the shared folder (a FAIL too)
             from .learn_tool import after_edit        # day 12: problems_queue.md / "Waiting for your fix"
             after_edit(self.ctx, j, res)
             self._save_rows()                         # run 18: its result kept for the next start

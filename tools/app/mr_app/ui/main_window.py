@@ -296,7 +296,9 @@ class MainWindow(QMainWindow):
                         done = list(publish.retry_pending(local, root))
             for p in PJ.list_projects(local):         # finished before (or on another night) but never published
                 edit = (p.data.get("steps") or {}).get("edit") or {}
-                if edit.get("state") == PJ.DONE and not p.data.get("published"):
+                made = any(p.folder.glob("edit*/1_edit.xml"))        # 30 Oct: a FAIL with its files counts too
+                if (edit.get("state") == PJ.DONE or (edit.get("state") == PJ.FAILED and made)) \
+                        and not p.data.get("published"):
                     try:
                         with BG.counted_work():
                             with self.publishing(p.folder):
