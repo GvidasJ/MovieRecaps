@@ -361,12 +361,10 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
         chk = X.same_frames(str(nm.piece), m, p.k0, n)
         if not chk["ok"]:
             raise EnhanceError(f"the piece does not show the RAW's frames: {chk['why']}")
-    except EnhanceError:
-        nm.piece.unlink(missing_ok=True)
-        raise
-    except Exception as e:  # noqa: BLE001 - said in plain words
-        nm.piece.unlink(missing_ok=True)
-        raise EnhanceError(f"the piece could not be made: {e}") from e
+    except Exception as e:  # noqa: BLE001 - 30 Oct: the lossless cut is not right (HEVC: 824 frames for 820) ->
+        nm.piece.unlink(missing_ok=True)                # an encoded piece of the same window instead
+        mov.unlink(missing_ok=True)
+        return _encoded_piece(raw, places, max_s, nm, name, project, f"the lossless cut failed: {e}", t0, say)
     finally:
         mov.unlink(missing_ok=True)
     fps = m.rate
