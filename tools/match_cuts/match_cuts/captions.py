@@ -825,6 +825,42 @@ def srt_text(caps: Sequence[Caption], fps: Fraction) -> str:
     return "\n".join(blocks)
 
 
+def _grow_key(text: str) -> str:
+    """A caption's words for comparing (no case, no punctuation, no typing cursor '_' / '|')."""
+    t = re.sub(r"[^\w' ]+", " ", str(text).replace("\n", " ").lower().replace("_", " "))
+    return " ".join(t.replace("\u2019", "'").split())
+
+
+def merge_growing(caps: Sequence[Caption], fps: Fraction, gap_s: float = 0.25) -> tuple[list[Caption], list[dict]]:
+    """30 Oct: a competitor that types its captions in word by word ("here's" -> "here's what" -> "here's what you
+    get") gave one caption per step -- the same words again and again. Back-to-back captions where the next one
+    starts with all of this one's words become ONE caption: the full text, from the first one's start. Returns the
+    captions and what was merged."""
+    out: list[Caption] = []
+    merged: list[dict] = []
+    gap = int(round(gap_s * float(fps)))
+    for c in caps:
+        if out and c.mode != "placeholder" and out[-1].mode != "placeholder":
+            p = out[-1]
+            a, b = _grow_key(p.text), _grow_key(c.text)
+            if a and b != a and (b + " ").startswith(a + " ") and 0 <= c.start - p.end <= gap:
+                merged.append({"from": p.text, "into": c.text, "start": int(p.start)})
+                out[-1] = dataclasses.replace(c, start=p.start, words=list(p.words) + list(c.words))
+                continue
+            if a and a == b and 0 <= c.start - p.end <= gap:               # the same words twice in a row: one
+                merged.append({"from": p.text, "into": c.text, "start": int(p.start)})
+                out[-1] = dataclasses.replace(p, end=c.end, words=list(p.words) + list(c.words))
+                continue
+            toks = c.text.split()                    # a rolling window ("the kids say you" -> "you want some"): the
+            pk, ck = a.split(), [_grow_key(t) for t in toks]                 # words shown again are left out
+            k = max((n for n in range(1, min(len(pk), len(toks) - 1) + 1) if pk[-n:] == ck[:n]), default=0)
+            if k and 0 <= c.start - p.end <= gap and len(toks) - k >= 1:
+                merged.append({"from": c.text, "into": " ".join(toks[k:]), "start": int(c.start), "repeat": k})
+                c = dataclasses.replace(c, text=" ".join(toks[k:]))
+        out.append(c)
+    return out, merged
+
+
 def write_srt(caps: Sequence[Caption], path: str | Path, fps: Fraction) -> Path:
     """Write the SRT -- always (night 7: one odd line held laptop video2's whole file back); the lines that still
     break a hard rule are listed by doubtful_lines, not withheld."""
@@ -1891,6 +1927,7 @@ def run_captions(ctx) -> dict:
         res["other_video"].append({"name": st["name"], "a": st["a"], "b": st["b"], "t0": st["t0"], "t1": st["t1"],
                                    "captions": len(mine), "how": dict(how), "words": len(st["words"]),
                                    "text": " ".join(c.text.replace("\n", " ") for c in mine)})
+    caps, res["grown_merged"] = merge_growing(caps, fps)   # 30 Oct: "here's" / "here's what" / "here's what you get"
     caps = no_overlaps(caps)                         # whatever was added late: never two captions at once
     # night 7: no caption shorter than 2 frames of the sequence you get (1_edit.xml's rate: the RAW's)
     final = Fraction(str(getattr(cfg, "premiere_seq_rate", None) or fps))
