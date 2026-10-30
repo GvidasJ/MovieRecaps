@@ -1,0 +1,16 @@
+{
+ "name": "DanCuts",
+ "link": "https://www.youtube.com/@DanCutss",
+ "handle": "@DanCutss",
+ "shorts_only": false,
+ "headline_anchor": [
+  1063.5,
+  849.5
+ ],
+ "headline_style": {
+  "font": "Instagram Sans Condensed Bold.ttf",
+  "size": 140,
+  "tracking": -10,
+  "faux_bold": true
+ }
+}

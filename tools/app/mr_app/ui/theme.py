@@ -50,7 +50,10 @@ MONO = "JetBrains Mono"
 GRID_STEP = 48                  # px between the grid's lines (the reference: 48)
 GRID_COLOUR = "#1b1b1b"
 
-CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "Flick707": FLICK, "SceneProof": SCENE}
+MIKECUTS = "#2dd4bf"             # 30 Oct: every channel its own colour (MikeCuts was red like MikeMemesYou): teal
+DANCUTS = "#f472b6"              # ... DanCuts: pink
+CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "Flick707": FLICK, "SceneProof": SCENE,
+                   "MikeCuts": MIKECUTS, "DanCuts": DANCUTS}
 
 # a result word -> its pill: (text colour, background, border)
 PILLS = {
