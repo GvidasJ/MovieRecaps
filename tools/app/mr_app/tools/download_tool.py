@@ -575,8 +575,8 @@ class DotButton(W.Button):
     """A channel's toggle with its colour dot (the reference's ``.seg2 .dot``)."""
 
     def __init__(self, name: str):
-        note = theme.channel_note(name)                   # 31 Oct: what the channel posts, on its button
-        super().__init__("    " + name + (f" · {note}" if note else ""), "Seg")
+        note = theme.channel_note(name)                   # 31 Oct: what the channel posts -- under its button
+        super().__init__("    " + name, "Seg")
         self.channel = name
         self.setCheckable(True)
         if note:
@@ -604,7 +604,16 @@ class ChannelButtons(QWidget):
         for n in names:
             b = DotButton(n)
             b.clicked.connect(lambda _=False, k=n: self.set(k, emit=True))
-            lay.addWidget(b)
+            col = QVBoxLayout()                            # 31 Oct: the button, what the channel posts under it
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(2)
+            col.addWidget(b)
+            note = theme.channel_note(n)
+            if note:
+                lab = W.label(note, "Dim")
+                lab.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                col.addWidget(lab)
+            lay.addLayout(col)
             self.buttons[n] = b
         lay.addStretch(1)
         self.value = ""
