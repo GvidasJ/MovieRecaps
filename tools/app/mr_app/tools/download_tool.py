@@ -575,9 +575,12 @@ class DotButton(W.Button):
     """A channel's toggle with its colour dot (the reference's ``.seg2 .dot``)."""
 
     def __init__(self, name: str):
-        super().__init__("    " + name, "Seg")
+        note = theme.channel_note(name)                   # 31 Oct: what the channel posts, on its button
+        super().__init__("    " + name + (f" · {note}" if note else ""), "Seg")
         self.channel = name
         self.setCheckable(True)
+        if note:
+            self.setToolTip(f"{name}: {note}")
 
     def paintEvent(self, e) -> None:                      # noqa: N802
         super().paintEvent(e)

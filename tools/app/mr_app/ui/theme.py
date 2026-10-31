@@ -140,6 +140,18 @@ def mono_fonts() -> None:
             return
 
 
+CHANNEL_NOTES = {"MikeCuts": "It's Sunny", "DanCuts": "Key & Peele", "MikeMemesYou": "Random Memes",
+                 "LouLaughs": "Random Memes", "SceneProof": "Random Memes"}   # 31 Oct: what each channel posts
+
+
+def channel_note(name: str | None) -> str:
+    """What the channel posts (shown on its button, so you don't forget): CHANNEL_NOTES, '' for others."""
+    for k, v in CHANNEL_NOTES.items():
+        if name and k.lower() == str(name).lower():
+            return v
+    return ""
+
+
 def channel_colour(name: str | None) -> str:
     """A channel's dot colour (red for one the app does not know)."""
     if not name:
