@@ -612,7 +612,7 @@ class BoardPage(QWidget):
         week = QHBoxLayout()
         week.setSpacing(10)
         self.weeks = {}
-        for ch in ("LouLaughs", "MikeMemesYou", "Flick707"):
+        for ch in ("LouLaughs", "MikeMemesYou", "MikeCuts", "DanCuts"):        # 31 Oct: Flick707 gone
             wc = WeekChart(ch)
             self.weeks[ch] = wc
             week.addWidget(wc)

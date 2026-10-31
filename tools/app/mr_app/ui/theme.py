@@ -52,7 +52,7 @@ GRID_COLOUR = "#1b1b1b"
 
 MIKECUTS = "#2dd4bf"             # 30 Oct: every channel its own colour (MikeCuts was red like MikeMemesYou): teal
 DANCUTS = "#f472b6"              # ... DanCuts: pink
-CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "Flick707": FLICK, "SceneProof": SCENE,
+CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "SceneProof": SCENE,         # 31 Oct: Flick707 gone
                    "MikeCuts": MIKECUTS, "DanCuts": DANCUTS}
 
 # a result word -> its pill: (text colour, background, border)

@@ -22,7 +22,7 @@ from typing import Iterable, Mapping, Sequence
 DAY_GOAL = 6
 MONTH_GOAL = 150
 DAY_START_HOUR = 0              # a day starts at this hour (0: midnight)
-CHANNEL_ORDER = ("LouLaughs", "MikeMemesYou", "Flick707")
+CHANNEL_ORDER = ("LouLaughs", "MikeMemesYou", "MikeCuts", "DanCuts")      # 31 Oct: Flick707 gone
 SHORT_NAMES = {"LouLaughs": "Lou", "MikeMemesYou": "Mike", "Flick707": "Flick707"}
 NO_CHANNEL = "no channel"
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
