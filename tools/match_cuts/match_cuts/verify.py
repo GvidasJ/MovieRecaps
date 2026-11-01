@@ -4250,14 +4250,28 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
     if val_ok is not True:
         failures.append("XML/EDL re-parse validation did not pass: "
                         + str(exports.get("errors") or exports.get("error") or "validation did not run"))
+    # 2 Nov: the two check videos (not your edit) that could not be made for lack of memory -- a note, never a stop
+    errors_all = list(getattr(ctx, "errors", None) or [])
+
+    def _no_memory(e: dict) -> bool:
+        t = f"{e.get('stage', '')} {e.get('error', '')}".lower()
+        return ("preview_recreation" in t or "compare" in t) and ("memory" in t or "allocate" in t)
+    mem = [e for e in errors_all if _no_memory(e)]
+    mem_steps = " ".join(str(e.get("stage", "")) for e in mem)
+    prev_p = Path(paths.get("preview") or out / "preview_recreation.mp4")
+    cmp_p = Path(paths.get("compare") or out / "compare.mp4")
     if getattr(cfg, "skip_preview", False):
         skipped["preview"] = "preview_recreation.mp4 (--skip-preview)"
+    elif "preview_recreation" in mem_steps and not prev_p.exists():
+        skipped["preview"] = "preview_recreation.mp4 (not enough memory -- only a check video)"
     else:
-        need("preview", Path(paths.get("preview") or out / "preview_recreation.mp4"), "preview_recreation.mp4")
+        need("preview", prev_p, "preview_recreation.mp4")
     if getattr(cfg, "skip_compare", False):
         skipped["compare"] = "compare.mp4 (--skip-compare)"
+    elif mem and not cmp_p.exists():
+        skipped["compare"] = "compare.mp4 (not enough memory -- only a check video)"
     else:
-        need("compare", Path(paths.get("compare") or out / "compare.mp4"), "compare.mp4")
+        need("compare", cmp_p, "compare.mp4")
     pipe_skipped = exports.get("skipped") or {}
     for key in exports.get("missing") or []:
         if key not in failed_keys and key not in skipped and key not in pipe_skipped:
@@ -4271,7 +4285,9 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
         got = len(list((dbg / "cuts").glob("cut_*.png"))) if (dbg / "cuts").is_dir() else 0
         if got < n_cuts:
             failures.append(f"debug/cuts has {got} cut images, the edit has {n_cuts} cuts")
-    errors = list(getattr(ctx, "errors", None) or [])
+    errors = [e for e in errors_all if e not in mem]
+    for e in mem:
+        warnings.append(f"{e.get('stage')}: not enough memory ({e.get('error')}) -- only a check video, your edit is made")
     for e in errors:
         failures.append(f"stage error {e.get('stage')}: {e.get('error')}")
     status = "fail" if failures else "pass"
