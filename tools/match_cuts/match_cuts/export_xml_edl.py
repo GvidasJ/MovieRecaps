@@ -6465,7 +6465,12 @@ def premiere_sync_problems(xml_path: str | os.PathLike, moving: bool = False) ->
                 out.append(f"A1 has a gap under V1 {v.get('label')} at {tc(at)}-{tc(a0)}")
             at = max(at, a1)
     raw_el = next((fe for fe in root.iter("file") if fe.get("id") == "file-raw" and fe.find("rate") is not None), None)
-    jump_max = take_jump_s(_xml_rate(raw_el) if raw_el is not None else None) * f
+    raw_rate = _xml_rate(raw_el) if raw_el is not None else None
+    jump_max = take_jump_s(raw_rate) * f
+    try:
+        raw_hz = float(Fraction(raw_rate)) if raw_rate else 0.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        raw_hz = 0.0
     for name, items in () if moving else (("V1", x["clips"]), ("A1", aud)):
         its = sorted((c for c in items if int(c["start"]) >= 0), key=lambda c: int(c["start"]))
         for p, q in zip(its, its[1:]):
@@ -6474,6 +6479,12 @@ def premiere_sync_problems(xml_path: str | os.PathLike, moving: bool = False) ->
             d = int(q["in"]) - int(p["out"])
             grid = 0 if max(abs(abs(float(p["speed"])) - 1.0), abs(abs(float(q["speed"])) - 1.0)) < 1e-9 else 2
             if abs(d) > grid and abs(d) <= jump_max + 1e-9:      # (a retimed clip's in-point grid rounds a tick)
+                if raw_hz >= 50.0 and abs(d) * 1000.0 / f <= 1000.0 / raw_hz + 1.0:
+                    # 4 Nov: ONE frame of a 50 / 60 fps RAW (17 ms -- Topaz's 60 fps piece, mostly an in-between
+                    # frame) is not a jump you see or hear: a note, not a stop
+                    exceptions.append(f"{name} {p.get('label')} | {q.get('label')} at {tc(q['start'])}: one 60 fps "
+                                      f"frame ({abs(d) / f * 1000.0:.0f} ms) skipped at the cut -- not noticeable")
+                    continue
                 out.append(f"{name} {p.get('label')} | {q.get('label')} at {tc(q['start'])}: the RAW "
                            f"{'skips' if d > 0 else 'repeats'} {abs(d) / f * 1000.0:.0f} ms at the cut "
                            f"(RAW {int(p['out']) / f:.3f} -> {int(q['in']) / f:.3f} s): one take, cut")
