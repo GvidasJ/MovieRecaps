@@ -634,9 +634,10 @@ def tidy_project(project: str | os.PathLike) -> list[str]:
             pass
     removed: list[str] = []
     if enh.is_file() and media:
-        same = False
+        linked, same = False, False
         try:
-            same = os.path.samefile(enh, media[0]) or enh.stat().st_size == media[0].stat().st_size
+            linked = os.path.samefile(enh, media[0])         # 4 Nov: a hard link costs no space -- kept, so Try again
+            same = not linked and enh.stat().st_size == media[0].stat().st_size   # still finds the piece
         except OSError:
             pass
         if same and PROJECT_FILE not in xml_text:
@@ -650,13 +651,20 @@ def tidy_project(project: str | os.PathLike) -> list[str]:
         inside = raw is not None and raw.is_file() and raw.resolve().parent == folder.resolve()
     except OSError:
         inside = False
-    if inside and media:
+    src = Path(str((p.data.get("raw") or {}).get("source_file") or ""))
+    try:                                                   # 4 Nov: only when the RAW is still kept elsewhere (the
+        elsewhere = (bool(src.name) and src.is_file() and src.suffix.lower() == raw.suffix.lower()  # torrent /
+                     and src.stat().st_size == raw.stat().st_size and not os.path.samefile(src, raw))  # Downloads)
+    except (OSError, TypeError):                           # Try again reads it there (project.json "kept_at")
+        elsewhere = False
+    if inside and media and elsewhere:
         from urllib.parse import quote
         plays = raw.name in xml_text or quote(raw.name) in xml_text
         if not plays:
             try:
                 raw.unlink()
                 removed.append(raw.name)
+                p.update(raw=dict(p.data.get("raw") or {}, kept_at=str(src)))
             except OSError:
                 pass
     if removed:
