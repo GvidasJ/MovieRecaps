@@ -91,7 +91,7 @@ from .model import Box, Layout, LayoutPeriod, Proxy, Zone
 __all__ = ["OverlayMasks", "analyze_layout", "refine_box_from_raw", "measure_box_from_raw", "box_coverage",
            "allowed_mask", "masks_from_residuals", "rounded_box_coverage", "LAYOUT_ALGO_VERSION"]
 
-LAYOUT_ALGO_VERSION = 3           # bump when the algorithm changes (part of the cache key)
+LAYOUT_ALGO_VERSION = 4           # bump when the algorithm changes (part of the cache key)
 
 # ------------------------------------------------------------------------------------------------
 # Internal thresholds (8-bit levels / proxy px). Each can be overridden with a Config attribute of
@@ -2138,6 +2138,11 @@ def _detect_text_overlays(comp: Proxy, st: _Stats, br: _BoxResult, periods: list
     if texts:
         cys = np.array([(e["y0"] + e["y1"]) / 2.0 for e in texts])
         wts = np.array([e["comp_out"] - e["comp_in"] for e in texts], np.float64)
+        # 3 Nov: text on screen the whole video (a watermark: "@ComedySlam") never is the caption band -- it
+        # out-weighed the real captions (two lines at other rows) and the OCR read the watermark all along
+        always = wts >= 0.9 * n
+        if (~always).any():
+            wts = np.where(always, 0.0, wts)
         half = max(2.0, 0.6 * float(np.median([e["h"] for e in texts])))
         score = [(float(wts[np.abs(cys - c) <= half].sum()), -i) for i, c in enumerate(cys)]
         ci = -max(score)[1]
@@ -2148,7 +2153,8 @@ def _detect_text_overlays(comp: Proxy, st: _Stats, br: _BoxResult, periods: list
     out = []
     for e in texts:
         cy = (e["y0"] + e["y1"]) / 2.0
-        if band is not None and abs(cy - band[0]) <= band[1] and 0.6 * band[2] <= e["h"] <= 1.6 * band[2]:
+        if band is not None and abs(cy - band[0]) <= band[1] and 0.6 * band[2] <= e["h"] <= 1.6 * band[2] \
+                and not (e["comp_out"] - e["comp_in"] >= 0.9 * n and len(texts) > 1):
             e["type"] = "captions"
         elif e["comp_out"] - e["comp_in"] < min_text:
             continue                     # short text outside the band (RAW counter digits, texture clusters)
