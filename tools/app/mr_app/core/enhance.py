@@ -463,6 +463,10 @@ def _probe_raw(raw: Path) -> dict:
                 continue
             if 0 < x <= 120:
                 fr = x.limit_denominator(1001)
+                for std in (Fraction(24000, 1001), Fraction(30000, 1001), Fraction(60000, 1001), Fraction(24),
+                            Fraction(25), Fraction(30), Fraction(50), Fraction(60)):
+                    if abs(float(x) - float(std)) < 0.002:       # 4 Nov: 21027/877 -> 24000/1001
+                        fr = std
                 break
         return {"fps": fr, "duration": float((d.get("format") or {}).get("duration") or 0.0),
                 "width": int(v.get("width") or 0), "height": int(v.get("height") or 0)}
