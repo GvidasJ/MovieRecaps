@@ -58,6 +58,8 @@ def send(folder: str, where: str = "") -> None:
     lo = min(int(c.find("in").text) for _t, c in clips) / float(fps)
     hi = max(int(c.find("out").text) for _t, c in clips) / float(fps)
     raw = p.file("raw")
+    if raw is None or not raw.is_file():                    # the RAW the edit plays (one RAW per project)
+        raw = p.folder / "edit" / "extras" / "media" / "raw.mp4"
     a, b = max(0.0, lo - MARGIN_S), hi + MARGIN_S
     places = [a, max(a, b - 3.0)]
     share = Path(r"D:\Shared\Enhance") if Path(r"D:\Shared\Enhance").exists() else None
