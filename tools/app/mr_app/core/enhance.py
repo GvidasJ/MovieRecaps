@@ -712,8 +712,15 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         r = take_back(folder, name, p.folder, (rec.get("piece") or None))
         if r["ok"]:
             c = r.get("check") or {}
-            text = f"enhanced on the laptop: {c.get('width')}x{c.get('height')}, {OUT_FPS} fps"
+            text = f"enhanced with Topaz: {c.get('width')}x{c.get('height')}, {OUT_FPS} fps"
             p.update(enhance={"state": "used", "used": now, "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text})
+            from . import enhance_swap as ES            # 7 Nov: the edit is finished already (matched on the normal
+            steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}         # RAW): it plays the picture now
+            if ES.match_normal() and (steps.get("edit") or {}).get("state") == PJ.DONE:
+                sw = ES.swap_in(p.folder)
+                if sw.get("ok"):
+                    return {"state": "used", "text": sw.get("text") or text, "swapped": True}
+                return {"state": "used", "text": f"{text} -- not swapped: {sw.get('why')}", "swapped": False}
             return {"state": "used", "text": text}
         why = f"the enhanced piece is not right ({r['why']}) -- the normal RAW is used"
         clear(folder, name)

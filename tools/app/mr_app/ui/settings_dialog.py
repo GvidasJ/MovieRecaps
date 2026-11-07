@@ -216,6 +216,15 @@ class SettingsDialog(QDialog):
         wrow.addWidget(W.label("only that computer takes the piece (its \"Enhance pieces … with Topaz\" on)", "Dim",
                                wrap=True), 1)
         ebox.addLayout(wrow)
+        nrow = QHBoxLayout()                              # 7 Nov: accurate -- matched on the normal RAW
+        nrow.addWidget(W.label("Match on the normal RAW", "Dim"))
+        self.match_n = W.Segmented([("on", "On"), ("off", "Off")],
+                                   "on" if getattr(self.s, "match_normal", True) else "off")
+        nrow.addWidget(self.match_n)
+        nrow.addWidget(W.label("On: the edit is matched on the normal RAW (accurate) and does not wait for Topaz; the "
+                               "enhanced picture is swapped into the finished edit when it is back. Off: matched on "
+                               "the enhanced piece, as before", "Dim", wrap=True), 1)
+        ebox.addLayout(nrow)
         self.topaz_line = W.label("Topaz Video AI: looking for it…", "Dim", wrap=True, select=True)
         ebox.addWidget(self.topaz_line)
         frow = QHBoxLayout()
@@ -469,6 +478,7 @@ class SettingsDialog(QDialog):
         s.one_at_a_time = self.one.value == "on"          # 7 Nov
         s.check_videos = self.checkv.value == "on"
         s.scene_only = self.scene.value == "on"
+        s.match_normal = self.match_n.value == "on"
         s.one_zip = self.onezip.value == "on"
         from ..core import enhance as E                   # run 20: kept as "this computer's default" (None) when
         dflt = copy.deepcopy(s)                           #   it is the default -- the default follows the machine

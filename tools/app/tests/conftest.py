@@ -21,6 +21,8 @@ os.environ.setdefault("MOVIERECAPS_ENHANCE", "0")     # run 20: no row sends a p
 #                                                       (the enhance tests switch them on)
 os.environ.setdefault("MOVIERECAPS_ONE_AT_A_TIME", "0")   # 7 Nov: the rows go on as before (one test switches it on)
 os.environ.setdefault("MOVIERECAPS_CHECK_VIDEOS", "1")    # 7 Nov: the edits' command lines as before
+os.environ.setdefault("MOVIERECAPS_MATCH_NORMAL", "0")   # 7 Nov: run 20's enhance tests as before (its own tests: 1)
+os.environ.setdefault("MOVIERECAPS_SCENE_ONLY", "0")     # 7 Nov: the tool's command lines and project folders as before
 if "MOVIERECAPS_SETTINGS" not in os.environ:
     os.environ["MOVIERECAPS_SETTINGS"] = str(_TMP / "settings.json")
     (_TMP / "settings.json").write_text(json.dumps({"save_to": str(_TMP / "shared"), "intro": False}),

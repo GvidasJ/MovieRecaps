@@ -2321,10 +2321,12 @@ class DownloadPage(QWidget):
             return
         if it.state == SENT and it.job is None:
             return                                        # being sent already (a second press)
-        if it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN:
+        from ..core.enhance_swap import match_normal
+        if it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN and not match_normal():
             self._gate(it, G_ENHANCE)                     # run 20: the edit waits for the laptop's enhanced piece
             self._enhance_wanted = 0.0                    #   (the Enhance folder looked at now)
-            return
+            return                                        # (7 Nov: no more -- matched on the normal RAW, the
+            #                                               enhanced picture swapped in when it is back)
         # project.json + title.txt written and read back (a network folder on the laptop): off the window's thread
         # (day 12 click-through: 60-140 ms here). SENT at once: "Turn off the PC" counts it as work meanwhile.
         it.state = SENT
@@ -2391,7 +2393,7 @@ class DownloadPage(QWidget):
     def _enhance_said(self, it: Item, rec: dict) -> None:
         """The piece's stage ended: sent (the step waits for the laptop) or skipped (why, on the row)."""
         if rec.get("state") == "sent":
-            self._step(it, "enhance", S_RUN, 0.0, "waiting for the laptop")
+            self._step(it, "enhance", S_RUN, 0.0, "with Topaz")
             self._enhance_wanted = 0.0
         else:
             self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {rec.get('why') or 'no piece'}")
@@ -2441,7 +2443,15 @@ class DownloadPage(QWidget):
         if st != S_RUN:
             return
         if what == "used":
-            self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced on the laptop")
+            self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced with Topaz")
+            if r.get("swapped") and it.state == DONE and it.project is not None:
+                self.toast(f"{it.name or 'The video'}: the edit plays the enhanced picture now ✓")
+                fn = getattr(self.ctx, "project_done", None)       # (the laptop: its shared copy made again)
+                if fn is not None:
+                    try:
+                        fn(type("J", (), {"project": it.project})())
+                    except Exception:  # noqa: BLE001
+                        pass
         elif what in ("failed", "late", "skipped"):
             self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {r.get('why') or 'the laptop did not answer'}")
         else:
@@ -2461,7 +2471,13 @@ class DownloadPage(QWidget):
 
         def work():
             from ..core import enhance as E
-            return E.use_late(folder)
+            from ..core import enhance_swap as ES
+            r = E.use_late(folder)
+            if r.get("ok") and ES.match_normal():          # 7 Nov: the finished edit plays it -- no edit again
+                sw = ES.swap_in(folder)
+                r = dict(r, swapped=bool(sw.get("ok")), text=sw.get("text") or r.get("text"),
+                         why=sw.get("why") or r.get("why"))
+            return r
 
         def done(r) -> None:
             r = r or {}
@@ -2469,6 +2485,12 @@ class DownloadPage(QWidget):
             if not r.get("ok"):
                 self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {r.get('why') or 'it could not be used'}")
                 self.toast(f"The enhanced piece cannot be used: {r.get('why')}", "warn")
+                return
+            if "swapped" in r:                             # 7 Nov: swapped into the finished edit (or why not)
+                self._step(it, "enhance", S_DONE if r["swapped"] else S_NOTE, 1.0,
+                           r.get("text") if r["swapped"] else f"not swapped: {r.get('why')}")
+                self.toast("The edit plays the enhanced picture now ✓" if r["swapped"] else
+                           f"Not swapped: {r.get('why')}", "ok" if r["swapped"] else "warn")
                 return
             self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced on the laptop")
             it.error, it.result = "", {}

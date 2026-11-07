@@ -322,7 +322,8 @@ def edit_job(p: P.Project, fast: bool = True, speed: float = 100.0):
     j.roles_chosen = chosen_roles(p.data) is not None      # day 12: you said which one is the RAW
     j.roles_how = str((chosen_roles(p.data) or {}).get("how") or "")     # "form": the New video form's RAW field
     from . import enhance
-    enh = enhance.edit_raw(p.data, p.folder)
+    from .enhance_swap import match_normal                 # 7 Nov: matched on the normal RAW (accurate), the
+    enh = None if match_normal() else enhance.edit_raw(p.data, p.folder)    # enhanced picture swapped in after
     if enh is not None:                                    # run 20: the enhanced piece of the scene is the RAW (2 min
         j.raw = enh                                        #   at most: it can be about as long as the Short -- it is
         j.roles_chosen, j.roles_how = True, "form"         #   the RAW all the same, as if chosen in the form)
@@ -411,6 +412,12 @@ def record_edit(p: P.Project, res: dict) -> None:
         title_copy(p, Path(res["run_dir"]))
         try:                                     # day 16: the edit plays only the movie's piece -- the whole movie
             drop_whole_raw(p, Path(res["run_dir"]))     # leaves the project folder (it stays where it was downloaded)
+        except Exception:  # noqa: BLE001
+            pass
+        try:                                     # 7 Nov: the enhanced piece is back already -> the edit, matched on
+            from . import enhance_swap as ES     #   the normal RAW, plays its picture now
+            if ES.match_normal() and (P.load(p.folder).data.get("enhance") or {}).get("state") == "used":
+                ES.swap_in(p.folder)
         except Exception:  # noqa: BLE001
             pass
         try:                                     # 7 Nov (your call): only the scene stays -- the downloaded RAW,

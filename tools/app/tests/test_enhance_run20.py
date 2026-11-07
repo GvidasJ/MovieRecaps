@@ -430,7 +430,7 @@ def test_the_row_waits_for_the_laptop_then_the_edit_runs_on_the_enhanced_piece(q
     assert "with the laptop" in page.now_text(it)
     E.Worker(share).once()                                                   # the laptop
     assert _wait(qapp, lambda: bool(mc.jobs) and bool(starts), page)
-    assert it.steps["enhance"].state == D.S_DONE and "enhanced on the laptop" in it.steps["enhance"].text
+    assert it.steps["enhance"].state == D.S_DONE and "enhanced with Topaz" in it.steps["enhance"].text   # 7 Nov
     assert mc.jobs[-1].raw == p.folder / "enhance" / "raw_enhanced.mp4" and it.gate == ""
 
 
