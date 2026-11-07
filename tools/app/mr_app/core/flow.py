@@ -432,8 +432,10 @@ def record_edit(p: P.Project, res: dict) -> None:
             pass
         try:                                     # night 15: the zip to send (core.share_zip; never stops anything;
             from . import share_zip              #   day 16: the whole folder -- in its own thread, nothing waits)
-            share_zip.make_later(Path(p.folder), Path(res["run_dir"]))
-        except Exception:  # noqa: BLE001
+            rec = P.load(p.folder).data.get("enhance")
+            if not (isinstance(rec, dict) and rec.get("state") == "sent"):     # 7 Nov: with Topaz still: the zip
+                share_zip.make_later(Path(p.folder), Path(res["run_dir"]))     #   comes with the Topaz picture
+        except Exception:  # noqa: BLE001                                      #   (enhance_swap.zip_when_done)
             pass
 
 

@@ -720,25 +720,38 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
                 sw = ES.swap_in(p.folder)
                 if sw.get("ok"):
                     return {"state": "used", "text": sw.get("text") or text, "swapped": True}
+                ES.zip_when_done(p.folder)              # (not swapped: the zip with the normal RAW's picture)
                 return {"state": "used", "text": f"{text} -- not swapped: {sw.get('why')}", "swapped": False}
             return {"state": "used", "text": text}
         why = f"the enhanced piece is not right ({r['why']}) -- the normal RAW is used"
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
+        _zip_now(p.folder)
         return {"state": "failed", "why": why}
     if b.state in ("failed", "gone"):
         why = b.text if b.state == "gone" else f"the laptop could not enhance it: {b.text}"
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
+        _zip_now(p.folder)
         return {"state": "failed", "why": why}
     waited = now - float(rec.get("sent") or now)
     if waited > timeout_s and not (b.state == "enhancing" and waited < MAX_WAIT_S) and \
             not (b.state != "enhancing" and waited < ALIVE_WAIT_S and worker_alive(folder, now)):
         why = TIMEOUT_WHY if b.state != "enhancing" else f"{STILL_WHY} after {_clock(waited)}"
         p.update(enhance={"state": "late", "why": why, "late": now})
+        _zip_now(p.folder)
         return {"state": "late", "why": why}
     return {"state": "progress", "share": b.share, "text": b.text + (" · over 1 hour, still working"
                                                                        if waited > timeout_s else "")}
+
+
+def _zip_now(project) -> None:
+    """7 Nov: the picture is final (no Topaz one): the zip to send is made now when the edit is finished."""
+    try:
+        from .enhance_swap import zip_when_done
+        zip_when_done(project)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def use_late(project: str | os.PathLike) -> dict:

@@ -194,3 +194,18 @@ def test_the_check_wants_the_mapped_frame_to_be_the_best_one(monkeypatch):
     assert ok["ok"], ok
     bad = ES.check(Path("raw.mov"), Fraction(24), Path("enh.mp4"), [(5, Fraction(7, 24))])   # 2 frames off
     assert not bad["ok"] and "does not show" in bad["why"]
+
+
+def test_the_zip_to_send_waits_for_the_topaz_picture(tmp_path, monkeypatch):
+    from mr_app.core import share_zip as Z
+    made = []
+    monkeypatch.setattr(Z, "make_later", lambda project, run=None, *a, **k: made.append(Path(project)))
+    p = _project(tmp_path, [(120, 150)], state="sent")                                # Topaz still at it
+    flow.record_edit(PJ.load(p.folder), {"label": "PASS", "run_dir": str(p.folder / "edit")})
+    assert made == []                                                                  # no zip of the normal picture
+    p.update(enhance={"state": "used"})                                               # the piece is back
+    assert ES.swap_in(p.folder, do_check=False)["ok"]
+    assert made == [p.folder]                                                          # the zip: the cut Topaz version
+    q = _project(tmp_path / "b", [(120, 150)], state="skipped")                       # no Topaz: zipped at once
+    flow.record_edit(PJ.load(q.folder), {"label": "PASS", "run_dir": str(q.folder / "edit")})
+    assert made[-1] == q.folder

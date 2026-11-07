@@ -986,6 +986,7 @@ class VideoRow(W.Card):
         steps = [(label.replace(" ×2", ""), to.get((it.steps.get(k) or Step()).state, MP.WAIT))
                  for k, label in it.step_list()]
         ok = it.state == DONE and (it.result or {}).get("label", "PASS") in ("PASS", "OK with a note", "Cuts ready")
+        ok = ok and not (it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN)   # 7 Nov: Topaz too
         self.pipe.set(steps + [("Done", MP.DONE if ok else MP.WAIT)])
         run = next((k for k, _l in it.step_list() if (it.steps.get(k) or Step()).state == S_RUN), None)
         if run is not None:
@@ -1028,6 +1029,8 @@ class VideoRow(W.Card):
             return (lab if lab in ("WRONG PAIR", "PICTURE NOT FOUND", "NOT IN THIS RAW") else "FAIL"), None
         if it.state == STOPPED:
             return "STOPPED", None
+        if it.state == DONE and it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN:
+            return "with Topaz", theme.pill_colours("note")          # 7 Nov: the edit waits for its Topaz picture
         if it.state == DONE:
             lab = it.result.get("label", "PASS")
             word = ("Cuts ready" if it.kind == NV.JUST_CUTS and lab == "PASS" else lab)
@@ -2818,6 +2821,9 @@ class DownloadPage(QWidget):
             if it.default_template:
                 text += " · default template used"
             enh = it.steps.get("enhance") if it.enhance else None
+            if enh is not None and enh.state == S_RUN:     # 7 Nov: matched on the normal RAW, Topaz still at it
+                return (text + " · Topaz is still enhancing it: the edit switches to the Topaz picture and its zip "
+                               "to send is made when that is done")
             if enh is not None and enh.state in (S_DONE, S_NOTE) and enh.text:      # run 20: enhanced, or why not
                 text += f" · {enh.text}"
             return text

@@ -311,6 +311,7 @@ def swap_in(project, do_check: bool = True) -> dict:
                 archive.drop_unplayed(folder, PJ.load(folder).data)
         except Exception:  # noqa: BLE001
             pass
+        zip_when_done(folder)                              # the zip to send: the cut Topaz version
         return {"ok": True, "why": "", "swapped": len(plan), "kept": kept, "text": text}
     except Exception as e:  # noqa: BLE001 - the edit stays on the normal RAW
         try:
@@ -320,6 +321,20 @@ def swap_in(project, do_check: bool = True) -> dict:
         except OSError:
             pass
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}
+
+
+def zip_when_done(project) -> None:
+    """The zip to send, made now that the picture is final (the Topaz one, or the normal RAW when Topaz failed or
+    is late) -- only for a finished edit; in its own thread (core.share_zip)."""
+    try:
+        from . import projects as PJ
+        from . import share_zip as Z
+        p = PJ.load(project)
+        ed = (p.data.get("steps") or {}).get("edit") or {}
+        if ed.get("state") == PJ.DONE:
+            Z.make_later(Path(p.folder), Z.run_dir_of(Path(p.folder), ed))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _now() -> str:
