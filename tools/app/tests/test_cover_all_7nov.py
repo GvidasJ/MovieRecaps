@@ -89,3 +89,16 @@ def test_topaz_is_tried_at_most_three_times(tmp_path):
     p.update(enhance={"redos": ES.MAX_REDOS})
     r = ES.cover_all(p.folder)
     assert not r["ok"] and "3 times" in r["why"]
+
+
+def test_a_wrong_first_guess_is_not_added_to_the_new_piece(tmp_path):
+    """8 Nov (Abbott Elementary: the guess at the episode's end, the clips at 2:00-2:18 -> a 2:25 piece): the new
+    piece is the edit's first clip to its last, not the old piece too."""
+    p = _project(tmp_path, [(120, 150), (200, 260)])
+    _movie(p.folder / "edit" / "extras" / "media" / "raw.mp4", 60)
+    _sent(p, tmp_path / "Enhance", start=900, frames=400)           # the guess: 0:37-0:54, no clip in it
+    r = ES.cover_all(p.folder)
+    assert r["ok"] and r["clips"] == 2, r
+    info = PJ.load(p.folder).data["enhance"]["piece"]
+    assert info["start_frame"] <= 120 and info["start_frame"] + info["frames"] >= 260
+    assert info["start_frame"] + info["frames"] < 600                   # not out to the old piece

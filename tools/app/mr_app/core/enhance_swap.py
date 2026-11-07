@@ -191,7 +191,7 @@ def outside(project) -> dict:
         return {}
     start, n = (int(info["start_frame"]), int(info.get("frames") or 0)) if info else (None, 0)
     groups = _groups(run)
-    need = []
+    need, every = [], []
     for c in _v1(root):
         rate = _rate(c.find("rate")) or raw_fps
         k = _speed(c) * raw_fps / rate
@@ -202,9 +202,10 @@ def outside(project) -> dict:
         ma, mb = to_movie(a * k, groups), to_movie(b * k, groups)
         if ma is None or mb is None:
             continue
+        every.append((int(math.floor(ma)), int(math.ceil(mb))))
         if start is None or ma < start or mb > start + n:
             need.append((int(math.floor(ma)), int(math.ceil(mb))))
-    return {"need": need, "run": run, "media": _media(root, "file-raw"), "groups": groups, "fps": raw_fps,
+    return {"need": need, "every": every, "run": run, "media": _media(root, "file-raw"), "groups": groups, "fps": raw_fps,
             "start": start, "frames": n, "rec": rec}
 
 
@@ -231,9 +232,8 @@ def cover_all(project, say=None) -> dict:
             if not E0.sends(S0.load()):
                 return {"ok": False, "why": "sending to Topaz is off in Settings"}
         fps, groups = o["fps"], o["groups"]
-        old_span = [] if o["start"] is None else [(o["start"], o["start"] + o["frames"])]
-        lo = min([a for a, _b in old_span + o["need"]])
-        hi = max([b for _a, b in old_span + o["need"]])
+        lo = min(a for a, _b in o["every"])              # 8 Nov: from the edit's first clip to its last -- not the
+        hi = max(b for _a, b in o["every"])              #   old piece too (a wrong guess made it 2:25 for 18 s)
         off = 0                                          # movie frames -> the frames of the file the edit plays
         if groups:
             if len(groups) > 1:
