@@ -1016,6 +1016,84 @@ def worker_alive(folder: str | os.PathLike, now: float | None = None) -> bool:
         return False
 
 
+def _reachable(path: str) -> Path | None:
+    """A project folder as the PC wrote it (D:\\Shared\\...), as this computer reaches it (the laptop: the share)."""
+    if not path:
+        return None
+    p = Path(path)
+    try:
+        if p.is_dir():
+            return p
+        low = str(p).replace("/", "\\").lower()
+        if low.startswith("d:\\shared\\"):
+            q = Path(rf"\\{M.PC_ADDRESS}\{M.SHARE}") / str(p)[len("D:\\Shared\\"):]
+            if q.is_dir():
+                return q
+    except OSError:
+        pass
+    return None
+
+
+def _video_key(data: dict) -> str:
+    comp = data.get("competitor") if isinstance(data.get("competitor"), dict) else {}
+    return str(comp.get("id") or comp.get("file") or comp.get("url") or "")
+
+
+def replaced_by(info: dict) -> str:
+    """7 Nov (the same video made twice: Topaz enhanced the first, broken copy after the new one was done): the name of
+    a newer copy of the piece's project -- the same competitor video, a folder named the same (+ " (2)" ...), its own
+    piece sent later -- or "" (none, or nothing can be read: the piece stays)."""
+    import glob
+    import re
+    from . import projects as PJ
+    pf = _reachable(str(info.get("project_folder") or ""))
+    if pf is None:
+        return ""
+    try:
+        me = PJ.load(pf).data
+    except Exception:  # noqa: BLE001
+        return ""
+    key = _video_key(me)
+    rec = me.get("enhance") if isinstance(me.get("enhance"), dict) else {}
+    sent = float(rec.get("sent") or info.get("made") or 0.0)
+    if not key or not sent:
+        return ""
+    base = re.sub(r" \(\d+\)$", "", pf.name)
+    try:
+        sibs = [Path(x) for x in glob.glob(glob.escape(str(pf.parent / base)) + "*")]
+    except OSError:
+        return ""
+    for sib in sibs:
+        if sib == pf or re.sub(r" \(\d+\)$", "", sib.name) != base or not sib.is_dir():
+            continue
+        try:
+            d = PJ.load(sib).data
+        except Exception:  # noqa: BLE001
+            continue
+        r2 = d.get("enhance") if isinstance(d.get("enhance"), dict) else {}
+        if _video_key(d) == key and float(r2.get("sent") or 0.0) > sent:
+            return sib.name
+    return ""
+
+
+def drop_replaced(nm: Names, newer: str) -> None:
+    """A replaced piece leaves the line: its files in the Enhance folder go (only the queue's copy -- the project and its
+    RAW are never touched), and its project.json says why."""
+    from . import projects as PJ
+    info = read_info(nm.info) or {}
+    clear(nm.folder, nm.name)
+    pf = _reachable(str(info.get("project_folder") or ""))
+    if pf is None:
+        return
+    try:
+        p = PJ.load(pf)
+        rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+        if rec.get("state") in ("sent", "late"):
+            p.update(enhance=dict(rec, state="replaced", why=f"made again as {newer}: not enhanced"))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def waiting_pieces(folder: str | os.PathLike, now: float | None = None, machine: str = "") -> list[Names]:
     """The pieces in the Enhance folder nobody has taken (the oldest first): their json written, no result yet, no
     live lock."""
@@ -1036,6 +1114,10 @@ def waiting_pieces(folder: str | os.PathLike, now: float | None = None, machine:
                 want = str((read_info(nm.info) or {}).get("topaz_on") or "")
                 if want and want != machine:
                     continue
+            newer = replaced_by(read_info(nm.info) or {})
+            if newer:                            # 7 Nov: the same video made again -- its old piece is not enhanced
+                drop_replaced(nm, newer)
+                continue
             out.append((p.stat().st_mtime, nm))
         except OSError:
             continue
