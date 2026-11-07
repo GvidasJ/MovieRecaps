@@ -816,6 +816,11 @@ class JobRow(QFrame):
         d = self.job.run_dir if self.job.run_dir is not None and Path(self.job.run_dir).exists() else self.job.project
         if d is not None and Path(d).exists():
             os.startfile(str(d))                          # noqa: S606
+        elif self.job.project is not None:                # 7 Nov: the project is one zip now -- the zip is shown
+            from ..core import archive
+            from ..ui import background as BG
+            BG.call(lambda: archive.reveal_gone(self.job.project),
+                    lambda r: _toast(self.page.ctx, r) if r else None, lambda _e: None)
 
     def _open_premiere(self) -> None:
         d = self.job.run_dir

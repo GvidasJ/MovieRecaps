@@ -415,10 +415,11 @@ def _speed_step(xml: Path) -> int:
 
 
 def keep_run(run_dir: str | os.PathLike, sources: list[str | os.PathLike] | None = None,
-             margin_s: float = KEEP_MARGIN_S, share: float = KEEP_MAX_SHARE) -> dict:
+             margin_s: float = KEEP_MARGIN_S, share: float = KEEP_MAX_SHARE, min_raw_s: float = MIN_RAW_S) -> dict:
     """Make a finished run folder play only its piece of the movie (module text). ``sources``: the original RAW's
     paths -- the run's link / copy of the whole movie in extras/media is removed only when one of them is still
-    there (and is not that file). Never raises: {kept, why | groups, piece, ...}."""
+    there (and is not that file). 7 Nov: ``min_raw_s`` -- a shorter RAW is kept whole (the app: 2 min, so a piece
+    made for Topaz stays as it is). Never raises: {kept, why | groups, piece, ...}."""
     t0 = time.perf_counter()
     run = Path(run_dir)
     extras = run / "extras"
@@ -435,8 +436,8 @@ def keep_run(run_dir: str | os.PathLike, sources: list[str | os.PathLike] | None
         m = movie_facts(movie)
         if m.why:
             return _off(m.why)
-        if m.duration < MIN_RAW_S:
-            return _off(f"the RAW is {m.duration / 60:.1f} min, under {MIN_RAW_S / 60:.0f}")
+        if m.duration < min_raw_s:
+            return _off(f"the RAW is {m.duration / 60:.1f} min, under {min_raw_s / 60:.0f}")
         raw_fps = m.rate
         xmls = [final] + sorted(extras.glob("edit_*.xml"))
         spans = []
@@ -509,7 +510,7 @@ def keep_run(run_dir: str | os.PathLike, sources: list[str | os.PathLike] | None
             if rep.is_file():
                 with open(rep, "a", encoding="utf-8") as fh:
                     fh.write(f"\n\n## Only the movie's piece (day 16)\n\n- {line}.\n- Each piece is the clips' frames "
-                             f"+- {margin_s / 60:.0f} min, from the keyframe before; every RAW clip of 1_edit.xml "
+                             f"+- {_span(margin_s)}, from the keyframe before; every RAW clip of 1_edit.xml "
                              f"plays it at its frame (checked: {len(chk['rows'])} piece frames and "
                              f"{len(cc['rows'])} clips against the movie).\n")
         except OSError:
@@ -558,7 +559,11 @@ def finish(ctx: Any) -> dict:
         return _off("switched off")
     sources = [x for x in (getattr(cfg, "raw_movie", None), getattr(cfg, "raw_input", None), getattr(cfg, "raw", None))
                if x]
-    out = keep_run(cfg.deliver, sources)
+    # 7 Nov (the user's call): the app asks for the scene +- 10 s (MATCH_CUTS_KEEP_MARGIN_S), a RAW of 2 min or more
+    # (MATCH_CUTS_KEEP_MIN_RAW_S: a piece made for Topaz stays whole) and up to MATCH_CUTS_KEEP_SHARE of it
+    out = keep_run(cfg.deliver, sources, margin_s=_env_float("MATCH_CUTS_KEEP_MARGIN_S", KEEP_MARGIN_S),
+                   share=_env_float("MATCH_CUTS_KEEP_SHARE", KEEP_MAX_SHARE),
+                   min_raw_s=_env_float("MATCH_CUTS_KEEP_MIN_RAW_S", MIN_RAW_S))
     if out.get("kept") and isinstance(getattr(ctx, "edit_media", None), dict):
         ctx.edit_media["line"] = out["line"]
     try:
@@ -579,6 +584,19 @@ def run_info(run_dir: str | os.PathLike) -> dict | None:
                 return None
             return info if isinstance(info, dict) and info.get("kept") else None
     return None
+
+
+def _span(s: float) -> str:
+    """10 -> '10 s', 600 -> '10 min'."""
+    return f"{s / 60:.0f} min" if s >= 60 else f"{s:.0f} s"
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        v = os.environ.get(name, "").strip()
+        return float(v) if v else default
+    except ValueError:
+        return default
 
 
 def _clock(s: float) -> str:

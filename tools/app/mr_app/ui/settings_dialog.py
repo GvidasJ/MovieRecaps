@@ -167,6 +167,27 @@ class SettingsDialog(QDialog):
         spbox.addLayout(vrow)
         g.addLayout(spbox, r, 1)
         r += 1
+        # 7 Nov: the finished projects -- only the scene of the RAW, one zip each
+        g.addWidget(W.label("Projects", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
+        pjbox = QVBoxLayout()
+        srow2 = QHBoxLayout()
+        srow2.addWidget(W.label("Keep only the scene", "Dim"))
+        self.scene = W.Segmented([("on", "On"), ("off", "Off")], "on" if getattr(self.s, "scene_only", True) else "off")
+        srow2.addWidget(self.scene)
+        srow2.addWidget(W.label("a finished edit plays only the RAW's scene, 10 s before and after; the rest of the "
+                                "movie or episode leaves the project folder (a piece made for Topaz stays whole)",
+                                "Dim", wrap=True), 1)
+        pjbox.addLayout(srow2)
+        zrow = QHBoxLayout()
+        zrow.addWidget(W.label("One zip per project", "Dim"))
+        self.onezip = W.Segmented([("on", "On"), ("off", "Off")], "on" if getattr(self.s, "one_zip", True) else "off")
+        zrow.addWidget(self.onezip)
+        zrow.addWidget(W.label("the zip to send is next to the folders; once the Short is uploaded (or a week after "
+                               "the edit) only the zip stays and the folder goes (the PC does it, never while it "
+                               "makes a video)", "Dim", wrap=True), 1)
+        pjbox.addLayout(zrow)
+        g.addLayout(pjbox, r, 1)
+        r += 1
         # run 20: the scene's piece enhanced with Topaz on the laptop (core.enhance)
         from ..core import enhance as E
         g.addWidget(W.label("Enhance with Topaz", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
@@ -447,6 +468,8 @@ class SettingsDialog(QDialog):
         s.cache_clean = self.cclean.value == "on"
         s.one_at_a_time = self.one.value == "on"          # 7 Nov
         s.check_videos = self.checkv.value == "on"
+        s.scene_only = self.scene.value == "on"
+        s.one_zip = self.onezip.value == "on"
         from ..core import enhance as E                   # run 20: kept as "this computer's default" (None) when
         dflt = copy.deepcopy(s)                           #   it is the default -- the default follows the machine
         dflt.enhance_send = dflt.enhance_topaz = None

@@ -1,9 +1,10 @@
 """A ZIP OF EVERY FINISHED PROJECT, to send to your friend (night 15, task 7; day 16, task 2: the WHOLE folder).
 
-When a project's edit is done (flow.record_edit, in the background) its folder gets ``<project folder name>.zip``
-(without emoji) -- made again when its files change later (Open in Premiere saved its .prproj); a sweep at the app's
-start (and every 10 minutes) does the projects made before, and remakes a zip of the older kind (night 15's had only
-the edit files).
+When a project's edit is done (flow.record_edit, in the background) it gets ``<project folder name>.zip`` (without
+emoji) -- 7 Nov: NEXT TO its folder (D:\\Shared\\Projects\\<name>.zip: the one file that stays when the folder goes,
+core.archive) -- made again when its files change later (Open in Premiere saved its .prproj); the PC's round at the
+app's start (and every 10 minutes, core.archive.tidy) does the projects made before, and remakes a zip of the older
+kind (night 15's had only the edit files; one inside the folder goes once the new one is made).
 
 In it, under one folder named after the project (without emoji), **everything in the project folder with the same
 folders inside**: ``edit\\`` (1_edit.xml, the captions, extras\\media -- the RAW or its piece, the WAV, the frame ...),
@@ -103,7 +104,45 @@ def plain_name(project: Path) -> str:
 
 
 def zip_path(project: Path) -> Path:
+    """7 Nov: the zip sits NEXT TO the project folder -- D:\\Shared\\Projects\\<name>.zip -- the one file that stays when
+    the folder goes (core.archive). project.json's "zip" names it when the plain name was taken by another project."""
+    project = Path(project)
+    try:
+        name = ((_project_data(project).get("zip") or {}).get("file") or "").strip()
+    except Exception:  # noqa: BLE001
+        name = ""
+    return project.parent / (name or f"{plain_name(project)}.zip")
+
+
+def old_zip_path(project: Path) -> Path:
+    """Where the zip was before 7 Nov: inside the project folder."""
     return Path(project) / f"{plain_name(Path(project))}.zip"
+
+
+def _project_data(project: Path) -> dict:
+    from . import projects as P
+    d = P.read_json(Path(project) / P.FILE, tries=2)
+    return d if isinstance(d, dict) else {}
+
+
+def _owner(z: Path) -> str:
+    """The project folder a zip was made from (the first line of its HOW TO OPEN), '' when it cannot be read."""
+    try:
+        with zipfile.ZipFile(z) as zf:
+            how = next((n for n in zf.namelist() if n.endswith("/" + HOW_TO)), None)
+            return zf.read(how).decode("utf-8", "replace").splitlines()[0].strip() if how else ""
+    except (OSError, zipfile.BadZipFile, IndexError, KeyError):
+        return ""
+
+
+def _free_name(project: Path) -> Path:
+    """The zip's place next to the folder: <plain name>.zip, or (2), (3) ... when another project's zip has it."""
+    base = plain_name(project)
+    for k in range(1, 50):
+        z = project.parent / (f"{base}.zip" if k == 1 else f"{base} ({k}).zip")
+        if not z.exists() or _owner(z) in ("", project.name):
+            return z
+    return project.parent / f"{base} ({int(time.time())}).zip"
 
 
 def _skipped(f: Path) -> bool:
@@ -150,8 +189,11 @@ def _unplayed_video(f: Path, rel: str, played_names: set, runs: set) -> bool:
         return False
 
 
-def members(project: Path, run_dir: Path | None = None) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
-    """(the files to put in -- (file, name in the zip) --, the files left out -- (file, why))."""
+def members(project: Path, run_dir: Path | None = None,
+            leave_unplayed: bool = True) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
+    """(the files to put in -- (file, name in the zip) --, the files left out -- (file, why)). ``leave_unplayed``
+    (7 Nov): a big video outside the edit folders that no edit plays stays out (False: the zip a folder becomes when
+    you keep the whole RAW -- Settings -> Projects -> Keep only the scene off)."""
     project = Path(project)
     top = plain_name(project)
     put: list[tuple[Path, str]] = []
@@ -166,7 +208,7 @@ def members(project: Path, run_dir: Path | None = None) -> tuple[list[tuple[Path
         dirnames.sort()
         for n in sorted(filenames):
             f = Path(dirpath) / n
-            if not _skipped(f):
+            if not _skipped(f) and not (n == HOW_TO and Path(dirpath) == project):   # (an unzipped one's: made new)
                 files.append(f)
     played = {os.path.normcase(os.path.abspath(reach(m))) for m in plays}
     files.sort(key=lambda f: (os.path.normcase(os.path.abspath(f)) not in played,))      # the played copy first
@@ -180,7 +222,7 @@ def members(project: Path, run_dir: Path | None = None) -> tuple[list[tuple[Path
         if k is not None and k in seen:
             left.append((f, f"the same file as {seen[k]} (a hard link): copy that one here if you need it"))
             continue
-        if _unplayed_video(f, rel, played_names, runs):
+        if leave_unplayed and _unplayed_video(f, rel, played_names, runs):
             left.append((f, "a video the edit does not play (the downloaded RAW, its conversion or an older piece): "
                             "it stays in the project folder"))
             continue
@@ -236,7 +278,7 @@ def _is_v2(z: Path) -> bool:
         return False
 
 
-def needs_zip(project: Path, run_dir: Path) -> bool:
+def needs_zip(project: Path, run_dir: Path, leave_unplayed: bool = True) -> bool:
     """No zip yet, a zip of the older kind (night 15: only the edit files), or a file changed after it was made
     (project.json alone does not count: the board changes it)."""
     z = zip_path(project)
@@ -245,7 +287,7 @@ def needs_zip(project: Path, run_dir: Path) -> bool:
     if not z.is_file() or not _is_v2(z):
         return True
     t = z.stat().st_mtime
-    put, _left = members(project, run_dir)
+    put, _left = members(project, run_dir, leave_unplayed)
     for f, _a in put:
         if f.name.lower() in NO_TRIGGER and f.parent == Path(project):
             continue
@@ -285,16 +327,29 @@ def _clean_tmp(z: Path) -> None:
         pass
 
 
-def make(project: Path, run_dir: Path | None = None) -> Path | None:
-    """The project's zip (written whole); None without a finished edit or without the space. Never raises."""
+_MAKING: set = set()
+_MAKING_LOCK = threading.Lock()
+
+
+def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True) -> Path | None:
+    """The project's zip (written whole); None without a finished edit or without the space -- or while another
+    thread makes the same one. 7 Nov: next to the folder (zip_path); the older one inside the folder then goes.
+    Never raises."""
     tmp = None
+    key = os.path.normcase(os.path.abspath(str(project)))
+    with _MAKING_LOCK:
+        if key in _MAKING:
+            return None
+        _MAKING.add(key)
     try:
         project = Path(project)
         run_dir = Path(run_dir) if run_dir else project / "edit"
         if not (run_dir / "1_edit.xml").is_file() or not drive_ok(project):
             return None
-        put, left = members(project, run_dir)
+        put, left = members(project, run_dir, leave_unplayed)
         z = zip_path(project)
+        if z.exists() and _owner(z) not in ("", project.name):
+            z = _free_name(project)                     # another project's zip has this name
         _clean_tmp(z)
         need = sum(f.stat().st_size for f, _a in put if f.exists())
         if _free_after(project, need) < MIN_FREE:
@@ -307,6 +362,21 @@ def make(project: Path, run_dir: Path | None = None) -> Path | None:
             zf.writestr(f"{plain_name(project)}/{HOW_TO}", how_to(project, put, left, run_dir))
             zf.comment = MARK
         os.replace(tmp, z)
+        try:
+            if z.name != f"{plain_name(project)}.zip" or (_project_data(project).get("zip") or {}).get("file"):
+                from . import projects as P
+                P.load(project).update(zip={"file": z.name})
+        except Exception:  # noqa: BLE001
+            pass
+        old = old_zip_path(project)
+        try:                                             # the older zip inside the folder: the same project twice
+            if old.is_file() and os.path.normcase(str(old)) != os.path.normcase(str(z)):
+                with zipfile.ZipFile(old) as zf:
+                    mine = zf.comment == MARK
+                if mine:
+                    old.unlink()
+        except (OSError, zipfile.BadZipFile):
+            pass
         return z
     except Exception:  # noqa: BLE001 - a zip that can not be made never stops anything
         try:
@@ -315,6 +385,9 @@ def make(project: Path, run_dir: Path | None = None) -> Path | None:
         except Exception:  # noqa: BLE001
             pass
         return None
+    finally:
+        with _MAKING_LOCK:
+            _MAKING.discard(key)
 
 
 def make_later(project: Path, run_dir: Path | None = None) -> threading.Thread:

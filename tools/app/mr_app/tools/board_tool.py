@@ -667,14 +667,18 @@ class BoardPage(QWidget):
         shared, local = self._roots()
 
         def work():
-            from ..core import board
+            from ..core import archive, board
             cards = board.load_cards(shared, local)
             datas = [dict(c.data, _folder=str(c.folder)) for c in cards              # (for the History tab; day 16:
                      if isinstance(getattr(c, "data", None), dict)]                 # its folder, Try another RAW)
-            return cards, datas
+            try:                                                                    # 7 Nov: the projects that are
+                zipped = archive.zipped_uploads(shared)                             #   one zip now still count
+            except Exception:  # noqa: BLE001
+                zipped = []
+            return cards, datas, zipped
 
         def got(r) -> None:
-            cards, self.datas = r
+            cards, self.datas, self.zipped_ups = r
             self._loading = False
             self.show_cards(cards)
             if self._first:

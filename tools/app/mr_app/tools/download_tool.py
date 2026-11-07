@@ -904,10 +904,14 @@ class VideoRow(W.Card):
         if folder is None:
             return
 
-        def work() -> None:
+        def work() -> str:
             if Path(folder).exists():
                 os.startfile(str(folder))                         # noqa: S606
-        off_thread(work, None, lambda e: self.page.toast(f"The folder could not be opened: {e}", "fail"))
+                return ""
+            from ..core import archive                    # 7 Nov: the project is one zip now -- the zip is shown
+            return archive.reveal_gone(folder)
+        off_thread(work, lambda r: self.page.toast(r, "note") if r else None,
+                   lambda e: self.page.toast(f"The folder could not be opened: {e}", "fail"))
 
     # -- what it shows --
     def refresh(self) -> None:
@@ -2687,7 +2691,8 @@ class DownloadPage(QWidget):
 
         def work():
             if not xml.is_file():
-                return "The edit's 1_edit.xml is not there"
+                from ..core import archive                # 7 Nov: the project is one zip now
+                return archive.reveal_gone(xml.parent.parent) or "The edit's 1_edit.xml is not there"
             return open_in_premiere(xml)
         self.toast("Opening in Premiere…")
         off_thread(work, lambda r: self.toast(str(r)) if r else None,

@@ -51,6 +51,29 @@ def check_videos() -> bool:
         return True
 
 
+SCENE_ENV = "MOVIERECAPS_SCENE_ONLY"         # 7 Nov: "0" / "1" wins over Settings -> Keep only the scene (the tests)
+
+
+def scene_env() -> dict:
+    """7 Nov (your call): the tool's switches that make a new edit play only the RAW's scene +- 10 s
+    (match_cuts.keep_piece -- the same cut and checks as on day 16; a RAW under 2 min, the piece made for Topaz,
+    stays whole) -- {} when Settings -> Keep only the scene is off."""
+    env = os.environ.get(SCENE_ENV, "").strip()
+    on = env == "1" if env in ("0", "1") else None
+    if on is None:
+        try:
+            from . import settings as S
+            on = bool(getattr(S.load(), "scene_only", True))
+        except Exception:  # noqa: BLE001
+            on = False
+    if not on:
+        return {}
+    from . import archive as A
+    return {"MATCH_CUTS_KEEP_PIECE": "1", "MATCH_CUTS_NO_KEEP_PIECE": "", "MATCH_CUTS_KEEP_MARGIN_S":
+            f"{A.SCENE_MARGIN_S:g}", "MATCH_CUTS_KEEP_MIN_RAW_S": f"{A.KEEP_MIN_RAW_S:g}",
+            "MATCH_CUTS_KEEP_SHARE": f"{A.KEEP_SHARE:g}"}
+
+
 def channel_music(job: Job) -> list[str]:
     """The tool's --music switches of the job's channel (night 15: SceneProof's song), [] without one.
 
@@ -115,7 +138,7 @@ class JobRun:
 
     def start(self) -> None:
         self.out.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1", PYTHONUNBUFFERED="1", **scene_env())
         self._fo = self._out_path.open("w", encoding="utf-8", errors="replace")
         self.t0 = time.time()
         self.proc = subprocess.Popen(self.cmd, cwd=str(paths.repo()), stdout=self._fo, stderr=subprocess.PIPE,

@@ -221,7 +221,8 @@ class MainWindow(QMainWindow):
         mc, hist, board = self.pages.get("match_cuts"), self.pages.get("history"), self.pages.get("board")
         try:
             from ..core import board as B
-            ups = B.uploads(cards)
+            ups = sorted(B.uploads(cards) + list(getattr(board, "zipped_ups", None) or []),   # 7 Nov: + the
+                         key=lambda x: x[0])                                               #   zipped projects'
         except Exception:  # noqa: BLE001
             ups = []
         if mc is not None and hasattr(mc, "show_uploads"):
@@ -455,21 +456,61 @@ class MainWindow(QMainWindow):
 
     def tidy(self) -> None:
         """Night 15 (task 7), in the background: every finished project's zip made (or made again when its files
-        changed: core.share_zip), and Media Encoder's renders moved into renders\\<day>\\ folders (core.renders)."""
+        changed: core.share_zip), and Media Encoder's renders moved into renders\\<day>\\ folders (core.renders).
+        7 Nov (your call): on the computer that holds the Save folder (the PC's D:\\Shared\\Projects), core.archive's
+        round instead -- each finished project keeps only its scene of the RAW, its zip sits next to the folders, and
+        once its Short is uploaded (or a week after the edit) only the zip stays. Never while this computer makes a
+        video (an edit, a New video step, Topaz): it stops between two projects and goes on in the next round."""
+        if getattr(self, "_tidying", False):
+            return                                        # (the round before still goes on)
         hub = _save_root(self.settings)
+        s = self.settings
+        scene_only = bool(getattr(s, "scene_only", True))
+        one_zip = bool(getattr(s, "one_zip", True))
+        self._tidying = True
+
+        def making() -> bool:
+            pages = getattr(self, "pages", {}) or {}
+            mc, dl, enh = pages.get("match_cuts"), pages.get("download"), pages.get("enhance")
+            try:
+                if mc is not None and (getattr(mc, "current", None) is not None or mc.has_work()):
+                    return True
+                if dl is not None and getattr(dl, "current", None) is not None:
+                    return True
+                w = getattr(enh, "worker", None)
+                return bool(w is not None and getattr(w, "busy", False))
+            except Exception:  # noqa: BLE001
+                return False
 
         def work():
-            from ..core import renders, share_zip
+            from ..core import renders, settings as S0
+            lines: list = []
             with BG.counted_work() as _tidying:
-                zips = share_zip.sweep(hub)
+                if S0.on_this_computer(hub) and not making():    # (the laptop leaves the shared folder to the PC)
+                    from ..core import archive
+                    lines = archive.tidy(hub, stop=making, scene_only=scene_only, one_zip=one_zip)
                 moved = renders.sort_renders()
-            return zips, moved
+            return lines, moved
 
         def done(r) -> None:
-            zips, moved = r or ([], [])
+            self._tidying = False
+            lines, moved = r or ([], [])
             if moved:
                 self.toast(f"{len(moved)} render{'s' if len(moved) != 1 else ''} put in renders\\<day> folders")
-        BG.call(work, done, lambda _e: None)
+            zipped = [x for x in lines if ": now only " in x]
+            if zipped:
+                self.toast(f"{len(zipped)} finished project{'s' if len(zipped) != 1 else ''} now only "
+                           f"{'a zip' if len(zipped) == 1 else 'zips'} in {hub}")
+            if lines:
+                try:
+                    from ..core import archive
+                    archive.log(hub, lines)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        def failed(_e) -> None:
+            self._tidying = False
+        BG.call(work, done, failed)
 
     def clean_cache(self) -> None:
         """Run 19 (task 4), in the background: the tool's cache files nobody used for a while go (core.cache_clean:

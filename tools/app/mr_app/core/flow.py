@@ -413,6 +413,16 @@ def record_edit(p: P.Project, res: dict) -> None:
             drop_whole_raw(p, Path(res["run_dir"]))     # leaves the project folder (it stays where it was downloaded)
         except Exception:  # noqa: BLE001
             pass
+        try:                                     # 7 Nov (your call): only the scene stays -- the downloaded RAW,
+            from . import archive, run as RN     #   its conversion, an older piece nothing plays leave the folder
+            if RN.scene_env():
+                q = P.load(p.folder)
+                if ((q.data.get("enhance") or {}) if isinstance(q.data.get("enhance"), dict) else {}).get(
+                        "state") != "sent":
+                    archive.drop_check_videos(q.folder)
+                    archive.drop_unplayed(q.folder, q.data)
+        except Exception:  # noqa: BLE001
+            pass
         try:                                     # night 15: the zip to send (core.share_zip; never stops anything;
             from . import share_zip              #   day 16: the whole folder -- in its own thread, nothing waits)
             share_zip.make_later(Path(p.folder), Path(res["run_dir"]))

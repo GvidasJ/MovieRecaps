@@ -45,6 +45,18 @@ def _raw_clips(root):
     return seq, out
 
 
+def _played_raw(root):
+    """The RAW file 1_edit.xml's V1 clips play (their <in> / <out> count in its frames), None when it is not there."""
+    from mr_app.core.share_zip import _path_of_url, reach
+    for f in root.iter("file"):
+        if f.get("id") == "file-raw" and f.findtext("pathurl"):
+            m = _path_of_url(f.findtext("pathurl").strip())
+            if m is not None:
+                m = reach(m)
+                return m if m.is_file() else None
+    return None
+
+
 def _name(p) -> str:
     return E.safe_name(p.folder.name) + "_E"
 
@@ -57,7 +69,9 @@ def send(folder: str, where: str = "") -> None:
     fps = _rate(clips[0][1])
     lo = min(int(c.find("in").text) for _t, c in clips) / float(fps)
     hi = max(int(c.find("out").text) for _t, c in clips) / float(fps)
-    raw = p.file("raw")
+    raw = _played_raw(root)                                 # 7 Nov: the file the clips' frames count in (the
+    if raw is None:                                          #   scene's piece once only the scene is kept)
+        raw = p.file("raw")
     if raw is None or not raw.is_file():                    # the RAW the edit plays (one RAW per project)
         raw = p.folder / "edit" / "extras" / "media" / "raw.mp4"
     a, b = max(0.0, lo - MARGIN_S), hi + MARGIN_S

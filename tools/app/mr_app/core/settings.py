@@ -57,6 +57,8 @@ class Settings:
     enhance_where: str = ""            # 30 Oct: Topaz for the videos made here runs on "pc" / "laptop" ("" = either)
     one_at_a_time: bool = True         # 7 Nov: New video -- the next video starts when the one before it is finished
     check_videos: bool = False         # 7 Nov: the edit also renders preview_recreation.mp4 + compare.mp4 (slower)
+    scene_only: bool = True            # 7 Nov: a finished project keeps only the RAW's scene +- 10 s (core.archive)
+    one_zip: bool = True               # 7 Nov: an uploaded (or week-old) project becomes one zip, its folder goes
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -111,7 +113,7 @@ def _valid(name: str, v: Any, default: Any) -> Any:
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
     if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean", "one_at_a_time",
-                "check_videos"):
+                "check_videos", "scene_only", "one_zip"):
         return v if isinstance(v, bool) else default
     if name in ("enhance_send", "enhance_topaz"):
         return v if isinstance(v, bool) or v is None else default

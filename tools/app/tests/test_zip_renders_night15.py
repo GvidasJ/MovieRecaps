@@ -89,7 +89,7 @@ def test_a_finished_project_zip_has_the_whole_folder_and_how_to_open_it(tmp_path
     monkeypatch.setattr(share_zip, "MIN_FREE", 0)                  # (not this PC's free space)
     proj, run = _project(tmp_path)
     z = share_zip.make(proj, run)
-    assert z == proj / f"{proj.name}.zip"
+    assert z == proj.parent / f"{proj.name}.zip"                   # 7 Nov: next to the folder (core.archive)
     names = zipfile.ZipFile(z).namelist()
     top = proj.name
     assert set(names) == {f"{top}/edit/1_edit.xml", f"{top}/edit/2_captions.srt", f"{top}/edit/video_edit.prproj",
