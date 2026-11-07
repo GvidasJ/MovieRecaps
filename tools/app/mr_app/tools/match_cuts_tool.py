@@ -1584,7 +1584,8 @@ class MatchCutsPage(QWidget):
             prog["text"] = f"{'RAW' if role == 'raw' else 'competitor'}: {text}"
 
         def work():
-            return J.project_for_job(work_job, None, progress=say), work_job
+            from ..core import settings as S0             # 7 Nov: the PC makes it right in D:\Shared\Projects
+            return J.project_for_job(work_job, S0.work_root(), progress=say), work_job
 
         t = QTimer(self)
 
@@ -2353,6 +2354,13 @@ class MatchCutsPage(QWidget):
 
     def busy(self) -> bool:
         return self.running and (self.current is not None or self.swap_waiting())
+
+    def has_work(self) -> bool:
+        """7 Nov: an edit runs here, or one waits its turn in the started queue (a video waiting for YOU -- which is
+        the RAW -- does not count): the New video page's "one video at a time" waits for it."""
+        if self.current is not None:
+            return True
+        return bool(self.running) and any(J.runnable(j) for j in self.jobs)
 
     # -- day 13: a project renamed after its title (core.renames) --
     def uses_folder(self, folder) -> str:

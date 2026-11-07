@@ -6,7 +6,8 @@ from __future__ import annotations
 import copy
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QSpinBox, QVBoxLayout)
+from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QScrollArea,
+                               QSpinBox, QVBoxLayout, QWidget)
 
 from . import background as BG
 from . import theme
@@ -18,7 +19,14 @@ class SettingsDialog(QDialog):
         super().__init__(win)
         self.win = win
         self.setWindowTitle("Settings")
-        self.resize(760, 680)
+        self.resize(780, 720)
+        try:                                              # 7 Nov: never taller than the screen (the rows scroll)
+            from PySide6.QtGui import QGuiApplication
+            scr = QGuiApplication.primaryScreen()
+            if scr is not None:
+                self.resize(780, min(860, max(480, scr.availableGeometry().height() - 60)))
+        except Exception:  # noqa: BLE001
+            pass
         self.s = copy.deepcopy(settings)
         self.result_settings = settings
         lay = QVBoxLayout(self)
@@ -46,10 +54,11 @@ class SettingsDialog(QDialog):
         box.addLayout(row)
         self.root_note = W.label("", "Dim", wrap=True)
         box.addWidget(self.root_note)
-        box.addWidget(W.label("Only finished projects go there (the edit, template.png, project.json, logs, "
-                              "title.txt); downloads, conversions and caches stay on this computer. When the folder "
-                              "cannot be reached, a project is kept here and moved there when it is back.", "Dim",
-                              wrap=True))
+        box.addWidget(W.label("When this folder is on this computer (the PC's D:\\Shared\\Projects), each new video's "
+                              "whole project is made right there: nothing is copied at the end and C: stays free. "
+                              "On the laptop (the folder is on the network) the project is made on the laptop -- "
+                              "fast, and it works while the PC is off -- and its finished parts are copied there; "
+                              "when the folder cannot be reached, it is copied when it is back.", "Dim", wrap=True))
         g.addLayout(box, r, 1)
         r += 1
         # which computer
@@ -136,6 +145,28 @@ class SettingsDialog(QDialog):
         cbox.addWidget(self.cclean_line)
         g.addLayout(cbox, r, 1)
         r += 1
+        # 7 Nov: speed -- one video at a time, no check videos
+        g.addWidget(W.label("Speed", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
+        spbox = QVBoxLayout()
+        orow = QHBoxLayout()
+        orow.addWidget(W.label("One video at a time", "Dim"))
+        self.one = W.Segmented([("on", "On"), ("off", "Off")],
+                               "on" if getattr(self.s, "one_at_a_time", True) else "off")
+        orow.addWidget(self.one)
+        orow.addWidget(W.label("On: a video added while another is being made waits until that one is finished (its "
+                               "edit and its Topaz piece) -- nothing runs at the same time, so each one goes faster",
+                               "Dim", wrap=True), 1)
+        spbox.addLayout(orow)
+        vrow = QHBoxLayout()
+        vrow.addWidget(W.label("Check videos", "Dim"))
+        self.checkv = W.Segmented([("on", "On"), ("off", "Off")],
+                                  "on" if getattr(self.s, "check_videos", False) else "off")
+        vrow.addWidget(self.checkv)
+        vrow.addWidget(W.label("preview_recreation.mp4 and compare.mp4, only to watch: Off saves about a tenth of "
+                               "every edit -- every check of the cuts still runs", "Dim", wrap=True), 1)
+        spbox.addLayout(vrow)
+        g.addLayout(spbox, r, 1)
+        r += 1
         # run 20: the scene's piece enhanced with Topaz on the laptop (core.enhance)
         from ..core import enhance as E
         g.addWidget(W.label("Enhance with Topaz", "Small"), r, 0, Qt.AlignmentFlag.AlignTop)
@@ -205,8 +236,18 @@ class SettingsDialog(QDialog):
         urow.addWidget(W.label("minutes (and at the start)", "Dim"))
         urow.addStretch(1)
         g.addLayout(urow, r, 1)
-        lay.addLayout(g)
-        lay.addStretch(1)
+        body = QWidget()                                  # 7 Nov: the rows scroll on a short screen (the laptop)
+        body.setObjectName("Transparent")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(0, 0, 8, 0)
+        bl.addLayout(g)
+        bl.addStretch(1)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setWidget(body)
+        lay.addWidget(sa, 1)
         self.where = W.label("", "Dim", wrap=True, select=True)
         lay.addWidget(self.where)
         btns = QHBoxLayout()
@@ -404,6 +445,8 @@ class SettingsDialog(QDialog):
         s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
         s.cache_clean = self.cclean.value == "on"
+        s.one_at_a_time = self.one.value == "on"          # 7 Nov
+        s.check_videos = self.checkv.value == "on"
         from ..core import enhance as E                   # run 20: kept as "this computer's default" (None) when
         dflt = copy.deepcopy(s)                           #   it is the default -- the default follows the machine
         dflt.enhance_send = dflt.enhance_topaz = None

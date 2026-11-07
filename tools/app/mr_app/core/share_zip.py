@@ -129,6 +129,27 @@ def _key(f: Path):
     return (st.st_dev, st.st_ino) if st.st_ino else None
 
 
+VIDEO_EXT = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".mts", ".m2ts", ".ts", ".flv", ".wmv", ".mxf"}
+
+
+def _unplayed_video(f: Path, rel: str, played_names: set, runs: set) -> bool:
+    """7 Nov: a big video OUTSIDE the edit folders that no edit plays -- the downloaded RAW, its conversion, an older
+    piece -- stays out of the zip (the PC now makes its projects right in D:\\Shared\\Projects: the RAW is in the folder
+    too). Never a file of an edit folder (edit, edit-2, cuts ...: everything there goes in, as before), never a file
+    whose name the edit plays, never when no edit could be read (nothing to compare with)."""
+    if not played_names or f.suffix.lower() not in VIDEO_EXT:
+        return False
+    first = rel.split("/", 1)[0].lower()
+    if "/" in rel and (first in runs or first.startswith(("edit", "cuts"))):
+        return False
+    if f.name.lower() in played_names:
+        return False
+    try:
+        return f.stat().st_size > BIG_BYTES
+    except OSError:
+        return False
+
+
 def members(project: Path, run_dir: Path | None = None) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
     """(the files to put in -- (file, name in the zip) --, the files left out -- (file, why))."""
     project = Path(project)
@@ -149,12 +170,19 @@ def members(project: Path, run_dir: Path | None = None) -> tuple[list[tuple[Path
                 files.append(f)
     played = {os.path.normcase(os.path.abspath(reach(m))) for m in plays}
     files.sort(key=lambda f: (os.path.normcase(os.path.abspath(f)) not in played,))      # the played copy first
+    played_names = {m.name.lower() for m in plays}
+    runs = {x.parent.name.lower() for x in project.glob("*/1_edit.xml")} | ({Path(run_dir).name.lower()}
+                                                                             if run_dir else set())
     seen: dict = {}
     for f in files:
         k = _key(f)
         rel = f.relative_to(project).as_posix()
         if k is not None and k in seen:
             left.append((f, f"the same file as {seen[k]} (a hard link): copy that one here if you need it"))
+            continue
+        if _unplayed_video(f, rel, played_names, runs):
+            left.append((f, "a video the edit does not play (the downloaded RAW, its conversion or an older piece): "
+                            "it stays in the project folder"))
             continue
         if k is not None:
             seen[k] = rel

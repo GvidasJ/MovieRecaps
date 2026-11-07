@@ -33,6 +33,24 @@ def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast
             *(["--allow-short-raw"] if allow_short_raw else []), *(music or [])]
 
 
+CHECK_VIDEOS_ENV = "MOVIERECAPS_CHECK_VIDEOS"     # 7 Nov: "0" / "1" wins over Settings -> Check videos (the tests)
+SKIP_CHECK_VIDEOS = ["--skip-preview", "--skip-compare"]
+
+
+def check_videos() -> bool:
+    """7 Nov: the edit also renders its two check videos, preview_recreation.mp4 and compare.mp4 (Settings -> Check
+    videos, OFF by itself: about 9 % of every run went into them). Without them every check still runs -- the cut
+    checks read the frames made in memory instead -- only the two videos you could watch are not made."""
+    env = os.environ.get(CHECK_VIDEOS_ENV, "").strip()
+    if env in ("0", "1"):
+        return env == "1"
+    try:
+        from . import settings as S
+        return bool(getattr(S.load(), "check_videos", False))
+    except Exception:  # noqa: BLE001 - the settings cannot be read: as before (made)
+        return True
+
+
 def channel_music(job: Job) -> list[str]:
     """The tool's --music switches of the job's channel (night 15: SceneProof's song), [] without one.
 
@@ -82,6 +100,8 @@ class JobRun:
         self.cmd = command(self.python, Path(job.competitor), self.use_raw, self.run_dir, self.work,
                            job.mode == FAST, float(job.speed), frame, watermark,
                            forced(job), bool(getattr(job, "roles_chosen", False)), short_raw(job), channel_music(job))
+        if not check_videos():
+            self.cmd += SKIP_CHECK_VIDEOS                  # 7 Nov: faster -- the checks still run
         if self.resuming:
             self.cmd.append("--resume")
         self.proc: subprocess.Popen | None = None

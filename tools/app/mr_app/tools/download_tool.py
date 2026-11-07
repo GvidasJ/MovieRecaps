@@ -67,6 +67,7 @@ STEP_ENHANCE = ("enhance", "Enhance")      # run 20: the scene's piece enhanced 
 G_CONVERT, G_SEND, G_HEADLINE, G_COMP = "convert", "send", "headline", "competitor"
 G_ENHANCE = "enhance"                      # run 20: the edit waits for the laptop's enhanced piece
 ENHANCE_POLL_S = 10.0                      # run 20: the Enhance folder is looked at this often for a waiting row
+ONE_ENV = "MOVIERECAPS_ONE_AT_A_TIME"      # 7 Nov: "0" / "1" wins over Settings -> One video at a time (the tests)
 
 
 @dataclass
@@ -449,7 +450,8 @@ class StageThread(QThread):
             self._say("raw", 0.0, f"the file {Path(it.raw_file).name} ({D.size_text(n)})")
             if not name:
                 name = Path(it.raw_file).stem
-        root = paths.projects_root()
+        from ..core import settings as S0                 # 7 Nov: the PC makes it right in D:\Shared\Projects
+        root = S0.work_root()
         # day 13: the whole video -- its downloads (or the RAW copied in), their conversions and the edit's run (the
         # tool's saved analysis, its temporary copy of a RAW it cannot read as it is) -- or it does not start
         why = space.new_video_problem(links, it.raw_file, root, how, sizer=estimate_bytes)
@@ -1222,6 +1224,7 @@ class DownloadPage(QWidget):
         self.rows: dict[int, VideoRow] = {}
         self.current: StageThread | None = None
         self.work: list[tuple[int, tuple[str, ...], bool]] = []    # (item id, stages, default template), in order
+        self._turn_why: dict[int, str] = {}       # 7 Nov: why a row waits its turn (one video at a time)
         self.raw_file: Path | None = None
         self.comp_file: Path | None = None
         self._worked = False            # something ran since "Turn off the PC" was ticked
@@ -1394,20 +1397,20 @@ class DownloadPage(QWidget):
     def _where(self) -> None:
         """Where the folders go, the free space and yt-dlp's version -- read in the background (a subprocess and a
         disk: never in the window's thread)."""
-        root = paths.projects_root()
-        self.where.setText(f"The video folders go to {root}")
+        self.where.setText("The video folders go to …")
 
         def work():
-            from ..core import space
+            from ..core import settings as S0, space
+            root = S0.work_root()                         # 7 Nov: the PC's own D:\Shared\Projects (a disk check)
             try:
                 from ..core import download as D
                 v = D.installed_version()
             except Exception:  # noqa: BLE001
                 v = "?"
-            return space.summary([root]), v
+            return space.summary([root]), v, root
 
         def got(r) -> None:
-            self.where.setText(f"The video folders go to {root} ({r[0]})  ·  yt-dlp {r[1]} (updated at most once a day "
+            self.where.setText(f"The video folders go to {r[2]} ({r[0]})  ·  yt-dlp {r[1]} (updated at most once a day "
                                "before a download)")
         from ..ui import background as BG
         BG.call(work, got)
@@ -1903,12 +1906,17 @@ class DownloadPage(QWidget):
 
     def _next(self) -> None:
         if self.current is not None:
+            self._say_turns()                             # 7 Nov: a row added meanwhile says why it waits
             return
-        while self.work:
-            item_id, stages, default = self.work.pop(0)
+        for entry in list(self.work):
+            item_id, stages, default = entry
             it = self._item(item_id)
             if it is None or it.state != QUEUED:
+                self.work.remove(entry)
                 continue
+            if self._turn(it):                            # 7 Nov: one video at a time -- it waits its turn
+                continue
+            self.work.remove(entry)
             it.state = WORKING
             it.started = it.started or datetime.now()
             self._worked = True
@@ -1922,8 +1930,93 @@ class DownloadPage(QWidget):
             self._step(it, self._display_step(it, stages[0]), S_RUN, 0.0, "starting")
             self._order()
             th.start()
+            self._say_turns()
             return
+        self._say_turns()
         self._counts()
+
+    # -- 7 Nov, your call: ONE VIDEO AT A TIME --
+    def _one_at_a_time(self) -> bool:
+        """Settings -> "One video at a time" (on by itself); MOVIERECAPS_ONE_AT_A_TIME=0/1 wins (the tests)."""
+        env = os.environ.get(ONE_ENV, "").strip()
+        if env in ("0", "1"):
+            return env == "1"
+        s = getattr(self.ctx, "settings", None)
+        if s is None:
+            try:
+                from ..core import settings as S0
+                s = S0.load()
+            except Exception:  # noqa: BLE001
+                return True
+        return bool(getattr(s, "one_at_a_time", True))
+
+    def _in_making(self, o: Item) -> bool:
+        """The video is still being made on this computer: a step of it runs or waits its turn, its piece is with
+        Topaz (the edit waits for it), or its edit runs or waits in the started Match cuts queue. One that waits for
+        YOU (a button, the headline, which is the RAW), is paused, stopped, failed or done: no."""
+        if o.state in (QUEUED, WORKING):
+            return True
+        if o.state == GATED:
+            return o.gate == G_ENHANCE
+        if o.state != SENT:
+            return False
+        j = o.job
+        if j is None:
+            return True                                   # on its way into the Match cuts queue
+        if waits_for_pick(o):
+            return False
+        st = getattr(j, "state", None)
+        if st == J.RUNNING:
+            return True
+        if st == J.READY:
+            mc = (getattr(self.ctx, "pages", None) or {}).get("match_cuts")
+            return bool(getattr(mc, "running", False))
+        return False
+
+    def _turn(self, it: Item) -> str:
+        """Why the row's next step waits ('' = it goes now): with "One video at a time" on, a video added before it
+        is still being made, or this computer runs another edit or Topaz. (Before 7 Nov the next video downloaded,
+        converted and made its piece for Topaz while the edit of the one before ran: both went slower.)"""
+        why = ""
+        if self._one_at_a_time():
+            key = (it.added, it.id)
+            ahead = next((o for o in self.items if o is not it and (o.added, o.id) < key and self._in_making(o)),
+                         None)
+            if ahead is not None:
+                name = (row_title(ahead) or ahead.name or "the video before it")[:60]
+                why = f"Waiting for its turn: {name} is being made first (one video at a time)"
+            else:
+                mc = (getattr(self.ctx, "pages", None) or {}).get("match_cuts")
+                busy = getattr(mc, "has_work", None)
+                try:
+                    if callable(busy) and busy():
+                        why = "Waiting for its turn: an edit is running in the Match cuts queue (one video at a time)"
+                except Exception:  # noqa: BLE001
+                    pass
+                if not why and self._topaz_here():
+                    why = "Waiting for its turn: Topaz is enhancing on this computer (one video at a time)"
+        if self._turn_why.get(it.id, "") != why:
+            self._turn_why[it.id] = why
+            self._refresh(it)
+        return why
+
+    def _topaz_here(self) -> bool:
+        """Topaz is enhancing a piece on this computer right now (the Enhance page's worker)."""
+        try:
+            pg = (getattr(self.ctx, "pages", None) or {}).get("enhance")
+            w = getattr(pg, "worker", None)
+            return bool(w is not None and w.busy)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _say_turns(self) -> None:
+        """The other waiting rows say why they wait (the one that just started has nothing to say)."""
+        waiting = {iid for iid, _s, _d in self.work}
+        for it in self.items:
+            if it.state == QUEUED and it.id in waiting:
+                self._turn(it)
+            elif self._turn_why.pop(it.id, ""):
+                self._refresh(it)
 
     def _display_step(self, it: Item, stage: str) -> str:
         if stage == "template" and it.kind == NV.JUST_CUTS:
@@ -2286,6 +2379,8 @@ class DownloadPage(QWidget):
                 self._refresh(it)
             self._order()
         self._enhance_poll()
+        if self.current is None and self.work:
+            self._next()                                  # 7 Nov: a row that waited its turn (one video at a time)
         self._check_shutdown()
 
     # -- run 20: the scene's piece enhanced on the laptop (core.enhance) --
@@ -2706,7 +2801,7 @@ class DownloadPage(QWidget):
             return "The edit runs in the Match cuts queue" if it.job is not None and it.job.state == J.RUNNING else \
                 "In the Match cuts queue — it starts when the queue gets to it"
         if it.state == QUEUED:
-            return "waiting for the video before it"
+            return self._turn_why.get(it.id) or "waiting for the video before it"
         if it.state == WORKING:
             return it.message or "working"
         return ""

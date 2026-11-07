@@ -19,6 +19,8 @@ os.environ.setdefault("MOVIERECAPS_NO_AI", "1")       # day 16: Find source neve
 os.environ.setdefault("MOVIERECAPS_KEEP_ROWS", "0")   # run 18: each test's lists start empty (its own test switches it on)
 os.environ.setdefault("MOVIERECAPS_ENHANCE", "0")     # run 20: no row sends a piece to the laptop, no Topaz worker starts
 #                                                       (the enhance tests switch them on)
+os.environ.setdefault("MOVIERECAPS_ONE_AT_A_TIME", "0")   # 7 Nov: the rows go on as before (one test switches it on)
+os.environ.setdefault("MOVIERECAPS_CHECK_VIDEOS", "1")    # 7 Nov: the edits' command lines as before
 if "MOVIERECAPS_SETTINGS" not in os.environ:
     os.environ["MOVIERECAPS_SETTINGS"] = str(_TMP / "settings.json")
     (_TMP / "settings.json").write_text(json.dumps({"save_to": str(_TMP / "shared"), "intro": False}),

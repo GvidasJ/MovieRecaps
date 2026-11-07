@@ -55,6 +55,8 @@ class Settings:
     enhance_topaz: bool | None = None  # run 20: "Enhance pieces for the PC with Topaz" (None: on on the laptop only)
     enhance_dir: str = ""              # run 20: the Enhance folder ("" = this computer's default: core.enhance.share_dir)
     enhance_where: str = ""            # 30 Oct: Topaz for the videos made here runs on "pc" / "laptop" ("" = either)
+    one_at_a_time: bool = True         # 7 Nov: New video -- the next video starts when the one before it is finished
+    check_videos: bool = False         # 7 Nov: the edit also renders preview_recreation.mp4 + compare.mp4 (slower)
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -108,7 +110,8 @@ def _valid(name: str, v: Any, default: Any) -> Any:
     if name == "machine":
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
-    if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean"):
+    if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean", "one_at_a_time",
+                "check_videos"):
         return v if isinstance(v, bool) else default
     if name in ("enhance_send", "enhance_topaz"):
         return v if isinstance(v, bool) or v is None else default
@@ -232,3 +235,42 @@ def save_root(s: Settings | None = None) -> Path:
     if (s.save_to or "").strip():
         return Path(os.path.expandvars(os.path.expanduser(s.save_to.strip())))
     return M.default_save_root(M.which(s))
+
+
+DRIVE_FIXED = 3                         # GetDriveTypeW: a disk inside this computer (not a network or USB drive)
+
+
+def on_this_computer(folder: str | os.PathLike) -> bool:
+    """7 Nov: the folder is on a disk inside this computer -- the PC's D:\\Shared\\Projects -- not a network folder
+    (\\\\192.168.101.11\\Shared ..., a mapped network drive), a USB stick or a CD. Only Windows says yes."""
+    s = str(folder).strip()
+    if not s or s.startswith(("\\\\", "//")) or os.name != "nt":
+        return False
+    drive = os.path.splitdrive(s)[0]
+    if len(drive) != 2 or drive[1] != ":":
+        return False
+    try:
+        import ctypes
+        return int(ctypes.windll.kernel32.GetDriveTypeW(drive + "\\")) == DRIVE_FIXED
+    except Exception:  # noqa: BLE001 - cannot tell: as before (this computer's own projects folder)
+        return False
+
+
+def work_root(s: Settings | None = None) -> Path:
+    """7 Nov, your call: where a NEW video's project folder is made. The "Save projects to" folder when it is on a disk
+    of this computer (the PC's D:\\Shared\\Projects): the whole project is made right there -- nothing is copied when
+    it is finished, and C: stays free. Else this computer's own projects folder (paths.projects_root(): the laptop
+    makes it on its own disk -- fast, and it works while the PC is off -- and the finished project is copied to the
+    shared folder as before). MOVIERECAPS_PROJECTS (the tests, a folder you set by hand) always wins."""
+    from . import paths
+    if os.environ.get(paths.PROJECTS_ENV, "").strip():
+        return paths.projects_root()
+    try:
+        root = save_root(s)
+        if on_this_computer(root):
+            root.mkdir(parents=True, exist_ok=True)
+            if os.access(root, os.W_OK):
+                return root
+    except Exception:  # noqa: BLE001 - not there / cannot be written: this computer's own folder
+        pass
+    return paths.projects_root()
