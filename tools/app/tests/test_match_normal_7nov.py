@@ -221,3 +221,31 @@ def test_the_position_is_halved_too():
     ES._half_center(par)
     got = [(float(v.findtext("horiz")), float(v.findtext("vert"))) for v in par.iter("value")]
     assert got == [pytest.approx((0.0369247, 0.0814815)), pytest.approx((-0.1, 0.05))]
+
+
+def test_a_60_fps_sequence_plays_the_nearest_enhanced_frame(tmp_path):
+    """7 Nov ("it should always be 60"): the edit is made in a 60 fps sequence -- its clips count 60ths of a second
+    of the 24 fps RAW, so the piece's start is rarely a whole step: the nearest 60 fps frame of the enhanced piece."""
+    p = _project(tmp_path, [(300, 400)], start=101)                   # 60ths: RAW frames 120-160
+    xml = p.folder / "edit" / "1_edit.xml"
+    root = ET.parse(str(xml)).getroot()
+    for ci in root.iter("clipitem"):
+        if ci.get("id") == "v0":
+            ci.find("rate").find("timebase").text = "60"              # (the clip's own rate; the file stays 24)
+    ET.ElementTree(root).write(str(xml), encoding="utf-8")
+    r = ES.swap_in(p.folder, do_check=False)
+    assert r["ok"] and r["swapped"] == 1, r
+    c = _clips(xml)
+    assert c["v0"][:3] == ("file-enhanced", 48, 148)                  # (120 - 101) / 0.4 = 47.5 -> 48, same length
+
+
+def test_an_edit_that_sends_its_piece_to_topaz_is_made_at_60(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv(ES.MATCH_ENV, "1")
+    p = PJ.create(tmp_path, name="x")
+    job = SimpleNamespace(project=p.folder)
+    assert not ES.wants_60(job)
+    p.update(enhance={"state": "sent"})
+    assert ES.wants_60(job)
+    monkeypatch.setenv(ES.MATCH_ENV, "0")
+    assert not ES.wants_60(job)

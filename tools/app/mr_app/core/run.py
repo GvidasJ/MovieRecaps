@@ -125,6 +125,12 @@ class JobRun:
                            forced(job), bool(getattr(job, "roles_chosen", False)), short_raw(job), channel_music(job))
         if not check_videos():
             self.cmd += SKIP_CHECK_VIDEOS                  # 7 Nov: faster -- the checks still run
+        try:                                               # 7 Nov: the Topaz picture is 60 fps -- so is the
+            from .enhance_swap import wants_60            #   sequence
+            if wants_60(job):
+                self.cmd += ["--sequence-fps", "60"]
+        except Exception:  # noqa: BLE001
+            pass
         if self.resuming:
             self.cmd.append("--resume")
         self.proc: subprocess.Popen | None = None

@@ -242,6 +242,9 @@ def swap_in(project, do_check: bool = True) -> dict:
                 kept += 1
                 continue
             na, nb = (ma - start) / k, (mb - start) / k
+            if (na.denominator != 1 or nb.denominator != 1) and rate == OUT_FPS:
+                na = Fraction(int(round(na)))              # 7 Nov: a 60 fps sequence's clip -- the nearest of the
+                nb = na + (b - a)                          #   enhanced piece's 60 fps frames (within 1/120 s)
             if na.denominator != 1 or nb.denominator != 1:
                 kept += 1                                  # not a whole step on its scale: the normal RAW
                 continue
@@ -335,6 +338,22 @@ def _half_center(par) -> None:
             e = v.find(ax)
             if e is not None and e.text and e.text.strip():
                 e.text = f"{float(e.text) / 2.0:.7f}"
+
+
+def wants_60(job) -> bool:
+    """7 Nov (your call: "it should always be 60"): an edit whose project sends its piece to Topaz is made in a 60 fps
+    sequence (--sequence-fps 60) -- the enhanced picture swapped in later is 60 fps, and plays at its own rate."""
+    try:
+        if not match_normal():
+            return False
+        folder = getattr(job, "project", None)
+        if folder is None:
+            return False
+        d = json.loads((Path(folder) / "project.json").read_text(encoding="utf-8"))
+        e = d.get("enhance") if isinstance(d.get("enhance"), dict) else {}
+        return e.get("state") in ("sent", "used")
+    except Exception:  # noqa: BLE001 - as before: the RAW's own rate
+        return False
 
 
 def zip_when_done(project) -> None:
