@@ -14,6 +14,10 @@ Fixed → Rendered → Uploaded -- for the PC and the laptop at once (the shared
   on Yes its edit is moved onto the whole movie (checked frame for frame) and the piece goes.
 * Every 30 minutes (and at the start) the three channels' Shorts tabs are read (core.uploads): a Short with the same
   title moves its card to Uploaded with the date; a near match asks first ("Is this the same video?").
+* 7 Nov (your call): no Board tab any more. The page is still made and works out of sight (main_window.HIDDEN sets
+  ``on_screen`` False): the Uploaded check marks the exact matches quietly (a finished project then becomes only its
+  zip, core.archive) and leaves the near ones (nobody would see the question); Clean up still runs from the top
+  strip's free space and from "Not enough free space".
 """
 from __future__ import annotations
 
@@ -592,6 +596,7 @@ class BoardPage(QWidget):
         self._loading = False
         self._checking = False
         self.asked: set = set()
+        self.on_screen = True                  # 7 Nov: False -- on no tab, working out of sight (main_window.HIDDEN)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 22, 0, 40)
         lay.setSpacing(16)
@@ -877,8 +882,15 @@ class BoardPage(QWidget):
                     done.append(card)
                 return done
             cards = list(self.cards)
-            BG.call(work, lambda done: (self.toast(f"Uploaded ✓ {len(done)} video(s) found on the channels")
-                                        if done else None, self.reload()))
+            quiet = not self.on_screen                 # 7 Nov: out of sight -- marked quietly (no count said)
+
+            def marked(done) -> None:
+                if done and not quiet:
+                    self.toast(f"Uploaded ✓ {len(done)} video(s) found on the channels")
+                self.reload()
+            BG.call(work, marked)
+        if not self.on_screen:
+            return                                     # 7 Nov: nobody would see "Is this the same video?"
         for item in near:
             card_key, short, score = item[0], item[1], float(item[2]) if len(item) > 2 else 0.0
             key = (str(card_key), getattr(short, "id", ""))
@@ -948,7 +960,7 @@ class BoardPage(QWidget):
             keptc = [c for c in one if not c.ok]
             if not junk and not ok and not okb and not okc:
                 self.toast("Nothing to clean up ✓" + (f" ({len(kept)} old run(s) keep two RAW files: see above)"
-                                                        if kept else ""))
+                                                        if kept and self.on_screen else ""))
                 if kept or keptb or keptc:
                     self.status.setText("\n".join(t for t in (self._kept_text(kept) if kept else "",
                                                              self._kept_big_text(keptb) if keptb else "",

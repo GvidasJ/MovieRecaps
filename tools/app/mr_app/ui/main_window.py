@@ -2,8 +2,10 @@
 
 * a thin mono strip on top -- this computer's graphics card, Premiere, where projects are saved, a timecode clock,
   "replay intro", "settings";
-* the brand (the match-cut logo, Movie in white, Recaps in red) and the tabs Match cuts · Board · Progress · History
-  (Match cuts holds the Queue and Learn, Progress holds Download, Convert and Template);
+* the brand (the match-cut logo, Movie in white, Recaps in red) and the tabs Match cuts · Progress (Match cuts holds
+  the Queue and Learn, Progress holds Download, Convert and Template). 7 Nov (your call): no Board and no History tab
+  any more (and no upload counter over the queue) -- the Board's page still works out of sight (HIDDEN): the
+  automatic "Uploaded" check (a finished project becomes only its zip once its Short is up) and Clean up;
 * the quote line; the pages over the fading grid; the toast; the intro.
 
 Keys: Space starts the queue, Del removes the queue row under the mouse, Ctrl+V pastes a YouTube link into Download
@@ -31,13 +33,11 @@ from . import theme
 from . import widgets as W
 
 CONTENT_W = 1040                    # the pages' column (the reference: a centred column)
-WIDE_W = 1680                       # the Board's
-TABS = (("Match cuts", ("match_cuts", "learn")), ("Board", ("board",)),
-        ("Progress", ("download", "find_source", "convert", "template", "enhance")), ("History", ("history",)))
+TABS = (("Match cuts", ("match_cuts", "learn")),
+        ("Progress", ("download", "find_source", "convert", "template", "enhance")))
 SUB_TITLES = {"match_cuts": "Queue", "learn": "Learn", "download": "Download", "find_source": "Find source",
-              "convert": "Convert", "enhance": "Enhance",
-              "template": "Template", "board": "Board", "history": "History"}
-WIDE = {"board"}
+              "convert": "Convert", "enhance": "Enhance", "template": "Template"}
+HIDDEN = ("board",)                 # 7 Nov: made but on no tab, works out of sight (_header hides any page not in TABS)
 
 
 def gpu_name() -> str:
@@ -89,7 +89,7 @@ class Area(QWidget):
             sa.setFrameShape(QFrame.Shape.NoFrame)
             page = pages[k]
             page.setMinimumWidth(min(CONTENT_W, 900))
-            sa.setWidget(_column(page, WIDE_W if k in WIDE else CONTENT_W))
+            sa.setWidget(_column(page, CONTENT_W))
             self.stack.addWidget(sa)
         lay.addWidget(self.stack, 1)
         if self.sub is not None:
@@ -152,9 +152,6 @@ class MainWindow(QMainWindow):
         self._quote_timer = QTimer(self)
         self._quote_timer.timeout.connect(self.refresh_quote)
         self._quote_timer.start(60_000)
-        board = self.pages.get("board")
-        if board is not None and hasattr(board, "changed"):
-            board.changed.connect(self._board_changed)
         self._pending_timer = QTimer(self)                # finished projects kept here while the share was away
         self._pending_timer.timeout.connect(self.retry_pending)
         self._pending_timer.start(5 * 60_000)
@@ -215,20 +212,6 @@ class MainWindow(QMainWindow):
                 dl.restore_torrents()
             except Exception:  # noqa: BLE001 - never a crash at the start
                 pass
-
-    # -- the board feeds the motivation strip and the history --
-    def _board_changed(self, cards: list) -> None:
-        mc, hist, board = self.pages.get("match_cuts"), self.pages.get("history"), self.pages.get("board")
-        try:
-            from ..core import board as B
-            ups = sorted(B.uploads(cards) + list(getattr(board, "zipped_ups", None) or []),   # 7 Nov: + the
-                         key=lambda x: x[0])                                               #   zipped projects'
-        except Exception:  # noqa: BLE001
-            ups = []
-        if mc is not None and hasattr(mc, "show_uploads"):
-            mc.show_uploads(ups, self.settings)
-        if hist is not None and hasattr(hist, "set_projects"):
-            hist.set_projects(list(getattr(board, "datas", []) or []))
 
     # -- section 2: a finished project goes to the shared folder --
     def project_done(self, job) -> None:
@@ -596,6 +579,15 @@ class MainWindow(QMainWindow):
             self.tools[t.key] = t
             self.pages[t.key] = t.page(self)
         self.areas = [Area(keys, self.pages) for _title, keys in TABS]
+        on_tab = {k for a in self.areas for k in a.keys}
+        for k, page in self.pages.items():                # 7 Nov (HIDDEN): a page on no tab works out of sight
+            if k not in on_tab:
+                try:
+                    page.on_screen = False
+                    page.setParent(self)
+                    page.hide()
+                except Exception:  # noqa: BLE001 - never a crash at the start
+                    pass
         self.tabbar = T.TabBar([title for title, _keys in TABS])
         il.addWidget(self.tabbar)
         hl.addWidget(_column(inner))
@@ -628,7 +620,7 @@ class MainWindow(QMainWindow):
         def go(key: str):
             return lambda: self.select(key)
         out = [("New video", "", go("download")), ("Match cuts queue", "", go("match_cuts")),
-               ("Learn", "", go("learn")), ("Board", "", go("board")), ("History", "", go("history")),
+               ("Learn", "", go("learn")),                                  # (7 Nov: no Board, no History)
                ("Find source", "", go("find_source")), ("Convert", "", go("convert")),
                ("Template", "", go("template")), ("Settings", "", self.open_settings),
                ("Start the queue", "Space", lambda: (self.select("match_cuts"), self._key_start())),
@@ -769,10 +761,14 @@ class MainWindow(QMainWindow):
             self.clean_up_now()
 
     def clean_up_now(self) -> None:
-        """The Board's Clean up (it looks first and asks before it removes anything)."""
-        self.select("board")
+        """The Board's Clean up (it looks first and asks before it removes anything). 7 Nov: the Board has no tab any
+        more -- its page works out of sight, so a toast says that Clean up is looking."""
         b = self.pages.get("board")
         if b is not None and hasattr(b, "clean_up"):
+            if getattr(b, "on_screen", True):
+                self.select("board")
+            else:
+                self.toast("Clean up: looking for leftovers -- it asks before it removes anything", "info")
             b.clean_up()
 
     # -- day 13: the versions this computer has (core.versions) --
@@ -857,7 +853,8 @@ class MainWindow(QMainWindow):
 
     # -- for the tools --
     def select(self, key: str) -> None:
-        """Show the page of that tool (its key: match_cuts, learn, board, download, convert, template, history)."""
+        """Show the page of that tool (its key: match_cuts, learn, download, find_source, convert, template, enhance;
+        a page on no tab -- the Board since 7 Nov -- is not shown: nothing happens)."""
         for i, a in enumerate(self.areas):
             if key in a.keys:
                 old = self.tabbar.index

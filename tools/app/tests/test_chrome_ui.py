@@ -1,5 +1,6 @@
 """The window's chrome on the real widgets (night 11, items 2 and 9): Settings are saved and applied at once
-(Animations off, goals, "Save projects to" checked for reachability), the motivation strip counts today's Shorts and
+(Animations off, the Uploaded check's minutes, "Save projects to" checked for reachability; 7 Nov: no Goals row), the
+motivation strip (no longer on the window since 7 Nov, the widget itself still tested) counts today's Shorts and
 says "goal hit" only when it happens while the app runs, the quote line fades to a new quote and a click asks for the
 next one, and the keys (Space, Del, Ctrl+V) do nothing while you type.
 
@@ -81,8 +82,7 @@ def test_settings_are_saved_and_applied_at_once(qapp, window, tmp_path, monkeypa
         assert pump_until(qapp, lambda: "reachable" in d.root_note.text())      # checked in the background
         notes.append(d.root_note.text())
         d.anim.set("off")
-        d.daily.setValue(4)
-        d.monthly.setValue(100)
+        assert not hasattr(d, "daily") and not hasattr(d, "monthly")             # 7 Nov: no Goals row any more
         d.every.setValue(45)
         d._ok()                                                                  # noqa: SLF001 - "Save"
         return d.result()
@@ -90,10 +90,9 @@ def test_settings_are_saved_and_applied_at_once(qapp, window, tmp_path, monkeypa
     win.open_settings()
     saved = json.loads(f.read_text(encoding="utf-8"))
     assert saved["save_to"] == str(other) and saved["animations"] is False
-    assert (saved["daily_goal"], saved["monthly_goal"], saved["upload_check_minutes"]) == (4, 100, 45)
+    assert (saved["daily_goal"], saved["monthly_goal"], saved["upload_check_minutes"]) == (6, 150, 45)   # kept
     assert notes and notes[0].endswith("-- reachable")
     assert not M.enabled()                                                       # applied at once
-    assert win.settings.daily_goal == 4
 
 
 def test_a_folder_that_is_not_there_is_said_to_be_unreachable(qapp, window, tmp_path, monkeypatch):

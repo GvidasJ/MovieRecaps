@@ -1355,10 +1355,7 @@ class MatchCutsPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 18, 0, 40)
         lay.setSpacing(18)
-        from ..ui.motivation_strip import MotivationStrip
-        self.motivation = MotivationStrip()
-        self.motivation.goal_hit.connect(self._goal_hit)
-        lay.addWidget(self.motivation)
+        # (7 Nov, your call: no upload counter -- the motivation strip -- over the queue any more)
         self.drop = W.DropZone("Drop videos here",
                                ["a RAW and a competitor = one video  ·  a folder of folders = one video each  ·  one "
                                 "video alone waits for the next one"],
@@ -1412,21 +1409,6 @@ class MatchCutsPage(QWidget):
         return (f"<span style='color:{theme.DIM}'>Drag rows to change the order · right-click a row for more · "
                 f"{k % 'Space'} start · {k % 'Del'} remove the row under the mouse · {k % 'Ctrl'}+{k % 'V'} paste a "
                 "link</span>")
-
-    # -- the motivation strip --
-    def show_uploads(self, uploads, settings=None) -> None:
-        s = settings or getattr(self.ctx, "settings", None)
-        self.motivation.refresh(uploads, int(getattr(s, "daily_goal", 6) or 6),
-                                int(getattr(s, "monthly_goal", 150) or 150))
-
-    def goal_hit(self) -> bool:
-        return bool(getattr(self.motivation, "hit", False))
-
-    def _goal_hit(self, n: int) -> None:
-        _toast(self.ctx, f"Daily goal hit — {n} Shorts today ✓")
-        fn = getattr(self.ctx, "refresh_quote", None)
-        if fn is not None:
-            fn(True)
 
     # -- adding videos --
     def _pick_files(self) -> None:

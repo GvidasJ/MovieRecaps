@@ -1,6 +1,7 @@
 """Settings (night 11): where finished projects are saved ("Save projects to": PC D:\\Shared\\Projects, laptop
-\\\\192.168.101.11\\Shared\\Projects by default), which computer this is, animations on/off, the intro, the daily and
-monthly goals, how often the Shorts are checked. Saved per computer (core/settings.py)."""
+\\\\192.168.101.11\\Shared\\Projects by default), which computer this is, animations on/off, the intro, how often the
+Shorts are checked (7 Nov: no daily / monthly goals any more -- the upload counter is gone). Saved per computer
+(core/settings.py)."""
 from __future__ import annotations
 
 import copy
@@ -239,32 +240,16 @@ class SettingsDialog(QDialog):
         g.addLayout(ebox, r, 1)
         r += 1
         self._find_topaz()
-        # goals
-        g.addWidget(W.label("Goals", "Small"), r, 0)
-        grow = QHBoxLayout()
-        self.daily = QSpinBox()
-        self.daily.setRange(1, 50)
-        self.daily.setValue(int(getattr(self.s, "daily_goal", 6) or 6))
-        self.monthly = QSpinBox()
-        self.monthly.setRange(1, 2000)
-        self.monthly.setValue(int(getattr(self.s, "monthly_goal", 150) or 150))
-        grow.addWidget(W.label("Shorts a day", "Dim"))
-        grow.addWidget(self.daily)
-        grow.addSpacing(18)
-        grow.addWidget(W.label("Shorts a month", "Dim"))
-        grow.addWidget(self.monthly)
-        grow.addStretch(1)
-        g.addLayout(grow, r, 1)
-        r += 1
+        # (7 Nov, your call: no Goals row -- the upload counter it was for is gone)
         g.addWidget(W.label("Uploaded check", "Small"), r, 0)
         urow = QHBoxLayout()
         self.every = QSpinBox()
         self.every.setRange(5, 600)
         self.every.setValue(int(getattr(self.s, "upload_check_minutes", 30) or 30))
-        urow.addWidget(W.label("read the three Shorts tabs every", "Dim"))
+        urow.addWidget(W.label("read the channels' Shorts tabs every", "Dim"))
         urow.addWidget(self.every)
-        urow.addWidget(W.label("minutes (and at the start)", "Dim"))
-        urow.addStretch(1)
+        urow.addWidget(W.label("minutes (and at the start): a finished project whose Short is up becomes only its zip",
+                               "Dim", wrap=True), 1)
         g.addLayout(urow, r, 1)
         body = QWidget()                                  # 7 Nov: the rows scroll on a short screen (the laptop)
         body.setObjectName("Transparent")
@@ -469,9 +454,7 @@ class SettingsDialog(QDialog):
         s.machine = self.machine.value
         s.animations = self.anim.value == "on"
         s.intro = self.intro.value == "on"
-        s.daily_goal = int(self.daily.value())
-        s.monthly_goal = int(self.monthly.value())
-        s.upload_check_minutes = int(self.every.value())
+        s.upload_check_minutes = int(self.every.value())               # (7 Nov: the goals are kept as they were)
         s.torrent_dir = S0.normalize_folder(self.tdir.text())
         s.torrent_keep_sharing = self.share.value == "on"
         s.cache_clean = self.cclean.value == "on"

@@ -45,19 +45,23 @@ class _Ctx:
         self.strip = (n, running)
 
 
-def test_the_window_has_the_four_tabs_and_every_page_under_one(qapp):
-    """Night 11: Match cuts (Queue, Learn) · Board · Progress (Download, Convert, Template) · History."""
+def test_the_window_has_the_two_tabs_and_every_page_under_one(qapp):
+    """Night 11: Match cuts (Queue, Learn) · Progress (Download, Convert, Template). 7 Nov: no Board and no History tab
+    -- the Board's page is made but works out of sight; no History page."""
     from mr_app.tools import tools
     from mr_app.ui import main_window as MW
     win = MW.MainWindow(tools())
-    assert [t.text for t in win.tabbar.tabs] == ["Match cuts", "Board", "Progress", "History"]
+    assert [t.text for t in win.tabbar.tabs] == ["Match cuts", "Progress"]
     assert set(win.pages) == {"match_cuts", "learn", "board", "download", "find_source", "convert", "template",
-                              "enhance", "history"}         # (run 20: Progress -> Enhance)
+                              "enhance"}                    # (run 20: Progress -> Enhance)
+    assert not any("board" in a.keys for a in win.areas) and win.pages["board"].on_screen is False
     win.select("template")
-    assert win.tabbar.index == 2 and win.stack.currentIndex() == 2
-    assert win.areas[2].current_key() == "template" and win.areas[2].sub.index == 3
+    assert win.tabbar.index == 1 and win.stack.currentIndex() == 1
+    assert win.areas[1].current_key() == "template" and win.areas[1].sub.index == 3
     win.select("learn")
     assert win.tabbar.index == 0 and win.areas[0].current_key() == "learn"
+    win.select("board")                                     # on no tab: nothing happens
+    assert win.tabbar.index == 0
     win.close()
 
 
