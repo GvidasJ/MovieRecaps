@@ -296,6 +296,7 @@ def check_zip(folder: Path, z: Path, run: Path | None = None, leave_unplayed: bo
     linked = {f for f, why in left if "hard link" in why}
     want = {arc: f for f, arc in put}
     wanted = set(want.values())
+    light = Z.zip_info(z).get("files") or {}
     try:
         with zipfile.ZipFile(z) as zf:
             have = {i.filename: i for i in zf.infolist()}
@@ -303,7 +304,8 @@ def check_zip(folder: Path, z: Path, run: Path | None = None, leave_unplayed: bo
                 i = have.get(arc)
                 if i is None:
                     return f"{f.name} is not in the zip"
-                if i.file_size != f.stat().st_size:
+                if i.file_size != f.stat().st_size and \
+                        (light.get(arc) or {}).get("from_bytes") != f.stat().st_size:   # (7 Nov: a lighter copy)
                     return f"{f.name} changed after the zip was made"
             bad = zf.testzip()
             if bad is not None:

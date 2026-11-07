@@ -414,6 +414,11 @@ def record_edit(p: P.Project, res: dict) -> None:
             drop_whole_raw(p, Path(res["run_dir"]))     # leaves the project folder (it stays where it was downloaded)
         except Exception:  # noqa: BLE001
             pass
+        try:                                     # 7 Nov (your call): no small cuts -- the pieces of one continuous
+            from . import join_clips             #   take are joined into one clip (V1 and A1)
+            join_clips.join(Path(res["run_dir"]) / "1_edit.xml")
+        except Exception:  # noqa: BLE001
+            pass
         try:                                     # 7 Nov: the enhanced piece is back already -> the edit, matched on
             from . import enhance_swap as ES     #   the normal RAW, plays its picture now
             if ES.match_normal() and (P.load(p.folder).data.get("enhance") or {}).get("state") == "used":

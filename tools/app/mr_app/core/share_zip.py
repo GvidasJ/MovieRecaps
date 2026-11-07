@@ -24,8 +24,10 @@ Nothing is ever deleted or moved: the zip is written next to them (a temporary f
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 import shutil
 import threading
 import time
@@ -36,6 +38,13 @@ from pathlib import Path
 
 BIG_BYTES = 200 * 1024 ** 2          # a file from OUTSIDE the project this big is not put in (the movie, its WAV)
 MIN_FREE = 40 * 1024 ** 3            # the drive keeps at least this much free after the zip
+FIT_BYTES = 950 * 1000 ** 2          # 7 Nov (your call: one zip you drop into Discord, Nitro: 1 GB): every zip stays
+                                     #   under this -- the biggest video in it (the Topaz picture) goes in as a
+                                     #   lighter copy when the whole would be more; the project keeps the full one
+FIT_MARGIN = 8 * 1000 ** 2          # room kept for the zip's own headers and the small files' growth
+FIT_ENV = "MOVIERECAPS_ZIP_FULL"     # "1": no lighter copy (the zip as big as the folder)
+INFO = ".zipinfo.json"               # in the zip: which file is a lighter copy (and of how many bytes)
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 HOW_TO = "HOW TO OPEN.txt"
 MARK = b"MovieRecaps project zip v2 (day 16): the whole project folder"
 STORE = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".mts", ".m2ts", ".ts", ".flv", ".wmv", ".mxf",
@@ -275,7 +284,7 @@ def members(project: Path, run_dir: Path | None = None,
 
 
 def how_to(project: Path, put: list[tuple[Path, str]], left: list[tuple[Path, str]],
-           run_dir: Path | None = None) -> str:
+           run_dir: Path | None = None, light: dict | None = None) -> str:
     run = Path(run_dir).name if run_dir else "edit"          # (a Just cuts project's run folder is "cuts")
     lines = [f"{project.name}", "", "HOW TO OPEN", "",
              "1. Unzip this anywhere (it keeps the project's own folders: edit, logs ...).",
@@ -288,6 +297,14 @@ def how_to(project: Path, put: list[tuple[Path, str]], left: list[tuple[Path, st
             lines.append(f"  - {f.name}: {why}")
             lines.append(f"      {f}")
         lines.append("")
+    if light and light.get("files"):
+        for arc, d in light["files"].items():
+            lines += ["LIGHTER COPY (so the zip stays under 1 GB, for Discord):",
+                      f"  - {arc.split('/', 1)[1]}: the same picture, length and sound at {d['mbps']} Mb/s instead "
+                      f"of {d['from_mbps']} Mb/s ({d['bytes'] / 1e6:.0f} MB instead of {d['from_bytes'] / 1e6:.0f} MB)",
+                      "    -- the full one is in the project folder on the PC (until the folder becomes this zip)", ""]
+    elif light and light.get("why"):
+        lines += [f"NOT MADE SMALLER: {light['why']}", ""]
     lines += [f"IN THIS ZIP: {len(put)} files"] + [f"  - {arc.split('/', 1)[1]}" for _f, arc in put] + [""]
     return "\r\n".join(lines)
 
@@ -309,6 +326,11 @@ def needs_zip(project: Path, run_dir: Path, leave_unplayed: bool = True) -> bool
     if not z.is_file() or not _is_v2(z):
         return True
     t = z.stat().st_mtime
+    try:                                         # 7 Nov: a zip over 1 GB made before the lighter copy existed
+        if z.stat().st_size > FIT_BYTES and os.environ.get(FIT_ENV) != "1" and not zip_info(z).get("tried"):
+            return True
+    except OSError:
+        pass
     put, _left = members(project, run_dir, leave_unplayed)
     try:                                         # 7 Nov: a file in the zip that should not be there any more (the
         want = {a for _f, a in put}               #   normal RAW, put in a moment before it left the folder)
@@ -357,6 +379,108 @@ def _clean_tmp(z: Path) -> None:
         pass
 
 
+def zip_info(z: Path) -> dict:
+    """The zip's own note (INFO): {"tried": bool, "files": {arc: {...}}, "why": ...}; {} for none / unreadable."""
+    try:
+        with zipfile.ZipFile(z) as zf:
+            n = next((x for x in zf.namelist() if x.endswith("/" + INFO)), None)
+            d = json.loads(zf.read(n).decode("utf-8")) if n else {}
+            return d if isinstance(d, dict) else {}
+    except (OSError, zipfile.BadZipFile, ValueError, KeyError):
+        return {}
+
+
+def _probe(f: Path) -> dict:
+    """{"dur": seconds, "abps": the sound's bits per second} of a video ({} when ffprobe cannot read it)."""
+    from match_cuts.common import ffprobe_bin
+    try:
+        r = subprocess.run([ffprobe_bin(), "-v", "error", "-show_entries", "format=duration:stream=codec_type,bit_rate",
+                            "-of", "json", str(f)], capture_output=True, text=True, timeout=120,
+                           creationflags=NO_WINDOW)
+        d = json.loads(r.stdout or "{}")
+        dur = float((d.get("format") or {}).get("duration") or 0.0)
+        abps = sum(float(x.get("bit_rate") or 0) for x in d.get("streams") or [] if x.get("codec_type") == "audio")
+        return {"dur": dur, "abps": abps or 320e3} if dur > 0 else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _encode(src: Path, dst: Path, vbps: int) -> bool:
+    """The picture again at ``vbps`` (H.265 10-bit: the graphics card's encoder, else x265), the sound copied."""
+    from match_cuts.common import ffmpeg_bin
+    head = [ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", str(src), "-map", "0:v:0",
+            "-map", "0:a?"]
+    tail = ["-c:a", "copy", "-tag:v", "hvc1", "-movflags", "+faststart", "-f", "mp4", str(dst)]
+    b = str(int(vbps))
+    tries = [["-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc", "cbr", "-b:v", b,
+              "-maxrate", b, "-bufsize", str(2 * int(vbps)), "-preset", "p5"],
+             ["-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-preset", "fast", "-b:v", b, "-maxrate", b,
+              "-bufsize", str(2 * int(vbps)), "-x265-params", "log-level=error"]]
+    for mid in tries:
+        try:
+            r = subprocess.run(head + mid + tail, capture_output=True, timeout=3 * 3600, creationflags=NO_WINDOW)
+            if r.returncode == 0 and dst.is_file() and dst.stat().st_size > 0:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            dst.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return False
+
+
+def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tuple[list[tuple[Path, str]], dict]:
+    """7 Nov: the files of a zip over ``limit`` (FIT_BYTES): the biggest video goes in as a lighter copy made in
+    ``work`` (``<work>.light.tmp``: deleted after the zip) -- the same picture, length and sound, its bitrate as
+    much as fits. Returns (the files to put in, the note for the zip: {} when nothing had to be done)."""
+    limit = FIT_BYTES if limit is None else limit
+    if os.environ.get(FIT_ENV) == "1":
+        return put, {}
+    sizes = []
+    for f, a in put:
+        try:
+            sizes.append(f.stat().st_size)
+        except OSError:
+            sizes.append(0)
+    total = sum(sizes)
+    if total <= limit:
+        return put, {}
+    vids = [(sz, i) for i, (sz, (f, _a)) in enumerate(zip(sizes, put)) if f.suffix.lower() in VIDEO_EXT]
+    if not vids:
+        return put, {"tried": True, "why": "it has no video to make lighter"}
+    big, i = max(vids)
+    src, arc = put[i]
+    room = limit - (total - big) - FIT_MARGIN
+    if room < big // 20:
+        return put, {"tried": True, "why": f"the files besides {src.name} are already {(total - big) / 1e9:.2f} GB"}
+    pr = _probe(src)
+    if not pr:
+        return put, {"tried": True, "why": f"{src.name} could not be read"}
+    from_bps = big * 8 / pr["dur"]
+    out = Path(str(work) + ".light.tmp")
+    vbps = (room * 8 / pr["dur"] - pr["abps"]) * 0.95
+    for _try in range(2):
+        if vbps < 2e6:
+            return put, {"tried": True, "why": f"{src.name} is too long to fit at a good quality"}
+        if not _encode(src, out, int(vbps)):
+            return put, {"tried": True, "why": f"{src.name} could not be encoded again"}
+        got = out.stat().st_size
+        pr2 = _probe(out)
+        if not pr2 or abs(pr2["dur"] - pr["dur"]) > 0.1:
+            out.unlink(missing_ok=True)
+            return put, {"tried": True, "why": "the lighter copy was not as long as the picture"}
+        if got <= room:
+            new = list(put)
+            new[i] = (out, arc)
+            return new, {"tried": True, "files": {arc: {
+                "bytes": got, "from_bytes": big, "mbps": round(got * 8 / pr["dur"] / 1e6),
+                "from_mbps": round(from_bps / 1e6)}}}
+        vbps *= room / got * 0.97                       # a little over: once more, lower
+    out.unlink(missing_ok=True)
+    return put, {"tried": True, "why": f"{src.name} did not fit"}
+
+
 _MAKING: set = set()
 _MAKING_LOCK = threading.Lock()
 
@@ -385,12 +509,18 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
         if _free_after(project, need) < MIN_FREE:
             return None
         tmp = z.with_name(z.name + ".tmp")
+        put, light = fit(put, z)
+        lighter = [f for f, _a in put if f.name.endswith(".light.tmp")]
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as zf:
             for f, arc in put:
-                store = f.suffix.lower() in STORE
+                store = f.suffix.lower() in STORE or f in lighter
                 zf.write(f, arc, compress_type=zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
-            zf.writestr(f"{plain_name(project)}/{HOW_TO}", how_to(project, put, left, run_dir))
+            zf.writestr(f"{plain_name(project)}/{HOW_TO}", how_to(project, put, left, run_dir, light))
+            if light:
+                zf.writestr(f"{plain_name(project)}/{INFO}", json.dumps(light, indent=1))
             zf.comment = MARK
+        for f in lighter:
+            f.unlink(missing_ok=True)
         os.replace(tmp, z)
         try:
             if z.name != f"{plain_name(project)}.zip" or (_project_data(project).get("zip") or {}).get("file"):
@@ -412,6 +542,7 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
         try:
             if tmp is not None:
                 tmp.unlink()
+                Path(str(tmp)[:-len(".tmp")] + ".light.tmp").unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
         return None

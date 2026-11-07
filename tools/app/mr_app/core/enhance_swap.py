@@ -307,6 +307,11 @@ def swap_in(project, do_check: bool = True) -> dict:
                        ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
         ET.parse(str(tmp))                                 # (reads back)
         os.replace(tmp, xml)
+        try:                                               # 7 Nov: no small cuts (core.join_clips)
+            from . import join_clips
+            join_clips.join(xml)
+        except Exception:  # noqa: BLE001
+            pass
         text = (f"enhanced: {width}x{height}, {OUT_FPS} fps -- {len(plan)} of {len(plan) + kept} V1 clips play it "
                 f"(matched on the normal RAW)")
         p.update(enhance={"swapped": _now(), "text": text, "swap": {"run": run.name, "clips": len(plan),
