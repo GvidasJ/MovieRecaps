@@ -189,6 +189,18 @@ def _unplayed_video(f: Path, rel: str, played_names: set, runs: set) -> bool:
         return False
 
 
+def _normal_picture(f: Path, played_names: set) -> bool:
+    """7 Nov (your call: only the enhanced picture stays): in a project whose edit plays the Topaz picture, a big video
+    the edit does not play -- edit\\extras\\media\\raw.mp4, the normal RAW's piece -- stays out of the zip, in the edit
+    folders too."""
+    if f.suffix.lower() not in VIDEO_EXT or f.name.lower() in played_names:
+        return False
+    try:
+        return f.stat().st_size > BIG_BYTES
+    except OSError:
+        return False
+
+
 def members(project: Path, run_dir: Path | None = None,
             leave_unplayed: bool = True) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
     """(the files to put in -- (file, name in the zip) --, the files left out -- (file, why)). ``leave_unplayed``
@@ -215,12 +227,22 @@ def members(project: Path, run_dir: Path | None = None,
     played_names = {m.name.lower() for m in plays}
     runs = {x.parent.name.lower() for x in project.glob("*/1_edit.xml")} | ({Path(run_dir).name.lower()}
                                                                              if run_dir else set())
+    try:
+        rec = _project_data(project).get("enhance")
+        enhanced = isinstance(rec, dict) and rec.get("state") == "used" and any(
+            "enhanced" in n for n in played_names)
+    except Exception:  # noqa: BLE001
+        enhanced = False
     seen: dict = {}
     for f in files:
         k = _key(f)
         rel = f.relative_to(project).as_posix()
         if k is not None and k in seen:
             left.append((f, f"the same file as {seen[k]} (a hard link): copy that one here if you need it"))
+            continue
+        if leave_unplayed and enhanced and _normal_picture(f, played_names):
+            left.append((f, "the normal picture: the edit plays the enhanced one (it stays in the project folder "
+                            "while it is there)"))
             continue
         if leave_unplayed and _unplayed_video(f, rel, played_names, runs):
             left.append((f, "a video the edit does not play (the downloaded RAW, its conversion or an older piece): "
@@ -288,6 +310,14 @@ def needs_zip(project: Path, run_dir: Path, leave_unplayed: bool = True) -> bool
         return True
     t = z.stat().st_mtime
     put, _left = members(project, run_dir, leave_unplayed)
+    try:                                         # 7 Nov: a file in the zip that should not be there any more (the
+        want = {a for _f, a in put}               #   normal RAW, put in a moment before it left the folder)
+        with zipfile.ZipFile(z) as zf:
+            had = [i for i in zf.infolist() if not i.filename.endswith("/" + HOW_TO) and not i.is_dir()]
+        if any(i.filename not in want and i.file_size > BIG_BYTES for i in had):
+            return True
+    except (OSError, zipfile.BadZipFile):
+        return True
     for f, _a in put:
         if f.name.lower() in NO_TRIGGER and f.parent == Path(project):
             continue
