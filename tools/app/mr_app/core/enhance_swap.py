@@ -36,6 +36,8 @@ NORMAL_XML = "1_edit_normal.xml"
 CHECK_MIN = 0.55                    # the mapped frame's correlation with the normal RAW's (gray, 160 px) at least
 CHECK_MARGIN = 0.02                 # ... and not worse than half a second before / after by more than this
 MATCH_ENV = "MOVIERECAPS_MATCH_NORMAL"
+MAX_REDOS = 3                       # 7 Nov: a video's piece goes to Topaz again at most this often (a failure, clips
+                                    #   left on the normal RAW) -- your call: no normal RAW in the timeline
 
 
 def match_normal(settings=None) -> bool:
@@ -169,8 +171,10 @@ def outside(project) -> dict:
     p = PJ.load(project)
     rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
     info = rec.get("piece") if isinstance(rec.get("piece"), dict) else {}
-    if rec.get("state") not in ("sent", "used") or "start_frame" not in info or not info.get("fps"):
+    if rec.get("state") not in ("sent", "used", "failed", "skipped", "late"):
         return {}
+    if rec.get("state") in ("failed", "skipped", "late") or "start_frame" not in info or not info.get("fps"):
+        info = {}                                        # no piece with Topaz: every clip needs one
     ed = (p.data.get("steps") or {}).get("edit") or {}
     if ed.get("state") != PJ.DONE:
         return {}
@@ -181,8 +185,11 @@ def outside(project) -> dict:
         root = ET.parse(str(src)).getroot()
     except (OSError, ET.ParseError):
         return {}
-    raw_fps = Fraction(str(info["fps"]))
-    start, n = int(info["start_frame"]), int(info.get("frames") or 0)
+    raw_def = next((f for f in root.iter("file") if f.get("id") == "file-raw" and f.find("rate") is not None), None)
+    raw_fps = Fraction(str(info["fps"])) if info else (_rate(raw_def.find("rate")) if raw_def is not None else None)
+    if raw_fps is None:
+        return {}
+    start, n = (int(info["start_frame"]), int(info.get("frames") or 0)) if info else (None, 0)
     groups = _groups(run)
     need = []
     for c in _v1(root):
@@ -195,7 +202,7 @@ def outside(project) -> dict:
         ma, mb = to_movie(a * k, groups), to_movie(b * k, groups)
         if ma is None or mb is None:
             continue
-        if ma < start or mb > start + n:
+        if start is None or ma < start or mb > start + n:
             need.append((int(math.floor(ma)), int(math.ceil(mb))))
     return {"need": need, "run": run, "media": _media(root, "file-raw"), "groups": groups, "fps": raw_fps,
             "start": start, "frames": n, "rec": rec}
@@ -215,9 +222,18 @@ def cover_all(project, say=None) -> dict:
         media = o["media"]
         if media is None or not Path(media).is_file():
             return {"ok": False, "why": "the RAW the edit plays is not here to cut a new piece from"}
+        rec = o["rec"]
+        if int(rec.get("redos") or 0) >= MAX_REDOS:
+            return {"ok": False, "why": f"Topaz was tried {MAX_REDOS} times for this video"}
+        if rec.get("state") == "skipped":               # never sent: only when this computer sends to Topaz
+            from . import enhance as E0
+            from . import settings as S0
+            if not E0.sends(S0.load()):
+                return {"ok": False, "why": "sending to Topaz is off in Settings"}
         fps, groups = o["fps"], o["groups"]
-        lo = min([o["start"]] + [a for a, _b in o["need"]])
-        hi = max([o["start"] + o["frames"]] + [b for _a, b in o["need"]])
+        old_span = [] if o["start"] is None else [(o["start"], o["start"] + o["frames"])]
+        lo = min([a for a, _b in old_span + o["need"]])
+        hi = max([b for _a, b in old_span + o["need"]])
         off = 0                                          # movie frames -> the frames of the file the edit plays
         if groups:
             if len(groups) > 1:
@@ -231,7 +247,6 @@ def cover_all(project, say=None) -> dict:
             lo, hi = max(lo, int(g["k0"])), min(hi, int(g["k1"]))
         a_s = max(0.0, float(Fraction(lo - off) / fps) - 1.0)
         b_s = float(Fraction(hi - off) / fps) + 1.0
-        rec = o["rec"]
         p = PJ.load(project)
         old = str(rec.get("name") or E.safe_name(Path(p.folder).name))
         name = E.safe_name(Path(p.folder).name) + "_all"
@@ -250,8 +265,8 @@ def cover_all(project, say=None) -> dict:
             E.clear(folder, old)                         # the old piece: nobody enhances it -- it leaves the line
         p.update(enhance={"name": name, "folder": str(folder), "state": "sent", "sent": time.time(),
                           "where": info.get("where"), "piece": info, "swapped": None, "swap": None, "used": None,
-                          "text": None, "file": None,
-                          "redo": f"{len(o['need'])} clip(s) were outside the first piece: all of it again"})
+                          "text": None, "file": None, "why": None, "redos": int(rec.get("redos") or 0) + 1,
+                          "redo": f"{len(o['need'])} clip(s) were not enhanced: a piece with all of them again"})
         return {"ok": True, "why": "", "clips": len(o["need"]), "where": info.get("where")}
     except Exception as e:  # noqa: BLE001 - the edit stays as it is (the clips outside keep the normal RAW)
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}

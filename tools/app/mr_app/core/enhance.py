@@ -720,8 +720,20 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         return {}
     folder, name = rec["folder"], rec["name"]
     b = status(folder, name, now)
-    if state == "late":
-        return {"state": "late_ready"} if b.state == "enhanced" else {}
+    if state == "late":                                  # 7 Nov (your call: everything enhanced): a late piece is
+        if b.state != "enhanced":                        #   used by itself when it comes
+            return {}
+        r = use_late(p.folder)
+        if not r.get("ok"):
+            return {"state": "failed", "why": r.get("why")}
+        from . import enhance_swap as ES
+        steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}
+        if ES.match_normal() and (steps.get("edit") or {}).get("state") == PJ.DONE:
+            sw = ES.swap_in(p.folder)
+            if sw.get("ok") and sw.get("kept"):
+                ES.cover_all(p.folder)
+            return {"state": "used", "text": sw.get("text") or r.get("text"), "swapped": bool(sw.get("ok"))}
+        return {"state": "used", "text": r.get("text")}
     if b.state == "enhanced":
         r = take_back(folder, name, p.folder, (rec.get("piece") or None))
         if r["ok"]:
@@ -732,6 +744,10 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
             steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}         # RAW): it plays the picture now
             if ES.match_normal() and (steps.get("edit") or {}).get("state") == PJ.DONE:
                 sw = ES.swap_in(p.folder)
+                if sw.get("ok") and sw.get("kept"):     # 7 Nov: clips left on the normal RAW -> Topaz again
+                    if ES.cover_all(p.folder).get("clips"):
+                        return {"state": "progress", "share": 0.0,
+                                "text": f"{sw.get('kept')} clip(s) not enhanced yet: a new piece went to Topaz"}
                 if sw.get("ok"):
                     return {"state": "used", "text": sw.get("text") or text, "swapped": True}
                 ES.zip_when_done(p.folder)              # (not swapped: the zip with the normal RAW's picture)
@@ -740,14 +756,12 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         why = f"the enhanced piece is not right ({r['why']}) -- the normal RAW is used"
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
-        _zip_now(p.folder)
-        return {"state": "failed", "why": why}
+        return _again(p.folder, why)
     if b.state in ("failed", "gone"):
         why = b.text if b.state == "gone" else f"the laptop could not enhance it: {b.text}"
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
-        _zip_now(p.folder)
-        return {"state": "failed", "why": why}
+        return _again(p.folder, why)
     waited = now - float(rec.get("sent") or now)
     if waited > timeout_s and not (b.state == "enhancing" and waited < MAX_WAIT_S) and \
             not (b.state != "enhancing" and waited < ALIVE_WAIT_S and worker_alive(folder, now)):
@@ -757,6 +771,20 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         return {"state": "late", "why": why}
     return {"state": "progress", "share": b.share, "text": b.text + (" · over 1 hour, still working"
                                                                        if waited > timeout_s else "")}
+
+
+def _again(project, why: str) -> dict:
+    """7 Nov (your call: no normal RAW in the timeline): Topaz failed -- the piece goes again (enhance_swap.cover_all,
+    at most MAX_REDOS times); only then the normal RAW stays and the zip is made."""
+    try:
+        from . import enhance_swap as ES
+        r = ES.cover_all(project)
+        if r.get("ok") and r.get("clips"):
+            return {"state": "progress", "share": 0.0, "text": f"Topaz failed ({why}) -- sent again"}
+    except Exception:  # noqa: BLE001
+        pass
+    _zip_now(project)
+    return {"state": "failed", "why": why}
 
 
 def _zip_now(project) -> None:

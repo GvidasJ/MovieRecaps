@@ -66,3 +66,26 @@ def test_a_short_raw_goes_to_topaz_whole(tmp_path):
     raw = _movie(tmp_path / "raw.mp4", 40)
     info = E.make_piece(None, raw, "short", tmp_path / "Enhance", project=tmp_path)
     assert info["start_frame"] == 0 and abs(info["duration"] - 40.0) < 0.2
+
+
+def test_a_failed_topaz_sends_all_the_clips_again(tmp_path):
+    p = _project(tmp_path, [(120, 150), (330, 400)])
+    _movie(p.folder / "edit" / "extras" / "media" / "raw.mp4")
+    enh = tmp_path / "Enhance"
+    _sent(p, enh)
+    p.update(enhance={"state": "failed", "why": "Topaz stopped"})
+    assert ES.outside(p.folder)["need"] == [(120, 150), (330, 400)]           # no piece: every clip
+    r = ES.cover_all(p.folder)
+    assert r["ok"] and r["clips"] == 2, r
+    rec = PJ.load(p.folder).data["enhance"]
+    assert rec["state"] == "sent" and rec["redos"] == 1 and rec["why"] is None
+    assert rec["piece"]["start_frame"] <= 120 and rec["piece"]["start_frame"] + rec["piece"]["frames"] >= 400
+
+
+def test_topaz_is_tried_at_most_three_times(tmp_path):
+    p = _project(tmp_path, [(330, 400)])
+    _movie(p.folder / "edit" / "extras" / "media" / "raw.mp4")
+    _sent(p, tmp_path / "Enhance")
+    p.update(enhance={"redos": ES.MAX_REDOS})
+    r = ES.cover_all(p.folder)
+    assert not r["ok"] and "3 times" in r["why"]

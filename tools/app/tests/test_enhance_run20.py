@@ -166,7 +166,8 @@ def test_the_progress_line_and_the_pcs_view_while_the_laptop_works(tmp_path, pai
 # the laptop does not answer / answers late / fails
 # ---------------------------------------------------------------------------------------------------------------------
 
-def test_no_answer_in_an_hour_then_a_late_piece_is_used_only_when_you_say(tmp_path, pair, fake_topaz):
+def test_no_answer_in_an_hour_then_a_late_piece_is_used_by_itself(tmp_path, pair, fake_topaz):
+    """7 Nov (your call: everything enhanced): a piece that comes late is used when it comes, not only when you say."""
     share = tmp_path / "Enhance"
     p = _project(tmp_path / "projects", pair)
     _send(p, share, pair)
@@ -177,10 +178,8 @@ def test_no_answer_in_an_hour_then_a_late_piece_is_used_only_when_you_say(tmp_pa
     assert E.edit_raw(P.load(p.folder).data, p.folder) is None          # the normal RAW
     assert E.watch(p.folder) == {}                                       # nothing came yet
     assert E.Worker(share).once().state == "done"                        # ... then the laptop's piece comes, late
-    assert E.watch(p.folder) == {"state": "late_ready"}                  # not used by itself
-    assert E.edit_raw(P.load(p.folder).data, p.folder) is None
-    u = E.use_late(p.folder)                                             # "Use the enhanced piece"
-    assert u["ok"] and "came late" in u["text"]
+    r = E.watch(p.folder)
+    assert r["state"] == "used" and "came late" in r["text"]             # used by itself
     assert E.edit_raw(P.load(p.folder).data, p.folder) is not None
     assert not any(f.exists() for f in E.names(share, p.folder.name).all())
 
@@ -430,7 +429,7 @@ def test_the_row_waits_for_the_laptop_then_the_edit_runs_on_the_enhanced_piece(q
     assert "with the laptop" in page.now_text(it)
     E.Worker(share).once()                                                   # the laptop
     assert _wait(qapp, lambda: bool(mc.jobs) and bool(starts), page)
-    assert it.steps["enhance"].state == D.S_DONE and "enhanced with Topaz" in it.steps["enhance"].text   # 7 Nov
+    assert it.steps["enhance"].state == D.S_DONE and "enhanced on the laptop" in it.steps["enhance"].text
     assert mc.jobs[-1].raw == p.folder / "enhance" / "raw_enhanced.mp4" and it.gate == ""
 
 
