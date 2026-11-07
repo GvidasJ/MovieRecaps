@@ -43,6 +43,7 @@ FIT_BYTES = 950 * 1000 ** 2          # 7 Nov (your call: one zip you drop into D
                                      #   lighter copy when the whole would be more; the project keeps the full one
 FIT_MARGIN = 8 * 1000 ** 2          # room kept for the zip's own headers and the small files' growth
 FIT_ENV = "MOVIERECAPS_ZIP_FULL"     # "1": no lighter copy (the zip as big as the folder)
+FIT_VERSION = 2                      # a zip over the limit made by an older try is made again once
 INFO = ".zipinfo.json"               # in the zip: which file is a lighter copy (and of how many bytes)
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 HOW_TO = "HOW TO OPEN.txt"
@@ -327,7 +328,8 @@ def needs_zip(project: Path, run_dir: Path, leave_unplayed: bool = True) -> bool
         return True
     t = z.stat().st_mtime
     try:                                         # 7 Nov: a zip over 1 GB made before the lighter copy existed
-        if z.stat().st_size > FIT_BYTES and os.environ.get(FIT_ENV) != "1" and not zip_info(z).get("tried"):
+        if z.stat().st_size > FIT_BYTES and os.environ.get(FIT_ENV) != "1" and \
+                int(zip_info(z).get("v") or (1 if zip_info(z).get("tried") else 0)) < FIT_VERSION:
             return True
     except OSError:
         pass
@@ -431,14 +433,15 @@ def _encode(src: Path, dst: Path, vbps: int) -> bool:
 
 
 def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tuple[list[tuple[Path, str]], dict]:
-    """7 Nov: the files of a zip over ``limit`` (FIT_BYTES): the biggest video goes in as a lighter copy made in
-    ``work`` (``<work>.light.tmp``: deleted after the zip) -- the same picture, length and sound, its bitrate as
-    much as fits. Returns (the files to put in, the note for the zip: {} when nothing had to be done)."""
+    """7 Nov: the files of a zip over ``limit`` (FIT_BYTES): the big videos go in as lighter copies made next to
+    ``work`` (``<work>.light<k>.tmp``: deleted after the zip) -- the same picture, length and sound, at one bitrate
+    for all of them (a video already lighter than that stays as it is), as high as fits. Returns (the files to put
+    in, the note for the zip: {} when nothing had to be done)."""
     limit = FIT_BYTES if limit is None else limit
     if os.environ.get(FIT_ENV) == "1":
         return put, {}
     sizes = []
-    for f, a in put:
+    for f, _a in put:
         try:
             sizes.append(f.stat().st_size)
         except OSError:
@@ -446,39 +449,62 @@ def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tu
     total = sum(sizes)
     if total <= limit:
         return put, {}
-    vids = [(sz, i) for i, (sz, (f, _a)) in enumerate(zip(sizes, put)) if f.suffix.lower() in VIDEO_EXT]
+    vids = []
+    for i, (f, _a) in enumerate(put):
+        if f.suffix.lower() in VIDEO_EXT and sizes[i] > 5 * 1000 ** 2:
+            pr = _probe(f)
+            if pr:
+                vids.append((i, sizes[i], pr))
     if not vids:
         return put, {"tried": True, "why": "it has no video to make lighter"}
-    big, i = max(vids)
-    src, arc = put[i]
-    room = limit - (total - big) - FIT_MARGIN
-    if room < big // 20:
-        return put, {"tried": True, "why": f"the files besides {src.name} are already {(total - big) / 1e9:.2f} GB"}
-    pr = _probe(src)
-    if not pr:
-        return put, {"tried": True, "why": f"{src.name} could not be read"}
-    from_bps = big * 8 / pr["dur"]
-    out = Path(str(work) + ".light.tmp")
-    vbps = (room * 8 / pr["dur"] - pr["abps"]) * 0.95
-    for _try in range(2):
-        if vbps < 2e6:
-            return put, {"tried": True, "why": f"{src.name} is too long to fit at a good quality"}
-        if not _encode(src, out, int(vbps)):
-            return put, {"tried": True, "why": f"{src.name} could not be encoded again"}
-        got = out.stat().st_size
-        pr2 = _probe(out)
-        if not pr2 or abs(pr2["dur"] - pr["dur"]) > 0.1:
+    fixed = total - sum(sz for _i, sz, _p in vids)
+    room = limit - fixed - FIT_MARGIN
+    if room < sum(sz for _i, sz, _p in vids) // 20:
+        return put, {"tried": True, "why": f"the files besides the videos are already {fixed / 1e9:.2f} GB"}
+
+    def used(rate: float) -> float:                     # bytes at one bitrate (a lighter video keeps its own)
+        return sum(min(sz, (rate + p["abps"]) * p["dur"] / 8) for _i, sz, p in vids)
+    lo_r, hi_r = 0.0, max(sz * 8 / p["dur"] for _i, sz, p in vids)
+    for _k in range(40):
+        mid = (lo_r + hi_r) / 2
+        lo_r, hi_r = (mid, hi_r) if used(mid) <= room else (lo_r, mid)
+    rate = lo_r * 0.95
+    if rate < 2e6:
+        return put, {"tried": True, "why": "the videos are too long to fit at a good quality"}
+    new, files, outs = list(put), {}, []
+    for k, (i, sz, pr) in enumerate(sorted(vids, key=lambda v: -v[1])):
+        if sz <= (rate + pr["abps"]) * pr["dur"] / 8:
+            continue
+        src, arc = put[i]
+        out = Path(f"{work}.light{k}.tmp")
+        vbps = rate
+        ok = False
+        for _try in range(2):
+            if not _encode(src, out, int(vbps)):
+                break
+            pr2 = _probe(out)
+            if not pr2 or abs(pr2["dur"] - pr["dur"]) > 0.1:
+                break
+            got = out.stat().st_size
+            share = sz / sum(s for _j, s, _p in vids)
+            if got <= (rate + pr["abps"]) * pr["dur"] / 8 * 1.03 or got <= room * share:
+                ok = True
+                break
+            vbps *= ((rate + pr["abps"]) * pr["dur"] / 8) / got * 0.97
+        if not ok:
             out.unlink(missing_ok=True)
-            return put, {"tried": True, "why": "the lighter copy was not as long as the picture"}
-        if got <= room:
-            new = list(put)
-            new[i] = (out, arc)
-            return new, {"tried": True, "files": {arc: {
-                "bytes": got, "from_bytes": big, "mbps": round(got * 8 / pr["dur"] / 1e6),
-                "from_mbps": round(from_bps / 1e6)}}}
-        vbps *= room / got * 0.97                       # a little over: once more, lower
-    out.unlink(missing_ok=True)
-    return put, {"tried": True, "why": f"{src.name} did not fit"}
+            for o in outs:
+                o.unlink(missing_ok=True)
+            return put, {"tried": True, "why": f"{src.name} could not be made lighter"}
+        outs.append(out)
+        new[i] = (out, arc)
+        files[arc] = {"bytes": out.stat().st_size, "from_bytes": sz, "mbps": round(out.stat().st_size * 8 / pr["dur"] / 1e6),
+                      "from_mbps": round(sz * 8 / pr["dur"] / 1e6)}
+    if sum(f.stat().st_size for f, _a in new) > limit:
+        for o in outs:
+            o.unlink(missing_ok=True)
+        return put, {"tried": True, "why": "the lighter copies did not fit"}
+    return new, {"tried": True, "files": files}
 
 
 _MAKING: set = set()
@@ -510,14 +536,14 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
             return None
         tmp = z.with_name(z.name + ".tmp")
         put, light = fit(put, z)
-        lighter = [f for f, _a in put if f.name.endswith(".light.tmp")]
+        lighter = [f for f, _a in put if re.search(r"\.light\d*\.tmp$", f.name)]
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as zf:
             for f, arc in put:
                 store = f.suffix.lower() in STORE or f in lighter
                 zf.write(f, arc, compress_type=zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
             zf.writestr(f"{plain_name(project)}/{HOW_TO}", how_to(project, put, left, run_dir, light))
             if light:
-                zf.writestr(f"{plain_name(project)}/{INFO}", json.dumps(light, indent=1))
+                zf.writestr(f"{plain_name(project)}/{INFO}", json.dumps(dict(light, v=FIT_VERSION), indent=1))
             zf.comment = MARK
         for f in lighter:
             f.unlink(missing_ok=True)
@@ -542,7 +568,8 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
         try:
             if tmp is not None:
                 tmp.unlink()
-                Path(str(tmp)[:-len(".tmp")] + ".light.tmp").unlink(missing_ok=True)
+                for x in Path(tmp).parent.glob(Path(str(tmp)[:-len(".tmp")]).name + ".light*.tmp"):
+                    x.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
         return None
