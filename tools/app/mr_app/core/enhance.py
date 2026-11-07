@@ -39,6 +39,8 @@ from typing import Any, Callable
 from . import machine as M
 
 MAX_PIECE_S = 80.0                  # the piece when the competitor's length is unknown: at most 1:20
+WHOLE_RAW_S = 180.0                 # 7 Nov (your call: everything must be enhanced): a RAW this short goes to Topaz
+                                    #   whole -- no guess of where the scene is, no clip left out
 EXTRA_S = 20.0                      # 29 Oct, your call: the piece = the competitor's length + 20 s (10 s each side):
                                     # a 10 s competitor -> a 30 s piece, a 20 s one -> 40 s
 TIMEOUT_S = 3600.0                  # nothing back from the laptop within this: the normal RAW
@@ -318,7 +320,7 @@ def _group(times: list[float], span: float) -> list[float]:
 def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str, out_dir: str | os.PathLike,
                project: str | os.PathLike | None = None, work: str | os.PathLike | None = None,
                progress: Callable[[float, str], None] | None = None, max_s: float | None = None,
-               topaz_on: str = "") -> dict:
+               topaz_on: str = "", span: tuple[float, float] | None = None) -> dict:
     """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json. Returns its
     info (the json's content); raises EnhanceError with the reason in plain words -- then the edit uses the normal
     RAW."""
@@ -329,25 +331,36 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     nm = names(out_dir, name)
     work = Path(work) if work else Path(project or raw.parent) / PROJECT_SUB
     t0 = time.perf_counter()
-    say(0.05, "finding the scene in the RAW (the sound)")
-    places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))
-    say(0.4, "reading the RAW's keyframes")
-    m = X.movie_facts(str(raw))
-    if max(places) + WIN_S - min(places) > MAX_PIECE_S - 10.0:   # 30 Oct: places far apart (a montage, look-alikes)
-        places = _group(places, MAX_PIECE_S - 10.0 - WIN_S)      # -> the biggest group that fits in 1:20
-    if max_s is None:
-        max_s = piece_length(competitor)
-        span = max(places) + WIN_S - min(places)          # 30 Oct: the competitor skips parts of the scene (Key &
-        if span + 10.0 > max_s:                           # Peele: places 45 s apart in a 23 s video) -> a longer
-            max_s = min(MAX_PIECE_S, span + 10.0)         # piece, 5 s each side, at most 1:20
+    win = WIN_S
+    if span is not None:                                 # 7 Nov: the frames the finished edit plays (cover_all)
+        say(0.4, "reading the RAW's keyframes")
+        m = X.movie_facts(str(raw))
+        places = [max(0.0, float(span[0]))]
+        win = max(1.0, min(float(m.duration), float(span[1])) - places[0])
+        max_s = win + 2.0
+    else:
+        say(0.4, "reading the RAW's keyframes")
+        m = X.movie_facts(str(raw))
+        if float(m.duration) <= WHOLE_RAW_S:             # 7 Nov: a short RAW goes whole (no scene to guess)
+            places, win, max_s = [0.0], float(m.duration), float(m.duration) + 1.0
+        else:
+            say(0.05, "finding the scene in the RAW (the sound)")
+            places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))
+            if max(places) + WIN_S - min(places) > MAX_PIECE_S - 10.0:   # 30 Oct: places far apart (a montage,
+                places = _group(places, MAX_PIECE_S - 10.0 - WIN_S)      #   look-alikes) -> the biggest group
+            if max_s is None:
+                max_s = piece_length(competitor)
+                spread = max(places) + WIN_S - min(places)    # 30 Oct: the competitor skips parts of the scene (Key
+                if spread + 10.0 > max_s:                     # & Peele: places 45 s apart in a 23 s video) -> a
+                    max_s = min(MAX_PIECE_S, spread + 10.0)   # longer piece, 5 s each side, at most 1:20
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
-        return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say, topaz_on)
+        return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say, topaz_on, win)
     try:
-        p = plan(m, places, WIN_S, max_s)
+        p = plan(m, places, win, max_s)
     except EnhanceError as e:                            # 30 Oct: keyframes too far apart for a lossless cut -> an
         if "keyframe" not in str(e):                     # encoded piece of the same window
             raise
-        return _encoded_piece(raw, places, max_s, nm, name, project, str(e), t0, say, topaz_on)
+        return _encoded_piece(raw, places, max_s, nm, name, project, str(e), t0, say, topaz_on, win)
     n_plan = p.k1 - p.k0
     work.mkdir(parents=True, exist_ok=True)
     mov = work / "piece.mov"
@@ -373,7 +386,7 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
         nm.piece.unlink(missing_ok=True)                # an encoded piece of the same window instead
         mov.unlink(missing_ok=True)
         return _encoded_piece(raw, places, max_s, nm, name, project, f"the lossless cut failed: {e}", t0, say,
-                              topaz_on)
+                              topaz_on, win)
     finally:
         mov.unlink(missing_ok=True)
     fps = m.rate
@@ -381,7 +394,7 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
     info = {"project": safe_name(name), "project_folder": str(project or ""), "computer": M.host(),
             "raw": os.path.abspath(str(raw)), "raw_name": raw.name, "start_frame": int(p.k0), "start_s": round(a, 6),
             "frames": int(n), "fps": str(fps), "duration": round(n / float(fps), 6), "width": int(m.width),
-            "height": int(m.height), "scene": [round(min(places), 3), round(max(places) + WIN_S, 3)],
+            "height": int(m.height), "scene": [round(min(places), 3), round(max(places) + win, 3)],
             "places": [round(x, 3) for x in places], "raw_duration": round(float(m.duration), 3),
             "bytes": int(nm.piece.stat().st_size), "check": chk.get("rows"), "made": time.time(),
             "seconds": round(time.perf_counter() - t0, 1),
@@ -393,7 +406,8 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
 
 
 def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", name: str, project: Any,
-                   why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str = "") -> dict:
+                   why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str = "",
+                   win: float | None = None) -> dict:
     """29 Oct: the piece when the RAW cannot be cut losslessly (uneven frame timing, ...): the same time window
     encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words)."""
     from match_cuts.common import ffmpeg_bin
@@ -404,7 +418,7 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
     if not fps or not dur:
         raise EnhanceError(f"the RAW cannot be cut losslessly ({why_not_copy}) and its frame rate or length can't "
                            "be read")
-    s0, s1 = max(0.0, min(places)), min(dur, max(places) + WIN_S)
+    s0, s1 = max(0.0, min(places)), min(dur, max(places) + (WIN_S if win is None else win))
     if s1 - s0 > max_s:
         raise EnhanceError(f"the scene is {_clock(s1 - s0)} long (places far apart or a montage) -- more than "
                            f"{_clock(max_s)}")

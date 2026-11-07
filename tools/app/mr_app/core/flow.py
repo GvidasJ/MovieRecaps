@@ -419,6 +419,11 @@ def record_edit(p: P.Project, res: dict) -> None:
             join_clips.join(Path(res["run_dir"]) / "1_edit.xml")
         except Exception:  # noqa: BLE001
             pass
+        try:                                     # 7 Nov (your call: everything in enhanced): clips outside the
+            from . import enhance_swap as ES     #   piece Topaz has -> a new piece with all of them goes instead
+            ES.cover_all(p.folder)
+        except Exception:  # noqa: BLE001
+            pass
         try:                                     # 7 Nov: the enhanced piece is back already -> the edit, matched on
             from . import enhance_swap as ES     #   the normal RAW, plays its picture now
             if ES.match_normal() and (P.load(p.folder).data.get("enhance") or {}).get("state") == "used":

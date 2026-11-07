@@ -27,6 +27,7 @@ import json
 import math
 import os
 import shutil
+import time
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
@@ -157,6 +158,103 @@ def _media(root, fid: str) -> Path | None:
             p = _path_of_url((f.findtext("pathurl") or "").strip())
             return reach(p) if p is not None else None
     return None
+
+
+def outside(project) -> dict:
+    """7 Nov (your call: "everything must be in enhanced"): the V1 clips of the finished edit (as matched: on the
+    normal RAW) whose frames are not in the piece sent to Topaz. {"need": [(movie frame a, b) ...], "run", "media",
+    "groups", "fps", "start", "frames"} -- {} when there is nothing to look at."""
+    from . import projects as PJ
+    from .share_zip import run_dir_of
+    p = PJ.load(project)
+    rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+    info = rec.get("piece") if isinstance(rec.get("piece"), dict) else {}
+    if rec.get("state") not in ("sent", "used") or "start_frame" not in info or not info.get("fps"):
+        return {}
+    ed = (p.data.get("steps") or {}).get("edit") or {}
+    if ed.get("state") != PJ.DONE:
+        return {}
+    run = run_dir_of(Path(p.folder), ed)
+    normal = run / "extras" / NORMAL_XML
+    src = normal if normal.is_file() else run / "1_edit.xml"
+    try:
+        root = ET.parse(str(src)).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    raw_fps = Fraction(str(info["fps"]))
+    start, n = int(info["start_frame"]), int(info.get("frames") or 0)
+    groups = _groups(run)
+    need = []
+    for c in _v1(root):
+        rate = _rate(c.find("rate")) or raw_fps
+        k = _speed(c) * raw_fps / rate
+        try:
+            a, b = int(c.findtext("in")), int(c.findtext("out"))
+        except (TypeError, ValueError):
+            continue
+        ma, mb = to_movie(a * k, groups), to_movie(b * k, groups)
+        if ma is None or mb is None:
+            continue
+        if ma < start or mb > start + n:
+            need.append((int(math.floor(ma)), int(math.ceil(mb))))
+    return {"need": need, "run": run, "media": _media(root, "file-raw"), "groups": groups, "fps": raw_fps,
+            "start": start, "frames": n, "rec": rec}
+
+
+def cover_all(project, say=None) -> dict:
+    """7 Nov: when clips of the finished edit lie outside the piece Topaz has, a new piece goes to Topaz instead --
+    from the first frame to the last one the edit plays (the old piece with them, 1 s more each side), cut from the
+    file the edit plays; the old piece leaves the line when nobody enhances it yet. The swap then puts the enhanced
+    picture on every clip. {ok, why, clips} -- never raises."""
+    from . import enhance as E
+    from . import projects as PJ
+    try:
+        o = outside(project)
+        if not o or not o["need"]:
+            return {"ok": True, "why": "every clip is in the enhanced piece" if o else "nothing to look at", "clips": 0}
+        media = o["media"]
+        if media is None or not Path(media).is_file():
+            return {"ok": False, "why": "the RAW the edit plays is not here to cut a new piece from"}
+        fps, groups = o["fps"], o["groups"]
+        lo = min([o["start"]] + [a for a, _b in o["need"]])
+        hi = max([o["start"] + o["frames"]] + [b for _a, b in o["need"]])
+        off = 0                                          # movie frames -> the frames of the file the edit plays
+        if groups:
+            if len(groups) > 1:
+                g = [g for g in groups if int(g["k0"]) <= lo and hi <= int(g["k1"])]
+                if not g:
+                    return {"ok": False, "why": "the clips are in several pieces of the RAW"}
+                g = g[0]
+            else:
+                g = groups[0]
+            off = int(g["k0"]) - int(g["offset"])
+            lo, hi = max(lo, int(g["k0"])), min(hi, int(g["k1"]))
+        a_s = max(0.0, float(Fraction(lo - off) / fps) - 1.0)
+        b_s = float(Fraction(hi - off) / fps) + 1.0
+        rec = o["rec"]
+        p = PJ.load(project)
+        old = str(rec.get("name") or E.safe_name(Path(p.folder).name))
+        name = E.safe_name(Path(p.folder).name) + "_all"
+        if old == name:
+            name = E.safe_name(Path(p.folder).name) + "_all2"
+        folder = rec.get("folder") or str(E.share_dir())
+        info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
+                            topaz_on=str((rec.get("piece") or {}).get("topaz_on") or ""),
+                            progress=(lambda s, t: say(s, t)) if say else None)
+        if off:                                          # the piece's start in the movie's frames (swap_in maps so)
+            info["start_frame"] = int(info["start_frame"]) + off
+            info["start_s"] = round(float(Fraction(int(info["start_frame"])) / fps), 6)
+            E._write_json(E.names(folder, name).info, info)                       # noqa: SLF001
+        lk = E.read_lock(E.names(folder, old).lock)
+        if lk is None or E.lock_stale(E.names(folder, old).lock):
+            E.clear(folder, old)                         # the old piece: nobody enhances it -- it leaves the line
+        p.update(enhance={"name": name, "folder": str(folder), "state": "sent", "sent": time.time(),
+                          "where": info.get("where"), "piece": info, "swapped": None, "swap": None, "used": None,
+                          "text": None, "file": None,
+                          "redo": f"{len(o['need'])} clip(s) were outside the first piece: all of it again"})
+        return {"ok": True, "why": "", "clips": len(o["need"]), "where": info.get("where")}
+    except Exception as e:  # noqa: BLE001 - the edit stays as it is (the clips outside keep the normal RAW)
+        return {"ok": False, "why": f"{type(e).__name__}: {e}"}
 
 
 def swap_in(project, do_check: bool = True) -> dict:
