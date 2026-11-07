@@ -209,3 +209,15 @@ def test_the_zip_to_send_waits_for_the_topaz_picture(tmp_path, monkeypatch):
     q = _project(tmp_path / "b", [(120, 150)], state="skipped")                       # no Topaz: zipped at once
     flow.record_edit(PJ.load(q.folder), {"label": "PASS", "run_dir": str(q.folder / "edit")})
     assert made[-1] == q.folder
+
+
+def test_the_position_is_halved_too():
+    """7 Nov: Premiere reads Position in the clip's own pixels -- the 2x enhanced picture with the same numbers sat
+    twice as far off (a black band over the picture)."""
+    import xml.etree.ElementTree as ET
+    par = ET.fromstring("<parameter><parameterid>center</parameterid><value><horiz>0.0738493</horiz>"
+                        "<vert>0.162963</vert></value><keyframe><when>0</when><value><horiz>-0.2</horiz>"
+                        "<vert>0.1</vert></value></keyframe></parameter>")
+    ES._half_center(par)
+    got = [(float(v.findtext("horiz")), float(v.findtext("vert"))) for v in par.iter("value")]
+    assert got == [pytest.approx((0.0369247, 0.0814815)), pytest.approx((-0.1, 0.05))]

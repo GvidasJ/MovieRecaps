@@ -11,7 +11,8 @@ finished 1_edit.xml play it:
   enhanced time = RAW time - the piece's start (its _TOENHANCE.json: start_frame, fps) -- on the clip's own scale (its
   rate and speed: a shift that is not whole keeps that clip on the normal RAW); a RAW clip of an edit that plays only
   the scene (extras\\keep_piece.json) is first put back on the movie's frames;
-* its framing stays: the same position, its scale halved (the enhanced picture has 2x the pixels);
+* its framing stays: its position and scale halved (the enhanced picture has 2x the pixels -- Premiere reads both
+  in the clip's own pixels);
 * a clip partly outside the piece keeps the normal RAW; A1 (the sound) is not touched -- in sync, as matched;
 * checked before anything changes: three swapped clips show the normal RAW's picture at the mapped moment (gray,
   small, closer than half a second before or after) -- else nothing changes and the edit stays on the normal RAW;
@@ -276,6 +277,8 @@ def swap_in(project, do_check: bool = True) -> dict:
                     for v in par.iter("value"):
                         if v.text and v.text.strip():
                             v.text = f"{float(v.text) / 2.0:.6f}"
+                elif (par.findtext("parameterid") or "") == "center":
+                    _half_center(par)
         users = [ci for ci in root.iter("clipitem") if ci.find("file") is not None
                  and ci.find("file").get("id") == "file-raw"]
         if users and not any(ci.find("file").find("pathurl") is not None for ci in users):
@@ -321,6 +324,17 @@ def swap_in(project, do_check: bool = True) -> dict:
         except OSError:
             pass
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}
+
+
+def _half_center(par) -> None:
+    """7 Nov: Premiere reads a clip's Position (center horiz / vert) in the clip's OWN pixels -- the enhanced picture
+    has 2x the pixels, so the same numbers moved it twice as far (a black band over the picture). Halved, like the
+    scale; keyframed positions too."""
+    for v in par.iter("value"):
+        for ax in ("horiz", "vert"):
+            e = v.find(ax)
+            if e is not None and e.text and e.text.strip():
+                e.text = f"{float(e.text) / 2.0:.7f}"
 
 
 def zip_when_done(project) -> None:
