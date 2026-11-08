@@ -187,6 +187,16 @@ class SettingsDialog(QDialog):
                                "the edit) only the zip stays and the folder goes (the PC does it, never while it "
                                "makes a video)", "Dim", wrap=True), 1)
         pjbox.addLayout(zrow)
+        wrow = QHBoxLayout()                              # 8 Nov: the laptop makes its projects in the shared folder
+        wrow.addWidget(W.label("Make projects in the shared folder", "Dim"))
+        self.onshare = W.Segmented([("on", "On"), ("off", "Off")],
+                                   "on" if getattr(self.s, "work_on_share", True) else "off")
+        wrow.addWidget(self.onshare)
+        wrow.addWidget(W.label("a new video's folder is made right in \"Save projects to\" (also from the laptop, over "
+                               "the network) -- nothing is kept in this computer's downloads folder; off: made here "
+                               "first and copied there when finished (also when the PC can't be reached)",
+                               "Dim", wrap=True), 1)
+        pjbox.addLayout(wrow)
         g.addLayout(pjbox, r, 1)
         r += 1
         # run 20: the scene's piece enhanced with Topaz on the laptop (core.enhance)
@@ -463,6 +473,7 @@ class SettingsDialog(QDialog):
         s.scene_only = self.scene.value == "on"
         s.match_normal = self.match_n.value == "on"
         s.one_zip = self.onezip.value == "on"
+        s.work_on_share = self.onshare.value == "on"
         from ..core import enhance as E                   # run 20: kept as "this computer's default" (None) when
         dflt = copy.deepcopy(s)                           #   it is the default -- the default follows the machine
         dflt.enhance_send = dflt.enhance_topaz = None

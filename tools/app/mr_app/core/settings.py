@@ -60,6 +60,8 @@ class Settings:
     scene_only: bool = True            # 7 Nov: a finished project keeps only the RAW's scene +- 10 s (core.archive)
     one_zip: bool = True               # 7 Nov: an uploaded (or week-old) project becomes one zip, its folder goes
     match_normal: bool = True          # 7 Nov: the edit is matched on the normal RAW, the enhanced picture swapped in
+    work_on_share: bool = True         # 8 Nov: a new video's project is made right in "Save projects to", also over
+                                       #   the network (the laptop): nothing in this computer's downloads folder
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
 
     def to_dict(self) -> dict:
@@ -114,7 +116,7 @@ def _valid(name: str, v: Any, default: Any) -> Any:
         m = str(v).strip().lower() if isinstance(v, str) else ""
         return m if m in MACHINES else default
     if name in ("animations", "intro", "torrent_keep_sharing", "console_open", "cache_clean", "one_at_a_time",
-                "check_videos", "scene_only", "one_zip", "match_normal"):
+                "check_videos", "scene_only", "one_zip", "match_normal", "work_on_share"):
         return v if isinstance(v, bool) else default
     if name in ("enhance_send", "enhance_topaz"):
         return v if isinstance(v, bool) or v is None else default
@@ -270,10 +272,24 @@ def work_root(s: Settings | None = None) -> Path:
         return paths.projects_root()
     try:
         root = save_root(s)
+        share = getattr(s if s is not None else load(), "work_on_share", True)
         if on_this_computer(root):
             root.mkdir(parents=True, exist_ok=True)
             if os.access(root, os.W_OK):
                 return root
+        elif share and _answers(root):                   # 8 Nov (your call): the laptop makes it in the shared
+            return root                                  #   folder too -- this computer's own only when it is away
     except Exception:  # noqa: BLE001 - not there / cannot be written: this computer's own folder
         pass
     return paths.projects_root()
+
+
+def _answers(root: Path, timeout_s: float = 5.0) -> bool:
+    """The shared folder is there and can be written (a sleeping PC: no -- this computer's own folder then)."""
+    try:
+        from .publish import reachable
+        if not reachable(root, timeout_s):
+            return False
+        return os.access(root, os.W_OK)
+    except Exception:  # noqa: BLE001
+        return False

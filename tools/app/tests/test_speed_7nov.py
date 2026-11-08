@@ -54,7 +54,12 @@ def test_the_pc_makes_the_project_in_its_save_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "on_this_computer", lambda _f: True)
     assert S.work_root(s) == save and save.is_dir()                # the PC: right in D:\Shared\Projects
     monkeypatch.setattr(S, "on_this_computer", lambda _f: False)
-    assert S.work_root(s) == paths.REPO / "input" / "downloads"   # the laptop: its own folder, as before
+    assert S.work_root(s) == save                                  # 8 Nov: the laptop too, over the network
+    monkeypatch.setattr(S, "_answers", lambda _r, timeout_s=5.0: False)
+    assert S.work_root(s) == paths.REPO / "input" / "downloads"   # ... its own folder only while the PC is away
+    monkeypatch.setattr(S, "_answers", lambda _r, timeout_s=5.0: True)
+    s.work_on_share = False
+    assert S.work_root(s) == paths.REPO / "input" / "downloads"   # ... or when Settings say so
 
 
 def test_a_save_folder_that_cannot_be_made_keeps_this_computers_folder(tmp_path, monkeypatch):
