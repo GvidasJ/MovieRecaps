@@ -109,6 +109,21 @@ class Area(QWidget):
         return self.keys[self.stack.currentIndex()] if self.keys else ""
 
 
+def _swapped_after(data: dict) -> bool:
+    """8 Nov (The Worst Doctor: made on the laptop, Topaz's picture swapped in after the project had gone to the shared
+    folder -- the shared copy kept the normal one): the enhanced picture came into this copy after it was published
+    -> it goes again."""
+    from datetime import datetime
+    try:
+        e = data.get("enhance") if isinstance(data.get("enhance"), dict) else {}
+        sw, pub = e.get("swapped"), (data.get("published") or {}).get("at")
+        if not sw or not pub:
+            return False
+        return datetime.fromisoformat(str(sw)) > datetime.fromisoformat(str(pub))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class MainWindow(QMainWindow):
     def __init__(self, tools):
         super().__init__()
@@ -282,7 +297,7 @@ class MainWindow(QMainWindow):
                 edit = (p.data.get("steps") or {}).get("edit") or {}
                 made = any(p.folder.glob("edit*/1_edit.xml"))        # 30 Oct: a FAIL with its files counts too
                 if (edit.get("state") == PJ.DONE or (edit.get("state") == PJ.FAILED and made)) \
-                        and not p.data.get("published"):
+                        and (not p.data.get("published") or _swapped_after(p.data)):
                     try:
                         with BG.counted_work():
                             with self.publishing(p.folder):
