@@ -183,9 +183,10 @@ class SettingsDialog(QDialog):
         zrow.addWidget(W.label("One zip per project", "Dim"))
         self.onezip = W.Segmented([("on", "On"), ("off", "Off")], "on" if getattr(self.s, "one_zip", True) else "off")
         zrow.addWidget(self.onezip)
-        zrow.addWidget(W.label("the zip to send is next to the folders; once the Short is uploaded (or a week after "
-                               "the edit) only the zip stays and the folder goes (the PC does it, never while it "
-                               "makes a video)", "Dim", wrap=True), 1)
+        zrow.addWidget(W.label("the zip to send is next to the folders; 20 minutes after the edit is finished (with "
+                               "Topaz's picture in it) only the zip stays and the folder goes -- checked first: every "
+                               "file is in the zip (the PC does it, never while it makes a video or Premiere has it open)",
+                               "Dim", wrap=True), 1)
         pjbox.addLayout(zrow)
         wrow = QHBoxLayout()                              # 8 Nov: the laptop makes its projects in the shared folder
         wrow.addWidget(W.label("Make projects in the shared folder", "Dim"))

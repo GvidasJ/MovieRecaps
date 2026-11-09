@@ -40,7 +40,9 @@ from . import projects as P
 SCENE_MARGIN_S = 10.0              # the scene +- this (your choice, 7 Nov)
 KEEP_MIN_RAW_S = 120.0             # a shorter RAW (the piece made for Topaz) stays whole
 KEEP_SHARE = 0.95                  # the piece may be up to this share of the RAW
-ARCHIVE_AFTER_DAYS = 7             # not uploaded: the folder becomes the zip this long after the edit
+ARCHIVE_AFTER_DAYS = 20 / 1440      # 9 Nov (your call: "it only needs to leave the zip"): the folder becomes its zip
+                                    #   20 min after its edit is finished (was 7 days) -- once the zip holds everything
+RESTORED_DAYS = 2.0                 # a project you unzipped again is left as a folder this long
 INDEX = "zipped.json"              # the projects that are only a zip now (in the Save folder)
 TRASH = ".zipped_trash"            # a folder is moved here first, then deleted (a left-over is deleted next time)
 CHECK_VIDEOS = ("preview_recreation.mp4", "compare.mp4")
@@ -477,7 +479,7 @@ def tidy(root: str | os.PathLike, *, stop: Callable[[], bool] | None = None, sce
         if not isinstance(data, dict) or why_not(folder, data):
             continue
         run = Z.run_dir_of(folder, (data.get("steps") or {}).get("edit") or {})
-        if folder.name in zipped_before and _restored_lately(folder, now, days):
+        if folder.name in zipped_before and _restored_lately(folder, now, RESTORED_DAYS):
             continue                                      # you unzipped it to work on it: left alone for a while
         if not due(data, now, days):
             if Z.old_zip_path(folder).is_file() and not Z.zip_path(folder).is_file():

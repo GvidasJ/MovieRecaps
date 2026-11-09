@@ -116,9 +116,10 @@ def test_an_uploaded_project_becomes_its_zip_and_its_upload_still_counts(root):
     assert A.zip_of_gone(folder) == z
 
 
-def test_not_uploaded_it_waits_a_week_then_becomes_its_zip(root):
-    young = _project(root, "young", uploaded=False, days_old=2)
-    old = _project(root, "old", uploaded=False, days_old=8)
+def test_not_uploaded_it_waits_20_minutes_then_becomes_its_zip(root):
+    """9 Nov (your call: only the zip stays): 20 minutes after the edit, not a week."""
+    young = _project(root, "young", uploaded=False, days_old=10 / 1440)
+    old = _project(root, "old", uploaded=False, days_old=30 / 1440)
     A.tidy(root, now=NOW)
     assert young.folder.is_dir() and (root / f"{Z.plain_name(young.folder)}.zip").is_file()   # its zip to send
     assert (young.folder / "edit" / "extras" / "compare.mp4").is_file()                        # nothing changed
@@ -127,7 +128,7 @@ def test_not_uploaded_it_waits_a_week_then_becomes_its_zip(root):
 
 
 def test_a_project_made_before_keeps_its_zip_inside_until_it_is_finished(root):
-    p = _project(root, "before", uploaded=False, days_old=1)
+    p = _project(root, "before", uploaded=False, days_old=10 / 1440)
     old = Z.old_zip_path(p.folder)
     with zipfile.ZipFile(old, "w") as zf:
         zf.writestr("x.txt", "x")
@@ -313,7 +314,7 @@ def test_a_real_movie_keeps_only_its_scene_then_becomes_one_zip(tmp_path, monkey
 
 
 def test_a_zip_made_earlier_is_made_again_when_project_json_changed(root):
-    p = _project(root, "earlier", uploaded=False, days_old=1)
+    p = _project(root, "earlier", uploaded=False, days_old=10 / 1440)
     A.tidy(root, now=NOW)                                 # in the works: its zip to send
     z = Z.zip_path(p.folder)
     assert z.is_file() and p.folder.is_dir()
