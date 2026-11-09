@@ -25,6 +25,7 @@ so the command line (steps.py) and the board do exactly the same."""
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import threading
 import time
@@ -1222,6 +1223,16 @@ class ShutdownWarning(QDialog):
 # the page
 # ---------------------------------------------------------------------------------------------------------------------
 
+def _with_topaz(folder) -> bool:
+    """9 Nov: the project's piece is with Topaz now (project.json) -- also a second piece sent after its row's edit
+    was done (enhance_swap.cover_all): the row keeps looking."""
+    try:
+        d = json.loads((Path(folder) / "project.json").read_text(encoding="utf-8"))
+        return (d.get("enhance") or {}).get("state") == "sent"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class DownloadPage(QWidget):
     def __init__(self, ctx):
         super().__init__()
@@ -2408,7 +2419,7 @@ class DownloadPage(QWidget):
         if getattr(self, "_enhance_busy", False) or now - getattr(self, "_enhance_wanted", 0.0) < ENHANCE_POLL_S:
             return
         rows = [(it.id, it.project) for it in self.items if it.enhance and it.project is not None and
-                (it.steps.get("enhance") or Step()).state == S_RUN]
+                ((it.steps.get("enhance") or Step()).state == S_RUN or _with_topaz(it.project))]
         from ..core.enhance import is_late
         late = [(it.id, it.project) for it in self.items if it.enhance and it.project is not None and
                 (it.steps.get("enhance") or Step()).state == S_NOTE and not it.enhance_late and
@@ -2443,7 +2454,7 @@ class DownloadPage(QWidget):
                 it.enhance_late = True
                 self._refresh(it)
             return
-        if st != S_RUN:
+        if st != S_RUN and what != "used":
             return
         if what == "used":
             self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced with Topaz")

@@ -479,3 +479,16 @@ def test_after_the_conversion_the_piece_is_made_first_then_the_row_goes_on(qapp,
     assert it.steps["enhance"].text == "not enhanced: the sound check could not find the scene in the RAW"
     page.send_to_edit(it)                                                     # a skipped piece never holds the edit
     assert it.gate != D.G_ENHANCE
+
+
+def test_a_piece_back_that_no_row_watches_is_taken_by_the_round(tmp_path, pair, fake_topaz):
+    """9 Nov (Valentine's Day Plan): Topaz's piece came back after its row had finished -- the round over all
+    projects (sweep) takes it; a piece still with Topaz is left to the rows."""
+    share = tmp_path / "Enhance"
+    p = _project(tmp_path / "projects", pair)
+    _send(p, share, pair)
+    assert E.sweep([tmp_path / "projects"]) == []                         # not back yet: nothing done
+    assert P.load(p.folder).data["enhance"]["state"] == "sent"
+    assert E.Worker(share).once().state == "done"
+    out = E.sweep([tmp_path / "projects"])
+    assert len(out) == 1 and P.load(p.folder).data["enhance"]["state"] == "used"

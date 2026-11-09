@@ -285,6 +285,12 @@ class MainWindow(QMainWindow):
         def work():
             from ..core import projects as PJ
             from ..core import publish
+            try:                                      # 9 Nov: every piece with Topaz is looked at, also one no
+                from ..core import enhance as E       #   row watches any more (taken, swapped in)
+                with BG.counted_work():
+                    E.sweep([local] + ([root] if publish.reachable(root, 5.0) else []))
+            except Exception:  # noqa: BLE001
+                pass
             if not publish.reachable(root, 5.0):
                 return None
             done = []

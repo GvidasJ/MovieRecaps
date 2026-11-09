@@ -702,7 +702,47 @@ def clear(folder: str | os.PathLike, name: str) -> None:
             pass
 
 
+_WATCH = threading.Lock()
+
+
 def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float = TIMEOUT_S) -> dict:
+    """``_watch`` one at a time in this app (9 Nov: the rows and the round over all projects both look)."""
+    with _WATCH:
+        return _watch(project, now, timeout_s)
+
+
+def sweep(roots, timeout_s: float = TIMEOUT_S) -> list[str]:
+    """9 Nov (Valentine's Day Plan: Topaz's second piece came back at 00:47 and nobody took it -- its row had finished):
+    every project under ``roots`` whose piece is with Topaz is looked at (``watch``): an enhanced piece is taken and
+    swapped in, whichever row (if any) sent it. Returns what changed."""
+    from . import projects as PJ
+    out: list[str] = []
+    seen: set = set()
+    for root in roots:
+        try:
+            items = PJ.list_projects(root)
+        except Exception:  # noqa: BLE001
+            continue
+        for p in items:
+            try:
+                key = os.path.normcase(os.path.abspath(str(p.folder)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+                if rec.get("state") not in ("sent", "late") or not rec.get("folder") or not rec.get("name"):
+                    continue
+                if status(rec["folder"], rec["name"]).state != "enhanced":
+                    continue                             # only a piece that is back (the rows do the waiting)
+                r = watch(p.folder, timeout_s=timeout_s)
+                if r.get("state") in ("used", "failed"):
+                    out.append(f"{p.folder.name}: {r.get('state')} -- {r.get('text') or r.get('why') or ''}")
+            except Exception:  # noqa: BLE001
+                continue
+    return out
+
+
+def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: float = TIMEOUT_S) -> dict:
     """A project's piece, as its row needs it (project.json's "enhance" record, kept up to date here):
     {"state": "progress", share, text} while the laptop has it; "used" once the enhanced piece was checked and copied
     into the project; "failed" (why) -- the laptop's failure file, a piece that is gone or not right; "late" -- nothing
@@ -757,6 +797,14 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
         return _again(p.folder, why)
+    if b.state == "gone":                                # 9 Nov: the other computer took it a moment ago?
+        try:
+            q = PJ.load(project).data.get("enhance") or {}
+            got = read_info(Path(p.folder) / PROJECT_SUB / "enhance.json") or {}
+            if q.get("state") != state or float(got.get("copied") or 0) >= float(rec.get("sent") or 0):
+                return {}
+        except Exception:  # noqa: BLE001
+            pass
     if b.state in ("failed", "gone"):
         why = b.text if b.state == "gone" else f"the laptop could not enhance it: {b.text}"
         clear(folder, name)
