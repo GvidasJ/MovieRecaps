@@ -336,13 +336,17 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
         say(0.4, "reading the RAW's keyframes")
         m = X.movie_facts(str(raw))
         places = [max(0.0, float(span[0]))]
-        win = max(1.0, min(float(m.duration), float(span[1])) - places[0])
+        dur_all = float(m.duration or 0.0) or float(_probe_raw(raw).get("duration") or 0.0)   # 9 Nov: 0 for a RAW
+        end = min(dur_all, float(span[1])) if dur_all > 0 else float(span[1])                 #   that cannot be cut
+        win = max(1.0, end - places[0])                                                       #   (Car Salesman: 3 s)
         max_s = win + 2.0
     else:
         say(0.4, "reading the RAW's keyframes")
         m = X.movie_facts(str(raw))
-        if float(m.duration) <= WHOLE_RAW_S:             # 7 Nov: a short RAW goes whole (no scene to guess)
-            places, win, max_s = [0.0], float(m.duration), float(m.duration) + 1.0
+        dur_all = float(m.duration or 0.0) or float(_probe_raw(raw).get("duration") or 0.0)   # 9 Nov: a RAW that
+        if 0.0 < dur_all <= WHOLE_RAW_S:                 #   cannot be cut has no length in movie_facts (it was 0:
+            places, win, max_s = [0.0], dur_all, dur_all + 1.0      # What About Bob got a 1 s piece) -- 7 Nov: a
+                                                                    # short RAW goes whole (no scene to guess)
         else:
             say(0.05, "finding the scene in the RAW (the sound)")
             places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))

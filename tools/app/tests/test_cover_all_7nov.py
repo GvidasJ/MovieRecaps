@@ -102,3 +102,14 @@ def test_a_wrong_first_guess_is_not_added_to_the_new_piece(tmp_path):
     info = PJ.load(p.folder).data["enhance"]["piece"]
     assert info["start_frame"] <= 120 and info["start_frame"] + info["frames"] >= 260
     assert info["start_frame"] + info["frames"] < 600                   # not out to the old piece
+
+
+def test_a_raw_that_cannot_be_cut_gets_the_right_length(tmp_path):
+    """9 Nov (What About Bob: odd pixels; Car Salesman: a ProRes copy): movie_facts gives no length for a RAW that
+    cannot be cut -- it was taken as 0: a 1 s 'whole RAW' piece, a 3 s piece for 23 clips. Now its real length."""
+    from match_cuts.common import ffmpeg_bin
+    raw = tmp_path / "prores.mov"
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:d=240",
+                    "-c:v", "prores_ks", "-profile:v", "0", str(raw)], check=True)
+    info = E.make_piece(None, raw, "long", tmp_path / "Enhance", project=tmp_path, span=(100.0, 160.0))
+    assert abs(info["duration"] - 62.0) < 1.5 and abs(info["start_s"] - 99.0) < 1.5, info

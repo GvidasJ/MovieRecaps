@@ -227,9 +227,21 @@ def speed_step(speed: float) -> int:
 
 def rules(duration: float) -> tuple[float, float, str]:
     """(margin s, max share, "episode" | "movie") for a RAW this long (night 15: episodes +- 2 min, up to 60 %)."""
+    lab = _lab_margin()
     if duration and duration <= EPISODE_MAX_S:
-        return EPISODE_MARGIN_S, EPISODE_MAX_SHARE, "episode"
-    return MARGIN_S, MAX_SHARE, "movie"
+        return (EPISODE_MARGIN_S if lab is None else lab), EPISODE_MAX_SHARE, "episode"
+    return (MARGIN_S if lab is None else lab), MAX_SHARE, "movie"
+
+
+def _lab_margin() -> float | None:
+    """7 Nov, the night lab only (MOVIERECAPS_NIGHT_LAB=1): MATCH_CUTS_LAB_MARGIN_S tries another margin."""
+    if os.environ.get("MOVIERECAPS_NIGHT_LAB") != "1":
+        return None
+    try:
+        v = float(os.environ.get("MATCH_CUTS_LAB_MARGIN_S", ""))
+    except ValueError:
+        return None
+    return v if v >= 0 else None
 
 
 def plan_piece(m: Movie, places: list[float], speed: float = 1.0) -> Plan | None:
@@ -429,9 +441,31 @@ def applies(cfg: Any, pair: Any) -> str:
         return "switched off"
     if pair is None or getattr(pair, "sound", None) is None:
         return "the sound check did not run"
-    if getattr(pair.sound, "state", "") != "found" or not list(getattr(pair.sound, "where", None) or []):
-        return "the sound check did not find the place"
+    if not found_places(pair):
+        return "neither the sound check nor the picture check found the place"
     return ""
+
+
+PICTURE_SPAN_S = 90.0           # 9 Nov: the picture's found frames kept: those within this of their median
+
+
+def found_places(pair: Any) -> list[float]:
+    """Where the competitor is in the RAW (seconds): the sound check's found places -- else (9 Nov, What About Bob:
+    the competitor's sound sped up 5 %, the sound check found nothing, the picture 15 of 16 frames at 1:00:44 -- and
+    the whole 1 h 39 min movie was analysed for an hour) the picture check's found frames, the ones together (near
+    their median: a look-alike frame elsewhere left out). [] when neither found it."""
+    snd = getattr(pair, "sound", None)
+    if snd is not None and getattr(snd, "state", "") == "found" and list(getattr(snd, "where", None) or []):
+        return [float(x) for x in snd.where]
+    pic = getattr(pair, "picture", None)
+    if pic is None or getattr(pic, "state", "") != "found":
+        return []
+    where = sorted(float(x) for x in (getattr(pic, "where", None) or []))
+    if not where:
+        return []
+    mid = where[len(where) // 2]
+    near = [x for x in where if abs(x - mid) <= PICTURE_SPAN_S]
+    return near if len(near) * 2 >= len(where) else []
 
 
 def prepare(ctx: Any, pair: Any) -> Excerpt | None:
@@ -447,7 +481,10 @@ def prepare(ctx: Any, pair: Any) -> Excerpt | None:
         dur = float((getattr(pair, "inputs", None) or {}).get("raw", {}).get("duration") or 0.0)
     except (TypeError, ValueError, AttributeError):
         dur = 0.0
-    places = [float(x) for x in pair.sound.where]
+    places = found_places(pair)
+    if getattr(getattr(pair, "sound", None), "state", "") != "found":
+        log.info("piece of the movie: the sound check did not find the place, the picture check did (%s) -- the "
+                 "piece is cut around the picture's frames", ", ".join(_clock(x) for x in places[:4]))
     if dur and dur < MIN_RAW_S:                       # (the quick answers first: no look at the packets)
         log.info("piece of the movie: no (the RAW is %.1f min, under %.0f) -- the whole RAW is analysed", dur / 60,
                  MIN_RAW_S / 60)
