@@ -56,7 +56,7 @@ def test_a_big_zip_gets_a_lighter_copy_of_the_picture_and_fits(project, monkeypa
     z = Z.make(project, project / "edit")
     assert z is not None and z.stat().st_size <= limit
     assert enh.stat().st_size == full                                    # the project keeps the full one
-    assert not list(project.parent.glob("*.light.tmp"))                  # the lighter copy only lives in the zip
+    assert not list(project.parent.glob("*.light*.tmp"))                  # the lighter copy only lives in the zip
     note = Z.zip_info(z)
     arc = f"{Z.plain_name(project)}/edit/extras/media/raw_enhanced.mp4"
     assert note["tried"] and note["files"][arc]["from_bytes"] == full
@@ -81,3 +81,39 @@ def test_the_switch_keeps_the_full_picture(project, monkeypatch):
     monkeypatch.setenv(Z.FIT_ENV, "1")
     put, _left = Z.members(project, project / "edit")
     assert Z.fit(put, project.parent / "x.zip", limit=1) == (put, {})
+
+
+def test_two_big_videos_both_get_lighter_and_the_zip_fits(project, monkeypatch):
+    """The Bathroom Break zip (2.9 GB): 8 clips still played the whole episode (1 GB) next to the Topaz picture --
+    both go in lighter, at one bitrate."""
+    media = project / "edit" / "extras" / "media"
+    raw = _video(media / "raw.mp4", 6.0)
+    xml = project / "edit" / "1_edit.xml"
+    xml.write_text(xml.read_text(encoding="utf-8").replace(
+        "</sequence>", f"<file><pathurl>{raw.as_uri()}</pathurl></file></sequence>"), encoding="utf-8")
+    enh = media / "raw_enhanced.mp4"
+    both = enh.stat().st_size + raw.stat().st_size
+    limit = int(both * 0.45)
+    monkeypatch.setattr(Z, "FIT_BYTES", limit)
+    monkeypatch.setattr(Z, "FIT_MARGIN", 50_000)
+    z = Z.make(project, project / "edit")
+    assert z is not None and z.stat().st_size <= limit
+    note = Z.zip_info(z)
+    assert len(note["files"]) == 2 and note["v"] == Z.FIT_VERSION
+    assert not Z.needs_zip(project, project / "edit")
+
+
+def test_two_writers_never_share_a_zip_and_a_damaged_zip_is_not_kept(project, monkeypatch):
+    """10 Nov (Suspicious Friend: its picture damaged inside the zip -- two computers wrote it at once): a second
+    writer finds the zip's lock and leaves it; a zip that does not read back is not put in place."""
+    z = Z.zip_path(project)
+    lk = z.with_name(z.name + ".lock")
+    lk.write_text("{}")
+    assert Z.make(project, project / "edit") is None and not z.exists()       # someone else is writing it
+    lk.unlink()
+    real = zipfile.ZipFile.testzip
+    monkeypatch.setattr(zipfile.ZipFile, "testzip", lambda self: "x/raw_enhanced.mp4")
+    assert Z.make(project, project / "edit") is None and not z.exists()       # damaged: not kept
+    assert not list(z.parent.glob("*.tmp")) and not lk.exists()
+    monkeypatch.setattr(zipfile.ZipFile, "testzip", real)
+    assert Z.make(project, project / "edit") == z and not lk.exists()

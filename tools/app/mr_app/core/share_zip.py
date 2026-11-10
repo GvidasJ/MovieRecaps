@@ -372,13 +372,55 @@ def _free_after(folder: Path, need: int) -> int:
         return MIN_FREE
 
 
-def _clean_tmp(z: Path) -> None:
-    tmp = z.with_name(z.name + ".tmp")
+def _me() -> str:
+    """This computer and process, in a file name ("gvidas-pc-1234")."""
     try:
-        if tmp.is_file() and time.time() - tmp.stat().st_mtime > STALE_TMP_S:
-            tmp.unlink()                                # a zip cut short (the app closed while it was written)
-    except OSError:
-        pass
+        from . import machine as M
+        who = f"{M.host()}-{M.which(None) if hasattr(M, 'which') else ''}"
+    except Exception:  # noqa: BLE001
+        who = os.environ.get("COMPUTERNAME", "pc")
+    return re.sub(r"[^A-Za-z0-9-]+", "-", f"{who}-{os.getpid()}").strip("-").lower()
+
+
+ZIP_LOCK_STALE_S = 3 * 3600          # a zip lock older than this: its computer stopped while writing
+
+
+def _take_zip_lock(z: Path) -> Path | None:
+    """``<zip>.lock`` made with O_EXCL (one computer writes a zip at a time); None when another one is writing it
+    now. A lock older than ZIP_LOCK_STALE_S is taken over."""
+    lk = z.with_name(z.name + ".lock")
+    for _try in range(2):
+        try:
+            fd = os.open(str(lk), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"who": _me(), "at": time.time()}))
+            return lk
+        except FileExistsError:
+            try:
+                if time.time() - lk.stat().st_mtime > ZIP_LOCK_STALE_S:
+                    lk.unlink()
+                    continue
+            except OSError:
+                pass
+            return None
+        except OSError:
+            return None
+    return None
+
+
+def _clean_tmp(z: Path) -> None:
+    """Zips cut short (the app closed while it wrote them): <zip>.tmp, <zip>.<who>.tmp and their lighter copies."""
+    for tmp in [z.with_name(z.name + ".tmp")] + list(z.parent.glob(glob_escape(z.name) + ".*.tmp")):
+        try:
+            if tmp.is_file() and time.time() - tmp.stat().st_mtime > STALE_TMP_S:
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def glob_escape(name: str) -> str:
+    import glob
+    return glob.escape(name)
 
 
 def zip_info(z: Path) -> dict:
@@ -516,6 +558,7 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
     thread makes the same one. 7 Nov: next to the folder (zip_path); the older one inside the folder then goes.
     Never raises."""
     tmp = None
+    locks: list[Path] = []
     key = os.path.normcase(os.path.abspath(str(project)))
     with _MAKING_LOCK:
         if key in _MAKING:
@@ -534,8 +577,13 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
         need = sum(f.stat().st_size for f, _a in put if f.exists())
         if _free_after(project, need) < MIN_FREE:
             return None
-        tmp = z.with_name(z.name + ".tmp")
-        put, light = fit(put, z)
+        lock = _take_zip_lock(z)                         # 10 Nov: two computers wrote one zip at once (Suspicious
+        if lock is None:                                 #   Friend: its picture broken inside) -- one at a time
+            return None
+        locks.append(lock)
+        me = _me()
+        tmp = z.with_name(f"{z.name}.{me}.tmp")
+        put, light = fit(put, Path(f"{z}.{me}"))
         lighter = [f for f, _a in put if re.search(r"\.light\d*\.tmp$", f.name)]
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as zf:
             for f, arc in put:
@@ -545,6 +593,10 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
             if light:
                 zf.writestr(f"{plain_name(project)}/{INFO}", json.dumps(dict(light, v=FIT_VERSION), indent=1))
             zf.comment = MARK
+        with zipfile.ZipFile(tmp) as zf:                 # 10 Nov: read back whole before it is the zip
+            bad = zf.testzip()
+        if bad is not None:
+            raise RuntimeError(f"{bad} reads back damaged from the zip")
         for f in lighter:
             f.unlink(missing_ok=True)
         os.replace(tmp, z)
@@ -567,13 +619,18 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
     except Exception:  # noqa: BLE001 - a zip that can not be made never stops anything
         try:
             if tmp is not None:
-                tmp.unlink()
+                tmp.unlink(missing_ok=True)
                 for x in Path(tmp).parent.glob(Path(str(tmp)[:-len(".tmp")]).name + ".light*.tmp"):
                     x.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
         return None
     finally:
+        for lk in locks:
+            try:
+                lk.unlink(missing_ok=True)
+            except OSError:
+                pass
         with _MAKING_LOCK:
             _MAKING.discard(key)
 
