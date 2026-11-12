@@ -125,6 +125,8 @@ def _rng(frames: Iterable[int], cap: int = 12) -> str:
 # per-frame arrays
 # =================================================================================================
 
+FREEZE_LOG_MAX = 100        # 12 Nov: 'freeze_not_static' records kept in the log (the rest only counted)
+
 class _Frames:
     """Working copy of the FrameMap columns segment.py needs (the FrameMap itself is only written at
     the end, see ``_Builder.write_back``)."""
@@ -1170,7 +1172,11 @@ class _Builder:
         floor = self.static_floor(a, b)
         thr = max(float(_cfg(self.cfg, "freeze_static_ratio", 10.0)) * (floor or 0.0),
                   float(_cfg(self.cfg, "freeze_static_mad", 0.25)))
-        mads = np.array([self.pair_mad(k) for k in range(a, b - 1)], np.float64)
+        all_mads = getattr(self, "_mads_all", None)        # 12 Nov (Worst Doctor Checkup: this step ran 2 h and
+        if all_mads is None:                                #   wrote a 1.4 GB log): every pair measured once, a
+            all_mads = np.array([self.pair_mad(k) for k in range(max(0, self.n - 1))], np.float64)   # span is a
+            self._mads_all = all_mads                       #   slice of it (the same numbers, no Python loop)
+        mads = all_mads[a:b - 1]
         ok = bool(np.all(np.isfinite(mads)) and np.all(mads <= thr))
         cadence = False
         if ok and floor is not None and mads.size >= 4:
@@ -1185,10 +1191,13 @@ class _Builder:
         res = ok and not cadence
         self.S._cache[key] = res
         if not res:
-            self.log("freeze_not_static", comp_range=[a, b], evidence={
-                "pair_mad": [None if not math.isfinite(m) else round(float(m), 4) for m in mads.tolist()],
-                "threshold": round(thr, 4), "repeat_floor": None if floor is None else round(floor, 5),
-                "cadence": cadence})
+            n_logged = getattr(self, "_freeze_logged", 0)
+            if n_logged < FREEZE_LOG_MAX:                   # 12 Nov: a few records, not one per span tried
+                self._freeze_logged = n_logged + 1
+                self.log("freeze_not_static", comp_range=[a, b], evidence={
+                    "pair_mad": [None if not math.isfinite(m) else round(float(m), 4) for m in mads.tolist()[:40]],
+                    "pairs": int(mads.size), "threshold": round(thr, 4),
+                    "repeat_floor": None if floor is None else round(floor, 5), "cadence": cadence})
         return res
 
     # ---------------------------------------------------------------------------------------------
