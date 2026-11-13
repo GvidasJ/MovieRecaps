@@ -57,6 +57,7 @@ SEED_WISHES = (
 )
 
 PC_SHARE = r"\\192.168.101.11\Shared"      # the PC's D:\Shared as the laptop sees it (machine.py)
+PC_SHARES = tuple(rf"\\{a}\Shared" for a in ("192.168.101.11", "100.105.55.69"))  # every address (machine.PC_ADDRESSES)
 PC_LOCAL = r"D:\Shared"
 SEP = " | "                                # between a queue line's fields (no path or name can hold a "|")
 
@@ -258,8 +259,9 @@ def for_pc(path: str | os.PathLike) -> str:
     """A path as the PC sees it: the laptop's \\\\192.168.101.11\\Shared\\... is the PC's own D:\\Shared\\... (the night
     runs on the PC)."""
     s = _clean(path)
-    if s.lower().startswith(PC_SHARE.lower()) and (len(s) == len(PC_SHARE) or s[len(PC_SHARE)] in "\\/"):
-        return PC_LOCAL + s[len(PC_SHARE):]
+    for share in PC_SHARES:
+        if s.lower().startswith(share.lower()) and (len(s) == len(share) or s[len(share)] in "\\/"):
+            return PC_LOCAL + s[len(share):]
     return s
 
 

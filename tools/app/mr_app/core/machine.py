@@ -11,7 +11,7 @@ Both computers report the same host name ("Gvidas"), so the name alone cannot te
    is a UPS, not a laptop's;
 4. else the PC.
 
-The hardware is asked once per process. The PC is 192.168.101.11 and shares D:\\Shared as "Shared", so the PC saves
+The hardware is asked once per process. The PC is 192.168.101.11 at home (100.105.55.69 through Tailscale; the first that answers is used) and shares D:\\Shared as "Shared", so the PC saves
 the projects to D:\\Shared\\Projects and the laptop to \\\\192.168.101.11\\Shared\\Projects."""
 from __future__ import annotations
 
@@ -27,7 +27,31 @@ PC = "pc"
 LAPTOP = "laptop"
 KINDS = (PC, LAPTOP)
 
-PC_ADDRESS = "192.168.101.11"          # the PC on the home network
+PC_ADDRESSES = ("192.168.101.11",      # the PC on the home network
+                "100.105.55.69")       # the PC through the private network (Tailscale) -- away from home too
+
+
+def _answers(address: str, timeout: float = 0.7) -> bool:
+    """The PC's file sharing (port 445) answers at this address -- a quick knock, no Windows wait of 20+ s."""
+    try:
+        with socket.create_connection((address, 445), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _pick_address() -> str:
+    """The first PC address that answers (MR_PC_ADDRESS overrides), else the home one. Asked once per start."""
+    forced = os.environ.get("MR_PC_ADDRESS", "").strip()
+    if forced:
+        return forced
+    for a in PC_ADDRESSES:
+        if _answers(a):
+            return a
+    return PC_ADDRESSES[0]
+
+
+PC_ADDRESS = _pick_address()           # the address the laptop reaches the PC at right now
 SHARE = "Shared"                       # the PC's D:\Shared, shared under this name
 PC_ROOT = Path(r"D:\Shared\Projects")
 LAPTOP_ROOT = Path(rf"\\{PC_ADDRESS}\{SHARE}\Projects")
