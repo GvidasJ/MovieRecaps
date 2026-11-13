@@ -253,6 +253,8 @@ def cover_all(project, say=None) -> dict:
         if old == name:
             name = E.safe_name(Path(p.folder).name) + "_all2"
         folder = rec.get("folder") or str(E.share_dir())
+        if not Path(folder).is_dir():                    # 13 Nov: the address it had then is not reachable now
+            folder = str(E.share_dir())
         info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
                             topaz_on=str((rec.get("piece") or {}).get("topaz_on") or ""),
                             progress=(lambda s, t: say(s, t)) if say else None)

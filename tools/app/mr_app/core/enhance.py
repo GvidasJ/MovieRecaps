@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
@@ -715,6 +716,41 @@ def watch(project: str | os.PathLike, now: float | None = None, timeout_s: float
         return _watch(project, now, timeout_s)
 
 
+RESEND_DAYS = 3.0                      # 13 Nov: a piece never sent because of an error is sent again up to 3 days on
+RESEND_GAP_S = 30 * 60                 #   one try per project every 30 minutes (both computers sweep)
+_ON_PURPOSE = ("the quick check", "sending to topaz is off", "topaz is off")
+
+
+def _resend(p, rec: dict) -> bool:
+    """13 Nov (The Weirdest Name In British Comedy: "[WinError 1909] The referenced account is currently locked out"
+    -- the piece was never sent and nothing tried again): a finished edit whose piece was skipped because of an
+    error gets its piece now (``enhance_swap.cover_all``). Not when it was skipped on purpose. True when it was sent."""
+    from . import projects as PJ
+    if rec.get("state") != "skipped":
+        return False
+    why = str(rec.get("why") or "").lower()
+    if not why or any(w in why for w in _ON_PURPOSE):
+        return False
+    ed = (p.data.get("steps") or {}).get("edit") or {}
+    if ed.get("state") != PJ.DONE:
+        return False
+    try:
+        fin = datetime.fromisoformat(str(ed.get("finished"))).timestamp()
+    except (TypeError, ValueError):
+        return False
+    if time.time() - fin > RESEND_DAYS * 86400:
+        return False
+    if time.time() - float(rec.get("resend_try") or 0) < RESEND_GAP_S:
+        return False
+    if not Path(share_dir()).is_dir():
+        return False
+    rec2 = dict(rec, resend_try=time.time())
+    p.update(enhance=rec2)
+    from . import enhance_swap as ES
+    r = ES.cover_all(p.folder)
+    return bool(r.get("ok")) and int(r.get("clips") or 0) > 0
+
+
 def sweep(roots, timeout_s: float = TIMEOUT_S) -> list[str]:
     """9 Nov (Valentine's Day Plan: Topaz's second piece came back at 00:47 and nobody took it -- its row had finished):
     every project under ``roots`` whose piece is with Topaz is looked at (``watch``): an enhanced piece is taken and
@@ -734,6 +770,9 @@ def sweep(roots, timeout_s: float = TIMEOUT_S) -> list[str]:
                     continue
                 seen.add(key)
                 rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+                if _resend(p, rec):
+                    out.append(f"{p.folder.name}: sent to Topaz again")
+                    continue
                 if rec.get("state") not in ("sent", "late") or not rec.get("folder") or not rec.get("name"):
                     continue
                 if status(rec["folder"], rec["name"]).state != "enhanced":
