@@ -327,6 +327,8 @@ def interpolate_keys(keys: Iterable[dict], k: float, raw_w: float | None = None,
         return Sim.from_dict(ks[-1])
     for a, b in zip(ks[:-1], ks[1:]):
         if a["comp_frame"] <= k <= b["comp_frame"]:
+            if b["comp_frame"] == a["comp_frame"]:     # 16 Nov: two keys on one frame (a chain merge) -- not / 0
+                return Sim.from_dict(b)
             u = (k - a["comp_frame"]) / (b["comp_frame"] - a["comp_frame"])
             ra, rb = a.get("rotation_deg", 0.0), b.get("rotation_deg", 0.0)
             if abs(ra - rb) > 1e-9:

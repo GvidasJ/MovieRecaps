@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -433,7 +434,42 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
         cfg.apply_fast()
     else:
         cfg.compare_fast = bool(getattr(args, "compare_fast", False))
+    lab_settings(cfg)
     return cfg
+
+
+def lab_settings(cfg: Config, env: dict | None = None) -> list[str]:
+    """7 Nov, the night lab only (work\\night_lab\\runner.py sets MOVIERECAPS_NIGHT_LAB=1): MATCH_CUTS_LAB_SET
+    ("full_res=1,comp_search_stride=1") changes those analysis settings of this run, after --fast. Without both
+    variables nothing changes. Returns what it set ("name=value")."""
+    import os
+    env = os.environ if env is None else env
+    spec = str(env.get("MATCH_CUTS_LAB_SET") or "").strip()
+    if not spec or str(env.get("MOVIERECAPS_NIGHT_LAB") or "") != "1":
+        return []
+    done = []
+    for part in spec.split(","):
+        key, _, val = part.partition("=")
+        key, val = key.strip(), val.strip()
+        if not key or not hasattr(cfg, key) or key.startswith("_"):
+            continue
+        old = getattr(cfg, key)
+        try:
+            if isinstance(old, bool):
+                new = val.lower() in ("1", "true", "yes", "on")
+            elif isinstance(old, int):
+                new = int(val)
+            elif isinstance(old, float):
+                new = float(val)
+            else:
+                new = val
+        except ValueError:
+            continue
+        setattr(cfg, key, new)
+        done.append(f"{key}={new}")
+    if done:
+        print(f"match_cuts night lab settings: {', '.join(done)}", file=sys.stderr, flush=True)
+    return done
 
 
 # ---------------------------------------------------------------------------------------------
@@ -875,6 +911,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except Exception as e:  # noqa: BLE001 - reported to the user with the log location
         print(f"match_cuts: ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        try:                                  # 16 Nov: "details in the log" -- the log now has where it stopped
+            logging.getLogger("match_cuts").error("the run stopped: %s: %s\n%s", type(e).__name__, e,
+                                                  traceback.format_exc())
+        except Exception:  # noqa: BLE001
+            pass
         if cfg.verbose:
             traceback.print_exc()
         print(f"match_cuts: details in {Path(cfg.out_dir) / 'match_cuts.log'}", file=sys.stderr)

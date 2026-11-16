@@ -376,11 +376,15 @@ def _sim_at(keys: list[dict], k: float, raw_wh: tuple[float, float], cap: int = 
     ks = sorted(keys, key=lambda d: d["comp_frame"])
     k0, k1 = ks[0]["comp_frame"], ks[-1]["comp_frame"]
     if k > k1:
-        a, b, kk = ks[-2], ks[-1], min(float(k), float(k1 + cap))
+        b, kk = ks[-1], min(float(k), float(k1 + cap))
+        a = next((d for d in reversed(ks) if d["comp_frame"] != b["comp_frame"]), None)
     elif k < k0:
-        a, b, kk = ks[0], ks[1], max(float(k), float(k0 - cap))
+        a, kk = ks[0], max(float(k), float(k0 - cap))
+        b = next((d for d in ks if d["comp_frame"] != a["comp_frame"]), None)
     else:
         return interpolate_keys(ks, k, raw_wh[0], raw_wh[1])
+    if a is None or b is None:                       # 16 Nov (The Worst Story In Its Always Sunny (2)): after a chain
+        return interpolate_keys(ks, k, raw_wh[0], raw_wh[1])  # merge every key sat on one frame -- held, not / 0
     u = (kk - a["comp_frame"]) / float(b["comp_frame"] - a["comp_frame"])
     return _lerp_keys(a, b, u, raw_wh)
 
