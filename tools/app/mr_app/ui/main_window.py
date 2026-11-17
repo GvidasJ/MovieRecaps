@@ -203,7 +203,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(12_000, self.retry_renames)
         if _start_checks():                               # night 15: folders named with emoji (made before)
             QTimer.singleShot(20_000, self.plain_names)   # get their plain names, once
-            QTimer.singleShot(30_000, self.tidy)          # night 15: the projects' zips, the renders by day
+            QTimer.singleShot(180_000, self.tidy)         # night 15: the projects' zips, the renders by day
+            #                                               (17 Nov: 3 minutes after the start, not 30 s)
             self._tidy_timer = QTimer(self)
             self._tidy_timer.timeout.connect(self.tidy)
             self._tidy_timer.start(10 * 60_000)
@@ -491,8 +492,15 @@ class MainWindow(QMainWindow):
             lines: list = []
             with BG.counted_work() as _tidying:
                 if S0.on_this_computer(hub) and not making():    # (the laptop leaves the shared folder to the PC)
-                    from ..core import archive
-                    lines = archive.tidy(hub, stop=making, scene_only=scene_only, one_zip=one_zip)
+                    from ..core import archive, tidy_child
+                    lines = None
+                    if tidy_child.wanted():           # 17 Nov: its own process, lowest priority -- the window
+                        try:                          #   froze while the round read the zips back in this one
+                            lines = tidy_child.run(hub, stop=making, scene_only=scene_only, one_zip=one_zip)
+                        except OSError:
+                            lines = None
+                    if lines is None:
+                        lines = archive.tidy(hub, stop=making, scene_only=scene_only, one_zip=one_zip)
                 moved = renders.sort_renders()
             return lines, moved
 
