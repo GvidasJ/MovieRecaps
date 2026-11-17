@@ -767,6 +767,29 @@ class MainWindow(QMainWindow):
         if self._was_busy and not busy:
             self.space_changed()
         self._was_busy = busy
+        try:                                              # 17 Nov: no sleep in the middle of a run (core.awake)
+            from ..core import awake
+            awake.keep(busy or self._working_now())
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _working_now(self) -> bool:
+        """Anything the app does by itself right now -- a download, a conversion, an edit running or waiting its turn,
+        a piece with Topaz, a copy to the shared folder, a zip (the pages' own flags: no disk, no network)."""
+        try:
+            if BG.working():
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        for p in self.pages.values():
+            for name in ("anything_working", "has_work"):
+                fn = getattr(p, name, None)
+                try:
+                    if callable(fn) and fn():
+                        return True
+                except Exception:  # noqa: BLE001
+                    continue
+        return False
 
     def offer_cleanup(self, text: str) -> None:
         """A page did not start something for lack of room: the numbers, and Clean up (the Board's)."""
