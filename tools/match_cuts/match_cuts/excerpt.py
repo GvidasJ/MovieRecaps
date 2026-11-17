@@ -788,20 +788,6 @@ def shift_xml(src: str | os.PathLike, dst: str | os.PathLike, ex: Excerpt, movie
         if d.denominator != 1:
             exact = False
         di = int(round(d))
-        el_in = ci.find("in")
-        if d.denominator != 1 and f.get("id") == "file-raw" and el_in is not None and el_in.text is not None \
-                and int(el_in.text) >= 0:
-            # 17 Nov: a shift rounded to the clip's units can land the in-point on the movie's frame BEFORE the one
-            # the piece showed (5 of 25 runs: "the movie's frame 58258 is not the piece's frame 7263" -- k - j was
-            # k0 - 1, the edit kept playing the piece and Topaz's piece of the movie went unused). The shift whose
-            # first frame is exactly the piece's first frame + k0 is taken (one unit either way).
-            x0 = int(el_in.text)
-            per = Fraction(str(s)) * raw_fps / rate              # movie frames per clip unit
-            want = math.floor(Fraction(x0) * per) + int(ex.k0)
-            for c in (di, di - 1, di + 1, di - 2, di + 2):
-                if math.floor(Fraction(x0 + c) * per) == want:
-                    di = c
-                    break
         shifts.add(di)
         for tag in ("in", "out"):
             el = ci.find(tag)
@@ -955,6 +941,9 @@ def move_run(ex: Excerpt, deliver: Path, out_dir: Path, media: Path, plays: Path
         from .export_xml_edl import premiere_item_problems
         final = deliver / "1_edit.xml"
         for x, tmp, info in moved:
+            if x == final and not info["exact"]:
+                raise KeepsPiece("a clip's place in the movie is not a whole number of its steps "
+                                 f"(the piece starts at frame {ex.k0}): the edit plays the piece, frame for frame")
             if x == final:
                 probs = premiere_item_problems(tmp)
                 if probs:
@@ -1016,6 +1005,14 @@ def move_run(ex: Excerpt, deliver: Path, out_dir: Path, media: Path, plays: Path
     return out
 
 
+class KeepsPiece(RuntimeError):
+    """17 Nov: 1_edit.xml is not moved onto the movie on purpose. A 60 fps edit of a 23.976 fps movie counts 2.5025
+    steps per movie frame, so the piece's start is a whole number of steps only every 400 frames; moved by a rounded
+    number, 2-16 % of the frames a clip shows were the movie's neighbour frame (1/24 s early or late -- at a clip's
+    first or last frame that can be the other shot: a flash frame). The piece is what the run analysed and checked:
+    the edit keeps playing it, frame for frame (the app finds Topaz's picture through extras/excerpt.json)."""
+
+
 def finish(ctx: Any) -> dict:
     """The end of a run that analysed a piece (module docstring): ``move_run`` on the run folder -- 1_edit.xml and the
     edits in extras/ moved onto the movie, A1's raw_stereo.wav made to the movie's frames, the movie linked into the
@@ -1035,6 +1032,20 @@ def finish(ctx: Any) -> dict:
     try:
         out = move_run(ex, Path(cfg.deliver), Path(cfg.out), Path(cfg.media_dir), plays,
                        tuple(p for p in (conf,) if p is not None))
+    except KeepsPiece as e:                # on purpose: no warning, no note (failed_move reads "error")
+        name = plays.name if plays is not None and plays.exists() else PIECE_NAME
+        log.info("piece of the movie: 1_edit.xml keeps playing the piece %s (extras\\media\\%s) -- %s",
+                 where_text(ex), name, e)
+        out = {"moved": False, "kept": str(e), "plays": name, "where": where_text(ex)}
+        if isinstance(getattr(ctx, "edit_media", None), dict):
+            ctx.edit_media["line"] = (f"V1 plays the piece of the movie the run analysed ({out['where']}, "
+                                      f"extras\\media\\{name}), frame for frame")
+        try:
+            (Path(cfg.out) / INFO_NAME).write_text(json.dumps({**ex.to_dict(), "moved": out}, indent=1, default=str),
+                                                   encoding="utf-8")
+        except OSError:
+            pass
+        return out
     except Exception as e:  # noqa: BLE001 - the edit keeps playing the piece
         name = plays.name if plays is not None and plays.exists() else PIECE_NAME
         log.error("piece of the movie: 1_edit.xml could not be moved onto the movie (%s: %s) -- it plays only the "
