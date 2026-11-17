@@ -5373,7 +5373,7 @@ def frame_track_problems(xml_path: str | os.PathLike, n: int) -> list[str]:
     if str(_text(ci, "alphatype", "")).lower() != "straight":
         out.append("XML FRAME: alphatype is not straight (the hole would not show V1)")
     url = str(_text(ci, "file/pathurl", "") or "")
-    path = urllib.parse.unquote(url.replace("file://localhost/", "", 1)) if url.startswith("file://localhost/") else ""
+    path = _url_path(url)                         # 17 Nov: a network share's file://server/share/... too (the laptop)
     if not path or not Path(path).is_file():
         out.append(f"XML FRAME: the frame file {url} does not exist")
     return out
@@ -5414,7 +5414,7 @@ def watermark_track_problems(xml_path: str | os.PathLike, n: int, opacity: float
         fid = (ci.find("file").get("id") if ci.find("file") is not None else "") or ""
         fe = next((f for f in root.iter("file") if f.get("id") == fid and f.findtext("pathurl")), None)
         url = fe.findtext("pathurl") if fe is not None else ""
-    path = urllib.parse.unquote(url.replace("file://localhost/", "", 1)) if url.startswith("file://localhost/") else ""
+    path = _url_path(url)                         # 17 Nov: a network share's file://server/share/... too (the laptop)
     if not path or not Path(path).is_file():
         out.append(f"XML WATERMARK: the watermark file {url} does not exist")
     else:

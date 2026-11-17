@@ -73,8 +73,36 @@ def _groups(run: Path) -> list[dict]:
     try:
         d = json.loads((run / "extras" / "keep_piece.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return _piece_group(run)
+    if not d.get("kept"):
+        return _piece_group(run)
     return [g for g in (d.get("groups") or []) if isinstance(g, dict)] if d.get("kept") else []
+
+
+def _groups_for(run: Path, info: dict | None) -> list[dict]:
+    """``_groups`` for the piece Topaz has (``info``, its TOENHANCE.json). A piece made by ``cover_all`` before 17 Nov
+    from an edit that plays only the movie's piece counts that piece's frames (no "units" in it): no group then."""
+    g = _groups(run)
+    if g and info and info.get("units") != "movie" and str(info.get("project") or "").endswith(("_all", "_all2")) \
+            and g == _piece_group(run):
+        return []
+    return g
+
+
+def _piece_group(run: Path) -> list[dict]:
+    """17 Nov (The Biggest Meltdown, The Worst Prank: Topaz ran twice): the run analysed a piece of the movie and its
+    edit could not be moved onto the movie (extras/excerpt.json: moved false) -- 1_edit.xml then counts the PIECE's
+    frames, which are the movie's frames minus the piece's start (k0). Said as one group, so the piece Topaz enhanced
+    before the edit (cut from the movie, in the movie's frames) is still found and used."""
+    try:
+        d = json.loads((run / "extras" / "excerpt.json").read_text(encoding="utf-8"))
+        mv = d.get("moved")
+        if not isinstance(mv, dict) or mv.get("moved") is not False:
+            return []
+        k0, n = int(d["k0"]), int(d["frames"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    return [{"k0": k0, "k1": k0 + n, "offset": 0}] if n > 0 else []
 
 
 def to_movie(frame: Fraction | int, groups: list[dict]) -> Fraction | None:
@@ -173,6 +201,7 @@ def outside(project) -> dict:
     info = rec.get("piece") if isinstance(rec.get("piece"), dict) else {}
     if rec.get("state") not in ("sent", "used", "failed", "skipped", "late"):
         return {}
+    info0 = info
     if rec.get("state") in ("failed", "skipped", "late") or "start_frame" not in info or not info.get("fps"):
         info = {}                                        # no piece with Topaz: every clip needs one
     ed = (p.data.get("steps") or {}).get("edit") or {}
@@ -190,7 +219,7 @@ def outside(project) -> dict:
     if raw_fps is None:
         return {}
     start, n = (int(info["start_frame"]), int(info.get("frames") or 0)) if info else (None, 0)
-    groups = _groups(run)
+    groups = _groups_for(run, info0) if info else _groups(run)
     need, every = [], []
     for c in _v1(root):
         rate = _rate(c.find("rate")) or raw_fps
@@ -258,9 +287,10 @@ def cover_all(project, say=None) -> dict:
         info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
                             topaz_on=str((rec.get("piece") or {}).get("topaz_on") or ""),
                             progress=(lambda s, t: say(s, t)) if say else None)
-        if off:                                          # the piece's start in the movie's frames (swap_in maps so)
+        if off or groups:                                # the piece's start in the movie's frames (swap_in maps so)
             info["start_frame"] = int(info["start_frame"]) + off
             info["start_s"] = round(float(Fraction(int(info["start_frame"])) / fps), 6)
+            info["units"] = "movie"
             E._write_json(E.names(folder, name).info, info)                       # noqa: SLF001
         lk = E.read_lock(E.names(folder, old).lock)
         if lk is None or E.lock_stale(E.names(folder, old).lock):
@@ -315,7 +345,7 @@ def swap_in(project, do_check: bool = True) -> dict:
         if enh_frames <= 0:
             return {"ok": False, "why": "the enhanced piece's length is not known"}
         covered = int(math.floor(Fraction(enh_frames) * raw_fps / OUT_FPS))
-        groups = _groups(run)
+        groups = _groups_for(run, info)
         normal_media = _media(root, "file-raw")
         raw_def = next((copy.deepcopy(f) for f in root.iter("file") if f.get("id") == "file-raw"
                         and f.find("pathurl") is not None), None)
