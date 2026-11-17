@@ -788,6 +788,20 @@ def shift_xml(src: str | os.PathLike, dst: str | os.PathLike, ex: Excerpt, movie
         if d.denominator != 1:
             exact = False
         di = int(round(d))
+        el_in = ci.find("in")
+        if d.denominator != 1 and f.get("id") == "file-raw" and el_in is not None and el_in.text is not None \
+                and int(el_in.text) >= 0:
+            # 17 Nov: a shift rounded to the clip's units can land the in-point on the movie's frame BEFORE the one
+            # the piece showed (5 of 25 runs: "the movie's frame 58258 is not the piece's frame 7263" -- k - j was
+            # k0 - 1, the edit kept playing the piece and Topaz's piece of the movie went unused). The shift whose
+            # first frame is exactly the piece's first frame + k0 is taken (one unit either way).
+            x0 = int(el_in.text)
+            per = Fraction(str(s)) * raw_fps / rate              # movie frames per clip unit
+            want = math.floor(Fraction(x0) * per) + int(ex.k0)
+            for c in (di, di - 1, di + 1, di - 2, di + 2):
+                if math.floor(Fraction(x0 + c) * per) == want:
+                    di = c
+                    break
         shifts.add(di)
         for tag in ("in", "out"):
             el = ci.find(tag)
