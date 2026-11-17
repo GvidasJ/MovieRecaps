@@ -52,8 +52,9 @@ GRID_COLOUR = "#1b1b1b"
 
 MIKECUTS = "#2dd4bf"             # 30 Oct: every channel its own colour (MikeCuts was red like MikeMemesYou): teal
 DANCUTS = "#f472b6"              # ... DanCuts: pink
+TOMSCUTS = "#fb923c"             # 17 Nov: TOMSCUTS (The Office): orange
 CHANNEL_COLOURS = {"LouLaughs": LOU, "MikeMemesYou": MIKE, "SceneProof": SCENE,         # 31 Oct: Flick707 gone
-                   "MikeCuts": MIKECUTS, "DanCuts": DANCUTS}
+                   "MikeCuts": MIKECUTS, "DanCuts": DANCUTS, "TOMSCUTS": TOMSCUTS}
 
 # a result word -> its pill: (text colour, background, border)
 PILLS = {
@@ -140,7 +141,8 @@ def mono_fonts() -> None:
             return
 
 
-CHANNEL_NOTES = {"MikeCuts": "It's Sunny", "DanCuts": "Key & Peele", "MikeMemesYou": "Random Memes",
+CHANNEL_NOTES = {"MikeCuts": "It's Sunny", "DanCuts": "Key & Peele", "TOMSCUTS": "The Office",
+                 "MikeMemesYou": "Random Memes",
                  "LouLaughs": "Random Memes", "SceneProof": "Random Memes"}   # 31 Oct: what each channel posts
 
 
