@@ -80,3 +80,16 @@ def test_job_run_activity_reads_sizes_and_cpu(tmp_path):
         r.proc.wait()
     r.proc = SimpleNamespace(poll=lambda: 0, pid=0)
     assert r.activity()[1] is None
+
+
+def test_a_run_that_went_on_after_a_pause_does_not_stand_at_99_percent():
+    """17 Nov: its saved steps end in no time, so the tool's first estimates are tiny; once the time spent has passed
+    that total and the tool says "about 13 min left", the total is that -- the bar goes back from 99 %."""
+    h = P.Honest()
+    h.update(0, 40)                                # "whole run: under a minute left"
+    a = h.update(60, None)                         # past it: the end seems near
+    assert a["share"] > 0.6
+    b = h.update(90, 13 * 60)                      # the search really starts: 13 minutes left
+    assert abs(h.total - (90 + 13 * 60)) < 1e-6 and b["share"] < 0.15 and abs(b["left_s"] - 13 * 60) < 1e-6
+    c = h.update(120, 12.5 * 60)
+    assert b["share"] <= c["share"] < 0.2

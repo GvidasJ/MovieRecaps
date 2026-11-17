@@ -83,6 +83,8 @@ def parse(text: str) -> Progress:
 
 
 MAX_CHANGE = 0.20          # night 15: the whole run's time moves at most this much (relative) per new estimate
+BIG_JUMP = 1.5             # 17 Nov: ... unless the time spent passed the total and the tool's new estimate is this
+#                            many times it: taken as it is (the bar goes back from 99 %)
 STUCK_S = 300.0            # no new output and no CPU for this long: "seems stuck"
 BUSY_CPU_S = 1.0           # CPU seconds of the run's processes that count as working
 STUCK_TEXT = "seems stuck (no output and no CPU for 5 min) -- Stop, then Try again?"
@@ -134,8 +136,16 @@ class Honest:
         if left_s is not None and key != self._raw_left:             # a new estimate from the tool
             self._raw_left = key
             want = e + float(left_s)
-            self.total = want if self.total is None else min(max(want, self.total * (1 - MAX_CHANGE)),
-                                                             self.total * (1 + MAX_CHANGE))
+            if self.total is not None and e >= self.total and want > self.total * BIG_JUMP:
+                # 17 Nov ("it says 99 % and it is still finding the shots"): the tool now says the run is much longer
+                # than thought -- a run that went on after a pause first finishes its saved steps in no time, so its
+                # early estimates are tiny. Moved up 20 % a time, the time spent passed the total and the bar stood
+                # at 99 % for the rest of the run. A correction this big is taken as it is, and the bar goes back.
+                self.total = want
+                self.share = min(self.share, e / want if want > 0 else 0.0)
+            else:
+                self.total = want if self.total is None else min(max(want, self.total * (1 - MAX_CHANGE)),
+                                                                 self.total * (1 + MAX_CHANGE))
         elif self.total is None and self.estimate > 0:
             self.total = self.estimate
         left = None
