@@ -3823,10 +3823,12 @@ def write_cut_images(cuts: Sequence[int], n_frames: int, comp_bgr: Callable[[lis
     import cv2
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    want = sorted({f for k in cuts for f in (k - 1, k, k + 1, k + 2) if 0 <= f < n_frames})
-    comp = comp_bgr(want) if want else {}
-    rec = rec_bgr(want) if want else {}
     written, failures = [], []
+    comp: dict = {}
+    rec: dict = {}
+    CHUNK = 6                                  # 17 Nov (The Worst Bedtime Routine, the laptop: 244 cuts -> every frame
+    #                                            of every cut read at once, 12 GB -> MemoryError, the run a FAIL): the
+    #                                            frames of a few cuts at a time
 
     def tile(img: np.ndarray | None, text: str) -> np.ndarray:
         if img is None:
@@ -3839,7 +3841,13 @@ def write_cut_images(cuts: Sequence[int], n_frames: int, comp_bgr: Callable[[lis
         cv2.putText(t, text, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
         return t
 
+    cuts = list(cuts)
     for i, k in enumerate(cuts, start=1):
+        if (i - 1) % CHUNK == 0:
+            want = sorted({f for kk in cuts[i - 1:i - 1 + CHUNK] for f in (kk - 1, kk, kk + 1, kk + 2)
+                           if 0 <= f < n_frames})
+            comp = comp_bgr(want) if want else {}
+            rec = rec_bgr(want) if want else {}
         fr = [f for f in (k - 1, k, k + 1, k + 2) if 0 <= f < n_frames]
         top = [tile(comp.get(f), f"comp {f}" + (" CUT" if f == k else "")) for f in fr]
         bot = [tile(rec.get(f), f"recr {f} {frame_label(f) if frame_label else ''}".rstrip()) for f in fr]
@@ -4283,8 +4291,8 @@ def check_deliverables(ctx: Any, n_cuts: int | None = None) -> dict:
             warnings.append(f"debug/{name} missing")
     if n_cuts is not None:
         got = len(list((dbg / "cuts").glob("cut_*.png"))) if (dbg / "cuts").is_dir() else 0
-        if got < n_cuts:
-            failures.append(f"debug/cuts has {got} cut images, the edit has {n_cuts} cuts")
+        if got < n_cuts:                       # 17 Nov: pictures to look at, not a deliverable -- a warning, not a FAIL
+            warnings.append(f"debug/cuts has {got} cut images, the edit has {n_cuts} cuts")
     errors = [e for e in errors_all if e not in mem]
     for e in mem:
         warnings.append(f"{e.get('stage')}: not enough memory ({e.get('error')}) -- only a check video, your edit is made")

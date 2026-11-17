@@ -1678,7 +1678,8 @@ def test_deliverables_check(tmp_path):
     ctx.cfg.skip_preview = ctx.cfg.skip_compare = True
     (out / "media" / "raw.mp4").write_bytes(b"x")
     r = verify.check_deliverables(ctx, n_cuts=2)
-    assert r["status"] == "fail" and r["failures"] == ["debug/cuts has 1 cut images, the edit has 2 cuts"]
+    assert r["status"] != "fail" and not r["failures"]          # 17 Nov: pictures to look at -- a warning, not a FAIL
+    assert "debug/cuts has 1 cut images, the edit has 2 cuts" in r["warnings"]
     assert len(r["skipped"]) == 3
     (out / "debug" / "scores.png").unlink()
     r = verify.check_deliverables(ctx, n_cuts=1)

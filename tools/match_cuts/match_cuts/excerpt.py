@@ -87,6 +87,8 @@ class Movie:
     a_start: float = 0.0            # the sound's first sample, seconds after the first shown frame
     step: float = 0.0               # max |frame step - 1| (frames)
     drift: float = 0.0              # max |frame - its slot| (frames)
+    encode: str = ""                # 17 Nov: why its piece is encoded, not copied (a stretched / rotated picture)
+    sar: str = "1"                  # the picture's pixel shape (sample aspect ratio)
 
     @property
     def rate(self) -> Fraction:
@@ -151,8 +153,13 @@ def movie_facts(path: str | os.PathLike) -> Movie:
             m.why = f"Premiere plays .{m.container or '?'} files only after a conversion"
         elif m.vcodec not in PLAYABLE or m.pix_fmt not in PLAYABLE[m.vcodec]:
             m.why = f"{m.vcodec or '?'} {m.pix_fmt or '?'} video is not played by Premiere as it is"
-        elif rot % 360 or (sar and sar != 1) or m.width % 2 or m.height % 2:
-            m.why = "a rotated, stretched or odd-sized picture"
+        elif rot % 360 or m.width % 2 or m.height % 2:
+            m.why = "a rotated or odd-sized picture"
+        elif sar and sar != 1:
+            # 17 Nov (The Worst Bedtime Routine: a 23-minute DVD-shaped RAW was analysed whole -- 43 minutes on the
+            # laptop): a stretched picture (pixels that are not square) cannot be played by Premiere as it is, but its
+            # piece can be ENCODED with square pixels (encode_piece) -- the run analyses that, the edit plays it
+            m.encode, m.sar = "a stretched picture (its pixels are not square)", fps_str(sar)
         if m.why:
             return m
         pk = _packets(path, m.vindex)
@@ -321,6 +328,36 @@ def copy_packets(m: Movie, plan: Plan, dst: Path) -> int:
     return n
 
 
+def encode_piece(m: Movie, plan: Plan, dst: str | os.PathLike) -> dict:
+    """17 Nov: ``dst`` (.mov) for a movie whose picture is stretched -- the plan's frames ENCODED (H.264, visually
+    lossless, square pixels: the width times the pixel shape) with the movie's sound as 16-bit PCM 48 kHz from the
+    same moment. Frame-accurate: the seek is a tenth of a millisecond before the first frame's time and exactly the
+    plan's frames are written (``same_frames`` then checks them against the movie). Returns {path, seconds, bytes}."""
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fps = m.rate
+    n = plan.k1 - plan.k0
+    t = max(0.0, float(Fraction(plan.k0) / fps) - 0.0001)
+    t0 = time.perf_counter()
+    tmp = dst.with_name(dst.stem + ".part.mov")
+    cmd = [ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-ss", f"{t:.6f}", "-i", m.path,
+           "-map", f"0:v:{m.vindex}"]
+    if m.has_audio:
+        cmd += ["-map", "0:a:0"]
+    cmd += ["-frames:v", str(n), "-vf", "scale=trunc(iw*sar/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1",
+            "-r", fps_str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
+            "-g", "48", "-bf", "0"]
+    if m.has_audio:
+        cmd += ["-c:a", "pcm_s16le", "-ar", str(SOUND_RATE), "-ac", "2", "-t", f"{float(Fraction(n) / fps):.6f}"]
+    cmd += ["-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1", str(tmp)]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"the piece could not be encoded: {(r.stderr or '').strip()[-300:]}")
+    os.replace(tmp, dst)
+    return {"path": str(dst), "seconds": round(time.perf_counter() - t0, 2), "bytes": int(dst.stat().st_size)}
+
+
 def cut_piece(m: Movie, plan: Plan, dst: str | os.PathLike) -> dict:
     """``dst`` (.mov): the movie's video packets from the plan's keyframe up to the next one in decoding order (stream
     copy: the same frames), and its sound decoded to 16-bit PCM 48 kHz, sample 0 at the piece's first frame (decoded
@@ -376,7 +413,10 @@ def cut_piece(m: Movie, plan: Plan, dst: str | os.PathLike) -> dict:
     return {"path": str(dst), "seconds": round(time.perf_counter() - t0, 2), "bytes": int(dst.stat().st_size)}
 
 
-def same_frames(piece: str, m: Movie, k0: int, n: int, points: int = 3) -> dict:
+ENCODED_SSIM = 0.90             # an encoded piece (square pixels, H.264 again): its frame and the movie's this alike
+
+
+def same_frames(piece: str, m: Movie, k0: int, n: int, points: int = 3, min_ssim: float | None = None) -> dict:
     """The piece's frame j and the movie's frame k0 + j look alike at ``points`` places (start, middle, end): gray
     SSIM at <= 480 px above CHECK_SSIM and above the movie's neighbouring frames. {ok, rows, why}."""
     import cv2
@@ -400,7 +440,7 @@ def same_frames(piece: str, m: Movie, k0: int, n: int, points: int = 3) -> dict:
         nb = [ssim(A, cv2.resize(fo[k], size, interpolation=cv2.INTER_AREA)) for k in (k0 + j - 1, k0 + j + 1)
               if fo.get(k) is not None]
         rows.append({"j": j, "k": k0 + j, "ssim": round(s, 4), "neighbours": [round(x, 4) for x in nb]})
-        if s < CHECK_SSIM or any(x > s + 0.003 for x in nb):     # (a neighbour clearly closer: one frame off)
+        if s < (CHECK_SSIM if min_ssim is None else min_ssim) or any(x > s + 0.003 for x in nb):     # (a neighbour clearly closer: one frame off)
             bad.append(f"piece frame {j} is not the movie's frame {k0 + j} (SSIM {s:.3f}, its neighbours "
                        f"{', '.join(f'{x:.3f}' for x in nb)})")
     return {"ok": not bad, "rows": rows, "why": "; ".join(bad)}
@@ -424,6 +464,8 @@ class Excerpt:
     cut_seconds: float = 0.0
     check: dict = field(default_factory=dict)
     sound: str = ""                  # 'wav': A1 plays a stereo WAV (the movie's own sound would need one too)
+    keep: str = ""                   # 17 Nov: why the edit keeps playing the piece (an encoded piece: the movie
+    #                                  itself is not played by Premiere as it is)
 
     @property
     def t0(self) -> float:
@@ -508,11 +550,13 @@ def prepare(ctx: Any, pair: Any) -> Excerpt | None:
         return None
     dst = Path(cfg.work) / "excerpt" / PIECE_NAME
     try:
-        made = cut_piece(m, plan, dst)
+        made = encode_piece(m, plan, dst) if m.encode else cut_piece(m, plan, dst)
         n = _frames_in(dst)
+        if m.encode and n != plan.k1 - plan.k0:
+            raise RuntimeError(f"the encoded piece has {n} frames, the plan {plan.k1 - plan.k0}")
         if n <= 0 or n > plan.k1 - plan.k0:
             raise RuntimeError(f"the piece has {n} frames, the plan {plan.k1 - plan.k0}")
-        chk = same_frames(str(dst), m, plan.k0, n)
+        chk = same_frames(str(dst), m, plan.k0, n, min_ssim=ENCODED_SSIM if m.encode else None)
         if not chk["ok"]:
             raise RuntimeError(chk["why"])
     except Exception as e:  # noqa: BLE001 - the whole movie then
@@ -525,11 +569,14 @@ def prepare(ctx: Any, pair: Any) -> Excerpt | None:
     sound = "wav" if (m.has_audio and not (m.a_codec == "aac" and m.a_channels <= 2 and abs(m.a_start) < 1e-3)) \
         else ""
     ex = Excerpt(str(dst), raw, plan.k0, n, m.fps, m.frames, round(m.duration, 3), plan.places,
-                 round(time.perf_counter() - t0, 2), chk, sound or ("wav" if m.has_audio else ""))
+                 round(time.perf_counter() - t0, 2), chk, sound or ("wav" if m.has_audio else ""),
+                 keep=(m.encode and "the movie has " + m.encode + ": Premiere plays the piece, encoded with square "
+                       "pixels") or "")
     a, b = plan.seconds(m.rate)
     log.info("piece of the movie: %s-%s of %s (%.1f of %.1f min, %d frames from frame %d) cut by stream copy in "
              "%.1f s, its frames checked against the movie at %d places -- the run analyses the piece; 1_edit.xml "
-             "will play the movie itself", _clock(a), _clock(a + n / float(m.rate)), _clock(m.duration),
+             "will play " + ("the piece (" + m.encode + ": encoded, not copied)" if m.encode else "the movie itself"),
+             _clock(a), _clock(a + n / float(m.rate)), _clock(m.duration),
              n / float(m.rate) / 60, m.duration / 60, n, plan.k0, ex.cut_seconds, len(chk.get("rows") or []))
     try:
         ctx.dlog.record("inputs", "excerpt", **{k: v for k, v in ex.to_dict().items() if k != "check"},
@@ -916,6 +963,8 @@ def move_run(ex: Excerpt, deliver: Path, out_dir: Path, media: Path, plays: Path
     target = movie_media.with_name(movie_media.stem + ".movie" + movie_media.suffix) if same_name else movie_media
     made: Path | None = None              # the movie's link / copy this call made (removed again on a failure)
     try:
+        if getattr(ex, "keep", ""):
+            raise KeepsPiece(str(ex.keep))
         xmls = [p for p in [deliver / "1_edit.xml"] + sorted(out_dir.glob("edit_*.xml")) if p.is_file()]
         if not xmls:
             raise RuntimeError("no edit XML to move")
