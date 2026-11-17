@@ -352,3 +352,21 @@ def test_keeping_the_whole_raw_its_zip_holds_it_too(root):
     z = root / f"{Z.plain_name(p.folder)}.zip"
     assert not p.folder.exists() and z.is_file(), out
     assert f"{Z.plain_name(p.folder)}/{down.name}" in zipfile.ZipFile(z).namelist()
+
+
+def test_the_normal_raw_left_out_on_purpose_does_not_keep_the_folder(root, monkeypatch):
+    """17 Nov: an edit that plays the Topaz picture leaves its normal RAW out of the zip (7 Nov) -- the check before
+    the folder goes said "would be lost" for exactly that file, so every such project stayed a folder."""
+    p = _project(root, "topazed", uploaded=True)
+    big = p.folder / "the downloaded episode.mp4"
+    big.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(Z, "members", lambda folder, run=None, leave=True: (
+        [(f, f"{Z.plain_name(Path(folder))}/{f.relative_to(folder).as_posix()}")
+         for f in sorted(Path(folder).rglob("*")) if f.is_file() and f != big and f.suffix != ".zip"],
+        [(big, "the normal picture: the edit plays the enhanced one (it stays in the project folder while it is "
+               "there)")]))
+    z = Z.zip_path(p.folder)
+    with zipfile.ZipFile(z, "w") as zf:
+        for f, arc in Z.members(p.folder)[0]:
+            zf.write(f, arc)
+    assert A.check_zip(p.folder, z) == ""

@@ -294,7 +294,9 @@ def check_zip(folder: Path, z: Path, run: Path | None = None, leave_unplayed: bo
         put, left = Z.members(folder, run, leave_unplayed)
     except OSError as e:
         return f"the folder cannot be read ({e})"
-    unplayed = {f for f, why in left if "does not play" in why}
+    unplayed = {f for f, why in left if "does not play" in why or "the normal picture" in why}   # 17 Nov: the normal
+    #   RAW of an edit that plays the Topaz picture stays out of the zip on purpose (7 Nov) -- until now this check
+    #   then said "would be lost" and every such project stayed a folder next to its zip
     linked = {f for f, why in left if "hard link" in why}
     want = {arc: f for f, arc in put}
     wanted = set(want.values())
@@ -334,7 +336,8 @@ def archive(folder: Path, data: dict, root: Path, scene_only: bool = True) -> st
         z = Z.zip_path(folder)
         why = check_zip(folder, z, run, leave) if z.is_file() and not Z.needs_zip(folder, run, leave) else \
             "it has no zip yet"
-        if why and ("no zip" in why or "changed after" in why or "is not in the zip" in why):
+        if why and ("no zip" in why or "changed after" in why or "is not in the zip" in why
+                    or "the zip cannot be read" in why or "cannot be read back" in why):   # 17 Nov: a broken zip too
             if Z.make(folder, run, leave) is None:         # made again: older, or project.json changed since
                 return f"{folder.name}: kept as a folder (its zip could not be made -- room?)"
             z = Z.zip_path(folder)
@@ -423,6 +426,16 @@ def why_not(folder: Path, data: dict) -> str:
     rec = data.get("enhance") if isinstance(data.get("enhance"), dict) else {}
     if rec.get("state") == "sent":
         return "its piece is with Topaz"
+    if rec.get("state") == "skipped":                     # 17 Nov: never sent because of an error -- the round sends
+        try:                                              #   it again for 3 days (enhance._resend): the folder stays
+            from . import enhance as E
+            why = str(rec.get("why") or "").lower()
+            fin = _finished(data)
+            if why and not any(w in why for w in E._ON_PURPOSE) and fin is not None and \
+                    datetime.now().astimezone() - fin < timedelta(days=E.RESEND_DAYS) and E.sends():   # noqa: SLF001
+                return "its piece goes to Topaz again"
+        except Exception:  # noqa: BLE001
+            pass
     try:
         from . import renames
         return renames.in_use(folder, data)
