@@ -382,10 +382,12 @@ class StageThread(QThread):
         where = str(getattr(S.load(), "enhance_where", "") or "")
         try:
             from ..core.enhance_swap import match_normal
-            if where and where == E._kind(S.load()) and match_normal():     # noqa: SLF001
-                # 17 Nov (The Best Business Idea: the whole 2:01 RAW went to Topaz for a 0:27 Short, 40 minutes):
-                # Topaz runs on this computer, where it waits for the edit anyway -- so the piece is cut AFTER the
-                # edit, from exactly what the edit plays (enhance_swap.cover_all): one Topaz run, as short as it can be
+            if match_normal():
+                # 17 Nov (your call: "just edit, then Topaz 10 seconds before, 10 seconds after, the zip, and that's
+                # it"): no piece is cut before the edit any more. A piece guessed before the edit was the whole 2:01
+                # RAW for a 0:27 Short (40 minutes of Topaz), or missed clips the edit then used (The Best Business
+                # Idea (2): 24 clips outside it -> Topaz ran twice). The piece is cut AFTER the edit, from its first
+                # clip to its last +- 10 s (enhance_swap.cover_all): one Topaz run, on whichever computer enhances.
                 raise E.EnhanceError(AFTER_EDIT)
             if comp is None or raw is None or not comp.is_file() or not raw.is_file():
                 raise E.EnhanceError("the competitor and the RAW are not both in the folder")
@@ -1232,7 +1234,7 @@ class ShutdownWarning(QDialog):
 # the page
 # ---------------------------------------------------------------------------------------------------------------------
 
-AFTER_EDIT = "Topaz comes after the edit (it runs on this computer: it gets exactly what the edit plays)"
+AFTER_EDIT = "Topaz comes after the edit (it gets what the edit plays, 10 s before and after)"
 
 
 def _with_topaz(folder) -> bool:
