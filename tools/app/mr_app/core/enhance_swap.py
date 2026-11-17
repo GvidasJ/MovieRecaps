@@ -190,6 +190,10 @@ def _media(root, fid: str) -> Path | None:
     return None
 
 
+COVER_MARGIN_S = 10.0                  # the piece cut after the edit: this much before its first clip and after its last
+#                                        (room to make a clip longer in Premiere with the enhanced picture)
+
+
 def outside(project) -> dict:
     """7 Nov (your call: "everything must be in enhanced"): the V1 clips of the finished edit (as matched: on the
     normal RAW) whose frames are not in the piece sent to Topaz. {"need": [(movie frame a, b) ...], "run", "media",
@@ -274,8 +278,8 @@ def cover_all(project, say=None) -> dict:
                 g = groups[0]
             off = int(g["k0"]) - int(g["offset"])
             lo, hi = max(lo, int(g["k0"])), min(hi, int(g["k1"]))
-        a_s = max(0.0, float(Fraction(lo - off) / fps) - 1.0)
-        b_s = float(Fraction(hi - off) / fps) + 1.0
+        a_s = max(0.0, float(Fraction(lo - off) / fps) - COVER_MARGIN_S)   # 17 Nov (your call): 10 s before the
+        b_s = float(Fraction(hi - off) / fps) + COVER_MARGIN_S             #   first clip and after the last (was 1 s)
         p = PJ.load(project)
         old = str(rec.get("name") or E.safe_name(Path(p.folder).name))
         name = E.safe_name(Path(p.folder).name) + "_all"

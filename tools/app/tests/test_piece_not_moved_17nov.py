@@ -89,4 +89,4 @@ def test_topaz_after_the_edit_gets_exactly_what_the_edit_plays(tmp_path, monkeyp
     info = rec["piece"]
     assert info["topaz_on"] == "pc"
     assert info["start_frame"] <= 120 and info["start_frame"] + info["frames"] >= 400
-    assert info["frames"] < 24 * 20                                   # 280 frames + 1 s each side, not the 40 s RAW
+    assert info["frames"] < 24 * 30                                   # the clips + 10 s each side, not the 40 s RAW
