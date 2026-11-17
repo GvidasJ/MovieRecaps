@@ -258,7 +258,7 @@ def cover_all(project, say=None) -> dict:
         if rec.get("state") == "skipped":               # never sent: only when this computer sends to Topaz
             from . import enhance as E0
             from . import settings as S0
-            if not E0.sends(S0.load()):
+            if not rec.get("after_edit") and not E0.sends(S0.load()):     # (17 Nov: after_edit -- its row sends)
                 return {"ok": False, "why": "sending to Topaz is off in Settings"}
         fps, groups = o["fps"], o["groups"]
         lo = min(a for a, _b in o["every"])              # 8 Nov: from the edit's first clip to its last -- not the
@@ -285,7 +285,7 @@ def cover_all(project, say=None) -> dict:
         if not Path(folder).is_dir():                    # 13 Nov: the address it had then is not reachable now
             folder = str(E.share_dir())
         info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
-                            topaz_on=str((rec.get("piece") or {}).get("topaz_on") or ""),
+                            topaz_on=str((rec.get("piece") or {}).get("topaz_on") or rec.get("topaz_on") or ""),
                             progress=(lambda s, t: say(s, t)) if say else None)
         if off or groups:                                # the piece's start in the movie's frames (swap_in maps so)
             info["start_frame"] = int(info["start_frame"]) + off
@@ -297,8 +297,10 @@ def cover_all(project, say=None) -> dict:
             E.clear(folder, old)                         # the old piece: nobody enhances it -- it leaves the line
         p.update(enhance={"name": name, "folder": str(folder), "state": "sent", "sent": time.time(),
                           "where": info.get("where"), "piece": info, "swapped": None, "swap": None, "used": None,
-                          "text": None, "file": None, "why": None, "redos": int(rec.get("redos") or 0) + 1,
-                          "redo": f"{len(o['need'])} clip(s) were not enhanced: a piece with all of them again"})
+                          "text": None, "file": None, "why": None, "after_edit": None,
+                          "redos": int(rec.get("redos") or 0) + (0 if rec.get("after_edit") else 1),
+                          "redo": None if rec.get("after_edit") else
+                          f"{len(o['need'])} clip(s) were not enhanced: a piece with all of them again"})
         return {"ok": True, "why": "", "clips": len(o["need"]), "where": info.get("where")}
     except Exception as e:  # noqa: BLE001 - the edit stays as it is (the clips outside keep the normal RAW)
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}

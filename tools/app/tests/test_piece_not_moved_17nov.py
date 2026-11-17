@@ -69,3 +69,24 @@ def test_an_older_second_piece_keeps_counting_the_pieces_frames(tmp_path):
     p.update(enhance={"piece": {"start_frame": 100, "frames": 240, "fps": "24", "topaz_on": "",
                                 "project": p.folder.name + "_all"}})
     assert ES.outside(p.folder)["need"] == []
+
+
+def test_topaz_after_the_edit_gets_exactly_what_the_edit_plays(tmp_path, monkeypatch):
+    """17 Nov: Topaz on this computer -- no piece before the edit; after it, one piece from the edit's first clip to
+    its last (not the whole RAW), also where "send to Topaz" is off (the row asked for it), and it is no redo."""
+    from mr_app.core import enhance as E
+    p = _project(tmp_path, [(120, 150), (330, 400)])
+    _movie(p.folder / "edit" / "extras" / "media" / "raw.mp4")
+    enh = tmp_path / "Enhance"
+    enh.mkdir()
+    monkeypatch.setattr(E, "sends", lambda *a, **k: False)
+    p.update(enhance={"state": "skipped", "why": "Topaz comes after the edit", "after_edit": True, "topaz_on": "pc",
+                      "name": E.safe_name(p.folder.name), "folder": str(enh)})
+    r = ES.cover_all(p.folder)
+    assert r["ok"] and r["clips"] == 2, r
+    rec = PJ.load(p.folder).data["enhance"]
+    assert rec["state"] == "sent" and not rec.get("redos") and rec.get("redo") is None and not rec.get("after_edit")
+    info = rec["piece"]
+    assert info["topaz_on"] == "pc"
+    assert info["start_frame"] <= 120 and info["start_frame"] + info["frames"] >= 400
+    assert info["frames"] < 24 * 20                                   # 280 frames + 1 s each side, not the 40 s RAW

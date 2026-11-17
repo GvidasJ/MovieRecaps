@@ -379,15 +379,24 @@ class StageThread(QThread):
         folder = E.share_dir(S.load())
         name = p.folder.name
         rec: dict = {"name": E.safe_name(name), "folder": str(folder)}
+        where = str(getattr(S.load(), "enhance_where", "") or "")
         try:
+            from ..core.enhance_swap import match_normal
+            if where and where == E._kind(S.load()) and match_normal():     # noqa: SLF001
+                # 17 Nov (The Best Business Idea: the whole 2:01 RAW went to Topaz for a 0:27 Short, 40 minutes):
+                # Topaz runs on this computer, where it waits for the edit anyway -- so the piece is cut AFTER the
+                # edit, from exactly what the edit plays (enhance_swap.cover_all): one Topaz run, as short as it can be
+                raise E.EnhanceError(AFTER_EDIT)
             if comp is None or raw is None or not comp.is_file() or not raw.is_file():
                 raise E.EnhanceError("the competitor and the RAW are not both in the folder")
             info = E.make_piece(comp, raw, name, folder, project=p.folder,
                                 progress=lambda s, t: self._say("raw", s, t),
-                                topaz_on=str(getattr(S.load(), "enhance_where", "") or ""))
+                                topaz_on=where)
             rec.update(state="sent", sent=time.time(), where=info.get("where"), piece=info)
         except E.EnhanceError as e:
             rec.update(state="skipped", why=str(e))
+            if str(e) == AFTER_EDIT:
+                rec.update(after_edit=True, topaz_on=where)
         except Exception as e:  # noqa: BLE001 - said in plain words; the edit goes on with the normal RAW
             rec.update(state="skipped", why=NV.plain_error(e))
         p.update(enhance=None)                            # (a new try: nothing of the last one's kept)
@@ -1222,6 +1231,9 @@ class ShutdownWarning(QDialog):
 # ---------------------------------------------------------------------------------------------------------------------
 # the page
 # ---------------------------------------------------------------------------------------------------------------------
+
+AFTER_EDIT = "Topaz comes after the edit (it runs on this computer: it gets exactly what the edit plays)"
+
 
 def _with_topaz(folder) -> bool:
     """9 Nov: the project's piece is with Topaz now (project.json) -- also a second piece sent after its row's edit
@@ -2410,7 +2422,8 @@ class DownloadPage(QWidget):
             self._step(it, "enhance", S_RUN, 0.0, "with Topaz")
             self._enhance_wanted = 0.0
         else:
-            self._step(it, "enhance", S_NOTE, 1.0, f"not enhanced: {rec.get('why') or 'no piece'}")
+            self._step(it, "enhance", S_NOTE, 1.0, AFTER_EDIT if rec.get("after_edit") else
+                       f"not enhanced: {rec.get('why') or 'no piece'}")
 
     def _enhance_poll(self) -> None:
         """Every ENHANCE_POLL_S: the rows whose piece is with the laptop (or late) -- their state read from the

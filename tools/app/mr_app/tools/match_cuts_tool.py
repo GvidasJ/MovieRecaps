@@ -2022,6 +2022,7 @@ class MatchCutsPage(QWidget):
             return False
 
     TOPAZ_TURN_S = 180.0                                  # how long the next edit waits for Topaz to take its piece
+    TOPAZ_GRACE_S = 15.0                                  # after an edit: Topaz may take a piece before the next edit
 
     def _topaz_waits(self) -> bool:
         """17 Nov (The Best Business Idea: its piece sat in the Enhance folder while the next video's edit started --
@@ -2038,7 +2039,7 @@ class MatchCutsPage(QWidget):
             waits = False
         if not waits:
             self._topaz_wait_since = None
-            return False
+            return time.time() < float(getattr(self, "_topaz_grace_until", 0.0) or 0.0)   # (an edit just ended)
         t0 = getattr(self, "_topaz_wait_since", None)
         if t0 is None:
             self._topaz_wait_since = t0 = time.time()
@@ -2121,6 +2122,14 @@ class MatchCutsPage(QWidget):
         j = next((j for j in self.jobs if j.id == job_id), None)
         th = self.current
         self.current = None
+        try:                                              # 17 Nov: Topaz looks at its folder now -- the piece this
+            pg = (getattr(self.ctx, "pages", None) or {}).get("enhance")     # edit just sent gets its turn before
+            w = getattr(pg, "worker", None)                                   # the next video's edit starts
+            if w is not None and getattr(w, "thread", None) is not None and w.thread.is_alive():
+                self._topaz_grace_until = time.time() + self.TOPAZ_GRACE_S
+                w.wake()
+        except Exception:  # noqa: BLE001
+            pass
         if th is not None:
             th.wait(2000)
         if j is not None and getattr(j, "restart_swapped", False):
