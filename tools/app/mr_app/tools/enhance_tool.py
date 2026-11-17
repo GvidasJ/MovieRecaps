@@ -34,7 +34,7 @@ class EnhancePage(QWidget):
         lay.addWidget(W.SectionHeader("Enhance on this laptop"))
         lay.addWidget(W.label("The PC puts the scene's piece (the competitor's length + 20 s) in the Enhance folder; this laptop "
                               "takes it by itself, runs Topaz Video AI on it (Proteus 2x, Apollo 60 fps, H.265 "
-                              "Main10 180 Mb/s) and puts the enhanced piece back next to it. The PC then makes the "
+                              "Main10 60 Mb/s) and puts the enhanced piece back next to it. The PC then makes the "
                               "edit with it.", "Muted", wrap=True))
         card = W.Card(hover=False)
         self.now = W.label("", "Name", wrap=True, select=True)

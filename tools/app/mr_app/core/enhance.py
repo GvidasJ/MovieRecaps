@@ -56,7 +56,8 @@ WORKER_GLOB = ".topaz_worker_*.json"
 LOCK_STALE_S = 15 * 60.0            # a lock not rewritten for this long: its computer stopped -- free again
 LOCK_BEAT_S = 5.0                   # the owner rewrites its lock this often (its progress)
 OUT_FPS = 60
-OUT_BITRATE = "180M"
+OUT_BITRATE = "60M"                 # 17 Nov (your call): 60 Mb/s, not 180 -- 4K 60 fps H.265 looks the same, a third the size
+OUT_BUFFER = "120M"
 FAKE_ENV = "MOVIERECAPS_FAKE_TOPAZ"
 ENHANCE_ENV = "MOVIERECAPS_ENHANCE"  # "0": both switches off unless Settings say (the app's tests)
 TOPAZ_ENV = "MOVIERECAPS_TOPAZ"     # Topaz Video AI's folder, when it is not where it installs itself
@@ -75,7 +76,7 @@ NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 # the user's Topaz settings (run 20): Proteus (prob-3) Manual -- revert compression 80, improve detail 80, sharpen 60,
 # reduce noise 80, dehalo 10, anti-alias/deblur -60, add noise 0, recover original detail 10 -- at 2x the piece's own
 # size; Apollo (apo-8) to 60 fps, no slow motion, duplicate frames not replaced; no stabilization, motion deblur or
-# grain; H.265 Main10 at a constant 180 Mb/s in an mp4, the sound copied
+# grain; H.265 Main10 at a constant 60 Mb/s (180 until 17 Nov) in an mp4, the sound copied
 PROTEUS = {"model": "prob-3", "scale": 2, "preblur": -0.6, "noise": 0.8, "details": 0.8, "halo": 0.1, "blur": 0.6,
            "compression": 0.8, "prenoise": 0, "grain": 0, "gsize": 0, "blend": 0.1, "estimate": 0}
 APOLLO = {"model": "apo-8", "slowmo": 1, "rdt": -0.000001, "fps": OUT_FPS}
@@ -972,7 +973,7 @@ def _opts(d: dict) -> str:
 
 def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0) -> list[str]:
     """Topaz's ffmpeg with the user's settings: Proteus at 2x the piece's size, then Apollo to 60 fps; H.265 Main10
-    at a constant 180 Mb/s; the sound copied. The fake Topaz: a plain 2x scale and 60 fps (the tests)."""
+    at a constant OUT_BITRATE; the sound copied. The fake Topaz: a plain 2x scale and 60 fps (the tests)."""
     head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
     tail = ["-c:a", "copy", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(dst)]
     if tz.fake:
@@ -981,7 +982,7 @@ def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vra
     gpu = dict(GPU, vram=f"{vram:g}")
     chain = f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}"
     return head + ["-vf", chain, "-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc", "cbr",
-                   "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", "360M", "-preset", "p5",
+                   "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", OUT_BUFFER, "-preset", "p5",
                    "-tag:v", "hvc1"] + tail
 
 

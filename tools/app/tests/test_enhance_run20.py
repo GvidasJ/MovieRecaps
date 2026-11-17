@@ -312,7 +312,7 @@ def test_the_topaz_command_has_the_users_settings_exactly():
         assert f":{k}={v}:" in up + ":"
     assert ":slowmo=1:" in fi and ":fps=60:" in fi and ":rdt=-1e-06:" in fi
     assert "tvai_stb" not in vf
-    for a, b in (("-c:v", "hevc_nvenc"), ("-profile:v", "main10"), ("-rc", "cbr"), ("-b:v", "180M"),
+    for a, b in (("-c:v", "hevc_nvenc"), ("-profile:v", "main10"), ("-rc", "cbr"), ("-b:v", "60M"),
                  ("-c:a", "copy")):
         assert cmd[cmd.index(a) + 1] == b
     assert cmd[-1] == "out.mp4" and cmd[cmd.index("-f") + 1] == "mp4"
