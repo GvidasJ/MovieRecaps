@@ -119,7 +119,6 @@ def test_switched_off_the_next_video_goes_on_at_once(page):
 
 
 @pytest.mark.parametrize("state,gate,job,running,holds", [
-    (D.GATED, D.G_ENHANCE, None, False, True),            # its piece is with Topaz: the edit waits for it
     (D.GATED, D.G_HEADLINE, None, False, False),          # waits for YOU
     (D.GATED, D.G_SEND, None, False, False),
     (D.SENT, "", J.PAUSED, True, False),                  # paused by you

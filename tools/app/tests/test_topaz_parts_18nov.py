@@ -57,6 +57,15 @@ def test_clips_closer_than_the_gap_are_one_part_and_little_to_save_keeps_the_who
     assert ES.play_ranges([(1240, 1360), (4240, 4360)], F, 1000, 3600) == []
 
 
+def test_what_the_cut_added_to_reach_the_keyframes_is_left_out(monkeypatch):
+    monkeypatch.delenv(ES.RANGES_ENV, raising=False)
+    # the piece starts 5 s before "10 s before the first clip" and ends 8 s after "10 s after the last" (keyframes)
+    assert ES.play_ranges([(1240, 1360), (1480, 1600)], F, 880, 840 + 120 + 192) == [[120, 960]]   # one part: no gap
+    assert ES.play_ranges([(1240, 1360), (4240, 4360)], F, 880, 3600 + 120 + 192) == [[120, 528], [3312, 3720]]
+    # a gap that is not worth another start of Topaz: still one part, without the lead-in and the tail
+    assert ES.play_ranges([(1240, 1960), (2344, 3160)], F, 880, 2400 + 120 + 192) == [[120, 2520]]
+
+
 def test_many_small_parts_are_joined_down_to_twelve(monkeypatch):
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
     clips = [(1000 + 600 * i, 1000 + 600 * i + 48) for i in range(20)]               # 20 clips, 23 s apart
@@ -68,9 +77,12 @@ def test_many_small_parts_are_joined_down_to_twelve(monkeypatch):
 def test_parts_that_are_not_sound_mean_the_whole_piece():
     ok = {"frames": 3600, "fps": "24", "ranges": [[0, 408], [3192, 3600]]}
     assert E.valid_ranges(ok) == [(0, 408), (3192, 3600)]
-    for bad in ([[0, 408]], [[10, 408], [3192, 3600]], [[0, 408], [3192, 3500]], [[0, 408], [400, 3600]],
-                [[0, 408], [408, 3600]], [[0, "x"], [3192, 3600]], None, "nonsense"):
+    for bad in ([[0, 3600]], [[0, 408], [3192, 3700]], [[-5, 408], [3192, 3600]], [[0, 408], [400, 3600]],
+                [[0, 408], [408, 3600]], [[500, 408]], [[0, "x"], [3192, 3600]], None, "nonsense"):
         assert E.valid_ranges(dict(ok, ranges=bad)) == [], bad
+    # one part is sound too: the piece without what the cut added to reach the RAW's keyframes
+    assert E.valid_ranges(dict(ok, ranges=[[100, 3500]])) == [(100, 3500)]
+    assert E.valid_ranges(dict(ok, ranges=[[10, 408], [3192, 3500]])) == [(10, 408), (3192, 3500)]
     assert E.valid_ranges({"ranges": ok["ranges"]}) == []                            # (no length: not known)
 
 
@@ -151,7 +163,6 @@ SPANS = [(600, 720), (720, 780), (3600, 3720)]             # 25-30 s, 30-32.5 s 
 @pytest.fixture
 def topaz(monkeypatch):
     monkeypatch.setenv(E.FAKE_ENV, "1")
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
 
 
@@ -207,8 +218,9 @@ def test_only_the_played_parts_are_enhanced_and_every_clip_shows_its_own_frames(
     start, n = info["start_frame"], info["frames"]
     assert start <= 600 - 240 and start + n >= 3720 + 240                            # 10 s before and after, as before
     rs = E.valid_ranges(info)
-    assert len(rs) == 2 and rs[0][0] == 0 and rs[-1][1] == n
+    assert len(rs) == 2 and start + rs[0][0] == 600 - 240 and start + rs[-1][1] == 3720 + 240   # 10 s, as before
     assert start + rs[0][1] == 780 + 48 and start + rs[1][0] == 3600 - 48            # 2 s more at the gap
+    assert not info.get("encoded") and all(r["ssim"] > 0.999 for r in info["check"])  # the RAW's own frames
     assert E.read_info(E.names(enh, rec["name"]).info)["ranges"] == [list(x) for x in rs]   # Topaz reads the same
     assert ES.outside(p.folder)["need"] == []                                        # every clip is in a part
     job = E.Worker(enh).once()
@@ -269,7 +281,6 @@ def test_a_topaz_computer_that_does_not_know_about_parts_enhances_the_whole_piec
     job = E.Worker(Path(rec["folder"])).once()
     monkeypatch.undo()
     monkeypatch.setenv(E.FAKE_ENV, "1")
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     assert job.state == "done"
     w = E.watch(p.folder)
     assert w.get("state") == "used" and w.get("swapped"), w

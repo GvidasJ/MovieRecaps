@@ -59,7 +59,8 @@ class Settings:
     check_videos: bool = False         # 7 Nov: the edit also renders preview_recreation.mp4 + compare.mp4 (slower)
     scene_only: bool = True            # 7 Nov: a finished project keeps only the RAW's scene +- 10 s (core.archive)
     one_zip: bool = True               # 7 Nov: an uploaded (or week-old) project becomes one zip, its folder goes
-    match_normal: bool = True          # 7 Nov: the edit is matched on the normal RAW, the enhanced picture swapped in
+    match_normal: bool = True          # (18 Nov: not read any more -- the edit is always matched on the normal RAW;
+    #                                    kept so that an older settings.json and an older app stay as they are)
     work_on_share: bool = True         # 8 Nov: a new video's project is made right in "Save projects to", also over
                                        #   the network (the laptop): nothing in this computer's downloads folder
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know

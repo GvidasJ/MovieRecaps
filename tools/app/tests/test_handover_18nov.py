@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -87,21 +88,17 @@ def _job(tmp_path, rec: dict | None):
 
 
 def test_topaz_after_the_edit_still_gets_a_60_fps_sequence(tmp_path, monkeypatch):
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     after = {"state": "skipped", "after_edit": True, "why": "Topaz comes after the edit"}
     assert ES.wants_60(_job(tmp_path / "a", after))                       # 17 Nov's flow: Topaz comes after the edit
     assert ES.wants_60(_job(tmp_path / "b", {"state": "sent"}))           # as before
     assert ES.wants_60(_job(tmp_path / "c", {"state": "used"}))
     assert not ES.wants_60(_job(tmp_path / "d", {"state": "skipped", "why": "sending to Topaz is off in Settings"}))
     assert not ES.wants_60(_job(tmp_path / "e", None))                    # no Topaz: the RAW's own rate
-    monkeypatch.setenv(ES.MATCH_ENV, "0")
-    assert not ES.wants_60(_job(tmp_path / "f", after))
 
 
 def test_the_edits_command_line_asks_for_60_fps_when_topaz_comes_after(tmp_path, monkeypatch):
     from mr_app.core import jobs as J
     from mr_app.core import run as RN
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     p = PJ.create(tmp_path / "projects", name="sixty")
     p.update(enhance={"state": "skipped", "after_edit": True})
     comp, raw = tmp_path / "c.mp4", tmp_path / "r.mp4"
@@ -123,7 +120,6 @@ def _failed_edit(tmp_path, monkeypatch, with_xml: bool = True):
     from mr_app.core import enhance as E
     from test_cover_all_7nov import _movie
     from test_match_normal_7nov import _project
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     monkeypatch.setenv(E.FAKE_ENV, "1")
     p = _project(tmp_path, [(120, 150), (330, 400)])
     run = p.folder / "edit"
@@ -212,7 +208,6 @@ def _done_edit(tmp_path, monkeypatch, state: str, why: str, **more):
     from mr_app.core import enhance as E
     from test_cover_all_7nov import _movie
     from test_match_normal_7nov import _project
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     p = _project(tmp_path, [(120, 150), (330, 400)])
     _movie(p.folder / "edit" / "extras" / "media" / "raw.mp4")
     (p.folder / "enhance" / "raw_enhanced.mp4").unlink()
@@ -389,3 +384,38 @@ def test_the_round_tidies_the_enhance_folder_once_a_day(tmp_path, monkeypatch):
     assert len(out) == 1 and not old.piece.exists()
     again = _piece_files(enh, "2026-10-29_Another old one", 20)
     assert E.sweep([tmp_path / "projects"]) == [] and again.piece.is_file()          # not before tomorrow
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# accuracy: the piece for Topaz is the RAW's own frames (not an 8-bit re-encode) when its keyframes are far apart
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_a_raw_with_keyframes_ten_seconds_apart_is_still_cut_without_an_encode(tmp_path):
+    """18 Nov: 18 of the 26 pieces cut after the edit in D:/Shared/Projects were encoded first ("the RAW's keyframes
+    are too far apart for a piece of at most 0:39"): the cut had 2 s of room to reach a keyframe."""
+    import subprocess
+    from match_cuts.common import ffmpeg_bin
+    from mr_app.core import enhance as E
+    raw = tmp_path / "film.mp4"
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:d=90",
+                    "-f", "lavfi", "-i", "sine=duration=90", "-c:v", "libx264", "-preset", "ultrafast", "-g", "240",
+                    "-keyint_min", "240", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+                    str(raw)], check=True)                                # a keyframe every 10 s, like a film
+    info = E.make_piece(raw, "film", tmp_path / "Enhance", (33.0, 58.0), project=tmp_path)
+    assert not info.get("encoded"), info.get("why_encoded")               # cut from the RAW's own packets
+    assert all(r["ssim"] > 0.999 for r in info["check"])
+    assert info["start_frame"] == 720 and info["frames"] == 720           # keyframe to keyframe: 30 s - 60 s
+    # the 3 s before the span and the 2 s after it are not enhanced: the played part only
+    assert ES.play_ranges([(33 * 24 + 240, 58 * 24 - 240)], Fraction(24), 720, 720) == [[72, 672]]
+
+
+def test_keyframes_too_far_from_the_span_fall_back_as_before():
+    from types import SimpleNamespace
+    from mr_app.core import enhance as E
+    m = SimpleNamespace(rate=Fraction(24), frames=24 * 600, keyframes=[(k, k * 1000, k * 1000 - 1) for k in
+                                                                         range(0, 24 * 600, 24 * 100)])
+    assert E._span_plan(m, 150.0, 180.0) is None                          # noqa: SLF001 - 50 s away: not this way
+    p = E._span_plan(m, 205.0, 280.0)                                     # noqa: SLF001
+    assert (p.k0, p.k1) == (24 * 200, 24 * 300)
+    end = E._span_plan(m, 505.0, 590.0)                                   # noqa: SLF001 - no keyframe after: the end
+    assert (end.k0, end.k1, end.dts_end) == (24 * 500, 24 * 600, None)

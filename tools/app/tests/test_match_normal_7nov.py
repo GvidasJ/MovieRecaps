@@ -155,10 +155,10 @@ def test_the_edit_is_matched_on_the_normal_raw_even_with_the_piece_back(tmp_path
     raw = p.folder / "The.Show.S04E01.mp4"
     raw.write_bytes(b"r")
     p.update(competitor={"file": comp.name}, raw={"file": raw.name})
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
-    assert flow.edit_job(PJ.load(p.folder)).raw == raw
-    monkeypatch.setenv(ES.MATCH_ENV, "0")                                             # run 20: the piece is the RAW
-    assert flow.edit_job(PJ.load(p.folder)).raw == p.folder / E.PROJECT_SUB / E.PROJECT_FILE
+    assert (p.folder / E.PROJECT_SUB / E.PROJECT_FILE).is_file()                      # the piece is back ("used") ...
+    j = flow.edit_job(PJ.load(p.folder))
+    assert j.raw == raw and not j.roles_chosen                                        # ... the edit: the normal RAW
+    # (18 Nov: run 20's other way -- the edit matched ON the enhanced piece, behind a switch -- is gone)
 
 
 def test_to_movie_reads_the_scenes_groups():
@@ -241,11 +241,8 @@ def test_a_60_fps_sequence_plays_the_nearest_enhanced_frame(tmp_path):
 
 def test_an_edit_that_sends_its_piece_to_topaz_is_made_at_60(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    monkeypatch.setenv(ES.MATCH_ENV, "1")
     p = PJ.create(tmp_path, name="x")
     job = SimpleNamespace(project=p.folder)
     assert not ES.wants_60(job)
     p.update(enhance={"state": "sent"})
     assert ES.wants_60(job)
-    monkeypatch.setenv(ES.MATCH_ENV, "0")
-    assert not ES.wants_60(job)

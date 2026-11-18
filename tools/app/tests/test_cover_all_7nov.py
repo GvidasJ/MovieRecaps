@@ -62,10 +62,14 @@ def test_every_clip_inside_changes_nothing(tmp_path):
     assert r["ok"] and r["clips"] == 0 and old.piece.is_file()
 
 
-def test_a_short_raw_goes_to_topaz_whole(tmp_path):
+def test_the_piece_is_what_was_asked_for_keyframe_to_keyframe(tmp_path):
+    # 18 Nov: until 17 Nov a short RAW went to Topaz whole, guessed before the edit ("a short RAW goes to Topaz
+    # whole") -- now a piece is only ever the span the finished edit plays (cover_all), on any RAW
     raw = _movie(tmp_path / "raw.mp4", 40)
-    info = E.make_piece(None, raw, "short", tmp_path / "Enhance", project=tmp_path)
-    assert info["start_frame"] == 0 and abs(info["duration"] - 40.0) < 0.2
+    info = E.make_piece(raw, "short", tmp_path / "Enhance", (10.5, 21.0), project=tmp_path)
+    assert 8.0 <= info["start_s"] <= 10.5 and info["start_s"] + info["duration"] >= 21.0
+    assert info["duration"] <= 15.0 and info["frames"] == round(info["duration"] * 24)
+    assert all(r["ssim"] > 0.999 for r in info["check"])                # the RAW's own frames
 
 
 def test_a_failed_topaz_sends_all_the_clips_again(tmp_path):
@@ -111,5 +115,5 @@ def test_a_raw_that_cannot_be_cut_gets_the_right_length(tmp_path):
     raw = tmp_path / "prores.mov"
     subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:d=240",
                     "-c:v", "prores_ks", "-profile:v", "0", str(raw)], check=True)
-    info = E.make_piece(None, raw, "long", tmp_path / "Enhance", project=tmp_path, span=(100.0, 160.0))
+    info = E.make_piece(raw, "long", tmp_path / "Enhance", (100.0, 160.0), project=tmp_path)
     assert abs(info["duration"] - 62.0) < 1.5 and abs(info["start_s"] - 99.0) < 1.5, info

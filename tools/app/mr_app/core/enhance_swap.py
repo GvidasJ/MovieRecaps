@@ -18,8 +18,9 @@ finished 1_edit.xml play it:
   small, closer than half a second before or after) -- else nothing changes and the edit stays on the normal RAW;
 * the edit as it was matched stays in extras\\1_edit_normal.xml (swapping again starts from it).
 
-Settings -> "Match on the normal RAW" (on): off goes back to run 20 (the edit waits for the piece and is matched on
-it). Everything here reads files and decodes frames: call it from a worker thread."""
+18 Nov: Settings' "Match on the normal RAW" switch is gone (off was run 20: the edit waited for the piece and was
+matched on it) -- this is the only way now. Everything here reads files and decodes frames: call it from a worker
+thread."""
 from __future__ import annotations
 
 import copy
@@ -35,23 +36,8 @@ from pathlib import Path
 NORMAL_XML = "1_edit_normal.xml"
 CHECK_MIN = 0.55                    # the mapped frame's correlation with the normal RAW's (gray, 160 px) at least
 CHECK_MARGIN = 0.02                 # ... and not worse than half a second before / after by more than this
-MATCH_ENV = "MOVIERECAPS_MATCH_NORMAL"
 MAX_REDOS = 3                       # 7 Nov: a video's piece goes to Topaz again at most this often (a failure, clips
                                     #   left on the normal RAW) -- your call: no normal RAW in the timeline
-
-
-def match_normal(settings=None) -> bool:
-    """Settings -> Match on the normal RAW (on by itself); MOVIERECAPS_MATCH_NORMAL=0/1 wins (the tests)."""
-    env = os.environ.get(MATCH_ENV, "").strip()
-    if env in ("0", "1"):
-        return env == "1"
-    try:
-        if settings is None:
-            from . import settings as S
-            settings = S.load()
-        return bool(getattr(settings, "match_normal", True))
-    except Exception:  # noqa: BLE001
-        return True
 
 
 def _rate(el) -> Fraction | None:
@@ -223,22 +209,25 @@ RANGES_ENV = "MOVIERECAPS_TOPAZ_RANGES"   # "0": the whole piece is enhanced, as
 def play_ranges(every: list[tuple[int, int]], fps: Fraction, start: int, frames: int) -> list[list[int]]:
     """18 Nov (The Best Business Idea In Key and Peele (2): 57 s of clips spread over 3:04 of the RAW -- Topaz enhanced
     a 3:24 piece, about an hour, of which the edit plays under a third): the parts of the piece the edit plays, as
-    [first frame, frame after the last] in the PIECE's own frames -- each clip with INNER_MARGIN_S around it, parts
-    closer than MIN_GAP_S joined, the first from the piece's start and the last to its end (so the 10 s before the
-    first clip and after the last are still there). [] when leaving the rest out is not worth it (or cannot be
-    done): then the whole piece is enhanced, as before. ``every``: the clips' frames in the movie; ``start`` /
-    ``frames``: the piece in the movie's frames."""
+    [first frame, frame after the last] in the PIECE's own frames -- COVER_MARGIN_S before the first clip and after
+    the last (as before), INNER_MARGIN_S around each clip at a gap inside the edit, parts closer than MIN_GAP_S
+    joined. What the cut added before and after that to reach the RAW's keyframes (enhance._span_plan) is left out
+    too. Leaving a gap out must be worth another start of Topaz (RANGES_MIN_SAVED of the piece and
+    RANGES_MIN_SAVED_S): else the one part from 10 s before the first clip to 10 s after the last. [] when that is
+    the whole piece (or nothing can be said): the whole piece is enhanced, as before. ``every``: the clips' frames
+    in the movie; ``start`` / ``frames``: the piece in the movie's frames."""
     if os.environ.get(RANGES_ENV, "").strip() == "0" or frames <= 0 or not every:
         return []
     f = float(fps)
-    pad, gap = int(round(INNER_MARGIN_S * f)), int(round(MIN_GAP_S * f))
+    pad, gap, outer = int(round(INNER_MARGIN_S * f)), int(round(MIN_GAP_S * f)), int(round(COVER_MARGIN_S * f))
     spans = sorted((max(0, int(a) - start), min(frames, int(b) - start)) for a, b in every)
     spans = [(a, b) for a, b in spans if b > a]
     if not spans:
         return []
+    lo, hi = max(0, spans[0][0] - outer), min(frames, max(b for _a, b in spans) + outer)
     out: list[list[int]] = []
     for a, b in spans:
-        a, b = max(0, a - pad), min(frames, b + pad)
+        a, b = max(lo, a - pad), min(hi, b + pad)
         if out and a - out[-1][1] <= gap:
             out[-1][1] = max(out[-1][1], b)
         else:
@@ -247,10 +236,11 @@ def play_ranges(every: list[tuple[int, int]], fps: Fraction, start: int, frames:
         i = min(range(len(out) - 1), key=lambda j: out[j + 1][0] - out[j][1])
         out[i][1] = out[i + 1][1]
         del out[i + 1]
-    out[0][0], out[-1][1] = 0, frames                      # the outer ends: the piece's own (10 s more each side)
-    kept = sum(b - a for a, b in out)
-    saved = frames - kept
-    if len(out) < 2 or saved < RANGES_MIN_SAVED * frames or saved < RANGES_MIN_SAVED_S * f:
+    out[0][0], out[-1][1] = lo, hi                         # the outer ends: 10 s more each side, as before
+    gaps = sum(out[i + 1][0] - out[i][1] for i in range(len(out) - 1))
+    if len(out) > 1 and (gaps < RANGES_MIN_SAVED * frames or gaps < RANGES_MIN_SAVED_S * f):
+        out = [[lo, hi]]                                   # the gaps are not worth another start of Topaz
+    if out == [[0, frames]]:
         return []
     return out
 
@@ -374,7 +364,7 @@ def cover_all(project, say=None) -> dict:
         folder = rec.get("folder") or str(E.share_dir())
         if not Path(folder).is_dir():                    # 13 Nov: the address it had then is not reachable now
             folder = str(E.share_dir())
-        info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
+        info = E.make_piece(media, name, folder, (a_s, b_s), project=p.folder,
                             topaz_on=str((rec.get("piece") or {}).get("topaz_on") or rec.get("topaz_on") or ""),
                             progress=(lambda s, t: say(s, t)) if say else None)
         again = False
@@ -622,8 +612,6 @@ def wants_60(job) -> bool:
     """7 Nov (your call: "it should always be 60"): an edit whose project sends its piece to Topaz is made in a 60 fps
     sequence (--sequence-fps 60) -- the enhanced picture swapped in later is 60 fps, and plays at its own rate."""
     try:
-        if not match_normal():
-            return False
         folder = getattr(job, "project", None)
         if folder is None:
             return False

@@ -46,6 +46,13 @@ def fake_topaz(monkeypatch):
     monkeypatch.setenv(E.FAKE_ENV, "1")
 
 
+def _taken(p: P.Project) -> Path | None:
+    """The enhanced piece in the project, once it was checked and copied there ("used")."""
+    d = P.load(p.folder).data.get("enhance") or {}
+    f = p.folder / E.PROJECT_SUB / E.PROJECT_FILE
+    return f if d.get("state") == "used" and f.is_file() else None
+
+
 def _project(root: Path, pair, name: str = "2026-10-29_Test scene") -> P.Project:
     p = P.create(root, competitor_url=None, raw_url=None, raw_file=str(pair.raw), name=name, folder=name)
     for role, src in (("competitor", pair.comp), ("raw", pair.raw)):
@@ -57,8 +64,9 @@ def _project(root: Path, pair, name: str = "2026-10-29_Test scene") -> P.Project
 
 
 def _send(p: P.Project, share: Path, pair) -> dict:
-    """The PC's stage (download_tool.StageThread._enhance) without the window."""
-    info = E.make_piece(pair.comp, pair.raw, p.folder.name, share, project=p.folder)
+    """A piece in the Enhance folder for the project, as enhance_swap.cover_all sends it after the edit (here: the
+    RAW from 1:40 to 2:10 -- the competitor's scene, 1:50-2:00, +- 10 s) -- without the window and without an edit."""
+    info = E.make_piece(pair.raw, p.folder.name, share, (100.0, 130.0), project=p.folder)
     p.update(enhance={"state": "sent", "name": E.safe_name(p.folder.name), "folder": str(share), "sent": time.time(),
                       "piece": info})
     return info
@@ -109,7 +117,7 @@ def test_near_the_movies_ends_the_piece_stays_inside_it():
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# the whole flow: the PC's piece -> the laptop's Topaz -> the PC's edit RAW
+# the whole flow: the piece -> Topaz -> checked and copied into the project (the edit itself: the normal RAW)
 # ---------------------------------------------------------------------------------------------------------------------
 
 def test_the_whole_flow_the_pc_and_the_laptop(tmp_path, pair, fake_topaz):
@@ -117,10 +125,9 @@ def test_the_whole_flow_the_pc_and_the_laptop(tmp_path, pair, fake_topaz):
     p = _project(tmp_path / "projects", pair)
     info = _send(p, share, pair)
     nm = E.names(share, p.folder.name)
-    # the PC's piece: <= 2 min, the scene (1:50-2:00) in it, from the RAW's own frames, its json written last
+    # the piece: what was asked for (1:40-2:10) from keyframe to keyframe, the RAW's own frames, its json written last
     assert nm.piece.is_file() and nm.info.is_file()
-    assert info["duration"] <= E.MAX_PIECE_S and info["start_s"] <= 110.5 and \
-        info["start_s"] + info["duration"] >= 120.0
+    assert info["duration"] <= 36.0 and info["start_s"] <= 100.0 and info["start_s"] + info["duration"] >= 130.0
     assert info["width"] == 320 and info["height"] == 180 and Fraction(info["fps"]) == Fraction(24000, 1001)
     assert all(r["ssim"] > 0.999 for r in info["check"])
     assert json.loads(nm.info.read_text(encoding="utf-8"))["project_folder"] == str(p.folder)
@@ -133,18 +140,19 @@ def test_the_whole_flow_the_pc_and_the_laptop(tmp_path, pair, fake_topaz):
     assert nm.enhanced.is_file() and not nm.part.exists() and not nm.lock.exists()
     assert any(j.state == "done" for j in seen)
     assert w.once() is None                                  # (nothing more to take)
-    # the PC: checked, copied into the project, the share's files gone, the edit's RAW
+    # the computer that made the edit: checked, copied into the project, the share's files gone
     r = E.watch(p.folder)
     assert r["state"] == "used" and "640x360" in r["text"]
     assert not any(f.exists() for f in nm.all())
     p = P.load(p.folder)
-    raw = E.edit_raw(p.data, p.folder)
+    raw = _taken(p)
     assert raw == p.folder / "enhance" / "raw_enhanced.mp4"
     chk = E.check_enhanced(raw, info)
     assert chk["ok"] and chk["width"] == 640 and chk["fps"] == "60"
+    # 18 Nov: an edit made now is still matched on the normal RAW (run 20 matched it ON this piece: that way is gone)
     from mr_app.core import flow
     j = flow.edit_job(p)
-    assert j.raw == raw and j.roles_chosen and j.roles_how == "form"
+    assert j.raw == p.folder / pair.raw.name and not j.roles_chosen
     assert p.file("raw") == p.folder / pair.raw.name           # (the project's own RAW stays as it was)
 
 
@@ -175,12 +183,12 @@ def test_no_answer_in_an_hour_then_a_late_piece_is_used_by_itself(tmp_path, pair
     assert E.watch(p.folder, now=sent + 1800)["state"] == "progress"
     r = E.watch(p.folder, now=sent + E.TIMEOUT_S + 1)
     assert r == {"state": "late", "why": E.TIMEOUT_WHY} and E.is_late("not enhanced: " + r["why"])
-    assert E.edit_raw(P.load(p.folder).data, p.folder) is None          # the normal RAW
+    assert _taken(p) is None                                            # the normal RAW
     assert E.watch(p.folder) == {}                                       # nothing came yet
     assert E.Worker(share).once().state == "done"                        # ... then the laptop's piece comes, late
     r = E.watch(p.folder)
     assert r["state"] == "used" and "came late" in r["text"]             # used by itself
-    assert E.edit_raw(P.load(p.folder).data, p.folder) is not None
+    assert _taken(p) is not None
     assert not any(f.exists() for f in E.names(share, p.folder.name).all())
 
 
@@ -211,7 +219,7 @@ def test_the_laptops_failure_says_why_and_the_normal_raw_is_used(tmp_path, pair)
     nm.failed.write_text("the graphics card ran out of memory\n\n(the laptop X)\n", encoding="utf-8")
     r = E.watch(p.folder)
     assert r["state"] == "failed" and r["why"] == "Topaz could not enhance it: the graphics card ran out of memory"
-    assert not any(f.exists() for f in nm.all()) and E.edit_raw(P.load(p.folder).data, p.folder) is None
+    assert not any(f.exists() for f in nm.all()) and _taken(p) is None
 
 
 def test_topaz_failing_on_the_laptop_writes_the_failure_file(tmp_path, pair, monkeypatch):
@@ -234,7 +242,7 @@ def test_a_broken_enhanced_piece_is_not_used(tmp_path, pair):
     nm.enhanced.write_bytes(nm.piece.read_bytes())          # the piece itself: not 2x, not 60 fps
     r = E.watch(p.folder)
     assert r["state"] == "failed" and "not twice the piece's size" in r["why"]
-    assert E.edit_raw(P.load(p.folder).data, p.folder) is None and not nm.enhanced.exists()
+    assert _taken(p) is None and not nm.enhanced.exists()
     info = P.load(p.folder).data["enhance"]["piece"]
     bad = tmp_path / "half.mp4"                              # 2x and 60 fps, but cut short / not decodable
     subprocess.run([_ffmpeg(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=60", "-t",
@@ -425,7 +433,6 @@ def _row_after(qapp, tmp_path, pair, monkeypatch):
     """A row whose video is ready for its edit, Topaz on: the "enhance" stage only left its note (no piece yet)."""
     from mr_app.tools import download_tool as D
     from mr_app.tools.match_cuts_tool import MatchCutsPage
-    monkeypatch.setenv("MOVIERECAPS_MATCH_NORMAL", "1")
     ctx = _Ctx()
     mc = MatchCutsPage(ctx)
     starts = []
@@ -521,7 +528,7 @@ def test_after_the_conversion_the_piece_is_made_first_then_the_row_goes_on(qapp,
     assert it.steps["enhance"].state == D.S_NOTE
     assert it.steps["enhance"].text == "not enhanced: the sound check could not find the scene in the RAW"
     page.send_to_edit(it)                                                     # a skipped piece never holds the edit
-    assert it.gate != D.G_ENHANCE
+    assert not hasattr(D, "G_ENHANCE")                                        # (18 Nov: that gate is gone)
 
 
 def test_a_piece_back_that_no_row_watches_is_taken_by_the_round(tmp_path, pair, fake_topaz):

@@ -1,25 +1,28 @@
-"""Run 20: the scene's piece enhanced with Topaz Video AI on the laptop, by itself.
+"""The scene's piece enhanced with Topaz Video AI, by itself (run 20; the order as it is since 17 Nov).
 
-The PC (``make_piece``, right after the conversion): the quick sound check (match_cuts.pair_check) finds where the
-competitor's scene is in the RAW; a piece of at most MAX_PIECE_S around it (the scene in the middle, the rest as
-margin) is cut by stream copy from the keyframe before (match_cuts.excerpt: the movie's own packets, its frames
-checked against the RAW at three places), its sound made AAC (Topaz's ffmpeg cannot put PCM in an mp4), and put in
-the Enhance folder (``share_dir``: D:\\Shared\\Enhance on the PC) as ``<project>_TOENHANCE.mp4`` with
-``<project>_TOENHANCE.json`` (where the piece starts in the RAW, its rate, length, size, which project). The json is
-written last: a piece without it is not finished yet.
+The order of one video (your call, 17 Nov): edit -> Topaz once -> the enhanced picture into the edit -> zip.
 
-The laptop (``Worker``, every SCAN_S and at the start): a ``_TOENHANCE.mp4`` with its json that nobody has taken is
-taken (``<project>_TOENHANCE.lock``, made with O_EXCL: two computers never take the same one; the owner rewrites it
-every few seconds with its progress, and a lock nobody rewrote for LOCK_STALE_S is free again), then Topaz's own
-ffmpeg runs on it (``topaz_command``: the user's settings, exactly) into ``<project>_ENHANCING.part.mp4``, which is
-checked (``check_enhanced``) and renamed ``<project>_ENHANCED.mp4`` -- the PC never sees a half-written file. A
-failure writes ``<project>_ENHANCE_FAILED.txt`` (the reason in plain words).
+After the edit (``enhance_swap.cover_all`` -> ``make_piece``): the RAW from the edit's first clip to its last, 10 s
+more on each side, is cut by stream copy from the keyframe before (match_cuts.excerpt: the movie's own packets, its
+frames checked against the RAW at three places; a RAW that cannot be cut that way gets an encoded piece), its sound
+made AAC (Topaz's ffmpeg cannot put PCM in an mp4), and put in the Enhance folder (``share_dir``: D:\\Shared\\Enhance
+on the PC) as ``<project>_TOENHANCE.mp4`` with ``<project>_TOENHANCE.json`` (where the piece starts in the RAW, its
+rate, length, size, which project; 18 Nov: "ranges" -- the parts of it the edit plays). The json is written last: a
+piece without it is not finished yet.
 
-The PC again (``status`` / ``take_back``): ``_ENHANCED.mp4`` checked (the same length as the piece within one of its
-frames, 60 fps, twice its size, it decodes from the first frame), copied into the project (``enhance\\raw_enhanced.mp4``:
-the edit's RAW from then on, ``edit_raw``) and the share's files deleted. Nothing back within TIMEOUT_S, or the
-failure file: the edit is made with the normal RAW, and a late enhanced piece is only used when you press "Use the
-enhanced piece".
+The computer that enhances (``Worker``, every SCAN_S and at the start): a ``_TOENHANCE.mp4`` with its json that
+nobody has taken is taken (``<project>_TOENHANCE.lock``, made with O_EXCL: two computers never take the same one; the
+owner rewrites it every few seconds with its progress, and a lock nobody rewrote for LOCK_STALE_S is free again),
+then Topaz's own ffmpeg runs on it (``topaz_command``: the user's settings, exactly; ``enhance_parts``: only the
+played parts) into ``<project>_ENHANCING.part.mp4``, which is checked (``check_enhanced``) and renamed
+``<project>_ENHANCED.mp4`` -- nobody ever sees a half-written file. A failure writes
+``<project>_ENHANCE_FAILED.txt`` (the reason in plain words and Topaz's last lines).
+
+The computer that made the edit (``watch`` / ``sweep`` / ``take_back``): ``_ENHANCED.mp4`` checked (the length, 60
+fps, the size, it decodes from the first frame), copied into the project (``enhance\\raw_enhanced.mp4``), the share's
+files deleted, and ``enhance_swap.swap_in`` makes the finished 1_edit.xml play it. A failure: the piece is sent
+again (at most enhance_swap.MAX_REDOS times, also later by the round). Nothing back within TIMEOUT_S: the zip is
+made with the normal RAW and a late piece is still used by itself when it comes.
 
 MOVIERECAPS_FAKE_TOPAZ=1 (the tests): a plain 2x scale + 60 fps with the normal ffmpeg instead of Topaz."""
 from __future__ import annotations
@@ -39,11 +42,7 @@ from typing import Any, Callable
 
 from . import machine as M
 
-MAX_PIECE_S = 80.0                  # the piece when the competitor's length is unknown: at most 1:20
-WHOLE_RAW_S = 180.0                 # 7 Nov (your call: everything must be enhanced): a RAW this short goes to Topaz
-                                    #   whole -- no guess of where the scene is, no clip left out
-EXTRA_S = 20.0                      # 29 Oct, your call: the piece = the competitor's length + 20 s (10 s each side):
-                                    # a 10 s competitor -> a 30 s piece, a 20 s one -> 40 s
+MAX_PIECE_S = 80.0                  # ``plan``'s limit when the caller gives none (make_piece gives the span's own)
 TIMEOUT_S = 3600.0                  # nothing back from the laptop within this: the normal RAW
 TIMEOUT_WHY = "the laptop did not answer in 1 hour"
 STILL_WHY = "the laptop was still enhancing it"
@@ -235,6 +234,39 @@ def plan(m: Any, places: list[float], win_s: float, max_s: float = MAX_PIECE_S):
                        "scene")
 
 
+KEYFRAME_ROOM_S = 30.0              # a keyframe this far before the span / after it still starts / ends the piece
+
+
+def _span_plan(m: Any, s0: float, s1: float, room_s: float = KEYFRAME_ROOM_S):
+    """18 Nov (the projects: 18 of the 26 pieces cut after the edit were ENCODED first -- "the RAW's keyframes are
+    too far apart for a piece of at most 0:39": the cut had 2 s of room, a film's keyframes are up to 10 s apart --
+    so Topaz got an 8-bit re-encode instead of the RAW's own frames): the piece from the last keyframe at or before
+    ``s0`` to the first keyframe at or after ``s1`` (or the RAW's end), each at most ``room_s`` away. What that adds
+    before and after the span is not enhanced (enhance_swap.play_ranges leaves it out). None when the RAW has no
+    such keyframes (the caller's old rule, then an encoded piece)."""
+    from match_cuts.excerpt import Plan
+    f = float(m.rate)
+    keys = sorted(m.keyframes or [])
+    if not keys or f <= 0:
+        return None
+    first, last = int(math.floor(s0 * f + 1e-6)), int(math.ceil(s1 * f - 1e-6))
+    before = [k for k in keys if k[0] <= first]
+    if not before:
+        return None
+    k0, pts0, _d = before[-1]
+    if (first - k0) / f > room_s:
+        return None
+    after = [k for k in keys if k[0] >= last and k[0] > k0]
+    if after:
+        k1, _p1, dts_end = after[0]
+        if (k1 - last) / f > room_s:
+            return None
+        return Plan(int(k0), int(k1), int(pts0), int(dts_end), [float(s0)])
+    if (int(m.frames) - last) / f > room_s or int(m.frames) <= k0:
+        return None
+    return Plan(int(k0), int(m.frames), int(pts0), None, [float(s0)])          # (the RAW ends there)
+
+
 def _run(cmd: list[str], timeout: float = 1800.0) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                           creationflags=NO_WINDOW)
@@ -255,114 +287,34 @@ def _aac(mov: Path, dst: Path, channels: int) -> None:
     os.replace(tmp, dst)
 
 
-def piece_length(competitor: str | os.PathLike) -> float:
-    """The piece's length for this competitor: its own length + EXTRA_S (10 s each side of the scene); MAX_PIECE_S
-    when its length can't be read."""
-    from match_cuts.common import ffprobe_bin
-    try:
-        r = _run([ffprobe_bin(), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-                  str(competitor)], timeout=60)
-        d = float((r.stdout or "").strip().splitlines()[0])
-    except Exception:  # noqa: BLE001 - unknown length: the old limit
-        return MAX_PIECE_S
-    return d + EXTRA_S if d > 0 else MAX_PIECE_S
-
-
-def find_scene(competitor: str | os.PathLike, raw: str | os.PathLike, work: str | os.PathLike | None = None,
-               progress: Callable[[str], None] | None = None) -> list[float]:
-    """Where the competitor's sound is in the RAW (RAW seconds), by the tool's quick sound check. Raises EnhanceError
-    when it cannot say."""
-    from match_cuts import pair_check as PC
-    res = PC.check(str(competitor), str(raw), work, progress)
-    snd = getattr(res, "sound", None)
-    if getattr(res, "wrong", False):
-        raise EnhanceError("the quick check says the competitor does not come from this RAW")
-    if snd is not None and getattr(snd, "state", "") == PC.FOUND and list(getattr(snd, "where", None) or []):
-        return [float(x) for x in snd.where]
-    # 29 Oct: the sound did not find it (music over the scene: Madagascar, Key & Peele) -> the picture's found frames,
-    # else the sound's almost-found pieces -- their biggest group that fits in one piece
-    pic = getattr(res, "picture", None)
-    if pic is not None and getattr(pic, "state", "") == PC.FOUND and list(getattr(pic, "where", None) or []):
-        g = _group([float(x) for x in pic.where], MAX_PIECE_S - PC.WIN_S)
-        if len(g) >= 2:
-            return g
-    frames = (getattr(pic, "details", None) or {}).get("frames") if pic is not None else None
-    tried = list(((getattr(snd, "details", None) or {}).get("tried") or {}).values()) + ([frames] if frames else [])
-    for stats in tried:
-        # almost-found pieces that agree on WHERE the competitor starts in the RAW (raw_at - at within 1.5 s)
-        pts = sorted((float(x["raw_at"]) - float(x.get("at") or 0.0), float(x["raw_at"])) for x in stats
-                     if isinstance(x, dict) and (x.get("weak") or x.get("found")) and x.get("raw_at") is not None)
-        best: list = []
-        for i in range(len(pts)):
-            grp = [q for q in pts if abs(q[0] - pts[i][0]) <= 1.5]
-            if len(grp) > len(best):
-                best = grp
-        if len(best) >= 2:
-            g = _group([q[1] for q in best], MAX_PIECE_S - PC.WIN_S)
-            if len(g) >= 2:
-                return g
-    why = str(getattr(snd, "why", "") or "").strip()
-    raise EnhanceError("neither the sound nor the picture check could find the scene in the RAW" +
-                       (f" ({why})" if why else ""))
-
-
-def _group(times: list[float], span: float) -> list[float]:
-    """The biggest group of ``times`` that fits within ``span`` seconds (the earliest group on a tie)."""
-    t = sorted(times)
-    best: list[float] = []
-    j = 0
-    for i in range(len(t)):
-        while t[i] - t[j] > span:
-            j += 1
-        if i - j + 1 > len(best):
-            best = t[j:i + 1]
-    return best
-
-
-def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str, out_dir: str | os.PathLike,
+def make_piece(raw: str | os.PathLike, name: str, out_dir: str | os.PathLike, span: tuple[float, float],
                project: str | os.PathLike | None = None, work: str | os.PathLike | None = None,
-               progress: Callable[[float, str], None] | None = None, max_s: float | None = None,
-               topaz_on: str = "", span: tuple[float, float] | None = None) -> dict:
-    """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json. Returns its
-    info (the json's content); raises EnhanceError with the reason in plain words -- then the edit uses the normal
-    RAW."""
+               progress: Callable[[float, str], None] | None = None, topaz_on: str = "") -> dict:
+    """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json: the RAW from
+    ``span[0]`` to ``span[1]`` seconds -- what the finished edit plays, +- 10 s (enhance_swap.cover_all) -- cut by
+    stream copy from the keyframe before to the keyframe after. Returns its info (the json's content); raises
+    EnhanceError with the reason in plain words -- then the edit keeps the normal RAW.
+
+    18 Nov: until 17 Nov a piece was also guessed BEFORE the edit (the quick sound check found the scene; a short RAW
+    went whole) -- that path is gone (your call: edit, then Topaz, then the zip), and with it find_scene,
+    piece_length and the whole-RAW rule."""
     from match_cuts import excerpt as X
-    from match_cuts.pair_check import WIN_S
     say = progress or (lambda share, text: None)
     raw = Path(raw)
     nm = names(out_dir, name)
     work = Path(work) if work else Path(project or raw.parent) / PROJECT_SUB
     t0 = time.perf_counter()
-    win = WIN_S
-    if span is not None:                                 # 7 Nov: the frames the finished edit plays (cover_all)
-        say(0.4, "reading the RAW's keyframes")
-        m = X.movie_facts(str(raw))
-        places = [max(0.0, float(span[0]))]
-        dur_all = float(m.duration or 0.0) or float(_probe_raw(raw).get("duration") or 0.0)   # 9 Nov: 0 for a RAW
-        end = min(dur_all, float(span[1])) if dur_all > 0 else float(span[1])                 #   that cannot be cut
-        win = max(1.0, end - places[0])                                                       #   (Car Salesman: 3 s)
-        max_s = win + 2.0
-    else:
-        say(0.4, "reading the RAW's keyframes")
-        m = X.movie_facts(str(raw))
-        dur_all = float(m.duration or 0.0) or float(_probe_raw(raw).get("duration") or 0.0)   # 9 Nov: a RAW that
-        if 0.0 < dur_all <= WHOLE_RAW_S:                 #   cannot be cut has no length in movie_facts (it was 0:
-            places, win, max_s = [0.0], dur_all, dur_all + 1.0      # What About Bob got a 1 s piece) -- 7 Nov: a
-                                                                    # short RAW goes whole (no scene to guess)
-        else:
-            say(0.05, "finding the scene in the RAW (the sound)")
-            places = find_scene(competitor, raw, work / "pair_check", lambda s: say(0.1, f"finding the scene: {s}"))
-            if max(places) + WIN_S - min(places) > MAX_PIECE_S - 10.0:   # 30 Oct: places far apart (a montage,
-                places = _group(places, MAX_PIECE_S - 10.0 - WIN_S)      #   look-alikes) -> the biggest group
-            if max_s is None:
-                max_s = piece_length(competitor)
-                spread = max(places) + WIN_S - min(places)    # 30 Oct: the competitor skips parts of the scene (Key
-                if spread + 10.0 > max_s:                     # & Peele: places 45 s apart in a 23 s video) -> a
-                    max_s = min(MAX_PIECE_S, spread + 10.0)   # longer piece, 5 s each side, at most 1:20
+    say(0.4, "reading the RAW's keyframes")
+    m = X.movie_facts(str(raw))
+    places = [max(0.0, float(span[0]))]
+    dur_all = float(m.duration or 0.0) or float(_probe_raw(raw).get("duration") or 0.0)   # 9 Nov: 0 for a RAW
+    end = min(dur_all, float(span[1])) if dur_all > 0 else float(span[1])                 #   that cannot be cut
+    win = max(1.0, end - places[0])                                                       #   (Car Salesman: 3 s)
+    max_s = win + 2.0
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
         return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say, topaz_on, win)
     try:
-        p = plan(m, places, win, max_s)
+        p = _span_plan(m, places[0], places[0] + win) or plan(m, places, win, max_s)
     except EnhanceError as e:                            # 30 Oct: keyframes too far apart for a lossless cut -> an
         if "keyframe" not in str(e):                     # encoded piece of the same window
             raise
@@ -412,19 +364,18 @@ def make_piece(competitor: str | os.PathLike, raw: str | os.PathLike, name: str,
 
 
 def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", name: str, project: Any,
-                   why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str = "",
-                   win: float | None = None) -> dict:
+                   why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str,
+                   win: float) -> dict:
     """29 Oct: the piece when the RAW cannot be cut losslessly (uneven frame timing, ...): the same time window
     encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words)."""
     from match_cuts.common import ffmpeg_bin
-    from match_cuts.pair_check import WIN_S
     st = _probe_raw(raw)
     fps = st["fps"]
     dur = st["duration"]
     if not fps or not dur:
         raise EnhanceError(f"the RAW cannot be cut losslessly ({why_not_copy}) and its frame rate or length can't "
                            "be read")
-    s0, s1 = max(0.0, min(places)), min(dur, max(places) + (WIN_S if win is None else win))
+    s0, s1 = max(0.0, min(places)), min(dur, max(places) + win)
     if s1 - s0 > max_s:
         raise EnhanceError(f"the scene is {_clock(s1 - s0)} long (places far apart or a montage) -- more than "
                            f"{_clock(max_s)}")
@@ -514,14 +465,14 @@ def read_info(path: str | os.PathLike) -> dict | None:
 
 def valid_ranges(info: dict) -> list[tuple[int, int]]:
     """18 Nov: the parts of the piece to enhance (its json's "ranges": [first frame, frame after the last] in the
-    piece's own frames, made by enhance_swap.play_ranges) -- only when they are sound: two or more, in order, not
-    touching, inside the piece, from its first frame to its last. Else [] (the whole piece, as before)."""
+    piece's own frames, made by enhance_swap.play_ranges) -- only when they are sound: in order, not touching,
+    inside the piece, and not simply all of it. Else [] (the whole piece, as before)."""
     try:
         rs = [(int(a), int(b)) for a, b in (info.get("ranges") or [])]
         n = int(info.get("frames") or 0)
     except (TypeError, ValueError):
         return []
-    if len(rs) < 2 or n <= 0 or rs[0][0] != 0 or rs[-1][1] != n:
+    if not rs or n <= 0 or rs[0][0] < 0 or rs[-1][1] > n or rs == [(0, n)]:
         return []
     at = -1
     for a, b in rs:
@@ -954,7 +905,7 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
             return {"state": "failed", "why": r.get("why")}
         from . import enhance_swap as ES
         steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}
-        if ES.match_normal() and ES.edit_made(p.folder, steps.get("edit")):
+        if ES.edit_made(p.folder, steps.get("edit")):
             sw = ES.swap_in(p.folder)
             if sw.get("ok") and sw.get("kept"):
                 ES.cover_all(p.folder)
@@ -968,7 +919,7 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
             p.update(enhance={"state": "used", "used": now, "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text})
             from . import enhance_swap as ES            # 7 Nov: the edit is finished already (matched on the normal
             steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}         # RAW): it plays the picture now
-            if ES.match_normal() and ES.edit_made(p.folder, steps.get("edit")):   # (18 Nov: a FAIL with its XML too)
+            if ES.edit_made(p.folder, steps.get("edit")):                       # (18 Nov: a FAIL with its XML too)
                 sw = ES.swap_in(p.folder)
                 if sw.get("ok") and sw.get("kept"):     # 7 Nov: clips left on the normal RAW -> Topaz again
                     if ES.cover_all(p.folder).get("clips"):
@@ -1082,15 +1033,6 @@ def use_late(project: str | os.PathLike) -> dict:
     text = f"enhanced on the laptop: {c.get('width')}x{c.get('height')}, {OUT_FPS} fps (came late)"
     p.update(enhance={"state": "used", "used": time.time(), "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text})
     return {"ok": True, "why": "", "text": text}
-
-
-def edit_raw(project_data: dict, folder: str | os.PathLike) -> Path | None:
-    """The enhanced piece the edit plays instead of the RAW (project.json's "enhance": used), else None."""
-    e = project_data.get("enhance") if isinstance(project_data, dict) else None
-    if not isinstance(e, dict) or e.get("state") != "used":
-        return None
-    f = Path(folder) / PROJECT_SUB / PROJECT_FILE
-    return f if f.is_file() else None
 
 
 # ---------------------------------------------------------------------------------------------------------------------

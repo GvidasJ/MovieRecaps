@@ -66,7 +66,6 @@ STEP_ENHANCE = ("enhance", "Enhance")      # run 20: the scene's piece enhanced 
 
 # what a row waits for
 G_CONVERT, G_SEND, G_HEADLINE, G_COMP = "convert", "send", "headline", "competitor"
-G_ENHANCE = "enhance"                      # run 20: the edit waits for the laptop's enhanced piece
 ENHANCE_POLL_S = 10.0                      # run 20: the Enhance folder is looked at this often for a waiting row
 ONE_ENV = "MOVIERECAPS_ONE_AT_A_TIME"      # 7 Nov: "0" / "1" wins over Settings -> One video at a time (the tests)
 
@@ -369,38 +368,18 @@ class StageThread(QThread):
         return res
 
     def _enhance(self, out: dict) -> None:
-        """Run 20: the scene's piece into the Enhance folder for the laptop (core.enhance.make_piece). Never fails the
-        row: a piece that cannot be made means the edit uses the normal RAW (``out["enhance"]`` says why)."""
+        """The row's "enhance" stage before the edit: only its note. 17 Nov (your call: "just edit, then Topaz 10
+        seconds before, 10 seconds after, the zip, and that's it"): no piece is cut before the edit -- one guessed
+        there was the whole 2:01 RAW for a 0:27 Short (40 minutes of Topaz), or missed clips the edit then used (The
+        Best Business Idea (2): 24 clips outside it -> Topaz ran twice). The piece is cut AFTER the edit, from what it
+        plays +- 10 s (enhance_swap.cover_all), on whichever computer enhances. (18 Nov: the code that cut a piece
+        here -- for run 20's flow, the edit waiting for it -- is gone.)"""
         from ..core import enhance as E
         from ..core import settings as S
-        it = self.item
         p = self._project()
-        comp, raw = p.file("competitor"), p.file("raw")
-        folder = E.share_dir(S.load())
-        name = p.folder.name
-        rec: dict = {"name": E.safe_name(name), "folder": str(folder)}
-        where = str(getattr(S.load(), "enhance_where", "") or "")
-        try:
-            from ..core.enhance_swap import match_normal
-            if match_normal():
-                # 17 Nov (your call: "just edit, then Topaz 10 seconds before, 10 seconds after, the zip, and that's
-                # it"): no piece is cut before the edit any more. A piece guessed before the edit was the whole 2:01
-                # RAW for a 0:27 Short (40 minutes of Topaz), or missed clips the edit then used (The Best Business
-                # Idea (2): 24 clips outside it -> Topaz ran twice). The piece is cut AFTER the edit, from its first
-                # clip to its last +- 10 s (enhance_swap.cover_all): one Topaz run, on whichever computer enhances.
-                raise E.EnhanceError(AFTER_EDIT)
-            if comp is None or raw is None or not comp.is_file() or not raw.is_file():
-                raise E.EnhanceError("the competitor and the RAW are not both in the folder")
-            info = E.make_piece(comp, raw, name, folder, project=p.folder,
-                                progress=lambda s, t: self._say("raw", s, t),
-                                topaz_on=where)
-            rec.update(state="sent", sent=time.time(), where=info.get("where"), piece=info)
-        except E.EnhanceError as e:
-            rec.update(state="skipped", why=str(e))
-            if str(e) == AFTER_EDIT:
-                rec.update(after_edit=True, topaz_on=where)
-        except Exception as e:  # noqa: BLE001 - said in plain words; the edit goes on with the normal RAW
-            rec.update(state="skipped", why=NV.plain_error(e))
+        s = S.load()
+        rec = {"name": E.safe_name(p.folder.name), "folder": str(E.share_dir(s)), "state": "skipped",
+               "why": AFTER_EDIT, "after_edit": True, "topaz_on": str(getattr(s, "enhance_where", "") or "")}
         p.update(enhance=None)                            # (a new try: nothing of the last one's kept)
         p.update(enhance=rec)
         out["enhance"] = rec
@@ -1051,8 +1030,6 @@ class VideoRow(W.Card):
             return word, theme.pill_colours(lab)
         if it.gate == G_HEADLINE:
             return "needs a headline", theme.pill_colours("note")
-        if it.gate == G_ENHANCE:
-            return "waiting for the laptop", None
         if it.state == GATED or waits_for_pick(it):
             return ("Check which is the RAW", theme.pill_colours("note")) if waits_for_pick(it) else \
                 ("waiting for you", None)
@@ -1989,7 +1966,7 @@ class DownloadPage(QWidget):
         if o.state in (QUEUED, WORKING):
             return True
         if o.state == GATED:
-            return o.gate == G_ENHANCE
+            return False                                  # (18 Nov: no gate waits for Topaz any more -- only for YOU)
         if o.state != SENT:
             return False
         j = o.job
@@ -2349,12 +2326,6 @@ class DownloadPage(QWidget):
             return
         if it.state == SENT and it.job is None:
             return                                        # being sent already (a second press)
-        from ..core.enhance_swap import match_normal
-        if it.enhance and (it.steps.get("enhance") or Step()).state == S_RUN and not match_normal():
-            self._gate(it, G_ENHANCE)                     # run 20: the edit waits for the laptop's enhanced piece
-            self._enhance_wanted = 0.0                    #   (the Enhance folder looked at now)
-            return                                        # (7 Nov: no more -- matched on the normal RAW, the
-            #                                               enhanced picture swapped in when it is back)
         # project.json + title.txt written and read back (a network folder on the laptop): off the window's thread
         # (day 12 click-through: 60-140 ms here). SENT at once: "Turn off the PC" counts it as work meanwhile.
         it.state = SENT
@@ -2487,9 +2458,6 @@ class DownloadPage(QWidget):
         else:
             return
         self._save_rows()
-        if it.gate == G_ENHANCE:                          # the edit waited for it: it starts now
-            it.gate = ""
-            self.send_to_edit(it, start=True)
 
     def use_enhanced(self, it: Item) -> None:
         """"Use the enhanced piece": the laptop's piece came after the edit was made with the normal RAW -- it is
@@ -2503,7 +2471,7 @@ class DownloadPage(QWidget):
             from ..core import enhance as E
             from ..core import enhance_swap as ES
             r = E.use_late(folder)
-            if r.get("ok") and ES.match_normal():          # 7 Nov: the finished edit plays it -- no edit again
+            if r.get("ok"):                                # 7 Nov: the finished edit plays it -- no edit again
                 sw = ES.swap_in(folder)
                 r = dict(r, swapped=bool(sw.get("ok")), text=sw.get("text") or r.get("text"),
                          why=sw.get("why") or r.get("why"))
@@ -2521,11 +2489,6 @@ class DownloadPage(QWidget):
                            r.get("text") if r["swapped"] else f"not swapped: {r.get('why')}")
                 self.toast("The edit plays the enhanced picture now ✓" if r["swapped"] else
                            f"Not swapped: {r.get('why')}", "ok" if r["swapped"] else "warn")
-                return
-            self._step(it, "enhance", S_DONE, 1.0, r.get("text") or "enhanced on the laptop")
-            it.error, it.result = "", {}
-            self._step(it, "edit", S_WAIT, 0.0, "")
-            self.send_to_edit(it, start=True)
 
         off_thread(work, done, lambda e: done({"ok": False, "why": NV.plain_error(e)}))
 
@@ -2832,10 +2795,6 @@ class DownloadPage(QWidget):
                     "Converted — press Send to Match cuts when you want")
         if it.gate == G_HEADLINE:
             return "Waiting for the headline — download and convert are done"
-        if it.gate == G_ENHANCE:                          # run 20
-            st = it.steps.get("enhance") or Step()
-            return f"The scene's piece is with the laptop ({st.text or 'waiting for the laptop'}) — the edit " \
-                   "starts when it comes back"
         if it.state == DONE:
             lab = it.result.get("label", "")
             if it.kind == NV.JUST_CUTS:
