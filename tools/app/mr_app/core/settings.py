@@ -63,12 +63,15 @@ class Settings:
     work_on_share: bool = True         # 8 Nov: a new video's project is made right in "Save projects to", also over
                                        #   the network (the laptop): nothing in this computer's downloads folder
     extra: dict = field(default_factory=dict, repr=False, compare=False)   # keys of the file this version does not know
+    # 18 Nov: what the file said when this object was read (``load``); None for one made by hand. ``save`` writes only
+    # what was changed since then (see there).
+    loaded: dict | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         """The file's JSON object: the keys kept from the file first, then this version's own."""
         out = dict(self.extra)
         for f in fields(self):
-            if f.name != "extra":
+            if f.name not in ("extra", "loaded"):
                 v = getattr(self, f.name)
                 out[f.name] = list(v) if isinstance(v, list) else v
         return out
@@ -78,7 +81,7 @@ class Settings:
         """A Settings from the file's object: a value of the wrong kind falls back to its default, unknown keys go
         to ``extra``."""
         base = cls()
-        known = {f.name for f in fields(cls)} - {"extra"}
+        known = {f.name for f in fields(cls)} - {"extra", "loaded"}
         kw: dict[str, Any] = {}
         for name in known:
             if name in d:
@@ -196,21 +199,43 @@ def load() -> Settings:
             return Settings()
         except OSError:
             return Settings()
-    return Settings() if d is None else Settings.from_dict(d)
+    s = Settings() if d is None else Settings.from_dict(d)
+    s.loaded = json.loads(json.dumps(s.to_dict()))        # (its own copy: lists and dicts too)
+    return s
 
 
 def save(s: Settings) -> Path:
     """Write the settings atomically. Keys in the file this version does not know are kept (also ones written after
-    ``s`` was loaded)."""
+    ``s`` was loaded).
+
+    18 Nov (17 Nov: a setting changed in the file while the app ran was lost): the window keeps the settings it read
+    when the app opened, and Settings -> OK wrote ALL of them back -- every value changed in the file since then (by
+    hand, by "Remember this channel", by the other page's switch) went back to what it was at the start. Now only
+    what was changed in ``s`` since it was read is written; everything else stays as the file has it now. A Settings
+    made by hand (not read from the file) is written whole, as before."""
     p = path()
     with _lock:
         try:
             disk = _read(p) or {}
         except (ValueError, OSError):
             disk = {}
-        known = {f.name for f in fields(Settings)} - {"extra"}
-        data = {k: v for k, v in disk.items() if k not in known}
-        data.update(s.to_dict())
+        known = {f.name for f in fields(Settings)} - {"extra", "loaded"}
+        mine = s.to_dict()
+        was = s.loaded if isinstance(getattr(s, "loaded", None), dict) else None
+        if was is None:
+            data = {k: v for k, v in disk.items() if k not in known}
+            data.update(mine)
+        else:
+            data = dict(disk)
+            for k, v in mine.items():
+                if k not in disk or k not in was or v != was[k]:      # new here, or changed since it was read
+                    data[k] = v
+            for k in was:                                 # a remembered choice taken out of ``s.extra`` since
+                if k not in mine and k not in known:
+                    data.pop(k, None)
+            for k in known:                               # a value of the wrong kind in the file: this version's
+                if k in data and _valid(k, data[k], mine[k]) != data[k]:
+                    data[k] = mine[k]
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f".{p.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         try:
@@ -231,6 +256,12 @@ def save(s: Settings) -> Path:
                 tmp.unlink()
             except OSError:
                 pass
+        if was is not None:                               # ``s`` now says what the file says
+            fresh = Settings.from_dict(data)
+            for f in fields(Settings):
+                if f.name != "loaded":
+                    setattr(s, f.name, getattr(fresh, f.name))
+            s.loaded = json.loads(json.dumps(fresh.to_dict()))
     return p
 
 

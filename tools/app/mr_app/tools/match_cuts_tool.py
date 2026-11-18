@@ -66,7 +66,43 @@ class JobThread(QThread):
         self.estimate = 0.0
         self.stop_asked = False             # day 12: Stop (or Swap) pressed before the tool started
 
+    def _say_done(self, job_id: int, res: dict) -> None:
+        self._said = True
+        self.done.emit(job_id, res)
+
     def run(self) -> None:
+        """18 Nov ("it must not stop"): an error of the app's own around the tool's run (reading a length, the lock,
+        the row's numbers, writing project.json) ended this thread without a word -- the row stayed "running" for
+        ever and the queue never went on to the next video. Now it ends as a FAIL that says so (Try again makes it
+        again), the project knows its edit failed, and the reason is in crash.log."""
+        self._said = False
+        try:
+            self._work()
+        except BaseException as e:  # noqa: BLE001 - whatever it was: the row and the queue hear about it
+            from ..core import trouble
+            trouble.note(f"the edit of {getattr(self.job, 'name', '?')}", e)
+            try:
+                run = getattr(self, "run_", None)
+                if run is not None and run.running():
+                    run.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            if not self._said:
+                res = {"label": R.FAIL, "failures": [f"the app itself had an error around this edit "
+                                                     f"({type(e).__name__}: {e}) -- press Try again"]}
+                run = getattr(self, "run_", None)
+                if run is not None:
+                    res["run_dir"] = str(run.run_dir)
+                if self.job.project is not None:
+                    try:
+                        from ..core import flow
+                        from ..core import projects as PJ
+                        flow.record_edit(PJ.load(self.job.project), res)
+                    except Exception as e2:  # noqa: BLE001
+                        trouble.note(f"writing the failed edit of {getattr(self.job, 'name', '?')}", e2)
+                self._say_done(self.job.id, res)
+
+    def _work(self) -> None:
         from ..core import flow
         from ..core.run import JobRun
         j = self.job
@@ -86,7 +122,7 @@ class JobThread(QThread):
             except Exception:  # noqa: BLE001 - an estimate that cannot be made never stops a run
                 why = ""
             if why:
-                self.done.emit(j.id, {"label": R.FAIL, "failures": [why], "no_space": True})
+                self._say_done(j.id, {"label": R.FAIL, "failures": [why], "no_space": True})
                 return
         lock = None
         if self.job.project is not None:      # night 11: two computers never make one project's edit at once
@@ -96,7 +132,7 @@ class JobThread(QThread):
                 lock.acquire()
             except Exception as e:  # noqa: BLE001 - LockedError says who holds it, in plain words
                 if type(e).__name__ == "LockedError":
-                    self.done.emit(self.job.id, {"label": R.FAIL, "failures": [str(e)]})
+                    self._say_done(self.job.id, {"label": R.FAIL, "failures": [str(e)]})
                     return
                 lock = None                   # (the locks module missing on an old checkout: go on without)
         try:
@@ -111,12 +147,12 @@ class JobThread(QThread):
     def _run(self, flow, lock) -> None:
         from ..core.run import JobRun
         if self.stop_asked:
-            self.done.emit(self.job.id, {"label": R.STOPPED})
+            self._say_done(self.job.id, {"label": R.STOPPED})
             return
         try:                         # night 10: the channel's template with the title as the frame, its watermark
             frame, watermark = flow.template_for_job(self.job)
         except Exception as e:  # noqa: BLE001
-            self.done.emit(self.job.id, {"label": R.FAIL, "failures": [f"the template could not be made: {e}"]})
+            self._say_done(self.job.id, {"label": R.FAIL, "failures": [f"the template could not be made: {e}"]})
             return
         try:
             self.run_ = JobRun(self.job, out_dir=self.out_dir, converted=self.converted, frame=frame,
@@ -126,7 +162,7 @@ class JobThread(QThread):
             if self.stop_asked:
                 self.run_.stop()
         except Exception as e:  # noqa: BLE001
-            self.done.emit(self.job.id, {"label": R.FAIL, "failures": [f"the tool could not start: {e}"]})
+            self._say_done(self.job.id, {"label": R.FAIL, "failures": [f"the tool could not start: {e}"]})
             return
         if self.job.project is not None:
             try:
@@ -201,12 +237,16 @@ class JobThread(QThread):
             except Exception:  # noqa: BLE001
                 pass
         if self.job.project is not None:
-            try:
-                from ..core import projects as PJ
-                flow.record_edit(PJ.load(self.job.project), res)
-            except Exception:  # noqa: BLE001
-                pass
-        self.done.emit(self.job.id, res)
+            from ..core import projects as PJ
+            for k in range(3):               # 18 Nov: project.json on the share may not answer for a moment (the
+                try:                         #   laptop): tried again -- unwritten, the video got no Topaz and no zip
+                    flow.record_edit(PJ.load(self.job.project), res)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    from ..core import trouble
+                    trouble.note(f"writing the edit's result of {self.job.name} (try {k + 1} of 3)", e)
+                    time.sleep(2.0 * (k + 1))
+        self._say_done(self.job.id, res)
 
     def _decode_fix(self, res: dict) -> bool:
         """Day 16, task 6: a run that stopped because the RAW can't be read ("could not decode source frames ... by

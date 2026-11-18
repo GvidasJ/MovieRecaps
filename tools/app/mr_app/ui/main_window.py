@@ -288,8 +288,10 @@ class MainWindow(QMainWindow):
             from ..core import publish
             try:                                      # 9 Nov: every piece with Topaz is looked at, also one no
                 from ..core import enhance as E       #   row watches any more (taken, swapped in)
-                with BG.counted_work():
-                    E.sweep([local] + ([root] if publish.reachable(root, 5.0) else []))
+                # 18 Nov: counted as work only while a piece is really taken back or sent again -- the whole look
+                # (a 5 s probe of the share + every project.json, every 5 minutes) counted, and "Turn off the PC"
+                # started its 60 s warning again each time (day 12's rule: a retry with nothing waiting is not work)
+                E.sweep([local] + ([root] if publish.reachable(root, 5.0) else []), busy=BG.counted_work)
             except Exception:  # noqa: BLE001
                 pass
             if not publish.reachable(root, 5.0):
@@ -1008,6 +1010,9 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         from .settings_dialog import SettingsDialog
+        # 18 Nov: the settings as the file has them NOW, not as they were when the app opened (17 Nov: a setting
+        # changed in the file while the app ran was shown old here and written back old by OK -- core.settings.save)
+        self.settings = _load_settings()
         d = SettingsDialog(self, self.settings)
         if d.exec():
             self.settings = d.result_settings

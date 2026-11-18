@@ -190,8 +190,82 @@ def _media(root, fid: str) -> Path | None:
     return None
 
 
+def edit_made(folder, ed) -> bool:
+    """18 Nov ("it must not stop"): the edit Topaz may work on -- a finished one (PASS / OK with a note), and also one
+    marked FAIL whose 1_edit.xml is there: you open those in Premiere too, and until now such a video never got its
+    Topaz picture (everything here wanted a "done" edit), so the normal RAW stayed in its timeline."""
+    from . import projects as PJ
+    from .share_zip import run_dir_of
+    if not isinstance(ed, dict):
+        return False
+    if ed.get("state") == PJ.DONE:
+        return True
+    try:
+        return ed.get("state") == PJ.FAILED and bool(ed.get("run_dir")) and             (run_dir_of(Path(folder), ed) / "1_edit.xml").is_file()
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 COVER_MARGIN_S = 10.0                  # the piece cut after the edit: this much before its first clip and after its last
 #                                        (room to make a clip longer in Premiere with the enhanced picture)
+
+
+INNER_MARGIN_S = 2.0                   # 18 Nov: at a gap INSIDE the edit (the clips jump over a part of the RAW) this
+#                                        much is enhanced on each side of the gap (the outer ends keep COVER_MARGIN_S)
+MIN_GAP_S = 6.0                        # a part of the RAW nothing plays is only left out when it is longer than this
+#                                        (after the margins): each part enhanced on its own costs Topaz a start
+MAX_RANGES = 12
+RANGES_MIN_SAVED = 0.20                # ... and only when at least this share of the piece, and RANGES_MIN_SAVED_S
+RANGES_MIN_SAVED_S = 20.0              #   seconds of it, need no Topaz at all
+RANGES_ENV = "MOVIERECAPS_TOPAZ_RANGES"   # "0": the whole piece is enhanced, as before 18 Nov
+
+
+def play_ranges(every: list[tuple[int, int]], fps: Fraction, start: int, frames: int) -> list[list[int]]:
+    """18 Nov (The Best Business Idea In Key and Peele (2): 57 s of clips spread over 3:04 of the RAW -- Topaz enhanced
+    a 3:24 piece, about an hour, of which the edit plays under a third): the parts of the piece the edit plays, as
+    [first frame, frame after the last] in the PIECE's own frames -- each clip with INNER_MARGIN_S around it, parts
+    closer than MIN_GAP_S joined, the first from the piece's start and the last to its end (so the 10 s before the
+    first clip and after the last are still there). [] when leaving the rest out is not worth it (or cannot be
+    done): then the whole piece is enhanced, as before. ``every``: the clips' frames in the movie; ``start`` /
+    ``frames``: the piece in the movie's frames."""
+    if os.environ.get(RANGES_ENV, "").strip() == "0" or frames <= 0 or not every:
+        return []
+    f = float(fps)
+    pad, gap = int(round(INNER_MARGIN_S * f)), int(round(MIN_GAP_S * f))
+    spans = sorted((max(0, int(a) - start), min(frames, int(b) - start)) for a, b in every)
+    spans = [(a, b) for a, b in spans if b > a]
+    if not spans:
+        return []
+    out: list[list[int]] = []
+    for a, b in spans:
+        a, b = max(0, a - pad), min(frames, b + pad)
+        if out and a - out[-1][1] <= gap:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    while len(out) > MAX_RANGES:                           # too many parts: the two nearest are joined
+        i = min(range(len(out) - 1), key=lambda j: out[j + 1][0] - out[j][1])
+        out[i][1] = out[i + 1][1]
+        del out[i + 1]
+    out[0][0], out[-1][1] = 0, frames                      # the outer ends: the piece's own (10 s more each side)
+    kept = sum(b - a for a, b in out)
+    saved = frames - kept
+    if len(out) < 2 or saved < RANGES_MIN_SAVED * frames or saved < RANGES_MIN_SAVED_S * f:
+        return []
+    return out
+
+
+def segments(info: dict | None) -> list[tuple[int, int, int]]:
+    """The parts of a piece enhanced on their own (``info``: the piece's json with "ranges"), as (first frame, frame
+    after the last, the part's first frame in the enhanced file) -- the first two in the piece's own frames, the
+    third in the enhanced file's 60 fps frames. [] for a piece enhanced whole."""
+    from .enhance import range_out_frames, valid_ranges
+    rs = valid_ranges(info or {})
+    out, at = [], 0
+    for a, b in rs:
+        out.append((a, b, at))
+        at += range_out_frames(b - a, (info or {}).get("fps"))
+    return out
 
 
 def outside(project) -> dict:
@@ -209,7 +283,7 @@ def outside(project) -> dict:
     if rec.get("state") in ("failed", "skipped", "late") or "start_frame" not in info or not info.get("fps"):
         info = {}                                        # no piece with Topaz: every clip needs one
     ed = (p.data.get("steps") or {}).get("edit") or {}
-    if ed.get("state") != PJ.DONE:
+    if not edit_made(p.folder, ed):                      # (18 Nov: a FAIL with its 1_edit.xml too)
         return {}
     run = run_dir_of(Path(p.folder), ed)
     normal = run / "extras" / NORMAL_XML
@@ -224,9 +298,13 @@ def outside(project) -> dict:
         return {}
     start, n = (int(info["start_frame"]), int(info.get("frames") or 0)) if info else (None, 0)
     groups = _groups_for(run, info0) if info else _groups(run)
-    need, every = [], []
+    parts = []                                           # 18 Nov: only parts of the piece were enhanced (play_ranges)
+    if info and (rec.get("state") != "used" or _was_ranged(p.folder)):
+        parts = [(start + a, start + b) for a, b, _at in segments(info)]
+    need, every, rates = [], [], set()
     for c in _v1(root):
         rate = _rate(c.find("rate")) or raw_fps
+        rates.add(rate)
         k = _speed(c) * raw_fps / rate
         try:
             a, b = int(c.findtext("in")), int(c.findtext("out"))
@@ -236,10 +314,18 @@ def outside(project) -> dict:
         if ma is None or mb is None:
             continue
         every.append((int(math.floor(ma)), int(math.ceil(mb))))
-        if start is None or ma < start or mb > start + n:
+        if (start is None or ma < start or mb > start + n
+                or (parts and not any(pa <= ma and mb <= pb for pa, pb in parts))):
             need.append((int(math.floor(ma)), int(math.ceil(mb))))
     return {"need": need, "every": every, "run": run, "media": _media(root, "file-raw"), "groups": groups, "fps": raw_fps,
-            "start": start, "frames": n, "rec": rec}
+            "start": start, "frames": n, "rec": rec, "rates": rates}
+
+
+def _was_ranged(folder) -> bool:
+    """The enhanced piece in the project holds only the played parts (its enhance.json, written by take_back)."""
+    from .enhance import PROJECT_SUB, read_info
+    d = read_info(Path(folder) / PROJECT_SUB / "enhance.json") or {}
+    return bool((d.get("enhanced") or {}).get("ranged")) if isinstance(d.get("enhanced"), dict) else False
 
 
 def cover_all(project, say=None) -> dict:
@@ -291,10 +377,26 @@ def cover_all(project, say=None) -> dict:
         info = E.make_piece(None, media, name, folder, project=p.folder, span=(a_s, b_s),
                             topaz_on=str((rec.get("piece") or {}).get("topaz_on") or rec.get("topaz_on") or ""),
                             progress=(lambda s, t: say(s, t)) if say else None)
+        again = False
         if off or groups:                                # the piece's start in the movie's frames (swap_in maps so)
             info["start_frame"] = int(info["start_frame"]) + off
             info["start_s"] = round(float(Fraction(int(info["start_frame"])) / fps), 6)
             info["units"] = "movie"
+            again = True
+        # 18 Nov: only what the edit plays is enhanced (play_ranges) -- in a 60 fps sequence (the enhanced frames
+        # are then found by their own number; at the RAW's rate a part's start would fall between two frames) and
+        # only for a video's FIRST piece (one sent again after a failure is enhanced whole, as before 18 Nov)
+        ranges = []
+        if (o.get("rates") == {Fraction(E.OUT_FPS)} and Fraction(str(info.get("fps") or 0)) == fps
+                and rec.get("state") == "skipped"):
+            ranges = play_ranges(o["every"], fps, int(info["start_frame"]), int(info.get("frames") or 0))
+        if ranges:
+            info["ranges"] = ranges
+            kept = sum(b - a for a, b in ranges)
+            info["ranges_text"] = (f"{len(ranges)} parts, {E._clock(kept / float(fps))} of the piece's "   # noqa: SLF001
+                                   f"{E._clock(float(info.get('duration') or 0.0))}")                      # noqa: SLF001
+            again = True
+        if again:
             E._write_json(E.names(folder, name).info, info)                       # noqa: SLF001
         lk = E.read_lock(E.names(folder, old).lock)
         if lk is None or E.lock_stale(E.names(folder, old).lock):
@@ -322,7 +424,7 @@ def swap_in(project, do_check: bool = True) -> dict:
         if rec.get("state") != "used":
             return {"ok": False, "why": "the enhanced piece is not back yet"}
         ed = (p.data.get("steps") or {}).get("edit") or {}
-        if ed.get("state") != PJ.DONE:
+        if not edit_made(p.folder, ed):                  # (18 Nov: a FAIL with its 1_edit.xml too)
             return {"ok": False, "why": "the edit is not finished yet"}
         folder = Path(p.folder)
         if rec.get("swapped") and (rec.get("swap") or {}).get("run") == run_dir_of(folder, ed).name and \
@@ -352,6 +454,9 @@ def swap_in(project, do_check: bool = True) -> dict:
             return {"ok": False, "why": "the enhanced piece's length is not known"}
         covered = int(math.floor(Fraction(enh_frames) * raw_fps / OUT_FPS))
         groups = _groups_for(run, info)
+        # 18 Nov: an enhanced file that holds only the played parts of the piece (play_ranges; its check says
+        # "ranged") -- each part (the movie's frames a..b) starts at its own 60 fps frame ``at`` of the file
+        parts = [(start + a, start + b, at) for a, b, at in segments(info)] if chk.get("ranged") else []
         normal_media = _media(root, "file-raw")
         raw_def = next((copy.deepcopy(f) for f in root.iter("file") if f.get("id") == "file-raw"
                         and f.find("pathurl") is not None), None)
@@ -389,10 +494,17 @@ def swap_in(project, do_check: bool = True) -> dict:
                 kept += 1
                 continue
             ma, mb = to_movie(a * k, groups), to_movie(b * k, groups)
-            if ma is None or mb is None or ma < start or mb > start + covered:      # (<out> is the frame after)
-                kept += 1
+            if ma is None or mb is None or ma < start or (not parts and mb > start + covered):   # (<out> is the
+                kept += 1                                                                        #   frame after)
                 continue
-            na, nb = (ma - start) / k, (mb - start) / k
+            base, at = start, Fraction(0)                  # the movie's frame that is the enhanced file's frame ``at``
+            if parts:
+                part = next((x for x in parts if x[0] <= ma and mb <= x[1]), None)
+                if part is None or rate != OUT_FPS:        # in a part nobody enhanced: the normal RAW (cover_all
+                    kept += 1                              #   then sends a piece with it)
+                    continue
+                base, at = part[0], Fraction(part[2])
+            na, nb = at * rate / OUT_FPS + (ma - base) / k, at * rate / OUT_FPS + (mb - base) / k
             if (na.denominator != 1 or nb.denominator != 1) and rate == OUT_FPS:
                 na = Fraction(int(round(na)))              # 7 Nov: a 60 fps sequence's clip -- the nearest of the
                 nb = na + (b - a)                          #   enhanced piece's 60 fps frames (within 1/120 s)
@@ -401,12 +513,15 @@ def swap_in(project, do_check: bool = True) -> dict:
                 continue
             mid = int((a * k + b * k) / 2)                 # (the check looks inside the clip, not at a cut)
             mm = to_movie(mid, groups)
-            plan.append((c, int(na), int(nb), mid, (mm if mm is not None else ma) - start, rate, k))
+            when = at / OUT_FPS + Fraction((mm if mm is not None else ma) - base) / raw_fps     # s in the enhanced file
+            plan.append((c, int(na), int(nb), mid, when, rate, k, base))
         if not plan:
             return {"ok": False, "why": f"no V1 clip lies inside the enhanced piece ({kept} outside it)"}
         if do_check:
-            idx = sorted({0, len(plan) // 2, len(plan) - 1})
-            pairs = [(plan[i][3], Fraction(plan[i][4]) / raw_fps) for i in idx]
+            idx = {0, len(plan) // 2, len(plan) - 1}
+            for x in parts:                                # (18 Nov: and the first clip of every part)
+                idx |= {next((i for i, pl in enumerate(plan) if pl[7] == x[0]), 0)}
+            pairs = [(plan[i][3], Fraction(plan[i][4])) for i in sorted(idx)]
             ck = check(normal_media, raw_fps, enh, pairs)
             if not ck["ok"]:
                 p.update(enhance={"swap_failed": ck["why"], "swap_check": ck["rows"]})
@@ -420,7 +535,7 @@ def swap_in(project, do_check: bool = True) -> dict:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             bigger = 2.0
         defined = False
-        for c, na, nb, _f, _m, rate, k in plan:
+        for c, na, nb, _f, _m, rate, k, _base in plan:
             c.find("in").text, c.find("out").text = str(na), str(nb)
             dur = c.find("duration")
             if dur is not None:
@@ -470,13 +585,14 @@ def swap_in(project, do_check: bool = True) -> dict:
         except Exception:  # noqa: BLE001
             pass
         text = (f"enhanced: {width}x{height}, {OUT_FPS} fps -- {len(plan)} of {len(plan) + kept} V1 clips play it "
-                f"(matched on the normal RAW)")
+                f"(matched on the normal RAW" + (f"; only the {len(parts)} played parts were enhanced" if parts
+                                                 else "") + ")")
         p.update(enhance={"swapped": _now(), "text": text, "swap": {"run": run.name, "clips": len(plan),
                                                                    "kept": kept, "check": ck.get("rows")}})
         try:                                               # only the scene stays: the downloaded RAW nothing plays
             from . import archive, run as RN              #   any more leaves the folder (as after an edit)
-            if RN.scene_env():
-                archive.drop_unplayed(folder, PJ.load(folder).data)
+            if RN.scene_env() and ed.get("state") == PJ.DONE:     # (18 Nov: a FAIL keeps all its files: you may
+                archive.drop_unplayed(folder, PJ.load(folder).data)   #   make it again)
         except Exception:  # noqa: BLE001
             pass
         zip_when_done(folder)                              # the zip to send: the cut Topaz version
@@ -513,7 +629,10 @@ def wants_60(job) -> bool:
             return False
         d = json.loads((Path(folder) / "project.json").read_text(encoding="utf-8"))
         e = d.get("enhance") if isinstance(d.get("enhance"), dict) else {}
-        return e.get("state") in ("sent", "used")
+        # 18 Nov (The Smartest Kevin Moment In The Office: its edit ran without --sequence-fps 60): since 17 Nov no
+        # piece is sent before the edit -- the record then says "skipped, Topaz comes after the edit" (after_edit),
+        # which this did not count, so every edit since was made at the RAW's rate again. It gets Topaz all the same.
+        return e.get("state") in ("sent", "used") or (e.get("state") == "skipped" and bool(e.get("after_edit")))
     except Exception:  # noqa: BLE001 - as before: the RAW's own rate
         return False
 

@@ -210,7 +210,7 @@ def test_the_laptops_failure_says_why_and_the_normal_raw_is_used(tmp_path, pair)
     nm = E.names(share, p.folder.name)
     nm.failed.write_text("the graphics card ran out of memory\n\n(the laptop X)\n", encoding="utf-8")
     r = E.watch(p.folder)
-    assert r["state"] == "failed" and r["why"] == "the laptop could not enhance it: the graphics card ran out of memory"
+    assert r["state"] == "failed" and r["why"] == "Topaz could not enhance it: the graphics card ran out of memory"
     assert not any(f.exists() for f in nm.all()) and E.edit_raw(P.load(p.folder).data, p.folder) is None
 
 
@@ -416,40 +416,83 @@ def _wait(qapp, cond, page, s: float = 30.0):
     return cond()
 
 
-def test_the_row_waits_for_the_laptop_then_the_edit_runs_on_the_enhanced_piece(qapp, tmp_path, pair, monkeypatch,
-                                                                               fake_topaz):
-    D, page, mc, it, share, p, starts = _row(qapp, tmp_path, pair, monkeypatch)
-    row = page.rows[it.id]
-    assert it.steps["enhance"].state == D.S_RUN
-    if row.pipe is not None:                                                 # (the Mono look's line of dots)
-        assert row.pipe.text() == "○ DOWNLOAD ─── ○ CONVERT ─── ○ TEMPLATE ─── ◉ ENHANCE ─── ○ EDIT ─── ○ DONE"
-    page.send_to_edit(it, start=True)
-    assert it.gate == D.G_ENHANCE and not mc.jobs                            # the edit waits
-    assert row._pill()[0] == "waiting for the laptop"                        # noqa: SLF001
-    assert "with the laptop" in page.now_text(it)
-    E.Worker(share).once()                                                   # the laptop
-    assert _wait(qapp, lambda: bool(mc.jobs) and bool(starts), page)
-    assert it.steps["enhance"].state == D.S_DONE and "enhanced on the laptop" in it.steps["enhance"].text
-    assert mc.jobs[-1].raw == p.folder / "enhance" / "raw_enhanced.mp4" and it.gate == ""
+# 18 Nov: the two tests that stood here described run 20's flow (the edit WAITS for the laptop's piece and is matched
+# ON the enhanced piece; after an hour the normal RAW, then "Use the enhanced piece" made the edit again). Your calls
+# of 7 Nov (matched on the normal RAW, the enhanced picture swapped in) and 17 Nov ("just edit, then Topaz 10 seconds
+# before, 10 seconds after, and that's it") replaced it -- the two tests below are that flow.
+
+def _row_after(qapp, tmp_path, pair, monkeypatch):
+    """A row whose video is ready for its edit, Topaz on: the "enhance" stage only left its note (no piece yet)."""
+    from mr_app.tools import download_tool as D
+    from mr_app.tools.match_cuts_tool import MatchCutsPage
+    monkeypatch.setenv("MOVIERECAPS_MATCH_NORMAL", "1")
+    ctx = _Ctx()
+    mc = MatchCutsPage(ctx)
+    starts = []
+    monkeypatch.setattr(mc, "start", lambda confirm=True: starts.append(confirm))
+    ctx.pages["match_cuts"] = mc
+    page = D.DownloadPage(ctx)
+    share = tmp_path / "Enhance"
+    share.mkdir()
+    p = _project(tmp_path / "projects", pair)
+    p.update(enhance={"state": "skipped", "why": D.AFTER_EDIT, "after_edit": True, "topaz_on": "",
+                      "name": E.safe_name(p.folder.name), "folder": str(share)})
+    it = D.Item("https://youtu.be/abcdefghijk", title="My title", project=p.folder, name=p.folder.name,
+                state=D.READY, enhance=True)
+    page.items.append(it)
+    page.rows[it.id] = D.VideoRow(page, it)
+    page._enhance_said(it, P.load(p.folder).data["enhance"])                 # noqa: SLF001 - the stage's end
+    return D, page, mc, it, share, p, starts
 
 
-def test_no_answer_in_an_hour_the_row_makes_the_edit_with_the_normal_raw(qapp, tmp_path, pair, monkeypatch):
-    D, page, mc, it, share, p, starts = _row(qapp, tmp_path, pair, monkeypatch, sent_ago=E.TIMEOUT_S + 5)
+def _edit_made(p: P.Project, pair, spans) -> None:
+    """The edit as the tool leaves it: its 1_edit.xml plays extras/media/raw.mp4 (the movie) on V1."""
+    from test_match_normal_7nov import _clip
+    media = p.folder / "edit" / "extras" / "media"
+    media.mkdir(parents=True)
+    raw = media / "raw.mp4"
+    raw.hardlink_to(pair.raw)
+    v = "".join(_clip(f"v{i}", "file-raw", a, b, raw if i == 0 else None, ntsc="TRUE", scale=86.0)
+                for i, (a, b) in enumerate(spans))
+    (p.folder / "edit" / "1_edit.xml").write_text(
+        "<?xml version=\"1.0\"?>\n<xmeml version=\"5\"><sequence><rate><timebase>24</timebase><ntsc>TRUE</ntsc></rate>"
+        f"<media><video><track>{v}</track></video></media></sequence></xmeml>", encoding="utf-8")
+    p.set_step("edit", P.DONE, result="PASS", run_dir=str(p.folder / "edit"), finished=P.now())
+
+
+def test_the_row_does_not_wait_for_topaz_its_edit_starts_at_once_on_the_normal_raw(qapp, tmp_path, pair, monkeypatch):
+    from mr_app.core import enhance_swap as ES
+    D, page, mc, it, share, p, starts = _row_after(qapp, tmp_path, pair, monkeypatch)
+    assert it.steps["enhance"].state == D.S_NOTE and it.steps["enhance"].text == D.AFTER_EDIT
+    assert list(share.iterdir()) == []                                       # no piece before the edit
     page.send_to_edit(it, start=True)
     assert _wait(qapp, lambda: bool(mc.jobs) and bool(starts), page)
-    assert it.steps["enhance"].state == D.S_NOTE
-    assert it.steps["enhance"].text == "not enhanced: the laptop did not answer in 1 hour"
-    assert mc.jobs[-1].raw == p.folder / pair.raw.name                       # the normal RAW
-    it.state = D.DONE                                                        # (its edit made)
-    monkeypatch.setenv(E.FAKE_ENV, "1")
-    E.Worker(share).once()                                                   # the laptop's piece comes late ...
-    assert _wait(qapp, lambda: it.enhance_late, page)
-    assert page.rows[it.id].b_enh.isVisibleTo(page.rows[it.id])              # ... "Use the enhanced piece"
-    n = len(mc.jobs)
-    page.use_enhanced(it)
-    assert _wait(qapp, lambda: len(mc.jobs) > n, page)
-    assert mc.jobs[-1].raw == p.folder / "enhance" / "raw_enhanced.mp4"
-    assert it.steps["enhance"].state == D.S_DONE and "came late" in it.steps["enhance"].text
+    assert it.gate == ""                                                     # nothing holds the edit
+    assert mc.jobs[-1].raw == p.folder / pair.raw.name                       # matched on the normal RAW
+    assert ES.wants_60(mc.jobs[-1])                                          # ... in a 60 fps sequence
+
+
+def test_after_the_edit_one_piece_goes_to_topaz_and_the_row_shows_it_then_the_enhanced_picture(qapp, tmp_path, pair,
+                                                                                                monkeypatch,
+                                                                                                fake_topaz):
+    from mr_app.core import enhance_swap as ES
+    D, page, mc, it, share, p, starts = _row_after(qapp, tmp_path, pair, monkeypatch)
+    _edit_made(p, pair, [(2400, 2520), (2640, 2700)])                        # the edit: 1:40-1:45 and 1:50-1:52.5
+    it.state = D.DONE
+    r = ES.cover_all(p.folder)                                               # (flow.record_edit, after the edit)
+    assert r["ok"] and r["clips"] == 2, r
+    rec = P.load(p.folder).data["enhance"]
+    assert rec["state"] == "sent" and not rec.get("redos")
+    info = rec["piece"]
+    assert 88.0 <= info["start_s"] <= 90.1 and 30.0 <= info["duration"] <= 36.0     # the clips +- 10 s, not 3:20
+    assert len(E.waiting_pieces(share)) == 1                                 # ONE piece in the line
+    assert _wait(qapp, lambda: it.steps["enhance"].state == D.S_RUN, page)   # the row: Topaz is working
+    assert E.Worker(share).once().state == "done"                            # Topaz
+    assert _wait(qapp, lambda: it.steps["enhance"].state == D.S_DONE, page)
+    assert "2 of 2 V1 clips play it" in it.steps["enhance"].text
+    rec = P.load(p.folder).data["enhance"]
+    assert rec["state"] == "used" and rec["swapped"] and rec["swap"]["kept"] == 0
+    assert E.waiting_pieces(share) == [] and not list(share.glob("*.mp4"))   # nothing left in the Enhance folder
 
 
 def test_after_the_conversion_the_piece_is_made_first_then_the_row_goes_on(qapp, monkeypatch):

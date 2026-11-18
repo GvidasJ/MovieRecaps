@@ -206,9 +206,44 @@ def _normal_picture(f: Path, played_names: set) -> bool:
     if f.suffix.lower() not in VIDEO_EXT or f.name.lower() in played_names:
         return False
     try:
-        return f.stat().st_size > BIG_BYTES
+        if f.stat().st_size > BIG_BYTES:
+            return True
+        # 18 Nov (The Best Business Idea (2), made again as a test: its 199 MB raw.mov was 1 MB under the limit, went
+        # into the zip, and the enhanced picture was squeezed to 7 Mb/s to make room): the RAW's own piece in an
+        # edit's media folder (raw.mov / raw.mp4 / raw_ae.mp4), whatever its size -- no clip plays it any more
+        return f.parent.name.lower() == "media" and f.stem.lower() in ("raw", "raw_ae") and f.stat().st_size > 0
     except OSError:
         return False
+
+
+CHECK_PICTURES = ("verify_failures", "cuts", "low_confidence")   # folders of edit*\extras\debug: pictures of the checks
+CHECK_WHY = "a check picture (not needed to open the edit): left out so the videos keep their quality"
+
+
+def _check_picture(arc: str) -> bool:
+    """18 Nov: a picture the tool's checks wrote (edit*/extras/debug/verify_failures, cuts, low_confidence) -- up to
+    275 MB in one zip (The Worst Timing In Its Always Sunny), room the enhanced picture then paid for with its
+    quality. Premiere needs none of them."""
+    parts = arc.lower().split("/")
+    return len(parts) >= 6 and parts[2] == "extras" and parts[3] == "debug" and parts[4] in CHECK_PICTURES \
+        and parts[-1].endswith((".png", ".jpg", ".jpeg"))
+
+
+def without_check_pictures(put: list[tuple[Path, str]], limit: int | None = None
+                           ) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
+    """(the files to put in, the check pictures left out) -- they are only left out when the zip would be over
+    ``limit`` (FIT_BYTES) with them: a small project keeps everything, as before."""
+    limit = FIT_BYTES if limit is None else limit
+    total = 0
+    for f, _a in put:
+        try:
+            total += f.stat().st_size
+        except OSError:
+            pass
+    if total <= limit:
+        return put, []
+    out = [(f, a) for f, a in put if _check_picture(a)]
+    return [(f, a) for f, a in put if not _check_picture(a)], out
 
 
 def members(project: Path, run_dir: Path | None = None,
@@ -474,7 +509,33 @@ def _encode(src: Path, dst: Path, vbps: int) -> bool:
     return False
 
 
-def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tuple[list[tuple[Path, str]], dict]:
+def _from_old_zip(old_zip: Path | None, arc: str, src: Path, out: Path, most: float) -> bool:
+    """18 Nov: the lighter copy of ``src`` that the project's older zip already holds (its note says which file it
+    was made from, by its size; the zip is newer than the file), copied out to ``out`` -- so a zip made again
+    because a small file changed does not encode the picture a second time. False when there is none that fits."""
+    try:
+        if old_zip is None or not old_zip.is_file():
+            return False
+        d = (zip_info(old_zip).get("files") or {}).get(arc) or {}
+        if int(d.get("from_bytes") or -1) != src.stat().st_size or old_zip.stat().st_mtime < src.stat().st_mtime:
+            return False
+        with zipfile.ZipFile(old_zip) as zf:
+            i = zf.getinfo(arc)
+            if i.file_size != int(d.get("bytes") or -2) or i.file_size > most:
+                return False
+            with zf.open(i) as r, open(out, "wb") as w:
+                shutil.copyfileobj(r, w, 8 << 20)
+        return out.stat().st_size == i.file_size
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None,
+        old_zip: Path | None = None) -> tuple[list[tuple[Path, str]], dict]:
     """7 Nov: the files of a zip over ``limit`` (FIT_BYTES): the big videos go in as lighter copies made next to
     ``work`` (``<work>.light<k>.tmp``: deleted after the zip) -- the same picture, length and sound, at one bitrate
     for all of them (a video already lighter than that stays as it is), as high as fits. Returns (the files to put
@@ -514,14 +575,17 @@ def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tu
     if rate < 2e6:
         return put, {"tried": True, "why": "the videos are too long to fit at a good quality"}
     new, files, outs = list(put), {}, []
+    reused: list[str] = []
     for k, (i, sz, pr) in enumerate(sorted(vids, key=lambda v: -v[1])):
         if sz <= (rate + pr["abps"]) * pr["dur"] / 8:
             continue
         src, arc = put[i]
         out = Path(f"{work}.light{k}.tmp")
         vbps = rate
-        ok = False
-        for _try in range(2):
+        ok = _from_old_zip(old_zip, arc, src, out, (rate + pr["abps"]) * pr["dur"] / 8 * 1.03)
+        if ok:
+            reused = reused + [arc]
+        for _try in range(0 if ok else 2):
             if not _encode(src, out, int(vbps)):
                 break
             pr2 = _probe(out)
@@ -546,7 +610,7 @@ def fit(put: list[tuple[Path, str]], work: Path, limit: int | None = None) -> tu
         for o in outs:
             o.unlink(missing_ok=True)
         return put, {"tried": True, "why": "the lighter copies did not fit"}
-    return new, {"tried": True, "files": files}
+    return new, {"tried": True, "files": files, **({"reused": reused} if reused else {})}
 
 
 _MAKING: set = set()
@@ -583,7 +647,9 @@ def make(project: Path, run_dir: Path | None = None, leave_unplayed: bool = True
         locks.append(lock)
         me = _me()
         tmp = z.with_name(f"{z.name}.{me}.tmp")
-        put, light = fit(put, Path(f"{z}.{me}"))
+        put, pictures = without_check_pictures(put)      # 18 Nov: before any video is made lighter
+        left = left + [(f, CHECK_WHY) for f, _a in pictures]
+        put, light = fit(put, Path(f"{z}.{me}"), old_zip=z if z.is_file() and _is_v2(z) else None)
         lighter = [f for f, _a in put if re.search(r"\.light\d*\.tmp$", f.name)]
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as zf:
             for f, arc in put:

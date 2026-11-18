@@ -447,6 +447,23 @@ def record_edit(p: P.Project, res: dict) -> None:
                 share_zip.make_later(Path(p.folder), Path(res["run_dir"]))     #   comes with the Topaz picture
         except Exception:  # noqa: BLE001                                      #   (enhance_swap.zip_when_done)
             pass
+    elif state == P.FAILED and res.get("run_dir") and (Path(res["run_dir"]) / "1_edit.xml").is_file():
+        # 18 Nov ("it must not stop"): an edit marked FAIL whose 1_edit.xml is there -- you open those in Premiere
+        # too, and until now it never got Topaz: the normal RAW stayed in its timeline. It gets its small cuts
+        # joined and its piece sent like a finished one (the swap follows when the piece is back: enhance.watch).
+        # Nothing is removed from its folder (you may make it again) and no zip is made of it.
+        try:
+            from . import join_clips
+            join_clips.join(Path(res["run_dir"]) / "1_edit.xml")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from . import enhance_swap as ES
+            ES.cover_all(p.folder)
+            if ES.match_normal() and (P.load(p.folder).data.get("enhance") or {}).get("state") == "used":
+                ES.swap_in(p.folder)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def drop_whole_raw(p: P.Project, run_dir: Path) -> str:

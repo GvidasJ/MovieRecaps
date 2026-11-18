@@ -512,6 +512,39 @@ def read_info(path: str | os.PathLike) -> dict | None:
 # the check of an enhanced piece (the laptop before the rename, the PC before it uses it)
 # ---------------------------------------------------------------------------------------------------------------------
 
+def valid_ranges(info: dict) -> list[tuple[int, int]]:
+    """18 Nov: the parts of the piece to enhance (its json's "ranges": [first frame, frame after the last] in the
+    piece's own frames, made by enhance_swap.play_ranges) -- only when they are sound: two or more, in order, not
+    touching, inside the piece, from its first frame to its last. Else [] (the whole piece, as before)."""
+    try:
+        rs = [(int(a), int(b)) for a, b in (info.get("ranges") or [])]
+        n = int(info.get("frames") or 0)
+    except (TypeError, ValueError):
+        return []
+    if len(rs) < 2 or n <= 0 or rs[0][0] != 0 or rs[-1][1] != n:
+        return []
+    at = -1
+    for a, b in rs:
+        if a <= at or b <= a:
+            return []
+        at = b
+    return rs
+
+
+def range_out_frames(frames: int, fps: Any) -> int:
+    """How many 60 fps frames a part of ``frames`` frames becomes -- the same number on the computer that enhances
+    it (it writes exactly that many) and on the one that maps the edit's clips onto it."""
+    try:
+        f = Fraction(str(fps))
+    except (ValueError, ZeroDivisionError):
+        return 0
+    return int(round(Fraction(int(frames)) * OUT_FPS / f)) if f > 0 else 0
+
+
+def ranges_out_frames(info: dict) -> int:
+    return sum(range_out_frames(b - a, info.get("fps")) for a, b in valid_ranges(info))
+
+
 def _probe(path: Path) -> dict:
     from match_cuts.common import ffprobe_bin
     r = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
@@ -550,8 +583,13 @@ def check_enhanced(path: str | os.PathLike, info: dict) -> dict:
         piece_fps = float(Fraction(str(info.get("fps") or "0/1")) or 0) or OUT_FPS
         want = float(info.get("duration") or 0.0)
         short_ok = 1.0 / piece_fps + 0.15 + 1e-3      # 29 Oct: Apollo makes no new frames after the piece's last one
-        if dur - want > 1.0 / piece_fps + 1e-3 or want - dur > short_ok:   # (a few 60 fps frames short is fine)
-            raise EnhanceError(f"it is {dur:.3f} s long, the piece {want:.3f} s (more than one frame apart)")
+        parts = ranges_out_frames(info)               # 18 Nov: only the played parts, each an exact number of frames
+        if parts and n == parts:
+            out["ranged"] = True
+        elif dur - want > 1.0 / piece_fps + 1e-3 or want - dur > short_ok:   # (a few 60 fps frames short is fine)
+            raise EnhanceError(f"it is {dur:.3f} s long, the piece {want:.3f} s (more than one frame apart)" +
+                               (f" -- and not its {len(valid_ranges(info))} played parts either ({parts} frames, it "
+                                f"has {n})" if parts else ""))
         start = float(st.get("start_time") or 0.0)
         if abs(start) > 1.0 / OUT_FPS:
             raise EnhanceError(f"its first frame is at {start:.3f} s, not at 0")
@@ -590,7 +628,7 @@ def status(folder: str | os.PathLike, name: str, now: float | None = None) -> Ba
                 why = nm.failed.read_text(encoding="utf-8", errors="replace").strip().splitlines()
             except OSError:
                 why = []
-            return Back("failed", (why[0] if why else "the laptop could not enhance it"), 0.0, nm.failed)
+            return Back("failed", (why[0] if why else "Topaz could not enhance it"), 0.0, nm.failed)
         lk = read_lock(nm.lock)
         if lk is not None and not lock_stale(nm.lock, now):
             pct = float(lk.get("share") or 0.0)
@@ -723,18 +761,20 @@ RESEND_GAP_S = 30 * 60                 #   one try per project every 30 minutes 
 _ON_PURPOSE = ("the quick check", "sending to topaz is off", "topaz is off")
 
 
-def _resend(p, rec: dict) -> bool:
-    """13 Nov (The Weirdest Name In British Comedy: "[WinError 1909] The referenced account is currently locked out"
-    -- the piece was never sent and nothing tried again): a finished edit whose piece was skipped because of an
-    error gets its piece now (``enhance_swap.cover_all``). Not when it was skipped on purpose. True when it was sent."""
-    from . import projects as PJ
-    if rec.get("state") != "skipped":
+def _resend_wanted(p, rec: dict) -> bool:
+    """``_resend``'s quick questions (nothing is read but project.json's own record): is there a piece to send again
+    now? 18 Nov: also a piece whose Topaz FAILED and could not be sent again at that moment (the Enhance folder or the
+    RAW was away: the video stayed on the normal RAW for good) -- ``enhance_swap.cover_all`` stops after MAX_REDOS."""
+    from .enhance_swap import MAX_REDOS, edit_made
+    if rec.get("state") not in ("skipped", "failed"):
         return False
     why = str(rec.get("why") or "").lower()
     if not why or any(w in why for w in _ON_PURPOSE):
         return False
+    if rec.get("state") == "failed" and int(rec.get("redos") or 0) >= MAX_REDOS:
+        return False
     ed = (p.data.get("steps") or {}).get("edit") or {}
-    if ed.get("state") != PJ.DONE:
+    if not edit_made(p.folder, ed):                      # (18 Nov: a FAIL with its 1_edit.xml too)
         return False
     try:
         fin = datetime.fromisoformat(str(ed.get("finished"))).timestamp()
@@ -744,7 +784,14 @@ def _resend(p, rec: dict) -> bool:
         return False
     if time.time() - float(rec.get("resend_try") or 0) < RESEND_GAP_S:
         return False
-    if not Path(share_dir()).is_dir():
+    return Path(share_dir()).is_dir()
+
+
+def _resend(p, rec: dict) -> bool:
+    """13 Nov (The Weirdest Name In British Comedy: "[WinError 1909] The referenced account is currently locked out"
+    -- the piece was never sent and nothing tried again): a finished edit whose piece was skipped because of an
+    error gets its piece now (``enhance_swap.cover_all``). Not when it was skipped on purpose. True when it was sent."""
+    if not _resend_wanted(p, rec):
         return False
     rec2 = dict(rec, resend_try=time.time())
     p.update(enhance=rec2)
@@ -753,11 +800,14 @@ def _resend(p, rec: dict) -> bool:
     return bool(r.get("ok")) and int(r.get("clips") or 0) > 0
 
 
-def sweep(roots, timeout_s: float = TIMEOUT_S) -> list[str]:
+def sweep(roots, timeout_s: float = TIMEOUT_S, busy=None) -> list[str]:
     """9 Nov (Valentine's Day Plan: Topaz's second piece came back at 00:47 and nobody took it -- its row had finished):
     every project under ``roots`` whose piece is with Topaz is looked at (``watch``): an enhanced piece is taken and
-    swapped in, whichever row (if any) sent it. Returns what changed."""
+    swapped in, whichever row (if any) sent it. Returns what changed. ``busy`` (18 Nov): a context manager entered only
+    while a piece is really taken back or sent again (the window counts that as work; the look itself is not)."""
+    import contextlib
     from . import projects as PJ
+    work = busy or contextlib.nullcontext
     out: list[str] = []
     seen: set = set()
     for root in roots:
@@ -772,14 +822,18 @@ def sweep(roots, timeout_s: float = TIMEOUT_S) -> list[str]:
                     continue
                 seen.add(key)
                 rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
-                if _resend(p, rec):
-                    out.append(f"{p.folder.name}: sent to Topaz again")
-                    continue
+                if _resend_wanted(p, rec):
+                    with work():
+                        sent = _resend(p, rec)
+                    if sent:
+                        out.append(f"{p.folder.name}: sent to Topaz again")
+                        continue
                 if rec.get("state") not in ("sent", "late") or not rec.get("folder") or not rec.get("name"):
                     continue
                 if status(rec["folder"], rec["name"]).state != "enhanced":
                     continue                             # only a piece that is back (the rows do the waiting)
-                r = watch(p.folder, timeout_s=timeout_s)
+                with work():
+                    r = watch(p.folder, timeout_s=timeout_s)
                 if r.get("state") in ("used", "failed"):
                     out.append(f"{p.folder.name}: {r.get('state')} -- {r.get('text') or r.get('why') or ''}")
             except Exception:  # noqa: BLE001
@@ -813,7 +867,7 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
             return {"state": "failed", "why": r.get("why")}
         from . import enhance_swap as ES
         steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}
-        if ES.match_normal() and (steps.get("edit") or {}).get("state") == PJ.DONE:
+        if ES.match_normal() and ES.edit_made(p.folder, steps.get("edit")):
             sw = ES.swap_in(p.folder)
             if sw.get("ok") and sw.get("kept"):
                 ES.cover_all(p.folder)
@@ -827,7 +881,7 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
             p.update(enhance={"state": "used", "used": now, "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text})
             from . import enhance_swap as ES            # 7 Nov: the edit is finished already (matched on the normal
             steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}         # RAW): it plays the picture now
-            if ES.match_normal() and (steps.get("edit") or {}).get("state") == PJ.DONE:
+            if ES.match_normal() and ES.edit_made(p.folder, steps.get("edit")):   # (18 Nov: a FAIL with its XML too)
                 sw = ES.swap_in(p.folder)
                 if sw.get("ok") and sw.get("kept"):     # 7 Nov: clips left on the normal RAW -> Topaz again
                     if ES.cover_all(p.folder).get("clips"):
@@ -850,8 +904,16 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
                 return {}
         except Exception:  # noqa: BLE001
             pass
+    if b.state == "gone" and not _folder_answers(folder):
+        # 18 Nov ("it must not stop"): the Enhance folder itself does not answer (the PC asleep, the network away
+        # for a moment) -- that read as "the piece is not in the Enhance folder any more": the video was marked
+        # failed and stayed on the normal RAW. The piece is still there: the row waits and looks again.
+        return {"state": "progress", "share": 0.0,
+                "text": "the Enhance folder cannot be reached now -- waiting for it to come back"}
     if b.state in ("failed", "gone"):
-        why = b.text if b.state == "gone" else f"the laptop could not enhance it: {b.text}"
+        why = b.text if b.state == "gone" else f"Topaz could not enhance it: {b.text}"
+        if b.state == "failed":
+            _keep_failure(p.folder, names(folder, name).failed)
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
         return _again(p.folder, why)
@@ -864,6 +926,32 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
         return {"state": "late", "why": why}
     return {"state": "progress", "share": b.share, "text": b.text + (" · over 1 hour, still working"
                                                                        if waited > timeout_s else "")}
+
+
+def _folder_answers(folder: str | os.PathLike) -> bool:
+    try:
+        return Path(folder).is_dir()
+    except OSError:
+        return False
+
+
+FAILURE_LOG = "topaz_failed.log"        # in the project's logs folder
+
+
+def _keep_failure(project: str | os.PathLike, failed: Path) -> None:
+    """18 Nov (17 Nov, Bedtime: "code 69" -- the reason was never seen): Topaz's failure file (the reason and
+    Topaz's last lines) was deleted from the Enhance folder the moment the row had read its first line. Its whole
+    text is kept in the project now: logs/topaz_failed.log (every failure of this video, the newest last)."""
+    try:
+        text = Path(failed).read_text(encoding="utf-8", errors="replace").strip()
+        if not text:
+            return
+        d = Path(project) / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / FAILURE_LOG, "a", encoding="utf-8") as f:
+            f.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  {Path(failed).name}\n{text}\n\n")
+    except OSError:
+        pass
 
 
 def _again(project, why: str) -> dict:
@@ -989,23 +1077,40 @@ def topaz_scale(width: int | None, height: int | None) -> int:
     return 2 if (2 * w) * (2 * h) <= MAX_OUT_PIXELS else 1
 
 
+SEEK_EARLY_S = 0.0002               # a part is read from this much before its first frame's time (never the frame
+#                                     after it because of a rounded number), and to this much before its end
+
+
 def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0,
-                  scale: int = 2) -> list[str]:
+                  scale: int = 2, part: tuple[float, float, int] | None = None) -> list[str]:
     """Topaz's ffmpeg with the user's settings: Proteus at 2x the piece's size, then Apollo to 60 fps; H.265 Main10
     at a constant OUT_BITRATE; the sound copied. ``scale`` 1 (``topaz_scale``: a piece that is 4K already): Apollo
-    only, the size as it is. The fake Topaz: a plain scale and 60 fps (the tests)."""
-    head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
-    tail = ["-c:a", "copy", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(dst)]
+    only, the size as it is. The fake Topaz: a plain scale and 60 fps (the tests).
+
+    18 Nov -- ``part`` (the first frame's time in s, the length in s, the 60 fps frames to write): only that part of
+    the piece, read frame-exactly (the seek decodes from the keyframe before), the SAME filters and encoder, no
+    sound (the edit's sound is the RAW's own), and exactly that many frames: Apollo writes no new frame after a
+    part's last one, so the last picture is held until the count is full (those frames lie in the margin after the
+    part: nothing plays them)."""
+    head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y"]
+    if part is not None:
+        t0, length, _n = part
+        head += ["-ss", f"{max(0.0, float(t0) - SEEK_EARLY_S):.6f}", "-t", f"{float(length):.6f}"]
+    head += ["-i", str(src), "-map", "0:v:0"] + ([] if part is not None else ["-map", "0:a:0?"])
+    tail = ([] if part is not None else ["-c:a", "copy"]) + ["-map_metadata", "-1", "-movflags", "+faststart",
+                                                              "-f", "mp4", str(dst)]
+    hold = ",tpad=stop_mode=clone:stop_duration=2" if part is not None else ""
+    count = ["-frames:v", str(int(part[2]))] if part is not None else []
     scale = 1 if int(scale or 2) == 1 else 2
     if tz.fake:
-        return head + ["-vf", f"scale=iw*{scale}:ih*{scale}:flags=lanczos,fps={OUT_FPS}", "-c:v", "libx264", "-preset",
-                       "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"] + tail
+        return head + ["-vf", f"scale=iw*{scale}:ih*{scale}:flags=lanczos,fps={OUT_FPS}{hold}", "-c:v", "libx264",
+                       "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"] + count + tail
     gpu = dict(GPU, vram=f"{vram:g}")
-    chain = f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}" if scale == 2 else \
-        f"tvai_fi={_opts({**APOLLO, **gpu})}"
-    return head + ["-vf", chain, "-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc", "cbr",
-                   "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", OUT_BUFFER, "-preset", "p5",
-                   "-tag:v", "hvc1"] + tail
+    chain = (f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}" if scale == 2 else
+             f"tvai_fi={_opts({**APOLLO, **gpu})}")
+    return head + ["-vf", chain + hold, "-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc",
+                   "cbr", "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", OUT_BUFFER, "-preset", "p5",
+                   "-tag:v", "hvc1"] + count + tail
 
 
 def topaz_env(tz: Topaz) -> dict:
@@ -1029,7 +1134,27 @@ def _plain_topaz_error(text: str, code: int | None) -> str:
     if "model" in t and ("download" in t or "not found" in t):
         return "Topaz could not find or download its model (Proteus / Apollo)"
     last = [x.strip() for x in (text or "").splitlines() if x.strip() and not x.lstrip().startswith("frame=")]
-    return f"Topaz stopped (code {code})" + (f": {last[-1][:200]}" if last else "")
+    return f"Topaz stopped (code {code})" + (f": {_telling_line(last)[:200]}" if last else "")
+
+
+_SAYS_NOTHING = ("conversion failed", "error while filtering", "exiting normally", "terminating thread",
+                 "task finished with error code", "nothing was written", "error sending frames to consumers",
+                 "failed to inject frame into filter network", "error while processing the decoded data")
+_SAYS_WHY = ("error", "fail", "cannot", "can't", "could not", "unable", "invalid", "not found", "denied", "no such",
+             "unsupported", "refused", "timed out", "corrupt", "missing")
+
+
+def _telling_line(lines: list[str]) -> str:
+    """18 Nov (17 Nov, The Worst Bedtime Routine: "Topaz stopped (code 69): Conversion failed!" -- ffmpeg's last
+    line, which says nothing; the reason stood a few lines above it and was never seen): the last line of Topaz's
+    output that names a reason, else its last line."""
+    for x in reversed(lines):
+        low = x.lower()
+        if any(w in low for w in _SAYS_NOTHING):
+            continue
+        if any(w in low for w in _SAYS_WHY):
+            return x
+    return lines[-1] if lines else ""
 
 
 STALL_S = 8 * 60.0                  # 18 Nov: Topaz writes no new frame for this long: it hangs -- stopped, tried again
@@ -1038,26 +1163,39 @@ STALL_TEXT = "Topaz stopped answering"
 
 def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, tz: Topaz | None = None,
               progress: Callable[[float, float | None], None] | None = None,
-              cancel: threading.Event | None = None, scale: int = 2) -> None:
+              cancel: threading.Event | None = None, scale: int = 2,
+              part: tuple[float, float, int] | None = None) -> None:
     """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
     (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
     again with less of its memory (60 %, then 35 %). 18 Nov: also when it hangs (no new frame for STALL_S)."""
     tz = tz or find_topaz()
     if not tz.found:
         raise EnhanceError(tz.why)
-    for vram in (1.0, 0.6, 0.35):
+    steps = [1.0, 0.6, 0.35]
+    once_more = True                    # 18 Nov (17 Nov, Bedtime on the laptop: "code 69: Conversion failed!", the
+    k = 0                               #   second try worked): a failure with no known reason is tried once more
+    while True:                         #   as it was, before the piece is given back as failed
         try:
-            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, vram, scale)
+            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, steps[k], scale, part)
         except EnhanceError as e:
-            again = "ran out of memory" in str(e) or STALL_TEXT in str(e)
-            if not again or vram == 0.35 or (cancel is not None and cancel.is_set()):
+            if cancel is not None and cancel.is_set():
+                raise
+            if "ran out of memory" in str(e) or STALL_TEXT in str(e):
+                if k == len(steps) - 1:
+                    raise
+                k += 1                  # (less of the graphics card's memory)
+            elif once_more and str(e).startswith("Topaz stopped (code"):
+                once_more = False
+            else:
                 raise
             Path(dst).unlink(missing_ok=True)
 
 
-def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2) -> None:
+def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2,
+                    part: tuple[float, float, int] | None = None) -> None:
     import queue
-    cmd = topaz_command(tz, src, dst, vram, scale)
+    cmd = topaz_command(tz, src, dst, vram, scale, part) if part is not None else topaz_command(tz, src, dst, vram,
+                                                                                                scale)
     t0 = time.monotonic()
     pr = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           env=topaz_env(tz), creationflags=NO_WINDOW)
@@ -1373,6 +1511,7 @@ class Job:
     why: str = ""
     started: float = field(default_factory=time.time)
     ended: float | None = None
+    note: str = ""                  # 18 Nov: something that went another way (the parts could not be used ...)
 
     def line(self) -> str:
         if self.state == "enhancing":
@@ -1381,6 +1520,112 @@ class Job:
         if self.state == "done":
             return f"{self.name}: enhanced in {_clock((self.ended or time.time()) - self.started)} -- the PC takes it"
         return f"{self.name}: not enhanced -- {self.why}"
+
+
+class PartsError(EnhanceError):
+    """The played parts could not be enhanced on their own (not Topaz failing: that is an EnhanceError) -- the
+    whole piece is enhanced instead."""
+
+
+PART_CHECK_MARGIN = 0.01            # a part's first enhanced frame may not look this much more like a neighbour frame
+
+
+def _part_file(nm: Names, k: int) -> Path:
+    return nm.part.with_name(f"{nm.name}_ENHANCING.p{k + 1}.part.mp4")
+
+
+def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[float, float | None], None] | None,
+                  cancel: threading.Event | None, scale: int) -> None:
+    """18 Nov (The Best Business Idea In Key and Peele (2): a 3:24 piece for 57 s of clips, about an hour of Topaz):
+    Topaz on each played part of the piece on its own (``valid_ranges``; ``topaz_command``'s ``part``), every part
+    exactly ``range_out_frames`` frames, then all joined (the same encoder settings: no re-encode) into
+    <name>_ENHANCING.part.mp4. Each part's first enhanced frame is compared with the piece's frames: it must be the
+    part's first frame, not the one before or after -- else PartsError (the caller enhances the whole piece). A
+    Topaz failure is an EnhanceError, as for a whole piece."""
+    from match_cuts.common import ffmpeg_bin
+    rs = valid_ranges(info)
+    try:
+        fps = Fraction(str(info.get("fps")))
+    except (ValueError, ZeroDivisionError) as e:
+        raise PartsError("the piece's frame rate cannot be read") from e
+    if not rs or fps <= 0:
+        raise PartsError("no parts")
+    counts = [range_out_frames(b - a, fps) for a, b in rs]
+    total = sum(counts)
+    t0 = time.monotonic()
+    files = [_part_file(nm, k) for k in range(len(rs))]
+    lst = nm.part.with_name(f"{nm.name}_ENHANCING.parts.txt")
+    try:
+        done = 0
+        for k, ((a, b), n) in enumerate(zip(rs, counts)):
+            files[k].unlink(missing_ok=True)
+
+            def prog(share: float, _left: float | None, done=done, n=n) -> None:
+                if progress is not None:
+                    all_share = max(0.0, min(0.999, (done + share * n) / float(total)))
+                    el = time.monotonic() - t0
+                    progress(all_share, el * (1 - all_share) / all_share if all_share > 0.02 else None)
+            part = (float(Fraction(a) / fps), float(Fraction(b - a) / fps) - SEEK_EARLY_S, n)
+            run_topaz(nm.piece, files[k], n, tz, prog, cancel, scale=scale, part=part)
+            got = _frames_of(files[k])
+            if got != n:
+                raise PartsError(f"part {k + 1} has {got} frames, not {n}")
+            why = _part_starts_right(nm.piece, fps, a, files[k])
+            if why:
+                raise PartsError(f"part {k + 1}: {why}")
+            done += n
+        lst.write_text("".join(f"file '{f.name}'\n" for f in files), encoding="utf-8")
+        tag = [] if (tz is not None and tz.fake) or fake() else ["-tag:v", "hvc1"]
+        r = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-f", "concat", "-safe", "0", "-i",
+                  str(lst), "-map", "0:v:0", "-c", "copy", *tag, "-map_metadata", "-1", "-movflags", "+faststart",
+                  "-f", "mp4", str(nm.part)], timeout=3600)
+        if r.returncode != 0 or not nm.part.is_file():
+            raise PartsError(f"the parts could not be joined: {(r.stderr or '').strip()[-200:]}")
+        got = _frames_of(nm.part)
+        if got != total:
+            raise PartsError(f"the joined parts have {got} frames, not {total}")
+    except OSError as e:
+        raise PartsError(f"{type(e).__name__}: {e}") from e
+    finally:
+        for f in files + [lst]:
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _frames_of(path: Path) -> int:
+    try:
+        st = _probe(path)
+        return int(st.get("nb_read_packets") or st.get("nb_frames") or 0)
+    except (EnhanceError, ValueError, TypeError):
+        return 0
+
+
+def _part_starts_right(piece: Path, fps: Fraction, first: int, part: Path) -> str:
+    """'' when the enhanced part's first frame shows the piece's frame ``first`` (and not clearly the frame before or
+    after it: a still picture, where they all look the same, is fine); else why not."""
+    try:
+        from .enhance_swap import _gray, _zncc
+        want = [f for f in (first - 1, first, first + 1) if f >= 0]
+        src = _gray(piece, fps, want)
+        out = _gray(part, Fraction(OUT_FPS), [0]).get(0)
+        if out is None or src.get(first) is None:
+            return "its first frame could not be read"
+        import cv2
+        h, w = src[first].shape[:2]
+        if out.shape[:2] != (h, w):
+            out = cv2.resize(out, (w, h), interpolation=cv2.INTER_AREA)
+        own = _zncc(src[first], out)
+        others = {f: _zncc(src[f], out) for f in want if f != first and src.get(f) is not None}
+        if own < 0.5:
+            return f"its first frame does not show the piece's frame {first} (ZNCC {own:.2f})"
+        for f, v in others.items():
+            if v > own + PART_CHECK_MARGIN:
+                return f"its first frame shows the piece's frame {f}, not {first} (ZNCC {v:.3f} against {own:.3f})"
+        return ""
+    except Exception as e:  # noqa: BLE001 - cannot be checked: not used
+        return f"its first frame could not be checked ({type(e).__name__}: {e})"
 
 
 def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None = None,
@@ -1403,7 +1648,7 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
         if not info:
             raise EnhanceError("its json (where the piece is in the RAW) cannot be read")
         dur = float(info.get("duration") or 0.0)
-        need = int(dur * 180e6 / 8 * 1.2) + (50 << 20)
+        need = int(dur * 60e6 / 8 * 1.2) + (50 << 20)       # (OUT_BITRATE: 60 Mb/s since 17 Nov, it asked for 3x)
         try:
             free = shutil.disk_usage(str(nm.folder)).free
         except OSError:
@@ -1412,8 +1657,19 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
             raise EnhanceError(f"the Enhance folder's drive has {free / 1e9:.1f} GB free, the enhanced piece needs "
                                f"about {need / 1e9:.1f} GB")
         nm.part.unlink(missing_ok=True)
-        run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel,
-                  scale=topaz_scale(info.get("width"), info.get("height")))
+        scale = topaz_scale(info.get("width"), info.get("height"))
+        done_parts = False
+        if valid_ranges(info):                           # 18 Nov: only what the edit plays (enhance_swap.play_ranges)
+            try:
+                enhance_parts(nm, info, tz, prog, cancel, scale)
+                done_parts = True
+            except PartsError as e:                      # a part did not start on its frame, the join failed ...:
+                job.note = f"the parts could not be used ({e}) -- the whole piece instead"    # the whole piece
+                nm.part.unlink(missing_ok=True)
+                if cancel is not None and cancel.is_set():
+                    raise EnhanceError("stopped") from e
+        if not done_parts:
+            run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel, scale=scale)
         chk = check_enhanced(nm.part, info)
         if not chk["ok"]:
             raise EnhanceError(f"Topaz's result is not right: {chk['why']}")

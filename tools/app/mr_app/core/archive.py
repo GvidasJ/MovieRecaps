@@ -298,6 +298,8 @@ def check_zip(folder: Path, z: Path, run: Path | None = None, leave_unplayed: bo
     #   RAW of an edit that plays the Topaz picture stays out of the zip on purpose (7 Nov) -- until now this check
     #   then said "would be lost" and every such project stayed a folder next to its zip
     linked = {f for f, why in left if "hard link" in why}
+    put, pictures = Z.without_check_pictures(put)          # 18 Nov: the checks' pictures of a zip over 1 GB stay out
+    unplayed |= {f for f, _a in pictures}                  #   of it on purpose (share_zip.make) -- not "would be lost"
     want = {arc: f for f, arc in put}
     wanted = set(want.values())
     light = Z.zip_info(z).get("files") or {}
@@ -426,13 +428,16 @@ def why_not(folder: Path, data: dict) -> str:
     rec = data.get("enhance") if isinstance(data.get("enhance"), dict) else {}
     if rec.get("state") == "sent":
         return "its piece is with Topaz"
-    if rec.get("state") == "skipped":                     # 17 Nov: never sent because of an error -- the round sends
+    if rec.get("state") in ("skipped", "failed"):         # 17 Nov: never sent because of an error -- the round sends
         try:                                              #   it again for 3 days (enhance._resend): the folder stays
-            from . import enhance as E
+            from . import enhance as E                    # 18 Nov: also a piece whose Topaz failed and that could
+            from .enhance_swap import MAX_REDOS           #   not be sent again yet (it is, up to MAX_REDOS times)
             why = str(rec.get("why") or "").lower()
             fin = _finished(data)
+            again = (E.sends() or bool(rec.get("after_edit"))) if rec.get("state") == "skipped" else \
+                int(rec.get("redos") or 0) < MAX_REDOS
             if why and not any(w in why for w in E._ON_PURPOSE) and fin is not None and \
-                    datetime.now().astimezone() - fin < timedelta(days=E.RESEND_DAYS) and E.sends():   # noqa: SLF001
+                    datetime.now().astimezone() - fin < timedelta(days=E.RESEND_DAYS) and again:   # noqa: SLF001
                 return "its piece goes to Topaz again"
         except Exception:  # noqa: BLE001
             pass
