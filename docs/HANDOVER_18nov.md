@@ -152,3 +152,136 @@ video. So:
   videos: leave them in the line.
 - While you work, the MovieRecaps app may be opened by him on either computer. Never edit files of a project that
   is running; the code you change only takes effect when he restarts the app.
+
+---
+
+# Report -- 18 Nov 2026, the session on the PC (Claude Code)
+
+For Gvidas. The short part first, the details after it.
+
+## What you must do
+
+1. **PC:** nothing. Open the app as always. It uses the new code from its next start.
+2. **Laptop:** close the app. Open a terminal in the MovieRecaps folder and type these two lines, one after the other:
+   - `git checkout -- tools`
+   - `git pull`
+
+   Then open the app again. Until you do this the laptop still works, but with the old code: it enhances the whole
+   piece (slower) and does not have today's fixes.
+3. That is all. If you want disk space back, read "Space" below -- I did not delete the big things, you decide.
+
+## What is different for you now
+
+1. **Edits are 60 fps again.** Since 17 Nov ("Topaz after the edit") the edits were quietly made at the RAW's
+   rate, not 60. Fixed.
+2. **Fewer "needs a look" notes.** The tool already knew how to repair flash frames and "the RAW skips 33 ms: one
+   take, cut" -- but only for edits at the RAW's rate. In 60 fps edits (all your Topaz videos since 7 Nov) these
+   repairs never ran. Now they run there too. Test video (The Best Business Idea (2)): **9 notes before, 2 after**.
+   The repair is only kept when the edit's own checks are not worse; if they are, the edit stays exactly as before.
+3. **Topaz does much less work.** It enhances only what the edit plays (10 s before the first clip, 10 s after the
+   last, 2 s around each jump inside), not everything in between. Business Idea (2): 3 parts instead of the whole
+   3:24 piece. The look (Proteus / Apollo settings) is not changed. Checked with the real Topaz on this PC: every
+   part starts on exactly the right frame. If any part looks wrong, the app enhances the whole piece like before.
+4. **Topaz gets the real RAW frames.** 18 of your last 26 pieces were first re-encoded (8-bit) because the cut had
+   only 2 s of room to find a keyframe. Now the piece is cut from the RAW's own frames; the extra seconds are not
+   enhanced.
+5. **The last step of an edit is fast.** "Double-checking" took 8 minutes on the PC in my test (13 on the laptop).
+   Most of it were checks that only fill report.md -- they never changed the edit and never decided PASS / OK with
+   a note / FAIL. With Settings -> Check videos OFF (your setting) they are not run: **481 s -> 29 s**. Every check
+   of 1_edit.xml still runs. Want them back? Settings -> Check videos -> On.
+6. **The zip keeps the Topaz picture good.** Before, the zip also held up to 275 MB of check pictures and the
+   unused RAW piece, and the Topaz picture was squeezed to fit 1 GB (7 Mb/s in my test). Now those stay out first
+   (the test: 31 Mb/s, zip 790 MB). The zip is also no longer made twice (the second time encoded the picture
+   again on the graphics card while the next video was running).
+7. **A video does not stop without a word any more:**
+   - an edit marked FAIL that has its 1_edit.xml still gets Topaz (no zip is made of a FAIL, nothing is removed);
+   - a Topaz piece that failed and could not be sent again is sent again later by itself (at most 3 times);
+   - if the Enhance folder is away for a moment (PC asleep, network), the video waits -- it is no longer "failed";
+   - Topaz's failure reason is kept in the project: `logs\topaz_failed.log` (before, it was deleted after one line
+     was read); the row shows the line that says why (not "Conversion failed!"); an unknown failure is tried once
+     more before it counts;
+   - if the app itself has an error around an edit, the row becomes FAIL with "press Try again" and the queue goes
+     on (before: the row stayed "running" for ever). The reason goes to `%APPDATA%\MovieRecaps\crash.log`.
+8. **Settings are not written back old.** Pressing OK in Settings wrote ALL settings as they were when the app
+   opened. Now only what you changed is written, and the dialog shows what the file says now.
+9. **The Enhance folder cleans itself** once a day: pieces older than 7 days that no video waits for. A finished
+   `_ENHANCED.mp4` is never deleted -- it is moved to `Enhance\_to_delete` for you to look at.
+10. **Removed from the app:** the old way (the edit waits for a Topaz piece guessed before the edit) and its
+    switch "Match on the normal RAW" in Settings. It is always "edit, then Topaz, then zip" now.
+
+## What I tested, and how
+
+- All tests: **app 1476 passed, tool 1691 passed** (at the start 19 + 5 failed; most were old tests that still
+  expected Flick707, the History tab, the old template -- updated to how the app is now).
+- **One real video end to end, three times** (a copy of The Best Business Idea (2), in a scratch folder, fake
+  Topaz): edit (60 fps) -> ONE piece cut after the edit -> Topaz -> "55 of 55 V1 clips play it" -> zip 790 MB ->
+  clean-up round: only the zip is left, the Enhance folder is empty.
+- **Real Topaz on this PC:** 3 parts of a test clip (each exactly its frames, each on its own first frame); a
+  4K piece (8 s of the waiting Shaq piece, a copy): stays 3840x2160, 60 fps, accepted.
+- **A stretched DVD episode** (It's Always Sunny S02E06, 720x480): the encoded piece shows exactly the movie's
+  frames at 3 places.
+- The scripts and logs are in `work\h18` (e2e.py, real_topaz_parts.py, real_cases.py, the log files).
+
+## What I did NOT do, and why
+
+- **Pause + resume still starts the running step again from zero.** Not touched: it needs changes deep in the tool
+  and I chose the bigger wins first.
+- **"Search / refine 3x slower on some runs" (17 Nov):** I could not repeat it. The likely reason is the zip's
+  encode on the same graphics card while the next video ran -- that now happens once instead of twice, and often
+  not at all (the Topaz file is shorter).
+- **Notes that are left:** short shots of the competitor's own (8 frames, 0.13 s) and "the person speaking is not
+  in the window". I did not loosen any check. They need your fixed Premiere projects to learn from.
+- **The laptop was not tested** (I am on the PC). Its 16 GB problem in the last step should be gone, because the
+  heavy checks no longer run -- please tell the next session if it is not.
+- The full edit time on a free PC was not measured: my runs used the caches of your 17 Nov run and the tests ran
+  at the same time (the edit: 718 s before the changes, 270 s after, same conditions).
+- The real Topaz was only run on short test clips (minutes), not on a whole video of yours.
+
+## Things I found that you should know
+
+- `The Worst Prank In The Office`: its piece is stuck. Its json was moved to `D:\Shared\Enhance\_to_delete` on
+  17 Nov (by the earlier session), so nobody can take it. If you still want that video enhanced: press Try again on
+  it. I left it as it is.
+- The two big zips of 17 Nov (Business Idea: 5.4 GB and 3.0 GB) were not made by the app (no "HOW TO OPEN" inside,
+  both copies of the Topaz file in them). The app will make its own (under 1 GB) when it tidies those projects.
+- 37 of the 175 zips in `D:\Shared\Projects` are over 1 GB. They are old (before 7 Nov) or made by hand.
+- Two Topaz installs are on the PC. `Topaz Video\ffmpeg.exe` does not start; the app uses `Topaz Video AI` (works).
+
+## Space (measured 18 Nov)
+
+Deleted by me (the handover said they are safe): `D:\Shared\fix_files` (39 MB), `D:\Shared\logs_for_claude`,
+`.git\stale_old`, and two dead zip leftovers in `D:\Shared\Projects` (1.1 GB: two `.light0.tmp` files and their
+`.lock` files, left by an app that was closed in the middle of a zip).
+
+NOT deleted -- you decide:
+
+| Folder | Size | What it is |
+|---|---|---|
+| `work\t19` | 249 GB | test runs of an earlier night (run 19), on C:. Can be made again |
+| `D:\mr_cache` (the same as `work\cache`) | 212 GB | the tool's caches. The app cleans old ones itself |
+| `D:\mr_checkall` | 83 GB | test runs (check-all) |
+| `D:\mr_t19`, `D:\MovieRecaps_scratch`, `D:\mr_scratch` | 18 + 15 + 10 GB | test scratch |
+| `work\t31`, `t16`, `pt_tool_final`, `t17`, `t8`, `t18` | 32 GB together | older test scratch |
+| `D:\Shared\Projects` | 276 GB | your projects and zips |
+| `D:\Shared\Enhance` | 9 GB | 7.3 GB are 9 old `_ENHANCED.mp4` (30 Oct - 11 Nov): the app moves them to `_to_delete` by itself now |
+| `D:\Shared\_to_delete` | 4.9 GB | zips moved there earlier |
+| `D:\Shared\Enhance\_to_delete` | 0.9 GB | old pieces moved there earlier |
+| `finished\`, `output\` | 3 GB, 1 GB | in the repo folder |
+
+Free now: C: 110 GB, D: 1.7 TB. Deleting `work\t19` alone gives C: 249 GB back.
+
+## For the next Claude session
+
+- Commits of today: 88ceadc, bad066e, 09e8dcc, 9eee3f5 (and this report), pushed. `docs/night15_prompt.md` is the
+  owner's own uncommitted edit: left alone.
+- New pieces: `enhance_swap.play_ranges` / `segments`, `enhance.enhance_parts` / `valid_ranges` / `_span_plan` /
+  `clean_folder`, `enhance_swap.edit_made`, `core/trouble.py`, `settings.save` (merge), `share_zip.without_check_pictures`
+  / `_from_old_zip`, `--no-recreation-checks` (`verify.not_run_reason`), `pipeline.fix_at_plan_rate` with
+  `write_premiere_xml(fix_plan_rate=True)`. Tests: `test_handover_18nov.py`, `test_topaz_parts_18nov.py`,
+  `test_zip_18nov.py`, `test_fix60_18nov.py`.
+- Switches: `MOVIERECAPS_TOPAZ_RANGES=0` (the whole piece again), `pipeline.PLAN_RATE_FIXES = False` (no fixes on
+  a 60 fps sequence).
+- Not verified on real data: check-all's scores (it runs at the RAW's rate, so the 60 fps fixes should not move
+  them, but nobody ran it today); a real run on the laptop; a whole real video through the real Topaz with parts.
+- Gone: `match_normal()`, `MOVIERECAPS_MATCH_NORMAL`, `G_ENHANCE`, `edit_raw`, `find_scene`, `piece_length`,
+  `WHOLE_RAW_S`, `EXTRA_S`; `make_piece(raw, name, out_dir, span, ...)` takes the span only.
