@@ -208,14 +208,23 @@ For Gvidas. The short part first, the details after it.
    `_ENHANCED.mp4` is never deleted -- it is moved to `Enhance\_to_delete` for you to look at.
 10. **Removed from the app:** the old way (the edit waits for a Topaz piece guessed before the edit) and its
     switch "Match on the normal RAW" in Settings. It is always "edit, then Topaz, then zip" now.
+11. **More videos work on a short piece of the episode, not the whole episode.** Many H.265 episodes store a few
+    pictures in a way that made the tool's cut say "the piece has 6458 frames, the plan 6455". Then the whole
+    21-minute episode was analysed (slow), stayed in the project and went into the zip. Fixed. Second test video
+    (The Most Jealous Group Leader): its zip went from **906 MB to 487 MB**, and the edit is a clean PASS (on
+    12 Nov it had a flash-frame note; the tool repaired that note by itself now).
+12. **A Topaz result is no longer refused for a wrong reason.** When a piece had to be re-encoded, it could start
+    one frame late; the app then said "Topaz's result is not right: its first frame is at 0.033 s" three times and
+    left the normal RAW in the timeline. Fixed (found on the second test video, with the fake Topaz).
 
 ## What I tested, and how
 
-- All tests: **app 1476 passed, tool 1691 passed** (at the start 19 + 5 failed; most were old tests that still
+- All tests: **app 1477 passed, tool 1694 passed** (at the start 19 + 5 failed; most were old tests that still
   expected Flick707, the History tab, the old template -- updated to how the app is now).
-- **One real video end to end, three times** (a copy of The Best Business Idea (2), in a scratch folder, fake
-  Topaz): edit (60 fps) -> ONE piece cut after the edit -> Topaz -> "55 of 55 V1 clips play it" -> zip 790 MB ->
-  clean-up round: only the zip is left, the Enhance folder is empty.
+- **Two real videos end to end, several times each** (copies of The Best Business Idea (2) and The Most Jealous
+  Group Leader, in a scratch folder, fake Topaz): edit (60 fps) -> ONE piece cut after the edit -> Topaz -> "55 of
+  55 V1 clips play it" / "12 of 12" -> zip 790 MB / 487 MB -> clean-up round: only the zip is left, the Enhance
+  folder is empty. The second video was a fresh analysis: **622 s** for the edit (on 12 Nov: 1433 s on this PC).
 - **Real Topaz on this PC:** 3 parts of a test clip (each exactly its frames, each on its own first frame); a
   4K piece (8 s of the waiting Shaq piece, a copy): stays 3840x2160, 60 fps, accepted.
 - **A stretched DVD episode** (It's Always Sunny S02E06, 720x480): the encoded piece shows exactly the movie's
@@ -272,8 +281,13 @@ Free now: C: 110 GB, D: 1.7 TB. Deleting `work\t19` alone gives C: 249 GB back.
 
 ## For the next Claude session
 
-- Commits of today: 88ceadc, bad066e, 09e8dcc, 9eee3f5 (and this report), pushed. `docs/night15_prompt.md` is the
-  owner's own uncommitted edit: left alone.
+- Commits of today: 88ceadc, bad066e, 09e8dcc, 9eee3f5, e1be4a9, ef08b90 (and this report), pushed.
+  `docs/night15_prompt.md` is the owner's own uncommitted edit: left alone.
+- `excerpt.copy_packets` now leaves out packets shown before the plan's keyframe and reads past the packets a seek
+  lands on before it (tests: `test_excerpt_open_gop_18nov.py`); `enhance._encoded_piece` starts on a frame.
+- Seen but not changed: a Topaz result that fails its check is sent again as the very same piece (up to 3 times).
+  If the reason is in the piece itself, all three fail the same way -- a second try could switch to another way of
+  making the piece.
 - New pieces: `enhance_swap.play_ranges` / `segments`, `enhance.enhance_parts` / `valid_ranges` / `_span_plan` /
   `clean_folder`, `enhance_swap.edit_made`, `core/trouble.py`, `settings.save` (merge), `share_zip.without_check_pictures`
   / `_from_old_zip`, `--no-recreation-checks` (`verify.not_run_reason`), `pipeline.fix_at_plan_rate` with
