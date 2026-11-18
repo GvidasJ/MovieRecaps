@@ -46,6 +46,26 @@ WHO = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _own_history_log(tmp_path, monkeypatch):
+    """18 Nov: every test here has its own app-data folder, so History's own log (history_log.jsonl, day 12: a New
+    video that failed before its folder was made) starts empty. The whole test session shares one app-data folder
+    (conftest), and a test that runs earlier leaves a line in that log -- test_enhance_run20's
+    test_after_the_conversion_the_piece_is_made_first_then_the_row_goes_on sends a row without a project to a
+    queue that is not there ("Edit failed") -- which ``H.events`` then showed as an extra, newest event here: these
+    tests passed alone and failed in the full suite."""
+    monkeypatch.setenv("MOVIERECAPS_APPDATA", str(tmp_path / "appdata"))
+    assert H.logged_events() == []
+
+
+def test_the_log_of_this_computer_is_part_of_the_events_and_can_be_left_out():
+    """18 Nov (the leak above, as a test of its own): a logged failure is History's newest event; ``log=False``
+    leaves the log out."""
+    H.log_event("Edit failed", "", "the Match cuts queue is not there", H.FAIL, "My title")
+    assert whats(H.events([WHO]))[0] == "Edit failed" and len(H.events([WHO])) == len(H.events([WHO], log=False)) + 1
+    assert "Edit failed" not in whats(H.events([WHO], log=False))
+
+
 def t(text):
     return datetime.fromisoformat(text)
 

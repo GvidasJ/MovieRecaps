@@ -220,10 +220,11 @@ class RunClock(logging.Filter):
             record.args = ()
 
     def record(self, timings: dict, path: Path = HISTORY, extra: dict | None = None) -> None:
-        """Append this run's stage times to the history (best effort; never from the unit tests)."""
+        """Append this run's stage times to the history (best effort; never from the unit tests, nor from the night
+        lab's test runs: they would change the app's time estimates)."""
         import os
         stages = {k: round(float(v), 2) for k, v in (timings or {}).items() if k in ORDER}
-        if not stages or "PYTEST_CURRENT_TEST" in os.environ:
+        if not stages or "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("MOVIERECAPS_NIGHT_LAB") == "1":
             return
         quick = {k for k, v in stages.items() if self.pred.get(k, 0.0) >= 5.0 and v < 0.15 * self.pred[k]}
         row = {"when": time.strftime("%Y-%m-%dT%H:%M:%S"), "machine": self.mach, "fast": self.fast,

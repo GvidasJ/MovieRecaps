@@ -32,20 +32,39 @@ def _real(name: str) -> C.Channel:
 # the channel folders
 # ---------------------------------------------------------------------------------------------------------------------
 
-def test_the_three_channels_are_found_with_their_links():
+# 18 Nov: the channels as they are now (this test was skipped since Flick707 left on 31 Oct, c93409c): handle,
+# template file, Shorts only, SceneProof's song kept (the channels made after "no song", 28 Oct, have none)
+CHANNELS_NOW = {"LouLaughs": ("LouLaughs", "template.png", False, True),          # 29 Oct: a template.png (180f642)
+                "MikeMemesYou": ("MikeMemesYou", "template.psd", False, True),
+                "MikeCuts": ("mikecutss", "template.png", False, False),           # 30 Oct (2356691)
+                "DanCuts": ("DanCutss", "template.png", False, False),             # 31 Oct (c73cdb1)
+                "SceneProof": ("SceneProof", "template.png", True, True),          # night 15
+                "TOMSCUTS": ("TomCutss", "template.png", False, False)}            # 17 Nov (bd949ba)
+
+
+def test_the_channels_are_found_with_their_links():
     chs = {c.name: c for c in C.channels()}
-    if not {"LouLaughs", "MikeMemesYou", "Flick707"} <= set(chs):
+    if not chs:
         pytest.skip("the channel folders are not in assets/channels")
-    for name in ("LouLaughs", "MikeMemesYou", "Flick707"):
+    assert set(chs) == set(CHANNELS_NOW)                                     # no Flick707 any more
+    for name, (handle, template, shorts_only, song) in CHANNELS_NOW.items():
         ch = chs[name]
-        assert ch.link == f"https://www.youtube.com/@{name}" and ch.handle == f"@{name}"
-        assert ch.psd == REPO / "assets" / "channels" / name / "template.psd"
-        assert ch.watermark == REPO / "assets" / "channels" / name / "watermark.png"
+        assert ch.link == f"https://www.youtube.com/@{handle}" and ch.handle == f"@{handle}"
+        assert ch.psd == REPO / "assets" / "channels" / name / template
+        assert ch.watermark == REPO / "assets" / "channels" / name / "watermark.png" and ch.watermark.is_file()
+        assert ch.shorts_only is shorts_only
         info = json.loads((ch.folder / "channel.json").read_text(encoding="utf-8"))
-        music = info.pop("music", None)                  # run 18 (task 2): SceneProof's song on every channel
+        music = info.pop("music", None)                  # run 18 (task 2): SceneProof's song
+        style = (info.pop("headline_anchor", None), info.pop("headline_style", None))   # a template.png's headline
         assert info == {"name": name, "link": ch.link, "handle": ch.handle, "shorts_only": ch.shorts_only}
-        assert music is not None and ch.music is not None and ch.music.volume_db == 8.5
-    assert chs["Flick707"].shorts_only and not chs["LouLaughs"].shorts_only and not chs["MikeMemesYou"].shorts_only
+        assert (music is not None) is song and (ch.music is not None) is song
+        if song:
+            assert ch.music.volume_db == 8.5
+        if name in ("LouLaughs", "MikeCuts", "DanCuts", "TOMSCUTS"):         # the Instagram Sans headline
+            assert style == ([1063.5, 849.5], {"font": "Instagram Sans Condensed Bold.ttf", "size": 140,
+                                               "tracking": -10, "faux_bold": True})
+        else:
+            assert style == (None, None)
     assert C.find("loulaughs").name == "LouLaughs"
     with pytest.raises(LookupError):
         C.find("NoSuchChannel")
@@ -80,9 +99,12 @@ def test_a_new_folder_is_a_new_channel_with_or_without_channel_json(tmp_path):
 # the base: the PSD's merged image without the example headline
 # ---------------------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["LouLaughs", "MikeMemesYou", "Flick707"])
+# 18 Nov: only MikeMemesYou still has a template.psd -- LouLaughs got a template.png on 29 Oct (your call, 180f642:
+# the new Lou Laughs template), Flick707 was removed on 31 Oct (c93409c). The PNG channels: the next test.
+@pytest.mark.parametrize("name", ["MikeMemesYou"])
 def test_the_base_is_the_merged_image_with_the_headline_area_white(name):
     ch = _real(name)
+    assert ch.psd.suffix.lower() == ".psd"
     base = C.base_template(ch)
     assert base.size == (2160, 3840) and base.mode == "RGBA"
     a = np.asarray(base)
@@ -97,6 +119,31 @@ def test_the_base_is_the_merged_image_with_the_headline_area_white(name):
     assert info["method"] == "merged image, headline area painted white"
     assert info["measured"].endswith("548,700 of 548,700 pixels white (darkest 255/255, least opaque 255/255)")
     assert C.headline_anchor(ch) == (1085.4632, 849.2045)                  # the type layer's: centre x, baseline 1
+
+
+@pytest.mark.parametrize("name", ["LouLaughs", "DanCuts", "MikeCuts", "TOMSCUTS"])
+def test_the_base_of_a_png_channel_is_its_template_png_as_it_is(name):
+    """18 Nov: the channels made from a template.png (LouLaughs since 29 Oct, MikeCuts 30 Oct, DanCuts 31 Oct,
+    TOMSCUTS 17 Nov) -- the base is that PNG as it is: the same card as a PSD's base (no example headline, the video
+    window transparent, the channel's picture), the headline where channel.json's "headline_anchor" says."""
+    ch = _real(name)
+    assert ch.psd.name == C.PNG_NAME
+    base = C.base_template(ch)
+    assert base.size == (2160, 3840) and base.mode == "RGBA"
+    a = np.asarray(base)
+    x0, y0, x1, y1 = C.HEADLINE_AREA
+    assert (a[y0:y1, x0:x1] == 255).all()                                   # no example headline in it
+    wx0, wy0, wx1, wy1 = C.WINDOW
+    assert (a[wy0 + 150:wy1 - 150, wx0 + 150:wx1 - 150, 3] == 0).all()        # the video window is transparent
+    assert (a[600:700, :, 3] == 255).all() and (a[3600:3700, :, 3] == 255).all()     # the card around it
+    avatar = a[260:500, 310:550, :3].astype(int)
+    assert (avatar.max(axis=2) - avatar.min(axis=2)).mean() > 15            # the channel's picture is there
+    info = C.base_info(ch)
+    assert (info["method"], info["why"]) == ("template.png as it is", "a channel without a PSD")
+    assert Path(info["png"]) == ch.psd and info["size"] == [2160, 3840]
+    assert "headline_layer" not in info and "measured" not in info          # (nothing painted out)
+    assert C.read_info(ch.folder)["headline_anchor"] == [1063.5, 849.5]
+    assert C.headline_anchor(ch) == (1063.5, 849.5)                         # channel.json's: centre x, baseline 1
 
 
 class _Layer:
@@ -181,8 +228,14 @@ def test_the_template_is_a_1080x1920_frame_png_with_a_clean_window(tmp_path):
 
 def test_a_title_too_long_is_shrunk_and_the_result_says_so(tmp_path):
     ch = _real("LouLaughs")
-    title = "The fact that the dog understood the assignment better than him 😭"
+    # 18 Nov: a longer title -- LouLaughs' headline is Instagram Sans since 29 Oct (180f642), narrower than the old
+    # style: "The fact that the dog understood the assignment better than him" now fits (its line is 1840.3 px of
+    # 1840), so it no longer showed a shrink
+    title = "The fact that the dog understood the whole assignment so much better than him is hilarious 😭"
     r = C.make_template(ch, title, tmp_path / "long.png")
+    assert r.layout.lines == ["The fact that the dog understood the whole",
+                              "assignment so much better than him is hilarious 😭"]
+    assert 60 < r.scale_pct < 75                                           # (68.4 %: the wider line is 2689 px)
     assert r.shrunk and r.scale_pct < 100 and r.why.startswith(f"shrunk to {r.scale_pct:.0f} %")
     assert r.summary() == f"2 lines, {r.why}"
     _check_clean_window(r.png)

@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mr_app.core import motivation as M   # noqa: E402
 
 LOU, MIKE, FLICK = "LouLaughs", "MikeMemesYou", "Flick707"
+# 18 Nov: Flick707 was removed on 31 Oct (your call, c93409c) -- the known channels are LouLaughs, MikeMemesYou,
+# MikeCuts, DanCuts (motivation.CHANNEL_ORDER); Flick707 is now "any other channel": after them, by name
+MIKECUTS, DAN = "MikeCuts", "DanCuts"
 NOW = datetime(2026, 10, 18, 14, 30)                    # a Sunday
 
 
@@ -36,7 +39,10 @@ def sep(d, h=12, ch=LOU):
 def test_short_names_and_the_channel_order():
     assert [M.short_name(c) for c in (LOU, MIKE, FLICK, "OtherOne", "loulaughs", "")] == \
         ["Lou", "Mike", "Flick707", "OtherOne", "Lou", "no channel"]
-    assert M.channel_order(["Zeta", FLICK, "alpha", MIKE, LOU, FLICK]) == [LOU, MIKE, FLICK, "alpha", "Zeta"]
+    # 18 Nov: the four known channels first, in their order; then the others by name (Flick707 is one of them now)
+    assert M.channel_order(["Zeta", FLICK, "alpha", MIKE, LOU, FLICK]) == [LOU, MIKE, "alpha", FLICK, "Zeta"]
+    assert M.channel_order([DAN, "Zeta", MIKECUTS, "dancuts", MIKE, LOU]) == [LOU, MIKE, MIKECUTS, DAN, "Zeta"]
+    assert M.CHANNEL_ORDER == (LOU, MIKE, MIKECUTS, DAN)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -162,9 +168,13 @@ def test_the_week_monday_to_sunday():
     ups = [oct_(12, 8), oct_(12, 23), oct_(18, 23, FLICK), oct_(15, ch=MIKE), oct_(11, 23, LOU),
            (datetime(2026, 10, 19, 0, 0), FLICK), (datetime(2026, 10, 12, 0, 0), MIKE)]
     w = M.week(ups, NOW)
-    assert w == {LOU: [2, 0, 0, 0, 0, 0, 0], MIKE: [1, 0, 0, 1, 0, 0, 0], FLICK: [0, 0, 0, 0, 0, 0, 1]}
-    assert list(w) == [LOU, MIKE, FLICK]
-    assert [M.week_total(v) for v in w.values()] == ["2 this week", "2 this week", "1 this week"]
+    # 18 Nov: the week always shows the four known channels (31 Oct: MikeCuts and DanCuts, all zero here); Flick707
+    # only because it uploaded this week, after them
+    assert w == {LOU: [2, 0, 0, 0, 0, 0, 0], MIKE: [1, 0, 0, 1, 0, 0, 0], MIKECUTS: [0] * 7, DAN: [0] * 7,
+                 FLICK: [0, 0, 0, 0, 0, 0, 1]}
+    assert list(w) == [LOU, MIKE, MIKECUTS, DAN, FLICK]
+    assert [M.week_total(v) for v in w.values()] == ["2 this week", "2 this week", "0 this week", "0 this week",
+                                                     "1 this week"]
     assert M.week_total(w) == "5 this week"
     assert M.week(ups, datetime(2026, 10, 12, 0, 5)) == w                   # Monday morning: the same week
 
@@ -173,8 +183,9 @@ def test_a_week_over_a_month_edge_and_the_channels_shown():
     ups = [sep(28, 9, LOU), sep(30, 9, MIKE), oct_(4, 22, FLICK), oct_(5, 9, FLICK), sep(27, 9, LOU),
            oct_(1, 9, "NewChannel")]
     w = M.week(ups, datetime(2026, 9, 30, 12))                              # Wed: Mon Sep 28 .. Sun Oct 4
-    assert w == {LOU: [1, 0, 0, 0, 0, 0, 0], MIKE: [0, 0, 1, 0, 0, 0, 0], FLICK: [0, 0, 0, 0, 0, 0, 1],
-                 "NewChannel": [0, 0, 0, 1, 0, 0, 0]}
+    assert w == {LOU: [1, 0, 0, 0, 0, 0, 0], MIKE: [0, 0, 1, 0, 0, 0, 0], MIKECUTS: [0] * 7, DAN: [0] * 7,
+                 FLICK: [0, 0, 0, 0, 0, 0, 1], "NewChannel": [0, 0, 0, 1, 0, 0, 0]}        # (18 Nov: see the top)
+    assert list(w) == [LOU, MIKE, MIKECUTS, DAN, FLICK, "NewChannel"]
     assert M.week(ups, datetime(2026, 9, 30, 12), channels=[FLICK]) == {FLICK: [0, 0, 0, 0, 0, 0, 1]}
-    assert M.week([], NOW) == {LOU: [0] * 7, MIKE: [0] * 7, FLICK: [0] * 7}
+    assert M.week([], NOW) == {LOU: [0] * 7, MIKE: [0] * 7, MIKECUTS: [0] * 7, DAN: [0] * 7}   # no Flick707 (31 Oct)
     assert M.week_total([0] * 7) == "0 this week"

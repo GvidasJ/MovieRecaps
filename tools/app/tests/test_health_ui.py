@@ -196,15 +196,21 @@ def test_fix_now_waits_while_a_video_is_being_made(window, qapp, monkeypatch):
 
 
 def test_not_enough_room_offers_the_board_s_clean_up(window, qapp, monkeypatch):
-    asked, cleaned = [], []
+    """18 Nov: the Board has no tab since 7 Nov (your call, a51d4be: "less on the screen") -- its Clean up still runs,
+    out of sight: the window stays on the page it shows and a toast says that Clean up is looking."""
+    asked, cleaned, said = [], [], []
     monkeypatch.setattr(H, "ask_cleanup", lambda parent, text, title="": (asked.append(text), True)[1])
     board = window.pages["board"]
     monkeypatch.setattr(board, "clean_up", lambda: cleaned.append(1))
+    monkeypatch.setattr(window, "toast", lambda text, kind="ok": said.append((text, kind)))
+    assert board.on_screen is False and not board.isVisible()
+    before = window.current()
     window.offer_cleanup("not enough free space on C: -- about 26.7 GB is needed there, only 9.2 GB is free")
     assert asked and "only 9.2 GB is free" in asked[0] and cleaned == [1]
-    assert window.current() == "board"
+    assert window.current() == before != "board" and not board.isVisible()      # no jump to a page without a tab
+    assert said == [("Clean up: looking for leftovers -- it asks before it removes anything", "info")]
     window.strip_space.clicked.emit()                        # the strip's click: the same Clean up
-    assert cleaned == [1, 1]
+    assert cleaned == [1, 1] and len(said) == 2 and said[1] == said[0]
 
 
 # ---------------------------------------------------------------------------------------------------------------------

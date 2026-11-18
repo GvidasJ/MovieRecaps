@@ -103,10 +103,13 @@ def test_caption_stage_keeps_the_competitors_timing_and_applies_my_rules(clip, t
     assert res["mode"] == "competitor" and warnings == ["captions: no transcription: not installed in this test"]
     blocks = C.parse_srt(Path(res["path"]).read_text(encoding="utf-8"))
     # 30 fps frame k = 2k at 60; "whoa!! x2" split after the sentence end (rule 1), "Audi" a name, "Whoa!!" the
-    # first word after an action caption; "no" | "no" (interjections the competitor shows alone) stay apart
+    # first word after an action caption. 18 Nov: "no" | "no" stood here as two captions (170-200, 200-236) -- since
+    # 30 Oct (ec630a9: a competitor that types its captions in word by word) the same words twice in a row, back to
+    # back, are ONE caption (captions.merge_growing): "no" from 170 to 236, the same words on screen the whole time
     assert [(b["text"], round(b["start_ms"] * 60 / 1000), round(b["end_ms"] * 60 / 1000)) for b in blocks] == \
         [("I got a Parker Peter", 20, 60), ("*automatic Audi braking*", 60, 110), ("Whoa!!", 110, 157),
-         ("x2", 157, 170), ("no", 170, 200), ("no", 200, 236), ("Spider-Man is", 236, 282)]   # back to back
+         ("x2", 157, 170), ("no", 170, 236), ("Spider-Man is", 236, 282)]   # back to back
+    assert res["grown_merged"] == [{"from": "no", "into": "no", "start": 170}]
     assert res["competitor_notes"] == {"from_transcript": [], "unreadable": []}
     assert res["rules"]["changed"][1] == 1 and res["weak_kept"][0]["reason"] == "last caption"
     ctx.captions = res

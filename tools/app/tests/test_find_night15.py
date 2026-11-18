@@ -119,9 +119,18 @@ def test_ctrl_f_on_the_real_window_searches_the_page_shown(qt, tmp_path, monkeyp
         assert win.find_bar.isVisible() and win.find_bar.box.hasFocus() or win.find_bar.isVisible()
         win.find_bar.box.setText("drop videos")
         assert win.find_bar.hits and win.find_bar.count.text().endswith(f"of {len(win.find_bar.hits)}")
-        win.select("history")
+        mine = list(win.find_bar.hits)
+        assert all(win.pages["match_cuts"].isAncestorOf(w) for w in mine)
+        # 18 Nov: the History tab is gone since 7 Nov (your call, a51d4be: "less on the screen") -- another page
+        # that still has a tab: Convert
+        assert "history" not in win.pages
+        win.select("convert")
+        assert win.current() == "convert"
         win.find_bar.box.setText("drop videos")                            # another page: its own words
-        assert all(win.pages["history"].isAncestorOf(w) for w in win.find_bar.hits)
+        assert all(win.pages["convert"].isAncestorOf(w) for w in win.find_bar.hits)
+        assert not any(w in mine for w in win.find_bar.hits)               # none of the queue's any more
+        win.find_bar.box.setText("convert")                                # a word the Convert page shows
+        assert win.find_bar.hits and all(win.pages["convert"].isAncestorOf(w) for w in win.find_bar.hits)
         win.find_bar.close_bar()
         assert not win.find_bar.isVisible()
     finally:

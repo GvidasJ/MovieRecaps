@@ -81,14 +81,18 @@ def result(c, shorts=ALL):
 # the channels' Shorts tabs
 # ---------------------------------------------------------------------------------------------------------------------
 
-def test_the_three_channels_and_their_shorts_tabs():
+def test_the_channels_and_their_shorts_tabs():
+    """18 Nov: the channels as they are now -- Flick707 removed (31 Oct, c93409c), MikeCuts and DanCuts added
+    (30-31 Oct), TOMSCUTS added (17 Nov, bd949ba: @TomCutss) -- every one with its Shorts tab, sorted by name."""
     tabs = U.channel_tabs()
     if not paths.channels_dir().is_dir():
         pytest.skip("no assets/channels in this checkout")
-    assert tabs == [("Flick707", "https://www.youtube.com/@Flick707/shorts"),
+    assert tabs == [("DanCuts", "https://www.youtube.com/@DanCutss/shorts"),
                     ("LouLaughs", "https://www.youtube.com/@LouLaughs/shorts"),
+                    ("MikeCuts", "https://www.youtube.com/@mikecutss/shorts"),
                     ("MikeMemesYou", "https://www.youtube.com/@MikeMemesYou/shorts"),
-                    ("SceneProof", "https://www.youtube.com/@SceneProof/shorts")]      # night 15
+                    ("SceneProof", "https://www.youtube.com/@SceneProof/shorts"),      # night 15
+                    ("TOMSCUTS", "https://www.youtube.com/@TomCutss/shorts")]
 
 
 @pytest.mark.parametrize("link, handle, tab", [

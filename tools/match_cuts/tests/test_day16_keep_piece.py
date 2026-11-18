@@ -75,7 +75,10 @@ def _run(tmp_path: Path, spans: list[tuple[int, int]]) -> tuple[Path, Path, np.n
 
 @pytest.fixture
 def short_ok(monkeypatch):
-    monkeypatch.setattr(K, "MIN_RAW_S", 0.0)                 # (a one-minute movie stands for a film)
+    # 18 Nov: since 7 Nov (17385a3) keep_run takes its own min_raw_s (the app passes MATCH_CUTS_KEEP_MIN_RAW_S) --
+    # changing the module's MIN_RAW_S no longer reached it, so these tests failed with "the RAW is 1.0 min, under
+    # 15": they pass min_raw_s=0.0 themselves now (a one-minute movie stands for a film)
+    monkeypatch.setattr(K, "MIN_RAW_S", 0.0)
     from match_cuts import export_xml_edl
     monkeypatch.setattr(export_xml_edl, "premiere_item_problems", lambda p: [])
 
@@ -95,7 +98,7 @@ def test_two_far_groups_make_one_piece_file_and_every_clip_plays_its_frame(tmp_p
     spans = [(100, 130), (150, 190), (1200, 1250)]          # 4-8 s, and 50 s: two groups with a 5 s margin
     run, movie, samples = _run(tmp_path, spans)
     before = _ins(run / "1_edit.xml")
-    out = K.keep_run(run, [movie], margin_s=5.0)
+    out = K.keep_run(run, [movie], margin_s=5.0, min_raw_s=0.0)
     assert out["kept"], out
     gs = [K.Group(**g) for g in out["groups"]]
     assert len(gs) == 2 and gs[0].offset == 0 and gs[1].offset == gs[0].frames
@@ -128,7 +131,7 @@ def test_two_far_groups_make_one_piece_file_and_every_clip_plays_its_frame(tmp_p
 
 def test_the_scores_read_it_back_in_the_movies_frames_and_learn_in_the_pieces(tmp_path, short_ok):
     run, movie, _s = _run(tmp_path, [(100, 130), (1200, 1250)])
-    out = K.keep_run(run, [movie], margin_s=5.0)
+    out = K.keep_run(run, [movie], margin_s=5.0, min_raw_s=0.0)
     assert out["kept"]
     from match_cuts.edit_score import Edit, movie_times
     e = movie_times(Edit.from_xml(run / "1_edit.xml"), run)
@@ -147,11 +150,11 @@ def test_the_scores_read_it_back_in_the_movies_frames_and_learn_in_the_pieces(tm
 
 def test_clips_near_each_other_make_one_piece_and_too_much_keeps_the_whole_movie(tmp_path, short_ok):
     run, movie, _s = _run(tmp_path, [(100, 130), (400, 450)])
-    out = K.keep_run(run, [movie], margin_s=8.0)            # 12.5 s apart < 2 x 8 s: one group
+    out = K.keep_run(run, [movie], margin_s=8.0, min_raw_s=0.0)            # 12.5 s apart < 2 x 8 s: one group
     assert out["kept"] and len(out["groups"]) == 1
     run2, movie2, _s2 = _run(tmp_path / "b", [(100, 130), (1300, 1350)])
     before = (run2 / "1_edit.xml").read_text(encoding="utf-8")
-    out2 = K.keep_run(run2, [movie2], margin_s=20.0)        # 2 x 40 s of 60: more than 60 %
+    out2 = K.keep_run(run2, [movie2], margin_s=20.0, min_raw_s=0.0)        # 2 x 40 s of 60: more than 60 %
     assert not out2["kept"] and "more than 60 %" in out2["why"]
     assert (run2 / "1_edit.xml").read_text(encoding="utf-8") == before                 # nothing changed
     assert (run2 / "extras" / "media" / "raw.mp4").is_file() and not (run2 / "extras" / "media" / "raw.mov").exists()
@@ -164,7 +167,7 @@ def test_a_short_raw_or_a_failed_check_changes_nothing(tmp_path, monkeypatch):
     assert not K.keep_run(run, [movie], margin_s=5.0)["kept"]                         # 1 min: under 15 min
     monkeypatch.setattr(K, "MIN_RAW_S", 0.0)
     monkeypatch.setattr(K, "check_frames", lambda *a, **k: {"ok": False, "rows": [], "why": "made-up mismatch"})
-    out = K.keep_run(run, [movie], margin_s=5.0)
+    out = K.keep_run(run, [movie], margin_s=5.0, min_raw_s=0.0)
     assert not out["kept"] and "made-up mismatch" in out["why"]
     media = run / "extras" / "media"
     assert (media / "raw.mp4").is_file() and not list(media.glob("*.new.*")) and not (media / "raw.mov").exists()
