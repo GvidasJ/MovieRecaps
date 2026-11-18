@@ -337,6 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-swap", action="store_true",
                    help="never swap --competitor/--raw even if they look reversed")
     p.add_argument("--quick-checks", action="store_true", help=argparse.SUPPRESS)   # check-all: no AE recreation checks
+    p.add_argument("--no-recreation-checks", action="store_true",
+                   help="18 Nov: do not run the frame-by-frame checks of the After Effects recreation (the movement "
+                        "between frames, the cuts, the framing of each frame, the check video, the audio, speed and "
+                        "framing). They only fill report.md -- a Premiere run's PASS / OK with a note / FAIL and its "
+                        "notes come from the checks of 1_edit.xml, which always run. On a 46 s Short with 244 "
+                        "segments they took 13 minutes on the laptop")
     p.add_argument("--raw-stretch", default="auto", metavar="auto|off|W:H",
                    help="night 15: a competitor that shows the RAW stretched sideways (a 4:3 episode pulled out to 16:9) -- auto: found from a few frames where the sound placed it; off: never; W:H (e.g. 4:3): the RAW's pixels that many times wider")
     p.add_argument("--music", default="", metavar="FILE",
@@ -430,6 +436,7 @@ def config_from_args(args: argparse.Namespace, competitor: str | None = None, ra
     cfg.music_gains_db = str(getattr(args, "music_gains", "0") or "0")
     cfg.music_volume_db = getattr(args, "music_volume", None)
     cfg.quick_checks = bool(getattr(args, "quick_checks", False))
+    cfg.recreation_checks = not bool(getattr(args, "no_recreation_checks", False))
     if getattr(args, "fast", False):
         cfg.apply_fast()
     else:

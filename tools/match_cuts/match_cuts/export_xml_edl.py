@@ -4922,8 +4922,18 @@ def comment_gain_db(ci: ET.Element) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def plan_rate_flash_max(fps: Any, raw_fps: Any) -> int:
+    """CUT_FLASH_MAX (frames at the RAW's rate) in frames of a sequence at ``fps``: 2 RAW frames are 5 frames of a
+    60 fps sequence over a 23.976 fps RAW, 4 over a 29.97 fps one -- never fewer than CUT_FLASH_MAX."""
+    try:
+        return max(CUT_FLASH_MAX, int(math.floor(CUT_FLASH_MAX * float(Fraction(fps)) / float(Fraction(raw_fps))
+                                                 + 1e-6)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return CUT_FLASH_MAX
+
+
 def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = None, silence: Any = None,
-                       speed: float = 1.0, seq_rate: Any = None) -> dict:
+                       speed: float = 1.0, seq_rate: Any = None, fix_plan_rate: bool = False) -> dict:
     """recreated_edit.xml for Premiere Pro (--premiere; see the section comment above): the 1080x1920 / 60.00 fps
     sequence, V1 = the RAW clips framed into the template window, A1 = their RAW audio at the same cuts (an audio
     line where FX-14 found one), markers on UNCERTAIN / NOT-IN-RAW (and RETIME) spots, V2+ empty. ``silence`` (a
@@ -4999,12 +5009,39 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                 end_cut, cut_fixed, take_jumps = _after_start_cut(end_cut, cut_fixed, take_jumps, start_cut["frames"])
         fps = want
         src_dur = int(math.floor(raw_frames * float(fps) / float(raw_fps)))
+    elif fix_plan_rate and abs(float(speed) - 1.0) <= 1e-9:
+        # 18 Nov (the projects' notes: 50 x "1 frame of a RAW shot at the framing of another clip of it (0.017 s)",
+        # 52 x "the RAW skips N ms at the cut: one take, cut", flashes at the first / last frames): the four fixes
+        # below were only ever made on a sequence at the RAW's rate. Since 7 Nov every video that gets Topaz is a
+        # 60 fps sequence (--sequence-fps 60: the planning rate itself) -- there none of them ran, and every such
+        # flash and jump was left for you. The same fixes now, on the 60 fps sequence (``fix_plan_rate``,
+        # pipeline.stage_finish: kept only when the edit's own checks then find no more than before). pos_map: every
+        # position of the planning grid on the delivered sequence (the captions follow what moved).
+        from .config import removes_silence
+        if not removes_silence(cfg):
+            n_plan = N
+            shots_ = getattr(cfg, "premiere_shots", None)
+            pos_map = {p_: p_ for p_ in range(int(N) + 1)}
+            clips, audio_items, markers, N, end_cut = _cut_end_flash(clips, audio_items, markers, N, pos_map, n_plan,
+                                                                     fps, fps, shots_)
+            clips, audio_items, cut_fixed = fix_cut_flashes(clips, audio_items, shots_, fps, raw_fps, pos_map,
+                                                            plan_rate_flash_max(fps, raw_fps))
+            clips, audio_items, markers, N, take_jumps = fix_take_jumps(
+                clips, audio_items, markers, N, pos_map, n_plan, fps, fps, raw_fps, shots_)
+            if take_jumps:
+                end_cut, cut_fixed = _after_jumps(end_cut, cut_fixed, take_jumps)
+            clips, audio_items, markers, N, start_cut = _cut_start_flash(clips, audio_items, markers, N, pos_map, fps,
+                                                                         shots_)
+            if start_cut:
+                end_cut, cut_fixed, take_jumps = _after_start_cut(end_cut, cut_fixed, take_jumps, start_cut["frames"])
+            if not (end_cut or cut_fixed or take_jumps or start_cut):
+                pos_map = {}                  # nothing to fix: the edit as it was
     clips, audio_items, pairs = last_steps(clips, audio_items, cfg, fps, (raw_w, raw_h), person_spans)
 
     def where(x: int) -> int:             # a position of the planning grid (100 %) on the delivered sequence
         y = int(round(int(x) / float(speed))) if abs(float(speed) - 1.0) > 1e-9 else int(x)
         if fps == plan_fps:
-            return y
+            return pos_map.get(y, y) if pos_map else y     # (18 Nov: fixed at the planning rate -- what moved)
         return pos_map.get(y, int(math.floor(Fraction(y) * Fraction(fps) / Fraction(plan_fps) + Fraction(1, 2))))
     fixes = edit_fix_lines(followed, end_cut, fps, where, cut_fixed, take_jumps, start_cut)
     for line in fixes:
@@ -5243,7 +5280,7 @@ def _with_start_cut(x: dict, k: int) -> dict:
 
 
 def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: float = 1.0, end_cut: int = 0,
-                  put_back: Sequence[tuple[int, int]] = (), start_cut: int = 0) -> list[str]:
+                  put_back: Sequence[tuple[int, int]] = (), start_cut: int = 0, raw_fps: Any = None) -> list[str]:
     """Night 7: 1_edit.xml at the RAW's rate (``final_xml``; --speed k too) against the edit every other check read
     (``base_xml``: the 60 fps grid, 100 %): the sequence lasts its length / k (within a frame of the new rate); every
     V1 clip and A1 item plays, on each of its frames, the RAW its twin in the checked edit (the clip it overlaps most)
@@ -5261,6 +5298,14 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
     b = _without_put_back(b, sorted((int(s), int(d)) for s, d in put_back or ()))
     b = _with_start_cut(b, int(start_cut))
     fa, fb = float(_seq_rate(a)), float(_seq_rate(b))
+    # 18 Nov: "a frame at each end" was written for a sequence at the RAW's rate (2 frames = 2 RAW frames). On a
+    # sequence faster than the RAW (60 fps, fixed at the planning rate) the same 2 RAW frames are more of its frames
+    moved_max = 2
+    try:
+        if raw_fps and fb > float(Fraction(raw_fps)) + 1e-6:
+            moved_max = max(2, int(math.ceil(2.0 * fb / float(Fraction(raw_fps)) - 1e-6)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        moved_max = 2
     k = float(k)
     out: list[str] = []
     end_b = b["duration"] / fb                     # the delivered edit's end (s)
@@ -5314,7 +5359,7 @@ def rate_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike, k: 
                 fr, got, want = bad[0]
                 out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(fr, _seq_rate(b))}: plays RAW {got:.3f} s where "
                            f"the checked edit plays {want:.3f} s ({len(bad)} of its {q1 - q0} frames)")
-            if moved > 2:                                # a frame at each end: the nearest frame / a shot change
+            if moved > moved_max:                        # a frame at each end: the nearest frame / a shot change
                 out.append(f"XML RATE {name} {q.get('label') or '?'} at {_tc(q0, _seq_rate(b))}: {moved} of its frames "
                            "play where the checked edit already shows the next / previous clip (a cut moved)")
         fin = sorted((int(c["start"]) / fb, int(c["end"]) / fb) for c in b[kind] if int(c["start"]) >= 0)
@@ -5351,7 +5396,7 @@ def final_xml_problems(base_xml: str | os.PathLike, final_xml: str | os.PathLike
     out += [f"XML TRANSITION {p}" for p in premiere_transition_problems(final_xml)]
     out += [f"XML LINK {p}" for p in premiere_link_problems(final_xml)[0]]
     out += [f"XML SYNC {p}" for p in premiere_sync_problems(final_xml, moving)[0]]
-    out += rate_problems(base_xml, final_xml, k, end_cut, put_back, start_cut)
+    out += rate_problems(base_xml, final_xml, k, end_cut, put_back, start_cut, raw_fps)
     return out
 
 

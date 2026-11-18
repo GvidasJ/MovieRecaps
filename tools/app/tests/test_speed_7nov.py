@@ -134,3 +134,14 @@ def test_without_a_readable_edit_nothing_is_left_out(tmp_path):
     (p / "edit" / "1_edit.xml").write_text("not xml", encoding="utf-8")
     put, _left = Z.members(p, p / "edit")
     assert "Show.mp4" in {f.name for f, _a in put}
+
+
+def test_without_check_videos_the_recreation_checks_are_not_run_either_18nov(tmp_path, monkeypatch):
+    """18 Nov (The Best Business Idea (2) made again: 481 of 718 s in the last stage, 455 s of them in the frame-by-
+    frame checks of the After Effects recreation, which only fill report.md; 13 minutes on the laptop)."""
+    monkeypatch.setenv(run.CHECK_VIDEOS_ENV, "")
+    monkeypatch.setattr(S, "load", lambda: S.Settings())
+    r = _job_run(tmp_path, resume=True)
+    assert "--no-recreation-checks" in r.cmd and r.cmd[-1] == "--resume"
+    monkeypatch.setattr(S, "load", lambda: S.Settings(check_videos=True))     # Settings -> Check videos: all of them
+    assert "--no-recreation-checks" not in _job_run(tmp_path).cmd

@@ -35,12 +35,20 @@ def command(python: Path, comp: Path, raw: Path, run_dir: Path, work: Path, fast
 
 CHECK_VIDEOS_ENV = "MOVIERECAPS_CHECK_VIDEOS"     # 7 Nov: "0" / "1" wins over Settings -> Check videos (the tests)
 SKIP_CHECK_VIDEOS = ["--skip-preview", "--skip-compare"]
+# 18 Nov (The Best Business Idea (2) made again: 481 s of 718 went into S9, 455 s of them into the frame-by-frame
+# checks of the After Effects recreation; 13 minutes on the laptop for a 46 s Short): with Check videos off those
+# checks are not run either. They never changed the edit and never decided PASS / OK with a note / FAIL -- that, and
+# every note you see, comes from the checks of 1_edit.xml, which always run. Settings -> Check videos (on) runs
+# them again and fills report.md with them.
+NO_RECREATION_CHECKS = ["--no-recreation-checks"]
 
 
 def check_videos() -> bool:
     """7 Nov: the edit also renders its two check videos, preview_recreation.mp4 and compare.mp4 (Settings -> Check
-    videos, OFF by itself: about 9 % of every run went into them). Without them every check still runs -- the cut
-    checks read the frames made in memory instead -- only the two videos you could watch are not made."""
+    videos, OFF by itself: about 9 % of every run went into them). Without them every check of 1_edit.xml still runs
+    (the ones that make a video PASS / OK with a note / FAIL and write its notes) -- only the two videos you could
+    watch are not made, and (18 Nov, NO_RECREATION_CHECKS) not the frame-by-frame checks of the After Effects
+    recreation either: they only fill report.md and took most of the last stage's time."""
     env = os.environ.get(CHECK_VIDEOS_ENV, "").strip()
     if env in ("0", "1"):
         return env == "1"
@@ -125,6 +133,7 @@ class JobRun:
                            forced(job), bool(getattr(job, "roles_chosen", False)), short_raw(job), channel_music(job))
         if not check_videos():
             self.cmd += SKIP_CHECK_VIDEOS                  # 7 Nov: faster -- the checks still run
+            self.cmd += NO_RECREATION_CHECKS               # 18 Nov: ... those of 1_edit.xml (see above)
         try:                                               # 7 Nov: the Topaz picture is 60 fps -- so is the
             from .enhance_swap import wants_60            #   sequence
             if wants_60(job):

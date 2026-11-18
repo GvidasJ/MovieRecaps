@@ -2479,3 +2479,28 @@ def test_ae_sim_frame_mix_compares_the_dominant_frame():
     bad[3][0].update(raw_frame=truth[3], mix=0.75)                  # shows mostly truth + 1, m = truth
     r = verify.check_ae_sim(bad, fm, F30, F30, n, [], Config())
     assert [x["k"] for x in r["mismatches"]] == [3] and r["mismatches"][0]["ae"] == truth[3] + 1
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 18 Nov: --no-recreation-checks (the app, Check videos off) -- the frame-by-frame checks of the After Effects
+# recreation are not run (455 of S9's 481 s on the PC, 13 min on the laptop); 1_edit.xml's own checks always are
+# ---------------------------------------------------------------------------------------------------------------------
+
+def test_no_recreation_checks_leaves_out_only_the_checks_that_fill_the_report():
+    from types import SimpleNamespace
+    from match_cuts import cli
+    from match_cuts import verify as V
+    on = cli.config_from_args(cli.build_parser().parse_args([]))
+    off = cli.config_from_args(cli.build_parser().parse_args(["--no-recreation-checks"]))
+    assert on.recreation_checks is True and off.recreation_checks is False and off.quick_checks is False
+    heavy = ("s9_2b_temporal", "c2_cuts", "s9_2c_refit", "s9_3_visual", "s9_5_audio", "c4_speed_framing")
+    assert set(heavy) == set(V.QUICK_SKIPPED)
+    for name in heavy:
+        assert V.not_run_reason(on, name) == ""                           # a normal run: every check
+        assert "--no-recreation-checks" in V.not_run_reason(off, name)
+    # what decides PASS / OK with a note / FAIL (batch.checks_of) and the cuts' pictures always run
+    for name in ("s9_1_coverage", "s9_8_deliverables", "s9_7_determinism", "s9_4_cut_images"):
+        assert V.not_run_reason(off, name) == "", name
+    quick = SimpleNamespace(quick_checks=True, recreation_checks=True)
+    assert "--quick-checks" in V.not_run_reason(quick, "c2_cuts")         # check-all's switch: as before
+    assert V.not_run_reason(SimpleNamespace(), "c2_cuts") == ""           # (an older config object: every check)

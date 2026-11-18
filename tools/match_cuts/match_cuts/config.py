@@ -55,6 +55,8 @@ class Config:
     music_split_s: float = 0.0             # --music-split: cut there (sequence s), each piece its own level
     music_gains_db: str = "0"              # --music-gains: "5,-1" -- dB before / after the cut
     quick_checks: bool = False             # check-all: no After Effects recreation checks (c2-c5, 9.9)
+    recreation_checks: bool = True         # 18 Nov: --no-recreation-checks (the app, Check videos off): the same
+    #                                        checks are left out, the run's times are still written to the history
     conform_codec: str = "auto"            # auto | prores_lt | prores | h264   (auto: ProRes LT via prores_aw <= 10 min, else H.264 CRF 12 in .mp4)
     ae_time_mode: str = "auto"             # auto | stretch | remap | frames  (auto: stretch, per-layer fallback, see export_ae)
     ae_slack_tol_frames: float = 0.01      # exact AE floor-rule slack (RAW frames; min over EVERY frame of a layer, from the
@@ -398,7 +400,7 @@ class Config:
         for k in ("competitor", "raw", "out_dir", "work_dir", "deliver_dir", "previous_out_dir", "verbose", "workers",
                   "skip_preview", "skip_compare",
                   "layout_mode", "comp_size", "fps_mode", "force_conform", "conform_codec", "large_file_bytes",
-                  "force_inputs", "quick_checks", "raw_stretch", "music_file", "music_start_s", "music_split_s", "music_gains_db",
+                  "force_inputs", "quick_checks", "recreation_checks", "raw_stretch", "music_file", "music_start_s", "music_split_s", "music_gains_db",
                   "ae_time_mode", "ae_slack_tol_frames", "run_ae", "ae_timeout_s", "verify_zncc", "audio_lag_tol_ms", "frame_exact_min",
                   "conform_h264_preset", "conform_h264_crf", "competitor_h264_preset", "competitor_h264_crf",
                   "preview_crf", "preview_preset", "preview_audio_budget_bytes", "compare_height", "compare_crf",

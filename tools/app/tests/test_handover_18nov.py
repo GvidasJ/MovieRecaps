@@ -332,3 +332,60 @@ def test_a_thread_that_said_how_it_ended_is_not_said_twice(tmp_path, monkeypatch
     monkeypatch.setattr(th, "_work", work)
     th.run()
     assert [r["label"] for r in said] == ["PASS"]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# space: the Enhance folder tidies its own left-overs
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _piece_files(enh, name: str, age_days: float, *, enhanced: bool = True, lock: bool = False):
+    import os
+    import time
+    from mr_app.core import enhance as E
+    nm = E.names(enh, name)
+    nm.piece.write_bytes(b"piece")
+    nm.info.write_text("{}", encoding="utf-8")
+    if enhanced:
+        nm.enhanced.write_bytes(b"enhanced by Topaz")
+    if lock:
+        nm.lock.write_text("{}", encoding="utf-8")
+    t = time.time() - age_days * 86400
+    for f in nm.all():
+        if f.is_file() and not (lock and f == nm.lock):
+            os.utime(f, (t, t))
+    return nm
+
+
+def test_the_enhance_folder_tidies_pieces_nobody_waits_for_and_never_deletes_a_finished_one(tmp_path):
+    from mr_app.core import enhance as E
+    enh = tmp_path / "Enhance"
+    enh.mkdir()
+    root = tmp_path / "projects"
+    waiting = PJ.create(root, name="still with topaz")
+    waiting.update(enhance={"state": "sent", "name": "2026-11-01_Still with Topaz_all", "folder": str(enh)})
+    old = _piece_files(enh, "2026-10-30_Old finished video", 20)                    # nobody waits: a left-over
+    kept = _piece_files(enh, "2026-11-01_Still with Topaz_all", 20, enhanced=False)  # a project still waits for it
+    new = _piece_files(enh, "2026-11-17_Made yesterday", 1)                          # too new
+    busy = _piece_files(enh, "2026-10-30_Being enhanced", 20, enhanced=False, lock=True)   # a live lock
+    (enh / "notes of mine.txt").write_text("not a piece", encoding="utf-8")
+    out = E.clean_folder(enh, [root])
+    assert len(out) == 1 and "2026-10-30_Old finished video" in out[0] and "moved to _to_delete" in out[0]
+    assert not old.piece.exists() and not old.info.exists() and not old.enhanced.exists()
+    assert (enh / "_to_delete" / old.enhanced.name).read_bytes() == b"enhanced by Topaz"   # hours of Topaz: kept
+    for nm in (kept, new, busy):
+        assert nm.piece.is_file() and nm.info.is_file()
+    assert new.enhanced.is_file() and (enh / "notes of mine.txt").is_file()
+    assert E.clean_folder(enh, [root]) == []                                         # nothing left to tidy
+
+
+def test_the_round_tidies_the_enhance_folder_once_a_day(tmp_path, monkeypatch):
+    from mr_app.core import enhance as E
+    enh = tmp_path / "Enhance"
+    enh.mkdir()
+    monkeypatch.setattr(E, "share_dir", lambda *a, **k: enh)
+    monkeypatch.setattr(E, "_CLEANED_AT", 0.0)
+    old = _piece_files(enh, "2026-10-30_Old finished video", 20)
+    out = E.sweep([tmp_path / "projects"])
+    assert len(out) == 1 and not old.piece.exists()
+    again = _piece_files(enh, "2026-10-29_Another old one", 20)
+    assert E.sweep([tmp_path / "projects"]) == [] and again.piece.is_file()          # not before tomorrow

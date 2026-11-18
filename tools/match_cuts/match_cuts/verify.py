@@ -4437,6 +4437,24 @@ def _run_check(name: str, fn: Callable[[], dict]) -> dict:
                 "failures": [f"{name} crashed: {type(e).__name__}: {e}"]}
 
 
+def not_run_reason(cfg: Any, name: str) -> str:
+    """Why the check ``name`` is not run in this run ('' = it runs). --quick-checks (check-all) and, 18 Nov,
+    --no-recreation-checks leave out the frame-by-frame checks of the After Effects recreation (QUICK_SKIPPED).
+
+    18 Nov (The Best Business Idea (2) made again on the PC: S9 took 481 s of the run's 718 -- 455 s of them in these
+    checks; 13 minutes on the laptop for a 46 s Short): they fill report.md only -- a Premiere run's result and its
+    notes come from the checks of 1_edit.xml (batch.checks_of: deliverables, coverage), which run as before."""
+    if name not in QUICK_SKIPPED:
+        return ""
+    if bool(getattr(cfg, "quick_checks", False)):
+        return ("not run (--quick-checks: check-all scores the Premiere deliverables, not the After Effects "
+                "recreation)")
+    if not bool(getattr(cfg, "recreation_checks", True)):
+        return ("not run (--no-recreation-checks: the app's Check videos is off -- this check of the After Effects "
+                "recreation only fills this report; 1_edit.xml's own checks ran)")
+    return ""
+
+
 def _preview_is_match_render(ctx: Any, main_fps: Fraction) -> bool:
     """The delivered preview is itself a match-geometry render on the competitor's grid (any proportional
     size: check_visual resizes it to the proxy)."""
@@ -4548,12 +4566,11 @@ def verify_all(ctx: Any) -> dict:
     raw_name = Path(ctx.raw_info.path).name
     checks: dict[str, dict] = {}
     extra: dict[str, dict] = {}
-    quick = bool(getattr(cfg, "quick_checks", False))
 
     def _check(name: str, fn: Callable[[], dict]) -> dict:
-        if quick and name in QUICK_SKIPPED:
-            return {"status": "not_available", "summary": "not run (--quick-checks: check-all scores the Premiere "
-                    "deliverables, not the After Effects recreation)", "failures": []}
+        why = not_run_reason(cfg, name)
+        if why:
+            return {"status": "not_available", "summary": why, "failures": []}
         return _run_check(name, fn)
 
     checks["s9_1_coverage"] = _check("s9_1_coverage", lambda: check_coverage(segs, n, cl.layout))

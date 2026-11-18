@@ -4019,6 +4019,8 @@ def stage_finish(ctx: Context) -> None:
     xml = cfg.deliver / run_folders.EDIT_XML
     plan = Fraction(str(cfg.premiere_fps or "60"))
     rate = Fraction(str(getattr(cfg, "premiere_seq_rate", None) or plan))
+    if abs(k - 1.0) <= 1e-9 and rate == plan and xml.exists() and plan_rate_fixes(cfg):
+        fix_at_plan_rate(ctx, k, rate)         # 18 Nov: --sequence-fps 60 -- the day-13 fixes on the 60 fps sequence
     if (abs(k - 1.0) > 1e-9 or rate != plan) and xml.exists():
         from .config import rate_text
         what = " and ".join(([f"--speed {100 * k:g}"] if abs(k - 1.0) > 1e-9 else []) +
@@ -4052,12 +4054,87 @@ def stage_finish(ctx: Context) -> None:
             ctx.paths["framed_preview"] = str(dst)
 
 
+PLAN_RATE_FIXES = True        # 18 Nov: a sequence asked for at the planning rate gets the day-13 / run-18 fixes too
+REDO_KINDS = ("XML ITEM", "XML EMPTY", "XML REPEAT", "XML FLASH", "XML AUDIO", "XML TRANSITION", "XML LINK", "XML SYNC")
+
+
+def plan_rate_fixes(cfg: Any) -> bool:
+    """The delivered sequence was asked for by its rate (--sequence-fps 60: the app, for a video that gets Topaz) --
+    not "the RAW's rate" (the default: there the fixes are made after the rate change, as before)."""
+    return PLAN_RATE_FIXES and str(getattr(cfg, "sequence_fps", "raw") or "raw").strip().lower() not in ("raw", "")
+
+
+def fix_at_plan_rate(ctx: Context, k: float, rate: Fraction) -> dict | None:
+    """18 Nov (the projects' notes: flash frames and "the RAW skips N ms: one take, cut" on almost every 60 fps edit):
+    1_edit.xml written again with export_xml_edl's own fixes -- a sliver of the next / last RAW shot at the edit's end
+    / start cut off, a flash of one or two RAW frames at a cut moved onto the RAW's shot change, a frame skipped
+    inside one take played again -- which until now were only made on a sequence at the RAW's rate. 2_captions.srt
+    follows what moved. Kept ONLY when it is no worse: the new edit's own hard checks (items, empty, repeats,
+    flashes, audio, transitions, links, sync) find no more than the checked edit's did, and nothing else (a frame of
+    it that plays another moment than the checked edit: XML RATE) -- else 1_edit.xml and 2_captions.srt are put back
+    exactly as they were. Returns apply_final's result when it was kept, else None."""
+    cfg = ctx.cfg
+    xml = cfg.deliver / run_folders.EDIT_XML
+    srt = cfg.deliver / run_folders.CAPTIONS_SRT
+    try:
+        was_xml = xml.read_bytes()
+        was_srt = srt.read_bytes() if srt.exists() else None
+    except OSError:
+        return None
+    was_px = dict(ctx.premiere_xml) if isinstance(ctx.premiere_xml, dict) else ctx.premiere_xml
+    was_caps = (ctx.paths or {}).get("captions")
+    old = [str(e) for e in ((ctx.exports or {}).get("errors") or []) if str(e).startswith(REDO_KINDS)] \
+        if isinstance(ctx.exports, dict) else []
+    ok, res = _soft(ctx, "S8 fixes at the sequence's rate", lambda: apply_final(ctx, k, rate, fix_plan=True))
+    fixes = list((ctx.premiere_xml or {}).get("edit_fixes") or []) if isinstance(ctx.premiere_xml, dict) else []
+    probs = [str(p) for p in (res.get("problems") or [])] if ok and isinstance(res, dict) else None
+    why = ""
+    if probs is None:
+        why = "it could not be written"
+    elif not fixes:
+        why = "nothing to fix"
+    elif not all(p.startswith(REDO_KINDS) for p in probs):
+        why = "a check that is not one of the edit's own found something: " + "; ".join(
+            p for p in probs if not p.startswith(REDO_KINDS))[:300]
+    elif len(probs) > len(old):
+        why = f"its checks find {len(probs)} thing(s), the checked edit's {len(old)}"
+    if why:
+        try:                                    # exactly as it was
+            xml.write_bytes(was_xml)
+            if was_srt is not None:
+                srt.write_bytes(was_srt)
+        except OSError as e:
+            ctx.warn(f"1_edit.xml could not be put back after the fixes were not kept: {e}")
+        ctx.premiere_xml = was_px
+        if was_caps is not None:
+            ctx.paths["captions"] = was_caps
+        if why != "nothing to fix":
+            log.info("1_edit.xml: the fixes on the %s fps sequence were not kept (%s) -- the edit as it was",
+                     fps_str(rate), why)
+        ctx.dlog.record("premiere", "plan_rate_fixes", kept=False, why=why, fixes=fixes[:10])
+        return None
+    if isinstance(ctx.exports, dict):           # the delivered XML's own checks speak for it now (as at another rate)
+        kept = [e for e in ctx.exports.get("errors") or [] if not str(e).startswith(REDO_KINDS)]
+        ctx.exports["errors"] = kept + probs[:10]
+        ctx.exports["ok"] = not ctx.exports["errors"]
+        ctx.exports["validation_ok"] = not ctx.exports["errors"]
+        if probs:
+            ctx.exports.setdefault("speed_problems", []).extend(probs)
+    ctx.finish["speed"] = res
+    log.info("1_edit.xml: fixed by itself on the %s fps sequence -- %s; its checks now find %d thing(s) (before: %d)",
+             fps_str(rate), "; ".join(fixes)[:600], len(probs), len(old))
+    if probs:
+        ctx.warn(f"1_edit.xml: {len(probs)} thing(s) left to look at after the fixes: " + "; ".join(probs[:6]))
+    ctx.dlog.record("premiere", "plan_rate_fixes", kept=True, fixes=fixes[:20], left=probs[:20], before=old[:20])
+    return res
+
+
 def apply_speed(ctx: Context, k: float) -> dict:
     """--speed alone (the sequence at the planning rate): apply_final."""
     return apply_final(ctx, k, None)
 
 
-def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
+def apply_final(ctx: Context, k: float, rate: Fraction | None = None, fix_plan: bool = False) -> dict:
     """The finished edit as you get it: 1_edit.xml written again from the same plan -- every clip k times as fast
     (--speed: export_xml_edl.retime_edit) and the sequence at ``rate`` (night 7: the RAW's own rate,
     export_xml_edl.rerate_edit) -- and 2_captions.srt timed to it (each caption's start and end / k, onto the new
@@ -4077,7 +4154,8 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
     shutil.copyfile(xml, base)
     ex = ctx.premiere_cutlist
     rp = (ctx.silence or {}).get("ripple") if isinstance(ctx.silence, dict) else None
-    res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k, seq_rate=rate if rate != plan else None)
+    res = X.write_premiere_xml(ex, xml, cfg, rp, speed=k, seq_rate=rate if rate != plan else None,
+                               fix_plan_rate=bool(fix_plan))
     if isinstance(ctx.premiere_xml, dict):      # the end summary's times: the delivered edit's (its re-framed clips,
         ctx.premiere_xml = dict(ctx.premiere_xml, reframed=res.get("reframed") or [], fps=res.get("fps"),  # the
                                 edit_fixes=res.get("edit_fixes") or [], end_cut=res.get("end_cut"))  # day-13 fixes)
@@ -4088,7 +4166,7 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
         probs += X.watermark_track_problems(xml, X.parse_premiere_xml(xml)["duration"],
                                             float(getattr(cfg, "watermark_opacity", X.WATERMARK_OPACITY) or
                                                   X.WATERMARK_OPACITY))
-    if rate == plan:
+    if rate == plan and not fix_plan:
         probs += X.speed_problems(base, xml, k)
     elif not probs:
         from .config import removes_silence
@@ -4111,8 +4189,9 @@ def apply_final(ctx: Context, k: float, rate: Fraction | None = None) -> dict:
             (cfg.out / f"captions_{sped}.srt").write_text(scaled_srt(rows, k, float(plan)), encoding="utf-8",
                                                           newline="\n")
         pos_map = {int(a): int(b) for a, b in (res.get("pos_map") or {}).items()}
-        srt.write_text(scaled_srt(rows, k, float(plan)) if rate == plan else final_srt(rows, k, plan, rate, pos_map),
-                       encoding="utf-8", newline="\n")
+        moved = rate == plan and any(a != b for a, b in pos_map.items())    # 18 Nov: fixed at the planning rate
+        srt.write_text(scaled_srt(rows, k, float(plan)) if rate == plan and not moved
+                       else final_srt(rows, k, plan, rate, pos_map), encoding="utf-8", newline="\n")
         if ctx.captions.get("path"):
             ctx.paths["captions"] = str(srt)
     x0, x1 = X.parse_premiere_xml(base), X.parse_premiere_xml(xml)
@@ -4140,7 +4219,7 @@ def final_srt(rows: list[dict], k: float, plan: Fraction, rate: Fraction, pos_ma
 
     def at(x: int) -> int:
         if rate == plan:
-            return int(x)
+            return int(pm.get(int(x), int(x)))            # (18 Nov: fixed at the planning rate -- what moved)
         return pm[x] if x in pm else int(math.floor(Fraction(int(x)) * r + Fraction(1, 2)))
     caps = []
     for row in rows:
@@ -4189,8 +4268,10 @@ def full_res_check(ctx: Context) -> dict | None:
     on the GPU, with verification's own layout masks. None when the pass does not run (--fast / no GPU)."""
     from . import fullres
     from . import verify as verify_mod
-    if fullres.available(ctx.cfg) or not ctx.segments or getattr(ctx.cfg, "quick_checks", False):
-        return None                                  # (--quick-checks: check-all does not score it)
+    if fullres.available(ctx.cfg) or not ctx.segments or getattr(ctx.cfg, "quick_checks", False) \
+            or not getattr(ctx.cfg, "recreation_checks", True):
+        return None                                  # (--quick-checks: check-all does not score it; 18 Nov:
+        #                                              --no-recreation-checks -- a check of the recreation too)
     try:
         workers = gpu_workers(ctx.cfg, "9.9 full resolution")
         comp_st, raw_st = _full_frames(ctx)

@@ -838,6 +838,93 @@ def sweep(roots, timeout_s: float = TIMEOUT_S, busy=None) -> list[str]:
                     out.append(f"{p.folder.name}: {r.get('state')} -- {r.get('text') or r.get('why') or ''}")
             except Exception:  # noqa: BLE001
                 continue
+    try:                                                 # 18 Nov: and the Enhance folder's left-overs, once a day
+        global _CLEANED_AT
+        if time.time() - _CLEANED_AT > CLEAN_EVERY_S:
+            _CLEANED_AT = time.time()
+            folder = share_dir()
+            if Path(folder).is_dir():                    # (quick: a look at file dates -- not counted as work)
+                out += clean_folder(folder, roots)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+CLEAN_AFTER_DAYS = 7.0                 # a piece nobody waits for is tidied away when it is this old
+CLEAN_EVERY_S = 24 * 3600.0
+TO_DELETE = "_to_delete"
+_CLEANED_AT = 0.0
+
+
+def clean_folder(folder: str | os.PathLike, roots, now: float | None = None,
+                 days: float = CLEAN_AFTER_DAYS) -> list[str]:
+    """18 Nov (D:\\Shared\\Enhance held 7 GB of enhanced pieces from 30 Oct - 11 Nov that no video was waiting for):
+    the Enhance folder tidies itself. A piece -- its _TOENHANCE.mp4 / .json / .lock, _ENHANCING.part.mp4,
+    _ENHANCED.mp4, _ENHANCE_FAILED.txt -- is a left-over when all its files are older than ``days``, nobody is
+    enhancing it (no live lock) and no project under ``roots`` (nor the project its json names) still has it "with
+    Topaz" under that name. Of a left-over, what the app can make again (the piece cut from the RAW, its json, a
+    half-written result, the failure note) is deleted; a finished _ENHANCED.mp4 -- hours of Topaz -- is never
+    deleted here: it is moved into the folder's _to_delete, for you to look at. Returns what was done."""
+    from . import projects as PJ
+    folder = Path(folder)
+    now = time.time() if now is None else now
+    out: list[str] = []
+    waited: set[str] = set()                             # the names some project still waits for
+    for root in roots or []:
+        try:
+            for p in PJ.list_projects(root):
+                rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+                if rec.get("state") in ("sent", "late") and rec.get("name"):
+                    waited.add(safe_name(str(rec["name"])))
+        except Exception:  # noqa: BLE001 - a folder that cannot be read: its pieces are not known -- nothing is tidied
+            return out
+    suffixes = (TO + PIECE_EXT, TO + ".json", TO + LOCK_EXT, PART_SUFFIX, DONE_SUFFIX, FAILED_SUFFIX)
+    names: set[str] = set()
+    try:
+        for f in folder.iterdir():
+            if f.is_file():
+                for suf in suffixes:
+                    if f.name.endswith(suf) and len(f.name) > len(suf):
+                        names.add(f.name[: -len(suf)])
+    except OSError:
+        return out
+    for name in sorted(names):
+        nm = Names(folder, name)
+        try:
+            files = [f for f in nm.all() if f.is_file()]
+            if not files or name in waited:
+                continue
+            if nm.lock.exists() and not lock_stale(nm.lock, now):
+                continue
+            if now - max(f.stat().st_mtime for f in files) < days * 86400:
+                continue
+            info = read_info(nm.info) or {}
+            pf = _reachable(str(info.get("project_folder") or ""))
+            if pf is not None:                           # the project its json names (it may be outside ``roots``)
+                rec = (PJ.load(pf).data.get("enhance") or {})
+                if isinstance(rec, dict) and rec.get("state") in ("sent", "late") and \
+                        safe_name(str(rec.get("name") or "")) == name:
+                    continue
+            moved = ""
+            if nm.enhanced.is_file():
+                dst = folder / TO_DELETE
+                dst.mkdir(exist_ok=True)
+                target = dst / nm.enhanced.name
+                if target.exists():
+                    target = dst / f"{nm.enhanced.stem}.{int(now)}{nm.enhanced.suffix}"
+                os.replace(nm.enhanced, target)
+                moved = f", its enhanced picture moved to {TO_DELETE}"
+            gone = 0
+            for f in (nm.piece, nm.info, nm.lock, nm.part, nm.failed):
+                try:
+                    if f.is_file():
+                        f.unlink()
+                        gone += 1
+                except OSError:
+                    pass
+            out.append(f"Enhance folder: {name} -- no video waits for it any more: {gone} file(s) removed{moved}")
+        except Exception:  # noqa: BLE001 - that piece stays as it is
+            continue
     return out
 
 
