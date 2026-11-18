@@ -419,3 +419,41 @@ def test_keyframes_too_far_from_the_span_fall_back_as_before():
     assert (p.k0, p.k1) == (24 * 200, 24 * 300)
     end = E._span_plan(m, 505.0, 590.0)                                   # noqa: SLF001 - no keyframe after: the end
     assert (end.k0, end.k1, end.dts_end) == (24 * 500, 24 * 600, None)
+
+
+def test_an_encoded_piece_starts_on_a_frame_so_topaz_result_is_not_refused(tmp_path, monkeypatch):
+    """18 Nov (The Most Jealous Group Leader, made again): "Topaz's result is not right: its first frame is at 0.033 s,
+    not at 0" -- three times, then the normal RAW stayed in the timeline. The window of a piece that had to be
+    encoded started between two frames."""
+    import subprocess
+    from match_cuts import excerpt as X
+    from match_cuts.common import ffmpeg_bin
+    from mr_app.core import enhance as E
+    monkeypatch.setenv(E.FAKE_ENV, "1")
+    raw = tmp_path / "raw.mp4"
+    subprocess.run([ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:d=40",
+                    "-f", "lavfi", "-i", "sine=duration=40", "-c:v", "libx264", "-preset", "ultrafast", "-g", "48",
+                    "-keyint_min", "48", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+                    str(raw)], check=True)
+
+    def no_copy(*a, **k):
+        raise RuntimeError("the seek landed on 1, not on the keyframe 2")
+    monkeypatch.setattr(X, "cut_piece", no_copy)                      # the lossless cut is not possible: encoded
+    enh = tmp_path / "Enhance"
+    for start in (10.01, 10.03, 12.0):                                # between two frames (early, late), on a frame
+        info = E.make_piece(raw, "enc", enh, (start, start + 8.0), project=tmp_path)
+        assert info["encoded"] and "lossless cut failed" in info["why_encoded"]
+        # (the window is 1 s wider on each side: an encoded piece has that margin, as before)
+        assert abs(info["start_s"] * 24 - info["start_frame"]) < 1e-3 and info["start_s"] <= start
+        nm = E.names(enh, "enc")
+        st = E._probe(nm.piece)                                       # noqa: SLF001
+        assert abs(float(st.get("start_time") or 0.0)) < 1e-3, (start, st.get("start_time"))
+        token = E.take(nm)
+        job = E.enhance_one(nm, token)
+        assert job.state == "done", (start, job.why)                  # (it failed: "its first frame is at 0.033 s")
+        got = ES._gray(nm.enhanced, Fraction(60), [0])[0]             # noqa: SLF001
+        import cv2
+        src = ES._gray(raw, Fraction(24), [info["start_frame"] - 1, info["start_frame"], info["start_frame"] + 1])  # noqa: SLF001
+        z = {k: ES._zncc(v, cv2.resize(got, (v.shape[1], v.shape[0]))) for k, v in src.items()}                    # noqa: SLF001
+        assert max(z, key=z.get) == info["start_frame"], (start, z)   # its first picture IS the frame its json names
+        E.clear(enh, "enc")

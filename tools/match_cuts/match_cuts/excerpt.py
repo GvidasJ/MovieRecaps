@@ -314,10 +314,26 @@ def copy_packets(m: Movie, plan: Plan, dst: Path) -> int:
                     raise RuntimeError("a video packet without a timestamp")
                 if first:
                     if int(pkt.pts) != int(plan.pts0) or not pkt.is_keyframe:
-                        raise RuntimeError(f"the seek landed on {pkt.pts}, not on the keyframe {plan.pts0}")
+                        # 18 Nov (The Most Jealous Group Leader: the Topaz piece cut from the piece the edit plays --
+                        # "the seek landed on 1628960, not on the keyframe 1731056", then an encoded piece; The Fastest
+                        # Confession In Scrubs: the whole RAW analysed for the same line): in a file whose first
+                        # picture is stored "before 0" a seek to a keyframe lands on the keyframe BEFORE it (38 of
+                        # 39 keyframes of that piece). The packets up to the wanted keyframe are read past; only
+                        # when it is not there (a packet stored after its time comes first) is it an error.
+                        if int(pkt.dts) > int(plan.pts0) or int(pkt.pts) > int(plan.pts0):
+                            raise RuntimeError(f"the seek landed on {pkt.pts}, not on the keyframe {plan.pts0}")
+                        continue
                     first = False
                 if plan.dts_end is not None and int(pkt.dts) >= int(plan.dts_end):
                     break
+                if int(pkt.pts) < int(plan.pts0):
+                    # 18 Nov (Key & Peele S05E03, H.265: "the piece has 6458 frames, the plan 6455" -- the whole
+                    # 21-minute episode was analysed instead, and stayed in the project and its zip; the same line
+                    # made Topaz pieces be encoded first): pictures that are SHOWN before the keyframe but stored
+                    # after it (an open group of pictures: they lean on the pictures before the keyframe, which
+                    # the piece does not have). They are not part of the piece -- left out, it has exactly the
+                    # plan's frames (``same_frames`` still compares them with the movie's).
+                    continue
                 pkt.pts = int(pkt.pts) - int(plan.pts0)
                 pkt.dts = int(pkt.dts) - int(plan.pts0)
                 pkt.stream = vout

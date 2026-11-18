@@ -385,12 +385,19 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
         lo, hi = 0.0, hi - lo
     if hi > dur:
         lo, hi = max(0.0, lo - (hi - dur)), dur
+    # 18 Nov (The Most Jealous Group Leader, made again: "Topaz's result is not right: its first frame is at 0.033 s,
+    # not at 0", three times, and the video stayed on the normal RAW): the window started between two frames, so
+    # the encoded piece's first frame came up to one frame after 0 -- about every second encoded piece. It starts
+    # ON a frame now (read from a fifth of a millisecond before it), and its start says that frame.
+    first = int(math.ceil(lo * float(fps) - 1e-6))
+    lo = first / float(fps)
     say(0.55, "encoding the piece (the RAW can't be cut losslessly)")
     Path(nm.piece).parent.mkdir(parents=True, exist_ok=True)
     for f in nm.all():
         f.unlink(missing_ok=True)
     tmp = nm.piece.with_name(nm.piece.stem + ".part" + nm.piece.suffix)
-    r = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-ss", f"{lo:.6f}", "-i", str(raw),
+    r = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-ss", f"{max(0.0, lo - 0.0002):.6f}",
+              "-i", str(raw),
               "-t", f"{hi - lo:.6f}", "-map", "0:v:0", "-map", "0:a:0?", "-vf", f"fps={fps}",
               "-c:v", "libx264", "-preset", "medium", "-crf", "10", "-pix_fmt", "yuv420p",
               "-c:a", "aac", "-b:a", "320k", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(tmp)])
@@ -405,7 +412,7 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
         raise EnhanceError("the encoded piece has no frames")
     f = float(fps)
     info = {"project": safe_name(name), "project_folder": str(project or ""), "computer": M.host(),
-            "raw": os.path.abspath(str(raw)), "raw_name": raw.name, "start_frame": int(round(lo * f)),
+            "raw": os.path.abspath(str(raw)), "raw_name": raw.name, "start_frame": int(first),
             "start_s": round(lo, 6), "frames": int(n), "fps": str(fps), "duration": round(n / f, 6),
             "width": st["width"], "height": st["height"], "scene": [round(s0, 3), round(s1, 3)],
             "places": [round(x, 3) for x in places], "raw_duration": round(dur, 3),
