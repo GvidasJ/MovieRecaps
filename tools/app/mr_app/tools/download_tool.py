@@ -2461,8 +2461,9 @@ class DownloadPage(QWidget):
     def _enhance_apply(self, it: Item, r: dict) -> None:
         st = (it.steps.get("enhance") or Step()).state
         what = r.get("state")
-        if what == "progress" and st == S_RUN:
-            self._step(it, "enhance", S_RUN, float(r.get("share") or 0.0), r.get("text") or "waiting for the laptop")
+        after = (it.steps.get("enhance") or Step()).text == AFTER_EDIT      # 17 Nov: the piece was cut after the edit
+        if what == "progress" and (st == S_RUN or (st == S_NOTE and after)):   # -- its row shows Topaz working too
+            self._step(it, "enhance", S_RUN, float(r.get("share") or 0.0), r.get("text") or "waiting for Topaz")
             return
         if what == "late_ready":
             if not it.enhance_late:

@@ -337,15 +337,20 @@ def encode_piece(m: Movie, plan: Plan, dst: str | os.PathLike) -> dict:
     dst.parent.mkdir(parents=True, exist_ok=True)
     fps = m.rate
     n = plan.k1 - plan.k0
-    t = max(0.0, float(Fraction(plan.k0) / fps) - 0.0001)
+    # the seek: the first frame's own timestamp (the plan's keyframe), a tenth of a millisecond early -- not a time
+    # counted from the file's start (a movie whose first frame is not at 0 gave the frame after). The frames are
+    # then written as they are decoded, numbered 0, 1, 2 ... (no frame doubled or dropped to fit a clock: with -r the
+    # piece ran one frame behind the movie from its first seconds on).
+    t = float(Fraction(int(plan.pts0)) * Fraction(m.tb)) - 0.0001
     t0 = time.perf_counter()
     tmp = dst.with_name(dst.stem + ".part.mov")
-    cmd = [ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-ss", f"{t:.6f}", "-i", m.path,
-           "-map", f"0:v:{m.vindex}"]
+    cmd = [ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-seek_timestamp", "1", "-ss", f"{t:.6f}",
+           "-i", m.path, "-map", f"0:v:{m.vindex}"]
     if m.has_audio:
         cmd += ["-map", "0:a:0"]
-    cmd += ["-frames:v", str(n), "-vf", "scale=trunc(iw*sar/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1",
-            "-r", fps_str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
+    cmd += ["-frames:v", str(n), "-vf", "scale=trunc(iw*sar/2)*2:trunc(ih/2)*2:flags=lanczos,setsar=1,"
+            f"setpts=N/({fps_str(fps)})/TB", "-fps_mode", "passthrough", "-video_track_timescale",
+            str(fps.numerator), "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
             "-g", "48", "-bf", "0"]
     if m.has_audio:
         cmd += ["-c:a", "pcm_s16le", "-ar", str(SOUND_RATE), "-ac", "2", "-t", f"{float(Fraction(n) / fps):.6f}"]

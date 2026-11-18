@@ -413,6 +413,12 @@ def swap_in(project, do_check: bool = True) -> dict:
                 return {"ok": False, "why": f"the enhanced piece does not line up with the edit: {ck['why']}"}
         else:
             ck = {"rows": []}
+        try:                                               # 18 Nov: how many times bigger the enhanced picture is --
+            bigger = float(width) / float(info["width"])    #   2, or 1 for a piece that was 4K already (topaz_scale)
+            if not (0.9 < bigger < 4.1):
+                bigger = 2.0
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            bigger = 2.0
         defined = False
         for c, na, nb, _f, _m, rate, k in plan:
             c.find("in").text, c.find("out").text = str(na), str(nb)
@@ -430,9 +436,9 @@ def swap_in(project, do_check: bool = True) -> dict:
                 if (par.findtext("parameterid") or "") == "scale":
                     for v in par.iter("value"):
                         if v.text and v.text.strip():
-                            v.text = f"{float(v.text) / 2.0:.6f}"
+                            v.text = f"{float(v.text) / bigger:.6f}"
                 elif (par.findtext("parameterid") or "") == "center":
-                    _half_center(par)
+                    _half_center(par, bigger)
         users = [ci for ci in root.iter("clipitem") if ci.find("file") is not None
                  and ci.find("file").get("id") == "file-raw"]
         if users and not any(ci.find("file").find("pathurl") is not None for ci in users):
@@ -485,7 +491,7 @@ def swap_in(project, do_check: bool = True) -> dict:
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}
 
 
-def _half_center(par) -> None:
+def _half_center(par, by: float = 2.0) -> None:
     """7 Nov: Premiere reads a clip's Position (center horiz / vert) in the clip's OWN pixels -- the enhanced picture
     has 2x the pixels, so the same numbers moved it twice as far (a black band over the picture). Halved, like the
     scale; keyframed positions too."""
@@ -493,7 +499,7 @@ def _half_center(par) -> None:
         for ax in ("horiz", "vert"):
             e = v.find(ax)
             if e is not None and e.text and e.text.strip():
-                e.text = f"{float(e.text) / 2.0:.7f}"
+                e.text = f"{float(e.text) / by:.7f}"
 
 
 def wants_60(job) -> bool:

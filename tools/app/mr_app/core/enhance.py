@@ -539,9 +539,10 @@ def check_enhanced(path: str | os.PathLike, info: dict) -> dict:
         fr = Fraction(str(st.get("r_frame_rate") or "0/1"))
         n = int(st.get("nb_read_packets") or st.get("nb_frames") or 0)
         out.update(width=w, height=h, fps=str(fr), frames=n)
-        want_w, want_h = 2 * int(info.get("width") or 0), 2 * int(info.get("height") or 0)
+        k = topaz_scale(info.get("width"), info.get("height"))
+        want_w, want_h = k * int(info.get("width") or 0), k * int(info.get("height") or 0)
         if (w, h) != (want_w, want_h):
-            raise EnhanceError(f"it is {w}x{h}, not twice the piece's size ({want_w}x{want_h})")
+            raise EnhanceError(f"it is {w}x{h}, not {'twice ' if k == 2 else ''}the piece's size ({want_w}x{want_h})")
         if fr != OUT_FPS:
             raise EnhanceError(f"it is {float(fr):.3f} fps, not {OUT_FPS}")
         dur = n / float(OUT_FPS)
@@ -971,16 +972,37 @@ def _opts(d: dict) -> str:
     return ":".join(f"{k}={v}" for k, v in d.items())
 
 
-def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0) -> list[str]:
+MAX_OUT_PIXELS = 3840 * 2880        # 18 Nov: the enhanced picture is at most this big (4K, a 4:3 one too)
+
+
+def topaz_scale(width: int | None, height: int | None) -> int:
+    """18 Nov (The Funniest Shaq Impression: a 4K RAW -- twice its size is 8K at 60 fps, the laptop's graphics card
+    failed once and then stood at 0 % until the app was closed): 2 when twice the piece's size is at most 4K, else 1
+    -- a piece that is 4K already keeps its size and only gets its 60 fps (Apollo); Proteus has nothing to add to it
+    that a 1080x1920 Short shows."""
+    try:
+        w, h = int(width or 0), int(height or 0)
+    except (TypeError, ValueError):
+        return 2
+    if w <= 0 or h <= 0:
+        return 2
+    return 2 if (2 * w) * (2 * h) <= MAX_OUT_PIXELS else 1
+
+
+def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0,
+                  scale: int = 2) -> list[str]:
     """Topaz's ffmpeg with the user's settings: Proteus at 2x the piece's size, then Apollo to 60 fps; H.265 Main10
-    at a constant OUT_BITRATE; the sound copied. The fake Topaz: a plain 2x scale and 60 fps (the tests)."""
+    at a constant OUT_BITRATE; the sound copied. ``scale`` 1 (``topaz_scale``: a piece that is 4K already): Apollo
+    only, the size as it is. The fake Topaz: a plain scale and 60 fps (the tests)."""
     head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
     tail = ["-c:a", "copy", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(dst)]
+    scale = 1 if int(scale or 2) == 1 else 2
     if tz.fake:
-        return head + ["-vf", f"scale=iw*2:ih*2:flags=lanczos,fps={OUT_FPS}", "-c:v", "libx264", "-preset",
+        return head + ["-vf", f"scale=iw*{scale}:ih*{scale}:flags=lanczos,fps={OUT_FPS}", "-c:v", "libx264", "-preset",
                        "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"] + tail
     gpu = dict(GPU, vram=f"{vram:g}")
-    chain = f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}"
+    chain = f"tvai_up={_opts({**PROTEUS, **gpu})},tvai_fi={_opts({**APOLLO, **gpu})}" if scale == 2 else \
+        f"tvai_fi={_opts({**APOLLO, **gpu})}"
     return head + ["-vf", chain, "-c:v", "hevc_nvenc", "-profile:v", "main10", "-pix_fmt", "p010le", "-rc", "cbr",
                    "-b:v", OUT_BITRATE, "-maxrate", OUT_BITRATE, "-bufsize", OUT_BUFFER, "-preset", "p5",
                    "-tag:v", "hvc1"] + tail
@@ -1010,37 +1032,64 @@ def _plain_topaz_error(text: str, code: int | None) -> str:
     return f"Topaz stopped (code {code})" + (f": {last[-1][:200]}" if last else "")
 
 
+STALL_S = 8 * 60.0                  # 18 Nov: Topaz writes no new frame for this long: it hangs -- stopped, tried again
+STALL_TEXT = "Topaz stopped answering"
+
+
 def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, tz: Topaz | None = None,
               progress: Callable[[float, float | None], None] | None = None,
-              cancel: threading.Event | None = None) -> None:
+              cancel: threading.Event | None = None, scale: int = 2) -> None:
     """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
     (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
-    again with less of its memory (60 %, then 35 %)."""
+    again with less of its memory (60 %, then 35 %). 18 Nov: also when it hangs (no new frame for STALL_S)."""
     tz = tz or find_topaz()
     if not tz.found:
         raise EnhanceError(tz.why)
     for vram in (1.0, 0.6, 0.35):
         try:
-            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, vram)
+            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, vram, scale)
         except EnhanceError as e:
-            if "ran out of memory" not in str(e) or vram == 0.35 or (cancel is not None and cancel.is_set()):
+            again = "ran out of memory" in str(e) or STALL_TEXT in str(e)
+            if not again or vram == 0.35 or (cancel is not None and cancel.is_set()):
                 raise
             Path(dst).unlink(missing_ok=True)
 
 
-def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float) -> None:
-    cmd = topaz_command(tz, src, dst, vram)
+def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2) -> None:
+    import queue
+    cmd = topaz_command(tz, src, dst, vram, scale)
     t0 = time.monotonic()
     pr = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           env=topaz_env(tz), creationflags=NO_WINDOW)
     tail: list[str] = []
     buf = b""
+    chunks: "queue.Queue[bytes | None]" = queue.Queue()
+
+    def pump() -> None:                  # (a hanging Topaz writes nothing: the read must not hold the loop)
+        try:
+            while True:
+                ch = pr.stderr.read(256)
+                if not ch:
+                    break
+                chunks.put(ch)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            chunks.put(None)
+    threading.Thread(target=pump, name="topaz-output", daemon=True).start()
+    moved_at, last_frame = time.monotonic(), -1
     try:
         while True:
             if cancel is not None and cancel.is_set():
                 pr.kill()
                 raise EnhanceError("stopped")
-            ch = pr.stderr.read(256)
+            if time.monotonic() - moved_at > STALL_S:
+                pr.kill()
+                raise EnhanceError(f"{STALL_TEXT} (no new frame for {STALL_S / 60:.0f} minutes)")
+            try:
+                ch = chunks.get(timeout=1.0)
+            except queue.Empty:
+                continue
             if not ch:
                 break
             buf += ch
@@ -1056,6 +1105,8 @@ def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram
                         n = int(line.split("=", 1)[1].strip().split()[0])
                     except (ValueError, IndexError):
                         continue
+                    if n > last_frame:
+                        last_frame, moved_at = n, time.monotonic()
                     share = max(0.0, min(0.999, n / float(out_frames)))
                     el = time.monotonic() - t0
                     left = el * (1 - share) / share if share > 0.02 else None
@@ -1085,12 +1136,66 @@ def read_lock(path: Path) -> dict | None:
         return {}                                       # (being written: someone has it)
 
 
+def _pid_alive(pid: int) -> bool:
+    """A process with this id runs on this computer (True when it cannot be told)."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.OpenProcess(0x1000, False, int(pid))            # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return k.GetLastError() == 5                      # access denied: it is there; else: no such process
+            try:
+                code = ctypes.c_ulong(0)
+                return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259     # STILL_ACTIVE
+            finally:
+                k.CloseHandle(h)
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception:  # noqa: BLE001 - cannot tell: as if it runs (the 15 minutes decide)
+        return True
+
+
+OWN_LOCK_S = 20.0                   # our own dead lock is free after this (a lock just being written is left alone)
+
+
+def _own_dead_lock(path: Path, age: float) -> bool:
+    """18 Nov (The Funniest Shaq Impression: the app was closed in the middle of Topaz and opened again -- its piece
+    was "being enhanced, 0 %" for 15 minutes with nobody working on it): the lock is this computer's own, from an app
+    that does not run any more (its process is gone). Free at once, not after LOCK_STALE_S."""
+    if age < OWN_LOCK_S:
+        return False
+    d = read_lock(path) or {}
+    try:
+        host, pid = str(d.get("token") or "").split(":")[:2]
+        pid = int(pid)
+    except (ValueError, TypeError):
+        return False
+    if host != M.host() or str(d.get("computer") or "") != M.host() or pid == os.getpid():
+        return False
+    try:
+        if str(d.get("machine") or "") != M.which():              # (both computers are called "Gvidas")
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return not _pid_alive(pid)
+
+
 def lock_stale(path: Path, now: float | None = None) -> bool:
     try:
         age = (now if now is not None else time.time()) - Path(path).stat().st_mtime
     except OSError:
         return False
-    return age > LOCK_STALE_S
+    if age > LOCK_STALE_S:
+        return True
+    try:
+        return _own_dead_lock(Path(path), age)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def take(nm: Names, me: str | None = None) -> str | None:
@@ -1307,7 +1412,8 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
             raise EnhanceError(f"the Enhance folder's drive has {free / 1e9:.1f} GB free, the enhanced piece needs "
                                f"about {need / 1e9:.1f} GB")
         nm.part.unlink(missing_ok=True)
-        run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel)
+        run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel,
+                  scale=topaz_scale(info.get("width"), info.get("height")))
         chk = check_enhanced(nm.part, info)
         if not chk["ok"]:
             raise EnhanceError(f"Topaz's result is not right: {chk['why']}")
