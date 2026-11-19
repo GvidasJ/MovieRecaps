@@ -250,14 +250,27 @@ def _gn_level(L: _Level, sim: Sim, flip: bool, raw_w: float, cfg, lock_theta: bo
         gy = cv2.Sobel(Iw, cv2.CV_32F, 0, 1, ksize=3, scale=0.125)[m].astype(np.float64)
         xv = Iw[m].astype(np.float64)
         yv = L.tmpl[m].astype(np.float64)
-        A = np.c_[xv, np.ones_like(xv)]
+        # 19 Nov (speed, the same numbers bit for bit -- tests/test_speed_19nov.py; py-spy on The Best Business Idea
+        # In Key and Peele (2): 82 % of a search worker's time is this function): the two matrices are filled in
+        # place (before: column lists stacked, multiplied and joined -- three copies of the big one per step), and
+        # gx * cx / gy * cy are worked out once.
+        n_px = xv.size
+        A = np.empty((n_px, 2), np.float64)
+        A[:, 0] = xv
+        A[:, 1] = 1.0
         (a, b), *_ = np.linalg.lstsq(A, yv, rcond=None)
         dX, dY = X[m] - cur.tx, Y[m] - cur.ty                            # c - t = s R p
-        cols = [-(gx * cx * dX + gy * cy * dY) / cur.s, -gx * cx, -gy * cy]
+        gxc, gyc = gx * cx, gy * cy
+        n_par = 3 if lock_theta else 4
+        J = np.empty((n_px, n_par + 2), np.float64)
+        J[:, 0] = (-(gxc * dX + gyc * dY) / cur.s) * a
+        J[:, 1] = (-gxc) * a
+        J[:, 2] = (-gyc) * a
         if not lock_theta:
             th = math.radians(1.0)                                     # d(c)/d(theta deg) = J (c - t) * pi/180
-            cols.append(-(gx * cx * (-dY) + gy * cy * dX) * th)
-        J = np.c_[np.stack(cols, axis=1) * a, xv, np.ones_like(xv)]
+            J[:, 3] = (-(gxc * (-dY) + gyc * dX) * th) * a
+        J[:, n_par] = xv
+        J[:, n_par + 1] = 1.0
         r = yv - (a * xv + b)
         try:
             d, *_ = np.linalg.lstsq(J, r, rcond=None)

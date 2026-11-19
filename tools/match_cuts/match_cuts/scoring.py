@@ -133,19 +133,40 @@ def score_candidates(comp: CompRegion, raw_frames: Sequence[np.ndarray], sim: Si
     """
     if len(raw_frames) == 0:
         return np.zeros(0)
+    # 19 Nov (speed, the same numbers bit for bit -- tests/test_speed_19nov.py; py-spy on The Best Business Idea In
+    # Key and Peele (2): 78 % of a refine worker's time was in this function, and the workers are limited by memory
+    # traffic, not by the CPU): the copies nobody needs are gone --
+    # * the "valid" mask is the same for every RAW frame of one size under one transform: warped once, not per frame;
+    # * the masked pixels go straight into the float64 matrix zncc_rows works on (before: picked through the
+    #   boolean mask, stacked as float32, then copied once more as float64).
+    import cv2
+    x, y, w, h = comp.roi
+    m = to_cv_matrix(sim, flip, raw_w_full, raw_ratio, comp_ratio)
+    m = (translate3(-x, -y) @ h3(m))[:2, :]              # (as warp_to_roi)
     warped = []
     valid_all = comp.mask.copy()
+    valid_of: dict[tuple[int, int], np.ndarray] = {}
     for rf in raw_frames:
-        w, v = warp_to_roi(rf, sim, flip, raw_w_full, raw_ratio, comp_ratio, comp.roi)
-        warped.append(_blur(w, blur))
-        valid_all &= v
+        out = cv2.warpAffine(rf.astype(np.float32, copy=False), m, (w, h), flags=cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        shape = tuple(rf.shape[:2])
+        if shape not in valid_of:
+            ones = np.full(shape, 255, np.uint8)
+            v = cv2.warpAffine(ones, m, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT,
+                               borderValue=0)
+            valid_of[shape] = cv2.erode(v, np.ones((3, 3), np.uint8)) > 0
+            valid_all &= valid_of[shape]
+        warped.append(_blur(out, blur))
     if valid_all.sum() < min_pixels:
         return np.full(len(raw_frames), np.nan)
-    mat = np.stack([w[valid_all] for w in warped])
+    idx = np.flatnonzero(valid_all)                      # (row by row, as a boolean mask picks)
+    mat = np.empty((len(warped), idx.size), np.float64)
+    for i, wi in enumerate(warped):
+        mat[i] = wi.ravel()[idx]
     s = zncc_rows(comp.img[valid_all], mat)
     if grad_weight > 0:
         g = comp.grad if comp.grad is not None else _gradmag(comp.img)
-        gm = np.stack([_gradmag(w)[valid_all] for w in warped])
+        gm = np.stack([_gradmag(wi)[valid_all] for wi in warped])
         s = (1 - grad_weight) * s + grad_weight * zncc_rows(g[valid_all], gm)
     return s
 
