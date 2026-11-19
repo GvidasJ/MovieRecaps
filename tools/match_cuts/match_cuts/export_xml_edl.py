@@ -3954,19 +3954,59 @@ def _follow_snaps(cfg: Any, clips: Sequence[PremiereClip], audio: Sequence[dict]
     return follow_snapped_cuts(clips, audio, moves)
 
 
+PAST_MEDIA_CUT = True       # 19 Nov: the edit's last frames that lie past the RAW's last frame are cut (below)
+
+
+def past_media_frames(clips: Sequence[PremiereClip], n: int, src_dur: int | None) -> int:
+    """19 Nov (The Worst Prank In The Office, 17 Nov: the competitor played 0.18 s on after the RAW's last frame, two
+    mini cuts there went into the clip before -- "the clip before plays on" -- and the edit's last clip asked for RAW
+    frames 1602-1622 of a RAW of 1611: Premiere skips or misplaces such a clip, the piece for Topaz could never
+    hold it, so it was sent 3 times and the clip stayed on the normal RAW): how many frames at the very end of the
+    edit (``n`` frames) the last V1 clip plays past the end of its media (``src_dur``: the RAW's length in the
+    sequence's frames). 0: none, or not this repair's -- a reverse, a dissolve, a clip that lies past the end as a
+    whole, a clip that is not the edit's last."""
+    if src_dur is None or n <= 0:
+        return 0
+    vis = [c for c in clips if c.rec_end > c.rec_start]
+    if not vis:
+        return 0
+    last = max(vis, key=lambda c: c.rec_end)
+    v = float(last.speed)
+    if last.rec_end != n or v <= 0 or last.end == -1 or last.start == -1:
+        return 0
+    over = int(last.src_out) - int(src_dur)
+    if over <= 0:
+        return 0
+    k = int(math.ceil(over / v - 1e-9))
+    return k if 0 < k < last.rec_end - last.rec_start else 0
+
+
 def _cut_end_flash(clips: list[PremiereClip], audio: list[dict], markers: list[dict], n: int, pos_map: dict[int, int],
-                   n_plan: int, plan_fps: Fraction, fps: Fraction, changes_s: Sequence[float] | None
+                   n_plan: int, plan_fps: Fraction, fps: Fraction, changes_s: Sequence[float] | None,
+                   src_dur: int | None = None
                    ) -> tuple[list[PremiereClip], list[dict], list[dict], int, dict | None]:
     """end_flash_frames + cut_end on the edit at the RAW's rate (rerate_edit's), with ``pos_map`` (the planning
     grid's positions on it: the captions follow) ending on the new end: a caption that ended in the frames cut ends
     there. The checked 60 fps edit (extras/edit_60fps.xml: check-all scores it) keeps them. Returns (clips, audio,
     markers, frames, {'frames', 'at', 'label', 'shot_s'} or None)."""
+    # 19 Nov: first the frames past the RAW's last frame (past_media_frames; ``src_dur``: the RAW's length in this
+    # sequence's frames), then -- as before -- a flash of the RAW's next shot at the end that is then left
+    past = past_media_frames(clips, n, src_dur) if PAST_MEDIA_CUT else 0
+    n0, label0 = int(n), None
+    if past:
+        label0 = max((c for c in clips if c.rec_end > c.rec_start), key=lambda c: c.rec_end).label
+        clips, audio, markers, n = cut_end(clips, audio, markers, n, past)
     k = end_flash_frames(clips, n, changes_s, fps) if END_FLASH_CUT else 0
-    if not k:
+    if not k and not past:
         return clips, audio, markers, n, None
-    last = max((c for c in clips if c.rec_end > c.rec_start), key=lambda c: c.rec_end)
-    info = {"frames": int(k), "at": int(n - k), "label": last.label, "was": int(n)}
-    clips, audio, markers, t = cut_end(clips, audio, markers, n, k)
+    t = int(n)
+    if k:
+        last = max((c for c in clips if c.rec_end > c.rec_start), key=lambda c: c.rec_end)
+        label0 = label0 or last.label
+        clips, audio, markers, t = cut_end(clips, audio, markers, n, k)
+    info = {"frames": int(k + past), "at": int(t), "label": label0, "was": n0}
+    if past:
+        info["past_media"] = int(past)
     r = Fraction(fps) / Fraction(plan_fps)
     for x, y in list(pos_map.items()):
         if y > t:
@@ -4007,6 +4047,13 @@ def edit_fix_lines(followed: Sequence[dict], end_cut: dict | None, fps: Fraction
         out.append(f"A1 now starts and ends with its V1 clip at {len(followed)} cut(s) moved a frame onto the RAW's "
                    f"shot change (before: the sound cut a frame off its picture, the note \"A1 range is not a V1 cut "
                    f"range\"): {at}")
+    if end_cut and int(end_cut.get("past_media") or 0):       # 19 Nov: the edit ends with the RAW
+        pm = int(end_cut["past_media"])
+        out.append(f"the edit ends {pm} frame{'' if pm == 1 else 's'} earlier ({short(end_cut['label'])}): its last "
+                   f"clip would have played {pm} frame{'' if pm == 1 else 's'} past the last frame of the RAW (the "
+                   "competitor plays on after the RAW ends; Premiere skips or misplaces such a clip and Topaz has "
+                   "no picture for it) -- 1_edit.xml now ends with the RAW's last frame, picture and sound")
+        end_cut = dict(end_cut, frames=int(end_cut["frames"]) - pm) if int(end_cut["frames"]) > pm else None
     if end_cut:
         k = int(end_cut["frames"])
         out.append(f"{k} flash frame{'' if k == 1 else 's'} removed at {_tc(int(end_cut['at']), fps)} "
@@ -5036,8 +5083,9 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
                                                               getattr(cfg, "premiere_shots", None))
         from .config import removes_silence
         if not removes_silence(cfg):      # day 13 -- the default only: with --remove-silence these cuts sit off speech
-            clips, audio_items, markers, N, end_cut = _cut_end_flash(clips, audio_items, markers, N, pos_map, n_plan,
-                                                                     fps, want, getattr(cfg, "premiere_shots", None))
+            clips, audio_items, markers, N, end_cut = _cut_end_flash(
+                clips, audio_items, markers, N, pos_map, n_plan, fps, want, getattr(cfg, "premiere_shots", None),
+                int(math.floor(raw_frames * float(want) / float(raw_fps))))
             clips, audio_items, cut_fixed = fix_cut_flashes(clips, audio_items, getattr(cfg, "premiere_shots", None),
                                                             want, raw_fps, pos_map)
             clips, audio_items, markers, N, take_jumps = fix_take_jumps(
@@ -5065,7 +5113,7 @@ def write_premiere_xml(cutlist: Cutlist, path: str | os.PathLike, cfg: Any = Non
             shots_ = getattr(cfg, "premiere_shots", None)
             pos_map = {p_: p_ for p_ in range(int(N) + 1)}
             clips, audio_items, markers, N, end_cut = _cut_end_flash(clips, audio_items, markers, N, pos_map, n_plan,
-                                                                     fps, fps, shots_)
+                                                                     fps, fps, shots_, src_dur)
             clips, audio_items, cut_fixed = fix_cut_flashes(clips, audio_items, shots_, fps, raw_fps, pos_map,
                                                             plan_rate_flash_max(fps, raw_fps))
             clips, audio_items, markers, N, take_jumps = fix_take_jumps(
