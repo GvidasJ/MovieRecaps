@@ -159,6 +159,106 @@ def check(normal_media: Path, raw_fps: Fraction, enhanced: Path, pairs: list[tup
     return {"ok": not bad and bool(rows), "rows": rows, "why": "; ".join(bad) or ("" if rows else "nothing read")}
 
 
+CUT_Z = 0.5                         # two RAW frames in a row that look this little alike: a shot change between them
+END_MARGIN = 0.05                   # a clip's end frame must look this much more like its own RAW frame than the
+#                                     next shot's (its first frame: than the shot before's)
+END_MIXED = 0.15                    # ... and may look at most this much more like the other shot than its own RAW
+#                                     frame does (a picture mixed of both shots)
+END_SHIFTS = (0, -1, -2, 1, 2)      # the clip's source moved by this many 60 fps frames, the smallest that fits
+
+
+def _int(el, tag: str) -> int | None:
+    try:
+        return int(el.findtext(tag))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fit_ends(plan: list, normal_media: Path, raw_fps: Fraction, enhanced: Path, lims: list) -> tuple[dict, list]:
+    """19 Nov (the first whole video through the REAL Topaz, The Best Business Idea In Key and Peele (2): 5 of its
+    55 clips ended with ONE frame of the next shot -- a flash frame nobody had put there). Premiere shows the normal
+    RAW's frame that is on at a moment (the one before, until the next begins); Topaz's 60 fps picture shows the
+    NEAREST RAW frame (Apollo makes the in-between pictures; across a shot change it jumps half a RAW frame early).
+    A clip that ends on the RAW's shot change -- most do, the tool cuts there -- so showed the next shot in its last
+    1/60 s whenever that frame lay in the second half of the RAW frame. The fake Topaz of the tests holds each frame
+    like Premiere, so no test saw it.
+
+    For every take the edit plays in one go (clips that follow each other in the source: they move together), when
+    the normal RAW has a shot change right before its first frame or right after its last: the enhanced frame at
+    that end must look like the take's own RAW frame, not like the other shot's. If not, the take's source is moved
+    by a 60 fps frame or two (``END_SHIFTS``; under a RAW frame -- nothing else changes, the cuts stay where they
+    are). ``plan``: swap_in's (..., a, b last); ``lims``: per clip the enhanced frames it may use (its part).
+    Returns ({plan index: frames moved}, [what could not be fitted])."""
+    from .enhance import OUT_FPS
+    groups: list[list[int]] = []
+    cur: list[int] = []
+    for i, pl in enumerate(plan):
+        c, na, rate, k = pl[0], pl[1], pl[5], pl[6]
+        if rate != OUT_FPS or k != raw_fps / OUT_FPS:      # (only a 60 fps sequence's clips at 100 %)
+            if cur:
+                groups.append(cur)
+            cur = []
+            continue
+        if cur:
+            q = plan[cur[-1]]
+            if q[2] == na and _int(q[0], "end") is not None and _int(q[0], "end") == _int(c, "start") \
+                    and lims[cur[-1]] == lims[i]:
+                cur.append(i)
+                continue
+            groups.append(cur)
+        cur = [i]
+    if cur:
+        groups.append(cur)
+    info = []
+    for g in groups:
+        first, last = plan[g[0]], plan[g[-1]]
+        f0 = int(math.floor(first[8] * first[6]))          # the normal media's first frame the take shows
+        f1 = int(math.floor((last[9] - 1) * last[6]))      # ... and its last
+        info.append((g, f0, f1, int(first[1]), int(last[2])))
+    norm = _gray(normal_media, raw_fps, sorted({x for _g, f0, f1, _a, _b in info for x in (f0 - 1, f0, f1, f1 + 1)}))
+
+    def cut(a: int, b: int) -> bool:
+        return norm.get(a) is not None and norm.get(b) is not None and _zncc(norm[a], norm[b]) < CUT_Z
+    todo = [(g, f0, f1, na, nb, cut(f0 - 1, f0), cut(f1, f1 + 1)) for g, f0, f1, na, nb in info]
+    todo = [t for t in todo if t[5] or t[6]]
+    if not todo:
+        return {}, []
+    want: set = set()
+    for _g, _f0, _f1, na, nb, before, after in todo:
+        want |= {na + m for m in END_SHIFTS} if before else set()
+        want |= {nb - 1 + m for m in END_SHIFTS} if after else set()
+    enh = _gray(enhanced, Fraction(OUT_FPS), sorted(x for x in want if x >= 0))
+
+    def more_like(e: int, own: int, other: int) -> bool:
+        import cv2
+        pic, a, b = enh.get(e), norm.get(own), norm.get(other)
+        if pic is None or a is None or b is None:
+            return False
+        if pic.shape != a.shape:                           # (a stretched RAW: the enhanced picture has square pixels)
+            pic = cv2.resize(pic, (a.shape[1], a.shape[0]), interpolation=cv2.INTER_AREA)
+        # like its own frame, and no more like the other shot than its own frame is (Topaz sometimes mixes the two
+        # shots in the frame at a change: The Best Business Idea (2), clip 14 -- 0.75 its own, 0.50 the next shot)
+        return _zncc(pic, a) > _zncc(pic, b) + END_MARGIN and _zncc(pic, b) < _zncc(a, b) + END_MIXED
+    shifts: dict[int, int] = {}
+    left: list[str] = []
+    for g, f0, f1, na, nb, before, after in todo:
+        lo, hi = lims[g[0]]
+
+        def fits(m: int) -> bool:
+            if na + m < lo or nb + m > hi:
+                return False
+            return (not before or more_like(na + m, f0, f0 - 1)) and (not after or more_like(nb - 1 + m, f1, f1 + 1))
+        m = next((m for m in END_SHIFTS if fits(m)), None)
+        if m is None:
+            which = "first" if before and not more_like(na, f0, f0 - 1) else "last"
+            left.append(f"the clip at {_int(plan[g[0]][0], 'start')}-{_int(plan[g[-1]][0], 'end')}: its {which} "
+                        f"frame shows the shot next to it")
+        elif m:
+            for i in g:
+                shifts[i] = m
+    return shifts, left
+
+
 def _same(a: Path, b: Path) -> bool:
     """The same video: one file (a hard link) or the same size."""
     try:
@@ -521,7 +621,7 @@ def swap_in(project, do_check: bool = True) -> dict:
             mid = int((a * k + b * k) / 2)                 # (the check looks inside the clip, not at a cut)
             mm = to_movie(mid, groups)
             when = at / OUT_FPS + Fraction((mm if mm is not None else ma) - base) / raw_fps     # s in the enhanced file
-            plan.append((c, int(na), int(nb), mid, when, rate, k, base))
+            plan.append((c, int(na), int(nb), mid, when, rate, k, base, a, b))
         if not plan:
             return {"ok": False, "why": f"no V1 clip lies inside the enhanced piece ({kept} outside it)"}
         if do_check:
@@ -535,6 +635,23 @@ def swap_in(project, do_check: bool = True) -> dict:
                 return {"ok": False, "why": f"{NOT_LINED_UP}: {ck['why']}"}
         else:
             ck = {"rows": []}
+        ends: dict = {"moved": 0, "left": []}             # 19 Nov: no clip ends on the next shot's picture
+        if do_check:
+            try:
+                lims = []
+                for pl in plan:
+                    part = next((x for x in parts if x[0] == pl[7]), None)
+                    if part is None:
+                        lims.append((0, enh_frames))
+                    else:
+                        later = [x[2] for x in parts if x[2] > part[2]]
+                        lims.append((int(part[2]), int(min(later)) if later else enh_frames))
+                shifts, left = _fit_ends(plan, normal_media, raw_fps, enh, lims)
+                plan = [pl if not shifts.get(i) else (pl[0], pl[1] + shifts[i], pl[2] + shifts[i], *pl[3:])
+                        for i, pl in enumerate(plan)]
+                ends = {"moved": len(shifts), "by": sorted(set(shifts.values())), "left": left}
+            except Exception as e:  # noqa: BLE001 - then the swap as it was before 19 Nov
+                ends = {"moved": 0, "left": [], "error": f"{type(e).__name__}: {e}"}
         try:                                               # 18 Nov: how many times bigger the enhanced picture is --
             bigger = float(width) / float(info["width"])    #   2, or 1 for a piece that was 4K already (topaz_scale)
             if not (0.9 < bigger < 4.1):
@@ -542,7 +659,7 @@ def swap_in(project, do_check: bool = True) -> dict:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             bigger = 2.0
         defined = False
-        for c, na, nb, _f, _m, rate, k, _base in plan:
+        for c, na, nb, _f, _m, rate, k, _base, _a, _b in plan:
             c.find("in").text, c.find("out").text = str(na), str(nb)
             dur = c.find("duration")
             if dur is not None:
@@ -594,8 +711,11 @@ def swap_in(project, do_check: bool = True) -> dict:
         text = (f"enhanced: {width}x{height}, {OUT_FPS} fps -- {len(plan)} of {len(plan) + kept} V1 clips play it "
                 f"(matched on the normal RAW" + (f"; only the {len(parts)} played parts were enhanced" if parts
                                                  else "") + ")")
+        if ends.get("left"):
+            text += f" -- look at {len(ends['left'])} clip end(s): {ends['left'][0]}"
         p.update(enhance={"swapped": _now(), "text": text, "swap": {"run": run.name, "clips": len(plan),
-                                                                   "kept": kept, "check": ck.get("rows")}})
+                                                                   "kept": kept, "check": ck.get("rows"),
+                                                                   "ends": ends}})
         try:                                               # only the scene stays: the downloaded RAW nothing plays
             from . import archive, run as RN              #   any more leaves the folder (as after an edit)
             if RN.scene_env() and ed.get("state") == PJ.DONE:     # (18 Nov: a FAIL keeps all its files: you may
