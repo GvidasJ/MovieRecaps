@@ -300,6 +300,7 @@ def test_no_parts_for_a_sequence_that_is_not_60_fps_or_a_piece_sent_again(tmp_pa
     assert ES.cover_all(p.folder)["clips"] == 3                                      # sent again: whole, as before
     rec = PJ.load(p.folder).data["enhance"]
     assert rec["redos"] == 1 and "ranges" not in rec["piece"]
+    assert rec["piece"].get("encoded")                     # 19 Nov: ... and made another way (test_retry_19nov.py)
 
 
 def test_a_broken_result_is_neither_the_whole_piece_nor_its_parts(tmp_path, movie, topaz):

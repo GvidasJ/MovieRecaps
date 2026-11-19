@@ -267,6 +267,88 @@ def _span_plan(m: Any, s0: float, s1: float, room_s: float = KEYFRAME_ROOM_S):
     return Plan(int(k0), int(m.frames), int(pts0), None, [float(s0)])          # (the RAW ends there)
 
 
+# 19 Nov (your call: "make the second try use another way of making the piece ... and the third another again" --
+# until now a piece Topaz failed on, or whose result failed its check, went again made the very same way, so it could
+# fail three times for one reason: 18 Nov, The Most Jealous Group Leader, "its first frame is at 0.033 s" x3):
+# the ways a video's piece is made, in the order they are tried -- (how the piece is made, only the played parts).
+COPY, ENCODED, INTRA = "copy", "encoded", "intra"
+WAYS = ((COPY, True),               # 1st: the RAW's own frames (stream copy), Topaz on the played parts only
+        (ENCODED, False),           # 2nd: an encoded piece (x264, near lossless), the whole piece
+        (COPY, False),              # 3rd: the RAW's own frames, the whole piece
+        (INTRA, False),             # 4th: encoded with every frame a keyframe, the whole piece
+        (ENCODED, True), (INTRA, True))     # (only reached when ways above come out the same for this RAW)
+_SAME_WAY = ("gb free", "not in the enhance folder any more")    # failures that say nothing about the piece itself
+#                                                                  (the drive is full, the piece was removed)
+
+
+def way_text(kind: str, parts: bool) -> str:
+    how = {COPY: "the RAW's own frames", ENCODED: "an encoded piece",
+           INTRA: "an encoded piece, every frame a keyframe"}.get(kind, str(kind))
+    return f"{how}, {'only the played parts' if parts else 'the whole piece'}"
+
+
+def piece_way(info: dict | None) -> tuple[str, bool]:
+    """How a piece was really made (its json): a copy that could not be cut is "encoded", parts not worth it "whole"."""
+    info = info or {}
+    kind = INTRA if info.get("intra") else ENCODED if info.get("encoded") else COPY
+    return kind, bool(valid_ranges(info))
+
+
+def ways_tried(tries: list | None) -> set:
+    """The ways that already failed for this video (asked for, and what came out) -- not a try that failed for a
+    reason that says nothing about the piece (``_SAME_WAY``): that way is tried again."""
+    out: set = set()
+    for t in tries or []:
+        if not isinstance(t, dict) or not t.get("why") or t.get("same_way"):
+            continue
+        for key in ("asked", "way", "also"):
+            w = t.get(key)
+            if isinstance(w, (list, tuple)) and len(w) == 2:
+                out.add((str(w[0]), bool(w[1])))
+        a, w = t.get("asked"), t.get("way")
+        if isinstance(a, (list, tuple)) and isinstance(w, (list, tuple)) and a and w and a[0] == COPY != w[0]:
+            out |= {(COPY, True), (COPY, False)}         # this RAW cannot be cut by copy: asking again changes nothing
+    return out
+
+
+def next_way(tries: list | None) -> tuple[str, bool]:
+    """The way the next piece is made: the first of ``WAYS`` that has not failed for this video; when all have, the
+    first again."""
+    done = ways_tried(tries)
+    return next((w for w in WAYS if w not in done), WAYS[0])
+
+
+def note_failure(project: str | os.PathLike, why: str, details: str = "") -> dict:
+    """19 Nov: a try that failed is written down in the project, whole: project.json's enhance "tries" (which try,
+    how its piece was made, the full reason, when) and logs/topaz_failed.log (the reason and everything Topaz
+    said). Until now the reason was overwritten when the piece went again. Returns the try. Never raises."""
+    try:
+        from . import projects as PJ
+        p = PJ.load(project)
+        rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+        tries = [dict(t) for t in (rec.get("tries") or []) if isinstance(t, dict)]
+        if not tries or tries[-1].get("why"):            # a piece sent by the app before 19 Nov: its try, from its json
+            tries.append({"n": len(tries) + 1, "piece": rec.get("name"), "sent": rec.get("sent"),
+                          "way": list(piece_way(rec.get("piece") if isinstance(rec.get("piece"), dict) else {}))})
+        t = tries[-1]
+        t["why"], t["failed"] = str(why), time.time()
+        if any(x in str(why).lower() for x in _SAME_WAY):
+            t["same_way"] = True
+        if "the parts could not be used" in f"{why} {details}".lower() and t.get("way"):
+            t["also"] = [t["way"][0], False]             # (the laptop went on with the whole piece: that failed too)
+        p.update(enhance={"tries": tries})
+        d = Path(project) / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        w = t.get("way") or t.get("asked") or [COPY, False]
+        with open(d / FAILURE_LOG, "a", encoding="utf-8") as f:
+            f.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  try {t.get('n')} of {t.get('piece')} "
+                    f"({way_text(str(w[0]), bool(w[1]))})\n{why}\n" + (f"{details.strip()}\n" if details.strip()
+                                                                        else "") + "\n")
+        return t
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _run(cmd: list[str], timeout: float = 1800.0) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                           creationflags=NO_WINDOW)
@@ -289,7 +371,7 @@ def _aac(mov: Path, dst: Path, channels: int) -> None:
 
 def make_piece(raw: str | os.PathLike, name: str, out_dir: str | os.PathLike, span: tuple[float, float],
                project: str | os.PathLike | None = None, work: str | os.PathLike | None = None,
-               progress: Callable[[float, str], None] | None = None, topaz_on: str = "") -> dict:
+               progress: Callable[[float, str], None] | None = None, topaz_on: str = "", way: str = "") -> dict:
     """The piece to enhance, put in ``out_dir`` (the Enhance folder) as <name>_TOENHANCE.mp4 + .json: the RAW from
     ``span[0]`` to ``span[1]`` seconds -- what the finished edit plays, +- 10 s (enhance_swap.cover_all) -- cut by
     stream copy from the keyframe before to the keyframe after. Returns its info (the json's content); raises
@@ -297,7 +379,10 @@ def make_piece(raw: str | os.PathLike, name: str, out_dir: str | os.PathLike, sp
 
     18 Nov: until 17 Nov a piece was also guessed BEFORE the edit (the quick sound check found the scene; a short RAW
     went whole) -- that path is gone (your call: edit, then Topaz, then the zip), and with it find_scene,
-    piece_length and the whole-RAW rule."""
+    piece_length and the whole-RAW rule.
+
+    19 Nov: ``way`` -- "" / "copy": as above; "encoded" / "intra": the piece is encoded on purpose (another try
+    after Topaz failed on the copied one: ``WAYS``)."""
     from match_cuts import excerpt as X
     say = progress or (lambda share, text: None)
     raw = Path(raw)
@@ -311,6 +396,10 @@ def make_piece(raw: str | os.PathLike, name: str, out_dir: str | os.PathLike, sp
     end = min(dur_all, float(span[1])) if dur_all > 0 else float(span[1])                 #   that cannot be cut
     win = max(1.0, end - places[0])                                                       #   (Car Salesman: 3 s)
     max_s = win + 2.0
+    if way in (ENCODED, INTRA):                          # 19 Nov: asked for (a try after a failure)
+        return _encoded_piece(raw, places, max_s, nm, name, project,
+                              "another way of making the piece, after Topaz failed", t0, say, topaz_on, win,
+                              intra=way == INTRA)
     if m.why:                                            # 29 Oct: then an encoded piece (near lossless) instead
         return _encoded_piece(raw, places, max_s, nm, name, project, m.why, t0, say, topaz_on, win)
     try:
@@ -365,9 +454,11 @@ def make_piece(raw: str | os.PathLike, name: str, out_dir: str | os.PathLike, sp
 
 def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", name: str, project: Any,
                    why_not_copy: str, t0: float, say: Callable[[float, str], None], topaz_on: str,
-                   win: float) -> dict:
+                   win: float, intra: bool = False) -> dict:
     """29 Oct: the piece when the RAW cannot be cut losslessly (uneven frame timing, ...): the same time window
-    encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words)."""
+    encoded near-lossless (x264 CRF 10, the RAW's frame rate, AAC). Raises EnhanceError (plain words).
+    19 Nov: ``intra`` -- every frame is a keyframe and none waits for a later one (no B-frames): the plainest
+    file a reader can get (the last way tried after Topaz failed on the others)."""
     from match_cuts.common import ffmpeg_bin
     st = _probe_raw(raw)
     fps = st["fps"]
@@ -400,6 +491,7 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
               "-i", str(raw),
               "-t", f"{hi - lo:.6f}", "-map", "0:v:0", "-map", "0:a:0?", "-vf", f"fps={fps}",
               "-c:v", "libx264", "-preset", "medium", "-crf", "10", "-pix_fmt", "yuv420p",
+              *(["-g", "1", "-bf", "0"] if intra else []),
               "-c:a", "aac", "-b:a", "320k", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(tmp)])
     if r.returncode != 0 or not tmp.is_file():
         tmp.unlink(missing_ok=True)
@@ -418,7 +510,7 @@ def _encoded_piece(raw: Path, places: list[float], max_s: float, nm: "Names", na
             "places": [round(x, 3) for x in places], "raw_duration": round(dur, 3),
             "bytes": int(nm.piece.stat().st_size), "check": None, "made": time.time(),
             "seconds": round(time.perf_counter() - t0, 1), "encoded": True, "why_encoded": why_not_copy,
-            "topaz_on": topaz_on,
+            "topaz_on": topaz_on, **({"intra": True} if intra else {}),
             "where": f"{_clock(lo)}-{_clock(lo + n / f)} of {_clock(dur)}"}
     _write_json(nm.info, info)
     say(1.0, f"the piece {info['where']} is in the Enhance folder (encoded)")
@@ -606,7 +698,10 @@ def take_back(folder: str | os.PathLike, name: str, project: str | os.PathLike, 
     """The enhanced piece checked and copied into the project (<project>\\enhance\\raw_enhanced.mp4: one copy, it
     replaces an older one), then the share's files deleted. {ok, why, file, check}."""
     nm = names(folder, name)
-    info = info or read_info(nm.info) or {}
+    there = read_info(nm.info) or {}
+    info = info or there
+    if there.get("worker_note"):                         # 19 Nov: e.g. "the parts could not be used (...)"
+        info = dict(info, worker_note=str(there["worker_note"]))
     chk = check_enhanced(nm.enhanced, info)
     if not chk["ok"]:
         return {"ok": False, "why": chk["why"], "check": chk}
@@ -624,7 +719,7 @@ def take_back(folder: str | os.PathLike, name: str, project: str | os.PathLike, 
         return {"ok": False, "why": f"it could not be copied into the project: {e}", "check": chk}
     _write_json(dst_dir / "enhance.json", dict(info, enhanced=chk, copied=time.time()))
     clear(folder, name)
-    return {"ok": True, "why": "", "file": str(dst), "check": chk}
+    return {"ok": True, "why": "", "file": str(dst), "check": chk, "note": str(info.get("worker_note") or "")}
 
 
 def tidy_project(project: str | os.PathLike) -> list[str]:
@@ -923,7 +1018,8 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
         if r["ok"]:
             c = r.get("check") or {}
             text = f"enhanced with Topaz: {c.get('width')}x{c.get('height')}, {OUT_FPS} fps"
-            p.update(enhance={"state": "used", "used": now, "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text})
+            p.update(enhance={"state": "used", "used": now, "file": f"{PROJECT_SUB}\\{PROJECT_FILE}", "text": text,
+                              **({"note": r["note"]} if r.get("note") else {})})
             from . import enhance_swap as ES            # 7 Nov: the edit is finished already (matched on the normal
             steps = PJ.read_json(p.folder / PJ.FILE).get("steps") or {}         # RAW): it plays the picture now
             if ES.edit_made(p.folder, steps.get("edit")):                       # (18 Nov: a FAIL with its XML too)
@@ -934,14 +1030,24 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
                                 "text": f"{sw.get('kept')} clip(s) not enhanced yet: a new piece went to Topaz"}
                 if sw.get("ok"):
                     return {"state": "used", "text": sw.get("text") or text, "swapped": True}
+                if str(sw.get("why") or "").startswith(ES.NOT_LINED_UP):
+                    # 19 Nov: the enhanced picture is not the edit's picture (the swap's own look at its frames) --
+                    # until now the video then simply kept the normal RAW. It is a failed try like the others: the
+                    # reason is kept and the piece goes again, made another way.
+                    why = f"the enhanced piece is not right ({sw.get('why')}) -- the normal RAW is used"
+                    rows = (PJ.load(p.folder).data.get("enhance") or {}).get("swap_check")
+                    note_failure(p.folder, why, json.dumps(rows) if rows else "")
+                    p.update(enhance={"state": "failed", "why": why})
+                    return _again(p.folder, why)
                 ES.zip_when_done(p.folder)              # (not swapped: the zip with the normal RAW's picture)
                 return {"state": "used", "text": f"{text} -- not swapped: {sw.get('why')}", "swapped": False}
             return {"state": "used", "text": text}
         why = f"the enhanced piece is not right ({r['why']}) -- the normal RAW is used"
+        note_failure(p.folder, why, json.dumps(r.get("check") or {}))     # (19 Nov: every failure, whole)
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
         return _again(p.folder, why)
-    if b.state == "gone":                                # 9 Nov: the other computer took it a moment ago?
+    if b.state == "gone":                               # 9 Nov: the other computer took it a moment ago?
         try:
             q = PJ.load(project).data.get("enhance") or {}
             got = read_info(Path(p.folder) / PROJECT_SUB / "enhance.json") or {}
@@ -957,8 +1063,7 @@ def _watch(project: str | os.PathLike, now: float | None = None, timeout_s: floa
                 "text": "the Enhance folder cannot be reached now -- waiting for it to come back"}
     if b.state in ("failed", "gone"):
         why = b.text if b.state == "gone" else f"Topaz could not enhance it: {b.text}"
-        if b.state == "failed":
-            _keep_failure(p.folder, names(folder, name).failed)
+        note_failure(p.folder, why, _failure_text(names(folder, name).failed) if b.state == "failed" else "")
         clear(folder, name)
         p.update(enhance={"state": "failed", "why": why})
         return _again(p.folder, why)
@@ -983,30 +1088,28 @@ def _folder_answers(folder: str | os.PathLike) -> bool:
 FAILURE_LOG = "topaz_failed.log"        # in the project's logs folder
 
 
-def _keep_failure(project: str | os.PathLike, failed: Path) -> None:
+def _failure_text(failed: Path) -> str:
     """18 Nov (17 Nov, Bedtime: "code 69" -- the reason was never seen): Topaz's failure file (the reason and
     Topaz's last lines) was deleted from the Enhance folder the moment the row had read its first line. Its whole
-    text is kept in the project now: logs/topaz_failed.log (every failure of this video, the newest last)."""
+    text is kept in the project now: logs/topaz_failed.log (every failure of this video, the newest last; 19 Nov:
+    written by ``note_failure``, with the try and how its piece was made)."""
     try:
-        text = Path(failed).read_text(encoding="utf-8", errors="replace").strip()
-        if not text:
-            return
-        d = Path(project) / "logs"
-        d.mkdir(parents=True, exist_ok=True)
-        with open(d / FAILURE_LOG, "a", encoding="utf-8") as f:
-            f.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  {Path(failed).name}\n{text}\n\n")
+        return Path(failed).read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
-        pass
+        return ""
 
 
 def _again(project, why: str) -> dict:
     """7 Nov (your call: no normal RAW in the timeline): Topaz failed -- the piece goes again (enhance_swap.cover_all,
-    at most MAX_REDOS times); only then the normal RAW stays and the zip is made."""
+    at most MAX_REDOS times); only then the normal RAW stays and the zip is made. 19 Nov: each time made another
+    way (``WAYS``)."""
     try:
         from . import enhance_swap as ES
         r = ES.cover_all(project)
         if r.get("ok") and r.get("clips"):
-            return {"state": "progress", "share": 0.0, "text": f"Topaz failed ({why}) -- sent again"}
+            return {"state": "progress", "share": 0.0,
+                    "text": f"Topaz failed ({why}) -- sent again" + (f", made another way: {r['way']}"
+                                                                     if r.get("way") else "")}
     except Exception:  # noqa: BLE001
         pass
     _zip_now(project)
@@ -1709,6 +1812,11 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
         chk = check_enhanced(nm.part, info)
         if not chk["ok"]:
             raise EnhanceError(f"Topaz's result is not right: {chk['why']}")
+        if job.note:                                     # 19 Nov: what went another way is told to the PC too (the
+            try:                                         #   piece's json: take_back keeps it in the project)
+                _write_json(nm.info, dict(read_info(nm.info) or info, worker_note=job.note))
+            except OSError:
+                pass
         os.replace(nm.part, nm.enhanced)
         job.state, job.share, job.left_s = "done", 1.0, None
     except Exception as e:  # noqa: BLE001 - said in plain words, and written for the PC
@@ -1721,6 +1829,7 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
             try:
                 more = getattr(e, "details", "")
                 nm.failed.write_text(f"{job.why}\n\n(the laptop {M.host()}, {time.strftime('%Y-%m-%d %H:%M')})\n"
+                                     + (f"\nbefore that: {job.note}\n" if job.note else "")     # (19 Nov)
                                      + (f"\nTopaz's last lines:\n{more}\n" if more else ""), encoding="utf-8")
             except OSError:
                 pass

@@ -206,6 +206,9 @@ RANGES_MIN_SAVED_S = 20.0              #   seconds of it, need no Topaz at all
 RANGES_ENV = "MOVIERECAPS_TOPAZ_RANGES"   # "0": the whole piece is enhanced, as before 18 Nov
 
 
+NOT_LINED_UP = "the enhanced piece does not line up with the edit"     # swap_in's own look at the frames said no
+
+
 def play_ranges(every: list[tuple[int, int]], fps: Fraction, start: int, frames: int) -> list[list[int]]:
     """18 Nov (The Best Business Idea In Key and Peele (2): 57 s of clips spread over 3:04 of the RAW -- Topaz enhanced
     a 3:24 piece, about an hour, of which the edit plays under a third): the parts of the piece the edit plays, as
@@ -364,9 +367,18 @@ def cover_all(project, say=None) -> dict:
         folder = rec.get("folder") or str(E.share_dir())
         if not Path(folder).is_dir():                    # 13 Nov: the address it had then is not reachable now
             folder = str(E.share_dir())
+        # 19 Nov (your call): a piece that goes again after a failure is made ANOTHER way each time (E.WAYS: the
+        # RAW's own frames + only the played parts, then an encoded piece whole, then the RAW's frames whole, then
+        # every frame a keyframe) -- the same piece again could fail three times for the same reason. A piece that
+        # goes again because clips were left outside it (nothing failed) is made as before: a copy, whole.
+        tries = [dict(t) for t in (rec.get("tries") or []) if isinstance(t, dict)]
+        if rec.get("state") == "failed" and tries and not tries[-1].get("why"):
+            tries[-1]["why"] = str(rec.get("why") or "it failed")       # (a failure nobody wrote down: it counts)
+        first = rec.get("state") == "skipped" and not tries
+        kind, want_parts = E.next_way(tries) if rec.get("state") in ("skipped", "failed") else (E.COPY, False)
         info = E.make_piece(media, name, folder, (a_s, b_s), project=p.folder,
                             topaz_on=str((rec.get("piece") or {}).get("topaz_on") or rec.get("topaz_on") or ""),
-                            progress=(lambda s, t: say(s, t)) if say else None)
+                            progress=(lambda s, t: say(s, t)) if say else None, way=kind)
         again = False
         if off or groups:                                # the piece's start in the movie's frames (swap_in maps so)
             info["start_frame"] = int(info["start_frame"]) + off
@@ -375,10 +387,10 @@ def cover_all(project, say=None) -> dict:
             again = True
         # 18 Nov: only what the edit plays is enhanced (play_ranges) -- in a 60 fps sequence (the enhanced frames
         # are then found by their own number; at the RAW's rate a part's start would fall between two frames) and
-        # only for a video's FIRST piece (one sent again after a failure is enhanced whole, as before 18 Nov)
+        # only when this try's way says so (19 Nov: the first piece, and a later one when the other ways failed)
         ranges = []
         if (o.get("rates") == {Fraction(E.OUT_FPS)} and Fraction(str(info.get("fps") or 0)) == fps
-                and rec.get("state") == "skipped"):
+                and want_parts):
             ranges = play_ranges(o["every"], fps, int(info["start_frame"]), int(info.get("frames") or 0))
         if ranges:
             info["ranges"] = ranges
@@ -391,13 +403,18 @@ def cover_all(project, say=None) -> dict:
         lk = E.read_lock(E.names(folder, old).lock)
         if lk is None or E.lock_stale(E.names(folder, old).lock):
             E.clear(folder, old)                         # the old piece: nobody enhances it -- it leaves the line
+        made = E.piece_way(info)
+        tries.append({"n": len(tries) + 1, "piece": name, "sent": time.time(), "asked": [kind, want_parts],
+                      "way": list(made), "text": E.way_text(*made)})
         p.update(enhance={"name": name, "folder": str(folder), "state": "sent", "sent": time.time(),
                           "where": info.get("where"), "piece": info, "swapped": None, "swap": None, "used": None,
-                          "text": None, "file": None, "why": None, "after_edit": None,
+                          "text": None, "file": None, "why": None, "after_edit": None, "tries": tries,
+                          "way": E.way_text(*made), "swap_failed": None, "swap_check": None,
                           "redos": int(rec.get("redos") or 0) + (0 if rec.get("after_edit") else 1),
                           "redo": None if rec.get("after_edit") else
                           f"{len(o['need'])} clip(s) were not enhanced: a piece with all of them again"})
-        return {"ok": True, "why": "", "clips": len(o["need"]), "where": info.get("where")}
+        return {"ok": True, "why": "", "clips": len(o["need"]), "where": info.get("where"),
+                "way": "" if first else E.way_text(*made)}
     except Exception as e:  # noqa: BLE001 - the edit stays as it is (the clips outside keep the normal RAW)
         return {"ok": False, "why": f"{type(e).__name__}: {e}"}
 
@@ -515,7 +532,7 @@ def swap_in(project, do_check: bool = True) -> dict:
             ck = check(normal_media, raw_fps, enh, pairs)
             if not ck["ok"]:
                 p.update(enhance={"swap_failed": ck["why"], "swap_check": ck["rows"]})
-                return {"ok": False, "why": f"the enhanced piece does not line up with the edit: {ck['why']}"}
+                return {"ok": False, "why": f"{NOT_LINED_UP}: {ck['why']}"}
         else:
             ck = {"rows": []}
         try:                                               # 18 Nov: how many times bigger the enhanced picture is --
