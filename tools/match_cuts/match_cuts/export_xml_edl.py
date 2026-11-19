@@ -3681,6 +3681,39 @@ def _moved_cut(clips: list[PremiereClip], i: int, to: int) -> list[PremiereClip]
     return out
 
 
+SWALLOW_FLASH_CLIP = True       # 19 Nov: a flash that is a clip of its own is taken too (``_swallowed_cut``)
+
+
+def _swallowed_cut(clips: list[PremiereClip], i: int, to: int
+                   ) -> tuple[list[PremiereClip], int, PremiereClip] | None:
+    """19 Nov (The Best Business Idea In Key and Peele (2), S21 at 00:00:06:58: "2 frame(s) of a different RAW shot"
+    left as a note, and 25 of the 50 such notes in the projects are 5 frames or less): since the clips are cut at
+    the RAW's shot changes (split_at_shots), the frames a take ran past its own shot are a clip of their OWN -- and
+    ``_moved_cut`` never leaves a clip without a frame, so the day-13 fix could not take exactly the flashes it was
+    made for. The cut between clips[i] and clips[i + 1] moved ALL the way over one of them: ``to`` == clips[i]'s
+    start -- that clip goes and the one after starts there, on its own source line; ``to`` == clips[i + 1]'s end --
+    that clip goes and the one before plays on to there. (the clips, the index of the clip that grew, the clip that
+    went), or None where
+    that cannot be (the same rules as ``_moved_cut``)."""
+    x, y = clips[i], clips[i + 1]
+    if abs(float(x.speed) - 1.0) > 1e-9 or abs(float(y.speed) - 1.0) > 1e-9 or x.retime or y.retime:
+        return None
+    out = list(clips)
+    if to == x.rec_start and x.start != -1:
+        d_y = int(round((to - y.rec_start) * float(y.speed)))
+        if y.src_in + d_y < 0:
+            return None
+        out[i + 1] = dataclasses.replace(y, start=to, rec_start=to, src_in=y.src_in + d_y)
+        del out[i]
+        return out, i, x
+    if to == y.rec_end and y.end != -1:
+        out[i] = dataclasses.replace(x, end=to, rec_end=to,
+                                     src_out=x.src_in + int(round((to - x.rec_start) * float(x.speed))))
+        del out[i + 1]
+        return out, i, y
+    return None
+
+
 def _overlaps_others(clips: Sequence[PremiereClip], i: int) -> bool:
     """Clip ``i``'s source frames overlap another clip's (the XML REPEAT check would fail)."""
     c = clips[i]
@@ -3736,15 +3769,24 @@ def fix_cut_flashes(clips: list[PremiereClip], audio: list[dict], changes_s: Seq
                 if to == c:
                     continue
                 cand = _moved_cut(clips, i, to)
-                if cand is None or _overlaps_others(cand, i) or _overlaps_others(cand, i + 1):
+                aud = audio
+                if cand is None:                          # 19 Nov: the flash is a whole clip of its own -- it goes
+                    sw = _swallowed_cut(clips, i, to) if SWALLOW_FLASH_CLIP else None
+                    if sw is None or _overlaps_others(sw[0], sw[1]):
+                        continue
+                    cand, gone = sw[0], sw[2]
+                    # ... and with it the A1 item linked to it (link_pairs: the same range, its own sound)
+                    aud = [it for it in audio if not (it.get("what") == "picture" and int(it["start"]) == gone.rec_start
+                                                      and int(it["end"]) == gone.rec_end and _on_line(it, gone))]
+                elif _overlaps_others(cand, i) or _overlaps_others(cand, i + 1):
                     continue
                 got = _flash_lines(cand, changes_s, fps, raw_fps)
                 if not (len(got) < len(probs) and set(got) <= set(probs)) or (
                         best is not None and (len(got), abs(to - c)) >= (len(best[2]), abs(best[1] - c))):
                     continue
                 move = {"clips": f"{x.label}|{y.label}", "from": c, "to": to}
-                a_new, moved = follow_snapped_cuts(cand, audio, [move])
-                at_cut = sum(1 for it in audio if c in (int(it["start"]), int(it["end"])))
+                a_new, moved = follow_snapped_cuts(cand, aud, [move])
+                at_cut = sum(1 for it in aud if c in (int(it["start"]), int(it["end"])))
                 if (moved[0]["items"] if moved else 0) != at_cut:
                     continue                              # a sound cut there that cannot move with its picture
                 best = (i, to, got, cand, a_new, move)
