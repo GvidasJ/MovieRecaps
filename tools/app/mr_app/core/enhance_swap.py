@@ -116,8 +116,21 @@ def _v1(root) -> list:
 def _gray(path: Path, fps: Fraction, frames: list[int]) -> dict:
     import cv2
     from match_cuts.media import VideoReader
+    want = sorted({f for f in frames if f >= 0})
     with VideoReader(str(path), fps=fps) as r:
-        got = r.get_many(sorted({f for f in frames if f >= 0}), fmt="gray")
+        try:
+            got = r.get_many(want, fmt="gray")
+        except IndexError:
+            # 19 Nov (The Worst Prank In The Office: a 27 s RAW whose last clip ends on the RAW's last frame -- the
+            # check's look "half a second later" and the clip-end fit's "the frame after" asked for frames past the
+            # end of the file, and the whole swap stopped with "IndexError: frames [1620] not found"): a frame the
+            # file does not have is simply not there (every caller treats a missing picture as "cannot say")
+            got = {}
+            for f in want:
+                try:
+                    got.update(r.get_many([f], fmt="gray"))
+                except IndexError:
+                    pass
     out = {}
     for k, a in got.items():
         if a is None:
@@ -159,6 +172,8 @@ def check(normal_media: Path, raw_fps: Fraction, enhanced: Path, pairs: list[tup
     return {"ok": not bad and bool(rows), "rows": rows, "why": "; ".join(bad) or ("" if rows else "nothing read")}
 
 
+END_SHORT = 2                          # 19 Nov: an enhanced file this many 60 fps frames short at its very end is
+#                                        fitted (swap_in: the clip plays that much earlier), not left on the normal RAW
 CUT_Z = 0.5                         # two RAW frames in a row that look this little alike: a shot change between them
 END_MARGIN = 0.05                   # a clip's end frame must look this much more like its own RAW frame than the
 #                                     next shot's (its first frame: than the shot before's)
@@ -592,6 +607,7 @@ def swap_in(project, do_check: bool = True) -> dict:
             ET.SubElement(sc, "height").text = str(height)
         ET.SubElement(sc, "pixelaspectratio").text = "square"
         plan, kept = [], 0
+        short: list[int] = []                              # 19 Nov: clips fitted to a file a frame or two short
         for c in clips:
             rate = _rate(c.find("rate")) or raw_fps
             k = _speed(c) * raw_fps / rate                 # one step of <in> / <out> in the RAW's frames
@@ -601,8 +617,12 @@ def swap_in(project, do_check: bool = True) -> dict:
                 kept += 1
                 continue
             ma, mb = to_movie(a * k, groups), to_movie(b * k, groups)
-            if ma is None or mb is None or ma < start or (not parts and mb > start + covered):   # (<out> is the
-                kept += 1                                                                        #   frame after)
+            # 19 Nov: a 60 fps clip may end up to END_SHORT enhanced frames past the enhanced file's last frame --
+            # it is fitted below (``short``)
+            near = (ma is not None and mb is not None and rate == OUT_FPS
+                    and (mb - start) * OUT_FPS / raw_fps - enh_frames <= END_SHORT)
+            if ma is None or mb is None or ma < start or (not parts and mb > start + covered and not near):
+                kept += 1                                  # (<out> is the frame after)
                 continue
             base, at = start, Fraction(0)                  # the movie's frame that is the enhanced file's frame ``at``
             if parts:
@@ -618,6 +638,18 @@ def swap_in(project, do_check: bool = True) -> dict:
             if na.denominator != 1 or nb.denominator != 1:
                 kept += 1                                  # not a whole step on its scale: the normal RAW
                 continue
+            if nb > enh_frames:
+                # 19 Nov (The Worst Prank In The Office, 17 Nov: the RAW has 1611 frames, the enhanced file Topaz
+                # gave back 1610 -- a clip that plays the RAW to its very last frame then asked for one frame the
+                # enhanced file does not have, stayed on the normal RAW, and the piece was sent again and again):
+                # a frame or two short at the very end of the file -- the clip plays the enhanced picture that
+                # much earlier (1/60 s: under a RAW frame; the cut and the sound stay). More than that: as before.
+                d = int(nb) - enh_frames
+                if rate != OUT_FPS or d > END_SHORT or na - d < 0:
+                    kept += 1
+                    continue
+                na, nb = na - d, nb - d
+                short.append(d)
             mid = int((a * k + b * k) / 2)                 # (the check looks inside the clip, not at a cut)
             mm = to_movie(mid, groups)
             when = at / OUT_FPS + Fraction((mm if mm is not None else ma) - base) / raw_fps     # s in the enhanced file
@@ -650,8 +682,12 @@ def swap_in(project, do_check: bool = True) -> dict:
                 plan = [pl if not shifts.get(i) else (pl[0], pl[1] + shifts[i], pl[2] + shifts[i], *pl[3:])
                         for i, pl in enumerate(plan)]
                 ends = {"moved": len(shifts), "by": sorted(set(shifts.values())), "left": left}
+                if short:
+                    ends["short"] = {"clips": len(short), "frames": max(short)}
             except Exception as e:  # noqa: BLE001 - then the swap as it was before 19 Nov
                 ends = {"moved": 0, "left": [], "error": f"{type(e).__name__}: {e}"}
+        if short and "short" not in ends:
+            ends["short"] = {"clips": len(short), "frames": max(short)}
         try:                                               # 18 Nov: how many times bigger the enhanced picture is --
             bigger = float(width) / float(info["width"])    #   2, or 1 for a piece that was 4K already (topaz_scale)
             if not (0.9 < bigger < 4.1):
