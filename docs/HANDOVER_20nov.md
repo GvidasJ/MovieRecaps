@@ -15,8 +15,8 @@ it is finished (or when I stop working on it).
 |---|---|---|
 | 1 | finish 19 Nov: the old videos, check-all, the 19 Nov report | done |
 | 2 | tests: the crash at the end, the timing test, the real crash.log | done |
-| 3 | a real failed Topaz try | waiting for the PC |
-| 4 | pause and resume | not started |
+| 3 | a real failed Topaz try | done |
+| 4 | pause and resume | edit: done and proven; Topaz: done, real-Topaz proof running |
 | 5 | speed ("lstsq"), only if every edit is the same | not started |
 
 ## Job 1 -- finishing 19 Nov
@@ -65,3 +65,53 @@ back, Windows' crash list (Event Viewer -> Application, "python.exe") says where
 One test (`test_torrent_day17`, a real torrent download into a network folder) fails when the test's temporary
 folder has a very long path -- correct behaviour of the app (it shortens a name that would pass Windows' path
 limit). It happened only because I gave the tests a long temporary folder; with a short one it passes.
+
+## Job 3 -- the real Topaz failing, and the next try made another way
+
+Until now the retry ladder (19 Nov) was only tested with a fake Topaz. Today, on a scratch copy of The Worst Prank
+In The Office (the competitor + the RAW copied; nothing of yours touched; the app closed), the edit was made as the
+app makes it (PASS, no note) and then every piece the app sent to the real Topaz was damaged before Topaz took it:
+
+| try | how the app made the piece | what I did to it | what happened |
+|---|---|---|---|
+| 1 | the RAW's own frames, whole | cut to its first 100 KB | the **real Topaz failed**: "Invalid data ... Conversion failed!" |
+| 2 | an encoded piece, whole | only the first half of its frames | Topaz worked (5 min), the **app refused the result**: "13.4 s long, the piece 26.85 s" |
+| 3 | an encoded piece, every frame a keyframe | nothing | Topaz worked (10 min), accepted: **"25 of 25 V1 clips play it"** |
+
+- Each try was made another way, as decided on 19 Nov. The third skipped "the RAW's own frames, the whole piece",
+  because try 1 had already been made exactly that way.
+- Both failures stayed in the project with their full reason: project.json "tries" and `logs\topaz_failed.log`
+  (with Topaz's own last lines for try 1).
+- Then every clip of the finished edit was checked at its first, middle and last frame against the normal RAW
+  (`work\h19\check_clips.py`): 74 of 75 right. The one left is the middle of the last clip, a still picture (0.9993
+  against 0.9994), 1/60 s early on purpose: the Topaz file is one frame shorter than this RAW (19 Nov, point 6).
+  That is exactly the result of yesterday's run of this video that never failed.
+- One small thing: the failure text says "(the laptop Gvidas, ...)" also when the PC did the work. Both your
+  computers are named Gvidas; the words come from the time only the laptop ran Topaz. Not changed (only words).
+
+## Job 4 -- pause and resume
+
+### An edit
+
+Until today Pause stopped the tool, and Resume ran it again: the steps already finished came back from the cache,
+but the step that was running -- usually the search or the refine, 80 % of an edit -- started again from zero.
+And after the PC was turned off (no pause at all) the row said "Try again" and that started from zero too.
+
+Now the search and the refine keep their finished work on disk as they go (every few seconds, in the cache
+folder, `cache\partial`). When the step runs again -- Resume, Try again after the PC was off, any new run of the
+same video with the same settings -- only the work that is missing is done. When the step is finished, its kept
+work is deleted (its result is in the cache as before). The row of a video stopped by a closed app or PC now says
+"Try again goes on from where it stopped".
+
+**The proof** (a copy of a real test video, video017-fixed, everything from empty caches, through the app's own
+Pause / Resume code):
+- once without any stop: 352 s, PASS;
+- once paused at 32 % of the search -> Resume -> killed hard at 80 % of the refine (as when the PC is turned
+  off: no pause, no note) -> Try again: PASS. The last part took 151 s instead of starting over: the refine took
+  34 s instead of 132 s, because almost all its work came from what was kept.
+- The two edits: `1_edit.xml`, `2_captions.srt`, the 60 fps XML -- **byte for byte the same**; the cut list the
+  same (only the times of the steps it writes down differ).
+
+Why it is the same: every small task of these steps gives the same answer whatever runs with it, before or after
+it (the tool was built that way: the check-all "determinism" check proves it on every test video), so a task
+done before the pause and kept is exactly the task done again. A task cut off by the kill is simply done again.
