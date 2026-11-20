@@ -115,3 +115,41 @@ Pause / Resume code):
 Why it is the same: every small task of these steps gives the same answer whatever runs with it, before or after
 it (the tool was built that way: the check-all "determinism" check proves it on every test video), so a task
 done before the pause and kept is exactly the task done again. A task cut off by the kill is simply done again.
+
+### A Topaz piece
+
+Until today a stopped Topaz (the app closed, the PC turned off, Topaz hanging) started again from frame 0. Its
+half-made file could not even be read: an mp4 can only be read when it is finished ("moov atom not found" -- the
+two half-made files of 17 Nov in `D:\Shared\Enhance` are like that, 150 MB and 114 MB of Topaz work lost).
+
+Now:
+- Topaz writes its file in small self-contained blocks, so a stopped file can be read up to its last block. When
+  Topaz is done, the file is written as a normal mp4 (copied, not encoded again). The sound is put in at that
+  moment (with the sound inside a block file every picture was 21 ms late -- found and avoided).
+- Every 1001 frames (16.7 s at 60 fps; 600 frames for 24, 25, 30 or 60 fps RAWs) Topaz is asked for a keyframe the
+  file can be cut at. There a 60 fps frame falls exactly on a frame of the RAW, so what comes after the cut has the
+  same frames at the same places. (The real Topaz stores frames out of order -- "B-frames": a cut anywhere else
+  could lose a frame. My first real test found this; the fake Topaz of the tests has none.)
+- The next try keeps the frames up to the last such keyframe and Topaz goes on from there; the two files are joined
+  without encoding again (as the played parts are since 18 Nov). A finished part is not made again.
+- Something wrong (another piece, other settings, a file that cannot be read, a failure that is not a stop): nothing
+  is kept, Topaz starts from 0 as before. `MOVIERECAPS_TOPAZ_RESUME=0` switches it all off.
+
+**The proof with the real Topaz** (35 s of It's Always Sunny, 1080p 23.976 fps -> 4K 60 fps, 2100 frames; a scratch
+copy, the app closed):
+
+| | frames | the very same pictures | difference (gray, of 255) | each frame the same RAW frame |
+|---|---|---|---|---|
+| no stop, the new way -- against the way until today | 2100 / 2100 | the first 1001 | mean 0.13, max 0.34 | 2100 of 2100 |
+| stopped at 75 % and started again -- against no stop | 2102 / 2100 | the first 1001 (all before the stop) | mean 0.14, max 3.4 | 2092 of 2100 |
+
+- The stopped run kept 1001 frames: the second try took **303 s instead of 580 s**.
+- The keyframes change the picture by 0.13 of 255 on average: not visible, the same frames. Your Proteus / Apollo
+  settings are not changed.
+- After the stop Topaz starts fresh, so its pictures differ by about the same tiny amount. The 8 frames counted as
+  "another RAW frame" are all pictures Apollo makes halfway between two RAW frames (it blends the two): there the
+  blend leans a hair towards the other one (the two fit 8.3 against 9.1). No frame shows a wrong moment.
+- 2 frames more at the end: the last picture held twice (nothing plays it; the check accepts it).
+- On the way, two small faults in the Topaz code were found and fixed: a Topaz that works was stopped as "not
+  answering" after 8 minutes when nothing showed its progress, and the next try failed with a Windows "file in use"
+  error when the stopped Topaz still held its file for a moment.
