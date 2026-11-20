@@ -36,6 +36,73 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
+# 20 Nov: ONE QApplication for the whole session, made here before any test file is read, and held to the end.
+# The app suite died with 0xC0000409 (Windows' "fail fast", no Python traceback) -- Qt's last words were "QWidget:
+# Cannot create a QWidget without QApplication": test_decode_fix_day16 had made a bare QCoreApplication when no app
+# was there, and the next file's ``QApplication.instance() or QApplication([])`` got that one back, so its first
+# window made Qt abort the process. It depended on the order of the files (the test that died passed alone), and
+# each file making and dropping its own app is the same kind of trap. Every ``instance() or ...`` now finds this one.
+try:
+    from PySide6.QtWidgets import QApplication as _QApplication
+except ImportError:                                       # (no PySide6: the Qt tests skip themselves)
+    _QAPP = None
+else:
+    _QAPP = _QApplication.instance() or _QApplication([])
+
+
+def _windows_away() -> None:
+    """Every window a test left is closed and deleted, and Python's garbage collector runs -- here, on the main
+    thread, at a known moment."""
+    import gc
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+        for w in list(_QApplication.topLevelWidgets()):
+            try:
+                w.close()
+                w.deleteLater()
+            except RuntimeError:                          # (its C++ side is gone already)
+                pass
+        QCoreApplication.sendPostedEvents(None, int(QEvent.Type.DeferredDelete))
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, int(QEvent.Type.DeferredDelete))
+    except Exception:  # noqa: BLE001 - the clean-up never changes a result
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _qt_objects_die_on_the_main_thread():
+    """20 Nov: the suite died twice with an access violation in pyside6.abi3.dll (Windows' event log, 08:13 and
+    08:39, the same place both times): once mid-run, in a test of the pair check that waits on 8 threads, once
+    while Python closed. Windows and pages of earlier tests were left to Python's garbage collector, which can run
+    in ANY thread at ANY moment -- a Qt object destroyed in another thread than its own. Now the automatic collector
+    is off while a test runs, and it is run here after each test, on the main thread (then the deletions Qt was
+    asked for). Windows a test file keeps for its next test are not touched."""
+    import gc
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.collect()
+        if _QAPP is not None:
+            try:
+                from PySide6.QtCore import QCoreApplication, QEvent
+                QCoreApplication.sendPostedEvents(None, int(QEvent.Type.DeferredDelete))
+            except Exception:  # noqa: BLE001
+                pass
+        gc.enable()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """20 Nov: the suite printed "N passed" and then died while Python closed ("Fatal Python error: Aborted", no
+    Python frame -- one run in two): windows left by the tests were destroyed in any order while Python shut down,
+    some after the QApplication. Every window is closed and deleted here, while Qt is still whole."""
+    if _QAPP is None:
+        return
+    for _ in range(3):
+        _windows_away()
+        _QAPP.processEvents()
+
+
 class _NoShutdown(AssertionError):
     pass
 

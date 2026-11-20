@@ -384,7 +384,12 @@ class TorrentPicker(W.Card):
         self._update()
 
     def eventFilter(self, obj, e) -> bool:                 # noqa: N802 - Esc in the search box clears it
-        if obj is self.find_box and e.type() == QEvent.Type.KeyPress and e.key() == Qt.Key.Key_Escape:
+        # 20 Nov: while the picker is being taken down Qt can still send the search box an event after the Python
+        # side lost its fields -- "'TorrentPicker' object has no attribute 'find_box'" twice in crash.log (19 Nov)
+        box = getattr(self, "find_box", None)
+        if box is None:
+            return False
+        if obj is box and e.type() == QEvent.Type.KeyPress and e.key() == Qt.Key.Key_Escape:
             self.find_box.clear()
             return True
         return super().eventFilter(obj, e)

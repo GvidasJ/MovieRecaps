@@ -24,8 +24,9 @@ PTS = ("RuntimeError: C:\\x\\Ted.2.2015.EXTENDED.1080p.BluRay.x265-RBG.mp4: coul
 
 def _thread(monkeypatch, tmp_path, results, converted=None):
     pytest.importorskip("PySide6.QtCore")
-    from PySide6.QtCore import QCoreApplication
-    QCoreApplication.instance() or QCoreApplication([])
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])          # 20 Nov: a real one (a bare QCoreApplication broke the
+    #                                                      next files' windows: conftest.py)
     from mr_app.tools import match_cuts_tool as M
     tmp_path.mkdir(parents=True, exist_ok=True)
     raw, comp = tmp_path / "Ted.2.x265.mp4", tmp_path / "c.mp4"

@@ -48,6 +48,34 @@ def pump(app, ms: float) -> None:
         time.sleep(0.003)
 
 
+# 20 Nov: the fades are checked on their own clock, not on the wall clock. "120 ms after the start it is part-way"
+# failed with 0.0 while the PC was full (19 Nov: the whole app suite beside two edits) -- the event loop's first
+# tick came late, nothing was wrong with the fade. ``seek`` puts a fade at an exact time since its start (Qt's
+# QVariantAnimation.setCurrentTime: the very value the screen would show then); the real clock is only used to see
+# that a fade or a glide gets to its end by itself (``until``, generous limit).
+
+def seek(fader, ms: int) -> None:
+    fader._a.setCurrentTime(ms)                                            # noqa: SLF001
+
+
+def until(app, done, limit_ms: float = 5000.0) -> bool:
+    t0 = time.perf_counter()
+    while not done() and (time.perf_counter() - t0) * 1000.0 < limit_ms:
+        app.processEvents()
+        time.sleep(0.003)
+    return bool(done())
+
+
+class _Frames:
+    """GlideBar's clock, one 60 Hz frame (16 ms) at every step: the glide as a free PC draws it."""
+
+    def restart(self) -> int:
+        return 16
+
+    def start(self) -> None:
+        pass
+
+
 def enter(w) -> None:
     QtWidgets.QApplication.sendEvent(w, QEnterEvent(QPointF(3, 3), QPointF(3, 3), QPointF(3, 3)))
 
@@ -61,15 +89,19 @@ def test_a_fader_fades_in_in_about_0_3_s_and_out_in_about_0_48_s(qapp):
     host = QtWidgets.QWidget()
     f = M.Fader(host, lambda: None)
     f.to(1.0)
-    pump(qapp, 120)
+    assert f._a.duration() == 300                                          # noqa: SLF001 - in: 0.3 s
+    seek(f, 120)
     assert 0.1 < f.value < 0.95                    # part-way: it fades, it does not jump
-    pump(qapp, 320)
+    seek(f, 300)
     assert f.value == pytest.approx(1.0)
     f.to(0.0)
-    pump(qapp, 300)
+    assert f._a.duration() == 480                                          # noqa: SLF001 - out: 0.48 s
+    seek(f, 300)
     assert 0.0 < f.value < 0.6                     # the way out is slower (0.48 s)
-    pump(qapp, 350)
+    seek(f, 480)
     assert f.value == pytest.approx(0.0)
+    f.to(1.0)                                      # and by itself, on the real clock, it gets there
+    assert until(qapp, lambda: f.value == pytest.approx(1.0))
 
 
 def test_the_soft_curve_is_the_references_cubic_bezier(qapp):
@@ -93,15 +125,18 @@ def test_a_hovered_button_card_and_drop_zone_fade_and_never_move_or_grow(qapp):
     before = [w.geometry() for w in (b, c, d)]
     for w in (b, c, d):
         enter(w)
-    pump(qapp, 100)
+    assert [w.hover._a.duration() for w in (b, c, d)] == [M.FADE_IN_MS] * 3              # noqa: SLF001
+    for w in (b, c, d):
+        seek(w.hover, 100)
     mid = [w.hover.value for w in (b, c, d)]
     assert all(0.05 < v < 0.98 for v in mid)       # fading, not switched
-    pump(qapp, 400)
-    assert [w.hover.value for w in (b, c, d)] == [pytest.approx(1.0)] * 3
+    assert until(qapp, lambda: [w.hover.value for w in (b, c, d)] == [pytest.approx(1.0)] * 3)
+    pump(qapp, 30)
     assert [w.geometry() for w in (b, c, d)] == before
     for w in (b, c, d):
         leave(w)
-    pump(qapp, 650)
+    assert until(qapp, lambda: [w.hover.value for w in (b, c, d)] == [pytest.approx(0.0)] * 3)
+    pump(qapp, 30)
     assert [w.geometry() for w in (b, c, d)] == before
     box.close()
 
@@ -117,10 +152,10 @@ def test_fades_still_run_when_windows_animation_effects_are_off(qapp):
             QtWidgets.QApplication.setEffectEnabled(e, False)
         b = W.Button("Start")
         enter(b)
-        pump(qapp, 120)
+        assert b.hover._a.state() == b.hover._a.State.Running                            # noqa: SLF001
+        seek(b.hover, 120)
         assert 0.1 < b.hover.value < 0.95
-        pump(qapp, 400)
-        assert b.hover.value == pytest.approx(1.0)
+        assert until(qapp, lambda: b.hover.value == pytest.approx(1.0))   # it runs by itself to the end
     finally:
         for e, on in was.items():
             QtWidgets.QApplication.setEffectEnabled(e, on)
@@ -162,6 +197,9 @@ def test_the_app_looks_up_the_emoji_font_before_the_window_exists(qapp, monkeypa
             calls.append("show")
 
     real = theme.warm_fonts
+    # 20 Nov: not the app's crash log in the test process (it took over sys.excepthook / faulthandler for the rest
+    # of the session and wrote into this PC's real crash.log; test_crash_log_20nov.py tests it on its own)
+    monkeypatch.setattr(A, "_crash_log", lambda: None)
     monkeypatch.setattr(QW, "QApplication", FakeApp)
     monkeypatch.setattr(main_window, "MainWindow", FakeWindow)
     monkeypatch.setattr(theme, "warm_fonts", lambda f: (calls.append("warm"), real(f))[1])
@@ -185,14 +223,21 @@ def test_the_progress_bar_glides_even_to_100_and_never_jumps(qapp):
     bar.resize(300, 3)
     bar.jump(0.3)
     bar.set(1.0)
-    pump(qapp, 60)
-    assert 0.3 < bar.shown < 0.9                   # on its way
+    bar._tick.stop()                                                       # noqa: SLF001 - the frames by hand:
+    bar._clock = _Frames()                                                 # noqa: SLF001 - one 60 Hz frame a step
     seen = [bar.shown]
-    for _ in range(80):                            # the reference's glide: ~1.4 s from 30 % to 100 %
-        pump(qapp, 30)
+    for _ in range(4):
+        bar._step()                                                        # noqa: SLF001
+        seen.append(bar.shown)
+    assert 0.3 < bar.shown < 0.9                   # on its way
+    for _ in range(84):                            # the reference's glide: ~1.4 s from 30 % to 100 %
+        bar._step()                                                        # noqa: SLF001
         seen.append(bar.shown)
     assert seen == sorted(seen) and seen[-1] == pytest.approx(1.0)
     assert max(b - a for a, b in zip(seen, seen[1:])) < 0.25
+    bar2 = W.GlideBar()                            # and on the real clock it gets there by itself
+    bar2.set(1.0)
+    assert until(qapp, lambda: bar2.shown == pytest.approx(1.0))
 
 
 def test_a_status_pill_says_its_word_and_pulses_only_while_running(qapp):
@@ -203,8 +248,7 @@ def test_a_status_pill_says_its_word_and_pulses_only_while_running(qapp):
     p.set("PASS")
     assert not p.pulse.running() and p.text() == "PASS"
     p.set("WRONG PAIR")
-    pump(qapp, 600)
-    assert p._now()[0] == QColor("#e5484d")                                # noqa: SLF001 - red, faded in
+    assert until(qapp, lambda: p._now()[0] == QColor("#e5484d"))           # noqa: SLF001 - red, faded in
 
 
 def test_the_page_glides_in_and_the_real_page_is_back_after(qapp):
@@ -218,10 +262,10 @@ def test_the_page_glides_in_and_the_real_page_is_back_after(qapp):
     pump(qapp, 20)
     st.glide_to(1, from_right=True)
     assert st.currentWidget() is b and b.graphicsEffect() is not None      # the picture glides, the page waits
-    pump(qapp, 120)
+    assert st.glide._a.duration() == M.GLIDE_MS                            # noqa: SLF001
+    seek(st.glide, 120)
     assert 0.0 < st.glide.value < 1.0
-    pump(qapp, 600)
-    assert b.graphicsEffect() is None and st.glide.value == pytest.approx(1.0)
+    assert until(qapp, lambda: b.graphicsEffect() is None and st.glide.value == pytest.approx(1.0))
     st.close()
 
 
@@ -231,10 +275,11 @@ def test_the_tab_underline_grows_on_the_new_tab_and_shrinks_on_the_old(qapp):
     bar.show()
     sizes = [t.size() for t in bar.tabs]
     bar.select(2, emit=True)
-    pump(qapp, 150)
+    seek(bar.tabs[2].sel, 150)
+    seek(bar.tabs[0].sel, 150)
     assert 0.0 < bar.tabs[2].sel.value < 1.0 and 0.0 < bar.tabs[0].sel.value < 1.0
-    pump(qapp, 500)
-    assert bar.tabs[2].sel.value == pytest.approx(1.0) and bar.tabs[0].sel.value == pytest.approx(0.0)
+    assert until(qapp, lambda: bar.tabs[2].sel.value == pytest.approx(1.0) and
+                 bar.tabs[0].sel.value == pytest.approx(0.0))
     assert [t.size() for t in bar.tabs] == sizes
     bar.close()
 

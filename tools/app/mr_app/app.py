@@ -17,7 +17,14 @@ def _crash_log() -> None:
     import traceback
     from pathlib import Path
     try:
-        d = Path(os.environ.get("APPDATA") or Path.home()) / "MovieRecaps"
+        # 20 Nov: the same folder as the settings and core.trouble's notes (settings.app_dir: MOVIERECAPS_APPDATA,
+        # else %APPDATA%\MovieRecaps). It read %APPDATA% itself, so the tests that start the app (their own app
+        # folder) wrote "the app started / closed normally" into the real crash.log of this PC.
+        try:
+            from .core.settings import app_dir
+            d = app_dir()
+        except Exception:  # noqa: BLE001 - never a crash at the start: the old place
+            d = Path(os.environ.get("APPDATA") or Path.home()) / "MovieRecaps"
         d.mkdir(parents=True, exist_ok=True)
         f = open(d / "crash.log", "a", encoding="utf-8", buffering=1)          # noqa: SIM115 - open for the app's life
     except OSError:
