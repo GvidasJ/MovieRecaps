@@ -16,8 +16,8 @@ it is finished (or when I stop working on it).
 | 1 | finish 19 Nov: the old videos, check-all, the 19 Nov report | done |
 | 2 | tests: the crash at the end, the timing test, the real crash.log | done |
 | 3 | a real failed Topaz try | done |
-| 4 | pause and resume | edit: done and proven; Topaz: done, real-Topaz proof running |
-| 5 | speed ("lstsq"), only if every edit is the same | not started |
+| 4 | pause and resume | done, proven with a real edit and the real Topaz |
+| 5 | speed ("lstsq"), only if every edit is the same | done: every edit the same, so it is kept |
 
 ## Job 1 -- finishing 19 Nov
 
@@ -153,3 +153,82 @@ copy, the app closed):
 - On the way, two small faults in the Topaz code were found and fixed: a Topaz that works was stopped as "not
   answering" after 8 minutes when nothing showed its progress, and the next try failed with a Windows "file in use"
   error when the stopped Topaz still held its file for a moment.
+
+## Job 5 -- the faster sum in the framing fit
+
+The framing fit (inside the search and the refine) solves two small "least squares" sums many thousand times per
+edit. numpy's way (lstsq) is careful and slow; the "normal equations" give the same answer about 5 times faster for
+these sums, but differ in the last digits. You said: keep it only if every edit comes out exactly the same.
+
+- All 11 old test videos were made twice, each from the same caches up to the search, with only this sum changed
+  (the search and the refine really ran again for the new way, they were not taken from a cache): **11 of 11
+  edits byte for byte the same** -- 1_edit.xml, 2_captions.srt and the 60 fps XML. So it is kept.
+- In a test of the fit itself the framing moves by at most 0.0000000004 of a pixel.
+- If a flat picture makes the faster sum impossible, the fit falls back to the old way for that step.
+- How much faster a whole edit is: The Best Business Idea (2), from empty caches, one edit at a time, the PC
+  otherwise free:
+
+  | | the whole edit | the search | the refine |
+  |---|---|---|---|
+  | the old sum (lstsq) | 2010 s | 667 s | 933 s |
+  | the new sum | **1820 s** | 521 s | 891 s |
+
+  About **3 minutes (9 %) less** per edit of this size. The two edits of this timing are also the same (the XMLs
+  differ only in the name of their run folder). The old sum's 2010 s is about what this edit took on 19 Nov (1999
+  s), so what the pause-and-resume of job 4 writes to disk as it goes costs no visible time.
+
+## What I decided for you (you said: do not ask)
+
+1. Job 2: the tests make one Qt program for the whole run, and Python's clean-up runs between tests. The app
+   itself is not changed by this (only its crash log's folder and the search box's Esc key).
+2. Job 3: the video for the real failures was The Worst Prank In The Office (short: three real Topaz tries in
+   20 minutes). The damage: a broken file, then half a file.
+3. Job 4, edit: the search and the refine keep their work (80 % of an edit). The other steps are short and were
+   already kept whole by the cache.
+4. Job 4, Topaz: a keyframe every 1001 / 600 frames in every Topaz file from now on, also when nothing stops. It
+   changes the picture by an invisible amount (0.13 of 255) and keeps the same frames; without it a stopped real
+   Topaz file cannot be cut safely.
+5. Job 4: a row stopped by a closed app or PC still says "Try again" (an earlier decision of yours), now with the
+   words "goes on from where it stopped" -- that is what it does now.
+6. Job 5: "exactly the same" = the edit files byte for byte (not only the frames). That was met.
+7. Jobs 1, 4 and 5: "the same" always means the new code's edit against the old code's edit of the same copies
+   (or a run without a pause) -- never against one of your projects. It proves "nothing changed", not "right".
+
+## The space (nothing big deleted -- you decide)
+
+Free now: C: 115 GB, D: 1384 GB. Everything below is mine (copies and test files), none of it is your work.
+
+| folder | size | what it is | can go? |
+|---|---|---|---|
+| `D:\mr_scratch\h20\pt_*` (27 folders) | about 50 GB | the tests' temporary folders of today's test runs | yes, all |
+| `D:\mr_scratch\h20\time_A20`, `time_B20` | 3.6 GB each | the two timed edits of job 5 | yes |
+| `D:\mr_scratch\h20\pause` | 5.5 GB | job 4's pause proof (video017-fixed copy, two edits) | yes |
+| `D:\mr_scratch\h20\dev` | 5.5 GB | my second copy of the code for testing (a "git worktree") | yes, but with `git worktree remove D:/mr_scratch/h20/dev --force` typed in the MovieRecaps folder, not by deleting the folder |
+| `D:\mr_scratch\h20\topaz_resume` | 0.8 GB | job 4's real Topaz pieces (A, N, C) | yes |
+| `D:\mr_scratch\h20\e2e_prankF` | 0.25 GB | job 3 (the real failed Topaz) | yes |
+| `D:\mr_scratch\h19` | 71 GB | the copies of 19 Nov and of job 1 today (`src` = the RAW and competitor copies the scripts use) | yes when no more old-video proof is needed; `src` is worth keeping until then |
+| `work\snap20_A`, `snap20_B`, `snap20_solve` | 16 MB each | code copies of job 5 | small, can stay |
+
+The two half-made 17 Nov files in `D:\Shared\Enhance` (`*_ENHANCING.part.mp4`) are still there, untouched: the
+laptop's app owns that folder. They cannot be resumed (they were made before today's change) -- yours to delete.
+
+## What I did NOT do
+
+- The 21 newer test videos with "fixed" in their name were not made again today (only the 11 old ones). The 19
+  Nov report says what they are; check-all on them is the next big proof if you want one.
+- The laptop was not tested. It gets today's code with `git pull` (see the top).
+- The words "(the laptop Gvidas, ...)" in the Topaz failure text are not changed (job 3).
+- The 3+ frame flash question of 19 Nov is still yours to answer.
+- Only the edit and Topaz go on from where they stopped (what you asked for); the other steps were not changed.
+
+## For the next Claude session
+
+- Scripts of today: `work\h20` (`STATE.md` says what each one is). `suites.ps1 -Tag NAME` runs both test suites
+  with a SHORT temporary folder (`D:\mr_scratch\h20\pt_NAME`): a long one makes `test_torrent_day17` fail.
+- Switches: `MOVIERECAPS_TOPAZ_RESUME=0` (Topaz starts from 0 as before), `MATCH_CUTS_CHECKPOINTS=0` (no kept
+  work in the search and the refine).
+- Editing `refine.py`, `visual_match.py` or `pipeline.py` makes every cached search and refine invalid (the cache
+  keys include their code): hours of work again on big videos.
+- The real Topaz's H.265 has B-frames (frames stored out of order); the fake Topaz of the tests has none. Anything
+  that cuts a Topaz file must be tested once with the real Topaz.
+- If the app's test suite crashes again: Windows' event log (Application, Id 1000, python.exe) names the DLL.
