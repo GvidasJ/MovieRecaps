@@ -258,7 +258,15 @@ def _gn_level(L: _Level, sim: Sim, flip: bool, raw_w: float, cfg, lock_theta: bo
         A = np.empty((n_px, 2), np.float64)
         A[:, 0] = xv
         A[:, 1] = 1.0
-        (a, b), *_ = np.linalg.lstsq(A, yv, rcond=None)
+        # 20 Nov (your job 5: "keep it only if every edit comes out exactly the same, frame for frame"): the two
+        # least-squares sums by the normal equations, not numpy's lstsq (SVD) -- about 5x faster for these thin
+        # matrices (work/h19/bench_lstsq.py). Its numbers differ in the last digits, so it was run on all 11 old
+        # test videos against lstsq: 11 of 11 edits byte for byte the same (1_edit.xml, 2_captions.srt, the 60 fps
+        # XML; work/h20/ab_solve.py). A matrix that cannot be solved this way (a flat picture) still goes to lstsq.
+        try:
+            (a, b) = np.linalg.solve(A.T @ A, A.T @ yv)
+        except np.linalg.LinAlgError:
+            (a, b), *_ = np.linalg.lstsq(A, yv, rcond=None)
         dX, dY = X[m] - cur.tx, Y[m] - cur.ty                            # c - t = s R p
         gxc, gyc = gx * cx, gy * cy
         n_par = 3 if lock_theta else 4
@@ -273,7 +281,7 @@ def _gn_level(L: _Level, sim: Sim, flip: bool, raw_w: float, cfg, lock_theta: bo
         J[:, n_par + 1] = 1.0
         r = yv - (a * xv + b)
         try:
-            d, *_ = np.linalg.lstsq(J, r, rcond=None)
+            d = np.linalg.solve(J.T @ J, J.T @ r)                   # (20 Nov: the normal equations, above)
         except np.linalg.LinAlgError:
             break
         ds, dtx, dty = float(d[0]), float(d[1]), float(d[2])

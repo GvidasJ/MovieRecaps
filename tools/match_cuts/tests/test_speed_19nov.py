@@ -174,7 +174,10 @@ def _gn_before(L, sim, flip, raw_w, cfg, lock_theta):
     return best
 
 
-def test_the_gauss_newton_fit_gives_the_same_framing_bit_for_bit():
+def test_the_gauss_newton_fit_gives_the_same_framing():
+    """19 Nov: bit for bit. 20 Nov (job 5): the fit solves its two least-squares sums by the normal equations now --
+    the same framing to far below a thousandth of a pixel here; on all 11 old test videos the whole edits are byte
+    for byte the same as with lstsq (work/h20/ab_solve.py)."""
     import cv2
 
     from match_cuts import refine
@@ -185,6 +188,7 @@ def test_the_gauss_newton_fit_gives_the_same_framing_bit_for_bit():
     rng = np.random.default_rng(31)
     rr, cr, roi = (640 / 1920.0, 360 / 1080.0), (0.5, 0.5), (0, 117, 540, 726)
     moved = found = 0
+    worst = [0.0, 0.0, 0.0, 0.0]
     with single_thread_blas():
         for r in range(14):
             raw = cv2.GaussianBlur(rng.integers(0, 256, (360, 640), dtype=np.uint8), (0, 0), 4)
@@ -202,7 +206,10 @@ def test_the_gauss_newton_fit_gives_the_same_framing_bit_for_bit():
                     b = refine._gn_level(L, start, flip, 1920.0, cfg, lock)
                     assert (a is None) == (b is None)
                     if a is not None:
-                        assert (a.s, a.theta_deg, a.tx, a.ty) == (b.s, b.theta_deg, b.tx, b.ty), (r, lock, a, b)
+                        d = (abs(a.s - b.s) / a.s, abs(a.theta_deg - b.theta_deg), abs(a.tx - b.tx), abs(a.ty - b.ty))
+                        worst = [max(x, y) for x, y in zip(worst, d)]
+                        assert d[0] < 1e-7 and d[1] < 1e-5 and d[2] < 1e-4 and d[3] < 1e-4, (r, lock, a, b)
                         found += 1
                         moved += int(abs(a.tx - start.tx) > 0.5 or abs(a.ty - start.ty) > 0.5)
     assert found >= 60 and moved >= 30                                           # the fit really ran and moved
+    print("worst difference (scale share, degrees, px, px):", worst)
