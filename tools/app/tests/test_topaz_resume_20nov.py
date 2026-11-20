@@ -231,3 +231,26 @@ def test_the_grid_steps():
     assert E.grid_step(Fraction(24000, 1001)) == (400, 1001)
     assert E.grid_step(Fraction(30000, 1001)) == (500, 1001)
     assert E.grid_step(25) == (5, 12) and E.grid_step(24) == (2, 5) and E.grid_step(60) == (1, 1)
+
+
+def test_a_topaz_that_works_is_not_taken_for_hanging_without_a_progress_bar(tmp_path, piece, fake, monkeypatch):
+    """20 Nov: the new frames were only noticed when somebody asked for the progress -- without it a Topaz that
+    worked was stopped as "not answering" after STALL_S (here 3 s; the run takes ~10 s)."""
+    monkeypatch.setattr(E, "STALL_S", 3.0)
+    dst = tmp_path / "s.mp4"
+    E.run_topaz(piece, dst, _out_frames(), E.find_topaz(), scale=2)
+    assert E._frames_of(dst) in (_out_frames(), _out_frames() - 1)       # noqa: SLF001
+
+
+def test_a_file_still_held_for_a_moment_after_topaz_stopped_goes_once_let_go(tmp_path):
+    f = tmp_path / "held.mp4"
+    f.write_bytes(b"x")
+    h = open(f, "rb")                                                     # noqa: SIM115 - held, as by the dying Topaz
+    threading.Timer(1.5, h.close).start()
+    E._unlink_soon(f)                                                     # noqa: SLF001
+    assert not f.exists()
+    g = tmp_path / "held2.mp4"
+    g.write_bytes(b"x")
+    with open(g, "rb"):
+        with pytest.raises(E.EnhanceError, match="still in use"):
+            E._unlink_soon(g, wait_s=1.0)                                 # noqa: SLF001

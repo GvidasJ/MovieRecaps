@@ -1335,6 +1335,21 @@ def grid_step(fps: Any) -> tuple[int, int]:
     return r.denominator, r.numerator
 
 
+def _unlink_soon(path: Path, wait_s: float = 10.0) -> None:
+    """20 Nov: a file a Topaz that was just stopped still holds (Windows: "being used by another process" for a
+    moment after the process ended -- the retry after a hang then failed with a PermissionError, not a reason in
+    plain words) goes once it is let go; still held after ``wait_s``: a Topaz failure that says so."""
+    end = time.monotonic() + wait_s
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError as e:
+            if time.monotonic() >= end:
+                raise EnhanceError(f"Topaz's file {path.name} is still in use after Topaz stopped") from e
+            time.sleep(0.5)
+
+
 def _fragmented(cmd: list[str]) -> list[str]:
     """Topaz's command writing its file in blocks, and only the picture. (Measured: with the sound in a file written
     in blocks every picture is 21 ms late -- the sound's start-up delay, which a normal mp4 notes and a file in
@@ -1490,7 +1505,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
         st = {}
     elif st.get("complete") and dst.is_file() and _frames_of(dst) == int(st.get("frames") or -1):
         return                                          # (a part finished before the stop)
-    dst.unlink(missing_ok=True)
+    _unlink_soon(dst)
     _step_src, step_out = grid_step(fps)
     segs: list[dict] = []
     for s in st.get("segs") or []:
@@ -1510,7 +1525,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
         kept = out_frames
     if kept < out_frames:
         seg = _seg_file(dst, len(segs))
-        seg.unlink(missing_ok=True)
+        _unlink_soon(seg)
         drop_resume(seg)
         if kept:                                        # Topaz goes on from the piece frame on the grid
             c = Fraction(kept) * fps / OUT_FPS          # (whole: kept is a number of whole grid steps)
@@ -1580,7 +1595,7 @@ def _topaz_tries(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int
                 once_more = False
             else:
                 raise
-            Path(dst).unlink(missing_ok=True)
+            _unlink_soon(Path(dst))
 
 
 def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2,
@@ -1632,13 +1647,15 @@ def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram
                 if not line:
                     continue
                 tail = (tail + [line])[-40:]
-                if line.startswith("frame=") and out_frames > 0 and progress is not None:
+                if line.startswith("frame="):
                     try:
                         n = int(line.split("=", 1)[1].strip().split()[0])
                     except (ValueError, IndexError):
                         continue
-                    if n > last_frame:
-                        last_frame, moved_at = n, time.monotonic()
+                    if n > last_frame:              # 20 Nov: also without a progress callback -- a Topaz that
+                        last_frame, moved_at = n, time.monotonic()  # worked was taken for hanging after 8 min
+                    if out_frames <= 0 or progress is None:
+                        continue
                     share = max(0.0, min(0.999, n / float(out_frames)))
                     el = time.monotonic() - t0
                     left = el * (1 - share) / share if share > 0.02 else None
