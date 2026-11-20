@@ -1865,7 +1865,8 @@ def cached_anchors(ctx: Context, compute: Callable[[], list], *extra: Any) -> li
         replay_decisions(ctx, "sparse_search", key)
         rows = ctx.cache.json("sparse_search", key, lambda: [])
     else:
-        with ctx.dlog.capture("sparse_search") as cap:
+        from . import checkpoint                 # 20 Nov: a paused search goes on from where it stopped
+        with ctx.dlog.capture("sparse_search") as cap, checkpoint.scope(ctx.cache.root, "sparse_search", key):
             rows = ctx.cache.json("sparse_search", key, lambda: [_anchor_to_dict(a) for a in compute()])
         store_decisions(ctx, "sparse_search", key, list(cap))
     return [_anchor_from_dict(r, visual_match.Anchor) for r in rows]
@@ -2382,7 +2383,9 @@ def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str
                     wins = hint_windows(AudioHints.empty(), ctx.raw_fps, ctx.raw_info.nb_frames, cfg,
                                         extra_times=[a.raw / float(ctx.raw_fps) for a in ctx.anchors])
                     raw_for_refine = _extend_raw(ctx, base_raw, wins)
-            with _stage(ctx, f"S5.3 refine{label}"):
+            from . import checkpoint             # 20 Nov: a paused refine goes on from where it stopped
+            with _stage(ctx, f"S5.3 refine{label}"), checkpoint.scope(ctx.cache.root, "frame_map", fm_path.stem,
+                                                                         drop=False):
                 seed_everything(cfg.seed)
                 fm = refine.build_frame_map(ctx.comp_proxy, raw_for_refine, ctx.layout, overlays, ctx.anchors,
                                             ctx.hints, ctx.index, cfg, ctx.cache, ctx.dlog, cfg.debug_dir)
@@ -2392,6 +2395,7 @@ def visual_refine_pass(ctx: Context, base_raw: Any, overlays_in: Any, label: str
                     ctx.index.close_gpu()           # the searches are done: the GPU's memory for the next stages
         store_decisions(ctx, "frame_map", key, list(cap))
         save_frame_map_cache(fm, overlays, fm_path, ov_path)
+        checkpoint.drop_folder(ctx.cache.root, "frame_map", fm_path.stem)   # (saved: the kept tasks go)
     # always continue from the cache files (first run == cached re-run, bit for bit)
     ctx.fm_pre = FrameMap.load(fm_path)
     ctx.overlays = load_overlays(ov_path)

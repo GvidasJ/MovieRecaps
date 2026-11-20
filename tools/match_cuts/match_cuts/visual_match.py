@@ -414,6 +414,12 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
     """
     global _WSTATE
     items = list(items)
+    if not _CK_BUSY[0]:                          # 20 Nov: a step that keeps its finished tasks (checkpoint.py)
+        from . import checkpoint
+        ck = checkpoint.call_for(fn, seed, items)
+        if ck is not None:
+            return _checkpointed(ck, fn, items, workers, state, seed, chunksize, min_items, label)
+    _DEPTH[0] += 1
     prev_state = _WSTATE
     _WSTATE = dict(state)
     _WSTATE["__fn__"] = fn
@@ -435,6 +441,48 @@ def parallel_map(fn: Callable[[dict, Any], Any], items: Sequence[Any], workers: 
         return res
     finally:
         _WSTATE = prev_state
+        _DEPTH[0] -= 1
+
+
+# 20 Nov (pause and resume, checkpoint.py): a call inside a step that keeps its finished tasks. The results an
+# earlier run of the step kept are read back; only the missing tasks run (as a call of their own: every task's
+# result is the same whatever else runs with it), and each new result is kept the moment it arrives (``_sink``:
+# from _collect / _inline of exactly that call, ``_DEPTH`` tells it from calls a task itself might make).
+_DEPTH = [0]
+_SINK: list = [None]                             # (depth, fn(index, result)) or None
+_CK_BUSY = [False]
+
+
+def _sink(i: int, r: Any) -> None:
+    s = _SINK[0]
+    if s is not None and s[0] == _DEPTH[0]:
+        s[1](i, r)
+
+
+def _checkpointed(ck: Any, fn: Callable, items: list, workers: int, state: dict, seed: int,
+                  chunksize: int | None, min_items: int, label: str | None) -> list[Any]:
+    from . import checkpoint
+    done = ck.load()
+    sc = checkpoint.current()
+    if sc is not None:
+        sc.total += len(items)
+        sc.loaded += len(done)
+    todo = [i for i in range(len(items)) if i not in done]
+    if done:
+        log.info("%s: %d of %d tasks were done before the pause (kept), %d to do", progress_name(label or
+                 _task_name(fn)), len(done), len(items), len(todo))
+    if todo:
+        prev_sink, prev_busy = _SINK[0], _CK_BUSY[0]
+        _SINK[0] = (_DEPTH[0] + 1, lambda j, r: ck.add(todo[j], r))
+        _CK_BUSY[0] = True
+        try:
+            sub = parallel_map(fn, [items[i] for i in todo], workers, state, seed, chunksize, min_items, label)
+        finally:
+            _SINK[0], _CK_BUSY[0] = prev_sink, prev_busy
+            ck.flush()
+        for j, i in enumerate(todo):
+            done[i] = sub[j]
+    return [done[i] for i in range(len(items))]
 
 
 # Watchdog bookkeeping of THIS process: pools stopped by the watchdog, and the reason fork is unsafe here
@@ -456,6 +504,7 @@ def _inline(items: list, name: str, done: dict[int, Any] | None = None) -> list[
         prog.done = len(items) - len(todo)
         for i in todo:
             done[i] = _invoke(items[i])
+            _sink(i, done[i])
             prog.step()
     return [done[i] for i in range(len(items))]
 
@@ -498,6 +547,7 @@ def _collect(pool: Any, func: Callable, tasks: list, cs: int, name: str, kind: s
                                    total_items=len(tasks)):
             for i, r in res:
                 out[i] = r
+                _sink(i, r)
     except PoolFailure as e:
         return out, str(e)
     return out, None

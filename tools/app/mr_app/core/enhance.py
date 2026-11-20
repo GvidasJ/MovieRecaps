@@ -28,6 +28,7 @@ MOVIERECAPS_FAKE_TOPAZ=1 (the tests): a plain 2x scale + 60 fps with the normal 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -41,6 +42,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import machine as M
+
+log = logging.getLogger(__name__)
 
 MAX_PIECE_S = 80.0                  # ``plan``'s limit when the caller gives none (make_piece gives the span's own)
 TIMEOUT_S = 3600.0                  # nothing back from the laptop within this: the normal RAW
@@ -598,7 +601,8 @@ def ranges_out_frames(info: dict) -> int:
 def _probe(path: Path) -> dict:
     from match_cuts.common import ffprobe_bin
     r = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
-              "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,nb_read_packets,nb_frames,start_time",
+              "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,nb_read_packets,nb_frames,start_time,"
+              "has_b_frames",
               "-of", "json", str(path)], timeout=600)
     if r.returncode != 0:
         raise EnhanceError(f"it cannot be read: {(r.stderr or '').strip()[-200:]}")
@@ -1296,6 +1300,167 @@ def _telling_line(lines: list[str]) -> str:
     return lines[-1] if lines else ""
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# 20 Nov: Topaz goes on from where it stopped
+# ---------------------------------------------------------------------------------------------------------------------
+# Your job 4 ("Make ... a Topaz piece go on from where it stopped, also after the app or the PC was closed in the
+# middle"). Until now a stopped Topaz (the app closed, the PC off, Topaz hanging) started again from frame 0: its
+# half-written file could not even be read (an mp4 is only readable once it is finished: "moov atom not found" --
+# 17 Nov, The Worst Prank In The Office: 150 MB of Topaz's work thrown away) and it was deleted anyway.
+#
+# Now Topaz writes its file in small self-contained blocks (a fragmented mp4, one block per keyframe: the picture
+# and the encoder are exactly as before), so a stopped file is readable up to its last whole block. The next try
+# keeps the frames it can (``_salvage``) and Topaz goes on from there in a new file of its own; at the end the
+# files are joined without encoding again (as the played parts are since 18 Nov) and written as a normal mp4.
+# The place where Topaz goes on is one where a 60 fps frame falls exactly on a frame of the piece (every 1001
+# frames of 60 fps for a 23.976 or 29.97 fps piece, every 12 for 25 fps, any for 60 fps): from there Topaz's
+# frames are on the very same times as in a run without a stop, so the joined file has the same frames at the same
+# places and the swap maps the edit onto it as before. What is kept is written next to the file:
+# <file>.resume.json (how it was made: when anything about the piece or Topaz's settings differs, nothing is kept).
+
+RESUME_EXT = ".resume.json"
+FRAG_FLAGS = "+frag_keyframe+empty_moov+default_base_moof"
+SALVAGE_MARGIN = 250                # frames of the cut-off end not kept (the last block may be half written)
+RESUME_ENV = "MOVIERECAPS_TOPAZ_RESUME"     # "0": no resume (a stopped Topaz starts again from frame 0, as before)
+
+
+def resume_on() -> bool:
+    return os.environ.get(RESUME_ENV, "1").strip() != "0"
+
+
+def grid_step(fps: Any) -> tuple[int, int]:
+    """(piece frames, 60 fps frames) between two places where a 60 fps frame falls exactly on a piece frame:
+    (400, 1001) at 23.976 fps, (500, 1001) at 29.97, (5, 12) at 25, (1, 1) at 60."""
+    r = Fraction(OUT_FPS) / Fraction(str(fps))
+    return r.denominator, r.numerator
+
+
+def _fragmented(cmd: list[str]) -> list[str]:
+    """Topaz's command writing its file in blocks, and only the picture. (Measured: with the sound in a file written
+    in blocks every picture is 21 ms late -- the sound's start-up delay, which a normal mp4 notes and a file in
+    blocks does not; the picture alone in blocks, the sound put in at the end: every frame on the same time, the
+    same pictures and the same sound as Topaz's own file, checked frame by frame.)"""
+    out: list[str] = []
+    i = 0
+    while i < len(cmd):
+        a = cmd[i]
+        if a == "-map" and i + 1 < len(cmd) and cmd[i + 1].startswith("0:a"):
+            i += 2
+            continue
+        if a == "-c:a" and i + 1 < len(cmd):
+            i += 2
+            continue
+        if a == "+faststart" and out and out[-1] == "-movflags":
+            a = FRAG_FLAGS
+        out.append(a)
+        i += 1
+    return out
+
+
+def _seg_file(dst: Path, k: int) -> Path:
+    return dst.with_name(f"{dst.stem}.seg{k + 1}{dst.suffix}")
+
+
+def _resume_file(dst: Path) -> Path:
+    return dst.with_name(dst.name + RESUME_EXT)
+
+
+def _resume_sig(tz: Topaz, src: Path, scale: int, part: tuple | None, out_frames: int, fps: Any) -> dict:
+    """What a kept file was made from: the piece (its size and time), Topaz's settings and the part asked for --
+    anything else and nothing is kept."""
+    st = Path(src).stat()
+    return {"src": Path(src).name, "size": st.st_size, "mtime": int(st.st_mtime), "scale": int(scale),
+            "part": [round(float(x), 6) for x in part] if part else None, "frames": int(out_frames),
+            "fps": str(Fraction(str(fps))), "fake": bool(tz.fake), "bitrate": OUT_BITRATE,
+            "filters": [PROTEUS, APOLLO] if scale == 2 else [APOLLO]}
+
+
+def drop_resume(dst: str | os.PathLike) -> None:
+    """The kept pieces of a stopped Topaz run of ``dst`` go (after it was finished, or failed for a reason)."""
+    dst = Path(dst)
+    rf = _resume_file(dst)
+    try:
+        st = json.loads(rf.read_text(encoding="utf-8"))
+        names = [s.get("file") for s in st.get("segs") or [] if isinstance(s, dict)]
+    except (OSError, ValueError):
+        names = []
+    for n in names + [f"{dst.stem}.seg{k}{dst.suffix}" for k in range(1, 4)]:
+        if n:
+            try:
+                (dst.parent / Path(str(n)).name).unlink(missing_ok=True)
+            except OSError:
+                pass
+    try:
+        rf.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_resume(dst: Path, sig: dict, segs: list[dict], complete: bool = False) -> None:
+    try:
+        _write_json(_resume_file(dst), {"sig": sig, "segs": segs, "complete": bool(complete)})
+    except OSError:
+        pass
+
+
+def _salvage(seg: Path, step_out: int) -> int:
+    """How many frames of a cut-off segment are kept (whole blocks, up to a place on the grid), the file cut to
+    exactly them; 0 = none (the file goes)."""
+    from match_cuts.common import ffmpeg_bin
+    try:
+        st = _probe(seg)
+        if int(st.get("has_b_frames") or 0) > 0:      # (frames out of order: a cut by count is not safe)
+            raise EnhanceError("B-frames")
+        n = int(st.get("nb_read_packets") or 0)
+    except (EnhanceError, ValueError, TypeError):
+        n = 0
+    k = ((n - SALVAGE_MARGIN) // step_out) * step_out if n > SALVAGE_MARGIN else 0
+    if k <= 0:
+        seg.unlink(missing_ok=True)
+        return 0
+    cut = seg.with_name(seg.stem + ".cut" + seg.suffix)
+    r = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y", "-i", str(seg), "-map", "0:v:0", "-c",
+              "copy", "-frames:v", str(k), "-map_metadata", "-1", "-movflags", "+faststart", str(cut)], timeout=1800)
+    ok = r.returncode == 0 and cut.is_file() and _frames_of(cut) == k
+    if ok:                                            # its end decodes (the last block whole)
+        t = _run([ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-sseof", "-2", "-i", str(cut), "-map",
+                  "0:v:0", "-f", "null", "-"], timeout=600)
+        ok = t.returncode == 0 and not (t.stderr or "").strip()
+    if not ok:
+        cut.unlink(missing_ok=True)
+        seg.unlink(missing_ok=True)
+        return 0
+    os.replace(cut, seg)
+    return k
+
+
+def _join(segs: list[Path], dst: Path, audio_from: Path | None, fake_tz: bool) -> None:
+    """The segments one after the other, not encoded again, as a normal mp4 (+ the piece's sound when the whole
+    piece was enhanced, as Topaz's own file has it)."""
+    from match_cuts.common import ffmpeg_bin
+    tag = [] if fake_tz or fake() else ["-tag:v", "hvc1"]
+    base = [ffmpeg_bin(), "-hide_banner", "-v", "error", "-nostdin", "-y"]
+    tmp = dst.with_name(dst.stem + ".join" + dst.suffix)
+    if len(segs) == 1:                                # no stop: Topaz's own picture, written as a normal mp4
+        cmd = base + ["-i", str(segs[0])]
+    else:
+        lst = dst.with_name(dst.stem + ".segs.txt")
+        lst.write_text("".join(f"file '{s.name}'\n" for s in segs), encoding="utf-8")
+        cmd = base + ["-f", "concat", "-safe", "0", "-i", str(lst)]
+    if audio_from is not None:                        # the piece's sound, copied (as Topaz's own command does)
+        cmd += ["-i", str(audio_from), "-map", "0:v:0", "-map", "1:a:0?"]
+    else:
+        cmd += ["-map", "0:v:0"]
+    cmd += ["-c", "copy", *tag, "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+    r = _run(cmd, timeout=3600)
+    if len(segs) > 1:
+        dst.with_name(dst.stem + ".segs.txt").unlink(missing_ok=True)
+    if r.returncode != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        raise EnhanceError(f"Topaz's file could not be written: {(r.stderr or '').strip()[-200:]}")
+    os.replace(tmp, dst)
+
+
 STALL_S = 8 * 60.0                  # 18 Nov: Topaz writes no new frame for this long: it hangs -- stopped, tried again
 STALL_TEXT = "Topaz stopped answering"
 
@@ -1303,19 +1468,107 @@ STALL_TEXT = "Topaz stopped answering"
 def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, tz: Topaz | None = None,
               progress: Callable[[float, float | None], None] | None = None,
               cancel: threading.Event | None = None, scale: int = 2,
-              part: tuple[float, float, int] | None = None) -> None:
-    """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
-    (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
-    again with less of its memory (60 %, then 35 %). 18 Nov: also when it hangs (no new frame for STALL_S)."""
+              part: tuple[float, float, int] | None = None, fps: Any = None) -> None:
+    """Topaz on ``src`` into ``dst`` (``_topaz_tries``: its retries). 20 Nov: with ``fps`` (the piece's frame rate)
+    a run that was stopped -- the app closed, the PC off, Topaz hanging -- goes on from where it stopped (above);
+    ``part``: (first frame's time, length, frames) of one part of the piece."""
     tz = tz or find_topaz()
     if not tz.found:
         raise EnhanceError(tz.why)
+    if fps is None or not resume_on():
+        return _topaz_tries(src, dst, out_frames, tz, progress, cancel, scale, part)
+    src, dst = Path(src), Path(dst)
+    scale = 1 if int(scale or 2) == 1 else 2
+    fps = Fraction(str(fps))
+    sig = _resume_sig(tz, src, scale, part, out_frames, fps)
+    try:
+        st = json.loads(_resume_file(dst).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    if st.get("sig") != sig:                            # (another piece, other settings, or nothing kept)
+        drop_resume(dst)
+        st = {}
+    elif st.get("complete") and dst.is_file() and _frames_of(dst) == int(st.get("frames") or -1):
+        return                                          # (a part finished before the stop)
+    dst.unlink(missing_ok=True)
+    _step_src, step_out = grid_step(fps)
+    segs: list[dict] = []
+    for s in st.get("segs") or []:
+        f = dst.parent / Path(str(s.get("file") or "")).name
+        if not s.get("file") or not f.is_file():
+            break
+        if s.get("done") and _frames_of(f) == int(s.get("frames") or -1):
+            segs.append({"file": f.name, "frames": int(s["frames"]), "done": True})
+            continue
+        k = _salvage(f, step_out)                       # the file Topaz was writing when it stopped
+        if k:
+            segs.append({"file": f.name, "frames": k, "done": True})
+        break
+    kept = sum(s["frames"] for s in segs)
+    first = int(round(float(part[0]) * fps)) if part else 0      # the part's first frame in the piece
+    if kept >= out_frames:
+        kept = out_frames
+    if kept < out_frames:
+        seg = _seg_file(dst, len(segs))
+        seg.unlink(missing_ok=True)
+        drop_resume(seg)
+        if kept:                                        # Topaz goes on from the piece frame on the grid
+            c = Fraction(kept) * fps / OUT_FPS          # (whole: kept is a number of whole grid steps)
+            if part:                                    # (the part's own reading, SEEK_EARLY_S before, goes on)
+                sub = (float(part[0]) + float(c / fps), float(part[1]) - float(c / fps), out_frames - kept)
+            else:                                       # the whole piece was read from 0 with no such margin: from
+                at = math.floor(float(c / fps) * 1e6) / 1e6     # the frame's own time (never a moment later)
+                sub = (at + SEEK_EARLY_S, out_frames / float(OUT_FPS) + 5.0 - at, out_frames - kept)
+            log.info("Topaz on %s goes on from where it stopped: %d of %d frames kept", src.name, kept, out_frames)
+        else:
+            sub = part
+        _write_resume(dst, sig, segs + [{"file": seg.name, "frames": None, "done": False}])
+        left = out_frames - kept
+
+        def prog(share: float, secs: float | None) -> None:
+            if progress is not None:
+                progress((kept + share * left) / float(out_frames), secs)
+        try:
+            _topaz_tries(src, seg, left, tz, prog, cancel, scale, sub, frag=True)
+        except EnhanceError:
+            if not (cancel is not None and cancel.is_set()):
+                drop_resume(dst)                         # (failed for a reason: nothing of it is kept)
+            raise
+        n = _frames_of(seg)
+        if kept:
+            c = int(Fraction(kept) * fps / OUT_FPS)
+            why = _part_starts_right(src, fps, first + c, seg)
+            if why:                                     # never a picture off by a frame: from the start instead
+                log.warning("Topaz on %s: the part after the stop is not right (%s) -- made again from the start",
+                            src.name, why)
+                drop_resume(dst)
+                return run_topaz(src, dst, out_frames, tz, progress, cancel, scale, part, fps)
+        segs.append({"file": seg.name, "frames": n, "done": True})
+        _write_resume(dst, sig, segs)
+    files = [dst.parent / s["file"] for s in segs]
+    _join(files, dst, src if part is None else None, tz.fake)
+    for f in files:
+        f.unlink(missing_ok=True)
+    try:
+        _write_json(_resume_file(dst), {"sig": sig, "segs": [], "complete": True, "frames": _frames_of(dst)})
+    except OSError:
+        pass
+
+
+def _topaz_tries(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, tz: Topaz,
+                 progress: Callable[[float, float | None], None] | None = None,
+                 cancel: threading.Event | None = None, scale: int = 2,
+                 part: tuple[float, float, int] | None = None, frag: bool = False) -> None:
+    """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
+    (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
+    again with less of its memory (60 %, then 35 %). 18 Nov: also when it hangs (no new frame for STALL_S)."""
     steps = [1.0, 0.6, 0.35]
     once_more = True                    # 18 Nov (17 Nov, Bedtime on the laptop: "code 69: Conversion failed!", the
     k = 0                               #   second try worked): a failure with no known reason is tried once more
     while True:                         #   as it was, before the piece is given back as failed
         try:
-            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, steps[k], scale, part)
+            return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, steps[k], scale, part,
+                                   *([True] if frag else []))
         except EnhanceError as e:
             if cancel is not None and cancel.is_set():
                 raise
@@ -1331,10 +1584,12 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
 
 
 def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2,
-                    part: tuple[float, float, int] | None = None) -> None:
+                    part: tuple[float, float, int] | None = None, frag: bool = False) -> None:
     import queue
     cmd = topaz_command(tz, src, dst, vram, scale, part) if part is not None else topaz_command(tz, src, dst, vram,
                                                                                                 scale)
+    if frag:                                 # 20 Nov: in blocks while Topaz writes it (it can go on after a stop) --
+        cmd = _fragmented(cmd)               #   the picture only: the sound is put in when the file is finished
     t0 = time.monotonic()
     pr = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           env=topaz_env(tz), creationflags=NO_WINDOW)
@@ -1697,7 +1952,6 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
     try:
         done = 0
         for k, ((a, b), n) in enumerate(zip(rs, counts)):
-            files[k].unlink(missing_ok=True)
 
             def prog(share: float, _left: float | None, done=done, n=n) -> None:
                 if progress is not None:
@@ -1705,7 +1959,7 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
                     el = time.monotonic() - t0
                     progress(all_share, el * (1 - all_share) / all_share if all_share > 0.02 else None)
             part = (float(Fraction(a) / fps), float(Fraction(b - a) / fps) - SEEK_EARLY_S, n)
-            run_topaz(nm.piece, files[k], n, tz, prog, cancel, scale=scale, part=part)
+            run_topaz(nm.piece, files[k], n, tz, prog, cancel, scale=scale, part=part, fps=fps)
             got = _frames_of(files[k])
             if got != n:
                 raise PartsError(f"part {k + 1} has {got} frames, not {n}")
@@ -1726,11 +1980,13 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
     except OSError as e:
         raise PartsError(f"{type(e).__name__}: {e}") from e
     finally:
-        for f in files + [lst]:
-            try:
-                f.unlink(missing_ok=True)
-            except OSError:
-                pass
+        if not (cancel is not None and cancel.is_set()):    # 20 Nov: stopped -- the parts made so far are kept
+            for f in files + [lst]:
+                try:
+                    f.unlink(missing_ok=True)
+                    drop_resume(f)
+                except OSError:
+                    pass
 
 
 def _frames_of(path: Path) -> int:
@@ -1808,7 +2064,11 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
                 if cancel is not None and cancel.is_set():
                     raise EnhanceError("stopped") from e
         if not done_parts:
-            run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel, scale=scale)
+            try:
+                fps = Fraction(str(info.get("fps"))) if info.get("fps") else None
+            except (ValueError, ZeroDivisionError):
+                fps = None
+            run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel, scale=scale, fps=fps)
         chk = check_enhanced(nm.part, info)
         if not chk["ok"]:
             raise EnhanceError(f"Topaz's result is not right: {chk['why']}")
@@ -1818,11 +2078,17 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
             except OSError:
                 pass
         os.replace(nm.part, nm.enhanced)
+        drop_resume(nm.part)
         job.state, job.share, job.left_s = "done", 1.0, None
     except Exception as e:  # noqa: BLE001 - said in plain words, and written for the PC
         job.state, job.why = "failed", (str(e) if isinstance(e, EnhanceError) else f"{type(e).__name__}: {e}")
         try:
             nm.part.unlink(missing_ok=True)
+            if job.why != "stopped":             # 20 Nov: stopped -- what Topaz made is kept for the next try
+                drop_resume(nm.part)
+                for k in range(len(valid_ranges(info))):
+                    _part_file(nm, k).unlink(missing_ok=True)
+                    drop_resume(_part_file(nm, k))
         except OSError:
             pass
         if job.why != "stopped":

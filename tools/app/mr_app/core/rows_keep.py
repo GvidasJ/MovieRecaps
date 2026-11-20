@@ -29,7 +29,9 @@ QUEUE_FILE = "queue_rows.json"
 NEWVIDEO_FILE = "newvideo_rows.json"
 ENV = "MOVIERECAPS_KEEP_ROWS"
 VERSION = 1
-CLOSED_WHILE_RUNNING = "the app was closed while it ran -- Try again starts it again"
+# 20 Nov: Try again goes on from where it stopped (the search and refine keep their finished work as they go:
+# match_cuts/checkpoint.py), also when the PC was turned off and nothing could pause the run
+CLOSED_WHILE_RUNNING = "the app or the PC was closed while it ran -- Try again goes on from where it stopped"
 CLOSED_WHILE_WORKING = "stopped when the app was closed -- Try again goes on from this step"
 
 
