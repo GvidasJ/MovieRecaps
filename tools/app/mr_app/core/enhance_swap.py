@@ -311,11 +311,14 @@ COVER_MARGIN_S = 10.0                  # the piece cut after the edit: this much
 #                                        (room to make a clip longer in Premiere with the enhanced picture)
 
 
-INNER_MARGIN_S = 2.0                   # 18 Nov: at a gap INSIDE the edit (the clips jump over a part of the RAW) this
+INNER_MARGIN_S = 1.0                   # (20 Nov: was 2 s; your call: only what the edit plays, 10 s at the ends)
+#                                        18 Nov: at a gap INSIDE the edit (the clips jump over a part of the RAW) this
 #                                        much is enhanced on each side of the gap (the outer ends keep COVER_MARGIN_S)
-MIN_GAP_S = 6.0                        # a part of the RAW nothing plays is only left out when it is longer than this
+MIN_GAP_S = 2.0                        # (20 Nov: was 6 s -- The Worst Employee In Key and Peele: 60 s of clips gave 2:39
+#                                        of parts; one more start of Topaz costs seconds, 2 s less of 4K saves minutes)
+#                                        a part of the RAW nothing plays is only left out when it is longer than this
 #                                        (after the margins): each part enhanced on its own costs Topaz a start
-MAX_RANGES = 12
+MAX_RANGES = 20                        # (20 Nov: was 12)
 RANGES_MIN_SAVED = 0.20                # ... and only when at least this share of the piece, and RANGES_MIN_SAVED_S
 RANGES_MIN_SAVED_S = 20.0              #   seconds of it, need no Topaz at all
 RANGES_ENV = "MOVIERECAPS_TOPAZ_RANGES"   # "0": the whole piece is enhanced, as before 18 Nov

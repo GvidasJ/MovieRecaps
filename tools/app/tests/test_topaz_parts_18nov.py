@@ -1,6 +1,6 @@
 """18 Nov (The Best Business Idea In Key and Peele (2): 57 s of clips spread over 3:04 of the RAW -- Topaz enhanced a
 3:24 piece, about an hour): only the parts of the piece the edit plays are enhanced (enhance_swap.play_ranges: each
-clip +- 2 s, parts closer than 6 s joined, the outer ends 10 s as before), each part on its own, joined into one
+clip +- 1 s, parts closer than 2 s joined (20 Nov: were 2 s and 6 s), the outer ends 10 s as before), each part on its own, joined into one
 enhanced file; the swap finds every clip's frames in it. Tested hard, with a fake Topaz, on a movie in which every
 frame is a different picture (so "the same moment" means the same frame, not a look-alike):
 
@@ -39,16 +39,19 @@ def test_clips_far_apart_make_parts_with_their_margins_and_the_outer_ends_are_th
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
     # the piece: movie frames 1000-4600 (150 s at 24 fps); the edit plays 1240-1360 and 4240-4360
     rs = ES.play_ranges([(1240, 1360), (4240, 4360)], F, 1000, 3600)
-    assert rs == [[0, 360 + 48], [3240 - 48, 3600]]               # 2 s more at the gap, the piece's own ends outside
-    assert E.valid_ranges({"ranges": rs, "frames": 3600}) == [(0, 408), (3192, 3600)]
-    assert E.range_out_frames(408, "24") == 1020 and E.ranges_out_frames({"ranges": rs, "frames": 3600,
-                                                                          "fps": "24"}) == 2040
+    assert rs == [[0, 360 + 24], [3240 - 24, 3600]]               # 1 s more at the gap, the piece's own ends outside
+    assert E.valid_ranges({"ranges": rs, "frames": 3600}) == [(0, 384), (3216, 3600)]
+    assert E.range_out_frames(384, "24") == 960 and E.ranges_out_frames({"ranges": rs, "frames": 3600,
+                                                                          "fps": "24"}) == 1920
 
 
 def test_clips_closer_than_the_gap_are_one_part_and_little_to_save_keeps_the_whole_piece(monkeypatch):
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
-    # 5 s between the clips: with 2 s each side only 1 s would be left out -- one part
-    assert ES.play_ranges([(1240, 1360), (1480, 1600), (4240, 4360)], F, 1000, 3600) == [[0, 648], [3192, 3600]]
+    # 5 s between the clips: with 1 s each side 3 s are left out (more than 2 s) -- a part of its own
+    assert ES.play_ranges([(1240, 1360), (1480, 1600), (4240, 4360)], F, 1000, 3600) == [[0, 384], [456, 624],
+                                                                                         [3216, 3600]]
+    # 3 s between the clips: with 1 s each side only 1 s would be left out -- one part
+    assert ES.play_ranges([(1240, 1360), (1432, 1600), (4240, 4360)], F, 1000, 3600) == [[0, 624], [3216, 3600]]
     assert ES.play_ranges([(1240, 1360), (1480, 1600)], F, 1000, 840) == []       # next to each other: the whole piece
     # 12 s to save of 100 s: under 20 % and under 20 s -- not worth another start of Topaz
     assert ES.play_ranges([(1240, 1960), (2344, 3160)], F, 1000, 2400) == []
@@ -61,16 +64,16 @@ def test_what_the_cut_added_to_reach_the_keyframes_is_left_out(monkeypatch):
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
     # the piece starts 5 s before "10 s before the first clip" and ends 8 s after "10 s after the last" (keyframes)
     assert ES.play_ranges([(1240, 1360), (1480, 1600)], F, 880, 840 + 120 + 192) == [[120, 960]]   # one part: no gap
-    assert ES.play_ranges([(1240, 1360), (4240, 4360)], F, 880, 3600 + 120 + 192) == [[120, 528], [3312, 3720]]
+    assert ES.play_ranges([(1240, 1360), (4240, 4360)], F, 880, 3600 + 120 + 192) == [[120, 504], [3336, 3720]]
     # a gap that is not worth another start of Topaz: still one part, without the lead-in and the tail
     assert ES.play_ranges([(1240, 1960), (2344, 3160)], F, 880, 2400 + 120 + 192) == [[120, 2520]]
 
 
-def test_many_small_parts_are_joined_down_to_twelve(monkeypatch):
+def test_many_small_parts_are_joined_down_to_twenty(monkeypatch):
     monkeypatch.delenv(ES.RANGES_ENV, raising=False)
-    clips = [(1000 + 600 * i, 1000 + 600 * i + 48) for i in range(20)]               # 20 clips, 23 s apart
-    rs = ES.play_ranges(clips, F, 760, 600 * 19 + 48 + 480)
-    assert len(rs) == ES.MAX_RANGES and rs[0][0] == 0 and rs[-1][1] == 600 * 19 + 48 + 480
+    clips = [(1000 + 600 * i, 1000 + 600 * i + 48) for i in range(30)]               # 30 clips, 23 s apart
+    rs = ES.play_ranges(clips, F, 760, 600 * 29 + 48 + 480)
+    assert len(rs) == ES.MAX_RANGES and rs[0][0] == 0 and rs[-1][1] == 600 * 29 + 48 + 480
     assert all(b > a for a, b in rs) and all(rs[i][1] < rs[i + 1][0] for i in range(len(rs) - 1))
 
 
@@ -219,7 +222,7 @@ def test_only_the_played_parts_are_enhanced_and_every_clip_shows_its_own_frames(
     assert start <= 600 - 240 and start + n >= 3720 + 240                            # 10 s before and after, as before
     rs = E.valid_ranges(info)
     assert len(rs) == 2 and start + rs[0][0] == 600 - 240 and start + rs[-1][1] == 3720 + 240   # 10 s, as before
-    assert start + rs[0][1] == 780 + 48 and start + rs[1][0] == 3600 - 48            # 2 s more at the gap
+    assert start + rs[0][1] == 780 + 24 and start + rs[1][0] == 3600 - 24            # 1 s more at the gap
     assert not info.get("encoded") and all(r["ssim"] > 0.999 for r in info["check"])  # the RAW's own frames
     assert E.read_info(E.names(enh, rec["name"]).info)["ranges"] == [list(x) for x in rs]   # Topaz reads the same
     assert ES.outside(p.folder)["need"] == []                                        # every clip is in a part
