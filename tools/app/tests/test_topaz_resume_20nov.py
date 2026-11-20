@@ -101,14 +101,18 @@ def _stopped_then_again(piece: Path, dst: Path, at: float, part=None, n=None):
     E.run_topaz(piece, dst, n, tz, None, threading.Event(), scale=2, part=part, fps=FPS)
 
 
-def test_a_finished_run_gives_the_very_same_pictures_as_before(tmp_path, piece, fake):
-    """No stop: the file in blocks, then written as a normal mp4 -- the same frames, times and sound as Topaz's own
-    file of before (no ``fps``: the way it was until today)."""
+def test_a_finished_run_gives_the_same_frames_as_before(tmp_path, piece, fake):
+    """No stop: the file in blocks (with a keyframe every 1001 frames more), then written as a normal mp4 -- the
+    same number of frames on the same times, each the same piece frame as Topaz's own file of before (no ``fps``:
+    the way it was until today), the pictures within the encoder's own noise, the sound in it."""
     tz = E.find_topaz()
     old, new = tmp_path / "old.mp4", tmp_path / "new.mp4"
     E.run_topaz(piece, old, _out_frames(), tz, scale=2)
     E.run_topaz(piece, new, _out_frames(), tz, scale=2, fps=FPS)
-    assert np.array_equal(_gray(old), _gray(new))
+    a, b = _gray(old), _gray(new)
+    src = _gray(piece)
+    assert len(a) == len(b) and _shows(a, src) == _shows(b, src)
+    assert max(np.abs(b[k] - a[k]).mean() for k in range(len(a))) < 6.0      # (random pictures: the hardest)
     po, pn = E._probe(old), E._probe(new)                                  # noqa: SLF001
     assert (po["r_frame_rate"], po["start_time"]) == (pn["r_frame_rate"], pn["start_time"])
     for f in (old, new):
@@ -121,7 +125,8 @@ def test_a_finished_run_gives_the_very_same_pictures_as_before(tmp_path, piece, 
 def test_stopped_half_way_it_goes_on_and_every_frame_is_the_right_one(tmp_path, piece, fake):
     tz = E.find_topaz()
     ref = tmp_path / "ref.mp4"
-    E.run_topaz(piece, ref, _out_frames(), tz, scale=2)                    # (never stopped, as before)
+    E.run_topaz(piece, ref, _out_frames(), tz, scale=2, fps=FPS)           # (never stopped)
+    fake.clear()
     dst = tmp_path / "x_ENHANCING.part.mp4"
     _stopped_then_again(piece, dst, 0.7)
     assert any(p is not None for p in fake)                                # it went on as a part, from the stop
@@ -254,3 +259,31 @@ def test_a_file_still_held_for_a_moment_after_topaz_stopped_goes_once_let_go(tmp
     with open(g, "rb"):
         with pytest.raises(E.EnhanceError, match="still in use"):
             E._unlink_soon(g, wait_s=1.0)                                 # noqa: SLF001
+
+
+def test_a_file_with_b_frames_is_cut_before_its_keyframe_on_the_grid_and_keeps_the_very_same_frames(tmp_path):
+    """The real Topaz's H.265 has B-frames (frames stored out of order: 20 Nov, a real 35 s piece). A stopped file
+    is cut only right before one of the IDR keyframes Topaz is asked for (``keep_every``): the frames before it
+    are all there, the very same pictures."""
+    every = E.keep_every(FPS)
+    assert every == 1001
+    f = tmp_path / "b.mp4"
+    subprocess.run([_ffmpeg(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=160x90:r=60:d=40", "-c:v",
+                    "libx264", "-bf", "2", "-force_key_frames", f"expr:eq(mod(n,{every}),0)", "-movflags",
+                    E.FRAG_FLAGS, str(f)], check=True)
+    whole = _gray(f)
+    assert int(E._probe(f)["has_b_frames"]) > 0                            # noqa: SLF001
+    assert E._salvage(f, every) == 2 * every                               # noqa: SLF001 - 2400 frames, 250 margin
+    cut = _gray(f)
+    assert len(cut) == 2 * every and np.array_equal(cut, whole[:2 * every])
+
+
+def test_topaz_writing_in_blocks_is_asked_for_the_keyframes_and_without_sound():
+    cmd = ["ffmpeg", "-i", "p.mp4", "-map", "0:v:0", "-map", "0:a:0?", "-vf", "x", "-c:v", "hevc_nvenc", "-c:a",
+           "copy", "-map_metadata", "-1", "-movflags", "+faststart", "-f", "mp4", "o.mp4"]
+    out = E._fragmented(cmd, 1001)                                         # noqa: SLF001
+    assert "0:a:0?" not in out and "-c:a" not in out
+    assert out[out.index("-movflags") + 1] == E.FRAG_FLAGS
+    i = out.index("-force_key_frames")
+    assert out[i + 1] == "expr:eq(mod(n,1001),0)" and out[i + 2:i + 4] == ["-forced-idr", "1"]
+    assert E.keep_every(25) == 600 and E.keep_every(60) == 600 and E.keep_every(Fraction(30000, 1001)) == 1001

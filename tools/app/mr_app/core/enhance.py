@@ -1328,6 +1328,18 @@ def resume_on() -> bool:
     return os.environ.get(RESUME_ENV, "1").strip() != "0"
 
 
+KEEP_EVERY = 600                    # an IDR keyframe at least every this many frames (at a place on the grid)
+
+
+def keep_every(fps: Any) -> int:
+    """Topaz's file gets an IDR keyframe every this many 60 fps frames -- the places where a stopped file can be cut
+    (frames before such a keyframe never need the frames after it, also with B-frames: the real Topaz's H.265 has
+    them, 20 Nov) and where a 60 fps frame falls exactly on a piece frame: 1001 at 23.976 / 29.97 fps, 600 at
+    24 / 25 / 30 / 60 fps. (Its encoder puts a keyframe every 250 frames by itself; this adds one in about four.)"""
+    step = grid_step(fps)[1]
+    return step * max(1, -(-KEEP_EVERY // step))
+
+
 def grid_step(fps: Any) -> tuple[int, int]:
     """(piece frames, 60 fps frames) between two places where a 60 fps frame falls exactly on a piece frame:
     (400, 1001) at 23.976 fps, (500, 1001) at 29.97, (5, 12) at 25, (1, 1) at 60."""
@@ -1350,7 +1362,7 @@ def _unlink_soon(path: Path, wait_s: float = 10.0) -> None:
             time.sleep(0.5)
 
 
-def _fragmented(cmd: list[str]) -> list[str]:
+def _fragmented(cmd: list[str], every: int = 0) -> list[str]:
     """Topaz's command writing its file in blocks, and only the picture. (Measured: with the sound in a file written
     in blocks every picture is 21 ms late -- the sound's start-up delay, which a normal mp4 notes and a file in
     blocks does not; the picture alone in blocks, the sound put in at the end: every frame on the same time, the
@@ -1367,6 +1379,9 @@ def _fragmented(cmd: list[str]) -> list[str]:
             continue
         if a == "+faststart" and out and out[-1] == "-movflags":
             a = FRAG_FLAGS
+            if every > 0:                       # (before -movflags: the IDR keyframes where it can be cut)
+                out[-1:-1] = ["-force_key_frames", f"expr:eq(mod(n,{int(every)}),0)"] + \
+                    (["-forced-idr", "1"] if "hevc_nvenc" in cmd else [])
         out.append(a)
         i += 1
     return out
@@ -1418,18 +1433,39 @@ def _write_resume(dst: Path, sig: dict, segs: list[dict], complete: bool = False
         pass
 
 
-def _salvage(seg: Path, step_out: int) -> int:
-    """How many frames of a cut-off segment are kept (whole blocks, up to a place on the grid), the file cut to
-    exactly them; 0 = none (the file goes)."""
+def _keyframes(path: Path) -> dict[int, float]:
+    """{decode position: time} of the file's keyframe packets."""
+    from match_cuts.common import ffprobe_bin
+    r = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
+              "-of", "csv=p=0", str(path)], timeout=600)
+    out: dict[int, float] = {}
+    for i, ln in enumerate((r.stdout or "").splitlines()):
+        t, _, fl = ln.partition(",")
+        if "K" in fl:
+            try:
+                out[i] = float(t)
+            except ValueError:
+                pass
+    return out
+
+
+def _salvage(seg: Path, every: int) -> int:
+    """How many frames of a cut-off segment are kept, the file cut to exactly them; 0 = none (the file goes). 20 Nov:
+    only up to an IDR keyframe Topaz was asked for (``keep_every``) -- the real Topaz's H.265 has B-frames (frames
+    stored out of order), so a cut anywhere else could take a frame that needs one after it -- and only when that
+    keyframe is exactly where it should be (its place in the file and its time)."""
     from match_cuts.common import ffmpeg_bin
     try:
-        st = _probe(seg)
-        if int(st.get("has_b_frames") or 0) > 0:      # (frames out of order: a cut by count is not safe)
-            raise EnhanceError("B-frames")
-        n = int(st.get("nb_read_packets") or 0)
+        n = int(_probe(seg).get("nb_read_packets") or 0)
+        keys = _keyframes(seg) if n > SALVAGE_MARGIN + every else {}
     except (EnhanceError, ValueError, TypeError):
-        n = 0
-    k = ((n - SALVAGE_MARGIN) // step_out) * step_out if n > SALVAGE_MARGIN else 0
+        n, keys = 0, {}
+    k = 0
+    t0 = keys.get(0, 0.0)                             # (with B-frames a file in blocks starts its times 2 frames on)
+    for c in range(((n - SALVAGE_MARGIN) // every) * every if every > 0 else 0, 0, -every):
+        if c in keys and abs(keys[c] - t0 - c / float(OUT_FPS)) < 0.5 / OUT_FPS:
+            k = c
+            break
     if k <= 0:
         seg.unlink(missing_ok=True)
         return 0
@@ -1506,7 +1542,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
     elif st.get("complete") and dst.is_file() and _frames_of(dst) == int(st.get("frames") or -1):
         return                                          # (a part finished before the stop)
     _unlink_soon(dst)
-    _step_src, step_out = grid_step(fps)
+    every = keep_every(fps)
     segs: list[dict] = []
     for s in st.get("segs") or []:
         f = dst.parent / Path(str(s.get("file") or "")).name
@@ -1515,7 +1551,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
         if s.get("done") and _frames_of(f) == int(s.get("frames") or -1):
             segs.append({"file": f.name, "frames": int(s["frames"]), "done": True})
             continue
-        k = _salvage(f, step_out)                       # the file Topaz was writing when it stopped
+        k = _salvage(f, every)                          # the file Topaz was writing when it stopped
         if k:
             segs.append({"file": f.name, "frames": k, "done": True})
         break
@@ -1544,7 +1580,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
             if progress is not None:
                 progress((kept + share * left) / float(out_frames), secs)
         try:
-            _topaz_tries(src, seg, left, tz, prog, cancel, scale, sub, frag=True)
+            _topaz_tries(src, seg, left, tz, prog, cancel, scale, sub, frag=every)
         except EnhanceError:
             if not (cancel is not None and cancel.is_set()):
                 drop_resume(dst)                         # (failed for a reason: nothing of it is kept)
@@ -1573,7 +1609,7 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
 def _topaz_tries(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, tz: Topaz,
                  progress: Callable[[float, float | None], None] | None = None,
                  cancel: threading.Event | None = None, scale: int = 2,
-                 part: tuple[float, float, int] | None = None, frag: bool = False) -> None:
+                 part: tuple[float, float, int] | None = None, frag: int = 0) -> None:
     """Topaz on ``src`` into ``dst``; ``progress(share, seconds left)`` from its "frame=" lines. Raises EnhanceError
     (plain words) when it fails or was stopped. 29 Oct: the graphics card out of memory (the laptop's 8 GB) -> tried
     again with less of its memory (60 %, then 35 %). 18 Nov: also when it hangs (no new frame for STALL_S)."""
@@ -1583,7 +1619,7 @@ def _topaz_tries(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int
     while True:                         #   as it was, before the piece is given back as failed
         try:
             return _run_topaz_once(src, dst, out_frames, tz, progress, cancel, steps[k], scale, part,
-                                   *([True] if frag else []))
+                                   *([frag] if frag else []))
         except EnhanceError as e:
             if cancel is not None and cancel.is_set():
                 raise
@@ -1599,12 +1635,12 @@ def _topaz_tries(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int
 
 
 def _run_topaz_once(src, dst, out_frames: int, tz: Topaz, progress, cancel, vram: float, scale: int = 2,
-                    part: tuple[float, float, int] | None = None, frag: bool = False) -> None:
+                    part: tuple[float, float, int] | None = None, frag: int = 0) -> None:
     import queue
     cmd = topaz_command(tz, src, dst, vram, scale, part) if part is not None else topaz_command(tz, src, dst, vram,
                                                                                                 scale)
     if frag:                                 # 20 Nov: in blocks while Topaz writes it (it can go on after a stop) --
-        cmd = _fragmented(cmd)               #   the picture only: the sound is put in when the file is finished
+        cmd = _fragmented(cmd, int(frag))               #   the picture only: the sound is put in when the file is finished
     t0 = time.monotonic()
     pr = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           env=topaz_env(tz), creationflags=NO_WINDOW)
