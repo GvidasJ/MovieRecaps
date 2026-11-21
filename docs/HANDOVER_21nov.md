@@ -7,7 +7,9 @@ it is finished (or when I stop working on it).
 
 1. **PC:** nothing. Open the app as always. It uses the new code from its next start.
 2. **Laptop:** close the app, open a terminal in the MovieRecaps folder, type `git pull`, open the app again.
-   (The fixes of jobs 1, 2 and 3 matter most on the laptop.)
+   (The fixes of jobs 1, 2, 3 and 4 matter most on the laptop. Then press Try again on "The Weirdest Gym Goal In
+   Its Always Sunny" -- it should find its picture now.)
+3. New on every video's row: a **No Topaz** button (and **Topaz again** to undo it). See job 4.
 
 ## The jobs
 
@@ -18,7 +20,7 @@ it is finished (or when I stop working on it).
 | 2 | a short network drop is not a failed Topaz try | done, proven with the real Topaz |
 | 3 | DVD RAW shape (SAR 64/81) | found and fixed (commit 3c0e677) |
 | 4 | a way to stop Topaz for one video | done ("No Topaz" button), proven with the real Topaz |
-| 5 | all tests + one real video end to end | not started |
+| 5 | all tests + one real video end to end | done: all tests pass; two real videos end to end with the real Topaz |
 
 ## Job 0 -- start
 
@@ -175,6 +177,64 @@ Business Idea In Key and Peele (2) in `D:\mr_scratch\h21\e2e_bi2`, empty caches,
 | clean-up round | only the zip is left; the Enhance folder is empty |
 
 (On 19 Nov the same video made 3 parts, 2:28 of Topaz work and 46 minutes; today 10 parts, 1:53 and 32 minutes.)
+
+**A second real video, for job 3: a DVD RAW** (your 12 Nov "The Funniest Misread In Its Always Sunny", It's Always
+Sunny S03E06, 480p DVD x265 10bit, copies in `D:\mr_scratch\h21\e2e_dvd`):
+
+| step | result |
+|---|---|
+| stretch check | "not stretched (1.002)" (12 Nov: 0.911, just inside the limit by luck) |
+| piece of the movie | used: 4.5 of the 22.4 minutes analysed (12 Nov: the whole episode) |
+| edit | **PASS, no notes**, 146 s |
+| the real Topaz | 142 s, 1 part, 1308x960 60 fps (square pixels, the right shape) |
+| the swap | "5 of 5 V1 clips play it"; every clip checked: **15 of 15 frames right** |
+| zip, clean-up | 327 MB; only the zip is left, the Enhance folder empty |
+
+The last full test run (with every change of today): **app 1535 passed, tool 1700 passed** (13 + 129 skipped: tests
+for files that are not on this PC, as before).
+
+## What I did NOT do
+
+- **The Worst Employee itself** could not be run again: its files are not on this PC (see job 1). The laptop gets
+  the fix with `git pull`; if that video is made again, its parts should pass (or, if anything is still wrong, fail
+  within seconds, with the reason in the project).
+- **The Weirdest Gym Goal (S04E10)** is on the laptop only. I proved the fix on the same release (S02E06 and
+  S03E06). Try it again on the laptop after `git pull` (Try again on its row).
+- **The laptop was not tested** (I cannot reach its disk). Jobs 1, 2 and 4 matter most there.
+- The words "(the laptop Gvidas, ...)" in a Topaz failure text are still the same (20 Nov note).
+- The 8-frame flash note (19 Nov question) is still yours to answer -- it came up again in today's test video.
+
+## The space (nothing of yours deleted -- you decide)
+
+Free now: C: 105 GB, D: 1.2 TB. Everything below is mine (copies and test files).
+
+| folder | size | what it is | can go? |
+|---|---|---|---|
+| `D:\mr_scratch\h21\pt_*` | 28 GB | the tests' temporary folders of today | yes, all |
+| `D:\mr_scratch\h21\work_bi2`, `work_dvd` | 3.2 + 2.5 GB | the caches of the two end-to-end videos | yes |
+| `D:\mr_scratch\h21\e2e_bi2`, `e2e_dvd` | 0.8 + 0.3 GB | the two test videos' zips (worth a look in Premiere if you want) | yes |
+| `D:\mr_scratch\h21\src` | 1 GB | copies of a Key and Peele BluRay RAW and the DVD video | yes |
+| `D:\mr_scratch\h21\real*`, `emul*`, `dropstop`, `dvd`, `dev` | 1.8 GB | today's Topaz tests, my code copy | yes |
+| `D:\mr_scratch\h19`, `h20` | 71 GB + about 70 GB (the 20 Nov report's list) | the 19 and 20 Nov tests (see those reports; `h20\dev` must go with `git worktree remove`) | yes |
+
+`D:\Shared\Enhance\_to_delete` still holds "The Scariest Trash Talk In Key and Peele" (85 MB; a stopped piece you
+moved there on 20 Nov) and older pieces. Not touched. The laptop was enhancing "Rons Biggest Enemy In Parks and Rec"
+in `D:\Shared\Enhance` all morning: not touched.
+
+## For the next Claude session
+
+- Scripts of today: `work\h21` (`STATE.md` says what each is): `parts_real.py` (a parts piece through the app's own
+  code, `--emul` = Topaz's own ffmpeg and encoder without the AI filters: seconds), `seek_sweep.py`, `dvd_stretch.py`,
+  `drop_stop_real.py`, `leading.py`, `suites.ps1 -Tag NAME`. The end-to-end script is still `work\h19\e2e.py`
+  (`--base D:/mr_scratch/h21`); pass Windows paths (`D:/...`) when a file name has brackets.
+- RAWs converted from MKV keep whole-millisecond frame times. Anything that seeks by "frame / fps" can land one frame
+  off: use `enhance._frame_times`. Test seeking on a BluRay Key and Peele copy and on frame numbers that are not
+  multiples of 24 (multiples of 24 are exact and hide the problem).
+- The stretch check (`match_cuts\stretch.py`) is in no cached stage's fingerprint; `probe.py` is in 8 of them.
+- New in `core\enhance.py`: `_frame_times`, `_seek_lands_right`, `parts_failed_to_project`, `ShareDrop`,
+  `share_drop`, `_wait_share`, `no_topaz`, `topaz_again`, `remove_piece`, the stop file `<name>_TOENHANCE.stop`,
+  Job state "waiting". Project enhance state "off" (+ `no_topaz: true`). Row buttons "No Topaz" / "Topaz again".
+- Commits of today: d9177fc, 3c0e677, 1effbb6, 4eeee9a, b2a427e and the report commits, all pushed.
 
 ## What I decided for you (you said: do not ask)
 
