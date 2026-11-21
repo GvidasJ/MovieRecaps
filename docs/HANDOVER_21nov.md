@@ -155,8 +155,42 @@ picture 12.5 % too tall, and the picture search found almost nothing (your 3 %).
   uses. (Changing probe.py would also have made 8 of the tool's cached steps run again on every video.)
 - New tests: `tools\match_cuts\tests\test_stretch_dvd_21nov.py` (5).
 
+## Job 5 -- all tests, and one real video end to end
+
+**All tests before every commit** (both suites, GPU hidden, your real crash.log checked before and after: never
+touched). The last run: see the table at the end of this section.
+
+**One real video, the real Topaz, everything as the app does it** (copies of the competitor and the RAW of The Best
+Business Idea In Key and Peele (2) in `D:\mr_scratch\h21\e2e_bi2`, empty caches, the app closed):
+
+| step | result |
+|---|---|
+| new project, convert | done (both kept as they are) |
+| edit (60 fps) | **OK with a note** in 1892 s. The note: "8 frame(s) of a different RAW shot (0.13 s)" -- the competitor's own short shot, your open question of 19 Nov |
+| the piece | ONE piece, 3:24 of the RAW, **10 played parts, 1:53** (the smaller parts of 20 Nov) |
+| the real Topaz | 1911 s (32 min), **all 10 parts used** (each checked before and after Topaz), no fallback to the whole piece |
+| the swap | **"56 of 56 V1 clips play it"**, 7 clip ends moved by 1-2 frames of 1/60 s (the 19 Nov rule: no flash at a clip end) |
+| every clip checked (first, middle, last frame against the normal RAW) | **168 of 168 right**, 0 wrong, 0 clips on the normal RAW |
+| zip | **883 MB** (under 1 GB), opens without errors, `1_edit.xml` + `HOW TO OPEN.txt` inside, the Topaz picture 665 MB, no normal RAW picture |
+| clean-up round | only the zip is left; the Enhance folder is empty |
+
+(On 19 Nov the same video made 3 parts, 2:28 of Topaz work and 46 minutes; today 10 parts, 1:53 and 32 minutes.)
+
 ## What I decided for you (you said: do not ask)
 
 1. Job 1: The Worst Employee's own files were gone, so I proved the cause on a copy of another Key and Peele RAW of
    yours (the same shape and release group) instead.
-2. Job 3: the fix is in the stretch check, not in probe.py (the probe was right; see above).
+2. Job 1: before Topaz starts on a part, its first frame is checked (about 1 s). If it would be wrong, the whole
+   piece is enhanced at once (as before, only an hour earlier).
+3. Job 2: a drop = the piece cannot be read at that moment, or the reason names a file of the Enhance folder and
+   says "cannot be read / no such file / network ...". The laptop waits up to 30 minutes at a time, then lets the
+   piece go and takes it again by itself. 6 such drops in one take while the folder answers each time: a real
+   failure (as before).
+4. Job 3: the fix is in the stretch check, not in probe.py (the probe was right; see above).
+5. Job 4: the button is called "No Topaz" and has an undo ("Topaz again"). "No Topaz" stays over Try again. A
+   finished enhanced picture that comes back for a "No Topaz" video is moved to `_to_delete`, never deleted. A video
+   whose edit already plays the enhanced picture has no button (nothing to stop).
+6. Jobs 2 and 4 are one commit: they change the same part of the worker (what happens when Topaz ends early).
+7. Job 5: the video was The Best Business Idea In Key and Peele (2) (its clips are spread over minutes, so it makes
+   many parts; its RAW is converted from an MKV: millisecond times, the case of job 1). Copies only, in
+   `D:\mr_scratch\h21`; the app stayed closed; the laptop's pieces in `D:\Shared\Enhance` were not touched.
