@@ -71,6 +71,7 @@ LOCK_EXT = ".lock"
 DONE_SUFFIX = "_ENHANCED.mp4"
 PART_SUFFIX = "_ENHANCING.part.mp4"
 FAILED_SUFFIX = "_ENHANCE_FAILED.txt"
+STOP_SUFFIX = "_TOENHANCE.stop"     # 21 Nov: "no Topaz for this video" -- the computer enhancing it stops (no_topaz)
 PROJECT_SUB = "enhance"             # the project's own copy: <project>\enhance\raw_enhanced.mp4
 PROJECT_FILE = "raw_enhanced.mp4"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -188,8 +189,12 @@ class Names:
     def failed(self) -> Path:
         return self._p(FAILED_SUFFIX)
 
+    @property
+    def stop(self) -> Path:
+        return self._p(STOP_SUFFIX)
+
     def all(self) -> list[Path]:
-        return [self.piece, self.info, self.lock, self.part, self.enhanced, self.failed]
+        return [self.piece, self.info, self.lock, self.part, self.enhanced, self.failed, self.stop]
 
 
 def names(folder: str | os.PathLike, name: str) -> Names:
@@ -280,7 +285,8 @@ WAYS = ((COPY, True),               # 1st: the RAW's own frames (stream copy), T
         (COPY, False),              # 3rd: the RAW's own frames, the whole piece
         (INTRA, False),             # 4th: encoded with every frame a keyframe, the whole piece
         (ENCODED, True), (INTRA, True))     # (only reached when ways above come out the same for this RAW)
-_SAME_WAY = ("gb free", "not in the enhance folder any more")    # failures that say nothing about the piece itself
+_SAME_WAY = ("gb free", "not in the enhance folder any more", "the enhance folder could not be read",
+             "no such file or directory")                 # (21 Nov: the network, not the piece)    # failures that say nothing about the piece itself
 #                                                                  (the drive is full, the piece was removed)
 
 
@@ -942,7 +948,7 @@ def clean_folder(folder: str | os.PathLike, roots, now: float | None = None,
                     waited.add(safe_name(str(rec["name"])))
         except Exception:  # noqa: BLE001 - a folder that cannot be read: its pieces are not known -- nothing is tidied
             return out
-    suffixes = (TO + PIECE_EXT, TO + ".json", TO + LOCK_EXT, PART_SUFFIX, DONE_SUFFIX, FAILED_SUFFIX)
+    suffixes = (TO + PIECE_EXT, TO + ".json", TO + LOCK_EXT, PART_SUFFIX, DONE_SUFFIX, FAILED_SUFFIX, STOP_SUFFIX)
     names: set[str] = set()
     try:
         for f in folder.iterdir():
@@ -1598,10 +1604,10 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
                 progress((kept + share * left) / float(out_frames), secs)
         try:
             _topaz_tries(src, seg, left, tz, prog, cancel, scale, sub, frag=every)
-        except EnhanceError:
-            if not (cancel is not None and cancel.is_set()):
-                drop_resume(dst)                         # (failed for a reason: nothing of it is kept)
-            raise
+        except EnhanceError as e:
+            if not (cancel is not None and cancel.is_set()) and not share_drop(e, src):
+                drop_resume(dst)                         # (failed for a reason: nothing of it is kept; 21 Nov: a
+            raise                                        #  network drop keeps it, as a stop does)
         n = _frames_of(seg)
         if kept:
             c = int(Fraction(kept) * fps / OUT_FPS)
@@ -1951,6 +1957,9 @@ def waiting_pieces(folder: str | os.PathLike, now: float | None = None, machine:
                 continue
             if nm.lock.exists() and not lock_stale(nm.lock, now):
                 continue
+            if nm.stop.exists():                 # 21 Nov: "no Topaz" pressed -- nobody takes it, its files go
+                remove_piece(nm)
+                continue
             if machine:                          # 30 Oct: a piece meant for the other computer is left for it
                 want = str((read_info(nm.info) or {}).get("topaz_on") or "")
                 if want and want != machine:
@@ -1969,20 +1978,25 @@ def waiting_pieces(folder: str | os.PathLike, now: float | None = None, machine:
 class Job:
     """One piece the laptop enhances (what its Progress page shows)."""
     name: str
-    state: str = "enhancing"        # "enhancing" | "done" | "failed"
+    state: str = "enhancing"        # "enhancing" | "done" | "failed" | "waiting" (21 Nov: the folder away, let go)
     share: float = 0.0
     left_s: float | None = None
     why: str = ""
     started: float = field(default_factory=time.time)
     ended: float | None = None
     note: str = ""                  # 18 Nov: something that went another way (the parts could not be used ...)
+    wait: str = ""                  # 21 Nov: waiting for the Enhance folder (a network drop) -- the same way goes on
 
     def line(self) -> str:
+        if self.state == "enhancing" and self.wait:
+            return f"{self.name}: {self.wait} -- waiting for it, then Topaz goes on the same way"
         if self.state == "enhancing":
             return f"Enhancing {self.name} on this laptop · {int(round(100 * self.share))} %" + (
                 f" · {_minutes(self.left_s)} left" if self.left_s else "")
         if self.state == "done":
             return f"{self.name}: enhanced in {_clock((self.ended or time.time()) - self.started)} -- the PC takes it"
+        if self.state == "waiting":
+            return f"{self.name}: {self.why} -- taken again when the folder answers"
         return f"{self.name}: not enhanced -- {self.why}"
 
 
@@ -2012,6 +2026,233 @@ def parts_failed_to_project(info: dict, why: str) -> bool:
         return True
     except Exception:  # noqa: BLE001
         return False
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 21 Nov: a short network drop is not a failed Topaz try (your job 2)
+# ---------------------------------------------------------------------------------------------------------------------
+# 20 Nov, the laptop: Topaz stopped with "\\192.168.101.11\Shared\Enhance\..._TOENHANCE.mp4: No such file or
+# directory" while the file was there -- the network was away for a moment. It counted as a failed try: the failure
+# file went to the PC, the PC made a new piece another way and sent it, and what Topaz had made was thrown away. Now a
+# failure while the piece cannot be read, or one that names a file of the Enhance folder with a "cannot be read" kind
+# of reason, is a drop: the laptop keeps what Topaz made (as after a stop), waits until the folder answers again and
+# goes on the SAME way. Nothing is written for the PC (no failure file, no try counted, the parts not marked failed).
+SHARE_WAIT_S = 30 * 60.0            # one wait for the folder at most this long (then the piece is let go -- not failed:
+SHARE_LOOK_S = 15.0                 #   the worker takes it again when the folder is back); looked at this often
+SHARE_DROPS = 6                     # this many drops in one take while the folder answers each time: a failure as before
+SHARE_TEXT = "the Enhance folder could not be read"
+GONE_TEXT = "the piece is not in the Enhance folder any more"
+_DROP_WORDS = ("no such file or directory", "permission denied", "invalid argument", "input/output error",
+               "i/o error", "network path was not found", "network name is no longer available",
+               "unexpected network error", "specified network name", "cannot find the path",
+               "cannot find the file", "semaphore timeout", "device is not ready", "could not be read",
+               "cannot be read", "network")
+_NET_WINERRORS = frozenset({53, 59, 64, 67, 121, 1231, 1232, 1236})   # Windows: the network went away
+
+
+class ShareDrop(EnhanceError):
+    """A file of the Enhance folder could not be read or written for a moment (the network) -- not Topaz failing,
+    not the piece: the same piece goes on the same way when the folder answers again."""
+
+
+def _readable(path: Path) -> bool:
+    try:
+        if not Path(path).parent.is_dir():
+            return False
+        with open(path, "rb") as f:
+            return bool(f.read(1))
+    except OSError:
+        return False
+
+
+def share_drop(e: BaseException, piece: Path) -> bool:
+    """Was ``e`` the Enhance folder away for a moment (and not the piece, Topaz or a stop)?"""
+    if isinstance(e, ShareDrop):
+        return True
+    if isinstance(e, PartsError) or str(e) == "stopped":
+        return False
+    if isinstance(e, OSError) and getattr(e, "winerror", None) in _NET_WINERRORS:
+        return True
+    if not _readable(Path(piece)):                       # whatever it was, the piece cannot be read now
+        return True
+    text = f"{e} {getattr(e, 'details', '')}".lower()
+    folder = str(Path(piece).parent).lower()
+    name = Path(piece).name.lower()
+    stem = name[: -len((TO + PIECE_EXT).lower())] if name.endswith((TO + PIECE_EXT).lower()) else name
+    names_it = any(s in text for s in (folder, folder.replace("\\", "/"), stem))
+    return names_it and any(w in text for w in _DROP_WORDS)
+
+
+def _sleep(seconds: float, stop: Any) -> None:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if stop is not None and stop.is_set():
+            return
+        time.sleep(min(1.0, max(0.0, end - time.monotonic())))
+
+
+def _wait_share(nm: Names, stop: Any, token: str) -> str:
+    """Until the piece can be read again: '' then; else why not ("stopped", no Topaz, the piece removed by the PC,
+    or the folder away for SHARE_WAIT_S)."""
+    end = time.monotonic() + SHARE_WAIT_S
+    gone = 0
+    while True:
+        if stop is not None and stop.is_set():
+            return NO_TOPAZ_TEXT if getattr(stop, "by_user", False) else "stopped"
+        try:
+            if nm.folder.is_dir():
+                if nm.stop.exists():
+                    return NO_TOPAZ_TEXT
+                if _readable(nm.piece) and nm.info.is_file():
+                    beat(nm, token)
+                    return ""
+                if not nm.piece.exists() and not nm.info.exists():
+                    gone += 1                            # (twice, a look apart: not a folder answering half)
+                    if gone >= 2:
+                        return GONE_TEXT
+                else:
+                    gone = 0
+        except OSError:
+            pass
+        if time.monotonic() >= end:
+            return f"{SHARE_TEXT} for {SHARE_WAIT_S / 60:.0f} minutes"
+        _sleep(SHARE_LOOK_S, stop)
+
+
+def _note_drop(nm: Names, e: BaseException) -> None:
+    """The drop written into the piece's json (best effort: the folder may be away): what, when, which computer."""
+    try:
+        d = read_info(nm.info)
+        if not d:                                        # (gone or unreadable: never written back -- a json the
+            return                                       #  PC removed must stay removed)
+        drops = [x for x in (d.get("share_drops") or []) if isinstance(x, dict)][-9:]
+        drops.append({"when": time.strftime("%Y-%m-%d %H:%M:%S"), "computer": M.host(), "why": str(e)[:300]})
+        _write_json(nm.info, dict(d, share_drops=drops))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 21 Nov: "no Topaz for this video" (your job 4)
+# ---------------------------------------------------------------------------------------------------------------------
+# Until now, moving a video's piece out of the Enhance folder made the PC send a new one by itself (the piece "gone"
+# is a failed try: _watch -> _again), so you had to move the whole project away. Now the row has a button: its piece
+# leaves the line, a Topaz working on it stops (on either computer: the stop file next to the piece, which the
+# enhancing computer looks at every few seconds), the project is marked "off" -- nothing sends it again, not the
+# rows, not the sweep, not a new run of the row -- and the video finishes with its zip (the normal RAW's picture).
+NO_TOPAZ_TEXT = "no Topaz for this video (you pressed No Topaz)"
+STOP_LOOK_S = 5.0                   # the enhancing computer looks for the stop file this often
+
+
+class _JobStop:
+    """The stop of one piece: the worker's own (the app closing) or the stop file (``no_topaz``)."""
+
+    def __init__(self, outer: Any, nm: Names):
+        self.outer, self.nm = outer, nm
+        self.by_user = False
+        self._looked = 0.0
+
+    def is_set(self) -> bool:
+        if self.by_user or (self.outer is not None and self.outer.is_set()):
+            return True
+        if time.monotonic() - self._looked >= STOP_LOOK_S:
+            self._looked = time.monotonic()
+            try:
+                self.by_user = self.nm.stop.exists()
+            except OSError:
+                pass
+        return self.by_user
+
+
+def remove_piece(nm: Names) -> int:
+    """Every file of the piece in the Enhance folder (its parts, Topaz's kept blocks, the stop file); a finished
+    _ENHANCED.mp4 -- hours of Topaz -- is moved into _to_delete, never deleted. Returns how many went."""
+    gone = 0
+    try:
+        if nm.enhanced.is_file():
+            dst = Path(nm.folder) / TO_DELETE
+            dst.mkdir(exist_ok=True)
+            target = dst / nm.enhanced.name
+            if target.exists():
+                target = dst / f"{nm.enhanced.stem}.{int(time.time())}{nm.enhanced.suffix}"
+            os.replace(nm.enhanced, target)
+            gone += 1
+    except OSError:
+        pass
+    try:
+        drop_resume(nm.part)
+        mine = [f for f in Path(nm.folder).iterdir() if f.is_file() and f.name.startswith(nm.name + "_ENHANCING")]
+    except OSError:
+        mine = []
+    end = time.monotonic() + REMOVE_WAIT_S              # (the real Topaz, just stopped, holds its files a moment:
+    for f in mine + [x for x in nm.all() if x != nm.enhanced]:      # "in use" -- found with the real Topaz, 21 Nov)
+        while True:
+            try:
+                if f.is_file():
+                    if f.name.endswith(".mp4") and ".part" in f.name:
+                        drop_resume(f)
+                    f.unlink()
+                    gone += 1
+                break
+            except PermissionError:
+                if time.monotonic() >= end:
+                    break
+                time.sleep(0.5)
+            except OSError:
+                break
+    return gone
+
+
+REMOVE_WAIT_S = 15.0
+
+
+def no_topaz(project: str | os.PathLike) -> dict:
+    """"No Topaz" for one video: {ok, why, text}. Never raises."""
+    from . import projects as PJ
+    try:
+        p = PJ.load(project)
+        rec = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+        if rec.get("state") == "used":
+            return {"ok": False, "why": "its edit plays the enhanced picture already"}
+        text = NO_TOPAZ_TEXT
+        if rec.get("folder") and rec.get("name"):
+            nm = names(rec["folder"], rec["name"])
+            try:
+                if nm.folder.is_dir():
+                    if nm.lock.exists() and not lock_stale(nm.lock):
+                        who = str((read_lock(nm.lock) or {}).get("computer") or "the other computer")
+                        nm.stop.write_text(json.dumps({"by": M.host(), "time": time.time(),
+                                                       "project": str(p.folder)}), encoding="utf-8")
+                        text += f" -- Topaz on {who} stops it now"
+                    elif remove_piece(nm):
+                        text += " -- its piece left the Enhance folder"
+            except OSError as e:
+                text += f" -- its piece could not be removed now ({e}); it is cleaned up later"
+        p.update(enhance={"state": "off", "why": NO_TOPAZ_TEXT, "no_topaz": True, "off": time.time()})
+        from .enhance_swap import zip_when_done
+        zip_when_done(p.folder)                          # (only when its edit is finished; else after the edit)
+        return {"ok": True, "why": "", "text": text}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "why": f"{type(e).__name__}: {e}"}
+
+
+def topaz_again(project: str | os.PathLike) -> dict:
+    """"Topaz again": the "no Topaz" undone -- the piece is cut and sent now when the edit is finished (else after
+    it). {ok, why, text}."""
+    from . import projects as PJ
+    try:
+        p = PJ.load(project)
+        p.update(enhance={"state": "skipped", "why": "Topaz comes after the edit", "after_edit": True,
+                          "no_topaz": False, "redos": 0})
+        from . import enhance_swap as ES
+        r = ES.cover_all(p.folder)
+        if r.get("ok") and r.get("clips"):
+            return {"ok": True, "why": "", "text": "sent to Topaz again"}
+        made = ES.edit_made(p.folder, (PJ.load(p.folder).data.get("steps") or {}).get("edit"))
+        return {"ok": True, "why": "", "text": (r.get("why") or "nothing to send") if made else
+                "Topaz comes after the edit"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "why": f"{type(e).__name__}: {e}"}
 
 
 PART_CHECK_MARGIN = 0.01            # a part's first enhanced frame may not look this much more like a neighbour frame
@@ -2057,6 +2298,7 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
     except Exception:  # noqa: BLE001 - run_topaz says why
         pass
     nf = int(info.get("frames") or 0) or None
+    keep = False
     try:
         done = 0
         for k, ((a, b), n) in enumerate(zip(rs, counts)):
@@ -2072,13 +2314,19 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
             if not _part_done(files[k], n):              # 21 Nov: a part that would start wrong fails in seconds
                 why = _seek_lands_right(tz, nm.piece, fps, a, part)
                 if why:
+                    if "could not be" in why and not _readable(nm.piece):
+                        raise ShareDrop(f"{SHARE_TEXT} (part {k + 1}'s first frame, before Topaz)")
                     raise PartsError(f"part {k + 1} (piece frame {a}, {ta:.4f} s): {why}")
             run_topaz(nm.piece, files[k], n, tz, prog, cancel, scale=scale, part=part, fps=fps)
             got = _frames_of(files[k])
             if got != n:
+                if got == 0 and not (_readable(nm.piece) and _readable(files[k])):
+                    raise ShareDrop(f"{SHARE_TEXT} (part {k + 1}'s frames)")
                 raise PartsError(f"part {k + 1} has {got} frames, not {n}")
             why = _part_starts_right(nm.piece, fps, a, files[k])
             if why:
+                if "could not be" in why and not (_readable(nm.piece) and _readable(files[k])):
+                    raise ShareDrop(f"{SHARE_TEXT} (part {k + 1}'s first frame)")
                 raise PartsError(f"part {k + 1}: {why}")
             done += n
         lst.write_text("".join(f"file '{f.name}'\n" for f in files), encoding="utf-8")
@@ -2087,14 +2335,27 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
                   str(lst), "-map", "0:v:0", "-c", "copy", *tag, "-map_metadata", "-1", "-movflags", "+faststart",
                   "-f", "mp4", str(nm.part)], timeout=3600)
         if r.returncode != 0 or not nm.part.is_file():
+            if not _readable(nm.piece) or share_drop(EnhanceError(r.stderr or ""), nm.piece):
+                raise ShareDrop(f"{SHARE_TEXT} (joining the parts: {(r.stderr or '').strip()[-200:]})")
             raise PartsError(f"the parts could not be joined: {(r.stderr or '').strip()[-200:]}")
         got = _frames_of(nm.part)
         if got != total:
+            if got == 0 and not (_readable(nm.piece) and _readable(nm.part)):
+                raise ShareDrop(f"{SHARE_TEXT} (the joined parts)")
             raise PartsError(f"the joined parts have {got} frames, not {total}")
+    except ShareDrop:
+        keep = True
+        raise
     except OSError as e:
+        if share_drop(e, nm.piece):                      # 21 Nov: the folder away -- the parts made so far stay
+            keep = True
+            raise ShareDrop(f"{SHARE_TEXT}: {e}") from e
         raise PartsError(f"{type(e).__name__}: {e}") from e
+    except EnhanceError as e:
+        keep = share_drop(e, nm.piece)
+        raise
     finally:
-        if not (cancel is not None and cancel.is_set()):    # 20 Nov: stopped -- the parts made so far are kept
+        if not (keep or (cancel is not None and cancel.is_set())):    # 20 Nov: stopped -- the parts made so far are kept
             for f in files + [lst]:
                 try:
                     f.unlink(missing_ok=True)
@@ -2221,11 +2482,17 @@ def _first_frame_shows(piece: Path, fps: Fraction, first: int, out: Any) -> str:
 def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None = None,
                 cancel: threading.Event | None = None, on_change: Callable[[Job], None] | None = None) -> Job:
     """Topaz on a taken piece: <name>_ENHANCING.part.mp4, checked, renamed <name>_ENHANCED.mp4; a failure writes
-    <name>_ENHANCE_FAILED.txt. The lock goes either way."""
+    <name>_ENHANCE_FAILED.txt. The lock goes either way.
+
+    21 Nov: the Enhance folder away for a moment (``share_drop``) is not a failure: what Topaz made is kept, the folder
+    is waited for and the piece goes on the same way (job.wait says so meanwhile); away too long, the piece is let go
+    -- "waiting", no failure file -- and taken again when the folder is back. "No Topaz" for its video (the stop file,
+    ``no_topaz``): Topaz stops and every file of the piece goes."""
     job = job or Job(nm.name)
     tell = on_change or (lambda j: None)
     info = read_info(nm.info) or {}
     last = [0.0]
+    stop = _JobStop(cancel, nm)
 
     def prog(share: float, left: float | None) -> None:
         job.share, job.left_s = share, left
@@ -2234,6 +2501,50 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
             last[0] = time.monotonic()
             beat(nm, token, share=round(share, 4), left_s=round(left, 1) if left else None)
 
+    def body(first: bool) -> None:
+        nonlocal info
+        dur = float(info.get("duration") or 0.0)
+        if first:
+            nm.part.unlink(missing_ok=True)
+        scale = topaz_scale(info.get("width"), info.get("height"))
+        done_parts = False
+        if valid_ranges(info) and not info.get("parts_failed"):   # 18 Nov: only what the edit plays (play_ranges)
+            try:
+                enhance_parts(nm, info, tz, prog, stop, scale)
+                done_parts = True
+            except PartsError as e:                      # a part did not start on its frame, the join failed ...:
+                job.note = f"the parts could not be used ({e}) -- the whole piece instead"    # the whole piece
+                nm.part.unlink(missing_ok=True)
+                try:                                     # 20 Nov (The Worst Employee In Key and Peele: the app was
+                    _write_json(nm.info, dict(read_info(nm.info) or info,   # closed and opened, the parts ran a
+                                              parts_failed=str(e), worker_note=job.note))   # second hour and
+                except OSError:                          # failed again): written at once -- a piece taken again goes
+                    pass                                 # straight to the whole piece (and its resume), and the
+                #                                          reason can be read in the json while Topaz still works
+                parts_failed_to_project(info, str(e))    # 21 Nov: and in the project, at once
+                info = dict(info, parts_failed=str(e))   # (a drop after this: on with the whole piece)
+                if stop.is_set():
+                    raise EnhanceError("stopped") from e
+        if not done_parts:
+            try:
+                fps = Fraction(str(info.get("fps"))) if info.get("fps") else None
+            except (ValueError, ZeroDivisionError):
+                fps = None
+            run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, stop, scale=scale, fps=fps)
+        chk = check_enhanced(nm.part, info)
+        if not chk["ok"]:
+            if not (_readable(nm.piece) and _readable(nm.part)):
+                raise ShareDrop(f"{SHARE_TEXT} (checking Topaz's result: {chk['why']})")
+            raise EnhanceError(f"Topaz's result is not right: {chk['why']}")
+        if job.note:                                     # 19 Nov: what went another way is told to the PC too (the
+            try:                                         #   piece's json: take_back keeps it in the project)
+                _write_json(nm.info, dict(read_info(nm.info) or info, worker_note=job.note))
+            except OSError:
+                pass
+        os.replace(nm.part, nm.enhanced)
+        drop_resume(nm.part)
+
+    let_go = False                                       # 21 Nov: the folder away too long -- not a failure
     try:
         if not info:
             raise EnhanceError("its json (where the piece is in the RAW) cannot be read")
@@ -2246,61 +2557,55 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
         if free is not None and free < need:
             raise EnhanceError(f"the Enhance folder's drive has {free / 1e9:.1f} GB free, the enhanced piece needs "
                                f"about {need / 1e9:.1f} GB")
-        nm.part.unlink(missing_ok=True)
-        scale = topaz_scale(info.get("width"), info.get("height"))
-        done_parts = False
-        if valid_ranges(info) and not info.get("parts_failed"):   # 18 Nov: only what the edit plays (play_ranges)
+        drops, first = 0, True
+        while True:
             try:
-                enhance_parts(nm, info, tz, prog, cancel, scale)
-                done_parts = True
-            except PartsError as e:                      # a part did not start on its frame, the join failed ...:
-                job.note = f"the parts could not be used ({e}) -- the whole piece instead"    # the whole piece
-                nm.part.unlink(missing_ok=True)
-                try:                                     # 20 Nov (The Worst Employee In Key and Peele: the app was
-                    _write_json(nm.info, dict(read_info(nm.info) or info,   # closed and opened, the parts ran a
-                                              parts_failed=str(e), worker_note=job.note))   # second hour and
-                except OSError:                          # failed again): written at once -- a piece taken again goes
-                    pass                                 # straight to the whole piece (and its resume), and the
-                #                                          reason can be read in the json while Topaz still works
-                parts_failed_to_project(info, str(e))    # 21 Nov: and in the project, at once
-                if cancel is not None and cancel.is_set():
-                    raise EnhanceError("stopped") from e
-        if not done_parts:
-            try:
-                fps = Fraction(str(info.get("fps"))) if info.get("fps") else None
-            except (ValueError, ZeroDivisionError):
-                fps = None
-            run_topaz(nm.piece, nm.part, int(round(dur * OUT_FPS)), tz, prog, cancel, scale=scale, fps=fps)
-        chk = check_enhanced(nm.part, info)
-        if not chk["ok"]:
-            raise EnhanceError(f"Topaz's result is not right: {chk['why']}")
-        if job.note:                                     # 19 Nov: what went another way is told to the PC too (the
-            try:                                         #   piece's json: take_back keeps it in the project)
-                _write_json(nm.info, dict(read_info(nm.info) or info, worker_note=job.note))
-            except OSError:
-                pass
-        os.replace(nm.part, nm.enhanced)
-        drop_resume(nm.part)
+                body(first)
+                break
+            except Exception as e:  # noqa: BLE001 - a drop waits and goes on; anything else as before
+                if stop.is_set() or drops >= SHARE_DROPS or not share_drop(e, nm.piece):
+                    raise
+                drops, first = drops + 1, False
+                log.warning("Topaz on %s: %s (%s) -- waiting for it, then the same way again", nm.name, SHARE_TEXT, e)
+                job.wait, job.left_s = f"{SHARE_TEXT} ({str(e)[:160]})", None
+                tell(job)
+                _note_drop(nm, e)
+                why = _wait_share(nm, stop, token)
+                job.wait = ""
+                tell(job)
+                if why == "stopped" or why == NO_TOPAZ_TEXT:
+                    raise EnhanceError(why) from e
+                if why:
+                    let_go = why != GONE_TEXT
+                    raise EnhanceError(why) from e
         job.state, job.share, job.left_s = "done", 1.0, None
     except Exception as e:  # noqa: BLE001 - said in plain words, and written for the PC
         job.state, job.why = "failed", (str(e) if isinstance(e, EnhanceError) else f"{type(e).__name__}: {e}")
-        try:
-            nm.part.unlink(missing_ok=True)
-            if job.why != "stopped":             # 20 Nov: stopped -- what Topaz made is kept for the next try
-                drop_resume(nm.part)
-                for k in range(len(valid_ranges(info))):
-                    _part_file(nm, k).unlink(missing_ok=True)
-                    drop_resume(_part_file(nm, k))
-        except OSError:
-            pass
-        if job.why != "stopped":
+        if stop.by_user or job.why == NO_TOPAZ_TEXT:     # "No Topaz": every file of the piece goes, nothing for the PC
+            job.why = NO_TOPAZ_TEXT
+            remove_piece(nm)
+        elif job.why == GONE_TEXT:                       # the PC removed it: what is left of it here goes too
+            remove_piece(nm)
+        elif let_go:                                     # the folder away: what Topaz made is kept, taken again later
+            job.state = "waiting"
+        else:
             try:
-                more = getattr(e, "details", "")
-                nm.failed.write_text(f"{job.why}\n\n(the laptop {M.host()}, {time.strftime('%Y-%m-%d %H:%M')})\n"
-                                     + (f"\nbefore that: {job.note}\n" if job.note else "")     # (19 Nov)
-                                     + (f"\nTopaz's last lines:\n{more}\n" if more else ""), encoding="utf-8")
+                nm.part.unlink(missing_ok=True)
+                if job.why != "stopped":             # 20 Nov: stopped -- what Topaz made is kept for the next try
+                    drop_resume(nm.part)
+                    for k in range(len(valid_ranges(info))):
+                        _part_file(nm, k).unlink(missing_ok=True)
+                        drop_resume(_part_file(nm, k))
             except OSError:
                 pass
+            if job.why != "stopped":
+                try:
+                    more = getattr(e, "details", "")
+                    nm.failed.write_text(f"{job.why}\n\n(the laptop {M.host()}, {time.strftime('%Y-%m-%d %H:%M')})\n"
+                                         + (f"\nbefore that: {job.note}\n" if job.note else "")     # (19 Nov)
+                                         + (f"\nTopaz's last lines:\n{more}\n" if more else ""), encoding="utf-8")
+                except OSError:
+                    pass
     finally:
         job.ended = time.time()
         try:

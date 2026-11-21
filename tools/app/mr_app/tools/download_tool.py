@@ -43,6 +43,7 @@ from . import Tool
 from ..core import jobs as J
 from ..core import newvideo as NV
 from ..core import paths
+from ..core.enhance import NO_TOPAZ_TEXT
 from ..ui import motion as M
 from ..ui import theme
 from ..ui import widgets as W
@@ -380,6 +381,9 @@ class StageThread(QThread):
         s = S.load()
         rec = {"name": E.safe_name(p.folder.name), "folder": str(E.share_dir(s)), "state": "skipped",
                "why": AFTER_EDIT, "after_edit": True, "topaz_on": str(getattr(s, "enhance_where", "") or "")}
+        old = p.data.get("enhance") if isinstance(p.data.get("enhance"), dict) else {}
+        if old.get("no_topaz"):                           # 21 Nov: "No Topaz" stays over Try again (Topaz again
+            rec = dict(rec, state="off", why=E.NO_TOPAZ_TEXT, no_topaz=True, after_edit=False)   # undoes it)
         p.update(enhance=None)                            # (a new try: nothing of the last one's kept)
         p.update(enhance=rec)
         out["enhance"] = rec
@@ -822,10 +826,19 @@ class VideoRow(W.Card):
         self.b_enh.setToolTip("The laptop's enhanced piece came after the edit was made with the normal RAW: "
                               "check it, copy it into the project and make the edit again with it")
         self.b_enh.clicked.connect(lambda: self.page.use_enhanced(self.item))
+        self.b_notopaz = W.Button("No Topaz", "Small")      # 21 Nov (your job 4): this video without Topaz
+        self.b_notopaz.setToolTip("No Topaz for this video: its piece leaves the Topaz line, a Topaz working on it "
+                                  "stops (on this computer or the other one), nothing sends it again, and the video "
+                                  "finishes with its zip (the normal RAW's picture)")
+        self.b_notopaz.clicked.connect(lambda: self.page.no_topaz(self.item))
+        self.b_topaz_again = W.Button("Topaz again", "Small")
+        self.b_topaz_again.setToolTip("Undo No Topaz: the video's piece goes to Topaz again (after its edit)")
+        self.b_topaz_again.clicked.connect(lambda: self.page.topaz_again(self.item))
         self.b_remove = W.Button("Remove", "Ghost")
         self.b_remove.clicked.connect(lambda: self.page.remove_item(self.item))
         for b in (self.b_go, self.b_prem, self.b_change, self.b_comp, self.b_folder, self.b_retry,
-                  self.b_another_raw, self.b_another_comp, self.b_stop, self.b_enh):
+                  self.b_another_raw, self.b_another_comp, self.b_stop, self.b_enh, self.b_notopaz,
+                  self.b_topaz_again):
             btns.addWidget(b)
         btns.addStretch(1)
         btns.addWidget(self.b_remove)
@@ -965,6 +978,11 @@ class VideoRow(W.Card):
         self.b_another_comp.setVisible(failed or paused)
         self.b_folder.setVisible(it.project is not None)
         self.b_enh.setVisible(bool(it.enhance_late) and it.state in (DONE, FAILED, STOPPED))
+        es = it.steps.get("enhance") or Step()
+        off = es.text == NO_TOPAZ_TEXT
+        self.b_notopaz.setVisible(bool(it.enhance) and it.project is not None and not off and es.state != S_DONE
+                                  and "enhance" in it.steps)
+        self.b_topaz_again.setVisible(bool(it.enhance) and it.project is not None and off)
         self.b_remove.setEnabled(not busy and not (it.job is not None and it.job.state == J.RUNNING))
 
     def _mono(self, it: "Item") -> None:
@@ -2394,6 +2412,8 @@ class DownloadPage(QWidget):
         if rec.get("state") == "sent":
             self._step(it, "enhance", S_RUN, 0.0, "with Topaz")
             self._enhance_wanted = 0.0
+        elif rec.get("state") == "off":                   # 21 Nov: "No Topaz" pressed (kept over a new run)
+            self._step(it, "enhance", S_NOTE, 1.0, NO_TOPAZ_TEXT)
         else:
             self._step(it, "enhance", S_NOTE, 1.0, AFTER_EDIT if rec.get("after_edit") else
                        f"not enhanced: {rec.get('why') or 'no piece'}")
@@ -2458,6 +2478,55 @@ class DownloadPage(QWidget):
         else:
             return
         self._save_rows()
+
+    def no_topaz(self, it: Item) -> None:
+        """21 Nov (your job 4): "No Topaz" -- core.enhance.no_topaz in the background; the row says what happened."""
+        if it.project is None:
+            return
+        folder = it.project
+
+        def work():
+            from ..core import enhance as E
+            return E.no_topaz(folder)
+
+        def done(r) -> None:
+            r = r or {}
+            if not r.get("ok"):
+                self.toast(f"No Topaz: {r.get('why') or 'it could not be done'}", "warn")
+                return
+            self._step(it, "enhance", S_NOTE, 1.0, NO_TOPAZ_TEXT)
+            it.enhance_late = False
+            self.toast(f"{it.name or 'The video'}: {r.get('text') or NO_TOPAZ_TEXT}")
+            self._save_rows()
+            self._refresh(it)
+
+        off_thread(work, done, lambda e: done({"ok": False, "why": NV.plain_error(e)}))
+
+    def topaz_again(self, it: Item) -> None:
+        """21 Nov: "Topaz again" -- the "No Topaz" undone (core.enhance.topaz_again)."""
+        if it.project is None:
+            return
+        folder = it.project
+
+        def work():
+            from ..core import enhance as E
+            return E.topaz_again(folder)
+
+        def done(r) -> None:
+            r = r or {}
+            if not r.get("ok"):
+                self.toast(f"Topaz again: {r.get('why') or 'it could not be done'}", "warn")
+                return
+            sent = r.get("text") == "sent to Topaz again"
+            self._step(it, "enhance", S_RUN if sent else S_NOTE, 0.0 if sent else 1.0,
+                       "with Topaz" if sent else AFTER_EDIT)
+            if sent:
+                self._enhance_wanted = 0.0
+            self.toast(f"{it.name or 'The video'}: {r.get('text')}")
+            self._save_rows()
+            self._refresh(it)
+
+        off_thread(work, done, lambda e: done({"ok": False, "why": NV.plain_error(e)}))
 
     def use_enhanced(self, it: Item) -> None:
         """"Use the enhanced piece": the laptop's piece came after the edit was made with the normal RAW -- it is
