@@ -20,6 +20,7 @@ A piece of the movie (excerpt.py) is not cut when the RAW is stretched (V1 plays
 """
 from __future__ import annotations
 
+import functools
 import subprocess
 from fractions import Fraction
 from typing import Any
@@ -62,10 +63,34 @@ def parse(text: Any) -> Fraction | None | str:
     return v
 
 
+@functools.lru_cache(maxsize=16)
+def _sar(path: str) -> Fraction:
+    """The file's pixel aspect as the probe reads it (ffprobe's stream value -- what S2's conversion, the piece of the
+    movie and ffmpeg's own filters use); 1 when it has none."""
+    try:
+        from .probe import _frac, _video_ordinal, ffprobe_json
+        _, vs, _ = _video_ordinal(ffprobe_json(str(path)))
+        s = _frac((vs or {}).get("sample_aspect_ratio"))
+        return s if s > 0 else Fraction(1)
+    except Exception:  # noqa: BLE001 - unreadable: as before (square)
+        return Fraction(1)
+
+
 def _frame(path: str, t: float, w: int) -> np.ndarray | None:
-    """One gray frame at ``t`` s, ``w`` px wide (its display aspect kept)."""
+    """One gray frame at ``t`` s, ``w`` px wide, its display aspect kept.
+
+    21 Nov (The Weirdest Gym Goal In Its Always Sunny, the laptop: a 480p DVD RAW, 720x480 with SAR 8:9 -- PICTURE NOT
+    FOUND, 3 % of frames): ``scale=w:-2`` keeps the STORED shape (720x480 = 1.5 wide), not the shown one (4:3), so
+    next to a competitor that shows the picture right the RAW looked 9/8 too wide; the check measured 0.889, called it
+    "stretched 8:9", and apply_to multiplied that onto the RAW's real 8:9 -> SAR 64/81, a 720x608 copy, every picture
+    12.5 % too tall. (The same DVD shape measured 0.911 on 12 Nov -- just inside MIN_STRETCH, so it worked by luck.)
+    Now the pixels are made square first, with the SAR the probe reads (``_sar``), and only a real stretch is
+    measured. A 1440x1080 anamorphic RAW (SAR 4:3) would have been doubled the same way."""
+    sar = _sar(str(path))
+    square = (f"scale=trunc(iw*{sar.numerator}/{sar.denominator}/2)*2:ih:flags=area,setsar=1,"
+              if sar != 1 else "")
     cmd = [ffmpeg_bin(), "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", str(path), "-frames:v", "1",
-           "-vf", f"scale={w}:-2:flags=area,format=gray", "-f", "image2pipe", "-vcodec", "png", "-"]
+           "-vf", f"{square}scale={w}:-2:flags=area,format=gray", "-f", "image2pipe", "-vcodec", "png", "-"]
     try:
         out = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_S).stdout
     except (OSError, subprocess.TimeoutExpired):
