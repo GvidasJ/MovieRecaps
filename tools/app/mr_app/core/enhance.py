@@ -706,6 +706,13 @@ def take_back(folder: str | os.PathLike, name: str, project: str | os.PathLike, 
     info = info or there
     if there.get("worker_note"):                         # 19 Nov: e.g. "the parts could not be used (...)"
         info = dict(info, worker_note=str(there["worker_note"]))
+    if there.get("parts_failed"):                        # 21 Nov: the parts' failure, whole (enhance.json + project)
+        info = dict(info, parts_failed=str(there["parts_failed"]))
+        try:
+            from . import projects as PJ
+            PJ.load(project).update(enhance={"parts_failed": str(there["parts_failed"])})
+        except Exception:  # noqa: BLE001
+            pass
     chk = check_enhanced(nm.enhanced, info)
     if not chk["ok"]:
         return {"ok": False, "why": chk["why"], "check": chk}
@@ -1224,6 +1231,12 @@ SEEK_EARLY_S = 0.0002               # a part is read from this much before its f
 #                                     after it because of a rounded number), and to this much before its end
 
 
+def _part_head(part: tuple) -> list[str]:
+    """The reading of one part: from SEEK_EARLY_S before its first frame's time, for its length."""
+    t0, length = float(part[0]), float(part[1])
+    return ["-ss", f"{max(0.0, t0 - SEEK_EARLY_S):.6f}", "-t", f"{length:.6f}"]
+
+
 def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vram: float = 1.0,
                   scale: int = 2, part: tuple[float, float, int] | None = None) -> list[str]:
     """Topaz's ffmpeg with the user's settings: Proteus at 2x the piece's size, then Apollo to 60 fps; H.265 Main10
@@ -1237,8 +1250,7 @@ def topaz_command(tz: Topaz, src: str | os.PathLike, dst: str | os.PathLike, vra
     part: nothing plays them)."""
     head = [str(tz.ffmpeg), "-hide_banner", "-nostdin", "-y"]
     if part is not None:
-        t0, length, _n = part
-        head += ["-ss", f"{max(0.0, float(t0) - SEEK_EARLY_S):.6f}", "-t", f"{float(length):.6f}"]
+        head += _part_head(part)
     head += ["-i", str(src), "-map", "0:v:0"] + ([] if part is not None else ["-map", "0:a:0?"])
     tail = ([] if part is not None else ["-c:a", "copy"]) + ["-map_metadata", "-1", "-movflags", "+faststart",
                                                               "-f", "mp4", str(dst)]
@@ -1565,8 +1577,13 @@ def run_topaz(src: str | os.PathLike, dst: str | os.PathLike, out_frames: int, t
         drop_resume(seg)
         if kept:                                        # Topaz goes on from the piece frame on the grid
             c = Fraction(kept) * fps / OUT_FPS          # (whole: kept is a number of whole grid steps)
-            if part:                                    # (the part's own reading, SEEK_EARLY_S before, goes on)
-                sub = (float(part[0]) + float(c / fps), float(part[1]) - float(c / fps), out_frames - kept)
+            times = _frame_times(src)                   # 21 Nov: from that frame's OWN time in the file (a time in
+            at = _frame_time(times, first + int(c), fps)    # whole ms -- an MKV's -- is up to 0.5 ms early: the seek
+            if part:                                    # to its exact time skipped it, the part after the stop
+                end = float(part[0]) + float(part[1])   # started one frame late and was made again from 0)
+                sub = (at, end - at, out_frames - kept)
+            elif times:                                 # (the whole piece: read from exactly that frame's time, as
+                sub = (at + SEEK_EARLY_S, out_frames / float(OUT_FPS) + 5.0 - at, out_frames - kept)   # without a stop
             else:                                       # the whole piece was read from 0 with no such margin: from
                 at = math.floor(float(c / fps) * 1e6) / 1e6     # the frame's own time (never a moment later)
                 sub = (at + SEEK_EARLY_S, out_frames / float(OUT_FPS) + 5.0 - at, out_frames - kept)
@@ -1974,11 +1991,43 @@ class PartsError(EnhanceError):
     whole piece is enhanced instead."""
 
 
+def parts_failed_to_project(info: dict, why: str) -> bool:
+    """21 Nov (your job 1: "every PartsError must save its full reason in the project and in the piece json at
+    once"): the reason written into the project the piece came from -- project.json "enhance" -> "parts_failed" and a
+    block in logs/topaz_failed.log -- when this computer reaches that folder (the piece was made here, or on the PC's
+    D:\\Shared). Else the PC copies it from the piece's json when it takes the result back (``take_back``). Not a
+    failed try: the whole piece is enhanced right after. Never raises; True when written."""
+    try:
+        pf = _reachable(str((info or {}).get("project_folder") or ""))
+        if pf is None:
+            return False
+        from . import projects as PJ
+        p = PJ.load(pf)
+        p.update(enhance={"parts_failed": str(why), "parts_failed_at": time.time()})
+        d = Path(pf) / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / FAILURE_LOG, "a", encoding="utf-8") as f:
+            f.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}  the played parts of {info.get('project')} could not "
+                    f"be used ({M.host()}) -- the whole piece is enhanced instead\n{why}\n\n")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 PART_CHECK_MARGIN = 0.01            # a part's first enhanced frame may not look this much more like a neighbour frame
 
 
 def _part_file(nm: Names, k: int) -> Path:
     return nm.part.with_name(f"{nm.name}_ENHANCING.p{k + 1}.part.mp4")
+
+
+def _part_done(dst: Path, frames: int) -> bool:
+    """A part finished before a stop (its resume note says complete, with that many frames): run_topaz keeps it."""
+    try:
+        st = json.loads(_resume_file(Path(dst)).read_text(encoding="utf-8"))
+        return bool(st.get("complete")) and Path(dst).is_file() and int(st.get("frames") or -1) == int(frames)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[float, float | None], None] | None,
@@ -2002,6 +2051,12 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
     t0 = time.monotonic()
     files = [_part_file(nm, k) for k in range(len(rs))]
     lst = nm.part.with_name(f"{nm.name}_ENHANCING.parts.txt")
+    times = _frame_times(nm.piece)                       # 21 Nov: the frames' own times (above _frame_times)
+    try:
+        tz = tz or find_topaz()
+    except Exception:  # noqa: BLE001 - run_topaz says why
+        pass
+    nf = int(info.get("frames") or 0) or None
     try:
         done = 0
         for k, ((a, b), n) in enumerate(zip(rs, counts)):
@@ -2011,7 +2066,13 @@ def enhance_parts(nm: Names, info: dict, tz: Topaz | None, progress: Callable[[f
                     all_share = max(0.0, min(0.999, (done + share * n) / float(total)))
                     el = time.monotonic() - t0
                     progress(all_share, el * (1 - all_share) / all_share if all_share > 0.02 else None)
-            part = (float(Fraction(a) / fps), float(Fraction(b - a) / fps) - SEEK_EARLY_S, n)
+            ta = _frame_time(times, a, fps, nf)
+            tb = _frame_time(times, b, fps, nf) if b < (nf or 0) else float(Fraction(b) / fps)
+            part = (ta, tb - ta, n)                      # (read from frame a's time to just before frame b's)
+            if not _part_done(files[k], n):              # 21 Nov: a part that would start wrong fails in seconds
+                why = _seek_lands_right(tz, nm.piece, fps, a, part)
+                if why:
+                    raise PartsError(f"part {k + 1} (piece frame {a}, {ta:.4f} s): {why}")
             run_topaz(nm.piece, files[k], n, tz, prog, cancel, scale=scale, part=part, fps=fps)
             got = _frames_of(files[k])
             if got != n:
@@ -2050,14 +2111,94 @@ def _frames_of(path: Path) -> int:
         return 0
 
 
+# 21 Nov (The Worst Employee In Key and Peele, the laptop: 4 parts, "PartsError" twice, each time after about an hour
+# of Topaz; found on a copy of a Key and Peele BluRay RAW, S02E08): a part was read from SEEK_EARLY_S (0.2 ms) before
+# its first frame's EXACT time (frame / fps). But a RAW the app converted from an MKV keeps the MKV's timestamps, which
+# are whole milliseconds: frame 300 of a 23.976 fps piece is at 12.5125 s, the file says 12.512 s. ffmpeg's seek to
+# 12.5123 s then throws frame 300 away and the part starts on frame 301 -- one frame late, and the check after the part
+# (rightly) refused it. About 3 in 10 frames of such a file are stored that early, so a part failed or not by its first
+# frame's number (part 1 starts on frame 0 and always passed: the failure came only after the next part, an hour on).
+# Now a part is read from its first frame's OWN time in the file (``_frame_times``), and before Topaz starts on a part
+# the same reading is tried on its first frame (seconds): a part that would start wrong fails at once, not an hour on.
+_TIMES: dict = {}
+
+
+def _frame_times(path: Path) -> list[float]:
+    """The times of the file's frames as ffmpeg's seek sees them (s after the file's start time, in showing order);
+    [] when they cannot be read."""
+    from match_cuts.common import ffprobe_bin
+    p = Path(path)
+    try:
+        st = p.stat()
+        key = (os.path.normcase(str(p)), st.st_size, int(st.st_mtime))
+    except OSError:
+        return []
+    if key in _TIMES:
+        return _TIMES[key]
+    try:
+        r = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                  "packet=pts_time:format=start_time", "-of", "json", str(p)], timeout=600)
+        js = json.loads(r.stdout or "{}") if r.returncode == 0 else {}
+        start = float((js.get("format") or {}).get("start_time") or 0.0)
+        times = sorted(float(k["pts_time"]) - start for k in js.get("packets") or []
+                       if str(k.get("pts_time", "N/A")) not in ("N/A", ""))
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return []
+    if len(_TIMES) > 16:
+        _TIMES.clear()
+    _TIMES[key] = times
+    return times
+
+
+def _frame_time(times: list[float], k: int, fps: Fraction, frames: int | None = None) -> float:
+    """Frame ``k``'s own time in the file (``_frame_times``) -- the ideal k / fps when the times are not known or do
+    not fit the piece (another count of frames)."""
+    if times and (frames is None or len(times) == int(frames)) and 0 <= k < len(times):
+        return float(times[k])
+    return float(Fraction(int(k)) / fps)
+
+
+def _seek_lands_right(tz: "Topaz", piece: Path, fps: Fraction, first: int, part: tuple) -> str:
+    """'' when a part read as Topaz will read it (the same ffmpeg, the same seek) starts on the piece's frame
+    ``first``; else why not (a few seconds: one frame decoded from the keyframe before)."""
+    try:
+        from match_cuts.common import ffmpeg_bin
+        ff = str(tz.ffmpeg) if tz is not None and getattr(tz, "found", False) and getattr(tz, "ffmpeg", None) \
+            else ffmpeg_bin()
+        st = _probe(piece)
+        w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+        cmd = [ff, "-hide_banner", "-v", "error", "-nostdin", *_part_head(part), "-i", str(piece), "-map", "0:v:0",
+               "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+        r = subprocess.run(cmd, capture_output=True, timeout=600, creationflags=NO_WINDOW,
+                           env=topaz_env(tz) if tz is not None and getattr(tz, "found", False) else None)
+        import numpy as np
+        if r.returncode != 0 or w <= 0 or h <= 0 or len(r.stdout) < w * h:
+            return f"its first frame could not be read before Topaz ({(r.stderr or b'').decode(errors='replace')[-200:]})"
+        img = np.frombuffer(r.stdout[: w * h], np.uint8).reshape(h, w)
+        import cv2
+        out = cv2.resize(img, (160, max(8, int(round(h * 160 / max(1, w))))), interpolation=cv2.INTER_AREA)
+        return _first_frame_shows(piece, fps, first, out)
+    except Exception as e:  # noqa: BLE001 - cannot be checked: said so
+        return f"its first frame could not be checked before Topaz ({type(e).__name__}: {e})"
+
+
 def _part_starts_right(piece: Path, fps: Fraction, first: int, part: Path) -> str:
     """'' when the enhanced part's first frame shows the piece's frame ``first`` (and not clearly the frame before or
     after it: a still picture, where they all look the same, is fine); else why not."""
     try:
+        from .enhance_swap import _gray
+        return _first_frame_shows(piece, fps, first, _gray(part, Fraction(OUT_FPS), [0]).get(0))
+    except Exception as e:  # noqa: BLE001 - cannot be checked: not used
+        return f"its first frame could not be checked ({type(e).__name__}: {e})"
+
+
+def _first_frame_shows(piece: Path, fps: Fraction, first: int, out: Any) -> str:
+    """'' when the picture ``out`` (gray, any size) shows the piece's frame ``first`` and not clearly the one before or
+    after it; else why not."""
+    try:
         from .enhance_swap import _gray, _zncc
         want = [f for f in (first - 1, first, first + 1) if f >= 0]
         src = _gray(piece, fps, want)
-        out = _gray(part, Fraction(OUT_FPS), [0]).get(0)
         if out is None or src.get(first) is None:
             return "its first frame could not be read"
         import cv2
@@ -2066,11 +2207,12 @@ def _part_starts_right(piece: Path, fps: Fraction, first: int, part: Path) -> st
             out = cv2.resize(out, (w, h), interpolation=cv2.INTER_AREA)
         own = _zncc(src[first], out)
         others = {f: _zncc(src[f], out) for f in want if f != first and src.get(f) is not None}
-        if own < 0.5:
-            return f"its first frame does not show the piece's frame {first} (ZNCC {own:.2f})"
-        for f, v in others.items():
+        if others:                                     # (21 Nov: the neighbour it shows is named first)
+            f, v = max(others.items(), key=lambda kv: kv[1])
             if v > own + PART_CHECK_MARGIN:
                 return f"its first frame shows the piece's frame {f}, not {first} (ZNCC {v:.3f} against {own:.3f})"
+        if own < 0.5:
+            return f"its first frame does not show the piece's frame {first} (ZNCC {own:.2f})"
         return ""
     except Exception as e:  # noqa: BLE001 - cannot be checked: not used
         return f"its first frame could not be checked ({type(e).__name__}: {e})"
@@ -2120,6 +2262,7 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
                 except OSError:                          # failed again): written at once -- a piece taken again goes
                     pass                                 # straight to the whole piece (and its resume), and the
                 #                                          reason can be read in the json while Topaz still works
+                parts_failed_to_project(info, str(e))    # 21 Nov: and in the project, at once
                 if cancel is not None and cancel.is_set():
                     raise EnhanceError("stopped") from e
         if not done_parts:
