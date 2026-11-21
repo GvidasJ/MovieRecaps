@@ -2107,13 +2107,19 @@ def enhance_one(nm: Names, token: str, tz: Topaz | None = None, job: Job | None 
         nm.part.unlink(missing_ok=True)
         scale = topaz_scale(info.get("width"), info.get("height"))
         done_parts = False
-        if valid_ranges(info):                           # 18 Nov: only what the edit plays (enhance_swap.play_ranges)
+        if valid_ranges(info) and not info.get("parts_failed"):   # 18 Nov: only what the edit plays (play_ranges)
             try:
                 enhance_parts(nm, info, tz, prog, cancel, scale)
                 done_parts = True
             except PartsError as e:                      # a part did not start on its frame, the join failed ...:
                 job.note = f"the parts could not be used ({e}) -- the whole piece instead"    # the whole piece
                 nm.part.unlink(missing_ok=True)
+                try:                                     # 20 Nov (The Worst Employee In Key and Peele: the app was
+                    _write_json(nm.info, dict(read_info(nm.info) or info,   # closed and opened, the parts ran a
+                                              parts_failed=str(e), worker_note=job.note))   # second hour and
+                except OSError:                          # failed again): written at once -- a piece taken again goes
+                    pass                                 # straight to the whole piece (and its resume), and the
+                #                                          reason can be read in the json while Topaz still works
                 if cancel is not None and cancel.is_set():
                     raise EnhanceError("stopped") from e
         if not done_parts:
