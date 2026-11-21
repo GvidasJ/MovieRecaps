@@ -2426,8 +2426,10 @@ def _seek_lands_right(tz: "Topaz", piece: Path, fps: Fraction, first: int, part:
         from match_cuts.common import ffmpeg_bin
         ff = str(tz.ffmpeg) if tz is not None and getattr(tz, "found", False) and getattr(tz, "ffmpeg", None) \
             else ffmpeg_bin()
-        st = _probe(piece)
-        w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+        from match_cuts.common import ffprobe_bin       # (its size only: _probe counts every packet -- the whole
+        r0 = _run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries",   # piece read again,
+                   "stream=width,height", "-of", "csv=p=0", str(piece)], timeout=120)       # over the network)
+        w, h = (int(x) for x in (r0.stdout or "0,0").strip().splitlines()[0].split(",")[:2])
         cmd = [ff, "-hide_banner", "-v", "error", "-nostdin", *_part_head(part), "-i", str(piece), "-map", "0:v:0",
                "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
         r = subprocess.run(cmd, capture_output=True, timeout=600, creationflags=NO_WINDOW,
